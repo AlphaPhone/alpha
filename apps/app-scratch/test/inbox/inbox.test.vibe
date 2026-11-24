@@ -1,0 +1,182 @@
+// spec/inbox/mailbox.md, "Story: Read my mailbox page by page"; spec/inbox/operations.md, "Story: Change or send from my mailbox once, as I reviewed it"; spec/inbox/drafts.md, "Story: Keep what I write, with the account I wrote it from"; spec/inbox/notices.md, "Story: Open the Inbox or ask about the exact notification I tapped"; spec/inbox/accounts.md, "Story: Choose which Gmail account my Inbox shows"
+import { assert, it } from "@effect/vitest"
+import { sha256Hex } from "@elizaos/plugin-inbox/mailbox"
+import { initial as sessionInitial } from "../../gen/account__session.ts"
+import { fakeCloud, fakeNative, fakeResident, buildInfo } from "../../src/platform/layers.vibe"
+import { memoryStore } from "../../src/platform/storage.vibe"
+import { CloudSession, GoogleAccounts } from "../../src/account/layer.vibe"
+import { Navigation } from "../../src/shell/navigation.vibe"
+import { Overview } from "../../src/shell/overview.vibe"
+import { ShellMail } from "../../src/shell/ports.vibe"
+import { ResidentControl } from "../../src/platform/resident-control.vibe"
+import { BrowserAgent } from "../../src/browser/agent.vibe"
+import { FilePicker } from "../../src/files/picker.vibe"
+import { Preferences } from "../../src/settings/preferences.vibe"
+import { Assistant } from "../../src/assistant/assistant.vibe"
+import { layer as inbox, InboxAccounts, Mailbox, MailComposer, MailOperations, MailNoticesShell } from "../../src/inbox/layer.vibe"
+
+const grantA = "grant-a"
+const grantB = "grant-b"
+const capabilities = { version: 1, from: "ann@example.com", kinds: ["send", "draft-create", "draft-replace", "draft-delete", "archive", "unarchive", "trash", "untrash", "mark-read", "mark-unread", "star", "unstar"], attachmentPolicy: { mimeTypes: ["application/pdf"], maxBytes: 5242880 } }
+const card = (id: string, unread: boolean) => ({ id, threadId: `t-${id}`, subject: `Subject ${id}`, from: "Bo", to: ["ann@example.com"], cc: [], snippet: `About ${id}`, receivedAt: "2026-11-21T09:30:00Z", labels: unread ? ["UNREAD", "INBOX"] : ["INBOX"], isUnread: unread, metadata: { historyId: "41" } })
+
+/** What the fake Cloud was asked, in order. */
+type Calls = string[]
+
+/** A fake Cloud for managed Gmail: two inbox pages, the second repeating a message, and an operation ledger that answers like Cloud's. */
+function gmailCloud(calls: Calls, options: { readonly loseDispatch?: boolean; readonly review?: Record<string, unknown>; readonly digest?: string } = {}) {
+  const ledger = new Map<string, { review: Record<string, unknown>; digest: string; state: string; kind: string }>()
+  return fakeCloud({
+    "GET /api/v1/eliza/google/gmail/inbox-v1/capabilities": () => { calls.push("capabilities"); return capabilities },
+    "GET /api/v1/eliza/google/gmail/search": () => {
+      calls.push("search")
+      const later = calls.filter((c) => c === "search").length > 1
+      return later
+        ? { messages: [card("m2", false), card("m3", true)], nextPageToken: "p1", syncedAt: "2026-11-21T09:31:00Z", mailboxHistoryId: "42", supportsSpamTrash: true }
+        : { messages: [card("m1", true), card("m2", false)], nextPageToken: "p1", syncedAt: "2026-11-21T09:30:00Z", mailboxHistoryId: "41", supportsSpamTrash: true }
+    },
+    "POST /api/v1/eliza/google/gmail/inbox-v1/operations": (body: unknown) => {
+      const { requestId, proposal } = body as { requestId: string; proposal: Record<string, unknown> }
+      calls.push(`prepare ${String(proposal.kind)}`)
+      const existing = ledger.get(requestId)
+      const entry = existing ?? { review: options.review ?? {}, digest: options.digest ?? "0".repeat(64), state: "prepared", kind: String(proposal.kind) }
+      ledger.set(requestId, entry)
+      return { version: 1, providerExactlyOnce: false, review: entry.review, receipt: { requestId, kind: entry.kind, reviewDigest: entry.digest, state: entry.state, providerResult: null, rejectionCode: null } }
+    },
+    "POST /api/v1/eliza/google/gmail/inbox-v1/operations/r-send/dispatch": () => {
+      calls.push("dispatch")
+      const entry = ledger.get("r-send")!
+      entry.state = "succeeded"
+      if (options.loseDispatch === true) throw new Error("connection reset")
+      return { version: 1, providerExactlyOnce: false, receipt: { requestId: "r-send", kind: "send", reviewDigest: entry.digest, state: "succeeded", providerResult: { messageId: "sent-1" }, rejectionCode: null } }
+    },
+    "GET /api/v1/eliza/google/gmail/inbox-v1/operations/r-send": () => {
+      calls.push("receipt")
+      const entry = ledger.get("r-send")!
+      return { version: 1, providerExactlyOnce: false, receipt: { requestId: "r-send", kind: "send", reviewDigest: entry.digest, state: entry.state, providerResult: entry.state === "succeeded" ? { messageId: "sent-1" } : null, rejectionCode: null } }
+    },
+  })
+}
+
+/** The account area, shell, assistant, browser and files as the Inbox sees them: one signed-in owner with two Gmail accounts. */
+function neighbors(rows = [{ connectionId: grantA, grantId: grantA, email: "ann@example.com", grantedCapabilities: ["google.basic_identity", "google.gmail.triage", "google.gmail.send", "google.gmail.drafts", "google.gmail.mailbox"] }, { connectionId: grantB, grantId: grantB, email: "ann@home.example", grantedCapabilities: ["google.basic_identity", "google.gmail.triage"] }], opened: string[] = []) {
+  const session = { ...sessionInitial, phase: "SignedIn" as const, generation: 1, account: { userId: "u1", organizationId: "org1", credentialId: "key-1", expiresAt: Date.now() + 86400000 } }
+  return Layer.mergeAll(
+    Layer.succeed(CloudSession, { changes: Stream.make(session), notices: Stream.empty, current: () => succeed(session), owner: () => succeed(1), ownerKey: (key: string) => succeed(`alpha/1/${key}`), run: () => Effect.void, adopt: () => Effect.void, attempt: () => Effect.void, signOut: () => succeed(true), rejected: () => Effect.void, admit: () => Effect.void } as unknown as CloudSession.Shape),
+    Layer.succeed(GoogleAccounts, { changes: Stream.empty, accounts: Stream.make(rows), list: () => succeed(rows), run: () => Effect.void, open: () => Effect.void, close: () => Effect.void, reload: () => Effect.void, connect: () => Effect.void, connectCalendar: () => Effect.void, allowCalendar: () => Effect.void, cancel: () => Effect.void, disconnect: () => Effect.void, showCache: () => Effect.void, prepareReview: () => Effect.void } as unknown as GoogleAccounts.Shape),
+    Layer.succeed(Navigation, { changes: Stream.empty, open: (app: string) => sync(() => { opened.push(app); return true }), openLayer: () => succeed(true), closeLayer: () => succeed(true) } as unknown as Navigation.Shape),
+    Layer.succeed(Overview, { reportAttention: () => Effect.void } as unknown as Overview.Shape),
+    Layer.succeed(ShellMail, { send: () => succeed("Unsent" as const), fill: () => Effect.void } as unknown as ShellMail.Shape),
+    Layer.succeed(ResidentControl, { changes: Stream.empty, session: () => succeed({ agent: "agent-test", generation: 1 }), refreshAccount: () => Effect.void, stop: () => Effect.void, recovered: () => Effect.void } as unknown as ResidentControl.Shape),
+    Layer.succeed(BrowserAgent, { openApproved: () => succeed({ tab: "t", present: Effect.void }) } as unknown as BrowserAgent.Shape),
+    Layer.succeed(FilePicker, { choose: () => succeed([]) } as unknown as FilePicker.Shape),
+    Layer.succeed(Preferences, { loadsMailImages: () => succeed(false) } as unknown as Preferences.Shape),
+    Layer.succeed(Assistant, { openWith: () => Effect.void } as unknown as Assistant.Shape),
+  )
+}
+
+/** The Inbox over the fake platform and neighbors. */
+function app(cloud: ReturnType<typeof gmailCloud>, native = fakeNative({}), rows?: Parameters<typeof neighbors>[0], opened?: string[]) {
+  return Layer.provide(inbox, Layer.mergeAll(cloud, native, fakeResident({}), buildInfo(), memoryStore, neighbors(rows, opened)))
+}
+
+effect function settle<A>(changes: Stream.Stream<A>, ok: (a: A) => boolean) {
+  try timeout(Stream.runHead(Stream.filter(changes, ok)), "5 seconds")
+}
+
+// spec/inbox/mailbox.md, "Story: Read my mailbox page by page"
+it.live("Read my mailbox page by page, and see when it changed while paging", () => effect {
+  const calls: Calls = []
+  provide app(gmailCloud(calls)) {
+    const accounts = try InboxAccounts
+    const mailbox = try Mailbox
+    try settle(mailbox.changes, (m) => m.phase === "ListReady" && m.rows.length === 2)
+    const first = try mailbox.get()
+    try mailbox.loadMore()
+    const later = try mailbox.get()
+    // spec/inbox/accounts.md, "Switching accounts retires every read made for the previous selection"
+    try accounts.choose(grantB)
+    try settle(mailbox.changes, (m) => m.account === grantB && m.phase === "ListReady")
+    const switched = try mailbox.get()
+    try Effect.try(() => assert.deepStrictEqual({
+      selected: first.account, firstIds: first.rows.map((r) => r.id), cursor: first.cursor,
+      laterIds: later.rows.map((r) => r.id), newerMail: later.newerMail, laterCursor: later.cursor,
+      switchedTo: switched.account, switchedRows: switched.rows.length,
+    }, {
+      selected: grantA, firstIds: ["m1", "m2"], cursor: "p1",
+      laterIds: ["m1", "m2", "m3"], newerMail: true, laterCursor: "",
+      switchedTo: grantB, switchedRows: 2,
+    }))
+  }
+})
+
+// spec/inbox/operations.md, "Story: Change or send from my mailbox once, as I reviewed it"; spec/inbox/operations.md, "Send of the email on screen continues its open operation, and an unresolved one blocks another"; spec/inbox/drafts.md, "A confirmed send removes only the exact copy that was sent and marks other versions as earlier"
+it.live("Send an email once as reviewed, and recover its outcome after a lost answer", () => effect {
+  const calls: Calls = []
+  const review = { kind: "send", from: "ann@example.com", to: ["bo@example.com"], cc: [], bcc: [], subject: "Friday", mode: "compose", bodyText: "Noon works.", attachments: [], forwardedAttachments: [] }
+  const digest = try sha256Hex(JSON.stringify(review))
+  provide app(gmailCloud(calls, { loseDispatch: true, review, digest })) {
+    const composer = try MailComposer
+    const operations = try MailOperations
+    const mailbox = try Mailbox
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try settle(operations.changes, (j) => j.capabilities.known)
+    try composer.compose()
+    const open = (try composer.mine()).open
+    try composer.edit({ ...open.fields, toList: ["bo@example.com"], subject: "Friday", body: "Noon works." }, "")
+    try composer.flush()
+    const draft = (try composer.mine()).open
+    const lost = try operations.sendDraft(draft, "r-send")
+    const again = try operations.sendDraft(draft, "r-send")
+    const recovered = try operations.refresh()
+    const after = try composer.mine()
+    try Effect.try(() => assert.deepStrictEqual({
+      lost, again, recovered, dispatches: calls.filter((c) => c === "dispatch").length, openDraftCleared: after.open.id === "",
+    }, {
+      lost: "Uncertain", again: "Sent", recovered: "SentBefore", dispatches: 1, openDraftCleared: true,
+    }))
+  }
+})
+
+// spec/inbox/drafts.md, "Story: Keep what I write, with the account I wrote it from"
+it.live("A draft stays with the account it was written from across a switch", () => effect {
+  const calls: Calls = []
+  provide app(gmailCloud(calls)) {
+    const accounts = try InboxAccounts
+    const composer = try MailComposer
+    const mailbox = try Mailbox
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try composer.compose({ toList: ["bo@example.com"], subject: "Plan", body: "Draft text", files: [] })
+    try composer.back()
+    const shelvedA = (try composer.mine()).shelf.map((d) => d.fields.subject)
+    try accounts.choose(grantB)
+    try settle(composer.changes, (d) => d.owner.includes(grantB))
+    const onB = try composer.mine()
+    try accounts.choose(grantA)
+    try settle(composer.changes, (d) => d.owner.includes(grantA))
+    const backOnA = try composer.mine()
+    try Effect.try(() => assert.deepStrictEqual({ shelvedA, onB: onB.shelf.length, backOnA: backOnA.shelf.map((d) => d.fields.subject) }, { shelvedA: ["Plan"], onB: 0, backOnA: ["Plan"] }))
+  }
+})
+
+// spec/inbox/notices.md, "A tap is admitted only for its own owner and a readable grant, and an ordinary tap spends it first"
+it.live("A notice tap is spent first and then opens the Inbox list of its account", () => effect {
+  const calls: Calls = []
+  const consumed: unknown[] = []
+  const opened: string[] = []
+  const native = fakeNative({
+    AlphaGmail: {
+      status: () => ({ status: "watching-new-mail", lastSyncAt: 1, notificationsAllowed: true, uncertainNotices: 0 }),
+      configure: () => ({ status: "waiting" }),
+      withdraw: () => ({}),
+      pending: () => ({ token: "tap-1", grantId: grantA, credentialId: "key-1", userId: "u1", generation: "g1" }),
+      consume: (args: unknown) => { consumed.push(args); return {} },
+    }
+  })
+  provide app(gmailCloud(calls), native, undefined, opened) {
+    const notices = try MailNoticesShell
+    try notices.handleTap()
+    const s = try notices.get()
+    try Effect.try(() => assert.deepStrictEqual({ tap: s.tap, spent: s.spent, consumed, opened }, { tap: "OpenedList", spent: true, consumed: [{ token: "tap-1" }], opened: ["inbox"] }))
+  }
+})

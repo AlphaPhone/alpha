@@ -1,0 +1,171 @@
+// spec/maps/index.md: the Maps layer over a fake Cloud, phone, resident and launcher, faked only at their boundary, with the assistant's shared network client over the fake phone.
+import { createCloudClient } from "@elizaos/cloud/client"
+import { Cloud, CloudUnavailable } from "../../src/platform/cloud.vibe"
+import { CloudServices } from "../../src/platform/cloud-services.vibe"
+import { Build } from "../../src/platform/build.vibe"
+import { Native, NativeFailed } from "../../src/platform/native.vibe"
+import { Resident, ResidentUnavailable } from "../../src/platform/resident.vibe"
+import { memoryStore } from "../../src/platform/storage.vibe"
+import { networkLocationLayer } from "../../src/assistant/network-location.vibe"
+import { AgentCalendar } from "../../src/calendar/agent.vibe"
+import { mapsCore } from "../../src/maps/layer.vibe"
+import { type AccountBinding, GuidanceSpeaker, MapsAccount, MapsShell, type ShellState } from "../../src/maps/ports.vibe"
+
+/** Two points on the San Francisco waterfront. */
+export const ferry = { latitude: 37.7955, longitude: -122.3937 }
+export const pier = { latitude: 37.8087, longitude: -122.4098 }
+
+/** A provider place as Cloud Maps returns it. */
+export const place = (id: string, providerId: string, name: string, coordinate = pier) => ({ providerId, id, name, coordinate, attribution: "© data", fetchedAt: 1 })
+
+/** A two-step provider route between two points. */
+export const route = (id: string, from: typeof ferry, to: typeof ferry, mode: string, providerId: string) => ({
+  providerId, id, from, to, mode, geometry: [from, to], distanceMeters: 2100, durationSeconds: 1560, attribution: "© data", fetchedAt: 1, traffic: "none",
+  steps: [{ instruction: "Head north", coordinate: from, distanceMeters: 1200, maneuver: "depart" }, { instruction: "Arrive", coordinate: to, distanceMeters: 0, maneuver: "arrive" }],
+})
+
+const capabilities = (providerId: string, data: string) => ({
+  available: true, providerId, connectionId: "conn_0123456789abcdef", revision: "r1", attribution: "© data", sources: { data, search: data, routing: data },
+  regions: [{ id: "sf", name: "San Francisco", bounds: [-123, 37, -122, 38] }],
+  capabilities: { map: false, search: true, placeDetails: true, modes: ["drive", "walk"], alternatives: true, traffic: "none", transit: "none" },
+})
+
+/** The launcher with Maps in front, opened from Calendar. */
+export const home: ShellState = {
+  live: true, hidden: false, suspended: false, assistantWindow: false, connectionOpen: false, home: true, secure: false, shaded: false,
+  ringing: false, native: true, view: "maps", stack: ["calendar"],
+}
+
+/** How the fakes answer: the location permission, the build, and the host's claim answer. */
+export interface FakeOptions {
+  readonly permission?: "granted" | "denied"
+  readonly variant?: "launcher" | "aosp" | "browser"
+  readonly claim?: unknown
+  /** What `AlphaNetworkLocation.locate` resolves, taken at the clock's now; undefined refuses every lookup as not found. */
+  readonly network?: { readonly latitude: number; readonly longitude: number; readonly accuracy: number; readonly fingerprint: string }
+}
+
+/** The Maps core over fakes, and the handles a test drives and reads. */
+export effect function harness(provider: { id: string; data: string }, options: FakeOptions = {}) {
+  const cloudCalls: string[] = []
+  const nativeCalls: string[] = []
+  const residentCalls: string[] = []
+  const opened: string[] = []
+  const spoken: string[] = []
+  const returnChecks: Array<{ readonly eventKey: string; readonly revision: string; readonly begin: number; readonly sourceRevision?: string }> = []
+  const fixes = try Queue.unbounded<unknown>()
+  const stops = try Queue.unbounded<unknown>()
+  const accounts = try SubscriptionRef.make<AccountBinding | undefined>({ sessionId: "s1", credentialId: "c1" })
+  const shell = try SubscriptionRef.make(home)
+  const refuseNext = try Ref.make(0)
+  const retryAfter = try Ref.make<number | undefined>(undefined)
+  const events = try Ref.make<ReadonlyArray<{ id: string; begin: number }>>([{ id: "ev1", begin: 1000 }])
+  const permission = options.permission ?? "granted"
+  /** What the fake Cloud answers a Maps path with, after any refusal a test asked for. */
+  const answer = (path: string, body?: unknown) => effect {
+    cloudCalls.push(path)
+    if ((try Ref.get(refuseNext)) > 0) {
+      try Ref.update(refuseNext, (n) => n - 1)
+      throw new CloudUnavailable({ status: 429, message: "slow down", retryAfter: try Ref.get(retryAfter) })
+    }
+    if (path.endsWith("/capabilities")) return capabilities(provider.id, provider.data)
+    if (path.endsWith("/places/search")) return { providerId: provider.id, attribution: "© data", places: [place("p1", provider.id, "Pier 39"), place("p2", provider.id, "Pier 41")] }
+    if (path.endsWith("/places/details")) return { providerId: provider.id, attribution: "© data", place: { ...place((body as { id: string }).id, provider.id, "Pier 39"), phone: "+1 415 555 0100" } }
+    if (path.endsWith("/routes")) {
+      const b = body as { from: typeof ferry; to: typeof ferry; mode: string; alternatives?: boolean }
+      return b.alternatives
+        ? { providerId: provider.id, attribution: "© data", routes: [route("r1", b.from, b.to, b.mode, provider.id), route("r2", b.from, b.to, b.mode, provider.id)] }
+        : { providerId: provider.id, attribution: "© data", routes: [route("detour", b.from, b.to, b.mode, provider.id)] }
+    }
+    return { providerId: provider.id, copyright: "© data" }
+  }
+  const cloud = Layer.succeed(Cloud, {
+    base: "https://cloud.test",
+    json: (_method: string, path: string, body?: unknown) => answer(path, body),
+  })
+  // The typed client's requests reach the same fake Cloud; a refusal comes back as Cloud sends it, with its Retry-After.
+  const fetch: typeof globalThis.fetch = async (input, init) => {
+    const request = new Request(input, init)
+    const text = request.method === "GET" ? "" : await request.text()
+    const said = await runPromise(Effect.result(answer(new URL(request.url).pathname, text === "" ? undefined : JSON.parse(text))))
+    if (said._tag === "Success") return new Response(JSON.stringify(said.success), { status: 200, headers: { "content-type": "application/json" } })
+    const wait = said.failure.retryAfter
+    return new Response(JSON.stringify({ error: "rate_limited" }), { status: said.failure.status, headers: { "content-type": "application/json", ...(wait === undefined ? {} : { "retry-after": String(wait) }) } })
+  }
+  const services = Layer.succeed(CloudServices, {
+    client: createCloudClient({ baseUrl: "https://cloud.test", credential: () => undefined, fetch }),
+    authority: { name: "test", api: "https://cloud.test", web: "https://cloud.test", services: "https://cloud.test", entitlementAudience: "test" },
+    openExternal: () => succeed(undefined),
+  })
+  const grant = permission === "granted" ? { location: "granted", accuracy: "precise" } : { location: "denied", accuracy: "none" }
+  const native = Layer.succeed(Native, {
+    available: () => succeed(true),
+    invoke: (plugin: string, method: string, args?: unknown) => effect {
+      nativeCalls.push(`${plugin}.${method}`)
+      if (method === "checkPermissions" || method === "requestPermissions") return grant
+      if (method === "watchPosition") return { watchId: "w1" }
+      if (method === "navigationAvailability") return { background: true }
+      if (method === "updateNavigation") return { active: true }
+      if (method === "consumeNavigationOpen") return { open: true }
+      if (method === "list") return { status: "ready", events: try Ref.get(events) }
+      if (plugin === "AlphaNetworkLocation") {
+        if (options.network === undefined) throw new NativeFailed({ plugin, method, message: "No position is known for these signals", code: "not-found" })
+        const from = (args as { unchangedFrom?: string } | undefined)?.unchangedFrom
+        if (from === options.network.fingerprint) return { unchanged: true, fingerprint: from }
+        return { ...options.network, timestamp: try Clock.currentTimeMillis }
+      }
+      return {}
+    },
+    listen: (plugin: string, event: string) =>
+      plugin === "ElizaLocation" && event === "locationChange" ? Stream.fromQueue(fixes)
+        : event === "navigationStopped" ? Stream.fromQueue(stops) : Stream.never,
+  })
+  const resident = Layer.succeed(Resident, {
+    status: () => succeed("running" as const),
+    ensureRunning: () => succeed(undefined),
+    json: (method: string, path: string) => effect {
+      residentCalls.push(path)
+      if (path === "/api/views/interact-claim" && options.claim !== undefined) return { status: 200, data: options.claim }
+      if (path === "/api/views/interact-result") return { status: 200, data: {} }
+      throw new ResidentUnavailable({ state: "stopped" })
+    },
+    stream: () => Stream.fail(new ResidentUnavailable({ state: "stopped" })),
+  })
+  const ports = Layer.mergeAll(
+    Layer.succeed(MapsAccount, { changes: SubscriptionRef.changes(accounts), residentReady: Stream.make(true) }),
+    Layer.succeed(GuidanceSpeaker, { speak: (text: string) => sync(() => { spoken.push(text) }) }),
+    Layer.succeed(MapsShell, {
+      states: SubscriptionRef.changes(shell), current: () => SubscriptionRef.get(shell),
+      open: (app: string) => effect {
+        opened.push(app)
+        try SubscriptionRef.update(shell, (s) => ({ ...s, view: app }))
+      },
+      admitOwnViewOpen: () => succeed(undefined), back: () => succeed(undefined),
+    }),
+    Layer.succeed(Build, { info: { version: "test", variant: options.variant ?? "launcher", testMocks: true } }),
+    Layer.succeed(AgentCalendar, {
+      view: () => succeed({ state: { portOwner: "owner", portSession: 1 } }),
+      verifyReturn: (eventKey: string, revision: string, begin: number, sourceRevision?: string) => sync(() => {
+        returnChecks.push({ eventKey, revision, begin, sourceRevision })
+        return "ReturnFound" as const
+      }),
+    } as unknown as AgentCalendar.Shape),
+  )
+  return {
+    layer: Layer.provideMerge(mapsCore, Layer.provideMerge(networkLocationLayer, Layer.mergeAll(cloud, services, native, resident, ports, memoryStore))),
+    cloudCalls, nativeCalls, residentCalls, opened, spoken, returnChecks, fixes, stops, accounts, shell, refuseNext, retryAfter, events,
+  }
+}
+
+/** The first state of `changes` that `ok` accepts, within five seconds. */
+export effect function until<S>(changes: Stream.Stream<S>, ok: (s: S) => boolean) {
+  const found = try timeout(Stream.runHead(Stream.filter(changes, ok)), "5 seconds")
+  if (found._tag === "None") throw new Error("never reached")
+  return found.value
+}
+
+/** A `locationChange` event at `coordinate`, taken now unless `ageMs` says how long ago. */
+export const fixAt = (coordinate: typeof ferry, accuracy = 8, ageMs = 0) => ({ coords: { ...coordinate, accuracy, timestamp: Date.now() - ageMs }, cached: false })
+
+/** A `locationChange` event at `coordinate` taken at `timestamp`, for tests on the test clock. */
+export const fixTakenAt = (coordinate: typeof ferry, timestamp: number, accuracy = 8) => ({ coords: { ...coordinate, accuracy, timestamp }, cached: false })

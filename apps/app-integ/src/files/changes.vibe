@@ -1,0 +1,269 @@
+// spec/files/mutations.md, "Story: Change many files and be told truthfully what changed"; spec/files/mutations.md, "A row is done only when its answer is the operation's result and names the result"; spec/files/browser.md, "Opens, shares and changes are counted until each one ends, and only one starts at a time"; spec/files/trash.md, "A permanent deletion first shows the rows it will erase, and erases only those Trash still lists"; spec/files/share.md, "A selection reaches Android's share sheet only when it is one to 100 files that are all still there"
+import { type Batch, type BatchOp, type RowAnswer, Machine as BatchMachine, rowDone } from "../../gen/files__mutations.effect.vibe"
+import { Machine as BrowserMachine } from "../../gen/files__browser.effect.vibe"
+import { Machine as TrashMachine } from "../../gen/files__trash.effect.vibe"
+import { chooserAdmits } from "../../gen/files__share.effect.vibe"
+import type { Row } from "../../gen/files__storage.ts"
+import { CHUNK_ROWS, settleRows, type RowOutcome } from "@elizaos/plugin-files/client"
+import { baseName, joinPath, keyPath, parentOf, toRow, validName } from "./paths.vibe"
+import { FilesBrowser } from "./browser.vibe"
+import { FilesStorage } from "./storage.vibe"
+import type * as N from "./native.schema.vibe"
+
+const DOWNLOAD_FOLDER = "Download"
+
+/** How a change that is not a batch ended, for Files to word. */
+export type ChangeResult =
+  | { readonly kind: "done"; readonly path?: string }
+  | { readonly kind: "refused"; readonly status: N.StorageStatus | "busy"; readonly message?: string }
+  | { readonly kind: "unknown" }
+
+/** How a share ended: the chooser opened, or why it did not. */
+export type ShareResult =
+  | { readonly kind: "opened"; readonly count: number }
+  | { readonly kind: "refused"; readonly status: N.StorageStatus | "folders" | "missing" | "limit" | "busy"; readonly message?: string }
+  | { readonly kind: "unknown" }
+
+const ANSWERS: Readonly<Record<RowOutcome["status"], RowAnswer>> = {
+  copied: "RowCopied", moved: "RowMoved", trashed: "RowTrashed", restored: "RowRestored",
+  changed: "RowChanged", missing: "RowMissing", invalid: "RowInvalid", unchanged: "RowUnchanged", failed: "RowFailed", unknown: "RowUnknown",
+}
+
+/** Whether a receipt counts as done for `op`, and whether it kept both names. */
+export function receipt(op: BatchOp, row: RowOutcome): { readonly done: boolean; readonly renamed: boolean } {
+  const done = rowDone(op, ANSWERS[row.status] ?? "RowFailed", (row.to ?? "") !== "")
+  return { done, renamed: done && (op === "MoveFiles" || op === "CopyFiles") && baseName(row.to ?? "") !== baseName(row.path) }
+}
+
+/** What one chunk's answer established: the device took it, refused it, or left a row unknown; and its receipts. */
+export interface Chunk {
+  readonly verdict: "ChunkConfirmed" | "ChunkRefused" | "ChunkUnknown"
+  readonly answered: number
+  readonly done: number
+  readonly renamed: number
+  readonly rows: readonly RowOutcome[]
+}
+
+/** A chunk's receipts, one per path it sent in order: a path the device did not answer is unknown, and then nothing of the chunk is claimed. */
+export function fromOutcomes(op: BatchOp, answer: N.OutcomesAnswer | undefined, part: readonly string[]): Chunk {
+  if (answer === undefined) return { verdict: "ChunkUnknown", answered: 0, done: 0, renamed: 0, rows: [] }
+  if (answer.status !== "ready" && answer.outcomes === undefined) return { verdict: "ChunkRefused", answered: 0, done: 0, renamed: 0, rows: [] }
+  const rows = settleRows(part, answer.outcomes)
+  if (rows.some((row) => row.status === "unknown")) return { verdict: "ChunkUnknown", answered: 0, done: 0, renamed: 0, rows }
+  const checked = rows.map((row) => receipt(op, row))
+  return { verdict: "ChunkConfirmed", answered: rows.length, done: checked.filter((r) => r.done).length, renamed: checked.filter((r) => r.renamed).length, rows }
+}
+
+/** Opens, shares and every reviewed change Files makes to the owner's storage. */
+export service FilesChanges {
+  readonly batches: Stream.Stream<Batch>
+  batch(): Batch!!
+  share(keys: readonly string[]): ShareResult!!
+  transfer(keys: readonly string[], dest: string, copy: boolean): void!!
+  trash(keys: readonly string[]): void!!
+  /** Put back what the last trash confirmed, from its Undo. */
+  undo(): void!!
+  restore(trashKeys: readonly string[]): void!!
+  /** Erase what the Trash confirmation showed and Trash still lists. */
+  erase(): void!!
+  rename(key: string, name: string): ChangeResult!!
+  createFolder(parent: string, volume: string, name: string): ChangeResult!!
+  /** The folders of `path`, for the Move and Copy picker. */
+  folders(path: string, volume: string): (readonly Row[] | undefined)!!
+  dismiss(): void!!
+}
+
+/** Files' changes over the batch machine and the device's storage. */
+export const layer = Layer.effect(FilesChanges, effect {
+  const storage = try FilesStorage
+  const browser = try FilesBrowser
+  const view = try BrowserMachine
+  const trashView = try TrashMachine
+  const batches = try BatchMachine
+  const undoIds = try Ref.make<{ readonly volume: string; readonly ids: readonly string[] }>({ volume: "", ids: [] })
+
+  effect function counted<A>(work: A!!, undo = false) {
+    const started = view.send({ type: undo ? "beginUndo" : "beginMutation" }) catch () => undefined
+    if (started === undefined) return undefined
+    return try ensuring(work, effect {
+      view.send({ type: "endMutation" }) catch () => undefined
+    })
+  }
+
+  effect function run(op: BatchOp, items: readonly string[], call: (part: readonly string[]) => Chunk!!) {
+    const begun = batches.send({ type: "beginBatch", op, total: items.length }) catch () => undefined
+    if (begun === undefined) return [] as RowOutcome[]
+    const rows: RowOutcome[] = []
+    while (true) {
+      const s = try batches.get()
+      if (s.phase !== "Running") break
+      if (!(try view.get()).active && !s.retired) {
+        batches.send({ type: "retireBatch" }) catch () => undefined
+        continue
+      }
+      const dispatched = batches.send({ type: "dispatchChunk" }) catch () => undefined
+      if (dispatched === undefined) break
+      const part = items.slice((dispatched.sent - 1) * CHUNK_ROWS, dispatched.sent * CHUNK_ROWS)
+      const chunk = try call(part)
+      if (chunk.verdict === "ChunkConfirmed") rows.push(...chunk.rows)
+      batches.send({ type: "settleChunk", verdict: chunk.verdict, answered: chunk.answered, done: chunk.done, renamed: chunk.renamed }) catch () => undefined
+    }
+    return rows
+  }
+
+  function located(keys: readonly string[]) {
+    const seen = new Set<string>()
+    const paths = keys.map((key) => keyPath(key).path).filter((path) => path !== "" && !seen.has(path) && (seen.add(path), true))
+    return { paths, volume: keys.length ? keyPath(keys[0]!).volume : "" }
+  }
+
+  effect function pathsOf(keys: readonly string[]) {
+    const s = try view.get()
+    const rows = keys.map((key) => s.rows.find((row) => row.key === key))
+    const listed = rows.filter((row): row is Row => row !== undefined)
+    return { rows: listed, missing: rows.length - listed.length, volume: keys.length ? keyPath(keys[0]!).volume : "" }
+  }
+
+  effect function share(keys: readonly string[]) {
+    const { rows, missing, volume } = try pathsOf(keys)
+    const folders = rows.filter((row) => row.kind === "KindFolder").length
+    if (!chooserAdmits(keys.length, folders, missing)) {
+      const status = keys.length > 100 ? "limit" : folders > 0 ? "folders" : "missing"
+      return { kind: "refused", status } satisfies ShareResult
+    }
+    const shared = try counted(effect {
+      const answer = storage.share(rows.map((row) => row.path), volume) catch () => undefined
+      const result: ShareResult = answer === undefined ? { kind: "unknown" }
+        : answer.status === "opened" ? { kind: "opened", count: answer.count }
+        : { kind: "refused", status: answer.status, ...(answer.message ? { message: answer.message } : {}) }
+      return result
+    })
+    return shared ?? ({ kind: "refused", status: "busy" } satisfies ShareResult)
+  }
+
+  effect function transfer(keys: readonly string[], dest: string, copy: boolean) {
+    const { paths, volume } = located(keys)
+    try counted(effect {
+      const op = copy ? "CopyFiles" : "MoveFiles"
+      try run(op, paths, effect (part) => fromOutcomes(op, (storage.transfer(part, dest, copy, volume) catch () => undefined), part))
+    })
+    try browser.dispatch({ type: "endSelecting" })
+    try browser.refresh()
+  }
+
+  effect function trash(keys: readonly string[]) {
+    const { paths, volume } = located(keys)
+    try counted(effect {
+      const answered = try run("TrashFiles", paths, effect (part) => fromOutcomes("TrashFiles", (storage.trash(part, volume) catch () => undefined), part))
+      const ids = answered.filter((row) => receipt("TrashFiles", row).done).map((row) => row.to ?? "")
+      try Ref.set(undoIds, { volume, ids })
+    })
+    try browser.dispatch({ type: "endSelecting" })
+    try browser.refresh()
+  }
+
+  effect function restoreIds(volume: string, ids: readonly string[], undo: boolean) {
+    try counted(effect {
+      try run("RestoreFiles", ids, effect (part) => fromOutcomes("RestoreFiles", (storage.restore(part, volume) catch () => undefined), part))
+    }, undo)
+  }
+
+  effect function restore(trashKeys: readonly string[]) {
+    const byVolume = new Map<string, string[]>()
+    const { items } = try trashView.get()
+    for (const key of trashKeys) {
+      const item = items.find((i) => i.key === key)
+      if (item) byVolume.set(item.volume, [...(byVolume.get(item.volume) ?? []), item.id])
+    }
+    for (const [volume, ids] of byVolume) try restoreIds(volume, ids, false)
+    trashView.send({ type: "endSelectingItems" }) catch () => undefined
+    trashView.send({ type: "hideItem" }) catch () => undefined
+    try browser.refresh()
+  }
+
+  effect function erase() {
+    const confirmed = trashView.send({ type: "confirmErase" }) catch () => undefined
+    if (confirmed === undefined) return
+    const byVolume = new Map<string, string[]>()
+    for (const key of confirmed.erasing) {
+      const item = confirmed.items.find((i) => i.key === key)
+      if (item) byVolume.set(item.volume, [...(byVolume.get(item.volume) ?? []), item.id])
+    }
+    try counted(effect {
+      for (const [volume, ids] of byVolume) {
+        try run("EraseFiles", ids, effect (part) => {
+          const answer = storage.erase(part, volume) catch () => undefined
+          const erased = Math.min(part.length, answer?.count ?? 0)
+          const chunk: Chunk = answer === undefined ? { verdict: "ChunkUnknown", answered: 0, done: 0, renamed: 0, rows: [] }
+            : { verdict: answer.status === "ready" ? "ChunkConfirmed" : "ChunkRefused", answered: answer.status === "ready" ? part.length : 0, done: answer.status === "ready" ? erased : 0, renamed: 0, rows: [] }
+          return chunk
+        })
+      }
+    })
+    trashView.send({ type: "eraseSettled" }) catch () => undefined
+    try browser.refresh()
+  }
+
+  effect function rename(key: string, name: string) {
+    const valid = validName(name)
+    const { path, volume } = keyPath(key)
+    if (valid === undefined) return { kind: "refused", status: "invalid" } satisfies ChangeResult
+    const result = try counted(effect {
+      const answer = storage.rename(path, valid, volume) catch () => undefined
+      const outcome: ChangeResult = answer === undefined ? { kind: "unknown" }
+        : answer.status === "ready" ? { kind: "done", path: answer.path ?? joinPath(parentOf(path), valid) }
+        : { kind: "refused", status: answer.status, ...(answer.message ? { message: answer.message } : {}) }
+      return outcome
+    })
+    try browser.refresh()
+    return result ?? ({ kind: "refused", status: "busy" } satisfies ChangeResult)
+  }
+
+  effect function createFolder(parent: string, volume: string, name: string) {
+    const valid = validName(name)
+    if (valid === undefined || valid.startsWith(".")) return { kind: "refused", status: "invalid" } satisfies ChangeResult
+    const result = try counted(effect {
+      if (parent === DOWNLOAD_FOLDER && volume === "") {
+        const listed = storage.list(DOWNLOAD_FOLDER, "") catch () => undefined
+        if (listed?.status === "missing") storage.createFolder("", DOWNLOAD_FOLDER, "") catch () => undefined
+      }
+      const answer = storage.createFolder(parent, valid, volume) catch () => undefined
+      const outcome: ChangeResult = answer === undefined ? { kind: "unknown" }
+        : answer.status === "ready" ? { kind: "done", path: answer.path ?? joinPath(parent, valid) }
+        : { kind: "refused", status: answer.status, ...(answer.message ? { message: answer.message } : {}) }
+      return outcome
+    })
+    try browser.refresh()
+    return result ?? ({ kind: "refused", status: "busy" } satisfies ChangeResult)
+  }
+
+  effect function folders(path: string, volume: string) {
+    const answer = storage.list(path, volume) catch () => undefined
+    if (answer?.status !== "ready") return undefined
+    return (answer.entries ?? []).filter((entry) => entry.directory).map((entry) => toRow(volume, entry))
+  }
+
+  return {
+    batches: batches.changes,
+    batch: () => batches.get(),
+    share,
+    transfer,
+    trash,
+    effect undo() {
+      const { volume, ids } = try Ref.get(undoIds)
+      if (!ids.length) return
+      try Ref.set(undoIds, { volume, ids: [] })
+      batches.send({ type: "dismissBatch" }) catch () => undefined
+      try restoreIds(volume, ids, true)
+      try browser.refresh()
+    },
+    restore,
+    erase,
+    rename,
+    createFolder,
+    folders,
+    effect dismiss() {
+      batches.send({ type: "dismissBatch" }) catch () => undefined
+    },
+  }
+})

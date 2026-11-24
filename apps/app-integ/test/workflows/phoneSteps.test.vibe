@@ -1,0 +1,83 @@
+// spec/workflows/deviceSteps.md, "Story: Hear or see a phone step's result only as I reviewed it"; spec/workflows/deviceSteps.md, "Story: Read my calendar for the run's own day"
+import { assert, describe, it } from "@effect/vitest"
+import { WorkflowCalendar, workflowCalendar } from "../../src/workflows/calendarRanges.vibe"
+import { describeOwned, summarizeOwned, workflowNoticeBindingText } from "../../src/workflows/operations.vibe"
+import { SimulatedWorkflows } from "../../src/workflows/simulator.vibe"
+import { type NativeCall, nativeOf, workflowsOf } from "./fakes.vibe"
+
+const route = { scope: "s".repeat(64), origin: "https://device.alpha.invalid", ownerId: "owner:agent-1", agentId: "agent-1", workflowId: "wf-1", runId: "run-1", versionId: "v-1" }
+const identity = { origin: "https://device.alpha.invalid", owner: "owner-1", agent: "agent-1", session: "session-1", installationId: "install-1", enrollmentId: "enroll-1" }
+const day = (iso: string) => Date.parse(iso)
+
+describe("phone steps (spec/workflows/deviceSteps.md)", () => {
+  // spec/workflows/deviceSteps.md, "A notification step is posted on Android, bound to its run, step and operation; elsewhere it is a notice in Alpha"
+  it.effect("a notification's binding names the owner scope, agent session, enrollment, proposal with its digest and operation, and its card says what it posts (spec/workflows/deviceSteps.md, \"A notification step is posted on Android, bound to its run, step and operation; elsewhere it is a notice in Alpha\")", () => effect {
+    const text = workflowNoticeBindingText(route, identity, { proposalId: "proposal-1", operationId: "op-1", attemptId: 1 }, "d".repeat(64))
+    const notice = { type: "post_notification", title: "Groceries", body: "Milk and eggs" } as const
+    try Effect.try(() => assert.deepStrictEqual(
+      { text, card: describeOwned(notice), applied: summarizeOwned(notice, "Applied"), failed: summarizeOwned(notice, "Failed") },
+      {
+        text: JSON.stringify([route.scope, "owner:agent-1", "agent-1", "session-1", route.origin, "install-1", "enroll-1", "proposal-1", "d".repeat(64), "op-1"]),
+        card: { title: "Post a notification", detail: "Groceries\nMilk and eggs" },
+        applied: "Posted the reviewed notification.", failed: "No notification was posted.",
+      },
+    ))
+  })
+
+  // spec/workflows/deviceSteps.md, "A named calendar range reads today, tomorrow, the next three days or this week from local midnight, and an all-day event counts by its civil dates"
+  it.live("a named range reads the phone's calendar with workflow access and refuses a truncated read or an unknown label (spec/workflows/deviceSteps.md, \"A named calendar range reads today, tomorrow, the next three days or this week from local midnight, and an all-day event counts by its civil dates\")", () => effect {
+    const calls: NativeCall[] = []
+    let truncated = false
+    const noon = new Date()
+    noon.setHours(12, 0, 0, 0)
+    const native = nativeOf((plugin, method) => {
+      if (plugin !== "AlphaCalendar") return undefined
+      if (method === "requestWorkflowReadAccess") return { status: "granted" }
+      if (method === "list") return {
+        status: "ready", truncated, calendars: [],
+        events: [
+          { id: "1", calendarId: "3", title: "Lunch", body: "", location: "", begin: noon.getTime(), end: noon.getTime() + 3_600_000, revision: "r1" },
+          { id: "2", calendarId: "3", title: "Far", body: "", location: "", begin: day("2001-01-01T10:00:00.000Z"), end: day("2001-01-01T11:00:00.000Z"), revision: "r2" },
+        ],
+      }
+      return undefined
+    }, calls)
+    provide Layer.provide(workflowCalendar, native) {
+      const calendar = try WorkflowCalendar
+      const today = try calendar.read("Today’s calendar")
+      const meeting = try calendar.inMeeting()
+      truncated = true
+      const cut = calendar.read("today's calendar") catch (refused) => refused.reason
+      const unknown = calendar.read("next year's calendar") catch (refused) => refused.reason
+      try Effect.try(() => assert.deepStrictEqual(
+        { today: today.events.map((event) => event.id), meeting, cut, unknown, asked: calls.filter((call) => call.method === "requestWorkflowReadAccess").length },
+        { today: ["1"], meeting: false, cut: "truncated", unknown: "label", asked: 3 },
+      ))
+    }
+  })
+  // spec/workflows/simulator.md, "A simulated trigger reuses a Calendar answer for at most a minute, and one failing flow never stops the others"
+  it.live("the browser simulator reads a named range through the workflow calendar and reuses the answer within a minute (spec/workflows/simulator.md, \"A simulated trigger reuses a Calendar answer for at most a minute, and one failing flow never stops the others\")", () => effect {
+    const calls: NativeCall[] = []
+    const noon = new Date()
+    noon.setHours(12, 0, 0, 0)
+    const native = (plugin: string, method: string) => {
+      if (plugin !== "AlphaCalendar") return undefined
+      if (method === "requestWorkflowReadAccess") return { status: "granted" }
+      if (method === "list") return {
+        status: "ready", truncated: false, calendars: [],
+        events: [{ id: "1", calendarId: "3", title: "Lunch", body: "", location: "", begin: noon.getTime(), end: noon.getTime() + 3_600_000, revision: "r1" }],
+      }
+      return undefined
+    }
+    provide workflowsOf([], [], { variant: "browser", testMocks: true, native, calls }) {
+      const simulator = try SimulatedWorkflows
+      const first = try simulator.calendar("today's calendar")
+      const again = try simulator.calendar("Today’s calendar")
+      const unknown = simulator.calendar("next year's calendar") catch (refused) => refused.reason
+      try Effect.try(() => assert.deepStrictEqual(
+        { first: first.map((event) => event.id), again: again.map((event) => event.id), unknown, lists: calls.filter((call) => call.method === "list").length },
+        { first: ["1"], again: ["1"], unknown: "range", lists: 1 },
+      ))
+    }
+  })
+})

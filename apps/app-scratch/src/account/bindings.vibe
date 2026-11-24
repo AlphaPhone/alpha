@@ -1,0 +1,358 @@
+// spec/account/session.md, "Story: Sign in once for Cloud's managed services"; spec/account/session.md, "A protected power launch is claimed only for a settled, quiet production account with its agent connected"; spec/account/plan.md, "The Ready card names a missing plan, AI being checked and AI off, and only a missing plan or AI off asks for attention"; spec/account/session.md, "Sign-out revokes exactly the key it was asked for, and the agent keeps running"; spec/platform/index.md, "Every stored key of an owner lies in that owner's namespace, and a reset removes exactly those keys"; spec/platform/resident.md, "Story: Keep my agent with my current Cloud account"; spec/shell/permissions.md, "Story: Grant Alpha what it needs, when I choose"; spec/voice/route.md, "Story: Use Cloud speech when I have it, and my phone otherwise"; spec/settings/updates.md, "The phone is idle only on resting Home with nothing typed, open, recording or in flight"; spec/maps/connection.md, "Changing account retires the provider; rebuilding the client for the same account keeps it"; spec/account/enrollment.md, "Only an enrollment the agent's own context confirmed is used, and anything else leaves chat only"
+import { initial as connectionStart, type Resident as ResidentConnection } from "../../gen/platform__resident.ts"
+import { aiChip, chipAsksAttention, type Admission, type AiChip } from "../../gen/account__plan.ts"
+import type { Provider } from "../../gen/account__provider.ts"
+import { isSignedIn, powerLaunchClaimable, restorePending, type Session } from "../../gen/account__session.ts"
+import type { SignIn } from "../../gen/account__signIn.ts"
+import { MapsAccount, type AccountBinding } from "../maps/ports.vibe"
+import { Build } from "../platform/build.vibe"
+import { Cloud } from "../platform/cloud.vibe"
+import { DeviceStorage } from "../platform/device-storage.vibe"
+import { buildCloudEnvironment, environmentName } from "../platform/build-live.vibe"
+import { ResidentControl, type ResidentSession } from "../platform/resident-control.vibe"
+import { Permissions, type ConnectionFacts } from "../shell/permissions.vibe"
+import { VoiceRoute, type VoiceAccount } from "../voice/route.vibe"
+import { DeviceEnrollment, type EnrolledDevice } from "./enrollment.vibe"
+import { Entitlement } from "./entitlement.vibe"
+import { AiProvider } from "./provider.vibe"
+import { CloudSession, ownerNameOf, ownerOf } from "./session.vibe"
+import { SignInScreen } from "./signIn.vibe"
+import { UserAnswer } from "./signIn.schema.vibe"
+
+/** The agent connection an agent-backed area is bound to: owner namespace, resident generation, agent id and whether it is usable now. */
+export interface AgentBinding {
+  readonly owner: string
+  readonly session: number
+  readonly agentId: string
+  readonly usable: boolean
+}
+
+/** The verified agent session the assistant talks to: one origin, owner, agent and session, with the installation and enrollment the agent confirmed for it, both empty while the phone is chat only. */
+export interface AgentSession {
+  readonly origin: string
+  readonly owner: string
+  readonly agent: string
+  readonly session: string
+  readonly installationId: string
+  readonly enrollmentId: string
+}
+
+/** The account's part of the idle decision before an update installs. */
+export interface ConnectionIdle {
+  readonly connectionBusy: boolean
+  readonly signInOpen: boolean
+  readonly signInUntouched: boolean
+}
+
+/** What the startup walkthrough's Ready card shows of the account. */
+export interface ReadyChips {
+  /** What the AI chip says: no plan, AI still checking, AI off, or nothing to say. */
+  readonly ai: AiChip
+  /** The resident agent is not running for this account. */
+  readonly agentDown: boolean
+  /** The key ended, Cloud refused it, an earlier sign-in is unconfirmed, or removing Cloud inference was not confirmed. */
+  readonly checkSignIn: boolean
+  /** This sign-in made a new account. */
+  readonly created: boolean
+  /** The signed-in account's email, once Cloud named it. */
+  readonly email: string | undefined
+}
+
+/** The account reference a protected power launch at cold start is claimed with, and whether the first restore is still pending. */
+export interface PowerLaunch {
+  readonly initialRestorePending: boolean
+  /** `["cloud","production",user,organization]` as JSON, or null while no launch may be claimed. */
+  readonly accountRef: string | null
+}
+
+/** The values Settings shows on its Account and AI provider rows. */
+export interface AccountRows {
+  readonly account: string
+  readonly provider: "Own key" | "Cloud"
+}
+
+/** What the account area tells the areas above it: the agent binding, the verified agent session, its share of the idle decision, the Ready card's chips, the protected power launch and the Settings rows. */
+export service AccountBindings {
+  /** The current agent binding, then each change of it; Calendar and Telephony rebind on every change. */
+  readonly agent: Stream.Stream<AgentBinding>
+  agentNow(): AgentBinding!!
+  /** The verified agent session, or undefined before the resident verifies one. */
+  identity(): (AgentSession | undefined)!!
+  /** Whether sign-in or sign-out work is in flight, and whether the sign-in card is open and untouched. */
+  idle(): ConnectionIdle!!
+  /** The Ready card's account chips, then each change of them. */
+  readonly ready: Stream.Stream<ReadyChips>
+  readyNow(): ReadyChips!!
+  /** The protected power launch's account reference, then each change of it; voice claims or discards the launch with it. */
+  readonly powerLaunch: Stream.Stream<PowerLaunch>
+  powerLaunchNow(): PowerLaunch!!
+  /** The Settings Account and AI provider row values, then each change of them. */
+  readonly rows: Stream.Stream<AccountRows>
+  rowsNow(): AccountRows!!
+}
+
+/** The verified agent session of a resident connection, naming the installation and enrollment only when the agent confirmed them for that same connection. */
+export function agentSessionOf(verified: ResidentSession, device: EnrolledDevice | undefined): AgentSession {
+  const own = device !== undefined && device.owner === verified.owner && device.agent === verified.agent && device.generation === verified.generation
+  return {
+    origin: "resident", owner: verified.owner, agent: verified.agent, session: `${verified.generation}:${verified.epoch}`,
+    installationId: own ? device.installationId : "", enrollmentId: own ? device.enrollmentId : "",
+  }
+}
+
+/** Whether the session's key may be used for Cloud requests now. */
+export function usableSession(s: Session): boolean {
+  return s.phase === "SignedIn" || s.phase === "ActivationPending"
+}
+
+/** The agent binding of a session over a resident connection. */
+export function agentBindingOf(s: Session, r: ResidentConnection): AgentBinding {
+  return { owner: ownerNameOf(s), session: r.generation, agentId: r.agent, usable: r.phase === "Connected" && r.owner !== "" }
+}
+
+/** The Maps account binding of a session: the signed-in key and its sign-in, or undefined while it cannot be used. */
+export function mapsBindingOf(s: Session): AccountBinding | undefined {
+  return usableSession(s) ? { sessionId: String(s.generation), credentialId: s.account.credentialId } : undefined
+}
+
+/** The sign-in or provider work that holds the connection. */
+export function connectionBusy(s: Session, signIn: SignIn, provider: Provider): boolean {
+  return s.holder !== "Free" || (signIn.work !== "NoWork" && signIn.work !== "Probing") || (provider.work !== "ProviderIdle" && provider.work !== "Reading")
+}
+
+/** The account's share of the idle decision. */
+export function idleOf(s: Session, signIn: SignIn, provider: Provider): ConnectionIdle {
+  return {
+    connectionBusy: connectionBusy(s, signIn, provider),
+    signInOpen: signIn.screen !== "ScreenClosed",
+    signInUntouched: signIn.screen === "Choose" && signIn.work === "NoWork" && signIn.attempt === 0 && !signIn.address && !signIn.prefill,
+  }
+}
+
+/** Whether the owner's own keys are the route the host confirmed. */
+export function ownRouteOf(provider: Provider): boolean {
+  return provider.known && provider.route === "OwnRoute"
+}
+
+/** The Ready card's account chips: the plan or AI state, a stopped agent, a sign-in to check and a new account. */
+export function readyChipsOf(s: Session, admission: Admission, r: ResidentConnection, provider: Provider, email: string | undefined): ReadyChips {
+  const account = usableSession(s)
+  const own = ownRouteOf(provider)
+  return {
+    ai: aiChip(account, own, admission.notice, admission.host, admission.binding),
+    agentDown: (account || own) && (r.phase === "Lost" || r.phase === "Refused"),
+    checkSignIn: s.phase === "KeyRefused" || s.phase === "KeyExpired" || (account && s.priorUnconfirmed) || admission.host === "HostRemovalUnconfirmed",
+    created: account && s.created,
+    email: account ? email : undefined,
+  }
+}
+
+/** Whether the Ready card has something the owner must see: a missing plan, AI off, a stopped agent or a sign-in to check. */
+export function attentionOf(chips: ReadyChips): boolean {
+  return chipAsksAttention(chips.ai) || chips.agentDown || chips.checkSignIn
+}
+
+const uuidShape = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+/** The protected power launch's account: only a settled, quiet, production Cloud account with a connected agent and well-formed ids may claim one. */
+export function powerLaunchOf(s: Session, signIn: SignIn, provider: Provider, r: ResidentConnection | undefined): PowerLaunch {
+  const interactive = signIn.screen !== "ScreenClosed" || signIn.work === "SavingOwnKeys"
+  const user = s.account.userId
+  const organization = s.account.organizationId
+  const claimable = powerLaunchClaimable(s.startupResolved, interactive, connectionBusy(s, signIn, provider), usableSession(s), s.environment === "Production",
+    r?.phase === "Connected", uuidShape.test(user) && uuidShape.test(organization))
+  return {
+    initialRestorePending: restorePending(s.startupResolved, interactive),
+    accountRef: claimable ? JSON.stringify(["cloud", "production", user.toLowerCase(), organization.toLowerCase()]) : null,
+  }
+}
+
+/** The Settings row values: the account's email or its sign-in state, and the confirmed AI route. */
+export function accountRowsOf(s: Session, provider: Provider, email: string | undefined): AccountRows {
+  const account = usableSession(s) ? email ?? "Signed in" : isSignedIn(s.phase) ? "Sign in again" : "Signed out"
+  return { account, provider: ownRouteOf(provider) ? "Own key" : "Cloud" }
+}
+
+/** What the startup walkthrough decides on, from the session, the sign-in screen, the plan's visibility and the resident. */
+export function connectionFactsOf(s: Session, signIn: SignIn, admission: Admission, r: ResidentConnection, provider: Provider, ownKeys: boolean): ConnectionFacts {
+  return {
+    account: usableSession(s),
+    ownKeys: signIn.ownKeys || provider.route === "OwnRoute" || ownKeys,
+    signingIn: signIn.screen !== "ScreenClosed" || s.holder === "Attempt" || signIn.work === "SavingOwnKeys",
+    busy: connectionBusy(s, signIn, provider),
+    residentStarting: r.phase === "Starting" || r.phase === "Verifying",
+    background: !admission.recheck.visible,
+    created: usableSession(s) && s.created,
+    attention: attentionOf(readyChipsOf(s, admission, r, provider, undefined)),
+  }
+}
+
+/** The speech account: the owner's own keys while they are the route in use, else the signed-in Cloud key, else none. */
+export function voiceAccountOf(s: Session, environment: string, provider: Provider): VoiceAccount {
+  if (provider.known && provider.route === "OwnRoute") return { kind: "own", revision: String(provider.revision), cartesia: provider.voiceKey }
+  if (usableSession(s)) return { kind: "cloud", environment, credentialId: s.account.credentialId }
+  return { kind: "none" }
+}
+
+/** The plan limit hosted speech is under: none while the plan admits, until cleared while a plan is needed. */
+export function planLimitOf(admission: Admission, now: number): { readonly kind: string; readonly observedAt: number } | undefined {
+  return admission.notice === "NeedsPlanNotice" || admission.notice === "PlanEndedNotice" ? { kind: "subscription-required", observedAt: now } : undefined
+}
+
+interface BindingFacts {
+  readonly session: Session
+  readonly signIn: SignIn
+  readonly provider: Provider
+  readonly admission: Admission
+  readonly connection: ResidentConnection | undefined
+  readonly email: string | undefined
+}
+
+function sameValue<A>(a: A, b: A): boolean {
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
+/** The bindings service over the session, sign-in, provider, plan and the resident connection. */
+export const bindingsService = Layer.effect(AccountBindings, effect {
+  const session = try CloudSession
+  const signIn = try SignInScreen
+  const provider = try AiProvider
+  const entitlement = try Entitlement
+  const resident = try ResidentControl
+  const enrollment = try DeviceEnrollment
+  const cloud = try Cloud
+  const latest = try SubscriptionRef.make<AgentBinding>({ owner: "device", session: 0, agentId: "", usable: false })
+  const facts = try SubscriptionRef.make<BindingFacts>({
+    session: try session.current(), signIn: try signIn.current(), provider: try provider.current(), admission: try entitlement.current(),
+    connection: undefined, email: undefined,
+  })
+
+  effect function refresh() {
+    const f = try SubscriptionRef.get(facts)
+    if (f.connection === undefined) return
+    const next = agentBindingOf(f.session, f.connection)
+    const before = try SubscriptionRef.get(latest)
+    if (before.owner !== next.owner || before.session !== next.session || before.agentId !== next.agentId || before.usable !== next.usable) try SubscriptionRef.set(latest, next)
+  }
+
+  effect function readEmail(owner: number) {
+    const answer = Effect.flatMap(cloud.json("GET", "/api/v1/user"), Schema.decodeUnknownEffect(UserAnswer)) catch () => undefined
+    if (owner !== ownerOf(try session.current())) return
+    try SubscriptionRef.update(facts, (f) => ({ ...f, email: answer?.success === true ? answer.data.email : undefined }))
+  }
+
+  fork.scoped Stream.runForEach(resident.changes, (r) => effect {
+    try SubscriptionRef.update(facts, (f) => ({ ...f, connection: r }))
+    try refresh()
+  })
+  fork.scoped Stream.runForEach(session.changes, (s) => effect {
+    try SubscriptionRef.update(facts, (f) => ({ ...f, session: s }))
+    try refresh()
+  })
+  fork.scoped Stream.runForEach(Stream.changes(Stream.map(session.changes, ownerOf)), (owner) => effect {
+    try SubscriptionRef.update(facts, (f) => ({ ...f, email: undefined }))
+    if (owner !== 0) try readEmail(owner)
+  })
+  fork.scoped Stream.runForEach(signIn.changes, (x) => SubscriptionRef.update(facts, (f) => ({ ...f, signIn: x })))
+  fork.scoped Stream.runForEach(provider.changes, (x) => SubscriptionRef.update(facts, (f) => ({ ...f, provider: x })))
+  fork.scoped Stream.runForEach(entitlement.changes, (x) => SubscriptionRef.update(facts, (f) => ({ ...f, admission: x })))
+
+  const chipsOf = (f: BindingFacts) => readyChipsOf(f.session, f.admission, f.connection ?? connectionStart, f.provider, f.email)
+  const launchOf = (f: BindingFacts) => powerLaunchOf(f.session, f.signIn, f.provider, f.connection)
+  const rowsOf = (f: BindingFacts) => accountRowsOf(f.session, f.provider, f.email)
+  function derived<A>(of: (f: BindingFacts) => A): Stream.Stream<A> {
+    return Stream.changesWith(Stream.map(SubscriptionRef.changes(facts), of), sameValue)
+  }
+
+  return {
+    agent: SubscriptionRef.changes(latest),
+    agentNow: () => SubscriptionRef.get(latest),
+    effect identity() {
+      const verified = try resident.session()
+      if (verified === undefined) return undefined
+      return agentSessionOf(verified, try enrollment.enrolled())
+    },
+    effect idle() { return idleOf(try session.current(), try signIn.current(), try provider.current()) },
+    ready: derived(chipsOf),
+    readyNow: () => Effect.map(SubscriptionRef.get(facts), chipsOf),
+    powerLaunch: derived(launchOf),
+    powerLaunchNow: () => Effect.map(SubscriptionRef.get(facts), launchOf),
+    rows: derived(rowsOf),
+    rowsNow: () => Effect.map(SubscriptionRef.get(facts), rowsOf),
+  }
+})
+
+/** Maps' account port: the usable Cloud key as it changes, and whether the resident runs. */
+export const mapsAccountLive = Layer.effect(MapsAccount, effect {
+  const session = try CloudSession
+  const resident = try ResidentControl
+  const same = (a: AccountBinding | undefined, b: AccountBinding | undefined) => a?.sessionId === b?.sessionId && a?.credentialId === b?.credentialId
+  return {
+    changes: Stream.changesWith(Stream.map(session.changes, mapsBindingOf), same),
+    residentReady: Stream.changes(Stream.map(resident.changes, (r) => r.phase === "Connected")),
+  }
+})
+
+/** The device storage owner a session names: the signed-in account's namespace, or none while signed out. */
+export function storageOwnerOf(s: Session): string | undefined {
+  return isSignedIn(s.phase) ? ownerNameOf(s) : undefined
+}
+
+/** What the account area keeps the rest of the phone told of: the storage owner, the resident's account, speech's key and limit, and the startup walkthrough. */
+export const followersLive = Layer.effectDiscard(effect {
+  const session = try CloudSession
+  const storage = try DeviceStorage
+  const signIn = try SignInScreen
+  const entitlement = try Entitlement
+  const provider = try AiProvider
+  const control = try ResidentControl
+  const voice = try VoiceRoute
+  const permissions = try Permissions
+  const build = try Build
+  const environment = environmentName(buildCloudEnvironment(build.info))
+  const connection = try SubscriptionRef.make<ResidentConnection | undefined>(undefined)
+
+  effect function walkthrough() {
+    const r = try SubscriptionRef.get(connection)
+    if (r === undefined) return
+    const reported = try voice.account()
+    try permissions.connection(connectionFactsOf(try session.current(), try signIn.current(), try entitlement.current(), r, try provider.current(), reported.kind === "own"))
+  }
+
+  effect function bindStorage() {
+    const owner = storageOwnerOf(try session.current())
+    if (owner === undefined) try storage.signedOut()
+    else storage.bindOwner(owner) catch () => undefined
+  }
+
+  fork.scoped Stream.runForEach(Stream.changes(Stream.map(session.changes, (s) => storageOwnerOf(s) ?? "")), () => bindStorage())
+  fork.scoped Stream.runForEach(Stream.changes(Stream.map(storage.changes, (d) => d.startupAdmitted && !d.resetPending)), (ready) => ready ? bindStorage() : Effect.void)
+
+  fork.scoped Stream.runForEach(Stream.drop(Stream.changes(Stream.map(session.changes, ownerOf)), 1), () => effect {
+    control.refreshAccount() catch () => undefined
+  })
+  effect function speech() {
+    const next = voiceAccountOf(try session.current(), environment, try provider.current())
+    const before = try voice.account()
+    if (JSON.stringify(before) !== JSON.stringify(next)) try voice.observeAccount(next)
+  }
+
+  fork.scoped Stream.runForEach(session.changes, () => effect {
+    try speech()
+    try walkthrough()
+  })
+  fork.scoped Stream.runForEach(entitlement.changes, (a) => effect {
+    const now = try Clock.currentTimeMillis
+    try voice.observeLimit(planLimitOf(a, now))
+    try walkthrough()
+  })
+  fork.scoped Stream.runForEach(signIn.changes, () => walkthrough())
+  fork.scoped Stream.runForEach(provider.changes, () => effect {
+    try speech()
+    try walkthrough()
+  })
+  fork.scoped Stream.runForEach(control.changes, (r) => effect {
+    try SubscriptionRef.set(connection, r)
+    try walkthrough()
+  })
+})

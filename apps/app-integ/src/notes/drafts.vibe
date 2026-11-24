@@ -1,0 +1,76 @@
+// spec/notes/editor.md, "A failed save keeps its changes in the encrypted draft slot, merged with earlier kept changes"; spec/notes/editor.md, "A kept draft is offered back only for the same owner over the record it started from, and cleared only by its exact value"
+import { keptDraftCleared, keptDraftOffer, priorDraftChoice, retryDraftWrite, type DraftSlotRead, type KeptDraftOffer } from "../../gen/notes__editor.effect.vibe"
+import { decodeKeptDraft, type KeptChange, type KeptDraft } from "./notes.schema.vibe"
+import { type SlotAccess, SlotUnavailable, slotAccess, slots } from "./slots.vibe"
+
+/** The draft slot held something that does not read back as a kept draft, so it is never written over. */
+export error DraftSlotBlocked
+/** Three compare-and-exchange attempts lost their race; the words stay on screen. */
+export error DraftNotKept
+
+/** What the encrypted draft slot holds for one owner, with the raw value it was read as. */
+export interface KeptRead { readonly raw: string | undefined; readonly draft: KeptDraft | undefined; readonly slot: DraftSlotRead }
+
+/** The kept draft service: one encrypted slot per phone, keyed to the owner's digest. */
+export service NotesDrafts {
+  read(ownerDigest: string): KeptRead!!
+  keep(ownerDigest: string, change: KeptChange): void!(DraftSlotBlocked | DraftNotKept | SlotUnavailable)
+  offer(ownerDigest: string, noteId: string, currentPrint: string): { readonly offer: KeptDraftOffer; readonly change?: KeptChange }!!
+  clear(ownerDigest: string, noteId: string, read: KeptRead, confirmedOrDiscarded: boolean): boolean!!
+}
+
+effect function readKept(access: SlotAccess, ownerDigest: string): KeptRead!! {
+  const raw = access.read(slots.draft) catch () => null
+  if (raw === null) return { raw: undefined, draft: undefined, slot: "SlotUnavailable" }
+  if (raw === undefined) return { raw, draft: undefined, slot: "SlotAbsent" }
+  const draft = (decodeKeptDraft(raw) catch () => undefined)
+  if (draft === undefined) return { raw, draft: undefined, slot: "SlotInvalid" }
+  return { raw, draft: draft.ownerDigest === ownerDigest ? draft : undefined, slot: draft.ownerDigest === ownerDigest ? "SlotReadable" : "SlotInvalid" }
+}
+
+function merged(base: KeptDraft | undefined, ownerDigest: string, change: KeptChange): KeptDraft {
+  const kept = (base?.changes ?? []).filter((row) => row.noteId !== change.noteId)
+  return { version: 1, ownerDigest, changes: [...kept, change] }
+}
+
+/** The kept draft slot over the platform's secure slot. */
+export const draftsLayer = Layer.effect(NotesDrafts, effect {
+  const access = try slotAccess()
+  const last = try Ref.make<{ readonly raw: string; readonly earlier: KeptDraft | undefined } | undefined>(undefined)
+  return {
+    read: (ownerDigest: string) => readKept(access, ownerDigest),
+    effect keep(ownerDigest: string, change: KeptChange) {
+      let attempts = 0
+      while (true) {
+        attempts += 1
+        const read = try readKept(access, ownerDigest)
+        const stored = try Ref.get(last)
+        const choice = priorDraftChoice(read.slot, stored !== undefined && read.raw === stored.raw)
+        if (choice === "DraftWriteBlocked") throw new DraftSlotBlocked()
+        const base = choice === "EarlierSessionDraft" ? stored?.earlier : choice === "CurrentSlotDraft" ? read.draft : undefined
+        const next = JSON.stringify(merged(base, ownerDigest, change))
+        const saved = try access.compareExchange(slots.draft, read.raw, next)
+        if (saved) {
+          try Ref.set(last, { raw: next, earlier: choice === "EarlierSessionDraft" ? stored?.earlier : read.draft })
+          return
+        }
+        if (!retryDraftWrite(attempts, "DraftNotSaved")) throw new DraftNotKept()
+      }
+    },
+    effect offer(ownerDigest: string, noteId: string, currentPrint: string) {
+      const read = try readKept(access, ownerDigest)
+      const change = read.draft?.changes.find((row) => row.noteId === noteId)
+      const offer = keptDraftOffer(read.draft !== undefined, change !== undefined, change?.basePrint === currentPrint)
+      return change === undefined ? { offer } : { offer, change }
+    },
+    effect clear(ownerDigest: string, noteId: string, read: KeptRead, confirmedOrDiscarded: boolean) {
+      const now = try readKept(access, ownerDigest)
+      if (!keptDraftCleared(confirmedOrDiscarded, now.raw === read.raw) || now.draft === undefined) return false
+      const changes = now.draft.changes.filter((row) => row.noteId !== noteId)
+      const next = changes.length === 0 ? undefined : JSON.stringify({ ...now.draft, changes })
+      const cleared = access.compareExchange(slots.draft, now.raw, next) catch () => false
+      if (cleared) try Ref.update(last, (held) => held !== undefined && held.raw === now.raw ? undefined : held)
+      return cleared
+    },
+  }
+})

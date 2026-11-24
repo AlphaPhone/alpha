@@ -1,0 +1,42 @@
+// @vitest-environment happy-dom
+// spec/camera/scan.md, "Story: Ask Alpha to scan what Camera sees"; spec/camera/scan.md, "A scanned frame reaches Photos only by its explicit Keep, retried under the same identity after an unknown answer"
+import { assert, it } from "@effect/vitest"
+import { Machine as ScanMachine } from "../../gen/camera__scan.effect.vibe"
+import { Machine as DialogMachine } from "../../gen/camera__scanDialogs.effect.vibe"
+import { Scanner } from "../../src/camera/scanner.vibe"
+import { Viewfinder } from "../../src/camera/viewfinder.vibe"
+import { cameraOver, phone, preview, until } from "./support.vibe"
+
+// spec/camera/scan.md, "Story: Ask Alpha to scan what Camera sees"
+it.live("a scanned frame is kept only by Keep, under one identity until a definite failure (spec/camera/scan.md, \"Story: Ask Alpha to scan what Camera sees\")", () => effect {
+  const answers = [{ status: "unknown" }, { status: "failed", message: "Photo could not be created" }, { status: "saved", id: "77" }]
+  const device = phone({
+    "ElizaCamera.startPreview": () => preview,
+    "ElizaCamera.stopPreview": () => undefined,
+    "ElizaCamera.setCaptureMode": () => undefined,
+    "ElizaCamera.capturePhoto": () => ({ format: "jpeg", base64: "/9j/AA==", width: 1600, height: 1200 }),
+    "AlphaPhotos.list": () => ({ items: [], next: "" }),
+    "AlphaPhotos.keepCapture": () => answers.shift() ?? { status: "failed" },
+  })
+  provide cameraOver(device) {
+    const view = try Viewfinder
+    const scanner = try Scanner
+    const scan = try ScanMachine
+    const dialogs = try DialogMachine
+    try view.leave()
+    const hidden = try scanner.scanFrame()
+    try view.enter()
+    try until(() => effect { return (try view.get()).phase === "PreviewReady" })
+    const shown = try scanner.scanFrame()
+    try until(() => effect { return (try dialogs.get()).text.shown })
+    const saved = device.calls.filter((call) => call.method === "ElizaCamera.capturePhoto").map((call) => (call.args as { saveToGallery: boolean }).saveToGallery)
+    try scanner.keepPhoto()
+    try scanner.keepPhoto()
+    try scanner.keepPhoto()
+    const kept = device.calls.filter((call) => call.method === "AlphaPhotos.keepCapture").map((call) => (call.args as { operationId: string }).operationId)
+    try Effect.try(() => assert.deepStrictEqual(
+      { hidden, shown, saved, sameAfterUnknown: kept[0] === kept[1], freshAfterFailure: kept[1] !== kept[2], keep: (try scan.get()).keep.status, calls: kept.length },
+      { hidden: false, shown: true, saved: [false], sameAfterUnknown: true, freshAfterFailure: true, keep: "KeepSaved", calls: 3 },
+    ))
+  }
+})

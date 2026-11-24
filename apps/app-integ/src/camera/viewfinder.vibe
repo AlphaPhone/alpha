@@ -1,0 +1,505 @@
+// spec/camera/viewfinder.md, "Story: Keep the viewfinder only while Camera is in front"; spec/camera/viewfinder.md, "Hiding the page stops the preview, and showing it again starts a fresh one"; spec/camera/viewfinder.md, "Story: Take photos"; spec/camera/viewfinder.md, "Story: Record videos"; spec/camera/viewfinder.md, "Story: Recover when the camera is denied or stops"; spec/camera/focus.md, "Story: Focus where I tap"; spec/camera/recorder.md, "Story: Keep every recording I make, within its limit"
+import {
+  Machine as ViewMachine, canAnswerMicNotice, canFlip, canRecord, canReserveShutter, canZoomTo, clampZoom, shutterWanted,
+  type Camera, type Chat, type Event as ViewEvent, type Mode, type RecordStart,
+} from "../../gen/camera__viewfinder.effect.vibe"
+import { Machine as FocusMachine, type Event as FocusEvent } from "../../gen/camera__focus.effect.vibe"
+import { Machine as RecorderMachine, maxBytes, type Event as RecorderEvent } from "../../gen/camera__recorder.effect.vibe"
+import { CameraBridge, CameraFailed, RECORDING, type LensDirection } from "./bridge.vibe"
+import { photoReceiptId, positive, videoReceiptId } from "./bridge.schema.vibe"
+import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
+import { observeLandscape, observeRecorder, onPreviewEnded } from "./browserCamera.ts"
+import { cameraText } from "./messages.vibe"
+import { CameraNotices } from "./notices.vibe"
+import { newId } from "../platform/ids.ts"
+import { PhotoStore } from "./photos.vibe"
+
+/** What a borrowed shutter answered: its value, or why it did not run. */
+export type Borrowed<A> = { readonly status: "done"; readonly value: A } | { readonly status: "busy" } | { readonly status: "closed" }
+
+/** Camera's visit: the preview, the shutter, recording and every control, over the viewfinder, focus and recorder Machines. */
+export service Viewfinder {
+  readonly changes: Stream.Stream<Camera>
+  get(): Camera!!
+  sync(): void!!
+  enter(): void!!
+  leave(): void!!
+  setChat(panel: Chat): void!!
+  rotate(): void!!
+  graceEnds(): void!!
+  hold(on: boolean): void!!
+  shutter(): void!!
+  pickMode(mode: Mode): void!!
+  answerMicNotice(withSound: boolean): void!!
+  flip(): void!!
+  zoomTo(tenths: number): void!!
+  cycleFlash(): void!!
+  cycleTimer(): void!!
+  toggleGrid(): void!!
+  toggleLight(): void!!
+  focusAt(x: number, y: number): void!!
+  retry(): void!!
+  allow(): void!!
+  resumed(): void!!
+  volumeKey(): void!!
+  /** Back while Camera is in front: a recording stops and is kept, and Camera stays; false when Back is the shell's. */
+  back(): boolean!!
+  /** Follow what is in front of the owner: the page shown, the conversation's detent and any sheet or dialog. */
+  foreground(state: ForegroundState): void!!
+  /** One of Camera's own dialogs, such as a scan review, opened over the viewfinder or closed. */
+  dialog(open: boolean): void!!
+  /** Wait until a starting preview settles. */
+  settled(): Camera!!
+  /** Run `task` with the shutter borrowed from the ready, idle preview of the current visit. */
+  borrow<A, E>(task: (epoch: number) => A!E): Borrowed<A>!E
+  /** Flip to the named camera for a request; true when the preview now runs on it. */
+  flipTo(lens: LensDirection): boolean!!
+}
+
+/** How long a covering conversation keeps Camera's preview. */
+export const CHAT_GRACE = "10 seconds"
+
+const lensOf = (c: Camera): LensDirection => c.lens === "FrontLens" ? "front" : "back"
+
+/** The conversation detent the viewfinder reasons about, from the foreground's. */
+export function chatOf(state: ForegroundState): Chat {
+  return state.chat === "full" ? "ChatFull" : state.chat === "sheet" ? "ChatSheet" : "ChatHidden"
+}
+
+/** The page shows Alpha's own screen, unlocked: the only place Camera may run. */
+export function shownOf(state: ForegroundState): boolean {
+  return state.visible && state.screen === "home" && !state.locked
+}
+
+/** The viewfinder service over the camera bridge, the photo store and the foreground. */
+export const viewfinder = Layer.effect(Viewfinder, effect {
+  const view = try ViewMachine
+  const focus = try FocusMachine
+  const recorder = try RecorderMachine
+  const bridge = try CameraBridge
+  const store = try PhotoStore
+  const notices = try CameraNotices
+  const front = try Foreground
+  const points = new Map<number, { x: number; y: number }>()
+  let borrowed = false
+  let ticking = false
+  let volumeArmed: boolean | undefined = false
+  let graceFiber: Fiber.Fiber<void> | undefined
+  let zoomWanted: number | undefined
+  let shellModal = false
+  let ownDialog = false
+  let zooming = false
+
+  effect function say(text: string) {
+    try notices.say(text, false)
+  }
+
+  effect function send(event: ViewEvent) {
+    const before = try view.get()
+    const after = view.send(event) catch () => undefined
+    if (after !== undefined) try react(before, after)
+    return after
+  }
+
+  effect function focusSend(event: FocusEvent) {
+    const before = try focus.get()
+    const after = focus.send(event) catch () => undefined
+    if (after !== undefined && after.writing !== 0 && after.writing !== before.writing) try forkDetach(writeFocus(after.writing))
+    return after
+  }
+
+  effect function writeFocus(tap: number) {
+    const point = points.get(tap) ?? { x: 0.5, y: 0.5 }
+    const applied = bridge.setFocusPoint(point.x, point.y) catch () => false
+    points.delete(tap)
+    try focusSend({ type: "driverReplies", applied })
+  }
+
+  effect function react(before: Camera, after: Camera) {
+    if (after.phase === "PreviewStarting" && (before.phase !== "PreviewStarting" || before.epoch !== after.epoch)) try forkDetach(start(after.epoch, lensOf(after)))
+    if (before.phase !== "PreviewOff" && after.phase === "PreviewOff") {
+      try focusSend({ type: "clear" })
+      bridge.stopPreview() catch () => undefined
+    }
+    if (after.binding && !before.binding) try forkDetach(bindMode(after.mode, after.epoch))
+    if (after.capturing && !before.capturing && !borrowed) try forkDetach(captureOwner())
+    if (after.countdown > 0 && !ticking) try forkDetach(countdown())
+    if (before.recording === "RecordingActive" && after.recording === "RecordingFinishing") try forkDetach(finalize())
+    if (before.recording !== "RecordingActive" && after.recording === "RecordingActive") try forkDetach(poll())
+    if (after.phase === "PreviewReady" && before.phase !== "PreviewReady" && after.photos === 0) try forkDetach(loadLast())
+    if (after.chat !== before.chat || after.landscape !== before.landscape) try armGrace(after)
+    try armVolume(after.volumeKeys && shutterWanted(after))
+  }
+
+  /** Arms or disarms the volume-key shutter; a failed native call leaves it unarmed as far as the next change knows, so the state is sent again. */
+  effect function armVolume(wanted: boolean) {
+    if (wanted === volumeArmed) return
+    volumeArmed = wanted
+    const done = try (effect {
+      try bridge.setVolumeShutter(wanted)
+      return true
+    } catch () => false)
+    if (!done) volumeArmed = undefined
+  }
+
+  effect function armGrace(c: Camera) {
+    if (graceFiber !== undefined) try Fiber.interrupt(graceFiber)
+    graceFiber = undefined
+    if (c.chat === "ChatFull" || (c.chat === "ChatSheet" && c.landscape)) {
+      graceFiber = try forkDetach(effect {
+        try sleep(CHAT_GRACE)
+        try send({ type: "graceEnds" })
+        try send({ type: "sync" })
+      })
+    }
+  }
+
+  effect function start(ticket: number, lens: LensDirection) {
+    const answer = try exit(bridge.startPreview(lens))
+    if (Exit.isSuccess(answer)) {
+      const reply = answer.value
+      const widest = Math.min(10, Math.max(1, Math.round((reply.minZoom ?? 1) * 10)))
+      const longest = Math.max(10, Math.round((reply.maxZoom ?? 1) * 10))
+      const ready = try send({ type: "previewReady", ticket, hasFlash: reply.hasFlash === true, widest, longest })
+      if (ready === undefined && (try view.get()).phase === "PreviewOff") bridge.stopPreview() catch () => undefined
+      if (ready !== undefined) try send({ type: "sync" })
+      return
+    }
+    const failure = Cause.squash(answer.cause)
+    const denied = failure instanceof CameraFailed && failure.code === "CAMERA_PERMISSION_DENIED"
+    try send({ type: "previewFails", ticket, kind: denied ? "CameraNotice" : "UnavailableNotice" })
+  }
+
+  effect function bindMode(mode: Mode, epoch: number) {
+    const answer = try exit(bridge.setCaptureMode(mode === "VideoMode" ? "video" : "photo"))
+    const now = try view.get()
+    if (now.epoch !== epoch) return
+    if (Exit.isSuccess(answer)) return try send({ type: "bindSettles", ok: true })
+    const failure = Cause.squash(answer.cause)
+    if (failure instanceof CameraFailed && failure.code === "PREVIEW_STOPPED") try send({ type: "bindStopsPreview" })
+    else try send({ type: "bindSettles", ok: false })
+  }
+
+  effect function loadLast() {
+    const page = store.list({ album: "camera", limit: 1, thumbnails: true }) catch () => undefined
+    const row = page?.items[0]
+    if (row === undefined || row.image === undefined) return
+    view.send({ type: "lastLoaded", id: row.id, image: row.image }) catch () => undefined
+  }
+
+  effect function captureOwner() {
+    const saved = effect {
+      const photo = try bridge.capturePhoto(bridge.browser ? { saveToGallery: false, quality: 85 } : { saveToGallery: true, thumbnailOnly: true })
+      const preview = photo.thumbnail ?? photo.base64
+      if (photo.format !== "jpeg" || preview === undefined || photo.width <= 0 || photo.height <= 0) throw new CameraFailed({ method: "capturePhoto", code: "INCOMPLETE", message: "" })
+      if (bridge.browser) {
+        const kept = try mapError(store.keepCapture(newId(), photo.base64 ?? preview), (failure) => new CameraFailed({ method: "keepCapture", code: failure.code, message: failure.message }))
+        return { ok: kept.status === "saved", id: kept.id ?? "", image: kept.id === undefined ? "" : `data:image/jpeg;base64,${preview}` }
+      }
+      const id = photoReceiptId(photo.path, false)
+      const legacy = typeof photo.path === "string" && photo.path.startsWith("file:///")
+      if (id === undefined && !legacy) throw new CameraFailed({ method: "capturePhoto", code: "INCOMPLETE", message: "" })
+      return { ok: true, id: id ?? "", image: id === undefined ? "" : `data:image/jpeg;base64,${preview}` }
+    } catch effect (failure) => {
+      try say(cameraText(failure, "Not saved"))
+      return { ok: false, id: "", image: "" }
+    }
+    const after = try send({ type: "captureSettles", ...saved })
+    if (after?.capturing === true && !borrowed) try forkDetach(captureOwner())
+  }
+
+  effect function countdown() {
+    ticking = true
+    try ensuring(effect {
+      while ((try view.get()).countdown > 0) {
+        try sleep("1 second")
+        if ((try view.get()).countdown > 0) try send({ type: "tick" })
+      }
+    }, sync(() => {
+      ticking = false
+    }))
+  }
+
+  effect function poll() {
+    while ((try view.get()).recording === "RecordingActive") {
+      try sleep("500 millis")
+      const state = bridge.recordingState() catch () => undefined
+      const now = try view.get()
+      if (now.recording !== "RecordingActive" || state === undefined) continue
+      if (!state.isRecording) {
+        try send({ type: "limitReached" })
+        return
+      }
+      view.send({ type: "recordingTick", seconds: Math.max(now.elapsed, Math.floor(state.duration)), bytes: Math.max(0, Math.floor(state.fileSize)) }) catch () => undefined
+    }
+  }
+
+  effect function finalize() {
+    const kept = effect {
+      const video = try bridge.stopRecording()
+      if (!positive(video.duration) || !positive(video.fileSize) || video.path === "") throw new CameraFailed({ method: "stopRecording", code: "INCOMPLETE", message: "" })
+      if (bridge.browser && video.dataBase64 !== undefined) {
+        const row = try mapError(store.keepVideo(video.dataBase64, video.mimeType ?? "video/webm", video.duration, video.width, video.height), () => new CameraFailed({ method: "keepVideo", code: "FAILED", message: "" }))
+        return { ok: true, id: row.id, image: row.image ?? "" }
+      }
+      const id = videoReceiptId(video.path)
+      if (id === undefined) throw new CameraFailed({ method: "stopRecording", code: "INCOMPLETE", message: "" })
+      const row = try mapError(store.read(`v:${id}`, false), () => new CameraFailed({ method: "read", code: "FAILED", message: "" }))
+      return { ok: true, id: row.id, image: row.image ?? "" }
+    } catch () => ({ ok: false, id: "", image: "" })
+    const before = try view.get()
+    const after = try send({ type: "recordingSaved", ok: kept.ok, id: kept.image === "" ? (kept.ok ? kept.id : "") : kept.id, image: kept.image })
+    if (!kept.ok) try say("Save unconfirmed")
+    else if (after?.saidMaxLength === true || before.stopCause === "LimitStopped") try say("Saved · max length")
+  }
+
+  effect function recordFrom(sound: boolean, fromNotice: boolean) {
+    const now = try view.get()
+    if (fromNotice ? !canAnswerMicNotice(now, sound, "RecordingStarted") : !canRecord(now, "RecordingStarted")) return
+    if (bridge.browser) recorder.send({ type: "shutter", limit: maxBytes }) catch () => undefined
+    const answer = try exit(bridge.startRecording({ audio: sound, maxDuration: RECORDING.maxDuration, maxFileSize: RECORDING.maxFileSize }))
+    if (bridge.browser) recorder.send({ type: "startResolved", ok: Exit.isSuccess(answer) }) catch () => undefined
+    const failure = Exit.isSuccess(answer) ? undefined : Cause.squash(answer.cause)
+    const code = failure instanceof CameraFailed ? failure.code : ""
+    const outcome: RecordStart = Exit.isSuccess(answer) ? "RecordingStarted" : code === "MICROPHONE_DENIED" ? "MicrophoneRefused" : "RecordingNotStarted"
+    const after = try send(fromNotice ? { type: "answerMicNotice", sound, result: outcome } : { type: "record", result: outcome })
+    if (after === undefined && outcome === "RecordingStarted") bridge.stopRecording() catch () => undefined
+    if (outcome === "RecordingNotStarted") {
+      if (code === "PREVIEW_STOPPED") try send({ type: "bindStopsPreview" })
+      else try say("Didn’t start")
+    }
+  }
+
+  effect function rearm() {
+    const now = try view.get()
+    if (now.notice !== "CameraNotice") return try send({ type: "sync" })
+    const read = bridge.checkAccess() catch () => undefined
+    const grant = read?.camera === "granted" ? "AccessGranted" : read === undefined ? "AccessUnreadable" : "AccessNotGranted"
+    try send({ type: "rearm", grant })
+    try send({ type: "sync" })
+  }
+
+  effect function covered() {
+    const open = shellModal || ownDialog
+    if ((try view.get()).modal !== open) try send({ type: "modalChanged", open })
+  }
+
+  effect function follow(state: ForegroundState) {
+    const before = try view.get()
+    const chat = chatOf(state), shown = shownOf(state)
+    shellModal = state.modal
+    try covered()
+    if (before.chat !== chat) try send(chat === "ChatHidden" ? { type: "closeChat" } : { type: "openChat", panel: chat })
+    if (before.onScreen !== shown) {
+      try send({ type: "screenChanged", shown })
+      if (shown) return try rearm()
+    }
+    try send({ type: "sync" })
+  }
+
+  effect function zoomLatest() {
+    zooming = true
+    try ensuring(effect {
+      while (zoomWanted !== undefined) {
+        const target = zoomWanted
+        zoomWanted = undefined
+        if (!canZoomTo(try view.get(), target)) continue
+        const ok = effect {
+          try bridge.setZoom(target / 10)
+          return true
+        } catch () => false
+        if (ok) try send({ type: "zoomTo", tenths: target })
+        else try say("Couldn’t zoom")
+      }
+    }, sync(() => {
+      zooming = false
+    }))
+  }
+
+  const first = try front.get()
+  if (first.view !== "camera") try send({ type: "leave" })
+  try follow(first)
+  try forkDetach(Stream.runForEach(front.changes, follow))
+  observeLandscape((landscape) => {
+    runFork(effect {
+      if ((try view.get()).landscape !== landscape) {
+        try send({ type: "rotate" })
+        try send({ type: "sync" })
+      }
+    })
+  })
+
+  if (bridge.browser) {
+    observeRecorder((event) => {
+      const mapped: RecorderEvent | undefined =
+        event.type === "chunk" ? { type: "chunk", piece: event.size } : event.type === "trackEnded" ? { type: "limitOrTrackEnded" }
+        : event.type === "stopped" ? { type: "recorderStopped" } : event.type === "error" ? { type: "recorderError" } : { type: "prefixRead", ok: event.ok }
+      runFork(ignore(recorder.send(mapped)))
+    })
+    onPreviewEnded(() => {
+      runFork(effect {
+        if ((try view.get()).phase === "PreviewReady") try send({ type: "bindStopsPreview" })
+      })
+    })
+  }
+
+  return {
+    changes: view.changes,
+    get: () => view.get(),
+    effect sync() {
+      try send({ type: "sync" })
+    },
+    effect enter() {
+      try send({ type: "enter" })
+      try send({ type: "sync" })
+      if (bridge.browser) recorder.send({ type: "returnToCamera" }) catch () => undefined
+    },
+    effect leave() {
+      if (bridge.browser) {
+        recorder.send({ type: "leave" }) catch () => undefined
+        recorder.send({ type: "finishOnLeave" }) catch () => undefined
+      }
+      try send({ type: "leave" })
+      if (bridge.browser) recorder.send({ type: "stopPreview" }) catch () => undefined
+    },
+    effect setChat(panel: Chat) {
+      try send(panel === "ChatHidden" ? { type: "closeChat" } : { type: "openChat", panel })
+      try send({ type: "sync" })
+    },
+    effect rotate() {
+      try send({ type: "rotate" })
+      try send({ type: "sync" })
+    },
+    effect graceEnds() {
+      try send({ type: "graceEnds" })
+      try send({ type: "sync" })
+    },
+    effect hold(on: boolean) {
+      try send({ type: "holdForRequest", on })
+      try send({ type: "sync" })
+    },
+    effect shutter() {
+      const now = try view.get()
+      if (now.phase === "PreviewOff" && now.notice !== "NoNotice") return
+      if (now.mode === "VideoMode") {
+        if (now.recording === "RecordingActive") {
+          try send({ type: "stopRecording" })
+          if (bridge.browser) recorder.send({ type: "finish" }) catch () => undefined
+        } else try recordFrom(true, false)
+        return
+      }
+      const after = try send({ type: "shoot" })
+      if (after === undefined) try say("Busy")
+    },
+    effect pickMode(mode: Mode) {
+      try send({ type: "pickMode", wanted: mode })
+    },
+    answerMicNotice: (withSound: boolean) => recordFrom(withSound, true),
+    effect flip() {
+      const now = try view.get()
+      if (!canFlip(now, true)) return
+      try focusSend({ type: "clear" })
+      const turned = effect {
+        if (now.flash !== "FlashOff" || now.light) try bridge.setFlash("off")
+        if (now.zoom !== 10) try bridge.setZoom(1)
+        return try bridge.switchCamera(lensOf(now) === "back" ? "front" : "back")
+      } catch () => undefined
+      try send({ type: "flip", ok: turned !== undefined })
+      if (turned === undefined) {
+        if (bridge.browser) try send({ type: "bindStopsPreview" })
+        else try say("Not supported")
+      }
+    },
+    effect zoomTo(tenths: number) {
+      const now = try view.get()
+      if (!canZoomTo(now, tenths)) return
+      zoomWanted = clampZoom(Math.round(tenths), now)
+      if (!zooming) try zoomLatest()
+    },
+    effect cycleFlash() {
+      const after = try send({ type: "cycleFlash" })
+      if (after === undefined) return
+      const flash = after.flash === "FlashAuto" ? "auto" : after.flash === "FlashOn" ? "on" : "off"
+      bridge.setFlash(flash) catch effect () => { try say("Not supported") }
+    },
+    effect cycleTimer() {
+      try send({ type: "cycleTimer" })
+    },
+    effect toggleGrid() {
+      try send({ type: "toggleGrid" })
+    },
+    effect toggleLight() {
+      const after = try send({ type: "toggleLight" })
+      if (after === undefined) return
+      bridge.setFlash(after.light ? "torch" : after.flash === "FlashAuto" ? "auto" : after.flash === "FlashOn" ? "on" : "off") catch effect () => {
+        try send({ type: "toggleLight" })
+        try say("Couldn’t turn off the light")
+      }
+    },
+    effect focusAt(x: number, y: number) {
+      const now = try view.get()
+      if (now.phase !== "PreviewReady" || now.recording === "RecordingFinishing") return
+      const tap = (try focus.get()).epoch + 1
+      points.set(tap, { x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) })
+      try focusSend({ type: "tapFocus" })
+    },
+    effect retry() {
+      try send({ type: "retryNotice" })
+    },
+    effect allow() {
+      bridge.openPrivacySettings() catch effect () => { try say("Couldn’t open") }
+    },
+    resumed: rearm,
+    foreground: follow,
+    effect dialog(open: boolean) {
+      ownDialog = open
+      try covered()
+      try send({ type: "sync" })
+    },
+    effect back() {
+      const now = try view.get()
+      if (now.recording === "RecordingFinishing") return true
+      if (now.recording !== "RecordingActive") return false
+      try send({ type: "stopRecording" })
+      if (bridge.browser) recorder.send({ type: "finish" }) catch () => undefined
+      return true
+    },
+    effect volumeKey() {
+      const pressed = try send({ type: "volumeKey" })
+      if (pressed === undefined) {
+        volumeArmed = false
+        bridge.setVolumeShutter(false) catch () => undefined
+      }
+    },
+    effect settled() {
+      const next = try Stream.runHead(Stream.filter(view.changes, (c) => c.phase !== "PreviewStarting"))
+      return Option.isSome(next) ? next.value : try view.get()
+    },
+    effect borrow<A, E>(task: (epoch: number) => A!E) {
+      const now = try view.get()
+      if (!now.visible) return { status: "closed" } as Borrowed<A>
+      if (!canReserveShutter(now)) return { status: "busy" } as Borrowed<A>
+      borrowed = true
+      const reserved = try send({ type: "reserveShutter" })
+      if (reserved === undefined) {
+        borrowed = false
+        return { status: "busy" } as Borrowed<A>
+      }
+      const result = try exit(task(reserved.epoch))
+      try send({ type: "captureSettles", ok: false, id: "", image: "" })
+      borrowed = false
+      return { status: "done", value: try result } as Borrowed<A>
+    },
+    effect flipTo(lens: LensDirection) {
+      const now = try view.get()
+      if (lensOf(now) === lens) return true
+      const turned = effect {
+        if (now.flash !== "FlashOff" || now.light) try bridge.setFlash("off")
+        if (now.zoom !== 10) try bridge.setZoom(1)
+        return try bridge.switchCamera(lens)
+      } catch () => undefined
+      const after = try send({ type: "flip", ok: turned !== undefined })
+      return after !== undefined && lensOf(after) === lens
+    },
+  }
+})

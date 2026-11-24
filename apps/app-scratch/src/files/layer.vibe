@@ -1,0 +1,50 @@
+// spec/files/index.md; spec/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks"
+import { machine as browserMachine } from "../../gen/files__browser.effect.vibe"
+import { machine as trashMachine } from "../../gen/files__trash.effect.vibe"
+import { machine as filterMachine } from "../../gen/files__filter.effect.vibe"
+import { machine as batchMachine } from "../../gen/files__mutations.effect.vibe"
+import { machine as previewMachine } from "../../gen/files__preview.effect.vibe"
+import { machine as pdfMachine } from "../../gen/files__pdf.effect.vibe"
+import { stored as recentStored } from "../../gen/files__recent.effect.vibe"
+import { machine as proposalMachine } from "../../gen/files__proposal.effect.vibe"
+import { machine as panelMachine } from "../../gen/files__share.effect.vibe"
+import { machine as emailMachine } from "../../gen/files__emailDraft.effect.vibe"
+import { machine as exportMachine } from "../../gen/files__downloads.effect.vibe"
+import { machine as pickerMachine } from "../../gen/files__picker.effect.vibe"
+import { Build } from "../platform/build.vibe"
+import { Native } from "../platform/native.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+import { FILES_PLUGIN, nativeDocuments, nativeStorage } from "./storage.vibe"
+import { fixtureLayer } from "./fixture.vibe"
+import { browserLibrary } from "./library.vibe"
+import { layer as browserLayer } from "./browser.vibe"
+import { layer as changesLayer } from "./changes.vibe"
+import { layer as previewLayer } from "./preview.vibe"
+import { layer as shareLayer } from "./share.vibe"
+import { layer as agentLayer } from "./agent.vibe"
+import { layer as pickerLayer } from "./picker.vibe"
+import { layer as downloadsLayer } from "./downloads.vibe"
+import { layer as usageLayer } from "./usage.vibe"
+import { layer as backLayer } from "./back.vibe"
+
+/** The device's storage and documents: the native bridges on the phone, the browser's own library in the browser build, and the development volume only in a build with test mocks that has neither. */
+export const devices = Layer.unwrap(effect {
+  const build = try Build
+  const native = try Native
+  const present = try native.available(FILES_PLUGIN)
+  if (present) return Layer.merge(nativeStorage, nativeDocuments)
+  if (build.info.variant === "browser") return browserLibrary
+  return build.info.testMocks ? fixtureLayer : Layer.merge(nativeStorage, nativeDocuments)
+})
+
+/** The Files area's machines; Recent is kept on this phone across restarts. */
+export const machines = Layer.mergeAll(
+  browserMachine(), trashMachine(), filterMachine(), batchMachine(), previewMachine(), pdfMachine(),
+  recentStored(ownerKey("device", "files/recent")), proposalMachine(), panelMachine(), emailMachine(), exportMachine(), pickerMachine(),
+)
+
+const base = Layer.provideMerge(browserLayer, Layer.merge(devices, machines))
+const viewing = Layer.provideMerge(Layer.mergeAll(changesLayer, previewLayer, shareLayer, downloadsLayer, pickerLayer, usageLayer), base)
+
+/** Every Files service: FilesBrowser, FilesChanges, FilesPreview, FilesShare, FilesDownloads, FilePicker, StorageUsage, FilesAgent and FilesBack, with their machines; LibraryImport where the browser keeps its library. */
+export const layer = Layer.provideMerge(Layer.merge(agentLayer, backLayer), viewing)

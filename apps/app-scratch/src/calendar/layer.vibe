@@ -1,0 +1,83 @@
+// spec/calendar/index.md
+// Every Calendar service, over the platform's Native, Resident, Build and KeyValueStore, Account's AccountBindings, Notes' NotesHandoff and the shell's Navigation, Notices and Foreground.
+import { Machine as PresentationMachine, stored as presentationStored } from "../../gen/calendar__presentation.effect.vibe"
+import { machine as agentMachine } from "../../gen/calendar__agent.effect.vibe"
+import { machine as deviceMachine } from "../../gen/calendar__device.effect.vibe"
+import { machine as selectionMachine } from "../../gen/calendar__selection.effect.vibe"
+import { machine as draftMachine } from "../../gen/calendar__drafts.effect.vibe"
+import { machine as heldMachine } from "../../gen/calendar__deletions.effect.vibe"
+import { machine as reviewMachine } from "../../gen/calendar__approvals.effect.vibe"
+import { machine as actionMachine } from "../../gen/calendar__deviceActions.effect.vibe"
+import { AccountBindings } from "../account/bindings.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
+import { type AgentBinding, agentLayer } from "./agent.vibe"
+import { approvalsLayer } from "./approvals.vibe"
+import { bindCalendar, enterCalendar, hideCalendar, leaveCalendar } from "./binding.vibe"
+import { deletionsLayer } from "./deletions.vibe"
+import { deviceLayer } from "./device.vibe"
+import { draftsLayer } from "./drafts.vibe"
+import { handoffLayer } from "./handoffs.vibe"
+import { homeLayer } from "./home.vibe"
+import { requestsLayer } from "./requests.vibe"
+
+export { AgentCalendar } from "./agent.vibe"
+export { CalendarHandoff, type CalendarScan } from "./handoffs.vibe"
+export { calendarCapabilities, operationPorts } from "./operations.vibe"
+export { CalendarMaps, type CalendarEventOrigin } from "./ports.vibe"
+export { calendarDayObservation, type CalendarDayObservation } from "./observation.vibe"
+
+const presentation = presentationStored(ownerKey("device", "calendar/presentation"))
+const agent = Layer.provideMerge(agentLayer, agentMachine())
+
+/** Calendar's own services: the screen's presentation, the agent Calendar, device calendars, drafts, held deletions, approvals, agent requests and Home's agenda, over the platform alone. */
+export const services = Layer.mergeAll(
+  presentation,
+  agent,
+  Layer.provide(approvalsLayer, Layer.merge(reviewMachine(), agent)),
+  Layer.provide(homeLayer, Layer.merge(agent, presentation)),
+  Layer.provideMerge(deviceLayer, Layer.merge(deviceMachine(), selectionMachine())),
+  Layer.provideMerge(draftsLayer, draftMachine()),
+  Layer.provideMerge(deletionsLayer, heldMachine()),
+  Layer.provideMerge(requestsLayer, actionMachine()),
+)
+
+/** Calendar follows the account's agent binding, bound at once and rebound whenever its owner, agent, generation or usability changes. */
+const followAccount = Layer.effectDiscard(effect {
+  const bindings = try AccountBindings
+  let bound = ""
+  effect function follow(binding: AgentBinding) {
+    const key = JSON.stringify([binding.owner, binding.session, binding.agentId, binding.usable])
+    if (key === bound) return
+    bound = key
+    const usable = binding.usable && binding.owner !== ""
+    try bindCalendar(usable ? { ...binding, usable } : { owner: "", session: 0, agentId: "", usable: false })
+  }
+  try follow(try bindings.agentNow())
+  try fork.scoped Stream.runForEach(bindings.agent, (binding) => follow(binding))
+})
+
+/** Calendar follows what is in front: entering it, leaving it, and the page hidden or locked, which also sends a waiting deletion and closes the editor. */
+const followForeground = Layer.effectDiscard(effect {
+  const foreground = try Foreground
+  const machine = try PresentationMachine
+  let shown = (try machine.get()).active
+  let away = false
+  effect function follow(state: ForegroundState) {
+    const hidden = !state.visible || state.locked
+    if (hidden !== away) {
+      away = hidden
+      if (hidden) try hideCalendar()
+    }
+    const front = !hidden && state.view === "calendar"
+    if (front === shown) return
+    shown = front
+    if (front) try enterCalendar()
+    else try leaveCalendar()
+  }
+  try follow(try foreground.get())
+  try fork.scoped Stream.runForEach(foreground.changes, (state) => follow(state))
+})
+
+/** Every Calendar service, bound to the account's agent binding and following the foreground, with the hand-over of note and scan drafts; it needs the platform, Account's AccountBindings, Notes' NotesHandoff and the shell's Navigation, Notices and Foreground. */
+export const layer = Layer.provideMerge(Layer.mergeAll(followAccount, followForeground, handoffLayer), services)

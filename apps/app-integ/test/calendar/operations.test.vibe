@@ -1,0 +1,38 @@
+// spec/calendar/rangeRead.md, "Story: Let a reviewed step read my phone's calendars for the range I approved"; spec/calendar/namedRead.md, "Story: Let the agent change an event I named only when it is the one I have open"; spec/calendar/deviceActions.md, "Story: Offer the agent only the Calendar actions this phone runs"
+import { assert, describe, it } from "@effect/vitest"
+import type { DeviceEventRecord } from "../../src/calendar/device.schema.vibe"
+import { calendarCapabilities, inReviewedRange, sameTitle, sharedFields } from "../../src/calendar/operations.vibe"
+
+const range = { type: "read_calendar_range", calendarIds: ["1"], start: "2026-11-20T08:00:00.000Z", end: "2026-11-21T08:00:00.000Z", timeZone: "America/Los_Angeles", maximumEvents: 10 } as const
+const event = (fields: Partial<DeviceEventRecord>): DeviceEventRecord => ({
+  id: "7", calendarId: "1", title: "Lunch", body: "Bring the slides", location: "Cafe", begin: Date.parse("2026-11-20T20:00:00.000Z"), end: Date.parse("2026-11-20T21:00:00.000Z"),
+  revision: "r1", ...fields,
+})
+
+describe("Calendar's agent operations (spec/calendar/rangeRead.md, spec/calendar/namedRead.md)", () => {
+  it("a range read takes only the reviewed calendars over the reviewed dates, titles and times only (spec/calendar/rangeRead.md, \"Story: Let a reviewed step read my phone's calendars for the range I approved\")", () => {
+    // spec/calendar/rangeRead.md, "An event overlaps the range by its instants, and an all-day event by its local dates"
+    const before = event({ begin: Date.parse("2026-11-20T07:00:00.000Z"), end: Date.parse("2026-11-20T08:00:00.000Z") })
+    const allDay = event({ allDay: true, begin: Date.UTC(2026, 10, 20), end: Date.UTC(2026, 10, 21) })
+    const nextDay = event({ allDay: true, begin: Date.UTC(2026, 10, 21), end: Date.UTC(2026, 10, 22) })
+    assert.deepStrictEqual([inReviewedRange(event({}), range), inReviewedRange(event({ calendarId: "2" }), range), inReviewedRange(before, range),
+      inReviewedRange(allDay, range), inReviewedRange(nextDay, range)], [true, false, false, true, false])
+    // spec/calendar/rangeRead.md, "Only a complete read within the limit is shared, with titles and times only"
+    assert.deepStrictEqual(sharedFields(event({})), { id: "7", calendarId: "1", title: "Lunch", start: "2026-11-20T20:00:00.000Z", end: "2026-11-20T21:00:00.000Z", allDay: false })
+  })
+
+  it("a named change needs the open event's title to be the name given (spec/calendar/namedRead.md, \"Story: Let the agent change an event I named only when it is the one I have open\")", () => {
+    // spec/calendar/namedRead.md, "A named change or deletion runs only for the selected event whose title is the name given"
+    assert.deepStrictEqual([sameTitle("Team  Lunch ", "team lunch"), sameTitle("Team lunch", "Dentist"), sameTitle("", "")], [true, false, false])
+  })
+
+  it("Calendar advertises the local event always, agenda reads only in the browser build, and the rest only when offered (spec/calendar/deviceActions.md, \"Story: Offer the agent only the Calendar actions this phone runs\")", () => {
+    // spec/calendar/deviceActions.md, "The local event is always advertised; agenda reads only in the browser build; every other Calendar action only when the agent offered it"
+    const offered = ["calendar.agenda-read.v1", "calendar.create.v1", "calendar.next-read.v1", "calendar.availability-read.v1", "calendar.named-read.v1", "sms.send.v1"]
+    assert.deepStrictEqual(calendarCapabilities(offered, "aosp"),
+      ["calendar.local-event.v1", "calendar.create.v1", "calendar.next-read.v1", "calendar.availability-read.v1", "calendar.named-read.v1"])
+    assert.deepStrictEqual(calendarCapabilities(offered, "browser"),
+      ["calendar.local-event.v1", "calendar.agenda-read.v1", "calendar.create.v1", "calendar.next-read.v1", "calendar.availability-read.v1", "calendar.named-read.v1"])
+    assert.deepStrictEqual(calendarCapabilities([], "launcher"), ["calendar.local-event.v1"])
+  })
+})

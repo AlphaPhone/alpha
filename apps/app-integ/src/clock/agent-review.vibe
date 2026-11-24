@@ -1,0 +1,99 @@
+// spec/clock/agentReview.md, "Story: Let the agent ask Clock only with my approval on the phone"; spec/clock/agentReview.md, "A new owner retires the review: one not yet approved is cancelled, and nothing is confirmed after"
+import { CloudSession, ownerOf } from "../account/layer.vibe"
+import { Machine as ReviewMachine, machine as reviewMachine } from "../../gen/clock__agentReview.effect.vibe"
+import type { HandoffStatus } from "../../gen/clock__vocabulary.ts"
+import { AgentClockOperation, ClockReviewAnswer } from "./native.schema.vibe"
+import { ACTION_JOURNAL, nativeCalls } from "./plugins.vibe"
+
+const STATUS: Readonly<Record<string, HandoffStatus>> = {
+  opened: "ClockOpened",
+  unavailable: "ClockUnavailable",
+  denied: "ClockDenied",
+  failed: "ClockFailed",
+  unknown: "ClockUnknown",
+}
+
+/** The agent's request is not one Alpha can review: nothing was sent. */
+export error InvalidClockRequest { operationId: string }
+/** Clock could not be reviewed or its outcome could not be read. */
+export error ClockReviewUnavailable { operationId: string }
+
+/** Which journaled proposal a review belongs to. */
+export interface ClockReviewIdentity {
+  readonly scope: string
+  readonly proposalId: string
+  readonly operationId: string
+}
+
+/** The agent's Clock requests, reviewed natively and confirmed at most once for the current owner. */
+export service ClockReview {
+  /** Reviews one proposed request and answers what Clock answered; it never claims an alarm rang. */
+  review(identity: ClockReviewIdentity, operation: unknown): HandoffStatus!(InvalidClockRequest | ClockReviewUnavailable)
+  /** The owner changed: every open review is cancelled natively before another owner proceeds. */
+  retire(): void!!
+}
+
+const OPERATION_ID = /^[A-Za-z0-9_-]{1,128}$/
+
+/** Reviews over `AlphaActionJournal`, one machine per review. */
+export const agentReviewLayer = Layer.effect(ClockReview, effect {
+  const { call, command } = try nativeCalls()
+  const active = try Ref.make<ReadonlyArray<{ readonly retire: void!! }>>([])
+
+  effect function reviewOnce(identity: ClockReviewIdentity, operation: unknown) {
+    if (!OPERATION_ID.test(identity.operationId)) throw new InvalidClockRequest({ operationId: identity.operationId })
+    const approved = try mapError(Schema.decodeUnknownEffect(AgentClockOperation)(operation), () => new InvalidClockRequest({ operationId: identity.operationId }))
+    provide reviewMachine() {
+      const review = try ReviewMachine
+      review.send({ type: "startReview" }) catch () => undefined
+      const cancel = effect {
+        command(ACTION_JOURNAL, "cancelClock", identity) catch () => undefined
+        review.send({ type: "cancelSettled" }) catch () => undefined
+      }
+      const entry = { retire: effect { review.send({ type: "retireOwner" }) catch () => undefined; try cancel } }
+      try Ref.update(active, (all) => [...all, entry])
+      return try ensuring(effect {
+        const reviewed = call(ACTION_JOURNAL, "reviewClock", ClockReviewAnswer, { ...identity, operation }) catch () => undefined
+        if (reviewed === undefined) throw new ClockReviewUnavailable({ operationId: identity.operationId })
+        const token = reviewed.reviewToken
+        const usable = typeof token === "string" && token.length > 0 && token.length <= 128
+        const refused = STATUS[reviewed.result?.status ?? "unknown"] ?? "ClockUnknown"
+        const decided = review.send({ type: "reviewAnswered", approved: usable && reviewed.result === undefined, status: refused }) catch () => undefined
+        if (decided?.phase !== "AgentConfirming") {
+          if (decided?.phase === "AgentRefused") return refused
+          throw new ClockReviewUnavailable({ operationId: identity.operationId })
+        }
+        const confirmed = call(ACTION_JOURNAL, "confirmClock", ClockReviewAnswer, { ...identity, reviewToken: token }) catch () => undefined
+        const result = confirmed?.result
+        if (result === undefined) throw new ClockReviewUnavailable({ operationId: identity.operationId })
+        const status = result.action === approved.action ? STATUS[result.status] ?? "ClockUnknown" : "ClockUnknown"
+        review.send({ type: "confirmAnswered", status }) catch () => undefined
+        return status
+      }, effect {
+        const settled = try review.get()
+        if (settled.phase === "AgentReviewing" || settled.phase === "AgentIdle") review.send({ type: "retireOwner" }) catch () => undefined
+        if ((try review.get()).cancels === 0) try cancel
+        try Ref.update(active, (all) => all.filter((other) => other !== entry))
+      })
+    }
+  }
+
+  return {
+    review: reviewOnce,
+    effect retire() {
+      for (const entry of try Ref.get(active)) try entry.retire
+    },
+  }
+})
+
+/** Retires every open review each time the signed-in owner changes. Never returns. */
+export effect function followOwner() {
+  const session = try CloudSession
+  const review = try ClockReview
+  let owner = ownerOf(try session.current())
+  for try (const next of session.changes) {
+    const current = ownerOf(next)
+    if (current !== owner) try review.retire()
+    owner = current
+  }
+}

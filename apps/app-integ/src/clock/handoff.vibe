@@ -1,0 +1,122 @@
+// spec/clock/handoff.md, "Story: Ask Clock for an alarm after I review it"; spec/clock/handoff.md, "Preparing shows the exact request with the phone's time zone; leaving, Back or hiding retires it"; spec/clock/handoff.md, "Story: Try the Clock screen without opening Clock"; spec/clock/handoffHistory.md, "Story: Know what became of my last Clock request after a restart"
+import { Build } from "../platform/build.vibe"
+import { Machine as HandoffMachine, type Handoff } from "../../gen/clock__handoff.effect.vibe"
+import { Machine as HistoryMachine } from "../../gen/clock__handoffHistory.effect.vibe"
+import type { HandoffAction, HandoffStatus } from "../../gen/clock__vocabulary.ts"
+import { ClockAnswer, SurfaceInfo } from "./native.schema.vibe"
+import { DAILY, nativeCalls } from "./plugins.vibe"
+import { freshId, pageVisible, phoneTimeZone } from "./page.ts"
+import { navigationPeer } from "./peers.vibe"
+
+const WIRE_ACTION: Readonly<Record<HandoffAction, "set" | "show" | "snooze" | "dismiss">> = {
+  SetAlarm: "set",
+  ShowAlarms: "show",
+  SnoozeAlarm: "snooze",
+  DismissAlarm: "dismiss",
+}
+
+const STATUS: Readonly<Record<string, HandoffStatus>> = {
+  opened: "ClockOpened",
+  unavailable: "ClockUnavailable",
+  denied: "ClockDenied",
+  failed: "ClockFailed",
+  unknown: "ClockUnknown",
+}
+
+/** The exact request the phone's Clock handoff receives for a reviewed draft. */
+export function handoffRequest(h: Handoff, zone: string): Record<string, unknown> {
+  switch (h.handoffAction) {
+    case "SetAlarm":
+      return { action: "set", hour: h.hour, minute: h.minute, label: h.label.trim(), timeZone: zone, reviewed: true, ...(h.days.length ? { days: [...h.days].sort((a, b) => a - b) } : {}) }
+    case "SnoozeAlarm":
+      return { action: "snooze", snoozeMinutes: h.snooze, reviewed: true }
+    case "ShowAlarms":
+      return { action: "show", reviewed: true }
+    case "DismissAlarm":
+      return { action: "dismiss", reviewed: true }
+  }
+}
+
+/** The Clock screen's handoff to Android Clock: the phone's support, the review, and one recorded dispatch. */
+export service ClockHandoff {
+  /** Reads what the phone's handoff supports and allows simulation only in a test-mocks build. */
+  restore(): void!!
+  /** Shows the exact request for review with the phone's time zone now. */
+  prepare(): boolean!!
+  /** Records and sends the reviewed request once; a review that went stale opens nothing. */
+  confirm(): void!!
+  /** Leaving, Back or hiding retires the review. */
+  retire(): void!!
+  /** Hardware or gesture Back: retires an open review, and holds Back while the reviewed request is being sent; false when no review is open. */
+  back(): boolean!!
+}
+
+/** The handoff over the draft machine and the stored history, reaching Clock through `DailyApps`. */
+export const handoffLayer = Layer.effect(ClockHandoff, effect {
+  const { call } = try nativeCalls()
+  const draft = try HandoffMachine
+  const history = try HistoryMachine
+  const build = (try Build).info
+
+  return {
+    effect restore() {
+      if (build.testMocks) draft.send({ type: "allowMocks" }) catch () => undefined
+      const info = call(DAILY, "surfaceInfo", SurfaceInfo) catch () => undefined
+      const version = info?.clockRepeatDaysVersion
+      if (typeof version === "number" && Number.isInteger(version) && version >= 1) draft.send({ type: "supportRepeat" }) catch () => undefined
+    },
+    effect prepare() {
+      const zone = phoneTimeZone()
+      const done = draft.send({ type: "prepare", zone }) catch () => undefined
+      return done?.phase === "Reviewing"
+    },
+    effect retire() {
+      draft.send({ type: "retire" }) catch () => undefined
+    },
+    effect back() {
+      const phase = (try draft.get()).phase
+      if (phase === "Saving" || phase === "Opening") return true
+      if (phase !== "Reviewing") return false
+      draft.send({ type: "retire" }) catch () => undefined
+      return true
+    },
+    effect confirm() {
+      if (!pageVisible()) {
+        draft.send({ type: "retire" }) catch () => undefined
+        return
+      }
+      const reviewed = try draft.get()
+      const zone = phoneTimeZone()
+      const admitted = draft.send({ type: "confirm", zone }) catch () => undefined
+      if (admitted?.phase !== "Saving") return
+      const id = freshId()
+      const recorded = history.send({ type: "beginRecord", id, handoffAction: reviewed.handoffAction, at: try Clock.currentTimeMillis }) catch () => undefined
+      if (recorded === undefined) {
+        draft.send({ type: "recordFailed" }) catch () => undefined
+        return
+      }
+      const sent = draft.send({ type: "recordSaved", generation: admitted.generation, zone: pageVisible() ? phoneTimeZone() : "" }) catch () => undefined
+      if (sent?.phase !== "Opening") {
+        history.send({ type: "finishRecord", id, status: "ClockFailed" }) catch () => undefined
+        return
+      }
+      const action = WIRE_ACTION[reviewed.handoffAction]
+      const answer = call(DAILY, "clockHandoff", ClockAnswer, handoffRequest(reviewed, zone)) catch () => undefined
+      const status: HandoffStatus = answer === undefined || answer.action !== action ? "ClockUnknown" : STATUS[answer.status] ?? "ClockUnknown"
+      history.send({ type: "finishRecord", id, status }) catch () => undefined
+      draft.send({ type: "clockAnswered", status, reason: answer?.message?.trim() ?? "" }) catch () => undefined
+    },
+  }
+})
+
+/** Retires the review whenever the owner leaves Clock or Workflows, whose Clock draft shares it, or the page hides. Never returns. */
+export effect function followHandoff() {
+  const handoff = try ClockHandoff
+  const navigator = try navigationPeer()
+  let last = ""
+  for try (const view of navigator.changes()) {
+    const now = view.hidden ? "" : view.app
+    if (now !== last && (last === "clock" || last === "workflows")) try handoff.retire()
+    last = now
+  }
+}

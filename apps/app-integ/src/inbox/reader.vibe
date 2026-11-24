@@ -1,0 +1,305 @@
+// spec/inbox/reader.md, "Story: Read a message and its conversation"; spec/inbox/reader.md, "Story: Mark mail read or unread"; spec/inbox/reader.md, "Story: Open an attachment as the exact file that was sent"; spec/inbox/reader.md, "Story: Trust what a formatted email shows me"; spec/inbox/attachments.md, "Story: Hand an attachment to another app"
+import { type Event as ReaderEvent, type Reader as ReaderState, type MailHeader, type MailBody, type MailPart, type MailLink, type ReviewedFile, type SavePhase, Machine as ReaderMachine, opaqueSaveOffered, linkOpens, askable } from "../../gen/inbox__reader.effect.vibe"
+import type { MailRow } from "../../gen/inbox__mailbox.ts"
+import { Machine as MailboxMachine } from "../../gen/inbox__mailbox.effect.vibe"
+import { Machine as JournalMachine } from "../../gen/inbox__operations.effect.vibe"
+import { handoffAllowed, type HandoffResult } from "../../gen/inbox__attachments.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { ResidentControl } from "../platform/resident-control.vibe"
+import { Preferences } from "../settings/preferences.vibe"
+import { Assistant } from "../assistant/assistant.vibe"
+import { reviewMailContext, validateMailContext } from "@elizaos/plugin-inbox/mailbox"
+import { BrowserAgent } from "../browser/agent.vibe"
+import { InboxAccounts, savedScope } from "./accounts.vibe"
+import { Gmail, GmailFailed, SignInExpired, type DownloadedFile } from "./gmail.vibe"
+import { SavedMail } from "./saved.vibe"
+import { WireHandoffResult } from "./wire.schema.vibe"
+import { checkMailFile, checkOpaqueFile, isRefusal } from "./files.ts"
+import { parseLink } from "./text.ts"
+import { newId } from "../platform/ids.ts"
+
+/** Why an attachment could not be opened here. */
+export type AttachmentRefusal = "refresh-first" | "open-in-gmail" | "changed" | "refused" | "failed"
+
+/** The owner's review of a link before it opens: where it goes, and whether its text names another host. */
+export interface LinkReview { readonly href: string; readonly host: string; readonly mismatch: boolean; readonly visit: number }
+
+/** The open message, its conversation, its read state and its attachments. */
+export service Reader {
+  readonly changes: Stream.Stream<ReaderState>
+  get(): ReaderState!!
+  /** Opens a listed message: from this phone's saved mail while the accounts are the saved ones, otherwise read whole from Gmail. */
+  open(row: MailRow): void!!
+  /** Closes the open message; false when none was open. */
+  close(): boolean!!
+  /** Marks the open message read or unread; `explicit` is the owner's own tap. */
+  setRead(unread: boolean, explicit: boolean): void!!
+  /** Shows the next or the previous page of the conversation. */
+  page(next: boolean): void!!
+  /** Loads remote images of the open message only. */
+  showImages(): void!!
+  /** Reads an attachment of the open message as its exact bytes, or says why not. */
+  openAttachment(part: MailPart): (AttachmentRefusal | undefined)!!
+  /** Hands the reviewed attachment to the phone's viewer. */
+  handOff(): HandoffResult!!
+  /** Saves an exact copy of the reviewed attachment to Files. */
+  saveAttachment(): void!!
+  /** Closes the attachment view and cancels any handoff; false when none was shown. */
+  closeAttachment(): boolean!!
+  /** The review of a link of the open message, or nothing when it cannot be opened at all. */
+  reviewLink(link: MailLink): (LinkReview | undefined)!!
+  /** Opens a reviewed link in Alpha's Browser, if the review is still for the open message. */
+  openLink(review: LinkReview): boolean!!
+  /** Hands the open message, at its revision, to the current agent session in the assistant's composer; says why not otherwise. */
+  askAgent(): ("not-ready" | "too-large" | "changed" | undefined)!!
+  /** Reads up to two bodies ahead into memory. */
+  prefetch(rows: MailRow[]): void!!
+}
+
+/** The reader shell over its machine, Gmail, the saved mail, Android's attachment viewer and Alpha's Browser. */
+export const layer = Layer.effect(Reader, effect {
+  const machine = try ReaderMachine
+  const mailbox = try MailboxMachine
+  const journal = try JournalMachine
+  const accounts = try InboxAccounts
+  const gmail = try Gmail
+  const saved = try SavedMail
+  const native = try Native
+  const browser = try BrowserAgent
+  const preferences = try Preferences
+  const assistant = try Assistant
+  const resident = try ResidentControl
+  const pending = try Ref.make<Map<string, Deferred.Deferred<MailBody | undefined>>>(new Map())
+  const handing = try Ref.make(false)
+  const file = try Ref.make<DownloadedFile | undefined>(undefined)
+
+  effect function send(event: ReaderEvent) {
+    return machine.send(event) catch () => undefined
+  }
+
+  const bodyKey = (account: string, id: string) => JSON.stringify([account, id])
+
+  effect function remember(account: string, body: MailBody) {
+    const now = try Clock.currentTimeMillis
+    const current = try accounts.owner()
+    const row = (try accounts.get()).rows.find((r) => r.id === account)
+    if (current !== undefined && row !== undefined) try saved.rememberBody(savedScope(current), row, body, now)
+  }
+
+  effect function cached(account: string, id: string) {
+    const now = try Clock.currentTimeMillis
+    const current = try accounts.owner()
+    const row = (try accounts.get()).rows.find((r) => r.id === account)
+    return current === undefined || row === undefined ? undefined : try saved.body(savedScope(current), row, id, now)
+  }
+
+  effect function fetch(account: string, id: string) {
+    const key = bodyKey(account, id)
+    const waiting = (try Ref.get(pending)).get(key)
+    if (waiting !== undefined) return try Deferred.await(waiting)
+    const deferred = try Deferred.make<MailBody | undefined>()
+    try Ref.update(pending, (m) => new Map(m).set(key, deferred))
+    const body = ensuring(gmail.read(account, id), Ref.update(pending, (m) => { const next = new Map(m); next.delete(key); return next })) catch effect (error) => {
+      try Deferred.succeed(deferred, undefined)
+      throw error
+    }
+    try remember(account, body)
+    try Deferred.succeed(deferred, body)
+    return body
+  }
+
+  effect function fail(visit: number, error: GmailFailed | SignInExpired, account: string) {
+    if (error._tag === "SignInExpired") {
+      try send({ type: "bodyFailed", visit, failure: "Unavailable" })
+      try accounts.refresh()
+    } else if (error.kind === "Revoked") {
+      try send({ type: "revoked" })
+      try accounts.revoked(account)
+    } else try send({ type: "bodyFailed", visit, failure: error.kind })
+  }
+
+  effect function setRead(unread: boolean, explicit: boolean) {
+    const s = try machine.get()
+    const allowed = (try journal.get()).capabilities.readState && (try accounts.canChange())
+    const started = try send({ type: "beginReadChange", visit: s.visit, unread, explicit, allowed })
+    if (started === undefined) return
+    const kind = unread ? "MarkUnreadKind" : "MarkReadKind"
+    const proposal = { tag: "LabelProposal" as const, messageId: s.body.id, expectedHistoryId: s.body.historyId }
+    const requestId = newId()
+    let expired = false
+    const receipt = effect {
+      const prepared = try gmail.prepare(s.account, requestId, kind, proposal)
+      if (!prepared.exact || prepared.receipt.receiptState !== "PreparedReceipt") return undefined
+      const receipt = try gmail.dispatch(s.account, requestId, prepared.receipt.digest, kind, proposal)
+      return receipt.receiptState === "SucceededReceipt" && receipt.messageId === s.body.id ? receipt : undefined
+    } catch (error) => {
+      expired = error._tag === "SignInExpired"
+      return undefined
+    }
+    if (receipt === undefined) {
+      try send({ type: "readUnconfirmed", visit: s.visit })
+      if (expired && explicit) try accounts.refresh()
+      return
+    }
+    try send({ type: "readChanged", visit: s.visit, unread, historyId: receipt.historyId })
+    mailbox.send({ type: "markRow", id: s.body.id, unread, starred: s.body.starred }) catch () => undefined
+    if (receipt.historyId === "") {
+      const fresh = gmail.read(s.account, s.body.id) catch () => undefined
+      if (fresh !== undefined && fresh.historyId !== "") try send({ type: "revisionRead", visit: s.visit, historyId: fresh.historyId, parts: fresh.parts })
+    }
+  }
+
+  effect function loadThread(visit: number) {
+    const s = try machine.get()
+    if (!(try journal.get()).capabilities.threads) return
+    const started = try send({ type: "beginThread", visit })
+    if (started === undefined) return
+    const thread = gmail.thread(s.account, s.body.threadId, 0, "") catch () => undefined
+    if (thread === undefined) {
+      try send({ type: "threadFailed", visit })
+      return
+    }
+    for (const m of thread.messages) if (m.id !== s.body.id) try remember(s.account, m)
+    try send({ type: "threadRead", visit, thread })
+  }
+
+  effect function open(row: MailRow) {
+    try send({ type: "preferenceRead", on: try preferences.loadsMailImages() })
+    const a = try accounts.get()
+    const header: MailHeader = row
+    try Ref.set(file, undefined)
+    native.invoke("AlphaMailAttachments", "cancel") catch () => undefined
+    if (a.fromDisk) {
+      const current = try accounts.owner()
+      const now = try Clock.currentTimeMillis
+      const account = a.rows.find((r) => r.id === a.selected)
+      const found = current === undefined || account === undefined ? undefined : try saved.body(savedScope(current), account, row.id, now)
+      const fallback: MailBody = { ...(try machine.get()).body, id: row.id, threadId: row.threadId, sender: row.sender, senderAddress: row.senderAddress, subject: row.subject, snippet: row.snippet, text: "", recipients: [], copied: [], links: [], parts: [], html: "", historyId: "", unread: row.unread, starred: row.starred, replyTo: "", receivedAt: row.receivedAt, htmlOmitted: false, omittedLinks: 0 }
+      try send({ type: "openSaved", body: found?.body ?? fallback, found: found !== undefined })
+      return
+    }
+    const opened = try send({ type: "openMessage", header })
+    if (opened === undefined) return
+    const visit = opened.visit
+    const account = opened.account
+    const kept = try cached(account, row.id)
+    const body = kept !== undefined && kept.skipRead ? kept.body : (fetch(account, row.id) catch effect (error) => { try fail(visit, error, account); return undefined })
+    if (body === undefined) return
+    const shown = try send({ type: "bodyRead", visit, body })
+    if (shown === undefined) return
+    if (shown.body.unread) try setRead(false, false)
+    try loadThread(visit)
+  }
+
+  return {
+    changes: machine.changes,
+    get: () => machine.get(),
+    open,
+    effect close() {
+      if ((try machine.get()).phase === "Closed") return false
+      try Ref.set(file, undefined)
+      native.invoke("AlphaMailAttachments", "cancel") catch () => undefined
+      return (try send({ type: "closeMessage" })) !== undefined
+    },
+    setRead,
+    effect page(next: boolean) {
+      const s = try machine.get()
+      const t = s.thread
+      const offset = next ? t.following : (t.previous.at(-1) ?? 0)
+      if (t.threadId === "" || (next && t.following < 0) || (!next && t.previous.length === 0)) return
+      const page = gmail.thread(s.account, t.threadId, offset, t.revision) catch () => undefined
+      if (page !== undefined) try send({ type: "threadPage", visit: s.visit, thread: { ...page, previous: t.previous } })
+    },
+    showImages: () => effect { try send({ type: "showImages" }) },
+    effect openAttachment(part: MailPart) {
+      const s = try machine.get()
+      const caps = (try journal.get()).capabilities
+      if (s.body.historyId === "") return "refresh-first"
+      if (!part.supported && !opaqueSaveOffered(caps.opaqueDownloads, part.bytes)) return "open-in-gmail"
+      const started = try send({ type: "beginAttachment", visit: s.visit, part })
+      if (started === undefined) return "failed"
+      const downloaded = gmail.attachment(s.account, s.body.id, part.partId, s.body.historyId, !part.supported) catch effect (error) => {
+        try send({ type: "attachmentFailed", visit: s.visit, failure: error._tag === "GmailFailed" ? error.kind : "Unavailable" })
+        return undefined
+      }
+      if (downloaded === undefined) return "refused"
+      const checked = tryPromise({ try: () => (part.supported ? checkMailFile : checkOpaqueFile)(downloaded.name, downloaded.mimeType, downloaded.dataBase64), catch: (cause) => cause }) catch () => "name-or-encoding" as const
+      if (isRefusal(checked) || checked.sha256 !== downloaded.sha256 || checked.bytes !== downloaded.bytes) {
+        try send({ type: "attachmentFailed", visit: s.visit, failure: "Refused" })
+        return "changed"
+      }
+      const reviewed: ReviewedFile = { partId: part.partId, name: checked.name, mimeType: checked.mimeType, bytes: checked.bytes, sha256: checked.sha256, preview: checked.text ?? "", external: checked.text === undefined && part.supported, opaque: !part.supported }
+      try Ref.set(file, downloaded)
+      const shown = try send({ type: "attachmentRead", visit: s.visit, file: reviewed })
+      return shown === undefined ? "failed" : undefined
+    },
+    effect handOff() {
+      const s = try machine.get()
+      const reviewed = try Ref.get(file)
+      if (reviewed === undefined || !handoffAllowed(s.attachment.sha256, reviewed.sha256, s.attachment.phase === "AttachmentShown" && !s.attachment.opaque)) return "HandedCancelled"
+      if (!(try Ref.modify(handing, (busy) => [!busy, true] as const))) return "HandedCancelled"
+      const answer = native.invoke("AlphaMailAttachments", "openReviewed", { name: reviewed.name, mimeType: reviewed.mimeType, dataBase64: reviewed.dataBase64, sha256: reviewed.sha256, size: reviewed.bytes, reviewed: true }) catch () => undefined
+      try Ref.set(handing, false)
+      const result = Schema.decodeUnknownEffect(WireHandoffResult)(answer) catch () => undefined
+      const still = try machine.get()
+      if (still.visit !== s.visit || still.attachment.sha256 !== s.attachment.sha256) return "HandedCancelled"
+      return result?.status === "opened" ? "HandedOpened" : result?.status === "cancelled" ? "HandedCancelled" : "HandedUnconfirmed"
+    },
+    effect saveAttachment() {
+      const s = try machine.get()
+      const reviewed = try Ref.get(file)
+      if (reviewed === undefined || !handoffAllowed(s.attachment.sha256, reviewed.sha256, s.attachment.phase === "AttachmentShown")) return
+      const started = try send({ type: "beginSave" })
+      if (started === undefined) return
+      const answer = native.invoke("AlphaMailAttachments", "saveReviewed", { name: reviewed.name, mimeType: reviewed.mimeType, dataBase64: reviewed.dataBase64, sha256: reviewed.sha256, size: reviewed.bytes, reviewed: true, opaque: reviewed.opaque }) catch () => undefined
+      const result = Schema.decodeUnknownEffect(WireHandoffResult)(answer) catch () => undefined
+      const outcome: SavePhase = result?.status === "saved" ? "SavedCopy" : result?.status === "cancelled" ? "SaveCancelled" : "SaveUnconfirmed"
+      try send({ type: "saveFinished", result: outcome })
+    },
+    effect closeAttachment() {
+      if ((try machine.get()).attachment.phase === "NoAttachment") return false
+      try Ref.set(file, undefined)
+      native.invoke("AlphaMailAttachments", "cancel") catch () => undefined
+      return (try send({ type: "closeAttachment" })) !== undefined
+    },
+    effect reviewLink(link: MailLink) {
+      const s = try machine.get()
+      const url = parseLink(link.href)
+      if (url === undefined || !url.https || url.credentials) return undefined
+      return { href: url.href, host: url.host, mismatch: link.mismatch, visit: s.visit }
+    },
+    effect openLink(review: LinkReview) {
+      const s = try machine.get()
+      const url = parseLink(review.href)
+      if (url === undefined || !linkOpens(url.https, url.credentials, true, review.visit === s.visit && s.phase === "BodyShown")) return false
+      const opened = browser.openApproved(url.href, true) catch () => undefined
+      if (opened === undefined) return false
+      try opened.present
+      return true
+    },
+    effect askAgent() {
+      const s = try machine.get()
+      const agent = resident.session() catch () => undefined
+      const owner = try accounts.owner()
+      if (owner === undefined || agent === undefined || !askable(s, agent.agent !== "")) return "not-ready"
+      const source = { accountId: s.account, messageId: s.body.id, revision: s.body.historyId, from: s.body.senderAddress || s.body.sender, to: s.body.recipients, subject: s.body.subject, bodyText: s.body.text }
+      const destination = { ownerId: owner.userId, agentId: agent.agent, sessionId: String(agent.generation), origin: "alpha" }
+      const outcome = effect {
+        const review = try reviewMailContext(source, destination)
+        const now = try machine.get()
+        if (now.visit !== s.visit || now.body.historyId !== s.body.historyId) return "changed" as const
+        try assistant.openWith(try validateMailContext(review, source, destination))
+        return undefined
+      } catch (error) => error.reason === "too-large" ? "too-large" as const : error.reason === "changed" ? "changed" as const : "not-ready" as const
+      return outcome
+    },
+    effect prefetch(rows: MailRow[]) {
+      const a = try accounts.get()
+      if (a.fromDisk || a.selected === "") return
+      for (const row of rows.slice(0, 2)) {
+        if ((try cached(a.selected, row.id))?.skipRead === true) continue
+        fetch(a.selected, row.id) catch () => undefined
+      }
+    }
+  }
+})

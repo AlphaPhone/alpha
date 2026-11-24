@@ -1,0 +1,113 @@
+// spec/browser/session.md, "A tab's page is the native host's latest report for it, and a private tab stays private"; spec/browser/session.md, "A pop-up the native host opened becomes the selected tab in its opener's profile, unless eight are open"; spec/browser/session.md, "A find result counts only for the bar's tab, and a cleared search closes the bar"
+// What the native tab host sends and answers, untrusted until decoded here.
+
+/** A `stateChanged` report of one tab. */
+export schema StateChanged {
+  readonly session: string
+  readonly id: string
+  readonly sequence: number
+  readonly navigation?: string
+  readonly url?: string
+  readonly title?: string
+  readonly loading?: boolean
+  readonly committed?: boolean
+  readonly canBack?: boolean
+  readonly canForward?: boolean
+  readonly error?: string
+  readonly private?: boolean
+  readonly surfaceResumed?: boolean
+  readonly externalOnly?: boolean
+}
+
+/** A pop-up or `target=_blank` link the host opened as a tab. */
+export schema TabOpened {
+  readonly session: string
+  readonly id: string
+  readonly opener?: string
+  readonly private?: boolean
+}
+
+/** An event naming one tab: `tabClosed`. */
+export schema TabEvent {
+  readonly session: string
+  readonly id: string
+}
+
+/** A notice about the current page, in the host's words. */
+export schema TabNotice {
+  readonly session: string
+  readonly id: string
+  readonly message: string
+}
+
+/** A find-in-page result or a cleared search. */
+export schema FindResult {
+  readonly session: string
+  readonly id: string
+  readonly cleared?: boolean
+  readonly index?: number
+  readonly count?: number
+  readonly done?: boolean
+}
+
+/** A page's video entering or leaving full screen. */
+export schema Fullscreen {
+  readonly session: string
+  readonly id: string
+  readonly active: boolean
+}
+
+/** The Downloads list's Show in Files. */
+export schema ShowDownloads {
+  readonly session: string
+}
+
+/** The bookmark list the store returned. */
+export schema MarkList {
+  readonly urls: ReadonlyArray<string>
+}
+
+/** One saved tab. */
+export schema SavedTabRow {
+  readonly id: string
+  readonly url: string
+  readonly title: string
+}
+
+/** The saved session record. */
+export schema SavedRecord {
+  readonly history: ReadonlyArray<string>
+  readonly tabs: ReadonlyArray<SavedTabRow>
+  readonly cur: string
+}
+
+/** What clearing browsing data closed. */
+export schema Cleared {
+  readonly closed?: ReadonlyArray<string>
+}
+
+/** The site whose data was cleared. */
+export schema SiteCleared {
+  readonly site?: string
+}
+
+/** Whether this WebView can read a page in an isolated world, or fill attested login fields. */
+export schema Support {
+  readonly available: boolean
+}
+
+/** A page excerpt for Ask about page. */
+export schema Excerpt {
+  readonly text?: string
+}
+
+/** A reviewed reading's single-use speech token. */
+export schema ReadingToken {
+  readonly readingToken: string
+}
+
+/** The native host's receipt of a page command. */
+export schema CommandReceipt {
+  readonly session?: string
+  readonly id?: string
+}

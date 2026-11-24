@@ -1,0 +1,60 @@
+// spec/shell/navigation.md, "An approved open_view shows Home or an admitted app, and is applied only once it is in front"; spec/shell/index.md, "An app is offered only where its availability admits it"
+import { operationOf } from "@elizaos/agent/operations"
+import { viewShown } from "../../gen/shell__navigation.effect.vibe"
+import { copy } from "../assistant/presentation.vibe"
+import type { OperationPorts } from "../assistant/review.vibe"
+import { APP_IDS } from "./apps.vibe"
+import { Navigation } from "./navigation.vibe"
+
+const TITLES: Readonly<Record<string, string>> = {
+  home: "Home", notes: "Notes", reminders: "Reminders", browser: "Browser", calendar: "Calendar", files: "Files",
+  photos: "Photos", camera: "Camera", maps: "Maps", inbox: "Inbox", settings: "Settings", workflows: "Workflows",
+}
+
+function viewOf(operation: unknown): string | undefined {
+  return operationOf(operation, "open_view")?.view
+}
+
+function titleOf(view: string): string {
+  return TITLES[view] ?? "the app"
+}
+
+/** The shell's family of agent device operations for `DeviceExecutors`: an approved open_view shows Home or an app this build admits, through the agent's claimed navigation, and changes nothing else. */
+export const operationPorts = effect {
+  const navigation = try Navigation
+
+  effect function show(view: string) {
+    if (view === "home") try navigation.home()
+    else {
+      const app = APP_IDS.find((known) => known === view)
+      if (app === undefined || !(try navigation.get()).admitted.includes(app)) return false
+      if (!(try navigation.switchForAgent(app, ""))) return false
+    }
+    const nav = try navigation.get()
+    return viewShown(view, nav.admitted, nav.app, nav.library)
+  }
+
+  const ports: OperationPorts = {
+    validate: (operation) => viewOf(operation) === undefined ? undefined : operation,
+    execute: async (operation) => {
+      const view = viewOf(operation)
+      if (view === undefined) return { kind: "refused", code: "unsupported" }
+      const shown = await runPromise(show(view))
+      return shown ? { kind: "applied" } : { kind: "refused", code: "not_shown" }
+    },
+    readBack: async () => ({ kind: "refused", code: "no_readback" }),
+    describe: (operation) => {
+      const view = viewOf(operation)
+      if (view === undefined) return { title: "Action", detail: "" }
+      const destination = view === "home" || view === "notes" || view === "calendar" ? view : undefined
+      return { title: `Open ${titleOf(view)}`, detail: "", ...(destination === undefined ? {} : { destination }) }
+    },
+    classOf: () => "OpenView",
+    target: () => ({ tag: "NoTarget" }),
+    summarize: (operation, result) => {
+      const view = viewOf(operation)
+      return result === "Applied" && view !== undefined ? `Opened ${titleOf(view)}.` : copy.unconfirmed
+    },
+  }
+  return ports
+}

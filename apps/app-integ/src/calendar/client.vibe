@@ -1,0 +1,20 @@
+// spec/calendar/agent.md, "Story: Change my agent's Calendar only as I reviewed, and be told what happened"; spec/calendar/googleLink.md, "Story: Link a Google calendar I can write to, and be told it is synced only when it is"
+// Upstream's calendar clients over the resident agent's authenticated JSON requests.
+import { type CalendarApi, type CalendarFetch, type LinkedSyncApi, createCalendarApi, createLinkedSyncApi } from "@elizaos/plugin-calendar/client"
+import type { Resident } from "../platform/resident.vibe"
+
+/** One authenticated request to the resident agent, as upstream's clients take it. */
+export function residentFetch(resident: Resident.Shape): CalendarFetch {
+  return <T,>(path: string, init?: RequestInit) => runPromise(effect {
+    const method = (init?.method ?? "GET") as "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
+    const body = typeof init?.body === "string" ? try Effect.try(() => JSON.parse(init.body as string) as unknown) : undefined
+    const answer = try resident.json(method, path, body)
+    return answer.data as T
+  })
+}
+
+/** The calendar client and the linked-sync control client, bound to the resident agent. */
+export function residentClients(resident: Resident.Shape): { readonly calendar: CalendarApi; readonly linked: LinkedSyncApi } {
+  const fetch = residentFetch(resident)
+  return { calendar: createCalendarApi(fetch), linked: createLinkedSyncApi(fetch) }
+}

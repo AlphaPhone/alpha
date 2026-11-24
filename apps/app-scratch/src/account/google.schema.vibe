@@ -1,0 +1,33 @@
+// spec/account/google.md, "The panel reads the accounts first, and only the latest read for this account counts"; spec/account/google.md, "A return asks for a read and never grants access by itself"
+
+/** One connected Google account of the signed-in Cloud account. */
+export schema GoogleAccountRow {
+  connectionId: string
+  grantId?: string
+  email?: string
+  grantedCapabilities: Array<string>
+}
+
+/** `GET /api/v1/eliza/google/accounts`. */
+export schema GoogleAccountList {
+  accounts: Array<GoogleAccountRow>
+}
+
+/** `POST /api/v1/eliza/google/connect/initiate`: Google's consent page, and whether it returns to the app. */
+export schema ConsentStart {
+  authUrl: string
+  appReturn?: number
+}
+
+/** The native workspace return's offer for one consent. */
+export schema WorkspaceOffer {
+  supported: boolean
+  redirectUrl?: string
+  state?: string
+}
+
+/** The native workspace return's consumed result. */
+export schema WorkspaceConsumed {
+  result: "none" | "connected" | "denied" | "failed"
+  connectionId?: string
+}

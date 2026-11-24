@@ -1,0 +1,139 @@
+// spec/calendar/presentation.md, "Story: Read the presentation of times"; spec/calendar/device.md, "A read covers the month before through the month after next, and its first instant is never negative"
+import { type CalendarEvent, type CalendarSummary, sourceKeyId, utcInstant } from "@elizaos/plugin-calendar"
+import { civilDay, deviceZone, midnightAfter } from "./time.ts"
+
+export const DAY = 86_400_000
+
+/** How an event of the app's own calendar repeats. */
+export type CalendarRepeat = "none" | "daily" | "weekdays" | "weekly"
+
+/** A half-open range of instants. */
+export interface InstantRange { readonly begin: number; readonly end: number }
+
+/** The RRULE line of a repeat the app writes. */
+export function rruleFor(repeat: CalendarRepeat): readonly string[] {
+  return repeat === "daily" ? ["RRULE:FREQ=DAILY"]
+    : repeat === "weekdays" ? ["RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"]
+    : repeat === "weekly" ? ["RRULE:FREQ=WEEKLY"] : []
+}
+
+/** The repeat an RRULE line names, when it is one the app writes. */
+export function repeatOf(rules: readonly string[] | null | undefined): CalendarRepeat | undefined {
+  const rrules = (rules ?? []).filter((rule) => rule.toUpperCase().startsWith("RRULE:"))
+  if (rrules.length === 0) return "none"
+  if (rrules.length > 1) return undefined
+  const parts = rrules[0]!.slice(6).toUpperCase().split(";").sort().join(";")
+  if (parts === "FREQ=DAILY") return "daily"
+  if (parts === "FREQ=WEEKLY") return "weekly"
+  const byDay = /^BYDAY=([A-Z,]+);FREQ=WEEKLY$/.exec(parts)
+  return byDay && byDay[1]!.split(",").sort().join(",") === "FR,MO,TH,TU,WE" ? "weekdays" : undefined
+}
+
+const UNITS: Readonly<Record<string, readonly [string, string]>> = { DAILY: ["daily", "days"], WEEKLY: ["weekly", "weeks"], MONTHLY: ["monthly", "months"], YEARLY: ["yearly", "years"] }
+const WEEKDAYS: Readonly<Record<string, string>> = { MO: "Mon", TU: "Tue", WE: "Wed", TH: "Thu", FR: "Fri", SA: "Sat", SU: "Sun" }
+
+/** One plain line for a repeating event; a rule these words cannot say still says that it repeats. */
+export function repeatText(rules: readonly string[] | null | undefined, recurringEventId?: string | null): string {
+  const rrules = (rules ?? []).filter((rule) => rule.startsWith("RRULE:"))
+  if (rrules.length === 0) return recurringEventId || (rules ?? []).length > 0 ? "Repeats" : ""
+  if (rrules.length > 1) return "Repeats"
+  const parts = Object.fromEntries(rrules[0]!.slice(6).split(";").map((part) => part.split("=") as [string, string]))
+  const unit = UNITS[parts.FREQ ?? ""]
+  const interval = parts.INTERVAL === undefined ? 1 : Number(parts.INTERVAL)
+  if (!unit || !Number.isInteger(interval) || interval < 1) return "Repeats"
+  const days = parts.BYDAY?.split(",") ?? []
+  if (parts.FREQ === "WEEKLY" && days.length > 0 && days.every((day) => WEEKDAYS[day] !== undefined)) {
+    if (interval === 1 && days.join(",") === "MO,TU,WE,TH,FR") return "Repeats every weekday"
+    return `${interval === 1 ? "Repeats weekly" : `Repeats every ${interval} weeks`} on ${days.map((day) => WEEKDAYS[day]).join(", ")}`
+  }
+  return interval === 1 ? `Repeats ${unit[0]}` : `Repeats every ${interval} ${unit[1]}`
+}
+
+/** The three-month read around the date in view: from the first of the previous month to the first of the month after next. */
+export function readWindow(day: number, month: number, now: number, zone = deviceZone()): InstantRange {
+  const selected = new Date(midnightAfter(now, zone, day))
+  const year = selected.getUTCFullYear()
+  const shown = selected.getUTCMonth() + month
+  const first = (offset: number) => Date.UTC(year, shown + offset, 1)
+  const begin = midnightAfter(first(-1), zone, 0)
+  return { begin: Math.max(0, begin), end: midnightAfter(first(2), zone, 0) }
+}
+
+/** The stable key of a read window and zone. */
+export function windowKey(range: InstantRange, zone: string): string {
+  return `${range.begin}:${range.end}:${zone}`
+}
+
+/** Where a row on screen came from. */
+export type RowSource = "device" | "agent"
+
+/** One event as the Calendar screen lays it out. */
+export interface CalendarRow {
+  readonly id: string
+  readonly source: RowSource
+  readonly sourceKey: string
+  readonly title: string
+  readonly notes: string
+  readonly where: string
+  readonly begin: number
+  readonly end: number
+  readonly allDay: boolean
+  readonly offset: number
+  readonly endOffset: number
+  readonly revision: string
+  readonly calendarName: string
+  readonly account: string
+  readonly writable: boolean
+  readonly recurring: boolean
+  readonly timeZone: string
+}
+
+/** The exact key of one agent Calendar event: provider, side, grant, account, calendar, external id and id. */
+export function agentEventKey(event: CalendarEvent): string {
+  return JSON.stringify([event.provider, event.side, event.grantId ?? "", event.connectorAccountId ?? "", event.calendarId, event.externalId, event.id])
+}
+
+/** The source key of an agent Calendar event, as its calendar list names it. */
+export function eventSourceKey(event: CalendarEvent): string {
+  return sourceKeyId({ provider: event.provider, side: event.side, grantId: event.grantId ?? "", connectorAccountId: event.connectorAccountId ?? "", calendarId: event.calendarId })
+}
+
+/** Whether a calendar may be read into the feed: included and with read access. */
+export function readableSource(calendar: CalendarSummary): boolean {
+  return calendar.includeInFeed && ["owner", "writer", "reader"].includes(calendar.accessRole)
+}
+
+/** Whether a calendar may be written from Calendar. */
+export function writableSource(calendar: CalendarSummary): boolean {
+  return calendar.includeInFeed && (calendar.accessRole === "owner" || calendar.accessRole === "writer")
+}
+
+/** Whether a source is a managed Google calendar, whose deletes and series writes the host refuses. */
+export function managedGoogle(calendar: Pick<CalendarSummary, "provider" | "grantId">): boolean {
+  return calendar.provider === "google" && /^alpha-google:[a-f0-9]{64}$/.test(calendar.grantId)
+}
+
+/** The agent's own calendar, where Alpha creates new events. */
+export function agentOwnCalendar(calendar: CalendarSummary): boolean {
+  return calendar.provider === "eliza" && calendar.side === "owner" && calendar.grantId === "eliza-calendar" && calendar.calendarId === "primary" && writableSource(calendar)
+}
+
+/** An agent Calendar event as a row, in the viewer's zone; an all-day event keeps its UTC dates. */
+export function agentRow(event: CalendarEvent, calendars: readonly CalendarSummary[], zone: string, now: number): CalendarRow | undefined {
+  const begin = utcInstant(event.startAt)
+  const end = utcInstant(event.endAt)
+  const key = eventSourceKey(event)
+  const calendar = calendars.find((summary) => sourceKeyId(summary) === key)
+  if (begin === undefined || end === undefined || end <= begin || !calendar || !readableSource(calendar) || event.status === "cancelled") return undefined
+  const today = civilDay(now, zone)
+  const offset = event.isAllDay ? Math.floor(begin / DAY) - today : civilDay(begin, zone) - today
+  const endOffset = event.isAllDay ? offset + Math.max(1, Math.ceil((end - begin) / DAY)) : civilDay(end - 1, zone) - today + 1
+  const etag = typeof event.metadata.etag === "string" ? event.metadata.etag.trim() : ""
+  return {
+    id: `agent:${agentEventKey(event)}`, source: "agent", sourceKey: key, title: event.title || "Event", notes: event.description, where: event.location,
+    begin, end, allDay: event.isAllDay, offset, endOffset, revision: etag, calendarName: calendar.summary, account: calendar.accountEmail ?? event.provider,
+    writable: writableSource(calendar) && etag !== "" && (event.provider === "eliza" || event.provider === "google"),
+    recurring: (event.recurrence ?? []).length > 0 || !!event.recurringEventId, timeZone: event.timezone ?? zone,
+  }
+}
+

@@ -1,0 +1,217 @@
+// spec/notes/collection.md, "Story: Read my notes under the account I am signed in as"; spec/notes/editor.md, "Story: Edit a note without losing a word"; spec/notes/trash.md, "Story: Let deleted notes expire after three days when I choose that"; spec/notes/cleanup.md, "Story: Erase only the recording of the note I erased, and only once the device proves it"; spec/notes/recorder.md, "Story: Save the recording as one voice note"; spec/notes/organize.md, "Story: Let the agent start and stop a voice note"; spec/notes/folders.md, "Story: Keep my notes in folders I name"; spec/notes/collection.md, "Story: See the notes I saved before this version"; spec/notes/trash.md, "Story: Keep the notes I deleted before this version"
+import { assert, describe, it } from "@effect/vitest"
+import { NotesCleanup } from "../../src/notes/cleanup.vibe"
+import { NotesCollection } from "../../src/notes/collection.vibe"
+import { NotesEditor } from "../../src/notes/editor.vibe"
+import { NotesFolders } from "../../src/notes/folders.vibe"
+import { NotesOrganize } from "../../src/notes/organize.vibe"
+import { NotesRecorder } from "../../src/notes/recorder.vibe"
+import { NotesTrash } from "../../src/notes/trash.vibe"
+import { slots } from "../../src/notes/slots.vibe"
+import { statusLabel } from "../../gen/notes__collection.effect.vibe"
+import { Machine as CollectionMachine } from "../../gen/notes__collection.effect.vibe"
+import { bound, check, notesOver, told } from "./harness.vibe"
+import { DeviceFake, NotesAgentFake } from "./resident-fake.ts"
+
+describe("Notes journeys", () => {
+  it.live("Read and save a note under the current connection (spec/notes/collection.md, \"Story: Read my notes under the account I am signed in as\")", () => effect {
+    const agent = new NotesAgentFake()
+    const device = new DeviceFake()
+    provide notesOver(agent, device) {
+      const editor = try NotesEditor
+      const trash = try NotesTrash
+      const machine = try CollectionMachine
+      try bound()
+
+      // spec/notes/editor.md, "A save captures the draft, runs only on its own base, and queues a later edit"
+      try editor.newNote("text")
+      try editor.edit({ body: "Pick up the keys" })
+      const saved = try editor.save()
+      const created = agent.notes.map((note) => [note.title, note.body])
+
+      // spec/notes/collection.md, "Reviewed text becomes one note under its own creation identity"
+      const scanned = try editor.createFromText("Receipt total 12.40", "scan-1")
+      const again = try editor.createFromText("Receipt total 12.40", "scan-1")
+
+      // spec/notes/editor.md, "A failed save keeps its changes in the encrypted draft slot, merged with earlier kept changes"
+      agent.failNextWrite = true
+      try editor.edit({ body: "Pick up the keys and the mail" })
+      const failed = try editor.save()
+      const review = try machine.get()
+      const kept = device.slots.has(slots.draft)
+
+      // spec/notes/editor.md, "Try again confirms words already saved, rebases only onto an untouched record, and otherwise keeps the draft"
+      const retried = try editor.retry()
+      const afterRetry = agent.notes.find((note) => note.title === "New note")?.body
+
+      // spec/notes/trash.md, "A restore needs the exact deletion and the current revision, and a delete's Undo the exact deletion"
+      const id = (try editor.selection())?.id ?? ""
+      const removed = try editor.remove(id)
+      try trash.deleted()
+      const undone = try trash.undo(id, removed.deletedAt ?? "")
+
+      try check(() => assert.deepStrictEqual({
+        saved, created, sameScan: scanned?.id === again?.id, failed, uncertain: review.uncertain, kept, retried, afterRetry,
+        removed: removed.deleted, undone, live: agent.notes.some((note) => note.id === id),
+      }, {
+        saved: true, created: [["New note", "\nPick up the keys"]], sameScan: true, failed: false, uncertain: true, kept: true, retried: "saved",
+        afterRetry: "\nPick up the keys and the mail", removed: true, undone: "restored", live: true,
+      }))
+    }
+  })
+
+  it.live("An owner change keeps an unsaved edit and says it was not saved (spec/notes/editor.md, \"Story: Keep my unsaved words on this phone when a save fails\")", () => effect {
+    const agent = new NotesAgentFake()
+    const device = new DeviceFake()
+    told.length = 0
+    provide notesOver(agent, device) {
+      const editor = try NotesEditor
+      const collection = try NotesCollection
+      try bound()
+      try editor.newNote("text")
+      try editor.edit({ body: "Pick up the keys" })
+      try editor.save()
+      try editor.edit({ body: "Pick up the keys and the mail" })
+      // spec/notes/editor.md, "A failed save keeps its changes in the encrypted draft slot, merged with earlier kept changes"
+      try collection.retire()
+      const shown = try editor.draft()
+      let waited = 0
+      while (told.length === 0 && waited < 100) {
+        try Effect.sleep("50 millis")
+        waited += 1
+      }
+      try check(() => assert.deepStrictEqual(
+        { shown, kept: device.slots.has(slots.draft), said: [...told] },
+        { shown: undefined, kept: true, said: ["Your edit to “New note” wasn’t saved because the account changed."] },
+      ))
+    }
+  })
+
+  it.live("Erase a voice note after review and clean up its recording once the device host registers (spec/notes/cleanup.md, \"Story: Erase only the recording of the note I erased, and only once the device proves it\")", () => effect {
+    const agent = new NotesAgentFake()
+    const device = new DeviceFake()
+    const at = "2026-11-19T10:00:00.000Z"
+    agent.notes.push({ id: "memo-one", title: "Voice note", body: "", color: "yellow", createdAt: at, updatedAt: at,
+      format: { kind: "voice", data: { recordingId: "rec_1", audio: { audioId: "rec_1", durationMs: 4000 }, lines: [], summary: [], actions: [] } } })
+    agent.revision = 1
+    device.saved.set("rec_1", { noteId: "memo-one", durationMs: 4000, transcript: "" })
+    device.host = false
+    agent.verifier = (audioId) => device.saved.get(audioId)?.purged === true
+    provide notesOver(agent, device) {
+      const editor = try NotesEditor
+      const trash = try NotesTrash
+      const cleanup = try NotesCleanup
+      try bound()
+      const removed = try editor.remove("memo-one")
+      try trash.open()
+      const row = try trash.entryFor("memo-one")
+      if (row !== undefined) try trash.ask(row)
+      // spec/notes/trash.md, "Erase needs the three-day choice, a review of that exact deletion at the current revision, and no shared recording"
+      try trash.askErase(false)
+      const erased = try trash.erase(row)
+      const pending = agent.cleanup.length
+      // spec/notes/cleanup.md, "Pending cleanups are read from the agent, worked one at a time, and acknowledged only with the device's proof"
+      const early = try cleanup.pass()
+      const stillPending = agent.cleanup.length
+      device.host = true
+      const late = try cleanup.pass()
+      try check(() => assert.deepStrictEqual(
+        { removed: removed.deleted, erased, pending, early, stillPending, late, left: agent.cleanup.length, purged: device.saved.get("rec_1")?.purged },
+        { removed: true, erased: "erased", pending: 1, early: 0, stillPending: 1, late: 1, left: 0, purged: true },
+      ))
+    }
+  })
+
+  it.live("Record a voice note and save it once (spec/notes/recorder.md, \"Story: Save the recording as one voice note\"; spec/notes/organize.md, \"Story: Let the agent start and stop a voice note\")", () => effect {
+    const agent = new NotesAgentFake()
+    const device = new DeviceFake()
+    provide notesOver(agent, device) {
+      const recorder = try NotesRecorder
+      const organize = try NotesOrganize
+      try bound()
+      // spec/notes/organize.md, "A recording receipt says what the recorder did"
+      const admitted = try organize.admit({ type: "notes_record", action: "start" }, { view: "notes" }, true, false, false)
+      const started = admitted === undefined ? undefined : try organize.execute(admitted.operation)
+      const stopped = try organize.execute({ type: "notes_record", action: "stop" })
+      const voice = agent.notes.filter((note) => note.format?.kind === "voice")
+      // spec/notes/recorder.md, "Done claims the save once, and the recording closes only after its note is confirmed"
+      const again = try recorder.finish()
+      try check(() => assert.deepStrictEqual({
+        direct: admitted?.direct, started, stopped, voices: voice.length, audio: voice[0]?.format?.data.audio, claims: device.claims, again,
+        retained: device.saved.get("rec_9")?.noteId === voice[0]?.id,
+      }, {
+        direct: true, started: { status: "succeeded", summary: "Recording" }, stopped: { status: "succeeded", summary: "Saved the voice note." },
+        voices: 1, audio: { audioId: "rec_9", durationMs: 3000 }, claims: 1, again: false, retained: true,
+      }))
+    }
+  })
+
+  it.live("Keep notes in folders I name (spec/notes/folders.md, \"Story: Keep my notes in folders I name\")", () => effect {
+    const agent = new NotesAgentFake()
+    const device = new DeviceFake()
+    provide notesOver(agent, device) {
+      const folders = try NotesFolders
+      try bound()
+      // spec/notes/folders.md, "A folder is created once per name, up to a hundred folders"
+      const work = try folders.create("Work")
+      const same = try folders.create("  work ")
+      // spec/notes/folders.md, "Renaming keeps the folder's ID, so every note stays in it"
+      const renamed = try folders.rename(work.id, "Office")
+      // spec/notes/folders.md, "Deleting a folder removes it first, and its notes then read as in no folder"
+      try folders.remove(work.id)
+      const left = try folders.list()
+      try check(() => assert.deepStrictEqual(
+        { same: same.id === work.id, renamed: [renamed.id === work.id, renamed.name], left: left.length },
+        { same: true, renamed: [true, "Office"], left: 0 },
+      ))
+    }
+  })
+
+  it.live("Earlier notes that cannot be imported need review, never an empty list (spec/notes/collection.md, \"Story: See the notes I saved before this version\")", () => effect {
+    const agent = new NotesAgentFake()
+    const device = new DeviceFake()
+    const read = agent.json.bind(agent)
+    let broken = true
+    agent.json = (method, path, body) => broken && path === "/api/notes/state"
+      ? { status: 503, data: { error: "The earlier Notes document needs review; nothing was imported and Notes did not start empty.", code: "NOTES_STORE_UNAVAILABLE" } }
+      : read(method, path, body)
+    provide notesOver(agent, device) {
+      const collection = try NotesCollection
+      const machine = try CollectionMachine
+      try timeout(Stream.runHead(Stream.filter(machine.changes, (state) => state.priorReview)), "5 seconds")
+      // spec/notes/collection.md, "Earlier notes are part of the collection once the agent imported them, and an unreadable earlier file needs review"
+      const reviewing = try machine.get()
+      const hidden = try collection.current()
+      broken = false
+      try collection.refresh()
+      const imported = try bound()
+      const settled = try machine.get()
+      try check(() => assert.deepStrictEqual(
+        { label: statusLabel(false, reviewing), hidden, imported: imported !== undefined, cleared: settled.priorReview },
+        { label: "EarlierNotesNeedReview", hidden: undefined, imported: true, cleared: false },
+      ))
+    }
+  })
+
+  it.live("Notes deleted before this version stay recoverable (spec/notes/trash.md, \"Story: Keep the notes I deleted before this version\")", () => effect {
+    const agent = new NotesAgentFake()
+    const device = new DeviceFake()
+    const now = Date.now()
+    device.slots.set(slots.legacyTrash, JSON.stringify({ version: 1, entries: [
+      { id: "op-recent", index: 0, deletedAt: now - 86400000, note: { id: "n-1", kind: "list", title: "Groceries", items: [{ t: "Milk", done: true }], folderId: "f-home" } },
+      { id: "op-old", index: 1, deletedAt: now - 40 * 86400000, note: { id: "n-2", kind: "text", title: "Old", body: "Gone" } },
+    ] }))
+    provide notesOver(agent, device) {
+      const collection = try NotesCollection
+      try bound()
+      // spec/notes/trash.md, "An earlier device Trash row comes into the canonical Trash once, and the device slot clears only after every row is settled"
+      try timeout(Stream.runHead(Stream.filter(collection.snapshots, (owned) => (owned?.snapshot.trash ?? []).length === 1)), "5 seconds")
+      try timeout(effect { while (device.slots.has(slots.legacyTrash)) try sleep("10 millis") }, "5 seconds")
+      const restored = agent.trash[0]?.note
+      try check(() => assert.deepStrictEqual(
+        { live: agent.notes.length, trashed: agent.trash.length, title: restored?.title, items: restored?.format?.data.items, folder: restored?.format?.data.folderId, slot: device.slots.has(slots.legacyTrash) },
+        { live: 0, trashed: 1, title: "Groceries", items: [{ t: "Milk", done: true }], folder: "f-home", slot: false },
+      ))
+    }
+  })
+})

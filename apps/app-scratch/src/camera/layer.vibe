@@ -1,0 +1,78 @@
+// spec/camera/index.md
+import { Build } from "../platform/build.vibe"
+import { Foreground } from "../shell/foreground.vibe"
+import { machine as viewfinderMachine } from "../../gen/camera__viewfinder.effect.vibe"
+import { machine as focusMachine } from "../../gen/camera__focus.effect.vibe"
+import { machine as recorderMachine } from "../../gen/camera__recorder.effect.vibe"
+import { machine as captureMachine } from "../../gen/camera__agentCapture.effect.vibe"
+import { machine as catalogMachine } from "../../gen/camera__library.effect.vibe"
+import { machine as browseMachine } from "../../gen/camera__browse.effect.vibe"
+import { machine as albumMachine } from "../../gen/camera__albums.effect.vibe"
+import { machine as hostMachine } from "../../gen/camera__agentLibrary.effect.vibe"
+import { machine as reviewMachine } from "../../gen/camera__libraryReview.effect.vibe"
+import { machine as editMachine } from "../../gen/camera__edit.effect.vibe"
+import { stored as storedIntents } from "../../gen/camera__copyIntent.effect.vibe"
+import { machine as videoMachine } from "../../gen/camera__videoEdit.effect.vibe"
+import { machine as scanMachine } from "../../gen/camera__scan.effect.vibe"
+import { machine as dialogMachine } from "../../gen/camera__scanDialogs.effect.vibe"
+import { machine as mediaMachine } from "../../gen/camera__media.effect.vibe"
+import { machine as noticeMachine } from "../../gen/camera__notices.effect.vibe"
+import { cameraActions } from "./actions.vibe"
+import { agentCamera } from "./agentCapture.vibe"
+import { AgentPhotos, agentPhotos } from "./agentPhotos.vibe"
+import { cameraBridge } from "./bridge.vibe"
+import { cameraChat } from "./chat.vibe"
+import { browserPhotoStore } from "./browserPhotos.vibe"
+import { MediaEditor, mediaEditor } from "./editor.vibe"
+import { PhotoLibrary, photoLibrary } from "./library.vibe"
+import { MediaReview, mediaReview } from "./mediaReview.vibe"
+import { cameraNotices } from "./notices.vibe"
+import { nativePhotoStore } from "./photos.vibe"
+import { Scanner, scanner } from "./scanner.vibe"
+import { shownOf, viewfinder } from "./viewfinder.vibe"
+
+/** The photo store the build needs: the browser's own for the browser build, Android's otherwise. */
+export const photoStore = Layer.unwrap(effect {
+  const build = try Build
+  return build.info.variant === "browser" ? browserPhotoStore : nativePhotoStore
+})
+
+const machines = Layer.mergeAll(
+  viewfinderMachine(), focusMachine(), recorderMachine(), captureMachine(), catalogMachine(), browseMachine(), albumMachine(),
+  hostMachine(), reviewMachine(), editMachine(), storedIntents("alpha/camera/copy-intent"), videoMachine(), scanMachine(), dialogMachine(),
+  mediaMachine(), noticeMachine(),
+)
+
+const devices = Layer.provideMerge(Layer.mergeAll(cameraBridge, photoStore, cameraNotices), machines)
+const camera = Layer.provideMerge(viewfinder, devices)
+const library = Layer.provideMerge(photoLibrary, camera)
+const agents = Layer.provideMerge(Layer.mergeAll(agentCamera, agentPhotos, mediaEditor, scanner, mediaReview), library)
+
+/** Camera and Photos follow the page: a hidden or locked page closes the scan's dialogs (unless a system picker covers them) and disposes the video editor, and while Photos is in front it fences the library, the assistant's reviews and the media in flight; showing it again reads afresh. */
+export const pageFollower = Layer.effectDiscard(effect {
+  const front = try Foreground
+  const library = try PhotoLibrary
+  const agent = try AgentPhotos
+  const media = try MediaReview
+  const scan = try Scanner
+  const editor = try MediaEditor
+  let pageHidden = false
+  let photosHidden = false
+  try forkDetach(Stream.runForEach(front.changes, (state) => effect {
+    const now = !shownOf(state)
+    if (now !== pageHidden) {
+      pageHidden = now
+      try scan.pageShown(now)
+      try editor.videoEvent({ type: now ? "hide" : "show" })
+    }
+    if (state.view !== "photos" || now === photosHidden) return
+    photosHidden = now
+    try library.visibility(now)
+    try agent.page(now)
+    if (now) try media.invalidate("AppPaused")
+    else try media.resume()
+  }))
+})
+
+/** Every Camera and Photos service and Machine, needing the platform's Native, Build and KeyValueStore and the shell's Foreground; Camera's handoff and call-fact ports refuse until another area fills them. */
+export const layer = Layer.provideMerge(Layer.mergeAll(cameraActions, cameraChat, pageFollower), agents)

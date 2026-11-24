@@ -1,0 +1,120 @@
+// spec/clock/reminderPage.md, "Story: Step back out of what I have open in Reminders"; spec/clock/reminderPage.md, "Story: Let the agent change a reminder I name only once I have it open"
+import { Machine as PageMachine } from "../../gen/clock__reminderPage.effect.vibe"
+import { chosenFor, type PageForm, type ReopenAsk } from "../../gen/clock__reminderPage.effect.vibe"
+import { Machine as RemindersMachine } from "../../gen/clock__reminders.effect.vibe"
+import { Machine as DraftsMachine } from "../../gen/clock__reminderDrafts.effect.vibe"
+import { Machine as TapsMachine } from "../../gen/clock__reminderTaps.effect.vibe"
+import { ReminderDrafts, confirmedSave, type DraftForm } from "./drafts.vibe"
+import { ReminderTaps } from "./reminder-taps.vibe"
+import { Reminders } from "./reminders.vibe"
+import { navigationPeer } from "./peers.vibe"
+
+const FORM: Readonly<Record<DraftForm, PageForm>> = { new: "NewForm", edit: "EditForm" }
+const REOPEN: Readonly<Record<"open" | "tomorrow", ReopenAsk>> = { open: "ReopenOpen", tomorrow: "ReopenTomorrow" }
+
+const normal = (name: string) => name.trim().toLowerCase()
+
+/** Whether a reminder's title is the name the agent gave, ignoring surrounding spaces and letter case. */
+export function sameName(title: string, name: string): boolean {
+  return normal(name) !== "" && normal(title) === normal(name)
+}
+
+/** What the Reminders screen has open: a reminder's detail, a form and a Reopen question, closed one at a time by Back. */
+export service RemindersPage {
+  /** Shows a reminder's detail, or the listing for undefined. */
+  show(id: string | undefined): void!!
+  /** Opens the new-reminder form, or the edit form of the reminder shown. */
+  openForm(form: DraftForm): void!!
+  /** The owner pressed Save on the open form. */
+  submitForm(): void!!
+  /** Cancel, or a confirmed discard, closes the form. */
+  closeForm(): void!!
+  /** Asks whether to reopen the completed reminder shown, without an alert or tomorrow at its time. */
+  askReopen(mode: "open" | "tomorrow"): void!!
+  /** Answers or dismisses the Reopen question. */
+  closeReopen(): void!!
+  /** Hardware or gesture Back: closes the innermost dialog, form or detail; false when nothing was open and Back is the shell's. */
+  back(): boolean!!
+  /** The reminder shown whose listed title is `name`, the only one a change the agent names may apply to. */
+  chosen(name: string): (string | undefined)!!
+}
+
+/** The page over its machine, closing the creation consent, the discard question and a tapped reminder's question first. */
+export const remindersPageLayer = Layer.effect(RemindersPage, effect {
+  const page = try PageMachine
+  const screen = try RemindersMachine
+  const drafts = try DraftsMachine
+  const tapState = try TapsMachine
+  const reminders = try Reminders
+  const kept = try ReminderDrafts
+  const taps = try ReminderTaps
+  const step = effect (event: Parameters<typeof page.send>[0]) => page.send(event) catch () => undefined
+
+  effect function show(id: string | undefined) {
+    try taps.interact()
+    try step({ type: "showDetail", id: id ?? "" })
+    try reminders.show(id === "" ? undefined : id)
+  }
+
+  return {
+    show,
+    effect openForm(form: DraftForm) {
+      try taps.interact()
+      try step({ type: "openForm", form: FORM[form] })
+    },
+    submitForm: () => asVoid(step({ type: "submitForm" })),
+    closeForm: () => asVoid(step({ type: "closeForm" })),
+    effect askReopen(mode: "open" | "tomorrow") {
+      try step({ type: "askReopen", mode: REOPEN[mode] })
+    },
+    closeReopen: () => asVoid(step({ type: "closeReopen" })),
+    effect back() {
+      try taps.interact()
+      if ((try tapState.get()).stage === "TapQuestion" && (try taps.question()) !== undefined) {
+        try taps.closeQuestion(undefined)
+        return true
+      }
+      const listing = try screen.get()
+      if (listing.stage === "WReview" && listing.kind === "CreateWrite") {
+        try reminders.continueCreate(false)
+        return true
+      }
+      if ((try drafts.get()).discard.tag === "Discarding") {
+        try kept.cancelDiscard()
+        return true
+      }
+      const before = try page.get()
+      const saved = before.submitted && confirmedSave(listing)
+      const listed = listing.rows.some((row) => row.id === before.detail)
+      const after = try step({ type: "back", saved, listed })
+      if (after === undefined) return false
+      if (after.detail !== before.detail) try reminders.show(undefined)
+      return true
+    },
+    effect chosen(name: string) {
+      const shown = try page.get()
+      const row = (try screen.get()).rows.find((r) => r.id === shown.detail)
+      const id = chosenFor(shown, normal(row?.title ?? ""), normal(name))
+      return id === "" ? undefined : id
+    },
+  }
+})
+
+/** Follows the route the shell shows Reminders at: a new route opens its reminder, and leaving Reminders closes everything. Never returns. */
+export effect function followReminderPage() {
+  const navigator = try navigationPeer()
+  const page = try PageMachine
+  const reminders = try Reminders
+  let showing = false
+  let route: string | undefined = undefined
+  for try (const view of navigator.changes()) {
+    const now = view.app === "reminders"
+    if (now && view.route !== undefined && view.route !== "" && view.route !== route) {
+      page.send({ type: "showDetail", id: view.route }) catch () => undefined
+      try reminders.show(view.route)
+    }
+    if (!now && showing) page.send({ type: "leave" }) catch () => undefined
+    route = now ? view.route : undefined
+    showing = now
+  }
+}

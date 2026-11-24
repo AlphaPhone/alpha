@@ -1,0 +1,500 @@
+// spec/telephony/actions.md, "Story: Call or text only the person I approved"; spec/telephony/actions.md, "An action starts once per operation ID, and a number the owner did not write is refused"; spec/telephony/actions.md, "A name is looked up on the phone and the owner picks the exact number, even for one match"; spec/telephony/actions.md, "The owner's Not now, leaving the app or a changed context ends a run that has not dispatched"; spec/telephony/actions.md, "An effect dispatches only after a fresh call-state reading allows it"; spec/telephony/actions.md, "A dispatched effect settles with what the phone answered, and a lost answer is unconfirmed, never nothing"; spec/telephony/actions.md, "A read, a keypad, a filtered list or a draft settles without any effect"; spec/telephony/actions.md, "An unconfirmed text is settled only by the phone's own send record for its operation ID"
+import { operationOf, readLatestSender, type DeviceOperationType } from "@elizaos/agent/operations"
+import { contactWriteAdvertised, type ContactDetail, type ContactDraft, type ContactId, type ContactVersion } from "@elizaos/os/bridges/contacts"
+import { operationIdOf } from "@elizaos/os/bridges/definitions/messages"
+import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone"
+import {
+  Machine as ActionsMachine, isChoosing, readBackOf, runIdOf, type ActionKind, type Candidate, type Event as ActionsEvent, type SendRecord, type Settled, type TargetForm,
+} from "../../gen/telephony__actions.effect.vibe"
+import { Machine as CallBarMachine } from "../../gen/telephony__callBar.effect.vibe"
+import { sameLine, withoutBody, writtenNumbers } from "../assistant/grounding.vibe"
+import { OwnerRequest } from "./actions.schema.vibe"
+import { callerOf, TelephonyBridges, TelephonyRefused } from "./bridges.vibe"
+import { CallWatch } from "./call-bar.vibe"
+import { ContactsView } from "./contacts.vibe"
+import { DraftSends } from "./drafts.vibe"
+import { MessagesView } from "./messages.vibe"
+import { placeOwnerCall } from "./phone.vibe"
+import { VoicemailView } from "./voicemail.vibe"
+import { Foreground } from "../shell/foreground.vibe"
+import { Navigation } from "../shell/navigation.vibe"
+import { readableIn } from "./front.vibe"
+
+/** The longest an open review waits for the owner's pick before it chooses nothing. */
+export const REVIEW_LIMIT = "5 minutes"
+/** How many contacts a name is looked up in. */
+export const LOOKUP_LIMIT = 10
+/** What the guard says when it refused: nothing was done during a call that may be an emergency call. */
+export const EMERGENCY_REFUSAL = "emergency-guard"
+
+/** The operation is none this device runs, or its shape is not the contract's. */
+export error NotATelephonyOperation { input: unknown }
+/** This operation ID already ran on this device: nothing runs again. */
+export error AlreadyRan { operationId: string }
+
+/** A view change that shows a successful outcome, run by the coordinator after the receipt is recorded. */
+export interface Present { readonly app: "phone" | "messages" | "contacts"; readonly route: string }
+/** Why a run was refused before it acted: the emergency guard, or a number the owner did not write. */
+export type Refusal = "emergency" | "ungrounded"
+/** One run's typed result for the agent, the view change that shows it, and why it was refused where it was. */
+export interface ActionExecution { readonly result: unknown; readonly settled: Settled; readonly present?: Present; readonly refusal?: Refusal }
+
+/** The approved telephony actions: one at a time, each exactly as observed and never retried. */
+export service TelephonyActions {
+  /** The capabilities this device advertises: none off the image. */
+  capabilities(): readonly string[]!!
+  /** Run one approved operation under its operation ID; `request` is the owner's own message it came from. */
+  run(operation: unknown, operationId: string, request: unknown): ActionExecution!(NotATelephonyOperation | AlreadyRan)
+  /** The owner's Not now, a hidden or locked phone, or another view replacing the review's. */
+  dismiss(): void!!
+  /** What the open review shows beside its candidates: a text's body, a contact's fields before and after. */
+  review(): ReviewDetails!!
+  /** Read back an operation whose answer was lost: a text by its operation ID in the phone's send history; undefined while it stays unconfirmed. */
+  readBack(operation: unknown, operationId: string): (ReadBack | undefined)!!
+}
+
+/** What a read-back found: the outcome the phone recorded, and the result the run would have reported. */
+export interface ReadBack { readonly settled: Settled; readonly result: unknown }
+
+/** What a review card shows beside its candidates. */
+export interface ReviewDetails {
+  readonly body?: string
+  /** More contacts matched than the review lists, which shows this many. */
+  readonly more?: number
+  readonly changes?: Readonly<Record<string, { readonly before: ContactDetail; readonly after?: ContactDraft }>>
+}
+
+/**
+ * A number target is grounded only when the owner wrote that number (#1393); a contact is refused in place of a number the owner wrote, unless the
+ * owner also wrote its name (#1396). The text's `body`, where the owner's request quotes it, is cut out first, so a number only in the body grounds nothing.
+ */
+export function grounded(text: string, target: { kind: "number"; number: string } | { kind: "contact"; query: string }, body?: string): boolean {
+  const own = withoutBody(text, body)
+  const written = writtenNumbers(own)
+  if (target.kind === "number") return written.some((d) => sameLine(d, target.number))
+  return written.length === 0 || own.toLowerCase().includes(target.query.toLowerCase())
+}
+
+/** What the phone's send record says of a text: taken by the radio, not sent, still unknown, or no record at all. */
+export function sendRecordOf(status: string | undefined): SendRecord {
+  if (status === undefined) return "NoRecord"
+  if (status === "submitted" || status === "sent" || status === "delivered") return "RecordTaken"
+  if (status === "cancelled" || status === "denied" || status === "failed") return "RecordNotSent"
+  return "RecordUnknown"
+}
+
+const KINDS: Record<string, ActionKind> = {
+  phone_dial: "DialNumber", phone_call: "PlaceCall", sms_send: "SendText", mms_send: "SendPictures", sms_compose: "ComposeText",
+  sms_reply_selected: "ReplyToSelected", contact_create: "ContactAdd", contact_update: "ContactChange", contact_delete: "ContactRemove",
+  messages_read_selected: "ReadThread", voicemail_read_selected: "ReadVoicemail", voicemail_delete_selected: "RemoveVoicemail",
+  sms_latest_sender: "LatestSender", phone_keypad: "KeypadOpen", contact_show: "ContactsShow", contact_read_selected: "ReadContact",
+}
+
+/** A telephony operation as the wire carries it, after its decoder admitted it. */
+export type TelephonyOperation = { readonly type: string } & Record<string, any>
+type Wire = TelephonyOperation
+
+/** A wire operation by the agent's own decoder for its type (`operationOf`); undefined for any other. The keypad, filtered Contacts and open-contact read are the agent's own telephony operations at this pin. */
+export function telephonyOperationOf(input: unknown): TelephonyOperation | undefined {
+  const type = typeof input === "object" && input !== null && "type" in input ? String(input.type) : ""
+  if (KINDS[type] === undefined) return undefined
+  return operationOf(input, type as DeviceOperationType) as TelephonyOperation | undefined
+}
+
+/** Whom a text names: the v2 `target`, or the v1 contact `query`. */
+export function composeTargetOf(op: TelephonyOperation): { kind: "number"; number: string } | { kind: "contact"; query: string } {
+  return op.target ?? { kind: "contact", query: op.query }
+}
+
+/** Whether every number a contact change saves is one the owner wrote, where the owner wrote any number at all (upstream `contactValueVerdict`). */
+export function contactNumbersGrounded(text: string, numbers: readonly string[]): boolean {
+  return writtenNumbers(text).length === 0 || numbers.every((number) => grounded(text, { kind: "number", number }))
+}
+
+/** `telephonyOperationOf`, failing where it returns undefined. */
+export effect function decodeOperation(input: unknown) {
+  const decoded = telephonyOperationOf(input)
+  if (decoded === undefined) throw new NotATelephonyOperation({ input })
+  return decoded
+}
+
+/** A contact's fields after a whole-field `set`: a number already on the contact keeps its type. */
+export function changedDraft(before: ContactDetail, set: { displayName?: string; phoneNumbers?: readonly string[]; emailAddresses?: readonly string[] }, keep: boolean): ContactDraft {
+  const phones = set.phoneNumbers === undefined ? before.phoneNumbers
+    : [...(keep ? before.phoneNumbers.filter((p) => !set.phoneNumbers!.some((n) => sameLine(n, p.number))) : []),
+       ...set.phoneNumbers.map((number) => ({ number, type: before.phoneNumbers.find((p) => sameLine(p.number, number))?.type ?? "mobile" as const }))]
+  const emails = set.emailAddresses === undefined ? before.emailAddresses
+    : [...(keep ? before.emailAddresses.filter((e) => !set.emailAddresses!.some((a) => a.toLowerCase() === e.address.toLowerCase())) : []),
+       ...set.emailAddresses.map((address) => ({ address, type: before.emailAddresses.find((e) => e.address.toLowerCase() === address.toLowerCase())?.type ?? "home" as const }))]
+  return { displayName: set.displayName ?? before.displayName, phoneNumbers: phones, emailAddresses: emails }
+}
+
+/** A contact's fields after `contact_update`'s explicit `add` and `remove` values: an added value already there and a removed one not there change nothing. */
+export function valuesChanged(draft: ContactDraft, add?: { phoneNumbers?: readonly string[]; emailAddresses?: readonly string[] }, remove?: { phoneNumbers?: readonly string[]; emailAddresses?: readonly string[] }): ContactDraft {
+  const goneNumbers = remove?.phoneNumbers ?? [], goneEmails = (remove?.emailAddresses ?? []).map((e) => e.toLowerCase())
+  const phones = draft.phoneNumbers.filter((p) => !goneNumbers.some((n) => sameLine(n, p.number)))
+  for (const number of add?.phoneNumbers ?? []) if (!phones.some((p) => sameLine(p.number, number))) phones.push({ number, type: "mobile" })
+  const emails = draft.emailAddresses.filter((e) => !goneEmails.includes(e.address.toLowerCase()))
+  for (const address of add?.emailAddresses ?? []) if (!emails.some((e) => e.address.toLowerCase() === address.toLowerCase())) emails.push({ address, type: "home" })
+  return { displayName: draft.displayName, phoneNumbers: phones, emailAddresses: emails }
+}
+
+/** Every number a contact operation saves, adds or removes. */
+export function contactNumbersOf(op: TelephonyOperation): readonly string[] {
+  if (op.type === "contact_create") return op.contact.phoneNumbers
+  if (op.type !== "contact_update") return []
+  return [...(op.set?.phoneNumbers ?? []), ...(op.add?.phoneNumbers ?? []), ...(op.remove?.phoneNumbers ?? [])]
+}
+
+const same = (a: ContactDraft, b: ContactDraft) => JSON.stringify([a.displayName, a.phoneNumbers, a.emailAddresses]) === JSON.stringify([b.displayName, b.phoneNumbers, b.emailAddresses])
+const DIAL: Record<string, string> = { DialHandedOff: "handed-off", DialUnavailable: "unavailable", DialRefused: "unavailable", DialFailed: "failed" }
+const CALL: Record<string, string> = { CallStarted: "placed", EmergencyOpened: "emergency-handoff", LineBusy: "busy", CallsUnavailable: "unavailable", CallNotStarted: "failed", DialerOpened: "unavailable", NoDialer: "unavailable", DialerFailed: "failed", CallUnconfirmed: "failed" }
+const SETTLED_OF_STATUS: Record<string, Settled> = {
+  placed: "Applied", "handed-off": "Applied", "emergency-handoff": "EmergencyHandoff", busy: "Busy", "not-found": "NothingFound", cancelled: "OwnerCancelled",
+  unavailable: "Unavailable", failed: "NotDone", unknown: "Unconfirmed", saved: "Applied", deleted: "Applied", stale: "Stale", drafted: "Applied",
+  submitted: "Applied", sent: "Applied", delivered: "Applied", denied: "Unavailable", occupied: "Occupied", "none-selected": "NoneSelected", read: "Applied",
+  found: "Applied", empty: "NothingFound", "sender-unavailable": "NothingFound", shown: "Applied", opened: "Applied",
+}
+
+/** The contact bridge's answer as the agent's result status: a removal staged in the Undo window is the deletion. */
+export function contactStatusOf(status: string): string {
+  return status === "queued" ? "deleted" : status
+}
+
+/** The approved actions over their machine, the views they act through and the emergency guard. */
+export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
+  const bridgeCall = callerOf(try TelephonyBridges)
+  const actions = try ActionsMachine
+  const callBar = try CallBarMachine
+  const bridges = try TelephonyBridges
+  const watch = try CallWatch
+  const contacts = try ContactsView
+  const drafts = try DraftSends
+  const messages = try MessagesView
+  const voicemail = try VoicemailView
+  const foreground = try Foreground
+  const navigation = try Navigation
+  const tell = (event: ActionsEvent, by: "Owner" | "Alpha" | "Device") => actions.send(event, by) catch () => undefined
+  const review = try Ref.make<ReviewDetails>({})
+
+  effect function settle(runId: string, result: unknown, status: string, present?: Present) {
+    const settled = SETTLED_OF_STATUS[status] ?? "NotDone"
+    try tell({ type: "settledWithoutEffect", runId, result: settled }, "Device")
+    return { result, settled, present } satisfies ActionExecution
+  }
+
+  /**
+   * Waits for the owner's choice among `candidates`: the chosen candidate, or undefined for none. Locking, hiding the page, another
+   * view replacing the one the review ran under, or no pick within `REVIEW_LIMIT` ends the review, choosing nothing.
+   */
+  effect function choose(runId: string, candidates: Candidate[]) {
+    const shown = try tell({ type: "candidatesFound", runId, candidates }, "Device")
+    if (shown === undefined || !isChoosing(shown.ongoing)) return undefined
+    const under = try navigation.get()
+    const decided = Effect.as(Stream.runHead(Stream.filter(actions.changes, (a) => runIdOf(a.ongoing) !== runId || !isChoosing(a.ongoing))), "decided" as const)
+    const away = Stream.merge(
+      Stream.map(foreground.changes, readableIn),
+      Stream.map(navigation.changes, (nav) => nav.app === under.app && !nav.hidden),
+    )
+    const left = Effect.as(Stream.runHead(Stream.filter(away, (still) => !still)), "left" as const)
+    const ended = try Effect.raceFirst(decided, Effect.raceFirst(left, Effect.as(sleep(REVIEW_LIMIT), "left" as const)))
+    if (ended === "left" && isChoosing((try actions.get()).ongoing)) try tell({ type: "reviewDismissed", runId }, "Device")
+    const after = try actions.get()
+    return after.ongoing.tag === "Guarding" && after.ongoing.runId === runId ? after.ongoing.guardedNumber : undefined
+  }
+
+  /** Reads Telecom right before an effect; true lets it dispatch. */
+  effect function guard(runId: string) {
+    const fresh = try watch.allowed()
+    const after = try tell({ type: "guardAnswered", runId, fresh, reading: (try callBar.get()).reading }, "Device")
+    return after?.ongoing.tag === "Dispatching"
+  }
+
+  effect function finish(runId: string, result: unknown, status: string) {
+    const settled = SETTLED_OF_STATUS[status] ?? "NotDone"
+    try tell({ type: "effectAnswered", runId, result: settled }, "Device")
+    return { result, settled } satisfies ActionExecution
+  }
+
+  effect function lost(runId: string, result: unknown) {
+    try tell({ type: "effectLost", runId }, "Device")
+    return { result, settled: "Unconfirmed" } satisfies ActionExecution
+  }
+
+  effect function cancelled(runId: string, result: unknown) {
+    const now = try actions.get()
+    const settled = now.ongoing.tag === "Finished" && now.ongoing.runId === runId ? now.ongoing.result : "OwnerCancelled"
+    return { result, settled } satisfies ActionExecution
+  }
+
+  /** More contacts matched than the review lists: the review says so (#1453). */
+  effect function more(found: boolean) {
+    if (found) try Ref.update(review, (details) => ({ ...details, more: LOOKUP_LIMIT }))
+  }
+
+  /** Every dialable number of every matching contact, one candidate per number; at most `LOOKUP_LIMIT` contacts, one more read to tell whether more matched. */
+  effect function numbersOf(query: string) {
+    const page = try bridgeCall("list", (c) => c.contacts.list({ query, limit: LOOKUP_LIMIT + 1, kind: "ExplicitRead" }))
+    try more(page.contacts.length > LOOKUP_LIMIT || page.next != null)
+    const out: Candidate[] = []
+    for (const row of page.contacts.slice(0, LOOKUP_LIMIT)) {
+      if ("incomplete" in row) continue
+      for (const raw of row.phones) {
+        const number = normalizePhoneNumber(raw)
+        if (number !== null && !out.some((c) => c.candidateId === `${row.id}:${number}`)) out.push({ candidateId: `${row.id}:${number}`, title: row.name.trim() || "Unnamed contact", number })
+      }
+    }
+    return out
+  }
+
+  /** The matching contacts read whole: the only ones a change or removal is offered for. */
+  effect function contactsMatching(query: string) {
+    const page = try bridgeCall("list", (c) => c.contacts.list({ query, limit: LOOKUP_LIMIT + 1, kind: "ExplicitRead" }))
+    try more(page.contacts.length > LOOKUP_LIMIT || page.next != null)
+    const out: ContactDetail[] = []
+    for (const row of page.contacts.slice(0, LOOKUP_LIMIT)) {
+      if ("incomplete" in row) continue
+      const detail = try (bridgeCall("get", (c) => c.contacts.get(row.id, "ExplicitRead")) catch () => undefined)
+      if (detail !== undefined) out.push(detail)
+    }
+    return out
+  }
+
+  effect function callOrDial(runId: string, op: Wire, dialOnly: boolean) {
+    const contact = op.target.kind === "contact"
+    let number: string | undefined = contact ? undefined : op.target.number
+    const kind = dialOnly ? "phone-dial" : "phone-call"
+    const failed = (status: string) => dialOnly ? { kind, status, handler: null, contact } : { kind, status, contact }
+    if (contact) {
+      const found = try (numbersOf(op.target.query) catch () => undefined)
+      if (found === undefined) return try finishEarly(runId, failed("unavailable"), "Unavailable")
+      if (found.length === 0) return try finishEarly(runId, dialOnly ? failed("unavailable") : failed("not-found"), "NothingFound")
+      number = try choose(runId, found)
+      if (number === undefined) return try cancelled(runId, failed("cancelled"))
+    } else if ((try tell({ type: "numberReady", runId, number: number! }, "Device")) === undefined) return try cancelled(runId, failed("cancelled"))
+    if (!(try guard(runId))) return { result: failed("unavailable"), settled: "Refused", refusal: "emergency" } satisfies ActionExecution
+    if (dialOnly) {
+      const report = try (bridgeCall("dial", (c) => c.phone.dial(number!)) catch () => undefined)
+      if (report === undefined) return try finish(runId, failed("failed"), "failed")
+      const status = DIAL[report.dialStatus] ?? "failed"
+      return try finish(runId, { kind, status, handler: status === "handed-off" ? report.handler : null, contact }, status)
+    }
+    const outcome = try Effect.provideService(placeOwnerCall(number!), TelephonyBridges, bridges)
+    if (outcome === "CallUnconfirmed") return try lost(runId, failed("failed"))
+    const status = CALL[outcome] ?? "failed"
+    return try finish(runId, { kind, status, contact }, status)
+  }
+
+  effect function finishEarly(runId: string, result: unknown, settled: Settled) {
+    try tell({ type: "settledWithoutEffect", runId, result: settled }, "Device")
+    return { result, settled } satisfies ActionExecution
+  }
+
+  effect function sendText(runId: string, recipients: readonly string[], body: string, operationId: string, subscriptionId?: number) {
+    const status = try bridgeCall("status", (c) => c.messages.status())
+    const sim = subscriptionId ?? status.defaultSmsSubscriptionId ?? (status.subscriptions?.length === 1 ? status.subscriptions[0]!.id : undefined)
+    const id = operationIdOf(operationId)
+    const numbers = recipients.map(normalizePhoneNumber).filter((n) => n !== null)
+    if (sim === undefined || id === null || numbers.length !== recipients.length) return undefined
+    return try bridgeCall("sendSms", (c) => c.messages.sendSms({ recipients: numbers, body, subscriptionId: sim }, id))
+  }
+
+  /** Alpha's draft into `thread` for `recipients`, then Messages shows it; it never sends. */
+  effect function drafted(runId: string, thread: string, recipients: readonly string[], body: string, route: string) {
+    const result = (status: string) => ({ kind: "sms-compose", status })
+    const placed = try drafts.placeAlphaDraft(thread, recipients, body)
+    if (placed === "drafted") return try settle(runId, result("drafted"), "drafted", { app: "messages", route })
+    return try finishEarly(runId, result("unavailable"), placed === "occupied" ? "Occupied" : "Unavailable")
+  }
+
+  effect function compose(runId: string, op: Wire, operationId: string) {
+    const result = (status: string) => ({ kind: "sms-compose", status })
+    const draftOnly = op.draft === true
+    const target = composeTargetOf(op)
+    try Ref.set(review, { body: op.body })
+    const open = try messages.selected()
+    const openTo = (number: string) => open !== null && open.addresses.length === 1 && sameLine(open.addresses[0]!, number)
+    let number: string
+    if (target.kind === "contact") {
+      const found = try (numbersOf(target.query) catch () => undefined)
+      if (found === undefined) return try finishEarly(runId, result("unavailable"), "Unavailable")
+      if (found.length === 0) return try finishEarly(runId, result("not-found"), "NothingFound")
+      const only = found.length === 1 ? found[0]! : undefined
+      if (only !== undefined && open !== null && openTo(only.number)) {
+        const placed = try drafts.placeAlphaDraft(open.threadId, open.addresses, op.body)
+        if (placed === "drafted") return try settle(runId, result("drafted"), "drafted", { app: "messages", route: `thread:${open.threadId}` })
+      }
+      const chosen = try choose(runId, found)
+      if (chosen === undefined) return try cancelled(runId, result("cancelled"))
+      number = chosen
+    } else {
+      number = normalizePhoneNumber(target.number) ?? target.number
+      if ((try tell({ type: "numberReady", runId, number }, "Device")) === undefined) return try cancelled(runId, result("cancelled"))
+    }
+    if (typeof op.replyThreadId === "string") return try drafted(runId, op.replyThreadId, [number], op.body, `thread:${op.replyThreadId}`)
+    if (open !== null && openTo(number)) {
+      if (draftOnly) return try drafted(runId, open.threadId, open.addresses, op.body, `thread:${open.threadId}`)
+      const placed = try drafts.placeAlphaDraft(open.threadId, open.addresses, op.body)
+      if (placed === "drafted") return try settle(runId, result("drafted"), "drafted", { app: "messages", route: `thread:${open.threadId}` })
+    }
+    if (draftOnly) return try drafted(runId, "new", [number], op.body, `compose:${number}`)
+    if (!(try guard(runId))) return { result: result("unavailable"), settled: "Refused", refusal: "emergency" } satisfies ActionExecution
+    const sent = try (sendText(runId, [number], op.body, operationId) catch (failure) => failure)
+    if (sent === undefined) return try finish(runId, result("unavailable"), "unavailable")
+    if (sent instanceof TelephonyRefused) return sent.code === undefined ? try lost(runId, result("unknown")) : try finish(runId, result("unavailable"), "unavailable")
+    const status = sent.status === "denied" ? "unavailable" : sent.status
+    return try finish(runId, result(status), status)
+  }
+
+  effect function contactWrite(runId: string, op: Wire) {
+    const result = (status: string) => ({ kind: "contact-write", status })
+    const writable = try (bridgeCall("status", (c) => c.contacts.status()) catch () => undefined)
+    if (writable === undefined || !contactWriteAdvertised("WritingInstall", writable)) return try finishEarly(runId, result("unavailable"), "Unavailable")
+    let write: () => Promise<{ status: string }>
+    if (op.type === "contact_create") {
+      const draft: ContactDraft = {
+        displayName: op.contact.displayName,
+        phoneNumbers: op.contact.phoneNumbers.map((number: string) => ({ number, type: "mobile" as const })),
+        emailAddresses: op.contact.emailAddresses.map((address: string) => ({ address, type: "home" as const })),
+      }
+      const twins: Candidate[] = []
+      for (const query of [op.contact.displayName, ...op.contact.phoneNumbers]) {
+        for (const found of try (numbersOf(query) catch () => [] as Candidate[])) if (!twins.some((t) => t.candidateId === found.candidateId)) twins.push(found)
+      }
+      const twin = twins.find((t) => op.contact.phoneNumbers.some((n: string) => sameLine(n, t.number)) || t.title.toLowerCase() === op.contact.displayName.toLowerCase())
+      const shown = try choose(runId, twin === undefined ? [] : [{ candidateId: "add-anyway", title: twin.title, number: twin.number }])
+      if (twin !== undefined && shown === undefined) return try cancelled(runId, result("cancelled"))
+      const clients = try bridges.clients()
+      write = () => clients.contacts.createContact(draft)
+    } else {
+      const found = try (contactsMatching(op.query) catch () => undefined)
+      if (found === undefined) return try finishEarly(runId, result("unavailable"), "Unavailable")
+      const options: { candidate: Candidate; before: ContactDetail; after?: ContactDraft }[] = []
+      for (const before of found) {
+        if (op.type === "contact_delete") { options.push({ candidate: { candidateId: `${before.id}:delete`, title: before.displayName, number: `${before.id}:delete` }, before }); continue }
+        for (const keep of op.set === undefined ? [true] : [true, false]) {
+          const after = valuesChanged(changedDraft(before, op.set ?? {}, keep), op.add, op.remove)
+          if (same(after, before) || options.some((o) => o.before.id === before.id && o.after !== undefined && same(o.after, after))) continue
+          const candidateId = `${before.id}:${keep ? "add" : "replace"}`
+          options.push({ candidate: { candidateId, title: after.displayName, number: candidateId }, before, after })
+        }
+      }
+      if (options.length === 0) return try finishEarly(runId, result("not-found"), "NothingFound")
+      try Ref.update(review, (details) => ({ ...details, changes: Object.fromEntries(options.map((o) => [o.candidate.candidateId, { before: o.before, after: o.after }])) }))
+      const chosenNumber = try choose(runId, options.map((o) => o.candidate))
+      const now = try actions.get()
+      if (chosenNumber === undefined || now.ongoing.tag !== "Guarding") return try cancelled(runId, result("cancelled"))
+      const chosen = options.find((o) => o.candidate.candidateId === chosenNumber)
+      if (chosen === undefined) return try cancelled(runId, result("cancelled"))
+      const reviewed = { id: chosen.before.id as ContactId, version: chosen.before.version as ContactVersion }
+      const clients = try bridges.clients()
+      write = chosen.after === undefined ? () => clients.contacts.remove(reviewed) : () => clients.contacts.updateContact(reviewed, chosen.after!)
+    }
+    if (!(try guard(runId))) return { result: result("unavailable"), settled: "Refused", refusal: "emergency" } satisfies ActionExecution
+    const written = try (tryPromise({ try: write, catch: (cause) => cause }) catch (cause) => ({ status: typeof cause === "object" && cause !== null && "code" in cause ? "failed" : "unknown" }))
+    const status = written.status === "not-found" && op.type === "contact_create" ? "failed" : contactStatusOf(written.status)
+    try contacts.alphaWrote(status === "unknown")
+    return status === "unknown" ? try lost(runId, result("unknown")) : try finish(runId, result(status), status)
+  }
+
+  return {
+    effect capabilities() {
+      if (!bridges.offered) return []
+      const base = ["phone.dial.v1", "phone.call.v1", "sms.send.v1", "sms.compose.v1", "sms.reply-selected.v1", "messages.read.v1",
+        "voicemail.read.v1", "voicemail.delete.v1", "sms.latest-sender.v1", "sms.latest-sender.v2", "views.telephony.v1", "phone.keypad.v1", "contacts.show.v1", "contacts.read.v1"]
+      const status = try (bridgeCall("status", (c) => c.contacts.status()) catch () => undefined)
+      return status !== undefined && contactWriteAdvertised("WritingInstall", status) ? [...base, "contacts.write.v1"] : base
+    },
+    effect run(operation: unknown, operationId: string, request: unknown) {
+      const op = try decodeOperation(operation)
+      const owner = try (Schema.decodeUnknownEffect(OwnerRequest)(request) catch () => ({ text: "" }))
+      const kind = KINDS[op.type]!
+      const form: TargetForm = op.target?.kind === "number" || op.type === "sms_send" ? "WrittenNumber"
+        : op.target?.kind === "contact" || op.query !== undefined && op.type !== "contact_show" ? "ContactLookup"
+        : op.type === "contact_create" ? "ContactLookup" : "NoTarget"
+      const isGrounded = op.type === "sms_send" ? op.recipients.every((n: string) => grounded(owner.text, { kind: "number", number: n }, op.body))
+        : op.target !== undefined ? grounded(owner.text, op.target, typeof op.body === "string" ? op.body : undefined) : true
+      try Ref.set(review, {})
+      const started = try tell({ type: "actionStarted", runId: operationId, kind, form, grounded: isGrounded }, "Device")
+      if (started === undefined) throw new AlreadyRan({ operationId })
+      if (started.ongoing.tag === "Finished") return { result: { kind: op.type, status: "unavailable" }, settled: "Refused", refusal: "ungrounded" } satisfies ActionExecution
+      if (!bridges.offered) return try settle(operationId, { kind: op.type, status: "unavailable" }, "unavailable")
+      switch (op.type) {
+        case "phone_dial": return try callOrDial(operationId, op, true)
+        case "phone_call": return try callOrDial(operationId, op, false)
+        case "sms_compose": return try compose(operationId, op, operationId)
+        case "contact_create": case "contact_update": case "contact_delete": {
+          if (!contactNumbersGrounded(owner.text, contactNumbersOf(op)))
+            return { ...(try finishEarly(operationId, { kind: "contact-write", status: "unavailable" }, "Refused")), refusal: "ungrounded" } satisfies ActionExecution
+          return try contactWrite(operationId, op)
+        }
+        case "sms_send": {
+          if ((try tell({ type: "numberReady", runId: operationId, number: op.recipients[0] }, "Device")) === undefined) return try cancelled(operationId, undefined)
+          if (!(try guard(operationId))) return { result: undefined, settled: "Refused", refusal: "emergency" } satisfies ActionExecution
+          const sent = try (sendText(operationId, op.recipients, op.body, operationId, op.subscriptionId) catch (failure) => failure)
+          if (sent === undefined || sent instanceof TelephonyRefused) return sent instanceof TelephonyRefused && sent.code === undefined ? try lost(operationId, undefined) : try finish(operationId, undefined, "unavailable")
+          return try finish(operationId, sent, sent.status)
+        }
+        case "mms_send": return try settle(operationId, undefined, "unavailable")
+        case "sms_reply_selected": {
+          const open = try messages.selected()
+          const status = open === null ? "none-selected" : try drafts.placeAlphaDraft(open.threadId, open.addresses, op.body)
+          return try settle(operationId, { kind: "sms-reply", status }, status, status === "drafted" && open !== null ? { app: "messages", route: `thread:${open.threadId}` } : undefined)
+        }
+        case "messages_read_selected": {
+          const open = try messages.readSelected()
+          return try settle(operationId, open === null ? { kind: "messages-read", status: "none-selected" } : { kind: "messages-read", status: "read", ...open }, open === null ? "none-selected" : "read")
+        }
+        case "voicemail_read_selected": {
+          const open = try voicemail.readSelected()
+          return try settle(operationId, open === null ? { kind: "voicemail-read", status: "none-selected" } : { kind: "voicemail-read", status: "read", ...open }, open === null ? "none-selected" : "read")
+        }
+        case "voicemail_delete_selected": {
+          // A voicemail delete is an effect (`effectKind`): it reads the call state like any other before it runs.
+          if ((try tell({ type: "numberReady", runId: operationId, number: "" }, "Device")) === undefined) return try cancelled(operationId, { kind: "voicemail-delete", status: "cancelled" })
+          if (!(try guard(operationId))) return { result: { kind: "voicemail-delete", status: "unavailable" }, settled: "Refused", refusal: "emergency" } satisfies ActionExecution
+          const status = try voicemail.deleteSelected()
+          return try finish(operationId, { kind: "voicemail-delete", status }, status)
+        }
+        case "sms_latest_sender": {
+          const sender = try messages.latestSender("includeAddress" in op && op.includeAddress === true)
+          const admitted = Option.getOrUndefined(readLatestSender(sender === "unavailable" ? { kind: "sms-latest-sender", status: "unavailable" } : { kind: "sms-latest-sender", ...sender }))
+          const result = admitted ?? { kind: "sms-latest-sender", status: "unavailable" as const }
+          return try settle(operationId, result, result.status)
+        }
+        case "phone_keypad":
+          return try settle(operationId, { kind: "phone-keypad", status: "opened" }, "opened", { app: "phone", route: `keypad:${op.number ?? ""}` })
+        case "contact_show": {
+          const listed = try contacts.matches(op.query)
+          const status = listed === undefined ? "unavailable" : listed ? "shown" : "not-found"
+          return try settle(operationId, { kind: "contact-show", status }, status, listed === true ? { app: "contacts", route: `filter:${op.query}` } : undefined)
+        }
+        case "contact_read_selected": {
+          const open = try contacts.readSelected()
+          const status = open === null ? "none-selected" : open === "unavailable" ? "unavailable" : "read"
+          return try settle(operationId, typeof open === "object" && open !== null ? { kind: "contact-read", status, contact: open } : { kind: "contact-read", status }, status)
+        }
+        default: throw new NotATelephonyOperation({ input: operation })
+      }
+    },
+    review: () => Ref.get(review),
+    effect readBack(operation: unknown, operationId: string) {
+      const op = telephonyOperationOf(operation)
+      const kind = op === undefined ? undefined : KINDS[op.type]
+      const id = operationIdOf(operationId)
+      if (op === undefined || kind === undefined || id === null || readBackOf(kind, "RecordTaken") === "StaysUnconfirmed") return undefined
+      const history = try (bridgeCall("smsSendHistory", (c) => c.messages.smsSendHistory()) catch () => undefined)
+      if (history === undefined) return undefined
+      const entry = history.find((record) => record.operationId === id)
+      const answer = readBackOf(kind, sendRecordOf(entry?.status))
+      if (answer === "StaysUnconfirmed" || entry === undefined) return undefined
+      const settled: Settled = answer === "ReadApplied" ? "Applied" : SETTLED_OF_STATUS[entry.status] ?? "NotDone"
+      return { settled, result: op.type === "sms_send" ? entry : { kind: "sms-compose", status: entry.status } } satisfies ReadBack
+    },
+    effect dismiss() {
+      const { ongoing } = try actions.get()
+      const runId = runIdOf(ongoing)
+      if (runId !== "") try tell({ type: "reviewDismissed", runId }, "Device")
+    },
+  }
+})

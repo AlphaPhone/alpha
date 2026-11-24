@@ -1,0 +1,138 @@
+// spec/files/share.md, "Story: Share the files I selected, to the place I chose"; spec/files/share.md, "A new panel retires the one before it, and one opened while Files is hidden is settled unseen"; spec/files/emailDraft.md, "A changed account, leaving the screen or losing the grant cancels the attempt and holds no bytes"; spec/files/emailDraft.md, "Story: Email a file from Files without touching the draft I was writing"; spec/files/preview.md, "Each preview action is offered exactly when the file allows it"
+import { type Destination, type DeliveryOutcome, type SharePanel, Machine as PanelMachine } from "../../gen/files__share.effect.vibe"
+import { type EmailShare, Machine as EmailMachine } from "../../gen/files__emailDraft.effect.vibe"
+import type { AttachmentBytes } from "./native.schema.vibe"
+import { FilesUnavailable } from "./storage.vibe"
+import { AppLifecycle } from "../platform/lifecycle.vibe"
+
+/** A file another area may take: what Files knows of it, and a fresh read of its bytes. */
+export interface SharedFile {
+  readonly name: string
+  readonly mimeType: string
+  readonly size: number
+  readonly read: AttachmentBytes!FilesUnavailable
+}
+
+/** The email account a new draft would go to, or why there is none. */
+export type EmailAccount = { readonly ready: true; readonly token: string } | { readonly ready: false; readonly reason: string }
+
+/** What Inbox did with a file: a new draft, the unfinished draft already holds it, or its own refusal. */
+export type EmailAnswer = { readonly kind: "inserted" } | { readonly kind: "duplicate" } | { readonly kind: "refused"; readonly reason: string }
+
+/** The destinations other areas give Files: Inbox's new draft, Messages' picture and the assistant's composer. None until an area provides them. */
+export service FileShareTargets {
+  emailAccount(): EmailAccount!!
+  email(file: AttachmentBytes, token: string): EmailAnswer!!
+  readonly messages: boolean
+  message(file: SharedFile): boolean!!
+  readonly ask: boolean
+  attachToChat(file: SharedFile, question: string): boolean!!
+  static readonly defaultValue = () => ({
+    emailAccount: () => succeed({ ready: false, reason: "Email is not set up on this phone." } as EmailAccount),
+    email: () => succeed({ kind: "refused", reason: "Email is not set up on this phone." } as EmailAnswer),
+    messages: false,
+    message: () => succeed(false),
+    ask: false,
+    attachToChat: () => succeed(false),
+  })
+}
+
+/** How an Email attempt ended, for Files to word. */
+export type EmailResult =
+  | { readonly kind: "inserted" }
+  | { readonly kind: "failed"; readonly reason: "changed" | "account" | "duplicate" | "unreadable" | "cancelled"; readonly detail?: string }
+
+/** The share panel and the Email attempt, over their machines. */
+export service FilesShare {
+  readonly panels: Stream.Stream<SharePanel>
+  readonly emails: Stream.Stream<EmailShare>
+  /** Open a panel for what is selected now; `same` tells later whether it still is. */
+  open(email: boolean, messages: boolean, same: boolean!!): number!!
+  /** The owner chose `destination` on panel `id`: only the panel on screen for an unchanged selection closes, records the send and then runs `deliver` once, whose outcome is reported. */
+  choose(id: number, destination: Destination, deliver: DeliveryOutcome!!): boolean!!
+  retire(): void!!
+  hidden(hidden: boolean): void!!
+  /** Follow the app in front or not while Files is on screen: hiding it closes the panel shown and cancels an Email attempt. */
+  followVisibility(): void!!
+  /** Stage `file` in a new email draft after reading it twice. */
+  email(file: SharedFile, current: boolean!!): EmailResult!!
+}
+
+/** The share panel and Email over their machines and the destinations other areas give. */
+export const layer = Layer.effect(FilesShare, effect {
+  const panels = try PanelMachine
+  const emails = try EmailMachine
+  const sameness = try Ref.make<readonly [number, boolean!!]>([0, succeed(true)])
+
+  effect function email(file: SharedFile, current: boolean!!) {
+    const targets = try FileShareTargets
+    const account = try targets.emailAccount()
+    if (!account.ready) return { kind: "failed", reason: "account", detail: account.reason } satisfies EmailResult
+    emails.send({ type: "restart" }) catch () => undefined
+    const begun = emails.send({ type: "beginEmail" }) catch () => undefined
+    if (begun === undefined) return { kind: "failed", reason: "cancelled" } satisfies EmailResult
+    const first = file.read catch () => undefined
+    const intact = first !== undefined && first.name === file.name && first.mimeType === file.mimeType && (try current)
+    const read = emails.send({ type: "readDone", intact }) catch () => undefined
+    if (first === undefined || read?.phase !== "EmailReviewing") return { kind: "failed", reason: first === undefined ? "unreadable" : "changed" } satisfies EmailResult
+    const again = try targets.emailAccount()
+    if (!again.ready || again.token !== account.token) {
+      emails.send({ type: "changeAccount" }) catch () => undefined
+      return { kind: "failed", reason: "account", ...(again.ready ? {} : { detail: again.reason }) } satisfies EmailResult
+    }
+    const second = file.read catch () => undefined
+    const reread = second !== undefined && second.sha256 === first.sha256 && second.size === first.size &&
+      second.name === first.name && second.mimeType === first.mimeType && second.dataBase64 === first.dataBase64 && (try current)
+    const answer = reread ? try targets.email(first, account.token) : { kind: "refused", reason: "" } as EmailAnswer
+    const inserted = emails.send({ type: "insertReply", reread, answer: answer.kind === "inserted" ? "InsertedNew" : answer.kind === "duplicate" ? "DuplicateRefused" : "InsertRefused" }) catch () => undefined
+    if (inserted?.phase === "EmailInserted") return { kind: "inserted" } satisfies EmailResult
+    return (!reread ? { kind: "failed", reason: "changed" }
+      : answer.kind === "duplicate" ? { kind: "failed", reason: "duplicate" }
+      : { kind: "failed", reason: "account", ...(answer.kind === "refused" && answer.reason ? { detail: answer.reason } : {}) }) satisfies EmailResult
+  }
+
+  effect function hidden(hide: boolean) {
+    panels.send({ type: "visibility", hidden: hide }) catch () => undefined
+    if (hide) emails.send({ type: "background" }) catch () => undefined
+  }
+
+  return {
+    panels: panels.changes,
+    emails: emails.changes,
+    effect open(email: boolean, messages: boolean, same: boolean!!) {
+      const opened = panels.send({ type: "openPanel", email, messages }) catch () => undefined
+      if (opened === undefined) return 0
+      try Ref.set(sameness, [opened.seen, same])
+      return opened.active
+    },
+    effect choose(id: number, destination: Destination, deliver: DeliveryOutcome!!) {
+      const s = try panels.get()
+      const [panel, same] = try Ref.get(sameness)
+      if (s.active !== id || s.hidden) return false
+      if (panel === id && !(try same)) {
+        panels.send({ type: "invalidate" }) catch () => undefined
+        panels.send({ type: "choose", id, destination }) catch () => undefined
+        return false
+      }
+      const after = panels.send({ type: "choose", id, destination }) catch () => undefined
+      if (destination === "CancelShare") return after !== undefined
+      if (after === undefined || !after.effects.some((e) => e.panel === id)) return false
+      const outcome: DeliveryOutcome = try deliver
+      panels.send({ type: "reportDelivery", id, result: outcome }) catch () => undefined
+      return outcome === "Delivered"
+    },
+    effect retire() {
+      panels.send({ type: "retirePanel" }) catch () => undefined
+    },
+    hidden,
+    effect followVisibility() {
+      const found = try Effect.serviceOption(AppLifecycle)
+      if (Option.isNone(found)) return
+      for try (const app of found.value.changes) {
+        if ((try panels.get()).hidden === !app.foreground) continue
+        try hidden(!app.foreground)
+      }
+    },
+    email,
+  }
+})

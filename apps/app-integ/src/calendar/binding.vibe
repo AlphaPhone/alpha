@@ -1,0 +1,137 @@
+// spec/calendar/approvals.md, "A changed conversation, a hidden page or Back retires the review"; spec/calendar/agent.md, "The port reports the current agent binding; a usable port always names an owner"; spec/calendar/presentation.md, "A committed Calendar change in a reply reads the window again once"; spec/calendar/presentation.md, "While Calendar is in front it reads again once a minute, never hidden, during a read or a write, or without a session"; spec/calendar/presentation.md, "Leaving Calendar ends its transient overlays and any pending save request"; spec/calendar/presentation.md, "Crossing midnight keeps the chosen dates"; spec/calendar/editor.md, "A form's day follows the calendar date when midnight passes"; spec/calendar/presentation.md, "Revoked access hides a source at once; hiding the agent calendar is a preference of that account"; spec/calendar/presentation.md, "Agent rows belong to the owner they were read for, and a changed owner clears them"; spec/calendar/deletions.md, "Leaving the app sends a waiting deletion at once; another account or session drops it unsent"; spec/calendar/drafts.md, "Changing owner closes the editor; the old owner's slot keeps its edits"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { Machine as PresentationMachine, replyRereads, rereadDue } from "../../gen/calendar__presentation.effect.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+import { Foreground } from "../shell/foreground.vibe"
+import { AgentCalendar, type AgentBinding, type CalendarWindow } from "./agent.vibe"
+import { ApprovalReviews } from "./approvals.vibe"
+import { HeldDeletions } from "./deletions.vibe"
+import { DeviceCalendar } from "./device.vibe"
+import { CalendarDrafts } from "./drafts.vibe"
+import { readWindow } from "./model.vibe"
+import type { ReplyChanges } from "../assistant/ports.vibe"
+import { civilDay, deviceZone } from "./time.ts"
+
+/** Tell Calendar which account and agent session it serves; Calendar's layer calls this on every change of Account's agent binding. */
+export effect function bindCalendar(binding: AgentBinding) {
+  const presentation = try PresentationMachine
+  const agent = try AgentCalendar
+  const before = try agent.view()
+  const changed = before.state.portOwner !== binding.owner || before.state.portSession !== binding.session
+  if (changed) {
+    try (try HeldDeletions).retire()
+    try (try ApprovalReviews).retire()
+  }
+  try agent.bind(binding)
+  const owner = binding.usable ? binding.owner : ""
+  presentation.send({ type: "changeOwner", nextOwner: owner }) catch () => undefined
+  try (try CalendarDrafts).bind(owner)
+}
+
+/** The window Calendar reads for what is on screen now. */
+export effect function currentWindow(): CalendarWindow {
+  const state = try (try PresentationMachine).get()
+  const now = try Clock.currentTimeMillis
+  const zone = deviceZone()
+  return { range: readWindow(state.day, state.view === "MonthView" || state.datePicker ? state.month : 0, now, zone), timeZone: zone }
+}
+
+/** Read what is on screen: the agent window and the device range, then publish the rows under the newest read token. */
+export effect function readCalendar(force: boolean, requestAccess: boolean) {
+  const presentation = try PresentationMachine
+  const requested = presentation.send({ type: "request", force }) catch () => undefined
+  if (requested === undefined) return
+  const window = try currentWindow()
+  const agent = try AgentCalendar
+  const device = try DeviceCalendar
+  const [, read] = try.all [agent.refresh(window), device.read(window.range, requestAccess, force)]
+  const view = try agent.view()
+  if (read.status === "denied") presentation.send({ type: "revokeDevice" }) catch () => undefined
+  else if (read.status === "allowed" || read.status === "limited" || read.status === "no-calendars") presentation.send({ type: "grantDevice" }) catch () => undefined
+  if (view.state.error === "AccessRefused") presentation.send({ type: "revokeAgent" }) catch () => undefined
+  else if (view.state.status === "Ready" || view.state.status === "Partial") presentation.send({ type: "grantAgent" }) catch () => undefined
+  presentation.send({ type: "reply", token: requested.readToken, replyOwner: requested.requestOwner,
+    truncated: read.truncated || view.feed?.state === "partial" }) catch () => undefined
+  try (try HeldDeletions).readBack(
+    (view.feed?.events ?? []).map((event) => ({ id: event.id, source: event.calendarId, series: event.recurringEventId ?? event.externalId, start: Date.parse(event.startAt) })),
+    (target, revision) => (view.feed?.events ?? []).some((event) => event.id === target && event.status !== "cancelled"
+      && (revision === "" || (typeof event.metadata.etag === "string" ? event.metadata.etag.trim() : "") === revision)),
+  )
+}
+
+const ANCHOR = ownerKey("device", "calendar/presentation-day")
+
+/** Day offsets count from today: once the date changed since they were set, every offset rolls back by the days that passed. */
+export effect function rollToToday() {
+  const store = try KeyValueStore.KeyValueStore
+  const now = try Clock.currentTimeMillis
+  const today = civilDay(now, deviceZone())
+  const raw = store.get(ANCHOR) catch () => undefined
+  const anchor = raw === undefined ? today : Number(raw)
+  if (Number.isSafeInteger(anchor) && today > anchor) (try PresentationMachine).send({ type: "rollDays", days: today - anchor }) catch () => undefined
+  if (raw !== String(today)) store.set(ANCHOR, String(today)) catch () => undefined
+}
+
+/** While Calendar is in front: read once on showing it, then again once a minute; never hidden, during a read or a write, or without a session. */
+export effect function whileVisible() {
+  const foreground = try Foreground
+  const shown = try foreground.get()
+  if (shown.visible && !shown.locked && shown.view === "calendar") {
+    try enterCalendar()
+    try readCalendar(false, false)
+  }
+  while (true) {
+    try sleep("60 seconds")
+    try rollToToday()
+    const front = try foreground.get()
+    const view = try (try AgentCalendar).view()
+    if (rereadDue(front.visible && !front.locked, front.view === "calendar", view.state.write.id !== 0, view.state.read.id !== 0, view.state.portOwner !== "")) {
+      try enterCalendar()
+      try readCalendar(false, false)
+    }
+  }
+}
+
+/** Calendar is in front again. */
+export effect function enterCalendar() {
+  try rollToToday()
+  (try PresentationMachine).send({ type: "enter" }) catch () => undefined
+}
+
+/** Calendar is no longer in front: its transient overlays close and a pending save request ends; the form keeps what was typed. */
+export effect function leaveCalendar() {
+  (try PresentationMachine).send({ type: "leave" }) catch () => undefined
+}
+
+/** The page was hidden or the screen locked: Calendar leaves, an approval review retires, its editor closes with the slot keeping the edits, and a waiting deletion is sent at once. */
+export effect function hideCalendar() {
+  const presentation = try PresentationMachine
+  presentation.send({ type: "leave" }) catch () => undefined
+  presentation.send({ type: "closeForm" }) catch () => undefined
+  try (try ApprovalReviews).retire()
+  try (try HeldDeletions).leave()
+  try (try CalendarDrafts).close()
+  try (try DeviceCalendar).closeForm()
+}
+
+/**
+ * The reply changes the assistant settles, followed by Calendar: a reply whose committed results changed a Calendar event reads the
+ * current window once, so the open Calendar and Home show it at once instead of on the next minute's read.
+ */
+export effect function calendarFollowsReplies(changes: ReplyChanges.Shape) {
+  const agent = try AgentCalendar
+  const presentation = try PresentationMachine
+  const followed: ReplyChanges.Shape = {
+    effect settle(results: ReadonlyArray<unknown>) {
+      const summary = try changes.settle(results)
+      if (replyRereads(summary.calendar, (try agent.view()).state.portOwner !== "")) {
+        const state = try presentation.get()
+        const now = try Clock.currentTimeMillis
+        const zone = deviceZone()
+        try agent.refresh({ range: readWindow(state.day, state.view === "MonthView" || state.datePicker ? state.month : 0, now, zone), timeZone: zone })
+      }
+      return summary
+    },
+  }
+  return followed
+}

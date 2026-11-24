@@ -1,0 +1,60 @@
+// spec/browser/presentation.md, "Story: See the page only when nothing covers it"; spec/browser/presentation.md, "Story: Never let a touch meant for Alpha reach the website"
+import { type CoverFacts, type Event, type Placement, type PresentEffect, type PresentRequest, type Presenter, Machine, machine, wantedPresentation } from "../../gen/browser__presentation.effect.vibe"
+import { Toasts } from "../shell/toasts.vibe"
+import { refusalText } from "./messages.ts"
+import { BrowserCallFailed, TabHost } from "./tabHost.vibe"
+
+/** Shows and withdraws the selected tab's native page as the renderer measures it. */
+export service BrowserPresenter {
+  readonly changes: Stream.Stream<Presenter>
+  /** One frame's measurement: the page is placed when nothing covers it, and withdrawn otherwise. */
+  offer(facts: CoverFacts, placement: Placement): void!!
+  /** Leaving the Browser view or a covering layer opening: the page steps aside at once. */
+  withdraw(): void!!
+  /** A host control over the page appeared or went: page input is blocked until the next frame measures it. */
+  chromeChanged(): void!!
+  /** A visibility change, a resumed surface or a closed dialog: the next frame sends again. */
+  forget(): void!!
+  /** Alpha itself was hidden or shown. */
+  appVisibility(hidden: boolean): void!!
+}
+
+function payloadOf(request: PresentRequest): Record<string, unknown> {
+  if (request.tag === "Withdrawn") return { id: null }
+  const { tab, x, y, width, height, below, rects } = request
+  return below ? { id: tab, x, y, width, height, layer: "below-host", hostRects: rects } : { id: tab, x, y, width, height }
+}
+
+/** BrowserPresenter over its machine in memory. */
+export const presenterLayer = Layer.provide(Layer.effect(BrowserPresenter, effect {
+  const presenter = try Machine
+  const host = try TabHost
+  const toasts = try Toasts
+  const lastFailure = try Ref.make("")
+
+  effect function perform(out: PresentEffect) {
+    match (out) {
+      when { tag: "Present", let request }: try effect {
+        const shown = host.call("present", payloadOf(request)) catch (error) => error
+        if (shown instanceof BrowserCallFailed) try Ref.set(lastFailure, shown.message)
+        try send({ type: "answered", ok: !(shown instanceof BrowserCallFailed) })
+      };
+      when { tag: "ReportPresentFailed" }: try toasts.show(refusalText(try Ref.get(lastFailure)));
+    }
+  }
+
+  effect function send(event: Event) {
+    const change = presenter.send(event) catch () => undefined
+    if (change === undefined) return
+    if ("out" in change) for (const out of change.out) try perform(out)
+  }
+
+  return {
+    changes: presenter.changes,
+    offer: (facts: CoverFacts, placement: Placement) => send({ type: "offer", wanted: wantedPresentation(facts, placement), inBrowser: facts.inBrowser }),
+    withdraw: () => send({ type: "withdraw" }),
+    chromeChanged: () => send({ type: "chromeChanged" }),
+    forget: () => send({ type: "forget" }),
+    appVisibility: (hidden: boolean) => send({ type: "appVisibility", hidden }),
+  }
+}), machine())

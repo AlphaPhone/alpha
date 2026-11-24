@@ -1,0 +1,160 @@
+// spec/calendar/deletions.md, "Story: Undo a deletion before it is sent"; spec/calendar/deletions.md, "The window ends only once its Undo notice is no longer shown"; spec/calendar/deletions.md, "Leaving the app sends a waiting deletion at once; another account or session drops it unsent"
+import { type DeferredDeletes as HeldState, type Event as HeldEvent, type HideScope, Machine as HeldMachine, hides } from "../../gen/calendar__deletions.effect.vibe"
+import { deleteUndoMs } from "@elizaos/os/bridges/deletion-window"
+import type { CalendarDeleteRequest } from "@elizaos/plugin-calendar/client"
+import { Notices } from "../shell/notices.vibe"
+
+/** A write scope of a repeating event, as upstream series scope names it. */
+export type CalendarWriteScope = NonNullable<CalendarDeleteRequest["recurrenceScope"]>
+
+/** What happened to a deletion the owner confirmed, for its notice. */
+export type HeldOutcome = "deleted" | "declined" | "not-deleted" | "failed"
+
+/** One confirmed deletion: what it hides, how it is sent, and how a later read tells whether its row is unchanged. */
+export interface HeldRequest {
+  readonly target: string
+  readonly decline: boolean
+  readonly source: string
+  readonly series: string
+  readonly start: number
+  /** The scope the owner chose and the deletion sends: one occurrence, this and following, the whole series, or a single event. */
+  readonly scope: CalendarWriteScope | "event"
+  readonly send: Effect.Effect<boolean>
+  /** The event's version when the owner confirmed; a read that lists it at another version shows it again, as a sent decline does. */
+  readonly revision?: string
+}
+
+/** Which rows a scope hides while its deletion waits or is in flight. */
+export function hideScope(scope: CalendarWriteScope | "event"): HideScope {
+  return scope === "series" ? "HideSeries" : scope === "this_and_following" ? "HideFollowing" : "HideEvent"
+}
+
+/** A row on screen, as a held deletion compares it. */
+export interface HeldRow { readonly id: string; readonly source: string; readonly series: string; readonly start: number }
+
+/** Confirmed agent Calendar deletions held through the Undo window, hidden meanwhile. */
+export service HeldDeletions {
+  readonly changes: Stream.Stream<HeldState>
+  get(): HeldState!!
+  /** Hold a confirmed deletion; a deletion still waiting is sent first. Returns its id for Undo. */
+  confirm(request: HeldRequest): number!!
+  /** True only while the deletion still waits; then nothing was sent. */
+  undo(id: number): boolean!!
+  /** Whether the Undo notice of a deletion is still on screen, which holds its window. */
+  offered(id: number, shown: boolean): void!!
+  /** The app was hidden: a waiting deletion is sent now. */
+  leave(): void!!
+  /** Another account or session: a waiting deletion is dropped unsent. */
+  retire(): void!!
+  /** A read: a sent deletion stops hiding once its row is gone or changed from the version confirmed. */
+  readBack(rows: readonly HeldRow[], unchanged: (target: string, revision: string) => boolean): void!!
+  hidden(row: HeldRow): boolean!!
+}
+
+/** The held deletions service over its machine and the upstream deletion window. */
+export const deletionsLayer = Layer.effect(HeldDeletions, effect {
+  const machine = try HeldMachine
+  const requests = try Ref.make<Map<number, HeldRequest>>(new Map())
+  const shown = try Ref.make<Set<number>>(new Set())
+  const notices = try Effect.serviceOption(Notices)
+
+  effect function send(event: HeldEvent) { return machine.send(event) catch () => undefined }
+
+  effect function notDeleted(request: HeldRequest) {
+    if (Option.isSome(notices)) try notices.value.show(request.decline ? "Invitation not declined" : "Event not deleted")
+  }
+
+  effect function dispatch(id: number) {
+    const request = (try Ref.get(requests)).get(id)
+    if (request === undefined) return
+    const ok = request.send catch () => false
+    try send(ok ? { type: "sendSucceeded", id } : { type: "sendFailed", id })
+    if (!ok) {
+      try Ref.update(requests, (all) => { const next = new Map(all); next.delete(id); return next })
+      try notDeleted(request)
+    }
+  }
+
+  effect function sendingIds(before: HeldState, after: HeldState) {
+    return after.held.filter((held) => held.phase === "Sending" && before.held.some((was) => was.id === held.id && was.phase === "Waiting")).map((held) => held.id)
+  }
+
+  effect function window(id: number) {
+    try sleep(Duration.millis(deleteUndoMs))
+    while (true) {
+      const state = try machine.get()
+      if (!state.held.some((held) => held.id === id && held.phase === "Waiting")) return
+      const offered = (try Ref.get(shown)).has(id)
+      const after = try send({ type: "elapse", id, offered })
+      if (!offered && after !== undefined) {
+        try dispatch(id)
+        return
+      }
+      try sleep(Duration.millis(500))
+    }
+  }
+
+  effect function row(state: HeldState, request: HeldRequest, candidate: HeldRow) {
+    return hides(request.source === candidate.source, request.target === candidate.id, request.series !== "" && request.series === candidate.series,
+      candidate.start >= request.start, hideScope(request.scope))
+  }
+
+  return {
+    changes: machine.changes,
+    effect get() { return try machine.get() },
+    effect confirm(request: HeldRequest) {
+      const before = try machine.get()
+      const after = try send({ type: "confirm", target: request.target, decline: request.decline })
+      if (after === undefined) return 0
+      const id = after.lastId
+      try Ref.update(requests, (all) => new Map(all).set(id, request))
+      for (const sending of try sendingIds(before, after)) fork.detached dispatch(sending)
+      fork.detached window(id)
+      return id
+    },
+    effect undo(id: number) {
+      const after = try send({ type: "undo", id })
+      if (after === undefined) return false
+      try Ref.update(requests, (all) => { const next = new Map(all); next.delete(id); return next })
+      return true
+    },
+    effect offered(id: number, notice: boolean) {
+      try Ref.update(shown, (all) => { const next = new Set(all); if (notice) next.add(id); else next.delete(id); return next })
+    },
+    effect leave() {
+      const before = try machine.get()
+      const after = try send({ type: "leave" })
+      if (after !== undefined) for (const sending of try sendingIds(before, after)) fork.detached dispatch(sending)
+    },
+    effect retire() {
+      const before = try machine.get()
+      const after = try send({ type: "retire" })
+      if (after === undefined) return
+      const dropped = before.held.filter((held) => held.phase === "Waiting").map((held) => held.id)
+      const all = try Ref.get(requests)
+      for (const id of dropped) {
+        const request = all.get(id)
+        if (request !== undefined) try notDeleted(request)
+      }
+      try Ref.update(requests, (kept) => new Map([...kept].filter(([id]) => !dropped.includes(id))))
+    },
+    effect readBack(rows: readonly HeldRow[], unchanged: (target: string, revision: string) => boolean) {
+      const state = try machine.get()
+      const all = try Ref.get(requests)
+      for (const held of state.held.filter((entry) => entry.phase === "Sent")) {
+        const request = all.get(held.id)
+        const listed = request !== undefined && rows.some((candidate) => candidate.id === held.target) && unchanged(held.target, request.revision ?? "")
+        try send({ type: "readBack", target: held.target, listedUnchanged: listed })
+      }
+    },
+    effect hidden(candidate: HeldRow) {
+      const state = try machine.get()
+      const all = try Ref.get(requests)
+      for (const held of state.held) {
+        const request = all.get(held.id)
+        if (request !== undefined && (try row(state, request, candidate))) return true
+      }
+      return false
+    },
+  }
+})

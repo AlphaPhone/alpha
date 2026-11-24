@@ -1,0 +1,60 @@
+// spec/telephony/attention.md, "Story: See what is new from Home"; spec/telephony/attention.md, "A card exists only for a source that was read and has something new"
+import { isIncompleteSmsRow } from "@elizaos/os/bridges/definitions/messages"
+import { Machine as AttentionMachine, type AttentionRead, type Event as AttentionEvent, type NewMissed, type NewVoicemail, type UnreadThread } from "../../gen/telephony__attention.effect.vibe"
+import { callerOf, TelephonyBridges } from "./bridges.vibe"
+import { frontChanges, whileInFront } from "./front.vibe"
+
+/** How often Home's cards read their sources while Home is in front. */
+export const ATTENTION_REFRESH = "30 seconds"
+
+/** Home's telephony cards: bounded reads while Home is in front. */
+export service HomeAttention {
+  /** One visit of Home: while it is in front on an unlocked phone, a read now and every thirty seconds; leaving forgets it, and each return reads again. */
+  visit(): void!!
+  /** Read again, as a return to the app does. */
+  refresh(): void!!
+}
+
+/** Home's cards over their machine and the phone and messages bridges. */
+export const homeAttentionLayer = Layer.effect(HomeAttention, effect {
+  const bridgeCall = callerOf(try TelephonyBridges)
+  const attention = try AttentionMachine
+  const front = try frontChanges()
+  const tell = (event: AttentionEvent) => attention.send(event) catch () => undefined
+
+  effect function sources() {
+    const status = try (bridgeCall("status", (c) => c.messages.status()) catch () => undefined)
+    const threads = status?.permissions.sms === "granted"
+      ? try (bridgeCall("listThreads", (c) => c.messages.listThreads(20)) catch () => undefined) : undefined
+    const calls = status?.permissions.callLog === "granted"
+      ? try (bridgeCall("recentCalls", (c) => c.phone.recentCalls({ limit: 50 })) catch () => undefined) : undefined
+    const voicemail = try (bridgeCall("voicemail", (c) => c.phone.refreshVoicemail("AutomaticRead")) catch () => undefined)
+    const unreadRows: UnreadThread[] = (threads ?? []).flatMap((t) => isIncompleteSmsRow(t) || !t.unread ? [] : [{ threadId: t.id, title: t.addresses.join(", "), snippet: t.snippet, date: t.date }])
+    const missedRows: NewMissed[] = (calls?.calls ?? []).filter((c) => c.isNew && c.type === "missed").map((c) => ({ callerKey: c.number, title: c.cachedName ?? c.number, date: c.date }))
+    const voicemailOk = voicemail !== undefined && voicemail.carrier === "CarrierReady"
+    const voicemailRows: NewVoicemail[] = voicemailOk ? voicemail.voicemails.filter((v) => !v.heard).map((v) => ({ voicemailId: v.id, title: v.cachedName ?? v.number, date: v.date, seconds: v.durationSeconds })) : []
+    return { threadsOk: threads !== undefined, unreadRows, callsOk: calls !== undefined, missedRows, voicemailOk, voicemailRows } satisfies AttentionRead
+  }
+
+  effect function refresh() {
+    const asked = try tell({ type: "readAsked" })
+    if (asked === undefined) return
+    const read = try sources()
+    try tell({ type: "readAnswered", ticket: asked.epoch, read, at: try Clock.currentTimeMillis })
+  }
+
+  return {
+    effect visit() {
+      try whileInFront(front, effect () => {
+        if ((try tell({ type: "homeShown" })) === undefined) return
+        try ensuring(effect {
+          while (true) {
+            try refresh()
+            try sleep(ATTENTION_REFRESH)
+          }
+        }, tell({ type: "homeHidden" }))
+      })
+    },
+    refresh,
+  }
+})

@@ -1,0 +1,15 @@
+// spec/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks"
+
+/** Which product the running build is, and what it may expose. */
+export interface BuildInfo {
+  /** The app version, from app.config.json. */
+  readonly version: string
+  /** The launcher APK on stock Android, or the Alpha AOSP image with its telephony capability. */
+  readonly variant: "launcher" | "aosp" | "browser"
+  /** ELIZA_DEV_ALLOW_TEST_MOCKS=1 at build time: mocks, fixtures and developer surfaces may load. */
+  readonly testMocks: boolean
+}
+
+export service Build {
+  readonly info: BuildInfo
+}

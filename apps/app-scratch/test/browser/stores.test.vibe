@@ -1,0 +1,127 @@
+// spec/browser/bookmarks.md, "Story: Keep my bookmarks whole"; spec/browser/persistence.md, "Story: Save my tabs without ever losing the saved record"; spec/browser/cloudCustody.md, "Story: Keep one Cloud request per slot until it settles"; spec/browser/googleReturn.md, "Story: Link Google only when the account really changed"
+import { assert, it } from "@effect/vitest"
+import { BrowserBookmarks } from "../../src/browser/bookmarks.vibe"
+import { CloudRequests } from "../../src/browser/cloudCustody.vibe"
+import { BrowserEgress } from "../../src/browser/egress.vibe"
+import { GoogleLink } from "../../src/browser/googleReturn.vibe"
+import { BrowserTabs } from "../../src/browser/session.vibe"
+import { callsTo, fakeHost, loadPage, sessionOf, settledTabs } from "./fakes.vibe"
+
+// spec/browser/bookmarks.md, "Story: Keep my bookmarks whole"
+it.live("a bookmark is written only after the list was read, keeps the page's name, and a refused write is reported and changes nothing", () => effect {
+  const fake = try fakeHost({
+    answers: {
+      bookmarks: () => ({ urls: ["https://recipes.test/bread"] }),
+      setBookmark: (args) => String(args.url).startsWith("https://example.test/") ? { urls: [String(args.url), "https://recipes.test/bread"] } : new Error("Bookmark could not be saved. The device stores up to 100 bookmarks; existing data was not changed."),
+    },
+  })
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const marks = try BrowserBookmarks
+      const egress = try BrowserEgress
+      try settledTabs(tabs)
+      try loadPage(tabs, fake.events, try sessionOf(fake.calls), "https://example.test/news", "1", 1)
+      try egress.toggleBookmark()
+      try marks.set("https://full.test/", "Full", true)
+      const now = try marks.get()
+      const order = (try Ref.get(fake.calls)).map((c) => c.method).filter((m) => m === "bookmarks" || m === "setBookmark")
+      try Effect.try(() => assert.deepStrictEqual({
+        firstIsARead: order[0],
+        marks: now.marks,
+        refused: (try Ref.get(fake.toasts)).includes("Bookmark not saved. Alpha keeps up to 100 bookmarks; nothing else changed."),
+      }, {
+        firstIsARead: "bookmarks",
+        marks: [{ url: "https://example.test/news", title: "example.test" }, { url: "https://recipes.test/bread", title: "" }],
+        refused: true,
+      }))
+    }
+  })
+})
+
+// spec/browser/bookmarks.md, "A read replaces the marks with the store's list, keeping each saved name, and a failed read is reported, or offered for recovery once when the list is damaged"
+it.live("an unreadable list is reported, nothing is written over it, and Recover keeps it as it is", () => effect {
+  const fake = try fakeHost({ answers: { bookmarks: () => new Error("Saved bookmarks could not be read. Existing bookmarks were not changed.") } })
+  try scoped(effect {
+    provide fake.live {
+      const marks = try BrowserBookmarks
+      try marks.refresh(false)
+      try marks.set("https://example.test/", "Example", true)
+      try marks.recover()
+      try Effect.try(() => assert.deepStrictEqual({
+        writes: (try callsTo(fake.calls, "setBookmark")).length,
+        said: (try Ref.get(fake.toasts)).filter((t) => t === "Saved bookmarks couldn’t be read. They weren’t changed.").length > 0,
+        kept: (try Ref.get(fake.toasts)).at(-1),
+      }, { writes: 0, said: true, kept: "Saved bookmarks were kept as they are. Nothing was replaced." }))
+    }
+  })
+})
+
+// spec/browser/persistence.md, "Story: Save my tabs without ever losing the saved record"
+it.live("a rejected save tells the owner once and is not repeated before its wait, then is tried again on its own", () => effect {
+  const fake = try fakeHost({ answers: { saveBrowsingState: () => new Error("Tabs and history could not be saved.") } })
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      try settledTabs(tabs)
+      const session = try sessionOf(fake.calls)
+      try loadPage(tabs, fake.events, session, "https://example.test/", "1", 1)
+      try sleep("50 millis")
+      const early = (try callsTo(fake.calls, "saveBrowsingState")).length
+      try sleep("2100 millis")
+      const later = (try callsTo(fake.calls, "saveBrowsingState")).length
+      try Effect.try(() => assert.deepStrictEqual({
+        retried: later > early,
+        told: (try Ref.get(fake.toasts)).filter((t) => t === "Tabs and history couldn’t be saved. Alpha will try again shortly.").length,
+      }, { retried: true, told: 1 }))
+    }
+  })
+})
+
+// spec/browser/cloudCustody.md, "Story: Keep one Cloud request per slot until it settles"
+it.live("a second request for an occupied slot is refused and never sent, and a cancelled request is never reported done", () => effect {
+  const gate = try Deferred.make<void>()
+  const fake = try fakeHost({ cloud: () => Effect.as(Deferred.await(gate), { ok: true }) })
+  try scoped(effect {
+    provide fake.live {
+      const requests = try CloudRequests
+      const first = fork requests.request("cloud:production", "GET", "/api/v1/status")
+      try sleep("20 millis")
+      const duplicate = requests.request("cloud:production", "GET", "/api/v1/status") catch (error) => error._tag
+      try requests.cancel("cloud:production")
+      const cancelled = (join first) catch (error) => error._tag
+      try Deferred.succeed(gate, undefined)
+      const after = try requests.request("cloud:production", "GET", "/api/v1/status")
+      try Effect.try(() => assert.deepStrictEqual(
+        { duplicate, cancelled, after, sent: (try Ref.get(fake.cloudCalls)).length },
+        { duplicate: "SlotBusy", cancelled: "RequestAborted", after: { ok: true }, sent: 2 },
+      ))
+    }
+  })
+})
+
+// spec/browser/googleReturn.md, "Story: Link Google only when the account really changed"
+it.live("a callback wakes only the newest attempt of the same credential, and only a linked readback closes the panel", () => effect {
+  const fake = try fakeHost({ cloud: () => succeed({ accounts: [{ connectionId: "g1", email: "owner@example.test", grantedCapabilities: ["calendar"] }] }) })
+  try scoped(effect {
+    provide fake.live {
+      const link = try GoogleLink
+      const nonce = try link.begin(7)
+      try link.returned(nonce + 1, 1)
+      const stale = try timeout(Stream.runHead(link.changes), "1 second")
+      try link.returned(nonce, 1)
+      const linked = try timeout(Stream.runHead(link.changes), "1 second")
+      const again = try link.begin(7)
+      try link.credentialChanged(8)
+      try link.returned(again, 1)
+      const switched = try timeout(Stream.runHead(link.changes), "1 second")
+      try Effect.try(() => assert.deepStrictEqual({
+        stalePanel: Option.getOrUndefined(stale)?.panel,
+        linkedPanel: Option.getOrUndefined(linked)?.panel,
+        verified: Option.getOrUndefined(linked)?.verified,
+        switchedPanel: Option.getOrUndefined(switched)?.panel,
+        reads: (try Ref.get(fake.cloudCalls)).filter((c) => c === "GET /api/v1/eliza/google/accounts?side=owner").length,
+      }, { stalePanel: true, linkedPanel: false, verified: true, switchedPanel: true, reads: 1 }))
+    }
+  })
+})

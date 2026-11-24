@@ -1,0 +1,415 @@
+// spec/assistant/send.md, "Story: Send a message and know what happened to it"
+import { Native, NativeUnavailable } from "../../src/platform/native.vibe"
+import { Resident, ResidentRefused } from "../../src/platform/resident.vibe"
+import { ResidentControl, ResidentRecovery } from "../../src/platform/resident-control.vibe"
+import { initial as residentStart } from "../../gen/platform__resident.ts"
+import { memoryStore } from "../../src/platform/storage.vibe"
+import { AssistantHost, type ScreenFacts } from "../../src/assistant/host.vibe"
+import { DeviceExecutors, type OperationPorts } from "../../src/assistant/review.vibe"
+import type { ItemizedSet } from "../../src/assistant/transcript.vibe"
+import { layer } from "../../src/assistant/layer.vibe"
+import { AssistantEmail, type ReviewedEmail } from "../../src/assistant/ports.vibe"
+import { Preferences } from "../../src/settings/preferences.vibe"
+import { Latency } from "../../src/voice/latency.vibe"
+import { AdvertisedCapabilities, BrowserPages, BrowserViews, MapsViews, type BrowserPage, type MapsShown, type ObservedTab, type PageObservation, type ViewAnswer } from "../../src/assistant/ports.vibe"
+import { ResidentFeeds } from "../../src/platform/view-events.vibe"
+import { CommsStage } from "../../src/telephony/comms.vibe"
+import { Navigation } from "../../src/shell/navigation.vibe"
+import type { AppId } from "../../src/web/app-screen.ts"
+import { initial as navStart, moveChat as navMoveChat, type Nav } from "../../gen/shell__navigation.ts"
+import type { Detent } from "../../gen/assistant__detents.ts"
+
+/** What the fake resident was asked, in order. */
+export interface Seen { readonly calls: { readonly method: string; readonly path: string; readonly body: unknown; readonly headers?: { readonly [name: string]: string } }[] }
+
+/** How the fake resident answers a chat turn: a reply, a refusal, or a failed reply naming its kind, the owner's fix and a live wait. */
+export type TurnScript =
+  | { readonly kind: "reply"; readonly text: string }
+  | { readonly kind: "refuse"; readonly status: number }
+  | { readonly kind: "fail"; readonly failureKind: string; readonly planAction?: "sign-in" | "funding" | "retry"; readonly retryAfterMs?: number }
+
+/** A pending proposal as the agent's `/api/client-devices/proposals` listing gives it. */
+export function wireProposal(id: string, digest: string, operation: unknown, requestMessageId?: string, expiresAt = "2099-01-01T00:00:00.000Z") {
+  return {
+    id, digest, state: "pending", expiresAt, agentId: "a1", action: "device_action", createdAt: "2026-11-22T00:00:00.000Z",
+    payload: { action: "device_action", version: 1, installationId: "i1", enrollmentId: "e1", operation, ...(requestMessageId === undefined ? {} : { requestMessageId }) },
+  }
+}
+
+function replyOf(turn: TurnScript, actionResults: readonly unknown[] = []) {
+  const base = { agentName: "Alpha", messageId: "m1", userMessageId: "u1", actionResults }
+  if (turn.kind === "fail") {
+    return { ...base, text: "", failureKind: turn.failureKind, ...(turn.planAction === undefined ? {} : { planAction: turn.planAction }), ...(turn.retryAfterMs === undefined ? {} : { retryAfterMs: turn.retryAfterMs }) }
+  }
+  return { ...base, text: turn.kind === "reply" ? turn.text : "" }
+}
+
+function proposalRoute(path: string): { readonly id: string; readonly step: string } | undefined {
+  const found = /^\/api\/client-devices\/proposals\/([^/]+)\/(decision|claim|receipt|reconciliation)$/.exec(path)
+  return found === null ? undefined : { id: decodeURIComponent(found[1] ?? ""), step: found[2] ?? "" }
+}
+
+const encoder = new TextEncoder()
+const frame = (value: unknown) => encoder.encode(`data: ${JSON.stringify(value)}\n\n`)
+
+/** What the fake resident answers besides the chat turn: the stored history of c1, search hits, and a refused proposal listing. */
+export interface ResidentScript {
+  readonly turn: TurnScript
+  readonly proposals: readonly unknown[]
+  readonly history?: readonly unknown[]
+  readonly hits?: readonly unknown[]
+  readonly listingStatus?: number
+  readonly actionResults?: readonly { readonly action: string; readonly data: unknown }[]
+  /** Frames the turn's stream sends before its reply: the cue as text, the agent's acknowledgment, a text restart and its tools. */
+  readonly before?: readonly unknown[]
+}
+
+/** The resident's local API as a scripted fake at its network boundary. */
+export function fakeResident(seen: Seen, script: ResidentScript) {
+  return Layer.succeed(Resident, {
+    status: () => succeed("running" as const),
+    ensureRunning: () => succeed(undefined),
+    json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown, headers?: { readonly [name: string]: string }) => effect {
+      seen.calls.push({ method, path, body, ...(headers === undefined ? {} : { headers }) })
+      if (path === "/api/views/interact-claim") return { status: 200, data: { claimId: "claim-1" } }
+      if (path === "/api/views/interact-result") return { status: 200, data: { accepted: true } }
+      if (path === "/api/conversations" && method === "POST") return { status: 200, data: { conversation: { id: "c1", roomId: "r1" } } }
+      if (path === "/api/conversations") return { status: 200, data: { conversations: [{ id: "c1", roomId: "r1" }] } }
+      if (path === "/api/client-devices/proposals") return script.listingStatus === undefined ? { status: 200, data: { proposals: script.proposals } } : { status: script.listingStatus, data: {} }
+      const step = proposalRoute(path)
+      if (step !== undefined) {
+        const digest = (body as { readonly digest?: string } | undefined)?.digest ?? ""
+        const execution = { attemptId: `attempt-${step.id}`, dispatchStartedAt: "2026-11-22T00:00:00.000Z", providerIdempotencyKey: step.id }
+        switch (step.step) {
+          case "decision": return { status: 200, data: { digest, proposal: { id: step.id, state: (body as { readonly decision?: string } | undefined)?.decision === "approve" ? "approved" : "rejected" } } }
+          case "claim": return { status: 200, data: { digest, proposal: { id: step.id, state: "executing", execution } } }
+          default: return { status: 200, data: { digest, proposal: { id: step.id, state: "done", execution } } }
+        }
+      }
+      if (path.startsWith("/api/conversations/messages/search")) return { status: 200, data: { messages: script.hits ?? [] } }
+      if (path.endsWith("/messages") && method === "POST") {
+        if (script.turn.kind === "refuse") throw new ResidentRefused({ status: script.turn.status, message: "busy", code: "room_busy" })
+        return { status: 200, data: replyOf(script.turn, script.actionResults) }
+      }
+      if (path.startsWith("/api/conversations/c1/messages")) return { status: 200, data: { messages: script.history ?? [], hasMore: false } }
+      return { status: 200, data: {} }
+    },
+    stream: (path: string, body: unknown, headers?: { readonly [name: string]: string }) => {
+      seen.calls.push({ method: "STREAM", path, body, ...(headers === undefined ? {} : { headers }) })
+      if (script.turn.kind === "refuse") return Stream.fail(new ResidentRefused({ status: script.turn.status, message: "busy", code: "room_busy" }))
+      const { text, ...reply } = replyOf(script.turn, script.actionResults)
+      const before = (script.before ?? []).map(frame)
+      return text === ""
+        ? Stream.make(...before, frame({ type: "done", fullText: text, ...reply }))
+        : Stream.make(...before, frame({ type: "token", text }), frame({ type: "done", fullText: text, ...reply }))
+    },
+  })
+}
+
+/** A phone with no native plugins, as the browser build is. */
+export const noNative = Layer.succeed(Native, {
+  available: () => succeed(false),
+  invoke: (plugin: string, method: string) => fail(new NativeUnavailable({ plugin, method })),
+  listen: (plugin: string, event: string) => Stream.fail(new NativeUnavailable({ plugin, method: event })),
+})
+
+/** A phone whose only plugin is the action journal, kept in memory and answering as the Android plugin does. */
+export function journalNative(rows: Map<string, { readonly revision: number }>) {
+  return Layer.succeed(Native, {
+    available: (plugin: string) => succeed(plugin === "AlphaActionJournal"),
+    invoke: (plugin: string, method: string, args?: unknown) => effect {
+      if (plugin !== "AlphaActionJournal") throw new NativeUnavailable({ plugin, method })
+      const input = (args ?? {}) as { readonly proposalId?: string; readonly expectedRevision?: number; readonly next?: { readonly revision: number } }
+      if (method === "get") return { entry: rows.get(input.proposalId ?? "") ?? null }
+      if (method === "list") return { entries: [...rows.values()] }
+      if (method === "edit") {
+        const id = input.proposalId ?? ""
+        const now = rows.get(id)?.revision ?? 0
+        if (now !== input.expectedRevision || input.next === undefined) return { kept: false }
+        rows.set(id, input.next)
+        return { kept: true }
+      }
+      throw new NativeUnavailable({ plugin, method })
+    },
+    listen: (plugin: string, event: string) => Stream.fail(new NativeUnavailable({ plugin, method: event })),
+  })
+}
+
+/** A resident that never answers a plain request, and records each request it withdrew when its caller gave up. */
+export function silentResident(withdrawn: string[]) {
+  return Layer.succeed(Resident, {
+    status: () => succeed("running" as const),
+    ensureRunning: () => succeed(undefined),
+    json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string) =>
+      onInterrupt(never, () => sync(() => { withdrawn.push(`${method} ${path}`) })),
+    stream: () => Stream.never,
+  })
+}
+
+/** A phone whose only plugin is `ElizaLocation`, granted, with one fix taken at time zero. */
+export function locationNative(fix: { readonly latitude: number; readonly longitude: number; readonly accuracy: number }, reads: { count: number }) {
+  return Layer.succeed(Native, {
+    available: (plugin: string) => succeed(plugin === "ElizaLocation"),
+    invoke: (plugin: string, method: string) => effect {
+      if (plugin === "ElizaLocation" && method === "checkPermissions") return { location: "granted" }
+      if (plugin === "ElizaLocation" && method === "getCurrentPosition") {
+        reads.count += 1
+        return { coords: fix, timestamp: 0 }
+      }
+      throw new NativeUnavailable({ plugin, method })
+    },
+    listen: (plugin: string, event: string) => Stream.fail(new NativeUnavailable({ plugin, method: event })),
+  })
+}
+
+/** A phone where GPS never fixes and `AlphaNetworkLocation` answers every lookup with `fix`, counting them. */
+export function networkNative(fix: { readonly latitude: number; readonly longitude: number; readonly accuracy: number }, lookups: { count: number }) {
+  return Layer.succeed(Native, {
+    available: (plugin: string) => succeed(plugin === "ElizaLocation" || plugin === "AlphaNetworkLocation"),
+    invoke: (plugin: string, method: string) => effect {
+      if (plugin === "ElizaLocation" && method === "checkPermissions") return { location: "granted" }
+      if (plugin === "AlphaNetworkLocation" && method === "locate") {
+        lookups.count += 1
+        return { ...fix, timestamp: try Clock.currentTimeMillis, fingerprint: "f1" }
+      }
+      throw new NativeUnavailable({ plugin, method })
+    },
+    listen: (plugin: string, event: string) => Stream.fail(new NativeUnavailable({ plugin, method: event })),
+  })
+}
+
+/** A phone whose Android hands the renderer one assist invocation of `origin`. */
+export function assistNative(origin: "assist" | "listener" | "system" | "power") {
+  return Layer.succeed(Native, {
+    available: (plugin: string) => succeed(plugin === "DailyApps"),
+    invoke: (plugin: string, method: string) => fail(new NativeUnavailable({ plugin, method })),
+    listen: (plugin: string, event: string) => plugin === "DailyApps" && event === "assistantInvoked"
+      ? Stream.make<unknown>({ origin })
+      : Stream.fail(new NativeUnavailable({ plugin, method: event })),
+  })
+}
+
+/** The shell's navigation as a value the test moves: opening an app, Home and moving the assistant change it as the shell does. */
+export function fakeNavigation(start: Nav = navStart) {
+  return Layer.effect(Navigation, effect {
+    const nav = try SubscriptionRef.make<Nav>(start)
+    const change = (next: (current: Nav) => Nav) => map(SubscriptionRef.update(nav, next), () => true)
+    return {
+      changes: SubscriptionRef.changes(nav),
+      get: () => SubscriptionRef.get(nav),
+      send: () => succeed(false),
+      open: (app: AppId) => change((current) => ({ ...current, app, revision: current.revision + 1 })),
+      back: () => succeed(false),
+      home: () => change((current) => ({ ...current, app: "", chat: "Input", revision: current.revision + 1 })),
+      openLayer: () => succeed(false),
+      closeLayer: () => succeed(false),
+      moveChat: (detent: Detent) => change((current) => navMoveChat(current, detent)),
+      switchForAgent: () => succeed(false),
+    }
+  })
+}
+
+/** A private screen: the passwords view. */
+export const privateScreen: ScreenFacts = {
+  exposure: { privateView: true, locked: false, hidden: false, connectionDialog: false },
+  observation: { view: "passwords", revision: 1, sensitive: true },
+  onCalendar: false,
+  contextKey: "passwords",
+}
+
+/** A plain, unlocked Home screen. */
+export const homeScreen: ScreenFacts = {
+  exposure: { privateView: false, locked: false, hidden: false, connectionDialog: false },
+  observation: { view: "home", revision: 1, sensitive: false },
+  onCalendar: false,
+  contextKey: "home",
+}
+
+/** A plain, unlocked Browser screen. */
+export const browserScreen: ScreenFacts = {
+  exposure: { privateView: false, locked: false, hidden: false, connectionDialog: false },
+  observation: { view: "browser", revision: 2, sensitive: false },
+  onCalendar: false,
+  contextKey: "browser:",
+}
+
+/** The shell's side of the assistant, signed in on Home, and Inbox delivering email cards; toasts and emails are collected; `browserPage` when the peer declares the Browser page field. */
+export function fakeHost(toasts: string[], screen: ScreenFacts = homeScreen, emails: unknown[] = [], browserPage = false) {
+  const inbox = Layer.succeed(AssistantEmail, {
+    send: (email: ReviewedEmail) => sync(() => { emails.push(email); return "Delivered" as const }),
+    address: () => succeed("owner@example.com"),
+  })
+  return Layer.mergeAll(inbox, Layer.succeed(AssistantHost, {
+    identity: () => succeed({ origin: "https://agent.local", owner: "o1", agent: "a1", session: "s1", installationId: "i1", enrollmentId: "e1" }),
+    screen: () => succeed(screen),
+    peer: () => succeed({ optionalFields: false, takesLocation: false, browserPage }),
+    inference: () => succeed({ where: "OnDevice" as const, provider: "this phone" }),
+    emergency: () => succeed(false),
+    openView: () => succeed(true),
+    toast: (text: string) => sync(() => { toasts.push(text) }),
+  }))
+}
+
+/** Executors that run every operation once and count it. */
+export function countingExecutors(runs: { count: number }, op: "CreateNote" | "CreateReminder" = "CreateNote", runnable = true) {
+  const ports: OperationPorts = {
+    validate: (operation) => runnable ? operation : undefined,
+    execute: async () => { runs.count += 1; return { kind: "applied" } },
+    readBack: async () => ({ kind: "found" }),
+    describe: () => ({ title: "Create note", detail: "Saves a note." }),
+    classOf: () => op,
+    target: () => ({ tag: "NoTarget" }),
+    summarize: (_operation, result) => result === "Applied" ? "Saved note." : "Not saved.",
+  }
+  return Layer.succeed(DeviceExecutors, { ports })
+}
+
+/** Executors whose operations act on a set their card must list: `said` is what listing it gives, a set or the notice instead of a card. */
+export function itemizingExecutors(runs: { count: number }, said: ItemizedSet | string) {
+  const ports: OperationPorts = {
+    validate: (operation) => operation,
+    execute: async () => { runs.count += 1; return { kind: "applied" } },
+    readBack: async () => ({ kind: "found" }),
+    describe: () => ({ title: "Close all tabs", detail: "Closes every tab listed here." }),
+    classOf: () => "BrowserNavigate",
+    target: () => ({ tag: "NoTarget" }),
+    summarize: (_operation, result) => result === "Applied" ? "Closed all tabs." : "No tab was closed.",
+    itemize: () => said,
+    handoff: () => false,
+  }
+  return Layer.succeed(DeviceExecutors, { ports })
+}
+
+/** The voice area's latency record, collecting each call and outcome in order; a dictated draft's trial records `sent:<text>` and each reply mark. */
+export function fakeLatency(marks: string[] = []) {
+  return Layer.succeed(Latency, {
+    changes: Stream.empty,
+    begin: () => sync(() => { marks.push("begin"); return "trial-1" }),
+    mark: (which) => sync(() => { marks.push(which) }),
+    nativeTurn: () => succeed(undefined),
+    endpointed: () => succeed(undefined),
+    finish: (outcome) => sync(() => { marks.push(outcome) }),
+    beginDraft: () => sync(() => { marks.push("beginDraft") }),
+    noteDraft: (text) => sync(() => { marks.push(`note:${text ?? ""}`) }),
+    draftSent: (text) => sync(() => { marks.push(`sent:${text}`) }),
+    draftReplied: (reply) => sync(() => { marks.push(reply) }),
+    entries: () => succeed([]),
+  })
+}
+
+/** Browser's one page model as a fake: `tab` in front, and the page Browser hands a turn when the owner's Browser page for Alpha setting `said.on` is on and the peer takes it; each turn's observation is collected. */
+export function fakeBrowserPages(said: { on: boolean }, tab: ObservedTab | undefined, page: BrowserPage | undefined, asked: PageObservation[] = []) {
+  return Layer.succeed(BrowserPages, {
+    selected: () => succeed(tab),
+    forTurn: (observation: PageObservation, peerTakesIt: boolean) => sync(() => {
+      asked.push(observation)
+      return said.on && peerTakesIt ? page : undefined
+    }),
+    carried: (url: string) => succeed((page?.links ?? []).some((link) => link.url === url)),
+  })
+}
+
+/** Maps showing `shown`, and its view deliveries collected as `request:effectKey`. */
+export function fakeMapsViews(shown: MapsShown | undefined, delivered: string[] = []) {
+  return Layer.succeed(MapsViews, {
+    shown: () => succeed(shown),
+    deliver: (request: number, effectKey: number, _binding: { readonly [field: string]: unknown }, apply: Effect.Effect<void>) => effect {
+      delivered.push(`${request}:${effectKey}`)
+      try apply
+    },
+  })
+}
+
+/** Browser's view commands as a fake answering `answer`, each call collected as `<kind>:<capability>`. */
+export function fakeBrowserViews(answer: ViewAnswer, calls: string[] = []) {
+  return Layer.succeed(BrowserViews, {
+    command: () => sync(() => { calls.push("command:browser-command"); return answer }),
+    interact: (capability: string) => sync(() => { calls.push(`interact:${capability}`); return answer }),
+  })
+}
+
+/** The capabilities the shell would advertise. */
+export function fakeAdvertised(names: readonly string[]) {
+  return Layer.succeed(AdvertisedCapabilities, { names: () => succeed(names) })
+}
+
+/** The resident's live feeds: `frames` on the view feed for any client, and no voice. */
+export function fakeFeeds(frames: readonly unknown[] = []) {
+  return Layer.succeed(ResidentFeeds, {
+    view: () => Stream.fromIterable(frames),
+    voice: () => Stream.empty,
+  })
+}
+
+/** The comms stage as a fake: the last proposal it was given is the open, live one unless `said.emergency`; approvals and declines are collected. */
+export function fakeComms(said: { emergency: boolean } = { emergency: false }, seen: string[] = []) {
+  return Layer.effect(CommsStage, effect {
+    let open: string | undefined
+    return {
+      follow: () => succeed(undefined),
+      briefing: () => succeed(null),
+      propose: (proposalId: string, _kind: unknown, acts: boolean) => sync(() => {
+        seen.push(`propose:${proposalId}`)
+        if (said.emergency && acts) return false
+        open = proposalId
+        return true
+      }),
+      approve: (proposalId: string) => sync(() => {
+        const ok = open === proposalId
+        seen.push(`approve:${proposalId}:${ok}`)
+        if (ok) open = undefined
+        return ok
+      }),
+      decline: (proposalId: string) => sync(() => {
+        seen.push(`decline:${proposalId}`)
+        const ok = open === proposalId
+        if (ok) open = undefined
+        return ok
+      }),
+      openCard: () => sync(() => open === undefined ? null : { proposalId: open, live: true, words: null }),
+    }
+  })
+}
+
+/** The owner's preferences, as Settings would give them. */
+export function fakePreferences(said: { asks: boolean; shares: boolean }) {
+  return Layer.succeed(Preferences, {
+    current: () => die("not read by the assistant"),
+    asksBeforeActions: () => sync(() => said.asks),
+    sharesLocation: () => sync(() => said.shares),
+    sharesBrowserPage: () => succeed(false),
+    loadsMailImages: () => succeed(false),
+    allowsGmailChanges: () => succeed(false),
+    allowsCalendarEdits: () => succeed(false),
+    sensorAllowed: () => succeed(false),
+    set: () => succeed(undefined),
+    reset: () => succeed(undefined),
+  })
+}
+
+/** The resident connection as it reports itself, connected unless `refused`, and the agent service's recovery review: held under "t1" while `held.reviewable`, restarted at most once. */
+export function fakeResidentControl(refused = false, held: { reviewable: boolean; restarts: number } = { reviewable: false, restarts: 0 }) {
+  return Layer.mergeAll(
+    Layer.succeed(ResidentControl, {
+      changes: Stream.make({ ...residentStart, phase: refused ? "Refused" as const : "Connected" as const }),
+      session: () => succeed(undefined),
+      refreshAccount: () => succeed(undefined),
+      stop: () => succeed(undefined),
+      recovered: () => succeed(undefined),
+    }),
+    Layer.succeed(ResidentRecovery, {
+      review: () => sync(() => held.reviewable ? { reviewable: true as const, reviewToken: "t1", retainedCount: 1 } : { reviewable: false as const }),
+      restart: () => sync(() => { held.restarts += 1; held.reviewable = false }),
+    }),
+  )
+}
+
+/** The assistant signed in on Home over a quiet resident, with the cross-area ports `ports` fills. */
+export function assistantWith<P>(ports: Layer.Layer<P>, resident: Layer.Layer<Resident> = fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals: [] })) {
+  return Layer.provideMerge(layer, Layer.mergeAll(fakeFeeds(), fakeComms(), resident, fakeResidentControl(), fakeHost([]), countingExecutors({ count: 0 }), noNative, memoryStore, fakePreferences({ asks: false, shares: false }), fakeNavigation(), fakeLatency(), ports))
+}
+
+/** The assistant over the fakes, with its stores in memory and the shell's navigation on Home. */
+export function assistantOver(resident: Layer.Layer<Resident>, host: Layer.Layer<AssistantHost | AssistantEmail>, executors: Layer.Layer<DeviceExecutors>, native: Layer.Layer<Native> = noNative, preferences: Layer.Layer<Preferences> = fakePreferences({ asks: false, shares: false }), control: Layer.Layer<ResidentControl | ResidentRecovery> = fakeResidentControl(), latency: Layer.Layer<Latency> = fakeLatency()) {
+  return Layer.provideMerge(layer, Layer.mergeAll(fakeFeeds(), fakeComms(), resident, control, host, executors, native, memoryStore, preferences, fakeNavigation(), latency))
+}

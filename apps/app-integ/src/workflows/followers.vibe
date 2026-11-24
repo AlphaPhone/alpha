@@ -1,0 +1,90 @@
+// spec/workflows/notices.md, "A waiting step posts one notice for the current owner, lasting at most seven days"; spec/workflows/notices.md, "Another owner's notices are suspended, and never shown while that owner is away"; spec/workflows/runs.md, "The previous account's unfinished run is asked to stop at most once"; spec/workflows/hostedResults.md, "Publishing a retained result posts it once; a newer one of the same digest supersedes the older notice"; spec/workflows/hostedResults.md, "Another owner withdraws every notice that is not theirs, and their pending tap"; spec/workflows/hostedResults.md, "Background delivery is configured only on Android, by one attempt that a pause retires"; spec/workflows/digests.md, "Home's brief is the newest result that ran; a missed, overlapping or unavailable occurrence never replaces it"; spec/shell/overview.md, "The brief card shows the newest retained brief, and says when it failed or did not run"
+import { type DigestResult, digestRan, digestStatusLabel, digestSummaryText } from "@elizaos/plugin-workflow/digests"
+import type { BriefOutcome } from "../../gen/shell__overview.effect.vibe"
+import { briefOf } from "../../gen/workflows__digests.effect.vibe"
+import { CloudSession, ownerOf } from "../account/layer.vibe"
+import { Build } from "../platform/build.vibe"
+import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
+import { Overview } from "../shell/overview.vibe"
+import { WorkflowApi } from "./api.vibe"
+import { Digests } from "./digests.vibe"
+import { instant } from "./ids.ts"
+import { ApprovalNotices } from "./notices.vibe"
+import { HostedResults } from "./results.vibe"
+import { WorkflowRuns } from "./runs.vibe"
+
+/** How often Workflows looks again for waiting steps and new digest results while Alpha is in front (legacy: once a minute). */
+export const FOLLOW_MS = 60000
+
+/** The longest summary Home's brief card is given. */
+const BRIEF_CHARS = 2000
+
+/** What Home's brief card shows for a read of retained results. */
+export interface HomeBrief { readonly outcome: BriefOutcome; readonly at: number; readonly title: string }
+
+/**
+ * Home's brief from retained digest results: the newest result that ran, failed when it ended in an error; when none ran, the
+ * newest occurrence that did not run says so; with no results there is no brief.
+ */
+export function homeBrief(results: ReadonlyArray<DigestResult>): HomeBrief {
+  const rows = results.map((r) => ({ ran: digestRan(r), completedAt: instant(r.completedAt), cursor: r.cursor }))
+  const best = briefOf(rows)
+  const ran = best.ran ? results.find((r) => digestRan(r) && instant(r.completedAt) === best.completedAt && r.cursor === best.cursor) : undefined
+  if (ran !== undefined) {
+    const failed = ran.error !== null || ran.status === "failed"
+    const text = digestSummaryText(ran).replace(/\s+/g, " ").trim().slice(0, BRIEF_CHARS)
+    return { outcome: failed ? "BriefFailed" : "BriefRan", at: best.completedAt, title: text === "" ? digestStatusLabel(ran.status) || "Brief" : text }
+  }
+  const newest = [...results].sort((a, b) => instant(b.completedAt) - instant(a.completedAt) || b.cursor - a.cursor)[0]
+  if (newest === undefined) return { outcome: "NoBrief", at: 0, title: "" }
+  return { outcome: "BriefNotRun", at: instant(newest.completedAt), title: digestStatusLabel(newest.status) || "Not run" }
+}
+
+const front = (state: ForegroundState) => state.visible && !state.locked
+
+/** Every owner-bound Workflows service follows the account: the previous owner's run is asked to stop, its notices are suspended or withdrawn, and on Android background delivery is configured for the new owner. */
+export effect function followOwner() {
+  const session = try CloudSession
+  const runs = try WorkflowRuns
+  const notices = try ApprovalNotices
+  const results = try HostedResults
+  const digests = try Digests
+  const build = try Build
+  for try (const owner of Stream.changes(Stream.map(session.changes, (current) => ownerOf(current)))) {
+    if (owner === 0) continue
+    try runs.bind()
+    try notices.bind()
+    try results.bind()
+    try digests.bind()
+    if (build.info.variant !== "browser") try results.background(true)
+  }
+}
+
+/** Each digest read's results post their notices and become Home's brief. */
+export effect function followResults() {
+  const digests = try Digests
+  const results = try HostedResults
+  const overview = try Overview
+  for try (const read of digests.synced) {
+    try results.publish(read)
+    const brief = homeBrief(read)
+    try overview.reportBrief(brief.outcome, brief.at, brief.title)
+  }
+}
+
+/** While Alpha is in front: on each return and once a minute, sweep the listed workflows' waiting steps into notices and read new digest results. */
+export effect function followWaiting() {
+  const foreground = try Foreground
+  const agent = try WorkflowApi
+  const notices = try ApprovalNotices
+  const digests = try Digests
+  const returns = Stream.map(Stream.filter(Stream.changesWith(foreground.changes, (a, b) => front(a) === front(b)), front), () => undefined)
+  // The first tick of Stream.tick comes at once; the return to the front (Foreground.changes starts with the current state) covers it.
+  const ticks = Stream.merge(returns, Stream.drop(Stream.tick(FOLLOW_MS), 1))
+  for try (const _ of ticks) {
+    if (!front(try foreground.get())) continue
+    const listed = agent.workflow.list() catch () => undefined
+    if (listed !== undefined) try notices.sweep(listed.filter((w) => !w.removed).map((w) => w.id))
+    try digests.poll(false)
+  }
+}

@@ -1,0 +1,706 @@
+// spec/settings/index.md, "Story: Find a setting in a few taps"
+import { assert, it } from "@effect/vitest"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { Machine as SettingsMachine, machine as settingsMachine } from "../../gen/settings.effect.vibe"
+import { Machine as FactsMachine, machine as factsMachine, unread } from "../../gen/settings__facts.effect.vibe"
+import { Machine as UpdatesMachine } from "../../gen/settings__updates.effect.vibe"
+import { Machine as ResetMachine, machine as resetMachine } from "../../gen/settings__reset.effect.vibe"
+import { Machine as VaultMachine, machine as vaultMachine } from "../../gen/settings__passwords.effect.vibe"
+import { Machine as PrivacyMachine, machine as privacyMachine } from "../../gen/settings__privacy.effect.vibe"
+import { Machine as NetworkMachine, machine as networkMachine } from "../../gen/settings__network.effect.vibe"
+import { Machine as DiagnosticsMachine, machine as diagnosticsMachine } from "../../gen/settings__diagnostics.effect.vibe"
+import { StorageUsage } from "../../src/files/usage.vibe"
+import { Build } from "../../src/platform/build.vibe"
+import { CrashJournal } from "../../src/platform/crash-journal.vibe"
+import { Native, NativeFailed, NativeUnavailable } from "../../src/platform/native.vibe"
+import { Resident } from "../../src/platform/resident.vibe"
+import { memoryStore } from "../../src/platform/storage.vibe"
+import { Activity } from "../../src/shell/activity.vibe"
+import { Navigation } from "../../src/shell/navigation.vibe"
+import { Permissions } from "../../src/shell/permissions.vibe"
+import { Listener } from "../../src/voice/listener.vibe"
+import { VoiceRoute } from "../../src/voice/route.vibe"
+import { Appearance, APPEARANCE_KEY, appearance } from "../../src/settings/appearance.vibe"
+import { Diagnostics, buildReport, diagnostics, noticesOf } from "../../src/settings/diagnostics.vibe"
+import { DeviceFacts, deviceFacts } from "../../src/settings/facts.vibe"
+import { SettingsPages, settingsPages } from "../../src/settings/navigation.vibe"
+import { Wifi, wifi } from "../../src/settings/network.vibe"
+import { Vault, vault } from "../../src/settings/passwords.vibe"
+import { Preferences, PREFERENCES_KEY, preferences } from "../../src/settings/preferences.vibe"
+import { PrivacyRow, privacyRow } from "../../src/settings/privacy.vibe"
+import { Reset, reset } from "../../src/settings/reset.vibe"
+import { Updates, updates } from "../../src/settings/updates.vibe"
+
+const SIGNER = "a".repeat(64)
+const DIGEST = "d".repeat(64)
+type Answer = unknown | ((args: unknown) => unknown)
+
+/** Android at its plugin boundary: each answer by plugin and method, and the calls it saw. */
+function android(answers: Record<string, Answer>) {
+  const calls: Array<{ readonly name: string; readonly args: unknown }> = []
+  const native = Layer.succeed(Native, {
+    available: (plugin: string) => effect { return Object.keys(answers).some((k) => k.startsWith(`${plugin}.`)) },
+    invoke: (plugin: string, method: string, args?: unknown) => effect {
+      const name = `${plugin}.${method}`
+      calls.push({ name, args })
+      if (!Object.hasOwn(answers, name)) throw new NativeUnavailable({ plugin, method })
+      const answer = answers[name]
+      const value = typeof answer === "function" ? answer(args) : answer
+      if (value instanceof Error) throw new NativeFailed({ plugin, method, message: value.message })
+      return value
+    },
+    listen: () => Stream.empty,
+  })
+  return { calls, native }
+}
+
+/** A service whose every method succeeds and is recorded as `Service.method [args]`; it answers true, or what `answers` names for that method. */
+function recorder(name: string, calls: string[], answers: Record<string, unknown> = {}): never {
+  const shape = new Proxy({}, {
+    get: (_target, method) => typeof method === "symbol" || method === "then" ? undefined
+      : (...args: unknown[]) => effect {
+        calls.push(args.length === 0 ? `${name}.${method}` : `${name}.${method} ${JSON.stringify(args)}`)
+        return Object.hasOwn(answers, method) ? answers[method] : true
+      },
+  })
+  return shape as never
+}
+
+const build = (variant: "launcher" | "aosp" | "browser" = "launcher") => Layer.succeed(Build, { info: { version: "1.4.0", variant, testMocks: false } })
+const idleFacts = { home: true, viewOpen: false, voiceOff: true, voiceInactive: true, typing: false, chatResting: true, editor: false, drawer: false, shade: false, homeEdit: false, review: false, connectionBusy: false, signInOpen: true, signInUntouched: true, call: false }
+const activity = (call: boolean) => Layer.succeed(Activity, {
+  updateIdleFacts: () => effect { return { ...idleFacts, call } },
+  keepDrafts: () => effect { return true },
+})
+const idle = activity(false)
+const volume = Layer.succeed(StorageUsage, { usage: () => effect { return { kind: "volume", name: "Internal storage", free: 88, total: 128, percent: 31 } as const } })
+const noStorage = Layer.succeed(StorageUsage, { usage: () => effect { return { kind: "unknown" } as const } })
+const row = { schema: "alpha-update/v1", versionCode: 150, versionName: "1.5.0", variant: "launcher", signerSha256: SIGNER, apkUrl: "https://updates.example/alpha.apk", sha256: "b".repeat(64), sizeBytes: 1000 }
+
+it.effect("Find a setting in a few taps (spec/settings/index.md, \"Story: Find a setting in a few taps\")", () => effect {
+  const calls: string[] = []
+  const fakes = Layer.mergeAll(
+    Layer.succeed(Navigation, recorder("Navigation", calls)), Layer.succeed(Permissions, recorder("Permissions", calls)),
+    Layer.succeed(DeviceFacts, recorder("DeviceFacts", calls)), Layer.succeed(Wifi, recorder("Wifi", calls)),
+    Layer.succeed(PrivacyRow, recorder("PrivacyRow", calls)), Layer.succeed(Updates, recorder("Updates", calls)),
+    Layer.succeed(Vault, recorder("Vault", calls, { back: false })), Layer.succeed(Diagnostics, recorder("Diagnostics", calls, { back: false })),
+  )
+  provide Layer.provideMerge(settingsPages, Layer.mergeAll(settingsMachine(), fakes, build())) {
+    const pages = try SettingsPages
+    const held = try SettingsMachine
+    // spec/settings/index.md, "Another surface may open only a listed section, never Developer or Passwords"
+    try pages.route("provider")
+    try pages.route("developer")
+    const refused = (try held.get()).page
+    try pages.route("privacy")
+    const section = (try held.get()).page
+    // spec/settings/index.md, "A page opens from its parent, and Back returns to that parent"
+    const up = try pages.back()
+    const atRoot = try pages.back()
+    // spec/settings/index.md, "Apps lists each app once, and opens its page in Settings or the app itself"
+    try pages.open("Apps")
+    try pages.openApp("RowCalendar")
+    try pages.openApp("RowPasswords")
+    const vaultPage = (try held.get()).page
+    try pages.back()
+    try pages.openApp("RowInbox")
+    const inboxPage = (try held.get()).page
+    // spec/settings/index.md, "Privacy's Access setup reopens the first-run access walkthrough at its first step"
+    try pages.accessSetup()
+    // spec/settings/index.md, "Leaving Settings returns to its root"
+    try pages.leave()
+    const left = (try held.get()).page
+    // spec/settings/index.md, "A route names a listed section, or another app it is forwarded to"
+    try pages.route("notifications")
+    const notifications = (try held.get()).page
+    const notificationsUp = try pages.back()
+    const general = (try held.get()).page
+    try pages.leave()
+    // spec/settings/index.md, "Calendar's row opens Calendar at its Calendars sheet, where its sources are set"
+    try pages.route("calendar")
+    try Effect.try(() => assert.deepStrictEqual(
+      { refused, section, up, atRoot, vaultPage, inboxPage, left, notifications, notificationsUp, general, calls },
+      {
+        refused: "Root", section: "Privacy", up: true, atRoot: false, vaultPage: "Passwords", inboxPage: "AppInbox", left: "Root",
+        notifications: "Notifications", notificationsUp: true, general: "General",
+        calls: [
+          "Navigation.open [\"account\",\"provider\"]", "PrivacyRow.readListener", "Navigation.open [\"calendar\",\"settings\"]", "Vault.open", "Vault.back",
+          "Vault.leave", "Permissions.reopen [0]", "Navigation.open [\"calendar\",\"settings\"]",
+        ],
+      },
+    ))
+  }
+})
+
+it.effect("General's Phone row and About's Agent activity open the app that answers them (spec/settings/index.md, \"General's Phone row opens Phone's line details on the Alpha image only, and About's Agent activity opens the assistant's activity on the phone\")", () => effect {
+  const opened = (variant: "launcher" | "aosp" | "browser") => effect {
+    const calls: string[] = []
+    const fakes = Layer.mergeAll(
+      Layer.succeed(Navigation, recorder("Navigation", calls)), Layer.succeed(Permissions, recorder("Permissions", calls)),
+      Layer.succeed(DeviceFacts, recorder("DeviceFacts", calls)), Layer.succeed(Wifi, recorder("Wifi", calls)),
+      Layer.succeed(PrivacyRow, recorder("PrivacyRow", calls)), Layer.succeed(Updates, recorder("Updates", calls)),
+      Layer.succeed(Vault, recorder("Vault", calls, { back: false })), Layer.succeed(Diagnostics, recorder("Diagnostics", calls, { back: false })),
+    )
+    provide Layer.provideMerge(settingsPages, Layer.mergeAll(settingsMachine(), fakes, build(variant))) {
+      const pages = try SettingsPages
+      const answers = [try pages.openElsewhere("PhoneInfo"), try pages.openElsewhere("AgentActivity")]
+      return { answers, calls }
+    }
+  }
+  const image = try opened("aosp")
+  const launcher = try opened("launcher")
+  const browser = try opened("browser")
+  try Effect.try(() => assert.deepStrictEqual(
+    { image, launcher, browser },
+    {
+      image: { answers: [true, true], calls: ["Navigation.open [\"phone\",\"info\"]", "Navigation.open [\"assistant\",\"activity\"]"] },
+      launcher: { answers: [false, true], calls: ["Navigation.open [\"assistant\",\"activity\"]"] },
+      browser: { answers: [false, false], calls: [] },
+    },
+  ))
+})
+
+it.effect("Back closes what a page holds open before the page (spec/settings/index.md, \"A page opens from its parent, and Back returns to that parent\")", () => effect {
+  const calls: string[] = []
+  const fakes = Layer.mergeAll(
+    Layer.succeed(Navigation, recorder("Navigation", calls)), Layer.succeed(Permissions, recorder("Permissions", calls)),
+    Layer.succeed(DeviceFacts, recorder("DeviceFacts", calls)), Layer.succeed(Wifi, recorder("Wifi", calls)),
+    Layer.succeed(PrivacyRow, recorder("PrivacyRow", calls)), Layer.succeed(Updates, recorder("Updates", calls)),
+    Layer.succeed(Vault, recorder("Vault", calls, { back: true })), Layer.succeed(Diagnostics, recorder("Diagnostics", calls, { back: true })),
+  )
+  provide Layer.provideMerge(settingsPages, Layer.mergeAll(settingsMachine(), fakes, build())) {
+    const pages = try SettingsPages
+    try pages.open("Apps")
+    try pages.open("Passwords")
+    const onVault = try pages.back()
+    const vaultPage = (try pages.current()).page
+    try pages.leave()
+    try pages.open("About")
+    try pages.open("Problems")
+    const onLog = try pages.back()
+    const logPage = (try pages.current()).page
+    try pages.leave()
+    try Effect.try(() => assert.deepStrictEqual(
+      { onVault, vaultPage, onLog, logPage, backs: calls.filter((c) => c.endsWith(".back")), leftVault: calls.filter((c) => c === "Vault.leave").length },
+      { onVault: true, vaultPage: "Passwords", onLog: true, logPage: "Problems", backs: ["Vault.back", "Diagnostics.back"], leftVault: 1 },
+    ))
+  }
+})
+
+it.effect("See only what Android reported (spec/settings/vocabulary.md, \"Story: See only what Android reported\")", () => effect {
+  const silent = android({})
+  const phone = try effect {
+    provide Layer.provideMerge(deviceFacts, Layer.mergeAll(factsMachine(), silent.native, build(), noStorage)) {
+      try (try DeviceFacts).show()
+      return (try (try FactsMachine).get()).read
+    }
+  }
+  // spec/settings/facts.md, "In a browser, each permission is the browser's own answer"
+  const browser = try effect {
+    provide Layer.provideMerge(deviceFacts, Layer.mergeAll(factsMachine(), android({}).native, build("browser"), noStorage)) {
+      try (try DeviceFacts).show()
+      return (try (try FactsMachine).get()).read
+    }
+  }
+  try Effect.try(() => assert.deepStrictEqual(
+    { phone: [phone.wifi, phone.dnd, phone.camera, phone.home, phone.storageTotal], browser: [browser.photos, browser.files, browser.calendar] },
+    { phone: ["Unknown", "Unknown", "Unread", "RoleUnread", -1], browser: ["Partial", "Partial", "Unread"] },
+  ))
+})
+
+it.effect("Read my phone's state truthfully (spec/settings/facts.md, \"Story: Read my phone's state truthfully\")", () => effect {
+  let refuseScale = false
+  const { native } = android({
+    "AlphaDevice.snapshot": { appVersion: "1.4.0", appVersionCode: 140, permissions: { Camera: true }, textScalePercent: 115 },
+    "ElizaSystem.getSystemFacts": { wifiActive: true, airplaneMode: false, interruptionFilter: "priority" },
+    "ElizaSystem.getStatus": { packageName: "ai.alphacompute.alphaphone", roles: [{ role: "home", androidRole: "android.app.role.HOME", held: false, holders: [], available: true }] },
+    "ElizaSystem.getBuildInfo": { launcher: true, version: "1.4.0" },
+    "AlphaDevice.setTextScale": (args: unknown) => refuseScale ? new Error("refused") : ({ textScalePercent: (args as { percent: number }).percent }),
+  })
+  provide Layer.provideMerge(deviceFacts, Layer.mergeAll(factsMachine(), native, build(), volume)) {
+    const facts = try DeviceFacts
+    try facts.show()
+    // spec/settings/vocabulary.md, "Wi-Fi is on when Android reports the switch, or an active Wi-Fi transport without it"
+    const shown = (try (try FactsMachine).get()).read
+    try facts.requestScale(130)
+    const scaled = (try (try FactsMachine).get()).read.textScale
+    // spec/settings/facts.md, "The newest text-size request decides what is shown, and an older one only when the newest fails"
+    refuseScale = true
+    try facts.requestScale(150)
+    const failed = try (try FactsMachine).get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { wifi: shown.wifi, bluetooth: shown.bluetooth, airplane: shown.airplane, dnd: shown.dnd, camera: shown.camera, microphone: shown.microphone, home: shown.home, scale: [shown.textScale, scaled, failed.read.textScale], storage: [shown.storageUsed, shown.storageTotal], reread: failed.generation > 1 },
+      { wifi: "On", bluetooth: "Unknown", airplane: "Off", dnd: "On", camera: "Allowed", microphone: "Unread", home: "NotHeldByAlpha", scale: [115, 130, 115], storage: [40, 128], reread: true },
+    ))
+  }
+})
+
+it.effect("Make Alpha my Home app (spec/settings/facts.md, \"Story: Make Alpha my Home app\")", () => effect {
+  let held = false
+  let refuse = true
+  const { calls, native } = android({
+    "ElizaSystem.getStatus": () => ({ packageName: "ai.alphacompute.alphaphone", roles: [{ role: "home", androidRole: "android.app.role.HOME", held, holders: held ? ["ai.alphacompute.alphaphone"] : ["com.android.launcher"], available: true }] }),
+    "ElizaSystem.getBuildInfo": { launcher: true, version: "1.4.0" },
+    "ElizaSystem.requestRole": () => { if (refuse) return new Error("cancelled"); held = true; return { role: "home", held: true, resultCode: -1 } },
+  })
+  provide Layer.provideMerge(deviceFacts, Layer.mergeAll(factsMachine(), native, build(), noStorage)) {
+    const facts = try DeviceFacts
+    const machine = try FactsMachine
+    try facts.show()
+    const before = (try machine.get()).read.home
+    try facts.askHome()
+    const refused = try machine.get()
+    refuse = false
+    try facts.askHome()
+    const after = try machine.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { before, refused: [refused.roleRefused, refused.read.home], after: [after.roleRefused, after.read.home, after.roleAsking], asked: calls.filter((c) => c.name === "ElizaSystem.requestRole").length },
+      { before: "HeldElsewhere", refused: [true, "HeldElsewhere"], after: [false, "HeldByAlpha", false], asked: 2 },
+    ))
+  }
+})
+
+it.effect("Go to Android's own page (spec/settings/facts.md, \"Story: Go to Android's own page\")", () => effect {
+  const { calls, native } = android({
+    "ElizaSystem.openSettingsPage": { status: "opened", specific: false },
+    "AlphaDevice.openSettings": { status: "opened" },
+    "ElizaSystem.openNotificationShade": { status: "permission-missing" },
+  })
+  provide Layer.provideMerge(deviceFacts, Layer.mergeAll(factsMachine(), native, build(), noStorage)) {
+    const facts = try DeviceFacts
+    const machine = try FactsMachine
+    try facts.openPage("PageDnd")
+    const dnd = try machine.get()
+    try facts.openPage("PageHome")
+    const home = (try machine.get()).handoff
+    // spec/settings/facts.md, "The shade opens only from a focused launcher that holds the status bar permission"
+    const shade = try facts.openShade()
+    try facts.openPage("PageAppInfo")
+    const appInfo = (try machine.get()).handoff
+    try Effect.try(() => assert.deepStrictEqual(
+      { dnd: [dnd.handoff, dnd.handoffPage], home, shade: [shade, (try machine.get()).shade], appInfo, opened: calls.filter((c) => c.name.includes("pen")).map((c) => [c.name, c.args]) },
+      {
+        dnd: [{ tag: "HandoffOpened", specific: false }, "PageDnd"], home: { tag: "HandoffOpened", specific: true },
+        shade: ["ShadePermissionMissing", "ShadePermissionMissing"], appInfo: { tag: "HandoffRefused" },
+        opened: [["ElizaSystem.openSettingsPage", { page: "dnd" }], ["AlphaDevice.openSettings", { page: "system" }], ["ElizaSystem.openNotificationShade", undefined], ["ElizaSystem.openAppInfo", { packageName: "ai.alphacompute.alphaphone" }]],
+      },
+    ))
+  }
+})
+
+it.effect("Decide what Alpha may do without asking (spec/settings/preferences.md, \"Story: Decide what Alpha may do without asking\")", () => effect {
+  const fresh = try effect {
+    provide Layer.provideMerge(preferences, Layer.mergeAll(memoryStore, build())) {
+      const p = try Preferences
+      const before = [try p.sharesLocation(), try p.asksBeforeActions(), try p.sharesBrowserPage()]
+      try p.set("AgentLocation", false)
+      // spec/settings/preferences.md, "The open Browser page goes with a chat turn only while Browser page for Alpha is on"
+      try p.set("BrowserPage", false)
+      return [...before, try p.sharesLocation(), try p.sharesBrowserPage()]
+    }
+  }
+  // spec/settings/preferences.md, "A preference an update added starts at its new-phone value, and the owner's saved choices stay"
+  const older = { askBeforeActions: true, agentLocation: false, gmailChanges: true, calendarEdits: true, mailImages: false, browserMicrophone: true, browserLocation: true, edits: 3 }
+  const upgraded = try effect {
+    provide Layer.provideMerge(preferences, Layer.mergeAll(Layer.provideMerge(Layer.effectDiscard(effect { try (try KeyValueStore.KeyValueStore).set(PREFERENCES_KEY, JSON.stringify(older)) }), memoryStore), build())) {
+      const p = try Preferences
+      const saved = JSON.parse((try (try KeyValueStore.KeyValueStore).get(PREFERENCES_KEY)) ?? "null")
+      return [(try p.current()).readable, try p.sharesBrowserPage(), try p.sharesLocation(), try p.asksBeforeActions(), try p.loadsMailImages(), saved?.browserPage, saved?.agentLocation]
+    }
+  }
+  const misshapen = try effect {
+    provide Layer.provideMerge(preferences, Layer.mergeAll(Layer.provideMerge(Layer.effectDiscard(effect { try (try KeyValueStore.KeyValueStore).set(PREFERENCES_KEY, JSON.stringify({ ...older, agentLocation: "no" })) }), memoryStore), build())) {
+      const p = try Preferences
+      return [(try p.current()).readable, try p.sharesBrowserPage()]
+    }
+  }
+  // spec/settings/preferences.md, "Preferences that cannot be read ask before every action and share nothing"
+  const damaged = try effect {
+    provide Layer.provideMerge(preferences, Layer.mergeAll(Layer.provideMerge(Layer.effectDiscard(effect { try (try KeyValueStore.KeyValueStore).set(PREFERENCES_KEY, "{not json") }), memoryStore), build())) {
+      const p = try Preferences
+      const locked = try (p.set("MailImages", false) catch (e) => e._tag)
+      const before = [try p.asksBeforeActions(), try p.sharesLocation(), try p.sharesBrowserPage(), locked]
+      try p.reset()
+      return [...before, try p.sharesLocation(), try p.sharesBrowserPage(), (try p.current()).readable]
+    }
+  }
+  try Effect.try(() => assert.deepStrictEqual(
+    { fresh, damaged, upgraded, misshapen },
+    {
+      fresh: [true, false, true, false, false], damaged: [true, false, false, "PreferencesUnreadable", true, true, true],
+      upgraded: [true, true, false, true, false, true, false], misshapen: [false, false],
+    },
+  ))
+})
+
+it.effect("Choose how Alpha looks (spec/settings/appearance.md, \"Story: Choose how Alpha looks\")", () => effect {
+  const chosen = try effect {
+    provide Layer.provideMerge(appearance, Layer.mergeAll(memoryStore, build())) {
+      try (try Appearance).choose("Dark")
+      return try (try KeyValueStore.KeyValueStore).get(APPEARANCE_KEY)
+    }
+  }
+  try Effect.try(() => assert.deepStrictEqual(JSON.parse(chosen ?? "null"), { choice: "Dark", legible: false }))
+})
+
+it.effect("Know where my voice goes (spec/settings/privacy.md, \"Story: Know where my voice goes\")", () => effect {
+  const voice = Layer.succeed(VoiceRoute, { privacy: () => effect { return "ViaCloud" as const } } as never)
+  const listener = Layer.succeed(Listener, {} as never)
+  provide Layer.provideMerge(privacyRow, Layer.mergeAll(privacyMachine(), voice, listener)) {
+    const shown = try (try PrivacyRow).route()
+    try Effect.try(() => assert.strictEqual(shown, "ViaCloud"))
+  }
+})
+
+it.effect("Pause or turn off listening and see what the listener did (spec/settings/privacy.md, \"Story: Pause or turn off listening and see what the listener did\")", () => effect {
+  const status = (mode: string, microphoneOpen: boolean) => ({ available: true, mode, consented: true, listening: mode === "ListeningOn", microphoneOpen })
+  let reading = status("ListeningOn", true)
+  let confirmed = false
+  const voice = Layer.succeed(VoiceRoute, { privacy: () => effect { return "OnPhone" as const } } as never)
+  const listener = Layer.succeed(Listener, {
+    status: () => effect { return reading },
+    pause: () => effect { return { ...status("ListeningOn", true), confirmed } },
+    turnOff: () => effect { return { ...status("ListeningOff", false), confirmed } },
+    openSettings: () => effect { return true },
+  } as never)
+  provide Layer.provideMerge(privacyRow, Layer.mergeAll(privacyMachine(), voice, listener)) {
+    const row = try PrivacyRow
+    const held = try PrivacyMachine
+    try row.readListener()
+    const on = (try held.get()).shown
+    try row.stop("Pause")
+    const unconfirmed = try held.get()
+    // spec/settings/privacy.md, "A status read is shown only when no action runs and nothing newer was issued"
+    reading = status("ListeningPaused", false)
+    try row.readListener()
+    const kept = (try held.get()).shown
+    confirmed = true
+    try row.stop("TurnOff")
+    const off = try held.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { on, unconfirmed: [unconfirmed.shown, unconfirmed.stopUnconfirmed], kept, off: [off.shown, off.stopUnconfirmed, off.busy] },
+      { on: "ListenerOn", unconfirmed: ["ListenerOn", true], kept: "ListenerOn", off: ["ListenerOff", false, false] },
+    ))
+  }
+})
+
+it.effect("Join a nearby network (spec/settings/network.md, \"Story: Join a nearby network\")", () => effect {
+  const { calls, native } = android({
+    "ElizaWiFi.listAvailableNetworks": { networks: [
+      { ssid: "home", rssi: -50, secured: true, security: "wpa3" },
+      { ssid: "office", rssi: -70, secured: true, security: "eap" },
+      { ssid: "cafe", rssi: -60, secured: false },
+      { ssid: " ", rssi: -40, secured: false },
+    ] },
+    "ElizaWiFi.addNetworkWithApproval": { status: "captivePortal" },
+  })
+  provide Layer.provideMerge(wifi, Layer.mergeAll(networkMachine(), native)) {
+    const w = try Wifi
+    const held = try NetworkMachine
+    try w.scan()
+    const found = (try held.get()).networks.map((n) => [n.name, n.security, n.joinable])
+    // spec/settings/network.md, "A join is one request at a time, and a passphrase fits its security before Android is asked"
+    try w.join("home", "Wpa2", "short")
+    const invalid = (try held.get()).join
+    try w.join("home", "Wpa3", "correct horse")
+    const joined = try held.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { found, invalid, joined: [joined.join, joined.network], asked: calls.filter((c) => c.name === "ElizaWiFi.addNetworkWithApproval").map((c) => c.args) },
+      {
+        found: [["home", "Wpa3", true], ["office", "Enterprise", false], ["cafe", "OpenNet", true]], invalid: "JoinInvalid",
+        joined: ["Portal", "home"], asked: [{ ssid: "home", security: "wpa3", password: "correct horse" }],
+      },
+    ))
+  }
+})
+
+it.effect("See whether I am online (spec/settings/network.md, \"Story: See whether I am online\")", () => effect {
+  let answer: unknown = { online: true, validated: false, captivePortal: false }
+  const { native } = android({ "ElizaWiFi.getConnectivity": () => answer })
+  provide Layer.provideMerge(wifi, Layer.mergeAll(networkMachine(), native)) {
+    const w = try Wifi
+    const held = try NetworkMachine
+    try w.readConnectivity()
+    const unvalidated = (try held.get()).online
+    answer = new Error("no network")
+    try w.readConnectivity()
+    const unknown = (try held.get()).online
+    try Effect.try(() => assert.deepStrictEqual([unvalidated, unknown], ["UnvalidatedOnline", "OnlineUnknown"]))
+  }
+})
+
+it.effect("Update Alpha when I choose (spec/settings/updates.md, \"Story: Update Alpha when I choose\")", () => effect {
+  const other = { ...row, signerSha256: "c".repeat(64) }
+  let feed = JSON.stringify({ schema: "alpha-update/index-v1", releases: [row] })
+  const { calls, native } = android({
+    "AlphaDevice.snapshot": { appVersionCode: 140, appSigner: SIGNER, appAutomaticUpdates: "supported" },
+    "ElizaSystem.getBuildInfo": { launcher: true, version: "1.4.0" },
+    "AlphaDevice.checkForUpdate": () => ({ manifest: feed, manifestSha256: DIGEST }),
+    "AlphaDevice.installUpdate": { status: "offer-withdrawn" },
+  })
+  provide Layer.provideMerge(updates, Layer.mergeAll(memoryStore, native, build(), idle)) {
+    const u = try Updates
+    try u.check(true)
+    const ready = try (try UpdatesMachine).get()
+    try u.install()
+    // spec/settings/updates.md, "Install is offered only for the offer the last answer holds for this install"
+    const withdrawn = try u.offer()
+    feed = JSON.stringify(other)
+    try u.check(true)
+    const otherSigner = (try (try UpdatesMachine).get()).outcome
+    try Effect.try(() => assert.deepStrictEqual(
+      { ready: [ready.outcome, ready.offerName], installed: calls.filter((c) => c.name === "AlphaDevice.installUpdate").map((c) => (c.args as { versionCode: number }).versionCode), withdrawn, otherSigner },
+      { ready: ["UpdateReady", "1.5.0"], installed: [150], withdrawn: undefined, otherSigner: "NoneOffered" },
+    ))
+  }
+})
+
+it.effect("Install only the reviewed update, once (spec/settings/native.md, \"Story: Install only the reviewed update, once\")", () => effect {
+  const { calls, native } = android({
+    "AlphaDevice.snapshot": { appVersionCode: 140, appSigner: SIGNER, appAutomaticUpdates: "permission-required" },
+    "ElizaSystem.getBuildInfo": { launcher: true, version: "1.4.0" },
+    "AlphaDevice.checkForUpdate": () => ({ manifest: JSON.stringify(row), manifestSha256: DIGEST }),
+    "AlphaDevice.installUpdate": {},
+  })
+  provide Layer.provideMerge(updates, Layer.mergeAll(memoryStore, native, build(), idle)) {
+    const u = try Updates
+    try u.check(true)
+    try u.install()
+    try Effect.try(() => assert.deepStrictEqual(
+      calls.filter((c) => c.name === "AlphaDevice.installUpdate").map((c) => c.args),
+      [{ apkUrl: row.apkUrl, sha256: row.sha256, sizeBytes: row.sizeBytes, versionCode: row.versionCode }],
+    ))
+  }
+})
+
+it.effect("Get updates hands-off (spec/settings/updates.md, \"Story: Get updates hands-off\")", () => effect {
+  const run = (busy: boolean) => effect {
+    const { calls, native } = android({
+      "AlphaDevice.snapshot": { appVersionCode: 140, appSigner: SIGNER, appAutomaticUpdates: "supported" },
+      "ElizaSystem.getBuildInfo": { launcher: true, version: "1.4.0" },
+      "AlphaDevice.checkForUpdate": () => ({ manifest: JSON.stringify(row), manifestSha256: DIGEST }),
+      "AlphaDevice.installUpdate": {},
+    })
+    provide Layer.provideMerge(updates, Layer.mergeAll(memoryStore, native, build(), activity(busy))) {
+      const u = try Updates
+      try u.check(true)
+      try u.setActive(true)
+      try u.poll()
+      const after = try (try UpdatesMachine).get()
+      return { automatic: calls.filter((c) => c.name === "AlphaDevice.installUpdate").map((c) => c.args), wakeAt: after.wakeAt }
+    }
+  }
+  const idleRun = try run(false)
+  // spec/settings/updates.md, "The phone is idle only on resting Home with nothing typed, open, recording or in flight";
+  // spec/settings/updates.md, "A failed poll retries after one minute, doubling to fifteen": an install that was due on a call retries in a minute.
+  const onACall = try run(true)
+  try Effect.try(() => assert.deepStrictEqual(
+    { idleRun: idleRun.automatic, onACall: [onACall.automatic, onACall.wakeAt] },
+    { idleRun: [{ apkUrl: row.apkUrl, sha256: row.sha256, sizeBytes: row.sizeBytes, versionCode: row.versionCode, automatic: true, manifestSha256: DIGEST }], onACall: [[], 60000] },
+  ))
+})
+
+it.effect("Let Android finish an update without losing what I typed (spec/settings/updates.md, \"Story: Let Android finish an update without losing what I typed\")", () => effect {
+  let state: unknown = { pending: true, phase: "preparing", activationId: "act-1", bridgeId: "bridge-1" }
+  const { calls, native } = android({
+    "AlphaDevice.updateState": () => state,
+    "AlphaDevice.activateUpdate": {},
+    "AlphaDevice.continueUpdate": {},
+  })
+  provide Layer.provideMerge(updates, Layer.mergeAll(memoryStore, native, build(), idle)) {
+    const u = try Updates
+    try u.watchActivation(() => effect { return true })
+    try u.watchActivation(() => effect { return true })
+    const preparing = try (try UpdatesMachine).get()
+    state = { pending: true, phase: "paused", canContinue: true, activationId: "act-1", bridgeId: "bridge-1" }
+    try u.watchActivation(() => effect { return true })
+    try u.continueInstall()
+    try Effect.try(() => assert.deepStrictEqual(
+      { acknowledged: [preparing.acknowledged, preparing.pending], native: calls.filter((c) => c.name === "AlphaDevice.activateUpdate" || c.name === "AlphaDevice.continueUpdate").map((c) => [c.name, c.args]) },
+      {
+        acknowledged: [true, true],
+        native: [["AlphaDevice.activateUpdate", { activationId: "act-1", bridgeId: "bridge-1", ready: true, resumeEligible: true }], ["AlphaDevice.continueUpdate", { activationId: "act-1", bridgeId: "bridge-1" }]],
+      },
+    ))
+  }
+})
+
+it.effect("Erase Alpha's data on purpose (spec/settings/reset.md, \"Story: Erase Alpha's data on purpose\")", () => effect {
+  let answer: unknown = { status: "cancelled", message: "Reset cancelled. Nothing reset." }
+  const { native } = android({ "AlphaReset.review": () => answer })
+  provide Layer.provideMerge(reset, Layer.mergeAll(resetMachine(), native)) {
+    const r = try Reset
+    const cancelled = try r.review()
+    answer = { status: "unavailable", message: "Everything was erased." }
+    const unknown = try r.review()
+    answer = new Error("bridge closed")
+    const refused = try r.review()
+    try Effect.try(() => assert.deepStrictEqual([cancelled, unknown, refused, (try (try ResetMachine).get()).open], ["NoNotice", "Unconfirmed", "Unconfirmed", false]))
+  }
+})
+
+it.effect("Use my saved passwords only after Android unlocks them (spec/settings/passwords.md, \"Story: Use my saved passwords only after Android unlocks them\")", () => effect {
+  let locked = true
+  const status = () => ({ available: true, locked, unlockRemainingMs: locked ? null : 60000, unlockSeconds: 60, biometric: true, autofill: { supported: true, selected: "none" } })
+  const entry = { id: "a", label: "Bank", username: "ann", bindings: [{ kind: "web", facet: "https://bank.example", display: "bank.example" }], updatedAt: 1, revision: 3 }
+  const { native } = android({
+    "ElizaPasswords.status": status,
+    "ElizaPasswords.unlock": () => { locked = false; return { unlocked: true, unlockRemainingMs: 60000 } },
+    "ElizaPasswords.list": () => ({ entries: [entry] }),
+    "ElizaPasswords.lock": () => { locked = true; return { locked: true } },
+  })
+  provide Layer.provideMerge(vault, Layer.mergeAll(vaultMachine(), native)) {
+    const v = try Vault
+    const held = try VaultMachine
+    try v.open()
+    const opened = (try held.get()).phase
+    try v.run("Unlocking", "")
+    const unlocked = try held.get()
+    try v.leave()
+    const left = try held.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { opened, unlocked: [unlocked.phase, unlocked.entries.map((e) => [e.label, e.sites]), unlocked.observed], left: [left.phase, left.entries.length, left.observed], lockedNatively: locked },
+      { opened: { tag: "Locked" }, unlocked: [{ tag: "Unlocked" }, [["Bank", ["bank.example"]]], false], left: [{ tag: "Closed" }, 0, true], lockedNatively: true },
+    ))
+  }
+})
+
+it.effect("Delete or reset only on purpose (spec/settings/passwords.md, \"Story: Delete or reset only on purpose\")", () => effect {
+  const entry = { id: "a", label: "Bank", username: "ann", bindings: [{ kind: "web", facet: "https://bank.example", display: "bank.example" }], updatedAt: 1, revision: 3 }
+  const { calls, native } = android({
+    "ElizaPasswords.status": () => ({ available: true, locked: false, unlockRemainingMs: 60000, unlockSeconds: 60, biometric: true, autofill: { supported: true, selected: "none" } }),
+    "ElizaPasswords.list": () => ({ entries: [entry] }),
+    "ElizaPasswords.remove": { removed: true },
+    "ElizaPasswords.reset": { reset: true },
+  })
+  provide Layer.provideMerge(vault, Layer.mergeAll(vaultMachine(), native)) {
+    const v = try Vault
+    const held = try VaultMachine
+    try v.open()
+    // spec/settings/passwords.md, "A removal acts on the revision the owner selected, after a second tap"
+    try v.run("Removing", "a")
+    const firstTap = calls.some((c) => c.name === "ElizaPasswords.remove")
+    try (held.send({ type: "openEntry", id: "a" }))
+    try (held.send({ type: "askRemove", id: "a" }))
+    // spec/settings/passwords.md, "Android's Back cancels a pending confirmation first, then closes the entry shown"
+    const cancelled = try v.back()
+    const afterCancel = try held.get()
+    const closed = try v.back()
+    const afterClose = (try held.get()).selected
+    const onList = try v.back()
+    try (held.send({ type: "openEntry", id: "a" }))
+    try (held.send({ type: "askRemove", id: "a" }))
+    try v.run("Removing", "a")
+    const removed = calls.find((c) => c.name === "ElizaPasswords.remove")?.args
+    // spec/settings/passwords.md, "A damaged vault offers only a reset, which needs a review and then Android's authentication"
+    try (held.send({ type: "beginTask", task: "Editing", id: "" }) catch () => undefined)
+    try (held.send({ type: "taskAnswered", visit: (try held.get()).visit, answer: "KeyInvalidated" }) catch () => undefined)
+    const damaged = (try held.get()).phase
+    try v.run("Resetting", "")
+    const unasked = calls.some((c) => c.name === "ElizaPasswords.reset")
+    try (held.send({ type: "askReset" }))
+    try v.run("Resetting", "")
+    const after = try held.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      {
+        firstTap, back: [cancelled, afterCancel.confirmRemove, afterCancel.selected, closed, afterClose, onList], removed, damaged, unasked,
+        reset: calls.filter((c) => c.name === "ElizaPasswords.reset").length, after: [after.phase, after.entries.length, after.selected],
+      },
+      {
+        firstTap: false, back: [true, "", "a", true, "", false], removed: { id: "a", expectedRevision: 3 }, damaged: { tag: "Damaged" }, unasked: false,
+        reset: 1, after: [{ tag: "Locked" }, 0, ""],
+      },
+    ))
+  }
+})
+
+it.effect("Fill passwords with Alpha (spec/settings/passwords.md, \"Story: Fill passwords with Alpha\")", () => effect {
+  let selected = "this-app"
+  const { calls, native } = android({
+    "ElizaPasswords.status": () => ({ available: true, locked: true, unlockRemainingMs: null, unlockSeconds: 60, biometric: true, autofill: { supported: true, selected } }),
+    "ElizaPasswords.openAutofillSettings": { status: "opened" },
+    "AlphaBrowser.loginFillStatus": { available: true },
+  })
+  provide Layer.provideMerge(vault, Layer.mergeAll(vaultMachine(), native)) {
+    const v = try Vault
+    const held = try VaultMachine
+    try v.open()
+    // spec/settings/passwords.md, "Use for autofill is offered only while Alpha is not already the selected service"
+    try v.run("OpeningAutofill", "")
+    const whileAlpha = calls.filter((c) => c.name === "ElizaPasswords.openAutofillSettings").length
+    const shown = try held.get()
+    selected = "other"
+    try v.leave()
+    try v.open()
+    try v.run("OpeningAutofill", "")
+    try Effect.try(() => assert.deepStrictEqual(
+      { whileAlpha, shown: [shown.autofill, shown.browserFill], afterOther: calls.filter((c) => c.name === "ElizaPasswords.openAutofillSettings").length },
+      { whileAlpha: 0, shown: ["AutofillThisApp", true], afterOther: 1 },
+    ))
+  }
+})
+
+// spec/settings/diagnostics.md, "The report copies only allowlisted fields, so no text, address, key or identifier can reach it"
+it("The report copies only allowlisted fields (spec/settings/diagnostics.md, \"Story: See what went wrong and share it with support\")", () => {
+  const report = buildReport({ at: 0, native: true, testMocks: false, read: { ...unread, version: "1.4.0", home: "HeldElsewhere" }, entries: [], facts: { upstreamPin: "not a pin", account: "ann@example.test", runtimeHashes: { "agent/agent-bundle.js": "e".repeat(64), "/etc/passwd": "f".repeat(64) } } })
+  const text = JSON.stringify(report)
+  assert.deepStrictEqual({ pin: report.upstreamPin, hashes: Object.keys(report.runtimeHashes), leaks: [text.includes("ann@"), text.includes("passwd")], roles: report.roles }, {
+    pin: null, hashes: ["agent/agent-bundle.js"], leaks: [false, false], roles: [{ role: "home", held: false, available: true }, { role: "assistant", held: false, available: false }],
+  })
+})
+
+it.effect("Reset, store and journal honestly (spec/settings/native.md, \"Story: Reset, store and journal honestly\")", () => effect {
+  const entries: Array<{ readonly at: number; readonly source: "inference"; readonly detail?: string }> = Array.from({ length: 60 }, (_, i) => i === 59 ? { at: i + 1, source: "inference" as const, detail: "text · rate-limit · HTTP 429" } : { at: i + 1, source: "inference" as const })
+  let clears = 0
+  const journal = Layer.succeed(CrashJournal, {
+    record: () => effect { return undefined },
+    recordInference: (failure: unknown) => effect { entries.push({ at: (failure as { at: number }).at, source: "inference" }) },
+    read: () => effect { return { entries, exitHistory: false } },
+    clear: () => effect { clears += 1; throw new Error("unconfirmed") },
+  } as never)
+  const resident = Layer.succeed(Resident, {
+    status: () => effect { return "running" as const },
+    json: () => effect { return { status: 200, data: { cloudInferenceFailure: { at: 61, status: 503 } } } },
+  } as never)
+  const { native } = android({})
+  provide Layer.provideMerge(diagnostics, Layer.mergeAll(diagnosticsMachine(), native, journal, resident, build())) {
+    const d = try Diagnostics
+    const held = try DiagnosticsMachine
+    // spec/settings/native.md, "The problem log keeps fifty entries, newest last, with only the fields its source allows"
+    try d.readLog(false)
+    const shown = try held.get()
+    // spec/settings/diagnostics.md, "An explicit Problem log read asks the agent for a Cloud failure it recorded, for at most ten seconds"
+    try d.readLog(true)
+    const asked = try held.get()
+    // spec/settings/diagnostics.md, "Clearing the log asks first, and runs once"
+    try d.clearLog()
+    try (held.send({ type: "askClear" }))
+    // spec/settings/diagnostics.md, "Clearing the log asks first, and runs once"
+    const cancelled = try d.back()
+    const unasked = try d.back()
+    const stillAsked = (try held.get()).confirmClear
+    try (held.send({ type: "askClear" }))
+    try d.clearLog()
+    const failed = try held.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      {
+        shown: [shown.problems.length, shown.problems[49]?.at, shown.problems[0]?.title, shown.problems[0]?.detail, shown.problems[49]?.detail],
+        asked: asked.problems[49]?.at, back: [cancelled, unasked, stillAsked], clears, failed: [failed.clearFailed, failed.problems.length],
+      },
+      {
+        shown: [50, 60, "Cloud AI request failed", "Details unavailable", "text · rate-limit · HTTP 429"],
+        asked: 61, back: [true, false, false], clears: 1, failed: [true, 50],
+      },
+    ))
+  }
+})
+
+it("Read the licences Alpha ships (spec/settings/diagnostics.md, \"Story: Read the licences Alpha ships\")", () => {
+  const notices = noticesOf([
+    { name: "react", version: "19.0.0", license: "MIT", text: "MIT License" },
+    { name: "react", version: "19.0.0", license: "MIT" },
+    { name: "gpl-lib", version: "1.0.0", license: "GPL-3.0", flags: ["copyleft-strong", ""], obligations: [{ flag: "copyleft-strong", note: "Ship the source." }, { flag: "x", note: "" }] },
+    { name: "broken" },
+  ])
+  assert.deepStrictEqual(notices.map((n) => [n.name, n.licence, n.flags, n.obligations]), [["react", "MIT", [], []], ["gpl-lib", "GPL-3.0", ["copyleft-strong"], ["Ship the source."]]])
+})

@@ -1,0 +1,88 @@
+// spec/clock/deletions.md, "Story: Undo a reviewed deletion in time"
+import { originsPeer, ownerPeer } from "./peers.vibe"
+import { Machine as DeletionsMachine, type JournalPhase, type JournalWindow, type PendingRow } from "../../gen/clock__deletions.effect.vibe"
+import { DeletionListing, DeletionRecord, UndoAnswer } from "./native.schema.vibe"
+import { DELETIONS, call } from "./plugins.vibe"
+import { pageVisible } from "./page.ts"
+
+type Listed = typeof DeletionRecord.Type
+
+const PHASE: Readonly<Partial<Record<string, JournalPhase>>> = { queued: "JQueued", paused: "JPaused", dispatching: "JDispatching", unknown: "JUnknown" }
+const WINDOW: Readonly<Partial<Record<string, JournalWindow>>> = { open: "JOpen", expired: "JExpired", "clock-changed": "JClockChanged" }
+
+/** A journal row as the notice shows it, or none for a settled deletion. */
+export function pendingRowOf(row: Listed): PendingRow | undefined {
+  const phase = PHASE[row.phase]
+  if (phase === undefined) return undefined
+  return {
+    key: `${row.kind}:${row.id}`,
+    kind: row.kind === "calendar" ? "CalendarDeletion" : "ReminderDeletion",
+    title: row.target?.row?.title || row.target?.fields?.title || row.original?.title || "",
+    phase,
+    window: WINDOW[row.window ?? ""] ?? "JExpired",
+  }
+}
+
+function identityOf(key: string): { readonly kind: string; readonly id: string } {
+  const split = key.indexOf(":")
+  return { kind: key.slice(0, split), id: key.slice(split + 1) }
+}
+
+/** The Undo notice of reviewed deletions, for the signed-in owner. */
+export service Deletions {
+  /** Reads the journal's pending deletions for the current owner. */
+  refresh(): void!!
+  /** Undoes the deletion the notice offers Undo for. */
+  undo(key: string): void!!
+  /** Dismisses an uncertain outcome; its receipt stays. */
+  dismiss(key: string): void!!
+}
+
+/** Deletions over `AlphaDeletions`. */
+export const deletionsLayer = Layer.effect(Deletions, effect {
+  const notice = try DeletionsMachine
+  const session = try ownerPeer()
+  const origins = try originsPeer()
+  const step = (event: Parameters<typeof notice.send>[0]) => notice.send(event) catch () => undefined
+
+  effect function followOwner() {
+    const owner = (try session.owner())?.key ?? ""
+    if (owner !== (try notice.get()).owner) step({ type: "ownerChanged", owner })
+    return try notice.get()
+  }
+
+  return {
+    effect refresh() {
+      const admitted = try followOwner()
+      if (admitted.owner === "") return
+      const listed = call(DELETIONS, "pending", DeletionListing) catch () => undefined
+      if (listed === undefined) step({ type: "pendingFailed", generation: admitted.generation })
+      else {
+        step({ type: "pendingAnswered", generation: admitted.generation, rows: listed.deletions.flatMap((row) => pendingRowOf(row) ?? []) })
+        for (const origin of listed.deletedOrigins ?? []) try origins.forget(origin.kind === "event" ? "event" : "reminder", origin.id)
+      }
+    },
+    effect undo(key: string) {
+      const admitted = try followOwner()
+      if (step({ type: "undo", key }) === undefined) return
+      const answer = call(DELETIONS, "undo", UndoAnswer, identityOf(key)) catch () => undefined
+      const phase = answer?.phase ?? answer?.status
+      step({ type: "undoAnswered", generation: admitted.generation, key, undone: phase === "undone", tooLate: phase === "deleted" || phase === "dispatching" })
+    },
+    effect dismiss(key: string) {
+      const admitted = try followOwner()
+      if (step({ type: "dismissOutcome", key }) === undefined) return
+      const ok = (call(DELETIONS, "dismiss", UndoAnswer, identityOf(key)) catch () => undefined) !== undefined
+      step({ type: "dismissAnswered", generation: admitted.generation, key, ok })
+    },
+  }
+})
+
+/** Reads pending deletions every two seconds while the page is visible. Never returns. */
+export effect function followDeletions() {
+  const deletions = try Deletions
+  while (true) {
+    if (pageVisible()) try deletions.refresh()
+    try sleep("2 seconds")
+  }
+}

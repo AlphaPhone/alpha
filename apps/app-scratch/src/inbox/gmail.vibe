@@ -1,0 +1,289 @@
+// spec/inbox/mailbox.md, "Only the current read can fill the list, one at a time"; spec/inbox/reader.md, "Only the newest opening of a message can fill the reader"; spec/inbox/reader.md, "An attachment is read at the message's revision and belongs to the open message"; spec/inbox/operations.md, "Gmail's review must match the proposal exactly and come with a prepared receipt"; spec/inbox/failures.md, "A failure is classified by its cause, in a fixed order"
+import type { MailRow, MailPage, DraftRow, DraftsPage } from "../../gen/inbox__mailbox.ts"
+import type { MailBody, MailPart, ThreadView } from "../../gen/inbox__reader.ts"
+import type { Capabilities, Receipt, Review, OpKind, ReceiptState, Proposal, MailMode, FileLine } from "../../gen/inbox__operations.ts"
+import type { FailureKind } from "../../gen/inbox__failures.ts"
+import { managedGmailClient, type ManagedGmailTransport } from "@elizaos/plugin-inbox/client"
+import {
+  MailProtocolFailed, MailUnreachable, AttachmentRefused, classifyGmailFailure, attachmentReadFailure, linkTextMismatch, sha256Hex,
+  type GmailFailureKind, type GmailInboxOperationKind, type GmailInboxReceipt, type GmailMessage, type GmailReadResult, type MailFailure
+} from "@elizaos/plugin-inbox/mailbox"
+import { Cloud, CloudUnavailable, CloudSignedOut } from "../platform/cloud.vibe"
+import { WireReview, WireProviderResult, type WireReviewedFile } from "./wire.schema.vibe"
+import { checkMailFile, isRefusal } from "./files.ts"
+import { canonicalJson, decodeMailPreview } from "./text.ts"
+import { pageOnline } from "./visibility.ts"
+
+/** Gmail did not answer as asked; `kind` says what the owner is told and what stays on screen. */
+export error GmailFailed { kind: FailureKind; status: number; code: string }
+/** The Cloud session ended while Gmail was asked; the owner signs in again. */
+export error SignInExpired
+
+/** A Gmail draft read from one snapshot, with the digest a replacement must name. */
+export interface GmailDraft {
+  readonly draftId: string
+  readonly messageId: string
+  readonly digest: string
+  readonly toList: string[]
+  readonly ccList: string[]
+  readonly bccList: string[]
+  readonly subject: string
+  readonly body: string
+  readonly threaded: boolean
+  readonly attachmentCount: number
+  readonly plainText: boolean
+}
+
+/** The exact bytes of one attachment at the revision they were read at. */
+export interface DownloadedFile {
+  readonly partId: string
+  readonly name: string
+  readonly mimeType: string
+  readonly bytes: number
+  readonly sha256: string
+  readonly dataBase64: string
+  readonly opaque: boolean
+}
+
+/** What prepare answers: the receipt, the review, and whether the review matches the proposal exactly. */
+export interface PreparedOperation {
+  readonly receipt: Receipt
+  readonly review: Review
+  readonly exact: boolean
+}
+
+const MiB = 1024 * 1024
+const SIGNED_OUT = "alpha_signed_out"
+
+const wireKinds: Record<OpKind, GmailInboxOperationKind> = {
+  SendKind: "send", DraftCreateKind: "draft-create", DraftReplaceKind: "draft-replace", DraftDeleteKind: "draft-delete",
+  ArchiveKind: "archive", UnarchiveKind: "unarchive", TrashKind: "trash", UntrashKind: "untrash",
+  MarkReadKind: "mark-read", MarkUnreadKind: "mark-unread", StarKind: "star", UnstarKind: "unstar"
+}
+const wireModes: Record<MailMode, string> = { ComposeMail: "compose", ReplyMail: "reply", ReplyAllMail: "reply-all", ForwardMail: "forward" }
+const receiptStates: Record<GmailInboxReceipt["state"], ReceiptState> = {
+  prepared: "PreparedReceipt", dispatched: "DispatchedReceipt", succeeded: "SucceededReceipt", rejected: "RejectedReceipt", "outcome-unknown": "UnknownReceipt"
+}
+const failureKinds: Record<GmailFailureKind, FailureKind> = {
+  offline: "Offline", revoked: "Revoked", stale: "Stale", gone: "Gone", unavailable: "Unavailable", refused: "Refused", rejected: "Rejected"
+}
+
+/** The wire name of an operation kind. */
+export function wireKind(kind: OpKind): GmailInboxOperationKind {
+  return wireKinds[kind]
+}
+
+function opKind(kind: GmailInboxOperationKind): OpKind {
+  return (Object.keys(wireKinds) as OpKind[]).find((k) => wireKinds[k] === kind) ?? "SendKind"
+}
+
+/** The proposal as managed Gmail takes it, in the field order its review digest is computed over. */
+export function wireProposal(kind: OpKind, proposal: Proposal): Record<string, unknown> {
+  const name = wireKinds[kind]
+  switch (proposal.tag) {
+    case "LabelProposal": return { kind: name, messageId: proposal.messageId, expectedHistoryId: proposal.expectedHistoryId }
+    case "DraftDeleteProposal": return { kind: name, draftId: proposal.draftId, expectedDigest: proposal.expectedDigest, confirmPermanentDelete: true }
+    case "MessageProposal": {
+      const m = proposal.mail
+      const compose: Record<string, unknown> = {
+        mode: wireModes[m.mode], to: m.toList, cc: m.ccList, bcc: m.bccList, subject: m.subject, bodyText: m.body,
+        attachments: m.files.map((f) => ({ name: f.name, mimeType: f.mimeType, dataBase64: f.dataBase64 })),
+        ...(m.forwardParts.length ? { forwardAttachments: { messageId: m.forwardMessage, historyId: m.forwardHistory, partIds: m.forwardParts } } : {}),
+        ...(m.replyMessage ? { replyMessageId: m.replyMessage } : {})
+      }
+      return kind === "DraftReplaceKind"
+        ? { kind: name, draftId: proposal.draftId, expectedDigest: proposal.expectedDigest, acceptNonAtomicReplacement: true, ...compose }
+        : { kind: name, ...compose }
+    }
+  }
+}
+
+function sameList(a: readonly string[] | undefined, b: readonly string[]): boolean {
+  return JSON.stringify(a ?? []) === JSON.stringify(b)
+}
+
+function hostOf(href: string): string {
+  return /^[a-z]+:\/\/([^/?#:]+)/i.exec(href)?.[1] ?? ""
+}
+
+function row(m: GmailMessage): MailRow {
+  return {
+    id: m.id, threadId: m.threadId, sender: m.from, senderAddress: m.fromEmail ?? "", subject: m.subject,
+    snippet: decodeMailPreview(m.snippet), receivedAt: m.receivedAt, unread: m.unread, starred: m.starred, attached: false
+  }
+}
+
+function body(read: GmailReadResult): MailBody {
+  const m = read.message
+  return {
+    id: m.id, threadId: m.threadId, sender: m.from, senderAddress: m.fromEmail ?? "", recipients: [...m.to], copied: [...m.cc],
+    replyTo: "", subject: m.subject, snippet: decodeMailPreview(m.snippet), receivedAt: m.receivedAt, text: read.bodyText, html: read.bodyHtml ?? "",
+    htmlOmitted: read.bodyHtmlOmitted === true,
+    links: read.links.map((l) => ({ href: l.href, text: l.text, host: hostOf(l.href), mismatch: linkTextMismatch(l) })),
+    omittedLinks: read.omittedLinks ?? 0,
+    parts: read.attachments.map((p): MailPart => ({ partId: p.partId, name: p.name, mimeType: p.mimeType, bytes: p.size, supported: p.supported })),
+    historyId: read.historyId ?? m.historyId ?? "", unread: m.unread, starred: m.starred
+  }
+}
+
+function receiptOf(w: GmailInboxReceipt, result: typeof WireProviderResult.Type | null): Receipt {
+  return {
+    requestId: w.requestId, receiptKind: opKind(w.kind), digest: w.reviewDigest, receiptState: receiptStates[w.state],
+    messageId: result?.messageId ?? "", historyId: result?.historyId ?? "", draftId: result?.draftId ?? "",
+    providerDigest: result?.providerDigest ?? "", rejection: w.rejectionCode ?? ""
+  }
+}
+
+function fileLine(f: WireReviewedFile): FileLine {
+  return { name: f.name, mimeType: f.mimeType ?? "", bytes: f.size, sha256: f.sha256 }
+}
+
+function reviewOf(r: typeof WireReview.Type): Review {
+  return {
+    sender: r.from, toList: r.to ?? [], ccList: r.cc ?? [], bccList: r.bcc ?? [], subject: r.subject ?? "",
+    files: (r.attachments ?? []).map(fileLine), forwarded: (r.forwardedAttachments ?? []).map(fileLine)
+  }
+}
+
+/** Whether managed Gmail's review repeats the proposal field for field, and names exactly its files and forwarded parts. */
+export function reviewMatches(kind: OpKind, proposal: Proposal, review: typeof WireReview.Type): boolean {
+  const wire = wireProposal(kind, proposal)
+  const fields = ["kind", "mode", "subject", "bodyText", "replyMessageId", "draftId", "expectedDigest", "messageId", "expectedHistoryId"] as const
+  for (const field of fields) {
+    if (wire[field] !== undefined && JSON.stringify(review[field]) !== JSON.stringify(wire[field])) return false
+  }
+  if (review.from === "") return false
+  if (proposal.tag !== "MessageProposal") return true
+  const m = proposal.mail
+  if (!sameList(review.to, m.toList) || !sameList(review.cc, m.ccList) || !sameList(review.bcc, m.bccList)) return false
+  const files = (review.attachments ?? []).map((f) => [f.name, f.mimeType ?? "", f.size, f.sha256])
+  if (JSON.stringify(files) !== JSON.stringify(m.files.map((f) => [f.name, f.mimeType, f.bytes, f.sha256]))) return false
+  const forwarded = review.forwardedAttachments ?? []
+  if (m.forwardParts.length === 0) return forwarded.length === 0
+  const source = review.forwardSource
+  const totalBytes = m.files.reduce((n, f) => n + f.bytes, 0) + forwarded.reduce((n, f) => n + f.size, 0)
+  return source !== undefined && source.messageId === m.forwardMessage && source.historyId === m.forwardHistory
+    && JSON.stringify(forwarded.map((f) => f.partId)) === JSON.stringify(m.forwardParts)
+    && forwarded.every((f) => /^[a-f0-9]{64}$/.test(f.sha256)) && m.files.length + forwarded.length <= 10 && totalBytes <= 5 * MiB
+}
+
+/** The failure the owner is told of for an upstream client failure in a read or a change. */
+export function failureOf(error: MailFailure, context: "read" | "operation"): GmailFailed | SignInExpired {
+  if (error instanceof MailProtocolFailed && error.reason === SIGNED_OUT) return new SignInExpired()
+  const status = error instanceof MailProtocolFailed ? error.status : 0
+  const code = error instanceof MailProtocolFailed ? (error.reason || error.code) : error._tag
+  return new GmailFailed({ kind: failureKinds[classifyGmailFailure(error, context, pageOnline())], status, code })
+}
+
+/** Managed Gmail of the owner's selected grant, through Eliza Cloud. */
+export service Gmail {
+  /** What this grant may read and change, from the kinds Cloud reports for it. */
+  capabilities(grant: string): Capabilities!(GmailFailed | SignInExpired)
+  /** One page of a folder or search, newest first, 25 at a time. */
+  search(grant: string, query: string, pageToken: string): MailPage!(GmailFailed | SignInExpired)
+  /** One message whole, at the revision it was read at. */
+  read(grant: string, messageId: string): MailBody!(GmailFailed | SignInExpired)
+  /** One page of a conversation; a later page names the first page's revision. */
+  thread(grant: string, threadId: string, offset: number, historyId: string): ThreadView!(GmailFailed | SignInExpired)
+  /** One attachment's exact bytes at the message's revision. */
+  attachment(grant: string, messageId: string, partId: string, historyId: string, opaque: boolean): DownloadedFile!(GmailFailed | SignInExpired)
+  /** One page of Gmail drafts, metadata only. */
+  drafts(grant: string, pageToken: string): DraftsPage!(GmailFailed | SignInExpired)
+  /** One Gmail draft's content from one snapshot. */
+  draft(grant: string, draftId: string): GmailDraft!(GmailFailed | SignInExpired)
+  /** Records the operation at managed Gmail and returns its review; repeating it under the same request id answers the same receipt. */
+  prepare(grant: string, requestId: string, kind: OpKind, proposal: Proposal): PreparedOperation!(GmailFailed | SignInExpired)
+  /** Dispatches a prepared operation once, by its review digest. */
+  dispatch(grant: string, requestId: string, digest: string, kind: OpKind, proposal: Proposal): Receipt!(GmailFailed | SignInExpired)
+  /** Reads an operation's receipt; it never dispatches. */
+  receipt(grant: string, requestId: string): Receipt!(GmailFailed | SignInExpired)
+}
+
+/** Gmail over upstream's managed Gmail client, carried by the platform's Cloud service. */
+export const layer = Layer.effect(Gmail, effect {
+  const cloud = try Cloud
+
+  const transport: ManagedGmailTransport = {
+    effect request(path: string, options: { readonly body?: unknown; readonly timeoutMs?: number }) {
+      const call = cloud.json(options.body === undefined ? "GET" : "POST", path, options.body)
+      const timed = options.timeoutMs === undefined ? call : timeout(call, `${options.timeoutMs} millis`)
+      return timed catch effect (error) => {
+        if (error instanceof CloudSignedOut) throw new MailProtocolFailed({ code: "http", status: 401, reason: SIGNED_OUT })
+        if (error instanceof CloudUnavailable && error.status > 0) throw new MailProtocolFailed({ code: "http", status: error.status, reason: error.code ?? "" })
+        throw new MailUnreachable({ cause: error })
+      }
+    },
+    effect reviewAttachment(file) {
+      const checked = tryPromise({ try: () => checkMailFile(file.name, file.mimeType, file.dataBase64), catch: (cause) => cause }) catch () => "name-or-encoding" as const
+      if (isRefusal(checked)) throw new AttachmentRefused({ detail: checked })
+      return { name: checked.name, mimeType: checked.mimeType, size: checked.bytes, sha256: checked.sha256, ...(checked.text === undefined ? {} : { text: checked.text }) }
+    }
+  }
+  const client = managedGmailClient(transport)
+
+  effect function receipt(r: GmailInboxReceipt) {
+    const result = r.providerResult === null ? null : (Schema.decodeUnknownEffect(WireProviderResult)(r.providerResult) catch () => null)
+    return receiptOf(r, result)
+  }
+
+  return {
+    effect capabilities(grant: string) {
+      const c = client.gmailInboxCapabilities(grant) catch effect (error) => { throw failureOf(error, "read") }
+      return {
+        known: true, sender: c.from, threads: c.threads, send: c.send, providerDrafts: c.providerDrafts, mailboxChanges: c.mailboxMutations,
+        readState: c.readState, stars: c.stars, draftsList: c.draftsList, forwardOriginals: c.forwardAttachments,
+        opaqueDownloads: c.opaqueAttachments, searchTrash: c.searchTrash,
+        policy: { maximumOutgoing: c.attachmentPolicy.maximumOutgoing, maximumTotalBytes: c.attachmentPolicy.maximumTotalBytes }
+      } satisfies Capabilities
+    },
+    effect search(grant: string, query: string, pageToken: string) {
+      const page = client.gmailSearch(grant, query, 25, pageToken === "" ? undefined : pageToken) catch effect (error) => { throw failureOf(error, "read") }
+      return { rows: page.messages.map(row), revision: page.mailboxHistoryId, nextCursor: page.nextPageToken ?? "", spamTrash: page.supportsSpamTrash } satisfies MailPage
+    },
+    effect read(grant: string, messageId: string) {
+      const read = client.gmailRead(grant, messageId) catch effect (error) => { throw failureOf(error, "read") }
+      return body(read)
+    },
+    effect thread(grant: string, threadId: string, offset: number, historyId: string) {
+      const cursor = historyId === "" && offset === 0 ? undefined : { offset, historyId }
+      const t = client.gmailThread(grant, threadId, cursor) catch effect (error) => { throw failureOf(error, "read") }
+      return { threadId, revision: t.historyId, offset: t.offset, previous: [], following: t.nextOffset ?? -1, total: t.total, messages: t.messages.map(body) } satisfies ThreadView
+    },
+    effect attachment(grant: string, messageId: string, partId: string, historyId: string, opaque: boolean) {
+      if (opaque) {
+        const a = client.gmailOpaqueAttachment(grant, messageId, partId, historyId) catch effect (error) => { throw failureOf(attachmentReadFailure(error), "read") }
+        return { partId, name: a.name, mimeType: a.mimeType, bytes: a.size, sha256: a.sha256, dataBase64: a.dataBase64, opaque: true } satisfies DownloadedFile
+      }
+      const a = client.gmailAttachment(grant, messageId, partId, historyId) catch effect (error) => { throw failureOf(attachmentReadFailure(error), "read") }
+      return { partId, name: a.name, mimeType: a.mimeType, bytes: a.size, sha256: a.sha256, dataBase64: a.dataBase64, opaque: false } satisfies DownloadedFile
+    },
+    effect drafts(grant: string, pageToken: string) {
+      const page = client.gmailDrafts(grant, pageToken === "" ? undefined : pageToken) catch effect (error) => { throw failureOf(error, "read") }
+      const drafts: DraftRow[] = page.drafts.map((d) => ({ draftId: d.draftId, messageId: d.messageId, subject: d.subject, recipients: [...d.to], snippet: decodeMailPreview(d.snippet), updatedAt: d.updatedAt ?? "" }))
+      return { drafts, nextCursor: page.nextPageToken ?? "" } satisfies DraftsPage
+    },
+    effect draft(grant: string, draftId: string) {
+      const d = client.gmailDraftContent(grant, draftId) catch effect (error) => { throw failureOf(error, "read") }
+      return {
+        draftId, messageId: d.messageId, digest: d.providerDigest, toList: [...d.to], ccList: [...d.cc], bccList: [...d.bcc],
+        subject: d.subject, body: d.bodyText, threaded: d.threaded, attachmentCount: d.attachmentCount, plainText: d.plainText
+      } satisfies GmailDraft
+    },
+    effect prepare(grant: string, requestId: string, kind: OpKind, proposal: Proposal) {
+      const prepared = client.gmailPrepareOperation(grant, requestId, wireProposal(kind, proposal)) catch effect (error) => { throw failureOf(error, "operation") }
+      const review = Schema.decodeUnknownEffect(WireReview)(prepared.review) catch effect () => { throw new GmailFailed({ kind: "Unavailable", status: 0, code: "invalid-response" }) }
+      const r = try receipt(prepared.receipt)
+      const digest = try sha256Hex(canonicalJson(prepared.review))
+      const exact = r.receiptKind === kind && digest === r.digest && reviewMatches(kind, proposal, review)
+      return { receipt: r, review: reviewOf(review), exact } satisfies PreparedOperation
+    },
+    effect dispatch(grant: string, requestId: string, digest: string, kind: OpKind, proposal: Proposal) {
+      const answer = client.gmailDispatchOperation(grant, requestId, digest, wireProposal(kind, proposal)) catch effect (error) => { throw failureOf(error, "operation") }
+      return try receipt(answer)
+    },
+    effect receipt(grant: string, requestId: string) {
+      const answer = client.gmailOperation(grant, requestId) catch effect (error) => { throw failureOf(error, "operation") }
+      return try receipt(answer)
+    }
+  }
+})

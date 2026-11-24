@@ -1,0 +1,210 @@
+// spec/telephony/contacts.md, "Story: Read my contacts only while I am looking at them"; spec/telephony/contacts.md, "A read starts only in the open view, and only the latest read publishes"; spec/telephony/contacts.md, "An open contact shows the fields the phone holds now, read for its own ticket"; spec/telephony/contacts.md, "The in-app editor opens only with write access and no write unsettled; otherwise the system editor opens"; spec/telephony/contacts.md, "A save names the version shown, a changed contact keeps the editor and writes nothing"; spec/telephony/contacts.md, "A removal needs the owner's confirmation of the contact read whole, at its version"; spec/telephony/contacts.md, "A write holds the gate while it runs, and a lost answer blocks every write until an explicit read that began after it"; spec/telephony/contacts.md, "Alpha's filter is the provider's own query on this phone, closes an open contact and shows a clearable chip"
+import { contactDraftProblem, isContactId, isContactVersion } from "@elizaos/os/bridges/contacts"
+import type { AddressBookContact, AddressBookRow, ContactDetail, ContactDraft, ContactId, ContactVersion } from "@elizaos/os/bridges/contacts"
+import {
+  Machine as ContactsMachine, type ContactRow, type ContactsAnswer, type Detail, type EditMode, type Event as ContactsEvent, type WriteAnswer,
+} from "../../gen/telephony__contacts.effect.vibe"
+import { callerOf, TelephonyBridges, TelephonyRefused } from "./bridges.vibe"
+import { frontChanges, whileInFront } from "./front.vibe"
+import { contactsRouteOf } from "./routes.vibe"
+import { DeletionUndo } from "./undo.vibe"
+
+/** What Alpha may read of the open contact (`contact_read_selected`). */
+export interface OpenContactRead {
+  readonly displayName: string | null
+  readonly phoneNumbers: readonly string[]
+  readonly emailAddresses: readonly string[]
+}
+
+/** Contacts' effects over the image's address book. */
+export service ContactsView {
+  /** One visit of Contacts, opened at `route` (`filter:<query>` is Alpha's filter): while it is in front on an unlocked phone the address book is open, and it closes when it leaves. */
+  visit(route?: string): void!!
+  /** Read the list for `query`; `explicit` is the owner's own Refresh, the only read that can settle an unknown write. */
+  read(query: string, explicit: boolean): void!!
+  /** Ask Android for Contacts access, then read again. */
+  allow(): void!!
+  /** Read 50 more, up to 200. */
+  more(): void!!
+  /** Open a listed contact and read it whole. */
+  open(contactId: string): void!!
+  /** The in-app editor with write access, or the system Contacts editor without it. */
+  edit(mode: EditMode): void!!
+  /** Save the owner's draft against the version the editor was opened on. */
+  save(draft: ContactDraft): void!!
+  /** Remove the confirmed contact at its version. */
+  remove(): void!!
+  /** Alpha's filter, the provider's own query, with its chip. */
+  alphaFilter(query: string, label: string): void!!
+  /** Clear Alpha's chip and read the whole list. */
+  clearChip(): void!!
+  /** An approved Alpha contact action wrote, or may have: read again, and hold writes when unconfirmed. */
+  alphaWrote(unconfirmed: boolean): void!!
+  /** The open contact as Alpha may read it: null when none is open, "unavailable" when it cannot be read whole. */
+  readSelected(): (OpenContactRead | null | "unavailable")!!
+  /** Whether a Contacts query lists anyone, without showing it. */
+  matches(query: string): (boolean | undefined)!!
+}
+
+/** A listed contact; an incomplete one carries no content. */
+export function contactRowOf(row: AddressBookRow): ContactRow {
+  return "incomplete" in row
+    ? { id: row.id, title: "", phones: [], emails: [], complete: false, lookup: "", revision: "" }
+    : { id: row.id, title: row.name, phones: [...row.phones], emails: [...row.emails], complete: true, lookup: row.lookup, revision: row.revision ?? "" }
+}
+
+/** A contact read whole, as the machine's detail; notes the phone cannot edit as one value stay out. */
+export function detailOf(detail: ContactDetail): Detail {
+  return {
+    tag: "DetailRead", contactId: detail.id, version: detail.version, displayName: detail.displayName, givenName: detail.givenName,
+    familyName: detail.familyName, notes: detail.notes ?? "", notesEditable: detail.notes !== undefined,
+    phoneFields: detail.phoneNumbers.map((p) => ({ number: p.number, phoneType: p.type })),
+    emailFields: detail.emailAddresses.map((e) => ({ address: e.address, emailType: e.type })),
+  }
+}
+
+/** A provider's write answer; a coded refusal wrote nothing, and a lost answer is unknown. */
+export function writtenOf(result: { status: string } | TelephonyRefused): WriteAnswer {
+  if (result instanceof TelephonyRefused) return result.code === undefined ? "WriteUnknown" : result.code === "not-found" ? "WriteMissing" : "WriteFailed"
+  switch (result.status) {
+    case "saved": return "WriteSaved"
+    case "deleted": return "WriteDeleted"
+    case "stale": return "WriteStale"
+    case "not-found": return "WriteMissing"
+    case "unknown": return "WriteUnknown"
+    default: return "WriteFailed"
+  }
+}
+
+/** Contacts' view over its machine and the image's address book. */
+export const contactsViewLayer = Layer.effect(ContactsView, effect {
+  const bridgeCall = callerOf(try TelephonyBridges)
+  const contacts = try ContactsMachine
+  const undo = try DeletionUndo
+  const front = try frontChanges()
+  const tell = (event: ContactsEvent) => contacts.send(event) catch () => undefined
+
+  effect function answer(ticket: number, explicit: boolean) {
+    const { query, limit } = try contacts.get()
+    const read: ContactsAnswer = try (effect {
+      const status = try bridgeCall("status", (c) => c.contacts.status())
+      if (!status.readable) return { tag: "ContactsNoAccess" } satisfies ContactsAnswer
+      const page = try bridgeCall("list", (c) => c.contacts.list({ query, limit, kind: explicit ? "ExplicitRead" : "AutomaticRead" }))
+      return { tag: "ContactsPage", contacts: page.contacts.map(contactRowOf), hasMore: page.next !== null, writable: status.writable } satisfies ContactsAnswer
+    } catch () => ({ tag: "ContactsUnreadable" }) satisfies ContactsAnswer)
+    try tell({ type: "readAnswered", ticket, answer: read })
+  }
+
+  effect function read(query: string, explicit: boolean) {
+    const asked = try tell({ type: "readAsked", query, explicit })
+    if (asked !== undefined) try answer(asked.epoch, explicit)
+  }
+
+  effect function reread() {
+    const { shown, query } = try contacts.get()
+    if (shown) try read(query, false)
+  }
+
+  effect function loadDetail() {
+    const { openId, detailTicket } = try contacts.get()
+    if (!isContactId(openId)) return
+    const detail = try (bridgeCall("get", (c) => c.contacts.get(openId, "ExplicitRead")) catch () => undefined)
+    if (detail !== undefined) try tell({ type: "detailAnswered", ticket: detailTicket, detail: detailOf(detail) })
+  }
+
+  return {
+    effect visit(route?: string) {
+      const ask = contactsRouteOf(route)
+      try whileInFront(front, effect (first: boolean) => {
+        if ((try tell({ type: "contactsShown" })) === undefined) return
+        try (bridgeCall("open", (c) => c.contacts.open()) catch () => undefined)
+        try ensuring(effect {
+          const filtered = first && ask.tag === "Filter" && ask.query !== "" ? try tell({ type: "alphaFiltered", query: ask.query, label: ask.query }) : undefined
+          const { epoch } = filtered ?? (try contacts.get())
+          try answer(epoch, false)
+          try Effect.never
+        }, effect {
+          try tell({ type: "contactsHidden" })
+          try (bridgeCall("close", (c) => c.contacts.close()) catch () => undefined)
+        })
+      })
+    },
+    read,
+    effect allow() {
+      try (bridgeCall("requestPermissions", (c) => c.contacts.requestPermissions()) catch () => undefined)
+      const { query } = try contacts.get()
+      try read(query, true)
+    },
+    effect more() {
+      const asked = try tell({ type: "moreAsked" })
+      if (asked !== undefined) try answer(asked.epoch, false)
+    },
+    effect open(contactId: string) {
+      if ((try tell({ type: "contactOpened", contactId })) !== undefined) try loadDetail()
+    },
+    effect edit(mode: EditMode) {
+      const c = try contacts.get()
+      const detail = c.detail
+      const version = detail.tag === "DetailRead" ? detail.version : ""
+      if ((try tell({ type: "editorOpened", mode, editId: mode === "Creating" ? "" : c.openId, editVersion: mode === "Creating" ? "" : version })) !== undefined) return
+      if ((try tell({ type: "systemEditorOpened" })) === undefined) return
+      const row = c.rows.find((r) => r.id === c.openId && r.complete)
+      const listed: AddressBookContact | undefined = row === undefined || mode === "Creating" ? undefined
+        : { id: row.id as ContactId, lookup: row.lookup, name: row.title, revision: row.revision === "" ? null : row.revision, starred: false, phones: row.phones, emails: row.emails }
+      try (bridgeCall("edit", (b) => listed === undefined ? b.contacts.create() : b.contacts.edit(listed)) catch () => undefined)
+      try read(c.query, false)
+    },
+    effect save(draft: ContactDraft) {
+      const c = try contacts.get()
+      const editor = c.editor
+      if (editor.tag !== "EditorOpen") return
+      const problem = contactDraftProblem(draft, { create: editor.mode === "Creating" })
+      const started = try tell({ type: "saveStarted", valid: problem === null })
+      if (started === undefined || problem !== null) return
+      const reviewed = isContactId(editor.editId) && isContactVersion(editor.editVersion) ? { id: editor.editId as ContactId, version: editor.editVersion as ContactVersion } : undefined
+      const result = try (bridgeCall("save", (b) => editor.mode === "Creating" || reviewed === undefined ? b.contacts.createContact(draft) : b.contacts.updateContact(reviewed, draft)) catch (failure) => failure)
+      const savedId = !(result instanceof TelephonyRefused) && result.status === "saved" ? result.id ?? "" : ""
+      const after = try tell({ type: "saveAnswered", written: writtenOf(result), savedId })
+      if (after?.detail.tag === "NoDetail" && after.openId !== "") try loadDetail()
+      if (after?.editor.tag === "EditorOpen" && after.editor.stale) try loadDetail()
+      try reread()
+    },
+    effect remove() {
+      const c = try contacts.get()
+      const detail = c.detail
+      if (detail.tag !== "DetailRead" || !isContactId(detail.contactId) || !isContactVersion(detail.version)) return
+      if ((try tell({ type: "deleteStarted" })) === undefined) return
+      const deferred = try undo.defer({ kind: "contact", reviewed: { id: detail.contactId as ContactId, version: detail.version as ContactVersion } })
+      const after = try tell({ type: "deleteAnswered", written: deferred.queued ? "WriteDeleted" : deferred.refused ? "WriteFailed" : "WriteUnknown" })
+      if (after !== undefined && after.openId !== "") try loadDetail()
+      try reread()
+    },
+    effect alphaFilter(query: string, label: string) {
+      const asked = try tell({ type: "alphaFiltered", query, label })
+      if (asked !== undefined) try answer(asked.epoch, false)
+    },
+    effect clearChip() {
+      const cleared = try tell({ type: "chipCleared" })
+      if (cleared !== undefined && cleared.shown) try answer(cleared.epoch, false)
+    },
+    effect alphaWrote(unconfirmed: boolean) {
+      try tell({ type: "alphaWrote", unconfirmed })
+      try reread()
+    },
+    effect readSelected() {
+      const c = try contacts.get()
+      if (!c.shown || c.openId === "") return null
+      const detail = c.detail
+      if (detail.tag !== "DetailRead" || detail.contactId !== c.openId) return "unavailable"
+      return {
+        displayName: detail.displayName.trim() === "" ? null : detail.displayName,
+        phoneNumbers: detail.phoneFields.map((p) => p.number),
+        emailAddresses: detail.emailFields.map((e) => e.address),
+      } satisfies OpenContactRead
+    },
+    effect matches(query: string) {
+      const page = try (bridgeCall("list", (c) => c.contacts.list({ query, limit: 1, kind: "AutomaticRead" })) catch () => undefined)
+      return page === undefined ? undefined : page.contacts.length > 0
+    },
+  }
+})

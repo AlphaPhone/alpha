@@ -1,0 +1,128 @@
+// spec/account/sheet.md, "The sheet shows one section at a time, and Android Home closes it"; spec/account/signIn.md, "Back ends the step in flight, then the code step, then the dialog; the required page keeps its chooser"; spec/account/signIn.md, "Sign-in is shown as the required page, the first-run page, or the dialog the owner opened"
+import type { Section } from "../../gen/account__sheet.ts"
+import { isSignedIn } from "../../gen/account__session.ts"
+import { entryOf } from "../../gen/account__signIn.ts"
+import type { Nav } from "../../gen/shell__navigation.ts"
+import { Navigation } from "../shell/navigation.vibe"
+import { Membership } from "./billing.vibe"
+import { GoogleAccounts } from "./google.vibe"
+import { AiProvider } from "./provider.vibe"
+import { CloudSession } from "./session.vibe"
+import { AccountSheet } from "./sheet.vibe"
+import { SignInScreen } from "./signIn.vibe"
+
+const routes: Record<string, Section> = {
+  plans: "PlansSection", funds: "FundsSection", google: "GoogleSection", delegation: "DelegationSection", provider: "ProviderSection"
+}
+
+/** The Account app's route while Account is in front, or undefined while it is not. */
+export function accountRoute(nav: Nav): string | undefined {
+  if (nav.app !== "account") return undefined
+  return nav.places.find((place) => place.app === "account")?.route ?? ""
+}
+
+/** The section a route names, if any. */
+export function sectionOf(route: string): Section | undefined {
+  return routes[route]
+}
+
+/** Account's sections with the panels they open: the plan manager, the funds form, the Settings Google panel and the AI provider form. */
+export service AccountPresentation {
+  /** Open one section and the panel it shows. */
+  openSection(section: Section): void!!
+  /**
+   * Back inside Account, as the screen shows it: the own-keys form returns to sign-in, sign-in steps back, a key removal
+   * review ends, a section returns to the account section and a sign-out review ends. Whether Account took it; closing the
+   * chooser of a sign-in opened while signed out leaves Account too, as the screen's own Back does.
+   */
+  back(): boolean!!
+}
+
+/** The presentation over the sheet and its panels. */
+export const presentationService = Layer.effect(AccountPresentation, effect {
+  const sheet = try AccountSheet
+  const membership = try Membership
+  const google = try GoogleAccounts
+  const provider = try AiProvider
+  const session = try CloudSession
+  const signIn = try SignInScreen
+
+  effect function closePanels() {
+    try membership.closeManager()
+    try membership.closeFunds()
+    if ((try google.current()).panel === "SettingsPanel") try google.close()
+    try provider.leave()
+  }
+
+  return {
+    effect openSection(section: Section) {
+      if (section === "PlansSection") try membership.openManager()
+      if (section === "FundsSection") try membership.openFunds()
+      if (section === "GoogleSection") try google.open("SettingsPanel")
+      if (section === "ProviderSection") try provider.refresh()
+      try sheet.openSection(section)
+    },
+    effect back() {
+      const entry = try signIn.current()
+      if (entry.work === "SavingOwnKeys") return try provider.leave()
+      const shown = try sheet.current()
+      const signedIn = isSignedIn((try session.current()).phase)
+      if (shown.section !== "ProviderSection" && (!signedIn || entryOf(entry) === "OpenedEntry")) {
+        const leavesAccount = !signedIn && entryOf(entry) === "OpenedEntry" && entry.screen === "Choose" && entry.work === "NoWork"
+        const took = try signIn.back()
+        return took && !leavesAccount
+      }
+      if (shown.section === "ProviderSection" && (try provider.current()).review.tag === "Reviewing") {
+        try provider.cancelRemove()
+        return true
+      }
+      if (!shown.open || (shown.section === "AccountSection" && shown.reviewOwner === 0)) return false
+      try closePanels()
+      return try sheet.back()
+    }
+  }
+})
+
+/** The sheet follows the Account app in front, and its panels close with it, by Done, by leaving the app or by Android Home. */
+export const presentationLive = Layer.effectDiscard(effect {
+  const navigation = try Navigation
+  const presentation = try AccountPresentation
+  const sheet = try AccountSheet
+  const session = try CloudSession
+  const signIn = try SignInScreen
+  const membership = try Membership
+  const google = try GoogleAccounts
+  const provider = try AiProvider
+
+  effect function opened(route: string) {
+    try sheet.show()
+    const section = sectionOf(route)
+    if (section !== undefined) try presentation.openSection(section)
+    const s = try session.current()
+    if (route === "sign-in" || (!isSignedIn(s.phase) && section !== "ProviderSection")) try signIn.open()
+  }
+
+  fork.scoped (effect {
+    let shown: string | undefined = undefined
+    for try (const route of Stream.changes(Stream.map(navigation.changes, accountRoute))) {
+      if (route !== undefined && shown === undefined) try opened(route)
+      else if (route !== undefined) {
+        const section = sectionOf(route)
+        if (section !== undefined) try presentation.openSection(section)
+      } else if (shown !== undefined) try sheet.close()
+      shown = route
+    }
+  })
+  fork.scoped (effect {
+    let open = false
+    for try (const s of sheet.changes) {
+      if (open && !s.open) {
+        try membership.closeManager()
+        try membership.closeFunds()
+        if ((try google.current()).panel === "SettingsPanel") try google.close()
+        try provider.leave()
+      }
+      open = s.open
+    }
+  })
+})

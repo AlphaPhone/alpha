@@ -1,0 +1,64 @@
+// spec/camera/agentCapture.md, "Story: Let the assistant take the photo I asked for"; spec/camera/agentLibrary.md, "Story: Let the assistant point at photos I can see"; spec/camera/libraryReview.md, "Photos operations reach a phone only when the assistant and the phone both offer their capability"
+import { operationOffered, type PhotoOperation } from "../../gen/camera__libraryReview.effect.vibe"
+import { offers } from "./agentContext.vibe"
+import { AgentCamera } from "./agentCapture.vibe"
+import { AgentPhotos, PhotosRefused } from "./agentPhotos.vibe"
+import { CameraOperation, PhotosOperation } from "./bridge.schema.vibe"
+
+/** How the assistant's device-action execution called this phone. */
+export interface ActionCall {
+  readonly operationId: string
+  readonly reviewed: boolean
+  readonly ownerWords: boolean
+  /** The `x-eliza-device-capabilities` the assistant named. */
+  readonly capabilities?: string
+  /** The screen under the assistant is a protected one. */
+  readonly sensitive?: boolean
+}
+
+/** A camera or Photos operation the phone refused before it changed anything. */
+export error ActionRefused { message: string }
+
+const families: Readonly<Record<string, PhotoOperation>> = {
+  photo_library_search: "SearchLibrary", photo_library_inspect: "InspectLibrary", photo_library_select: "SelectInLibrary", photo_library_review: "ReviewLibrary",
+  photos_filter: "FilterPhotos", photos_open: "OpenPhoto", photos_album_create: "CreateAlbumFromPhotos", photos_share: "SharePhotos",
+}
+
+/** The executor the assistant's device actions call for `camera_capture_photo` and every Photos operation. */
+export service CameraActions {
+  /** The operation types this area executes. */
+  readonly types: readonly string[]
+  execute(operation: unknown, call: ActionCall): unknown!ActionRefused
+  /** A result that may exist after a lost answer; a photo is never taken again to find out. */
+  readBack(operation: unknown, call: ActionCall): unknown!ActionRefused
+}
+
+/** The camera and Photos executor over the requested-photo and Photos request services. */
+export const cameraActions = Layer.effect(CameraActions, effect {
+  const camera = try AgentCamera
+  const photos = try AgentPhotos
+  return {
+    types: ["camera_capture_photo", ...Object.keys(families)],
+    effect execute(operation: unknown, call: ActionCall) {
+      const photo = Schema.decodeUnknownOption(CameraOperation)(operation)
+      if (Option.isSome(photo)) {
+        const attempt = try camera.capture({
+          operationId: call.operationId, reviewed: call.reviewed, ownerWords: call.ownerWords,
+          offersLibraryId: offers(call.capabilities, "camera.capture-library-id.v1"), sensitive: call.sensitive === true, ...(photo.value.lens === undefined ? {} : { lens: photo.value.lens }),
+        })
+        if (attempt.status === "failed") throw new ActionRefused({ message: attempt.summary })
+        return attempt
+      }
+      const decoded = Schema.decodeUnknownOption(PhotosOperation)(operation)
+      if (Option.isNone(decoded)) throw new ActionRefused({ message: "This Photos request isn’t supported." })
+      const op = decoded.value
+      const selectedForm = "selected" in op && op.selected === true
+      const offered = { library: offers(call.capabilities, "photos.library.v1"), view: offers(call.capabilities, "photos.view.v1"), viewSelected: offers(call.capabilities, "photos.view-selected.v1") }
+      if (call.capabilities !== undefined && !operationOffered(families[op.type]!, selectedForm, offered)) throw new ActionRefused({ message: "This Photos request isn’t supported." })
+      return try mapError(photos.run(op, offered.viewSelected), (refused: PhotosRefused) => new ActionRefused({ message: refused.message }))
+    },
+    effect readBack() {
+      throw new ActionRefused({ message: "Check Photos for the result." })
+    },
+  }
+})

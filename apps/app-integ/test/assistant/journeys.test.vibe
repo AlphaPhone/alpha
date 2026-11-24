@@ -1,0 +1,502 @@
+// spec/assistant/dock.md, "Story: Open and size the chat with one gesture"; spec/assistant/dock.md, "Story: Size the sheet to what it shows"; spec/assistant/draft.md, "Story: Keep what I typed"; spec/assistant/conversation.md, "Story: Talk to my agent and approve what it proposes"; spec/assistant/conversation.md, "Story: Reply to or edit a message I sent"; spec/assistant/attachments.md, "Story: Attach a photo or file to my message"; spec/assistant/attachments.md, "Story: Attach only what fits"; spec/assistant/search.md, "Story: Find something I said in an earlier chat"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/decision.md, "Story: Approve or deny a workflow step once"; spec/assistant/stoppedReply.md, "Story: Know what became of a reply I stopped"; spec/assistant/context.md, "Story: Let my agent know where I am when I allow it"; spec/assistant/context.md, "Story: Tell my agent what my screen shows, and nothing more"; spec/assistant/entry.md, "Story: Summon my assistant from anywhere on the phone"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"; spec/assistant/recovery.md, "Story: See what still waits for me without the phone polling my agent"; spec/assistant/index.md, "Story: Ask my assistant from anywhere"; spec/assistant/review.md, "Story: Act only on what I asked for"; spec/assistant/recovery.md, "Story: Restart my agent when it stopped for review"
+import { assert, it } from "@effect/vitest"
+import { Machine as DockMachine, clampSheet, halfHeight } from "../../gen/assistant__dock.effect.vibe"
+import { Machine as DraftsMachine, shown } from "../../gen/assistant__draft.effect.vibe"
+import { Machine as SummonsMachine } from "../../gen/assistant__entry.effect.vibe"
+import { Assistant } from "../../src/assistant/assistant.vibe"
+import { ChatAttachments } from "../../src/assistant/attachments.vibe"
+import { Composer } from "../../src/assistant/composer.vibe"
+import { AssistantFlows } from "../../src/assistant/flows.vibe"
+import { PhoneLocation } from "../../src/assistant/location.vibe"
+import { OwnNotices, WorkflowStepDecisions } from "../../src/assistant/ports.vibe"
+import { copy } from "../../src/assistant/presentation.vibe"
+import { DeviceReview } from "../../src/assistant/review.vibe"
+import { AgentRestart } from "../../src/assistant/restart.vibe"
+import { ChatSearch } from "../../src/assistant/search.vibe"
+import { emptyTranscript, type Row } from "../../src/assistant/transcript.vibe"
+import { textOf } from "../../src/assistant/units.vibe"
+import { Navigation } from "../../src/shell/navigation.vibe"
+import {
+  assistNative, assistantOver, assistantWith, countingExecutors, fakeHost, fakePreferences, fakeResident, fakeResidentControl, itemizingExecutors, journalNative,
+  locationNative, networkNative, noNative, privateScreen, wireProposal, type Seen,
+} from "./fakes.vibe"
+
+const futureExpiry = "2099-01-01T00:00:00.000Z"
+const quietResident = (proposals: readonly unknown[] = []) => fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals })
+
+effect function transcriptNow() {
+  const composer = try Composer
+  const head = try Stream.runHead(composer.transcript)
+  return Option.isSome(head) ? head.value : emptyTranscript
+}
+
+effect function settle() {
+  for (const _ of [1, 2, 3, 4, 5, 6, 7, 8]) try yieldNow
+  try TestClock.adjust("10 millis")
+}
+
+it.effect("Open and size the chat with one gesture (spec/assistant/dock.md, \"A tap runs its control once, and a settled drag lands in one detent\")", () => effect {
+  provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 })) {
+    const dock = try DockMachine
+    const assistant = try Assistant
+    try dock.send({ type: "down", label: "OpenControl" })
+    try dock.send({ type: "tap" })
+    const opened = try dock.get()
+    try dock.send({ type: "lateClick" })
+    const late = try dock.get()
+    try assistant.show("Full")
+    const full = (try dock.get()).chat
+    try Effect.try(() => assert.deepStrictEqual(
+      { opened: opened.chat, effects: opened.effects, stillOpen: late.chat, ignored: late.ignored, full },
+      { opened: "Sheet", effects: 1, stillOpen: "Sheet", ignored: 1, full: "Full" },
+    ))
+  }
+})
+
+it.effect("Size the sheet to what it shows (spec/assistant/dock.md, \"Story: Size the sheet to what it shows\")", () => effect {
+  provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 })) {
+    const dock = try DockMachine
+    const assistant = try Assistant
+    try assistant.show("Sheet")
+    const sheet = try dock.get()
+    try dock.send({ type: "touchOutside" })
+    const after = (try dock.get()).chat
+    const half = halfHeight(800, 700)
+    try Effect.try(() => assert.deepStrictEqual(
+      { sheet: sheet.chat, fitted: sheet.remembered, after, half, tall: clampSheet(1000, half, 700), short: clampSheet(50, half, 700) },
+      { sheet: "Sheet", fitted: false, after: "Input", half: 480, tall: 700, short: 200 },
+    ))
+  }
+})
+
+it.effect("The dock rests where the shell puts it (spec/assistant/dock.md, \"Home keeps its bar, and a dragged height lasts only while the chat it was dragged in is open\")", () => effect {
+  provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 })) {
+    const dock = try DockMachine
+    const assistant = try Assistant
+    const navigation = try Navigation
+    try assistant.follow()
+    try settle()
+    try navigation.open("calendar")
+    try settle()
+    const onPill = try dock.get()
+    try assistant.show("Sheet")
+    try settle()
+    const shell = (try navigation.get()).chat
+    try navigation.home()
+    try settle()
+    const home = try dock.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { view: onPill.view, rest: onPill.chat, shell, homeView: home.view, homeChat: home.chat },
+      { view: "PillView", rest: "Hidden", shell: "Sheet", homeView: "HomeView", homeChat: "Input" },
+    ))
+  }
+})
+
+it.effect("Keep what I typed (spec/assistant/draft.md, \"Each binding keeps its own text, and selecting a binding never overwrites another\")", () => effect {
+  provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 })) {
+    const composer = try Composer
+    const drafts = try DraftsMachine
+    try composer.open("c1", false)
+    try composer.edit("For the first chat")
+    try composer.open(null, false)
+    try composer.edit("For a new chat")
+    try composer.open("c1", false)
+    const first = textOf(shown(try drafts.get()))
+    try composer.open(null, false)
+    const fresh = textOf(shown(try drafts.get()))
+    try Effect.try(() => assert.deepStrictEqual({ first, fresh }, { first: "For the first chat", fresh: "For a new chat" }))
+  }
+})
+
+it.effect("Talk to my agent and approve what it proposes (spec/assistant/conversation.md, \"A changed screen context bumps the revision and drops every proposal; a private screen stops everything\")", () => effect {
+  const proposal = wireProposal("p5", "c".repeat(64), { type: "create_reminder" }, "u1", futureExpiry)
+  const runs = { count: 0 }
+  provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "Review it." }, proposals: [proposal] }), fakeHost([]), countingExecutors(runs, "CreateReminder"), journalNative(new Map())) {
+    const composer = try Composer
+    const review = try DeviceReview
+    try composer.edit("Remind me at 5")
+    try composer.send()
+    const live = (try transcriptNow()).rows.find((row) => row.kind === "card")
+    try composer.screenChanged("calendar:", false)
+    const moved = (try transcriptNow()).rows.find((row) => row.kind === "card")
+    const tapped = moved?.kind === "card" ? try review.approve(moved.card) : undefined
+    try Effect.try(() => assert.deepStrictEqual(
+      { live: live?.kind === "card" ? live.card.state : "none", moved: moved?.kind === "card" ? moved.card.state : "none", after: tapped?.card.state, runs: runs.count },
+      { live: "LiveCard", moved: "ReplacedCard", after: "ReplacedCard", runs: 0 },
+    ))
+  }
+})
+
+it.effect("Reply to or edit a message I sent (spec/assistant/conversation.md, \"Only a recorded message of this session that is settled can be quoted, and only my own can be edited, from an empty composer\")", () => effect {
+  const toasts: string[] = []
+  provide assistantOver(quietResident(), fakeHost(toasts), countingExecutors({ count: 0 })) {
+    const composer = try Composer
+    const drafts = try DraftsMachine
+    try composer.edit("Something else")
+    try composer.aim({ kind: "edit", messageId: "u1", text: "Lunch at noon", requestId: "r1" })
+    const refused = toasts.includes(copy.editFirst)
+    try composer.edit("")
+    try composer.aim({ kind: "edit", messageId: "u1", text: "Lunch at noon", requestId: "r1" })
+    const placed = textOf(shown(try drafts.get()))
+    const target = try Stream.runHead(composer.target)
+    try Effect.try(() => assert.deepStrictEqual(
+      { refused, placed, aimed: Option.isSome(target) ? target.value?.kind : undefined },
+      { refused: true, placed: "Lunch at noon", aimed: "edit" },
+    ))
+  }
+})
+
+it.effect("Attach a photo or file to my message (spec/assistant/attachments.md, \"A reload shows the attachment of a recorded message again, and a switch shows another owner's or conversation's nothing\")", () => effect {
+  provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 })) {
+    const attachments = try ChatAttachments
+    const file = { id: "f1", name: "note.txt", mimeType: "text/plain", data: "aGVsbG8=" }
+    const pendingSlot = ["https://agent.local", "o1", "a1", "c1", "pending-1"]
+    const recordedSlot = ["https://agent.local", "o1", "a1", "c1", "u1"]
+    try attachments.addEncoded([file])
+    const held = try attachments.hold(pendingSlot, "Read this")
+    try attachments.recorded(pendingSlot, recordedSlot)
+    try attachments.clear()
+    const saved = try attachments.savedFor(recordedSlot)
+    try attachments.addEncoded([{ ...file, id: "f2" }])
+    try attachments.retire("conversation")
+    const left = try attachments.pending()
+    const elsewhere = try attachments.savedFor(["https://agent.local", "o2", "a1", "c1", "u1"])
+    try Effect.try(() => assert.deepStrictEqual(
+      { held, saved: saved.map((f) => f.name), left: left.length, elsewhere: elsewhere.length },
+      { held: true, saved: ["note.txt"], left: 0, elsewhere: 0 },
+    ))
+  }
+})
+
+it.effect("Attach only what fits (spec/assistant/attachments.md, \"At most four attachments, each within its cap, and a batch within 19 MiB of base64\")", () => effect {
+  provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 })) {
+    const attachments = try ChatAttachments
+    const files = [1, 2, 3, 4, 5].map((n) => ({ id: `f${n}`, name: `file${n}.txt`, mimeType: "text/plain", data: "aGk=" }))
+    const five = try exit(attachments.addEncoded(files))
+    const video = try exit(attachments.addEncoded([{ id: "v1", name: "clip.mp4", mimeType: "video/mp4", data: "aGk=" }]))
+    const four = try attachments.addEncoded(files.slice(0, 4))
+    const said = (outcome: Exit.Exit<unknown, { readonly message: string }>) =>
+      Exit.isFailure(outcome) ? Option.match(Cause.findErrorOption(outcome.cause), { onNone: () => "", onSome: (e) => e.message }) : "accepted"
+    try Effect.try(() => assert.deepStrictEqual(
+      { five: said(five), video: said(video), four: four.length },
+      { five: copy.attachmentFull, video: copy.attachmentTooLarge, four: 4 },
+    ))
+  }
+})
+
+it.effect("Find something I said in an earlier chat (spec/assistant/search.md, \"A search answer shows only while search is open and its owner scope is the one that asked\")", () => effect {
+  const hit = { id: "m5", conversationId: "c1", text: "Buy milk on the way home" }
+  provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals: [], hits: [hit] }), fakeHost([]), countingExecutors({ count: 0 })) {
+    const search = try ChatSearch
+    try search.start()
+    const asking = fork search.query("milk")
+    try TestClock.adjust("300 millis")
+    join asking
+    const found = try Stream.runHead(search.hits)
+    try search.retire()
+    const retired = try Stream.runHead(search.hits)
+    try Effect.try(() => assert.deepStrictEqual(
+      { found: Option.isSome(found) ? found.value.map((h) => h.id) : [], retired: Option.isSome(retired) ? retired.value.length : -1 },
+      { found: ["m5"], retired: 0 },
+    ))
+  }
+})
+
+it.effect("Hear a brief acknowledgment and still get the whole answer (spec/assistant/reply.md, \"One brief acknowledgment at most, only before work runs, and the final answer is delivered whole\")", () => effect {
+  const answer = "The drive takes 42 minutes. ".repeat(10).trim()
+  provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: answer }, proposals: [] }), fakeHost([]), countingExecutors({ count: 0 })) {
+    const composer = try Composer
+    try composer.edit("How long to get home?")
+    try composer.send()
+    const reply = (try transcriptNow()).rows.find((row) => row.kind === "agent")
+    try Effect.try(() => assert.deepStrictEqual(
+      reply?.kind === "agent" ? { text: reply.text, status: reply.reply.status, whole: reply.reply.spoken === reply.reply.final && reply.reply.final === answer.length } : {},
+      { text: answer, status: "Settled", whole: true },
+    ))
+  }
+})
+
+/** Send one message to an agent whose stream sends `before` ahead of `answer`; every transcript it showed, and the reply it settled. */
+effect function acknowledgedTurn(before: readonly unknown[], answer: string) {
+  provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: answer }, proposals: [], before }), fakeHost([]), countingExecutors({ count: 0 })) {
+    const composer = try Composer
+    const seen: Row[] = []
+    const watching = fork Stream.runForEach(composer.transcript, (t) => sync(() => {
+      const row = t.rows.find((r) => r.kind === "agent")
+      if (row !== undefined) seen.push(row)
+    }))
+    for (const _ of [1, 2, 3, 4]) try yieldNow
+    try composer.edit("What's on my calendar today?")
+    try composer.send()
+    for (const _ of [1, 2, 3, 4, 5, 6, 7, 8]) try yieldNow
+    try Fiber.interrupt(watching)
+    const settled = (try transcriptNow()).rows.find((row) => row.kind === "agent")
+    const working = seen.filter((row) => row.kind === "agent" && row.reply.status === "Working" && row.text === "").map((row) => row.kind === "agent" ? row.label : undefined)
+    return { settled, working }
+  }
+}
+
+const calendarAnswer = "You have two meetings today: standup at nine and a review at three."
+const cueText = (text: string) => ({ type: "token", text })
+const restart = { type: "token", fullText: "" }
+const R1 = "spec/assistant/reply.md, \"One brief acknowledgment at most, only before work runs, and the final answer is delivered whole\""
+const R0 = "spec/assistant/reply.md, \"The planning label shows until the first text, and provisional text is shown but never spoken\""
+
+it.effect(`The agent's acknowledgment frame is the one acknowledgement, kept out of the answer and shown as the working label through its tool and status (${R1}; ${R0})`, () => effect {
+  const cue = "Let me check your calendar."
+  const { settled, working } = try acknowledgedTurn([cueText(cue), { type: "acknowledgment", text: cue }, restart, { type: "tool", name: "CALENDAR", label: "Using Calendar" }, { type: "status", activity: "Reading your calendar" }], calendarAnswer)
+  try Effect.try(() => assert.deepStrictEqual(
+    settled?.kind === "agent" ? { text: settled.text, acks: settled.reply.acks, ackUnits: settled.reply.ackUnits, final: settled.reply.final, labels: [...new Set(working)] } : {},
+    { text: calendarAnswer, acks: 1, ackUnits: cue.length, final: calendarAnswer.length, labels: [cue] },
+  ))
+})
+
+it.effect(`An agent that sends no acknowledgment frame gives none: text before its first tool never acknowledges, and the tool's label is the working label (${R1})`, () => effect {
+  const { settled, working } = try acknowledgedTurn([cueText("On it."), { type: "tool", name: "CALENDAR", label: "Using Calendar" }, restart, { type: "tool", name: "CALENDAR", label: "Using Calendar" }], calendarAnswer)
+  try Effect.try(() => assert.deepStrictEqual(
+    settled?.kind === "agent" ? { text: settled.text, acks: settled.reply.acks, ackUnits: settled.reply.ackUnits, final: settled.reply.final, labels: [...new Set(working)] } : {},
+    { text: calendarAnswer, acks: 0, ackUnits: 0, final: calendarAnswer.length, labels: ["Using Calendar"] },
+  ))
+})
+
+it.effect(`A second acknowledgment frame, or one after a tool ran, never acknowledges again (${R1})`, () => effect {
+  const toolFirst = try acknowledgedTurn([cueText("On it."), { type: "tool", name: "CALENDAR" }, { type: "acknowledgment", text: "Let me check your calendar." }, restart], calendarAnswer)
+  const frameFirst = try acknowledgedTurn([cueText("Sure."), { type: "acknowledgment", text: "Sure." }, cueText(" One more."), { type: "tool", name: "ALARM", label: "Using Clock" }], calendarAnswer)
+  const twice = try acknowledgedTurn([{ type: "acknowledgment", text: "Sure." }, { type: "acknowledgment", text: "Let me check your calendar." }, { type: "tool", name: "CALENDAR" }], calendarAnswer)
+  const units = (turn: { readonly settled?: Row }) => turn.settled?.kind === "agent" ? [turn.settled.reply.acks, turn.settled.reply.ackUnits, turn.settled.text] : []
+  try Effect.try(() => assert.deepStrictEqual(
+    { toolFirst: units(toolFirst), frameFirst: units(frameFirst), twice: units(twice), twiceLabels: [...new Set(twice.working)] },
+    { toolFirst: [0, 0, calendarAnswer], frameFirst: [1, "Sure.".length, calendarAnswer], twice: [1, "Sure.".length, calendarAnswer], twiceLabels: ["Sure."] },
+  ))
+})
+
+it.effect(`A proposal the agent made for review, which names no message, joins the reply as a card at once (spec/assistant/review.md, "A card is listed only on the foreground, recovered only under the current screen, and approved only under the session that listed it")`, () => effect {
+  const proposal = wireProposal("p8", "c".repeat(64), { type: "create_note", title: "Milk" }, undefined, futureExpiry)
+  const runs = { count: 0 }
+  provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "I made a card for it." }, proposals: [proposal] }), fakeHost([]), countingExecutors(runs), journalNative(new Map())) {
+    const composer = try Composer
+    try composer.edit("Make a note: milk")
+    try composer.send()
+    const cards = (try transcriptNow()).rows.flatMap((row) => row.kind === "card" ? [row.card.proposalId] : [])
+    try composer.edit("And another")
+    try composer.send()
+    const again = (try transcriptNow()).rows.flatMap((row) => row.kind === "card" ? [row.card.proposalId] : [])
+    try Effect.try(() => assert.deepStrictEqual({ cards, again, runs: runs.count }, { cards: ["p8"], again: ["p8"], runs: 0 }))
+  }
+})
+
+it.effect("Approve an action card once, from wherever it is shown (spec/assistant/approvals.md, \"A recovered card lists again at the tap and reuses a result it already tracks\")", () => effect {
+  const proposal = wireProposal("p3", "b".repeat(64), { type: "create_note", title: "Milk" }, undefined, futureExpiry)
+  const runs = { count: 0 }
+  provide assistantOver(quietResident([proposal]), fakeHost([]), countingExecutors(runs), journalNative(new Map())) {
+    const composer = try Composer
+    const review = try DeviceReview
+    try composer.open("c1", false)
+    const listedRow = (try transcriptNow()).rows.find((row) => row.kind === "card")
+    const first = listedRow?.kind === "card" ? try review.approve(listedRow.card) : undefined
+    const second = first === undefined ? undefined : try review.approve(first.card)
+    try Effect.try(() => assert.deepStrictEqual(
+      { recovered: listedRow?.kind === "card" ? listedRow.card.state : "none", first: first?.card.state, second: second?.card.state, runs: runs.count },
+      { recovered: "RecoveredCard", first: "DoneCard", second: "DoneCard", runs: 1 },
+    ))
+  }
+})
+
+it.effect("Approve or deny a workflow step once (spec/assistant/decision.md, \"A decision names the request as last read, is sent at most once per request, and blocks review until released\")", () => effect {
+  const sent: boolean[] = []
+  const steps = Layer.succeed(WorkflowStepDecisions, { decide: (_run: string, approved: boolean) => sync(() => { sent.push(approved); return "recorded" as const }) })
+  provide assistantWith(steps) {
+    const flows = try AssistantFlows
+    const reviewed = try flows.decideStep("run-1", true)
+    const decided = try flows.decideStep("run-1", true)
+    const again = try flows.decideStep("run-1", false)
+    try Effect.try(() => assert.deepStrictEqual(
+      { reviewed: reviewed.reviewDigest, decided: decided.knownStatus, again: again.knownStatus, sent },
+      { reviewed: 1, decided: "Approved", again: "Approved", sent: [true] },
+    ))
+  }
+})
+
+it.effect("Know what became of a reply I stopped (spec/assistant/stoppedReply.md, \"The read says once what happened, and never replaces the chat while the owner is busy in it\")", () => effect {
+  const seen: Seen = { calls: [] }
+  const history = [{ id: "h1", role: "user", text: "Are you there?", createdAt: "1970-01-01T00:00:00.000Z" }]
+  provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "ok" }, proposals: [], history }), fakeHost([]), countingExecutors({ count: 0 })) {
+    const composer = try Composer
+    const opening = fork composer.open("c1", false)
+    try TestClock.adjust("3 seconds")
+    join opening
+    const notices = (try transcriptNow()).rows.filter((row) => row.kind === "notice" && row.id === "stopped-reply-notice")
+    const posted = seen.calls.filter((call) => call.method === "STREAM" || (call.method === "POST" && call.path.endsWith("/messages"))).length
+    try Effect.try(() => assert.deepStrictEqual(
+      { notices: notices.map((row) => row.kind === "notice" ? row.text : ""), posted },
+      { notices: [copy.stoppedNotRecorded], posted: 0 },
+    ))
+  }
+})
+
+it.effect("Let my agent know where I am when I allow it (spec/assistant/context.md, \"A turn carries the location only with the setting on, the permission granted, a screen that is not private and a peer that takes it\")", () => effect {
+  const said = { asks: false, shares: true }
+  const reads = { count: 0 }
+  provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 }), locationNative({ latitude: 37.1234567, longitude: -122.7654321, accuracy: 4.6 }, reads), fakePreferences(said)) {
+    const location = try PhoneLocation
+    try location.warm()
+    const first = try location.forTurn(true, true)
+    const reused = try location.forTurn(true, true)
+    const unobserved = try location.forTurn(false, true)
+    const olderPeer = try location.forTurn(true, false)
+    said.shares = false
+    const off = try location.forTurn(true, true)
+    try Effect.try(() => assert.deepStrictEqual(
+      { first, reused: reused?.latitude, unobserved, olderPeer, off, reads: reads.count },
+      { first: { latitude: 37.12346, longitude: -122.76543, accuracyMeters: 5, capturedAt: 0 }, reused: 37.12346, unobserved: undefined, olderPeer: undefined, off: undefined, reads: 1 },
+    ))
+  }
+})
+
+it.effect("Let my agent know where I am when I allow it, indoors (spec/assistant/context.md, \"The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again\")", () => effect {
+  const said = { asks: false, shares: true }
+  const lookups = { count: 0 }
+  provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 }), networkNative({ latitude: 48.8566, longitude: 2.3522, accuracy: 25000 }, lookups), fakePreferences(said)) {
+    const location = try PhoneLocation
+    const beforeWarm = try location.forTurn(true, true)
+    try location.warm()
+    const afterWarm = try location.forTurn(true, true)
+    try location.warm()
+    try Effect.try(() => assert.deepStrictEqual(
+      { beforeWarm, afterWarm: afterWarm?.accuracyMeters, lookups: lookups.count },
+      { beforeWarm: undefined, afterWarm: 25000, lookups: 1 },
+    ))
+  }
+})
+
+it.effect("Tell my agent what my screen shows, and nothing more (spec/assistant/context.md, \"A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn\")", () => effect {
+  const seen: Seen = { calls: [] }
+  provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "Hi." }, proposals: [] }), fakeHost([], privateScreen), countingExecutors({ count: 0 })) {
+    const composer = try Composer
+    try composer.edit("What is on my screen?")
+    try composer.send()
+    const turns = seen.calls.filter((call) => call.method === "STREAM" || (call.method === "POST" && call.path.endsWith("/messages")))
+    try Effect.try(() => assert.deepStrictEqual(
+      { posted: turns.length, leaked: turns.some((call) => JSON.stringify(call.body).includes("passwords")), text: JSON.stringify(turns[0]?.body ?? {}).includes("What is on my screen?") },
+      { posted: 1, leaked: false, text: true },
+    ))
+  }
+})
+
+it.effect("Ask my assistant from anywhere (spec/assistant/index.md, \"The assistant observes the screen only while it is visible, unlocked and not private\")", () => effect {
+  const proposal = wireProposal("p8", "a".repeat(64), { type: "create_note" }, undefined, futureExpiry)
+  provide assistantOver(quietResident([proposal]), fakeHost([], privateScreen), countingExecutors({ count: 0 })) {
+    const review = try DeviceReview
+    const listed = try review.pending()
+    try Effect.try(() => assert.deepStrictEqual({ ok: listed.ok, cards: listed.cards.length }, { ok: true, cards: 0 }))
+  }
+})
+
+it.effect("Summon my assistant from anywhere on the phone (spec/assistant/entry.md, \"An invocation opens the chat once, and starts voice only when it came by voice, unlocked, fresh and for this account\")", () => effect {
+  const opened = effect function (origin: "assist" | "listener") {
+    provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 }), assistNative(origin)) {
+      const assistant = try Assistant
+      const dock = try DockMachine
+      const summons = try SummonsMachine
+      try assistant.follow()
+      const state = try summons.get()
+      return { chat: (try dock.get()).chat, opens: state.opens, voice: state.voiceStarts }
+    }
+  }
+  const assist = try opened("assist")
+  const listener = try opened("listener")
+  try Effect.try(() => assert.deepStrictEqual(
+    { assist, listener },
+    { assist: { chat: "Full", opens: 1, voice: 0 }, listener: { chat: "Full", opens: 1, voice: 1 } },
+  ))
+})
+
+it.effect("Ask Alpha about a notification (spec/assistant/noticeQuestion.md, \"A notice is composed once, after a recheck of the exact notice, and only while the owner and screen are current\")", () => effect {
+  const consumed: string[] = []
+  const notices = Layer.succeed(OwnNotices, {
+    current: (id: string) => succeed(id === "n1" ? { id, revision: "2" } : undefined),
+    consume: (id: string) => sync(() => { consumed.push(id); return true }),
+  })
+  provide assistantWith(notices) {
+    const flows = try AssistantFlows
+    const drafts = try DraftsMachine
+    const stale = try flows.askAboutNotice("n1", "1", "ValidNotice", "What should I do?")
+    const hidden = try flows.askAboutNotice("n1", "2", "PrivateNotice", "What should I do?")
+    const asked = try flows.askAboutNotice("n1", "2", "ValidNotice", "What should I do?")
+    const draft = textOf(shown(try drafts.get()))
+    try Effect.try(() => assert.deepStrictEqual({ stale, hidden, asked, draft, consumed }, { stale: false, hidden: false, asked: true, draft: "What should I do?", consumed: ["n1"] }))
+  }
+})
+
+it.effect("See what still waits for me without the phone polling my agent (spec/assistant/recovery.md, \"A listing is read once per key, applies only to its own key, and a failed one waits for a new key\")", () => effect {
+  const seen: Seen = { calls: [] }
+  provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "ok" }, proposals: [], listingStatus: 500 }), fakeHost([]), countingExecutors({ count: 0 })) {
+    const composer = try Composer
+    const listings = () => seen.calls.filter((call) => call.method === "GET" && call.path === "/api/client-devices/proposals").length
+    try composer.open("c1", false)
+    const first = listings()
+    try TestClock.adjust("10 minutes")
+    const later = listings()
+    try Effect.try(() => assert.deepStrictEqual({ first, later }, { first: 1, later: 1 }))
+  }
+})
+
+it.effect("Act only on what I asked for (spec/assistant/review.md, \"A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it\")", () => effect {
+  const proposal = wireProposal("p9", "c".repeat(64), { type: "browser_tab_close", all: true }, undefined, futureExpiry)
+  const runs = { count: 0 }
+  const listed = { lines: ["Weather · weather.com"], unnamed: 1, unnamedLabel: "private tab" }
+  provide assistantOver(quietResident([proposal]), fakeHost([]), itemizingExecutors(runs, listed), journalNative(new Map())) {
+    const composer = try Composer
+    const review = try DeviceReview
+    try composer.open("c1", false)
+    const row = (try transcriptNow()).rows.find((each) => each.kind === "card")
+    const items = row?.kind === "card" ? row.card.items : undefined
+    const done = row?.kind === "card" ? try review.approve(row.card) : undefined
+    try Effect.try(() => assert.deepStrictEqual({ items, state: done?.card.state, runs: runs.count }, { items: listed, state: "DoneCard", runs: 1 }))
+  }
+})
+
+it.effect("Act only on what I asked for, when the set cannot be listed (spec/assistant/review.md, \"A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it\")", () => effect {
+  const proposal = wireProposal("p10", "d".repeat(64), { type: "browser_tab_close", all: true }, undefined, futureExpiry)
+  const runs = { count: 0 }
+  const notice = "Close all tabs: Browser couldn't list its open tabs for this request. Nothing was closed. Ask again."
+  provide assistantOver(quietResident([proposal]), fakeHost([]), itemizingExecutors(runs, notice), journalNative(new Map())) {
+    const composer = try Composer
+    try composer.open("c1", false)
+    const rows = (try transcriptNow()).rows
+    try Effect.try(() => assert.deepStrictEqual(
+      { cards: rows.filter((each) => each.kind === "card").length, notices: rows.flatMap((each) => each.kind === "notice" ? [each.text] : []), runs: runs.count },
+      { cards: 0, notices: [notice], runs: 0 },
+    ))
+  }
+})
+
+it.effect("Restart my agent when it stopped for review (spec/assistant/recovery.md, \"Restart is offered only while the resident is refused and holds a reviewable recovery, once per tap\")", () => effect {
+  const held = { reviewable: true, restarts: 0 }
+  provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 }), noNative, fakePreferences({ asks: false, shares: false }), fakeResidentControl(true, held)) {
+    const restart = try AgentRestart
+    try settle()
+    const offered = try Stream.runHead(restart.offered)
+    const first = try restart.restart()
+    const second = try restart.restart()
+    try Effect.try(() => assert.deepStrictEqual(
+      { offered: Option.getOrUndefined(offered), first, second, restarts: held.restarts },
+      { offered: true, first: true, second: false, restarts: 1 },
+    ))
+  }
+})
+
+it.effect("Ask my assistant from anywhere, and leave with Back (spec/assistant/index.md, \"Back closes what the assistant opened before it leaves the assistant\")", () => effect {
+  provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 })) {
+    const assistant = try Assistant
+    const composer = try Composer
+    const search = try ChatSearch
+    const idle = try assistant.back()
+    try composer.aim({ kind: "reply", quote: { messageId: "m1", text: "Hi", from: "agent" } })
+    try search.start()
+    const closedSearch = try assistant.back()
+    const droppedAim = try assistant.back()
+    const shells = try assistant.back()
+    try Effect.try(() => assert.deepStrictEqual({ idle, closedSearch, droppedAim, shells }, { idle: false, closedSearch: true, droppedAim: true, shells: false }))
+  }
+})

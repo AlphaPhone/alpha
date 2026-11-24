@@ -1,0 +1,318 @@
+// spec/maps/guidance.md, "Start begins a new session from a ready route"; spec/maps/agentSurface.md, "Maps opens at most once per request, only over an unblocked launcher, and the answer waits for the open to commit or two seconds"; spec/maps/delivery.md, "The relay belongs to the last accepted turn, and only that turn's end clears it"; spec/maps/delivery.md, "A navigation effect runs only under a returned claim, and a redelivery never runs it twice"; spec/maps/selectedRead.md, "The context revision changes exactly when what is shown changes, and clears when Maps is not in front"; spec/maps/selectedRead.md, "A read is approved only for the selection the card showed, and its result is uploaded only while that selection is still shown"
+import { Machine as SurfaceMachine, openWaitMs, showable } from "../../gen/maps__agentSurface.effect.vibe"
+import { Machine as DeliveryMachine, claimDeadlineMs, negativeCleanupMs } from "../../gen/maps__delivery.effect.vibe"
+import { type Guidance, Machine as GuidanceMachine } from "../../gen/maps__guidance.effect.vibe"
+import { type Screen, Machine as ScreenMachine } from "../../gen/maps__screen.effect.vibe"
+import { type ContextKind, Machine as ReadMachine, maxReadBytes } from "../../gen/maps__selectedRead.effect.vibe"
+import type { ProviderConfig, ResultState, Place, Route } from "@elizaos/plugin-maps/client/contracts"
+import {
+  type ActiveGuidance, type MapsNavigationSurface, type NavigationOwner, type RoutePlanReceipt, RelayUnavailable,
+  deviceMapsNavigation, withMapsNavigationRelay,
+} from "@elizaos/plugin-maps/client/device-navigation"
+import { MapsRelay } from "../assistant/ports.vibe"
+import { newId } from "../platform/ids.ts"
+import { Resident } from "../platform/resident.vibe"
+import { modelTravel, wireMode } from "./cloud.vibe"
+import { emptyContent, MapsContent, type MapsContentState } from "./content.vibe"
+import { failure } from "./failure.vibe"
+import { MapsLocation } from "./location.vibe"
+import { InteractClaim } from "./maps.schema.vibe"
+import { MapsNavigation } from "./navigation.vibe"
+import { MapsShell } from "./ports.vibe"
+import { MapsScreen } from "./screen.vibe"
+
+const RELAY_PATH = "/api/client-devices/maps-navigation"
+
+/** The wire name of the reviewed read of the selected place or route. */
+export const MAPS_SELECTED_READ_CAPABILITY = "maps.selected-read.v1"
+
+/** The Maps capabilities this phone advertises in `x-eliza-device-capabilities`, of those the agent offered: the selected read, on every build. */
+export function mapsDeviceCapabilities(offered: readonly string[]): string[] {
+  return [MAPS_SELECTED_READ_CAPABILITY].filter((capability) => offered.includes(capability))
+}
+
+/** What a view navigation must say to the host: its binding, as the host prepared it. */
+export interface NavigationBinding {
+  readonly [field: string]: unknown
+}
+
+/** What Maps shows the agent now, as the turn observation's selected object and a `maps_read_selected` target name it. */
+export interface MapsContext {
+  readonly kind: "map-place" | "map-route" | "map-search"
+  readonly id: string
+  readonly revision: string
+}
+
+/** The agent's way into Maps on this phone. */
+export service MapsAgent {
+  /** Offer this phone's Maps navigation to the agent for the length of one authenticated resident turn. */
+  withRelay<A, E, R>(conversationId: string, send: A!E!R): A!E!R
+  /** Claim and apply a view navigation the agent asked for; a redelivery of an effect already applied applies nothing. */
+  deliver(request: number, effectKey: number, binding: NavigationBinding, apply: void!!): void!!
+  /** The agent's read of the selected place or route, after the owner approved its card; undefined when the selection changed. */
+  readSelected(): (string | undefined)!!
+  review(): boolean!!
+  approve(): boolean!!
+  /** What Maps shows now with its identity and revision; undefined off Maps, on a locked screen, or with nothing shown. */
+  context(): (MapsContext | undefined)!!
+}
+
+/** The identity of what is shown, kept while the same place or search stays selected: a route keeps its destination's. */
+export function selectionOf(s: Screen, c: MapsContentState, kind: ContextKind): string {
+  if (kind === "MapSearch") return JSON.stringify(["search", s.searched])
+  if ((kind === "MapPlace" || kind === "MapRoute") && c.shown) return JSON.stringify(["place", c.shown.providerId, c.shown.providerPlaceId, c.shown.label, c.shown.coordinate])
+  return ""
+}
+
+const KEPT_IDENTITIES = 32
+
+function providerConfig(c: MapsContentState): ProviderConfig {
+  const coverage = c.coverage
+  if (!coverage) return { status: "unconfigured" }
+  const o = coverage.offer
+  const modes = (["drive", "walk", "bicycle", "transit"] as const).filter((m) => o[m])
+  return {
+    status: "configured", providerId: coverage.providerId, connectionId: coverage.connectionId, revision: coverage.revision,
+    capabilities: { map: o.map, search: true, placeDetails: true, modes, traffic: o.liveTraffic ? "live" : "none", transit: o.transit ? "scheduled" : "none",
+      offline: { map: false, search: false, routing: false }, alternatives: o.alternatives },
+  }
+}
+
+function phaseOf(p: Screen["details"]): ResultState<unknown>["phase"] {
+  return p === "Loading" ? "loading" : p === "Ready" ? "ready" : p === "Empty" ? "empty" : p === "Failed" ? "error" : "idle"
+}
+
+function shownPlace(c: MapsContentState): Place | null {
+  const s = c.shown
+  if (!s) return null
+  return s.place ?? { providerId: s.providerId ?? c.coverage?.providerId ?? "coordinates", id: s.providerPlaceId ?? "manual", name: s.label, coordinate: s.coordinate,
+    attribution: "User-selected coordinates", fetchedAt: 1 }
+}
+
+/** What the context publishes: its kind and the key that changes exactly when what is shown changes. */
+export function contextOf(s: Screen, c: MapsContentState, guiding: boolean): { kind: ContextKind; key: string } {
+  const route = c.routes.run === s.routeRun ? c.routes.routes[s.chosen] : undefined
+  if ((s.directions || guiding) && s.route === "Ready" && route && route.mode !== "transit")
+    return { kind: "MapRoute", key: JSON.stringify(["route", route.providerId, route.id, route.from, route.to, route.mode]) }
+  if (c.shown) return { kind: "MapPlace", key: JSON.stringify(["place", c.shown.label, c.shown.coordinate, c.shown.providerId, c.shown.providerPlaceId]) }
+  if (s.searching && s.searched) return { kind: "MapSearch", key: JSON.stringify(["search", s.searched, s.search, c.results.run]) }
+  return { kind: "NoContext", key: "" }
+}
+
+/** The agent glue over the plugin's device navigation and relay, the screen, guidance and the shell. */
+export const agentLayer = Layer.effect(MapsAgent, effect {
+  const resident = try Resident
+  const shell = try MapsShell
+  const surface = try SurfaceMachine
+  const delivery = try DeliveryMachine
+  const reads = try ReadMachine
+  const screen = try ScreenMachine
+  const guidanceMachine = try GuidanceMachine
+  const content = try MapsContent
+  const location = try MapsLocation
+  const navigation = try MapsNavigation
+  const actions = try MapsScreen
+  let latest: { screen: Screen; content: MapsContentState; guidance: Guidance } = { screen: try screen.get(), content: emptyContent, guidance: try guidanceMachine.get() }
+  let contextKey = ""
+  let selection = ""
+  const identities = new Map<string, string>()
+  let reported = { session: 0, intent: 0 }
+  const offers = new Map<string, number>()
+  const connected = try Queue.unbounded<{ value: boolean; offerId: string }>()
+
+  fork.detached Stream.runForEach(Stream.zipLatest(Stream.zipLatest(screen.changes, content.changes), guidanceMachine.changes), ([[s, c], g]) => effect {
+    latest = { screen: s, content: c, guidance: g }
+    const context = contextOf(s, c, g.phase !== "NotGuiding")
+    if (context.key !== contextKey) {
+      contextKey = context.key
+      selection = selectionOf(s, c, context.kind)
+      reads.send({ type: "publish", kind: context.kind, changed: true }) catch () => undefined
+    }
+  })
+
+  fork.detached Stream.runForEach(shell.states, (state) => effect {
+    surface.send({ type: "setBlocked", on: !showable(state) }) catch () => undefined
+    const view = state.view === "maps" ? "MapsView" : state.view === "home" ? "HomeView" : "AppView"
+    const now = try surface.get()
+    if (now.view !== view || now.pendingOpen) {
+      if (view === "MapsView" && now.pendingOpen) surface.send({ type: "commitOpen" }) catch () => undefined
+      else surface.send({ type: "goTo", view }) catch () => undefined
+    }
+    reads.send(state.view === "maps" ? { type: "enterContext" } : { type: "leaveContext" }) catch () => undefined
+    if ((try reads.get()).sensitive !== state.secure) reads.send({ type: "protect", on: state.secure }) catch () => undefined
+  })
+
+  fork.detached Stream.runForEach(Stream.fromQueue(connected), ({ value, offerId }) => effect {
+    if (value) {
+      const turn = (try delivery.get()).offer + 1
+      offers.set(offerId, turn)
+      delivery.send({ type: "openOffer", turn }) catch () => undefined
+      delivery.send({ type: "offerSettles", turn, acknowledged: true }) catch () => undefined
+    } else {
+      const turn = offers.get(offerId)
+      offers.delete(offerId)
+      if (turn !== undefined) delivery.send({ type: "endTurn", turn }) catch () => undefined
+    }
+  })
+
+  effect function present() {
+    const asked = surface.send({ type: "requestMaps" }) catch () => undefined
+    if (!asked) return false
+    if (asked.waiting === 0) return asked.last === "Admitted"
+    try shell.admitOwnViewOpen("maps")
+    try shell.open("maps")
+    const settled = timeout(Stream.runHead(Stream.filter(surface.changes, (s) => s.waiting === 0)), openWaitMs) catch () => undefined
+    if (settled === undefined || settled._tag === "None") {
+      const s = try surface.get()
+      if (s.waiting > 0) surface.send({ type: "openTimesOut", id: s.waiting }) catch () => undefined
+    }
+    return (try surface.get()).last === "Admitted"
+  }
+
+  effect function plannedFrom(origin: { latitude: number; longitude: number }) {
+    const before = try screen.get()
+    try actions.planFrom(origin)
+    const after = try screen.get()
+    if (after.routeRun === before.routeRun) return
+    try Stream.runHead(Stream.filter(screen.changes, (s) => s.routeRun !== after.routeRun || s.route !== "Loading"))
+  }
+
+  const owner: NavigationOwner = {
+    get providerId() { return latest.content.coverage?.providerId ?? "" },
+    get attribution() { return latest.content.coverage?.attribution ?? "" },
+    current: () => latest.content.coverage !== undefined,
+  }
+
+  const mapsSurface: MapsNavigationSurface = {
+    present,
+    snapshot: () => {
+      const { screen: s, content: c } = latest
+      const route: Route | null = s.route === "Ready" && c.routes.run === s.routeRun ? c.routes.routes[s.chosen] ?? null : null
+      return {
+        provider: providerConfig(c),
+        selection: { phase: phaseOf(s.details), value: shownPlace(c), error: null },
+        route: { phase: phaseOf(s.route), value: route, error: null },
+        revision: s.intent * 100000 + s.choiceId,
+        mode: wireMode(s.travel),
+      }
+    },
+    showPlace: (place, resolveDetails) => actions.showAgentPlace(place, resolveDetails),
+    showDirections: (place, mode, resolveDetails) => actions.showAgentPlace(place, resolveDetails, modelTravel(mode)),
+    locationGranted: () => location.granted(),
+    locate: () => location.once("AgentFix"),
+    planFrom: (origin) => plannedFrom(origin),
+    guidance: (): ActiveGuidance | null => {
+      const { guidance: g, content: c, screen: s } = latest
+      if (g.phase === "NotGuiding" || !c.guidance) return null
+      return { session: g.session, routeId: c.guidance.route.id, placeName: c.guidance.destination, travelMode: wireMode(s.travel),
+        ...(c.guidance.fix ? { fix: c.guidance.fix } : {}), rerouting: g.phase === "Rerouting", arrived: g.phase === "Arrived" }
+    },
+    reroute: (from) => effect {
+      const session = latest.guidance.session
+      const error = (navigation.reroute() |> map(%, () => undefined)) catch (e) => e
+      const route = (try content.get()).guidance?.route
+      return { session, ...(route ? { route } : {}), ...(error ? { error } : {}) } satisfies RoutePlanReceipt
+    },
+    stop: () => navigation.end(),
+  }
+  const device = try deviceMapsNavigation(mapsSurface, owner)
+
+  fork.detached Stream.runForEach(Stream.zipLatest(guidanceMachine.changes, screen.changes), ([g, s]) => effect {
+    const was = reported
+    const live = g.phase === "Guiding" || g.phase === "Rerouting"
+    if (live && was.session !== g.session) {
+      reported = { session: g.session, intent: s.intent }
+      try device.confirmed()
+      const active = mapsSurface.guidance()
+      if (active) try device.guidanceStarted(active)
+    } else if (!live && was.session !== 0) {
+      reported = { session: 0, intent: s.intent }
+      try device.guidanceEnded()
+    } else if (!live && s.intent !== was.intent) {
+      reported = { ...was, intent: s.intent }
+      try device.sheetChanged()
+    }
+  })
+
+  effect function relayRequest(body: Readonly<Record<string, unknown>>) {
+    const answer = resident.json("POST", RELAY_PATH, body) catch effect () => { throw new RelayUnavailable({ reason: "The Maps relay is unavailable." }) }
+    return answer.data
+  }
+
+  return {
+    withRelay: (conversationId, send) => withMapsNavigationRelay({
+      current: () => latest.content.coverage ? device : undefined,
+      execute: (_owner, operation) => operation.kind === "select" ? device.select(operation.place)
+        : operation.kind === "start" ? device.start(operation.request)
+        : operation.kind === "reroute" ? device.reroute() : device.stop(),
+      connected: (value, offerId) => { Queue.offerUnsafe(connected, { value, offerId }) },
+    }, relayRequest, conversationId, send),
+    effect deliver(request: number, effectKey: number, binding: NavigationBinding, apply: void!!) {
+      const begun = delivery.send({ type: "grantArrives", request, effectKey }) catch () => undefined
+      if (!begun) return
+      const claimed = timeout(resident.json("POST", "/api/views/interact-claim", binding), claimDeadlineMs) catch () => undefined
+      const claim = claimed === undefined ? undefined : (Schema.decodeUnknownEffect(InteractClaim)(claimed.data) catch () => undefined)
+      const claimId = claim?.claimId
+      const step = delivery.send({ type: "claimSettles", request, claim: claimId ? 1 : 0 }) catch () => undefined
+      if (!claimId || step === undefined) return
+      const applied = delivery.send({ type: "applyClaimed", request }) catch () => undefined
+      if (!applied) {
+        delivery.send({ type: "failBeforeEffect", request }) catch () => undefined
+        timeout(resident.json("POST", "/api/views/interact-result", { ...binding, claimId, success: false, result: { switched: false } }), negativeCleanupMs) catch () => undefined
+        return
+      }
+      for (const out of applied.out) {
+        if (out.tag === "ApplyNavigation") try apply
+        if (out.tag === "SendPositive") resident.json("POST", "/api/views/interact-result", { ...binding, claimId, success: true, result: { switched: true } }) catch () => undefined
+      }
+    },
+    effect review() {
+      return (reads.send({ type: "review" }) catch () => undefined) !== undefined
+    },
+    effect approve() {
+      const approved = reads.send({ type: "approveRead" }) catch () => undefined
+      return approved?.phase === "Executing"
+    },
+    effect context() {
+      const r = try reads.get()
+      if (!r.inMaps || r.sensitive || r.kind === "NoContext" || selection === "") return undefined
+      let id = identities.get(selection)
+      if (id === undefined) {
+        id = `maps_${newId()}`
+        identities.set(selection, id)
+        if (identities.size > KEPT_IDENTITIES) identities.delete(identities.keys().next().value ?? "")
+      }
+      const kind = r.kind === "MapRoute" ? "map-route" as const : r.kind === "MapPlace" ? "map-place" as const : "map-search" as const
+      return { kind, id, revision: String(r.revision) } satisfies MapsContext
+    },
+    effect readSelected() {
+      const executed = reads.send({ type: "executeRead" }) catch () => undefined
+      if (executed?.outcome !== "ReadSucceeded") {
+        reads.send({ type: "uploadRead" }) catch () => undefined
+        return undefined
+      }
+      const { screen: s, content: c } = latest
+      const route = c.routes.run === s.routeRun ? c.routes.routes[s.chosen] : undefined
+      const coverage = c.coverage
+      const body = executed.kind === "MapRoute" && route
+        ? { kind: "map-route", providerId: route.providerId, providerRevision: coverage?.revision ?? "", attribution: route.attribution, from: route.from, to: route.to,
+            mode: route.mode, distanceMeters: route.distanceMeters, durationSeconds: route.durationSeconds, traffic: route.traffic }
+        : { kind: "map-place", providerId: coverage?.providerId ?? "", providerRevision: coverage?.revision ?? "", attribution: c.shown?.place?.attribution ?? coverage?.attribution ?? "",
+            label: c.shown?.label ?? "", coordinate: c.shown?.coordinate }
+      const text = JSON.stringify(body)
+      const uploaded = reads.send({ type: "uploadRead" }) catch () => undefined
+      return uploaded?.uploaded && encodeURIComponent(text).replace(/%[0-9A-F]{2}/g, "x").length <= maxReadBytes ? text : undefined
+    },
+  }
+})
+
+/** The refusal the shell shows when the agent's request could not bring Maps forward. */
+export const notShown = failure("unavailable", "Open Maps on the phone to continue. Nothing was changed on the map.")
+
+/** The assistant's MapsRelay port filled by Maps: each resident turn offers this phone's Maps navigation through MapsAgent. */
+export const mapsRelayPort = Layer.effect(MapsRelay, effect {
+  const agent = try MapsAgent
+  return {
+    withRelay: <A, E, R>(conversationId: string, send: Effect.Effect<A, E, R>) => agent.withRelay(conversationId, send),
+  }
+})

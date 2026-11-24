@@ -1,0 +1,20 @@
+// spec/workflows/vocabulary.md, "Only an applied, durable receipt of a successful result counts as committed"; spec/workflows/vocabulary.md, "A refusal to edit or switch on a workflow in chat offers to open Workflows"
+
+/** A record an effect receipt names: its kind, id and the revision it reached. */
+export schema EffectResource { kind: string; id: string; version?: string }
+
+/** One effect receipt of an action result, as the agent reports it. */
+export schema EffectReceiptRecord {
+  operation: string
+  outcome: string
+  resource: EffectResource
+  commit?: { kind: string }
+  artifacts?: ReadonlyArray<EffectResource>
+}
+
+/** One action result of an agent reply: whether it succeeded, its refusal code and its receipts. */
+export schema ActionResultRecord {
+  success: boolean
+  error?: string
+  effectReceipts?: ReadonlyArray<EffectReceiptRecord>
+}

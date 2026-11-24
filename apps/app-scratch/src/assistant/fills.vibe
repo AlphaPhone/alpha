@@ -1,0 +1,45 @@
+// spec/assistant/context.md, "A turn carries the page Browser hands it for the observed tab, beside the observation, only to a peer that declares it"; spec/assistant/context.md, "A turn names the place, route or search Maps shows as its selected object only while Maps is in front"; spec/assistant/views.md, "Maps' view is delivered by Maps, at most once per effect"; spec/assistant/views.md, "A view command is claimed once, refused under \"Ask before Alpha acts\", run only in Browser, and answered once"
+import { isPrivateTab } from "../../gen/browser__session.effect.vibe"
+import { BrowserAgent } from "../browser/agent.vibe"
+import { BrowserPageContext } from "../browser/pageContext.vibe"
+import { BrowserTabs } from "../browser/session.vibe"
+import { MapsAgent } from "../maps/agent.vibe"
+import type { BrowserPages, BrowserViews, MapsViews, PageObservation } from "./ports.vibe"
+
+/** The assistant's BrowserPages port over Browser's one page model, for the shell to fill once Browser is built: the tab in front unless it is private, Browser's own read for a turn, and the links the latest turn carried. */
+export const browserPagesFromBrowser = effect {
+  const context = try BrowserPageContext
+  const agent = try BrowserAgent
+  const tabs = try BrowserTabs
+  const port: BrowserPages.Shape = {
+    effect selected() {
+      const state = try tabs.get()
+      if (isPrivateTab(state, state.cur)) return undefined
+      const picked = try agent.selection()
+      return picked === undefined ? undefined : { id: picked.id, revision: picked.revision }
+    },
+    forTurn: (observation: PageObservation, peerTakesIt: boolean) => context.forTurn(observation, peerTakesIt),
+    carried: (url: string) => context.carried(url),
+  }
+  return port
+}
+
+/** The assistant's MapsViews port over Maps' agent glue, for the shell to fill once Maps is built. */
+export const mapsViewsFromMaps = effect {
+  const maps = try MapsAgent
+  const port: MapsViews.Shape = {
+    shown: () => maps.context(),
+    deliver: (request: number, effectKey: number, binding: { readonly [field: string]: unknown }, apply: Effect.Effect<void>) => maps.deliver(request, effectKey, binding, apply),
+  }
+  return port
+}
+
+/** The assistant's BrowserViews port over Browser's agent, for the shell to fill once Browser is built: back, forward and reload as view commands, everything else answered by Browser's interaction rule. */
+export const browserViewsFromBrowser = effect {
+  const agent = try BrowserAgent
+  const port: BrowserViews.Shape = {
+    command: (raw: unknown, selection: unknown) => agent.command(raw, selection),
+    interact: (capability: string, raw: unknown, selection: unknown) => agent.interact(capability, raw, selection),
+  }
+  return port
+}

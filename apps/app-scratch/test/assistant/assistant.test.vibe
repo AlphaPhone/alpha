@@ -1,0 +1,102 @@
+// spec/assistant/send.md, "Story: Send a message and know what happened to it"; spec/assistant/draft.md, "Story: Get my message back when it was not sent"; spec/assistant/review.md, "Story: Let my agent act only with my say-so"; spec/assistant/reply.md, "Story: Read a reply with its cards"; spec/assistant/index.md, "Something handed to the assistant is only ever a draft the owner sends"
+import { assert, it } from "@effect/vitest"
+import { Machine as DraftsMachine, shown } from "../../gen/assistant__draft.effect.vibe"
+import { Assistant } from "../../src/assistant/assistant.vibe"
+import { Composer } from "../../src/assistant/composer.vibe"
+import { copy } from "../../src/assistant/presentation.vibe"
+import { emptyTranscript } from "../../src/assistant/transcript.vibe"
+import { classify, plainText } from "../../src/assistant/reply-lines.vibe"
+import { textOf } from "../../src/assistant/units.vibe"
+import { assistantOver, countingExecutors, fakeHost, fakePreferences, fakeResident, journalNative, wireProposal, type Seen } from "./fakes.vibe"
+
+const futureExpiry = "2099-01-01T00:00:00.000Z"
+const noteProposal = wireProposal("p1", "d".repeat(64), { type: "create_note", title: "Milk", body: "" }, "u1", futureExpiry)
+
+effect function transcriptNow() {
+  const composer = try Composer
+  const head = try Stream.runHead(composer.transcript)
+  return Option.isSome(head) ? head.value : emptyTranscript
+}
+
+it.effect("Send a message and know what happened to it (spec/assistant/send.md, \"Story: Send a message and know what happened to it\")", () => effect {
+  const seen: Seen = { calls: [] }
+  const toasts: string[] = []
+  const runs = { count: 0 }
+  provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "Done." }, proposals: [] }), fakeHost(toasts), countingExecutors(runs)) {
+    const composer = try Composer
+    const drafts = try DraftsMachine
+    try composer.edit("Add milk to my list")
+    try composer.send()
+    const after = try transcriptNow()
+    const said = after.rows.filter((row) => row.kind === "agent").map((row) => row.kind === "agent" ? row.text : "")
+    const draft = textOf(shown(try drafts.get()))
+    const posted = seen.calls.filter((call) => call.method === "STREAM" || (call.method === "POST" && call.path.endsWith("/messages"))).length
+    try Effect.try(() => assert.deepStrictEqual({ said, draft, posted, user: after.rows[0]?.kind }, { said: ["Done."], draft: "", posted: 1, user: "user" }))
+  }
+})
+
+it.effect("Get my message back when it was not sent (spec/assistant/draft.md, \"Story: Get my message back when it was not sent\")", () => effect {
+  const seen: Seen = { calls: [] }
+  const toasts: string[] = []
+  provide assistantOver(fakeResident(seen, { turn: { kind: "refuse", status: 429 }, proposals: [] }), fakeHost(toasts), countingExecutors({ count: 0 })) {
+    const composer = try Composer
+    const drafts = try DraftsMachine
+    try composer.edit("Call mom")
+    try composer.send()
+    // spec/assistant/send.md, "Nothing reached the agent: the bubble goes and the text comes back ahead of newer typing, in its own session only"
+    const back = textOf(shown(try drafts.get()))
+    const rows = (try transcriptNow()).rows.length
+    try Effect.try(() => assert.deepStrictEqual({ back, rows, told: toasts.includes(copy.backInComposer) }, { back: "Call mom", rows: 0, told: true }))
+  }
+})
+
+it.effect("A handed-over draft never overwrites typing (spec/assistant/index.md, \"Something handed to the assistant is only ever a draft the owner sends\")", () => effect {
+  provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals: [] }), fakeHost([]), countingExecutors({ count: 0 })) {
+    const composer = try Composer
+    const assistant = try Assistant
+    const drafts = try DraftsMachine
+    try assistant.openWith("Explain this file")
+    const placed = textOf(shown(try drafts.get()))
+    try composer.edit("My own words")
+    try assistant.openWith("Summarize this for me")
+    const kept = textOf(shown(try drafts.get()))
+    const holding = try assistant.holdingDraft()
+    try composer.edit("")
+    const released = try assistant.holdingDraft()
+    try Effect.try(() => assert.deepStrictEqual({ placed, kept, holding, released }, { placed: "Explain this file", kept: "My own words", holding: true, released: false }))
+  }
+})
+
+it.effect("Let my agent act only with my say-so (spec/assistant/review.md, \"Story: Let my agent act only with my say-so\")", () => effect {
+  const journal = new Map<string, { readonly revision: number }>()
+  const runs = { count: 0 }
+  const seen: Seen = { calls: [] }
+  const said = { asks: false, shares: false }
+  provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "Saved it." }, proposals: [noteProposal] }), fakeHost([]), countingExecutors(runs), journalNative(journal), fakePreferences(said)) {
+    const composer = try Composer
+    // spec/assistant/review.md, "A direct effect needs an allow-listed operation of the current message that is not a workflow step, with review-first off"
+    try composer.edit("Make a note: milk")
+    try composer.send()
+    const direct = runs.count
+    // spec/assistant/review.md, "A result is settled once, uploaded only from the terminal journal, and \"unknown\" only for an attempt that reached the executor"
+    try composer.edit("Make a note: milk")
+    try composer.send()
+    const again = runs.count
+    said.asks = true
+    try composer.edit("Make another note")
+    try composer.send()
+    const cards = (try transcriptNow()).rows.filter((row) => row.kind === "card").length
+    try Effect.try(() => assert.deepStrictEqual({ direct, again, afterPreference: runs.count, cards: cards >= 1 }, { direct: 1, again: 1, afterPreference: 1, cards: true }))
+  }
+})
+
+it.effect("Read a reply with its cards (spec/assistant/reply.md, \"Story: Read a reply with its cards\")", () => effect {
+  const maps = "[MAPSCARD]\n{\"kind\":\"place\",\"place\":{\"name\":\"SFO\",\"latitude\":37.62,\"longitude\":-122.38,\"provider\":\"osm\",\"providerPlaceId\":\"1\",\"categories\":[]},\"attribution\":null}\n[/MAPSCARD]"
+  const reply = `${maps}\nAbout 25 minutes.\n\`\`\`\n${maps}\n[INFO] ok\n\`\`\`\n[FORM]{"id":"f","fields":[]}[/FORM]`
+  const segments = classify(reply, false)
+  const kinds = segments.map((segment) => segment.line.tag)
+  try Effect.try(() => assert.deepStrictEqual(
+    { kinds, plain: plainText(segments).includes("About 25 minutes."), fencedKept: plainText(segments).includes("[INFO] ok") },
+    { kinds: ["ToolBlock", "Prose", "FenceMark", "Prose", "Prose", "Prose", "Prose", "FenceMark", "FormBlock"], plain: true, fencedKept: true },
+  ))
+})

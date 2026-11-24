@@ -1,0 +1,69 @@
+// spec/shell/handoffs.md, "Story: Carry what I asked for in Notes into the app that does it"; spec/shell/handoffs.md, "A note's web page opens only as a secure web address, through Browser's approved open"; spec/notes/share.md, "Story: Share the note I have open"; spec/notes/webSource.md, "Story: Visit or remove the web page a note came from"; spec/notes/origins.md, "Story: Go from a saved event or reminder back to its note"
+import { opensApp, refusalShown, sourceOpens, type Request } from "../../gen/shell__handoffs.effect.vibe"
+import { BrowserAgent } from "../browser/agent.vibe"
+import { MailComposer } from "../inbox/composer.vibe"
+import { notesRouteOf } from "../notes/list.vibe"
+import { NotesHandoff, type NotesRequest } from "../notes/origins.vibe"
+import { Navigation } from "./navigation.vibe"
+import { Notices } from "./notices.vibe"
+
+const REQUESTS: Readonly<Record<NotesRequest["kind"], Request>> = {
+  "open-notes": "OpenNotes", "email-draft": "EmailDraft", "open-web-source": "OpenWebSource", "calendar-draft": "CalendarDraft",
+}
+
+const EMAIL_REFUSED = "Inbox couldn’t start the email. Nothing was sent."
+const SOURCE_REFUSED = "Browser couldn’t open the page this note came from."
+
+function secureAddress(url: string): boolean {
+  const parsed = URL.parse(url.trim())
+  return parsed !== null && parsed.protocol === "https:" && parsed.hostname !== "" && parsed.username === "" && parsed.password === ""
+}
+
+/** The shell's side of what Notes hands over: Notes at a note or a list filter, carried as its route, an Inbox draft, and the note's web page in Browser; Calendar follows its own drafts. Built after Inbox and Browser. */
+export const handoffsLive = Layer.effectDiscard(effect {
+  const notes = try NotesHandoff
+  const navigation = try Navigation
+  const notices = try Notices
+  const composer = try MailComposer
+  const agent = try BrowserAgent
+
+  effect function openNotes(request: Extract<NotesRequest, { readonly kind: "open-notes" }>) {
+    try navigation.open("notes", notesRouteOf(request))
+  }
+
+  effect function emailDraft(subject: string, body: string) {
+    const accepted = (try composer.compose({ toList: [], subject, body, files: [] })) === undefined
+    if (refusalShown("EmailDraft", accepted)) try notices.show(EMAIL_REFUSED, { failure: true })
+    if (opensApp("EmailDraft", accepted)) try navigation.open("inbox")
+  }
+
+  effect function webSource(url: string) {
+    const secure = secureAddress(url)
+    let refusal = SOURCE_REFUSED
+    let opened: { readonly tab: string; readonly present: Effect.Effect<void> } | undefined = undefined
+    if (secure) {
+      opened = agent.openApproved(url.trim(), false) catch (error) => {
+        refusal = error.message || SOURCE_REFUSED
+        return undefined
+      }
+    }
+    const accepted = sourceOpens(secure, opened !== undefined)
+    if (refusalShown("OpenWebSource", accepted)) try notices.show(refusal, { failure: true })
+    if (opensApp("OpenWebSource", accepted) && opened !== undefined) {
+      try navigation.open("browser")
+      try opened.present
+    }
+  }
+
+  effect function follow(request: NotesRequest) {
+    if (!opensApp(REQUESTS[request.kind], true)) return
+    switch (request.kind) {
+      case "open-notes": return try openNotes(request)
+      case "email-draft": return try emailDraft(request.subject, request.body)
+      case "open-web-source": return try webSource(request.url)
+      case "calendar-draft": return
+    }
+  }
+
+  fork.scoped Stream.runForEach(notes.requests, follow)
+})

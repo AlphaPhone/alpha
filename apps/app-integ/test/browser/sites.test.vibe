@@ -1,0 +1,131 @@
+// spec/browser/site.md, "Story: Keep sites apart and ask me before they use my device"; spec/browser/site.md, "Story: Sign out of one site"; spec/browser/autofill.md, "Story: Fill a login only on the site I see"; spec/browser/autofill.md, "Story: Know whether this phone can fill logins in Browser"; spec/browser/agent.md, "Story: Open the site I asked for"
+import { assert, it } from "@effect/vitest"
+import { BrowserAutofill } from "../../src/browser/autofill.vibe"
+import { operationPorts } from "../../src/browser/operations.vibe"
+import { BrowserReviews } from "../../src/browser/reviews.vibe"
+import { BrowserTabs } from "../../src/browser/session.vibe"
+import { callsTo, emit, fakeHost, loadPage, sessionOf, settledTabs } from "./fakes.vibe"
+
+// spec/browser/site.md, "A tab is built only with the cookie policy its profile asks for, and a private tab never shares cookies or remembers a decision"
+it.live("each tab's WebView is built in its own profile, and a pop-up of a private tab is private", () => effect {
+  const fake = try fakeHost()
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      try settledTabs(tabs)
+      const session = try sessionOf(fake.calls)
+      try loadPage(tabs, fake.events, session, "https://example.test/", "1", 1)
+      try tabs.dispatch({ type: "openTab", id: "bpriv", profile: "Private" })
+      try loadPage(tabs, fake.events, session, "https://private.test/", "1", 1)
+      try emit(fake.events, "tabOpened", { session, id: "bpopup", opener: "bpriv", private: false })
+      const now = try tabs.get()
+      try Effect.try(() => assert.deepStrictEqual({
+        built: (try callsTo(fake.calls, "create")).map((c) => c.args.private),
+        popup: now.tabs.find((t) => t.id === "bpopup")?.profile,
+        selected: now.cur,
+      }, { built: [false, true], popup: "Private", selected: "bpopup" }))
+    }
+  })
+})
+
+// spec/browser/site.md, "A site's request is held only while its page is shown and selected, and is granted only by the owner's allow, then Android's, for the page that asked"
+it.live("the host's refusals for a site's device request reach the owner in Alpha's words", () => effect {
+  const fake = try fakeHost()
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const started = try settledTabs(tabs)
+      const session = try sessionOf(fake.calls)
+      try emit(fake.events, "notice", { session, id: started.cur, message: "Blocked a camera or microphone request from an embedded site." })
+      try emit(fake.events, "notice", { session, id: started.cur, message: "Android has not allowed Alpha Phone to use your location. You can allow it in Android Settings." })
+      try emit(fake.events, "notice", { session, id: started.cur, message: "Something the host never words" })
+      try Effect.try(() => assert.deepStrictEqual(try Ref.get(fake.toasts), [
+        "Blocked a camera or microphone request from a site inside this page.",
+        "Android hasn’t allowed Alpha to use your location. You can allow it in Android Settings.",
+        "Browser blocked something on this page.",
+      ]))
+    }
+  })
+})
+
+// spec/browser/site.md, "Story: Sign out of one site"
+it.live("Clear site data clears only the shown site after the owner confirms it, and a page that is not loaded clears nothing", () => effect {
+  const fake = try fakeHost({ answers: { clearSiteData: (args) => ({ site: URL.parse(String(args.url))?.hostname }) } })
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const reviews = try BrowserReviews
+      try settledTabs(tabs)
+      try tabs.clearSiteData()
+      const id = try loadPage(tabs, fake.events, try sessionOf(fake.calls), "https://example.test/account", "1", 1)
+      for (const approve of [false, true]) {
+        const clearing = fork tabs.clearSiteData()
+        try timeout(Stream.runHead(Stream.filter(reviews.changes, (r) => r.open.some((o) => o.kind === "ClearSiteData" && o.detail === "example.test"))), "2 seconds")
+        if (approve) try reviews.approve("browser-clear-site")
+        else try reviews.dismiss("browser-clear-site")
+        try join clearing
+      }
+      try Effect.try(() => assert.deepStrictEqual({
+        cleared: (try callsTo(fake.calls, "clearSiteData")).map((c) => [c.args.id, c.args.url]),
+        said: try Ref.get(fake.toasts),
+      }, {
+        cleared: [[id, "https://example.test/account"]],
+        said: ["Load a website before clearing its data.", "Cleared example.test"],
+      }))
+    }
+  })
+})
+
+// spec/browser/autofill.md, "Story: Know whether this phone can fill logins in Browser"; spec/browser/autofill.md, "Story: Fill a login only on the site I see"
+it.live("filling is known only from the host's answer, the menu's Passwords opens the Passwords app, and a foreign sign-in prompt is blocked", () => effect {
+  const able = try fakeHost({ answers: { loginFillStatus: () => ({ available: true }) } })
+  const silent = try fakeHost({ answers: { loginFillStatus: () => new Error("Browser operation failed") } })
+  const statuses: string[] = []
+  for (const fake of [able, silent]) {
+    try scoped(effect {
+      provide fake.live {
+        const tabs = try BrowserTabs
+        const autofill = try BrowserAutofill
+        const started = try settledTabs(tabs)
+        statuses.push(try autofill.status())
+        try tabs.dispatch({ type: "toggleMenu" })
+        try autofill.openPasswords()
+        try emit(fake.events, "notice", { session: try sessionOf(fake.calls), id: started.cur, message: "Blocked a sign-in prompt from a different site." })
+      }
+    })
+  }
+  try Effect.try(() => assert.deepStrictEqual({
+    statuses,
+    opened: try Ref.get(able.opened),
+    blocked: (try Ref.get(able.toasts)).includes("Blocked a sign-in request from a different site."),
+  }, { statuses: ["FillAvailable", "FillUnknown"], opened: ["passwords"], blocked: true }))
+})
+
+// spec/browser/agent.md, "Story: Open the site I asked for"
+it.live("an approved HTTPS open runs once through the Browser family's executor, and an HTTP or credentialed address is never an open", () => effect {
+  const fake = try fakeHost()
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const started = try settledTabs(tabs)
+      const ports = try operationPorts
+      const open = { type: "browser_navigate", url: "https://example.test/" }
+      const valid = [open, { type: "browser_navigate", url: "http://example.test/" }, { type: "browser_navigate", url: "https://ann:pw@example.test/" }].map((op) => ports.validate(op) !== undefined)
+      const executed = try promise(() => ports.execute(open, {} as never))
+      try sleep("50 millis")
+      try Effect.try(() => assert.deepStrictEqual({
+        valid,
+        executed,
+        described: ports.describe(open),
+        navigated: (try callsTo(fake.calls, "navigate")).map((c) => [c.args.id, c.args.url]),
+        readBack: try promise(() => ports.readBack(open, {} as never)),
+      }, {
+        valid: [true, false, false],
+        executed: { kind: "applied" },
+        described: { title: "Open in Browser", detail: "https://example.test/" },
+        navigated: [[started.cur, "https://example.test/"]],
+        readBack: { kind: "refused", code: "no_readback" },
+      }))
+    }
+  })
+})

@@ -1,0 +1,51 @@
+// spec/account/plan.md, "Only an admitting plan binds inference, and nothing stops the agent"; spec/account/plan.md, "The phone's agent host alone confirms what its inference is"; spec/account/session.md, "Sign-out revokes exactly the key it was asked for, and the agent keeps running"
+import { Native } from "../platform/native.vibe"
+import { Resident } from "../platform/resident.vibe"
+import { Attachment, ProviderConfigured, ProviderStatus } from "./provider.schema.vibe"
+
+const agent = "Agent"
+
+/** The model Eliza Cloud serves the agent through Cerebras. */
+export const cloudModel = "cerebras/qwen-3.8-27b"
+
+/** The resident's provider as the native host reports it. */
+export effect function providerStatus(native: Native.Shape) {
+  return try Schema.decodeUnknownEffect(ProviderStatus)(try native.invoke(agent, "providerStatus"))
+}
+
+/** Whether the owner's own keys are the route in use. */
+export function ownKeysInUse(status: ProviderStatus | undefined): boolean {
+  return status?.mode === "own" && status.keys?.text.configured === true
+}
+
+/**
+ * Binds Eliza Cloud inference for this account's key into the resident; the host keeps own keys selected when the owner
+ * chose them. Whether the host confirmed the binding.
+ */
+export effect function bindInference(native: Native.Shape, credentialId: string) {
+  const attachment = effect {
+    return try Schema.decodeUnknownEffect(Attachment)(try native.invoke(agent, "residentAttachment", { credentialId }))
+  } catch () => ({ attachable: false, bindingRetained: false })
+  if (attachment.attachable || attachment.bindingRetained === true) return true
+  const bound = effect {
+    return try Schema.decodeUnknownEffect(ProviderConfigured)(try native.invoke(agent, "configureCloudProvider", { credentialId, model: cloudModel }))
+  } catch () => ({ configured: false })
+  return bound.configured
+}
+
+/** Removes Cloud inference from the resident and reads it back; own keys keep AI on. Whether the host confirmed the removal. */
+export effect function unbindInference(native: Native.Shape) {
+  const before = providerStatus(native) catch () => undefined
+  if (ownKeysInUse(before)) return true
+  const cleared = effect {
+    return try Schema.decodeUnknownEffect(ProviderConfigured)(try native.invoke(agent, "clearProvider", { onlyIfPresent: true }))
+  } catch () => ({ configured: true })
+  if (cleared.configured) return false
+  const after = providerStatus(native) catch () => undefined
+  return after !== undefined && !after.configured
+}
+
+/** The resident agent always runs: ensured after every account change, whatever its outcome (P-43). */
+export effect function ensureResident(resident: Resident.Shape) {
+  resident.ensureRunning() catch () => undefined
+}

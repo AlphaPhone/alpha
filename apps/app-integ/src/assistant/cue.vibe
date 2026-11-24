@@ -1,0 +1,55 @@
+// spec/assistant/reply.md, "A spoken cue starts at once and a reply ready before it is audible drops it; an audible cue finishes before the reply, within 2.5 s"; spec/assistant/reply.md, "One brief acknowledgment at most, only before work runs, and the final answer is delivered whole"
+import { ackLimit, cueOnReply, cueReplyBoundMs, replyWaitMs, type Cue } from "../../gen/assistant__reply.effect.vibe"
+
+/** One voice turn's acknowledgement cue, spoken through the voice area's speech: started at once, dropped for a reply ready before it is audible, and finished within the bound when it already is. */
+export interface SpokenCue {
+  /** Start speaking the turn's one cue at once; a second cue, a blank one or one over 120 characters is ignored. */
+  say(text: string): void!!
+  /** The reply is ready: a cue still being prepared, or not yet said, is dropped at once and none is said after it; an audible one may finish; succeeds when reply speech may start, at most 2.5 s later. */
+  replyReady(): void!!
+  /** Stop, barge-in or the turn left: the cue ends at once. */
+  cancel(): void!!
+}
+
+/** A cue over `speak`, which plays `text` and runs `started` at its first audible playback, not at synthesis or fetch. */
+export effect function spokenCue(speak: (text: string, started: void!!) => void!!) {
+  let cue: Cue = "CuePreparing"
+  let used = false
+  let playing: Fiber.Fiber<void> | undefined
+  const ended = try Deferred.make<void>()
+  effect function play(text: string) {
+    if (cue !== "CuePreparing") return
+    try ensuring(speak(text, sync(() => { if (cue === "CuePreparing") cue = "CueAudible" })), effect {
+      if (cue === "CueAudible") cue = "CueEnded"
+      try Deferred.succeed(ended, undefined)
+    })
+  }
+  effect function drop() {
+    cue = "CueDropped"
+    const fiber = playing
+    playing = undefined
+    if (fiber !== undefined) try Fiber.interrupt(fiber)
+    try Deferred.succeed(ended, undefined)
+  }
+  const shape: SpokenCue = {
+    say: (text: string) => effect {
+      if (used || text.trim() === "" || text.length > ackLimit) return
+      used = true
+      playing = fork.detached play(text)
+    },
+    replyReady: () => effect {
+      const next = cueOnReply(cue)
+      if (next === "CueDropped") {
+        // A reply ready before any cue was said drops the turn's cue too, so a cue that arrives later is never said.
+        used = true
+        try drop()
+        return
+      }
+      if (cue !== "CueAudible") return
+      const finished = try timeoutOption(Deferred.await(ended), replyWaitMs(cue, cueReplyBoundMs))
+      if (Option.isNone(finished)) try drop()
+    },
+    cancel: () => drop(),
+  }
+  return shape
+}

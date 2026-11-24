@@ -1,0 +1,147 @@
+// spec/voice/conversation.md, "A Cloud stream listens, speaks the replies and the cue and mutes the speaker on one relay session, and only voice retiring ends it"
+import { assert, it } from "@effect/vitest"
+import { Build } from "../../src/platform/build.vibe"
+import { Cloud, CloudUnavailable } from "../../src/platform/cloud.vibe"
+import { Native, NativeFailed } from "../../src/platform/native.vibe"
+import { Resident } from "../../src/platform/resident.vibe"
+import { ResidentControl } from "../../src/platform/resident-control.vibe"
+import { memoryStore } from "../../src/platform/storage.vibe"
+import { ResidentFeeds } from "../../src/platform/view-events.vibe"
+import { voiceAbort } from "../../src/voice/cloud-stream.ts"
+import { layer } from "../../src/voice/layer.vibe"
+import { Speech, type StreamSpeaker } from "../../src/voice/speech.vibe"
+import { cloudStreaming } from "../../src/voice/stream.vibe"
+
+/** What the native host was asked, in order. */
+type Calls = Array<{ readonly plugin: string; readonly method: string; readonly args: { readonly [key: string]: unknown } }>
+
+/** A Cloud speech relay bridge that opens one session, plays each utterance at once and posts its events on `events`. */
+function relayBridge(calls: Calls, events: Queue.Queue<unknown>) {
+  return Layer.succeed(Native, {
+    available: () => Effect.succeed(true),
+    invoke: (plugin: string, method: string, args?: unknown) => effect {
+      const input = (args ?? {}) as { readonly [key: string]: unknown }
+      calls.push({ plugin, method, args: input })
+      if (plugin !== "AlphaCloudSpeechStream") throw new NativeFailed({ plugin, method, message: "absent" })
+      if (method === "startCloudSpeech") return { sessionId: input.sessionId, sampleRate: 16000, echoCancelled: true }
+      if (method === "speakCloudSpeech") {
+        try Queue.offer(events, { sessionId: input.sessionId, type: "audio-start", utteranceId: input.utteranceId })
+        try Queue.offer(events, { sessionId: input.sessionId, type: "audio-end", utteranceId: input.utteranceId })
+      }
+      return {}
+    },
+    listen: () => Stream.fromQueue(events),
+  })
+}
+
+/** The rest of the platform at its boundary: the resident and Cloud refuse, nothing leaves the test. */
+function platform(native: Layer.Layer<Native>) {
+  return Layer.mergeAll(
+    native,
+    Layer.succeed(Cloud, {
+      base: "https://api.eliza.app",
+      json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string) => Effect.fail(new CloudUnavailable({ status: 404, message: `${method} ${path}` })),
+    }),
+    Layer.succeed(Resident, {
+      status: () => Effect.succeed("running" as const),
+      ensureRunning: () => Effect.void,
+      json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string) => Effect.succeed({ status: 200, data: { method, path } }),
+      stream: () => Stream.empty,
+    }),
+    Layer.succeed(ResidentControl, {
+      changes: Stream.never,
+      session: () => Effect.succeed(undefined),
+      refreshAccount: () => Effect.void,
+      stop: () => Effect.void,
+      recovered: () => Effect.void,
+    }),
+    Layer.succeed(ResidentFeeds, { view: () => Stream.never, voice: () => Stream.never }),
+    Layer.succeed(Build, { info: { version: "test", variant: "launcher", testMocks: false } }),
+    memoryStore,
+  )
+}
+
+/** A stream speaker that records each passage, starts it at once and plays until `finish` or its abort. */
+function streamSpeaker(said: string[], finish: Deferred.Deferred<void>, muted: boolean[]) {
+  const speaker: StreamSpeaker = {
+    speak: (text: string, signal: AbortSignal, onStarted: () => void) => new Promise<void>((resolve, reject) => {
+      said.push(text)
+      onStarted()
+      signal.addEventListener("abort", () => reject(Object.assign(new Error("cancelled"), { name: "AbortError" })), { once: true })
+      runPromise(Deferred.await(finish)).then(() => resolve())
+    }),
+    setOutputMuted: (value: boolean) => {
+      muted.push(value)
+      return Promise.resolve()
+    },
+  }
+  return speaker
+}
+
+it.live(`one relay session hears the owner, speaks on the same session and mutes its microphone at a turn's end (spec/voice/conversation.md, "A Cloud stream listens, speaks the replies and the cue and mutes the speaker on one relay session, and only voice retiring ends it")`, () => effect {
+  const calls: Calls = []
+  const events = try Queue.unbounded<unknown>()
+  provide relayBridge(calls, events) {
+    const relay = try cloudStreaming("production", "credential-1", () => true, () => undefined)
+    const heard = try Deferred.make<string | null>()
+    const owner = voiceAbort()
+    const capture = try promise(() => relay.listen({
+      signal: owner.signal,
+      onSpeechStart: () => undefined,
+      onSpeechEnd: () => undefined,
+      onSegment: (text: string | null) => { runFork(Deferred.succeed(heard, text)) },
+      onEnd: () => undefined,
+    }))
+    const sessionId = calls[0]?.args.sessionId
+    try Queue.offer(events, { sessionId, type: "speech-start" })
+    try Queue.offer(events, { sessionId, type: "speech-end", text: " what is on today " })
+    const segment = try Deferred.await(heard)
+    let started = 0
+    try promise(() => relay.speak("Two meetings.", owner.signal, () => { started += 1 }))
+    try promise(() => capture.close())
+    try promise(() => relay.stop())
+    try Effect.try(() => assert.deepStrictEqual({
+      segment,
+      started,
+      fullDuplex: capture.fullDuplex,
+      methods: calls.map((call) => call.method),
+      muted: calls.filter((call) => call.method === "setCloudSpeechMuted").map((call) => call.args.muted),
+      oneSession: calls.every((call) => call.args.sessionId === sessionId),
+    }, {
+      segment: "what is on today",
+      started: 1,
+      fullDuplex: true,
+      methods: ["startCloudSpeech", "setCloudSpeechMuted", "speakCloudSpeech", "setCloudSpeechMuted", "stopCloudSpeech"],
+      muted: [false, true],
+      oneSession: true,
+    }))
+  }
+})
+
+it.live(`a bound stream speaks the reply channel, Stop cancels it, and Mute sets its output (spec/voice/conversation.md, "A Cloud stream listens, speaks the replies and the cue and mutes the speaker on one relay session, and only voice retiring ends it")`, () => effect {
+  const calls: Calls = []
+  const events = try Queue.unbounded<unknown>()
+  provide Layer.provide(layer, platform(relayBridge(calls, events))) {
+    const speech = try Speech
+    const said: string[] = []
+    const muted: boolean[] = []
+    const finish = try Deferred.make<void>()
+    try speech.bindStream(streamSpeaker(said, finish, muted))
+    const first = fork speech.speak("Two meetings today.", "Replies")
+    try sleep("20 millis")
+    try Deferred.succeed(finish, undefined)
+    try join first
+    const held = try Deferred.make<void>()
+    try speech.bindStream(streamSpeaker(said, held, muted))
+    const second = fork effect { return speech.speak("The first is at nine.", "Replies") catch (error) => error._tag }
+    try sleep("20 millis")
+    try speech.stop("Replies")
+    const stopped = try join second
+    const unmuted = try speech.setMuted(true)
+    try speech.bindStream(undefined)
+    const synthesized = calls.filter((call) => call.method.startsWith("synthesize") || call.method === "play" || call.method === "setSpeechOutputMuted").length
+    try Effect.try(() => assert.deepStrictEqual({ said, stopped, unmuted, muted, synthesized }, {
+      said: ["Two meetings today.", "The first is at nine."], stopped: "SpeechInterrupted", unmuted: true, muted: [true], synthesized: 0,
+    }))
+  }
+})

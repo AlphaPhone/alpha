@@ -1,0 +1,74 @@
+// spec/inbox/operations.md, "Gmail's review must match the proposal exactly and come with a prepared receipt"; spec/inbox/notices.md, "The watch's status says what it can promise, from the native side's own report"
+
+/** What a provider result of a succeeded receipt may name. */
+export schema WireProviderResult {
+  messageId?: string
+  historyId?: string | null
+  draftId?: string
+  providerDigest?: string
+  unread?: boolean
+}
+
+/** A reviewed attachment line of a Gmail review. */
+export schema WireReviewedFile {
+  name: string
+  mimeType?: string
+  size: number
+  sha256: string
+  partId?: string
+}
+
+/** The review managed Gmail answers a prepared operation with. */
+export schema WireReview {
+  kind: string
+  from: string
+  to?: string[]
+  cc?: string[]
+  bcc?: string[]
+  subject?: string
+  mode?: string
+  bodyText?: string
+  replyMessageId?: string
+  draftId?: string
+  expectedDigest?: string
+  messageId?: string
+  expectedHistoryId?: string
+  attachments?: WireReviewedFile[]
+  forwardedAttachments?: WireReviewedFile[]
+  forwardSource?: WireForwardSource
+}
+
+/** The source message a reviewed forward binds its original parts to. */
+export schema WireForwardSource {
+  messageId: string
+  historyId: string
+}
+
+/** `AlphaGmail.status()`: the native watch's own report. */
+export schema WireBackgroundStatus {
+  status: "web-unavailable" | "unavailable" | "disabled" | "waiting" | "watching-new-mail" | "catching-up" | "history-expired" | "unsupported" | "retrying" | "grant-unavailable" | "capacity-reached"
+  lastSyncAt?: number
+  incompleteCatchup?: boolean
+  uncertainNotices?: number
+  deniedNotices?: number
+  notificationsAllowed?: boolean
+  grantId?: string
+}
+
+/** `AlphaGmail.pending()`: a captured notice tap, or nothing. */
+export schema WireNoticeTap {
+  token?: string
+  grantId?: string
+  credentialId?: string
+  userId?: string
+  generation?: string
+  question?: boolean
+  messageId?: string
+  threadId?: string
+}
+
+/** `AlphaMailAttachments.openReviewed` and `saveReviewed`: what Android or the browser confirms. */
+export schema WireHandoffResult {
+  status: string
+  message?: string
+}

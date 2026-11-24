@@ -1,0 +1,228 @@
+// spec/shell/index.md, "Story: Open an app from Home and keep my place"; spec/shell/navigation.md, "Story: Go back one step at a time"; spec/shell/favorites.md, "Story: Keep Home the way I arranged it"; spec/shell/toasts.md, "Story: Read what just happened, at my own pace"; spec/shell/landing.md, "Story: Come back to Alpha after authorizing a connection"; spec/shell/routes.md, "Story: Let only my own app reach my agent's records"
+// @vitest-environment happy-dom
+import { assert, it } from "@effect/vitest"
+import { Machine as NavigationMachine, stored as storedNavigation } from "../../gen/shell__navigation.effect.vibe"
+import { Machine as FavoritesMachine } from "../../gen/shell__favorites.effect.vibe"
+import { buildInfo, fakeNative, fakeResident } from "../../src/platform/layers.vibe"
+import { memoryStore } from "../../src/platform/storage.vibe"
+import { CrashJournal } from "../../src/platform/crash-journal.vibe"
+import { layer as shell, NAVIGATION_KEY } from "../../src/shell/layer.vibe"
+import { Launcher } from "../../src/shell/launcher.vibe"
+import { land } from "../../src/shell/landing.vibe"
+import { Navigation, navigationLive } from "../../src/shell/navigation.vibe"
+import { Notices } from "../../src/shell/notices.vibe"
+import { routeCrosses, preparedViewNavigation } from "../../src/shell/ownerRoutes.vibe"
+import { followSurfaceSheets } from "../../src/shell/surfaceSheets.vibe"
+import { enrolledDeviceHeaders } from "../../src/shell/compose/fills.vibe"
+import { requestHeaders } from "../../src/assistant/transport.vibe"
+
+const journal = Layer.succeed(CrashJournal, {
+  record: () => succeed(undefined),
+  recordInference: () => succeed(undefined),
+  read: () => succeed({ entries: [], exitHistory: false }),
+  clear: () => succeed(undefined),
+})
+const platform = Layer.mergeAll(fakeNative({}), buildInfo({ variant: "browser" }), fakeResident({ "GET /api/automations": { automations: [] } }), journal)
+const navigationOnly = Layer.provideMerge(navigationLive, storedNavigation(NAVIGATION_KEY))
+
+it.effect("Open an app from Home and keep my place (spec/shell/index.md, \"Story: Open an app from Home and keep my place\")", () => effect {
+  provide memoryStore, platform {
+    const walked = try effect {
+      provide navigationOnly {
+        const navigation = try Navigation
+        try navigation.open("calendar", "event-1")
+        try navigation.send({ type: "openInner" })
+        try navigation.open("notes")
+        const pushed = try navigation.get()
+        try navigation.back()
+        const returned = try navigation.get()
+        return { pushed: [pushed.app, pushed.stack], returned: [returned.app, returned.closed, returned.places.find((p) => p.app === "calendar")] }
+      }
+    }
+    const restarted = try effect {
+      provide navigationOnly {
+        const navigation = try Navigation
+        const restored = try navigation.get()
+        try navigation.back()
+        const inner = (try navigation.get()).closed
+        try navigation.back()
+        const home = try navigation.get()
+        const phone = try navigation.open("phone")
+        return { restored: [restored.app, restored.revision > 0], inner, home: [home.app, home.outcome, home.chat], phone }
+      }
+    }
+    try Effect.try(() => assert.deepStrictEqual({ walked, restarted }, {
+      walked: { pushed: ["notes", ["calendar"]], returned: ["calendar", "ClosedStack", { app: "calendar", route: "event-1", inner: true }] },
+      restarted: { restored: ["calendar", true], inner: "ClosedInner", home: ["", "RendererBack", "Input"], phone: false },
+    }))
+  }
+})
+
+effect function until(check: () => boolean) {
+  for (let step = 0; step < 64 && !check(); step++) try yieldNow
+}
+
+it.effect("A surface's sheet is listed while it shows, and Back and HOME close it through the surface (spec/shell/navigation.md, \"A layer is listed once, closes with its owner or with Back, and holds the phone while open\")", () => effect {
+  provide memoryStore, platform {
+    provide navigationOnly {
+      const navigation = try Navigation
+      const open = try SubscriptionRef.make(false)
+      let finishing = false
+      let closed = 0
+      let layers: readonly string[] = []
+      const sheet = {
+        id: "test-sheet",
+        shown: SubscriptionRef.changes(open),
+        close: effect {
+          closed = closed + 1
+          if (!finishing) try SubscriptionRef.set(open, false)
+          return true
+        },
+      }
+      const fiber = fork followSurfaceSheets([sheet])
+      const watcher = fork (effect { for try (const state of navigation.changes) layers = state.layers.map((layer) => layer.id) })
+      try navigation.open("calendar")
+      try SubscriptionRef.set(open, true)
+      try until(() => layers.includes("test-sheet"))
+      const listed = [...layers]
+      const backTaken = try navigation.back()
+      try until(() => !layers.includes("test-sheet"))
+      const afterBack = { closed, layers: [...layers], app: (try navigation.get()).app, backTaken }
+      finishing = true
+      try SubscriptionRef.set(open, true)
+      try until(() => layers.includes("test-sheet"))
+      try navigation.back()
+      try until(() => closed === 2)
+      const kept = { closed, layers: [...layers] }
+      finishing = false
+      try navigation.home()
+      try until(() => closed === 3 && !layers.includes("test-sheet"))
+      for (const _ of [1, 2, 3, 4, 5, 6, 7, 8]) try yieldNow
+      const homed = { closed, layers: [...layers], app: (try navigation.get()).app, open: try SubscriptionRef.get(open) }
+      try Fiber.interrupt(fiber)
+      try Fiber.interrupt(watcher)
+      try Effect.try(() => assert.deepStrictEqual({ listed, afterBack, kept, homed }, {
+        listed: ["test-sheet"],
+        afterBack: { closed: 1, layers: [], app: "calendar", backTaken: true },
+        kept: { closed: 2, layers: ["test-sheet"] },
+        homed: { closed: 3, layers: [], app: "", open: false },
+      }))
+    }
+  }
+})
+
+it.effect("Keep Home the way I arranged it (spec/shell/favorites.md, \"Story: Keep Home the way I arranged it\")", () => effect {
+  provide memoryStore, platform {
+    provide shell {
+      const launcher = try Launcher
+      const favorites = try FavoritesMachine
+      const navigation = try NavigationMachine
+      const defaults = (try favorites.get()).entries
+      try launcher.startEditing()
+      try launcher.tap("alpha:inbox", true, false)
+      const removed = (try favorites.get()).entries
+      try launcher.arrow("alpha:notes", -1)
+      const moved = (try favorites.get()).entries
+      try launcher.openAdd()
+      try launcher.addView("alpha:inbox")
+      const restored = try favorites.get()
+      try launcher.finishEditing()
+      const editing = (try navigation.get()).editing
+      try Effect.try(() => assert.deepStrictEqual({
+        defaults: defaults.slice(0, 3), removed: removed.includes("alpha:inbox"), notesMovedUp: moved.indexOf("alpha:notes") < defaults.indexOf("alpha:notes"),
+        restored: [restored.chosen, restored.entries.at(-1)], editing,
+      }, {
+        defaults: ["alpha:inbox", "alpha:calendar", "alpha:browser"], removed: false, notesMovedUp: true,
+        restored: [true, "alpha:inbox"], editing: false,
+      }))
+    }
+  }
+})
+
+it.effect("Read what just happened, at my own pace (spec/shell/toasts.md, \"Story: Read what just happened, at my own pace\")", () => effect {
+  provide memoryStore, platform {
+    provide shell {
+      const notices = try Notices
+      let undone = 0
+      try notices.show("Saved")
+      try notices.show("Deleted Lunch", { undo: () => sync(() => { undone = undone + 1 }) })
+      try notices.takeAction()
+      try notices.takeAction()
+      try notices.persist("Recording was not saved.")
+      try notices.persist("Recording was not saved.")
+      try Effect.try(() => assert.deepStrictEqual({ undone }, { undone: 1 }))
+    }
+  }
+})
+
+it.effect("Come back to Alpha after authorizing a connection (spec/shell/landing.md, \"Story: Come back to Alpha after authorizing a connection\")", () => effect {
+  const state = "a".repeat(43)
+  let scrubbed = 0
+  const scrub = () => { scrubbed = scrubbed + 1 }
+  const code = try land(`?state=${state}&code=abc`, scrub)
+  const denied = try land(`?state=${state}&error=access_denied&error_description=No`, scrub)
+  const twoStates = try land(`?state=${state}&state=${state}&code=abc`, scrub)
+  const reopened = try land("", scrub)
+  try Effect.try(() => assert.deepStrictEqual(
+    [code.href.includes("code=abc"), denied.href.includes("error=access_denied") && !denied.href.includes("No"), twoStates.href, reopened.landing.message, scrubbed],
+    [true, true, "", "MessageReopened", 4],
+  ))
+})
+
+it.effect("Let only my own app reach my agent's records (spec/shell/routes.md, \"Story: Let only my own app reach my agent's records\")", () => effect {
+  try Effect.try(() => assert.deepStrictEqual([
+    routeCrosses("GET", "/api/notes/state", true),
+    routeCrosses("GET", "/api/notes/state", false),
+    routeCrosses("GET", "/api/lifeops/calendar/feed?timeMin=1&timeMax=2", true),
+    routeCrosses("GET", "/api/lifeops/calendar/feed?secret=1", true),
+    routeCrosses("DELETE", "/api/lifeops/calendar/events/evt-1?mode=local", true),
+    routeCrosses("DELETE", "/api/lifeops/calendar/events/..%2F?mode=local", true),
+    preparedViewNavigation("/api/views/calendar/navigate", { clientId: "c1", delivery: "completed-action", prepareOnly: true, viewType: "gui", completedActionHandoffId: "h1" }),
+    preparedViewNavigation("/api/views/calendar/navigate", { clientId: "c1", delivery: "completed-action", prepareOnly: false, viewType: "gui", completedActionHandoffId: "h1" }),
+  ], [true, false, true, false, true, false, true, false]))
+})
+
+it.effect("Notes' records cross only by their own routes (spec/shell/routes.md, \"A claimed route crosses only with a verified owner, an allowed method and path, its own query keys and a well-formed id\")", () => effect {
+  const allowed: readonly (readonly [string, string])[] = [
+    ["GET", "/api/notes/state"],
+    ["POST", "/api/notes/interact"],
+    ["POST", "/api/notes/trash/erase"],
+    ["GET", "/api/notes/trash/recordings"],
+    ["POST", "/api/notes/trash/recordings/complete"],
+    ["POST", "/api/views/notes/interact"],
+  ]
+  const refused: readonly (readonly [string, string])[] = [
+    ["GET", "/api/notes/interact"],
+    ["POST", "/api/notes/state"],
+    ["DELETE", "/api/notes/trash/erase"],
+    ["POST", "/api/notes/trash"],
+    ["POST", "/api/notes/trash/recordings"],
+    ["GET", "/api/notes/trash/recordings?all=1"],
+    ["POST", "/api/notes/interact?as=other"],
+    ["POST", "/api/notes/trash/erase/extra"],
+    ["POST", "/api/notes/interact#x"],
+  ]
+  try Effect.try(() => assert.deepStrictEqual(
+    [allowed.map(([method, url]) => routeCrosses(method, url, true)), allowed.map(([method, url]) => routeCrosses(method, url, false)), refused.map(([method, url]) => routeCrosses(method, url, true))],
+    [allowed.map(() => true), allowed.map(() => false), refused.map(() => false)],
+  ))
+})
+
+// spec/account/enrollment.md, "Only an enrollment the agent's own context confirmed is used, and anything else leaves chat only"; spec/assistant/context.md, "Every assistant request carries the capabilities this phone advertises of those the agent offered, and none when it offered none"
+it.effect("an assistant request carries the confirmed enrollment's device id and key with its capabilities, and a chat-only phone sends neither", () => effect {
+  const enrolled = { "x-eliza-device-id": "agent-1", "x-eliza-device-key": "a".repeat(64), "x-eliza-device-capabilities": "calendar.local-event.v1" }
+  try Effect.try(() => assert.deepStrictEqual(
+    [
+      enrolledDeviceHeaders(enrolled),
+      enrolledDeviceHeaders(undefined),
+      requestHeaders(enrolledDeviceHeaders(enrolled), ["maps.selected-read.v1", "maps.selected-read.v1"]),
+      requestHeaders(enrolledDeviceHeaders(undefined), []),
+    ],
+    [
+      { "x-eliza-device-id": "agent-1", "x-eliza-device-key": "a".repeat(64) },
+      {},
+      { "x-eliza-device-id": "agent-1", "x-eliza-device-key": "a".repeat(64), "x-eliza-device-capabilities": "maps.selected-read.v1" },
+      {},
+    ],
+  ))
+})

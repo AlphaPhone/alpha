@@ -1,0 +1,71 @@
+// spec/assistant/send.md, "The transport's own result decides, and a send that may have reached the agent stays in the transcript, unconfirmed"; spec/assistant/withdrawal.md, "A request withdrawn before its worker dispatched it never reaches the agent, and every call is answered at most once"; spec/assistant/context.md, "Every assistant request carries the capabilities this phone advertises of those the agent offered, and none when it offered none"
+import type { TurnTransport } from "@elizaos/agent/client"
+import { Resident, ResidentRefused, ResidentUnavailable, type ResidentHeaders } from "../platform/resident.vibe"
+import { AdvertisedCapabilities } from "./ports.vibe"
+
+/** The resident could not be reached, or refused, for an assistant request. */
+export error AgentUnreachable { status: number; code?: string; message: string }
+
+/** What the upstream turn controller reads as a refusal of the request. */
+export interface RuntimeRefusal { readonly name: "RuntimeRequestError"; readonly status: number; readonly message: string; readonly code?: string }
+
+/** The header that names the device capabilities a request carries. */
+export const CAPABILITIES_HEADER = "x-eliza-device-capabilities"
+
+const CAPABILITY_NAME = /^[a-z0-9][a-z0-9._-]{0,127}$/
+
+function refusalOf(status: number, message: string, code: string | undefined): RuntimeRefusal {
+  return { name: "RuntimeRequestError", status, message, ...(code === undefined ? {} : { code }) }
+}
+
+/** The capability header for `names`: each well-formed name once, in order, in one line; no header for none. */
+export function capabilityHeaders(names: readonly string[]): ResidentHeaders {
+  const kept = [...new Set(names.filter((name) => CAPABILITY_NAME.test(name)))]
+  return kept.length === 0 ? {} : { [CAPABILITIES_HEADER]: kept.join(",") }
+}
+
+/** The device headers of the next request, read again for each one. */
+export effect function deviceHeaders() {
+  const advertised = try AdvertisedCapabilities
+  const names = advertised.names() catch () => [] as readonly string[]
+  return capabilityHeaders(names)
+}
+
+/** One JSON request of the resident, carrying the device headers, whose refusal and absence are both `AgentUnreachable`. */
+export effect function ask(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown) {
+  const resident = try Resident
+  const headers = try deviceHeaders()
+  const answer = resident.json(method, path, body, headers) catch effect (error) => match (error) {
+    when ResidentRefused: throw new AgentUnreachable({ status: error.status, code: error.code, message: error.message });
+    when ResidentUnavailable: throw new AgentUnreachable({ status: 0, code: "unavailable", message: error.reason ?? error.state });
+  }
+  if (answer.status >= 400) throw new AgentUnreachable({ status: answer.status, message: "refused" })
+  return answer.data
+}
+
+/** The resident's local API as the upstream turn controller reaches it, each request carrying the device headers: a refusal keeps its status, an absent agent is a request never sent. */
+export effect function turnTransport() {
+  const resident = try Resident
+  const advertised = try AdvertisedCapabilities
+  const headersNow = () => runPromise(map(advertised.names() catch () => [] as readonly string[], capabilityHeaders))
+  const transport: TurnTransport = {
+    request: async (path: string, body?: unknown) => {
+      const headers = await headersNow()
+      const exit = await runPromiseExit(resident.json(body === undefined ? "GET" : "POST", path, body, headers))
+      if (Exit.isSuccess(exit)) {
+        if (exit.value.status >= 400) throw refusalOf(exit.value.status, "refused", undefined)
+        return exit.value.data
+      }
+      const failure = Cause.findErrorOption(exit.cause)
+      if (Option.isSome(failure) && failure.value._tag === "ResidentRefused") throw refusalOf(failure.value.status, failure.value.message, failure.value.code)
+      throw new Error("StartupFailed")
+    },
+    stream: async (path: string, body: unknown) => {
+      const headers = await headersNow()
+      const bytes = Stream.mapError(resident.stream(path, body, headers), (error) =>
+        error._tag === "ResidentRefused" ? refusalOf(error.status, error.message, error.code) : new Error("StartupFailed"))
+      return { status: 200, headers: { "content-type": "text/event-stream" }, body: Stream.toAsyncIterable(bytes) }
+    },
+  }
+  return transport
+}

@@ -1,0 +1,177 @@
+// spec/calendar/deviceActions.md, "Story: Let the agent change my phone's calendar only through my reviews"; spec/calendar/availability.md, "Story: Choose the calendars and see the answer before it is shared"; spec/calendar/namedRead.md, "Story: Be told plainly what a named read shared"; spec/calendar/deviceActions.md, "Story: Delete only after I answered yes"
+import { type DeviceAction, type Event as ActionEvent, type CalendarOperation, type ScreenView, Machine as ActionMachine, deleteConfirmed } from "../../gen/calendar__deviceActions.effect.vibe"
+import { type NamedOutcome, namedSentence, shareOffered } from "../../gen/calendar__namedRead.effect.vibe"
+import { checkOffered } from "../../gen/calendar__availability.effect.vibe"
+import {
+  type AvailabilityOutcome, type AvailabilitySource, type NamedCalendarReadContext, type NamedReadOutcome,
+  executeCalendarAvailability, executeNamedCalendarRead, CALENDAR_CAPABILITY, CALENDAR_NAMED_READ_CAPABILITY,
+} from "@elizaos/plugin-calendar/client"
+import {
+  type CalendarAvailabilityOperation, type CalendarAvailabilityResult, type ReadAnswer, type SourcesAnswer, AvailabilityUnavailable,
+} from "@elizaos/plugin-calendar/availability"
+import { NamedReadUnavailable } from "@elizaos/plugin-calendar/client"
+import { Native } from "../platform/native.vibe"
+import { decodeAccess, decodeAgentReply, decodeAvailability, decodeAvailabilitySources } from "./device.schema.vibe"
+import { deviceZone } from "./time.ts"
+
+/** A review sheet the owner answers for an agent request: calendars to read, or the exact result to share. */
+export type RequestSheet =
+  | { readonly kind: "none" }
+  | { readonly kind: "choose-calendars"; readonly sources: readonly AvailabilitySource[]; readonly operation: CalendarAvailabilityOperation }
+  | { readonly kind: "confirm-result"; readonly result: CalendarAvailabilityResult; readonly chosen: readonly AvailabilitySource[] }
+
+/** One approved agent operation as the phone's own review runs it, under the proposal's journal identity. */
+export interface AgentRun {
+  readonly operation: unknown
+  readonly operationId: string
+  readonly journalIdentity?: { readonly scope: string; readonly proposalId: string }
+}
+
+/** Where an approved operation ended, and the record the phone's review returned with it. */
+export interface ApprovedAction {
+  readonly action: DeviceAction
+  readonly result: unknown
+}
+
+/** The agent's Calendar requests on the phone: device actions, named reads and availability checks. */
+export service AgentRequests {
+  readonly sheets: Stream.Stream<RequestSheet>
+  readonly actions: Stream.Stream<DeviceAction>
+  /** The screen a device action is bound to, as the shell reports it. */
+  scene(view: ScreenView, sensitive: boolean, selected: string, permission: boolean): void!!
+  /** The selected event changed or the page was hidden. */
+  eventChanged(): void!!
+  hidden(): void!!
+  /** Take one operation to review; false while another runs or a queued deletion waits out its window. */
+  propose(op: CalendarOperation): boolean!!
+  /** The owner's card approved the proposed operation; the phone's own review then runs it. */
+  approve(run: AgentRun): ApprovedAction!!
+  undoQueuedDelete(): void!!
+  windowEnded(): void!!
+  settle(): void!!
+  /** Whether the owner's first reply to a deletion question confirms it. */
+  confirmsDelete(firstReply: boolean, answer: "yes" | "title" | "no" | "question" | "other", plannerConfirmed: boolean, targetMatches: boolean): boolean!!
+  namedRead(operation: unknown, operationId: string, context: NamedCalendarReadContext, current: () => NamedCalendarReadContext, journalIdentity?: AgentRun["journalIdentity"]): { readonly outcome: NamedReadOutcome; readonly sentence: string }!!
+  availability(operation: unknown, contextTimeZone: string | undefined, current: () => boolean): AvailabilityOutcome!!
+  /** The owner's answers to the review sheets. */
+  chooseCalendars(ids: readonly string[] | null): void!!
+  confirmResult(share: boolean): void!!
+}
+
+const PLUGIN = "AlphaCalendar"
+
+const SENTENCES: Readonly<Record<string, string>> = {
+  SaysShared: "Shared the event you chose.",
+  SaysOpenTheEvent: "Open the event in Calendar first. Nothing was shared.",
+  SaysEventChanged: "The event changed before it could be shared. Nothing was shared.",
+  SaysNameDiffers: "The open event has a different name. Nothing was shared.",
+  SaysNotShared: "The event wasn’t shared.",
+}
+
+function namedOutcome(outcome: NamedReadOutcome): NamedOutcome {
+  if (outcome.status === "succeeded") return "NamedShared"
+  const summary = outcome.summary.toLowerCase()
+  return summary.includes("open") || summary.includes("select") ? "NamedNotOpen"
+    : summary.includes("changed") ? "NamedChanged"
+    : summary.includes("name") || summary.includes("match") ? "NamedMismatch"
+    : summary.includes("cancel") ? "NamedCancelled" : "NamedUnavailable"
+}
+
+/** The agent request service over the AlphaCalendar plugin and the device action machine. */
+export const requestsLayer = Layer.effect(AgentRequests, effect {
+  const native = try Native
+  const machine = try ActionMachine
+  const sheets = try SubscriptionRef.make<RequestSheet>({ kind: "none" })
+  const choice = try Ref.make<Deferred.Deferred<readonly string[] | null> | undefined>(undefined)
+  const confirm = try Ref.make<Deferred.Deferred<boolean> | undefined>(undefined)
+
+  effect function send(event: ActionEvent) { return machine.send(event) catch () => undefined }
+
+  effect function invoke(method: string, args?: unknown) {
+    return try mapError(native.invoke(PLUGIN, method, args), (cause) => new AvailabilityUnavailable({ reason: cause._tag }))
+  }
+
+  return {
+    sheets: sheets.changes,
+    actions: machine.changes,
+    effect scene(view: ScreenView, sensitive: boolean, selected: string, permission: boolean) {
+      try send({ type: "scene", view, sensitive, selected, permission })
+    },
+    effect eventChanged() { try send({ type: "eventChanges" }) },
+    effect hidden() { try send({ type: "hideAction" }) },
+    effect propose(op: CalendarOperation) { return (try send({ type: "propose", op })) !== undefined },
+    effect approve(run: AgentRun) {
+      const approved = try send({ type: "approve" })
+      if (approved === undefined) return { action: try machine.get(), result: undefined }
+      const refused = try send({ type: "permissionRefused" })
+      if (refused !== undefined) return { action: refused, result: undefined }
+      const reviewing = try send({ type: "nativeReview" })
+      if (reviewing === undefined) return { action: try machine.get(), result: undefined }
+      const reply = effect { return try decodeAgentReply(try native.invoke(PLUGIN, "executeAgent", run)) } catch () => ({ status: "unknown" as const, result: undefined })
+      const status: string = reply.status
+      const next: ActionEvent = status === "cancelled" ? { type: "nativeCancel" }
+        : status === "conflict" || status === "changed" ? { type: "nativeTargetChanged" }
+        : status === "queued" ? { type: "nativeQueueDelete" }
+        : status === "applied" || status === "saved" || status === "shared" ? { type: "nativeApply" }
+        : { type: "nativeUnknown" }
+      const action = (try send(next)) ?? (try send({ type: "nativeUnknown" })) ?? (try machine.get())
+      return { action, result: reply.result }
+    },
+    effect undoQueuedDelete() { try send({ type: "undo" }) },
+    effect windowEnded() { try send({ type: "windowEnds" }) },
+    effect settle() { try send({ type: "settleAction" }) },
+    effect confirmsDelete(firstReply: boolean, answer: "yes" | "title" | "no" | "question" | "other", plannerConfirmed: boolean, targetMatches: boolean) {
+      const mapped = answer === "yes" ? "AnsweredYes" : answer === "title" ? "AnsweredTitle" : answer === "no" ? "AnsweredNo" : answer === "question" ? "AnsweredQuestion" : "AnsweredOther"
+      return deleteConfirmed(firstReply, mapped, plannerConfirmed, targetMatches)
+    },
+    effect namedRead(operation: unknown, operationId: string, context: NamedCalendarReadContext, current: () => NamedCalendarReadContext, journalIdentity?: AgentRun["journalIdentity"]) {
+      const outcome: NamedReadOutcome = shareOffered(context.view === "calendar", context.sensitive === true, context.selectedObject !== undefined)
+        ? try executeNamedCalendarRead({
+            executeAgent: (input) => effect {
+              return try mapError(native.invoke(PLUGIN, "executeAgent", input), (cause) => new NamedReadUnavailable({ reason: cause._tag })) as { status: string; result?: unknown; feedComplete?: boolean }
+            },
+            cancelAgent: (input) => effect { native.invoke(PLUGIN, "cancelAgent", input) catch () => undefined },
+          }, operation, operationId, context, [CALENDAR_NAMED_READ_CAPABILITY, CALENDAR_CAPABILITY], current, journalIdentity) catch () => ({ status: "failed", summary: "unavailable" }) as NamedReadOutcome
+        : { status: "failed", summary: "Open the event first" }
+      return { outcome, sentence: SENTENCES[namedSentence(namedOutcome(outcome))] ?? SENTENCES.SaysNotShared! }
+    },
+    effect availability(operation: unknown, contextTimeZone: string | undefined, current: () => boolean) {
+      return try executeCalendarAvailability({
+        requestReadAccess: () => effect {
+          const reply = try mapError(decodeAccess(try invoke("requestAccess")), () => new AvailabilityUnavailable({ reason: "NativeFailed" }))
+          return { status: reply.status === "granted" ? "granted" : "denied" }
+        },
+        availabilitySources: (input) => effect {
+          const answer: SourcesAnswer = try mapError(decodeAvailabilitySources(try invoke("availabilitySources", input)), () => new AvailabilityUnavailable({ reason: "NativeFailed" }))
+          return answer
+        },
+        readAvailability: (request) => effect {
+          const answer: ReadAnswer = try mapError(decodeAvailability(try invoke("readAvailability", request)), () => new AvailabilityUnavailable({ reason: "NativeFailed" }))
+          return answer
+        },
+      }, operation, { current, contextTimeZone, deviceTimeZone: deviceZone }, {
+        chooseCalendars: (sources, request) => effect {
+          const answer = try Deferred.make<readonly string[] | null>()
+          try Ref.set(choice, answer)
+          try SubscriptionRef.set(sheets, { kind: "choose-calendars", sources, operation: request })
+          const ids = try ensuring(Deferred.await(answer), SubscriptionRef.set(sheets, { kind: "none" }))
+          return ids !== null && checkOffered(ids.length) ? ids : null
+        },
+        confirmResult: (result, chosen) => effect {
+          const answer = try Deferred.make<boolean>()
+          try Ref.set(confirm, answer)
+          try SubscriptionRef.set(sheets, { kind: "confirm-result", result, chosen })
+          return try ensuring(Deferred.await(answer), SubscriptionRef.set(sheets, { kind: "none" }))
+        },
+      })
+    },
+    effect chooseCalendars(ids: readonly string[] | null) {
+      const pending = try Ref.get(choice)
+      if (pending !== undefined) try Deferred.succeed(pending, ids)
+    },
+    effect confirmResult(share: boolean) {
+      const pending = try Ref.get(confirm)
+      if (pending !== undefined) try Deferred.succeed(pending, share)
+    },
+  }
+})

@@ -1,0 +1,330 @@
+// spec/calendar/device.md, "Story: Create an event on my phone without making it twice"; spec/calendar/device.md, "Story: Edit or delete exactly the event I reviewed"; spec/calendar/device.md, "Story: Read my device calendars over a range that makes sense"; spec/calendar/selection.md, "Story: Let the assistant act only on the event I have open"
+import { type DeviceWrites, type Event as DeviceEvent, type InspectReply, type EditReply, type DeleteReply, Machine as DeviceMachine, readLimited } from "../../gen/calendar__device.effect.vibe"
+import { type CalendarSelection, type Event as SelectionEvent, Machine as SelectionMachine, exposed } from "../../gen/calendar__selection.effect.vibe"
+import { readClearsHold, deleteScope } from "@elizaos/plugin-calendar/series"
+import { readRange } from "@elizaos/os/bridges/calendar"
+import { Native } from "../platform/native.vibe"
+import {
+  type DeviceCalendarRecord, type DeviceEventRecord, decodeAccess, decodeCreations, decodeHandoff, decodeInspect, decodeList, decodeOptions,
+  decodeRemove, decodeSave, decodeSource,
+} from "./device.schema.vibe"
+import { type InstantRange, rruleFor, type CalendarRepeat } from "./model.vibe"
+
+const PLUGIN = "AlphaCalendar"
+
+/** How the last device read ended, as Calendar shows it. */
+export type DeviceStatus = "not-connected" | "loading" | "allowed" | "no-calendars" | "denied" | "connect" | "limited" | "failed" | "android-only"
+
+/** What the device calendars showed for the range last read. */
+export interface DeviceRead {
+  readonly status: DeviceStatus
+  readonly range: InstantRange | undefined
+  readonly events: readonly DeviceEventRecord[]
+  readonly calendars: readonly DeviceCalendarRecord[]
+  readonly truncated: boolean
+  readonly readAt: number | undefined
+}
+
+/** A form's fields as the device save takes them. */
+export interface DeviceForm {
+  readonly creationId: string
+  readonly separate: boolean
+  readonly id?: string
+  readonly expected?: { readonly title: string; readonly body: string; readonly location: string; readonly begin: number; readonly end: number; readonly revision: string }
+  readonly calendarId: string
+  readonly title: string
+  readonly body: string
+  readonly location: string
+  readonly begin: number
+  readonly end: number
+  readonly allDay: boolean
+  readonly timeZone: string
+  readonly repeat: CalendarRepeat
+  readonly guests: readonly string[]
+  readonly alert: number | null
+  readonly video: boolean
+}
+
+/** What a save or deletion came to, for the owner's notice. */
+export type DeviceOutcome = "saved" | "checking" | "duplicate" | "changed" | "read-only" | "unconfirmed" | "no-access" | "deleted" | "queued"
+  | "external" | "unavailable" | "cancelled" | "held" | "busy" | "found" | "cant-check" | "opened" | "no-calendar-app"
+
+/** What the assistant may act on now: the open event as the phone inspected it, or the phone's calendar a new form targets. */
+export type SelectedObject =
+  | { readonly kind: "calendar-event"; readonly id: string; readonly revision: string; readonly accountId: string; readonly sourceRevision: string }
+  | { readonly kind: "calendar-source"; readonly id: string; readonly revision: string; readonly accountId: string; readonly sourceRevision: string }
+
+/** The phone's own calendars: reads, guarded writes, inspected deletions and the assistant's selection. */
+export service DeviceCalendar {
+  readonly reads: Stream.Stream<DeviceRead>
+  readonly writes: Stream.Stream<DeviceWrites>
+  readonly selections: Stream.Stream<CalendarSelection>
+  available(): boolean!!
+  /** Read a range; `request` asks for access first; a requested or forced read may release a held write. */
+  read(range: InstantRange, request: boolean, force: boolean): DeviceRead!!
+  /** Open a form: a new event (with the phone's calendar prepared for the assistant) or an edit of the selected one. */
+  openForm(kind: "new" | "edit", separate: boolean): void!!
+  closeForm(): void!!
+  formChanged(): void!!
+  save(form: DeviceForm): DeviceOutcome!!
+  checkCreations(): DeviceOutcome!!
+  /** Show an event's detail: selects it and inspects it for the assistant. */
+  open(id: string, calendarId: string, revision: string, expected: DeviceForm["expected"]): void!!
+  close(): void!!
+  remove(id: string, calendarId: string, expected: NonNullable<DeviceForm["expected"]>, recurring: boolean, series: boolean): DeviceOutcome!!
+  /** Hand a new event with guests, alerts or a room to Android Calendar's insert screen; opening is never a write. */
+  handoff(form: DeviceForm): DeviceOutcome!!
+  /** Open an event in Android Calendar's editor. */
+  openExternal(id: string, begin: number, end: number): DeviceOutcome!!
+  remount(): void!!
+  /** The selection the assistant may act on now, only while its detail or form still shows it. */
+  selected(): (SelectedObject | undefined)!!
+}
+
+effect function call(native: Native.Shape, method: string, args?: unknown) {
+  return try native.invoke(PLUGIN, method, args)
+}
+
+/** The device calendar service over the AlphaCalendar plugin and its two machines. */
+export const deviceLayer = Layer.effect(DeviceCalendar, effect {
+  const native = try Native
+  const writes = try DeviceMachine
+  const selection = try SelectionMachine
+  const reads = try SubscriptionRef.make<DeviceRead>({ status: "not-connected", range: undefined, events: [], calendars: [], truncated: false, readAt: undefined })
+  const generation = try Ref.make(0)
+  const openRow = try Ref.make<{ id: string; calendarId: string; expected: DeviceForm["expected"] } | undefined>(undefined)
+  const heldBegin = try Ref.make(0)
+  const inspectedEvent = try Ref.make<{ open: string; revision: string; eventId: string; sourceId: string; sourceRevision: string } | undefined>(undefined)
+  const preparedSource = try Ref.make<{ sourceId: string; sourceRevision: string } | undefined>(undefined)
+
+  effect function sendWrite(event: DeviceEvent) { return writes.send(event) catch () => undefined }
+  effect function sendSelection(event: SelectionEvent) { return selection.send(event) catch () => undefined }
+
+  effect function access() {
+    const reply = effect { return try decodeAccess(try call(native, "requestAccess")) } catch () => undefined
+    return reply?.status === "granted"
+  }
+
+  effect function read(range: InstantRange, request: boolean, force: boolean) {
+    const ticket = (try Ref.get(generation)) + 1
+    try Ref.set(generation, ticket)
+    if (!(try native.available(PLUGIN))) {
+      const none: DeviceRead = { status: "android-only", range, events: [], calendars: [], truncated: false, readAt: undefined }
+      try SubscriptionRef.set(reads, none)
+      return none
+    }
+    if (readRange(range.begin, range.end) !== "ReadAllowed") {
+      const refused: DeviceRead = { status: "failed", range, events: [], calendars: [], truncated: false, readAt: undefined }
+      try SubscriptionRef.set(reads, refused)
+      return refused
+    }
+    try SubscriptionRef.update(reads, (shown) => ({ ...shown, status: "loading" }))
+    const result: DeviceRead = try effect {
+      if (request && !(try access())) return { status: "denied", range, events: [], calendars: [], truncated: false, readAt: undefined } as DeviceRead
+      const reply = try decodeList(try call(native, "list", { begin: range.begin, end: range.end }))
+      if (reply.status !== "ready") return { status: "connect", range, events: [], calendars: [], truncated: false, readAt: undefined } as DeviceRead
+      const now = try Clock.currentTimeMillis
+      const status: DeviceStatus = readLimited(reply.truncated, reply.events.length) ? "limited" : reply.calendars.length === 0 ? "no-calendars" : "allowed"
+      return { status, range, events: reply.events, calendars: reply.calendars, truncated: reply.truncated, readAt: now } as DeviceRead
+    } catch () => ({ status: "failed", range, events: [], calendars: [], truncated: false, readAt: undefined }) as DeviceRead
+    if ((try Ref.get(generation)) !== ticket) return try SubscriptionRef.get(reads)
+    try SubscriptionRef.set(reads, result)
+    const state = try writes.get()
+    if (state.held !== "" && (request || force) && result.readAt !== undefined) {
+      const lists = result.events.some((event) => event.id === state.held)
+      const begin = try Ref.get(heldBegin)
+      const shows = readClearsHold(state.holdKind === "DeleteHold" ? "DeleteWrite" : "EditWrite", true, true, !result.truncated, lists, begin, range.begin, range.end)
+      try sendWrite({ type: "readAgain", showsOutcome: shows })
+    }
+    const open = try Ref.get(openRow)
+    const row = open === undefined ? undefined : result.events.find((event) => event.id === open.id)
+    try sendSelection({ type: "refresh", revision: row?.revision ?? "" })
+    return result
+  }
+
+  effect function receipts() {
+    const reply = try decodeCreations(try call(native, "pendingCreations"))
+    return reply.creations
+  }
+
+  effect function prepareSource(epochBefore: number) {
+    const ready = effect {
+      if (!(try access())) return false
+      const reply = try decodeSource(try call(native, "prepareAgentSource"))
+      try Ref.set(preparedSource, reply.status === "ready" ? { sourceId: reply.sourceId, sourceRevision: reply.sourceRevision } : undefined)
+      return reply.status === "ready"
+    } catch () => false
+    try sendSelection({ type: "sourcePrepared", ready })
+  }
+
+  effect function inspected(id: string, calendarId: string, expected: DeviceForm["expected"]) {
+    const args = { id, calendarId, expected }
+    const first = effect { return try decodeInspect(try call(native, "inspect", args)) } catch () => undefined
+    const reply = first?.status === "ready" ? first : effect { return try decodeInspect(try call(native, "inspectDeletion", args)) } catch () => undefined
+    return reply
+  }
+
+  effect function confirmCreate(form: DeviceForm, id: string) {
+    const state = try sendWrite({ type: "createSaved" })
+    if (state?.stage === "Acknowledging") {
+      const acknowledged = effect {
+        try call(native, "acknowledgeCreation", { creationId: form.creationId })
+        return true
+      } catch () => false
+      try sendWrite({ type: "acknowledge", ok: acknowledged })
+    }
+    return id === "" ? ("checking" as DeviceOutcome) : ("saved" as DeviceOutcome)
+  }
+
+  effect function save(form: DeviceForm) {
+    const before = try writes.get()
+    if (form.id !== undefined && before.held === form.id) return "held" as DeviceOutcome
+    const started = try sendWrite({ type: "startSave" })
+    if (started === undefined) return "busy" as DeviceOutcome
+    if (!(try access())) {
+      if (started.stage === "ReadingReceipts") try sendWrite({ type: "readReceipts", ok: false, receipts: 0 })
+      else try sendWrite({ type: "editResult", reply: "EditConflict" })
+      return "no-access" as DeviceOutcome
+    }
+    if (started.stage === "ReadingReceipts") {
+      const found = receipts() catch () => undefined
+      const after = try sendWrite({ type: "readReceipts", ok: found !== undefined, receipts: found?.length ?? 0 })
+      if (found === undefined) return "cant-check" as DeviceOutcome
+      if (after?.stage !== "Writing") return "duplicate" as DeviceOutcome
+      const options = form.allDay || form.repeat !== "none"
+      const method = options ? "saveOptions" : "save"
+      const event = { title: form.title, body: form.body, location: form.location, begin: form.begin, end: form.end, allDay: form.allDay,
+        timeZone: form.timeZone, rrule: rruleFor(form.repeat)[0]?.slice(6) ?? null }
+      const reply = effect { return try decodeSave(try call(native, method, { creationId: form.creationId, separateCreation: form.separate, calendarId: form.calendarId,
+        ...(options ? { event } : { title: form.title, body: form.body, location: form.location, begin: form.begin, end: form.end }) })) } catch () => undefined
+      if (reply === undefined) {
+        try sendWrite({ type: "createLost" })
+        return "unconfirmed" as DeviceOutcome
+      }
+      if (reply.status === "pending-creation") {
+        try sendWrite({ type: "createRefused" })
+        return "checking" as DeviceOutcome
+      }
+      if (reply.status !== "saved") {
+        try sendWrite({ type: "createRefused" })
+        return (reply.status === "read-only" ? "read-only" : reply.status === "conflict" ? "changed" : "unavailable") as DeviceOutcome
+      }
+      if (reply.creationId !== undefined && reply.creationId !== form.creationId) {
+        try sendWrite({ type: "createLost" })
+        return "unconfirmed" as DeviceOutcome
+      }
+      if (options) {
+        const back = effect { return try decodeOptions(try call(native, "readOptions", { id: reply.id })) } catch () => undefined
+        const rule = rruleFor(form.repeat)[0]?.slice(6) ?? null
+        if (back === undefined || back.allDay !== form.allDay || back.timeZone !== (form.allDay ? "UTC" : form.timeZone) || back.rrule !== rule) {
+          try sendWrite({ type: "createLost" })
+          return "unconfirmed" as DeviceOutcome
+        }
+      }
+      return try confirmCreate(form, reply.id)
+    }
+    const reply = effect { return try decodeSave(try call(native, "save", { id: form.id, expected: form.expected, calendarId: form.calendarId, title: form.title,
+      body: form.body, location: form.location, begin: form.begin, end: form.end })) } catch () => undefined
+    const result: EditReply = reply === undefined ? "EditLost" : reply.status === "saved" ? "EditSaved" : "EditConflict"
+    if (result === "EditLost") try Ref.set(heldBegin, form.begin)
+    try sendWrite({ type: "editResult", reply: result })
+    return (result === "EditSaved" ? "saved" : result === "EditLost" ? "unconfirmed" : "changed") as DeviceOutcome
+  }
+
+  return {
+    reads: reads.changes,
+    writes: writes.changes,
+    selections: selection.changes,
+    effect available() { return try native.available(PLUGIN) },
+    read,
+    effect openForm(kind: "new" | "edit", separate: boolean) {
+      if (kind === "new") {
+        try sendWrite({ type: "newForm", separate })
+        const before = try sendSelection({ type: "newForm" })
+        if (before !== undefined) try prepareSource(before.epoch)
+      } else {
+        const state = try writes.get()
+        try sendWrite({ type: "openEdit", id: state.selected })
+      }
+    },
+    effect closeForm() {
+      try sendWrite({ type: "closeForm" })
+      try sendSelection({ type: "closeForm" })
+    },
+    effect formChanged() { try sendWrite({ type: "replaceForm" }) },
+    save,
+    effect checkCreations() {
+      const found = receipts() catch () => undefined
+      if (found === undefined) {
+        try sendWrite({ type: "checkCreations", ok: false, unknown: 0 })
+        return "cant-check" as DeviceOutcome
+      }
+      for (const entry of found.filter((receipt) => receipt.status === "saved")) {
+        call(native, "acknowledgeCreation", { creationId: entry.creationId }) catch () => undefined
+      }
+      const unknown = found.filter((receipt) => receipt.status !== "saved").length
+      try sendWrite({ type: "checkCreations", ok: true, unknown })
+      return (unknown > 0 ? "duplicate" : "found") as DeviceOutcome
+    },
+    effect open(id: string, calendarId: string, revision: string, expected: DeviceForm["expected"]) {
+      try Ref.set(openRow, { id, calendarId, expected })
+      try sendWrite({ type: "selectEvent", id })
+      try sendSelection({ type: "openEvent", id, revision })
+      const rendered = try sendSelection({ type: "renderDetail" })
+      if (rendered === undefined) return
+      const reply = try inspected(id, calendarId, expected)
+      try Ref.set(inspectedEvent, reply?.status === "ready"
+        ? { open: id, revision: reply.revision, eventId: reply.eventId, sourceId: reply.sourceId ?? calendarId, sourceRevision: reply.sourceRevision } : undefined)
+      try sendSelection({ type: "inspected", ready: reply?.status === "ready", revision: reply?.status === "ready" ? reply.revision : "" })
+    },
+    effect close() {
+      try Ref.set(openRow, undefined)
+      try sendSelection({ type: "closeEvent" })
+      try sendWrite({ type: "selectEvent", id: "" })
+    },
+    effect remove(id: string, calendarId: string, expected: NonNullable<DeviceForm["expected"]>, recurring: boolean, series: boolean) {
+      const started = try sendWrite({ type: "startDelete" })
+      if (started === undefined) return "held" as DeviceOutcome
+      const scope = deleteScope(recurring, series)
+      const reply = effect { return try decodeInspect(try call(native, "inspectDeletion", { id, calendarId, expected, ...(scope === "EntireSeries" ? { scope: "series" } : {}) })) } catch () => undefined
+      const inspection: InspectReply = reply?.status === "ready" ? "InspectReady" : reply?.status === "external" ? "InspectExternal" : "InspectChanged"
+      try sendWrite({ type: "inspect", reply: inspection })
+      if (reply?.status !== "ready") return (inspection === "InspectExternal" ? "external" : "changed") as DeviceOutcome
+      const removed = effect { return try decodeRemove(try call(native, "removeScoped", { eventId: reply.eventId, sourceId: reply.sourceId ?? calendarId, sourceRevision: reply.sourceRevision, revision: reply.revision })) } catch () => undefined
+      const result: DeleteReply = removed === undefined ? "DeleteUnknown"
+        : removed.status === "queued" ? "DeleteQueued" : removed.status === "deleted" ? "DeleteDone"
+        : removed.status === "conflict" ? "DeleteConflict" : removed.status === "cancelled" ? "DeleteCancelled" : "DeleteUnknown"
+      if (result === "DeleteUnknown") try Ref.set(heldBegin, expected.begin)
+      try sendWrite({ type: "deleteResult", reply: result })
+      if (result === "DeleteQueued" || result === "DeleteDone") try sendSelection({ type: "closeEvent" })
+      return (result === "DeleteQueued" ? "queued" : result === "DeleteDone" ? "deleted" : result === "DeleteConflict" ? "changed"
+        : result === "DeleteCancelled" ? "cancelled" : "unconfirmed") as DeviceOutcome
+    },
+    effect handoff(form: DeviceForm) {
+      if (form.title.trim() === "") return "unavailable" as DeviceOutcome
+      const guests = form.guests.filter((guest) => /^[^\s@,;<>]+@[^\s@,;<>]+$/.test(guest))
+      const reply = effect { return try decodeHandoff(try call(native, "insertHandoff", { event: { title: form.title, body: form.body, location: form.location,
+        begin: form.begin, end: form.end, allDay: form.allDay, timeZone: form.timeZone, attendees: guests, alerts: form.alert === null ? [] : [form.alert] } })) } catch () => undefined
+      return (reply?.status === "opened" ? "opened" : "no-calendar-app") as DeviceOutcome
+    },
+    effect openExternal(id: string, begin: number, end: number) {
+      const reply = effect { return try decodeHandoff(try call(native, "open", { id, begin, end })) } catch () => undefined
+      return (reply?.status === "opened" ? "opened" : "no-calendar-app") as DeviceOutcome
+    },
+    effect remount() { try sendWrite({ type: "remount" }) },
+    effect selected() {
+      const shown = exposed(try selection.get())
+      if (shown.kind === "EventSelected") {
+        const event = try Ref.get(inspectedEvent)
+        if (event === undefined || event.open !== shown.open || event.revision !== shown.revision) return undefined
+        return { kind: "calendar-event", id: event.eventId, revision: event.revision, accountId: event.sourceId, sourceRevision: event.sourceRevision } as SelectedObject
+      }
+      if (shown.kind === "SourceSelected") {
+        const source = try Ref.get(preparedSource)
+        if (source === undefined) return undefined
+        return { kind: "calendar-source", id: source.sourceId, revision: source.sourceRevision, accountId: source.sourceId, sourceRevision: source.sourceRevision } as SelectedObject
+      }
+      return undefined
+    },
+  }
+})

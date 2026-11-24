@@ -1,0 +1,52 @@
+// spec/account/provider.md, "The form shows what the host reports, and a failed read keeps the last known choice"; spec/account/plan.md, "The phone's agent host alone confirms what its inference is"
+
+/** Whether one saved key is present; never the key. */
+export schema KeyPresence {
+  configured: boolean
+}
+
+/** The two keys the host may hold for the owner. */
+export schema SavedKeys {
+  text: KeyPresence
+  voice: KeyPresence
+}
+
+/** `Agent.providerStatus`: the selected route, whether each key is saved and the host's opaque revision. */
+export schema ProviderStatus {
+  configured: boolean
+  provider: "cerebras" | "elizacloud"
+  model?: string
+  selected?: boolean
+  voiceConfigured?: boolean
+  mode?: "cloud" | "own"
+  revision?: string
+  persistence?: "native-secure-store" | "host-session"
+  keys?: SavedKeys
+}
+
+/** `Agent.prepareProviderConfiguration`: the host's lease for one provider change. */
+export schema ProviderLease {
+  requestId: string
+}
+
+/** `Agent.clearProvider` and `Agent.configureCloudProvider`: whether a provider binding is in place now. */
+export schema ProviderConfigured {
+  configured: boolean
+  bindingGuard?: string
+}
+
+/** `Agent.residentAttachment`: whether the running agent already holds this key's binding. */
+export schema Attachment {
+  attachable: boolean
+  bindingRetained?: boolean
+  bindingGuard?: string
+  reason?: string
+}
+
+/** `Agent.revealProviderKey`: the host's secure dialog opened for one key; the key itself never arrives. */
+export schema Revealed {
+  key: "text" | "voice"
+  shown: boolean
+  hidesAfterMs: number
+  revision: string
+}

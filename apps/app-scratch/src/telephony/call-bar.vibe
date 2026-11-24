@@ -1,0 +1,174 @@
+// spec/telephony/callBar.md, "Story: See my live call over every view"; spec/telephony/callBar.md, "A reading older than the latest one never replaces it"; spec/telephony/callBar.md, "Return and End act only on the call the bar shows, and End is asked once"; spec/telephony/callBar.md, "The bar keeps Telecom's latest call-state reading for the emergency gate"; spec/telephony/common.md, "A call, text, dial handoff or contact write runs only on a fresh reading that rules out an emergency call"
+import { Machine as CallBarMachine, type CallPhase, type Event as CallBarEvent, type LiveCall } from "../../gen/telephony__callBar.effect.vibe"
+import { effectAllowed, emergencyLive, noReading, type CallReading, type Known } from "../../gen/telephony__common.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { Microphone } from "../voice/capture.vibe"
+import { VoiceConversation } from "../voice/conversation.vibe"
+import { Foreground } from "../shell/foreground.vibe"
+import { CALL_STATE_PLUGIN, ONGOING_CALL_PLUGIN } from "./bridges.vibe"
+import { barEligibleIn, readableIn } from "./front.vibe"
+import { CallStateReading, OngoingCalls, exact } from "./call-bar.schema.vibe"
+
+/** How often the bar polls while Telecom's listener is not yet registered (phone-state access can come later). */
+const POLL = "4 seconds"
+const TICK = "1 second"
+
+/** The ongoing-call bar's source: Telecom's calls, Return and End, and the emergency gate. */
+export service CallWatch {
+  /** Follow Telecom's reports, and where the bar may show, for as long as it runs; a return to the page reads Telecom again. */
+  watch(): void!!
+  /** Read Telecom again, as a return to the app does. */
+  refresh(): void!!
+  /** Whether the bar may show here: the screen on, outside the assistant surface. */
+  eligible(on: boolean): void!!
+  /** Bring the call screen of the bar's call to the front. */
+  returnToCall(callId: string): void!!
+  /** End (or, ringing, decline) the bar's call, once. */
+  end(callId: string): void!!
+  /** A fresh Telecom reading that rules out an emergency call; any failure refuses. */
+  allowed(): boolean!!
+  /** Whether a call holds the phone now, from the latest reading: the shell's idle fact `call`. */
+  live(): boolean!!
+}
+
+/** A call holds the phone: Telecom says so, or the bar shows one of its calls. */
+export function callHolds(bar: { readonly calls: readonly LiveCall[]; readonly reading: CallReading }): boolean {
+  return bar.calls.length > 0 || bar.reading.inCall === "KnownYes"
+}
+
+const PHASES: Record<string, CallPhase> = { dialing: "Dialing", ringing: "Ringing", active: "Active", held: "Held" }
+const known = (value: boolean | null): Known => value === null ? "NotKnown" : value ? "KnownYes" : "KnownNo"
+
+/** The calls of a reading, or undefined for one the bar cannot trust. */
+export effect function readCalls(raw: unknown) {
+  const reading = try (Schema.decodeUnknownEffect(OngoingCalls, exact)(raw) catch () => undefined)
+  if (reading === undefined) return undefined
+  return reading.calls.map((row): LiveCall => ({ id: row.id, phase: PHASES[row.state] ?? "Dialing", connectedAt: row.connectedAt ?? 0 }))
+}
+
+/** Telecom's call-state reading, or undefined; a payload claiming a live emergency is never lifted by its other fields. */
+export effect function readCallState(raw: unknown) {
+  const row = try (Schema.decodeUnknownEffect(CallStateReading, exact)(raw) catch () => undefined)
+  if (row === undefined) return undefined
+  const reading: CallReading = { inCall: known(row.inCall), emergency: known(row.emergency) }
+  return row.emergencyLive && !emergencyLive(reading) ? { inCall: "KnownYes", emergency: "NotKnown" } satisfies CallReading : reading
+}
+
+/** The call watch over the bar's machine and the image's two call plugins. */
+export const callWatchLayer = Layer.effect(CallWatch, effect {
+  const native = try Native
+  const bar = try CallBarMachine
+  const voice = try VoiceConversation
+  const microphone = try Microphone
+  const foreground = try Foreground
+  const tell = (event: CallBarEvent) => bar.send(event) catch () => undefined
+  const ongoing = try native.available(ONGOING_CALL_PLUGIN)
+  const callState = try native.available(CALL_STATE_PLUGIN)
+
+  effect function applyCalls(raw: unknown, ticket?: number) {
+    const calls = try readCalls(raw)
+    const reported = { calls: calls ?? [], wellFormed: calls !== undefined }
+    try tell(ticket === undefined ? { type: "callsReported", ...reported } : { type: "refreshAnswered", ticket, ...reported })
+  }
+
+  effect function readState() {
+    const raw = try (native.invoke(CALL_STATE_PLUGIN, "callState") catch () => undefined)
+    const reading = try readCallState(raw)
+    if (reading !== undefined) try tell({ type: "callStateReported", reading })
+    return reading
+  }
+
+  effect function refresh() {
+    if (ongoing) {
+      const started = try tell({ type: "refreshStarted" })
+      const generation = started === undefined ? (try bar.get()).generation : started.generation
+      const raw = try (native.invoke(ONGOING_CALL_PLUGIN, "ongoingCall") catch () => undefined)
+      if (raw !== undefined) try applyCalls(raw, generation)
+    }
+    if (callState) try readState()
+  }
+
+  effect function follow(plugin: string, event: string, take: (raw: unknown) => void!!) {
+    for try (const raw of native.listen(plugin, event)) {
+      try take(raw)
+    }
+  }
+
+  effect function clock() {
+    while (true) {
+      try sleep(TICK)
+      const state = try bar.get()
+      if (state.shown || state.endedUntil > 0) try tell({ type: "tick", at: try Clock.currentTimeMillis })
+    }
+  }
+
+  effect function voiceFollow() {
+    let held = false
+    for try (const state of bar.changes) {
+      const now = callHolds(state)
+      if (now === held) continue
+      held = now
+      try microphone.callChanged(now)
+      if (now) try voice.callStarted()
+    }
+  }
+
+  effect function place() {
+    let readable = false
+    for try (const state of foreground.changes) {
+      try tell({ type: "eligibilityChanged", eligible: barEligibleIn(state) })
+      const now = readableIn(state)
+      if (now && !readable) try refresh()
+      readable = now
+    }
+  }
+
+  effect function poll() {
+    while (true) {
+      try sleep(POLL)
+      if ((try bar.get()).reading.inCall === "NotKnown") try refresh()
+    }
+  }
+
+  return {
+    effect watch() {
+      try tell({ type: "tick", at: try Clock.currentTimeMillis })
+      try refresh()
+      try.all [
+        ongoing ? (follow(ONGOING_CALL_PLUGIN, "ongoingCall", (raw) => applyCalls(raw)) catch () => undefined) : Effect.void,
+        callState ? (follow(CALL_STATE_PLUGIN, "callState", effect (raw) => {
+          const reading = try readCallState(raw)
+          if (reading !== undefined) try tell({ type: "callStateReported", reading })
+        }) catch () => undefined) : Effect.void,
+        clock(),
+        poll(),
+        voiceFollow(),
+        place(),
+      ]
+    },
+    refresh,
+    effect eligible(on: boolean) {
+      try tell({ type: "eligibilityChanged", eligible: on })
+    },
+    effect returnToCall(callId: string) {
+      try (native.invoke(ONGOING_CALL_PLUGIN, "showCall", { id: callId }) catch () => undefined)
+    },
+    effect end(callId: string) {
+      const asked = try tell({ type: "endAsked", callId })
+      if (asked === undefined) return
+      const done = try (native.invoke(ONGOING_CALL_PLUGIN, "endCall", { id: callId }) catch () => false)
+      if (done === false) try tell({ type: "endRefused", callId })
+      try refresh()
+    },
+    effect allowed() {
+      if (!callState) return false
+      const fresh = try readState()
+      if (fresh === undefined) return false
+      const latest = (try bar.get()).reading
+      return effectAllowed(true, fresh) && effectAllowed(true, latest ?? noReading)
+    },
+    effect live() {
+      return callHolds(try bar.get())
+    },
+  }
+})

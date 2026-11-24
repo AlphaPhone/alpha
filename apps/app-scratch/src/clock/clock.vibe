@@ -1,0 +1,206 @@
+// spec/clock/ringer.md, "Story: Hear an alarm once, from the page in front"; spec/clock/ringer.md, "Story: Hear an alarm as loud as my phone's alarm volume, and through Do Not Disturb only as Android lets alarms through"; spec/clock/alarms.md, "Story: Set an alarm in the browser build"; spec/clock/alarms.md, "Story: Stop a ringing alarm"; spec/clock/timers.md, "Story: Time something"; spec/clock/timers.md, "Story: Hear a timer end"; spec/clock/stopwatch.md, "Story: Measure elapsed time"; spec/clock/worldClock.md, "Story: See the time where others are"
+import { Build } from "../platform/build.vibe"
+import { DeviceFacts } from "../settings/facts.vibe"
+import type { AlarmFilter } from "../../gen/clock__ringer.ts"
+import { DeviceVolumes, InterruptionFacts } from "./native.schema.vibe"
+import { call, present } from "./plugins.vibe"
+import { Machine as RingerMachine, type Event as RingerEvent, type Ringer } from "../../gen/clock__ringer.effect.vibe"
+import type { Switch } from "../../gen/settings__vocabulary.ts"
+import { Machine as AlarmsMachine, type AlarmClock, type Event as AlarmEvent } from "../../gen/clock__alarms.effect.vibe"
+import { Machine as TimersMachine, type Timers, type Event as TimerEvent } from "../../gen/clock__timers.effect.vibe"
+import { Machine as StopwatchMachine, type Event as StopwatchEvent } from "../../gen/clock__stopwatch.effect.vibe"
+import { Machine as WorldMachine } from "../../gen/clock__worldClock.effect.vibe"
+import { freshId, knownTimeZone, nextAlarmAt, pageVisible, playTone, requestAlarmLock, stopTones } from "./page.ts"
+
+const SYSTEM = "ElizaSystem"
+const FILTER: Readonly<Record<string, AlarmFilter>> = { all: "FilterAll", priority: "FilterPriority", alarms: "FilterAlarms", none: "FilterNone" }
+
+/** The ringer's sound facts from Settings' Do Not Disturb and what Android answered of its mode and the alarm stream; absent answers are unread. */
+export function soundEventOf(dnd: Switch, mode: typeof InterruptionFacts.Type | undefined, volumes: typeof DeviceVolumes.Type | undefined): RingerEvent {
+  const alarm = volumes?.volumes.find((v) => v.stream === "alarm")
+  const filter: AlarmFilter = mode?.interruptionFilter === undefined ? "FilterUnread" : FILTER[mode.interruptionFilter] ?? "FilterUnread"
+  return { type: "soundFacts", dnd, filter, reported: alarm !== undefined, volume: Math.round(alarm?.current ?? 0), max: Math.round(alarm?.max ?? 0) }
+}
+
+/** The alarms and timers that ring now, with their revisions: a changed set is a new key. */
+export function ringingKey(alarms: AlarmClock, timers: Timers, browser: boolean): string {
+  const ringingAlarms = browser ? alarms.alarms.filter((a) => a.phase === "AlarmRinging").map((a) => `${a.id}:${a.revision}`) : []
+  const ringingTimers = timers.timers.filter((t) => t.phase === "TimerRinging").map((t) => `${t.id}:${t.revision}`)
+  return [...ringingAlarms, ...ringingTimers].sort().join("|")
+}
+
+/** What the Clock screen asks of the clock: each answers whether the rules allowed it at this instant. */
+export service ClockActions {
+  addAlarm(hour: number, minute: number, label: string, days: number[]): boolean!!
+  snoozeAlarm(id: string, revision: number): boolean!!
+  dismissAlarm(id: string, revision: number): boolean!!
+  switchAlarm(id: string, revision: number, on: boolean): boolean!!
+  deleteAlarm(id: string, revision: number): boolean!!
+  setSnoozeMinutes(minutes: number): boolean!!
+  startTimer(label: string, durationMs: number): boolean!!
+  timer(action: "pause" | "resume" | "addMinute" | "reset" | "remove", id: string): boolean!!
+  dismissTimer(id: string, revision: number): boolean!!
+  stopwatch(action: "start" | "stop" | "lap" | "reset"): boolean!!
+  addZone(zone: string): boolean!!
+  removeZone(zone: string): boolean!!
+  silence(): boolean!!
+}
+
+effect function accepted<A, E>(sent: A!E) {
+  const done = sent catch () => undefined
+  return done !== undefined
+}
+
+/** The Clock screen's writes, each stamped with the current instant. */
+export const actionsLayer = Layer.effect(ClockActions, effect {
+  const ringer = try RingerMachine
+  const alarms = try AlarmsMachine
+  const timers = try TimersMachine
+  const watch = try StopwatchMachine
+  const world = try WorldMachine
+  const now = () => Clock.currentTimeMillis
+  const alarm = (event: AlarmEvent) => accepted(alarms.send(event))
+  const countdown = (event: TimerEvent) => accepted(timers.send(event))
+  const lap = (event: StopwatchEvent) => accepted(watch.send(event))
+
+  effect function alarmOf(id: string) {
+    return (try alarms.get()).alarms.find((a) => a.id === id)
+  }
+
+  return {
+    effect addAlarm(hour: number, minute: number, label: string, days: number[]) {
+      const at = try now()
+      const ordered = [...days].sort((a, b) => a - b)
+      return try alarm({ type: "addAlarm", id: `alarm_${freshId()}`, hour, minute, label: label.trim().slice(0, 200), days: ordered, nextAt: nextAlarmAt(hour, minute, ordered, at), now: at })
+    },
+    effect snoozeAlarm(id: string, revision: number) {
+      return try alarm({ type: "snoozeAlarm", id, revision, now: try now() })
+    },
+    effect dismissAlarm(id: string, revision: number) {
+      const at = try now()
+      const row = try alarmOf(id)
+      const next = row === undefined ? 0 : nextAlarmAt(row.hour, row.minute, row.days, at)
+      return try alarm({ type: "dismissAlarm", id, revision, nextAt: next, now: at })
+    },
+    effect switchAlarm(id: string, revision: number, on: boolean) {
+      const at = try now()
+      const row = try alarmOf(id)
+      const next = row === undefined ? 0 : nextAlarmAt(row.hour, row.minute, row.days, at)
+      return try alarm({ type: "switchAlarm", id, revision, on, nextAt: next, now: at })
+    },
+    deleteAlarm: (id: string, revision: number) => alarm({ type: "deleteAlarm", id, revision }),
+    setSnoozeMinutes: (minutes: number) => alarm({ type: "setSnoozeMinutes", minutes }),
+    effect startTimer(label: string, durationMs: number) {
+      return try countdown({ type: "startTimer", id: `timer_${freshId()}`, label: label.trim().slice(0, 200), durationMs: Math.round(durationMs), now: try now() })
+    },
+    effect timer(action: "pause" | "resume" | "addMinute" | "reset" | "remove", id: string) {
+      const at = try now()
+      return try match (action) {
+        when "pause": countdown({ type: "pauseTimer", id, now: at });
+        when "resume": countdown({ type: "resumeTimer", id, now: at });
+        when "addMinute": countdown({ type: "addMinute", id, now: at });
+        when "reset": countdown({ type: "resetTimer", id });
+        when "remove": countdown({ type: "removeTimer", id });
+      }
+    },
+    dismissTimer: (id: string, revision: number) => countdown({ type: "dismissTimer", id, revision }),
+    effect stopwatch(action: "start" | "stop" | "lap" | "reset") {
+      const at = try now()
+      return try match (action) {
+        when "start": lap({ type: "startStopwatch", now: at });
+        when "stop": lap({ type: "stopStopwatch", now: at });
+        when "lap": lap({ type: "lap", now: at });
+        when "reset": lap({ type: "resetStopwatch" });
+      }
+    },
+    effect addZone(zone: string) {
+      if (!knownTimeZone(zone)) return false
+      return try accepted(world.send({ type: "addZone", zone }))
+    },
+    removeZone: (zone: string) => accepted(world.send({ type: "removeZone", zone })),
+    effect silence() {
+      stopTones()
+      return try accepted(ringer.send({ type: "silence" }))
+    },
+  }
+})
+
+/** Keeps the page's time and attention, rings what is due, and holds the alarm lock only while it rings. Never returns. */
+export effect function keepTime() {
+  const build = (try Build).info
+  const browser = build.variant === "browser"
+  const ringer = try RingerMachine
+  const alarms = try AlarmsMachine
+  const timers = try TimersMachine
+  const watch = try StopwatchMachine
+  const facts = try DeviceFacts
+  const held = try Ref.make<(() => void) | undefined>(undefined)
+  const android = try present(SYSTEM)
+  let wasSounding = false
+  let factsAt = -Infinity
+  let toneAt = 0
+
+  effect function readSoundFacts() {
+    const dnd = (try facts.read()).dnd
+    const mode = android ? (call(SYSTEM, "getSystemFacts", InterruptionFacts) catch () => undefined) : undefined
+    const volumes = android ? (call(SYSTEM, "getDeviceSettings", DeviceVolumes) catch () => undefined) : undefined
+    ringer.send(soundEventOf(dnd, mode, volumes)) catch () => undefined
+  }
+
+  effect function releaseLock() {
+    const release = try Ref.getAndSet(held, undefined)
+    if (release !== undefined) release()
+  }
+
+  effect function acquire() {
+    const release = try callback<(() => void) | undefined>((resume) => {
+      requestAlarmLock((granted) => resume(succeed(granted)), () => resume(succeed(undefined)))
+    })
+    if (release === undefined) {
+      ringer.send({ type: "lockBusy" }) catch () => undefined
+      return
+    }
+    const key = ringingKey(try alarms.get(), try timers.get(), browser)
+    ringer.send({ type: "lockGranted", key }) catch () => undefined
+    if ((try ringer.get()).owns) try Ref.set(held, release)
+    else release()
+  }
+
+  effect function ringDue(now: number) {
+    if (browser) {
+      for (const due of (try alarms.get()).alarms.filter((a) => a.phase === "AlarmSet" && a.nextAt <= now)) {
+        alarms.send({ type: "ringDue", id: due.id, now }) catch () => undefined
+      }
+    }
+    for (const done of (try timers.get()).timers.filter((t) => t.phase === "TimerRunning" && t.endsAt <= now)) {
+      timers.send({ type: "finishTimer", id: done.id, now }) catch () => undefined
+    }
+  }
+
+  while (true) {
+    const now = try Clock.currentTimeMillis
+    ringer.send({ type: "tick", now }) catch () => undefined
+    const visible = pageVisible()
+    if (visible !== (try ringer.get()).allowed) ringer.send({ type: "setAllowed", allowed: visible }) catch () => undefined
+    try ringDue(now)
+    const key = ringingKey(try alarms.get(), try timers.get(), browser)
+    const page: Ringer = try ringer.get()
+    if (page.owns) ringer.send({ type: "follow", key }) catch () => undefined
+    else if (key !== "" && page.allowed && !page.asking) {
+      ringer.send({ type: "requestLock", key }) catch () => undefined
+      fork.detached acquire()
+    }
+    if ((try ringer.get()).sounding && (!wasSounding || now - factsAt >= 30_000)) {
+      try readSoundFacts()
+      factsAt = now
+    }
+    const after = try ringer.get()
+    if (!after.owns) try releaseLock()
+    if (after.sounding && now - toneAt >= 1000) {
+      if (after.level > 0) playTone(after.level)
+      toneAt = now
+    } else if (!after.sounding && wasSounding) stopTones()
+    wasSounding = after.sounding
+    try sleep((try watch.get()).running ? "100 millis" : "1 second")
+  }
+}

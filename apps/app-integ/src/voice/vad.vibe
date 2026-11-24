@@ -1,0 +1,38 @@
+// spec/voice/vad.md, "Story: End my spoken turn when I stop speaking"; spec/voice/vad.md, "Nothing counts in the first 250 ms; a turn ends after 180 ms of speech and 650 ms of silence, or at 12 s of speech"
+import { Native } from "../platform/native.vibe"
+import { Machine, hasSpeech, machine } from "../../gen/voice__vad.effect.vibe"
+import { RecordingMetrics } from "./native.schema.vibe"
+
+const SAMPLE_EVERY = "50 millis"
+const decodeMetrics = Schema.decodeUnknownOption(RecordingMetrics)
+
+/** A turn the gate ended: whether it heard speech, and when its speech began and ended, relative to the recording's start. */
+export interface GatedTurn {
+  readonly heard: boolean
+  readonly speechStartMs: number
+  readonly speechEndMs: number
+}
+
+function micro(level: number | undefined): number {
+  return level === undefined || !Number.isFinite(level) || level < 0 || level > 1 ? 0 : Math.round(level * 1_000_000)
+}
+
+/** Sample a native recording's level until the energy gate ends the turn, `cancelled` holds or the recording vanishes. */
+export effect function gateRecording(recordingId: string, echoGate: () => boolean, cancelled: () => boolean) {
+  const native = try Native
+  const startedAt = try Clock.currentTimeMillis
+  provide machine() {
+    const gate = try Machine
+    while (!(try gate.get()).stopped && !cancelled()) {
+      const raw = native.invoke("AlphaVoiceCloud", "getRecordingMetrics", { recordingId }) catch () => undefined
+      const metrics = raw === undefined ? undefined : Option.getOrUndefined(decodeMetrics(raw))
+      if (metrics === undefined || metrics.recordingId !== recordingId) break
+      const atMs = (try Clock.currentTimeMillis) - startedAt
+      gate.send({ type: "sample", atMs, rmsMicro: micro(metrics.rms), peakMicro: micro(metrics.peak), echoGate: echoGate() }) catch () => undefined
+      try sleep(SAMPLE_EVERY)
+    }
+    const ended = try gate.get()
+    const turn: GatedTurn = { heard: hasSpeech(ended), speechStartMs: Math.max(0, ended.firstSpeech), speechEndMs: Math.max(0, ended.lastSpeech) }
+    return turn
+  }
+}

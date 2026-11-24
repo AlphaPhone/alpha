@@ -1,0 +1,46 @@
+// spec/telephony/phone.md, "A number handed to Phone fills the keypad once it is idle, and never dials"; spec/telephony/messages.md, "Only a complete listed conversation opens, with the full identity it was listed with"; spec/telephony/contacts.md, "Alpha's filter is the provider's own query on this phone, closes an open contact and shows a clearable chip"
+import { ContactsRoute, MessagesRoute, PhoneRoute } from "./routes.schema.vibe"
+
+/** The longest number the keypad holds. */
+export const KEYPAD_MAX = 40
+
+/** What a route asks of a view once its first read has answered. */
+export type RouteAsk =
+  | { readonly tag: "Keypad"; readonly number: string }
+  | { readonly tag: "Recents" }
+  | { readonly tag: "Voicemail" }
+  | { readonly tag: "Info" }
+  | { readonly tag: "Compose"; readonly number: string }
+  | { readonly tag: "Thread"; readonly threadId: string }
+  | { readonly tag: "Notice" }
+  | { readonly tag: "Filter"; readonly query: string }
+  | { readonly tag: "FromPhone" }
+  | { readonly tag: "NoRoute" }
+
+/** Phone's route, or NoRoute for anything else: the keypad keeps only its own keys, at most 40, `info` is Settings → Phone's details, and a malformed route opens Phone as it is and never dials. */
+export function phoneRouteOf(route: string | undefined): RouteAsk {
+  const ok = route === undefined ? undefined : Option.getOrUndefined(Schema.decodeUnknownOption(PhoneRoute)(route))
+  if (ok === undefined) return { tag: "NoRoute" }
+  if (ok.startsWith("keypad:")) {
+    const keys = ok.slice("keypad:".length).replace(/[^0-9*#+]/g, "")
+    const number = keys.startsWith("+") ? `+${keys.slice(1).replace(/\+/g, "")}` : keys.replace(/\+/g, "")
+    return { tag: "Keypad", number: number.slice(0, KEYPAD_MAX) }
+  }
+  return ok === "recents" ? { tag: "Recents" } : ok === "info" ? { tag: "Info" } : { tag: "Voicemail" }
+}
+
+/** Messages' route, or NoRoute: a malformed route opens the list and never composes or opens a lookalike. */
+export function messagesRouteOf(route: string | undefined): RouteAsk {
+  const ok = route === undefined ? undefined : Option.getOrUndefined(Schema.decodeUnknownOption(MessagesRoute)(route))
+  if (ok === undefined) return { tag: "NoRoute" }
+  if (ok.startsWith("compose:")) return { tag: "Compose", number: ok.slice("compose:".length) }
+  if (ok.startsWith("thread:")) return { tag: "Thread", threadId: ok.slice("thread:".length) }
+  return { tag: "Notice" }
+}
+
+/** Contacts' route, or NoRoute. */
+export function contactsRouteOf(route: string | undefined): RouteAsk {
+  const ok = route === undefined ? undefined : Option.getOrUndefined(Schema.decodeUnknownOption(ContactsRoute)(route))
+  if (ok === undefined) return { tag: "NoRoute" }
+  return ok === "from:phone" ? { tag: "FromPhone" } : { tag: "Filter", query: ok.slice("filter:".length).trim() }
+}

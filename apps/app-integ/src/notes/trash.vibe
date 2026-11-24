@@ -1,0 +1,202 @@
+// spec/notes/trash.md, "Story: Recover a deleted note"; spec/notes/trash.md, "Recently deleted opens while it has rows, one action runs at a time, and it closes once empty"; spec/notes/trash.md, "A restore needs the exact deletion and the current revision, and a delete's Undo the exact deletion"; spec/notes/trash.md, "Erase needs the three-day choice, a review of that exact deletion at the current revision, and no shared recording"; spec/notes/trash.md, "A saved erase leaves its recordings' cleanup pending, a conflict changes nothing, and an unknown outcome reopens the store"
+import type { NotesSnapshot, NotesTrashRecordingCleanup, StickyNote } from "@elizaos/plugin-notes/types"
+import { type EraseCommit, type Event as TrashEvent, Machine as TrashMachine, type TrashView, daysLeft, machine as trashMachine } from "../../gen/notes__trash.effect.vibe"
+import { NotesClient, NotesRefused, TrashRetentionOff } from "./client.vibe"
+import { NotesCollection } from "./collection.vibe"
+import { NotesEditor } from "./editor.vibe"
+import { voiceAudio } from "./list.vibe"
+
+/** One Recently deleted row as the owner reviews it: the note, its deletion time and the revision it was seen at. */
+export interface TrashRow {
+  readonly id: string
+  readonly title: string
+  readonly kind: string
+  readonly deletedAt: string
+  readonly revision: number
+  readonly daysLeft: number
+  readonly audioId?: string
+}
+
+/** What a Trash action did, for its one-line notice. */
+export type TrashNotice = "restored" | "review-again" | "restore-unconfirmed" | "erased" | "erase-unconfirmed" | "erase-conflict" | "recording-shared" | "gone"
+
+/** Recently deleted over the canonical Trash, with the three-day choice when the host has it. */
+export service NotesTrash {
+  readonly rows: Stream.Stream<readonly TrashRow[]>
+  readonly cleanups: Stream.Stream<readonly NotesTrashRecordingCleanup[]>
+  open(): void!!
+  /** Close Recently deleted; false when it was not open. */
+  close(): boolean!!
+  ask(row: TrashRow): void!!
+  /** Close a row's review; false when none was open. */
+  closeAsk(): boolean!!
+  askErase(all: boolean): void!!
+  /** Cancel an erase confirmation; false when none was asked. */
+  cancelErase(): boolean!!
+  restore(row: TrashRow): TrashNotice!!
+  undo(noteId: string, deletedAt: string): TrashNotice!!
+  erase(row?: TrashRow): TrashNotice!!
+  deleted(): void!!
+  dismissUndo(): void!!
+  noticeShown(): void!!
+  probeRetention(): boolean!!
+  entryFor(noteId: string): (TrashRow | undefined)!!
+}
+
+const kindNames: Record<string, string> = { text: "Note", list: "Checklist", voice: "Voice note", link: "Link" }
+
+/** The rows of a snapshot's Trash, newest deletion first. */
+export function trashRows(snapshot: NotesSnapshot, now: number): TrashRow[] {
+  return [...(snapshot.trash ?? [])].sort((a, b) => Date.parse(b.deletedAt) - Date.parse(a.deletedAt)).map((entry) => {
+    const audio = entry.note.format?.kind === "voice" ? voiceAudio(entry.note.format.data) : undefined
+    const kind = entry.note.format?.kind ?? "text"
+    return {
+      id: entry.note.id, title: entry.note.title.trim() === "" ? kindNames[kind] ?? "Note" : entry.note.title, kind: kindNames[kind] ?? "Note",
+      deletedAt: entry.deletedAt, revision: snapshot.revision, daysLeft: daysLeft(Date.parse(entry.deletedAt), now),
+      ...(audio === undefined ? {} : { audioId: audio.audioId }),
+    }
+  })
+}
+
+/** How many saved or trashed notes refer to a recording. */
+export function recordingReferences(snapshot: NotesSnapshot, audioId: string): number {
+  const notes: StickyNote[] = [...snapshot.notes, ...(snapshot.trash ?? []).map((entry) => entry.note)]
+  return notes.filter((note) => note.format?.kind === "voice" && voiceAudio(note.format.data)?.audioId === audioId).length
+}
+
+const make = effect {
+  const client = try NotesClient
+  const collection = try NotesCollection
+  const editor = try NotesEditor
+  const machine = try TrashMachine
+  const rows = try SubscriptionRef.make<readonly TrashRow[]>([])
+  const cleanups = try SubscriptionRef.make<readonly NotesTrashRecordingCleanup[]>([])
+  const asked = try Ref.make<TrashRow | undefined>(undefined)
+
+  effect function send(event: TrashEvent): (TrashView | undefined)!! {
+    return (machine.send(event) catch () => undefined)
+  }
+
+  effect function snapshot(): (NotesSnapshot | undefined)!! {
+    return (try collection.current())?.snapshot
+  }
+
+  effect function exact(row: TrashRow, strictRevision: boolean): boolean!! {
+    const current = try snapshot()
+    return current !== undefined && (current.trash ?? []).some((entry) => entry.note.id === row.id && entry.deletedAt === row.deletedAt)
+      && (!strictRevision || current.revision === row.revision)
+  }
+
+  effect function restoring(): TrashNotice!! {
+    const state = try machine.get()
+    if (state.busy !== "Restoring") return state.staleReview ? "review-again" : "gone"
+    const id = (try Ref.get(asked))?.id ?? ""
+    const restored = id !== "" && (try editor.restore(id))
+    try send({ type: "finishRestore", restored })
+    return restored ? "restored" : "restore-unconfirmed"
+  }
+
+  effect function probeRetention(): boolean!! {
+    const listed = (client.readCleanups() catch effect (error) => match (error) {
+      when TrashRetentionOff: undefined;
+      default: null;
+    })
+    if (listed === null) return (try machine.get()).retentionOn
+    const on = listed !== undefined
+    try send({ type: "setRetention", on })
+    if (listed !== undefined) try SubscriptionRef.set(cleanups, listed)
+    return on
+  }
+
+  return {
+    rows: SubscriptionRef.changes(rows),
+    cleanups: SubscriptionRef.changes(cleanups),
+    probeRetention,
+    effect open() {
+      if (!(try editor.leave())) return
+      try collection.refresh()
+      try probeRetention()
+      try send({ type: "openTrash" })
+    },
+    effect close() { return (try send({ type: "closeTrash" })) !== undefined },
+    effect ask(row: TrashRow) {
+      try Ref.set(asked, row)
+      try send({ type: "askRow" })
+    },
+    effect closeAsk() { return (try send({ type: "closeAsk" })) !== undefined },
+    effect askErase(all: boolean) {
+      if (!all) {
+        const row = try Ref.get(asked)
+        if (row === undefined) return
+      }
+      try send({ type: "askErase", everything: all })
+    },
+    effect cancelErase() { return (try send({ type: "cancelErase" })) !== undefined },
+    effect restore(row: TrashRow) {
+      try Ref.set(asked, row)
+      const ok = try exact(row, true)
+      const state = try send({ type: "restoreRow", exact: ok })
+      if (state === undefined) return "gone"
+      return try restoring()
+    },
+    effect undo(noteId: string, deletedAt: string) {
+      try collection.refresh()
+      const current = try snapshot()
+      const row = current === undefined ? undefined : trashRows(current, Date.now()).find((entry) => entry.id === noteId && entry.deletedAt === deletedAt)
+      if (row !== undefined) try Ref.set(asked, row)
+      const state = try send({ type: "undo", exact: row !== undefined })
+      if (state === undefined) return "gone"
+      return try restoring()
+    },
+    effect erase(row?: TrashRow) {
+      const state = try machine.get()
+      const current = try snapshot()
+      if (current === undefined) return "gone"
+      const target = state.confirm === "ConfirmOne" ? row ?? (try Ref.get(asked)) : undefined
+      if (state.confirm === "ConfirmOne" && (target === undefined || !(try exact(target, true)))) {
+        try send({ type: "cancelErase" })
+        return "review-again"
+      }
+      const selected = target === undefined ? trashRows(current, Date.now()) : [target]
+      const shared = selected.some((entry) => entry.audioId !== undefined && recordingReferences(current, entry.audioId) !== 1)
+      const started = try send({ type: "eraseRows", shared })
+      if (started === undefined || started.busy !== "Erasing") return shared ? "recording-shared" : "review-again"
+      const review = target === undefined ? { scope: "all" as const, expectedRevision: current.revision }
+        : { scope: "entry" as const, expectedRevision: current.revision, id: target.id, deletedAt: target.deletedAt }
+      const outcome = (client.eraseTrash(review) catch (error) => error)
+      const reply = "erased" in outcome ? outcome : undefined
+      const conflict = outcome instanceof NotesRefused && outcome.status === 409
+      const commit: EraseCommit = reply !== undefined ? "CommitSaved" : conflict ? "CommitConflict" : "CommitUnknownNotApplied"
+      try send({ type: "finishErase", commit, recordings: reply?.recordingCleanup.length ?? 0 })
+      if (reply !== undefined) {
+        try SubscriptionRef.update(cleanups, (pending) => [...pending, ...reply.recordingCleanup])
+        try collection.invalidate(reply.state.revision)
+        return "erased"
+      }
+      try collection.refresh()
+      try send({ type: "reopen" })
+      return conflict ? "erase-conflict" : "erase-unconfirmed"
+    },
+    effect deleted() { try send({ type: "deleted" }) },
+    effect dismissUndo() { try send({ type: "dismissUndo" }) },
+    effect noticeShown() { try send({ type: "noticeShown" }) },
+    effect entryFor(noteId: string) {
+      const current = try snapshot()
+      return current === undefined ? undefined : trashRows(current, Date.now()).find((entry) => entry.id === noteId)
+    },
+    effect follow() {
+      for try (const owned of collection.snapshots) {
+        const listed = owned === undefined ? [] : trashRows(owned.snapshot, Date.now())
+        try SubscriptionRef.set(rows, listed)
+        if (owned !== undefined) try send({ type: "published", rows: listed.length, revision: owned.snapshot.revision })
+      }
+    },
+  }
+}
+
+/** The Trash service with its machine, following the collection's Trash. */
+export const trashLayer = Layer.provideMerge(Layer.effect(NotesTrash, effect {
+  const trash = try make
+  try fork.scoped trash.follow()
+  return trash
+}), trashMachine())

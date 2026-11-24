@@ -1,0 +1,148 @@
+// spec/browser/session.md, "Story: Browse in tabs": the Browser shell over a fake native tab host, faked once at the Native boundary.
+import { Build } from "../../src/platform/build.vibe"
+import { Native, NativeFailed } from "../../src/platform/native.vibe"
+import { Cloud } from "../../src/platform/cloud.vibe"
+import { Navigation } from "../../src/shell/navigation.vibe"
+import { Toasts } from "../../src/shell/toasts.vibe"
+import { Foreground, type ForegroundState } from "../../src/shell/foreground.vibe"
+import { Assistant } from "../../src/assistant/assistant.vibe"
+import { Preferences } from "../../src/settings/preferences.vibe"
+import { PageMail, ReadingSpeechFailed, ReadingVoice } from "../../src/browser/ports.vibe"
+import { layer } from "../../src/browser/layer.vibe"
+import type { BrowserTabs } from "../../src/browser/session.vibe"
+import { typedAddress } from "../../src/browser/address.ts"
+
+/** One call the fake tab host received. */
+export interface Call { readonly method: string; readonly args: Record<string, unknown> }
+
+/** One event the fake tab host sends. */
+export interface HostEvent { readonly name: string; readonly event: unknown }
+
+/** The foreground of an unlocked phone showing Browser with nothing over it. */
+export const shownBrowser: ForegroundState = { visible: true, locked: false, screen: "home", view: "browser", shade: false, chat: "closed", modal: false }
+
+/** How a fake behaves where a test needs more than the defaults. */
+export interface FakeOptions {
+  /** The tab host's answer to a method; an Error is a native refusal with its message, and an Effect is run for the answer. */
+  readonly answers?: Record<string, (args: Record<string, unknown>) => unknown>
+  /** Settings › Privacy › Browser page for Alpha; on when not given. */
+  readonly sharing?: Ref.Ref<boolean>
+  /** Cloud's answer to one request. */
+  readonly cloud?: (method: string, path: string, body?: unknown) => Effect.Effect<unknown>
+  /** Whether this device has an on-device reading voice, and whether its speech ends cleanly. */
+  readonly voice?: { readonly binding: boolean; readonly ready: boolean; readonly speaks: boolean }
+  /** Whether Inbox can open a draft. */
+  readonly mail?: boolean
+}
+
+function defaultAnswer(method: string): unknown {
+  if (method === "bookmarks" || method === "setBookmark") return { urls: [] }
+  if (method === "browsingState") return { history: [], tabs: [], cur: "" }
+  return {}
+}
+
+/** A tab host that answers every call, records it, and sends the events a test publishes, under the real Browser layer. */
+export effect function fakeHost(options: FakeOptions = {}) {
+  const answers = options.answers ?? {}
+  const calls = try Ref.make<Call[]>([])
+  const events = try PubSub.unbounded<HostEvent>()
+  const opened = try Ref.make<string[]>([])
+  const toasts = try Ref.make<string[]>([])
+  const drafts = try Ref.make<string[]>([])
+  const mails = try Ref.make<{ subject: string; body: string }[]>([])
+  const spoken = try Ref.make<string[]>([])
+  const cloudCalls = try Ref.make<string[]>([])
+  const foreground = try SubscriptionRef.make(shownBrowser)
+  const voice = options.voice ?? { binding: false, ready: false, speaks: true }
+  const sharing = options.sharing ?? (try Ref.make(true))
+  const native = Layer.succeed(Native, {
+    available: () => succeed(true),
+    effect invoke(_plugin: string, method: string, args?: unknown) {
+      const given = typeof args === "object" && args !== null ? { ...args } : {}
+      try Ref.update(calls, (all) => [...all, { method, args: given }])
+      const answer = answers[method]
+      if (answer === undefined) return defaultAnswer(method)
+      const answered = answer(given)
+      const result = Effect.isEffect(answered) ? try (answered as Effect.Effect<unknown>) : answered
+      if (result instanceof Error) throw new NativeFailed({ plugin: "AlphaBrowser", method, message: result.message })
+      return result
+    },
+    listen: (_plugin: string, name: string) => Stream.map(Stream.filter(Stream.fromPubSub(events), (e) => e.name === name), (e) => e.event),
+  })
+  const speech = (text: string) => effect {
+    try Ref.update(spoken, (all) => [...all, text])
+    if (!voice.speaks) throw new ReadingSpeechFailed({ reason: "Speech stopped" })
+  }
+  const platform = Layer.mergeAll(
+    native,
+    Layer.succeed(Build, { info: { version: "test", variant: "launcher", testMocks: true } }),
+    Layer.succeed(Cloud, {
+      base: "https://cloud.test",
+      json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown) => effect {
+        try Ref.update(cloudCalls, (all) => [...all, `${method} ${path}`])
+        return options.cloud === undefined ? { accounts: [] } : try options.cloud(method, path, body)
+      },
+    }),
+    Layer.succeed(Navigation, {
+      open: (app: string, route?: string) => Effect.as(Ref.update(opened, (all) => [...all, route === undefined ? app : `${app}:${route}`]), true),
+    } as unknown as Navigation.Shape),
+    Layer.succeed(Toasts, { show: (text: string) => Ref.update(toasts, (all) => [...all, text]) } as unknown as Toasts.Shape),
+    Layer.succeed(Foreground, { changes: SubscriptionRef.changes(foreground), get: () => SubscriptionRef.get(foreground) }),
+    Layer.succeed(Preferences, {
+      sharesBrowserPage: () => Ref.get(sharing),
+      asksBeforeActions: () => succeed(false),
+    } as unknown as Preferences.Shape),
+    Layer.succeed(Assistant, { openWith: (draft: string) => Ref.update(drafts, (all) => [...all, draft]) } as unknown as Assistant.Shape),
+    Layer.succeed(ReadingVoice, {
+      binding: () => succeed(voice.binding ? { route: "on-device" } : undefined),
+      ready: () => succeed(voice.ready),
+      speakToken: (token: string) => speech(token),
+      speakText: (text: string) => speech(text),
+      stop: () => succeed(undefined),
+    }),
+    Layer.succeed(PageMail, {
+      compose: (subject: string, body: string) => effect {
+        try Ref.update(mails, (all) => [...all, { subject, body }])
+        return options.mail === false ? "Email isn’t available on this phone." : undefined
+      },
+    }),
+  )
+  return { calls, events, opened, toasts, drafts, mails, spoken, cloudCalls, foreground, sharing, live: Layer.provide(layer, platform) }
+}
+
+/** The calls the fake host received for `method`. */
+export effect function callsTo(calls: Ref.Ref<Call[]>, method: string) {
+  return (try Ref.get(calls)).filter((c) => c.method === method)
+}
+
+/** This document's tab-host session, as the first call named it. */
+export effect function sessionOf(calls: Ref.Ref<Call[]>) {
+  const first = (try Ref.get(calls))[0]
+  return typeof first?.args.session === "string" ? first.args.session : ""
+}
+
+/** The host sends one event and the shell takes a moment to follow it. */
+export effect function emit(events: PubSub.PubSub<HostEvent>, name: string, event: Record<string, unknown>) {
+  try PubSub.publish(events, { name, event })
+  try sleep("20 millis")
+}
+
+/** The host reports one tab's page under `session`. */
+export effect function report(events: PubSub.PubSub<HostEvent>, session: string, event: Record<string, unknown>) {
+  try emit(events, "stateChanged", { session, ...event })
+}
+
+/** The started session, once its saved record was read or refused. */
+export effect function settledTabs(tabs: BrowserTabs.Shape) {
+  try timeout(Stream.runHead(Stream.filter(tabs.changes, (s) => s.host !== "UnknownHost" && s.hydration !== "Reading" && s.hydration !== "Unread")), "2 seconds")
+  return try tabs.get()
+}
+
+/** Loads `url` in the selected tab and has the host commit it. */
+export effect function loadPage(tabs: BrowserTabs.Shape, events: PubSub.PubSub<HostEvent>, session: string, url: string, navigation: string, sequence: number) {
+  const id = (try tabs.get()).cur
+  try tabs.dispatch({ type: "startEditing" })
+  try tabs.dispatch({ type: "submitAddress", facts: typedAddress(url).facts, url })
+  try report(events, session, { id, sequence, navigation, url, title: URL.parse(url)?.hostname ?? url, committed: true })
+  return id
+}

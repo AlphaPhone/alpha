@@ -1,0 +1,93 @@
+// spec/notes/cleanup.md, "Pending cleanups are read from the agent, worked one at a time, and acknowledged only with the device's proof"; spec/notes/cleanup.md, "The device erases a recording only for the exact tombstone with no other reference"; spec/notes/audioCustody.md, "One current operation controls the trash, and an erased recording never comes back"
+import type { NotesSnapshot, NotesTrashRecordingCleanup } from "@elizaos/plugin-notes/types"
+import {
+  type CleanupPlan, type CleanupView, type DeviceReceipt, type Event as CleanupEvent, Machine as CleanupMachine, cleanupPlan, machine as cleanupMachine,
+} from "../../gen/notes__cleanup.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { NotesClient } from "./client.vibe"
+import { NotesCollection } from "./collection.vibe"
+import { decodeAudioDescription, decodeAudioReceipt } from "./notes.schema.vibe"
+import { recordingReferences } from "./trash.vibe"
+
+const audioPlugin = "AlphaNoteAudio"
+
+/** The recording cleanup that follows a canonical erase. */
+export service NotesCleanup {
+  pass(): number!!
+}
+
+const receiptOf = (status: string | undefined): DeviceReceipt =>
+  status === "removed" ? "ReceiptRemoved" : status === "restored" ? "ReceiptRestored" : status === "purged" ? "ReceiptPurged" : status === "unknown" ? "ReceiptUnknown" : "ReceiptUnreadable"
+
+const make = effect {
+  const client = try NotesClient
+  const collection = try NotesCollection
+  const native = try Native
+  const machine = try CleanupMachine
+  const running = try Semaphore.make(1)
+
+  effect function send(event: CleanupEvent): (CleanupView | undefined)!! {
+    return (machine.send(event) catch () => undefined)
+  }
+
+  effect function device(method: string, receipt: NotesTrashRecordingCleanup) {
+    return try native.invoke(audioPlugin, method, { audioId: receipt.audioId, noteId: receipt.noteId, operationId: receipt.operationId })
+  }
+
+  effect function purge(receipt: NotesTrashRecordingCleanup, snapshot: NotesSnapshot | undefined): boolean!! {
+    const described = (effect {
+      return try decodeAudioDescription(try native.invoke(audioPlugin, "describe", { audioId: receipt.audioId }))
+    } catch () => undefined)
+    const status = (effect {
+      return (try decodeAudioReceipt(try device("deletionStatus", receipt))).status
+    } catch () => undefined)
+    const plan: CleanupPlan = cleanupPlan({
+      noteState: snapshot !== undefined && snapshot.notes.some((note) => note.id === receipt.noteId) ? "DifferentNote" : "ExactTombstone",
+      metadataRead: described !== undefined || status === "purged",
+      owned: described === undefined ? status === "purged" : described.noteId === receipt.noteId,
+      audioTrashed: described?.deletedAt !== undefined,
+      receipt: receiptOf(status),
+      shared: snapshot !== undefined && recordingReferences(snapshot, receipt.audioId) > 0,
+    })
+    if (plan === "RetireReceipt") return status === "purged"
+    if (plan !== "EraseAudio" && plan !== "MoveThenEraseAudio") return false
+    return (effect {
+      if (plan === "MoveThenEraseAudio") {
+        const removed = try decodeAudioReceipt(try device("remove", receipt))
+        if (removed.status !== "removed") return false
+      }
+      const purged = try decodeAudioReceipt(try device("purge", receipt))
+      return purged.status === "purged" && purged.audioId === receipt.audioId && purged.noteId === receipt.noteId && purged.operationId === receipt.operationId
+    } catch () => false)
+  }
+
+  effect function work(): number!! {
+    const listed = (client.readCleanups() catch () => undefined)
+    if (listed === undefined) return 0
+    try send({ type: "listed", count: listed.length })
+    if (try native.available(audioPlugin)) try send({ type: "hostRegistered" })
+    else try send({ type: "hostLost" })
+    let acknowledged = 0
+    for (const receipt of listed) {
+      if ((try send({ type: "beginCleanup" })) === undefined) break
+      const proven = try purge(receipt, (try collection.current())?.snapshot)
+      try send({ type: "devicePurged", proven })
+      if (!proven) continue
+      const exact = (client.completeCleanup(receipt) catch () => false)
+      try send({ type: "acknowledge", exact })
+      if (exact) acknowledged += 1
+    }
+    return acknowledged
+  }
+
+  return { pass: () => running.withPermits(1)(work()) }
+}
+
+/** The cleanup service with its machine; it works after start-up, after every published snapshot and every fifteen minutes. */
+export const cleanupLayer = Layer.provideMerge(Layer.effect(NotesCleanup, effect {
+  const cleanup = try make
+  const collection = try NotesCollection
+  try fork.scoped Stream.runForEach(collection.snapshots, (owned) => owned === undefined ? Effect.void : Effect.asVoid(cleanup.pass()))
+  try fork.scoped Effect.repeat(cleanup.pass(), Schedule.spaced("15 minutes"))
+  return cleanup
+}), cleanupMachine())

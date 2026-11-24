@@ -1,0 +1,51 @@
+// spec/voice/route.md, "Story: Use Cloud speech when I have it, and my phone otherwise"; spec/voice/dictation.md, "Story: Keep my recording when transcription fails"
+import { Native } from "../platform/native.vibe"
+import type { Route } from "../../gen/voice__route.ts"
+import { newId } from "../platform/ids.ts"
+import { TranscriptReply } from "./native.schema.vibe"
+import { VoiceRoute, VoiceRouteFailed, attemptFailed, type VoiceAccount } from "./route.vibe"
+
+/** A transcript of a recording the phone holds, and whether the phone made it. */
+export interface RecordingTranscript {
+  readonly text: string
+  readonly local: boolean
+}
+
+/** Transcription of a recording the native recorder kept, such as a voice note's segment, on the route in use. */
+export service RecordingTranscriber {
+  /** Transcribe the recording under `recordingId` on the route in use, on the phone when a network route fails before its answer; `details` go with the request, such as a saved note's window. */
+  transcribe(recordingId: string, details?: { readonly [key: string]: unknown }): RecordingTranscript!VoiceRouteFailed
+}
+
+const decodeTranscript = Schema.decodeUnknownOption(TranscriptReply)
+
+/** The native transcription call for a kept recording on `route`, with the account's credential or revision. */
+export function transcription(route: Route, account: VoiceAccount, recordingId: string, requestId: string) {
+  if (route === "Cloud" && account.kind === "cloud") {
+    return { method: "transcribeRecording", args: { recordingId, requestId, environment: account.environment, credentialId: account.credentialId } }
+  }
+  if (route === "Direct" && account.kind === "own") {
+    return { method: "transcribeOwnRecording", args: { recordingId, requestId, providerRevision: account.revision } }
+  }
+  return { method: "transcribeLocalRecording", args: { recordingId, requestId } }
+}
+
+/** RecordingTranscriber over the speech route and the native recorder. */
+export const recordingTranscriber = Layer.effect(RecordingTranscriber, effect {
+  const native = try Native
+  const routes = try VoiceRoute
+  return {
+    effect transcribe(recordingId: string, details: { readonly [key: string]: unknown } = {}) {
+      return try routes.run((route: Route, heard) => effect {
+        const account = try routes.account()
+        const call = transcription(route, account, recordingId, newId())
+        const raw = native.invoke("AlphaVoiceCloud", call.method, { ...details, ...call.args }) catch effect (error) => { throw attemptFailed(error) }
+        const reply = Option.getOrUndefined(decodeTranscript(raw))
+        if (reply === undefined || reply.local !== (route === "Device")) throw attemptFailed({ code: "voice-stt-response" })
+        try heard()
+        const transcript: RecordingTranscript = { text: reply.text.trim(), local: reply.local }
+        return transcript
+      })
+    },
+  }
+})

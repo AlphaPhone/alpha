@@ -1,0 +1,38 @@
+// spec/camera/libraryReview.md, "Photos operations reach a phone only when the assistant and the phone both offer their capability"; spec/camera/agentLibrary.md, "The selected form names the open viewer item, and only for an assistant that offered it"; spec/camera/agentCapture.md, "A saved photo with its library identity succeeds; a write without one, or a lost answer, is unknown and never repeated"
+import { negotiation, shownPhoto, type ShownPhoto } from "@elizaos/agent/device-actions"
+
+/** The camera and Photos capabilities this phone advertises in `x-eliza-device-capabilities`. */
+export const cameraCapabilities: readonly string[] = [
+  "camera.capture-photo.v1",
+  "camera.capture-library-id.v1",
+  "photos.library.v1",
+  "photos.view.v1",
+  "photos.view-selected.v1",
+]
+
+/** The item the Photos viewer shows, as the turn observation names it. */
+export interface ShownItem {
+  readonly id: string
+  readonly revision: string
+  readonly video: boolean
+}
+
+/** The turn observation of the Photos screen: the open viewer item, never on a sensitive screen. */
+export function photosObservation(shown: ShownItem | undefined, revision: number, sensitive: boolean) {
+  return {
+    view: "photos",
+    revision,
+    sensitive,
+    ...(shown === undefined || sensitive ? {} : { selectedObject: { kind: shown.video ? "video" : "photo", id: shown.id, revision: shown.revision } }),
+  }
+}
+
+/** How "this photo" targets the open viewer item under the capabilities the assistant named, or undefined when it may not. */
+export function shownPhotoFor(shown: ShownItem | undefined, revision: number, sensitive: boolean, header: string | undefined): ShownPhoto | undefined {
+  return shownPhoto(photosObservation(shown, revision, sensitive), negotiation(true, header))
+}
+
+/** Whether a header names a capability, so a receipt field or an operation form it gates may be used. */
+export function offers(header: string | undefined, name: string): boolean {
+  return header !== undefined && !/[\r\n]/.test(header) && header.split(",").map((part) => part.trim()).includes(name)
+}

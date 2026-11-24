@@ -1,0 +1,135 @@
+// spec/camera/browse.md, "Story: Let the assistant narrow what Photos shows"; spec/camera/browse.md, "A long press starts selecting with that item; a tap toggles one item, a drag adds a range, Select all adds the whole list"; spec/camera/browse.md, "A change reaches the selection in batches; a declined batch ends the run and nothing after it is sent"
+import type { Row } from "../../gen/camera__library.effect.vibe"
+
+/** The assistant's read-only filter (`photos_filter`). */
+export interface PhotosFilter {
+  readonly from?: number
+  readonly to?: number
+  readonly kind?: "image" | "video"
+  readonly favorite?: boolean
+  readonly album?: string
+  readonly text?: string
+}
+
+const DAY = 86_400_000
+const DAY_HEADER_WINDOW = 30
+const STOP = new Set(["of", "at", "the", "in", "on", "from", "with", "and", "my", "a", "an", "me", "show", "find"])
+
+function startOfDay(time: number): number {
+  const d = new Date(time)
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+}
+
+/** "Today", "Yesterday", a day within the last month, then the month. */
+export function sectionKey(time: number, now: number): { readonly key: string; readonly label: string } {
+  const ago = Math.round((startOfDay(now) - startOfDay(time)) / DAY), d = new Date(time)
+  if (ago <= 0) return { key: "today", label: "Today" }
+  if (ago === 1) return { key: "yesterday", label: "Yesterday" }
+  if (ago < DAY_HEADER_WINDOW) {
+    const year = d.getFullYear() !== new Date(now).getFullYear()
+    return { key: `d:${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`, label: d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", ...(year ? { year: "numeric" } : {}) }) }
+  }
+  return { key: `m:${d.getFullYear()}-${d.getMonth()}`, label: d.toLocaleDateString("en-US", { month: "long", year: "numeric" }) }
+}
+
+/** Consecutive rows that share a section, in grid order. */
+export function groupSections(rows: readonly Row[], now: number): { readonly key: string; readonly label: string; readonly items: Row[] }[] {
+  const groups: { key: string; label: string; items: Row[] }[] = []
+  for (const row of rows) {
+    const section = sectionKey(row.rank, now), last = groups[groups.length - 1]
+    if (last !== undefined && last.key === section.key) last.items.push(row)
+    else groups.push({ ...section, items: [row] })
+  }
+  return groups
+}
+
+/** The viewer's title: the capture day and time. */
+export function viewerTitle(time: number, now: number): { readonly day: string; readonly time: string } {
+  const section = sectionKey(time, now), d = new Date(time)
+  return {
+    day: section.key.startsWith("m:") ? d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" }) : section.label,
+    time: d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
+  }
+}
+
+/** Days before Android removes an item from Recently deleted. */
+export function daysLeft(expiresAt: number, now: number): number | undefined {
+  if (!Number.isFinite(expiresAt) || expiresAt <= 0) return undefined
+  return Math.max(0, Math.ceil((expiresAt - now) / DAY))
+}
+
+/** Everything between the anchor and the tile under the finger, in grid order. */
+export function dragRange(order: readonly Row[], anchor: string, current: string): string[] {
+  const a = order.findIndex((row) => row.id === anchor), b = order.findIndex((row) => row.id === current)
+  if (a < 0 || b < 0) return []
+  return order.slice(Math.min(a, b), Math.max(a, b) + 1).map((row) => row.id)
+}
+
+/** A built-in album's members, or a custom album's listed members. */
+export function albumOf(row: Row, album: string, members: (album: string) => readonly string[] | undefined): boolean {
+  if (album === "favorites") return row.favorite
+  if (album === "videos") return row.video
+  if (album === "camera") return /(^|\/)DCIM\/Camera\//i.test(row.folder)
+  if (album === "screenshots") return /Screenshots\//i.test(row.folder)
+  return members(album)?.includes(row.id) === true
+}
+
+function filterWords(text: string | undefined): string[] {
+  return (text ?? "").toLowerCase().replace(/'s\b/g, "").replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((word) => word !== "" && !STOP.has(word)).slice(0, 12)
+}
+
+function textMatches(row: Row, words: readonly string[], now: number): boolean {
+  if (words.length === 0) return true
+  const date = new Date(row.rank), ago = Math.round((startOfDay(now) - startOfDay(row.rank)) / DAY)
+  const bag = [
+    row.video ? "video" : "photo", row.video ? "videos" : "photos", row.video ? "clip" : "picture", row.video ? "clips" : "pictures",
+    date.toLocaleDateString("en-US", { weekday: "long" }).toLowerCase(), date.toLocaleDateString("en-US", { month: "long" }).toLowerCase(),
+    String(date.getFullYear()), String(date.getDate()),
+  ]
+  if (ago === 0) bag.push("today")
+  if (ago === 1) bag.push("yesterday")
+  if (ago >= 0 && ago < 7) bag.push("week")
+  if (date.getDay() === 0 || date.getDay() === 6) bag.push("weekend")
+  if (row.favorite) bag.push("favorite", "favorites", "favourite", "favourites")
+  if (/(^|\/)DCIM\/Camera\//i.test(row.folder)) bag.push("camera")
+  if (/Screenshots\//i.test(row.folder)) bag.push("screenshot", "screenshots")
+  if (row.width > 0 && row.height > 0) bag.push(row.width > row.height ? "landscape" : row.width < row.height ? "portrait" : "square")
+  return words.every((word) => bag.some((term) => term.startsWith(word)))
+}
+
+/** Whether a row passes the filter: dates, kind, favorite, album and on-device words; file names are never matched. */
+export function filterMatches(row: Row, filter: PhotosFilter | undefined, members: (album: string) => readonly string[] | undefined, now: number): boolean {
+  if (filter === undefined) return true
+  if (filter.from !== undefined && row.rank < filter.from) return false
+  if (filter.to !== undefined && row.rank > filter.to) return false
+  if (filter.kind !== undefined && (row.video ? "video" : "image") !== filter.kind) return false
+  if (filter.favorite !== undefined && row.favorite !== filter.favorite) return false
+  if (filter.album !== undefined && !albumOf(row, filter.album, members)) return false
+  return textMatches(row, filterWords(filter.text), now)
+}
+
+const ALBUM_LABELS: Readonly<Record<string, string>> = { favorites: "Favorites", videos: "Videos", camera: "Camera", screenshots: "Screenshots" }
+
+/** The filter chip: what the filter asks for, in a few words. */
+export function filterLabel(filter: PhotosFilter, albumName: (album: string) => string | undefined): string {
+  const parts: string[] = []
+  if (filter.favorite === true) parts.push("Favorites")
+  else if (filter.favorite === false) parts.push("Not favorites")
+  if (filter.kind !== undefined) parts.push(filter.kind === "video" ? "Videos" : "Photos")
+  if (filter.album !== undefined) parts.push(albumName(filter.album) ?? ALBUM_LABELS[filter.album] ?? "Album")
+  const day = (time: number) => new Date(time).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+  if (filter.from !== undefined && filter.to !== undefined) parts.push(day(filter.from) === day(filter.to) ? day(filter.from) : `${day(filter.from)} – ${day(filter.to)}`)
+  else if (filter.from !== undefined) parts.push(`Since ${day(filter.from)}`)
+  else if (filter.to !== undefined) parts.push(`Until ${day(filter.to)}`)
+  const text = filterWords(filter.text).join(" ")
+  if (text !== "") parts.push(`“${text}”`)
+  return [...new Set(parts)].join(" · ") || "Filter"
+}
+
+/** Owned items go in batches of 20; permitted library items (`m:` ids) in reviewed requests of up to 500, one Android confirmation each. */
+export function changeBatches<T extends { readonly id: string }>(items: readonly T[]): T[][] {
+  const size = items.length > 0 && items.every((row) => row.id.startsWith("m:")) ? 500 : 20
+  const out: T[][] = []
+  for (let at = 0; at < items.length; at += size) out.push(items.slice(at, at + size))
+  return out
+}

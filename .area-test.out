@@ -1,0 +1,17 @@
+test rc=1
+[41m[1m FAIL [22m[49m test/files/agent.test.vibe[2m [ test/files/agent.test.vibe ][22m
+[41m[1m FAIL [22m[49m test/files/back.test.vibe[2m [ test/files/back.test.vibe ][22m
+[41m[1m FAIL [22m[49m test/files/browse.test.vibe[2m [ test/files/browse.test.vibe ][22m
+[41m[1m FAIL [22m[49m test/files/preview.test.vibe[2m [ test/files/preview.test.vibe ][22m
+[41m[1m FAIL [22m[49m test/files/recent.test.vibe[2m [ test/files/recent.test.vibe ][22m
+[41m[1m FAIL [22m[49m test/files/share.test.vibe[2m [ test/files/share.test.vibe ][22m
+[41m[1m FAIL [22m[49m test/files/trash.test.vibe[2m [ test/files/trash.test.vibe ][22m
+[41m[1m FAIL [22m[49m test/files/files.test.vibe[2m [ test/files/files.test.vibe ][22m
+[41m[1m FAIL [22m[49m test/notes/notes.test.vibe[2m [ test/notes/notes.test.vibe ][22m
+[41m[1m FAIL [22m[49m test/notes/operations.test.vibe[2m [ test/notes/operations.test.vibe ][22m
+[41m[1m FAIL [22m[49m test/notes/stories.test.vibe[2m [ test/notes/stories.test.vibe ][22m
+[41m[1m FAIL [22m[49m test/workflows/phoneSteps.test.vibe[2m [ test/workflows/phoneSteps.test.vibe ][22m
+[41m[1m FAIL [22m[49m test/workflows/stories.test.vibe[2m [ test/workflows/stories.test.vibe ][22m
+[41m[1m FAIL [22m[49m test/workflows/workflows.test.vibe[2m [ test/workflows/workflows.test.vibe ][22m
+[2m Test Files [22m [1m[31m14 failed[39m[22m[90m (14)[39m
+[2m      Tests [22m [2mno tests[22m

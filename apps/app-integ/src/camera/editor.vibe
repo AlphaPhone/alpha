@@ -1,0 +1,228 @@
+// spec/camera/edit.md, "Story: Edit a photo and keep the original"; spec/camera/copyIntent.md, "Story: Never lose track of a copy that may have been saved"; spec/camera/videoEdit.md, "Story: Trim a video into a copy"; spec/camera/videoEdit.md, "Story: Recover a video copy that may exist"
+import { Machine as EditMachine, type CropArea, type Edit, type Event as EditEvent, type Look, type SaveAnswer, type SaveMode } from "../../gen/camera__edit.effect.vibe"
+import { Machine as IntentMachine } from "../../gen/camera__copyIntent.effect.vibe"
+import { Machine as VideoMachine, type Event as VideoEvent, type VideoSave } from "../../gen/camera__videoEdit.effect.vibe"
+import { LOOKS, fromArea } from "./imageEdit.ts"
+import { PhotoLibrary } from "./library.vibe"
+import { photosText } from "./messages.vibe"
+import { CameraNotices } from "./notices.vibe"
+import { PhotosFailed, PhotoStore } from "./photos.vibe"
+
+const EDITOR = 1
+const RECOVERY = 2
+
+/** The photo editor and the video trim editor, over their Machines and the pending copy request. */
+export service MediaEditor {
+  readonly photo: Stream.Stream<Edit>
+  begin(id: string): void!!
+  rotate(): void!!
+  look(look: Look): void!!
+  startCrop(): void!!
+  applyCrop(area: CropArea): void!!
+  cancelCrop(): void!!
+  save(mode: SaveMode): void!!
+  askClose(): void!!
+  keepEditing(): void!!
+  confirmClose(): void!!
+  recover(): void!!
+  beginVideo(id: string): void!!
+  videoEvent(event: VideoEvent): void!!
+  saveVideo(): void!!
+  /** Settle a video copy whose save Alpha could not confirm, by the owner's review of what Photos finds. */
+  reviewVideoCopy(): void!!
+  /** Back inside an editor: the close question, the crop, then the editor itself; false when no editor is open. */
+  back(): boolean!!
+}
+
+function answerOf(status: string, replaced: boolean | undefined): SaveAnswer {
+  return status === "saved" ? (replaced === true ? "SavedReplace" : "SavedCopy") : status === "stale" ? "SourceStale" : status === "unchanged" ? "NothingChanged"
+    : status === "failed" || status === "not-started" ? "SaveFailed" : "SaveUnconfirmed"
+}
+
+/** The editors over the photo store. */
+export const mediaEditor = Layer.effect(MediaEditor, effect {
+  const edit = try EditMachine
+  const intents = try IntentMachine
+  const video = try VideoMachine
+  const store = try PhotoStore
+  const library = try PhotoLibrary
+  const notices = try CameraNotices
+  let session: { sessionId: string; operationId: string; source: string } | undefined
+  let videoSession: { sessionId: string; operationId: string; id: string; revision: string } | undefined
+
+  intents.send({ type: "restart" }) catch () => undefined
+
+  effect function say(text: string) {
+    try notices.say(text, false)
+  }
+
+  effect function send(event: EditEvent) {
+    return edit.send(event) catch () => undefined
+  }
+
+  effect function request(e: Edit) {
+    return { sessionId: session?.sessionId ?? "", rotation: e.rotation, filter: LOOKS[e.look].id, crop: false, ...(e.cropped ? { cropRect: fromArea(e.crop) } : {}) }
+  }
+
+  effect function preview(after: Edit | undefined) {
+    if (after === undefined || session === undefined) return
+    const shown = store.previewEdit(try request(after)) catch (failure) => failure
+    if (shown instanceof PhotosFailed) {
+      try send({ type: "previewSettled", ok: false, image: "" })
+      try say(photosText(shown.message, "No preview"))
+    } else try send({ type: "previewSettled", ok: true, image: shown.image })
+  }
+
+  effect function settle(status: string, replaced: boolean | undefined, id: string | undefined) {
+    const answer = answerOf(status, replaced)
+    const after = try send({ type: "saveSettled", answer })
+    if (answer !== "SaveUnconfirmed") intents.send({ type: "acknowledge", caller: EDITOR }) catch () => undefined
+    if (after?.status === "EditSaved") {
+      try say(answer === "SavedReplace" ? "Saved" : "Copy saved")
+      try library.refresh()
+      if (id !== undefined) try library.openViewer(id)
+    } else if (after?.status === "EditStale") try say("Photo changed")
+    else if (after?.status === "EditFailed") try say("Not saved")
+    else if (after?.status === "EditUnchanged") try say("No changes to save")
+    else if (after?.status === "EditUncertain") try say("Save unconfirmed")
+  }
+
+  effect function recoverPending() {
+    const stored = try intents.get()
+    if (stored.slot.token === "") return true
+    intents.send({ type: "recover", caller: RECOVERY }) catch () => undefined
+    const result = store.editResult(stored.slot.token) catch () => undefined
+    if (result === undefined) {
+      try say("Save unconfirmed")
+      return false
+    }
+    const terminal = (result.status === "saved" && result.id !== undefined) || ["failed", "unchanged", "not-started", "stale"].includes(result.status)
+    if (!terminal) {
+      try say("Save unconfirmed")
+      return false
+    }
+    intents.send({ type: "acknowledge", caller: RECOVERY }) catch () => undefined
+    const now = try edit.get()
+    if (now.status === "EditUncertain") try send({ type: "recover", read: result.status === "saved" ? "FoundSaved" : "FoundNothing" })
+    if (result.status === "saved") try say("Copy saved")
+    return true
+  }
+
+  effect function askCloseNow() {
+    const after = try send({ type: "askClose" })
+    if (after?.status === "EditClosed" && session !== undefined) {
+      store.cancelEdit(session.sessionId) catch () => undefined
+      session = undefined
+    }
+  }
+
+  effect function videoEventNow(event: VideoEvent) {
+    const after = video.send(event) catch () => undefined
+    if (after?.closed === true && videoSession !== undefined && (event.type === "closeEditor" || event.type === "hide")) {
+      if (!after.busy) store.cancelVideoEdit(videoSession.sessionId) catch () => undefined
+      if (!after.busy) videoSession = undefined
+    }
+  }
+
+  return {
+    photo: edit.changes,
+    effect begin(id: string) {
+      const row = try library.find(id)
+      if (row === undefined || row.video) return
+      if (!(try recoverPending())) return try say("Checking…")
+      const opened = store.beginEdit({ id: row.id, revision: row.revision }) catch (failure) => failure
+      if (opened instanceof PhotosFailed) return try say(photosText(opened.message, "Couldn’t open"))
+      session = { sessionId: opened.sessionId, operationId: opened.operationId, source: row.id }
+      const after = try send({ type: "begin", source: row.id, canReplace: opened.canReplace === true, unresolved: false, image: opened.image })
+      if (after === undefined) store.cancelEdit(opened.sessionId) catch () => undefined
+    },
+    rotate: () => effect { try preview(try send({ type: "rotateEdit" })) },
+    look: (look: Look) => effect { try preview(try send({ type: "chooseLook", look })) },
+    startCrop: () => effect { try send({ type: "startCrop" }) },
+    applyCrop: (area: CropArea) => effect { try preview(try send({ type: "applyCrop", area })) },
+    cancelCrop: () => effect { try send({ type: "cancelCrop" }) },
+    effect save(mode: SaveMode) {
+      const after = try send({ type: "save", mode })
+      if (after === undefined || session === undefined) return
+      if (after.status === "EditUnchanged") return try say("No changes to save")
+      const admitted = intents.send({ type: "admit", caller: EDITOR, token: session.operationId }) catch () => undefined
+      if (admitted === undefined || admitted.slot.token !== session.operationId) {
+        try send({ type: "saveSettled", answer: "SaveUnconfirmed" })
+        return try say("Checking…")
+      }
+      const receipt = store.saveEdit({ ...(try request(after)), ...(mode === "ReplaceMode" ? { replace: true } : {}) }) catch () => undefined
+      if (receipt === undefined) return try settle("unknown", undefined, undefined)
+      if (receipt.operationId !== session.operationId) return try settle("unknown", undefined, undefined)
+      try settle(receipt.status, receipt.replaced, receipt.id)
+    },
+    askClose: askCloseNow,
+    keepEditing: () => effect { try send({ type: "keepEditing" }) },
+    effect confirmClose() {
+      try send({ type: "confirmClose" })
+      if (session !== undefined) store.cancelEdit(session.sessionId) catch () => undefined
+      session = undefined
+    },
+    effect recover() {
+      try recoverPending()
+    },
+    effect beginVideo(id: string) {
+      const row = try library.find(id)
+      if (row === undefined || !row.video) return
+      if (!(try recoverPending())) return try say("Checking…")
+      const opened = store.beginVideoEdit({ id: row.id, revision: row.revision }) catch (failure) => failure
+      if (opened instanceof PhotosFailed) return try say(photosText(opened.message, "Couldn’t open"))
+      videoSession = { sessionId: opened.sessionId, operationId: opened.operationId, id: row.id, revision: row.revision }
+      const length = Math.min(3000, Math.max(1, Math.round(opened.duration * 10)))
+      video.send({ type: "openEditor", source: row.id, len: length }) catch () => undefined
+      video.send({ type: "sourceLoaded" }) catch () => undefined
+    },
+    videoEvent: videoEventNow,
+    effect saveVideo() {
+      const after = video.send({ type: "commit" }) catch () => undefined
+      if (after === undefined || videoSession === undefined) return
+      const current = videoSession
+      const admitted = intents.send({ type: "admit", caller: EDITOR, token: current.operationId }) catch () => undefined
+      if (admitted === undefined || admitted.slot.token !== current.operationId) {
+        video.send({ type: "saveSettled", result: "VideoUnconfirmed" }) catch () => undefined
+        return try say("Checking…")
+      }
+      const trim = after.submitted
+      const receipt = store.saveVideoEdit({ sessionId: current.sessionId, start: trim.start / 10, end: trim.end / 10, rotation: trim.rotation, crop: trim.crop }) catch () => undefined
+      const result: VideoSave = receipt === undefined ? "VideoUnconfirmed" : receipt.status === "saved" ? "VideoSaved" : ["failed", "stale", "not-started", "unchanged"].includes(receipt.status) ? "VideoNotSaved" : "VideoUnconfirmed"
+      if (result !== "VideoUnconfirmed") intents.send({ type: "acknowledge", caller: EDITOR }) catch () => undefined
+      video.send({ type: "saveSettled", result }) catch () => undefined
+      if (result === "VideoSaved") {
+        videoSession = undefined
+        try say("Copy saved")
+        try library.refresh()
+        if (receipt?.id !== undefined) try library.openViewer(receipt.id)
+      } else try say(result === "VideoNotSaved" ? photosText(receipt?.message, "Not saved") : "Save unconfirmed")
+    },
+    effect reviewVideoCopy() {
+      const current = videoSession
+      if (current === undefined || (try video.get()).outcome !== "VideoUnconfirmed") return
+      const receipt = store.reviewRemovedVideoCopy(current.operationId) catch () => undefined
+      if (receipt === undefined || receipt.status === "unknown" || receipt.status === "incomplete") return try say("Save unconfirmed")
+      intents.send({ type: "acknowledge", caller: EDITOR }) catch () => undefined
+      videoSession = undefined
+      video.send({ type: "closeEditor" }) catch () => undefined
+      try library.refresh()
+      if (receipt.status === "saved") {
+        try say("Copy saved")
+        if (receipt.id !== undefined) try library.openViewer(receipt.id)
+      } else try say(photosText(receipt.message, "Not saved"))
+    },
+    effect back() {
+      const now = try edit.get()
+      if (now.status !== "EditClosed") {
+        if (now.closeAsked) try send({ type: "keepEditing" })
+        else if (now.cropping && !now.previewing) try send({ type: "cancelCrop" })
+        else try askCloseNow()
+        return true
+      }
+      if ((try video.get()).closed) return false
+      try videoEventNow({ type: "closeEditor" })
+      return true
+    },
+  }
+})

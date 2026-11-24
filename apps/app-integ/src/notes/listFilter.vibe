@@ -1,0 +1,106 @@
+// spec/notes/listFilter.md, "Story: Let the agent narrow my Notes list only on the list I am looking at"; spec/notes/listFilter.md, "A turn names the list only while the plain list is in front, owned and settled"; spec/notes/listFilter.md, "Only a negotiated agent naming the list is admitted, and only the owner's own message skips the card"; spec/notes/listFilter.md, "The filter is shown only on the list the turn named, checked again at commit"
+import { type Event as FilterEvent, type ListFilter, Machine as ListFilterMachine, machine as listFilterMachine, stillCurrent } from "../../gen/notes__listFilter.effect.vibe"
+import { NotesCollection } from "./collection.vibe"
+import type { NotesFilter } from "./list.vibe"
+
+/** What the phone shows now, as the list filter needs it. */
+export interface ListScene { readonly onList: boolean; readonly sensitive: boolean; readonly obstructed: boolean }
+
+/** A proposal's admission: refused, waiting for review, or allowed to run without a card. */
+export type FilterAdmission = "refused" | "review" | "direct"
+
+/** A filter run's receipt status. */
+export type FilterReceipt = "succeeded" | "failed" | "unknown"
+
+/** The agent's canonical list filter proposals and the filter the list shows. */
+export service NotesListFilter {
+  readonly shown: Stream.Stream<NotesFilter | undefined>
+  scene(scene: ListScene): void!!
+  collectionChanged(): void!!
+  newVisit(): void!!
+  ownerLost(): void!!
+  prefer(reviewFirst: boolean): void!!
+  negotiate(offered: boolean): void!!
+  context(): ({ readonly kind: "canonical-note-source"; readonly id: "notes"; readonly revision: string } | undefined)!!
+  propose(filter: NotesFilter, own: boolean, workflow: boolean): FilterAdmission!!
+  approve(): void!!
+  run(): FilterReceipt!!
+  dismiss(): void!!
+  clear(): void!!
+}
+
+const make = effect {
+  const machine = try ListFilterMachine
+  const collection = try NotesCollection
+  const filters = try Ref.make<ReadonlyMap<number, NotesFilter>>(new Map())
+  const shown = try SubscriptionRef.make<NotesFilter | undefined>(undefined)
+
+  effect function send(event: FilterEvent): (ListFilter | undefined)!! {
+    return (machine.send(event) catch () => undefined)
+  }
+
+  effect function publish(state: ListFilter | undefined): void!! {
+    if (state === undefined) return
+    const filter = state.shown === 0 ? undefined : (try Ref.get(filters)).get(state.shown)
+    try SubscriptionRef.set(shown, filter)
+  }
+
+  effect function settle(): void!! {
+    try send({ type: "settleFilter" })
+  }
+
+  return {
+    shown: SubscriptionRef.changes(shown),
+    effect scene(scene: ListScene) { try send({ type: "scene", ...scene }) },
+    effect collectionChanged() {
+      try send({ type: "notesChange" })
+    },
+    effect newVisit() { try send({ type: "newVisit" }) },
+    effect ownerLost() {
+      try send({ type: "loseOwner" })
+      try publish(try send({ type: "clearFilter" }))
+    },
+    effect prefer(reviewFirst: boolean) { try send({ type: "prefer", reviewFirst }) },
+    effect negotiate(offered: boolean) { try send({ type: "negotiate", offered }) },
+    effect context() {
+      const state = try send({ type: "observe" })
+      if (state === undefined || !state.named) return undefined
+      const revision = (try collection.current())?.snapshot.revision
+      if (revision === undefined) return undefined
+      return { kind: "canonical-note-source" as const, id: "notes" as const, revision: String(revision) }
+    },
+    effect propose(filter: NotesFilter, own: boolean, workflow: boolean) {
+      const known = try Ref.get(filters)
+      const requested = known.size + 1
+      try Ref.set(filters, new Map([...known, [requested, filter]]))
+      const state = try send({ type: "propose", requested, own, workflow })
+      if (state === undefined || state.proposal !== "Admitted") { try settle(); return "refused" }
+      if ((try send({ type: "runDirect" })) !== undefined) return "direct"
+      return "review"
+    },
+    effect approve() { try send({ type: "approve" }) },
+    effect run() {
+      const state = try machine.get()
+      if (state.authority === "NoAuthority") return "failed"
+      if (!stillCurrent(state)) {
+        try send({ type: "decline" })
+        try settle()
+        return "failed"
+      }
+      try publish(try send({ type: "commit" }))
+      const after = try send({ type: "afterCommit" })
+      try settle()
+      return after?.outcome === "FilterSucceeded" ? "succeeded" : "unknown"
+    },
+    effect dismiss() {
+      const state = try machine.get()
+      if (state.proposal === "Admitted" && state.authority === "NoAuthority") try send({ type: "approve" })
+      try send({ type: "abort" })
+      try settle()
+    },
+    effect clear() { try publish(try send({ type: "clearFilter" })) },
+  }
+}
+
+/** The list filter service with its machine. */
+export const listFilterLayer = Layer.provideMerge(Layer.effect(NotesListFilter, make), listFilterMachine())

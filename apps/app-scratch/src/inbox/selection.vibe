@@ -1,0 +1,115 @@
+// spec/inbox/selection.md, "Story: Change several messages at once"; spec/inbox/drafts.md, "Deleting drafts removes exactly the versions the owner selected"
+import { type Event as SelectionEvent, type Selection, type SelectAction, type Picked, Machine as SelectionMachine, nextToChange } from "../../gen/inbox__selection.effect.vibe"
+import type { OpKind } from "../../gen/inbox__operations.ts"
+import { Machine as MailboxMachine } from "../../gen/inbox__mailbox.effect.vibe"
+import { InboxAccounts } from "./accounts.vibe"
+import { Gmail } from "./gmail.vibe"
+import { MailOperations } from "./operations.vibe"
+import { MailComposer } from "./composer.vibe"
+
+const kinds: Record<Exclude<SelectAction, "SelDeleteDrafts">, OpKind> = {
+  SelArchive: "ArchiveKind", SelUnarchive: "UnarchiveKind", SelTrash: "TrashKind", SelUntrash: "UntrashKind",
+  SelMarkRead: "MarkReadKind", SelMarkUnread: "MarkUnreadKind", SelStar: "StarKind", SelUnstar: "UnstarKind"
+}
+
+/** Selecting messages or local drafts and changing them together. */
+export service MailSelection {
+  readonly changes: Stream.Stream<Selection>
+  get(): Selection!!
+  /** Starts selecting in the list on screen. */
+  start(): void!!
+  toggle(item: Picked): void!!
+  pickAll(items: Picked[]): void!!
+  review(action: SelectAction): void!!
+  backToPicking(): boolean!!
+  /** Applies the reviewed change, one message at a time, stopping at the first that is not confirmed. */
+  apply(): number!!
+  /** Ends the selection; false while nothing is selected or a change is being applied. */
+  finish(): boolean!!
+  /** Back while selecting: from the review to the picking, otherwise the end of the selection; held while a change is applied, not taken when nothing is selected. */
+  back(): boolean!!
+}
+
+/** The selection shell over its machine, the list scope and the reviewed operations. */
+export const layer = Layer.effect(MailSelection, effect {
+  const machine = try SelectionMachine
+  const mailbox = try MailboxMachine
+  const accounts = try InboxAccounts
+  const gmail = try Gmail
+  const operations = try MailOperations
+  const composer = try MailComposer
+
+  effect function send(event: SelectionEvent) {
+    return machine.send(event) catch () => undefined
+  }
+
+  effect function scope() {
+    const m = try mailbox.get()
+    const a = try accounts.get()
+    return a.selected === "" ? "" : JSON.stringify([a.selected, a.readEpoch, m.folder, m.query])
+  }
+
+  fork.scoped (effect {
+    for try (const _ of mailbox.changes) {
+      const s = try machine.get()
+      if (s.phase === "NotSelecting") continue
+      const now = try scope()
+      if (now !== s.scope) try send({ type: "scopeChanged", scope: now === "" ? "-" : now })
+    }
+  })
+
+  return {
+    changes: machine.changes,
+    get: () => machine.get(),
+    effect start() {
+      const s = try scope()
+      if (s !== "") try send({ type: "start", scope: s })
+    },
+    toggle: (item: Picked) => effect { try send({ type: "toggle", entry: item }) },
+    pickAll: (items: Picked[]) => effect { try send({ type: "pickAll", items }) },
+    review: (action: SelectAction) => effect { try send({ type: "review", selAction: action }) },
+    backToPicking: () => effect { return (try send({ type: "backToPicking" })) !== undefined },
+    effect apply() {
+      const approved = try send({ type: "approve" })
+      if (approved === undefined) return 0
+      const s = try machine.get()
+      if (s.selAction === "SelDeleteDrafts") {
+        const picks = s.picked.map((p) => ({ id: p.id, revision: Number(p.version) }))
+        const deleted = try composer.deleteShelved(picks)
+        for (const p of s.picked) {
+          try send({ type: "dispatchNext", id: p.id })
+          if (deleted) try send({ type: "itemApplied", id: p.id })
+          else { try send({ type: "itemStopped", id: p.id }); break }
+        }
+        return deleted ? s.picked.length : 0
+      }
+      const kind = kinds[s.selAction]
+      let applied = 0
+      while (true) {
+        const current = try machine.get()
+        const id = nextToChange(current)
+        if (current.phase !== "Applying" || id === "") break
+        if ((try scope()) !== current.scope) { try send({ type: "scopeChanged", scope: "-" }); break }
+        try send({ type: "dispatchNext", id })
+        const fresh = gmail.read(current.scope === "" ? "" : (try accounts.get()).selected, id) catch () => undefined
+        if (fresh === undefined || fresh.historyId === "") { try send({ type: "itemStopped", id }); break }
+        const outcome = try operations.prepare(kind, { tag: "LabelProposal", messageId: id, expectedHistoryId: fresh.historyId }, { draftId: "", content: "" }, { localDraft: "", revision: 0, gmailDraft: "", gmailDigest: "" })
+        const confirmed = outcome === undefined ? try operations.confirm({ draftId: "", content: "" }) : outcome
+        if (confirmed !== "Changed") { try send({ type: "itemStopped", id }); break }
+        try operations.clear()
+        try send({ type: "itemApplied", id })
+        applied++
+      }
+      return applied
+    },
+    finish: () => effect { return (try send({ type: "finish" })) !== undefined },
+    effect back() {
+      const s = try machine.get()
+      if (s.phase === "NotSelecting") return false
+      if (s.phase === "Applying") return true
+      if (s.phase === "ReviewingSelection") try send({ type: "backToPicking" })
+      else try send({ type: "finish" })
+      return true
+    }
+  }
+})

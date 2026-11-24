@@ -1,0 +1,69 @@
+// spec/workflows/recovery.md, "Story: Recover my saved requests without a stale review acting"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { Machine, machine } from "../../gen/workflows__recovery.effect.vibe"
+import { Build } from "../platform/build.vibe"
+import { AUTOMATIONS_KEY } from "./automations.vibe"
+import { DRAFT_KEY, LIFECYCLE_KEY } from "./definitions.vibe"
+import { DIGESTS_KEY } from "./digests.vibe"
+import { RUNS_KEY } from "./runs.vibe"
+
+/** The saved request records the browser build can back up or reset. */
+export const SAVED_REQUEST_KEYS: ReadonlyArray<string> = [AUTOMATIONS_KEY, RUNS_KEY, LIFECYCLE_KEY, DRAFT_KEY, DIGESTS_KEY]
+
+/** A backup of every saved request record, as their raw stored text. */
+export type RequestBackup = Readonly<Record<string, string | null>>
+
+/** Back up or reset saved workflow requests from the one open, visible review. */
+export service RequestRecovery {
+  /** Open a review: retires the previous one and reads what is saved. */
+  open(): (RequestBackup | undefined)!!
+  /** The page left, hid or changed session: every review is blocked until `allow`. */
+  block(): void!!
+  allow(): void!!
+  /** The open review's backup, or undefined when that review is no longer the open one. */
+  capture(review: number): (RequestBackup | undefined)!!
+  /** Remove every saved request after the owner confirmed it in the open review. */
+  reset(review: number): boolean!!
+  /** The open review's number. */
+  current(): number!!
+}
+
+export const requestRecovery = Layer.provideMerge(Layer.effect(RequestRecovery, effect {
+  const held = try Machine
+  const store = try KeyValueStore.KeyValueStore
+  const build = try Build
+  const offered = build.info.variant === "browser"
+
+  effect function readAll() {
+    const entries: Array<[string, string | null]> = []
+    for (const key of SAVED_REQUEST_KEYS) entries.push([key, ((store.get(key) catch () => undefined)) ?? null])
+    return Object.fromEntries(entries) as RequestBackup
+  }
+
+  return {
+    effect open() {
+      if (!offered) return undefined
+      const opened = (held.send({ type: "open" }) catch () => undefined)
+      if (opened === undefined) return undefined
+      const id = (try held.get()).current
+      const backup = (readAll() catch () => undefined)
+      held.send({ type: "read", id, ok: backup !== undefined }) catch () => undefined
+      held.send({ type: "offer", id, ok: backup !== undefined }) catch () => undefined
+      return (try held.get()).offered.includes(id) ? backup : undefined
+    },
+    block: effect () => { held.send({ type: "block", blocked: true }) catch () => undefined },
+    allow: effect () => { held.send({ type: "block", blocked: false }) catch () => undefined },
+    effect capture(review: number) {
+      held.send({ type: "capture", id: review }) catch () => undefined
+      return (try held.get()).captured.includes(review) ? try readAll() : undefined
+    },
+    effect reset(review: number) {
+      held.send({ type: "reset", id: review }) catch () => undefined
+      if (!(try held.get()).saving.includes(review)) return false
+      for (const key of SAVED_REQUEST_KEYS) store.remove(key) catch () => undefined
+      held.send({ type: "saved", id: review }) catch () => undefined
+      return (try held.get()).published.includes(review)
+    },
+    current: effect () => (try held.get()).current,
+  }
+}), machine())

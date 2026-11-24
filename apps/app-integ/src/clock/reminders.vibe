@@ -1,0 +1,387 @@
+// spec/clock/reminders.md, "Story: See my reminders as the phone holds them"; spec/clock/reminders.md, "Story: Change a reminder exactly once"; spec/clock/reminderJournal.md, "Story: Never create or change a reminder twice"
+import { navigationPeer } from "./peers.vibe"
+import { Machine as RemindersMachine, type ReminderRow, type RepeatRule, type Readback, type Refusal, type SendAnswer, type WriteKind, type DeletionAnswer, type Precheck } from "../../gen/clock__reminders.effect.vibe"
+import { Machine as JournalMachine, type OpKind } from "../../gen/clock__reminderJournal.effect.vibe"
+import { DeletionReviewAnswer, ReminderListing, ReminderReceipt, ReminderTarget, ScheduleAnswer, SurfaceInfo, TodoDecided } from "./native.schema.vibe"
+import { DAILY, DELETIONS, nativeCalls } from "./plugins.vibe"
+import { digestOf, freshId } from "./page.ts"
+import { deliveryOf, reopenScheduleOf, scheduleOf, statusOf, type ReminderDraft, type ReminderSchedule } from "./schedule.ts"
+
+type StoreRecord = typeof ReminderListing.Type.reminders[number]
+type Target = typeof ReminderTarget.Type
+
+const REFUSAL: Readonly<Partial<Record<string, Refusal>>> = {
+  past: "RefusedPast",
+  "permission-denied": "RefusedNotifications",
+  "storage-full": "RefusedStorageFull",
+  failed: "RefusedFailed",
+}
+
+const RULE: Readonly<Record<"daily" | "weekdays" | "weekly", RepeatRule>> = { daily: "RepeatDaily", weekdays: "RepeatWeekdays", weekly: "RepeatWeekly" }
+
+const DELETION: Readonly<Partial<Record<string, DeletionAnswer>>> = {
+  queued: "DeletionQueued",
+  cancelled: "DeletionCancelled",
+  stale: "DeletionStale",
+  unavailable: "DeletionUnavailable",
+  "not-staged": "DeletionNotStaged",
+}
+
+/** A store listing row as the screen shows it. */
+export function rowOf(r: StoreRecord): ReminderRow {
+  const undated = r.undated === true
+  return {
+    id: r.id,
+    occurrence: r.occurrenceId,
+    revision: r.target.revision,
+    title: r.title,
+    body: r.body,
+    status: statusOf(r.status),
+    undated,
+    dueAt: r.dueAt ?? r.at ?? 0,
+    hasAlert: !undated && r.alertMinutes !== null,
+    alertMinutes: r.alertMinutes ?? 0,
+    repeats: r.recurrence !== undefined,
+    rule: r.recurrence === undefined ? "RepeatNever" : RULE[r.recurrence.rule],
+    deleting: r.pendingDeletion !== undefined,
+  }
+}
+
+function sameTarget(a: Target, b: Target): boolean {
+  return a.sourceId === b.sourceId && a.sourceRevision === b.sourceRevision && a.reminderId === b.reminderId && a.occurrenceId === b.occurrenceId && a.revision === b.revision
+}
+
+/** The Reminders screen's reads and its one write at a time, each a step of spec/clock/reminders.md. */
+export service Reminders {
+  /** The owner opened Reminders: a new navigation visit, and a refresh. */
+  enter(): void!!
+  /** The detail the owner is looking at, or none; a write whose detail was left journals nothing. */
+  show(id: string | undefined): void!!
+  /** Reads the store again; only the newest read publishes. */
+  refresh(): void!!
+  /** A tapped notification asked to open this reminder occurrence. */
+  openRequested(id: string, occurrence: string): void!!
+  /** Creates a reminder from the reviewed draft under the creation id its kept form holds, or a fresh one when `kept` is "". */
+  create(draft: ReminderDraft, kept: string): void!!
+  /** Answers the "Create another?" question a creation asks while earlier ones are unconfirmed. */
+  continueCreate(approved: boolean): void!!
+  /** Edits a reminder's text, and its schedule when `draft` moves it, as shown at `revision`. */
+  edit(id: string, revision: string, draft: ReminderDraft, reschedule: boolean): void!!
+  /** Done or Snooze on the occurrence the detail shows at `revision`. */
+  decide(id: string, revision: string, decision: "done" | "snooze"): void!!
+  /** Reopens a completed one-off reminder shown at `revision`, without an alert or tomorrow at its time. */
+  reopen(id: string, revision: string, mode: "open" | "tomorrow"): void!!
+  /** Deletes a reminder shown at `revision` through the phone's deletion review and its ten seconds of Undo. */
+  remove(id: string, revision: string): void!!
+  /** Saves an undated to-do; the same text again reuses the attempt's id. */
+  saveTodo(title: string, body: string): void!!
+  /** Completes, reopens or deletes a to-do listed at `revision`. */
+  todo(id: string, revision: string, decision: "done" | "reopen" | "cancel"): void!!
+}
+
+/** Reminders over the store (`DailyApps`), the deletion review (`AlphaDeletions`) and the stored journal. */
+export const remindersLayer = Layer.effect(Reminders, effect {
+  const { call } = try nativeCalls()
+  const screen = try RemindersMachine
+  const journal = try JournalMachine
+  const navigator = try navigationPeer()
+  const records = try Ref.make<ReadonlyArray<StoreRecord>>([])
+  const visit = try Ref.make(0)
+  const shown = try Ref.make<string | undefined>(undefined)
+  const creating = try Ref.make<{ readonly id: string; readonly request: Record<string, unknown> } | undefined>(undefined)
+
+  const step = effect (event: Parameters<typeof screen.send>[0]) => screen.send(event) catch () => undefined
+  const keep = effect (event: Parameters<typeof journal.send>[0]) => journal.send(event) catch () => undefined
+  const now = () => Clock.currentTimeMillis
+
+  effect function listing() {
+    return try call(DAILY, "listReminders", ReminderListing)
+  }
+
+  effect function capabilities() {
+    const info = call(DAILY, "surfaceInfo", SurfaceInfo) catch () => undefined
+    const timingVersion = info?.reminderTimingVersion ?? 0
+    const todoVersion = info?.reminderTodoVersion ?? 0
+    try step({ type: "capabilities", timingVersion, todoVersion })
+  }
+
+  effect function reconcile(listed: ReadonlyArray<StoreRecord>) {
+    const kept = try journal.get()
+    for (const creation of kept.creations.filter((c) => c.state === "CreationPending")) {
+      if (listed.some((r) => r.id === creation.id)) try keep({ type: "creationFound", id: creation.id })
+    }
+    for (const change of kept.changes.filter((c) => c.sent)) {
+      const operation = Effect.try(() => JSON.parse(change.operation) as unknown) catch () => undefined
+      if (operation === undefined) continue
+      const receipt = call(DAILY, "reminderOperationReceipt", ReminderReceipt, { operationId: change.operationId, bindingHash: change.bindingHash, operation }) catch () => undefined
+      if (receipt?.status === "succeeded" && receipt.result !== undefined) try keep({ type: "acknowledgeChange", operationId: change.operationId })
+    }
+  }
+
+  effect function refresh() {
+    const begun = try step({ type: "beginRefresh" })
+    if (begun === undefined) return
+    const generation = begun.issued
+    if (begun.timingVersion === 0 && begun.todoVersion === 0) try capabilities()
+    const read = listing() catch () => undefined
+    if (read === undefined) {
+      try step({ type: "listFailed", generation })
+      return
+    }
+    try Ref.set(records, read.reminders)
+    try reconcile(read.reminders)
+    const published = try step({ type: "listed", generation, rows: read.reminders.map(rowOf), visit: try Ref.get(visit), now: try now() })
+    const opening = published?.opening
+    if (opening !== undefined && opening.tag !== "NoOpen") {
+      try navigator.open("reminders", opening.tag === "OpenDetail" ? opening.id : undefined)
+      try step({ type: "opened" })
+    }
+  }
+
+  effect function stillShown(id: string) {
+    return (try Ref.get(shown)) === id
+  }
+
+  effect function recordOf(id: string) {
+    return (try Ref.get(records)).find((r) => r.id === id)
+  }
+
+  effect function readBack(check: (r: StoreRecord | undefined) => Readback) {
+    const read = listing() catch () => undefined
+    if (read === undefined) {
+      try step({ type: "readBack", readback: { tag: "ReadMismatch" } })
+      return
+    }
+    try Ref.set(records, read.reminders)
+    const targetId = (try screen.get()).targetId
+    const settled = try step({ type: "readBack", readback: check(read.reminders.find((r) => r.id === targetId)) })
+    if (settled !== undefined) try refresh()
+  }
+
+  effect function change(kind: WriteKind, opKind: OpKind, id: string, revision: string, operation: (target: Target) => Record<string, unknown>, check: (r: StoreRecord | undefined) => Readback) {
+    const row = try recordOf(id)
+    if (row === undefined || row.target.revision !== revision) {
+      try step({ type: "precheckFailed", precheck: "PrecheckRefreshFirst" })
+      try refresh()
+      return
+    }
+    if ((try step({ type: "beginWrite", kind, id, revision })) === undefined) {
+      try step({ type: "precheckFailed", precheck: "PrecheckRefreshFirst" })
+      return
+    }
+    const bound = operation(row.target)
+    const journaled = (try journal.get()).changes.find((c) => c.target === id)
+    const bindingHash = try promise(() => digestOf(bound))
+    const found = journaled === undefined ? "NothingJournaled" : journaled.bindingHash === bindingHash ? "SameJournaled" : "OtherJournaled"
+    const looked = try step({ type: "lookedUp", found })
+    if (looked === undefined) return
+    const input = journaled === undefined ? { operationId: freshId(), bindingHash, operation: bound } : { operationId: journaled.operationId, bindingHash: journaled.bindingHash, operation: bound }
+    if (looked.stage === "WSelect") {
+      const current = call(DAILY, "selectedReminder", ReminderTarget, { id }) catch () => undefined
+      const matches = current !== undefined && sameTarget(current, row.target)
+      const selected = try step({ type: "selected", matches })
+      if (selected?.stage !== "WRetain") {
+        try refresh()
+        return
+      }
+      try keep({ type: "retainChange", operationId: input.operationId, bindingHash, opKind, target: id, operation: JSON.stringify(bound) })
+      const kept = try step({ type: "retained", stillShown: try stillShown(id) })
+      if (kept?.stage !== "WSend") {
+        try keep({ type: "discardChange", operationId: input.operationId })
+        return
+      }
+      try keep({ type: "markChangeSent", operationId: input.operationId })
+      const answer = call(DAILY, "operateReminder", ReminderReceipt, input) catch () => undefined
+      const sentAnswer: SendAnswer = answer?.status === "succeeded" && answer.result !== undefined ? { tag: "SendAnswered" } : { tag: "SendLost" }
+      try step({ type: "sent", answer: sentAnswer })
+    }
+    if ((try screen.get()).stage === "WReceipt") {
+      const receipt = call(DAILY, "reminderOperationReceipt", ReminderReceipt, input) catch () => undefined
+      try step({ type: "receiptRead", succeeded: receipt?.status === "succeeded" && receipt.result !== undefined })
+    }
+    if ((try screen.get()).stage === "WReadback") {
+      try keep({ type: "acknowledgeChange", operationId: input.operationId })
+      try readBack(check)
+    }
+  }
+
+  effect function saveCreation(id: string, request: Record<string, unknown>) {
+    const digest = try promise(() => digestOf(request))
+    try keep({ type: "retainCreation", id, request: digest })
+    const kept = try step({ type: "retained", stillShown: true })
+    if (kept?.stage !== "WSend") {
+      try keep({ type: "discardCreation", id })
+      return
+    }
+    try keep({ type: "markCreationSent", id })
+    const answer = call(DAILY, "scheduleReminder", ScheduleAnswer, request) catch () => undefined
+    const refusal = answer !== undefined && answer.id === id ? REFUSAL[answer.status] : undefined
+    if (refusal !== undefined) {
+      const listed = listing() catch () => undefined
+      if (listed !== undefined && !listed.reminders.some((r) => r.id === id)) {
+        try keep({ type: "retireRefusedCreation", id })
+        try step({ type: "sent", answer: { tag: "SendRefused", refusal } })
+        return
+      }
+    }
+    try step({ type: "sent", answer: answer !== undefined && answer.id === id && (answer.status === "scheduled" || answer.status === "pending") ? { tag: "SendAnswered" } : { tag: "SendLost" } })
+    if ((try screen.get()).stage === "WReceipt") {
+      const listed = listing() catch () => undefined
+      try step({ type: "receiptRead", succeeded: listed?.reminders.some((r) => r.id === id) === true })
+    }
+    if ((try screen.get()).stage === "WReadback") {
+      const retained = (try journal.get()).creations.find((c) => c.id === id)
+      try readBack((r) => {
+        if (r === undefined) return { tag: "ReadMismatch" }
+        return retained?.request === digest ? { tag: "ReadMatch", delivery: deliveryOf(r.status) } : { tag: "ReadOther" }
+      })
+      if ((try journal.get()).creations.some((c) => c.id === id && c.state === "CreationPending") && (try Ref.get(records)).some((r) => r.id === id)) try keep({ type: "creationFound", id })
+    }
+    try Ref.set(creating, undefined)
+  }
+
+  effect function prechecked(result: ReminderSchedule | Precheck) {
+    if (typeof result === "string") {
+      try step({ type: "precheckFailed", precheck: result })
+      return undefined
+    }
+    return result
+  }
+
+  const expectStatus = (status: string) => (r: StoreRecord | undefined): Readback =>
+    r !== undefined && r.status === status ? { tag: "ReadMatch", delivery: deliveryOf(r.status) } : { tag: "ReadMismatch" }
+
+  return {
+    effect enter() {
+      try Ref.update(visit, (v) => v + 1)
+      try refresh()
+    },
+    show: (id: string | undefined) => Ref.set(shown, id),
+    refresh,
+    effect openRequested(id: string, occurrence: string) {
+      try step({ type: "requestOpen", id, occurrence, visit: try Ref.get(visit), at: try now() })
+      try refresh()
+    },
+    effect create(draft: ReminderDraft, kept: string) {
+      const at = try now()
+      const schedule = try prechecked(scheduleOf(draft, at))
+      if (schedule === undefined) return
+      const id = kept === "" ? freshId() : kept
+      const request = { id, title: draft.title.trim(), body: draft.body, at: schedule.at, dueAt: schedule.dueAt, alertMinutes: schedule.alertMinutes, ...(schedule.recurrence ? { recurrence: schedule.recurrence } : {}) }
+      if ((try step({ type: "beginWrite", kind: "CreateWrite", id, revision: "" })) === undefined) {
+        if ((try screen.get()).timingVersion !== 2) try step({ type: "precheckFailed", precheck: "PrecheckUpdateRequired" })
+        return
+      }
+      try Ref.set(creating, { id, request })
+      const earlier = (try journal.get()).creations.some((c) => c.state === "CreationPending")
+      const looked = try step({ type: "lookedUp", found: earlier ? "EarlierCreations" : "NothingJournaled" })
+      if (looked?.stage === "WRetain") try saveCreation(id, request)
+    },
+    effect continueCreate(approved: boolean) {
+      const pending = try Ref.get(creating)
+      const reviewed = try step({ type: "reviewed", approved })
+      if (reviewed?.stage === "WRetain" && pending !== undefined) try saveCreation(pending.id, pending.request)
+      else try Ref.set(creating, undefined)
+    },
+    effect edit(id: string, revision: string, draft: ReminderDraft, reschedule: boolean) {
+      const at = try now()
+      const schedule = reschedule ? try prechecked(scheduleOf(draft, at)) : undefined
+      if (reschedule && schedule === undefined) return
+      const fields = { title: draft.title.trim(), body: draft.body, ...(schedule ? { schedule } : {}) }
+      try change(reschedule ? "RescheduleWrite" : "EditWrite", "OpUpdate", id, revision, (target) => ({ type: "reminder_update", target, fields }), (r) =>
+        r !== undefined && r.title === fields.title && (schedule === undefined || r.dueAt === schedule.dueAt) ? { tag: "ReadMatch", delivery: deliveryOf(r.status) } : { tag: "ReadMismatch" })
+    },
+    effect decide(id: string, revision: string, decision: "done" | "snooze") {
+      const row = try recordOf(id)
+      if (decision === "snooze" && row !== undefined && (row.alertMinutes === null || row.undated === true)) {
+        try step({ type: "precheckFailed", precheck: "PrecheckNoAlert" })
+        return
+      }
+      const occurrence = row?.occurrenceId
+      try change(decision === "done" ? "DoneWrite" : "SnoozeWrite", decision === "done" ? "OpComplete" : "OpSnooze", id, revision,
+        (target) => ({ type: decision === "done" ? "reminder_complete" : "reminder_snooze", target }),
+        (r) => r !== undefined && (r.occurrenceId !== occurrence || r.status === "completed") ? { tag: "ReadMatch", delivery: deliveryOf(r.status) } : { tag: "ReadMismatch" })
+    },
+    effect reopen(id: string, revision: string, mode: "open" | "tomorrow") {
+      const row = try recordOf(id)
+      if (row === undefined || row.target.revision !== revision) {
+        try step({ type: "precheckFailed", precheck: "PrecheckRefreshFirst" })
+        return
+      }
+      const schedule = try prechecked(reopenScheduleOf(rowOf(row), mode, try now()))
+      if (schedule === undefined) return
+      if (schedule.at <= (try now())) {
+        try step({ type: "precheckFailed", precheck: "PrecheckTimePassed" })
+        return
+      }
+      const previous = row.occurrenceId
+      try change("ReopenWrite", "OpUpdate", id, revision, (target) => ({ type: "reminder_update", target, fields: { title: row.title, body: row.body, schedule } }), (r) =>
+        r !== undefined && r.status !== "completed" && r.occurrenceId !== previous && r.dueAt === schedule.dueAt ? { tag: "ReadMatch", delivery: deliveryOf(r.status) } : { tag: "ReadMismatch" })
+    },
+    effect remove(id: string, revision: string) {
+      const row = try recordOf(id)
+      if (row === undefined || row.target.revision !== revision || (try step({ type: "beginWrite", kind: "DeleteWrite", id, revision })) === undefined) {
+        try step({ type: "precheckFailed", precheck: "PrecheckRefreshFirst" })
+        return
+      }
+      const other = (try journal.get()).changes.some((c) => c.target === id)
+      const looked = try step({ type: "lookedUp", found: other ? "OtherJournaled" : "NothingJournaled" })
+      if (looked?.stage !== "WReview") return
+      const answer = call(DELETIONS, "reviewReminder", DeletionReviewAnswer, { target: row.target }) catch () => undefined
+      try step({ type: "deletionReviewed", deletion: answer === undefined ? "DeletionUnknown" : DELETION[answer.status] ?? "DeletionUnknown" })
+      try refresh()
+    },
+    effect saveTodo(title: string, body: string) {
+      const text = title.trim()
+      if (!text) return
+      const state = try screen.get()
+      const attempt = state.todoAttempt !== "" ? state.todoAttempt : freshId()
+      if ((try step({ type: "beginWrite", kind: "TodoSaveWrite", id: attempt, revision: "" })) === undefined) {
+        if (state.todoVersion !== 1) try step({ type: "precheckFailed", precheck: "PrecheckUpdateRequired" })
+        return
+      }
+      try step({ type: "lookedUp", found: "NothingJournaled" })
+      try step({ type: "retained", stillShown: true })
+      const answer = call(DAILY, "saveTodo", ScheduleAnswer, { id: attempt, title: text, body }) catch () => undefined
+      const refusal = answer !== undefined && answer.id === attempt ? REFUSAL[answer.status] : undefined
+      const listedAfter = listing() catch () => undefined
+      if (refusal !== undefined && listedAfter !== undefined && !listedAfter.reminders.some((r) => r.id === attempt)) {
+        try step({ type: "sent", answer: { tag: "SendRefused", refusal } })
+        return
+      }
+      try step({ type: "sent", answer: answer?.status === "saved" ? { tag: "SendAnswered" } : { tag: "SendLost" } })
+      if ((try screen.get()).stage === "WReceipt") try step({ type: "receiptRead", succeeded: listedAfter?.reminders.some((r) => r.id === attempt) === true })
+      if ((try screen.get()).stage === "WReadback") try readBack((r) => r !== undefined && r.undated === true ? { tag: "ReadMatch", delivery: "NoAlert" } : { tag: "ReadMismatch" })
+    },
+    effect todo(id: string, revision: string, decision: "done" | "reopen" | "cancel") {
+      const row = try recordOf(id)
+      const kind: WriteKind = decision === "done" ? "TodoDoneWrite" : decision === "reopen" ? "TodoReopenWrite" : "TodoDeleteWrite"
+      if (row === undefined || row.target.revision !== revision || (try step({ type: "beginWrite", kind, id, revision })) === undefined) {
+        try step({ type: "precheckFailed", precheck: "PrecheckRefreshFirst" })
+        return
+      }
+      try step({ type: "lookedUp", found: "NothingJournaled" })
+      const answer = call(DAILY, "todoDecision", TodoDecided, { target: row.target, action: decision }) catch () => undefined
+      try step({ type: "sent", answer: answer === undefined ? { tag: "SendLost" } : { tag: "SendAnswered" } })
+      if ((try screen.get()).stage === "WReceipt") try step({ type: "receiptRead", succeeded: false })
+      const expected = decision === "done" ? "completed" : decision === "reopen" ? "todo" : "cancelled"
+      if ((try screen.get()).stage === "WReadback") try readBack((r) => expected === "cancelled" ? (r === undefined || r.status === "cancelled" ? { tag: "ReadMatch", delivery: "NoAlert" } : { tag: "ReadMismatch" }) : expectStatus(expected)(r))
+    },
+  }
+})
+
+/** Starts a new visit and a refresh whenever the owner opens Reminders, and refreshes when the page comes back to the front. Never returns. */
+export effect function followReminderScreen() {
+  const navigator = try navigationPeer()
+  const reminders = try Reminders
+  let showing = false
+  let hidden = false
+  for try (const view of navigator.changes()) {
+    const now = view.app === "reminders"
+    if (now && !showing) try reminders.enter()
+    else if (now && hidden && !view.hidden) try reminders.refresh()
+    if (!now && showing) try reminders.show(undefined)
+    showing = now
+    hidden = view.hidden
+  }
+}

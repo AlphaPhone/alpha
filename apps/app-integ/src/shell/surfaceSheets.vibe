@@ -1,0 +1,64 @@
+// spec/shell/navigation.md, "A layer is listed once, closes with its owner or with Back, and holds the phone while open"; spec/shell/navigation.md, "Back closes the topmost layer first, then Home's launcher layers, then the assistant, then the app"
+import { Navigation, setLayerBack } from "./navigation.vibe"
+
+/** A sheet an always-mounted surface draws over the phone: the layer it is listed under, whether it shows, and how Back closes it. */
+export interface SurfaceSheet<R> {
+  readonly id: string
+  readonly shown: Stream.Stream<boolean, unknown, R>
+  readonly close: boolean!unknown!R
+}
+
+effect function followSheet<R>(navigation: Navigation.Shape, sheet: SurfaceSheet<R>) {
+  const context = try Effect.context<R>()
+  const close = effect () => Effect.provideContext(sheet.close, context) catch () => false
+  const lock = try Semaphore.make(1)
+  const shown = try Ref.make(false)
+  const listed = try Ref.make(false)
+
+  effect function present() {
+    return (try navigation.get()).layers.some((layer) => layer.id === sheet.id)
+  }
+
+  effect function list() {
+    if (!(try Ref.get(shown)) || (try Ref.get(listed))) return
+    const opened = (try present()) || (try navigation.openLayer(sheet.id, "SheetLayer", true))
+    try Ref.set(listed, opened)
+  }
+
+  effect function lost() {
+    if (!(try Ref.get(listed)) || (try present())) return
+    try Ref.set(listed, false)
+    if (!(try Ref.get(shown))) return
+    try close()
+    const now = Stream.runHead(sheet.shown) catch () => Option.none<boolean>()
+    try Ref.set(shown, Option.getOrElse(now, () => false))
+  }
+
+  effect function follow(open: boolean) {
+    try Ref.set(shown, open)
+    if (open) return try list()
+    if (!(try Ref.get(listed))) return
+    try Ref.set(listed, false)
+    try navigation.closeLayer(sheet.id)
+  }
+
+  try sync(() => setLayerBack(sheet.id, close))
+  try ensuring(effect {
+    try.all [
+      effect { for try (const open of Stream.changes(sheet.shown)) try Semaphore.withPermit(lock, follow(open)) },
+      effect { for try (const _ of navigation.changes) try Semaphore.withPermit(lock, effect { try lost(); try list() }) },
+    ]
+  }, sync(() => setLayerBack(sheet.id, undefined)))
+}
+
+/**
+ * Lists each always-mounted surface's sheet as a navigation layer under the surface's id while it shows, so Back and HOME reach it
+ * before anything under it: Back on that layer asks the surface to close the sheet, and HOME or a boot that drops the layer closes it
+ * too; a sheet that keeps Back while it finishes is listed again. Runs until interrupted.
+ */
+export effect function followSurfaceSheets<R>(sheets: readonly SurfaceSheet<R>[]) {
+  const navigation = try Navigation
+  for concurrent (const sheet of sheets) {
+    try followSheet(navigation, sheet)
+  }
+}

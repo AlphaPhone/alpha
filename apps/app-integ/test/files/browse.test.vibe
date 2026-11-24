@@ -1,0 +1,184 @@
+// spec/files/storage.md, "Story: Browse my files by category, folder and volume"; spec/files/storage.md, "Story: Never be told a folder is empty when Files could not know"; spec/files/browser.md, "Story: Open Files and see my storage"; spec/files/browser.md, "Story: Select files and act on them together"; spec/files/browser.md, "Story: Tap a file while Files is still reading"; spec/files/browser.md, "Story: Sort and view a listing my way"
+import { assert, it } from "@effect/vitest"
+import { showsEmpty } from "../../gen/files__browser.ts"
+import { FilesBrowser } from "../../src/files/browser.vibe"
+import { FilesChanges } from "../../src/files/changes.vibe"
+import { FilesPreview } from "../../src/files/preview.vibe"
+import { rowKey } from "../../src/files/paths.vibe"
+import { device, files, granted, noNative, until } from "./harness.vibe"
+
+it.live("Images lists pictures in their folder groups, Downloads is the Download folder and the primary volume comes first (spec/files/storage.md, \"Story: Browse my files by category, folder and volume\")", () => effect {
+  provide files(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      try Effect.forkScoped(browser.visit())
+      const counted = try until((s) => s.access === "AccessGranted" && s.counts.length === 5)
+      try browser.navigate({ tag: "InCategory", category: "Images" })
+      const images = try until((s) => s.place.tag === "InCategory" && s.listing === "Complete")
+      // spec/files/browser.md, "A press starts a selection with its row, a tap adds or removes a row, and an empty selection ends"
+      const grouped = try browser.dispatch({ type: "toggle", key: images.rows[0]?.key ?? "" })
+      try browser.navigate({ tag: "InCategory", category: "Downloads" })
+      const downloads = try until((s) => s.place.tag === "InCategory" && s.place.category === "Downloads" && s.listing === "Complete")
+      try Effect.try(() => assert.deepStrictEqual({
+        volumes: counted.volumes.map((v) => [v.id, v.primary]),
+        counts: counted.counts.map((c) => [c.category, c.count]),
+        images: images.rows.map((r) => r.kind),
+        groups: images.groups.map((g) => [g.folder, g.count]),
+        grouped,
+        downloads: downloads.rows.map((r) => r.folder),
+      }, {
+        volumes: [["primary", true]],
+        counts: [["Downloads", 2], ["Images", 1], ["Videos", 1], ["Audio", 1], ["Documents", 3]],
+        images: ["KindImage"],
+        groups: [["DCIM/Camera", 1]],
+        grouped: false,
+        downloads: ["Download", "Download"],
+      }))
+    })
+  }
+})
+
+it.live("a failed read shows nothing and is never called empty, and a folder read whole with nothing in it is (spec/files/storage.md, \"Story: Never be told a folder is empty when Files could not know\")", () => effect {
+  const native = device((plugin, method, args) =>
+    plugin !== "AlphaFiles" ? undefined
+    : method === "storageState" ? granted
+    : method === "storageList" ? (args?.path === "Empty" ? { status: "ready", truncated: false, entries: [] } : { status: "failed", message: "This storage is not mounted." })
+    : method === "storageCategory" ? { status: "ready", count: 0 }
+    : method === "storageTrashList" ? { status: "ready", items: [] }
+    : { status: "ready" })
+  provide files(native, false) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      try browser.navigate({ tag: "InFolder", path: "Broken", volume: "" })
+      const failed = try until((s) => s.listing !== "Unread")
+      try browser.navigate({ tag: "InFolder", path: "Empty", volume: "" })
+      const empty = try until((s) => s.place.tag === "InFolder" && s.place.path === "Empty" && s.listing !== "Unread")
+      try Effect.try(() => assert.deepStrictEqual(
+        { failed: [failed.listing, failed.rows.length, showsEmpty(failed)], empty: [empty.listing, showsEmpty(empty)] },
+        { failed: ["Failed", 0, false], empty: ["Complete", true] },
+      ))
+    })
+  }
+})
+
+it.live("without access Files lists nothing and asks for it, and the grant shows once Files reads again (spec/files/browser.md, \"Story: Open Files and see my storage\")", () => effect {
+  let allowed = false
+  const native = device((plugin, method) =>
+    plugin !== "AlphaFiles" ? undefined
+    : method === "storageState" ? (allowed ? granted : { status: "denied", access: "denied", legacy: true })
+    : method === "storageRequestAccess" ? ((allowed = true), { status: "ready", access: "granted" })
+    : method === "storageCategory" ? { status: "ready", count: 1 }
+    : method === "storageTrashList" ? { status: "ready", items: [] }
+    : { status: "ready" })
+  provide files(native, false) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      try Effect.forkScoped(browser.visit())
+      const denied = try until((s) => s.access === "AccessDenied")
+      // spec/files/browser.md, "Only the newest access read decides access, and without access nothing is listed"
+      const navigated = try browser.dispatch({ type: "navigate", place: { tag: "InTrash" } })
+      try browser.requestAccess()
+      const allowedNow = try until((s) => s.access === "AccessGranted" && s.counts.length > 0)
+      try Effect.try(() => assert.deepStrictEqual(
+        { denied: [denied.legacyAccess, denied.rows.length, denied.counts.length], navigated, allowed: [allowedNow.legacyAccess, allowedNow.volumes.length] },
+        { denied: [true, 0, 0], navigated: false, allowed: [false, 1] },
+      ))
+    })
+  }
+})
+
+it.live("a press, taps and Select all choose rows of the Download folder, and leaving the folder ends the selection (spec/files/browser.md, \"Story: Select files and act on them together\")", () => effect {
+  provide files(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      try browser.navigate({ tag: "InFolder", path: "Download", volume: "" })
+      try until((s) => s.listing === "Complete")
+      const pdf = rowKey("", "Download/lease.pdf")
+      const begun = try browser.dispatch({ type: "beginSelecting" })
+      try browser.dispatch({ type: "toggle", key: pdf })
+      try browser.dispatch({ type: "selectAll" })
+      const all = try browser.get()
+      try browser.dispatch({ type: "selectAll" })
+      const none = try browser.get()
+      try browser.dispatch({ type: "toggle", key: pdf })
+      try browser.goUp()
+      const left = try browser.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        { begun, all: all.selected.length, none: [none.selected.length, none.selecting], left: [left.place.tag, left.selected.length, left.selecting] },
+        { begun: true, all: 2, none: [0, true], left: ["Browse", 0, false] },
+      ))
+    })
+  }
+})
+
+it.live("a tap opens a file while the folder is still being read, and the read does not settle the open (spec/files/browser.md, \"Story: Tap a file while Files is still reading\")", () => effect {
+  provide files(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      const preview = try FilesPreview
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      try browser.navigate({ tag: "InFolder", path: "Download", volume: "" })
+      const listed = try until((s) => s.listing === "Complete")
+      try preview.enter()
+      // spec/files/browser.md, "Opens, shares and changes are counted until each one ends, and only one starts at a time"
+      try browser.dispatch({ type: "reload" })
+      const loading = (try browser.get()).loading
+      const row = listed.rows.find((r) => r.name === "notes.txt")!
+      const opened = try preview.openRow(row)
+      const after = try browser.get()
+      const shownName = (try preview.get()).doc.name
+      try Effect.try(() => assert.deepStrictEqual(
+        { loading, opened: opened.kind, shown: shownName, mutations: after.mutations },
+        { loading: true, opened: "shown", shown: "notes.txt", mutations: 0 },
+      ))
+    })
+  }
+})
+
+it.live("Browse offers no sort or view, and a listing sorts by name, reverses on a second choice and switches to a grid (spec/files/browser.md, \"Story: Sort and view a listing my way\")", () => effect {
+  provide files(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      const onBrowse = try browser.dispatch({ type: "chooseSort", mode: "ByName" })
+      try browser.navigate({ tag: "InFolder", path: "Download", volume: "" })
+      try until((s) => s.listing === "Complete")
+      try browser.dispatch({ type: "chooseSort", mode: "ByName" })
+      const named = try browser.get()
+      try browser.dispatch({ type: "chooseSort", mode: "ByName" })
+      try browser.dispatch({ type: "toggleGrid" })
+      const reversed = try browser.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        { onBrowse, named: [named.sort, named.reverse], reversed: [reversed.sort, reversed.reverse, reversed.grid] },
+        { onBrowse: false, named: ["ByName", false], reversed: ["ByName", true, true] },
+      ))
+    })
+  }
+})
+
+it.live("moving a file keeps both names when the destination has one, and says how many moved (spec/files/mutations.md, \"Story: Change many files and be told truthfully what changed\")", () => effect {
+  provide files(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      const changes = try FilesChanges
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      try changes.transfer([rowKey("", "Download/lease.pdf")], "Documents", true)
+      const copied = try changes.batch()
+      try changes.transfer([rowKey("", "Download/lease.pdf")], "Documents", false)
+      const moved = try changes.batch()
+      try changes.transfer([rowKey("", "Documents/lease.pdf")], "Documents", false)
+      const unchanged = try changes.batch()
+      try Effect.try(() => assert.deepStrictEqual(
+        { copied: [copied.op, copied.done, copied.renamed], moved: [moved.op, moved.done, moved.renamed], unchanged: [unchanged.phase, unchanged.done] },
+        { copied: ["CopyFiles", 1, 0], moved: ["MoveFiles", 1, 1], unchanged: ["Finished", 0] },
+      ))
+    })
+  }
+})

@@ -1,0 +1,228 @@
+// spec/clock/handoff.md, "Story: Ask Clock for an alarm after I review it"; spec/clock/agentReview.md, "Story: Be offered only the Clock and reminder requests this phone can carry out"; spec/clock/vocabulary.md, "Story: Hear only what Clock could know"; spec/clock/handoff.md, "Story: Try the Clock screen without opening Clock"; spec/clock/handoffHistory.md, "Story: Know what became of my last Clock request after a restart"; spec/clock/agentReview.md, "Story: Let the agent ask Clock only with my approval on the phone"; spec/clock/reminderReads.md, "Story: Let a workflow read today's reminders only as I reviewed"
+// @vitest-environment happy-dom
+import { assert, describe, it } from "@effect/vitest"
+import { Machine as HandoffMachine } from "../../gen/clock__handoff.effect.vibe"
+import { Machine as HistoryMachine, shownStatus } from "../../gen/clock__handoffHistory.effect.vibe"
+import { ClockHandoff, handoffLayer } from "../../src/clock/handoff.vibe"
+import { workflowClockPort } from "../../src/clock/workflow-port.vibe"
+import { WorkflowClockPort } from "../../src/workflows/ports.vibe"
+import { opening } from "../../gen/clock__handoffHistory.ts"
+import { ClockReview, agentReviewLayer } from "../../src/clock/agent-review.vibe"
+import { advertisedBy, clockCapabilities, operationPorts } from "../../src/clock/operations.vibe"
+import { build, fakeHost, fakePhone, fakeReminders, machines, refuse } from "./phone.vibe"
+
+describe("Clock handoff (spec/clock/handoff.md, \"Story: Ask Clock for an alarm after I review it\")", () => {
+  it.effect("review a repeating alarm, open Clock once and keep what it answered (spec/clock/handoff.md, \"Story: Ask Clock for an alarm after I review it\")", () => effect {
+    const phone = fakePhone({
+      "DailyApps.surfaceInfo": () => ({ clockRepeatDaysVersion: 1 }),
+      "DailyApps.clockHandoff": (args) => ({ action: (args as { action: string }).action, status: "opened", message: "Clock request sent. Check the Clock app; Alpha cannot confirm an alarm was changed." }),
+    })
+    provide Layer.provideMerge(Layer.provideMerge(handoffLayer, machines), Layer.mergeAll(phone.layer, build("launcher"))) {
+      const handoff = try ClockHandoff
+      const draft = try HandoffMachine
+      const history = try HistoryMachine
+      try handoff.restore()
+      try draft.send({ type: "setTime", hour: 6, minute: 45 })
+      try draft.send({ type: "toggleDay", day: 6 })
+      try draft.send({ type: "toggleDay", day: 2 })
+      const reviewed = try handoff.prepare()
+      try draft.send({ type: "setLabel", label: "Run" })
+      const retired = (try draft.get()).phase
+      try handoff.prepare()
+      try handoff.confirm()
+      try handoff.confirm()
+      const sent = phone.calls.filter((c) => c.method === "clockHandoff").map((c) => c.args as Record<string, unknown>)
+      const after = try draft.get()
+      const kept = try history.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        { reviewed, retired, sent: sent.map((r) => [r.action, r.hour, r.minute, r.label, r.days, r.reviewed]), message: after.message, kept: shownStatus(kept) },
+        { reviewed: true, retired: "Drafting", sent: [["set", 6, 45, "Run", [2, 6], true]], message: { tag: "Answered", status: "ClockOpened", reason: "Clock request sent. Check the Clock app; Alpha cannot confirm an alarm was changed." }, kept: "ClockOpened" },
+      ))
+    }
+  })
+
+  // spec/clock/handoff.md, "A repeating alarm is reviewed only when the phone's Clock handoff carries repeat days"
+  it.effect("refuse a repeat the phone's Clock cannot take, and simulate only with test mocks (spec/clock/handoff.md, \"Story: Try the Clock screen without opening Clock\")", () => effect {
+    const phone = fakePhone({ "DailyApps.surfaceInfo": () => ({}), "DailyApps.clockHandoff": () => ({ action: "show", status: "opened" }) })
+    provide Layer.provideMerge(Layer.provideMerge(handoffLayer, machines), Layer.mergeAll(phone.layer, build("launcher", true))) {
+      const handoff = try ClockHandoff
+      const draft = try HandoffMachine
+      try handoff.restore()
+      try draft.send({ type: "toggleDay", day: 2 })
+      const repeat = try handoff.prepare()
+      const refusal = (try draft.get()).message
+      try draft.send({ type: "toggleDay", day: 2 })
+      try draft.send({ type: "chooseAction", handoffAction: "ShowAlarms" })
+      try draft.send({ type: "simulate", on: true })
+      try handoff.prepare()
+      try handoff.confirm()
+      const simulated = (try draft.get()).message
+      try Effect.try(() => assert.deepStrictEqual(
+        { repeat, refusal, simulated, opened: phone.calls.filter((c) => c.method === "clockHandoff").length },
+        { repeat: false, refusal: { tag: "NeedsRepeatSupport" }, simulated: { tag: "Simulated" }, opened: 0 },
+      ))
+    }
+  })
+})
+
+describe("Agent Clock review (spec/clock/agentReview.md, \"Story: Let the agent ask Clock only with my approval on the phone\")", () => {
+  it.effect("confirm an approved request once and report only what Clock answered (spec/clock/agentReview.md, \"Story: Let the agent ask Clock only with my approval on the phone\")", () => effect {
+    const phone = fakePhone({
+      "AlphaActionJournal.reviewClock": () => ({ reviewToken: "approved-1" }),
+      "AlphaActionJournal.confirmClock": () => ({ result: { action: "set", status: "opened" } }),
+      "AlphaActionJournal.cancelClock": () => ({}),
+    })
+    provide Layer.provideMerge(agentReviewLayer, phone.layer) {
+      const review = try ClockReview
+      const identity = { scope: "agent", proposalId: "p1", operationId: "op_1" }
+      const status = try review.review(identity, { action: "set", hour: 7, minute: 0, timeZone: "Europe/Paris" })
+      const invalid = review.review({ ...identity, operationId: "op_2" }, { action: "set", hour: 31, minute: 0, timeZone: "Europe/Paris" }) catch (error) => error._tag
+      const methods = phone.calls.map((c) => c.method)
+      try Effect.try(() => assert.deepStrictEqual(
+        { status, invalid, methods },
+        { status: "ClockOpened", invalid: "InvalidClockRequest", methods: ["reviewClock", "confirmClock", "cancelClock"] },
+      ))
+    }
+  })
+})
+
+describe("Agent Clock operations (spec/clock/agentReview.md, \"Story: Let the agent ask Clock only with my approval on the phone\")", () => {
+  it.effect("run an approved Clock request through the native review and report what Clock answered (spec/clock/agentReview.md, \"The confirmed request is reported only as Clock answered\")", () => effect {
+    const phone = fakePhone({
+      "AlphaActionJournal.reviewClock": () => ({ reviewToken: "approved-1" }),
+      "AlphaActionJournal.confirmClock": () => ({ result: { action: "show", status: "opened" } }),
+      "AlphaActionJournal.cancelClock": () => ({}),
+    })
+    provide Layer.provideMerge(agentReviewLayer, Layer.mergeAll(phone.layer, fakeHost(), fakeReminders().layer)) {
+      const ports = try operationPorts
+      const operation = { type: "clock_handoff", action: "show" }
+      const at = { proposalId: "p1", operationId: "op_1", attemptId: 1 }
+      const answer = try promise(() => ports.execute(operation, at))
+      const reviewed = phone.calls.find((c) => c.method === "reviewClock")?.args as { scope: string; operation: unknown } | undefined
+      try Effect.try(() => assert.deepStrictEqual(
+        { valid: ports.validate(operation) !== undefined, other: ports.validate({ type: "notes_search", query: "x" }), answer, sent: reviewed?.operation, scoped: /^[a-f0-9]{64}$/.test(reviewed?.scope ?? ""), cls: ports.classOf(operation), handoff: ports.handoff?.(operation) },
+        { valid: true, other: undefined, answer: { kind: "applied", result: { kind: "clock-handoff", action: "show", status: "opened" } }, sent: operation, scoped: true, cls: "CreateReminder", handoff: true },
+      ))
+    }
+  })
+
+  it.effect("refuse a reminder change whose reminder moved since it was approved (spec/clock/reminders.md, \"Story: Change a reminder exactly once\")", () => effect {
+    const target = { sourceId: "s1", sourceRevision: "a".repeat(64), reminderId: "r1", occurrenceId: "o1", revision: "b".repeat(64) }
+    const phone = fakePhone({
+      "AlphaActionJournal.get": () => ({ entry: { digest: "d1" } }),
+      "DailyApps.selectedReminder": () => ({ ...target, revision: "c".repeat(64) }),
+      "DailyApps.operateReminder": () => ({ status: "succeeded" }),
+    })
+    provide Layer.provideMerge(agentReviewLayer, Layer.mergeAll(phone.layer, fakeHost(), fakeReminders().layer)) {
+      const ports = try operationPorts
+      const answer = try promise(() => ports.execute({ type: "reminder_complete", target }, { proposalId: "p2", operationId: "op_2", attemptId: 1 }))
+      try Effect.try(() => assert.deepStrictEqual(
+        { answer, operated: phone.calls.filter((c) => c.method === "operateReminder").length, cls: ports.classOf({ type: "reminder_complete", target }), handoff: ports.handoff?.({ type: "reminder_complete", target }) },
+        { answer: { kind: "refused", code: "reminder_changed" }, operated: 0, cls: "CreateReminder", handoff: false },
+      ))
+    }
+  })
+})
+
+describe("What Clock answered (spec/clock/vocabulary.md, \"Story: Hear only what Clock could know\")", () => {
+  it.effect("report an answer for another action as unknown, and Workflows' Clock draft as opened only when Clock opened (spec/clock/vocabulary.md, \"Story: Hear only what Clock could know\")", () => effect {
+    let answer = "show"
+    const phone = fakePhone({
+      "DailyApps.surfaceInfo": () => ({}),
+      "DailyApps.clockHandoff": () => ({ action: answer, status: "opened" }),
+    })
+    provide Layer.provideMerge(Layer.provideMerge(Layer.provideMerge(workflowClockPort, handoffLayer), machines), Layer.mergeAll(phone.layer, build("launcher"))) {
+      const port = try WorkflowClockPort
+      const draft = try HandoffMachine
+      try port.prepare({ hour: 7, minute: 30, label: "Gym", days: [] })
+      const mismatched = try port.confirm()
+      const reported = (try draft.get()).message
+      answer = "set"
+      try port.prepare({ hour: 7, minute: 30, label: "Gym", days: [] })
+      const opened = try port.confirm()
+      try Effect.try(() => assert.deepStrictEqual(
+        { mismatched, reported, opened, sent: phone.calls.filter((c) => c.method === "clockHandoff").length },
+        { mismatched: false, reported: { tag: "Answered", status: "ClockUnknown", reason: "" }, opened: true, sent: 2 },
+      ))
+    }
+  })
+})
+
+describe("Clock handoff history (spec/clock/handoffHistory.md, \"Story: Know what became of my last Clock request after a restart\")", () => {
+  it.effect("keep a lost answer as unknown and never send it again without a new review (spec/clock/handoffHistory.md, \"Story: Know what became of my last Clock request after a restart\")", () => effect {
+    const phone = fakePhone({ "DailyApps.surfaceInfo": () => ({}), "DailyApps.clockHandoff": () => refuse("The activity was stopped") })
+    provide Layer.provideMerge(Layer.provideMerge(handoffLayer, machines), Layer.mergeAll(phone.layer, build("aosp"))) {
+      const handoff = try ClockHandoff
+      const history = try HistoryMachine
+      try handoff.prepare()
+      try handoff.confirm()
+      try handoff.confirm()
+      const lost = try history.get()
+      try history.send({ type: "beginRecord", id: "interrupted", handoffAction: "ShowAlarms", at: 1 })
+      const interrupted = try history.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        { lost: [shownStatus(lost), opening(lost)], interrupted: [shownStatus(interrupted), opening(interrupted)], sent: phone.calls.filter((c) => c.method === "clockHandoff").length },
+        { lost: ["ClockUnknown", false], interrupted: ["ClockUnknown", true], sent: 1 },
+      ))
+    }
+  })
+})
+
+describe("Reminder reads (spec/clock/reminderReads.md, \"Story: Let a workflow read today's reminders only as I reviewed\")", () => {
+  it.effect("share the reviewed day's open and completed reminders without their notes, and none past the bound (spec/clock/reminderReads.md, \"Story: Let a workflow read today's reminders only as I reviewed\")", () => effect {
+    const at = (iso: string) => Date.parse(iso)
+    const row = (id: string, status: string, dueAt: string, extra: Record<string, unknown> = {}) => ({
+      id, title: id, body: "private notes", occurrenceId: "o1", createdAt: 0, dueAt: at(dueAt), alertMinutes: 0, status,
+      target: { sourceId: "s1", sourceRevision: "r", reminderId: id, occurrenceId: "o1", revision: "v1" }, ...extra,
+    })
+    const phone = fakePhone({
+      "DailyApps.listReminders": () => ({ reminders: [
+        row("today", "scheduled", "2026-11-22T09:00:00Z"),
+        row("overdue", "posted", "2026-11-21T09:00:00Z"),
+        row("done", "completed", "2026-11-22T07:00:00Z", { completedAt: at("2026-11-22T07:05:00Z") }),
+        row("tomorrow", "scheduled", "2026-11-23T09:00:00Z"),
+        row("gone", "cancelled", "2026-11-22T10:00:00Z"),
+        { ...row("todo", "todo", "2026-11-22T00:00:00Z"), undated: true },
+      ] }),
+    })
+    provide Layer.provideMerge(agentReviewLayer, Layer.mergeAll(phone.layer, fakeHost(), fakeReminders().layer)) {
+      const ports = try operationPorts
+      const read = { type: "read_selected_reminders", window: "open_and_completed_today", day: "2026-11-22", timeZone: "UTC", maximumItems: 5 }
+      const call = { proposalId: "p3", operationId: "op_3", attemptId: 1 }
+      const shared = (try promise(() => ports.execute(read, call))) as { kind: string; result?: { reminders: Array<Record<string, unknown>> } }
+      const overflow = (try promise(() => ports.execute({ ...read, maximumItems: 2 }, call))) as { kind: string; code?: string; result?: { overdue: number } }
+      try Effect.try(() => assert.deepStrictEqual(
+        {
+          kind: shared.kind, ids: shared.result?.reminders.map((r) => [r.id, r.status]), notes: JSON.stringify(shared.result ?? {}).includes("private"),
+          overflow: [overflow.kind, overflow.code, overflow.result?.overdue], cls: ports.classOf(read), handoff: ports.handoff?.(read),
+        },
+        {
+          kind: "applied", ids: [["overdue", "open"], ["done", "completed"], ["today", "open"]], notes: false,
+          overflow: ["refused", "reminders_overflow", 1], cls: "RemindersRead", handoff: false,
+        },
+      ))
+    }
+  })
+})
+
+describe("What Clock advertises (spec/clock/agentReview.md, \"Story: Be offered only the Clock and reminder requests this phone can carry out\")", () => {
+  it.effect("advertise the handoff, repeat days and one reminder version only where the phone carries them (spec/clock/agentReview.md, \"Clock advertises a Clock handoff only with a Clock handler, repeat days only where Clock carries them, and one reminder version only where the phone keeps reminders\")", () => effect {
+    const offered = ["clock.handoff.v1", "clock.handoff.v2", "clock.alarms.v1", "reminders.local-record.v1", "reminders.local-record.v2", "reminders.create.v1", "notes.query.v1"]
+    const phone = fakePhone({ "DailyApps.surfaceInfo": () => ({ clockRepeatDaysVersion: 1 }) })
+    const plain = fakePhone({ "DailyApps.surfaceInfo": () => ({}) })
+    const advertised = (on: typeof phone.layer, variant: "launcher" | "aosp" | "browser") =>
+      Effect.provide(Effect.flatMap(clockCapabilities, (clock) => clock.advertise(offered)), Layer.merge(on, build(variant)))
+    const onPhone = try advertised(phone.layer, "aosp")
+    const noRepeat = try advertised(plain.layer, "launcher")
+    const browser = try advertised(phone.layer, "browser")
+    try Effect.try(() => assert.deepStrictEqual(
+      { onPhone, noRepeat, browser, v1Only: advertisedBy({ handler: true, store: true, repeatDays: true }, ["reminders.local-record.v1", "clock.handoff.v2"]) },
+      {
+        onPhone: ["clock.handoff.v1", "clock.handoff.v2", "reminders.local-record.v2", "reminders.create.v1"],
+        noRepeat: ["clock.handoff.v1", "reminders.local-record.v2", "reminders.create.v1"],
+        browser: [],
+        v1Only: ["clock.handoff.v2", "reminders.local-record.v1"],
+      },
+    ))
+  })
+})

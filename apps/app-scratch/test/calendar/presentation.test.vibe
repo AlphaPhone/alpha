@@ -1,0 +1,182 @@
+// spec/calendar/presentation.md, "Story: Move between days, weeks, months and my schedule"; spec/calendar/presentation.md, "Back closes one layer at a time: the form, the delete sheet, the event, the Calendars sheet, the date picker, then search"; spec/calendar/approvals.md, "A changed conversation, a hidden page or Back retires the review"; spec/calendar/presentation.md, "Story: Search my events and list what is coming"; spec/calendar/presentation.md, "Story: Open an event and come back"; spec/calendar/presentation.md, "Story: Create or edit an event in a form"; spec/calendar/presentation.md, "Story: See only what the current read found, for the current account"; spec/calendar/presentation.md, "Story: Choose which calendars I see"; spec/calendar/presentation.md, "Story: Read the presentation of times"; spec/calendar/selection.md, "Story: Let the assistant know which day I am looking at"
+import { assert, describe, it } from "@effect/vitest"
+import { Machine as PresentationMachine } from "../../gen/calendar__presentation.effect.vibe"
+import { bindCalendar, hideCalendar, leaveCalendar, readCalendar } from "../../src/calendar/binding.vibe"
+import { HeldDeletions } from "../../src/calendar/deletions.vibe"
+import { HomeAgenda } from "../../src/calendar/home.vibe"
+import type { CalendarRow } from "../../src/calendar/model.vibe"
+import { calendarDayObservation } from "../../src/calendar/observation.vibe"
+import { ApprovalReviews } from "../../src/calendar/approvals.vibe"
+import { calendarBack, calendarScreenBack, calendarSurfacesBack, eventRoute, openEditor, openSources, rowFields } from "../../src/calendar/screen.vibe"
+import { repeatText } from "../../src/calendar/model.vibe"
+import { intervalDetail, listGroups, monthGrid, rowMatches, timeline, visibleDays } from "../../src/web/calendar/layout.ts"
+import { binding, calendarOver, check, foregroundAt, otherBinding, same } from "./harness.vibe"
+import { CalendarAgentFake, DeviceCalendarFake } from "./resident-fake.ts"
+
+const now = Date.UTC(2026, 10, 20, 9, 30)
+const base = { source: "agent", sourceKey: "agent", notes: "", where: "", allDay: false, revision: "etag-1", calendarName: "Agent Calendar",
+  account: "owner@example.com", writable: true, recurring: false, timeZone: "UTC" } as const
+const standup: CalendarRow = { ...base, id: "agent:standup", title: "Standup", where: "Room 2", begin: Date.UTC(2026, 10, 20, 10), end: Date.UTC(2026, 10, 20, 10, 30), offset: 0, endOffset: 1 }
+const late: CalendarRow = { ...base, id: "agent:late", title: "Late call", begin: Date.UTC(2026, 10, 20, 5), end: Date.UTC(2026, 10, 20, 23, 30), offset: 0, endOffset: 1 }
+const trip: CalendarRow = { ...base, id: "agent:trip", title: "Trip", allDay: true, begin: Date.UTC(2026, 10, 21), end: Date.UTC(2026, 10, 23), offset: 1, endOffset: 3 }
+
+describe("Calendar views (spec/calendar/presentation.md)", () => {
+  it("a week leads with the day before and a month has whole weeks (spec/calendar/presentation.md, \"Story: Move between days, weeks, months and my schedule\")", () => {
+    // spec/calendar/presentation.md, "A day view of three or more columns leads with the previous day"
+    assert.deepStrictEqual([visibleDays(4, 7)[0], visibleDays(4, 7).length, visibleDays(4, 1)], [3, 7, [4]])
+    // spec/calendar/presentation.md, "The month grid has five weeks unless the month and its leading days need six"
+    const grid = monthGrid(0, 0, [standup], "UTC", now)
+    assert.isTrue(grid.cells.length === 35 || grid.cells.length === 42)
+    assert.isTrue(grid.cells.some((cell) => cell.offset === 0 && cell.busy))
+  })
+
+  it("search matches every word in title, place or notes and lists each event once (spec/calendar/presentation.md, \"Story: Search my events and list what is coming\")", () => {
+    assert.deepStrictEqual([rowMatches(standup, "room STANDUP"), rowMatches(standup, "lunch")], [true, false])
+    const groups = listGroups([standup, trip], Date.UTC(2026, 10, 20), Date.UTC(2026, 11, 1), "trip", "UTC", now)
+    assert.deepStrictEqual(groups.map((group) => group.items.map((item) => item.row.title)), [["Trip"]])
+  })
+
+  it("an event's route names its day, and a repeat says itself plainly (spec/calendar/presentation.md, \"Story: Open an event and come back\")", () => {
+    assert.strictEqual(eventRoute(trip), `event/${encodeURIComponent("agent:trip")}?day=1`)
+    assert.deepStrictEqual([repeatText(["RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"]), repeatText(["RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=FR"]), repeatText([], "series-1")],
+      ["Repeats every weekday", "Repeats every 2 weeks on Fri", "Repeats"])
+  })
+
+  it.effect("a new form opens on the selected day, and an all-day edit form keeps its dates (spec/calendar/presentation.md, \"Story: Create or edit an event in a form\")", () => effect {
+    provide calendarOver(new CalendarAgentFake(), new DeviceCalendarFake()) {
+      const opened = try openEditor(undefined)
+      const state = try (try PresentationMachine).get()
+      const fields = rowFields(trip, "c-1")
+      try same([opened, state.form, fields.start, fields.end, fields.allDay], [true, "NewForm", "2026-11-21", "2026-11-22", true])
+    }
+  })
+
+  it.effect("Back closes the form, the Calendars sheet and search one at a time, then leaves Back to the shell (spec/calendar/presentation.md, \"Story: Open an event and come back\")", () => effect {
+    // spec/calendar/presentation.md, "Back closes one layer at a time: the form, the delete sheet, the event, the Calendars sheet, the date picker, then search"
+    provide calendarOver(new CalendarAgentFake(), new DeviceCalendarFake()) {
+      const presentation = try PresentationMachine
+      try openEditor(undefined)
+      const formClosed = try calendarBack()
+      const afterForm = try presentation.get()
+      // spec/calendar/presentation.md, "The Calendars sheet is a modal over the view, opened only with no form or delete sheet open"
+      const sheet = try openSources()
+      const sheetClosed = try calendarBack()
+      const afterSheet = try presentation.get()
+      presentation.send({ type: "openSearch" }) catch () => undefined
+      const searchClosed = try calendarBack()
+      const afterSearch = try presentation.get()
+      const nothingLeft = try calendarBack()
+      try same([formClosed, afterForm.form, sheet, sheetClosed, afterSheet.sourcesSheet, searchClosed, afterSearch.searching, nothingLeft],
+        [true, "NoForm", true, true, false, true, false, false])
+    }
+  })
+
+  it.effect("Back closes an open approval review before Calendar's own layers, then leaves Back to the shell (spec/calendar/approvals.md, \"Story: Approve or decline a Calendar change the agent asked for\")", () => effect {
+    // spec/calendar/approvals.md, "A changed conversation, a hidden page or Back retires the review"
+    provide calendarOver(new CalendarAgentFake(), new DeviceCalendarFake()) {
+      const presentation = try PresentationMachine
+      const reviews = try ApprovalReviews
+      effect function phase() {
+        const shown = try Stream.runHead(reviews.changes)
+        return shown._tag === "Some" ? shown.value.state.phase : "ReviewIdle"
+      }
+      try openSources()
+      try reviews.open("00000000-0000-4000-8000-000000000001")
+      const opened = try phase()
+      const reviewClosed = try calendarScreenBack()
+      const afterReview = try phase()
+      const sheetStill = (try presentation.get()).sourcesSheet
+      const sheetClosed = try calendarScreenBack()
+      const overlaysLeft = try calendarSurfacesBack()
+      const nothingLeft = try calendarScreenBack()
+      try same([opened, reviewClosed, afterReview, sheetStill, sheetClosed, overlaysLeft, nothingLeft],
+        ["ReviewShown", true, "ReviewIdle", true, true, false, false])
+    }
+  })
+
+  it.effect("the Calendars sheet ends with the visit and gives way to a form (spec/calendar/presentation.md, \"Story: Choose which calendars I see\")", () => effect {
+    // spec/calendar/presentation.md, "Leaving Calendar ends its transient overlays and any pending save request"
+    provide calendarOver(new CalendarAgentFake(), new DeviceCalendarFake()) {
+      const presentation = try PresentationMachine
+      try openSources()
+      try openEditor(undefined)
+      const underForm = (try presentation.get()).sourcesSheet
+      try calendarBack()
+      try openSources()
+      try leaveCalendar()
+      const left = (try presentation.get()).sourcesSheet
+      try same([underForm, left], [false, false])
+    }
+  })
+
+  it.effect("a read publishes for its owner, and another account clears it (spec/calendar/presentation.md, \"Story: See only what the current read found, for the current account\")", () => effect {
+    const agent = new CalendarAgentFake()
+    agent.add("event-a", "Standup", 0, 10)
+    provide calendarOver(agent, new DeviceCalendarFake()) {
+      try bindCalendar(binding)
+      try readCalendar(false, false)
+      const read = try (try PresentationMachine).get()
+      try bindCalendar(otherBinding)
+      const other = try (try PresentationMachine).get()
+      try same([read.loading, read.lastReadToken, read.agentRows, read.agentRowsOwner, other.agentRows, other.owner],
+        [false, read.readToken, true, binding.owner, false, otherBinding.owner])
+    }
+  })
+
+  it.effect("leaving Calendar ends its overlays, and a hidden page closes the form (spec/calendar/presentation.md, \"Leaving Calendar ends its transient overlays and any pending save request\")", () => effect {
+    provide calendarOver(new CalendarAgentFake(), new DeviceCalendarFake()) {
+      const presentation = try PresentationMachine
+      try presentation.send({ type: "openDatePicker" })
+      try leaveCalendar()
+      const left = try presentation.get()
+      try presentation.send({ type: "enter" })
+      try openEditor(undefined)
+      try hideCalendar()
+      const hidden = try presentation.get()
+      try same([left.active, left.datePicker, hidden.form, (try (try HeldDeletions).get()).held.length], [false, false, "NoForm", 0])
+    }
+  })
+
+  it.effect("hiding the agent calendar is kept for that account and Home never calls it empty (spec/calendar/presentation.md, \"Story: Choose which calendars I see\")", () => effect {
+    const agent = new CalendarAgentFake()
+    provide calendarOver(agent, new DeviceCalendarFake()) {
+      try bindCalendar(binding)
+      try readCalendar(false, false)
+      const presentation = try PresentationMachine
+      try presentation.send({ type: "hideAgent" })
+      const hidden = try (try HomeAgenda).current()
+      try bindCalendar(otherBinding)
+      const other = try presentation.get()
+      try bindCalendar(binding)
+      const back = try presentation.get()
+      try same([hidden.state, other.hiddenAgentOwners.includes(other.owner), back.hiddenAgentOwners.includes(back.owner)], ["HomeQuiet", false, true])
+    }
+  })
+
+  it("the timeline grows for an early or late event, and a span crossing days shows both dates (spec/calendar/presentation.md, \"Story: Read the presentation of times\")", () => {
+    // spec/calendar/presentation.md, "The timeline runs from seven to midnight and grows to hold every event of the day"
+    const day = timeline([late], 0, "UTC", now)
+    assert.deepStrictEqual([day.first, day.last > 23, day.last <= 24], [5, true, true])
+    // spec/calendar/presentation.md, "An interval shows UTC offsets only when they differ at its ends, and its dates only when they differ"
+    const span = intervalDetail({ ...standup, end: Date.UTC(2026, 10, 21, 1) })
+    assert.isTrue(span.day?.includes("–") === true)
+    assert.isFalse(intervalDetail(standup).when.includes("UTC"))
+  })
+
+  it.effect("the assistant sees the shown day only on a plain, ready day in front (spec/calendar/selection.md, \"Story: Let the assistant know which day I am looking at\")", () => effect {
+    const agent = new CalendarAgentFake()
+    provide Layer.merge(calendarOver(agent, new DeviceCalendarFake()), foregroundAt({ view: "calendar" })) {
+      try bindCalendar(binding)
+      try readCalendar(false, false)
+      const shown = try calendarDayObservation()
+      try openEditor(undefined)
+      const underForm = try calendarDayObservation()
+      try check(() => assert.deepStrictEqual([shown !== undefined && /^\d{4}-\d\d-\d\d$/.test(shown.date), underForm], [true, undefined]))
+    }
+    provide Layer.merge(calendarOver(agent, new DeviceCalendarFake()), foregroundAt({ view: "maps" })) {
+      try bindCalendar(binding)
+      try readCalendar(false, false)
+      try same(try calendarDayObservation(), undefined)
+    }
+  })
+})

@@ -1,0 +1,48 @@
+// spec/camera/scan.md, "Only a complete, bounded scan request starts a scan, and only over the visible Camera"; spec/camera/media.md, "A frame question needs the ready, idle preview, and its frame is reviewed before it joins the draft"
+import { asksAboutFrame } from "../../gen/camera__media.ts"
+import { startsScan } from "../../gen/camera__scan.ts"
+import { MediaReview } from "./mediaReview.vibe"
+import { Scanner } from "./scanner.vibe"
+import { frameQuestionRequested, scanRequested } from "./scanText.ts"
+import { Viewfinder } from "./viewfinder.vibe"
+
+/** One message the owner is about to send from the composer. */
+export interface ChatMessage {
+  /** The message text as typed or spoken. */
+  readonly text: string
+  /** Files or pictures already attached to it. */
+  readonly attachments: number
+  /** The owner is editing an earlier message. */
+  readonly editing: boolean
+}
+
+/** What Camera did with a message sent while it shows. */
+export type ChatTaken = "scan" | "frame" | "none"
+
+/** Camera's part of the composer: "scan this" and "what am I looking at?" sent over Camera run here and never reach the agent as text. */
+export service CameraChat {
+  /** Take a whole short scan request or frame question sent over the visible Camera; "none" leaves the message to the conversation. */
+  intercept(message: ChatMessage): ChatTaken!!
+}
+
+/** Camera's composer requests over the viewfinder, the scanner and the frame review. */
+export const cameraChat = Layer.effect(CameraChat, effect {
+  const viewfinder = try Viewfinder
+  const scanner = try Scanner
+  const media = try MediaReview
+  return {
+    effect intercept(message: ChatMessage) {
+      if (message.attachments > 0 || message.editing) return "none" as ChatTaken
+      const view = try viewfinder.get()
+      const busy = view.capturing || view.recording !== "RecordingIdle"
+      const shown = view.visible && view.onScreen
+      if (startsScan({ matches: scanRequested(message.text), cameraShown: shown, busy })) {
+        return (try scanner.scanFrame()) ? "scan" as ChatTaken : "none" as ChatTaken
+      }
+      if (asksAboutFrame({ matches: frameQuestionRequested(message.text), ready: shown && view.phase === "PreviewReady", busy })) {
+        return (try media.askAboutFrame(message.text.trim())) ? "frame" as ChatTaken : "none" as ChatTaken
+      }
+      return "none" as ChatTaken
+    },
+  }
+})

@@ -1,0 +1,117 @@
+// spec/calendar/editor.md, "Story: Set an event's time with controls that never produce an impossible range"; spec/calendar/editor.md, "Story: Change an event only where Alpha can do it exactly"; spec/calendar/editor.md, "Story: Know why Save is off"; spec/calendar/drafts.md, "Story: Save an event from its draft exactly once"; spec/calendar/drafts.md, "Story: Recover a draft whose storage cannot be read"; spec/calendar/drafts.md, "Story: Keep each account's draft with that account"; spec/calendar/drafts.md, "Story: Turn a note or a scan into an event I review"
+import { assert, describe, it } from "@effect/vitest"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { ownerKey } from "../../src/platform/storage.vibe"
+import { CalendarDrafts } from "../../src/calendar/drafts.vibe"
+import type { DraftFieldsRecord } from "../../src/calendar/drafts.schema.vibe"
+import { formSpan, moveEnd, moveStart, nudgeEnd, nudgeStart } from "../../src/calendar/formTime.vibe"
+import { type CalendarScan, scanFields } from "../../src/calendar/handoffs.vibe"
+import type { CalendarRow } from "../../src/calendar/model.vibe"
+import { rowTimingLocked, saveEditor } from "../../src/calendar/screen.vibe"
+import { calendarOver, same } from "./harness.vibe"
+import { CalendarAgentFake, DeviceCalendarFake } from "./resident-fake.ts"
+
+const fields: DraftFieldsRecord = { title: "Lunch", body: "", location: "", start: "2026-11-20T23:50", end: "2026-11-21T00:50", zone: "UTC", allDay: false,
+  repeat: "none", alert: null, video: false, who: [], calendar: "local", creationId: "c-1", origin: "typed" }
+
+describe("Calendar editor and drafts (spec/calendar/editor.md, spec/calendar/drafts.md)", () => {
+  it("the start stays in its day, the end after the start, and a moved start keeps the length (spec/calendar/editor.md, \"Story: Set an event's time with controls that never produce an impossible range\")", () => {
+    // spec/calendar/editor.md, "Times are civil minutes of the day; the start stays within the day and nudges by fifteen minutes"
+    const later = nudgeStart(fields, true)
+    assert.deepStrictEqual([later.start, formSpan(later)?.duration], ["2026-11-20T23:59", 60])
+    // spec/calendar/editor.md, "The duration is at least one minute, and an end at or before the start is refused"
+    const shortest = nudgeEnd(nudgeEnd(nudgeEnd(nudgeEnd(nudgeEnd({ ...fields, start: "2026-11-20T10:00", end: "2026-11-20T11:00" }, false), false), false), false), false)
+    assert.strictEqual(formSpan(shortest)?.duration, 1)
+    const refused = moveEnd({ ...fields, start: "2026-11-20T10:00", end: "2026-11-20T11:00" }, "2026-11-20T09:00")
+    assert.strictEqual(refused.end, "2026-11-20T11:00")
+    assert.strictEqual(moveStart({ ...fields, start: "2026-11-20T10:00", end: "2026-11-20T11:30" }, "2026-11-22T08:00").end, "2026-11-22T09:30")
+  })
+
+  it.effect("the agent's own calendar refuses repeats, alerts and rooms, and an unshowable span keeps its time (spec/calendar/editor.md, \"Story: Change an event only where Alpha can do it exactly\")", () => effect {
+    provide calendarOver(new CalendarAgentFake(), new DeviceCalendarFake()) {
+      const repeat = try saveEditor({ ...fields, start: "2026-11-20T10:00", end: "2026-11-20T11:00", repeat: "daily" }, undefined, false, false)
+      const alert = try saveEditor({ ...fields, start: "2026-11-20T10:00", end: "2026-11-20T11:00", alert: 10 }, undefined, false, false)
+      const locked = try saveEditor({ ...fields, start: "2026-11-20T10:00", end: "2026-11-20T11:00" }, undefined, true, true)
+      try same([repeat.startsWith("Agent Calendar can’t"), alert.startsWith("Agent Calendar can’t"), locked.startsWith("Reopen the event")], [true, true, true])
+    }
+    const row: CalendarRow = { id: "agent:a", source: "agent", sourceKey: "agent", title: "A", notes: "", where: "", begin: 0, end: 30, allDay: false, offset: 0, endOffset: 1,
+      revision: "r", calendarName: "", account: "", writable: true, recurring: false, timeZone: "UTC" }
+    try same([rowTimingLocked(row), rowTimingLocked({ ...row, end: 3_600_000 })], [true, false])
+  })
+
+  it.effect("a missing wall time and an end before the start are refused and nothing is saved (spec/calendar/editor.md, \"Story: Know why Save is off\")", () => effect {
+    const agent = new CalendarAgentFake()
+    provide calendarOver(agent, new DeviceCalendarFake()) {
+      // spec/calendar/editor.md, "A missing or repeated wall time is refused, and nothing is saved"
+      const gap = try saveEditor({ ...fields, start: "2026-03-08T02:30", end: "2026-03-08T03:30", zone: "America/New_York" }, undefined, false, false)
+      const backwards = try saveEditor({ ...fields, start: "2026-11-20T11:00", end: "2026-11-20T10:00" }, undefined, false, false)
+      try same([gap.includes("Nothing was saved"), backwards, agent.writes.length], [true, "Choose an end after the start. Nothing was saved.", 0])
+    }
+  })
+
+  it.effect("edits typed against an older revision are never saved (spec/calendar/drafts.md, \"Story: Save an event from its draft exactly once\")", () => effect {
+    provide calendarOver(new CalendarAgentFake(), new DeviceCalendarFake()) {
+      const drafts = try CalendarDrafts
+      try drafts.bind("owner-1")
+      try drafts.open("event-1", "r1")
+      try drafts.edit({ ...fields, expectedProviderVersion: "r1" })
+      try drafts.close()
+      try drafts.open("event-1", "r2")
+      try drafts.restore()
+      const refused = drafts.beginSave() catch (error) => error.reason
+      try same(refused, "stale")
+    }
+  })
+
+  it.effect("production explains a draft it cannot read; development resets only the snapshot confirmed (spec/calendar/drafts.md, \"Story: Recover a draft whose storage cannot be read\")", () => effect {
+    provide calendarOver(new CalendarAgentFake(), new DeviceCalendarFake(), false) {
+      try (try KeyValueStore.KeyValueStore).set(ownerKey("owner-1", "calendar/draft/new"), "{")
+      const drafts = try CalendarDrafts
+      try drafts.bind("owner-1")
+      try drafts.open("", "")
+      try drafts.openRecovery()
+      try same((try drafts.get()).recovery, "RecoveryNotice")
+    }
+    provide calendarOver(new CalendarAgentFake(), new DeviceCalendarFake(), true) {
+      const store = try KeyValueStore.KeyValueStore
+      try store.set(ownerKey("owner-1", "calendar/draft/new"), "{")
+      const drafts = try CalendarDrafts
+      try drafts.bind("owner-1")
+      try drafts.open("", "")
+      try drafts.openRecovery()
+      try drafts.captureRecovery()
+      const ready = (try drafts.get()).recovery
+      try drafts.requestReset()
+      const asked = (try drafts.get()).recovery
+      try drafts.confirmReset()
+      const slot = try store.get(ownerKey("owner-1", "calendar/draft/new"))
+      try same([ready, asked, (try drafts.get()).recovery, slot], ["RecoveryReady", "RecoveryConfirm", "RecoveryReloading", undefined])
+    }
+  })
+
+  it.effect("each account's draft stays with that account (spec/calendar/drafts.md, \"Story: Keep each account's draft with that account\")", () => effect {
+    provide calendarOver(new CalendarAgentFake(), new DeviceCalendarFake()) {
+      const drafts = try CalendarDrafts
+      try drafts.bind("owner-1")
+      try drafts.open("", "")
+      try drafts.edit(fields)
+      try drafts.bind("owner-2")
+      const closed = (try drafts.get()).alive
+      const foreign = try drafts.retained("")
+      try drafts.bind("owner-1")
+      try same([closed, foreign, (try drafts.retained(""))?.title], [false, undefined, "Lunch"])
+    }
+  })
+
+  it.effect("a note opens a draft only when nothing is being edited, and a scan needs a usable time (spec/calendar/drafts.md, \"Story: Turn a note or a scan into an event I review\")", () => effect {
+    provide calendarOver(new CalendarAgentFake(), new DeviceCalendarFake()) {
+      const drafts = try CalendarDrafts
+      try drafts.bind("owner-1")
+      const first = try drafts.handoff("FromNote", { ...fields, origin: "note" })
+      const second = try drafts.handoff("FromNote", { ...fields, title: "Other", origin: "note" })
+      try same([first, second, (try drafts.get()).origin], ["HandoffAdmitted", "HandoffRefused", "FromNote"])
+    }
+    const scan: CalendarScan = { creationId: "c-2", title: "Concert", date: "2026-11-28", time: "19:30", minutes: 90, allDay: false, location: "Hall", notes: "", repeat: "none" }
+    try same([scanFields(scan, "UTC", "c-2")?.end, scanFields({ ...scan, time: "7pm" }, "UTC", "c-2")], ["2026-11-28T21:00", undefined])
+  })
+})

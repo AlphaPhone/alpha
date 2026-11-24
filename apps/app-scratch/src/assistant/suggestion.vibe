@@ -1,0 +1,103 @@
+// spec/assistant/suggestion.md, "Story: Use a suggested wording exactly as I reviewed it"; spec/assistant/suggestion.md, "Insert places the reviewed text once, into the reviewed target, only when everything still matches"
+import { Machine as SuggestionMachine, type Event as SuggestionEvent, type Front, type Wording } from "../../gen/assistant__suggestion.effect.vibe"
+import { AssistantHost } from "./host.vibe"
+
+/** Where a suggestion would go, as the field's host sees it now. */
+export interface SuggestionTarget {
+  readonly token: number
+  readonly front: Front
+  readonly ready: boolean
+  readonly room: boolean
+  readonly appendMode: boolean
+}
+
+/** What the owner reviews: the wording and the review it belongs to. */
+export interface SuggestionView { readonly reviewId: number; readonly text: string; readonly notice: string }
+
+const wordingLimit = 4000
+const notices = { NoReviewNotice: "", FrontNotice: "Return to the field to insert this.", CloudNotice: "Your account changed. Review the wording again.", TargetNotice: "The field changed. Review the wording again." } as const
+
+/** Suggested wording for a text field, inserted once and exactly as reviewed. */
+export service Suggestions {
+  readonly view: Stream.Stream<SuggestionView | undefined>
+  /** A new suggestion for the field, or the owner's edit of it. */
+  propose(suggested: string, text: string): void!!
+  /** The field's host reports where the wording would go now. */
+  target(target: SuggestionTarget): void!!
+  /** A control for the suggestion was drawn in `slot`. */
+  render(slot: number): void!!
+  /** The owner opened the review from `slot`. */
+  open(slot: number): void!!
+  /** The owner closed the review. */
+  close(slot: number): void!!
+  /** Insert the reviewed wording through `insert`, once; false when anything about it changed. */
+  confirm(slot: number, insert: (text: string, appendMode: boolean) => boolean): boolean!!
+  static readonly key = "alpha/assistant/Suggestions"
+}
+
+/** Suggestions over the suggestion machine. */
+export const suggestionsLayer = Layer.effect(Suggestions, effect {
+  const machine = try SuggestionMachine
+  const host = try AssistantHost
+  const view = try SubscriptionRef.make<SuggestionView | undefined>(undefined)
+  let suggested = ""
+  let text = ""
+  const quiet = (event: SuggestionEvent) => map(machine.send(event), () => true) catch () => false
+  const wordingOf = (value: string): Wording =>
+    value.trim() === "" ? "MissingText" : value.length > wordingLimit ? "LongText" : value === suggested ? "ShortText" : "EditedText"
+  effect function publish() {
+    const state = try machine.get()
+    try SubscriptionRef.set(view, state.review.id === 0 ? undefined : { reviewId: state.review.id, text, notice: notices[state.review.notice] })
+  }
+  effect function sync() {
+    const identity = try host.identity()
+    const state = try machine.get()
+    const session = identity === undefined ? 0 : identity.session === "" ? 1 : Math.abs([...identity.session].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)) % 1000 + 1
+    if (state.env.session !== session) try quiet({ type: "setSession", session })
+    const inference = try host.inference()
+    const cloud = inference.where === "CloudHosted" ? 2 : 1
+    if (state.env.cloud !== cloud) try quiet({ type: "setCloud", cloud })
+  }
+  return {
+    view: SubscriptionRef.changes(view),
+    propose: (next: string, edited: string) => effect {
+      if (next !== suggested) suggested = next
+      text = edited
+      try sync()
+      try quiet({ type: "setText", text: wordingOf(edited) })
+      try publish()
+    },
+    target: (where: SuggestionTarget) => effect {
+      try quiet({ type: "setFront", front: where.front })
+      try quiet({ type: "setTarget", token: where.token, ready: where.ready, room: where.room, appendMode: where.appendMode })
+      try publish()
+    },
+    render: (slot: number) => effect {
+      try sync()
+      try quiet({ type: "render", slot })
+      try publish()
+    },
+    open: (slot: number) => effect {
+      try sync()
+      try quiet({ type: "open", slot })
+      try publish()
+    },
+    close: (slot: number) => effect {
+      try quiet({ type: "close", slot })
+      try publish()
+    },
+    confirm: (slot: number, insert: (text: string, appendMode: boolean) => boolean) => effect {
+      try sync()
+      const before = (try machine.get()).inserts.length
+      const toasts = (try machine.get()).toasts
+      try quiet({ type: "confirm", slot })
+      const after = try machine.get()
+      try publish()
+      if (after.toasts > toasts) try host.toast("The wording changed. Review it again.")
+      if (after.inserts.length === before) return false
+      const placed = after.inserts[after.inserts.length - 1]
+      if (placed === undefined) return false
+      return Effect.try(() => insert(text, placed.appendMode)) catch () => false
+    },
+  }
+})

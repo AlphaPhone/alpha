@@ -1,0 +1,279 @@
+// spec/workflows/digests.md, "Story: See my digests and the newest brief, read only for my account"; spec/workflows/digests.md, "Story: Change a digest once, even when the answer is lost"; spec/workflows/digests.md, "Run now is offered only for a missed occurrence the agent offers, never for an overlap or an unavailable source"; spec/workflows/digests.md, "Story: Read a digest's state plainly"; spec/workflows/digests.md, "Pausing or resuming keeps the saved time, zone and source"; spec/workflows/digestInbox.md, "Story: Keep every digest result on my phone before my agent is told I have it"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { WorkflowHttpError } from "@elizaos/plugin-workflow/client"
+import {
+  type DigestInbox, type DigestLoop, type DigestResult, type DigestSource, type HostedDigestMutationPath, type MissedRunNow, HostedSourceRejected, digestInbox,
+  digestRan, digestSourceState, missedRunNowOffers, parseDigestResult,
+} from "@elizaos/plugin-workflow/digests"
+import { type LoopRow, type MutationReply, type ResultRow, Machine as PanelMachine, briefOf, loopWord, runNowOffered, runNowRequestValid, stored as panelStored } from "../../gen/workflows__digests.effect.vibe"
+import { Machine as QueueMachine, machine as queueMachine } from "../../gen/workflows__digestInbox.effect.vibe"
+import { Build } from "../platform/build.vibe"
+import { Native } from "../platform/native.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+import { type OwnerScope, WorkflowApi } from "./api.vibe"
+import { instant, sha256Hex } from "./ids.ts"
+import { newId } from "../platform/ids.ts"
+
+export const DIGESTS_KEY = ownerKey("device", "workflows/digests")
+
+/** A digest change kept until the agent answers: its route and body. */
+export interface DigestChange {
+  readonly path: HostedDigestMutationPath
+  readonly body: Record<string, unknown>
+}
+
+/** The digest panel: its reads, its one kept change, and the brief on Home. */
+export service Digests {
+  /** The results of each read that reached the agent, as read, for the result notices and Home's brief. */
+  readonly synced: Stream.Stream<ReadonlyArray<DigestResult>>
+  /** Follow the agent's current owner, restoring a change kept for it. */
+  bind(): void!!
+  open(): void!!
+  close(): void!!
+  visibility(hidden: boolean): void!!
+  /** A poll tick: a full read when the panel is open or `full` asks for one. */
+  poll(full: boolean): void!!
+  /** Keep a reviewed change and send it. */
+  change(change: DigestChange): (MutationReply | "busy")!!
+  /** Send the kept change again. */
+  retry(): (MutationReply | "busy")!!
+  /** Discard a kept change still in review. */
+  discard(): void!!
+  /** Pause or resume the digest `loopId`, keeping its saved time, zone and source, under its current version. */
+  toggle(loopId: string, on: boolean): (MutationReply | "busy" | "withdrawn")!!
+  /** The agent's Run now offer for the missed result `runId`, as the review names it; undefined when none is offered now. */
+  runNowOffer(runId: string): (MissedRunNow | undefined)!!
+  /** Keep and send the reviewed Run now of the missed result `runId`, under that offer's source, revision and mutation id. */
+  runMissedNow(runId: string, reviewed: MissedRunNow): (MutationReply | "busy" | "withdrawn")!!
+  /** The loops, sources and results as last read, for the review sheets and the result notices. */
+  catalog(): { readonly loops: ReadonlyArray<DigestLoop>; readonly sources: ReadonlyArray<DigestSource>; readonly results: ReadonlyArray<DigestResult> }!!
+}
+
+function textOf(result: DigestResult): string {
+  if (result.error !== null) return ""
+  const output = result.output
+  if (typeof output === "string") return output
+  if (Array.isArray(output) && output.length === 1) {
+    const value = output[0] as { nodeId?: unknown; runId?: unknown; text?: unknown }
+    if (value?.nodeId === "typed-steps" && value.runId === result.runId && typeof value.text === "string") return value.text
+  }
+  if (output !== null && typeof output === "object" && !Array.isArray(output)) {
+    const value = output as { summary?: unknown; text?: unknown }
+    if (typeof value.summary === "string") return value.summary
+    if (typeof value.text === "string") return value.text
+  }
+  return ""
+}
+
+function loopRow(loop: DigestLoop, sources: ReadonlyArray<DigestSource>, now: number): LoopRow {
+  const source = sources.find((s) => s.id === loop.spec.sourceId)
+  const state = source === undefined ? "expired" : digestSourceState(source, now)
+  return {
+    id: loop.id, name: loop.name, template: loop.spec.template, localTime: loop.spec.localTime, zone: loop.spec.timeZone,
+    enabled: loop.spec.enabled, active: loop.active, removed: loop.removed,
+    sourceRevoked: loop.sourceState === "revoked" || state === "revoked", sourceExpired: loop.sourceState === "expired" || state === "expired",
+  }
+}
+
+function resultRows(results: ReadonlyArray<DigestResult>, loops: ReadonlyArray<DigestLoop>, sources: ReadonlyArray<DigestSource>, now: number): ResultRow[] {
+  const offers = missedRunNowOffers(results, loops, sources, now)
+  return [...results].sort((a, b) => b.cursor - a.cursor).map((r) => ({
+    runId: r.runId, workflowId: r.workflowId, status: r.status, scheduledAt: r.scheduledAt, completedAt: r.completedAt,
+    text: textOf(r), error: r.error ?? "", runNow: runNowOffered(r.status, offers.has(r.runId)),
+  }))
+}
+
+export const digests = Layer.provideMerge(Layer.provideMerge(Layer.effect(Digests, effect {
+  const panel = try PanelMachine
+  const queue = try QueueMachine
+  const agent = try WorkflowApi
+  const native = try Native
+  const build = try Build
+  const store = try KeyValueStore.KeyValueStore
+  const protocol = agent.digestProtocol
+  const sessions = try Ref.make<ReadonlyArray<string>>([])
+  const scopes = try Ref.make<{ scope?: OwnerScope; hash: string; inbox?: DigestInbox }>({ hash: "" })
+  const catalog = try Ref.make<{ loops: ReadonlyArray<DigestLoop>; sources: ReadonlyArray<DigestSource>; results: ReadonlyArray<DigestResult> }>({ loops: [], sources: [], results: [] })
+  const syncs = try Ref.make(0)
+  const synced = try PubSub.unbounded<ReadonlyArray<DigestResult>>()
+  const android = build.info.variant !== "browser"
+  const pendingKey = (hash: string) => ownerKey("device", `workflows/digest-pending/${hash}`)
+
+  effect function readPending(hash: string) {
+    const raw = (store.get(pendingKey(hash)) catch () => undefined)
+    if (raw === undefined) return undefined
+    return (Effect.try(() => JSON.parse(raw) as { phase?: string; change: DigestChange }) catch () => undefined)
+  }
+
+  effect function bind() {
+    const scope = (agent.scope() catch () => undefined)
+    if (scope === undefined) return
+    const hash = (tryPromise(() => sha256Hex(JSON.stringify([scope.origin, scope.ownerId, scope.agentId]))) catch () => "")
+    const before = try Ref.get(scopes)
+    if (hash === "" || before.hash === hash) return
+    if (before.inbox !== undefined) try before.inbox.retire()
+    const inbox = android ? undefined : try Effect.provideService(digestInbox(hash), KeyValueStore.KeyValueStore, store)
+    try Ref.set(scopes, { scope, hash, ...(inbox === undefined ? {} : { inbox }) })
+    try Ref.set(catalog, { loops: [], sources: [], results: [] })
+    const known = try Ref.get(sessions)
+    const session = known.includes(hash) ? known.indexOf(hash) + 1 : known.length + 1
+    if (!known.includes(hash)) try Ref.set(sessions, [...known, hash])
+    panel.send({ type: "selectSession", session }) catch () => undefined
+    const kept = try readPending(hash)
+    panel.send({ type: "restorePending", session, pending: kept === undefined ? "NoPending" : kept.phase === "review" ? "InReview" : "Dispatched" }) catch () => undefined
+  }
+
+  effect function nativeEntries(method: "syncInbox" | "inboxHistory", hash: string) {
+    const raw = try native.invoke("AlphaHostedResults", method, { sessionId: hash })
+    const entries = typeof raw === "object" && raw !== null && Array.isArray((raw as { entries?: unknown }).entries) ? (raw as { entries: unknown[] }).entries : []
+    const parsed: DigestResult[] = []
+    for (const entry of entries) parsed.push(try parseDigestResult(entry))
+    return parsed
+  }
+
+  effect function inboxResults() {
+    const { hash, inbox } = try Ref.get(scopes)
+    if (android) return (nativeEntries("syncInbox", hash) catch effect () => { return try nativeEntries("inboxHistory", hash) })
+    if (inbox === undefined) return []
+    const id = try Ref.updateAndGet(syncs, (n) => n + 1)
+    queue.send({ type: "submit", id, scope: "WebScope" }) catch () => undefined
+    const synced = (inbox.sync(protocol, id) catch () => undefined)
+    queue.send({ type: "finish", id, replied: synced !== undefined }) catch () => undefined
+    return synced ?? (inbox.history() catch () => [])
+  }
+
+  effect function flight() {
+    const state = try panel.get()
+    if (state.flight === "NoFlight") return
+    const now = try Clock.currentTimeMillis
+    const read = (effect {
+      if (state.flight === "FullFlight") {
+        const capabilities = try protocol.capabilities()
+        if (!capabilities.digests) return { ok: false }
+        const loops = try protocol.loops()
+        const sources = try protocol.sources()
+        try Ref.update(catalog, (c) => ({ ...c, loops, sources }))
+      }
+      return { ok: true, results: try inboxResults() }
+    } catch () => ({ ok: false }))
+    const results = "results" in read ? read.results ?? [] : (try Ref.get(catalog)).results
+    if (read.ok) try PubSub.publish(synced, results)
+    try Ref.update(catalog, (c) => ({ ...c, results }))
+    const { loops, sources } = try Ref.get(catalog)
+    const brief = briefOf(results.map((r) => ({ ran: digestRan(r), completedAt: instant(r.completedAt), cursor: r.cursor })))
+    const briefRow = brief.ran ? results.find((r) => instant(r.completedAt) === brief.completedAt && r.cursor === brief.cursor) : undefined
+    panel.send({ type: "synced", session: state.flightSession, ok: read.ok, loops: loops.map((l) => loopRow(l, sources, now)), results: resultRows(results, loops, sources, now),
+      brief: briefRow === undefined ? "" : textOf(briefRow).slice(0, 2000) }) catch () => undefined
+    if ((try panel.get()).flight !== "NoFlight") try flight()
+  }
+
+  effect function send() {
+    const { hash } = try Ref.get(scopes)
+    const kept = try readPending(hash)
+    if (kept === undefined) return "MutationUnconfirmed" satisfies MutationReply
+    store.set(pendingKey(hash), JSON.stringify({ phase: "dispatched", change: kept.change })) catch () => undefined
+    const { session } = try panel.get()
+    const reply: MutationReply = (effect { try protocol.mutate(kept.change.path, kept.change.body); return "MutationSaved" satisfies MutationReply as MutationReply } catch (error): MutationReply =>
+      error instanceof HostedSourceRejected ? "MutationRejected"
+      : error instanceof WorkflowHttpError && error.status === 409 && error.code === "WORKFLOW_TYPED_NOT_APPLIED" && error.workflowId === kept.change.body.id ? "ExactStale"
+      : error instanceof WorkflowHttpError && error.status === 409 ? "ScheduleRefused"
+      : error instanceof WorkflowHttpError && error.status >= 400 && error.status < 500 ? "MutationRejected" : "MutationUnconfirmed")
+    panel.send({ type: "mutationReplied", session, reply }) catch () => undefined
+    if (reply === "MutationUnconfirmed") return reply
+    const cleared = (store.remove(pendingKey(hash)) catch () => "failed")
+    panel.send({ type: "cleared", session, ok: cleared !== "failed" }) catch () => undefined
+    panel.send({ type: "poll", full: true }) catch () => undefined
+    try flight()
+    panel.send({ type: "refreshedAfter", session }) catch () => undefined
+    return reply
+  }
+
+  return {
+    synced: Stream.fromPubSub(synced),
+    bind,
+    effect open() {
+      try bind()
+      panel.send({ type: "openPanel" }) catch () => undefined
+      try flight()
+      if (android) native.invoke("AlphaHostedResults", "setResultsShowing", { scope: (try Ref.get(scopes)).hash }) catch () => undefined
+    },
+    effect close() {
+      panel.send({ type: "closePanel" }) catch () => undefined
+      if (android) native.invoke("AlphaHostedResults", "setResultsShowing", { scope: null }) catch () => undefined
+    },
+    effect visibility(hidden: boolean) {
+      panel.send({ type: "visibility", hidden }) catch () => undefined
+      try flight()
+    },
+    effect poll(full: boolean) {
+      try bind()
+      panel.send({ type: "poll", full }) catch () => undefined
+      try flight()
+    },
+    effect change(change: DigestChange) {
+      const kept = (panel.send({ type: "keep" }) catch () => undefined)
+      if (kept === undefined) return "busy"
+      const { hash } = try Ref.get(scopes)
+      const saved = (store.set(pendingKey(hash), JSON.stringify({ phase: "review", change })) catch () => "failed")
+      if (saved === "failed") return "MutationUnconfirmed"
+      const started = (panel.send({ type: "retry" }) catch () => undefined)
+      if (started === undefined) return "busy"
+      return try send()
+    },
+    effect retry() {
+      const started = (panel.send({ type: "retry" }) catch () => undefined)
+      if (started === undefined) return "busy"
+      return try send()
+    },
+    effect discard() {
+      const asked = (panel.send({ type: "discard" }) catch () => undefined)
+      if (asked === undefined) return
+      const { hash } = try Ref.get(scopes)
+      const { session } = try panel.get()
+      const removed = (store.remove(pendingKey(hash)) catch () => "failed")
+      panel.send({ type: "cleared", session, ok: removed !== "failed" }) catch () => undefined
+    },
+    catalog: () => Ref.get(catalog),
+    effect toggle(loopId: string, on: boolean) {
+      const { loops } = try Ref.get(catalog)
+      const loop = loops.find((l) => l.id === loopId && !l.removed)
+      if (loop === undefined || loop.spec.enabled === on) return "withdrawn"
+      const kept = (panel.send({ type: "keep" }) catch () => undefined)
+      if (kept === undefined) return "busy"
+      const { hash } = try Ref.get(scopes)
+      const change: DigestChange = { path: "loops", body: { spec: { ...loop.spec, enabled: on }, mutationId: newId(), confirmed: true, id: loop.id, expectedVersionId: loop.versionId } }
+      const saved = (store.set(pendingKey(hash), JSON.stringify({ phase: "review", change })) catch () => "failed")
+      if (saved === "failed") return "MutationUnconfirmed"
+      const started = (panel.send({ type: "retry" }) catch () => undefined)
+      if (started === undefined) return "busy"
+      return try send()
+    },
+    effect runNowOffer(runId: string) {
+      const { loops, sources, results } = try Ref.get(catalog)
+      const now = try Clock.currentTimeMillis
+      return missedRunNowOffers(results, loops, sources, now).get(runId)
+    },
+    effect runMissedNow(runId: string, reviewed: MissedRunNow) {
+      const { loops, sources, results } = try Ref.get(catalog)
+      const now = try Clock.currentTimeMillis
+      const offer = missedRunNowOffers(results, loops, sources, now).get(runId)
+      const valid = runNowRequestValid(offer !== undefined, offer?.sourceId === reviewed.sourceId, offer?.sourceRevision === reviewed.sourceRevision,
+        offer?.mutationId === reviewed.mutationId && reviewed.mutationId !== "")
+      if (!valid || offer === undefined) return "withdrawn"
+      const kept = (panel.send({ type: "keep" }) catch () => undefined)
+      if (kept === undefined) return "busy"
+      const { hash } = try Ref.get(scopes)
+      const change: DigestChange = { path: "dossier", body: { sourceId: offer.sourceId, sourceRevision: offer.sourceRevision, mutationId: offer.mutationId, confirmed: true } }
+      const saved = (store.set(pendingKey(hash), JSON.stringify({ phase: "review", change })) catch () => "failed")
+      if (saved === "failed") return "MutationUnconfirmed"
+      const started = (panel.send({ type: "retry" }) catch () => undefined)
+      if (started === undefined) return "busy"
+      return try send()
+    },
+  }
+}), panelStored(DIGESTS_KEY)), queueMachine())
+
+/** The panel's word for a loop row. */
+export function loopRowWord(row: LoopRow) {
+  return loopWord(row.removed, row.enabled, row.active, row.sourceRevoked, row.sourceExpired)
+}

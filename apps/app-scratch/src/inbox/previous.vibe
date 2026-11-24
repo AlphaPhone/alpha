@@ -1,0 +1,176 @@
+// spec/inbox/drafts.md, "Story: Keep the drafts I wrote before this version"; spec/inbox/drafts.md, "A draft the previous version kept comes into its account's Drafts once, and the previous slots clear only after every draft is kept"; spec/platform/storage.md, "A legacy slot is cleared only once the secure store holds a value for it"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { type Draft, type DraftFields, type Mode, Machine as DraftsMachine, accountOf, emptyFields, noDraft, noForward, noProvider, meaningful, previousKept, previousSlotsClear } from "../../gen/inbox__drafts.effect.vibe"
+import type { OutgoingFile } from "../../gen/inbox__attachments.ts"
+import { GoogleAccounts } from "../account/layer.vibe"
+import { adoptLegacySlot } from "../platform/legacy-slots.vibe"
+import { Native } from "../platform/native.vibe"
+import { mailAccountOf } from "./accounts.vibe"
+import { outgoing } from "./composer.vibe"
+import { checkMailFile, isRefusal } from "./files.ts"
+import { jsonBytes, oneLineSubject, ownerParts, sha256Hex } from "./text.ts"
+import {
+  type PreviousDraft, decodePreviousSlot, decodePreviousDraft, decodePreviousShelf, decodePreviousRecoveryEnvelope, decodePreviousRecovery
+} from "./previous.schema.vibe"
+
+const SECURE_STORE = "ElizaSecureStore"
+const BROWSER_PREFIX = "alpha.browser."
+const RECOVERY_PROFILES: readonly string[] = ["app", "development"]
+
+const previousEnvironments: Record<string, string> = { "ElizaCloud/Production": "production", "ElizaCloud/Staging": "staging" }
+
+const modes: Record<string, Mode> = { compose: "ComposeMode", reply: "ReplyMode", "reply-all": "ReplyAllMode", forward: "ForwardMode" }
+
+/** One slot of the previous version and the drafts it holds, newest first, each with its half-typed address. */
+interface PreviousSlotDrafts { readonly slot: string; readonly raw: string; readonly drafts: ReadonlyArray<{ readonly draft: PreviousDraft; readonly toQ: string }> }
+
+/** The keys the previous version kept an account's drafts under, for each name `grants` gives its Gmail grant; none for an account outside Eliza Cloud, which the previous version never served. */
+export function previousOwners(owner: string, grants: readonly string[]): string[] {
+  const parts = ownerParts(owner)
+  if (parts === undefined) return []
+  const environment = previousEnvironments[parts.environment]
+  if (environment === undefined) return []
+  const names = [...new Set(grants.filter((grant) => grant !== ""))]
+  return names.map((grant) => JSON.stringify([environment, parts.userId, parts.organizationId, grant]))
+}
+
+/** The mode of a previous draft, as the previous version read a draft without one. */
+export function previousMode(draft: PreviousDraft): Mode {
+  const named = draft.mode === undefined ? undefined : modes[draft.mode]
+  return named ?? (draft.reply === undefined ? "ComposeMode" : "ReplyMode")
+}
+
+/** A previous draft as a shelved draft of this version: everything it held, its attachments checked again, revision one. */
+export effect function previousDraftOf(draft: PreviousDraft, toQ: string): Draft {
+  const forwardParts = (draft.forward?.parts ?? []).slice(0, 10).map((part) => ({ partId: part.partId, name: part.name, nameKey: part.name.toLowerCase(), mimeType: part.mimeType, bytes: part.size }))
+  const files: OutgoingFile[] = []
+  for (const attachment of draft.attachments ?? []) {
+    if (files.length + forwardParts.length >= 10) break
+    const checked = try (tryPromise({ try: () => checkMailFile(attachment.name, attachment.mimeType, attachment.dataBase64), catch: () => "name-or-encoding" as const }) catch () => "name-or-encoding" as const)
+    if (!isRefusal(checked)) files.push(outgoing(checked.name, checked.mimeType, checked.bytes, checked.sha256, attachment.dataBase64))
+  }
+  const fields: DraftFields = {
+    ...emptyFields, mode: previousMode(draft), toList: draft.to.slice(0, 20), ccList: (draft.cc ?? []).slice(0, 20), bccList: (draft.bcc ?? []).slice(0, 20),
+    subject: oneLineSubject(draft.subject), body: draft.body.slice(0, 64000), files,
+    forward: draft.forward === undefined || forwardParts.length === 0 ? noForward : { messageId: draft.forward.messageId, historyId: draft.forward.historyId, parts: forwardParts },
+    replyMessage: draft.reply?.messageId ?? "", replyThread: draft.reply?.threadId ?? ""
+  }
+  return {
+    ...noDraft, id: draft.id, revision: 1, fields,
+    provider: draft.provider === undefined ? noProvider : { draftId: draft.provider.draftId, digest: draft.provider.providerDigest },
+    earlier: draft.earlierThanSent === true, pendingTo: toQ.slice(0, 4096)
+  }
+}
+
+/** Bring the drafts the previous version kept for the bound account `owner` onto its shelf, then clear each previous slot whose drafts are all kept; the count of drafts kept. */
+export effect function keepPreviousDrafts(owner: string): number!! {
+  const machine = try DraftsMachine
+  const google = try GoogleAccounts
+  const native = try Native
+  const store = try KeyValueStore.KeyValueStore
+  const parts = ownerParts(owner)
+  if (parts === undefined) return 0
+  const onDevice = try (native.available(SECURE_STORE) catch () => false)
+  const prefix = onDevice ? "" : BROWSER_PREFIX
+
+  effect function hash(text: string): string {
+    return try (tryPromise({ try: () => sha256Hex(text), catch: () => "" }) catch () => "")
+  }
+
+  effect function read(slot: string): string | undefined {
+    if (onDevice) {
+      try adoptLegacySlot(slot, slot)
+      const answer = try native.invoke(SECURE_STORE, "get", { key: slot })
+      const decoded = try decodePreviousSlot(answer)
+      return decoded.value ?? undefined
+    }
+    return try store.get(slot)
+  }
+
+  effect function clear(slot: string, raw: string) {
+    if (onDevice) {
+      try native.invoke(SECURE_STORE, "compareAndExchange", { key: slot, expected: raw, value: null })
+      return
+    }
+    if ((try store.get(slot)) === raw) try store.remove(slot)
+  }
+
+  effect function slotsOf(previous: string): PreviousSlotDrafts[] {
+    const ownerHash = try hash(previous)
+    if (ownerHash === "") return []
+    const found: PreviousSlotDrafts[] = []
+    for (const profile of RECOVERY_PROFILES) {
+      const binding = JSON.stringify(["inbox-unsaved", profile, previous])
+      const bindingHash = try hash(binding)
+      if (bindingHash === "") continue
+      const slot = `${prefix}inbox-drafts:v1:unsaved:${bindingHash}`
+      const raw = try (read(slot) catch () => undefined)
+      if (raw === undefined) continue
+      const envelope = try (decodePreviousRecoveryEnvelope(raw) catch () => undefined)
+      if (envelope === undefined || envelope.version !== 1 || envelope.binding !== binding) continue
+      if (envelope.text === "") {
+        found.push({ slot, raw, drafts: [] })
+        continue
+      }
+      const copy = try (decodePreviousRecovery(envelope.text) catch () => undefined)
+      if (copy === undefined || copy.version !== 1 || copy.owner !== previous || copy.draft.owner !== previous || copy.draft.version !== 1) continue
+      found.push({ slot, raw, drafts: [{ draft: copy.draft, toQ: copy.toQ }] })
+    }
+    const savedSlot = onDevice ? `inbox-drafts:v1:${previous}` : `${BROWSER_PREFIX}inbox-saved-drafts:v1:${ownerHash}`
+    const savedRaw = try (read(savedSlot) catch () => undefined)
+    if (savedRaw !== undefined) {
+      const saved = try (decodePreviousDraft(savedRaw) catch () => undefined)
+      if (saved !== undefined && saved.version === 1 && saved.owner === previous) found.push({ slot: savedSlot, raw: savedRaw, drafts: [{ draft: saved, toQ: "" }] })
+    }
+    const shelfSlot = `${prefix}inbox-drafts:v1:shelf:${ownerHash}`
+    const shelfRaw = try (read(shelfSlot) catch () => undefined)
+    if (shelfRaw !== undefined) {
+      const shelf = try (decodePreviousShelf(shelfRaw) catch () => undefined)
+      if (shelf !== undefined && shelf.version === 1 && shelf.owner === previous && shelf.items.every((row) => row.draft.version === 1 && row.draft.owner === previous)) {
+        found.push({ slot: shelfSlot, raw: shelfRaw, drafts: shelf.items.map((row) => ({ draft: row.draft, toQ: row.toQ })) })
+      }
+    }
+    return found
+  }
+
+  const rows = try (google.list() catch () => [])
+  const grants = [parts.grant, ...rows.filter((row) => mailAccountOf(row).id === parts.grant).flatMap((row) => [row.connectionId, row.grantId ?? ""])]
+  let kept = 0
+  for (const previous of previousOwners(owner, grants)) {
+    const slots = try slotsOf(previous)
+    const converted = new Map<string, Draft>()
+    for (const slot of slots) {
+      for (const row of slot.drafts) {
+        if (converted.has(row.draft.id) || row.draft.id === "") continue
+        converted.set(row.draft.id, try previousDraftOf(row.draft, row.toQ))
+      }
+    }
+    for (const draft of converted.values()) {
+      const s = try machine.get()
+      if (s.owner !== owner) return kept
+      const a = accountOf(owner, s)
+      if (!meaningful(draft) || previousKept(a, draft.id)) continue
+      const shelfBytes = jsonBytes([...a.shelf, draft])
+      const done = try (machine.send({ type: "keepPrevious", owner, draft, shelfBytes }) catch () => undefined)
+      if (done !== undefined) kept += 1
+    }
+    const after = try machine.get()
+    if (after.owner !== owner) return kept
+    const account = accountOf(owner, after)
+    for (const slot of slots) {
+      const settled = slot.drafts.filter((row) => {
+        const draft = converted.get(row.draft.id)
+        return draft === undefined || !meaningful(draft) || previousKept(account, draft.id)
+      }).length
+      if (previousSlotsClear(settled, slot.drafts.length)) try (clear(slot.slot, slot.raw) catch () => undefined)
+    }
+  }
+  return kept
+}
+
+/** Keeps the previous version's drafts of each account the composer binds to, once per binding. */
+export const previousDrafts = Layer.effectDiscard(effect {
+  const machine = try DraftsMachine
+  try fork.scoped Stream.runForEach(Stream.changes(Stream.map(machine.changes, (s) => s.owner)), (owner) =>
+    owner === "" ? Effect.void : Effect.asVoid(Effect.catchCause(keepPreviousDrafts(owner), () => Effect.succeed(0))))
+})

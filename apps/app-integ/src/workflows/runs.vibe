@@ -1,0 +1,271 @@
+// spec/workflows/runs.md, "Story: Open a workflow and see its runs"; spec/workflows/runs.md, "Story: Run the version I reviewed exactly once"; spec/workflows/runs.md, "Story: Stop a run I started"; spec/workflows/runs.md, "Story: Run a missed occurrence when I choose"; spec/workflows/runs.md, "A notice opens exactly the run it names"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import {
+  type WorkflowNoticeRoute, type WorkflowRun, WorkflowAdmissionRejected, WorkflowResponseInvalid, isRecordedMissedExecution, openWorkflowNotice,
+  parseWorkflowRun, parseWorkflowRunDeepLink, workflowRunDeepLink,
+} from "@elizaos/plugin-workflow/client"
+import { type Entry, Machine, autoRefreshes, refreshAfter, stored } from "../../gen/workflows__runs.effect.vibe"
+import { occurred } from "../../gen/workflows__vocabulary.effect.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+import { type OwnerScope, WorkflowApi } from "./api.vibe"
+import { sha256Hex } from "./ids.ts"
+
+/** The key the open workflow and its kept run request are stored under. */
+export const RUNS_KEY = ownerKey("device", "workflows/runs")
+/** The key the versions seen of each workflow are stored under, oldest first. */
+export const VERSIONS_KEY = ownerKey("device", "workflows/versions")
+
+/** The run a notice names is not one this owner's agent keeps at that version. */
+export error RunNotFound { runId: string }
+
+/** What the run confirmation and the receipt say happened. */
+export type RunOutcome = "started" | "recovered" | "unknown" | "not-admitted" | "version-changed" | "busy" | "refused"
+
+/** The version ids seen of each workflow, as the whole numbers the run and lifecycle specs compare. */
+export service WorkflowVersions {
+  /** The ordinal of `versionId`: 1 for the first seen of `workflowId`, the next number for a new one. */
+  ordinal(workflowId: string, versionId: string): number!!
+  /** The version id of an ordinal, or "" when none was seen. */
+  versionId(workflowId: string, ordinal: number): string!!
+}
+
+/** Open workflows and runs, start a reviewed run once, recover it after a lost answer, and open a run from its notice. */
+export service WorkflowRuns {
+  /** Open the run `runId` a notice names, and give the deep link Workflows opens it under. */
+  open(runId: string): string!RunNotFound
+  /** Open exactly the run a deep link names: its workflow at that version, or nothing. */
+  openRoute(link: string): string!RunNotFound
+  /** Open the workflow `workflowId` and read its runs. */
+  openWorkflow(workflowId: string): boolean!!
+  /** Read the shown run again; the delay before the next read while it is unfinished, or 0. */
+  refreshRun(first: boolean): number!!
+  /** Keep reading the shown run while it is unfinished: after 2 seconds, then every 5 when nothing changed. */
+  follow(): void!!
+  /** Show the run confirmation for the open workflow's current version. */
+  review(): boolean!!
+  /** Save a fresh submission before it is sent, then send it. */
+  confirm(): RunOutcome!!
+  /** Ask the agent for the kept submission after an unknown outcome. */
+  reconcile(): RunOutcome!!
+  /** Show the review before sending the kept submission again. */
+  reviewResend(): boolean!!
+  /** Send the kept submission again under its own id. */
+  resend(): RunOutcome!!
+  /** Ask the agent to stop the shown run. */
+  cancel(): boolean!!
+  /** Return to the confirmation of a fresh run for a missed occurrence. */
+  runMissedNow(runId: string): boolean!!
+  /** Follow the agent's current owner, asking once to stop the previous owner's unfinished run. */
+  bind(): void!!
+  /** Each run's own output as last read, by run id, for the open workflow of the current owner: a workflow's content, shown as it is. */
+  readonly outputs: Stream.Stream<ReadonlyMap<string, string>>
+}
+
+export const versions = Layer.effect(WorkflowVersions, effect {
+  const store = try KeyValueStore.KeyValueStore
+  effect function load() {
+    const raw = (store.get(VERSIONS_KEY) catch () => undefined)
+    const parsed = raw === undefined ? {} : (Effect.try(() => JSON.parse(raw) as unknown) catch () => ({}))
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, ReadonlyArray<string>> : {}
+  }
+  return {
+    effect ordinal(workflowId: string, versionId: string) {
+      const seen = try load()
+      const list = Array.isArray(seen[workflowId]) ? seen[workflowId].filter((v) => typeof v === "string") : []
+      const at = list.indexOf(versionId)
+      if (at >= 0) return at + 1
+      store.set(VERSIONS_KEY, JSON.stringify({ ...seen, [workflowId]: [...list, versionId] })) catch () => undefined
+      return list.length + 1
+    },
+    effect versionId(workflowId: string, ordinal: number) {
+      const seen = try load()
+      const list = Array.isArray(seen[workflowId]) ? seen[workflowId] : []
+      return ordinal >= 1 && ordinal <= list.length ? list[ordinal - 1] : ""
+    },
+  }
+})
+
+function entryOf(run: WorkflowRun): Entry {
+  const marked = isRecordedMissedExecution(run) || run.occurrence?.status === "missed"
+  return { runId: run.id, occurred: occurred(marked, run.occurrence?.status ?? "ready"), finished: run.finished, status: run.status, at: run.startedAt }
+}
+
+function ownerOf(scope: OwnerScope): string {
+  return `${scope.origin}|${scope.ownerId}|${scope.agentId}`
+}
+
+export const runs = Layer.provideMerge(Layer.effect(WorkflowRuns, effect {
+  const held = try Machine
+  const agent = try WorkflowApi
+  const seen = try WorkflowVersions
+  const client = agent.workflow
+  const outputs = try SubscriptionRef.make<ReadonlyMap<string, string>>(new Map())
+
+  // spec/workflows/vocabulary.md: only a run's own output is shown as it is, never the agent's error text.
+  effect function keepOutputs(read: ReadonlyArray<WorkflowRun>) {
+    const said = read.flatMap((run) => typeof run.output === "string" && run.output.trim() !== "" ? [[run.id, run.output] as const] : [])
+    if (said.length > 0) try SubscriptionRef.update(outputs, (known) => new Map([...known, ...said]))
+  }
+
+  effect function owner() {
+    const scope = (agent.scope() catch () => undefined)
+    return scope === undefined ? undefined : { scope, owner: ownerOf(scope) }
+  }
+
+  effect function adopt(current: string) {
+    if ((try held.get()).owner === current) return
+    held.send({ type: "switchOwner", owner: current }) catch () => undefined
+    try SubscriptionRef.set(outputs, new Map())
+  }
+
+  effect function openWorkflow(workflowId: string) {
+    const who = try owner()
+    if (who === undefined) return false
+    try adopt(who.owner)
+    const workflow = (client.detail(workflowId) catch () => undefined)
+    if (workflow === undefined) return false
+    const version = try seen.ordinal(workflow.id, workflow.versionId)
+    if ((try held.get()).workflowId === workflow.id) held.send({ type: "definitionRead", version }) catch () => undefined
+    held.send({ type: "openWorkflow", owner: who.owner, workflowId: workflow.id, version, typed: workflow.phoneSpec !== undefined }) catch () => undefined
+    const executions = (client.executions(workflow.id) catch () => undefined)
+    if (executions !== undefined) held.send({ type: "historyRead", entries: executions.map(entryOf) }) catch () => undefined
+    if (executions !== undefined) try keepOutputs(executions)
+    return true
+  }
+
+  effect function show(run: WorkflowRun) {
+    try keepOutputs([run])
+    held.send({ type: "showRun", runId: run.id, finished: run.finished, cancelRequested: false, status: run.status, reconciliation: run.reconciliation?.state ?? "" }) catch () => undefined
+  }
+
+  effect function openExact(route: Pick<WorkflowNoticeRoute, "workflowId" | "runId" | "versionId">) {
+    const who = try owner()
+    if (who === undefined) throw new RunNotFound({ runId: route.runId })
+    const scope = (tryPromise(() => sha256Hex(JSON.stringify([who.scope.origin, who.scope.ownerId, who.scope.agentId]))) catch () => "")
+    const target = try openWorkflowNotice(client, { scope, origin: who.scope.origin, ownerId: who.scope.ownerId, agentId: who.scope.agentId, ...route })
+    if (target.kind !== "run") throw new RunNotFound({ runId: route.runId })
+    if (!(try openWorkflow(route.workflowId))) throw new RunNotFound({ runId: route.runId })
+    try show(target.run)
+    return workflowRunDeepLink(route)
+  }
+
+  /** Settle one dispatch of the kept submission with what the agent answered. */
+  effect function settle(sent: WorkflowRun!unknown) {
+    const { intent } = try held.get()
+    const versionId = try seen.versionId(intent.workflowId, intent.version)
+    const reply = (effect { return { run: try sent } } catch (error) => ({ error }))
+    if ("error" in reply) {
+      if (reply.error instanceof WorkflowAdmissionRejected) {
+        held.send({ type: "versionRefused" }) catch () => undefined
+        return "version-changed" satisfies RunOutcome
+      }
+      held.send({ type: "replyLost" }) catch () => undefined
+      return "unknown" satisfies RunOutcome
+    }
+    if (reply.run.workflowId !== intent.workflowId || reply.run.versionId !== versionId) {
+      held.send({ type: "replyLost" }) catch () => undefined
+      return "unknown" satisfies RunOutcome
+    }
+    held.send({ type: "admitted", runId: reply.run.id, version: intent.version }) catch () => undefined
+    return "started" satisfies RunOutcome
+  }
+
+  effect function refreshRun(first: boolean) {
+    const before = try held.get()
+    if (!autoRefreshes(before)) return 0
+    const run = (client.receipt(before.shown.runId, before.shown.workflowId) catch () => undefined)
+    if (run === undefined) return refreshAfter(first, false, true)
+    try keepOutputs([run])
+    held.send({ type: "receiptRead", runId: run.id, finished: run.finished, cancelRequested: false, status: run.status, reconciliation: run.reconciliation?.state ?? "" }) catch () => undefined
+    const after = try held.get()
+    return autoRefreshes(after) ? refreshAfter(first, after.shown.status !== before.shown.status, false) : 0
+  }
+  const start = try owner()
+
+  if (start !== undefined) try adopt(start.owner)
+  held.send({ type: "restarted" }) catch () => undefined
+
+  return {
+    outputs: SubscriptionRef.changes(outputs),
+    effect open(runId: string) {
+      const answer = (agent.request("GET", `/api/workflow/executions/${runId}`) catch effect () => { throw new RunNotFound({ runId }) })
+      const raw = typeof answer === "object" && answer !== null ? (answer as { execution?: unknown }).execution : undefined
+      const execution = (parseWorkflowRun(raw) catch effect () => { throw new RunNotFound({ runId }) })
+      if (execution.id !== runId) throw new RunNotFound({ runId })
+      return try openExact({ workflowId: execution.workflowId, runId, versionId: execution.versionId })
+    },
+    effect openRoute(link: string) {
+      const route = parseWorkflowRunDeepLink(link)
+      if (route === undefined) throw new RunNotFound({ runId: "" })
+      return try openExact(route)
+    },
+    openWorkflow,
+    refreshRun,
+    effect follow() {
+      let first = true
+      while (true) {
+        const delay = try refreshRun(first)
+        first = false
+        if (delay === 0) return
+        try sleep(Duration.millis(delay))
+      }
+    },
+    effect review() {
+      return ((held.send({ type: "review" }) catch () => undefined)) !== undefined
+    },
+    effect confirm() {
+      const state = try held.get()
+      if (!state.confirming) return "busy" satisfies RunOutcome
+      const versionId = try seen.versionId(state.workflowId, state.reviewed)
+      const kept = try Ref.make(false)
+      const beforeSubmit = effect (submissionId: string) => {
+        const saved = (held.send({ type: "confirm", submission: submissionId }) catch () => undefined)
+        if (saved === undefined) throw new WorkflowResponseInvalid({ message: "Run request not kept" })
+        held.send({ type: "dispatched" }) catch () => undefined
+        try Ref.set(kept, true)
+      }
+      const outcome = try settle(client.run(state.workflowId, versionId, beforeSubmit))
+      return (try Ref.get(kept)) ? outcome : "busy"
+    },
+    effect reconcile() {
+      const { intent, custody } = try held.get()
+      if (custody !== "Unknown") return "refused" satisfies RunOutcome
+      const versionId = try seen.versionId(intent.workflowId, intent.version)
+      const found = (effect { return { run: try client.reconcile(intent.workflowId, versionId, intent.submission) } } catch () => undefined)
+      if (found === undefined) return "unknown" satisfies RunOutcome
+      held.send({ type: "reconciled", found: found.run !== null, runId: found.run?.id ?? "" }) catch () => undefined
+      return found.run !== null ? "recovered" : (try held.get()).custody === "NotAdmitted" ? "not-admitted" : "version-changed"
+    },
+    effect reviewResend() {
+      return ((held.send({ type: "reviewResend" }) catch () => undefined)) !== undefined
+    },
+    effect resend() {
+      const sent = (held.send({ type: "resend" }) catch () => undefined)
+      if (sent === undefined) return "busy" satisfies RunOutcome
+      const { intent } = try held.get()
+      const versionId = try seen.versionId(intent.workflowId, intent.version)
+      return try settle(client.resubmit(intent.workflowId, versionId, intent.submission))
+    },
+    effect cancel() {
+      const state = try held.get()
+      const asked = (held.send({ type: "requestCancel" }) catch () => undefined)
+      if (asked === undefined) return false
+      const run = (client.cancel(state.shown.runId, state.shown.workflowId) catch () => undefined)
+      if (run !== undefined) held.send({ type: "receiptRead", runId: run.id, finished: run.finished, cancelRequested: true, status: run.status, reconciliation: run.reconciliation?.state ?? "" }) catch () => undefined
+      return true
+    },
+    effect runMissedNow(runId: string) {
+      return ((held.send({ type: "runMissedNow", runId }) catch () => undefined)) !== undefined
+    },
+    effect bind() {
+      const who = try owner()
+      if (who === undefined || who.owner === (try held.get()).owner) return
+      held.send({ type: "switchOwner", owner: who.owner }) catch () => undefined
+      try SubscriptionRef.set(outputs, new Map())
+      const { previous } = try held.get()
+      if (previous.runId === "") return
+      held.send({ type: "cancelPrevious" }) catch () => undefined
+      client.cancel(previous.runId, previous.workflowId) catch () => undefined
+    },
+  }
+}), stored(RUNS_KEY))

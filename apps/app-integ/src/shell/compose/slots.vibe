@@ -1,0 +1,205 @@
+// spec/shell/index.md, "Story: Open an app from Home and keep my place"; spec/files/share.md, "Story: Share the files I selected, to the place I chose"; spec/browser/egress.md, "Story: Share or keep the page I am looking at"; spec/calendar/presentation.md, "Story: Open an event and come back"; spec/workflows/clockDraft.md, "Story: Set an alarm a workflow suggests, from Workflows"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"; spec/maps/cards.md, "Story: Answer my agent's Maps question with one tap"; spec/camera/scan.md, "Only a complete, bounded scan request starts a scan, and only over the visible Camera"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"
+import { AdvertisedCapabilities, AssistantEmail, BrowserPages, BrowserViews, CameraComposer, MapsChatCards, MapsRelay, MapsViews, OwnNotices, ReplyChanges, type PageObservation } from "../../assistant/ports.vibe"
+import { PageMail } from "../../browser/ports.vibe"
+import { CalendarMaps } from "../../calendar/ports.vibe"
+import { FileShareTargets } from "../../files/share.vibe"
+import { WorkflowClockPort, type AlarmRequest } from "../../workflows/ports.vibe"
+import { DeviceCapabilities } from "../assistantHost.vibe"
+
+/** One port's implementation as it is now: the port's refusing default until the area that provides it is built. */
+export interface Cell<S> {
+  current: S
+}
+
+/** The ports an earlier area reads and a later area provides, each held as a cell the runtime fills once the provider is built. */
+export service PortCells {
+  /** The slot implementations themselves, which a cell never takes. */
+  readonly slots: WeakSet<object>
+  readonly fileShare: Cell<FileShareTargets.Shape>
+  readonly pageMail: Cell<PageMail.Shape>
+  readonly calendarMaps: Cell<CalendarMaps.Shape>
+  readonly workflowClock: Cell<WorkflowClockPort.Shape>
+  readonly assistantEmail: Cell<AssistantEmail.Shape>
+  readonly ownNotices: Cell<OwnNotices.Shape>
+  readonly mapsChat: Cell<MapsChatCards.Shape>
+  readonly cameraComposer: Cell<CameraComposer.Shape>
+  readonly mapsRelay: Cell<MapsRelay.Shape>
+  readonly replyChanges: Cell<ReplyChanges.Shape>
+  readonly deviceCapabilities: Cell<DeviceCapabilities.Shape>
+  readonly browserPages: Cell<BrowserPages.Shape>
+  readonly mapsViews: Cell<MapsViews.Shape>
+  readonly browserViews: Cell<BrowserViews.Shape>
+  readonly advertised: Cell<AdvertisedCapabilities.Shape>
+}
+
+/** Puts `next` in `cell`, unless `next` is a slot, which would delegate to itself. */
+export function fillCell<S extends object>(cells: PortCells.Shape, cell: Cell<S>, next: S): void {
+  if (!cells.slots.has(next)) cell.current = next
+}
+
+function slot<S extends object>(cells: PortCells.Shape, shape: S): S {
+  cells.slots.add(shape)
+  return shape
+}
+
+const cellsLive = Layer.effect(PortCells, effect {
+  return {
+    slots: new WeakSet<object>(),
+    fileShare: { current: try FileShareTargets },
+    pageMail: { current: try PageMail },
+    calendarMaps: { current: try CalendarMaps },
+    workflowClock: { current: try WorkflowClockPort },
+    assistantEmail: { current: try AssistantEmail },
+    ownNotices: { current: try OwnNotices },
+    mapsChat: { current: try MapsChatCards },
+    cameraComposer: { current: try CameraComposer },
+    mapsRelay: { current: try MapsRelay },
+    replyChanges: { current: try ReplyChanges },
+    deviceCapabilities: { current: try DeviceCapabilities },
+    browserPages: { current: try BrowserPages },
+    mapsViews: { current: try MapsViews },
+    browserViews: { current: try BrowserViews },
+    advertised: { current: try AdvertisedCapabilities },
+  }
+})
+
+const fileShare = Layer.effect(FileShareTargets, effect {
+  const cells = try PortCells
+  const cell = cells.fileShare
+  return slot(cells, {
+    emailAccount: (...args: Parameters<FileShareTargets.Shape["emailAccount"]>) => suspend(() => cell.current.emailAccount(...args)),
+    email: (...args: Parameters<FileShareTargets.Shape["email"]>) => suspend(() => cell.current.email(...args)),
+    get messages() { return cell.current.messages },
+    message: (...args: Parameters<FileShareTargets.Shape["message"]>) => suspend(() => cell.current.message(...args)),
+    get ask() { return cell.current.ask },
+    attachToChat: (...args: Parameters<FileShareTargets.Shape["attachToChat"]>) => suspend(() => cell.current.attachToChat(...args)),
+  } satisfies FileShareTargets.Shape)
+})
+
+const pageMail = Layer.effect(PageMail, effect {
+  const cells = try PortCells
+  const cell = cells.pageMail
+  return slot(cells, {
+    compose: (...args: Parameters<PageMail.Shape["compose"]>) => suspend(() => cell.current.compose(...args)),
+  } satisfies PageMail.Shape)
+})
+
+const calendarMaps = Layer.effect(CalendarMaps, effect {
+  const cells = try PortCells
+  const cell = cells.calendarMaps
+  return slot(cells, {
+    enterFromEvent: (...args: Parameters<CalendarMaps.Shape["enterFromEvent"]>) => suspend(() => cell.current.enterFromEvent(...args)),
+  } satisfies CalendarMaps.Shape)
+})
+
+const workflowClock = Layer.effect(WorkflowClockPort, effect {
+  const cells = try PortCells
+  const cell = cells.workflowClock
+  return slot(cells, {
+    prepare: (request: AlarmRequest) => suspend(() => cell.current.prepare(request)),
+    confirm: () => suspend(() => cell.current.confirm()),
+    retire: () => suspend(() => cell.current.retire()),
+  } satisfies WorkflowClockPort.Shape)
+})
+
+const assistantEmail = Layer.effect(AssistantEmail, effect {
+  const cells = try PortCells
+  const cell = cells.assistantEmail
+  return slot(cells, {
+    send: (...args: Parameters<AssistantEmail.Shape["send"]>) => suspend(() => cell.current.send(...args)),
+    address: () => suspend(() => cell.current.address()),
+  } satisfies AssistantEmail.Shape)
+})
+
+const ownNotices = Layer.effect(OwnNotices, effect {
+  const cells = try PortCells
+  const cell = cells.ownNotices
+  return slot(cells, {
+    current: (...args: Parameters<OwnNotices.Shape["current"]>) => suspend(() => cell.current.current(...args)),
+    consume: (...args: Parameters<OwnNotices.Shape["consume"]>) => suspend(() => cell.current.consume(...args)),
+  } satisfies OwnNotices.Shape)
+})
+
+const mapsChat = Layer.effect(MapsChatCards, effect {
+  const cells = try PortCells
+  const cell = cells.mapsChat
+  return slot(cells, {
+    agentReply: (...args: Parameters<MapsChatCards.Shape["agentReply"]>) => suspend(() => cell.current.agentReply(...args)),
+    ownerMessage: () => suspend(() => cell.current.ownerMessage()),
+  } satisfies MapsChatCards.Shape)
+})
+
+const cameraComposer = Layer.effect(CameraComposer, effect {
+  const cells = try PortCells
+  const cell = cells.cameraComposer
+  return slot(cells, {
+    intercept: (...args: Parameters<CameraComposer.Shape["intercept"]>) => suspend(() => cell.current.intercept(...args)),
+  } satisfies CameraComposer.Shape)
+})
+
+const mapsRelay = Layer.effect(MapsRelay, effect {
+  const cells = try PortCells
+  const cell = cells.mapsRelay
+  return slot(cells, {
+    withRelay: <A, E, R>(conversationId: string, send: Effect.Effect<A, E, R>) => suspend(() => cell.current.withRelay(conversationId, send)),
+  } satisfies MapsRelay.Shape)
+})
+
+const replyChanges = Layer.effect(ReplyChanges, effect {
+  const cells = try PortCells
+  const cell = cells.replyChanges
+  return slot(cells, {
+    settle: (...args: Parameters<ReplyChanges.Shape["settle"]>) => suspend(() => cell.current.settle(...args)),
+  } satisfies ReplyChanges.Shape)
+})
+
+const deviceCapabilities = Layer.effect(DeviceCapabilities, effect {
+  const cells = try PortCells
+  const cell = cells.deviceCapabilities
+  return slot(cells, {
+    advertise: (...args: Parameters<DeviceCapabilities.Shape["advertise"]>) => suspend(() => cell.current.advertise(...args)),
+  } satisfies DeviceCapabilities.Shape)
+})
+
+const browserPages = Layer.effect(BrowserPages, effect {
+  const cells = try PortCells
+  const cell = cells.browserPages
+  return slot(cells, {
+    selected: () => suspend(() => cell.current.selected()),
+    forTurn: (observation: PageObservation, peerTakesIt: boolean) => suspend(() => cell.current.forTurn(observation, peerTakesIt)),
+    carried: (url: string) => suspend(() => cell.current.carried(url)),
+  } satisfies BrowserPages.Shape)
+})
+
+const mapsViews = Layer.effect(MapsViews, effect {
+  const cells = try PortCells
+  const cell = cells.mapsViews
+  return slot(cells, {
+    shown: () => suspend(() => cell.current.shown()),
+    deliver: (...args: Parameters<MapsViews.Shape["deliver"]>) => suspend(() => cell.current.deliver(...args)),
+  } satisfies MapsViews.Shape)
+})
+
+const browserViews = Layer.effect(BrowserViews, effect {
+  const cells = try PortCells
+  const cell = cells.browserViews
+  return slot(cells, {
+    command: (raw: unknown, selection: unknown) => suspend(() => cell.current.command(raw, selection)),
+    interact: (capability: string, raw: unknown, selection: unknown) => suspend(() => cell.current.interact(capability, raw, selection)),
+  } satisfies BrowserViews.Shape)
+})
+
+const advertised = Layer.effect(AdvertisedCapabilities, effect {
+  const cells = try PortCells
+  const cell = cells.advertised
+  return slot(cells, {
+    names: () => suspend(() => cell.current.names()),
+    device: () => suspend(() => cell.current.device()),
+  } satisfies AdvertisedCapabilities.Shape)
+})
+
+/** Every late-filled port as a slot over its cell, placed before the first area that reads one; each answers as its refusing default until filled. */
+export const slotsLive = Layer.provideMerge(
+  Layer.mergeAll(fileShare, pageMail, calendarMaps, workflowClock, assistantEmail, ownNotices, mapsChat, cameraComposer, mapsRelay, replyChanges, deviceCapabilities, browserPages, mapsViews, browserViews, advertised),
+  cellsLive,
+)

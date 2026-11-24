@@ -1,0 +1,333 @@
+// spec/account/billing.md, "Story: Choose or change my plan in Alpha"; spec/account/billing.md, "Story: Add funds"; spec/account/billing.md, "Story: Redeem a membership code"; spec/account/billing.md, "Story: Share or enter a referral code"
+import {
+  type Billing as BillingState, type BillingEffect, type ChangeResult, type CheckoutAnswer, type Current, type PaidPlan,
+  Machine as BillingMachine, fundsAmountAccepted, machine as billingMachine
+} from "../../gen/account__billing.effect.vibe"
+import {
+  checkoutFromResponse, commandFromResponse, paymentFromResponse, redeemResultFromResponse, reviewFromResponse,
+  snapshotFromResponse, type BillingSnapshot
+} from "@elizaos/cloud/client"
+import { Build } from "../platform/build.vibe"
+import { buildCloudEnvironment } from "../platform/build-live.vibe"
+import { Cloud } from "../platform/cloud.vibe"
+import { CloudServices } from "../platform/cloud-services.vibe"
+import { Native } from "../platform/native.vibe"
+import { authorityOf, billingReturnUrl, deployment, freshKey, stripePageAllowed } from "./deployment.ts"
+import { AuthorityAnswer, AuthorityStatus, FundsCheckout, PlanList, Referral } from "./billing.schema.vibe"
+import { Entitlement } from "./entitlement.vibe"
+import { CloudSession, ownerOf } from "./session.vibe"
+import { UserAnswer } from "./signIn.schema.vibe"
+
+const authorityPlugin = "AlphaBillingAuthority"
+
+/** A plan Cloud offers, as the manager lists it. */
+export type Offer = PlanList["plans"][number]
+
+/** What the plan manager shows beside the machine's state: Cloud's offers, the referral and the live quote's amounts. */
+export interface BillingDetails {
+  readonly offers: ReadonlyArray<Offer>
+  readonly referral: Referral | undefined
+  readonly email: string | undefined
+  readonly quote: { readonly dueNowCents: number; readonly recurringCents: number; readonly effectiveAt: number; readonly expiresAt: number } | undefined
+  readonly renewsAt: number | undefined
+}
+
+const wireKeys = { Plus: "plus_monthly", Pro: "pro_monthly" } as const satisfies Record<PaidPlan, string>
+const planOfWire = { plus_monthly: "Plus", pro_monthly: "Pro" } as const
+
+/** The current paid plan a billing snapshot shows. */
+export function currentOf(snapshot: BillingSnapshot): Current {
+  const sub = snapshot.subscription
+  if (sub === null || sub.planKey === "free" || sub.status === "canceled" || sub.status === "incomplete_expired") return { tag: "NoPaidPlan" }
+  return { tag: "OnPlan", plan: planOfWire[sub.planKey], endsAtPeriodEnd: sub.cancelAtPeriodEnd, paymentDue: ["dunning", "past_due", "unpaid"].includes(sub.status) }
+}
+
+/** Plans, checkout, plan changes, funds, membership codes and referrals. */
+export service Membership {
+  readonly changes: Stream.Stream<BillingState>
+  readonly details: Stream.Stream<BillingDetails>
+  run(): void!!
+  openManager(): void!!
+  closeManager(): void!!
+  subscribe(plan: PaidPlan): void!!
+  change(target: PaidPlan): void!!
+  cancel(): void!!
+  keep(): void!!
+  sendCode(): void!!
+  /** The one-time code the owner typed for the account session; it never leaves the native host's call. */
+  verifyCode(code: string): void!!
+  confirmChange(): void!!
+  confirmCancel(): void!!
+  openFunds(): void!!
+  closeFunds(): void!!
+  addFunds(cents: number): void!!
+  redeem(code: string): boolean!!
+  applyReferral(code: string): void!!
+}
+
+/** A referral code is a short public token: trimmed, and nothing else changed. */
+export function normalizeReferral(input: string): string | undefined {
+  const code = input.trim()
+  return /^[A-Za-z0-9_-]{4,64}$/.test(code) ? code : undefined
+}
+
+/** The billing service over its in-memory machine. */
+export const billingService = Layer.effect(Membership, effect {
+  const machine = try BillingMachine
+  const cloud = try Cloud
+  const native = try Native
+  const services = try CloudServices
+  const build = try Build
+  const session = try CloudSession
+  const entitlement = try Entitlement
+  const authority = authorityOf(deployment, buildCloudEnvironment(build.info))
+  const details = try SubscriptionRef.make<BillingDetails>({ offers: [], referral: undefined, email: undefined, quote: undefined, renewsAt: undefined })
+  const snapshot = try Ref.make<BillingSnapshot | undefined>(undefined)
+  const checkoutSession = try Ref.make("")
+  const checkoutKey = try Ref.make("")
+  const quoteId = try Ref.make("")
+  const accountCode = try Ref.make("")
+  const fundsCents = try Ref.make(0)
+  const referral = try Ref.make("")
+  const scope = try Scope.Scope
+
+  effect function send(event: Parameters<typeof machine.send>[0]) {
+    const step = machine.send(event) catch () => undefined
+    if (step !== undefined && "out" in step) try perform(step.out)
+    return step !== undefined
+  }
+
+  effect function openPage(url: string) {
+    if (!stripePageAllowed(url)) return false
+    const opened = effect {
+      try services.openExternal(url)
+      return true
+    } catch () => false
+    return opened
+  }
+
+  effect function performAuthority(operation: Record<string, unknown>) {
+    const answer = try Effect.flatMap(native.invoke(authorityPlugin, "perform", operation), Schema.decodeUnknownEffect(AuthorityAnswer))
+    return answer
+  }
+
+  effect function subscriptionFacts() {
+    const snap = try Ref.get(snapshot)
+    const sub = snap?.subscription ?? null
+    return sub === null ? undefined : { subscriptionId: sub.id, expectedSubscriptionRevision: sub.control.expectedSubscriptionRevision }
+  }
+
+  effect function loadPlans() {
+    const plans = Effect.flatMap(cloud.json("GET", "/api/v1/subscriptions/plans"), Schema.decodeUnknownEffect(PlanList)) catch () => undefined
+    const snap = Effect.flatMap(cloud.json("GET", "/api/v1/billing/limits"), snapshotFromResponse) catch () => undefined
+    const referral = Effect.flatMap(cloud.json("GET", "/api/v1/referrals"), Schema.decodeUnknownEffect(Referral)) catch () => undefined
+    const user = Effect.flatMap(cloud.json("GET", "/api/v1/user"), Schema.decodeUnknownEffect(UserAnswer)) catch () => undefined
+    try Ref.set(snapshot, snap)
+    try SubscriptionRef.set(details, {
+      offers: [...(plans?.plans ?? [])].sort((a, b) => a.amountCents - b.amountCents),
+      referral, email: user?.data.email, quote: undefined, renewsAt: snap?.subscription?.periodEnd
+    })
+    return { ok: plans !== undefined && snap !== undefined, current: snap === undefined ? ({ tag: "NoPaidPlan" } as const) : currentOf(snap) }
+  }
+
+  effect function startCheckout() {
+    const s = try machine.get()
+    const plan = s.checkout.tag === "OpeningCheckout" ? s.checkout.opening : "Plus"
+    const key = freshKey()
+    try Ref.set(checkoutKey, key)
+    const started = Effect.flatMap(cloud.json("POST", "/api/v1/subscriptions/checkout", { planKey: wireKeys[plan], idempotencyKey: key, presentation: "mobile" }), checkoutFromResponse) catch () => undefined
+    let answer: CheckoutAnswer = "CheckoutGone"
+    if (started !== undefined && started.status === "open" && "checkoutUrl" in started) {
+      try Ref.set(checkoutSession, started.sessionId)
+      answer = (try openPage(started.checkoutUrl)) ? "CheckoutPage" : "CheckoutGone"
+    } else if (started?.status === "completed") answer = "CheckoutDone"
+    try send({ type: "checkoutOpened", answer })
+  }
+
+  effect function confirmCheckout() {
+    const sessionId = try Ref.get(checkoutSession)
+    const confirmed = Effect.flatMap(cloud.json("POST", "/api/v1/subscriptions/checkout/confirm", { sessionId }), checkoutFromResponse) catch () => undefined
+    try send({ type: "checkoutConfirmed", active: confirmed?.status === "completed" })
+  }
+
+  effect function reviewChange() {
+    const s = try machine.get()
+    const facts = try subscriptionFacts()
+    const target = s.pending.tag === "ChangeTo" ? s.pending.target : "Plus"
+    const upgrade = target === "Pro"
+    const review = facts === undefined ? undefined : effect {
+      const answer = try performAuthority({ operation: upgrade ? "upgrade-review" : "downgrade-review", ...facts, targetPlanKey: wireKeys[target] })
+      return try reviewFromResponse(answer.body)
+    } catch () => undefined
+    if (review === undefined) {
+      try send({ type: "reviewFailed" })
+      return
+    }
+    try Ref.set(quoteId, review.quoteId)
+    try SubscriptionRef.update(details, (d) => ({ ...d, quote: { dueNowCents: review.review.dueNow.amountDueCents, recurringCents: review.review.recurringEstimate.amountDueCents, effectiveAt: review.review.effectiveAt, expiresAt: review.review.expiresAt } }))
+    try send({ type: "quoteReceived", plan: target })
+    fork.in(scope) quoteTimer(review.review.expiresAt)
+  }
+
+  effect function quoteTimer(expires: number) {
+    const now = try Clock.currentTimeMillis
+    if (expires > now) try sleep(Duration.millis(expires - now))
+    try send({ type: "quoteExpires" })
+  }
+
+  effect function confirmPlanChange() {
+    const s = try machine.get()
+    const upgrade = s.pending.tag === "ChangeTo" && s.pending.target === "Pro"
+    const id = try Ref.get(quoteId)
+    const result: ChangeResult = effect {
+      const answer = try performAuthority({ operation: upgrade ? "upgrade-confirm" : "downgrade-confirm", quoteId: id, idempotencyKey: freshKey() })
+      const command = try commandFromResponse(answer.body)
+      if (command.status === "succeeded") return "ChangeApplied" as ChangeResult
+      if (command.status === "rejected") return "ChangeFailed" as ChangeResult
+      if (command.status === "awaiting_payment") {
+        const payment = try performAuthority({ operation: "upgrade-payment", commandId: command.commandId })
+        const page = try paymentFromResponse(payment.body)
+        if (try openPage(page.url)) return "ChangeNeedsPayment" as ChangeResult
+      }
+      return "ChangeNotYet" as ChangeResult
+    } catch () => "ChangeFailed" as ChangeResult
+    try send({ type: "changeSettled", result })
+  }
+
+  effect function lifecycle(operation: "cancel" | "undo-cancel") {
+    const facts = try subscriptionFacts()
+    const ok = facts !== undefined && (effect {
+      const answer = try performAuthority({ operation, ...facts, idempotencyKey: freshKey() })
+      return answer.status >= 200 && answer.status < 300
+    } catch () => false)
+    try send({ type: "cancelSettled", ok })
+  }
+
+  effect function sendAccountCode() {
+    const email = (try SubscriptionRef.get(details)).email
+    const started = email !== undefined && (native.invoke(authorityPlugin, "start", { email }) catch () => false) !== false
+    if (!started) try send({ type: "authorityVerified", ok: false })
+  }
+
+  effect function fundsCheckout() {
+    const cents = try Ref.get(fundsCents)
+    try Ref.set(fundsCents, 0)
+    const target = billingReturnUrl(authority)
+    const page = Effect.flatMap(cloud.json("POST", "/api/v1/credits/checkout", { amountUsd: cents / 100, success_url: target, cancel_url: `${target}?cancelled=1` }), Schema.decodeUnknownEffect(FundsCheckout)) catch () => undefined
+    const opened = page !== undefined && (try openPage(page.url))
+    try send({ type: "fundsOpened", ok: opened })
+  }
+
+  effect function redeemCode() {
+    const code = try Ref.get(accountCode)
+    try Ref.set(accountCode, "")
+    const now = try Clock.currentTimeMillis
+    const result = Effect.flatMap(cloud.json("POST", "/api/v1/subscription/redeem", { code, idempotencyKey: freshKey() }), (body) => redeemResultFromResponse(body, now)) catch () => undefined
+    if (result?.kind === "redeemed") try entitlement.redeemed(result.grant.effectiveUntil)
+    try send({ type: "redeemSettled", ok: result?.kind === "redeemed" })
+  }
+
+  effect function referralCode() {
+    const code = try Ref.get(referral)
+    try Ref.set(referral, "")
+    const applied = (cloud.json("POST", "/api/v1/referrals/apply", { code }) catch () => undefined) !== undefined
+    try send({ type: "referralSettled", ok: applied })
+  }
+
+  effect function perform(out: ReadonlyArray<BillingEffect>): void!! {
+    for (const effectOf of out) {
+      match (effectOf) {
+        when "LoadPlans": do {
+          const loaded = loadPlans() catch () => ({ ok: false, current: { tag: "NoPaidPlan" } as const })
+          try send({ type: "managerLoaded", present: loaded.current, ok: loaded.ok })
+        };
+        when "StartCheckout": startCheckout() catch () => undefined;
+        when "ConfirmCheckout": confirmCheckout() catch () => undefined;
+        when "SendAccountCode": try sendAccountCode();
+        when "ReviewChange": try reviewChange();
+        when "ConfirmChange": try confirmPlanChange();
+        when "PerformCancel": try lifecycle("cancel");
+        when "PerformKeep": try lifecycle("undo-cancel");
+        when "OpenPaymentPage": try entitlement.paymentPageOpened();
+        when "StartFundsCheckout": fundsCheckout() catch () => undefined;
+        when "RedeemCode": redeemCode() catch () => undefined;
+        when "ApplyReferral": referralCode() catch () => undefined;
+        when "RecheckPlan": try entitlement.recheck();
+      }
+    }
+  }
+
+  effect function followAccount() {
+    let credential = ""
+    for try (const s of session.changes) {
+      const owner = ownerOf(s)
+      const b = try machine.get()
+      if (owner !== b.owner) {
+        try SubscriptionRef.set(details, { offers: [], referral: undefined, email: undefined, quote: undefined, renewsAt: undefined })
+        try send({ type: "accountChanged", owner })
+        native.invoke(authorityPlugin, "clear") catch () => undefined
+      } else if (s.account.credentialId !== credential && credential !== "") {
+        try send({ type: "authorityEnded" })
+        native.invoke(authorityPlugin, "clear") catch () => undefined
+      }
+      credential = s.account.credentialId
+    }
+  }
+
+  effect function followReturns() {
+    for try (const a of Stream.changesWith(Stream.map(entitlement.changes, (x) => x.recheck.visible), (x, y) => x === y)) {
+      if (!a) continue
+      const b = try machine.get()
+      if (b.checkout.tag === "AwaitingReturn") try send({ type: "billingReturned" })
+      const status = Effect.flatMap(native.invoke(authorityPlugin, "status"), Schema.decodeUnknownEffect(AuthorityStatus)) catch () => undefined
+      if (status !== undefined && status.status === "required" && b.authority === "Authorized") try send({ type: "authorityEnded" })
+    }
+  }
+
+  return {
+    changes: machine.changes,
+    details: SubscriptionRef.changes(details),
+    effect run() {
+      try send({ type: "configure", deployment })
+      try.all [ignore(followAccount()), ignore(followReturns())]
+    },
+    effect openManager() { try send({ type: "openManager" }) },
+    effect closeManager() { try send({ type: "closeManager" }) },
+    effect subscribe(plan: PaidPlan) { try send({ type: "subscribe", plan }) },
+    effect change(target: PaidPlan) { try send({ type: "requestChange", target }) },
+    effect cancel() { try send({ type: "requestCancel" }) },
+    effect keep() { try send({ type: "requestKeep" }) },
+    effect sendCode() { try send({ type: "sendAuthorityCode" }) },
+    effect verifyCode(code: string) {
+      const user = Effect.flatMap(cloud.json("GET", "/api/v1/user"), Schema.decodeUnknownEffect(UserAnswer)) catch () => undefined
+      const status = user === undefined ? undefined : (Schema.decodeUnknownEffect(AuthorityStatus)(try native.invoke(authorityPlugin, "verify", {
+        code: code.replace(/\s/g, ""), userId: user.data.id, organizationId: user.data.organization_id
+      })) catch () => undefined)
+      try send({ type: "authorityVerified", ok: status?.status === "authorized" })
+    },
+    effect confirmChange() { try send({ type: "confirmChange" }) },
+    effect confirmCancel() { try send({ type: "confirmCancel" }) },
+    effect openFunds() { try send({ type: "openFunds" }) },
+    effect closeFunds() { try send({ type: "closeFunds" }) },
+    effect addFunds(cents: number) {
+      if (!fundsAmountAccepted(cents)) return
+      try Ref.set(fundsCents, cents)
+      try send({ type: "startFunds", cents })
+    },
+    effect redeem(code: string) {
+      const trimmed = code.trim()
+      if (trimmed === "") return false
+      try Ref.set(accountCode, trimmed)
+      return try send({ type: "startRedeem" })
+    },
+    effect applyReferral(code: string) {
+      const normalized = normalizeReferral(code)
+      if (normalized === undefined) return
+      try Ref.set(referral, normalized)
+      try send({ type: "applyReferral" })
+    }
+  }
+})
+
+/** The billing service with its machine in memory: a checkout's evidence is Cloud's, so a restart reads the plan again. */
+export const billingLayer = Layer.provideMerge(billingService, billingMachine())

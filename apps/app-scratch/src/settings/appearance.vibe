@@ -1,0 +1,87 @@
+// spec/settings/appearance.md, "Story: Choose how Alpha looks"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { type Appearance as State, type Choice, Machine, barsDark, initial, machine } from "../../gen/settings__appearance.effect.vibe"
+import { Build } from "../platform/build.vibe"
+import { Native } from "../platform/native.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+import { attempt } from "./call.vibe"
+import { savedElsewhere, schemeChanges, systemDark, themeQuery } from "./files.ts"
+import { SavedAppearance } from "./stored.schema.vibe"
+
+export const APPEARANCE_KEY = ownerKey("device", "settings/appearance")
+
+/** The owner's appearance choices, applied at once and kept on the phone. */
+export service Appearance {
+  choose(choice: Choice): void!!
+  setLegible(on: boolean): void!!
+  /** Follow a choice another tab of the browser build saved. */
+  reload(): void!!
+}
+
+effect function readSaved() {
+  const store = try KeyValueStore.KeyValueStore
+  const raw = try (store.get(APPEARANCE_KEY) catch () => undefined)
+  if (raw === undefined) return undefined
+  const value = try (Effect.try(() => JSON.parse(raw) as unknown) catch () => undefined)
+  return try (Schema.decodeUnknownEffect(SavedAppearance)(value) catch () => undefined)
+}
+
+/** The appearance Machine, started from what the phone saved, the system's scheme and a test build's preview, and the service that keeps it. */
+export const appearance = Layer.unwrap(effect {
+  const saved = try readSaved()
+  const mocks = (try Build).info.testMocks
+  const query = mocks ? themeQuery() : undefined
+  const preview = query === "dark" ? "PreviewDark" : query === "light" ? "PreviewLight" : "NoPreview"
+  const base: State = { ...initial, mocks, systemDark: systemDark(), preview }
+  const start: State = saved === undefined ? base : { ...base, choice: saved.choice, saved: saved.choice, legible: saved.legible, savedLegible: saved.legible }
+  const service = Layer.effect(Appearance, effect {
+    const held = try Machine
+    const store = try KeyValueStore.KeyValueStore
+    effect function keep() {
+      const { choice, legible } = try held.get()
+      const written = try (store.set(APPEARANCE_KEY, JSON.stringify({ choice, legible })) catch () => false)
+      try (held.send({ type: written === false ? "saveFailed" : "saved" }) catch () => undefined)
+    }
+    return {
+      effect choose(choice: Choice) {
+        try (held.send({ type: "choose", choice }) catch () => undefined)
+        try keep()
+      },
+      effect setLegible(on: boolean) {
+        try (held.send({ type: "setLegible", on }) catch () => undefined)
+        try keep()
+      },
+      effect reload() {
+        const next = try readSaved()
+        if (next !== undefined) try (held.send({ type: "restored", choice: next.choice, legible: next.legible }) catch () => undefined)
+      },
+    }
+  })
+  return Layer.provideMerge(service, machine(start))
+})
+
+/** The system scheme, another tab's saved choice in a browser, and Android's bars on the phone, followed for as long as the layer lives. */
+export const appearanceFollow = Layer.effectDiscard(effect {
+  const held = try Machine
+  const service = try Appearance
+  const native = try Native
+  const browser = (try Build).info.variant === "browser"
+  try fork.scoped (effect {
+    for try (const dark of schemeChanges()) {
+      try (held.send({ type: "systemChanged", systemDark: dark }) catch () => undefined)
+    }
+  })
+  if (browser) {
+    try fork.scoped (effect {
+      for try (const _ of savedElsewhere(APPEARANCE_KEY)) {
+        try service.reload()
+      }
+    })
+    return
+  }
+  try fork.scoped (effect {
+    for try (const dark of Stream.changes(Stream.map(held.changes, barsDark))) {
+      try attempt(native.invoke("AlphaDevice", "setSystemBarAppearance", { dark }))
+    }
+  })
+})

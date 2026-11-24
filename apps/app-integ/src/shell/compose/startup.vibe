@@ -1,0 +1,8 @@
+// spec/platform/storage.md, "Startup is admitted once, and only with no reset pending"; spec/platform/storage.md, "A pending reset blocks startup until it has cleared the owner's namespace"
+import { DeviceStorage } from "../../platform/device-storage.vibe"
+
+/** Admits startup before any area reads what it stored, first finishing a reset an earlier process left pending; a refusal leaves startup unadmitted. */
+export const startupLive = Layer.effectDiscard(effect {
+  const storage = try DeviceStorage
+  storage.admitStartup() catch () => undefined
+})

@@ -1,0 +1,114 @@
+// spec/camera/media.md, "Story: Use a photo only as I selected it"; spec/camera/media.md, "Story: Ask Alpha about the photo I am looking at"; spec/camera/media.md, "Story: Send a photo only as a reviewed copy"; spec/camera/media.md, "Story: Ask Alpha about what Camera sees"
+import { Machine as MediaMachine, asksAboutFrame, emailable, messagesSendable, type Event as MediaEvent, type Invalidation, type PictureType } from "../../gen/camera__media.effect.vibe"
+import { CameraBridge } from "./bridge.vibe"
+import { CameraHandoffs } from "./ports.vibe"
+import { PhotoLibrary } from "./library.vibe"
+import { CameraNotices } from "./notices.vibe"
+import { jpegBlob } from "./scanWork.ts"
+import { Viewfinder } from "./viewfinder.vibe"
+
+/** What leaves Photos about one item, always as the revision the owner reviewed. */
+export service MediaReview {
+  /** Library access as Android granted it. */
+  granted(scope: "full" | "selected"): void!!
+  invalidate(reason: Invalidation): void!!
+  resume(): void!!
+  askAboutPhoto(id: string): boolean!!
+  /** Whether an item may be offered to Email or Messages, by its type and size. */
+  offers(mimeType: string, size: number): { readonly email: boolean; readonly messages: boolean }!!
+  emailPhoto(id: string): void!!
+  messagePhoto(id: string): void!!
+  askAboutFrame(question: string): boolean!!
+}
+
+function pictureType(mimeType: string): PictureType {
+  return mimeType === "image/jpeg" ? "Jpeg" : mimeType === "image/png" ? "Png" : mimeType === "image/webp" ? "Webp" : mimeType === "image/heic" ? "Heic" : "OtherType"
+}
+
+/** Media review over the media Machine, the library and the handoff ports. */
+export const mediaReview = Layer.effect(MediaReview, effect {
+  const media = try MediaMachine
+  const library = try PhotoLibrary
+  const bridge = try CameraBridge
+  const viewfinder = try Viewfinder
+  const handoffs = try CameraHandoffs
+  const notices = try CameraNotices
+
+  effect function send(event: MediaEvent) {
+    return media.send(event) catch () => undefined
+  }
+
+  effect function say(text: string) {
+    try notices.say(text, false)
+  }
+
+  effect function reviewedBytes(id: string, destination: "email" | "messages") {
+    const row = try library.find(id)
+    if (row === undefined || row.video) return undefined
+    try send({ type: "selectMedia" })
+    if ((try send({ type: "beginRead" })) === undefined) return undefined
+    const epoch = (try media.get()).epoch
+    const bytes = bridge.readPhotoSelected(row.id, row.revision) catch () => undefined
+    const fresh = try library.find(id)
+    try send({ type: "readComplete", ticket: bytes === undefined ? -1 : epoch, revision: fresh?.revision === row.revision ? (try media.get()).revision : 1 - (try media.get()).revision })
+    if (bytes === undefined || (try send({ type: "review" })) === undefined) return undefined
+    const allowed = destination === "email" ? emailable(pictureType(bytes.mimeType), bytes.size) : messagesSendable(pictureType(bytes.mimeType), bytes.size)
+    if (!allowed || (try send({ type: "publish" })) === undefined) return undefined
+    return bytes
+  }
+
+  return {
+    granted: (scope: "full" | "selected") => effect { try send({ type: "grant", granted: scope === "full" ? "MediaFull" : "MediaSelected" }) },
+    invalidate: (reason: Invalidation) => effect { try send({ type: "invalidate", reason }) },
+    resume: () => effect { try send({ type: "resume" }) },
+    effect askAboutPhoto(id: string) {
+      const row = try library.find(id)
+      if (row === undefined || row.video) return false
+      const chat = try handoffs.conversation()
+      const ids = chat === "" ? 1 : Math.max(1, Math.abs([...chat].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) | 0, 7)))
+      try send({ type: "switchConversation", chat: ids })
+      try send({ type: "selectMedia" })
+      if ((try send({ type: "askAboutPhoto" })) === undefined) return false
+      const fresh = try library.find(id)
+      const unchanged = fresh !== undefined && fresh.revision === row.revision && !fresh.video
+      const nowChat = try handoffs.conversation()
+      if (nowChat !== chat) try send({ type: "switchConversation", chat: ids + 1 })
+      const after = try send({ type: "photoRead", unchanged })
+      if (after === undefined || after.attached === 0 || nowChat !== chat) {
+        try say(unchanged ? "Chat changed. Choose the photo again." : "Photo changed")
+        return true
+      }
+      const attached = try handoffs.attachPhoto({ conversation: chat, mediaId: row.id, revision: row.revision, image: fresh!.image })
+      if (!attached) try say("Chat changed. Choose the photo again.")
+      return true
+    },
+    offers: (mimeType: string, size: number) => effect {
+      return { email: emailable(pictureType(mimeType), size), messages: messagesSendable(pictureType(mimeType), size) }
+    },
+    effect emailPhoto(id: string) {
+      const bytes = try reviewedBytes(id, "email")
+      if (bytes === undefined) return try say("Couldn’t open")
+      const inserted = try handoffs.emailFile(bytes)
+      if (inserted) try handoffs.open("inbox")
+      else try say("Your current email is still here.")
+    },
+    effect messagePhoto(id: string) {
+      const bytes = try reviewedBytes(id, "messages")
+      if (bytes === undefined) return try say("This picture is too large for Messages.")
+      if (try handoffs.messagePicture(bytes)) try handoffs.open("messages")
+    },
+    effect askAboutFrame(question: string) {
+      const view = try viewfinder.get()
+      const ready = view.phase === "PreviewReady"
+      const busy = view.capturing || view.recording !== "RecordingIdle"
+      if (!asksAboutFrame({ matches: true, ready, busy })) return false
+      const shot = try viewfinder.borrow(() => effect { return bridge.capturePhoto({ saveToGallery: false, quality: 85 }) catch () => undefined })
+      const photo = shot.status === "done" ? shot.value : undefined
+      if (photo?.base64 === undefined) {
+        try say("Camera frame unavailable.")
+        return true
+      }
+      return try handoffs.askAboutFrame({ question, image: jpegBlob(photo.base64) })
+    },
+  }
+})

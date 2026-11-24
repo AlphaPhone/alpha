@@ -1,0 +1,107 @@
+// spec/shell/overview.md, "Story: See my day on Home"
+import { Machine as OverviewMachine, nextChange, type Attention, type BriefOutcome, type Event as OverviewEvent, type FeedState, type Item } from "../../gen/shell__overview.effect.vibe"
+import { Resident } from "../platform/resident.vibe"
+import { AutomationList, CalendarFeed } from "./overview.schema.vibe"
+import { localDay, nextMidnight, pageEvents, pageHidden } from "./page.ts"
+
+/** What another area reports for Home's overview: the mail it loaded, the newest brief, overdue reminders. */
+export service Overview {
+  /** The mail summary of the page last loaded in Inbox: its state, unread count, whether more were not seen, when it was read. */
+  reportAttention(attention: Attention, unread: number, more: boolean, at: number, connected: boolean): void!!
+  /** The newest retained brief for the current connection. */
+  reportBrief(outcome: BriefOutcome, at: number, title: string): void!!
+  /** Reminders saved on this phone that are past due and not handled. */
+  reportOverdue(reminders: readonly { id: string; title: string; at: number }[]): void!!
+  /** Reads the calendar feed and the workflows again. */
+  refresh(): void!!
+}
+
+const DAY_MS = 86_400_000
+
+const FEED_STATES: Readonly<Record<string, FeedState>> = { complete: "FeedComplete", partial: "FeedPartial", unavailable: "FeedUnavailable" }
+
+function itemsOf(events: readonly { id: string; title: string; startAt: string; endAt: string; isAllDay: boolean; conferenceLink?: string | null }[]): Item[] {
+  return events.flatMap((event) => {
+    const begin = Date.parse(event.startAt)
+    const end = Date.parse(event.endAt)
+    if (!Number.isFinite(begin) || !Number.isFinite(end)) return []
+    const local = (at: number) => { const date = new Date(at); return new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()).getTime() }
+    return [{
+      id: event.id, title: event.title, begin: event.isAllDay ? local(begin) : begin, end: event.isAllDay ? local(end) : end,
+      allDay: event.isAllDay, overdue: false, video: typeof event.conferenceLink === "string" && event.conferenceLink !== "",
+    }]
+  })
+}
+
+effect function sendTo(machine: OverviewMachine.Shape, event: OverviewEvent) {
+  machine.send(event) catch () => undefined
+}
+
+effect function readAgenda(machine: OverviewMachine.Shape) {
+  const resident = try Resident
+  const at = try Clock.currentTimeMillis
+  const day = localDay(at)
+  const query = new URLSearchParams({ timeMin: new Date(at - DAY_MS).toISOString(), timeMax: new Date(at + 2 * DAY_MS).toISOString() })
+  const feed = effect {
+    const answer = try resident.json("GET", `/api/lifeops/calendar/feed?${query.toString()}`)
+    return try Schema.decodeUnknownEffect(CalendarFeed)(answer.data)
+  } catch () => undefined
+  if (feed === undefined) try sendTo(machine, { type: "agendaRead", ok: false, feed: "FeedFailed", items: [], at, day })
+  else try sendTo(machine, { type: "agendaRead", ok: true, feed: FEED_STATES[feed.state], items: itemsOf(feed.events), at, day })
+}
+
+effect function readWorkflows(machine: OverviewMachine.Shape) {
+  const resident = try Resident
+  const at = try Clock.currentTimeMillis
+  const list = effect { return try Schema.decodeUnknownEffect(AutomationList)((try resident.json("GET", "/api/automations")).data) } catch () => undefined
+  if (list === undefined) return
+  const count = list.automations.filter((row) => row.enabled === true || row.status === "active").length
+  try sendTo(machine, { type: "workflowsRead", count, at })
+}
+
+effect function readAll(machine: OverviewMachine.Shape) {
+  try.all [readAgenda(machine), readWorkflows(machine)]
+}
+
+effect function ticker(machine: OverviewMachine.Shape) {
+  while (true) {
+    const now = try Clock.currentTimeMillis
+    const state = try machine.get()
+    const change = nextChange(state.items.concat(state.overdue), now)
+    const wake = Math.min(nextMidnight(now), change >= 0 ? change + 60_000 : Number.POSITIVE_INFINITY)
+    try sleep(Duration.millis(Math.max(1000, wake - now)))
+    const at = try Clock.currentTimeMillis
+    try sendTo(machine, { type: "tick", day: localDay(at), now: at })
+    if ((try machine.get()).refreshDue) try readAll(machine)
+  }
+}
+
+/** The overview service: the agent's calendar feed and workflows read from the resident, the rest reported. */
+export const overviewLive = Layer.effect(Overview, effect {
+  const machine = try OverviewMachine
+  const now = try Clock.currentTimeMillis
+  try sendTo(machine, { type: "mount", day: localDay(now), now })
+  fork.scoped readAll(machine)
+  fork.scoped ticker(machine)
+  fork.scoped (effect {
+    for try (const _ of pageEvents("visibilitychange", "document")) {
+      if (pageHidden()) continue
+      const at = try Clock.currentTimeMillis
+      try sendTo(machine, { type: "tick", day: localDay(at), now: at })
+      try readAll(machine)
+    }
+  })
+  return {
+    effect reportAttention(attention: Attention, unread: number, more: boolean, at: number, connected: boolean) {
+      try sendTo(machine, { type: "attentionReported", attention, unread, more, at, connected })
+    },
+    effect reportBrief(outcome: BriefOutcome, at: number, title: string) {
+      try sendTo(machine, { type: "briefReported", result: outcome, at, title: outcome === "NoBrief" ? "" : title })
+    },
+    effect reportOverdue(reminders: readonly { id: string; title: string; at: number }[]) {
+      const overdue = reminders.map((row) => ({ id: row.id, title: row.title, begin: row.at, end: row.at, allDay: false, overdue: true, video: false }))
+      try sendTo(machine, { type: "remindersRead", overdue })
+    },
+    refresh: () => readAll(machine),
+  }
+})

@@ -1,0 +1,217 @@
+// spec/telephony/index.md
+import type { TelephonyStatus } from "@elizaos/os/bridges/phone"
+import { CloudSession } from "../../src/account/layer.vibe"
+import { Build } from "../../src/platform/build.vibe"
+import { Native } from "../../src/platform/native.vibe"
+import { memoryStore } from "../../src/platform/storage.vibe"
+import { Foreground, type ForegroundState } from "../../src/shell/foreground.vibe"
+import { Navigation } from "../../src/shell/navigation.vibe"
+import { TelephonyBridges, type TelephonyClients } from "../../src/telephony/bridges.vibe"
+import { telephonyLayer } from "../../src/telephony/layer.vibe"
+import { VoicemailTranscriber } from "../../src/telephony/ports.vibe"
+import { base64Of } from "../../src/telephony/wav.ts"
+import { Microphone } from "../../src/voice/capture.vibe"
+import { VoiceConversation } from "../../src/voice/conversation.vibe"
+
+/** The image's status with every grant and both roles held, one SIM. */
+export const status = (over: Partial<TelephonyStatus["permissions"]> = {}): TelephonyStatus => ({
+  version: 2, voiceCapable: true, smsCapable: true,
+  permissions: { contacts: "granted", phoneState: "granted", sms: "granted", sendSms: "granted", callLog: "granted", ...over },
+  sendMode: "direct", mmsSend: true,
+  roles: { dialer: { available: true, held: true, eligible: true }, sms: { available: true, held: true, eligible: true } },
+  defaultDialer: "ai.alphacompute.alphaphone", defaultSms: "ai.alphacompute.alphaphone",
+  subscriptions: [{ id: 7, slot: 0, displayName: "Personal", carrierName: "Carrier", defaultSms: true, defaultVoice: true }], defaultSmsSubscriptionId: 7,
+})
+
+/** One mono 16 kHz PCM16 WAV of two samples, base64. */
+export function tinyWav(): string {
+  const bytes = new Uint8Array(48)
+  const view = new DataView(bytes.buffer)
+  const text = (at: number, word: string) => { for (let i = 0; i < 4; i++) bytes[at + i] = word.charCodeAt(i) }
+  text(0, "RIFF"); view.setUint32(4, 40, true); text(8, "WAVE"); text(12, "fmt "); view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true); view.setUint16(22, 1, true); view.setUint32(24, 16000, true); view.setUint32(28, 32000, true)
+  view.setUint16(32, 2, true); view.setUint16(34, 16, true); text(36, "data"); view.setUint32(40, 4, true)
+  return base64Of(bytes)
+}
+
+/** The foreground the page starts in: in front, unlocked, Phone open, the chat closed. */
+export const inFront: ForegroundState = { visible: true, locked: false, screen: "home", view: "phone", shade: false, chat: "closed", modal: false }
+
+/** What the scripted phone holds; a journey changes it between steps. */
+export interface World {
+  callLog: TelephonyStatus["permissions"]["callLog"]
+  placeStatus: string | undefined
+  ongoing: unknown
+  callState: unknown
+  carrier: "CarrierReady" | "CarrierUnsupported" | "CarrierUnconfigured"
+  voicemails: { id: string; number: string; cachedName: string | null; date: number; durationSeconds: number; heard: boolean; audio: string; carrierTranscript: string | null }[]
+  threads: { id: string; addresses: string[]; snippet: string; date: number; unread: boolean }[]
+  messages: { id: string; kind: "sms" | "mms"; threadId: string; direction: "incoming" | "outgoing"; status: string; deliveryReport: string; date: number; body: string; attachments: number }[]
+  contacts: { id: string; lookup: string; name: string; revision: string; starred: boolean; phones: string[]; emails: string[] }[]
+  smsAnswer: () => Promise<unknown>
+  smsHistory: { operationId: string; status: string }[]
+  phoneState: boolean
+  saveAnswer: () => Promise<{ status: string }>
+  notice: unknown
+  transcript: string
+  /** The app in front and its route, as the shell's Navigation reports them. */
+  place: { app: string; route: string }
+}
+
+/** The native boundary of the image, scripted per journey: every call is recorded, and nothing reaches a real phone. */
+export function fakePhone(variant: "aosp" | "launcher" | "browser" = "aosp") {
+  const calls: string[] = []
+  let sent = 0
+  let front: SubscriptionRef.SubscriptionRef<ForegroundState> | undefined = undefined
+  const world: World = {
+    callLog: "prompt",
+    placeStatus: "CallRoleRequired",
+    ongoing: { calls: [] },
+    callState: { inCall: false, emergency: false, emergencyLive: false, watching: true },
+    carrier: "CarrierUnsupported",
+    voicemails: [],
+    threads: [{ id: "thread:1", addresses: ["4155550100"], snippet: "See you at five", date: 10, unread: true }],
+    messages: [
+      { id: "sms:1", kind: "sms", threadId: "thread:1", direction: "incoming", status: "complete", deliveryReport: "none", date: 10, body: "See you at five", attachments: 0 },
+      { id: "sms:9", kind: "sms", threadId: "thread:2", direction: "incoming", status: "complete", deliveryReport: "none", date: 11, body: "Elsewhere", attachments: 0 },
+    ],
+    contacts: [{ id: "7", lookup: "k7", name: "Maya Chen", revision: "r1", starred: false, phones: ["4155550100"], emails: [] }],
+    smsAnswer: () => Promise.reject(new Error("answer lost")),
+    smsHistory: [],
+    phoneState: true,
+    saveAnswer: () => Promise.reject(new Error("lost")),
+    notice: undefined,
+    transcript: "Call me back",
+    place: { app: "", route: "" },
+  }
+  const log = (name: string) => calls.push(name)
+  const listing = () => ({ carrier: world.carrier, gate: "WriteIdle", voicemails: world.carrier === "CarrierReady" ? world.voicemails : [] })
+  const queued = (kind: string, id: string) => ({ status: "queued", deletion: { kind, id, expiresAt: 99 } })
+  const messages = {
+    status: async () => status(),
+    threadPage: async () => (log("threadPage"), { rows: world.threads, next: null }),
+    messagePage: async (threadId: string) => (log("messagePage"), { rows: world.messages.filter((m) => m.threadId === threadId), next: null }),
+    listThreads: async () => world.threads,
+    markThreadRead: async () => (log("markThreadRead"), undefined),
+    observeMessages: async () => async () => {},
+    latestIncomingSender: async () => (log("latestIncomingSender"), { status: "found", last4: "0100" }),
+    deleteMessage: async (reference: { id: string }) => {
+      log("deleteMessage")
+      world.messages = world.messages.filter((m) => m.id !== reference.id)
+      return queued("MessageRecord", reference.id)
+    },
+    sendSms: async () => { log("sendSms"); sent++; return await world.smsAnswer() },
+    smsSendResult: async () => (log("smsSendResult"), { kind: "sms-send", operationId: "x", subscriptionId: 7, bindingHash: "", status: "sent", parts: [], createdAt: 9 }),
+    smsSendHistory: async () => (log("smsSendHistory"), world.smsHistory.map((entry) => ({ kind: "sms-send", subscriptionId: 7, bindingHash: "", parts: [], createdAt: 9, ...entry }))),
+    sendMms: async () => { log("sendMms"); sent++; return { status: "submitted", createdAt: 9 } },
+    mmsSendResult: async () => ({ status: "sent", createdAt: 9 }),
+  }
+  // The owner's Send reaches the composer port, never the plain bridge Alpha's approved sends use.
+  const composer = {
+    ...messages,
+    sendSms: async () => { log("composer.sendSms"); sent++; return await world.smsAnswer() },
+    sendMms: async () => { log("composer.sendMms"); sent++; return { status: "submitted", createdAt: 9 } },
+  }
+  const clients = {
+    phone: {
+      status: async () => (log("status"), status({ callLog: world.callLog })),
+      requestAccess: async (access: string) => {
+        log("requestAccess")
+        if (access === "phoneState") world.phoneState = true
+        else world.callLog = "granted"
+        return status({ callLog: world.callLog })
+      },
+      recentCalls: async () => (log("recentCalls"), { calls: [{ id: "1", number: "4155550100", cachedName: "Maya Chen", date: 5, durationSeconds: 0, type: "missed", isNew: true }], next: null }),
+      placeCall: async () => {
+        log("placeCall")
+        if (world.placeStatus === undefined) throw new Error("answer lost")
+        return { placeStatus: world.placeStatus, receipt: {} }
+      },
+      dial: async () => (log("dial"), { dialStatus: "DialHandedOff", handler: "Dialer", receipt: {} }),
+      phoneInfo: async () => (log("phoneInfo"), {
+        access: { phoneState: world.phoneState, phoneNumbers: world.phoneState, deviceIdentifiers: false },
+        lines: world.phoneState ? [{ subscriptionId: 7, slot: 0, displayName: "Personal", carrierName: "Carrier", number: "+14155550100", countryIso: "us", networkType: "5g", roaming: false, signalLevel: 3, embedded: false, iccid: null, imei: null }] : [],
+      }),
+      voicemail: async () => listing(),
+      refreshVoicemail: async (kind: string) => (log(`refreshVoicemail:${kind}`), listing()),
+      observeVoicemail: async () => async () => {},
+      fetchVoicemailAudio: async () => (log("fetchVoicemailAudio"), "ready"),
+      voicemailPcm: async () => (log("voicemailPcm"), { data: tinyWav() }),
+      markVoicemailHeard: async (id: string) => {
+        log("markVoicemailHeard")
+        world.voicemails = world.voicemails.map((v) => v.id === id ? { ...v, heard: true } : v)
+        return { listing: listing() }
+      },
+      deleteVoicemail: async (id: string) => {
+        log("deleteVoicemail")
+        world.voicemails = world.voicemails.filter((v) => v.id !== id)
+        return queued("VoicemailRecord", id)
+      },
+    },
+    messages,
+    composer,
+    contacts: {
+      open: async () => (log("contacts.open"), { available: true, readable: true, writable: true }),
+      close: async () => (log("contacts.close"), undefined),
+      status: async () => ({ available: true, readable: true, writable: true }),
+      list: async (query: { query: string }) => (log(`list:${query.query}`), { contacts: world.contacts.filter((c) => c.name.toLowerCase().includes(query.query.toLowerCase())), next: null }),
+      get: async () => ({ id: "7", lookup: "k7", displayName: "Maya Chen", givenName: "Maya", familyName: "Chen", starred: false,
+        phoneNumbers: [{ number: "4155550100", type: "mobile" }], emailAddresses: [], version: "a".repeat(64) }),
+      createContact: async () => world.saveAnswer(),
+      updateContact: async () => world.saveAnswer(),
+      remove: async () => (log("contacts.remove"), queued("ContactRecord", "7")),
+      requestPermissions: async () => ({ available: true, readable: true, writable: true }),
+    },
+    names: { resolve: async () => [], close: async () => {} },
+    deletions: {
+      pending: async () => ({ deletions: [], deletedOrigins: [] }),
+      undo: async () => ({ kind: "Kept" }),
+      dismiss: async () => ({ kind: "Dismissed", message: "" }),
+    },
+  } as unknown as TelephonyClients
+  const native = {
+    available: () => succeed(true),
+    invoke: (plugin: string, method: string, args?: { page?: string }) => sync(() => {
+      log(args?.page === undefined ? `${plugin}.${method}` : `${plugin}.${method}:${args.page}`)
+      return method === "ongoingCall" ? world.ongoing : method === "callState" ? world.callState : method === "endCall" ? true
+        : method === "smsNoticePending" ? world.notice : method === "openSettingsPage" ? { status: "opened", page: args?.page, specific: true } : undefined
+    }),
+    listen: () => Stream.never,
+  }
+  const foreground = Layer.effect(Foreground, effect {
+    const ref = try SubscriptionRef.make(inFront)
+    front = ref
+    return { changes: SubscriptionRef.changes(ref), get: () => SubscriptionRef.get(ref) }
+  })
+  const platform = Layer.mergeAll(
+    Layer.succeed(Native, native as unknown as Native.Shape),
+    Layer.succeed(Build, { info: { version: "0", variant, testMocks: true } }),
+    memoryStore,
+    foreground,
+    Layer.succeed(CloudSession, { changes: Stream.never, owner: () => succeed(1), ownerKey: (key: string) => succeed(`alpha/1/${key}`) } as unknown as CloudSession.Shape),
+    Layer.succeed(VoiceConversation, { callStarted: () => sync(() => log("voice.callStarted")) } as unknown as VoiceConversation.Shape),
+    Layer.succeed(Microphone, { callChanged: (active: boolean) => sync(() => log(`microphone.callChanged:${active}`)) } as unknown as Microphone.Shape),
+    Layer.succeed(VoicemailTranscriber, { ready: () => succeed(true), transcribe: () => sync(() => (log("transcribe"), world.transcript)) }),
+    Layer.succeed(Navigation, {
+      open: (app: string, route?: string) => sync(() => (log(`navigation.open:${app}:${route ?? ""}`), true)),
+      changes: Stream.never,
+      get: () => sync(() => ({ app: world.place.app, hidden: false, places: world.place.app === "" ? [] : [{ ...world.place, inner: false }] })),
+    } as unknown as Navigation.Shape),
+  )
+  return {
+    calls, world, sent: () => sent, platform,
+    /** The page leaves the front (hidden or locked) or comes back. */
+    effect setFront(over: Partial<ForegroundState>) {
+      if (front !== undefined) try SubscriptionRef.update(front, (state) => ({ ...state, ...over }))
+    },
+    layer: Layer.provideMerge(
+      telephonyLayer(Layer.succeed(TelephonyBridges, { offered: variant === "aosp", clients: () => succeed(clients) })),
+      platform,
+    ),
+  }
+}
+
+/** Waits for the first state of `changes` that `ok` accepts, for at most two seconds. */
+export effect function until<S>(changes: Stream.Stream<S>, ok: (s: S) => boolean) {
+  return try timeout(Stream.runHead(Stream.filter(changes, ok)), "2 seconds")
+}

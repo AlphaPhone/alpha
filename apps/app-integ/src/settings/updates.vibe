@@ -1,0 +1,206 @@
+// spec/settings/updates.md, "Story: Update Alpha when I choose"; spec/settings/updates.md, "Story: Get updates hands-off"; spec/settings/updates.md, "Story: Let Android finish an update without losing what I typed"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { type Activation, type InstallAnswer, type Permission, type PollEnd, Machine, activationReadMs, activationReady, checkDue, followsActivation, initial, machine, pollEndOf, pollFailedOf, updateIdle } from "../../gen/settings__updates.effect.vibe"
+import { Build } from "../platform/build.vibe"
+import { AppLifecycle } from "../platform/lifecycle.vibe"
+import { Native } from "../platform/native.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+import { Activity } from "../shell/activity.vibe"
+import { attempt, call } from "./call.vibe"
+import { DeviceSnapshot, InstallReply, PermissionPage, SystemBuild, UpdateCheck, UpdateState } from "./native.schema.vibe"
+import { type Offer, completeFeed, isDigest, offerFor } from "./offer.vibe"
+import { SavedFeed } from "./stored.schema.vibe"
+
+export const UPDATE_KEY = ownerKey("device", "settings/app-update")
+
+const PERMISSION: Record<string, Permission> = {
+  starting: "AndroidStarting", "permission-required": "PermissionRequired", supported: "AutomaticAllowed", unsupported: "AutomaticUnsupported",
+}
+const INSTALL: Record<string, InstallAnswer> = {
+  "offer-unavailable": "OfferUnavailable", "offer-withdrawn": "OfferWithdrawn", "offer-response-changed": "OfferChanged",
+  starting: "StillStarting", "permission-required": "NeedsPermission", unsupported: "Unsupported",
+}
+
+/** Alpha's launcher updates: the offer, checks, installs, the hands-off schedule and Android's activation. */
+export service Updates {
+  /** The offer the saved feed holds for this install, for the Install row. */
+  offer(): (Offer | undefined)!!
+  check(manual: boolean): void!!
+  install(): void!!
+  /** Open Android's page that allows installs from Alpha. */
+  allowAutomatic(): boolean!!
+  /** One hands-off attempt if the schedule is due. */
+  poll(): void!!
+  setActive(active: boolean): void!!
+  /** Read Android's activation of a staged update and acknowledge it once the drafts are kept. */
+  watchActivation(keepDrafts: () => boolean!!): void!!
+  /** Whether Android holds an activation Alpha follows: preparing, paused or continuing. */
+  following(): boolean!!
+  continueInstall(): void!!
+}
+
+/** Updates over the updates Machine, started from the saved feed. */
+export const updates = Layer.unwrap(effect {
+  const store = try KeyValueStore.KeyValueStore
+  const raw = try (store.get(UPDATE_KEY) catch () => undefined)
+  const parsed = raw === undefined ? undefined : do { try { JSON.parse(raw) as unknown } catch { undefined } }
+  const saved = Option.getOrUndefined(Schema.decodeUnknownOption(SavedFeed)(parsed))
+  const service = Layer.effect(Updates, effect {
+    const held = try Machine
+    const native = try Native
+    const activity = try Activity
+    const native_ = (try Build).info.variant !== "browser"
+    let feed: { checkedAt: number; feed: unknown; digest?: string } = saved ?? { checkedAt: -1, feed: null }
+    let activationIds: { activationId: string; bridgeId: string } | undefined
+    const within = <A, E>(program: A!E!Native) => Effect.provideService(program, Native, native)
+
+    effect function installed() {
+      const [snapshot, build] = try.all [attempt(call("AlphaDevice", "snapshot", DeviceSnapshot)), attempt(call("ElizaSystem", "getBuildInfo", SystemBuild))]
+      if (snapshot?.appAutomaticUpdates !== undefined) try (held.send({ type: "permissionRead", permission: PERMISSION[snapshot.appAutomaticUpdates] }) catch () => undefined)
+      return { versionCode: snapshot?.appVersionCode ?? Number.MAX_SAFE_INTEGER, launcher: build?.launcher === true, signerSha256: snapshot?.appSigner ?? "" }
+    }
+
+    effect function keep(next: typeof feed) {
+      feed = next
+      try (store.set(UPDATE_KEY, JSON.stringify(next)) catch () => undefined)
+    }
+
+    /** One check: false only when the feed could not be read. */
+    effect function check(manual: boolean) {
+      if (!native_) return true
+      const begun = try (held.send({ type: "beginCheck", manual }) catch () => undefined)
+      if (begun === undefined) return true
+      const now = try Clock.currentTimeMillis
+      if (!manual && !checkDue(feed.checkedAt, now) && (feed.feed === null || isDigest(feed.digest))) {
+        const offered = offerFor(feed.feed, try installed())
+        try (held.send({ type: "checkAnswered", now: feed.checkedAt, offer: offered?.versionCode ?? 0, versionName: offered?.versionName ?? "", bound: isDigest(feed.digest) }) catch () => undefined)
+        return true
+      }
+      const reply = try attempt(call("AlphaDevice", "checkForUpdate", UpdateCheck))
+      const kept = reply === undefined ? undefined : reply.manifest === undefined && reply.manifestSha256 === undefined ? null : typeof reply.manifest === "string" ? completeFeed(reply.manifest) : undefined
+      if (kept === undefined || (reply?.manifestSha256 !== undefined && !isDigest(reply.manifestSha256))) {
+        try keep({ checkedAt: feed.checkedAt, feed: feed.feed })
+        try (held.send({ type: "checkFailed" }) catch () => undefined)
+        return false
+      }
+      try keep({ checkedAt: now, feed: kept, ...(isDigest(reply?.manifestSha256) ? { digest: reply.manifestSha256 } : {}) })
+      const offered = offerFor(kept, try installed())
+      try (held.send({ type: "checkAnswered", now, offer: offered?.versionCode ?? 0, versionName: offered?.versionName ?? "", bound: isDigest(feed.digest) }) catch () => undefined)
+      return true
+    }
+
+    effect function install(automatic: boolean) {
+      const mine = try installed()
+      const offer = offerFor(feed.feed, mine)
+      if (offer === undefined || (automatic && !isDigest(feed.digest))) {
+        // No offer to install still answers the attempt, so the updater returns to idle and the next tap or poll retries.
+        try (held.send({ type: "installAnswered", answer: "OfferUnavailable" }) catch () => undefined)
+        return "OfferUnavailable" as InstallAnswer
+      }
+      const reply = try attempt(call("AlphaDevice", "installUpdate", InstallReply, {
+        apkUrl: offer.apkUrl, sha256: offer.sha256, sizeBytes: offer.sizeBytes, versionCode: offer.versionCode,
+        ...(automatic ? { automatic: true, manifestSha256: feed.digest } : {}),
+      }))
+      // AlphaDevice.installUpdate resolves with no status once its attempt ran (or another attempt holds the updater):
+      // only a named status refuses the offer.
+      const answer: InstallAnswer = reply === undefined ? "OfferUnavailable" : reply.status === undefined ? "Accepted" : INSTALL[reply.status] ?? "OfferUnavailable"
+      if (answer === "OfferWithdrawn" || (answer === "OfferChanged" && typeof reply?.manifest === "string" && completeFeed(reply.manifest) !== undefined)) try keep({ checkedAt: -1, feed: null })
+      else if (answer === "OfferUnavailable" || answer === "OfferChanged") try keep({ checkedAt: feed.checkedAt, feed: feed.feed })
+      const settled: InstallAnswer = answer === "OfferChanged" && feed.feed === null ? "OfferWithdrawn" : answer
+      try (held.send({ type: "installAnswered", answer: settled }) catch () => undefined)
+      return settled
+    }
+
+    /** Read Android's activation and acknowledge it once, ready only when the page kept its drafts and nothing the activation must not cut is in flight. */
+    effect function readActivation(keepDrafts: () => boolean!!) {
+      const state = try attempt(call("AlphaDevice", "updateState", UpdateState))
+      if (state === undefined) return
+      const activation: Activation = state.pending === true ? (state.phase === "paused" ? "Paused" : "Preparing") : state.outcome !== undefined || state.idle === true ? "Ended" : "NoActivation"
+      if (state.activationId !== undefined && state.bridgeId !== undefined) activationIds = { activationId: state.activationId, bridgeId: state.bridgeId }
+      const read = try (held.send({ type: "activationRead", activation, canContinue: state.canContinue === true }) catch () => undefined)
+      if (read === undefined || activation !== "Preparing" || read.acknowledged || activationIds === undefined) return
+      const ready = activationReady(try activity.updateIdleFacts(), state.automatic === true) && (try keepDrafts())
+      try (held.send({ type: "acknowledge", ready }) catch () => undefined)
+      try attempt(native.invoke("AlphaDevice", "activateUpdate", { ...activationIds, ready, ...(ready ? { resumeEligible: true } : {}) }))
+    }
+
+    return {
+      offer: () => within(effect { return offerFor(feed.feed, try installed()) }),
+      check: (manual: boolean) => within(Effect.asVoid(check(manual))),
+      install: () => within(effect {
+        const begun = try (held.send({ type: "install" }) catch () => undefined)
+        if (begun !== undefined) try install(false)
+      }),
+      allowAutomatic: () => within(effect {
+        const opened = try attempt(call("AlphaDevice", "openUpdatePermissionSettings", PermissionPage))
+        return opened?.status === "opened"
+      }),
+      poll: () => within(effect {
+        if (!native_ || (try Build).info.testMocks) return
+        const now = try Clock.currentTimeMillis
+        if ((try held.get()).wakeAt > now) return
+        const read = try check(false)
+        const state = try attempt(call("AlphaDevice", "updateState", UpdateState))
+        if (state?.pending === true) try (held.send({ type: "activationRead", activation: state.phase === "paused" ? "Paused" : "Preparing", canContinue: state.canContinue === true }) catch () => undefined)
+        const before = try held.get()
+        const idle = updateIdle(try activity.updateIdleFacts())
+        const polled = try (held.send({ type: "poll", now, idle }) catch () => undefined)
+        // An install that was due but found the phone busy, or Android starting, is a failed poll and retries soon.
+        const due = !before.pending && before.offer > before.installed && before.bound && (before.permission === "AutomaticAllowed" || before.permission === "AndroidStarting")
+        const end: PollEnd = !read ? "PollCheckFailed"
+          : polled?.busy === "Polling" ? pollEndOf(try install(true))
+          : due && (!idle || before.permission === "AndroidStarting") ? "PollBusy"
+          : before.permission === "PermissionRequired" || before.permission === "AutomaticUnsupported" ? "PollNeedsOwner"
+          : "PollNothingDue"
+        try (held.send({ type: "pollFinished", now: try Clock.currentTimeMillis, failed: pollFailedOf(end) }) catch () => undefined)
+      }),
+      setActive: (active: boolean) => effect { try (held.send({ type: "setActive", active }) catch () => undefined) },
+      watchActivation: (keepDrafts: () => boolean!!) => within(readActivation(keepDrafts)),
+      following: () => effect { return followsActivation(try held.get()) },
+      continueInstall: () => within(effect {
+        const begun = try (held.send({ type: "continueInstall" }) catch () => undefined)
+        if (begun !== undefined && activationIds !== undefined) try attempt(native.invoke("AlphaDevice", "continueUpdate", activationIds))
+      }),
+    }
+  })
+  return Layer.provideMerge(service, machine({ ...initial, checkedAt: saved?.checkedAt ?? -1 }))
+})
+
+/** The hands-off schedule and Android's activation events, for as long as the layer lives. */
+export const schedule = Layer.effectDiscard(effect {
+  const service = try Updates
+  const native = try Native
+  const lifecycle = try AppLifecycle
+  const activity = try Activity
+  try service.setActive(true)
+  try fork.scoped (effect {
+    while (true) {
+      try service.poll()
+      try sleep(Duration.millis(60000))
+    }
+  })
+  try fork.scoped (effect {
+    for try (const app of lifecycle.changes) {
+      try service.setActive(app.foreground)
+    }
+  })
+  try service.watchActivation(() => activity.keepDrafts())
+  // While Android holds an activation it is read again every second, so Continue and the release follow it.
+  try fork.scoped (effect {
+    while (true) {
+      try sleep(Duration.millis(activationReadMs))
+      if (try service.following()) try service.watchActivation(() => activity.keepDrafts())
+    }
+  })
+  try fork.scoped (effect {
+    for try (const _ready of native.listen("AlphaDevice", "alphaUpdateReady")) {
+      try service.watchActivation(() => activity.keepDrafts())
+    }
+  } catch () => undefined)
+  try fork.scoped (effect {
+    for try (const _settled of native.listen("AlphaDevice", "alphaUpdateSettled")) {
+      try service.watchActivation(() => activity.keepDrafts())
+    }
+  } catch () => undefined)
+})
+

@@ -1,0 +1,98 @@
+// spec/workflows/vocabulary.md, "Only an owner route of Workflows is sent, and a read or delete carries no body"; spec/workflows/automations.md, "Each source is read on its own, and its failure is a note beside the other sources' rows"
+import { Resident, ResidentRefused, ResidentUnavailable } from "../platform/resident.vibe"
+import { type Method, type RouteFamily, sendable } from "../../gen/workflows__vocabulary.effect.vibe"
+import { type WorkflowClient, type WorkflowRequest, workflowClient, workflowHttpError } from "@elizaos/plugin-workflow/client"
+import { type HostedDigestProtocol, hostedDigestProtocol } from "@elizaos/plugin-workflow/digests"
+import { AuthMe } from "./wire.schema.vibe"
+
+/** A request Workflows does not own, or a body where none belongs: nothing was sent. */
+export error NotSent { path: string }
+/** The agent answered with a refusal; `status` is its HTTP status, `code` its refusal code and `message` the error it gave. */
+export error AgentRefused { status: number; code?: string; message?: string }
+/** The agent is not running and did not start in time. */
+export error AgentUnavailable { state: string }
+/** The agent answered with something that is not the answer the route documents. */
+export error Unrecognized { path: string }
+
+/** The methods Workflows sends. */
+export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE"
+
+/** Who the agent answers for: the origin, owner and agent every stored record is fenced to. */
+export interface OwnerScope {
+  readonly origin: string
+  readonly ownerId: string
+  readonly agentId: string
+}
+
+/** The origin a resident agent on this phone answers from. */
+export const residentOrigin = "https://device.alpha.invalid"
+
+/** The family a path belongs to, by its canonical owner route. */
+export function familyOf(path: string): RouteFamily {
+  if (/^\/api\/automations$/.test(path)) return "AutomationRoutes"
+  if (/^\/api\/triggers(\/[A-Za-z0-9][A-Za-z0-9._:-]{0,199}(\/(runs|execute))?)?$/.test(path)) return "TriggerRoutes"
+  if (/^\/api\/scheduled-tasks(\?ownerVisibleOnly=1|\/[A-Za-z0-9][A-Za-z0-9._:-]{0,199}(\/(snooze|skip|complete|dismiss|escalate|acknowledge|edit|reopen|fire))?)?$/.test(path)) return "ScheduledTaskRoutes"
+  if (/^\/api\/lifeops\/(reminders|definitions(\/[A-Za-z0-9][A-Za-z0-9._:-]{0,199})?|occurrences\/[A-Za-z0-9][A-Za-z0-9._:-]{0,199}\/snooze)$/.test(path)) return "LifeOpsRoutes"
+  if (/^\/api\/workflow\/hosted\/(sources(\/revoke)?|loops|dossier|live-accounts|live-calendars|results(\?clientId=[A-Za-z0-9_-]{1,128}|\/ack)?|cloud-delegation\/(start|complete|status|cancel|revoke|revocations))$/.test(path)) return "HostedRoutes"
+  if (/^\/api\/workflow\/phone\/(catalog|generate|validate|workflows|mutations\/[a-f0-9-]{36})$/.test(path)) return "WorkflowRoutes"
+  if (/^\/api\/workflow\/(status|removed-workflows|workflows(\/[A-Za-z0-9][A-Za-z0-9._:-]{0,199}(\/[a-z-]+(\/[A-Za-z0-9-]{1,64})?)?)?|executions\/[A-Za-z0-9][A-Za-z0-9._:-]{0,199}(\/(cancel|approvals|phone-review)(\/[A-Za-z0-9._:-]+\/\d+)?)?)$/.test(path)) return "WorkflowRoutes"
+  if (/^\/api\/auth\/me$/.test(path)) return "AutomationRoutes"
+  return "OtherRoute"
+}
+
+function methodOf(method: HttpMethod): Method {
+  return method === "GET" ? "Get" : method === "POST" ? "Post" : method === "PUT" ? "Put" : "Delete"
+}
+
+/** The agent's owner routes Workflows reads and writes, each checked before it is sent. */
+export service WorkflowApi {
+  /** One request; its answer is untrusted until a schema decodes it. */
+  request(method: HttpMethod, path: string, body?: unknown): unknown!(NotSent | AgentRefused | AgentUnavailable)
+  /** Who the agent answers for now. */
+  scope(): OwnerScope!(AgentRefused | AgentUnavailable | Unrecognized)
+  /** plugin-workflow's receipt-checked client over these routes. */
+  readonly workflow: WorkflowClient
+  /** plugin-workflow's hosted digest routes over these routes. */
+  readonly digestProtocol: HostedDigestProtocol
+}
+
+/** The refusal code a request Workflows does not own carries: nothing was sent. */
+export const NOT_SENT_CODE = "ALPHA_NOT_SENT"
+
+/** Decode an answer of `path` with `schema`, or fail with Unrecognized. */
+export effect function decoded<A>(schema: Schema.Codec<A>, path: string, value: unknown) {
+  return (Schema.decodeUnknownEffect(schema)(value) catch effect () => { throw new Unrecognized({ path }) })
+}
+
+/** WorkflowApi over the resident's local API. */
+export const api = Layer.effect(WorkflowApi, effect {
+  const resident = try Resident
+  effect function request(method: HttpMethod, path: string, body?: unknown) {
+    if (!sendable(familyOf(path), methodOf(method), body !== undefined)) throw new NotSent({ path })
+    const answer = (resident.json(method, path, body) catch effect (error) => match (error) {
+      when ResidentRefused: throw new AgentRefused({ status: error.status, code: error.code, message: error.message });
+      when ResidentUnavailable: throw new AgentUnavailable({ state: error.state });
+    })
+    return answer.data
+  }
+  const transport: WorkflowRequest = effect (path: string, body: unknown) => request(body === undefined ? "GET" : "POST", path, body) catch effect (error) => match (error) {
+    when NotSent: throw workflowHttpError(0, { code: NOT_SENT_CODE });
+    // The agent's error text goes with the refusal, so a 422 that asks for clarification reaches the screen as the agent asked it.
+    when AgentRefused: throw workflowHttpError(error.status, { ...(error.code === undefined ? {} : { code: error.code }), ...(error.message === undefined ? {} : { error: error.message }) });
+    when AgentUnavailable: throw workflowHttpError(0, {});
+  }
+  return {
+    request,
+    workflow: workflowClient(transport),
+    digestProtocol: hostedDigestProtocol(transport),
+    effect scope() {
+      const me = (request("GET", "/api/auth/me") catch effect (error) => match (error) {
+        when NotSent: throw new Unrecognized({ path: error.path });
+        default: throw error;
+      })
+      const { identity } = try decoded(AuthMe, "/api/auth/me", me)
+      if (identity.id === "") throw new Unrecognized({ path: "/api/auth/me" })
+      return { origin: residentOrigin, ownerId: `${identity.kind}:${identity.id}`, agentId: identity.id }
+    },
+  }
+})

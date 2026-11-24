@@ -1,0 +1,147 @@
+// spec/platform/index.md, "Story: Reach the phone's native capabilities"; spec/platform/index.md, "Story: Talk to the resident agent"; spec/platform/index.md, "Story: Use Eliza Cloud's managed services when signed in"; spec/platform/index.md, "Story: Keep my phone's state across restarts"; spec/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks"
+import { createCloudClient } from "@elizaos/cloud/client"
+import { initial as connectionStart, type Resident as ResidentConnection } from "../../gen/platform__resident.ts"
+import { adviceOf, cloudOutcomeOf, pathAdmitted, resetCarried } from "../../gen/platform.effect.vibe"
+import { Build, type BuildInfo } from "./build.vibe"
+import { buildLive } from "./build-live.vibe"
+import { Cloud, CloudSignedOut, CloudUnavailable } from "./cloud.vibe"
+import { CloudServices } from "./cloud-services.vibe"
+import { cloudLive } from "./cloud-live.vibe"
+import { crashJournalLive } from "./crash-journal.vibe"
+import { deviceStorageLive } from "./device-storage.vibe"
+import { lifecycleLive } from "./lifecycle.vibe"
+import { Native, NativeFailed, NativeUnavailable } from "./native.vibe"
+import { nativeLive } from "./native-live.vibe"
+import { Resident, ResidentRefused, ResidentUnavailable, type ResidentAnswer, type ResidentHeaders } from "./resident.vibe"
+import { ResidentControl, ResidentRecovery } from "./resident-control.vibe"
+import { deviceHeaders, headerRefusal, pathShapeOf, residentLive, routeAllowed } from "./resident-live.vibe"
+import { browserStore, memoryStore } from "./storage.vibe"
+import { feedsLive } from "./view-events.vibe"
+import { answerRoute, routeFetch } from "./cloud-fetch.ts"
+import { elizaCloud } from "./build-flags.ts"
+
+const platformBase = Layer.mergeAll(nativeLive, buildLive, browserStore)
+
+const platformServices = Layer.provideMerge(
+  feedsLive,
+  Layer.mergeAll(residentLive, cloudLive, crashJournalLive, lifecycleLive, deviceStorageLive),
+)
+
+/** Every platform service on this device: Native, Build, the KeyValueStore, Resident and its control, recovery and feeds, Cloud and its client, the problem log, the app lifecycle and device storage. */
+export const live = Layer.provideMerge(platformServices, platformBase)
+
+/** One fake plugin method: its answer, or a `NativeFailed` it refuses with. */
+export type FakeMethod = (args: unknown) => unknown
+
+/** A fake plugin table: plugin → method → answer; `events` lists what `plugin:event` emits when listened to. */
+export interface FakeNativeTable {
+  readonly [plugin: string]: { readonly [method: string]: FakeMethod }
+}
+
+/** A Native layer for tests and stories over `table`; a plugin or method it does not list is unavailable. */
+export function fakeNative(table: FakeNativeTable, events: { readonly [pluginEvent: string]: readonly unknown[] } = {}) {
+  const native: Native.Shape = {
+    available: (plugin: string) => succeed(Object.hasOwn(table, plugin)),
+    effect invoke(plugin: string, method: string, args?: unknown) {
+      const handler = Object.hasOwn(table, plugin) && Object.hasOwn(table[plugin]!, method) ? table[plugin]![method] : undefined
+      if (handler === undefined) throw new NativeUnavailable({ plugin, method })
+      const answer = try Effect.try({ try: () => handler(args ?? {}), catch: (cause) => new NativeFailed({ plugin, method, message: String(cause) }) })
+      if (answer instanceof NativeFailed) throw answer
+      return answer
+    },
+    listen: (plugin: string, event: string) => Object.hasOwn(table, plugin)
+      ? Stream.fromIterable(events[`${plugin}:${event}`] ?? [])
+      : Stream.fail(new NativeUnavailable({ plugin, method: event })),
+  }
+  return Layer.succeed(Native, native)
+}
+
+/** One fake resident route: its data, a function of the body and the admitted device headers that gives it, or a `ResidentRefused` it refuses with. */
+export type FakeRoute = unknown
+
+/** A Resident, ResidentControl and ResidentRecovery layer for tests and stories: `routes` keyed `"METHOD /path"`, `streams` keyed by path with the text chunks each streams, and `heard` told the admitted device headers of each stream; headers are admitted as the live resident admits them, and nothing is ever held for review. */
+export function fakeResident(routes: { readonly [route: string]: FakeRoute }, streams: { readonly [path: string]: readonly string[] } = {}, owner = "owner-test", heard: (path: string, headers: ResidentHeaders) => void = () => undefined) {
+  const connected: ResidentConnection = { ...connectionStart, phase: "Connected", generation: 1, owner, agent: "agent-test" }
+  effect function answer(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body: unknown, headers: ResidentHeaders | undefined): ResidentAnswer!ResidentRefused {
+    if (!pathAdmitted(pathShapeOf(path))) throw new ResidentRefused({ status: 400, code: "InvalidPath", message: "Invalid local app request" })
+    if (!routeAllowed(method, path)) throw new ResidentRefused({ status: 400, code: "InvalidRoute", message: "Invalid local app request" })
+    const sent = deviceHeaders(headers)
+    if (sent === undefined) throw headerRefusal()
+    const key = `${method} ${path.split("?")[0]}`
+    if (!Object.hasOwn(routes, key)) throw new ResidentRefused({ status: 404, code: "not_found", message: "Not found" })
+    const route = routes[key]
+    const data = typeof route === "function" ? try Effect.orDie(Effect.try(() => (route as (body: unknown, headers: ResidentHeaders) => unknown)(body, sent))) : route
+    if (data instanceof ResidentRefused) throw data
+    return { status: 200, data }
+  }
+  const encoder = new TextEncoder()
+  const resident: Resident.Shape = {
+    status: () => succeed("running"),
+    ensureRunning: () => Effect.void,
+    json: (method, path, body, headers) => answer(method, path, body, headers),
+    stream: (path: string, _body: unknown, headers?: ResidentHeaders) => {
+      const sent = deviceHeaders(headers)
+      if (sent === undefined) return Stream.fail(headerRefusal())
+      if (!Object.hasOwn(streams, path)) return Stream.fail(new ResidentRefused({ status: 404, code: "not_found", message: "Not found" }))
+      return Stream.unwrap(sync(() => {
+        heard(path, sent)
+        return Stream.fromIterable(streams[path]!.map((chunk) => encoder.encode(chunk)))
+      }))
+    },
+  }
+  const control: ResidentControl.Shape = {
+    changes: Stream.make(connected),
+    session: () => succeed({ owner, agent: "agent-test", generation: 1, epoch: 1 }),
+    refreshAccount: () => Effect.void,
+    stop: () => Effect.void,
+    recovered: () => Effect.void,
+  }
+  const recovery: ResidentRecovery.Shape = {
+    review: () => succeed({ reviewable: false }),
+    restart: () => Effect.fail(new ResidentUnavailable({ state: "stopped", reason: "not-held" })),
+  }
+  return Layer.mergeAll(Layer.succeed(Resident, resident), Layer.succeed(ResidentControl, control), Layer.succeed(ResidentRecovery, recovery))
+}
+
+/** A Cloud and CloudServices layer for tests and stories: `routes` keyed `"METHOD /path"` give each answer's data, `status` its HTTP status, `retryAfter` a 429's wait in seconds and `resetAt` the epoch milliseconds a refusal names its allowance reset; signed out, every route is refused. */
+export function fakeCloud(routes: { readonly [route: string]: unknown }, options: { readonly signedIn?: boolean; readonly status?: { readonly [route: string]: number }; readonly retryAfter?: { readonly [route: string]: number }; readonly resetAt?: { readonly [route: string]: number } } = {}) {
+  const base = "https://cloud.test"
+  const signedIn = options.signedIn ?? true
+  const said = (method: string, path: string, body: unknown) => answerRoute(routes, options.status, signedIn, method, path, body)
+  const cloud: Cloud.Shape = {
+    base,
+    effect json(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown) {
+      const reply = said(method, path, body)
+      const outcome = cloudOutcomeOf(reply.status)
+      if (outcome === "CloudSignedOutNow") throw new CloudSignedOut()
+      if (outcome === "CloudDown") {
+        const route = `${method} ${path.split("?")[0]}`
+        const wait = options.retryAfter?.[route]
+        const advice = adviceOf(reply.status, wait !== undefined && Number.isSafeInteger(wait), wait ?? 0)
+        const reset = options.resetAt?.[route]
+        const now = try Clock.currentTimeMillis
+        throw new CloudUnavailable({
+          status: reply.status,
+          message: `Cloud request failed (HTTP ${reply.status}).`,
+          ...(advice.tag === "WaitSeconds" ? { retryAfter: advice.seconds } : {}),
+          ...(resetCarried(reset !== undefined && Number.isSafeInteger(reset), reset ?? 0, now) ? { resetAt: reset } : {}),
+        })
+      }
+      return reply.data
+    },
+  }
+  const services: CloudServices.Shape = {
+    client: createCloudClient({ baseUrl: base, credential: () => signedIn ? "test-session" : undefined, fetch: routeFetch(said) }),
+    authority: { ...elizaCloud.production, api: base },
+    openExternal: () => Effect.void,
+  }
+  return Layer.merge(Layer.succeed(Cloud, cloud), Layer.succeed(CloudServices, services))
+}
+
+/** A Build layer for tests and stories: a test-mocks launcher build unless `partial` says otherwise. */
+export function buildInfo(partial: Partial<BuildInfo> = {}) {
+  return Layer.succeed(Build, { info: { version: "0.0.0-test", variant: "launcher", testMocks: true, ...partial } })
+}
+
+/** The fake platform for tests and stories, and memory storage beside it. */
+export const fakes = { fakeNative, fakeResident, fakeCloud, buildInfo, memoryStore }

@@ -1,0 +1,90 @@
+// spec/notes/audio.md, "Story: Generate a transcript of a saved recording when I ask"; spec/notes/audio.md, "A transcript is read in 25-second windows, each checked against the exact recording first"
+import type { NoteJson } from "@elizaos/plugin-notes/types"
+import { mayUploadWindow, transcriptSaved, windowAllowed, windowCount, windowMs } from "../../gen/notes__audio.effect.vibe"
+import { Machine as EditorMachine } from "../../gen/notes__editor.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { VoiceRoute } from "../voice/route.vibe"
+import { RecordingTranscriber } from "../voice/transcription.vibe"
+import { NotesCollection } from "./collection.vibe"
+import { contentOf, type NoteRow } from "./list.vibe"
+import { decodeAudioDescription } from "./notes.schema.vibe"
+import { transcribeKept } from "./speech.vibe"
+
+/** What Generate transcript did: saved, heard nothing and kept the recording, stopped by the owner or by leaving the note, or could not run. */
+export type TranscriptOutcome = "saved" | "no-speech" | "cancelled" | "unavailable" | "not-saved"
+
+/** Explicit transcription of a saved voice note's recording. */
+export service NotesAudio {
+  transcribe(row: NoteRow): TranscriptOutcome!!
+  /** Stop the transcription in progress before its next window: nothing more is sent, nothing is saved, and the recording is kept. */
+  cancel(): void!!
+}
+
+/** The transcription service over the device's recording store and voice's recording transcriber. */
+export const audioLayer = Layer.effect(NotesAudio, effect {
+  const native = try Native
+  const routes = try VoiceRoute
+  const transcriber = try RecordingTranscriber
+  const collection = try NotesCollection
+  const editor = try EditorMachine
+  const runs = try Ref.make(0)
+  const cancelled = try Ref.make(0)
+
+  // spec/notes/audio.md: a transcription stops when the owner cancels it or leaves the note it was asked on.
+  effect function stopped(run: number, noteId: string): boolean!! {
+    if ((try Ref.get(cancelled)) >= run) return true
+    const open = (editor.get() catch () => undefined)
+    return open === undefined || !open.present || open.draftId !== noteId
+  }
+
+  effect function exactAt(row: NoteRow, offset: number): boolean!! {
+    const audio = row.audio
+    if (audio === undefined) return false
+    const described = (effect {
+      return try decodeAudioDescription(try native.invoke("AlphaNoteAudio", "describe", { audioId: audio.audioId }))
+    } catch () => undefined)
+    const owner = (try collection.current())?.snapshot.notes.some((note) => note.id === row.id) ?? false
+    return owner && described !== undefined && windowAllowed({
+      validIds: /^[A-Za-z0-9_-]{1,128}$/.test(audio.audioId), exactAudio: described.audioId === audio.audioId, exactNote: described.noteId === row.id,
+      duration: audio.durationMs, recordedDuration: described.durationMs, offset, deletedKeyPresent: described.deletedAt !== undefined, liveFilePresent: true,
+    })
+  }
+
+  return {
+    effect transcribe(row: NoteRow) {
+      const audio = row.audio
+      if (audio === undefined || !Number.isSafeInteger(audio.durationMs) || audio.durationMs <= 0) return "unavailable"
+      if ((try routes.route()) === "Device") return "unavailable"
+      const run = try Ref.updateAndGet(runs, (n) => n + 1)
+      const parts: string[] = []
+      for (let index = 0; index < windowCount(audio.durationMs); index += 1) {
+        const offset = index * windowMs
+        const exact = try exactAt(row, offset)
+        const stop = try stopped(run, row.id)
+        if (!mayUploadWindow(true, exact, true, stop)) return stop ? "cancelled" : "unavailable"
+        const text = try transcribeKept(transcriber, audio.audioId, { savedNoteId: row.id, savedDurationMs: audio.durationMs, offsetMs: offset })
+        if (typeof text !== "string") {
+          if (text.code === "no-speech") continue
+          return "unavailable"
+        }
+        if (text.trim() !== "") parts.push(text.trim())
+      }
+      if (try stopped(run, row.id)) return "cancelled"
+      const owned = try exactAt(row, 0)
+      if (!transcriptSaved(parts.length, owned)) return parts.length === 0 ? "no-speech" : "unavailable"
+      const current = try collection.current()
+      const note = current?.snapshot.notes.find((item) => item.id === row.id)
+      if (current === undefined || note === undefined || note.format?.kind !== "voice") return "not-saved"
+      const words = parts.join("\n")
+      const data: Record<string, NoteJson> = { ...note.format.data, lines: [{ s: "me", at: 0, t: words }] }
+      const saved = (collection.interact("update-note", {
+        id: row.id, expectedRevision: current.snapshot.revision, content: contentOf(row.title, "\n", words), color: note.color, format: { kind: "voice", data },
+      }) catch () => undefined)
+      return saved?.target?.id === row.id ? "saved" : "not-saved"
+    },
+    effect cancel() {
+      const current = try Ref.get(runs)
+      try Ref.set(cancelled, current)
+    },
+  }
+})

@@ -1,0 +1,297 @@
+// spec/files/browser.md, "Story: Open Files and see my storage"; spec/files/browser.md, "Coming back to the phone with Files on screen reads it again"; spec/files/browser.md, "Story: Walk my folders and categories"; spec/files/browser.md, "A listing reply publishes only for the read it answers, prunes the selection and never fakes an empty place"; spec/files/trash.md, "Opening Trash and refreshing it start a new read; a reply publishes only for its own read"; spec/files/filter.md, "A refresh of Files runs the filter on screen again under a new query"
+import { type Browser, type CategoryCount, type Event as BrowserEvent, type FolderGroup, Machine as BrowserMachine } from "../../gen/files__browser.effect.vibe"
+import { type Event as TrashEvent, type TrashItem, Machine as TrashMachine } from "../../gen/files__trash.effect.vibe"
+import { type Criteria, Machine as FilterMachine } from "../../gen/files__filter.effect.vibe"
+import type { Access, FileCategory, ListingOutcome, Place, Row, Volume } from "../../gen/files__storage.ts"
+import { AppLifecycle } from "../platform/lifecycle.vibe"
+import { baseName, criteriaMatch, filterTime, kindOf, kindQuery, parentOf, rowKey, toRow } from "./paths.vibe"
+import { type CategoryId, FilesStorage, FilesUnavailable, type WatchTarget } from "./storage.vibe"
+import type * as N from "./native.schema.vibe"
+
+const CHANGE_SETTLE = "150 millis"
+const CATEGORY_IDS: Readonly<Record<FileCategory, CategoryId>> = { Downloads: "downloads", Images: "images", Videos: "videos", Audio: "audio", Documents: "documents" }
+const CATEGORIES: readonly FileCategory[] = ["Downloads", "Images", "Videos", "Audio", "Documents"]
+const DOWNLOAD_FOLDER = "Download"
+
+/** What a storage state answer says about access. */
+export function accessOf(answer: N.StateAnswer | undefined): Access {
+  if (answer === undefined) return "AccessUnavailable"
+  if (answer.status === "denied" || answer.access === "denied") return "AccessDenied"
+  return answer.status === "ready" && answer.access === "granted" ? "AccessGranted" : "AccessUnavailable"
+}
+
+function volumesOf(answer: N.StateAnswer): Volume[] {
+  return (answer.volumes ?? []).map((v) => ({ id: v.id, name: v.name, primary: v.primary, free: Math.max(0, Math.trunc(v.free)), total: Math.max(0, Math.trunc(v.total)) }))
+}
+
+/** The device's per-folder counts of a category, or its listed rows grouped by folder, newest folder first. */
+export function folderGroups(rows: readonly Row[], counted: readonly N.StorageEntry[] | undefined, folders: readonly { folder: string; count: number; latest: N.StorageEntry }[] | undefined): FolderGroup[] {
+  const groups = new Map<string, FolderGroup>()
+  for (const f of folders ?? []) {
+    groups.set(f.folder, { folder: f.folder, label: f.folder ? baseName(f.folder) : "Internal storage", count: f.count,
+      latestKind: kindOf(f.latest.mimeType, f.latest.directory), latestModified: Math.max(0, Math.trunc(f.latest.modified)) })
+  }
+  if (folders === undefined) {
+    for (const row of rows) {
+      const group = groups.get(row.folder)
+      groups.set(row.folder, group === undefined
+        ? { folder: row.folder, label: row.folder ? baseName(row.folder) : "Internal storage", count: 1, latestKind: row.kind, latestModified: row.modified }
+        : { ...group, count: group.count + 1, ...(row.modified > group.latestModified ? { latestKind: row.kind, latestModified: row.modified } : {}) })
+    }
+  }
+  return [...groups.values()].sort((a, b) => b.latestModified - a.latestModified || a.folder.localeCompare(b.folder))
+}
+
+function outcomeOf(status: N.StorageStatus, truncated: boolean | undefined): ListingOutcome {
+  return status !== "ready" ? "Failed" : truncated === true ? "Partial" : "Complete"
+}
+
+function uniqueRows(rows: readonly Row[]): Row[] {
+  const seen = new Set<string>()
+  return rows.filter((row) => !seen.has(row.key) && (seen.add(row.key), true))
+}
+
+/** The device's answer to a filter's criteria: the primary volume's rows that match its text, folder and dates, newest first and each once, and whether the query read everything. */
+export effect function queryFilter(storage: FilesStorage.Shape, criteria: Criteria) {
+  const answer = storage.query({ ...(criteria.text ? { text: criteria.text } : {}), ...(criteria.within ? { folder: criteria.within } : {}), ...kindQuery(criteria.kind),
+    ...(criteria.since ? { from: filterTime(criteria.since) } : {}), ...(criteria.until ? { to: filterTime(criteria.until, true) } : {}) }) catch () => undefined
+  const rows = uniqueRows((answer?.entries ?? []).map((entry) => toRow("", entry)).filter((row) => criteriaMatch(criteria, row)).sort((a, b) => b.modified - a.modified))
+  return { ready: answer?.status === "ready", rows, complete: answer?.truncated === false }
+}
+
+/** The device watch target for a place. */
+export function watchTarget(place: Place): WatchTarget {
+  switch (place.tag) {
+    case "InFolder": return { path: place.path, volume: place.volume }
+    case "InCategory": return { category: CATEGORY_IDS[place.category] }
+    case "Browse": return {}
+    case "InTrash": return {}
+  }
+}
+
+/** The identity of a watch target, so a place already watched is not asked for again. */
+export function watchKey(place: Place): string {
+  switch (place.tag) {
+    case "InFolder": return `folder\n${place.volume}\n${place.path}`
+    case "InCategory": return `category\n${place.category}`
+    case "Browse": return "browse"
+    case "InTrash": return "browse"
+  }
+}
+
+/** Every mounted volume's Trash, newest first: unread when the primary one cannot be read, partial when another cannot. */
+export effect function trashAcross(volumes: readonly Volume[]) {
+  const storage = try FilesStorage
+  const ids = ["", ...volumes.filter((v) => !v.primary).map((v) => v.id)]
+  const lists = try Effect.forEach(ids, effect (volume) => {
+    const answer = storage.trashList(volume) catch () => undefined
+    return answer?.status === "ready" ? (answer.items ?? []).map((item) => trashItemOf(volume, item)) : undefined
+  })
+  const [primary, ...others] = lists
+  if (primary === undefined) return { items: [] as TrashItem[], outcome: "Failed" as ListingOutcome }
+  const items = [primary, ...others].flatMap((list) => list ?? []).sort((a, b) => b.deletedAt - a.deletedAt)
+  return { items, outcome: (others.includes(undefined) ? "Partial" : "Complete") as ListingOutcome }
+}
+
+/** A device Trash entry as a Trash row of `volume`. */
+export function trashItemOf(volume: string, item: N.TrashEntry): TrashItem {
+  return { key: rowKey(volume, item.id), id: item.id, volume, name: item.name, origin: item.origin, directory: item.directory,
+    kind: kindOf(item.mimeType, item.directory), size: Number.isSafeInteger(item.size) && item.size >= 0 ? item.size : -1,
+    deletedAt: Math.max(0, Math.trunc(item.deletedAt)) }
+}
+
+/** The Files view: its place, its reads, its Trash and its selection, over the browser and Trash machines. */
+export service FilesBrowser {
+  readonly changes: Stream.Stream<Browser>
+  get(): Browser!!
+  /** One event of the browser machine, and whether the rules allowed it. */
+  dispatch(event: BrowserEvent): boolean!!
+  /** One event of the Trash machine, and whether the rules allowed it. */
+  dispatchTrash(event: TrashEvent): boolean!!
+  /** The visit while Files is on screen: enter, read, follow the device's changes, and leave when interrupted. */
+  visit(route?: string): void!!
+  refresh(): void!!
+  navigate(place: Place): void!!
+  goUp(): void!!
+  /** Read the access, then the place, for the reads the browser machine numbered last. */
+  read(): void!!
+  /** Ask the owner for storage access, then read again. */
+  requestAccess(): void!!
+}
+
+/** The Files view over its machines and the device's storage. */
+export const layer = Layer.effect(FilesBrowser, effect {
+  const storage = try FilesStorage
+  const held = try BrowserMachine
+  const trash = try TrashMachine
+  const filter = try FilterMachine
+  const watching = try Ref.make("")
+
+  effect function dispatch(event: BrowserEvent) {
+    const sent = held.send(event) catch () => undefined
+    return sent !== undefined
+  }
+  effect function dispatchTrash(event: TrashEvent) {
+    const sent = trash.send(event) catch () => undefined
+    return sent !== undefined
+  }
+
+  effect function watch(place: Place) {
+    const key = watchKey(place)
+    if (key === (try Ref.get(watching))) return
+    try Ref.set(watching, key)
+    try ignore(storage.watch(watchTarget(place)))
+  }
+
+  effect function readTrash(generation: number, volumes: readonly Volume[]) {
+    const { ticket } = try trash.get()
+    const { items, outcome } = try Effect.provideService(trashAcross(volumes), FilesStorage, storage)
+    try dispatchTrash({ type: "trashReply", ticket, items, result: outcome })
+    try dispatch({ type: "listReply", ticket: generation, rows: [], groups: [], result: outcome, count: -1 })
+  }
+
+  effect function readCounts(ticket: number, volumes: readonly Volume[]) {
+    const counts = try Effect.forEach(CATEGORIES, effect (category) => {
+      const answer = storage.category(CATEGORY_IDS[category], true) catch () => undefined
+      const counted: CategoryCount | undefined = answer?.status === "ready" ? { category, count: answer.count ?? answer.entries?.length ?? 0, bytes: answer.bytes ?? -1 } : undefined
+      return counted
+    })
+    const { items, outcome } = try Effect.provideService(trashAcross(volumes), FilesStorage, storage)
+    try dispatch({ type: "countsReply", ticket, counts: counts.filter((c): c is CategoryCount => c !== undefined), trashed: outcome === "Complete" ? items.length : -1 })
+  }
+
+  effect function readPlace(s: Browser) {
+    const ticket = s.generation
+    const place = s.place
+    if (place.tag === "Browse") return try readCounts(ticket, s.volumes)
+    if (place.tag === "InTrash") return try readTrash(ticket, s.volumes)
+    if (place.tag === "InFolder" || place.category === "Downloads") {
+      const path = place.tag === "InFolder" ? place.path : DOWNLOAD_FOLDER
+      const volume = place.tag === "InFolder" ? place.volume : ""
+      const answer = storage.list(path, volume) catch () => undefined
+      if (answer?.status === "missing" && place.tag === "InFolder") {
+        try dispatch({ type: "goUp", parent: parentOf(path) })
+        return try read()
+      }
+      if (answer?.status === "denied") return try deny()
+      const missingDownloads = answer?.status === "missing"
+      const rows = uniqueRows((answer?.entries ?? []).map((entry) => toRow(volume, entry)))
+      const outcome: ListingOutcome = answer === undefined ? "Failed" : missingDownloads ? "Complete" : outcomeOf(answer.status, answer.truncated)
+      return try dispatch({ type: "listReply", ticket, rows: missingDownloads ? [] : rows, groups: [], result: outcome, count: answer?.count ?? -1 })
+    }
+    const answer = storage.category(CATEGORY_IDS[place.category], false) catch () => undefined
+    if (answer?.status === "denied") return try deny()
+    const rows = uniqueRows((answer?.entries ?? []).map((entry) => toRow("", entry)))
+    const grouped = place.category === "Images" || place.category === "Videos"
+    try dispatch({ type: "listReply", ticket, rows, groups: grouped ? folderGroups(rows, answer?.entries, answer?.folders) : [],
+      result: answer === undefined ? "Failed" : outcomeOf(answer.status, answer.truncated), count: answer?.count ?? -1 })
+  }
+
+  effect function deny() {
+    const { accessTicket } = try held.get()
+    try dispatch({ type: "accessReply", ticket: accessTicket, access: "AccessDenied", legacy: false, volumes: [] })
+  }
+
+  effect function read(): void!! {
+    const before = try held.get()
+    const answer = storage.state() catch () => undefined
+    try dispatch({ type: "accessReply", ticket: before.accessTicket, access: accessOf(answer), legacy: answer?.legacy === true, volumes: answer ? volumesOf(answer) : [] })
+    const s = try held.get()
+    if (!s.active || s.access !== "AccessGranted" || s.generation !== before.generation) return
+    try readPlace(s)
+    try watch(s.place)
+  }
+
+  effect function requery() {
+    const f = try filter.get()
+    if (!f.active || f.shown === 0 || f.pending !== 0) return
+    const next = filter.send({ type: "requery" }) catch () => undefined
+    if (next === undefined) return
+    const answer = try queryFilter(storage, next.criteria)
+    filter.send({ type: "queryReply", id: next.shown, ready: answer.ready, rows: answer.rows, complete: answer.complete }) catch () => undefined
+  }
+
+  effect function readAgain(event: "reload" | "returned") {
+    try dispatch({ type: event })
+    const s = try held.get()
+    if (s.place.tag === "InTrash") try dispatchTrash({ type: "refreshTrash" })
+    try read()
+    try requery()
+  }
+
+  effect function refresh() {
+    try readAgain("reload")
+  }
+
+  effect function followReturns() {
+    const found = try Effect.serviceOption(AppLifecycle)
+    if (Option.isNone(found)) return
+    const away = try Ref.make(!(try found.value.get()).foreground)
+    for try (const app of found.value.changes) {
+      const wasAway = try Ref.getAndSet(away, !app.foreground)
+      if (!wasAway || !app.foreground) continue
+      const s = try held.get()
+      if (s.active) try readAgain("returned")
+    }
+  }
+
+  effect function navigate(place: Place) {
+    const before = try held.get()
+    if (!(try dispatch({ type: "navigate", place }))) return
+    if (place.tag === "InTrash") try dispatchTrash({ type: "openTrash" })
+    else if (before.place.tag === "InTrash") try dispatchTrash({ type: "closeTrash" })
+    try read()
+  }
+
+  effect function goUp() {
+    const s = try held.get()
+    if (!(try dispatch({ type: "goUp", parent: parentOf(s.place.tag === "InFolder" ? s.place.path : "") }))) return
+    if (s.place.tag === "InTrash") try dispatchTrash({ type: "closeTrash" })
+    try read()
+  }
+
+  effect function settleChanges() {
+    for try (const _ of Stream.debounce(storage.changes, CHANGE_SETTLE)) {
+      const s = try held.get()
+      if (s.active && s.mutations === 0 && !s.loading) try refresh()
+    }
+  }
+
+  effect function leave() {
+    const s = try held.get()
+    try dispatch({ type: "leaveFiles" })
+    if (s.place.tag === "InTrash") try dispatchTrash({ type: "closeTrash" })
+    filter.send({ type: "leaveFilter" }) catch () => undefined
+    try Ref.set(watching, "")
+    try ignore(storage.unwatch())
+  }
+
+  effect function visit(route?: string) {
+    try dispatch({ type: "enterFiles" })
+    filter.send({ type: "enterFilter" }) catch () => undefined
+    try ensuring(effect {
+      if (route === "downloads") {
+        try read()
+        try navigate({ tag: "InFolder", path: DOWNLOAD_FOLDER, volume: "" })
+      } else try read()
+      try.all [Effect.orElseSucceed(settleChanges(), () => undefined), followReturns()]
+      try never
+    }, leave())
+  }
+
+  return {
+    changes: held.changes,
+    get: () => held.get(),
+    dispatch,
+    dispatchTrash,
+    visit,
+    refresh,
+    navigate,
+    goUp,
+    read,
+    effect requestAccess() {
+      try ignore(storage.requestAccess(false))
+      try refresh()
+    },
+  }
+})

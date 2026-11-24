@@ -1,0 +1,102 @@
+// spec/maps/screen.md, "The screen holds the search, the chosen place, the starting point and the route request"; spec/maps/vocabulary.md, "A Google place is never saved, shared, renamed or copied, and Google guidance is never spoken"
+import type { Offer, ProviderKind } from "../../gen/maps__vocabulary.ts"
+import type { Position } from "./geometry.vibe"
+import type { Coordinate, EventOrigin, Place, Recipient, Route } from "./maps.schema.vibe"
+
+/** The installed provider's coverage, as Cloud described it for this account. */
+export interface CoverageInfo {
+  readonly providerId: string
+  readonly kind: ProviderKind
+  readonly connectionId: string
+  readonly revision: string
+  readonly attribution: string
+  readonly sourceName: string
+  readonly recipients: ReadonlyArray<Recipient>
+  readonly regions: ReadonlyArray<{ readonly name: string; readonly bounds: readonly [number, number, number, number] }>
+  readonly offer: Offer
+  readonly tiles?: { readonly minZoom: number; readonly maxZoom: number; readonly tileSize: number; readonly attribution: string }
+}
+
+/** The place the screen shows under the screen machine's `choiceId`. */
+export interface Shown {
+  readonly id: number
+  readonly label: string
+  readonly coordinate: Coordinate
+  readonly kind: ProviderKind
+  readonly place?: Place
+  readonly savedId?: number
+  readonly providerId?: string
+  readonly providerPlaceId?: string
+}
+
+/** The guidance session's route and the fix it last measured. */
+export interface GuidanceContent {
+  readonly session: number
+  readonly route: Route
+  readonly marks: ReadonlyArray<number>
+  readonly destination: string
+  readonly kind: ProviderKind
+  readonly fix?: Position
+  readonly title: string
+  readonly text: string
+  /** The navigation service confirmed screen-off guidance for this session. */
+  readonly screenOff: boolean
+}
+
+/** Everything a Maps request returned, each kept under the run of the request that fetched it. */
+export interface MapsContentState {
+  readonly coverage?: CoverageInfo
+  readonly results: { readonly run: number; readonly places: ReadonlyArray<Place> }
+  readonly originResults: { readonly run: number; readonly places: ReadonlyArray<Place> }
+  readonly shown?: Shown
+  readonly origin?: { readonly label: string; readonly coordinate: Coordinate }
+  readonly routes: { readonly run: number; readonly routes: ReadonlyArray<Route> }
+  readonly position?: Position
+  readonly guidance?: GuidanceContent
+  readonly message: string
+  readonly copyright: string
+  readonly viewport?: { readonly center: Coordinate; readonly zoom: number }
+  readonly searchNear?: Coordinate
+  /** Where the quiet fix on open centred the map, while nothing was chosen or listed. */
+  readonly centerOn?: Coordinate
+  readonly recent: ReadonlyArray<string>
+  readonly eventOrigin?: EventOrigin
+  /** Whether guidance voice is on. */
+  readonly voiceOn: boolean
+  /** The name being typed for the shown place under its `id`, while its rename field is open. */
+  readonly renaming?: { readonly id: number; readonly text: string }
+  readonly nextId: number
+}
+
+/** Nothing fetched yet. */
+export const emptyContent: MapsContentState = {
+  results: { run: 0, places: [] }, originResults: { run: 0, places: [] }, routes: { run: 0, routes: [] },
+  message: "", copyright: "", recent: [], voiceOn: true, nextId: 1,
+}
+
+/** What Maps fetched for the screen; nothing here is stored, so it never outlives the app. */
+export service MapsContent {
+  readonly changes: Stream.Stream<MapsContentState>
+  get(): MapsContentState!!
+  update(change: (content: MapsContentState) => MapsContentState): void!!
+  /** A fresh id for a place the screen shows. */
+  issue(): number!!
+}
+
+/** Content in memory, starting empty. */
+export const contentLayer = Layer.effect(MapsContent, effect {
+  const held = try SubscriptionRef.make(emptyContent)
+  return {
+    changes: SubscriptionRef.changes(held),
+    get: () => SubscriptionRef.get(held),
+    update: (change: (content: MapsContentState) => MapsContentState) => SubscriptionRef.update(held, change),
+    issue: () => SubscriptionRef.modify(held, (content) => [content.nextId, { ...content, nextId: content.nextId + 1 }] as const),
+  }
+})
+
+/** Recent searches: newest first, five at most, no case-insensitive repeat, never coordinates or over 300 characters. */
+export function remembered(recent: ReadonlyArray<string>, query: string, coordinates: boolean): ReadonlyArray<string> {
+  const text = query.trim()
+  if (!text || text.length > 300 || coordinates) return recent
+  return [text, ...recent.filter((item) => item.toLowerCase() !== text.toLowerCase())].slice(0, 5)
+}

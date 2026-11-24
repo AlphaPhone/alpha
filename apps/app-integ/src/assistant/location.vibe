@@ -1,0 +1,133 @@
+// spec/assistant/context.md, "Story: Let my agent know where I am when I allow it"; spec/assistant/context.md, "A turn carries the location only with the setting on, the permission granted, a screen that is not private and a peer that takes it"; spec/assistant/context.md, "The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again"
+import type { LocationObservation } from "@elizaos/agent/client"
+import { Machine as LocatorMachine, type Event as LocatorEvent, canLookUp, gpsCurrent, needsRead, networkUnchangedS, platformMaxAgeMs, platformTimeoutMs, precision, sendsLocation, usesNetwork } from "../../gen/assistant__context.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { Preferences } from "../settings/preferences.vibe"
+import { NetworkLocation, type NetworkPosition } from "./network-location.vibe"
+import { LocationPermission, PositionFix } from "./payloads.schema.vibe"
+
+/** The location a turn carries, as the `location` of the upstream `Observation` (`LocationObservation`). */
+export type TurnLocation = LocationObservation
+
+const plugin = "ElizaLocation"
+
+/** The phone's last known location for chat turns, read only with consent and never asked for; a turn never waits for it. */
+export service PhoneLocation {
+  /** Settings › Privacy › Location for Alpha changed; the next turn also reads it from Preferences. */
+  setEnabled(on: boolean): void!!
+  /** Read the permission and, when due, one GPS fix, shared with any read already in flight. */
+  refresh(): void!!
+  /** The cached location for a turn from a screen that is or is not observed, to a peer that does or does not take it; at most starts one background read. */
+  forTurn(observed: boolean, peerTakesIt: boolean): (TurnLocation | undefined)!!
+  /** The resident connection's warm-up, off the messaging path: wait for the GPS read, and look up the network position once when it left nothing. */
+  warm(): void!!
+  static readonly key = "alpha/assistant/PhoneLocation"
+}
+
+function rounded(value: number): number {
+  return Math.round(value * precision) / precision
+}
+
+function observed(latitude: number, longitude: number, accuracy: number, timestamp: number): TurnLocation {
+  return { latitude: rounded(latitude), longitude: rounded(longitude), accuracyMeters: Math.max(0, Math.round(accuracy)), capturedAt: Math.max(0, Math.round(timestamp)) }
+}
+
+/** The phone location over `ElizaLocation`, the shared network position and the Locator machine. */
+export const locationLayer = Layer.effect(PhoneLocation, effect {
+  const native = try Native
+  const locator = try LocatorMachine
+  const preferences = try Preferences
+  const network = try NetworkLocation
+  const reading = try Semaphore.make(1)
+  let gps: TurnLocation | undefined
+  let adopted: NetworkPosition | undefined
+  let clockAt = try Clock.currentTimeMillis
+  let refreshing = false
+  const send = (event: LocatorEvent) => map(locator.send(event), () => undefined) catch () => undefined
+  effect function tick() {
+    const now = try Clock.currentTimeMillis
+    const seconds = Math.floor((now - clockAt) / 1000)
+    if (seconds < 1) return
+    clockAt += seconds * 1000
+    try send({ type: "elapse", seconds })
+  }
+  effect function forget() {
+    gps = undefined
+    adopted = undefined
+  }
+  effect function consent() {
+    const on = try preferences.sharesLocation()
+    if ((try locator.get()).enabled !== on) try send({ type: "toggle", on })
+    if (!on) try forget()
+    return on
+  }
+  effect function permission() {
+    if (!(try native.available(plugin))) return false
+    const raw = native.invoke(plugin, "checkPermissions") catch () => undefined
+    const read = Schema.decodeUnknownOption(LocationPermission)(raw)
+    return Option.isSome(read) && read.value.location === "granted"
+  }
+  effect function adopt() {
+    const answer = try network.cached()
+    if (answer === undefined || (adopted !== undefined && answer.timestamp <= adopted.timestamp)) return
+    const now = try Clock.currentTimeMillis
+    const ageS = Math.max(0, Math.floor((now - answer.timestamp) / 1000))
+    if (ageS > networkUnchangedS) return
+    try send({ type: "networkArrives", ageS })
+    adopted = answer
+  }
+  effect function readGps() {
+    if (!(try consent())) return
+    const granted = try permission()
+    if ((try locator.get()).granted !== granted) try send({ type: "permissionChanges", granted })
+    if (!granted) {
+      try forget()
+      return
+    }
+    try tick()
+    if (!needsRead(try locator.get())) return
+    try send({ type: "read" })
+    const raw = timeout(native.invoke(plugin, "getCurrentPosition", { accuracy: "high", maxAge: platformMaxAgeMs, timeout: platformTimeoutMs }), platformTimeoutMs) catch () => undefined
+    const fix = Schema.decodeUnknownOption(PositionFix)(raw)
+    if (Option.isNone(fix) || !(try locator.get()).enabled) return
+    const now = try Clock.currentTimeMillis
+    const ageS = Math.max(0, Math.floor((now - fix.value.timestamp) / 1000))
+    if (ageS > platformMaxAgeMs / 1000) return
+    gps = observed(fix.value.coords.latitude, fix.value.coords.longitude, fix.value.coords.accuracy, fix.value.timestamp)
+    try send({ type: "fixArrives", ageS })
+  }
+  const refresh = () => Semaphore.withPermit(reading, readGps())
+  effect function background() {
+    if (refreshing) return
+    refreshing = true
+    try ensuring(refresh(), sync(() => { refreshing = false }))
+  }
+  return {
+    setEnabled: (on: boolean) => effect {
+      if ((try locator.get()).enabled !== on) try send({ type: "toggle", on })
+      if (!on) try forget()
+    },
+    refresh,
+    forTurn: (observedScreen: boolean, peerTakesIt: boolean) => effect {
+      if (!(try consent())) return undefined
+      try tick()
+      try adopt()
+      fork.detached background()
+      const state = try locator.get()
+      if (!sendsLocation(state, observedScreen, peerTakesIt)) return undefined
+      if (gpsCurrent(state)) return gps
+      if (!usesNetwork(state)) return undefined
+      const answer = try network.cached()
+      return answer === undefined ? undefined : observed(answer.latitude, answer.longitude, answer.accuracyMeters, answer.timestamp)
+    },
+    warm: () => effect {
+      try refresh()
+      try tick()
+      try adopt()
+      if (!canLookUp(try locator.get(), true)) return
+      try send({ type: "lookUp", warm: true })
+      try network.locate()
+      try adopt()
+    },
+  }
+})

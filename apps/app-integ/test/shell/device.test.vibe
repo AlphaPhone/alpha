@@ -1,0 +1,221 @@
+// spec/shell/permissions.md, "Back leaves a review and finishes the Ready card; on a first-run step it does nothing"; spec/shell/permissions.md, "An allowed step says how much Android allowed, and a browser request left off says so"; spec/shell/navigation.md, "Back closes the topmost layer first, then Home's launcher layers, then the assistant, then the app"; spec/shell/navigation.md, "Booting brings back the app and its history without the old page's layers"; spec/assistant/index.md, "The assistant observes the screen only while it is visible, unlocked and not private"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/shell/routes.md, "Story: Let only my own app reach my agent's records"; spec/shell/navigation.md, "Hiding the page retires what the owner was in the middle of"
+// @vitest-environment happy-dom
+import { assert, describe, it } from "@effect/vitest"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { Machine as NavigationMachine } from "../../gen/shell__navigation.effect.vibe"
+import { Machine as PermissionsMachine } from "../../gen/shell__permissions.effect.vibe"
+import { backOf, grantOf, noticeAfter } from "../../gen/shell__permissions.effect.vibe"
+import { CrashJournal } from "../../src/platform/crash-journal.vibe"
+import { DeviceStorage } from "../../src/platform/device-storage.vibe"
+import { buildInfo, fakeNative, fakeResident } from "../../src/platform/layers.vibe"
+import ownerRoutes from "../../src/platform/owner-routes.json" with { type: "json" }
+import { memoryStore } from "../../src/platform/storage.vibe"
+import { comparePeer, learnPeer, statusReadOf } from "../../src/shell/assistantHost.vibe"
+import { Foreground } from "../../src/shell/foreground.vibe"
+import { NAVIGATION_KEY, layer as shell } from "../../src/shell/layer.vibe"
+import { Navigation } from "../../src/shell/navigation.vibe"
+import { serializeOwnerRouteTable } from "../../src/shell/ownerRoutes.vibe"
+import { Permissions } from "../../src/shell/permissions.vibe"
+
+const journal = Layer.succeed(CrashJournal, {
+  record: () => succeed(undefined),
+  recordInference: () => succeed(undefined),
+  read: () => succeed({ entries: [], exitHistory: false }),
+  clear: () => succeed(undefined),
+})
+const resident = fakeResident({ "GET /api/automations": { automations: [] } })
+const signedIn = { account: true, ownKeys: false, signingIn: false, busy: false, residentStarting: false, background: false, created: false }
+
+let closedAssistant = 0
+function phone(locked: boolean, assistant = false) {
+  return fakeNative({
+    ...(assistant ? { ElizaSystem: { getLaunchInfo: () => ({ assistant: true }) } } : {}),
+    Agent: { launchSurface: () => ({ assistant }), takeInvocation: () => ({ assistant, invocation: assistant ? "assist" : null, locked }) },
+    DailyApps: {
+      closeAssistant: () => { closedAssistant = closedAssistant + 1; return { closed: true } },
+      checkPermissions: () => ({ camera: "granted" }),
+      requestPermissions: () => ({}),
+    },
+    AlphaDevice: { openSettings: () => ({}), recommendedTimeout: () => ({ timeoutMs: 5000 }) },
+    AlphaNotifications: { status: () => ({ permissionGranted: true, appEnabled: true }) },
+    AlphaVoiceCloud: { checkPermissions: () => ({ microphone: "granted" }) },
+    ElizaLocation: { checkPermissions: () => ({ location: "granted", accuracy: "approximate" }) },
+    AlphaCalendar: { checkPermissions: () => ({ calendar: "granted" }) },
+    AlphaPhotoLibrary: { scope: () => ({ scope: "selected", locked: false }) },
+    AlphaFiles: { storageState: () => ({ access: "denied" }), storageRequestAccess: () => ({}) },
+    DeviceApps: { platformCapabilities: () => ({ startupPermissionDefaults: false }) },
+  })
+}
+const onPhone = (locked: boolean, assistant = false) => Layer.mergeAll(phone(locked, assistant), buildInfo({ variant: "launcher" }), resident, journal)
+
+describe("The walkthrough's own Back (spec/shell/permissions.md, \"Back leaves a review and finishes the Ready card; on a first-run step it does nothing\")", () => {
+  it.effect("Back does nothing on a first-run step and leaves a review from Settings (spec/shell/permissions.md, \"Back leaves a review and finishes the Ready card; on a first-run step it does nothing\")", () => effect {
+    provide memoryStore, onPhone(false) {
+      provide shell {
+        const permissions = try Permissions
+        const machine = try PermissionsMachine
+        const navigation = try Navigation
+        try permissions.connection(signedIn)
+        try TestClock.adjust("1 millis")
+        const before = try machine.get()
+        const tookFirst = try navigation.back()
+        try TestClock.adjust("1 millis")
+        const held = try machine.get()
+        try permissions.reopen(3)
+        try TestClock.adjust("1 millis")
+        const reviewing = backOf(try machine.get())
+        try navigation.back()
+        try TestClock.adjust("1 millis")
+        const after = try machine.get()
+        try Effect.try(() => assert.deepStrictEqual(
+          [before.phase, tookFirst, held.phase, held.progress, reviewing, after.phase, after.target],
+          ["PhaseWalkthrough", true, "PhaseWalkthrough", before.progress, "BackCloses", "PhaseHome", -1],
+        ))
+      }
+    }
+  })
+})
+
+describe("How much Android allowed (spec/shell/permissions.md, \"An allowed step says how much Android allowed, and a browser request left off says so\")", () => {
+  it.effect("an approximate location and selected photos are said as Android reported them, and only a browser says Still off (spec/shell/permissions.md, \"An allowed step says how much Android allowed, and a browser request left off says so\")", () => effect {
+    provide memoryStore, onPhone(false) {
+      provide shell {
+        const machine = try PermissionsMachine
+        const state = try machine.get()
+        const location = state.keys.indexOf("PermLocation")
+        const photos = state.keys.indexOf("PermPhotos")
+        const files = state.keys.indexOf("PermFiles")
+        try Effect.try(() => assert.deepStrictEqual(
+          [grantOf(state, location), grantOf(state, photos), grantOf(state, files), noticeAfter(false, "AccessSettings"), noticeAfter(false, "AccessUnavailable"), noticeAfter(true, "AccessSettings")],
+          ["GrantApproximate", "GrantSelected", "GrantNone", "NoticeStillOff", "NoticeUnconfirmed", "NoCheckNotice"],
+        ))
+      }
+    }
+  })
+})
+
+describe("The keyguard and the assistant surface (spec/assistant/index.md, \"The assistant observes the screen only while it is visible, unlocked and not private\")", () => {
+  it.effect("the foreground reports Android's keyguard, and the browser has none (spec/assistant/index.md, \"The assistant observes the screen only while it is visible, unlocked and not private\")", () => effect {
+    const locked = try effect {
+      provide memoryStore, onPhone(true) {
+        provide shell { return (try (try Foreground).get()).locked }
+      }
+    }
+    const unlocked = try effect {
+      provide memoryStore, onPhone(false) {
+        provide shell { return (try (try Foreground).get()).locked }
+      }
+    }
+    const browser = try effect {
+      provide memoryStore, Layer.mergeAll(fakeNative({}), buildInfo({ variant: "browser" }), resident, journal) {
+        provide shell { return (try (try Foreground).get()).locked }
+      }
+    }
+    try Effect.try(() => assert.deepStrictEqual([locked, unlocked, browser], [true, false, false]))
+  })
+
+  it.effect("Back from the assistant surface at rest finishes Android's assistant activity (spec/shell/navigation.md, \"Back closes the topmost layer first, then Home's launcher layers, then the assistant, then the app\")", () => effect {
+    closedAssistant = 0
+    provide memoryStore, onPhone(false, true) {
+      provide shell {
+        const navigation = try Navigation
+        const machine = try NavigationMachine
+        const host = (try machine.get()).host
+        const surface = (try (try Foreground).get()).assistantSurface
+        try navigation.back()
+        try TestClock.adjust("1 millis")
+        const now0 = try machine.get()
+        try Effect.try(() => assert.deepStrictEqual([host, surface, now0.ended, closedAssistant], ["AssistantSurface", true, true, 1]))
+      }
+    }
+  })
+
+  it.effect("only Alpha's own assistant activity is the assistant surface, whatever action a caller set (spec/shell/navigation.md, \"Hiding the page retires what the owner was in the middle of\")", () => effect {
+    const hostWith = (table: Parameters<typeof fakeNative>[0]) => effect {
+      provide memoryStore, Layer.mergeAll(fakeNative(table), buildInfo({ variant: "launcher" }), resident, journal) {
+        provide shell { return (try (try NavigationMachine).get()).host }
+      }
+    }
+    const callerAssist = try hostWith({ ElizaSystem: { getLaunchInfo: () => ({ assistant: true }) }, Agent: { launchSurface: () => ({ assistant: false }) } })
+    const ownSurface = try hostWith({ ElizaSystem: { getLaunchInfo: () => ({ assistant: false }) }, Agent: { launchSurface: () => ({ assistant: true }) } })
+    const withoutAgent = try hostWith({ ElizaSystem: { getLaunchInfo: () => ({ assistant: true }) } })
+    try Effect.try(() => assert.deepStrictEqual([callerAssist === "AssistantSurface", ownSurface, withoutAgent], [false, "AssistantSurface", "AssistantSurface"]))
+  })
+
+  it.effect("the keyguard is read without taking the invocation, and follows each change Android posts (spec/shell/navigation.md, \"Hiding the page retires what the owner was in the middle of\")", () => effect {
+    let taken = 0
+    const agent = { keyguard: () => ({ locked: false }), takeInvocation: () => { taken = taken + 1; return { assistant: false, locked: true } } }
+    const read = try effect {
+      provide memoryStore, Layer.mergeAll(fakeNative({ Agent: agent }), buildInfo({ variant: "launcher" }), resident, journal) {
+        provide shell { return (try (try Foreground).get()).locked }
+      }
+    }
+    const posted = try effect {
+      provide memoryStore, Layer.mergeAll(fakeNative({ Agent: agent }, { "Agent:keyguardChanged": [{ locked: true }] }), buildInfo({ variant: "launcher" }), resident, journal) {
+        provide shell {
+          try TestClock.adjust("1 millis")
+          return (try (try Foreground).get()).locked
+        }
+      }
+    }
+    try Effect.try(() => assert.deepStrictEqual([read, posted, taken], [false, true, 0]))
+  })
+})
+
+describe("A kept navigation that is not a state (spec/shell/navigation.md, \"Booting brings back the app and its history without the old page's layers\")", () => {
+  it.effect("is held for review and, where its copy cannot be kept apart, never written over, and the phone starts on Home (spec/platform/storage.md, \"A stored value that is not a state is held for review and never written over\")", () => effect {
+    let held: string[] = []
+    const storage = Layer.succeed(DeviceStorage, { hold: (key: string) => sync(() => { held = [...held, key]; return false }) } as never)
+    provide memoryStore, storage, Layer.mergeAll(fakeNative({}), buildInfo({ variant: "browser" }), resident, journal) {
+      const store = try KeyValueStore.KeyValueStore
+      try store.set(NAVIGATION_KEY, "{not a state")
+      const app = try effect {
+        provide shell {
+          const navigation = try Navigation
+          try navigation.open("notes")
+          return (try navigation.get()).app
+        }
+      }
+      const kept = try store.get(NAVIGATION_KEY)
+      try Effect.try(() => assert.deepStrictEqual([held, app, Option.isOption(kept) ? Option.getOrUndefined(kept) : kept], [[NAVIGATION_KEY], "notes", "{not a state"]))
+    }
+  })
+  it.effect("is removed once its copy is kept apart, and the phone keeps its new navigation (spec/platform/storage.md, \"A stored value that is not a state is held for review and never written over\")", () => effect {
+    let held: string[] = []
+    const storage = Layer.succeed(DeviceStorage, { hold: (key: string) => sync(() => { held = [...held, key]; return true }) } as never)
+    provide memoryStore, storage, Layer.mergeAll(fakeNative({}), buildInfo({ variant: "browser" }), resident, journal) {
+      const store = try KeyValueStore.KeyValueStore
+      try store.set(NAVIGATION_KEY, "{not a state")
+      const app = try effect {
+        provide shell {
+          const navigation = try Navigation
+          try navigation.open("notes")
+          return (try navigation.get()).app
+        }
+      }
+      const kept = try store.get(NAVIGATION_KEY)
+      const text = Option.isOption(kept) ? Option.getOrUndefined(kept) : kept
+      try Effect.try(() => assert.deepStrictEqual([held, app, typeof text === "string" && text !== "{not a state"], [[NAVIGATION_KEY], "notes", true]))
+    }
+  })
+})
+
+describe("Optional context fields (spec/assistant/context.md, \"A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn\")", () => {
+  it.effect("the instance learned once is the only one that takes optional fields, and a failed learn may be tried again", () => effect {
+    // spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"
+    const first = learnPeer({ tag: "NotLearned" }, statusReadOf({ serverInstanceId: "process-1" }))
+    const same = comparePeer(first, statusReadOf({ serverInstanceId: "process-1" }))
+    const moved = comparePeer(first, statusReadOf({ serverInstanceId: "process-2" }))
+    const never = learnPeer(moved, statusReadOf({ serverInstanceId: "process-2" }))
+    const retried = learnPeer(learnPeer({ tag: "NotLearned" }, { tag: "ReadFailed" }), statusReadOf({ serverInstanceId: "process-3" }))
+    const nameless = learnPeer({ tag: "NotLearned" }, statusReadOf({}))
+    try Effect.try(() => assert.deepStrictEqual(
+      [same.tag, moved.tag, never.tag, retried.tag, nameless.tag],
+      ["SamePeer", "OrdinaryOnly", "OrdinaryOnly", "SamePeer", "OrdinaryOnly"],
+    ))
+  })
+})
+
+it.effect("Let only my own app reach my agent's records: the renderer's table is the asset Android ships (spec/shell/routes.md, \"Story: Let only my own app reach my agent's records\")", () => effect {
+  try Effect.try(() => assert.deepStrictEqual(JSON.parse(serializeOwnerRouteTable()), ownerRoutes))
+})

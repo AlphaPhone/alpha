@@ -1,0 +1,265 @@
+// spec/files/proposal.md, "Story: Offer the agent only what this phone can do"; spec/files/proposal.md, "A move or trash changes only files still as they were reviewed"; spec/files/proposal.md, "Story: Review the actual files before anything changes"; spec/files/proposal.md, "Story: Let the agent show me files without changing them"; spec/files/proposal.md, "Story: Carry out the change I approved, exactly"; spec/files/filter.md, "Story: Let the agent show me the files I asked about"; spec/files/filter.md, "A position names a row of the results on screen, counting from one"
+import { type AgentOp, type AgentView, type Proposal, type Target, Machine as ProposalMachine } from "../../gen/files__proposal.effect.vibe"
+import { type Criteria, type FilterKind, Machine as FilterMachine, rowAt } from "../../gen/files__filter.effect.vibe"
+import { Machine as BrowserMachine } from "../../gen/files__browser.effect.vibe"
+import { rowDone } from "../../gen/files__mutations.effect.vibe"
+import type { Row } from "../../gen/files__storage.ts"
+import { baseName, parentOf, rowKey, toRow } from "./paths.vibe"
+import { FilesStorage } from "./storage.vibe"
+import { FilesBrowser, accessOf, queryFilter } from "./browser.vibe"
+import { FilesPreview } from "./preview.vibe"
+import { FILES_CAPABILITY, FILES_SHOWN_TARGET_CAPABILITY, FilesOperationRefused, filesOperationAdmitted, filesShownTarget, type FilesAgentOperation, type FilesAgentRunner, type FilesPathOperation } from "@elizaos/plugin-files/contract"
+
+export { FILES_CAPABILITY, FILES_SHOWN_TARGET_CAPABILITY, describeFilesOperation, decodeFilesOperation, filesToolSurface } from "@elizaos/plugin-files/contract"
+
+/** What the agent is told of an operation's end. */
+export interface AgentResult { readonly status: "succeeded" | "failed"; readonly summary: string }
+
+/** Where the owner is when the operation arrives. */
+export interface AgentContext { readonly view: "home" | "files" | "other"; readonly sensitive: boolean; readonly foreground: boolean }
+
+/** A review the phone can show, with the exact paths and the identities it read, or why it cannot. */
+export type Prepared =
+  | { readonly kind: "ready"; readonly op: FilesAgentOperation }
+  | { readonly kind: "notAvailable"; readonly notice: string }
+  | { readonly kind: "failed"; readonly summary: string }
+
+const KINDS: Readonly<Record<string, FilterKind>> = { image: "ImageKind", video: "VideoKind", audio: "AudioKind", document: "DocumentKind", pdf: "PdfKind", folder: "FolderKind" }
+const OPS: Readonly<Record<FilesAgentOperation["type"], AgentOp>> = {
+  files_filter: "OpFilter", files_open: "OpOpen", files_share: "OpShare", files_folder_create: "OpFolderCreate", files_move: "OpMove", files_trash: "OpTrash",
+}
+
+const count = (n: number) => (n === 1 ? "1 item" : `${n} items`)
+const FILES_FORWARD = "3 seconds"
+
+/** A filter operation's criteria in the spec's terms. */
+export function criteriaOf(op: Extract<FilesAgentOperation, { type: "files_filter" }>): Criteria {
+  return { text: op.text ?? "", kind: op.kind ? KINDS[op.kind] ?? "AnyKind" : "AnyKind", within: op.folder ?? "", since: op.from ?? "", until: op.to ?? "" }
+}
+
+function targetOf(op: FilesAgentOperation): Target {
+  return "shown" in op ? "ByShown" : "ByPaths"
+}
+
+/** The agent's Files operations on this phone. */
+export service FilesAgent {
+  readonly proposals: Stream.Stream<Proposal>
+  /** The capabilities the phone advertises to an agent that offers `peer`. */
+  advertise(peer: readonly string[]): readonly string[]!!
+  /** Build the review card: positions become the exact paths shown, and a move or trash binds each file's identity. */
+  prepare(op: FilesAgentOperation, context: AgentContext): Prepared!!
+  /** Run an operation the owner approved, or a filter or open directly; `bringForward` shows Files first. */
+  run(op: FilesAgentOperation, context: AgentContext, bringForward: boolean!!): AgentResult!!
+  /** The runner the assistant's coordinator registers while Files is installed. */
+  readonly runner: FilesAgentRunner
+}
+
+/** The agent's Files operations over the proposal and filter machines and the Files view. */
+export const layer = Layer.effect(FilesAgent, effect {
+  const storage = try FilesStorage
+  const files = try FilesBrowser
+  const preview = try FilesPreview
+  const proposal = try ProposalMachine
+  const filter = try FilterMachine
+  const view = try BrowserMachine
+  const send = (event: Parameters<typeof proposal.send>[0]) => ignore(proposal.send(event))
+  const negotiated = try Ref.make<readonly string[]>([])
+
+  effect function scene(context: AgentContext) {
+    const s = try view.get()
+    const state = storage.state() catch () => undefined
+    const shown = s.active && context.view === "files"
+    const agentView: AgentView = shown ? "OnFiles" : context.view === "home" ? "OnHome" : "OnOther"
+    const primary = !(s.place.tag === "InFolder" && s.place.volume !== "" && s.place.volume !== "primary")
+    try send({ type: "scene", view: agentView, sensitive: context.sensitive, foreground: context.foreground, primary, granted: accessOf(state) === "AccessGranted" })
+  }
+
+  effect function shownPaths(shown: readonly number[]) {
+    const f = try filter.get()
+    const rows = shown.map((position) => rowAt(f, position))
+    return rows.some((row) => row.key === "") ? undefined : { paths: rows.map((row) => row.path), generation: f.generation }
+  }
+
+  effect function prepare(op: FilesAgentOperation, context: AgentContext) {
+    try send({ type: "settleProposal" })
+    try scene(context)
+    const admitted = filesOperationAdmitted(op, try Ref.get(negotiated))
+    const proposed = proposal.send({ type: "propose", op: OPS[op.type], target: targetOf(op) }) catch () => undefined
+    if (!admitted || proposed === undefined || proposed.outcome === "NotAvailable") return { kind: "notAvailable", notice: "This action isn't available on this phone." } satisfies Prepared
+    let ready: FilesAgentOperation = op
+    if (filesShownTarget(op)) {
+      const resolved = try shownPaths(op.shown)
+      const after = resolved ? (proposal.send({ type: "resolveShown" }) catch () => undefined) : undefined
+      if (resolved === undefined || after === undefined) return { kind: "failed", summary: "Files does not show those items." } satisfies Prepared
+      ready = op.type === "files_move" ? { type: "files_move", paths: resolved.paths, dest: op.dest } : op.type === "files_trash" ? { type: "files_trash", paths: resolved.paths } : { type: "files_share", paths: resolved.paths }
+    }
+    const moving = ready
+    if (moving.type === "files_move" || moving.type === "files_trash") {
+      if (!("paths" in moving)) return { kind: "failed", summary: "Files does not show those items." } satisfies Prepared
+      const paths = moving.paths
+      const answer = storage.reviewedIdentities(paths, "") catch () => undefined
+      const reviewed = answer?.status === "ready" ? answer.reviewed : undefined
+      const bound = reviewed && reviewed.length === paths.length ? (proposal.send({ type: "bindIdentities" }) catch () => undefined) : undefined
+      if (reviewed === undefined || bound === undefined) return { kind: "failed", summary: "Open Files on primary storage to review these items." } satisfies Prepared
+      ready = { ...moving, reviewed }
+    }
+    return { kind: "ready", op: ready } satisfies Prepared
+  }
+
+  effect function filterNow(op: Extract<FilesAgentOperation, { type: "files_filter" }>) {
+    const criteria = criteriaOf(op)
+    const begun = filter.send({ type: "beginFilter", criteria }) catch () => undefined
+    const id = begun?.serial ?? 0
+    if (begun === undefined || begun.pending !== id) return { status: "failed", summary: "Files is unavailable." } satisfies AgentResult
+    const state = storage.state() catch () => undefined
+    const admitted = filter.send({ type: "accessReply", id, granted: accessOf(state) === "AccessGranted" }) catch () => undefined
+    if (admitted?.shown !== id) {
+      const settled = admitted?.ops.find((o) => o.id === id)
+      try ignore(filter.send({ type: "forgetFilter", id }))
+      return { status: "failed", summary: settled?.result === "FilterAccessNeeded" ? "Nothing was changed because Files needs storage access." : "Files could not read this filter." } satisfies AgentResult
+    }
+    try ignore(files.dispatch({ type: "endSelecting" }))
+    if ((try view.get()).place.tag !== "Browse") try files.navigate({ tag: "Browse" })
+    if ((try preview.get()).shown) try preview.close(false)
+    const answer = try queryFilter(storage, criteria)
+    const after = filter.send({ type: "queryReply", id, ready: answer.ready, rows: answer.rows, complete: answer.complete }) catch () => undefined
+    const settled = after?.ops.find((o) => o.id === id)
+    if (settled?.result === "FilterShown") return { status: "succeeded", summary: `Showing ${count(settled.count)} in Files.` } satisfies AgentResult
+    if (settled?.result === "FilterIncomplete") return { status: "failed", summary: `Files could not finish this search and shows ${count(settled.count)} from the scanned folders.` } satisfies AgentResult
+    return { status: "failed", summary: "Files could not read this filter." } satisfies AgentResult
+  }
+
+  effect function listedRow(path: string): (Row | null | undefined)!! {
+    const answer = storage.list(parentOf(path), "") catch () => undefined
+    const entry = answer?.status === "ready" ? (answer.entries ?? []).find((e) => e.path === path) : undefined
+    if (entry !== undefined) return toRow("", entry)
+    return answer?.status === "missing" || (answer?.status === "ready" && answer.truncated !== true) ? null : undefined
+  }
+
+  effect function openNow(op: Extract<FilesAgentOperation, { type: "files_open" }>) {
+    const before = try filter.get()
+    const row = "shown" in op ? rowAt(before, op.shown) : undefined
+    if ("shown" in op && (row === undefined || row.key === "")) return { status: "failed", summary: "Files does not show that item." } satisfies AgentResult
+    const path = row?.path ?? ("path" in op ? op.path : "")
+    const listed = row ?? (try listedRow(path))
+    if (listed === null) {
+      try send({ type: "openFile", found: false })
+      return { status: "failed", summary: "That file is not there." } satisfies AgentResult
+    }
+    if (listed !== undefined && listed.kind === "KindFolder") {
+      try files.navigate({ tag: "InFolder", path: listed.path, volume: "" })
+      try send({ type: "openFile", found: true })
+      return { status: "succeeded", summary: "Opened the folder in Files." } satisfies AgentResult
+    }
+    const target = listed ?? toRow("", { path, name: baseName(path), directory: false, mimeType: "application/octet-stream", size: -1, modified: 0 })
+    const opened = try preview.openRow({ ...target, key: rowKey("", path) })
+    const now = try filter.get()
+    const stillShown = !("shown" in op) || (now.generation === before.generation && now.shown === before.shown && now.pending === 0)
+    if (!stillShown) try send({ type: "shownChange" })
+    try send({ type: "openFile", found: opened.kind === "shown" })
+    if (opened.kind !== "shown") return { status: "failed", summary: opened.kind === "stale" ? "Nothing was opened because Files changed." : "That file is not there." } satisfies AgentResult
+    return stillShown ? { status: "succeeded", summary: "Opened the file in Files." } satisfies AgentResult : { status: "failed", summary: "The file preview is no longer open." } satisfies AgentResult
+  }
+
+  effect function changeNow(op: FilesAgentOperation) {
+    if (op.type === "files_share" && "paths" in op) {
+      const answer = storage.share(op.paths, "") catch () => undefined
+      try send({ type: "share", opened: answer?.status === "opened" })
+      return answer?.status === "opened" ? { status: "succeeded", summary: "Opened the share sheet." } satisfies AgentResult : { status: "failed", summary: "Sharing could not open." } satisfies AgentResult
+    }
+    if (op.type === "files_folder_create") {
+      const answer = storage.createFolder(op.parent, op.name, "") catch () => undefined
+      try send({ type: "createFolder", ok: answer?.status === "ready" })
+      try files.refresh()
+      return answer?.status === "ready" ? { status: "succeeded", summary: `Created ${answer.path ?? op.name}.` } satisfies AgentResult : { status: "failed", summary: "The folder was not created." } satisfies AgentResult
+    }
+    if ((op.type === "files_move" || op.type === "files_trash") && "paths" in op && op.reviewed) {
+      const answer = (op.type === "files_move" ? storage.transfer(op.paths, op.dest, false, "", op.reviewed) : storage.trash(op.paths, "", op.reviewed)) catch () => undefined
+      const batchOp = op.type === "files_move" ? "MoveFiles" : "TrashFiles"
+      const done = answer?.status === "ready" ? (answer.outcomes ?? []).filter((row) => op.paths.includes(row.path) && rowDone(batchOp, row.status === "moved" ? "RowMoved" : row.status === "trashed" ? "RowTrashed" : "RowChanged", (row.to ?? "") !== "")).length : 0
+      if (done === 0) try ignore(proposal.send({ type: "filesChange" }))
+      try ignore(proposal.send({ type: "transfer" }))
+      try files.refresh()
+      if (answer?.status !== "ready") return { status: "failed", summary: "Nothing was changed." } satisfies AgentResult
+      return { status: done ? "succeeded" : "failed", summary: op.type === "files_move" ? `Moved ${done} of ${op.paths.length}.` : `Moved ${done} of ${op.paths.length} to Trash.` } satisfies AgentResult
+    }
+    return { status: "failed", summary: "Nothing changed because these files changed after review." } satisfies AgentResult
+  }
+
+  effect function runOwned(op: FilesPathOperation, openFiles?: () => boolean!!) {
+    const s = try view.get()
+    const context: AgentContext = { view: s.active ? "files" : "other", sensitive: false, foreground: true }
+    if (op.type !== "files_filter" && op.type !== "files_open") {
+      const prepared = try prepare(op, context)
+      if (prepared.kind !== "ready") return { status: "failed", summary: prepared.kind === "failed" ? prepared.summary : prepared.notice } satisfies AgentResult
+    }
+    return try runApproved(op, context, openFiles ? openFiles() : succeed(false))
+  }
+
+  const runner: FilesAgentRunner = {
+    reviewedIdentities: (paths) => effect {
+      const answer = storage.reviewedIdentities(paths, "") catch () => undefined
+      if (answer?.status !== "ready" || answer.reviewed?.length !== paths.length) throw new FilesOperationRefused({ input: paths, reason: "Files changed. Review them again." })
+      return answer.reviewed
+    },
+    shownPaths: (shown) => effect {
+      const resolved = try shownPaths(shown)
+      if (resolved === undefined) throw new FilesOperationRefused({ input: shown, reason: "Files does not show those items." })
+      return resolved.paths
+    },
+    run: (op, openFiles) => runOwned(op, openFiles),
+  }
+
+  return {
+    proposals: proposal.changes,
+    runner,
+    effect advertise(peer: readonly string[]) {
+      const browserOffered = peer.includes(FILES_CAPABILITY)
+      const shownOffered = browserOffered && peer.includes(FILES_SHOWN_TARGET_CAPABILITY)
+      try send({ type: "settleProposal" })
+      try send({ type: "negotiateWith", peerBrowser: browserOffered, peerShown: shownOffered })
+      const advertised = browserOffered ? (shownOffered ? [FILES_CAPABILITY, FILES_SHOWN_TARGET_CAPABILITY] : [FILES_CAPABILITY]) : []
+      try Ref.set(negotiated, advertised)
+      return advertised
+    },
+    prepare,
+    run: (op: FilesAgentOperation, context: AgentContext, bringForward: boolean!!) => runApproved(op, context, bringForward),
+  }
+
+  effect function runApproved(op: FilesAgentOperation, context: AgentContext, bringForward: boolean!!) {
+      const s = try proposal.get()
+      const direct = op.type === "files_filter" || op.type === "files_open"
+      if (direct) {
+        try send({ type: "settleProposal" })
+        try scene(context)
+        const proposed = proposal.send({ type: "propose", op: OPS[op.type], target: targetOf(op) }) catch () => undefined
+        if (proposed === undefined || proposed.outcome === "NotAvailable") return { status: "failed", summary: "This action isn't available on this phone." } satisfies AgentResult
+        try send({ type: "runDirect" })
+      } else {
+        if (s.op !== OPS[op.type] || s.outcome !== "Unsettled") return { status: "failed", summary: "Review this action again." } satisfies AgentResult
+        try scene(context)
+        const approved = proposal.send({ type: "approve" }) catch () => undefined
+        if (approved === undefined) return { status: "failed", summary: "Nothing changed because these files changed after review." } satisfies AgentResult
+      }
+      const refused = proposal.send({ type: "refuse" }) catch () => undefined
+      if (refused !== undefined) {
+        try send({ type: "settleProposal" })
+        return { status: "failed", summary: refused.sensitive || !refused.foreground ? "Files is unavailable." : !refused.granted ? "Nothing was changed because Files needs storage access." : "Nothing changed because these files changed after review." } satisfies AgentResult
+      }
+      if (direct && (try proposal.get()).view !== "OnFiles") {
+        const forward = try bringForward
+        const shown = forward ? (timeout(Stream.runHead(Stream.filter(filter.changes, (f) => f.active)), FILES_FORWARD) catch () => undefined) : undefined
+        if (shown === undefined || Option.isNone(shown)) {
+          try send({ type: "giveUp" })
+          try send({ type: "settleProposal" })
+          return { status: "failed", summary: "Files is unavailable." } satisfies AgentResult
+        }
+        try ignore(proposal.send({ type: "openFiles" }))
+      }
+      const result = op.type === "files_filter" ? try filterNow(op) : op.type === "files_open" ? try openNow(op) : try changeNow(op)
+      if (op.type === "files_filter" && result.status === "succeeded") try ignore(proposal.send({ type: "showFilter" }))
+      try send({ type: "giveUp" })
+      try send({ type: "settleProposal" })
+      return result
+  }
+})

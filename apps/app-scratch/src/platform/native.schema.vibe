@@ -1,0 +1,165 @@
+// spec/platform/index.md, "Story: Reach the phone's native capabilities"; spec/platform/resident.md, "A connection is one verified owner with exactly one running agent"; spec/platform/resident.md, "Only a record read the resident deferred is retried, and only before its deadline"; spec/platform/viewEvents.md, "Story: Follow what my agent does on my screen"; spec/platform/crashJournal.md, "Story: Tell support what went wrong without telling them what I wrote"
+
+/** What a `view-interact` frame says: the client it is for and the frame itself. */
+export schema ViewPayload { readonly clientId: string; readonly frame: Schema.Unknown }
+
+/** A resident `view-interact` agent event. */
+export schema ViewInteract { readonly type: "agent_event"; readonly stream: "view-interact"; readonly payload: ViewPayload }
+
+/** A resident `voice-transcript` agent event. */
+export schema VoiceTranscript { readonly type: "agent_event"; readonly stream: "voice-transcript" }
+
+/** `ElizaSystem.getNetworkStatus`: the app's active Android network; an omitted fact means Android could not tell. */
+export schema NetworkStatus { readonly connected?: boolean; readonly wifiActive?: boolean; readonly internetValidated?: boolean }
+
+/** `DeviceApps.platformCapabilities`: what the image verified. */
+export schema PlatformCapabilities {
+  readonly aospImage: boolean
+  readonly phone?: boolean
+  readonly contacts?: boolean
+  readonly sms?: boolean
+  readonly sense?: boolean
+  readonly startupPermissionDefaults?: boolean
+}
+
+/** `ElizaSystem.crashLog`: the native entries, untrusted until each is sanitized, and whether exit history is readable. */
+export schema CrashLogReply { readonly entries?: Schema.Unknown; readonly exitHistory?: boolean }
+
+/** One entry of the problem log as native or the page kept it. */
+export schema CrashEntry {
+  readonly at: Schema.Int
+  readonly source: "renderer" | "uncaught" | "exit" | "inference"
+  readonly kind?: "render" | "startup" | "uncaught"
+  readonly errorClass?: string
+  readonly rootClass?: string
+  readonly reason?: "crash" | "native-crash" | "anr" | "low-memory" | "signaled" | "initialization-failure" | "excessive-resource-usage" | "dependency-died" | "freezer" | "other" | "unknown" | "exit-self"
+  readonly process?: string
+  readonly thread?: "main" | "background"
+  readonly detail?: string
+}
+
+/** Who `/api/auth/me` says the session is. */
+export schema ResidentIdentity { readonly kind: string; readonly id: string }
+
+/** The access `/api/auth/me` grants the session. */
+export schema ResidentAccess { readonly role: string; readonly mode: string }
+
+/** The resident's `/api/auth/me` answer. */
+export schema ResidentWhoAmI { readonly identity: ResidentIdentity; readonly access: ResidentAccess }
+
+/** One agent `/api/agents` lists. */
+export schema ResidentAgentRow { readonly id: string; readonly name?: string; readonly status: string }
+
+/** The resident's `/api/agents` answer. */
+export schema ResidentAgents { readonly agents: readonly ResidentAgentRow[] }
+
+/** A resident refusal body. */
+export schema ResidentRefusal { readonly error?: string; readonly code?: string; readonly message?: string; readonly retryAfter?: number }
+
+/** The resident's closed read barrier while a feature is still starting. */
+export schema FeatureStarting {
+  readonly code: "feature_starting"
+  readonly error: "feature_starting"
+  readonly retryable: true
+  readonly phase: "agent-deferred-boot" | "app-route-tail"
+  readonly status: "pending" | "runtime_starting"
+  readonly retryAfter?: number
+}
+
+/** A renderer-owned Cloud inference failure: only its fixed stage, reason and status, never what was asked. */
+export schema InferenceFailure {
+  readonly version: 1
+  readonly at: Schema.Int
+  readonly stage: "response-handler" | "action-planner" | "text" | "other"
+  readonly reason: "unsupported-schema-keyword" | "invalid-parameter" | "context-window" | "unavailable-model" | "rate-limit" | "credits" | "transport" | "unknown" | "schema-limit"
+  readonly status?: Schema.Int
+  readonly parameter?: "tools" | "response_format" | "tool_choice" | "messages" | "model" | "max_tokens" | "temperature" | "reasoning_effort"
+  readonly keyword?: "pattern" | "minLength" | "maxLength" | "format" | "minItems" | "maxItems" | "oneOf" | "allOf" | "not" | "if" | "then" | "else" | "dependentRequired" | "dependentSchemas" | "patternProperties" | "unevaluatedProperties" | "$anchor"
+}
+
+/** `ElizaNetworkPolicy.getMeteredHint`: Android's metered flag, null where it could not tell. */
+export schema MeteredHint { readonly metered: boolean | null }
+
+/** An `ElizaAgent` `agentEvent`: one event of a subscription, its end, or its failure. */
+export schema FeedEvent { readonly id: string; readonly kind: "event" | "end" | "failed"; readonly event?: Schema.Unknown; readonly code?: string }
+
+/** `ElizaAgent.reviewRecovery`: a reviewable hold with its one-use token and how many interrupted requests it kept, or none. */
+export schema RecoveryReview { readonly kind: "reviewable" | "unavailable"; readonly reviewToken?: string; readonly retainedCount?: Schema.Int }
+
+/** `ElizaAgent.archiveRecovery`: whether the reviewed hold was archived, and how much of it. */
+export schema RecoveryArchive { readonly kind: "archived" | "unavailable"; readonly archivedCount?: Schema.Int }
+
+/** `AlphaActionJournal.get` without a scope: the device-execution entry for one proposal, null when the journal holds none. */
+export schema DeviceJournalRead { readonly entry: unknown }
+
+/** `AlphaActionJournal.edit`: whether the compare-and-set at the expected revision replaced the entry. */
+export schema DeviceJournalEdit { readonly kept: boolean }
+
+/** `AlphaActionJournal.list` without a scope: every device-execution entry, oldest first. */
+export schema DeviceJournalList { readonly entries: readonly Schema.Unknown[] }
+
+/** `AlphaNetworkLocation.locate` with a position: what BeaconDB resolved from the Wi-Fi and cell signals the phone sees, `accuracy` in meters and `fingerprint` naming those signals. */
+export const NetworkFix = Schema.Struct({
+  latitude: Schema.Finite.check(Schema.isBetween({ minimum: -90, maximum: 90 })),
+  longitude: Schema.Finite.check(Schema.isBetween({ minimum: -180, maximum: 180 })),
+  accuracy: Schema.Finite.check(Schema.isGreaterThan(0)),
+  timestamp: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  fingerprint: Schema.String,
+  wifi: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  cells: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+})
+
+/** `AlphaNetworkLocation.locate` when the visible signals are the ones `unchangedFrom` named: nothing was sent, and the earlier position stands. */
+export schema NetworkUnchanged { readonly unchanged: true; readonly fingerprint: string }
+
+/** `AlphaNetworkLocation.locate`: a fresh position, or the earlier one confirmed unchanged. */
+export const NetworkLocationReply = Schema.Union([NetworkFix, NetworkUnchanged])
+
+/** Why `AlphaNetworkLocation.locate` gave no position, as the code of its refusal. */
+export schema NetworkLocationRefusal = "permission-denied" | "location-off" | "no-signals" | "not-found" | "invalid-response" | "unavailable"
+
+/** `Agent.launchSurface`: whether Alpha's own assistant surface hosts this page, never what a caller passed. */
+export schema LaunchSurface { readonly assistant: boolean }
+
+/** `Agent.takeInvocation`: how the assistant surface was opened, consumed on read, and whether the keyguard shows now; Android counts an unknown keyguard as locked. */
+export schema AssistantInvocation { readonly assistant: boolean; readonly invocation?: "listener" | "assist"; readonly locked: boolean }
+
+/** `DailyApps.closeAssistant`: whether the assistant surface was the page's host and is now closing. */
+export schema AssistantClosed { readonly closed: boolean }
+
+/** One visible link of the open Browser page: its words and its public HTTPS address. */
+export schema PageLink { readonly text: string; readonly url: string }
+
+/** `AlphaBrowser.pageContext` with the page read: its address, one-line title, visible text, whether text was cut, the owner's selection and up to 20 links. */
+export const PageContextRead = Schema.Struct({
+  url: Schema.String,
+  title: Schema.String,
+  text: Schema.String.check(Schema.isMaxLength(6000)),
+  truncated: Schema.Boolean,
+  selection: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1000))),
+  links: Schema.optionalKey(Schema.Array(PageLink).check(Schema.isMaxLength(20))),
+})
+
+/** `AlphaBrowser.pageContext` with the text withheld: the address (no query for a sensitive page) and title only. */
+export schema PageContextWithheld { readonly url: string; readonly title: string; readonly withheld: "sensitive-page" | "unreadable" }
+
+/** `AlphaBrowser.pageContext`: the open page for one chat turn, read or withheld. */
+export const PageContextReply = Schema.Union([PageContextRead, PageContextWithheld])
+
+/** Why `AlphaBrowser.pageContext` gave no page, as the code of its refusal; the turn then goes without it. */
+export schema PageContextRefusal = "page-changed" | "private-tab" | "not-public"
+
+/** `Agent.keyguard` and its `keyguardChanged` event: whether Android's keyguard shows now, consuming nothing; Android counts an unknown keyguard as locked. */
+export schema Keyguard { readonly locked: boolean }
+
+/** `ElizaSecureStore.get`: the slot's value, absent or null when the slot is empty. */
+export schema SecureSlotRead { readonly value?: string | null }
+
+/** `ElizaSecureStore.compareAndExchange`: whether the slot still held the expected value and now holds the new one. */
+export schema SecureSlotExchange { readonly exchanged: boolean }
+
+/** `AlphaConnection.secureRead`: what the earlier Alpha kept in one of its encrypted slots, null when it kept nothing there. */
+export schema LegacySlotRead { readonly value?: string | null }
+
+/** `AlphaConnection.secureCompareExchange`: whether the earlier Alpha's slot held the expected value and was replaced. */
+export schema LegacySlotExchange { readonly status: "saved" | "conflict" }

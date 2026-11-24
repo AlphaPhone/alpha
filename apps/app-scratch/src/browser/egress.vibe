@@ -1,0 +1,98 @@
+// spec/browser/egress.md, "Story: Share or keep the page I am looking at"
+import { type EgressEffect, type Event, type Viewed, Machine, machine } from "../../gen/browser__egress.effect.vibe"
+import { type Session, curTab } from "../../gen/browser__session.effect.vibe"
+import { isSettled } from "../../gen/browser__page.effect.vibe"
+import { Foreground } from "../shell/foreground.vibe"
+import { Toasts } from "../shell/toasts.vibe"
+import { copyText } from "./clipboard.ts"
+import { EGRESS_NOTICES, refusalText } from "./messages.ts"
+import { BrowserBookmarks } from "./bookmarks.vibe"
+import { PageMail } from "./ports.vibe"
+import { BrowserTabs } from "./session.vibe"
+import { BrowserCallFailed, TabHost } from "./tabHost.vibe"
+
+/** Share, Share by email, Copy link and Bookmark for the selected page. */
+export service BrowserEgress {
+  share(): void!!
+  shareByEmail(): void!!
+  copyLink(): void!!
+  toggleBookmark(): void!!
+}
+
+const MENU_CLOSING = "150 millis"
+
+/** What a tap reads: the selected tab's committed page, and whether the Browser view shows it now. */
+export function viewedOf(s: Session, visible: boolean): Viewed {
+  const tab = curTab(s)
+  return {
+    visible, tab: s.cur, url: tab.page.url, title: tab.page.title || tab.page.url, navigation: tab.page.navigation,
+    revision: tab.revision, settled: tab.stage === "Live" && isSettled(tab.page), secure: tab.page.secure,
+  }
+}
+
+/** BrowserEgress over its machine in memory. */
+export const egressLayer = Layer.provide(Layer.effect(BrowserEgress, effect {
+  const egress = try Machine
+  const tabs = try BrowserTabs
+  const marks = try BrowserBookmarks
+  const host = try TabHost
+  const foreground = try Foreground
+  const mail = try PageMail
+  const toasts = try Toasts
+
+  effect function viewed() {
+    const shown = try foreground.get()
+    return viewedOf(try tabs.get(), shown.visible && !shown.locked && shown.screen === "home" && shown.view === "browser")
+  }
+
+  effect function perform(out: EgressEffect) {
+    match (out) {
+      when { tag: "ShareSheet", let tab, let url, let navigation }: do {
+        const shared = host.call("share", { id: tab, url, navigation }) catch (error) => error
+        if (shared instanceof BrowserCallFailed) try toasts.show(refusalText(shared.message))
+        try send({ type: "shareSettled", ok: !(shared instanceof BrowserCallFailed) })
+      }
+      when { tag: "ComposeEmail", let url, let title }: do {
+        const refused = try mail.compose(title || "Shared page", url)
+        if (refused !== undefined) try toasts.show(refused); else undefined
+      }
+      when { tag: "CopyLink", let url }: do {
+        const copied = tryPromise(() => copyText(url)) catch () => false
+        try send({ type: "copied", ok: copied !== false })
+      }
+      when { tag: "ToggleMark", let url, let title, let saved }: try marks.set(url, title, saved)
+      when { tag: "Say", let problem }: try toasts.show(EGRESS_NOTICES[problem])
+    }
+  }
+
+  effect function send(event: Event) {
+    const change = egress.send(event) catch () => undefined
+    if (change !== undefined) for (const out of change.out) try perform(out)
+  }
+
+  return {
+    effect share() {
+      try tabs.dispatch({ type: "closeMenu" })
+      try tabs.dispatch({ type: "closeShare" })
+      try send({ type: "startShare", viewed: try viewed() })
+      if ((try egress.get()).share !== "ShareWaiting") return
+      try sleep(MENU_CLOSING)
+      try send({ type: "shareDelayEnded", viewed: try viewed() })
+    },
+    effect shareByEmail() {
+      try tabs.dispatch({ type: "closeShare" })
+      try send({ type: "shareByEmail", viewed: try viewed() })
+    },
+    effect copyLink() {
+      const page = try viewed()
+      try send({ type: "copyLink", viewed: page })
+      try tabs.dispatch({ type: "closeShare" })
+      try tabs.dispatch({ type: "closeMenu" })
+    },
+    effect toggleBookmark() {
+      const page = try viewed()
+      try send({ type: "toggleBookmark", viewed: page, marked: (try marks.get()).marks.some((m) => m.url === page.url) })
+      try tabs.dispatch({ type: "closeMenu" })
+    },
+  }
+}), machine())

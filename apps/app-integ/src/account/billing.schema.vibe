@@ -1,0 +1,45 @@
+// spec/account/billing.md, "The plans and the current plan are read when the manager opens"; spec/account/billing.md, "Story: Share or enter a referral code"; spec/account/billing.md, "Add funds is offered only on Eliza Cloud, never opens the plan manager, and takes $5 to $1,000"
+
+/** A plan's included AI usage. */
+export schema PlanAllowance {
+  amountUsd: string
+}
+
+/** One plan Cloud offers. */
+export schema PlanOffer {
+  key: "plus_monthly" | "pro_monthly"
+  name: string
+  amountCents: number
+  currency: string
+  interval: string
+  allowance: PlanAllowance
+}
+
+/** `GET /api/v1/subscriptions/plans`. */
+export schema PlanList {
+  plans: Array<PlanOffer>
+}
+
+/** `GET /api/v1/referrals`. */
+export schema Referral {
+  code: string
+  total_referrals: number
+  is_active: boolean
+}
+
+/** `POST /api/v1/credits/checkout`: the Stripe page for a balance purchase. */
+export schema FundsCheckout {
+  url: string
+}
+
+/** The native billing authority's account session state. */
+export schema AuthorityStatus {
+  status: "authorized" | "required"
+  expiresAt?: number
+}
+
+/** One answer of the native billing authority: Cloud's status and JSON body. */
+export schema AuthorityAnswer {
+  status: number
+  body: unknown
+}

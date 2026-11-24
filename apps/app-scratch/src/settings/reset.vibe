@@ -1,0 +1,45 @@
+// spec/settings/reset.md, "Story: Erase Alpha's data on purpose"
+import { type NativeSentence, type NativeStatus, type Notice, Machine, noticeOf } from "../../gen/settings__reset.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { attempt, call } from "./call.vibe"
+import { ResetAnswer } from "./native.schema.vibe"
+
+const SENTENCES: Record<string, NativeSentence> = {
+  "Reset review closed. Nothing reset.": "ClosedNothingReset",
+  "Nothing reset.": "NothingReset",
+  "Reset cancelled. Nothing reset.": "CancelledNothingReset",
+  "A reset review is already open.": "ReviewAlreadyOpen",
+  "Reset review expired. Nothing reset.": "ReviewExpired",
+  "Set a device screen lock in Android before resetting Alpha data.": "SetScreenLock",
+  "Device authentication is unavailable. Nothing reset.": "AuthenticationUnavailable",
+  "Reset could not be prepared. Close and reopen Alpha before trying again.": "CouldNotPrepare",
+  "The listener is off or can't be reached, so nothing was reset. Turn it on in Android Settings and try again.": "ListenerOffOrUnreachable",
+}
+
+/** Alpha's notice for a native reset answer; the native sentence itself is never shown. */
+export function resetNotice(status: unknown, message: unknown): Notice {
+  const s: NativeStatus = status === "cancelled" ? "NativeCancelled" : status === "unavailable" ? "NativeUnavailable" : "NativeOther"
+  const text = typeof message === "string" ? message.trim() : ""
+  return noticeOf(s, Object.hasOwn(SENTENCES, text) ? SENTENCES[text] : "UnknownSentence")
+}
+
+/** The native reset review. A confirmed reset stops the app and never answers here. */
+export service Reset {
+  review(): Notice!!
+}
+
+/** Reset over the review Machine it is given. */
+export const reset = Layer.effect(Reset, effect {
+  const held = try Machine
+  const native = try Native
+  return {
+    review: () => Effect.provideService(effect {
+      const begun = try (held.send({ type: "openReview" }) catch () => undefined)
+      if (begun === undefined) return "AlreadyOpen" as Notice
+      const answer = try attempt(call("AlphaReset", "review", ResetAnswer))
+      const notice = answer === undefined ? "Unconfirmed" : resetNotice(answer.status, answer.message)
+      try (held.send({ type: "reviewAnswered", notice }) catch () => undefined)
+      return notice
+    }, Native, native),
+  }
+})

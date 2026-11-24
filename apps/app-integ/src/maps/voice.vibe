@@ -1,0 +1,35 @@
+// spec/maps/vocabulary.md, "A Google place is never saved, shared, renamed or copied, and Google guidance is never spoken"; spec/maps/guidance.md, "A fix guides only when usable, and only for the current session"
+import { navigationVoice } from "@elizaos/plugin-maps/client/guidance"
+import { MapsContent } from "./content.vibe"
+import { GuidanceSpeaker } from "./ports.vibe"
+
+/** Turn instructions spoken in front through the phone's speaker route; nothing while hidden, an interrupted one owed until Maps returns. */
+export service NavigationVoice {
+  offer(key: string, text: string, allowed: boolean): void!!
+  pause(): void!!
+  toggle(allowed: boolean): void!!
+  setHidden(hidden: boolean, allowed: boolean): void!!
+  setAuthority(authority: string): void!!
+  setSheet(open: boolean): void!!
+  /** Whether voice is on, for the navigation banner's toggle. */
+  readonly voiceOn: Stream.Stream<boolean>
+}
+
+/** The plugin's guidance speaker over the speaker the voice area provides; a definite failure mutes it and tells the owner. */
+export const voiceLayer = Layer.effect(NavigationVoice, effect {
+  const speaker = try GuidanceSpeaker
+  const content = try MapsContent
+  const muted = try Queue.unbounded<void>()
+  const voice = try navigationVoice({ speak: (text: string) => speaker.speak(text) }, () => { Queue.offerUnsafe(muted, undefined) })
+  fork.detached Stream.runForEach(Stream.fromQueue(muted), () => content.update((c) => ({ ...c, message: "Navigation voice paused." })))
+  fork.detached Stream.runForEach(voice.changes, (v) => content.update((c) => c.voiceOn === v.voiceOn ? c : { ...c, voiceOn: v.voiceOn }))
+  return {
+    effect offer(key: string, text: string, allowed: boolean) { try voice.offer(key, text, allowed) },
+    effect pause() { try voice.pause() },
+    effect toggle(allowed: boolean) { try voice.toggle(allowed) },
+    effect setHidden(hidden: boolean, allowed: boolean) { if (hidden) { try voice.hide() } else { try voice.show(allowed) } },
+    effect setAuthority(authority: string) { try voice.authority(authority) },
+    effect setSheet(open: boolean) { try voice.sheet(open) },
+    voiceOn: Stream.map(voice.changes, (v) => v.voiceOn),
+  }
+})

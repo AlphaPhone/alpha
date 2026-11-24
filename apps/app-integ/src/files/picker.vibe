@@ -1,0 +1,181 @@
+// spec/files/picker.md, "Story: Choose a file from my phone for another app on Alpha"; spec/shell/navigation.md, "A layer is listed once, closes with its owner or with Back, and holds the phone while open"; spec/files/picker.md, "A tapped file is chosen only after its identity and its listing agree"; spec/files/picker.md, "Attaching reads the chosen files again and answers the caller once"
+import { type Picked, type Picker, Machine as PickerMachine } from "../../gen/files__picker.effect.vibe"
+import type { ListingOutcome } from "../../gen/files__storage.ts"
+import { Navigation } from "../shell/navigation.vibe"
+import { keyPath, parentOf, toRow } from "./paths.vibe"
+import { Documents, FilesStorage } from "./storage.vibe"
+import { accessOf } from "./browser.vibe"
+import type { AttachmentBytes } from "./native.schema.vibe"
+
+const PICKER_LAYER = "files-picker"
+
+/** A file the owner chose, with the bytes read when they attached it. */
+export interface PickedFile {
+  readonly name: string
+  readonly mimeType: string
+  readonly size: number
+  readonly dataBase64: string
+  readonly sha256: string
+}
+
+/** Real files chosen for another area: from the phone's storage or the system document picker. */
+export service FilePicker {
+  readonly changes: Stream.Stream<Picker>
+  /** Open the picker for at most `maximum` files and wait for the owner: the files attached, or none. Interrupting it dismisses it. */
+  choose(maximum: number, accepts: (mimeType: string) => boolean): readonly PickedFile[]!!
+  browse(path: string): void!!
+  review(key: string): void!!
+  unchoose(key: string): void!!
+  fromDevice(): void!!
+  attach(): void!!
+  dismiss(): void!!
+}
+
+/** The picker over its machine, the device's storage and the selected-documents registry. */
+export const layer = Layer.effect(FilePicker, effect {
+  const storage = try FilesStorage
+  const documents = try Documents
+  const picker = try PickerMachine
+  const waiting = try Ref.make<Deferred.Deferred<readonly PickedFile[]> | undefined>(undefined)
+  const device = try Ref.make(new Map<string, AttachmentBytes>())
+  const accepted = try Ref.make<(mimeType: string) => boolean>(() => true)
+  const serial = try Ref.make(0)
+
+  effect function answer(files: readonly PickedFile[]) {
+    const deferred = try Ref.getAndSet(waiting, undefined)
+    try Ref.set(device, new Map())
+    if (deferred) try Deferred.succeed(deferred, files)
+  }
+
+  effect function browse(path: string) {
+    const opened = picker.send({ type: "browseFolder", path }) catch () => undefined
+    if (opened === undefined) return
+    try listFolder(opened.ticket, path)
+  }
+
+  effect function listFolder(ticket: number, path: string) {
+    const state = storage.state() catch () => undefined
+    const granted = accessOf(state) === "AccessGranted"
+    const listed = granted ? (storage.list(path, "") catch () => undefined) : undefined
+    const outcome: ListingOutcome = listed === undefined ? "Failed" : listed.status !== "ready" ? "Failed" : listed.truncated ? "Partial" : "Complete"
+    const take = try Ref.get(accepted)
+    const rows = (listed?.entries ?? []).map((entry) => toRow("", entry)).filter((row) => row.kind === "KindFolder" || take(row.mimeType))
+    try ignore(picker.send({ type: "folderReply", ticket, rows, result: outcome, granted }))
+  }
+
+  effect function identity(path: string) {
+    const answer = storage.reviewedIdentities([path], "") catch () => undefined
+    return answer?.status === "ready" ? answer.reviewed?.[0] ?? "" : ""
+  }
+
+  effect function review(key: string) {
+    const started = picker.send({ type: "reviewFile", key }) catch () => undefined
+    if (started === undefined || started.reading !== key) return
+    const row = started.rows.find((r) => r.key === key)
+    const { path } = keyPath(key)
+    const first = try identity(path)
+    const listed = storage.list(parentOf(path), "") catch () => undefined
+    const actual = listed?.status === "ready" ? listed.entries?.find((entry) => entry.path === path) : undefined
+    const second = try identity(path)
+    const agrees = row !== undefined && actual !== undefined && !actual.directory && actual.name === row.name && actual.size === row.size &&
+      actual.mimeType === row.mimeType && Math.trunc(actual.modified) === row.modified && first !== "" && first === second
+    try ignore(picker.send({ type: "reviewReply", key, token: first, agrees }))
+  }
+
+  effect function fromDevice() {
+    const s = try picker.get()
+    if (!s.open || s.reading !== "" || s.attaching) return
+    const picked = documents.pick() catch () => undefined
+    if (picked?.status !== "selected" || !picked.selectionId) return
+    const bytes = documents.bytes(picked.selectionId) catch () => undefined
+    try documents.forget(picked.selectionId)
+    const take = try Ref.get(accepted)
+    if (bytes === undefined || !take(bytes.mimeType)) return
+    const n = try Ref.updateAndGet(serial, (x) => x + 1)
+    const key = `device:${n}`
+    try Ref.update(device, (map) => new Map(map).set(key, bytes))
+    const file: Picked = { key, name: bytes.name, mimeType: bytes.mimeType, size: bytes.size, token: "" }
+    try ignore(picker.send({ type: "deviceFiles", files: [file] }))
+  }
+
+  effect function readChosen(p: Picked) {
+    if (p.token === "") return (try Ref.get(device)).get(p.key)
+    const { path } = keyPath(p.key)
+    if ((try identity(path)) !== p.token) return undefined
+    const selected = storage.select(path, "") catch () => undefined
+    if (selected?.status !== "selected" || !("selectionId" in selected)) return undefined
+    const bytes = documents.bytes(selected.selectionId) catch () => undefined
+    try documents.forget(selected.selectionId)
+    const still = (try identity(path)) === p.token
+    return bytes !== undefined && still && bytes.name === p.name && bytes.mimeType === p.mimeType && bytes.size === p.size ? bytes : undefined
+  }
+
+  effect function attach() {
+    const started = picker.send({ type: "attach" }) catch () => undefined
+    if (started === undefined) return
+    const files: PickedFile[] = []
+    for (const p of started.selected) {
+      const bytes = try readChosen(p)
+      if (bytes === undefined || bytes.size <= 0) break
+      files.push({ name: bytes.name, mimeType: bytes.mimeType, size: bytes.size, dataBase64: bytes.dataBase64, sha256: bytes.sha256 })
+    }
+    const intact = files.length === started.selected.length
+    const after = picker.send({ type: "attachReply", intact }) catch () => undefined
+    if (after?.outcome === "Attached") try answer(files)
+  }
+
+  effect function dismiss() {
+    try ignore(picker.send({ type: "dismiss" }))
+    try answer([])
+  }
+
+  const navigation = try Effect.serviceOption(Navigation)
+  if (Option.isSome(navigation)) {
+    const nav = navigation.value
+    const listed = try Ref.make(false)
+    fork.scoped (effect {
+      for try (const s of picker.changes) {
+        const was = try Ref.get(listed)
+        if (s.open && !was) {
+          const opened = nav.openLayer(PICKER_LAYER, "SheetLayer", true) catch () => false
+          try Ref.set(listed, opened)
+        } else if (!s.open && was) {
+          try Ref.set(listed, false)
+          try ignore(nav.closeLayer(PICKER_LAYER))
+        }
+      }
+    })
+    fork.scoped (effect {
+      for try (const _ of nav.changes) {
+        if (!(try Ref.get(listed)) || (try nav.get()).layers.some((l) => l.id === PICKER_LAYER)) continue
+        try Ref.set(listed, false)
+        if ((try picker.get()).open) try dismiss()
+      }
+    })
+  }
+
+  return {
+    changes: picker.changes,
+    effect choose(maximum: number, accepts: (mimeType: string) => boolean) {
+      try dismiss()
+      const deferred = try Deferred.make<readonly PickedFile[]>()
+      try Ref.set(waiting, deferred)
+      try Ref.set(accepted, accepts)
+      const opened = picker.send({ type: "openPicker", maximum }) catch () => undefined
+      if (opened === undefined) {
+        try answer([])
+        return [] as readonly PickedFile[]
+      }
+      try listFolder(opened.ticket, "")
+      return try onInterrupt(Deferred.await(deferred), () => dismiss())
+    },
+    browse,
+    review,
+    effect unchoose(key: string) {
+      try ignore(picker.send({ type: "unchoose", key }))
+    },
+    fromDevice,
+    attach,
+    dismiss,
+  }
+})

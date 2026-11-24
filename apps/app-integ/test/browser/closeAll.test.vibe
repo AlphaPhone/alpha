@@ -1,0 +1,164 @@
+// spec/browser/session.md, "Story: Close every tab from one listed review"
+import { assert, it } from "@effect/vitest"
+import { BrowserTabs } from "../../src/browser/session.vibe"
+import { BrowserAgent } from "../../src/browser/agent.vibe"
+import { BROWSER_TABS_CLOSE_ALL_CAPABILITY, NO_TABS_TO_CLOSE_NOTICE, TABS_UNLISTED_NOTICE, browserDeviceCapabilities, closedSummary, closingCard, groundedIn, operationPorts, parseBrowserCloseAll } from "../../src/browser/operations.vibe"
+import { AGENT_REFUSALS } from "../../src/browser/messages.ts"
+import { callsTo, fakeHost, loadPage, report, settledTabs, shownBrowser } from "./fakes.vibe"
+
+const all = { type: "browser_tab_close", all: true }
+const call = (proposalId: string) => ({ proposalId, operationId: `${proposalId}-op`, attemptId: 1 })
+
+// spec/browser/session.md, "Closing every tab closes exactly the tabs its proposal's card listed, or nothing once Browser's tabs changed, and one approval closes once"
+it.live("closing every tab closes exactly the tabs its card listed, and nothing once Browser changed", () => effect {
+  const fake = try fakeHost()
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const agent = try BrowserAgent
+      const ports = try operationPorts
+      try SubscriptionRef.set(fake.foreground, { ...shownBrowser, view: "" })
+      const started = try settledTabs(tabs)
+      const session = (try callsTo(fake.calls, "browsingState"))[0]?.args.session as string
+      const news = try loadPage(tabs, fake.events, session, "https://news.example/", "1", 1)
+      try tabs.dispatch({ type: "openTab", id: "bdocs", profile: "Normal" })
+      const docs = try loadPage(tabs, fake.events, session, "https://docs.example.org/", "1", 1)
+      const first = try agent.tabsClosing("first")
+      const unlisted = agent.closeAll("never-listed") catch (error) => error.message
+      // A tab that only retitles itself, such as an unread count, keeps the listing.
+      try report(fake.events, session, { id: docs, sequence: 2, navigation: "1", url: "https://docs.example.org/", title: "(3) Docs", committed: true })
+      const retitled = try agent.closingListed("first")
+
+      // spec/browser/session.md, "A close-every-tab card lists the tabs it would close once per proposal, and a listing that no longer matches Browser's tabs is withdrawn"
+      try tabs.dispatch({ type: "openTab", id: "bshop", profile: "Normal" })
+      const shop = try loadPage(tabs, fake.events, session, "https://shop.example/", "1", 1)
+      const withdrawn = try agent.tabsClosing("first")
+      const refused = agent.closeAll("first") catch (error) => error.message
+      const untouched = (try tabs.get()).tabs.map((t) => t.id)
+
+      const card = ports.itemize(all, "second")
+      const listed = ports.stillListed(all, "second")
+      const applied = try promise(() => ports.execute(all, call("second")))
+      const shownBeforeReceipt = (try Ref.get(fake.opened)).includes("browser")
+      ports.present(all, call("second"))
+      try sleep("30 millis")
+      const after = try tabs.get()
+      const again = try promise(() => ports.execute(all, call("second")))
+      const receipt = ports.summarize(all, "Applied", "second")
+      try Effect.try(() => assert.deepStrictEqual({
+        first, unlisted, retitled, withdrawn, refused, untouched, receipt,
+        card: typeof card === "object" ? [card.lines, card.unnamed] : card,
+        listed, applied, shownBeforeReceipt,
+        closed: (try callsTo(fake.calls, "close")).map((c) => c.args.id).sort(),
+        left: [after.tabs.length, [news, docs, shop].includes(after.cur)],
+        shown: (try Ref.get(fake.opened)).includes("browser"),
+        again,
+      }, {
+        first: { tabs: [{ title: "news.example", host: "news.example" }, { title: "docs.example.org", host: "docs.example.org" }], kept: 0 },
+        unlisted: AGENT_REFUSALS.RefusedListChanged,
+        retitled: true,
+        withdrawn: null,
+        refused: AGENT_REFUSALS.RefusedListChanged,
+        untouched: [started.cur, "bdocs", "bshop"],
+        receipt: "Closed 3 tabs.",
+        card: [["news.example", "(3) Docs (docs.example.org)", "shop.example"], 0],
+        listed: true,
+        applied: { kind: "applied" },
+        shownBeforeReceipt: false,
+        closed: [news, docs, shop].sort(),
+        left: [1, false],
+        shown: true,
+        again: { kind: "refused", code: "not_started", result: { message: AGENT_REFUSALS.RefusedListChanged } },
+      }))
+    }
+  })
+})
+
+// spec/browser/session.md, "Closing every tab closes exactly the tabs its proposal's card listed, or nothing once Browser's tabs changed, and one approval closes once"
+it.live("closing every tab from Browser closes the showing tab only when presented, and never a private tab from outside one", () => effect {
+  const fake = try fakeHost()
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const agent = try BrowserAgent
+      try settledTabs(tabs)
+      const session = (try callsTo(fake.calls, "browsingState"))[0]?.args.session as string
+      const news = try loadPage(tabs, fake.events, session, "https://news.example/", "1", 1)
+      try tabs.dispatch({ type: "openTab", id: "bdocs", profile: "Normal" })
+      const docs = try loadPage(tabs, fake.events, session, "https://docs.example.org/", "1", 1)
+      try agent.tabsClosing("from-browser")
+      const present = try agent.closeAll("from-browser")
+      const beforePresent = (try callsTo(fake.calls, "close")).map((c) => c.args.id)
+      try present.present
+      const afterPresent = (try callsTo(fake.calls, "close")).map((c) => c.args.id)
+      const leftInBrowser = (try tabs.get()).tabs.length
+
+      try tabs.dispatch({ type: "openTab", id: "bbank", profile: "Normal" })
+      try loadPage(tabs, fake.events, session, "https://bank.example/", "1", 1)
+      try tabs.dispatch({ type: "openTab", id: "bsecret", profile: "Private" })
+      try loadPage(tabs, fake.events, session, "https://bank.example/private", "1", 1)
+      try SubscriptionRef.set(fake.foreground, { ...shownBrowser, view: "" })
+      const fromHome = try agent.tabsClosing("home")
+      const homeClose = try agent.closeAll("home")
+      try homeClose.present
+      const home = try tabs.get()
+      // Only the private tab is open now: from outside it the notice says it stays open.
+      const onlyPrivate = closingCard(try agent.tabsClosing("only-private"))
+
+      try SubscriptionRef.set(fake.foreground, shownBrowser)
+      try tabs.dispatch({ type: "showTabs" })
+      try tabs.dispatch({ type: "pickTab", id: "bsecret" })
+      const fromPrivate = try agent.tabsClosing("private")
+      try Effect.try(() => assert.deepStrictEqual({
+        beforePresent, afterPresent, leftInBrowser, fromHome, homeClosed: homeClose.result, onlyPrivate,
+        bankClosed: !home.tabs.some((t) => t.id === "bbank"),
+        secretKept: home.tabs.some((t) => t.id === "bsecret"),
+        showsPrivate: home.tabs.find((t) => t.id === home.cur)?.profile,
+        fromPrivate: fromPrivate === null ? null : [fromPrivate.tabs.map((line) => line.private === true), fromPrivate.kept],
+      }, {
+        beforePresent: [news],
+        afterPresent: [news, docs],
+        leftInBrowser: 1,
+        fromHome: { tabs: [{ title: "New tab" }, { title: "bank.example", host: "bank.example" }], kept: 1 },
+        homeClosed: { closed: 2, kept: 1 },
+        onlyPrivate: "Close all tabs: No other tabs are open to close. 1 private tab stays open. Ask from a private tab to close it.",
+        bankClosed: true,
+        secretKept: true,
+        showsPrivate: "Normal",
+        fromPrivate: [[true, false], 0],
+      }))
+    }
+  })
+})
+
+// spec/browser/session.md, "A close-every-tab card lists the tabs it would close once per proposal, and a listing that no longer matches Browser's tabs is withdrawn"
+it("a close-every-tab card names normal tabs with their host where it differs, counts private tabs and those it keeps, and is a notice when nothing was listed", () => {
+  assert.deepStrictEqual({
+    listed: closingCard({ tabs: [{ title: "News", host: "news.example" }, { title: "docs.example.org", host: "docs.example.org" }, { title: "Bank", host: "bank.example", private: true }], kept: 0 }),
+    keeping: closingCard({ tabs: [{ title: "News", host: "news.example" }], kept: 2 }),
+    unlisted: closingCard(null),
+    empty: closingCard({ tabs: [], kept: 0 }),
+    receipts: [closedSummary({ closed: 1, kept: 0 }), closedSummary({ closed: 2, kept: 1 })],
+  }, {
+    listed: { lines: ["News (news.example)", "docs.example.org"], unnamed: 1, unnamedLabel: "private tab" },
+    keeping: { lines: ["News (news.example)"], unnamed: 0, unnamedLabel: "private tab", note: "2 private tabs stay open. Ask from a private tab to close them." },
+    unlisted: `Close all tabs: ${TABS_UNLISTED_NOTICE}`,
+    empty: `Close all tabs: ${NO_TABS_TO_CLOSE_NOTICE}`,
+    receipts: ["Closed 1 tab.", "Closed 2 tabs. Private tabs were left open."],
+  })
+})
+
+// spec/browser/session.md, "Closing every tab is negotiated only beside Browser tabs, and it never runs without the owner's review"
+it("closing every tab is its own exact form, negotiated only beside Browser tabs, and never grounded in a message alone", () => {
+  assert.deepStrictEqual({
+    parsed: [parseBrowserCloseAll(all), parseBrowserCloseAll({ ...all, target: "news" }), parseBrowserCloseAll({ type: "browser_tab_close", all: false }), parseBrowserCloseAll({ type: "browser_tab_close" })],
+    withTabs: browserDeviceCapabilities(["browser.search.v1", "browser.tabs.v1", "browser.history.v1", "browser.find.v1", BROWSER_TABS_CLOSE_ALL_CAPABILITY], true),
+    withoutTabs: browserDeviceCapabilities(["browser.search.v1", BROWSER_TABS_CLOSE_ALL_CAPABILITY], true).includes(BROWSER_TABS_CLOSE_ALL_CAPABILITY),
+    grounded: groundedIn(all, "close all the tabs"),
+  }, {
+    parsed: [all, undefined, undefined, undefined],
+    withTabs: ["browser.search.v1", "browser.tabs.v1", "browser.history.v1", "browser.find.v1", BROWSER_TABS_CLOSE_ALL_CAPABILITY],
+    withoutTabs: false,
+    grounded: false,
+  })
+})

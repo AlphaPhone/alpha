@@ -1,0 +1,56 @@
+// spec/shell/index.md, "An app is offered only where its availability admits it"; spec/shell/index.md, "Home lists Alpha's apps in Alpha's order until the owner arranges them"
+import type { AppId, Availability } from "../web/app-screen.ts"
+import type { BuildInfo } from "../platform/build.vibe"
+import { admits, homeRank, type Variant } from "../../gen/shell.effect.vibe"
+
+/** Every app the shell can open, by id. */
+export const APP_IDS: readonly AppId[] = [
+  "assistant", "calendar", "notes", "files", "inbox", "maps", "browser", "camera", "photos",
+  "phone", "messages", "contacts", "clock", "reminders", "settings", "account", "workflows", "passwords",
+]
+
+/** Apps that exist only on the Alpha AOSP image (PRD AP-08). */
+export const AOSP_ONLY: ReadonlySet<AppId> = new Set<AppId>(["phone", "messages", "contacts"])
+
+/** The comms apps whose own bottom bar addresses the person or Alpha, so the assistant's pill stays away at rest (PRD AC-01). */
+export const BAR_APPS: ReadonlySet<AppId> = new Set<AppId>(["phone", "messages", "contacts"])
+
+/** The prefix of an Alpha app's key in Home's favorites. */
+export const BUILTIN_PREFIX = "alpha:"
+
+/** The build as the spec names it. */
+export function variantOf(info: BuildInfo): Variant {
+  return info.variant === "aosp" ? "AospImage" : info.variant === "browser" ? "BrowserBuild" : "LauncherBuild"
+}
+
+/** The spec's availability for a screen's declared availability. */
+export function availabilityOf(availability: Availability) {
+  return availability === "aosp" ? "AospOnly" : "Everywhere"
+}
+
+/** Whether a screen with this availability may be offered in this build. */
+export function offered(availability: Availability, info: BuildInfo): boolean {
+  return admits(availabilityOf(availability), variantOf(info))
+}
+
+/** The app ids this build admits. */
+export function admittedApps(info: BuildInfo): AppId[] {
+  return APP_IDS.filter((app) => offered(AOSP_ONLY.has(app) ? "aosp" : "everywhere", info))
+}
+
+/** Home's favorites key of an Alpha app. */
+export function builtinKey(app: string): string {
+  return `${BUILTIN_PREFIX}${app}`
+}
+
+/** The Alpha app a favorites key names, if it names one. */
+export function appOfKey(key: string): AppId | undefined {
+  if (!key.startsWith(BUILTIN_PREFIX)) return undefined
+  const app = key.slice(BUILTIN_PREFIX.length)
+  return APP_IDS.find((known) => known === app)
+}
+
+/** Home's default tiles: the admitted Alpha apps that are Home defaults, in Alpha's order. */
+export function homeDefaults(admitted: readonly string[]): string[] {
+  return admitted.filter((app) => homeRank(app) > 0).sort((a, b) => homeRank(a) - homeRank(b)).map(builtinKey)
+}

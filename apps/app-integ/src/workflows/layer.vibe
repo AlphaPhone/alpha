@@ -1,0 +1,55 @@
+// spec/workflows/index.md
+import { api } from "./api.vibe"
+import { ReplyChanges } from "../assistant/ports.vibe"
+import { AgentChanges, agentChanges } from "./changes.vibe"
+import { automations } from "./automations.vibe"
+import { workflowCalendar } from "./calendarRanges.vibe"
+import { clockDraft } from "./clock-draft.vibe"
+import { stepDecisions } from "./decisions.vibe"
+import { definitions } from "./definitions.vibe"
+import { followOwner, followResults, followWaiting } from "./followers.vibe"
+import { followForeground } from "./foreground.vibe"
+import { digests } from "./digests.vibe"
+import { approvalNotices, phoneSteps } from "./notices.vibe"
+import { followRoute, place } from "./place.vibe"
+import { requestRecovery } from "./recovery.vibe"
+import { hostedResults } from "./results.vibe"
+import { runs, versions } from "./runs.vibe"
+import { simulatedTriggers, simulatedWorkflows } from "./simulator.vibe"
+import { digestSources, followRenewals } from "./sources.vibe"
+
+const agent = Layer.provideMerge(versions, api)
+
+const panel = Layer.provideMerge(digestSources, digests)
+
+const services = Layer.mergeAll(
+  runs, automations, definitions, approvalNotices, phoneSteps, panel, hostedResults, clockDraft, requestRecovery, simulatedTriggers, stepDecisions,
+  Layer.provideMerge(simulatedWorkflows, workflowCalendar),
+)
+
+const background = Layer.effectDiscard(effect {
+  fork.scoped followRenewals()
+  fork.scoped followForeground()
+  fork.scoped followRoute()
+  fork.scoped followOwner()
+  fork.scoped followResults()
+  fork.scoped followWaiting()
+})
+
+/**
+ * Workflows' services: WorkflowApi, WorkflowVersions, WorkflowRuns, Automations, WorkflowDefinitions, ApprovalNotices, PhoneSteps,
+ * Digests, DigestSourcesService, HostedResults, WorkflowClockDraft, RequestRecovery, SimulatedWorkflows, SimulatedTriggers, WorkflowCalendar, AgentChanges,
+ * WorkflowsPlace and the assistant's WorkflowStepDecisions port, with the renewal reminder, foreground, route, owner, result and waiting-step
+ * followers running. It needs Resident, Native, Build and KeyValueStore from the platform, CloudSession from the account, and Navigation,
+ * Foreground and Overview from the shell; WorkflowClockPort refuses until Clock's provider reaches it.
+ */
+export const layer = Layer.provideMerge(background, Layer.provideMerge(place, Layer.provideMerge(Layer.provideMerge(agentChanges, services), agent)))
+
+/** The assistant's WorkflowStepDecisions port over Workflows' agent routes, for the shell to provide where the assistant reads it. */
+export const workflowStepDecisions = Layer.provideMerge(stepDecisions, agent)
+
+/** The assistant's ReplyChanges port over Workflows' AgentChanges, for the shell's fills to put where the assistant settles a reply's action results. */
+export const replyChanges = Layer.effect(ReplyChanges, effect {
+  const changes = try AgentChanges
+  return { settle: (results: ReadonlyArray<unknown>) => changes.settle(results) }
+})

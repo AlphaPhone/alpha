@@ -1,0 +1,212 @@
+// spec/camera/agentCapture.md, "Story: Let the assistant take the photo I asked for"; spec/camera/agentCapture.md, "The reveal ends only once the closing panel is gone; an abort, a changed context or a hidden Camera ends it with nothing taken"; spec/camera/viewfinder.md, "Another flow borrows the shutter only over the ready, idle preview: the assistant's photo, a scanned frame or a document page"
+import { Machine as CaptureMachine, needsCard, openLimitMs, type Capture, type Event as CaptureEvent, type Scene, type Wanted, panelLimitMs } from "../../gen/camera__agentCapture.effect.vibe"
+import { chatCovers, type Camera } from "../../gen/camera__viewfinder.effect.vibe"
+import { CameraBridge, CameraFailed } from "./bridge.vibe"
+import { photoReceiptId } from "./bridge.schema.vibe"
+import { CameraHandoffs } from "./ports.vibe"
+import { PHOTO_NOT_TAKEN, cameraText } from "./messages.vibe"
+import { PhotoStore } from "./photos.vibe"
+import { Viewfinder } from "./viewfinder.vibe"
+import { Foreground } from "../shell/foreground.vibe"
+
+/** The receipt a requested photo answers with; the library id only for an assistant that offered `camera.capture-library-id.v1`. */
+export interface CameraReceipt {
+  readonly version: 1
+  readonly kind: "camera_capture_photo"
+  readonly operationId: string
+  readonly mediaId: string
+  readonly width: number
+  readonly height: number
+  readonly mime: "image/jpeg"
+  readonly libraryId?: string
+}
+
+/** What a requested photo did: succeeded with its receipt, failed before any shutter, or unknown after one. */
+export interface CaptureAttempt {
+  readonly status: "succeeded" | "failed" | "unknown"
+  readonly summary: string
+  readonly receipt?: CameraReceipt
+  readonly cancelledBeforeCapture?: true
+}
+
+/** How the assistant's request reached the phone. */
+export interface CaptureRequest {
+  readonly operationId: string
+  readonly lens?: "front" | "back"
+  /** Approved on its card. */
+  readonly reviewed: boolean
+  /** The owner's own words for this message ask for a photo now. */
+  readonly ownerWords: boolean
+  readonly offersLibraryId: boolean
+  /** The screen is a protected one. */
+  readonly sensitive?: boolean
+}
+
+/** The assistant's one Camera operation. */
+export service AgentCamera {
+  /** A new owner message: it may carry one direct capture again. */
+  newMessage(): void!!
+  capture(request: CaptureRequest): CaptureAttempt!!
+  readonly changes: Stream.Stream<Capture>
+}
+
+/** The viewfinder's state as the request reads it. */
+export function sceneOf(c: Camera): Scene {
+  return {
+    shown: c.visible, covers: chatCovers(c), ready: c.phase === "PreviewReady", starting: c.phase === "PreviewStarting",
+    recording: c.recording !== "RecordingIdle", busy: c.capturing, front: c.lens === "FrontLens",
+  }
+}
+
+const wantedOf = (lens: "front" | "back" | undefined): Wanted => lens === "front" ? "WantFront" : lens === "back" ? "WantBack" : "AnyLens"
+
+/** The requested-photo service: the request Machine reads the viewfinder's own state at every step. */
+export const agentCamera = Layer.effect(AgentCamera, effect {
+  const machine = try CaptureMachine
+  const viewfinder = try Viewfinder
+  const bridge = try CameraBridge
+  const store = try PhotoStore
+  const handoffs = try CameraHandoffs
+  const foreground = try Foreground
+
+  effect function panelGone() {
+    if ((try foreground.get()).chat === "closed") return true
+    const closed = timeout(Stream.runHead(Stream.filter(foreground.changes, (state) => state.chat === "closed")), Duration.millis(panelLimitMs)) catch () => undefined
+    if (closed !== undefined && Option.isSome(closed)) return true
+    return (try foreground.get()).chat === "closed"
+  }
+
+  effect function scene() {
+    return sceneOf(try viewfinder.get())
+  }
+
+  effect function send(event: CaptureEvent) {
+    return machine.send(event) catch () => undefined
+  }
+
+  try forkDetach(Stream.runForEach(viewfinder.changes, (now) => effect {
+    if (now.recording !== "RecordingIdle") try send({ type: "recordingStarted" })
+  }))
+
+  effect function failed(summary: string): CaptureAttempt!! {
+    return { status: "failed", summary }
+  }
+
+  effect function shoot(request: CaptureRequest): CaptureAttempt!! {
+    const outcome = try viewfinder.borrow(() => effect {
+      const armed = try send({ type: "shutter", scene: { ...(try scene()), busy: false } })
+      if (armed === undefined) {
+        const now = try scene()
+        try send({ type: "recheckFails", scene: now })
+        return try failed(now.covers ? "Camera viewfinder is covered" : "The camera changed, so no photo was taken.")
+      }
+      const shot = try exit(bridge.capturePhoto({ saveToGallery: !bridge.browser, thumbnailOnly: !bridge.browser, quality: 85 }))
+      if (!Exit.isSuccess(shot)) {
+        const failure = Cause.squash(shot.cause)
+        const code = failure instanceof CameraFailed ? failure.code : ""
+        const notTaken = PHOTO_NOT_TAKEN.has(code)
+        try send({ type: "written", result: notTaken ? "NotTaken" : "WriteThrew", wrote: false })
+        return notTaken ? try failed(cameraText(failure instanceof CameraFailed ? failure : {}, "The photo couldn’t be taken. Try again."))
+          : { status: "unknown", summary: "Save unconfirmed" } as CaptureAttempt
+      }
+      const photo = shot.value
+      const kept = bridge.browser && photo.base64 !== undefined ? (store.keepCapture(request.operationId, photo.base64) catch () => undefined) : undefined
+      const mediaId = bridge.browser ? kept?.id : photoReceiptId(photo.path, false)
+      if (mediaId === undefined) {
+        try send({ type: "written", result: "SavedWithoutId", wrote: true })
+        return { status: "unknown", summary: "Saved" } as CaptureAttempt
+      }
+      const after = try send({ type: "written", result: "SavedWithId", wrote: true })
+      const libraryId = after?.libraryIdShared === true ? (store.read(mediaId, false) catch () => undefined)?.id : undefined
+      const receipt: CameraReceipt = {
+        version: 1, kind: "camera_capture_photo", operationId: request.operationId, mediaId, width: Math.round(photo.width), height: Math.round(photo.height), mime: "image/jpeg",
+        ...(libraryId === undefined ? {} : { libraryId }),
+      }
+      return { status: "succeeded", summary: "Saved", receipt } as CaptureAttempt
+    })
+    if (outcome.status === "done") return outcome.value
+    try send({ type: "recheckFails", scene: try scene() })
+    return try failed(outcome.status === "closed" ? "Camera closed" : "Camera busy")
+  }
+
+  /**
+   * A request that may run, asked while Camera is not in front on an unprotected screen, first opens Camera and waits for it to
+   * show (upstream: "the requesting phone opens Camera itself"); a Camera that does not show in time leaves the request to fail.
+   */
+  effect function openCamera(request: CaptureRequest) {
+    if ((try scene()).shown || request.sensitive === true) return
+    if (needsCard(request.reviewed, request.ownerWords, (try machine.get()).directTaken)) return
+    try handoffs.open("camera")
+    try (timeout(Stream.runHead(Stream.filter(viewfinder.changes, (c) => c.visible)), Duration.millis(openLimitMs)) catch () => undefined)
+  }
+
+  effect function run(request: CaptureRequest): CaptureAttempt!! {
+    try openCamera(request)
+    const before = try scene()
+    const asked = try send({ type: "ask", scene: before, wanted: wantedOf(request.lens), reviewed: request.reviewed, ownerWords: request.ownerWords, offersLibraryId: request.offersLibraryId, sensitive: request.sensitive === true })
+    if (asked === undefined || asked.outcome === "Failed") {
+      return try failed(!before.shown ? "Open Camera first" : before.recording ? "Recording — no photo" : "Camera busy")
+    }
+    try viewfinder.hold(true)
+    if (asked.request === "Revealing") {
+      try handoffs.hideConversation()
+      try viewfinder.setChat("ChatHidden")
+      const gone = try panelGone()
+      try send({ type: "panelCleared" })
+      const now = try scene()
+      const seen = gone ? now : { ...now, covers: true }
+      if ((try send({ type: "revealed", scene: seen })) === undefined) {
+        try send({ type: "revealFails", scene: seen })
+        return try failed(gone ? "Camera closed" : "Camera viewfinder is covered")
+      }
+    }
+    if ((try machine.get()).request === "Queued") {
+      if ((try viewfinder.get()).phase === "PreviewOff") try viewfinder.retry()
+      try viewfinder.settled()
+      try send({ type: "previewSettled", scene: try scene() })
+    }
+    const armed = try machine.get()
+    if (armed.request !== "Armed") return try failed("The screen changed before the photo. Ask again.")
+    const now = try scene()
+    if (armed.refusedByRecording || now.recording) {
+      try send({ type: "recheckFails", scene: now })
+      return try failed("Recording — no photo")
+    }
+    if (!now.ready) {
+      try send({ type: "recheckFails", scene: now })
+      return try failed((try viewfinder.get()).notice === "CameraNotice" ? "Camera access is off. Allow camera access, then ask again." : "Camera unavailable")
+    }
+    if (request.lens !== undefined && (now.front ? "front" : "back") !== request.lens) {
+      const ok = try viewfinder.flipTo(request.lens)
+      const flipped = try send({ type: "flipForRequest", scene: now, ok })
+      if (!ok || flipped === undefined || flipped.request !== "Armed") return try failed("Couldn’t switch camera, so no photo was taken.")
+    }
+    return try shoot(request)
+  }
+
+  return {
+    effect newMessage() {
+      try send({ type: "newMessage" })
+    },
+    effect capture(request: CaptureRequest) {
+      return ensuring(
+        onInterrupt(run(request), () => effect {
+          if ((try machine.get()).request !== "Writing") try send({ type: "abort" })
+        }),
+        effect {
+          const now = try machine.get()
+          const seen = try scene()
+          if (now.request === "Revealing") {
+            try send({ type: "panelCleared" })
+            try send({ type: "revealFails", scene: { ...seen, shown: false } })
+          } else if (now.request === "Queued" || now.request === "Armed") {
+            try send({ type: "abort" })
+            try send({ type: "recheckFails", scene: { ...seen, shown: false } })
+          }
+          try viewfinder.hold(false)
+        },
+      ) catch () => ({ status: "failed", summary: "The screen changed before the photo. Ask again." }) as CaptureAttempt
+    },
+    changes: machine.changes,
+  }
+})

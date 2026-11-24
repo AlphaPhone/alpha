@@ -1,0 +1,28 @@
+// spec/assistant/draft.md, "Each binding keeps its own text, and selecting a binding never overwrites another"
+
+/** Text as the UTF-16 units the draft and send machines hold. */
+export function unitsOf(text: string): number[] {
+  return Array.from({ length: text.length }, (_, at) => text.charCodeAt(at))
+}
+
+/** UTF-16 units back to text. */
+export function textOf(units: readonly number[]): string {
+  let text = ""
+  for (let at = 0; at < units.length; at += 8192) text += String.fromCharCode(...units.slice(at, at + 8192))
+  return text
+}
+
+/** The draft binding of a conversation, or of the new-chat slot when there is none yet: origin, owner, agent, conversation. */
+export function bindingOf(origin: string, owner: string, agent: string, conversation: string | null): string {
+  return JSON.stringify([origin, owner, agent, conversation])
+}
+
+/** The conversation a binding names, or null for the new-chat slot and an unreadable binding. */
+export function conversationOfBinding(binding: string): string | null {
+  try {
+    const parts: unknown = JSON.parse(binding)
+    return Array.isArray(parts) && parts.length === 4 && typeof parts[3] === "string" && parts[3] !== "" ? parts[3] : null
+  } catch {
+    return null
+  }
+}

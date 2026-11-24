@@ -1,0 +1,58 @@
+// spec/browser/cloudCustody.md, "Story: Keep one Cloud request per slot until it settles"
+import { type Custody, Machine, machine, ownerOf } from "../../gen/browser__cloudCustody.effect.vibe"
+import { Cloud, CloudSignedOut, CloudUnavailable } from "../platform/cloud.vibe"
+
+/** A request for a slot another request still owns; it was never sent. */
+export error SlotBusy { slot: string }
+/** The request was cancelled or its caller went away before it settled. */
+export error RequestAborted { slot: string }
+
+/** Cloud requests of the browser build, one per slot until each settles. */
+export service CloudRequests {
+  readonly changes: Stream.Stream<Custody>
+  /** One JSON request in `slot`; refused when the slot is taken, aborted when cancelled. */
+  request(slot: string, method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown): unknown!(SlotBusy | RequestAborted | CloudUnavailable | CloudSignedOut)
+  /** Aborts the request that owns `slot`. */
+  cancel(slot: string): void!!
+}
+
+/** CloudRequests over the custody machine in memory. */
+export const cloudRequestsLayer = Layer.provide(Layer.effect(CloudRequests, effect {
+  const custody = try Machine
+  const cloud = try Cloud
+  const counter = try Ref.make(0)
+  const running = try Ref.make(new Map<number, Deferred.Deferred<void>>())
+
+  return {
+    changes: custody.changes,
+    effect request(slot: string, method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown) {
+      const generation = try Ref.updateAndGet(counter, (n) => n + 1)
+      const started = custody.send({ type: "startRequest", generation, slot }) catch () => undefined
+      if (started === undefined || !started.pending.includes(generation)) throw new SlotBusy({ slot })
+      const stop = try Deferred.make<void>()
+      try Ref.update(running, (all) => new Map(all).set(generation, stop))
+      const outcome = try onExit(
+        race(Effect.map(cloud.json(method, path, body), (data) => ({ data })), Effect.map(Deferred.await(stop), () => undefined)),
+        (exit) => effect {
+          if (Exit.isInterrupted(exit)) custody.send({ type: "closeRequest", generation }) catch () => undefined
+          custody.send({ type: "finishRequest", generation }) catch () => undefined
+          try Ref.update(running, (all) => {
+            const next = new Map(all)
+            next.delete(generation)
+            return next
+          })
+        },
+      )
+      const state = try custody.get()
+      if (outcome === undefined || state.aborted.includes(generation)) throw new RequestAborted({ slot })
+      return outcome.data
+    },
+    effect cancel(slot: string) {
+      const owner = ownerOf(try custody.get(), slot)
+      if (owner === 0) return
+      custody.send({ type: "cancelSlot", slot }) catch () => undefined
+      const stop = (try Ref.get(running)).get(owner)
+      if (stop !== undefined) try Deferred.succeed(stop, undefined)
+    },
+  }
+}), machine())

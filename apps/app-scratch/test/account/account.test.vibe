@@ -1,0 +1,318 @@
+// spec/account/session.md, "Story: Sign in once for Cloud's managed services"; spec/account/session.md, "Story: Talk to my agent from the power button at cold start"; spec/account/plan.md, "Story: Use my plan's AI on the phone"; spec/account/plan.md, "Story: See what my account needs when setup ends"; spec/account/billing.md, "Story: Add funds"; spec/account/google.md, "Story: Connect my Google account with the access I choose"; spec/account/limits.md, "Story: Know when I can use a limited service again"; spec/account/billing.md, "Story: Choose or change my plan in Alpha"
+import { assert, it } from "@effect/vitest"
+import { CloudSession } from "../../src/account/session.vibe"
+import { Entitlement } from "../../src/account/entitlement.vibe"
+import { Membership } from "../../src/account/billing.vibe"
+import { GoogleAccounts } from "../../src/account/google.vibe"
+import { authorityOf, stripePageAllowed } from "../../src/account/deployment.ts"
+import { clefAllows, limitDisplay, limitOfError, limitOfRefusal, readLimit } from "../../src/account/limits.vibe"
+import { CloudUnavailable } from "../../src/platform/cloud.vibe"
+import { SignInScreen } from "../../src/account/signIn.vibe"
+import {
+  accountRowsOf, agentBindingOf, attentionOf, connectionFactsOf, idleOf, mapsBindingOf, planLimitOf, powerLaunchOf, readyChipsOf, storageOwnerOf, voiceAccountOf
+} from "../../src/account/bindings.vibe"
+import { AccountPresentation } from "../../src/account/presentation.vibe"
+import { AccountSheet } from "../../src/account/sheet.vibe"
+import { initial as connectionStart } from "../../gen/platform__resident.ts"
+import { initial as planStart } from "../../gen/account__plan.ts"
+import { initial as providerStart } from "../../gen/account__provider.ts"
+import { initial as sessionStart } from "../../gen/account__session.ts"
+import { initial as signInStart } from "../../gen/account__signIn.ts"
+import { type Calls, account, cloudAnswers, expiresAt, found, names, signedInNative, until } from "./platform.vibe"
+
+const consentUrl = "https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=c&state=s&scope=openid%20https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.readonly&redirect_uri=https%3A%2F%2Fapi.eliza.app%2Fapi%2Fv1%2Foauth%2Fgoogle%2Fcallback"
+
+const googleCloud = {
+  ...cloudAnswers,
+  "POST /api/v1/credits/checkout": { url: "https://checkout.stripe.com/c/pay/funds" },
+  "GET /api/v1/eliza/google/accounts?side=owner": { accounts: [{ connectionId: "conn-1", email: "owner@example.com", grantedCapabilities: ["google.basic_identity", "google.gmail.triage", "google.gmail.manage", "google.calendar.read"] }] },
+  "POST /api/v1/eliza/google/connect/initiate": { authUrl: consentUrl }
+}
+
+// spec/account/session.md, "Story: Sign in once for Cloud's managed services"
+it.live(`Sign out of exactly the signed-in key with the agent still running (spec/account/session.md, "Story: Sign in once for Cloud's managed services")`, () => effect {
+  const calls: Calls = []
+  provide account(calls) {
+    try scoped(effect {
+      const session = try CloudSession
+      const signIn = try SignInScreen
+      fork.scoped session.run()
+      fork.scoped signIn.run()
+      const restored = try found(try until(session.changes, (s) => s.phase === "SignedIn" && s.startupResolved))
+      // spec/account/session.md, "A signed-in account is the one Cloud named for the saved key"
+      const owner = try session.owner()
+      // spec/account/session.md, "Only managed routes are admitted, the sign-in hand-off only with test mocks, and funds only on Eliza Cloud"
+      const hosted = Effect.flip(session.admit("HostedAgentRoute")) catch () => undefined
+      // spec/account/session.md, "Sign-out revokes exactly the key it was asked for, and the agent keeps running"
+      const revoked = try session.signOut()
+      const after = try session.current()
+      const revokedAt = names(calls).indexOf("DELETE /api/v1/api-keys/current")
+      const identityBefore = calls.slice(0, revokedAt).filter((c) => c.name === "AlphaCloudSignIn.credentialIdentity").length
+      try Effect.try(() => assert.deepStrictEqual({
+        restored: restored.account, owner, hostedRefused: hosted !== undefined, revoked,
+        after: [after.phase, after.revocation, after.account.credentialId, after.generation > owner],
+        revokedOnce: names(calls).filter((n) => n === "DELETE /api/v1/api-keys/current").length,
+        keyCheckedBeforeRevoke: identityBefore >= 2,
+        clearedAfterRevoke: names(calls).lastIndexOf("AlphaCloudSignIn.clearCredentialState") > revokedAt,
+        unboundBeforeRevoke: names(calls).indexOf("Agent.clearProvider") < revokedAt,
+        residentAfterSignOut: names(calls).lastIndexOf("Resident.ensureRunning") > revokedAt
+      }, {
+        restored: { userId: "user-1", organizationId: "org-1", credentialId: "key-1", expiresAt },
+        owner: 1, hostedRefused: true, revoked: true,
+        after: ["SignedOut", "Revoked", "", true],
+        revokedOnce: 1, keyCheckedBeforeRevoke: true, clearedAfterRevoke: true, unboundBeforeRevoke: true, residentAfterSignOut: true
+      }))
+    })
+  }
+})
+
+// spec/account/plan.md, "Story: Use my plan's AI on the phone"
+it.live(`Explicit credits bind Cloud inference for this key, confirmed by the host (spec/account/plan.md, "Story: Use my plan's AI on the phone")`, () => effect {
+  const calls: Calls = []
+  provide account(calls) {
+    try scoped(effect {
+      const session = try CloudSession
+      const entitlement = try Entitlement
+      fork.scoped session.run()
+      fork.scoped entitlement.run()
+      // spec/account/plan.md, "The phone's agent host alone confirms what its inference is"
+      const bound = try found(try until(entitlement.changes, (a) => a.binding === "CloudBound" && a.host === "HostBound"))
+      try Effect.try(() => assert.deepStrictEqual({
+        bound: [bound.basis, bound.record.present, bound.record.endsAt],
+        configured: calls.find((c) => c.name === "Agent.configureCloudProvider")?.args
+      }, {
+        bound: ["VerifiedBasis", true, "NoEnd"],
+        configured: { credentialId: "key-1", model: "cerebras/qwen-3.8-27b" }
+      }))
+    })
+  }
+})
+
+// spec/account/billing.md, "Story: Add funds"
+it.live(`Add funds with its own amount and Stripe page (spec/account/billing.md, "Story: Add funds")`, () => effect {
+  const calls: Calls = []
+  provide account(calls, signedInNative, googleCloud) {
+    try scoped(effect {
+      const session = try CloudSession
+      const membership = try Membership
+      const entitlement = try Entitlement
+      fork.scoped session.run()
+      fork.scoped entitlement.run()
+      fork.scoped membership.run()
+      try until(membership.changes, (b) => b.owner === 1)
+      try membership.openFunds()
+      try membership.addFunds(400)
+      const refused = calls.some((c) => c.name === "POST /api/v1/credits/checkout")
+      try membership.addFunds(2500)
+      const waiting = try found(try until(membership.changes, (b) => b.funds === "FundsAwaitingReturn"))
+      const checkout = calls.find((c) => c.name === "POST /api/v1/credits/checkout")?.args as { amountUsd?: number } | undefined
+      const opened = calls.filter((c) => c.name === "CloudServices.openExternal").map((c) => (c.args as { url: string }).url)
+      try Effect.try(() => assert.deepStrictEqual({
+        refused, amount: checkout?.amountUsd, opened, manager: waiting.manager,
+        planManagerRead: calls.some((c) => c.name === "GET /api/v1/subscriptions/plans")
+      }, { refused: false, amount: 25, opened: ["https://checkout.stripe.com/c/pay/funds"], manager: "ManagerClosed", planManagerRead: false }))
+    })
+  }
+})
+
+// spec/account/google.md, "Story: Connect my Google account with the access I choose"
+it.live(`Connect Google for one capability after a current read, keeping what it holds (spec/account/google.md, "Story: Connect my Google account with the access I choose")`, () => effect {
+  const calls: Calls = []
+  provide account(calls, signedInNative, googleCloud) {
+    try scoped(effect {
+      const session = try CloudSession
+      const google = try GoogleAccounts
+      fork.scoped session.run()
+      fork.scoped google.run()
+      try until(google.changes, (g) => g.owner === 1)
+      // spec/account/google.md, "Consent asks for the capabilities a caller names, after a current read, and never for less than the account holds"
+      try google.connect(["CalendarRead"])
+      const waiting = try found(try until(google.changes, (g) => g.phase === "GWaiting"))
+      const asked = calls.find((c) => c.name === "POST /api/v1/eliza/google/connect/initiate")?.args as { capabilities?: Array<string> } | undefined
+      try Effect.try(() => assert.deepStrictEqual({
+        kept: [...waiting.requested].sort(),
+        keepsModify: asked?.capabilities?.includes("google.gmail.manage"),
+        opened: calls.some((c) => c.name === "CloudServices.openExternal" && (c.args as { url: string }).url === consentUrl)
+      }, { kept: ["CalendarRead", "GmailModify", "GmailRead"], keepsModify: true, opened: true }))
+    })
+  }
+})
+
+// spec/account/limits.md, "Story: Know when I can use a limited service again"
+it.effect(`Read a refusal's wait (spec/account/limits.md, "Story: Know when I can use a limited service again")`, () => effect {
+  const at = 1_000_000
+  const fromBody = readLimit(null, { error: { code: "rate_limited", retryAfterSeconds: 0.2 } }, at)
+  const fromHeader = readLimit("30", {}, at)
+  const tooLong = readLimit("90000", {}, at)
+  const fromError = limitOfError({ code: "voice-http-429", data: { retryAfterSeconds: 12, limitCode: "clef_daily" } })
+  const other = limitOfError({ code: "voice-http-500" })
+  const shown = limitDisplay({ limitCode: "subscription_required" }, at)
+  // spec/account/limits.md, "A wait is between one second and one day, or there is none"
+  const refusal = limitOfRefusal(new CloudUnavailable({ status: 429, code: "allowance_exhausted", message: "spent", retryAfter: 120, resetAt: at + 86400000 }), at)
+  const stale = limitOfRefusal(new CloudUnavailable({ status: 429, code: "Not A Code", message: "spent", retryAfter: 90000, resetAt: at - 1 }), at)
+  // spec/account/limits.md, "A refusal names a plan, an allowance or a wait, and a limit is shown only until it passes"
+  const allowance = limitDisplay(refusal, at)
+  const passed = limitDisplay(refusal, at + 86400001)
+  // spec/account/limits.md, "Semantic end-of-turn has a daily quota, after which only a subscription continues"
+  const quota = [clefAllows("ClefFree", 1999), clefAllows("ClefFree", 2000), clefAllows("ClefFunded", 3999), clefAllows("ClefSubscribed", 9000)]
+  try Effect.try(() => assert.deepStrictEqual(
+    { fromBody, fromHeader, tooLong, fromError, other, card: shown.card, refusal, stale, allowance: [allowance.limit.tag, allowance.shown, allowance.card], passed: passed.shown, quota },
+    {
+      fromBody: { retryAfterSeconds: 1, limitCode: "rate_limited" }, fromHeader: { retryAfterSeconds: 30 }, tooLong: {},
+      fromError: { retryAfterSeconds: 12, limitCode: "clef_daily" }, other: undefined, card: "ChoosePlanCard",
+      refusal: { retryAfterSeconds: 120, limitCode: "allowance_exhausted", resetAt: at + 86400000 }, stale: {},
+      allowance: ["AllowanceExhausted", true, "ManagePlanCard"], passed: false, quota: [true, false, true, true]
+    }
+  ))
+})
+
+// spec/account/billing.md, "A payment page opens only on a Stripe host the phone's link policy opens"
+it.effect(`Open only the payment pages the phone's link policy opens (spec/account/billing.md, "Story: Choose or change my plan in Alpha")`, () => effect {
+  const pages = [
+    "https://checkout.stripe.com/c/pay/plus", "https://billing.stripe.com/p/session/1", "https://invoice.stripe.com/i/acct/inv",
+    "http://checkout.stripe.com/c/pay/plus", "https://checkout.stripe.com:8443/c", "https://user:pw@checkout.stripe.com/c", "https://checkout.stripe.com.example/c"
+  ]
+  // spec/account/session.md, "The build addresses one deployment, and staging only with test mocks or the Cloud resident's browser preview"
+  const eliza = authorityOf("ElizaCloud", "Production")
+  const alpha = authorityOf("AlphaCloud", "Staging")
+  try Effect.try(() => assert.deepStrictEqual(
+    { opens: pages.map(stripePageAllowed), agents: [eliza.agents, alpha.agents], alphaWeb: alpha.web },
+    { opens: [true, true, false, false, false, false, false], agents: [new URL(eliza.services).host, "cloud-staging.alphacompute.cc"], alphaWeb: "https://cloud-staging.alphacompute.cc" }
+  ))
+})
+
+// spec/account/session.md, "Story: Sign in once for Cloud's managed services"
+it.effect(`Tell the areas above the account what it is bound to (spec/account/session.md, "Story: Sign in once for Cloud's managed services")`, () => effect {
+  const account = { userId: "user-1", organizationId: "org-1", credentialId: "key-1", expiresAt }
+  const signedIn = { ...sessionStart, loaded: true, phase: "SignedIn" as const, account, generation: 3, startupResolved: true }
+  const created = { ...signedIn, created: true }
+  const connected = { ...connectionStart, phase: "Connected" as const, generation: 2, owner: "owner-1", agent: "agent-1" }
+  const starting = { ...connectionStart, phase: "Starting" as const, generation: 1 }
+  const closed = { ...signInStart, hostFixed: true, startupResolved: true }
+  const choosing = { ...closed, screen: "Choose" as const }
+  const visible = { ...planStart, recheck: { ...planStart.recheck, visible: true } }
+  const own = { ...providerStart, known: true, route: "OwnRoute" as const, textKey: true, voiceKey: true, revision: 4 }
+  const saving = { ...providerStart, work: "Saving" as const }
+  try Effect.try(() => assert.deepStrictEqual({
+    bound: agentBindingOf(signedIn, connected),
+    device: agentBindingOf(sessionStart, starting),
+    maps: mapsBindingOf(signedIn),
+    mapsSignedOut: mapsBindingOf({ ...signedIn, phase: "KeyRefused" }),
+    cloudVoice: voiceAccountOf(signedIn, "production", providerStart),
+    ownVoice: voiceAccountOf(signedIn, "production", own),
+    noVoice: voiceAccountOf(sessionStart, "production", providerStart),
+    walkthrough: connectionFactsOf(signedIn, closed, visible, connected, providerStart, false),
+    newAccount: connectionFactsOf(created, closed, visible, connected, providerStart, false).created,
+    ownKeys: connectionFactsOf(sessionStart, closed, visible, connected, own, false).ownKeys,
+    signingIn: connectionFactsOf(sessionStart, choosing, planStart, starting, providerStart, false).signingIn,
+    untouched: idleOf(sessionStart, choosing, providerStart),
+    savingKeys: idleOf(sessionStart, closed, saving).connectionBusy,
+    planLimit: planLimitOf({ ...planStart, notice: "NeedsPlanNotice" }, 5)?.kind,
+    noLimit: planLimitOf(planStart, 5)
+  }, {
+    bound: { owner: "user-1.org-1", session: 2, agentId: "agent-1", usable: true },
+    device: { owner: "device", session: 1, agentId: "", usable: false },
+    maps: { sessionId: "3", credentialId: "key-1" },
+    mapsSignedOut: undefined,
+    cloudVoice: { kind: "cloud", environment: "production", credentialId: "key-1" },
+    ownVoice: { kind: "own", revision: "4", cartesia: true },
+    noVoice: { kind: "none" },
+    walkthrough: { account: true, ownKeys: false, signingIn: false, busy: false, residentStarting: false, background: false, created: false, attention: false },
+    newAccount: true,
+    ownKeys: true,
+    signingIn: true,
+    untouched: { connectionBusy: false, signInOpen: true, signInUntouched: true },
+    savingKeys: true,
+    planLimit: "subscription-required",
+    noLimit: undefined
+  }))
+})
+
+// spec/account/plan.md, "Story: See what my account needs when setup ends"
+it.effect(`The Ready card shows what the account needs, and only that asks for attention (spec/account/plan.md, "Story: See what my account needs when setup ends")`, () => effect {
+  const account = { userId: "user-1", organizationId: "org-1", credentialId: "key-1", expiresAt }
+  const signedIn = { ...sessionStart, loaded: true, phase: "SignedIn" as const, account, generation: 3, startupResolved: true }
+  const connected = { ...connectionStart, phase: "Connected" as const, generation: 2, owner: "owner-1", agent: "agent-1" }
+  const lost = { ...connected, phase: "Lost" as const }
+  const closed = { ...signInStart, hostFixed: true, startupResolved: true }
+  const bound = { ...planStart, credential: 3, binding: "CloudBound" as const, host: "HostBound" as const }
+  const needsPlan = { ...planStart, credential: 3, binding: "Unbound" as const, notice: "NeedsPlanNotice" as const, host: "HostRemoved" as const }
+  const failed = { ...bound, host: "HostBindFailed" as const }
+  const own = { ...providerStart, known: true, route: "OwnRoute" as const, textKey: true, revision: 4 }
+  const quiet = readyChipsOf(signedIn, bound, connected, providerStart, "owner@example.com")
+  const plan = readyChipsOf(signedIn, needsPlan, connected, providerStart, undefined)
+  const off = readyChipsOf(signedIn, failed, lost, providerStart, undefined)
+  const checking = readyChipsOf(signedIn, planStart, connected, providerStart, undefined)
+  const unconfirmed = readyChipsOf({ ...signedIn, priorUnconfirmed: true }, bound, connected, providerStart, undefined)
+  const created = readyChipsOf({ ...signedIn, created: true }, bound, connected, providerStart, "owner@example.com")
+  const ownKeys = readyChipsOf(sessionStart, planStart, connected, own, undefined)
+  try Effect.try(() => assert.deepStrictEqual({
+    quiet: [quiet.ai, attentionOf(quiet)], plan: [plan.ai, attentionOf(plan)], off: [off.ai, off.agentDown, attentionOf(off)],
+    checking: [checking.ai, attentionOf(checking)], unconfirmed: [unconfirmed.checkSignIn, attentionOf(unconfirmed)],
+    created: [created.created, created.email, attentionOf(created)], ownKeys: [ownKeys.ai, attentionOf(ownKeys)],
+    facts: connectionFactsOf(signedIn, closed, needsPlan, connected, providerStart, false).attention
+  }, {
+    quiet: ["NoAiChip", false], plan: ["NoPlanChip", true], off: ["AiOffChip", true, true],
+    checking: ["AiCheckingChip", false], unconfirmed: [true, true],
+    created: [true, "owner@example.com", false], ownKeys: ["NoAiChip", false],
+    facts: true
+  }))
+})
+
+// spec/account/session.md, "Story: Talk to my agent from the power button at cold start"
+it.effect(`A power launch is claimed only for a settled production account, and Settings shows the account and its route (spec/account/session.md, "Story: Talk to my agent from the power button at cold start")`, () => effect {
+  const user = "0f8fad5b-d9cb-469f-a165-70867728950e"
+  const organization = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+  const account = { userId: user, organizationId: organization, credentialId: "key-1", expiresAt }
+  const signedIn = { ...sessionStart, loaded: true, phase: "SignedIn" as const, account, generation: 3, startupResolved: true }
+  const connected = { ...connectionStart, phase: "Connected" as const, generation: 2, owner: "owner-1", agent: "agent-1" }
+  const closed = { ...signInStart, hostFixed: true, startupResolved: true }
+  const choosing = { ...closed, screen: "Choose" as const }
+  const own = { ...providerStart, known: true, route: "OwnRoute" as const, textKey: true, revision: 4 }
+  try Effect.try(() => assert.deepStrictEqual({
+    claim: powerLaunchOf(signedIn, closed, providerStart, connected),
+    restoring: powerLaunchOf({ ...signedIn, startupResolved: false }, closed, providerStart, connected),
+    interactive: powerLaunchOf(signedIn, choosing, providerStart, connected),
+    staging: powerLaunchOf({ ...signedIn, environment: "Staging" }, closed, providerStart, connected).accountRef,
+    noAgent: powerLaunchOf(signedIn, closed, providerStart, undefined).accountRef,
+    notUuid: powerLaunchOf({ ...signedIn, account: { ...account, userId: "user-1" } }, closed, providerStart, connected).accountRef,
+    rows: [accountRowsOf(signedIn, providerStart, "owner@example.com"), accountRowsOf(signedIn, own, undefined), accountRowsOf(sessionStart, providerStart, undefined),
+      accountRowsOf({ ...signedIn, phase: "KeyRefused" }, providerStart, "owner@example.com")],
+    storage: [storageOwnerOf(signedIn), storageOwnerOf(sessionStart)]
+  }, {
+    claim: { initialRestorePending: false, accountRef: JSON.stringify(["cloud", "production", user, organization]) },
+    restoring: { initialRestorePending: true, accountRef: null },
+    interactive: { initialRestorePending: false, accountRef: null },
+    staging: null, noAgent: null, notUuid: null,
+    rows: [{ account: "owner@example.com", provider: "Cloud" }, { account: "Signed in", provider: "Own key" }, { account: "Signed out", provider: "Cloud" },
+      { account: "Sign in again", provider: "Cloud" }],
+    storage: [`${user}.${organization}`, undefined]
+  }))
+})
+
+// spec/account/sheet.md, "The sheet shows one section at a time, and Android Home closes it"
+it.live(`Back leaves a section before Account leaves, and is the shell's once Account rests (spec/account/sheet.md, "The sheet shows one section at a time, and Android Home closes it")`, () => effect {
+  provide account([]) {
+    try scoped(effect {
+      const session = try CloudSession
+      const sheet = try AccountSheet
+      const presentation = try AccountPresentation
+      fork.scoped session.run()
+      fork.scoped sheet.run()
+      try until(sheet.changes, (s) => s.owner === 1)
+      try sheet.show()
+      const resting = try presentation.back()
+      try presentation.openSection("GoogleSection")
+      const inSection = try presentation.back()
+      const afterSection = (try sheet.current()).section
+      try sheet.askSignOut()
+      const inReview = try presentation.back()
+      const afterReview = (try sheet.current()).reviewOwner
+      const rested = try presentation.back()
+      try Effect.try(() => assert.deepStrictEqual(
+        { resting, inSection, afterSection, inReview, afterReview, rested },
+        { resting: false, inSection: true, afterSection: "AccountSection", inReview: true, afterReview: 0, rested: false }
+      ))
+    })
+  }
+})

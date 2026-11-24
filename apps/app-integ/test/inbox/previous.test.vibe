@@ -1,0 +1,127 @@
+// spec/inbox/drafts.md, "Story: Keep the drafts I wrote before this version"; spec/inbox/operations.md, "The phone advertises the agent's local email draft only when the agent offers it"
+import { assert, it } from "@effect/vitest"
+import { fakeNative, fakeResident, buildInfo } from "../../src/platform/layers.vibe"
+import { memoryStore } from "../../src/platform/storage.vibe"
+import { layer as inbox, InboxAccounts, Mailbox, MailComposer, inboxCapabilities, keepPreviousDrafts } from "../../src/inbox/layer.vibe"
+import { previousOwners } from "../../src/inbox/previous.vibe"
+import { sha256Hex } from "../../src/inbox/text.ts"
+import { calls, grantA, mailCloud, neighbors, settle } from "./support.vibe"
+
+const previous = JSON.stringify(["production", "u1", "org1", grantA])
+
+/** `ElizaSecureStore` over one map of slots, as the phone answers it. */
+function secureStore(slots: Map<string, string>) {
+  return fakeNative({
+    ElizaSecureStore: {
+      get: (args: unknown) => ({ value: slots.get((args as { key: string }).key) ?? null }),
+      set: (args: unknown) => {
+        const { key, value } = args as { key: string; value: string }
+        slots.set(key, value)
+        return {}
+      },
+      remove: (args: unknown) => ({ removed: slots.delete((args as { key: string }).key) }),
+      compareAndExchange: (args: unknown) => {
+        const { key, expected, value } = args as { key: string; expected: string | null; value: string | null }
+        if ((slots.get(key) ?? null) !== expected) return { exchanged: false }
+        if (value === null) slots.delete(key)
+        else slots.set(key, value)
+        return { exchanged: true }
+      },
+    },
+  })
+}
+
+/** The Inbox with its platform kept visible, so a pass can be run again by hand. */
+function inboxOver(log: ReturnType<typeof calls>, slots: Map<string, string>) {
+  return Layer.provideMerge(inbox, Layer.mergeAll(mailCloud(log), secureStore(slots), fakeResident({}), buildInfo(), memoryStore, neighbors(log)))
+}
+
+/** A draft as the previous version kept it for this account. */
+function previousDraft(id: string, extra: Record<string, unknown> = {}) {
+  return { version: 1, id, revision: `rev-${id}`, owner: previous, to: ["bo@example.com"], subject: "Lunch", body: "Saved body", ...extra }
+}
+
+function previousSlotsLeft(slots: Map<string, string>): string[] {
+  return [...slots.keys()].filter((key) => key.startsWith("inbox-drafts:v1:"))
+}
+
+// spec/inbox/drafts.md, "A draft the previous version kept comes into its account's Drafts once, and the previous slots clear only after every draft is kept"
+it.live("Keep the drafts I wrote before this version: saved, set aside and being edited come into Drafts once, then their slots clear", () => effect {
+  const log = calls()
+  const ownerHash = try tryPromise({ try: () => sha256Hex(previous), catch: (cause) => cause })
+  const binding = JSON.stringify(["inbox-unsaved", "app", previous])
+  const bindingHash = try tryPromise({ try: () => sha256Hex(binding), catch: (cause) => cause })
+  const slots = new Map<string, string>([
+    [`inbox-drafts:v1:${previous}`, JSON.stringify(previousDraft("p-saved"))],
+    [`inbox-drafts:v1:unsaved:${bindingHash}`, JSON.stringify({
+      version: 1, binding, revision: "x1",
+      text: JSON.stringify({ version: 1, owner: previous, baseRevision: "rev-p-saved", draft: previousDraft("p-saved", { body: "Newer body" }), toQ: "cy" }),
+    })],
+    [`inbox-drafts:v1:shelf:${ownerHash}`, JSON.stringify({
+      version: 1, owner: previous, items: [
+        { draft: previousDraft("p-reply", { subject: "Re: Plan", body: "", mode: "reply", reply: { messageId: "m1", threadId: "t-m1" } }), toQ: "" },
+        { draft: previousDraft("p-forward", { to: [], subject: "Fwd: Plan", body: "FYI", mode: "forward", earlierThanSent: true, provider: { draftId: "g9", providerDigest: "d9" }, forward: { messageId: "m2", historyId: "41", parts: [{ partId: "1", name: "A.pdf", mimeType: "application/pdf", size: 10 }] } }), toQ: "" },
+        { draft: previousDraft("p-empty", { to: [], subject: "", body: "" }), toQ: "" },
+      ],
+    })],
+  ])
+  provide inboxOver(log, slots) {
+    const accounts = try InboxAccounts
+    const mailbox = try Mailbox
+    const composer = try MailComposer
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try settle(composer.changes, (s) => s.accounts.some((a) => a.shelf.length === 3))
+    const owner = try accounts.selectedKey()
+    const again = try keepPreviousDrafts(owner)
+    const shelf = (try composer.mine()).shelf
+    const saved = shelf.find((d) => d.id === "p-saved")
+    const reply = shelf.find((d) => d.id === "p-reply")
+    const forward = shelf.find((d) => d.id === "p-forward")
+    try Effect.try(() => assert.deepStrictEqual({
+      owners: previousOwners(owner, [grantA, grantA, ""]),
+      ids: shelf.map((d) => d.id), again,
+      saved: { body: saved?.fields.body, pendingTo: saved?.pendingTo, to: saved?.fields.toList },
+      reply: { mode: reply?.fields.mode, message: reply?.fields.replyMessage, thread: reply?.fields.replyThread },
+      forward: { mode: forward?.fields.mode, earlier: forward?.earlier, provider: forward?.provider.draftId, parts: forward?.fields.forward.parts.map((p) => p.nameKey) },
+      left: previousSlotsLeft(slots),
+    }, {
+      owners: [previous],
+      ids: ["p-saved", "p-reply", "p-forward"], again: 0,
+      saved: { body: "Newer body", pendingTo: "cy", to: ["bo@example.com"] },
+      reply: { mode: "ReplyMode", message: "m1", thread: "t-m1" },
+      forward: { mode: "ForwardMode", earlier: true, provider: "g9", parts: ["a.pdf"] },
+      left: [],
+    }))
+  }
+})
+
+// spec/inbox/drafts.md, "A draft the previous version kept comes into its account's Drafts once, and the previous slots clear only after every draft is kept"
+it.live("A previous draft of another account is never brought in, and its slot is kept", () => effect {
+  const log = calls()
+  const savedSlot = `inbox-drafts:v1:${previous}`
+  const slots = new Map<string, string>([[savedSlot, JSON.stringify({ ...previousDraft("p-other"), owner: JSON.stringify(["production", "u1", "org1", "grant-b"]) })]])
+  provide inboxOver(log, slots) {
+    const accounts = try InboxAccounts
+    const mailbox = try Mailbox
+    const composer = try MailComposer
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try settle(composer.changes, (s) => s.owner !== "")
+    const kept = try keepPreviousDrafts(try accounts.selectedKey())
+    const shelf = (try composer.mine()).shelf
+    try Effect.try(() => assert.deepStrictEqual({ kept, shelf: shelf.length, left: previousSlotsLeft(slots) }, { kept: 0, shelf: 0, left: [savedSlot] }))
+  }
+})
+
+// spec/inbox/drafts.md, "A draft the previous version kept comes into its account's Drafts once, and the previous slots clear only after every draft is kept"
+it.effect("An account outside Eliza Cloud has no previous drafts", () => effect {
+  const alpha = JSON.stringify(["AlphaCloud/Production", "u1", "org1", grantA])
+  try Effect.try(() => assert.deepStrictEqual({ alpha: previousOwners(alpha, [grantA]), broken: previousOwners("not json", [grantA]) }, { alpha: [], broken: [] }))
+})
+
+// spec/inbox/operations.md, "The phone advertises the agent's local email draft only when the agent offers it"
+it.effect("Inbox advertises the agent's local email draft only when the agent offers it", () => effect {
+  try Effect.try(() => assert.deepStrictEqual({
+    offered: inboxCapabilities(["calendar.create.v1", "gmail.local-compose.v1"]),
+    missing: inboxCapabilities(["calendar.create.v1"]),
+  }, { offered: ["gmail.local-compose.v1"], missing: [] }))
+})

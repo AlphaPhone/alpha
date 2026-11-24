@@ -1,0 +1,142 @@
+// spec/telephony/messages.md, "Delete passes the exact listed row after confirmation, and an unconfirmed delete keeps the row and blocks another"; spec/telephony/voicemail.md, "A delete needs the owner's confirmation of the open voicemail, and a refused delete keeps it"; spec/telephony/contacts.md, "A removal needs the owner's confirmation of the contact read whole, at its version"
+import type { ReviewedContact } from "@elizaos/os/bridges/contacts"
+import { deletionNoticeOf, recordKindOf, type DeferredDeletionEntry, type DeletionNoticeView, type StagedDeletion, type StagedRecordKind } from "@elizaos/os/bridges/deletion-window"
+import type { MessageDeleteReference } from "@elizaos/os/bridges/messages"
+import type { VoicemailId } from "@elizaos/os/bridges/phone"
+import { callerOf, TelephonyBridges, TelephonyRefused } from "./bridges.vibe"
+import { frontChanges, whileInFront } from "./front.vibe"
+
+const BUSY = "1 second"
+const IDLE = "10 seconds"
+
+/** The exact record a confirmed delete names: the listed message, the open voicemail, or the contact at the version read. */
+export type DeletionTarget =
+  | { readonly kind: "message"; readonly reference: MessageDeleteReference }
+  | { readonly kind: "voicemail"; readonly id: VoicemailId }
+  | { readonly kind: "contact"; readonly reviewed: ReviewedContact }
+
+/** How a confirmed delete was handed to the phone: queued in its window under its notice key, refused before anything changed, or with no answer. */
+export type Deferred = { readonly queued: true; readonly key: string } | { readonly queued: false; readonly refused: boolean }
+
+/** The deletions waiting in the phone's window, as their notices show them, and what the last Undo or dismissal said. */
+export interface UndoView {
+  readonly notices: readonly DeletionNoticeView[]
+  readonly said: string
+}
+
+/** What an Undo came to: kept, with the kind of list to read again, or the phone's own sentence. */
+export type UndoAnswer = { readonly kept: true; readonly kind: StagedRecordKind } | { readonly kept: false; readonly message: string }
+
+/** Deferred deletions with Undo, over the phone's deletion window and its journal. */
+export service DeletionUndo {
+  readonly changes: Stream.Stream<UndoView>
+  /** The view now. */
+  get(): UndoView!!
+  /** Stage a confirmed delete; the row leaves its list at once. */
+  defer(target: DeletionTarget): Deferred!!
+  /** Undo a queued delete while its notice offers Undo. */
+  undo(key: string): UndoAnswer!!
+  /** Dismiss an uncertain outcome; its receipt stays. */
+  dismiss(key: string): void!!
+  /** Read the window's pending deletions again. */
+  refresh(): void!!
+  /** Keep the notices current for as long as it runs, reading the window only while the page is in front on an unlocked phone. */
+  run(): void!!
+}
+
+/** The notice key of a staged deletion, as `deletionNoticeOf` names it. */
+export function keyOf(deletion: Pick<StagedDeletion, "kind" | "id">): string {
+  return `${recordKindOf(deletion.kind)}:${deletion.id}`
+}
+
+/** The kind of list a notice key belongs to. */
+export function kindOfKey(key: string): StagedRecordKind | undefined {
+  const kind = key.slice(0, key.indexOf(":"))
+  return kind === "message" || kind === "thread" || kind === "voicemail" || kind === "contact" ? kind : undefined
+}
+
+/** A refused staging call: a coded refusal changed nothing; a lost answer is unknown. */
+const failed = (failure: TelephonyRefused): Deferred => ({ queued: false, refused: failure.code !== undefined })
+
+/** Undo over the phone bridges' staged deletions and the upstream deferred-deletion client. */
+export const deletionUndoLayer = Layer.effect(DeletionUndo, effect {
+  const bridgeCall = callerOf(try TelephonyBridges)
+  const entries = try SubscriptionRef.make<readonly DeferredDeletionEntry[]>([])
+  const said = try SubscriptionRef.make("")
+  const front = try frontChanges()
+
+  effect function view() {
+    const listed = try SubscriptionRef.get(entries)
+    return { notices: listed.flatMap((entry) => deletionNoticeOf(entry) ?? []), said: try SubscriptionRef.get(said) } satisfies UndoView
+  }
+
+  effect function refresh() {
+    const pending = try (bridgeCall("pending", (c) => c.deletions.pending()) catch () => undefined)
+    if (pending !== undefined) try SubscriptionRef.set(entries, pending.deletions)
+  }
+
+  effect function stage(target: DeletionTarget) {
+    switch (target.kind) {
+      case "message": {
+        const answer = try (bridgeCall("deleteMessage", (c) => c.messages.deleteMessage(target.reference)) catch (failure) => failure)
+        if (answer instanceof TelephonyRefused) return failed(answer)
+        return answer.status === "queued" ? { queued: true, key: keyOf(answer.deletion) } satisfies Deferred : { queued: false, refused: true } satisfies Deferred
+      }
+      case "voicemail": {
+        const answer = try (bridgeCall("deleteVoicemail", (c) => c.phone.deleteVoicemail(target.id)) catch (failure) => failure)
+        if (answer instanceof TelephonyRefused) return failed(answer)
+        return answer.status === "queued" ? { queued: true, key: keyOf(answer.deletion) } satisfies Deferred : { queued: false, refused: true } satisfies Deferred
+      }
+      case "contact": {
+        const answer = try (bridgeCall("remove", (c) => c.contacts.remove(target.reviewed)) catch (failure) => failure)
+        if (answer instanceof TelephonyRefused) return failed(answer)
+        return answer.status === "queued" ? { queued: true, key: keyOf(answer.deletion) } satisfies Deferred : { queued: false, refused: true } satisfies Deferred
+      }
+    }
+  }
+
+  effect function entryOf(key: string) {
+    return (try SubscriptionRef.get(entries)).find((entry) => keyOf(entry) === key)
+  }
+
+  return {
+    changes: Stream.mapEffect(Stream.merge(SubscriptionRef.changes(entries), SubscriptionRef.changes(said)), () => view()),
+    get: view,
+    effect defer(target: DeletionTarget) {
+      try SubscriptionRef.set(said, "")
+      const deferred = try stage(target)
+      try refresh()
+      return deferred
+    },
+    effect undo(key: string) {
+      const entry = try entryOf(key)
+      const kind = kindOfKey(key)
+      if (entry === undefined || kind === undefined || deletionNoticeOf(entry)?.canUndo !== true) return { kept: false, message: "" } satisfies UndoAnswer
+      const outcome = try (bridgeCall("undo", (c) => c.deletions.undo({ kind: entry.kind, id: entry.id })) catch () => undefined)
+      try refresh()
+      if (outcome?.kind === "Kept") {
+        try SubscriptionRef.set(said, "")
+        return { kept: true, kind } satisfies UndoAnswer
+      }
+      const message = outcome?.kind === "NotKept" ? outcome.message : ""
+      try SubscriptionRef.set(said, message)
+      return { kept: false, message } satisfies UndoAnswer
+    },
+    effect dismiss(key: string) {
+      const entry = try entryOf(key)
+      if (entry === undefined) return
+      const outcome = try (bridgeCall("dismiss", (c) => c.deletions.dismiss({ kind: entry.kind, id: entry.id })) catch () => undefined)
+      try SubscriptionRef.set(said, outcome?.message ?? "")
+      try refresh()
+    },
+    refresh,
+    effect run() {
+      try whileInFront(front, effect () => {
+        while (true) {
+          try refresh()
+          try sleep((try SubscriptionRef.get(entries)).length > 0 ? BUSY : IDLE)
+        }
+      })
+    },
+  }
+})

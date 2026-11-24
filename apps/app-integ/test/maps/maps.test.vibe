@@ -1,0 +1,176 @@
+// spec/maps/screen.md, "Story: Find a place"; spec/maps/screen.md, "Story: Plan directions and choose a route"; spec/maps/guidance.md, "Story: Guide me along the route I started"; spec/maps/connection.md, "Story: Keep Cloud Maps on the account that asked for it"; spec/maps/connection.md, "Story: Back off when Maps asks me to wait"; spec/maps/savedPlaces.md, "Story: Keep the places I care about on this phone"; spec/maps/eventReturn.md, "Story: Go back to the event whose place I opened"; spec/maps/notificationOpen.md, "Story: Return to guidance from the notification"
+import { assert, it } from "@effect/vitest"
+import { Machine as ConnectionMachine } from "../../gen/maps__connection.effect.vibe"
+import { Machine as GuidanceMachine } from "../../gen/maps__guidance.effect.vibe"
+import { Machine as ScreenMachine } from "../../gen/maps__screen.effect.vibe"
+import { Machine as OpenMachine } from "../../gen/maps__notificationOpen.effect.vibe"
+import { MapsContent } from "../../src/maps/content.vibe"
+import { MapsHandoff } from "../../src/maps/handoff.vibe"
+import { MapsSession } from "../../src/maps/layer.vibe"
+import { MapsNavigation } from "../../src/maps/navigation.vibe"
+import { SavedPlacesStore } from "../../src/maps/saved.vibe"
+import { MapsScreen } from "../../src/maps/screen.vibe"
+import { ferry, fixAt, harness, pier, until } from "./fakes.vibe"
+
+it.live("Find a place, plan directions, choose a route and follow it (spec/maps/screen.md, \"Story: Find a place\"; spec/maps/screen.md, \"Story: Plan directions and choose a route\"; spec/maps/guidance.md, \"Story: Guide me along the route I started\")", () => effect {
+  const h = try harness({ id: "alpha-osm", data: "OpenStreetMap" })
+  provide h.layer {
+    const screen = try MapsScreen
+    const machine = try ScreenMachine
+    const content = try MapsContent
+    const connection = try ConnectionMachine
+    const navigation = try MapsNavigation
+    const guidance = try GuidanceMachine
+    try (try MapsSession).open()
+    try until(connection.changes, (s) => s.phase === "Installed")
+
+    // spec/maps/screen.md, "Typing waits 350 milliseconds; Enter searches once for the text, and repeating it reuses the answer"
+    try screen.typeQuery("pier")
+    try screen.submitSearch()
+    const searched = try until(machine.changes, (s) => s.search === "Ready")
+    try screen.submitSearch()
+    const searches = h.cloudCalls.filter((p) => p.endsWith("/places/search")).length
+
+    // spec/maps/screen.md, "A place opens from a result, a saved place, a pin, the phone's position or the agent"
+    try screen.pickResult(0)
+    const detailed = try until(machine.changes, (s) => s.details === "Ready")
+    const shown = (try content.get()).shown
+
+    // spec/maps/screen.md, "A starting point is the phone's position, coordinates, a saved place or a provider candidate"
+    try screen.openDirections()
+    try screen.editOrigin("37.79550, -122.39370")
+    try screen.submitOrigin()
+    const planned = try until(machine.changes, (s) => s.route === "Ready")
+
+    // spec/maps/screen.md, "The provider's routes are listed in order and choosing one sends no new request"
+    const routeCalls = h.cloudCalls.filter((p) => p.endsWith("/routes")).length
+    try screen.chooseRoute(1)
+    const chosen = try machine.get()
+
+    // spec/maps/guidance.md, "Start begins a new session from a ready route"
+    try navigation.start()
+    const started = try until(guidance.changes, (g) => g.phase === "Guiding")
+    const screenOff = try until((try MapsContent).changes, (c) => c.guidance?.screenOff === true)
+    // spec/maps/guidance.md, "A fix guides only when usable, and only for the current session"
+    try Queue.offer(h.fixes, fixAt(ferry, 400))
+    try Queue.offer(h.fixes, fixAt(ferry))
+    try until(guidance.changes, (g) => g.fixUsable)
+    try Queue.offer(h.fixes, fixAt(pier))
+    const end = try until(guidance.changes, (g) => g.phase === "Arrived")
+
+    try Effect.try(() => assert.deepStrictEqual({
+      searched: [searched.queryRun, searches],
+      shown: [detailed.choice, shown?.label, shown?.place?.phone],
+      planned: [planned.routes, routeCalls === h.cloudCalls.filter((p) => p.endsWith("/routes")).length, chosen.chosen],
+      started: [started.phase, screenOff.guidance?.screenOff],
+      end: [end.phase, h.nativeCalls.includes("AlphaMapsTransport.startNavigation"), h.nativeCalls.includes("ElizaLocation.clearWatch")],
+    }, {
+      searched: [1, 1],
+      shown: ["ResultChoice", "Pier 39", "+1 415 555 0100"],
+      planned: [2, true, 1],
+      started: ["Guiding", true],
+      end: ["Arrived", true, true],
+    }))
+  }
+})
+
+it.live("Keep Cloud Maps on the account that asked for it (spec/maps/connection.md, \"Story: Keep Cloud Maps on the account that asked for it\")", () => effect {
+  const h = try harness({ id: "eliza-cloud-google", data: "Google Maps" })
+  provide h.layer {
+    const connection = try ConnectionMachine
+    const screen = try MapsScreen
+    const content = try MapsContent
+    try (try MapsSession).open()
+    const installed = try until(connection.changes, (s) => s.phase === "Installed")
+    const kind = (try content.get()).coverage?.kind
+    // spec/maps/connection.md, "Changing account retires the provider; rebuilding the client for the same account keeps it"
+    try SubscriptionRef.set(h.accounts, { sessionId: "s2", credentialId: "c2" })
+    const rebound = try until(connection.changes, (s) => s.account !== installed.account)
+    // spec/maps/connection.md, "A coverage read starts only for a signed-in account, and a signed-out read sends nothing"
+    try SubscriptionRef.set(h.accounts, undefined)
+    try until(connection.changes, (s) => s.account === 0)
+    const before = h.cloudCalls.length
+    try (try MapsSession).retry()
+    try (try MapsSession).open()
+    try screen.typeQuery("coffee")
+    try screen.submitSearch()
+    const signedOut = try connection.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { kind, rebound: rebound.generation > installed.generation, signedOut: [signedOut.phase, signedOut.failure], calls: h.cloudCalls.length - before },
+      { kind: "GoogleProvider", rebound: true, signedOut: ["ReadFailed", "SignedOutFailure"], calls: 0 },
+    ))
+  }
+})
+
+it.live("Back off when Maps asks me to wait (spec/maps/connection.md, \"Story: Back off when Maps asks me to wait\")", () => effect {
+  const h = try harness({ id: "alpha-osm", data: "OpenStreetMap" })
+  provide h.layer {
+    const connection = try ConnectionMachine
+    const screen = try MapsScreen
+    const machine = try ScreenMachine
+    try (try MapsSession).open()
+    try until(connection.changes, (s) => s.phase === "Installed")
+    // spec/maps/connection.md, "A rate-limit refusal of the current generation pauses every data request until its wait ends"
+    try Ref.set(h.refuseNext, 1)
+    try screen.typeQuery("coffee")
+    try screen.submitSearch()
+    try until(machine.changes, (s) => s.search === "Failed")
+    const paused = try connection.get()
+    const calls = h.cloudCalls.length
+    try screen.typeQuery("tea")
+    try screen.submitSearch()
+    try until(machine.changes, (s) => s.search === "Failed" && s.searched === "tea")
+    try Effect.try(() => assert.deepStrictEqual({ paused: paused.pausedUntil > paused.now, calls: h.cloudCalls.length - calls }, { paused: true, calls: 0 }))
+  }
+})
+
+it.live("Keep the places I care about on this phone (spec/maps/savedPlaces.md, \"Story: Keep the places I care about on this phone\")", () => effect {
+  const h = try harness({ id: "alpha-osm", data: "OpenStreetMap" })
+  provide h.layer {
+    const saved = try SavedPlacesStore
+    // spec/maps/vocabulary.md, "A Google place is never saved, shared, renamed or copied, and Google guidance is never spoken"
+    const google = saved.save({ id: 1, label: "Gallery", coordinate: pier, kind: "GoogleProvider", providerId: "eliza-cloud-google", providerPlaceId: "g1" }, "Gallery") catch (e) => e.message
+    // spec/maps/savedPlaces.md, "A place is saved with a name and a valid identity; saving it again updates the same row"
+    const first = try saved.save({ id: 2, label: "Pier 39", coordinate: pier, kind: "OpenProvider", providerId: "alpha-osm", providerPlaceId: "p1" }, "Pier 39")
+    const again = try saved.save({ id: 3, label: "Pier 39", coordinate: pier, kind: "OpenProvider", providerId: "alpha-osm", providerPlaceId: "p1" }, "Sea lions")
+    // spec/maps/savedPlaces.md, "A saved place can be renamed to a non-empty name and removed"
+    try saved.rename(first.id, "Work")
+    const renamed = try saved.list()
+    try saved.remove(first.id)
+    const removed = try saved.list()
+    try Effect.try(() => assert.deepStrictEqual(
+      { google, same: again.id === first.id, renamed: renamed.map((i) => i.label), removed: removed.length },
+      { google: "Google Maps results cannot be saved on this device.", same: true, renamed: ["Work"], removed: 0 },
+    ))
+  }
+})
+
+it.live("Go back to the event whose place I opened, and return to guidance from the notification (spec/maps/eventReturn.md, \"Story: Go back to the event whose place I opened\"; spec/maps/notificationOpen.md, \"Story: Return to guidance from the notification\")", () => effect {
+  const h = try harness({ id: "alpha-osm", data: "OpenStreetMap" })
+  provide h.layer {
+    const handoff = try MapsHandoff
+    const opens = try OpenMachine
+    try (try MapsSession).open()
+    // spec/maps/eventReturn.md, "One check per tap, and only its reply for the current origin returns, once"
+    try handoff.enterFromEvent({ version: 1, id: "ev1", begin: 1000, rowId: "row1", day: 3, title: "Lunch" }, "Pier 39")
+    try handoff.returnToEvent()
+    const back = try SubscriptionRef.get(h.shell)
+    try handoff.returnToEvent()
+    // spec/maps/eventReturn.md, "An event's place enters Maps with a new origin; leaving, hiding or unloading retires the attempt"
+    try SubscriptionRef.update(h.shell, (s) => ({ ...s, view: "maps" }))
+    try handoff.enterFromEvent({ version: 2, id: "ev2", begin: 2000, rowId: "row2", day: 3, title: "Dinner", binding: "someone-else:1", eventKey: "k2", revision: "e1", sourceRevision: "a".repeat(64) }, "Pier 41")
+    try handoff.returnToEvent()
+    const changed = (try (try MapsContent).get()).message
+    try SubscriptionRef.update(h.shell, (s) => ({ ...s, view: "maps", stack: ["calendar"] }))
+    try handoff.enterFromEvent({ version: 2, id: "ev3", begin: 3000, rowId: "row3", day: 3, title: "Ferry", binding: "owner:1", eventKey: "k3", revision: "e3", sourceRevision: "b".repeat(64) }, "Ferry Building")
+    try handoff.returnToEvent()
+    // spec/maps/notificationOpen.md, "A read starts only when Maps can be shown and none is in flight, and opens Maps at most once per tap"
+    try SubscriptionRef.update(h.shell, (s) => ({ ...s, view: "home" }))
+    try handoff.notificationTapped()
+    const opened = try until(opens.changes, (s) => s.opened >= 1)
+    try Effect.try(() => assert.deepStrictEqual(
+      { back: back.view, lists: h.nativeCalls.filter((c) => c === "AlphaCalendar.list").length, changed, opened: opened.opened, checks: h.returnChecks },
+      { back: "calendar", lists: 1, changed: "Event changed", opened: 1, checks: [{ eventKey: "k3", revision: "e3", begin: 3000, sourceRevision: "b".repeat(64) }] },
+    ))
+  }
+})

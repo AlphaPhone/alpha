@@ -1,0 +1,14 @@
+// spec/platform/index.md, "Story: Use Eliza Cloud's managed services when signed in"
+import type { CloudClient } from "@elizaos/cloud/client"
+import type { CloudAuthority } from "./build-flags.ts"
+import type { CloudUnavailable } from "./cloud.vibe"
+
+/** The typed Cloud client and the Cloud this build talks to, beside the plain requests of `Cloud`. */
+export service CloudServices {
+  /** `@elizaos/cloud/client` over the native Cloud plugin: account, plan, entitlement, inference, speech, Maps and managed Google. */
+  readonly client: CloudClient
+  /** The public authorities of the Cloud this build talks to. */
+  readonly authority: CloudAuthority
+  /** Opens a Cloud page, such as plan management, in the system browser. */
+  openExternal(url: string): void!CloudUnavailable
+}

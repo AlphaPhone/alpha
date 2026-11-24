@@ -1,0 +1,435 @@
+// spec/calendar/presentation.md, "Story: Create or edit an event in a form"; spec/calendar/presentation.md, "Story: Open an event and come back"; spec/calendar/presentation.md, "Back closes one layer at a time: the form, the delete sheet, the event, the Calendars sheet, the date picker, then search"; spec/calendar/approvals.md, "A changed conversation, a hidden page or Back retires the review"; spec/calendar/presentation.md, "The Calendars sheet is a modal over the view, opened only with no form or delete sheet open"; spec/notes/origins.md, "Story: Go from a saved event or reminder back to its note"; spec/calendar/deletions.md, "Story: Undo a deletion before it is sent"; spec/calendar/agent.md, "A write runs only between reads, from a ready feed, for the current binding"; spec/calendar/editor.md, "A missing or repeated wall time is refused, and nothing is saved"
+import { Machine as PresentationMachine, type EventSource, canBack } from "../../gen/calendar__presentation.effect.vibe"
+import { agentCalendarAccepts, agentRepeatSendable, defaultStart, deviceRoute, newEventTarget, recurrenceEditAllowed, timingChangeAllowed, timingLocked, wallTimeSavable, type WallTime } from "../../gen/calendar__editor.effect.vibe"
+import { NotesOrigins, type OriginView } from "../notes/origins.vibe"
+import { Native } from "../platform/native.vibe"
+import { Notices } from "../shell/notices.vibe"
+import type { WriteOutcome } from "../../gen/calendar__agent.ts"
+import { AgentCalendar, eventSourceRevision } from "./agent.vibe"
+import { ApprovalReviews } from "./approvals.vibe"
+import { enterCalendar, readCalendar } from "./binding.vibe"
+import { type CalendarWriteScope, HeldDeletions } from "./deletions.vibe"
+import { DeviceCalendar, type DeviceOutcome } from "./device.vibe"
+import { CalendarDrafts } from "./drafts.vibe"
+import type { DraftFieldsRecord } from "./drafts.schema.vibe"
+import type { EventRecord } from "./feed.schema.vibe"
+import { type CalendarRow, DAY, agentEventKey, agentOwnCalendar, rruleFor } from "./model.vibe"
+import { calendarWall, civil, civilDay, deviceZone, isoInstant, midnightAfter, resolveWall } from "./time.ts"
+import { sha256Hex } from "./digest.ts"
+import { CalendarMaps } from "./ports.vibe"
+import { AgentRequests } from "./requests.vibe"
+import { sourceKeyId } from "@elizaos/plugin-calendar"
+
+/** The source of a row as the presentation names it. */
+function sourceOf(row: CalendarRow): EventSource {
+  return row.source === "device" ? "DeviceSource" : "AgentSource"
+}
+
+effect function agentEvent(row: CalendarRow): EventRecord | undefined {
+  const view = try (try AgentCalendar).view()
+  return view.feed?.events.find((event) => `agent:${agentEventKey(event)}` === row.id)
+}
+
+/** The id a note's back-link names an agent event by: a digest of its exact key, short enough for the origin index. */
+export effect function noteRecordId(rowId: string) {
+  if (!rowId.startsWith("agent:")) return ""
+  const digest = try tryPromise({ try: () => sha256Hex(rowId.slice("agent:".length)), catch: () => "" }) catch () => ""
+  return digest === "" ? "" : `agent-event:${digest}`
+}
+
+/** The note an event was made from, as its detail names it; undefined when it was not made from a note. */
+export effect function rowOrigin(row: CalendarRow) {
+  const recordId = try noteRecordId(row.id)
+  if (recordId === "") return undefined as OriginView | undefined
+  return try (try NotesOrigins).view("event", recordId)
+}
+
+/** Open the note an event was made from; the notice says when it is gone or Notes cannot tell. */
+export effect function openRowOrigin(row: CalendarRow) {
+  const recordId = try noteRecordId(row.id)
+  const opened = recordId === "" ? "unavailable" : try (try NotesOrigins).open("event", recordId)
+  if (opened === "gone") try (try Notices).show("That note was deleted.")
+  else if (opened === "unavailable") try (try Notices).show("Open Notes to find that note.")
+  else if (opened === "edited") try (try Notices).show("The note changed since this event was made.")
+  return opened
+}
+
+/** Open a row's detail; a device row is also inspected for the assistant. Returns the note it was made from, if any. */
+export effect function openRow(row: CalendarRow) {
+  const presentation = try PresentationMachine
+  const shown = presentation.send({ type: "showEvent", id: row.id, source: sourceOf(row), day: row.offset }) catch () => undefined
+  if (shown === undefined) return undefined as OriginView | undefined
+  if (row.source === "device") {
+    const [, id, begin] = row.id.split(":")
+    const calendarId = row.sourceKey.replace(/^native:/, "")
+    try (try DeviceCalendar).open(id ?? "", calendarId, row.revision, { title: row.title, body: row.notes, location: row.where, begin: Number(begin), end: row.end, revision: row.revision })
+    return undefined as OriginView | undefined
+  }
+  return try rowOrigin(row)
+}
+
+/** Close the open detail. */
+export effect function closeRow() {
+  (try PresentationMachine).send({ type: "closeEvent" }) catch () => undefined
+  try (try DeviceCalendar).close()
+}
+
+/** Back inside Calendar: the form, the delete sheet, the event, the Calendars sheet, the date picker or search closes, one at a time; false when none was open and Back is the shell's. */
+export effect function calendarBack() {
+  const presentation = try PresentationMachine
+  const before = try presentation.get()
+  if (!canBack(before)) return false
+  const after = presentation.send({ type: "back" }) catch () => undefined
+  if (after === undefined) return false
+  if (before.form !== "NoForm") {
+    try (try CalendarDrafts).close()
+    try (try DeviceCalendar).closeForm()
+  } else if (!before.deleteSheet && before.openEvent !== "") {
+    try (try DeviceCalendar).close()
+  }
+  return true
+}
+
+/** Back over Calendar's always-mounted review sheets: the availability review cancels its step, then the approval review closes; a review sending its decision keeps Back; false when no sheet is open and Back goes on. */
+export effect function calendarSurfacesBack() {
+  const requests = try AgentRequests
+  const request = try Stream.runHead(requests.sheets)
+  const sheet = request._tag === "Some" ? request.value : { kind: "none" as const }
+  if (sheet.kind === "choose-calendars") {
+    try requests.chooseCalendars(null)
+    return true
+  }
+  if (sheet.kind === "confirm-result") {
+    try requests.confirmResult(false)
+    return true
+  }
+  const reviews = try ApprovalReviews
+  const review = try Stream.runHead(reviews.changes)
+  const phase = review._tag === "Some" ? review.value.state.phase : "ReviewIdle"
+  if (phase === "ReviewIdle") return false
+  if (phase !== "Deciding") try reviews.close()
+  return true
+}
+
+/** Back while Calendar is in front: its open review sheet first, then its own layers. */
+export effect function calendarScreenBack() {
+  if (try calendarSurfacesBack()) return true
+  return try calendarBack()
+}
+
+/** Open the Calendars sheet with the source switches. */
+export effect function openSources() {
+  return ((try PresentationMachine).send({ type: "openSources" }) catch () => undefined) !== undefined
+}
+
+/** Close the Calendars sheet. */
+export effect function closeSources() {
+  (try PresentationMachine).send({ type: "closeSources" }) catch () => undefined
+}
+
+/** Open an event's checked HTTPS link in the phone's browser; "web" where the phone's apps cannot be reached, so the page opens it itself. */
+export effect function openEventLink(url: string) {
+  const native = try Native
+  if (!/^https:\/\/[^\s/@]+(\/\S*)?$/i.test(url)) return "refused" as const
+  if (!(try native.available("DailyApps"))) return "web" as const
+  const reply = native.invoke("DailyApps", "perform", { action: "browser", url }) catch () => undefined
+  const opened = typeof reply === "object" && reply !== null && (reply as { readonly status?: unknown }).status === "opened"
+  if (!opened) try (try Notices).show("Couldn’t open")
+  return opened ? "opened" as const : "failed" as const
+}
+
+/** What a deletion came to, for its notice. */
+export type DeleteResult = "held" | "queued" | "deleted" | "changed" | "external" | "unconfirmed" | "refused" | "not-staged"
+
+/** Delete or decline the open row with the scope chosen; an agent Calendar deletion waits out the Undo window, hidden. */
+export effect function deleteRow(row: CalendarRow, scope: CalendarWriteScope | "event", mode: "organizer_cancel" | "decline_invitation" | "remove_private_copy") {
+  const presentation = try PresentationMachine
+  if (row.source === "device") {
+    const [, id, begin] = row.id.split(":")
+    const outcome = try (try DeviceCalendar).remove(id ?? "", row.sourceKey.replace(/^native:/, ""),
+      { title: row.title, body: row.notes, location: row.where, begin: Number(begin), end: row.end, revision: row.revision }, row.recurring, scope === "series")
+    presentation.send(outcome === "queued" || outcome === "deleted" ? { type: "deletionStaged" } : { type: "closeDeleteSheet" }) catch () => undefined
+    return (outcome === "queued" || outcome === "deleted" || outcome === "changed" || outcome === "external" || outcome === "unconfirmed" ? outcome : "refused") as DeleteResult
+  }
+  const event = try agentEvent(row)
+  if (event === undefined || row.revision === "") {
+    presentation.send({ type: "closeDeleteSheet" }) catch () => undefined
+    return "changed" as DeleteResult
+  }
+  const agent = try AgentCalendar
+  const key = agentEventKey(event)
+  const operation = `delete-${civilDay(Date.parse(event.startAt), "UTC")}-${row.revision.replace(/[^-a-zA-Z0-9_]/g, "").slice(0, 60)}`
+  const recordId = try noteRecordId(row.id)
+  const origins = try NotesOrigins
+  const send = effect {
+    let waited = 0
+    while (waited < 40) {
+      const busy = (try agent.view()).state
+      if (busy.read.id === 0 && busy.write.id === 0) break
+      try sleep("250 millis")
+      waited += 1
+    }
+    const outcome = try agent.remove({ eventKey: key, admitted: true, request: {
+      calendarId: event.calendarId, grantId: event.grantId, side: event.side, expectedProviderVersion: row.revision, idempotencyKey: operation,
+      cancellationMode: mode, ...(scope !== "event" ? { recurrenceScope: scope } : {}),
+    } })
+    const done = outcome === "Deleted" || outcome === "DeletedByReceipt"
+    if (done && recordId !== "" && mode !== "decline_invitation" && scope !== "instance") try origins.forget("event", recordId, true)
+    return done
+  }
+  const id = try (try HeldDeletions).confirm({ target: event.id, decline: mode === "decline_invitation", source: event.calendarId,
+    series: event.recurringEventId ?? event.externalId, start: Date.parse(event.startAt), scope, send, revision: row.revision })
+  presentation.send({ type: "deletionStaged" }) catch () => undefined
+  return (id === 0 ? "not-staged" : "held") as DeleteResult
+}
+
+function wallOf(instant: number, zone: string): string {
+  return (calendarWall(instant, zone) ?? isoInstant(instant).slice(0, -1)).slice(0, 16)
+}
+
+/** The fields a new form opens with: today at the next full hour, another day at ten, one hour long, in the device zone. */
+export effect function newFields(day: number, creationId: string): DraftFieldsRecord {
+  const now = try Clock.currentTimeMillis
+  const zone = deviceZone()
+  const hour = Number((calendarWall(now, zone) ?? "T00").slice(11, 13))
+  const start = defaultStart(day, hour)
+  const begin = midnightAfter(now, zone, start.offset) + start.hour * 3_600_000
+  return { title: "", body: "", location: "", start: wallOf(begin, zone), end: wallOf(begin + 3_600_000, zone), zone, allDay: false,
+    repeat: "none", alert: null, video: false, who: [], calendar: "local", creationId, origin: "typed" }
+}
+
+/** The fields of an existing row for its edit form. */
+export function rowFields(row: CalendarRow, creationId: string): DraftFieldsRecord {
+  const zone = row.allDay ? "UTC" : row.timeZone
+  return { title: row.title, body: row.notes, location: row.where,
+    start: row.allDay ? isoInstant(row.begin).slice(0, 10) : wallOf(row.begin, zone), end: row.allDay ? isoInstant(row.end - DAY).slice(0, 10) : wallOf(row.end, zone),
+    zone, allDay: row.allDay, repeat: row.recurring ? "preserve" : "none", alert: null, video: false, who: [], calendar: row.source === "device" ? row.sourceKey : "local",
+    creationId, origin: "typed", ...(row.revision ? { expectedProviderVersion: row.revision } : {}) }
+}
+
+/** Open the form, new or for the open row, over its retained draft. */
+export effect function openEditor(row: CalendarRow | undefined) {
+  const presentation = try PresentationMachine
+  const opened = presentation.send(row === undefined ? { type: "newForm" } : { type: "editForm", editable: row.writable }) catch () => undefined
+  if (opened === undefined) return false
+  try (try CalendarDrafts).open(row?.id ?? "", row?.revision ?? "")
+  const device = try DeviceCalendar
+  if (row === undefined) try device.openForm("new", false)
+  else if (row.source === "device") try device.openForm("edit", false)
+  return true
+}
+
+/** Close the form; the slot keeps what was typed. */
+export effect function closeEditor() {
+  (try PresentationMachine).send({ type: "closeForm" }) catch () => undefined
+  try (try CalendarDrafts).close()
+  try (try DeviceCalendar).closeForm()
+}
+
+function wallTime(text: string, zone: string): { readonly kind: WallTime; readonly at: number } {
+  const found = resolveWall(text.length === 16 ? `${text}:00` : text, zone)
+  return found.kind === "exists" ? { kind: "WallExists", at: found.at } : found.kind === "twice" ? { kind: "WallTwice", at: found.at } : { kind: "WallMissing", at: Number.NaN }
+}
+
+/** After a saved form made from a note, link the event to that note; only an event a readback confirmed is linked, and the notice says when it is not. */
+export effect function linkSavedNote(creationId: string, link: unknown) {
+  const key = try (try AgentCalendar).createdEvent(creationId)
+  const notices = try Notices
+  if (key === undefined) {
+    try notices.show("Saved · note not linked")
+    return
+  }
+  const recordId = try noteRecordId(`agent:${key}`)
+  const linked = recordId !== "" && (try (try NotesOrigins).remember("event", recordId, link, true))
+  if (!linked) try notices.show("Saved · note not linked")
+}
+
+const DEVICE_PROBLEMS: Partial<Record<DeviceOutcome, string>> = {
+  checking: "Checking whether the event was made. Don’t save it again yet.",
+  duplicate: "This event was already made on the phone.",
+  "cant-check": "Couldn’t check whether the event was made. Your draft is kept.",
+  unconfirmed: "Not confirmed. Check the phone’s calendar before saving again.",
+  "read-only": "That calendar is read-only. Choose another.",
+  "no-access": "Allow calendar access to save on this phone.",
+  busy: "Calendar is still saving. Try again in a moment.",
+  "no-calendar-app": "No calendar app can add this event.",
+  cancelled: "Not added",
+}
+
+/** What the form says when an agent Calendar save did not go through, one sentence per outcome. */
+export function writeProblem(outcome: WriteOutcome): string {
+  switch (outcome) {
+    case "WriteQueuedForApproval": return "Waiting for your approval"
+    case "WriteBusy": return "Calendar is still updating. Try again in a moment. Your draft is kept."
+    case "WriteNotAdmitted": return "Refresh this event before saving. Your draft is kept."
+    case "WriteOwnerChanged": return "Another account is signed in now. Nothing was saved."
+    case "WriteTransport": return "Couldn’t reach your agent. Nothing was saved. Try again."
+    case "WriteRefused": return "Your agent’s Calendar refused this change. Your draft is kept."
+    case "WriteForeign": return "Another agent answered. Check Calendar before saving again."
+    case "WriteUnknown": return "Not confirmed. Check Calendar before saving again."
+    case "NotDeleted": return "Not deleted"
+    case "NoOutcome": case "Saved": case "SentUnverified": case "Deleted": case "DeletedByReceipt": return ""
+  }
+}
+
+/** Save the form from what it shows; returns the problem to show, or "" when it saved. */
+export effect function saveEditor(fields: DraftFieldsRecord, row: CalendarRow | undefined, timingLocked: boolean, timingChanged: boolean) {
+  const presentation = try PresentationMachine
+  const allDay = fields.allDay
+  const start = allDay ? { kind: "WallExists" as WallTime, at: Date.parse(`${fields.start}T00:00:00Z`) } : wallTime(fields.start, fields.zone)
+  const end = allDay ? { kind: "WallExists" as WallTime, at: Date.parse(`${fields.end}T00:00:00Z`) + DAY } : wallTime(fields.end, fields.zone)
+  const valid = wallTimeSavable(start.kind) && wallTimeSavable(end.kind) && Number.isFinite(start.at) && Number.isFinite(end.at)
+  if (!valid) return "That time does not exist or occurs twice because the clocks change. Choose another time. Nothing was saved."
+  if (end.at <= start.at) return "Choose an end after the start. Nothing was saved."
+  if (!timingChangeAllowed(timingLocked, timingChanged)) return "Reopen the event before changing its timing. Your edits are kept."
+  const scope = fields.recurrenceScope === "instance" ? "ThisOccurrence" : fields.recurrenceScope === "this_and_following" ? "ThisAndFollowing" : fields.recurrenceScope === "series" ? "EntireSeries" : "NoScope"
+  if (row?.recurring && !recurrenceEditAllowed(true, fields.repeat !== "preserve", scope)) return "Choose Entire series to change how it repeats."
+  const agentTarget = (row === undefined && !fields.calendar.startsWith("native:")) || row?.source === "agent"
+  const listedCalendars = (try (try AgentCalendar).view()).calendars
+  const ownCalendar = row === undefined || listedCalendars.some((calendar) => agentOwnCalendar(calendar) && sourceKeyId(calendar) === row.sourceKey)
+  if (agentTarget && !agentCalendarAccepts(ownCalendar, fields.repeat !== "none" && fields.repeat !== "preserve", fields.alert !== null, fields.video)) {
+    return "Agent Calendar can’t repeat events or add alerts or video rooms. Your draft is kept."
+  }
+  if (agentTarget && !agentRepeatSendable(row === undefined, fields.repeat !== (row?.recurring === true ? "preserve" : "none"))) {
+    return "Change how this event repeats in Google Calendar. Your draft is kept."
+  }
+  if ((presentation.send({ type: "requestSave", validTime: true }) catch () => undefined) === undefined) return "Saving"
+  const drafts = try CalendarDrafts
+  const saved = drafts.beginSave() catch (refused) => refused.reason
+  if (typeof saved === "string") {
+    presentation.send({ type: "saveFailed" }) catch () => undefined
+    return saved === "stale" ? "These edits belong to an older version. Discard them and reopen the event." : "Check this draft."
+  }
+  const startAt = isoInstant(start.at)
+  const endAt = isoInstant(end.at)
+  const zone = allDay ? "UTC" : fields.zone
+  let ok = false
+  let problem = ""
+  if (row === undefined && newEventTarget(fields.calendar.startsWith("native:")) === "PhoneCalendar") {
+    const device = try DeviceCalendar
+    const form = { creationId: saved.creationId, separate: false, calendarId: fields.calendar.replace(/^native:/, ""),
+      title: saved.title.trim(), body: saved.body, location: saved.location, begin: start.at, end: end.at, allDay, timeZone: zone,
+      repeat: saved.repeat === "preserve" ? "none" : saved.repeat, guests: saved.who, alert: saved.alert, video: saved.video }
+    const route = deviceRoute(false, form.guests.length > 0, form.alert !== null, form.video, allDay, !allDay && zone !== deviceZone(), form.repeat !== "none")
+    const outcome = route === "AndroidHandoff" ? try device.handoff(form) : try device.save(form)
+    ok = outcome === "saved" || outcome === "opened"
+    problem = ok ? "" : DEVICE_PROBLEMS[outcome] ?? "Not saved. Your draft is kept."
+  } else if (row !== undefined && row.source === "device") {
+    const [, id, begin] = row.id.split(":")
+    const outcome = try (try DeviceCalendar).save({ creationId: saved.creationId, separate: false, id, calendarId: row.sourceKey.replace(/^native:/, ""),
+      expected: { title: row.title, body: row.notes, location: row.where, begin: Number(begin), end: row.end, revision: row.revision },
+      title: saved.title.trim(), body: saved.body, location: saved.location, begin: start.at, end: end.at, allDay, timeZone: zone,
+      repeat: "none", guests: [], alert: null, video: false })
+    ok = outcome === "saved"
+    problem = ok ? "" : outcome === "changed" ? "Changed" : outcome === "held" ? "Unconfirmed" : "Unconfirmed"
+  } else {
+    const agent = try AgentCalendar
+    const view = try agent.view()
+    if (row === undefined) {
+      const own = view.calendars.find(agentOwnCalendar)
+      if (own === undefined) problem = "Calendar is not ready to create an event. Your draft is kept."
+      else {
+        const outcome = try agent.create({ sourceKey: sourceKeyId(own), admitted: true, request: {
+          title: saved.title.trim(), description: saved.body, location: saved.location, startAt, endAt, isAllDay: allDay, timeZone: zone,
+          calendarId: own.calendarId, idempotencyKey: saved.creationId } })
+        ok = outcome === "Saved" || outcome === "SentUnverified"
+        problem = ok ? "" : writeProblem(outcome) || "Couldn’t save"
+      }
+    } else {
+      const event = try agentEvent(row)
+      const outcome = event === undefined ? "WriteNotAdmitted" : try agent.update({ eventKey: agentEventKey(event), admitted: true, request: {
+        title: saved.title.trim(), notes: saved.body, location: saved.location, startAt, endAt, isAllDay: allDay, timeZone: zone,
+        calendarId: event.calendarId, expectedProviderVersion: row.revision, idempotencyKey: saved.creationId,
+        ...(fields.recurrenceScope ? { recurrenceScope: fields.recurrenceScope } : {}) } })
+      ok = outcome === "Saved" || outcome === "SentUnverified"
+      problem = ok ? "" : writeProblem(outcome) || "Refresh this event before saving"
+    }
+  }
+  try drafts.saved(ok)
+  if (!ok) {
+    presentation.send({ type: "saveFailed" }) catch () => undefined
+    return problem
+  }
+  const now = try Clock.currentTimeMillis
+  presentation.send({ type: "saveSucceeded", savedDay: (allDay ? Math.floor(start.at / DAY) : civilDay(start.at, deviceZone())) - civilDay(now, deviceZone()) }) catch () => undefined
+  try readCalendar(true, false)
+  return ""
+}
+
+/** The repeat rule a form sends. */
+export const repeatRule = rruleFor
+
+/** Whether an existing timed row's span cannot be shown on the wall clock, so its timing is kept. */
+export function rowTimingLocked(row: CalendarRow | undefined): boolean {
+  if (row === undefined) return false
+  const begin = civil(wallOf(row.begin, row.timeZone))
+  const end = civil(wallOf(row.end, row.timeZone))
+  return timingLocked(row.allDay, begin === undefined || end === undefined ? 0 : Math.round((end - begin) / 60_000))
+}
+
+/** Whether the form's times differ from those it opened with. */
+export function timingChanged(opened: DraftFieldsRecord, fields: DraftFieldsRecord): boolean {
+  return opened.start !== fields.start || opened.end !== fields.end || opened.zone !== fields.zone || opened.allDay !== fields.allDay
+}
+
+/** The route Calendar opens an event at, as Home and Maps' "Back to event" name it. */
+export function eventRoute(row: CalendarRow): string {
+  return `event/${encodeURIComponent(row.id)}?day=${row.offset}`
+}
+
+/** Open the place of the open row in Maps, with the origin "Back to event" checks on its way back; false where Maps did not open. */
+export effect function placeRow(row: CalendarRow) {
+  const maps = try CalendarMaps
+  const [, id, begin] = row.id.split(":")
+  if (row.source === "device") {
+    return try maps.enterFromEvent({ version: 1, id: id ?? "", begin: Number(begin), rowId: row.id, day: row.offset, title: row.title }, row.where)
+  }
+  const event = try agentEvent(row)
+  if (event === undefined || row.revision === "") return false
+  const view = try (try AgentCalendar).view()
+  const sourceRevision = try eventSourceRevision(view.calendars, event)
+  if (sourceRevision === "") return false
+  return try maps.enterFromEvent({ version: 2, id: event.id, begin: row.begin, rowId: row.id, day: row.offset, title: row.title,
+    binding: `${view.state.portOwner}:${view.state.portSession}`, eventKey: agentEventKey(event), revision: row.revision, sourceRevision }, row.where)
+}
+
+/** The route Calendar opens a note's or a scan's draft at, in a new event form. */
+export const DRAFT_ROUTE = "draft"
+
+/** The route Calendar opens its Calendars sheet at, with the source switches. */
+export const SETTINGS_ROUTE = "settings"
+
+/** Open Calendar at a route: a handed-over draft's form, or the day it names, then its event once a read has it. */
+export effect function openRoute(route: string) {
+  try enterCalendar()
+  if (route === DRAFT_ROUTE) {
+    const draft = try (try CalendarDrafts).get()
+    if (!draft.alive || draft.origin === "TypedHere") return
+    const opened = (try PresentationMachine).send({ type: "newForm" }) catch () => undefined
+    if (opened !== undefined) try (try DeviceCalendar).openForm("new", false)
+    return
+  }
+  if (route === SETTINGS_ROUTE) {
+    try openSources()
+    return
+  }
+  const match = /^event\/([^?]+)\?day=(-?\d+)$/.exec(route)
+  if (!match) return
+  const rowId = decodeURIComponent(match[1]!)
+  const day = Number(match[2])
+  const presentation = try PresentationMachine
+  presentation.send({ type: "chooseDay", day }) catch () => undefined
+  try readCalendar(true, false)
+  const view = try (try AgentCalendar).view()
+  const now = try Clock.currentTimeMillis
+  const event = view.feed?.events.find((candidate) => `agent:${agentEventKey(candidate)}` === rowId)
+  if (event !== undefined) {
+    presentation.send({ type: "showEvent", id: rowId, source: "AgentSource", day }) catch () => undefined
+    return
+  }
+  const read = try (try DeviceCalendar).read((try presentation.get()).day === day ? { begin: midnightAfter(now, deviceZone(), day - 1), end: midnightAfter(now, deviceZone(), day + 2) } : { begin: 0, end: 1 }, false, false)
+  const [, id, begin] = rowId.split(":")
+  if (read.events.some((candidate) => candidate.id === id && candidate.begin === Number(begin))) {
+    presentation.send({ type: "showEvent", id: rowId, source: "DeviceSource", day }) catch () => undefined
+  }
+}

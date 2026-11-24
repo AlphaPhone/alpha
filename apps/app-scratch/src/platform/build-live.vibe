@@ -1,0 +1,73 @@
+// spec/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks"; spec/platform/index.md, "Mock mode opens on the phone only after both live collectors are paused"; spec/platform/index.md, "Staging is reached only by a test-mocks build that chose it, or a browser preview of the Cloud resident"; spec/platform/index.md, "Eliza Cloud stays the live host until the Alpha Cloud cutover flag is set"
+import { environmentOf, fixturesAllowed, hostOf, mockAdmitted, toolsShown, type Choice, type Environment, type Variant } from "../../gen/platform.effect.vibe"
+import { Build, type BuildInfo } from "./build.vibe"
+import { Native } from "./native.vibe"
+import { alphaCloud, alphaCloudCutover, appVersion, cloudEnvironmentAsked, cloudResidentPreview, developmentServer, elizaCloud, markPage, testMocksBuilt, toolsAsked, type CloudAuthority } from "./build-flags.ts"
+import { capacitor } from "./native-capacitor.ts"
+import { detectVariant } from "./native-live.vibe"
+
+/** Mock mode stayed closed: a live collector could not be paused. */
+export error MockModeRefused { message: string }
+
+const variantNames = { Launcher: "launcher", Aosp: "aosp", Browser: "browser" } as const satisfies Record<Variant, BuildInfo["variant"]>
+
+/** The build info of a device of `variant`. */
+export function buildInfoOf(variant: Variant): BuildInfo {
+  return { version: appVersion, variant: variantNames[variant], testMocks: testMocksBuilt }
+}
+
+/** This build on this device: its version, the variant it detected and whether it allows test mocks, also marked on the page root. */
+export const buildLive = Layer.effect(Build, effect {
+  const info = buildInfoOf(try detectVariant(capacitor))
+  try sync(() => markPage(info))
+  return { info }
+})
+
+/** Whether fixtures, remote transports and simulated device events may load. */
+export function fixturesOn(info: BuildInfo): boolean {
+  return fixturesAllowed(info.testMocks)
+}
+
+/** Whether the developer device controls show: test mocks, the development server, a page off the phone and `?tools=1`. */
+export function developerToolsShown(info: BuildInfo): boolean {
+  return toolsShown(info.testMocks, developmentServer, info.variant !== "browser", toolsAsked())
+}
+
+const choices = { production: "ChoseProduction", staging: "ChoseStaging" } as const satisfies Record<string, Choice>
+
+/** The Cloud environment this build talks to, given the owner's choice in a test-mocks build. */
+export function cloudEnvironmentOf(info: BuildInfo, chosen?: "production" | "staging", preview?: { readonly staging: boolean; readonly cloudResident: boolean }): Environment {
+  return environmentOf(developmentServer, info.testMocks, info.variant !== "browser", preview?.staging === true, preview?.cloudResident === true,
+    chosen === undefined ? "NoChoice" : choices[chosen])
+}
+
+/** The Cloud environment of this build: the one `VITE_ALPHA_CLOUD_ENVIRONMENT` asked for, where a test-mocks build or the Cloud resident preview honours it. */
+export function buildCloudEnvironment(info: BuildInfo): Environment {
+  return cloudEnvironmentOf(info, cloudEnvironmentAsked, { staging: cloudEnvironmentAsked === "staging", cloudResident: cloudResidentPreview(info.variant !== "browser") })
+}
+
+/** The name native's Cloud plugin knows `environment` by. */
+export function environmentName(environment: Environment): "production" | "staging" {
+  return environment === "Staging" ? "staging" : "production"
+}
+
+/** The public authorities of the Cloud this build talks to: Eliza Cloud unless the cutover flag is set. */
+export function cloudAuthorityOf(environment: Environment): CloudAuthority {
+  const cloud = hostOf(alphaCloudCutover) === "AlphaCloud" ? alphaCloud : elizaCloud
+  return environment === "Staging" ? cloud.staging : cloud.production
+}
+
+/** Opens mock mode: refused outside a test-mocks build, and on the phone only once notification collection and hosted background work have paused. */
+export effect function admitMockMode() {
+  const build = try Build
+  if (!fixturesOn(build.info)) throw new MockModeRefused({ message: "Mock mode is not part of this build." })
+  if (build.info.variant === "browser") return
+  const native = try Native
+  const [notifications, hosted] = try.allSettled [
+    native.invoke("AlphaConnection", "pauseNotificationCollection", {}),
+    native.invoke("AlphaHostedResults", "disableBackground", {}),
+  ]
+  if (!mockAdmitted(true, Exit.isSuccess(notifications), Exit.isSuccess(hosted))) {
+    throw new MockModeRefused({ message: "Live background activity could not be paused. Retry before opening mock mode." })
+  }
+}

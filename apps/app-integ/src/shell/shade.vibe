@@ -1,0 +1,88 @@
+// spec/shell/shade.md, "Story: Pull down for my notifications"; spec/shell/navigation.md, "The stand-in shade opens only over Home"
+import { Machine as ShadeMachine, WaitMs, type Fallback, type ShadeReply, type ShadeSurface } from "../../gen/shell__shade.effect.vibe"
+import { Build } from "../platform/build.vibe"
+import { Foreground } from "./foreground.vibe"
+import { Native } from "../platform/native.vibe"
+import { ShadeAnswer } from "./native.schema.vibe"
+import { Navigation } from "./navigation.vibe"
+import { Notices } from "./notices.vibe"
+
+/** The one notification surface Home's control and pull reach. */
+export service Shade {
+  /** Home's notifications control or a pull on empty Home. */
+  pull(): void!!
+  /** Android's notification settings for Alpha's own notices; a build without Android has none to open. */
+  settings(): void!!
+}
+
+const REPLIES: Readonly<Record<string, ShadeReply>> = {
+  opened: "ShadeOpened", standalone: "ShadeStandalone", "permission-missing": "ShadePermissionMissing",
+  unsupported: "ShadeUnsupported", "not-in-front": "ShadeNotInFront",
+}
+
+const FALLBACKS: Readonly<Record<Fallback, string>> = {
+  NoFallback: "",
+  FallbackNotInFront: "Alpha is not in front. Swipe down from the top edge of the screen for Android notifications.",
+  FallbackStandalone: "Swipe down from the top edge of the screen for Android notifications.",
+  FallbackUnavailable: "Android did not open its notifications from Alpha. Swipe down from the top edge of the screen instead.",
+  FallbackLocked: "Unlock the phone to see notifications.",
+}
+
+/** The shade service: Android's shade on a device, the stand-in in a development browser, a fallback elsewhere. */
+export const shadeLive = Layer.effect(Shade, effect {
+  const native = try Native
+  const build = try Build
+  const navigation = try Navigation
+  const notices = try Notices
+  const foreground = try Foreground
+  const machine = try ShadeMachine
+  const scope = try Scope.Scope
+  const surface: ShadeSurface = build.info.variant === "browser" ? (build.info.testMocks ? "StandInShade" : "NoShade") : "AndroidShade"
+  machine.send({ type: "configure", surface }) catch () => undefined
+
+  effect function ask(ticket: number) {
+    const answer = effect { return try Schema.decodeUnknownEffect(ShadeAnswer)(try native.invoke("AlphaDevice", "openNotificationShade")) } catch () => ({ status: "unsupported" as const })
+    machine.send({ type: "answer", ticket, reply: REPLIES[answer.status] }) catch () => undefined
+  }
+
+  effect function waitFor(ticket: number) {
+    try sleep(Duration.millis(WaitMs))
+    machine.send({ type: "waitEnds", ticket }) catch () => undefined
+  }
+
+  fork.scoped (effect {
+    for try (const state of machine.changes) {
+      if (state.fallback === "NoFallback") continue
+      try notices.show(FALLBACKS[state.fallback])
+      machine.send({ type: "dismissFallback" }) catch () => undefined
+    }
+  })
+  // A locked Home shows no notifications: a pull under Android's keyguard says to unlock instead.
+  machine.send({ type: "lock", secure: (try foreground.get()).locked }) catch () => undefined
+  fork.scoped (effect {
+    for try (const front of foreground.changes) machine.send({ type: "lock", secure: front.locked }) catch () => undefined
+  })
+  fork.scoped (effect {
+    for try (const nav of navigation.changes) {
+      machine.send({ type: "onHome", home: nav.app === "" && !nav.library && !nav.hidden }) catch () => undefined
+    }
+  })
+
+  return {
+    effect pull() {
+      if (surface === "StandInShade") {
+        try navigation.send({ type: "openShade" })
+        return
+      }
+      const before = try machine.get()
+      const after = machine.send({ type: "pull" }) catch () => undefined
+      if (after === undefined || !after.asking || after.ticket === before.ticket) return
+      fork.in(scope) ask(after.ticket)
+      fork.in(scope) waitFor(after.ticket)
+    },
+    effect settings() {
+      if (build.info.variant === "browser") return
+      native.invoke("AlphaDevice", "openSettings", { page: "notifications" }) catch () => undefined
+    },
+  }
+})

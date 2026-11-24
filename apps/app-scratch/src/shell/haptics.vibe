@@ -1,0 +1,38 @@
+// spec/shell/haptics.md, "Story: Feel the changes I make"
+import { Machine as HapticsMachine, hapticForClick, type Haptic } from "../../gen/shell__haptics.effect.vibe"
+import { Build } from "../platform/build.vibe"
+import { Native } from "../platform/native.vibe"
+import { clickedControl, pageEvents } from "./page.ts"
+
+/** Touch feedback for the shell: the long press that starts editing, and every click that earns some. */
+export service Haptics {
+  longPress(): void!!
+}
+
+const KINDS: Readonly<Record<Haptic, string>> = {
+  NoHaptic: "", ToggleOn: "toggle-on", ToggleOff: "toggle-off", Confirm: "confirm", LongPress: "long-press",
+}
+
+/** The haptics service: AlphaDevice.haptic on Android, nothing elsewhere. */
+export const hapticsLive = Layer.effect(Haptics, effect {
+  const native = try Native
+  const build = try Build
+  const machine = try HapticsMachine
+  const available = build.info.variant !== "browser" && (try native.available("AlphaDevice"))
+  machine.send({ type: "install", available }) catch () => undefined
+
+  effect function play(kind: Haptic) {
+    const now = try Clock.currentTimeMillis
+    const played = machine.send({ type: "play", kind, now }) catch () => undefined
+    if (played === undefined) return
+    native.invoke("AlphaDevice", "haptic", { kind: KINDS[kind] }) catch () => undefined
+  }
+
+  fork.scoped (effect {
+    for try (const event of pageEvents("click", "document", true)) {
+      const control = clickedControl(event)
+      try play(hapticForClick(control.role, control.disabled, control.inert, control.checked, control.inDialog, control.destructive))
+    }
+  })
+  return { longPress: () => play("LongPress") }
+})

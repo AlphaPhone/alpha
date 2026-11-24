@@ -1,0 +1,235 @@
+// spec/workflows/notices.md, "Story: Be told when a workflow waits for me, and only for my account"; spec/workflows/deviceSteps.md, "Story: Approve a phone step only as I reviewed it"
+import {
+  type WorkflowApproval, type WorkflowNoticeRoute, type WorkflowPhoneReview, type WorkflowRun, revalidateWorkflowApprovalNotice, workflowApprovalNoticeIdentity,
+  workflowApprovalProposalId, workflowNoticeReads,
+} from "@elizaos/plugin-workflow/client"
+import { type NoticeRoute, Machine as NoticesMachine, stored as noticesStored } from "../../gen/workflows__notices.effect.vibe"
+import { type Performed, Machine as StepsMachine, machine as stepsMachine } from "../../gen/workflows__deviceSteps.effect.vibe"
+import { type Approval, DeviceReview } from "../assistant/review.vibe"
+import { Native } from "../platform/native.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+import { type OwnerScope, WorkflowApi } from "./api.vibe"
+import { sha256Hex } from "./ids.ts"
+import { NoticePosted } from "./wire.schema.vibe"
+
+export const NOTICES_KEY = ownerKey("device", "workflows/notices")
+
+/** How long an approval notice stays posted when the agent names no expiry. */
+export const STEP_NOTICE_MS = 86400000
+
+const plugin = "AlphaHostedResults"
+
+/** Whether the agent performs this step through the phone's own workflow bridge, with no proposal for the phone to run: a Calendar range read (scripts/resident/bridges.ts). */
+function bridgeRead(review: StepReview): boolean {
+  return review.phone?.spec.steps.find((step) => step.id === review.approval.nodeId)?.operation === "calendar_range"
+}
+
+/** How often the open step's own proposal is looked for while its decision is in flight. */
+const STEP_POLL_MS = 1000
+
+/** The approval the open run's phone step waits for, as the screen reviews it. */
+export interface StepReview {
+  readonly run: WorkflowRun
+  readonly approval: WorkflowApproval
+  /** The run's reviewed phone specification and Calendar anchor, where the agent gives one. */
+  readonly phone?: WorkflowPhoneReview
+}
+
+/** One redacted notice per waiting phone step, for the current owner only. */
+export service ApprovalNotices {
+  /** Read the waiting steps of the workflows named and post, withdraw or repost their notices. */
+  sweep(workflowIds: ReadonlyArray<string>): void!!
+  /** Follow the agent's current owner: suspend every other owner's notice. */
+  bind(): void!!
+}
+
+/** The open run's phone step: reviewed and decided twice; the agent performs an approved step once through its enrolled phone bridge. */
+export service PhoneSteps {
+  /** Read the run's pending phone step and show it; undefined when none waits. */
+  review(runId: string, workflowId: string): (StepReview | undefined)!!
+  /** One tap of Approve or Deny; the second of the same choice decides. */
+  tap(approve: boolean): void!!
+  /** The page went to the background or came back. */
+  foreground(front: boolean): void!!
+  /** The step the open run shows now, as last reviewed; undefined when none waits. */
+  reviewed(): (StepReview | undefined)!!
+}
+
+function ownerOf(scope: OwnerScope): string {
+  return `${scope.origin}|${scope.ownerId}|${scope.agentId}`
+}
+
+export const approvalNotices = Layer.provideMerge(Layer.effect(ApprovalNotices, effect {
+  const held = try NoticesMachine
+  const agent = try WorkflowApi
+  const native = try Native
+  const client = agent.workflow
+  const reads = workflowNoticeReads(client)
+
+  effect function bind() {
+    const scope = (agent.scope() catch () => undefined)
+    if (scope === undefined) return undefined
+    const owner = ownerOf(scope)
+    const hash = (tryPromise(() => sha256Hex(JSON.stringify([scope.origin, scope.ownerId, scope.agentId]))) catch () => "")
+    if ((try held.get()).owner !== owner) {
+      held.send({ type: "bindOwner", owner }) catch () => undefined
+      native.invoke(plugin, "withdrawOtherOwnerApprovalNotices", { owner: { origin: scope.origin, ownerId: scope.ownerId, agentId: scope.agentId } }) catch () => undefined
+    }
+    return { scope, owner, hash }
+  }
+
+  effect function waitingSteps(workflowId: string) {
+    const executions = try client.executions(workflowId)
+    const steps: Array<{ run: WorkflowRun; approval: WorkflowApproval }> = []
+    for (const run of executions.filter((r) => !r.finished)) {
+      const receipt = try client.approvals(run)
+      if (receipt === null || receipt.finished || receipt.cancellationRequested) continue
+      for (const approval of receipt.approvals.filter((a) => a.status === "pending" && a.supported)) steps.push({ run, approval })
+    }
+    return steps
+  }
+
+  return {
+    bind: effect () => { try bind() },
+    effect sweep(workflowIds: ReadonlyArray<string>) {
+      const bound = try bind()
+      if (bound === undefined) return
+      const now = try Clock.currentTimeMillis
+      held.send({ type: "tick", now }) catch () => undefined
+      const routeOf = (run: WorkflowRun): WorkflowNoticeRoute => ({
+        scope: bound.hash, origin: bound.scope.origin, ownerId: bound.scope.ownerId, agentId: bound.scope.agentId,
+        workflowId: run.workflowId, runId: run.id, versionId: run.versionId,
+      })
+      for (const workflowId of workflowIds) {
+        const steps = (waitingSteps(workflowId) catch () => undefined)
+        held.send({ type: "swept", workflowId, waits: (steps?.length ?? 0) > 0, readable: steps !== undefined }) catch () => undefined
+        if (steps === undefined) continue
+        for (const posted of (try held.get()).notices.filter((n) => n.route.workflowId === workflowId && n.route.owner === bound.owner)) {
+          const route: WorkflowNoticeRoute = { scope: bound.hash, origin: bound.scope.origin, ownerId: bound.scope.ownerId, agentId: bound.scope.agentId,
+            workflowId, runId: posted.route.runId, versionId: posted.route.versionId }
+          const identity = try workflowApprovalNoticeIdentity(route, posted.route.step)
+          if (posted.state === "NoticeSuspended") {
+            const verdict = (revalidateWorkflowApprovalNotice({ ...identity, expiresAt: posted.expiresAt, route }, reads, () => true) catch () => "withdraw")
+            if (verdict === "stale") continue
+            held.send({ type: "rechecked", runId: posted.route.runId, stepId: posted.route.step, stillPending: verdict === "resume" }) catch () => undefined
+            if (verdict === "resume") native.invoke(plugin, "resumeWorkflowApprovalNotice", { ...identity, expiresAt: posted.expiresAt, route }) catch () => undefined
+            else native.invoke(plugin, "withdrawWorkflowApprovalNotice", { id: identity.id }) catch () => undefined
+          } else if (!steps.some((s) => s.run.id === posted.route.runId && workflowApprovalProposalId(s.approval) === posted.route.step)) {
+            held.send({ type: "settledStep", runId: posted.route.runId, stepId: posted.route.step }) catch () => undefined
+            native.invoke(plugin, "withdrawWorkflowApprovalNotice", { id: identity.id }) catch () => undefined
+          }
+        }
+        for (const { run, approval } of steps) {
+          const route = routeOf(run)
+          const step = workflowApprovalProposalId(approval)
+          const full: NoticeRoute = { owner: bound.owner, workflowId: run.workflowId, runId: run.id, versionId: run.versionId, step }
+          const expiresAt = approval.expiresAt ?? now + STEP_NOTICE_MS
+          const added = (held.send({ type: "awaitingStep", route: full, expiresAt }) catch () => undefined)
+          if (added === undefined) continue
+          const identity = try workflowApprovalNoticeIdentity(route, step)
+          const reply = (effect { return try Schema.decodeUnknownEffect(NoticePosted)(try native.invoke(plugin, "postWorkflowApprovalNotice", { ...identity, expiresAt, route })) } catch () => undefined)
+          if (reply !== undefined && reply.status === "failed") held.send({ type: "settledStep", runId: run.id, stepId: step }) catch () => undefined
+        }
+      }
+    },
+  }
+}), noticesStored(NOTICES_KEY))
+
+export const phoneSteps = Layer.provideMerge(Layer.effect(PhoneSteps, effect {
+  const held = try StepsMachine
+  const agent = try WorkflowApi
+  const client = agent.workflow
+  const devices = try DeviceReview
+  const current = try Ref.make<StepReview | undefined>(undefined)
+
+  effect function readStep(run: WorkflowRun) {
+    const receipt = try client.approvals(run)
+    const phone = (client.phoneReview(run) catch () => undefined)
+    return { receipt, phone, approval: receipt?.approvals.find((a) => a.status === "pending" && a.supported) }
+  }
+
+  effect function advance() {
+    const review = try Ref.get(current)
+    if (review === undefined) return
+    const state = try held.get()
+    const id = workflowApprovalProposalId(review.approval)
+    if (state.inflight === "ReadingReview") {
+      const fresh = (readStep(review.run) catch () => undefined)
+      if (fresh === undefined || fresh.receipt === null || fresh.receipt.finished || fresh.receipt.cancellationRequested || fresh.phone?.finished === true
+        || (fresh.phone !== undefined && fresh.phone.cancellationRequestedAt !== null)) held.send({ type: "cancelRun" }) catch () => undefined
+      else if (fresh.approval === undefined || workflowApprovalProposalId(fresh.approval) !== id) held.send({ type: "expire" }) catch () => undefined
+      else if (fresh.approval.requestDigest !== review.approval.requestDigest || fresh.phone?.specDigest !== review.phone?.specDigest) held.send({ type: "changeDigest" }) catch () => undefined
+      else if (fresh.phone?.calendarAnchorAt !== review.phone?.calendarAnchorAt) held.send({ type: "changeAnchor" }) catch () => undefined
+      held.send({ type: "readReview" }) catch () => undefined
+      return try advance()
+    }
+    if (state.inflight === "Admitting") {
+      // The agent performs an approved step inside this decision request, offering it to the phone and answering once it settled, so
+      // the step's own proposal is run here while the decision is in flight (spec/workflows/deviceSteps.md).
+      const decisionDone = try Ref.make(false)
+      const decision = fork ensuring(exit(client.decideApproval(review.run, review.approval, true)), Ref.set(decisionDone, true))
+      let ran: Approval | undefined = undefined
+      const bridged = bridgeRead(review)
+      if (!bridged) {
+        while (ran === undefined && !(try Ref.get(decisionDone))) {
+          ran = try devices.workflowStep(review.run.id, review.approval.nodeId)
+          if (ran === undefined) try sleep(Duration.millis(STEP_POLL_MS))
+        }
+        if (ran === undefined) ran = try devices.workflowStep(review.run.id, review.approval.nodeId)
+      }
+      const answered = join decision
+      const decided = Exit.isSuccess(answered)
+        && answered.value.approvals.some((a) => workflowApprovalProposalId(a) === id && a.status === "approved" && a.requestDigest === review.approval.requestDigest)
+      if (!decided && ran === undefined) held.send({ type: "expire" }) catch () => undefined
+      held.send({ type: "admit" }) catch () => undefined
+      if ((try held.get()).inflight !== "Executing") return
+      const performed: Performed = ran === undefined
+        ? (bridged && decided ? "PhoneUnknown" : "PhoneNothing")
+        : ran.outcome === "Applied" ? "PhoneApplied" : ran.outcome === "Unknown" ? "PhoneUnknown" : "PhoneNothing"
+      held.send({ type: "execute", performed }) catch () => undefined
+      if ((try held.get()).inflight !== "SendingReceipt") return
+      if (Exit.isSuccess(answered)) held.send({ type: "receiptSent" }) catch () => undefined
+      else held.send({ type: "receiptLost" }) catch () => undefined
+      return
+    }
+    if (state.status === "StepDeniedStatus") client.decideApproval(review.run, review.approval, false) catch () => undefined
+  }
+
+  return {
+    effect review(runId: string, workflowId: string) {
+      const run = (client.receipt(runId, workflowId) catch () => undefined)
+      const read = run === undefined || run.finished ? undefined : (readStep(run) catch () => undefined)
+      if (run === undefined || read === undefined || read.approval === undefined) {
+        try Ref.set(current, undefined)
+        return undefined
+      }
+      const before = try Ref.get(current)
+      const next: StepReview = read.phone === undefined ? { run, approval: read.approval } : { run, approval: read.approval, phone: read.phone }
+      if (before === undefined || before.run.id !== runId || workflowApprovalProposalId(before.approval) !== workflowApprovalProposalId(read.approval)) {
+        held.send({ type: "beginStep" }) catch () => undefined
+      }
+      try Ref.set(current, next)
+      held.send({ type: "review" }) catch () => undefined
+      return next
+    },
+    effect tap(approve: boolean) {
+      held.send({ type: "tap", approve }) catch () => undefined
+      try advance()
+    },
+    effect foreground(front: boolean) {
+      const state = try held.get()
+      if (!front && state.foreground) {
+        held.send({ type: "leave" }) catch () => undefined
+        held.send({ type: "suspend" }) catch () => undefined
+      }
+      if (front && !state.foreground) {
+        held.send({ type: "returnTo" }) catch () => undefined
+        held.send({ type: "reopen" }) catch () => undefined
+        held.send({ type: "sync" }) catch () => undefined
+      }
+    },
+    effect reviewed() {
+      return try Ref.get(current)
+    },
+  }
+}), stepsMachine())

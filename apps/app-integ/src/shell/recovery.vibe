@@ -1,0 +1,80 @@
+// spec/shell/recovery.md, "Story: Get my phone back when something breaks"
+import { Machine as RecoveryMachine, type Event as RecoveryEvent } from "../../gen/shell__recovery.effect.vibe"
+import type { AppId } from "../web/app-screen.ts"
+import { Build } from "../platform/build.vibe"
+import { CrashJournal } from "../platform/crash-journal.vibe"
+import { Native } from "../platform/native.vibe"
+import { BuildFacts } from "./native.schema.vibe"
+import { Navigation } from "./navigation.vibe"
+import { Notices } from "./notices.vibe"
+import { appRendered, errorClass, failureOf, pageEvents, reloadPage, takeOverFromDialogs } from "./page.ts"
+
+/** Recovery from a failed render, for the shell's error boundaries. */
+export service Recovery {
+  /** The shell rendered for the first time. */
+  mounted(): void!!
+  /** One app's screen failed to render: it closes and Home says so. */
+  viewFailed(app: AppId, title: string, error: unknown): void!!
+  /** The shell itself failed to render: the recovery screen takes over. */
+  rootFailed(error: unknown): void!!
+  reload(): void!!
+  /** Android's Home app picker, from the owner's tap. */
+  switchHome(): void!!
+}
+
+/** The recovery service: uncaught failures before the first render, render failures after, and the problem log. */
+export const recoveryLive = Layer.effect(Recovery, effect {
+  const native = try Native
+  const build = try Build
+  const journal = try CrashJournal
+  const navigation = try Navigation
+  const notices = try Notices
+  const machine = try RecoveryMachine
+
+  effect function sendTo(event: RecoveryEvent) {
+    const sent = machine.send(event) catch () => undefined
+    return sent
+  }
+
+  effect function record(kind: "render" | "startup" | "uncaught", error: unknown) {
+    try journal.record(kind, error)
+  }
+
+  effect function takeOver() {
+    try sync(() => takeOverFromDialogs())
+    try navigation.send({ type: "hold", id: "recovery" })
+  }
+
+  effect function uncaught(error: unknown) {
+    if (appRendered()) return
+    const before = (try machine.get()).phase
+    const after = try sendTo({ type: "uncaught", errorClass: errorClass(error) })
+    if (after === undefined || after.phase === before) return
+    try record("startup", error)
+    try takeOver()
+  }
+
+  fork.scoped (effect { for try (const event of pageEvents("error")) try uncaught(failureOf(event)) })
+  fork.scoped (effect { for try (const event of pageEvents("unhandledrejection")) try uncaught(failureOf(event)) })
+  if (build.info.variant !== "browser" && (try native.available("DeviceApps"))) {
+    const facts = effect { return try Schema.decodeUnknownEffect(BuildFacts)(try native.invoke("ElizaSystem", "getBuildInfo")) } catch () => ({ launcher: false })
+    try sendTo({ type: "escapeAvailable", available: facts.launcher })
+  }
+
+  return {
+    effect mounted() { try sendTo({ type: "appMounted" }) },
+    effect viewFailed(app: AppId, title: string, error: unknown) {
+      if ((try sendTo({ type: "viewFailed", app, errorClass: errorClass(error) })) === undefined) return
+      try record("render", error)
+      try navigation.send({ type: "appFailed", app })
+      try notices.show(`${title} closed after a problem.`, { failure: true })
+    },
+    effect rootFailed(error: unknown) {
+      if ((try sendTo({ type: "rootFailed", errorClass: errorClass(error) })) === undefined) return
+      try record("render", error)
+      try takeOver()
+    },
+    reload: () => sync(() => reloadPage()),
+    effect switchHome() { native.invoke("DeviceApps", "openHomeChooser") catch () => undefined },
+  }
+})

@@ -1,0 +1,66 @@
+// spec/notes/collection.md, "Story: Read my notes under the account I am signed in as"; spec/notes/collection.md, "A mutation is confirmed only by its own reply, and an uncertain one stays under review"; spec/notes/trash.md, "A saved erase leaves its recordings' cleanup pending, a conflict changes nothing, and an unknown outcome reopens the store"
+import { createNotesClient, NotesClientRefused, type NotesInteractResult } from "@elizaos/plugin-notes/client"
+import type { NotesSnapshot, NotesTrashErase, NotesTrashRecordingCleanup } from "@elizaos/plugin-notes/types"
+import { Resident, ResidentRefused, ResidentUnavailable } from "../platform/resident.vibe"
+import { ResidentAnswerRefused, residentTransport } from "./transport.ts"
+
+/** The resident did not answer, or is not running. */
+export error NotesUnavailable { reason: string }
+/** The resident answered with a refusal; `message` is its own text, which Notes words for the owner. */
+export error NotesRefused { status: number; message: string; code?: string }
+/** The resident answered with something that is not a Notes reply; the outcome of a mutation is unknown. */
+export error NotesInvalid { reason: string }
+/** The host has no three-day Trash, so its owner-only Trash routes do not exist. */
+export error TrashRetentionOff
+
+/** The canonical Notes capabilities the phone calls. */
+export type NotesCapability = "create-note" | "update-note" | "delete-note" | "restore-note"
+
+/** A confirmed erase: what it erased and the recordings whose device cleanup is now pending. */
+export interface EraseReply {
+  readonly erased: number
+  readonly recordingCleanup: readonly NotesTrashRecordingCleanup[]
+  readonly state: NotesSnapshot
+}
+
+/** The failures of a Notes request. */
+export type NotesFailure = NotesUnavailable | NotesRefused | NotesInvalid
+
+/** The resident agent's canonical Notes routes through `@elizaos/plugin-notes/client`, decoded at the boundary. */
+export service NotesClient {
+  readState(): NotesSnapshot!NotesFailure
+  interact(capability: NotesCapability, params: Record<string, unknown>): NotesInteractResult!NotesFailure
+  eraseTrash(review: NotesTrashErase): EraseReply!(NotesFailure | TrashRetentionOff)
+  readCleanups(): readonly NotesTrashRecordingCleanup[]!(NotesFailure | TrashRetentionOff)
+  completeCleanup(receipt: NotesTrashRecordingCleanup): boolean!(NotesFailure | TrashRetentionOff)
+}
+
+/** What a rejected client promise means: unavailable, refused, or an invalid reply. */
+export function failureOf(cause: unknown): NotesFailure {
+  if (cause instanceof ResidentAnswerRefused) return cause.status >= 500 && cause.code === undefined ? new NotesUnavailable({ reason: cause.message }) : new NotesRefused({ status: cause.status, message: cause.message, ...(cause.code === undefined ? {} : { code: cause.code }) })
+  if (cause instanceof NotesClientRefused) return new NotesInvalid({ reason: cause.message })
+  return new NotesInvalid({ reason: cause instanceof Error ? cause.message : "Notes returned an invalid reply." })
+}
+
+function ownerTrashFailure(cause: unknown): NotesFailure | TrashRetentionOff {
+  return cause instanceof ResidentAnswerRefused && cause.status === 404 ? new TrashRetentionOff() : failureOf(cause)
+}
+
+/** The client over the platform's resident service. */
+export const clientLayer = Layer.effect(NotesClient, effect {
+  const agent = try Resident
+  const answer = effect (method: "GET" | "POST", path: string, body: unknown) => agent.json(method, path, body) catch (error) => match (error) {
+    when ResidentUnavailable: { status: 503, data: { error: error.reason ?? error.state } };
+    when ResidentRefused: { status: error.status, data: { error: error.message, ...(error.code === undefined ? {} : { code: error.code }) } };
+  }
+  const notes = try Effect.orDie(Effect.try(() => createNotesClient(residentTransport((method, path, body) => runPromise(answer(method, path, body))))))
+  return {
+    readState: () => tryPromise({ try: (signal) => notes.readState(signal), catch: failureOf }),
+    interact: (capability: NotesCapability, params: Record<string, unknown>) =>
+      tryPromise({ try: (signal) => notes.interact(capability, params, signal), catch: failureOf }),
+    eraseTrash: (review: NotesTrashErase) => tryPromise({ try: (signal) => notes.eraseTrash(review, signal), catch: ownerTrashFailure }),
+    readCleanups: () => tryPromise({ try: (signal) => notes.readTrashRecordingCleanup(signal), catch: ownerTrashFailure }),
+    completeCleanup: (receipt: NotesTrashRecordingCleanup) =>
+      tryPromise({ try: (signal) => notes.completeTrashRecordingCleanup(receipt, signal), catch: ownerTrashFailure }),
+  }
+})

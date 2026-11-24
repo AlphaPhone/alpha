@@ -1,0 +1,35 @@
+// spec/files/storage.md, "The primary volume is listed first, and its used share is a whole percentage of what is known"
+import { primaryFirst, usedPercent, showsBar } from "../../gen/files__storage.effect.vibe"
+import { storageEstimate } from "./download.ts"
+import { FilesStorage } from "./storage.vibe"
+
+/** How full the phone's storage is: the primary volume's free and total bytes, or the browser's estimate of this app's use. */
+export type Usage =
+  | { readonly kind: "volume"; readonly name: string; readonly free: number; readonly total: number; readonly percent: number }
+  | { readonly kind: "app"; readonly used: number; readonly quota: number; readonly percent: number }
+  | { readonly kind: "unknown" }
+
+/** Storage use, for Files' volumes and for Settings. */
+export service StorageUsage {
+  usage(): Usage!!
+}
+
+/** Storage use from the files bridge, else from the browser. */
+export const layer = Layer.effect(StorageUsage, effect {
+  const storage = try FilesStorage
+  return {
+    effect usage() {
+      const state = storage.state() catch () => undefined
+      const [primary] = primaryFirst((state?.volumes ?? []).map((v) => ({ id: v.id, name: v.name, primary: v.primary, free: Math.max(0, Math.trunc(v.free)), total: Math.max(0, Math.trunc(v.total)) })))
+      if (primary !== undefined && showsBar(primary)) {
+        const usage: Usage = { kind: "volume", name: primary.name, free: primary.free, total: primary.total, percent: usedPercent(primary) }
+        return usage
+      }
+      const estimate = tryPromise(() => storageEstimate()) catch () => undefined
+      if (estimate === undefined) return { kind: "unknown" } satisfies Usage
+      const used = Math.max(0, Math.trunc(estimate.usage))
+      const quota = Math.max(1, Math.trunc(estimate.quota))
+      return { kind: "app", used, quota, percent: Math.min(100, Math.trunc((100 * used) / quota)) } satisfies Usage
+    },
+  }
+})

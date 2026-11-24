@@ -1,0 +1,336 @@
+// spec/files/preview.md, "Story: Open the file I tapped, and only in the visit I tapped it"; spec/files/preview.md, "One open is asked for at a time, and its selection is shown only in the visit that asked"; spec/files/preview.md, "A rename shows the same file under its new name, or asks to choose it again"; spec/files/pdf.md, "Story: Read a PDF page by page on the phone"; spec/files/recent.md, "Story: Reopen what I opened recently"; spec/files/recent.md, "Story: Come back to the document I had open"
+import { type Content, type Doc, type PreviewState, type RenameAnswer, Machine as PreviewMachine, emailable, linkable, messageable } from "../../gen/files__preview.effect.vibe"
+import { type PageOutcome, type PdfPages, Machine as PdfMachine } from "../../gen/files__pdf.effect.vibe"
+import { type Recent, type RecentRow, Machine as RecentMachine } from "../../gen/files__recent.effect.vibe"
+import { Machine as BrowserMachine } from "../../gen/files__browser.effect.vibe"
+import type { Row } from "../../gen/files__storage.ts"
+import { Native } from "../platform/native.vibe"
+import { keyPath, kindOf, parentOf, previewable } from "./paths.vibe"
+import { Documents, FILES_PLUGIN, FilesStorage, FilesUnavailable } from "./storage.vibe"
+import type { SharedFile } from "./share.vibe"
+import type * as N from "./native.schema.vibe"
+
+const PAGE_TIMEOUT = "20 seconds"
+
+/** Why a tap opened nothing, for Files to word. */
+export type OpenResult =
+  | { readonly kind: "shown" }
+  | { readonly kind: "elsewhere"; readonly opened: boolean; readonly status?: string }
+  | { readonly kind: "refused"; readonly status: string; readonly message?: string }
+  | { readonly kind: "stale" }
+
+/** How a hand-off of the shown file to another app ended, with the device's reviewed sentence for Files to word. */
+export interface Handoff { readonly status: N.DocumentHandoff["status"] | "unknown"; readonly message?: string }
+
+/** How a rename of the shown file ended, with the device's reviewed sentence for Files to word. */
+export interface Renaming { readonly answer: RenameAnswer; readonly message?: string }
+
+function handoff(answer: N.DocumentHandoff | undefined): Handoff {
+  return answer === undefined ? { status: "unknown" } : { status: answer.status, ...(answer.message ? { message: answer.message } : {}) }
+}
+
+function docOf(selected: N.SelectedDocument | N.SelectionAnswer, known: Partial<Doc>, source: Doc["source"]): Doc | undefined {
+  if (selected.status !== "selected" || !("selectionId" in selected) || !selected.selectionId) return undefined
+  const mimeType = (("mimeType" in selected ? selected.mimeType : undefined) ?? known.mimeType ?? "application/octet-stream") || "application/octet-stream"
+  const size = "size" in selected && selected.size !== undefined ? selected.size : known.size ?? -1
+  const modified = "modified" in selected && selected.modified !== undefined && selected.modified > 0 ? selected.modified : known.modified ?? 0
+  return { selection: selected.selectionId, path: known.path ?? "", volume: known.volume ?? "", name: ("name" in selected ? selected.name : undefined) ?? known.name ?? "Selected document",
+    mimeType, kind: kindOf(mimeType, false), size, modified, source }
+}
+
+function pageOutcome(answer: N.PdfPageAnswer): PageOutcome {
+  if (answer.status === "rendered") return "PageRendered"
+  if (answer.status === "unsupported") return "PageNotPdf"
+  return /encrypted/i.test(answer.message ?? "") ? "PageEncrypted" : answer.status === "failed" ? "PageMalformed" : "PageUnavailable"
+}
+
+/** The file preview: opening a tapped, picked or recent file, its content and PDF pages, rename, and the grants it gives back. */
+export service FilesPreview {
+  readonly changes: Stream.Stream<PreviewState>
+  readonly pages: Stream.Stream<PdfPages>
+  readonly recents: Stream.Stream<Recent>
+  get(): PreviewState!!
+  enter(): void!!
+  leave(): void!!
+  openRow(row: Row): OpenResult!!
+  openPicked(): OpenResult!!
+  openRecent(row: RecentRow): OpenResult!!
+  /** Reopen the picked document that was open when Files last closed, when Recent still remembers it. */
+  restoreOpen(): void!!
+  page(page: number): void!!
+  close(forget: boolean): void!!
+  rename(name: string): Renaming!!
+  /** Open the shown file in another app, or download it in the browser build. */
+  openElsewhere(): Handoff!!
+  shareSelected(): Handoff!!
+  /** The picture or recording of opening `serial` could not be played here. */
+  mediaFailed(serial: number): void!!
+  /** The shown file for another area: its bytes are read fresh, and only while it is still the file shown. */
+  sharedFile(): (SharedFile | undefined)!!
+  /** Whether the shown file is still the one with this opening number. */
+  stillShowing(serial: number): boolean!!
+  openViewer(): void!!
+  closeViewer(): void!!
+}
+
+/** The preview over its machines, the selected-documents registry and the device's storage. */
+export const layer = Layer.effect(FilesPreview, effect {
+  const storage = try FilesStorage
+  const documents = try Documents
+  const native = try Native
+  const preview = try PreviewMachine
+  const pdf = try PdfMachine
+  const recent = try RecentMachine
+  const browser = try BrowserMachine
+  const send = <E>(machine: { send(event: E): unknown!unknown }, event: E) => ignore(machine.send(event))
+
+  effect function release() {
+    const { toRelease } = try recent.get()
+    if (!toRelease.length) return
+    for (const id of toRelease) try documents.forget(id)
+    try send(recent, { type: "releasedGrants" })
+  }
+
+  effect function loadContent(doc: Doc, serial: number) {
+    if (doc.kind === "KindPdf") {
+      try send(pdf, { type: "openDocument" })
+      try renderPage(doc, 0)
+      const pages = try pdf.get()
+      const content: Content = pages.shown ? "ContentPdf" : "ContentUnavailable"
+      return try send(preview, { type: "contentReply", serial, content, body: "" })
+    }
+    if (doc.kind === "KindImage" || doc.kind === "KindVideo" || doc.kind === "KindAudio") {
+      const described = documents.describe(doc.selection) catch () => undefined
+      const uri = described?.uri ?? ""
+      return try send(preview, { type: "contentReply", serial, content: uri ? "ContentMedia" : "ContentUnavailable", body: uri })
+    }
+    const text = documents.read(doc.selection) catch () => undefined
+    const shown = text?.status === "read" && (text.text ?? "").trim() !== ""
+    if (shown) return try send(preview, { type: "contentReply", serial, content: "ContentText", body: (text?.text ?? "").replace(/^\uFEFF/, "") })
+    const described = documents.describe(doc.selection) catch () => undefined
+    const said = text?.message ? `${text.status}\n${text.message}` : text?.status ?? "failed"
+    try send(preview, { type: "contentReply", serial, content: "ContentUnavailable", body: described?.uri?.startsWith("blob:") ? described.uri : said })
+  }
+
+  effect function renderPage(doc: Doc, page: number) {
+    const { ticket } = try pdf.get()
+    const answer = timeout(documents.pdf(doc.selection, page), PAGE_TIMEOUT) catch () => undefined
+    if (answer === undefined) return try send(pdf, { type: "timeOutPage" })
+    const image = answer.imageUri && (answer.imageUri.startsWith("file://") || answer.imageUri.startsWith("blob:") || answer.imageUri.startsWith("content://")) ? answer.imageUri : ""
+    try send(pdf, { type: "pageReply", ticket, result: pageOutcome(answer), page: answer.page ?? -1, count: answer.pageCount ?? 0, image })
+  }
+
+  effect function show(doc: Doc, key: string, listed: boolean) {
+    const after = preview.send({ type: "openReply", granted: true, doc }) catch () => undefined
+    if (after === undefined || !after.shown || after.doc.selection !== doc.selection) {
+      try documents.forget(doc.selection)
+      return { kind: "stale" } satisfies OpenResult
+    }
+    const at = try Clock.currentTimeMillis
+    const accepted = recent.send({ type: "acceptDocument", kind: "PickedDoc", key, selection: doc.selection,
+      name: doc.name, mimeType: doc.mimeType, at, listed }) catch () => undefined
+    if (accepted !== undefined && doc.source !== "Browsed") try ignore(recent.send({ type: "rememberOpen" }))
+    try release()
+    try loadContent(doc, after.serial)
+    return { kind: "shown" } satisfies OpenResult
+  }
+
+  effect function counted<A>(work: A!!) {
+    const begun = browser.send({ type: "beginMutation" }) catch () => undefined
+    if (begun === undefined) return undefined
+    return try ensuring(work, ignore(browser.send({ type: "endMutation" })))
+  }
+
+  effect function openRow(row: Row) {
+    const { path, volume } = keyPath(row.key)
+    const elsewhere = try native.available(FILES_PLUGIN)
+    const requested = preview.send({ type: "requestOpen", previewable: previewable(row.mimeType), elsewhere }) catch () => undefined
+    if (requested === undefined) return { kind: "refused", status: "busy" } satisfies OpenResult
+    const result = try counted(effect {
+      if (requested.route === "OpenElsewhere") {
+        const answer = storage.open(path, volume) catch () => undefined
+        try send(preview, { type: "openReply", granted: false, doc: requested.doc })
+        const handed: OpenResult = { kind: "elsewhere", opened: answer?.status === "opened", ...(answer && answer.status !== "opened" ? { status: answer.status } : {}) }
+        return handed
+      }
+      const state = storage.state() catch () => undefined
+      if (state?.status !== "ready" || state.access !== "granted") {
+        try send(preview, { type: "openReply", granted: false, doc: requested.doc })
+        const denied: OpenResult = { kind: "refused", status: "denied" }
+        return denied
+      }
+      const selected = storage.select(path, volume) catch () => undefined
+      const doc = selected ? docOf(selected, { path, volume, name: row.name, mimeType: row.mimeType, size: row.size, modified: row.modified }, "Browsed") : undefined
+      if (doc === undefined) {
+        try send(preview, { type: "openReply", granted: false, doc: requested.doc })
+        const refused: OpenResult = { kind: "refused", status: selected?.status ?? "unavailable", ...(selected && "message" in selected && selected.message ? { message: selected.message } : {}) }
+        return refused
+      }
+      return try show(doc, `browsed:${doc.selection}`, false)
+    })
+    return result ?? ({ kind: "refused", status: "busy" } satisfies OpenResult)
+  }
+
+  effect function openPicked() {
+    const requested = preview.send({ type: "requestOpen", previewable: true, elsewhere: false }) catch () => undefined
+    if (requested === undefined) return { kind: "refused", status: "busy" } satisfies OpenResult
+    const picked = documents.pick() catch () => undefined
+    const doc = picked ? docOf(picked, {}, "Picked") : undefined
+    if (doc === undefined || picked === undefined) {
+      try send(preview, { type: "openReply", granted: false, doc: requested.doc })
+      return (picked?.status === "cancelled" ? { kind: "stale" } : { kind: "refused", status: picked?.status ?? "unavailable", ...(picked?.message ? { message: picked.message } : {}) }) satisfies OpenResult
+    }
+    return try show(doc, `picked:${doc.selection}`, true)
+  }
+
+  effect function openRecent(row: RecentRow) {
+    if (row.status !== "Ready" || !row.selection) return { kind: "refused", status: "unavailable" } satisfies OpenResult
+    const requested = preview.send({ type: "requestOpen", previewable: true, elsewhere: false }) catch () => undefined
+    if (requested === undefined) return { kind: "refused", status: "busy" } satisfies OpenResult
+    const described = documents.describe(row.selection) catch () => undefined
+    const doc = described ? docOf(described, { name: row.name, mimeType: row.mimeType }, "Remembered") : undefined
+    if (doc === undefined || described === undefined || doc.selection !== row.selection) {
+      try send(preview, { type: "openReply", granted: false, doc: requested.doc })
+      if (described?.status === "unavailable") try ignore(recent.send({ type: "revokeRow", key: row.key }))
+      try release()
+      return { kind: "refused", status: described?.status ?? "unavailable", ...(described?.message ? { message: described.message } : {}) } satisfies OpenResult
+    }
+    const r = try recent.get()
+    const showing = try preview.get()
+    if (r.opened === row.selection && showing.shown && showing.doc.selection === row.selection) {
+      try send(preview, { type: "openReply", granted: false, doc })
+      return { kind: "shown" } satisfies OpenResult
+    }
+    const after = preview.send({ type: "openReply", granted: true, doc }) catch () => undefined
+    if (after === undefined || !after.shown) return { kind: "stale" } satisfies OpenResult
+    try send(recent, { type: "reopenRow", key: row.key })
+    if (row.kind === "PickedDoc") try send(recent, { type: "rememberOpen" })
+    try release()
+    try loadContent(doc, after.serial)
+    return { kind: "shown" } satisfies OpenResult
+  }
+
+  effect function close(forget: boolean) {
+    try ignore(preview.send({ type: "closePreview" }))
+    try ignore(pdf.send({ type: "closeDocument" }))
+    const r = try recent.get()
+    if (r.opened) {
+      if (!forget) try ignore(recent.send({ type: "forgetOpen" }))
+      try send(recent, { type: "closeDocument", forget })
+    }
+    try release()
+  }
+
+  effect function rename(name: string) {
+    const s = try preview.get()
+    const begun = preview.send({ type: "beginRename" }) catch () => undefined
+    if (begun === undefined) return { answer: "RenameRefused" } satisfies Renaming
+    const answer = documents.rename(s.doc.selection, name) catch () => undefined
+    const outcome: RenameAnswer = answer?.status === "selected" ? "Renamed" : answer?.status === "renamed-reselect" ? "RenamedReselect" : "RenameRefused"
+    const renamed = answer ? docOf(answer, { ...s.doc, name, path: s.doc.path ? `${parentOf(s.doc.path) ? parentOf(s.doc.path) + "/" : ""}${name}` : "" }, s.doc.source) : undefined
+    const after = preview.send({ type: "renameReply", answer: outcome, doc: renamed ?? s.doc }) catch () => undefined
+    if (outcome === "Renamed" && renamed && after) {
+      if (renamed.selection !== s.doc.selection) {
+        const at = try Clock.currentTimeMillis
+        try send(recent, { type: "closeDocument", forget: false })
+        try ignore(recent.send({ type: "acceptDocument", kind: "PickedDoc", key: `${s.doc.source === "Browsed" ? "browsed" : "picked"}:${renamed.selection}`,
+          selection: renamed.selection, name: renamed.name, mimeType: renamed.mimeType, at, listed: s.doc.source !== "Browsed" }))
+        try release()
+      }
+      try loadContent(after.doc, after.serial)
+    }
+    return { answer: outcome, ...(answer?.message ? { message: answer.message } : {}) } satisfies Renaming
+  }
+
+  return {
+    changes: preview.changes,
+    pages: pdf.changes,
+    recents: recent.changes,
+    get: () => preview.get(),
+    effect enter() {
+      try ignore(preview.send({ type: "enterPreview" }))
+    },
+    effect leave() {
+      try ignore(preview.send({ type: "leavePreview" }))
+      try ignore(pdf.send({ type: "closeDocument" }))
+      const r = try recent.get()
+      if (r.opened) try send(recent, { type: "closeDocument", forget: false })
+      try release()
+    },
+    openRow,
+    openPicked,
+    openRecent,
+    effect restoreOpen() {
+      const r = try recent.get()
+      if (!r.restoreOpen || r.opened) return
+      const restored = documents.restore() catch () => undefined
+      if (restored?.status === "unavailable") return try send(recent, { type: "forgetOpen" })
+      const row = r.rows.find((x) => x.selection === r.restoreOpen)
+      if (restored?.status !== "selected" || restored.selectionId !== r.restoreOpen || row === undefined) return
+      try openRecent(row)
+    },
+    effect page(page: number) {
+      const s = try preview.get()
+      const requested = pdf.send({ type: "requestPage", page }) catch () => undefined
+      if (requested === undefined || !s.shown || s.doc.kind !== "KindPdf") return
+      try renderPage(s.doc, page)
+    },
+    close,
+    rename,
+    effect openElsewhere() {
+      const s = try preview.get()
+      if (!s.shown) return { status: "unavailable" } satisfies Handoff
+      return handoff(documents.open(s.doc.selection) catch () => undefined)
+    },
+    effect shareSelected() {
+      const s = try preview.get()
+      if (!s.shown) return { status: "unavailable" } satisfies Handoff
+      return handoff(documents.share(s.doc.selection) catch () => undefined)
+    },
+    effect mediaFailed(serial: number) {
+      const s = try preview.get()
+      if (s.shown && s.serial === serial && s.content === "ContentMedia") try send(preview, { type: "contentReply", serial, content: "ContentUnavailable", body: "media" })
+    },
+    effect sharedFile() {
+      const s = try preview.get()
+      if (!s.shown || !linkable(s)) return undefined
+      const serial = s.serial
+      const selection = s.doc.selection
+      const file: SharedFile = {
+        name: s.doc.name, mimeType: s.doc.mimeType, size: s.doc.size,
+        read: effect {
+          const now = try preview.get()
+          if (!now.shown || now.serial !== serial) throw new FilesUnavailable({ method: "readSelected", reason: "changed" })
+          return try documents.bytes(selection)
+        },
+      }
+      return file
+    },
+    effect stillShowing(serial: number) {
+      const s = try preview.get()
+      return s.shown && s.serial === serial
+    },
+    effect openViewer() {
+      try ignore(preview.send({ type: "openViewer" }))
+    },
+    effect closeViewer() {
+      try ignore(preview.send({ type: "closeViewer" }))
+    },
+  }
+})
+
+/** Which preview actions the shown file allows here. */
+export function previewActions(s: PreviewState, aosp: boolean, targets: { readonly messages: boolean; readonly ask: boolean }) {
+  const selected = s.shown && s.content !== "ContentNeedsReselect"
+  return {
+    share: selected,
+    email: selected && emailable(s.doc.mimeType),
+    message: selected && aosp && targets.messages && messageable(s.doc.mimeType, s.doc.size),
+    ask: selected && targets.ask && (s.content === "ContentText" || s.content === "ContentPdf" || (s.content === "ContentMedia" && s.doc.kind === "KindImage")),
+    move: selected && s.doc.source === "Browsed" && s.doc.path !== "",
+    rename: selected && !s.renaming,
+    trash: selected && s.doc.source === "Browsed" && s.doc.path !== "",
+    elsewhere: selected,
+    reselect: s.shown && s.content === "ContentNeedsReselect",
+  }
+}

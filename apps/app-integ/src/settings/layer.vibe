@@ -1,0 +1,37 @@
+// spec/settings/index.md, "Story: Find a setting in a few taps"
+import { machine as diagnosticsMachine } from "../../gen/settings__diagnostics.effect.vibe"
+import { machine as factsMachine } from "../../gen/settings__facts.effect.vibe"
+import { machine as networkMachine } from "../../gen/settings__network.effect.vibe"
+import { machine as vaultMachine } from "../../gen/settings__passwords.effect.vibe"
+import { machine as privacyMachine } from "../../gen/settings__privacy.effect.vibe"
+import { machine as resetMachine } from "../../gen/settings__reset.effect.vibe"
+import { appearance, appearanceFollow } from "./appearance.vibe"
+import { diagnostics } from "./diagnostics.vibe"
+import { deviceFacts } from "./facts.vibe"
+import { pagesMachine, settingsFollow, settingsPages } from "./navigation.vibe"
+import { wifi } from "./network.vibe"
+import { vault } from "./passwords.vibe"
+import { preferences } from "./preferences.vibe"
+import { privacyRow } from "./privacy.vibe"
+import { reset } from "./reset.vibe"
+import { schedule, updates } from "./updates.vibe"
+
+const services = Layer.mergeAll(
+  Layer.provideMerge(deviceFacts, factsMachine()),
+  appearance,
+  preferences,
+  Layer.provideMerge(privacyRow, privacyMachine()),
+  Layer.provideMerge(wifi, networkMachine()),
+  Layer.provideMerge(schedule, updates),
+  Layer.provideMerge(reset, resetMachine()),
+  Layer.provideMerge(diagnostics, diagnosticsMachine()),
+  Layer.provideMerge(vault, vaultMachine()),
+)
+
+const pages = Layer.provideMerge(settingsPages, pagesMachine)
+
+/** Every Settings service and the Machines behind them, the pages' navigation and what follows the front; over the platform services, Voice's route and listener, Files' StorageUsage and the shell's Navigation, Permissions and Activity. */
+export const layer = Layer.provideMerge(
+  Layer.merge(settingsFollow, appearanceFollow),
+  Layer.provideMerge(pages, services),
+)

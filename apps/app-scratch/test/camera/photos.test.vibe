@@ -1,0 +1,181 @@
+// spec/camera/library.md, "Story: See my whole permitted library, newest first"; spec/camera/browse.md, "Story: Change my photos in batches I confirm"; spec/camera/agentLibrary.md, "Story: Let the assistant point at photos I can see"; spec/camera/libraryReview.md, "Story: Approve each library change the assistant proposes"; spec/camera/edit.md, "Story: Edit a photo and keep the original"
+import { assert, it } from "@effect/vitest"
+import { Machine as BrowseMachine } from "../../gen/camera__browse.effect.vibe"
+import { Machine as CatalogMachine } from "../../gen/camera__library.effect.vibe"
+import { Machine as EditMachine } from "../../gen/camera__edit.effect.vibe"
+import { CameraActions } from "../../src/camera/actions.vibe"
+import { AgentPhotos } from "../../src/camera/agentPhotos.vibe"
+import { MediaEditor } from "../../src/camera/editor.vibe"
+import { PhotoLibrary } from "../../src/camera/library.vibe"
+import { cameraOver, item, phone, until } from "./support.vibe"
+
+const day = 86_400_000
+const rows = [item("m:1", 5 * day), item("m:2", 4 * day, { favorite: true }), item("m:3", 3 * day, { kind: "video", duration: 12 })]
+
+function library(extra: Record<string, (args: unknown) => unknown> = {}) {
+  return phone({
+    "AlphaPhotoLibrary.scope": () => ({ scope: "full", imageAccess: "full", videoAccess: "full", images: true, videos: true, canSelectMore: false, canEditOthers: true, locked: false, version: "1" }),
+    "AlphaPhotoLibrary.watch": () => ({ active: true }),
+    "AlphaPhotos.list": (args) => {
+      const { before, trashed } = args as { before?: string; trashed?: boolean }
+      if (trashed === true) return { items: [], next: "" }
+      return before === undefined ? { items: rows.slice(0, 2), next: "m:2" } : { items: rows.slice(2), next: "" }
+    },
+    "AlphaPhotos.read": (args) => rows.find((row) => row.id === (args as { id: string }).id) ?? { reject: "MISSING" },
+    "AlphaPhotos.albums": () => ({ items: [] }),
+    "AlphaPhotos.changeMany": (args) => ({ status: "complete", outcomes: (args as { items: { id: string }[] }).items.map((row) => ({ id: row.id, status: "trashed" })) }),
+    ...extra,
+  })
+}
+
+// spec/camera/library.md, "Story: See my whole permitted library, newest first"
+it.live("page through the permitted library newest first, select, and move to trash with Undo (spec/camera/library.md, \"Story: See my whole permitted library, newest first\")", () => effect {
+  const device = library()
+  provide cameraOver(device) {
+    const photos = try PhotoLibrary
+    const catalog = try CatalogMachine
+    const browse = try BrowseMachine
+    try photos.enter()
+    try until(() => effect { return (try catalog.get()).main.loaded && (try catalog.get()).read === "ReadIdle" })
+    try photos.more()
+    try until(() => effect { return (try catalog.get()).main.rows.length === 3 })
+    try photos.startSelection("m:1")
+    try photos.dragTo("m:1", "m:3")
+    const selected = (try browse.get()).selection
+    try photos.trash()
+    const after = try browse.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { order: (try catalog.get()).main.rows.map((row) => row.id), selected: [...selected].sort(), undo: [...after.undo].sort(), selecting: after.selecting },
+      { order: ["m:1", "m:2", "m:3"], selected: ["m:1", "m:2", "m:3"], undo: ["m:1", "m:2", "m:3"], selecting: false },
+    ))
+  }
+})
+
+// spec/camera/browse.md, "A change reaches the selection in batches; a declined batch ends the run and nothing after it is sent"
+it.live("a declined Android confirmation ends the change (spec/camera/browse.md, \"A change reaches the selection in batches; a declined batch ends the run and nothing after it is sent\")", () => effect {
+  const device = library({ "AlphaPhotos.changeMany": () => ({ reject: "LIBRARY_DECLINED" }) })
+  provide cameraOver(device) {
+    const photos = try PhotoLibrary
+    const catalog = try CatalogMachine
+    const browse = try BrowseMachine
+    try photos.enter()
+    try until(() => effect { return (try catalog.get()).main.loaded && (try catalog.get()).read === "ReadIdle" })
+    try photos.startSelection("m:1")
+    try photos.trash()
+    const after = try browse.get()
+    try Effect.try(() => assert.deepStrictEqual({ declined: after.declined, work: after.work, sent: device.calls.filter((call) => call.method === "AlphaPhotos.changeMany").length }, { declined: true, work: "NoWork", sent: 1 }))
+  }
+})
+
+// spec/camera/agentLibrary.md, "Story: Let the assistant point at photos I can see"
+it.live("the assistant selects, filters and shares the open photo only under its capability (spec/camera/agentLibrary.md, \"Story: Let the assistant point at photos I can see\")", () => effect {
+  const device = library()
+  provide cameraOver(device) {
+    const photos = try PhotoLibrary
+    const actions = try CameraActions
+    const catalog = try CatalogMachine
+    const agent = try AgentPhotos
+    try photos.enter()
+    try agent.visit(true)
+    try until(() => effect { return (try catalog.get()).main.loaded && (try catalog.get()).read === "ReadIdle" })
+    const view = "photos.library.v1, photos.view.v1"
+    const selected = try actions.execute({ type: "photo_library_select", ids: ["m:1", "m:9"] }, { operationId: "a", reviewed: true, ownerWords: false, capabilities: view })
+    try photos.cancelSelection()
+    const filtered = try actions.execute({ type: "photos_filter", favorite: true }, { operationId: "b", reviewed: true, ownerWords: false, capabilities: view })
+    try photos.clearFilter()
+    try photos.openViewer("m:1")
+    const target = try photos.shownTarget(`${view}, photos.view-selected.v1`)
+    const unoffered = actions.execute({ type: "photos_share", selected: true }, { operationId: "c", reviewed: true, ownerWords: false, capabilities: view }) catch (refused) => refused.message
+    const shared = try actions.execute({ type: "photos_share", selected: true }, { operationId: "d", reviewed: true, ownerWords: false, capabilities: `${view}, photos.view-selected.v1` })
+    try Effect.try(() => assert.deepStrictEqual({ selected, filtered, target, unoffered, shared }, {
+      selected: { kind: "photo_library_select", selected: 1, missing: 1 },
+      filtered: { kind: "photos_filter", shown: 1, more: false },
+      target: { ids: [], selected: true },
+      unoffered: "This Photos request isn’t supported.",
+      shared: { kind: "photos_share", status: "review_opened", count: 1, missing: 0 },
+    }))
+  }
+})
+
+// spec/camera/libraryReview.md, "Story: Approve each library change the assistant proposes"
+it.live("a reviewed library change uses the revision the assistant read and is handed to Android once (spec/camera/libraryReview.md, \"Story: Approve each library change the assistant proposes\")", () => effect {
+  const device = library({
+    "AlphaPhotoLibrary.scope": () => ({ scope: "full", imageAccess: "full", videoAccess: "full", images: true, videos: true, canSelectMore: false, canEditOthers: true, locked: false, version: "1" }),
+    "AlphaPhotoLibrary.page": () => ({ scope: "full", imageAccess: "full", videoAccess: "full", images: true, videos: true, canSelectMore: false, canEditOthers: true, locked: false, version: "1", items: [item("m:1", day)], next: "" }),
+    "AlphaPhotoLibrary.validate": (args) => ({ items: (args as { items: { id: string }[] }).items.map((row) => ({ id: row.id, status: "current" })) }),
+    "AlphaPhotoLibrary.requestChange": (args) => ({ status: "complete", outcomes: (args as { items: { id: string }[] }).items.map((row) => ({ id: row.id, status: "trashed" })) }),
+  })
+  provide cameraOver(device) {
+    const photos = try PhotoLibrary
+    const actions = try CameraActions
+    const agent = try AgentPhotos
+    try photos.enter()
+    try agent.visit(true)
+    const found = (try actions.execute({ type: "photo_library_search", limit: 5 }, { operationId: "s", reviewed: true, ownerWords: false })) as { items: { id: string; revision: string }[] }
+    const revision = found.items[0]!.revision
+    const opened = try actions.execute({ type: "photo_library_review", action: "trash", items: [{ id: "m:1", revision }] }, { operationId: "r", reviewed: true, ownerWords: false })
+    try agent.confirm()
+    try agent.confirm()
+    const sent = device.calls.filter((call) => call.method === "AlphaPhotoLibrary.requestChange")
+    try Effect.try(() => assert.deepStrictEqual(
+      { opaque: /^rev-[a-z0-9]{1,16}-1$/.test(revision), named: "name" in (found.items[0] as object), opened, sent: sent.map((call) => call.args) },
+      { opaque: true, named: false, opened: { kind: "photo_library_review", status: "review_opened", action: "trash", count: 1 }, sent: [{ operation: "trash", items: [{ id: "m:1", revision: "m-m:1-1" }] }] },
+    ))
+  }
+})
+
+// spec/camera/edit.md, "Story: Edit a photo and keep the original"
+it.live("an unconfirmed copy is checked before another edit, and a found copy settles once (spec/camera/edit.md, \"Story: Edit a photo and keep the original\")", () => effect {
+  let saves = 0
+  const device = library({
+    "AlphaPhotos.beginEdit": () => ({ sessionId: "s1", operationId: "op1", image: "data:image/jpeg;base64,AA", width: 4, height: 3, reduced: false, maxEdge: 2048, filter: "none", canReplace: false }),
+    "AlphaPhotos.previewEdit": () => ({ sessionId: "s1", operationId: "op1", image: "data:image/jpeg;base64,BB", width: 3, height: 4, reduced: false, maxEdge: 2048, filter: "none" }),
+    "AlphaPhotos.saveEdit": () => { saves++; return { reject: "LOST" } },
+    "AlphaPhotos.editResult": () => ({ status: "saved", operationId: "op1", id: "m:9" }),
+    "AlphaPhotos.cancelEdit": () => undefined,
+  })
+  provide cameraOver(device) {
+    const photos = try PhotoLibrary
+    const editor = try MediaEditor
+    const edit = try EditMachine
+    const catalog = try CatalogMachine
+    try photos.enter()
+    try until(() => effect { return (try catalog.get()).main.loaded && (try catalog.get()).read === "ReadIdle" })
+    try editor.begin("m:1")
+    try editor.rotate()
+    try until(() => effect { return !(try edit.get()).previewing })
+    try editor.save("CopyMode")
+    const uncertain = (try edit.get()).status
+    try editor.recover()
+    const settled = try edit.get()
+    try Effect.try(() => assert.deepStrictEqual({ uncertain, status: settled.status, writes: settled.writes, saves }, { uncertain: "EditUncertain", status: "EditSaved", writes: 1, saves: 1 }))
+  }
+})
+
+// spec/camera/browse.md, "Story: Look at one photo"
+it.live("Back closes the viewer, then the selection, then hands Back to the shell (spec/camera/browse.md, \"Story: Look at one photo\")", () => effect {
+  const device = library()
+  provide cameraOver(device) {
+    const photos = try PhotoLibrary
+    const editor = try MediaEditor
+    const agent = try AgentPhotos
+    const catalog = try CatalogMachine
+    const browse = try BrowseMachine
+    try photos.enter()
+    try until(() => effect { return (try catalog.get()).main.loaded && (try catalog.get()).read === "ReadIdle" })
+    try photos.openViewer("m:1")
+    const viewing = (try browse.get()).viewer
+    const noEditor = try editor.back()
+    const noCard = try agent.back()
+    const closedViewer = try photos.back()
+    const afterViewer = (try browse.get()).viewer
+    try photos.startSelection("m:2")
+    const closedSelection = try photos.back()
+    const selecting = (try browse.get()).selecting
+    const shell = try photos.back()
+    try Effect.try(() => assert.deepStrictEqual(
+      { viewing, noEditor, noCard, closedViewer, afterViewer, closedSelection, selecting, shell },
+      { viewing: "m:1", noEditor: false, noCard: false, closedViewer: true, afterViewer: "", closedSelection: true, selecting: false, shell: false },
+    ))
+  }
+})

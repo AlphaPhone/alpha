@@ -1,0 +1,339 @@
+// spec/clock/agentReview.md, "Story: Let the agent ask Clock only with my approval on the phone"; spec/clock/agentReview.md, "Story: Be offered only the Clock and reminder requests this phone can carry out"; spec/clock/reminderReads.md, "Story: Let a workflow read today's reminders only as I reviewed"; spec/clock/reminders.md, "Story: Change a reminder exactly once"; spec/clock/reminderJournal.md, "Story: Never create or change a reminder twice"; spec/clock/deletions.md, "Story: Undo a reviewed deletion in time"; spec/clock/reminderPage.md, "Story: Let the agent change a reminder I name only once I have it open"
+import { NOT_DISPATCHED, type ExecutorCall } from "@elizaos/agent/client"
+import { readOperation, readResult, type DeviceOperation } from "@elizaos/agent/operations"
+import type { HandoffStatus } from "../../gen/clock__vocabulary.ts"
+import { advertises, isHandoff, reviewClassOf, type ClockOffer, type ClockOperationKind, type ClockSupport } from "../../gen/clock__agentReview.ts"
+import type { Op } from "../../gen/assistant__review.effect.vibe"
+import { AssistantHost, type AgentIdentity } from "../assistant/host.vibe"
+import type { OperationPorts } from "../assistant/review.vibe"
+import { Native } from "../platform/native.vibe"
+import { Build } from "../platform/build.vibe"
+import { describeDays, wall } from "../web/clock/text.ts"
+import { deliveryProblem, exactDue, reminderCardDetail, timingLines } from "./card-text.ts"
+import { ClockReview } from "./agent-review.vibe"
+import { AgentReminderReceipt, DeletionReviewAnswer, JournalEntryReply, ReminderListing, ReminderTarget, SurfaceInfo } from "./native.schema.vibe"
+import { readDay } from "./reads.ts"
+import { digestOf, pageVisible, phoneTimeZone } from "./page.ts"
+import { ACTION_JOURNAL, DAILY, DELETIONS, call } from "./plugins.vibe"
+import { Reminders } from "./reminders.vibe"
+import { RemindersPage, sameName } from "./reminder-page.vibe"
+
+const REMINDER_TYPES = ["reminder_create", "reminder_read_selected", "reminder_update", "reminder_complete", "reminder_snooze", "reminder_cancel"] as const
+const DAY_READ = "read_selected_reminders"
+const NAMED = "reminder_named"
+
+type ReminderType = typeof REMINDER_TYPES[number]
+type ClockOperation = Extract<DeviceOperation, { type: "clock_handoff" }>
+type ReminderOperation = Extract<DeviceOperation, { type: ReminderType }>
+type TargetedOperation = Exclude<ReminderOperation, { type: "reminder_create" }>
+type DayReadOperation = Extract<DeviceOperation, { type: "read_selected_reminders" }>
+type NamedOperation = Extract<DeviceOperation, { type: "reminder_named" }>
+type Owned = ClockOperation | ReminderOperation | DayReadOperation | NamedOperation
+type Target = typeof ReminderTarget.Type
+
+const WIRE_STATUS: Readonly<Record<HandoffStatus, "opened" | "unavailable" | "denied" | "failed" | "unknown">> = {
+  ClockOpened: "opened",
+  ClockUnavailable: "unavailable",
+  ClockDenied: "denied",
+  ClockFailed: "failed",
+  ClockUnknown: "unknown",
+}
+
+const DELETION_REFUSALS: ReadonlySet<string> = new Set(["cancelled", "stale", "unavailable", "not-staged"])
+
+const refused = (code: string, result?: unknown) => (result === undefined ? { kind: "refused", code } : { kind: "refused", code, result })
+const applied = (result: unknown) => ({ kind: "applied", result })
+const lost = { kind: "lost" }
+const unresolved = { kind: "unresolved" }
+
+/** The Clock, reminder, named-reminder and day-read operations this area runs, or undefined for every other wire type. */
+export function ownedOperation(operation: unknown): Owned | undefined {
+  const op = readOperation(operation)?.operation
+  if (op === undefined) return undefined
+  return op.type === "clock_handoff" || op.type === DAY_READ || op.type === NAMED || (REMINDER_TYPES as readonly string[]).includes(op.type) ? op as Owned : undefined
+}
+
+/** What kind of Clock operation `op` is, as the review and the history reason about it. */
+export function operationKindOf(op: Owned): ClockOperationKind {
+  if (op.type === "clock_handoff") return "ClockRequest"
+  if (op.type === DAY_READ) return "DayRead"
+  if (op.type === NAMED) return "NamedReminder"
+  return op.type === "reminder_read_selected" ? "ReminderRead" : "ReminderChange"
+}
+
+const REVIEW_OP: Readonly<Record<ReturnType<typeof reviewClassOf>, Op>> = { ReminderWrite: "CreateReminder", ScheduleRead: "RemindersRead" }
+
+/** The assistant's review class of a Clock operation: every Clock request and reminder change a reminder write, every read a reminders read. */
+export function reviewOpOf(op: Owned): Op {
+  return REVIEW_OP[reviewClassOf(operationKindOf(op))]
+}
+
+const OFFERS: ReadonlyArray<readonly [ClockOffer, string]> = [
+  ["OfferHandoff", "clock.handoff.v1"],
+  ["OfferRepeatDays", "clock.handoff.v2"],
+  ["OfferRecordV2", "reminders.local-record.v2"],
+  ["OfferRecordV1", "reminders.local-record.v1"],
+  ["OfferCreate", "reminders.create.v1"],
+]
+
+/** Of the capabilities the agent `offered`, those Clock advertises under `support`. */
+export function advertisedBy(support: Omit<ClockSupport, "recordV2Offered">, offered: readonly string[]): string[] {
+  const full: ClockSupport = { ...support, recordV2Offered: offered.includes("reminders.local-record.v2") }
+  return OFFERS.filter(([offer, name]) => advertises(full, offer, offered.includes(name))).map(([, name]) => name)
+}
+
+/** What Clock advertises to the agent in `x-eliza-device-capabilities`, for the shell to merge into DeviceCapabilities: the Clock handoff where Android Clock is, its repeat days where Clock carries them, and one reminder version and reminder creation where the phone keeps reminders. */
+export const clockCapabilities = effect {
+  const native = try Native
+  const build = (try Build).info
+  return {
+    effect advertise(offered: readonly string[]) {
+      const store = build.variant !== "browser" && (try native.available(DAILY))
+      let repeatDays = false
+      if (store && offered.includes("clock.handoff.v2")) {
+        const info = Effect.provideService(call(DAILY, "surfaceInfo", SurfaceInfo), Native, native) catch () => undefined
+        const version = info?.clockRepeatDaysVersion
+        repeatDays = typeof version === "number" && Number.isInteger(version) && version >= 1
+      }
+      return advertisedBy({ handler: store, store, repeatDays }, offered) as readonly string[]
+    },
+  }
+}
+
+function sameTarget(current: Target, approved: Target): boolean {
+  return current.sourceId === approved.sourceId && current.sourceRevision === approved.sourceRevision && current.reminderId === approved.reminderId &&
+    current.occurrenceId === approved.occurrenceId && current.revision === approved.revision && current.timingVersion === approved.timingVersion
+}
+
+function describeClock(op: ClockOperation): { readonly title: string; readonly detail: string } {
+  switch (op.action) {
+    case "set": {
+      const days = op.days === undefined || op.days.length === 0 ? "" : ` · ${describeDays(op.days)}`
+      const label = op.label.trim() === "" ? "" : ` · “${op.label.trim()}”`
+      return { title: "Set an alarm in Clock", detail: `${wall(op.hour, op.minute)} in ${op.timeZone}${days}${label}. You review it in Clock; Alpha cannot confirm it rings.` }
+    }
+    case "snooze": return { title: "Snooze the ringing alarm", detail: `Opens Clock to snooze for ${op.snoozeMinutes} minutes.` }
+    case "dismiss": return { title: "Dismiss the ringing alarm", detail: "Opens Clock to choose the alarm." }
+    default: return { title: "Open Clock", detail: "Opens your Clock app; no alarm changes." }
+  }
+}
+
+/** The card's title and detail for a Clock, reminder, named-reminder or day-read operation; a reminder card names the due time, alert and repeat it saves, in the phone's time zone `zone` unless its repeat names one. */
+export function describeOwned(op: Owned, zone: string = phoneTimeZone()): { readonly title: string; readonly detail: string } {
+  switch (op.type) {
+    case "clock_handoff": return describeClock(op)
+    case "read_selected_reminders": return { title: "Share a day's reminders", detail: `Up to ${op.maximumItems} reminders open by the end of ${op.day} (${op.timeZone}), overdue ones included, and those done that day: titles and times only, never notes.` }
+    case "reminder_create": return { title: "Create a reminder", detail: reminderCardDetail(op.fields, zone) }
+    case "reminder_read_selected": return { title: "Read this reminder", detail: "Shares the reminder you have open with your agent." }
+    case "reminder_update": return { title: "Change a reminder", detail: reminderCardDetail(op.fields, zone) }
+    case "reminder_complete": return { title: "Mark a reminder done", detail: "The reminder you have open." }
+    case "reminder_snooze": return { title: "Snooze a reminder", detail: "The reminder you have open." }
+    case "reminder_named": return op.action === "update"
+      ? { title: `Change “${op.name}”`, detail: [`Open the reminder named “${op.name}” in Reminders; only that reminder changes, to “${op.fields.title}”.`, ...(op.fields.schedule === undefined ? ["Timing unchanged."] : timingLines(op.fields.schedule, zone))].join("\n") }
+      : { title: `Delete “${op.name}”`, detail: `Open the reminder named “${op.name}” in Reminders; you get ten seconds to Undo.` }
+    default: return { title: "Delete a reminder", detail: "You get ten seconds to Undo." }
+  }
+}
+
+const REMINDER_DONE: Readonly<Record<ReminderType, string>> = {
+  reminder_create: "Reminder created.",
+  reminder_read_selected: "Read the reminder you had open.",
+  reminder_update: "Reminder changed.",
+  reminder_complete: "Reminder marked done.",
+  reminder_snooze: "Reminder snoozed.",
+  reminder_cancel: "Reminder deleted.",
+}
+
+function summarizeClock(op: ClockOperation, result: string): string {
+  if (result === "Applied") return op.action === "set" ? "Sent the request to Clock." : op.action === "show" ? "Opened Clock." : "Opened Clock to choose the alarm."
+  if (result === "Failed") return "The Clock request was not sent."
+  if (result === "NotStarted") return "Nothing was sent to Clock."
+  return "The Clock result is unknown."
+}
+
+/** The receipt sentence for a settled Clock, reminder or day-read operation: an applied reminder change whose notification the phone could not arrange (its result's `status`) says so, and a created or rescheduled one confirms its exact due instant. */
+export function summarizeOwned(op: Owned, result: "NoResult" | "Applied" | "Failed" | "NotStarted" | "Unknown", status?: string, zone: string = phoneTimeZone()): string {
+  if (op.type === "clock_handoff") return summarizeClock(op, result)
+  if (op.type === DAY_READ) return result === "Applied" ? `Shared the reminders of ${op.day}.` : result === "Failed" ? "No reminders were shared." : result === "NotStarted" ? "Nothing was shared." : "Alpha can’t tell whether the reminders were shared."
+  if (op.type === NAMED) {
+    if (result === "Applied") return op.action === "update" ? "Reminder changed." : "Reminder deleted."
+    if (result === "Failed") return `Nothing was changed: open “${op.name}” in Reminders first.`
+    if (result === "NotStarted") return "Nothing was changed."
+    return op.action === "cancel" ? "Deletion queued with ten seconds to Undo; its outcome is unconfirmed." : "The reminder outcome is unconfirmed."
+  }
+  if (result === "Applied") {
+    const problem = deliveryProblem(op.type, status)
+    if (problem !== undefined) return problem
+    const fields = op.type === "reminder_create" || op.type === "reminder_update" ? op.fields : undefined
+    const due = fields === undefined ? undefined : exactDue(fields, zone)
+    return fields === undefined || due === undefined ? REMINDER_DONE[op.type] : `${REMINDER_DONE[op.type]} “${fields.title}”, due ${due}.`
+  }
+  if (result === "Failed") return op.type === "reminder_create" ? "Nothing was scheduled." : "Nothing was changed because this reminder changed."
+  if (result === "NotStarted") return "Nothing was changed."
+  return op.type === "reminder_cancel" ? "Deletion queued with ten seconds to Undo; its outcome is unconfirmed." : "The reminder outcome is unconfirmed."
+}
+
+/**
+ * The executors of the agent's Clock handoffs and reminder operations, for the shell to compose into DeviceExecutors.
+ * A Clock request is reviewed natively before it reaches Clock; a reminder change is bound to the approved journal entry.
+ */
+export const operationPorts = effect {
+  const native = try Native
+  const host = try AssistantHost
+  const review = try ClockReview
+  const reminders = try Reminders
+  const page = try RemindersPage
+  const onPhone = <A>(work: Effect.Effect<A, never, Native>) => runPromise(Effect.provideService(work, Native, native))
+  // The delivery status each applied reminder change reported, by operation, for its receipt; the newest 64 are kept.
+  const delivered = new Map<string, string>()
+  const remember = (op: Owned, outcome: unknown) => {
+    const status = (outcome as { readonly kind?: unknown; readonly result?: { readonly status?: unknown } }).result?.status
+    if ((outcome as { readonly kind?: unknown }).kind !== "applied" || typeof status !== "string") return outcome
+    delivered.set(JSON.stringify(op), status)
+    while (delivered.size > 64) delivered.delete(delivered.keys().next().value ?? "")
+    return outcome
+  }
+
+  effect function screenAllows() {
+    const exposure = (try host.screen()).exposure
+    return pageVisible() && !exposure.hidden && !exposure.locked && !exposure.privateView
+  }
+
+  effect function scopeOf(identity: AgentIdentity) {
+    return try promise(() => digestOf([identity.origin, identity.owner, identity.agent, identity.installationId]))
+  }
+
+  effect function bindingOf(identity: AgentIdentity, scope: string, at: ExecutorCall) {
+    const entry = (call(ACTION_JOURNAL, "get", JournalEntryReply, { proposalId: at.proposalId }) catch () => undefined)?.entry ?? undefined
+    if (entry === undefined) return undefined
+    return try promise(() => digestOf([
+      scope, identity.owner, identity.agent, identity.session, identity.origin, identity.installationId, identity.enrollmentId,
+      at.proposalId, entry.digest, at.operationId,
+    ]))
+  }
+
+  effect function handOff(op: ClockOperation, at: ExecutorCall) {
+    if (!(try native.available(ACTION_JOURNAL))) return refused(NOT_DISPATCHED)
+    if (op.action === "set" && op.timeZone !== phoneTimeZone()) return refused("time_zone_changed")
+    if (!(try screenAllows())) return refused(NOT_DISPATCHED)
+    const identity = try host.identity()
+    if (identity === undefined) return refused(NOT_DISPATCHED)
+    const scope = try scopeOf(identity)
+    const status = review.review({ scope, proposalId: at.proposalId, operationId: at.operationId }, op) catch (error) => error._tag === "InvalidClockRequest" ? "invalid" : undefined
+    if (status === "invalid") return refused("invalid_request")
+    if (status === undefined) return lost
+    const result = { kind: "clock-handoff", action: op.action, status: WIRE_STATUS[status] }
+    return status === "ClockOpened" || status === "ClockUnknown" ? applied(result) : refused(`clock_${result.status}`, result)
+  }
+
+  effect function prepared(op: ReminderOperation, at: ExecutorCall) {
+    if (!(try screenAllows())) return undefined
+    const identity = try host.identity()
+    if (identity === undefined) return undefined
+    const scope = try scopeOf(identity)
+    const bindingHash = try bindingOf(identity, scope, at)
+    if (bindingHash === undefined) return undefined
+    return { scope, input: { operationId: at.operationId, bindingHash, operation: op } }
+  }
+
+  effect function targetHolds(op: TargetedOperation) {
+    const current = call(DAILY, "selectedReminder", ReminderTarget, { id: op.target.reminderId }) catch () => undefined
+    return current !== undefined && sameTarget(current, op.target)
+  }
+
+  effect function changeReminder(op: ReminderOperation, at: ExecutorCall) {
+    const bound = try prepared(op, at)
+    if (bound === undefined) return refused(NOT_DISPATCHED)
+    if (op.type === "reminder_create") {
+      const info = call(DAILY, "surfaceInfo", SurfaceInfo) catch () => undefined
+      if (info?.reminderCreationVersion !== 1) return refused("reminder_create_unsupported")
+    } else if (!(try targetHolds(op))) {
+      return refused("reminder_changed")
+    }
+    if (op.type === "reminder_cancel") {
+      const queued = call(DELETIONS, "reviewAgentReminder", DeletionReviewAnswer, { ...bound.input, journalIdentity: { scope: bound.scope, proposalId: at.proposalId } }) catch () => undefined
+      if (queued !== undefined && DELETION_REFUSALS.has(queued.status)) return refused(`deletion_${queued.status}`)
+      if (queued?.status === "queued") fork.detached reminders.refresh()
+      return lost
+    }
+    const answer = call(DAILY, "operateReminder", AgentReminderReceipt, bound.input) catch () => undefined
+    if (answer?.status !== "succeeded" || answer.result === undefined || readResult(op, answer.result) === undefined) return lost
+    fork.detached reminders.refresh()
+    return applied(answer.result)
+  }
+
+  effect function namedRecord(op: NamedOperation) {
+    const open = try page.chosen(op.name)
+    if (open === undefined) return undefined
+    const listed = call(DAILY, "listReminders", ReminderListing) catch () => undefined
+    const record = listed?.reminders.find((r) => r.id === open)
+    return record !== undefined && record.undated !== true && sameName(record.title, op.name) ? record : undefined
+  }
+
+  effect function changeNamed(op: NamedOperation, at: ExecutorCall) {
+    if (!(try screenAllows())) return refused(NOT_DISPATCHED)
+    const record = try namedRecord(op)
+    if (record === undefined) return refused("reminder_not_chosen")
+    const exact = (op.action === "update"
+      ? { type: "reminder_update", target: record.target, fields: op.fields }
+      : { type: "reminder_cancel", target: record.target }) as TargetedOperation
+    const outcome: { readonly kind: string; readonly result?: unknown; readonly code?: string } = try changeReminder(exact, at)
+    if (outcome.kind !== "applied") return outcome
+    return applied({ version: 1, kind: NAMED, action: op.action, name: op.name, basis: "owner-chosen", operation: exact, record: outcome.result })
+  }
+
+  effect function readTheDay(op: DayReadOperation) {
+    if (!(try screenAllows())) return refused(NOT_DISPATCHED)
+    const listed = call(DAILY, "listReminders", ReminderListing) catch () => undefined
+    if (listed === undefined) return refused("reminders_unavailable")
+    const read = tryPromise(() => readDay(listed.reminders, op.day, op.timeZone, op.maximumItems)) catch () => undefined
+    if (read === undefined) return refused("reminders_unavailable")
+    if (read.kind === "overflow") return refused("reminders_overflow", read)
+    if (readResult(op, read) === undefined) return refused("reminders_unverified")
+    return applied(read)
+  }
+
+  effect function readReminder(op: ReminderOperation, at: ExecutorCall) {
+    if (op.type === "reminder_cancel") return unresolved
+    const bound = try prepared(op, at)
+    if (bound === undefined) return unresolved
+    const receipt = call(DAILY, "reminderOperationReceipt", AgentReminderReceipt, bound.input) catch () => undefined
+    if (receipt?.status !== "succeeded" || receipt.result === undefined || readResult(op, receipt.result) === undefined) return unresolved
+    return { kind: "found", result: receipt.result }
+  }
+
+  const ports: OperationPorts = {
+    validate: (operation) => ownedOperation(operation),
+    execute: (operation, at) => {
+      const op = ownedOperation(operation)
+      if (op === undefined) return Promise.resolve(refused("unsupported"))
+      if (op.type === DAY_READ) return onPhone(readTheDay(op))
+      if (op.type === NAMED) return onPhone(changeNamed(op, at))
+      return op.type === "clock_handoff" ? onPhone(handOff(op, at)) : onPhone(changeReminder(op, at)).then((outcome) => remember(op, outcome))
+    },
+    readBack: (operation, at) => {
+      const op = ownedOperation(operation)
+      if (op === undefined) return Promise.resolve(refused("unsupported"))
+      if (op.type === DAY_READ || op.type === NAMED) return Promise.resolve(unresolved)
+      return op.type === "clock_handoff" ? Promise.resolve(unresolved) : onPhone(readReminder(op, at))
+    },
+    describe: (operation) => {
+      const op = ownedOperation(operation)
+      return op === undefined ? { title: "Action", detail: "" } : describeOwned(op)
+    },
+    classOf: (operation) => {
+      const op = ownedOperation(operation)
+      return op === undefined ? "CreateReminder" : reviewOpOf(op)
+    },
+    handoff: (operation) => {
+      const op = ownedOperation(operation)
+      return op === undefined || isHandoff(operationKindOf(op))
+    },
+    target: () => ({ tag: "NoTarget" }),
+    summarize: (operation, result) => {
+      const op = ownedOperation(operation)
+      return op === undefined ? "" : summarizeOwned(op, result, delivered.get(JSON.stringify(op)))
+    },
+  }
+  return ports
+}

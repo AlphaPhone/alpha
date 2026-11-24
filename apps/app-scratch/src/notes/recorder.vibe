@@ -1,0 +1,395 @@
+// spec/notes/recorder.md, "Story: Record a voice note"; spec/notes/recorder.md, "A recording starts only for the current owner, after any playback has confirmed it stopped"; spec/notes/recorder.md, "A recording is audio only, and shows only text its journal already holds, never past the audio"; spec/notes/recorder.md, "Pause, resume and stop act only on the owner's open recording"; spec/notes/recorder.md, "Done claims the save once, and the recording closes only after its note is confirmed"; spec/notes/recorder.md, "Discard asks once for a recording of a second or more, and never while its save is claimed"; spec/notes/recorder.md, "Another owner or leaving Notes detaches the view and keeps the recording"; spec/notes/recordingJournal.md, "A stopped recording is claimed once and committed only to its canonical note"; spec/notes/audio.md, "Playback starts only for the open note's own live recording, and stops before any change to it"
+import type { NoteFormat, NoteJson, StickyNote } from "@elizaos/plugin-notes/types"
+import { playbackAllowed } from "../../gen/notes__audio.effect.vibe"
+import {
+  type Event as RecorderEvent, Machine as RecorderMachine, type Recorder, type StartRefusal, machine as recorderMachine, voiceSavePlan,
+} from "../../gen/notes__recorder.effect.vibe"
+import { type Event as JournalEvent, Machine as JournalMachine, machine as journalMachine } from "../../gen/notes__recordingJournal.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { NotesCollection } from "./collection.vibe"
+import { NotesEditor } from "./editor.vibe"
+import { contentOf, nextDefaultTitle, type NoteRow, voiceAudio } from "./list.vibe"
+import { decodeAudioDescription, decodeClaim, decodePlayback, decodeRecordingStatus, decodeSavedAudio, type RecordingStatus } from "./notes.schema.vibe"
+import { sha256Hex } from "./platform.ts"
+
+const voicePlugin = "AlphaVoiceCloud"
+const audioPlugin = "AlphaNoteAudio"
+
+/** What the recorder shows beside its machine: the clock, the level meter and the transcribed words. */
+export interface RecorderDisplay {
+  readonly recordingId?: string
+  readonly durationMs: number
+  readonly levels: readonly number[]
+  readonly transcript: string
+  readonly playingAudioId?: string
+  readonly positionMs: number
+}
+
+/** The agent's `notes_record` start: started, already recording, or the microphone did not start. */
+export type RecordStart = "started" | "already" | "failed"
+/** The agent's `notes_record` stop: saved, kept for a later transcription choice, nothing recording, or not confirmed. */
+export type RecordStop = "saved" | "retained" | "none" | "failed"
+
+/** The Notes voice recorder over the native recorder, and saved-note playback. */
+export service NotesRecorder {
+  readonly display: Stream.Stream<RecorderDisplay>
+  begin(folderId: string | null, viaControl: boolean): RecordStart!!
+  adopt(): boolean!!
+  pause(): void!!
+  resume(): void!!
+  stop(): boolean!!
+  finish(): boolean!!
+  askDiscard(): void!!
+  /** Keep the recording the owner was asked to discard; false when no discard was asked. */
+  keep(): boolean!!
+  discard(): void!!
+  /** Detach the recorder sheet and keep the recording; false when no recording was open. */
+  leave(): boolean!!
+  ownerChanged(present: boolean): void!!
+  play(row: NoteRow): boolean!!
+  stopPlayback(): boolean!!
+  recordStart(): RecordStart!!
+  recordStop(): RecordStop!!
+}
+
+/** One short reason the native recorder gave for refusing a start or resume. */
+export function startRefusal(error: unknown): StartRefusal {
+  const { code, message } = (typeof error === "object" && error !== null ? error : {}) as { code?: unknown; message?: unknown }
+  const text = `${typeof code === "string" ? code : ""} ${typeof message === "string" ? message : ""}`.toLowerCase()
+  if (text.includes("storage")) return "RefusedStorage"
+  if (code === "recovery") return "RefusedRecovery"
+  if (code === "permission-denied" || text.includes("notallowed")) return "RefusedPermission"
+  if (code === "call-active") return "RefusedCall"
+  if (code === "media-unconfirmed") return "RefusedMedia"
+  return "RefusedCapture"
+}
+
+/** Whole elapsed seconds of a recording as m:ss or h:mm:ss; a negative time reads as zero. */
+export function recordingClock(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  const h = Math.floor(total / 3600)
+  const m = Math.floor(total / 60) % 60
+  const s = total % 60
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`
+}
+
+const idle: RecorderDisplay = { durationMs: 0, levels: [], transcript: "", positionMs: 0 }
+
+const make = effect {
+  const native = try Native
+  const collection = try NotesCollection
+  const editor = try NotesEditor
+  const machine = try RecorderMachine
+  const journal = try JournalMachine
+  const display = try SubscriptionRef.make<RecorderDisplay>(idle)
+  const ids = try Ref.make<ReadonlyMap<string, number>>(new Map())
+  const texts = try Ref.make<ReadonlyMap<string, string>>(new Map())
+  const digest = try Ref.make<string | undefined>(undefined)
+  const folder = try Ref.make<string | null>(null)
+
+  effect function send(event: RecorderEvent): (Recorder | undefined)!! {
+    return (machine.send(event) catch () => undefined)
+  }
+  effect function record(event: JournalEvent): void!! {
+    journal.send(event) catch () => undefined
+  }
+
+  effect function numberOf(recordingId: string): number!! {
+    const known = try Ref.get(ids)
+    const number = known.get(recordingId) ?? known.size + 1
+    try Ref.set(ids, new Map([...known, [recordingId, number]]))
+    return number
+  }
+
+  effect function voice(method: string, args?: unknown) {
+    return try native.invoke(voicePlugin, method, args)
+  }
+
+  effect function ownerDigest(): (string | undefined)!! {
+    const owner = (try collection.current())?.owner
+    if (owner === undefined) return undefined
+    const value = (tryPromise(() => sha256Hex(owner)) catch () => "")
+    return value === "" ? undefined : value
+  }
+
+  function matches(status: RecordingStatus, wanted: string | undefined, wantedFolder: string | null): boolean {
+    return wanted !== undefined && status.binding !== undefined && status.binding.ownerDigest === wanted && status.binding.folderId === wantedFolder
+  }
+
+  effect function transcript(segments: readonly { readonly segmentId: string }[]): string!! {
+    const known = try Ref.get(texts)
+    const parts: string[] = []
+    for (const segment of segments) {
+      const text = known.get(segment.segmentId)
+      if (text === undefined) break
+      if (text.trim() !== "") parts.push(text.trim())
+    }
+    return parts.join(" ")
+  }
+
+  effect function learn(status: RecordingStatus): void!! {
+    const segments = status.segments ?? []
+    const before = (try journal.get()).segments
+    for (let index = before; index < segments.length; index += 1) try record({ type: "segmentFinished", journaled: true })
+    for (const segment of segments) if (segment.text !== undefined && !(try Ref.get(texts)).has(segment.segmentId)) {
+      try Ref.update(texts, (known) => new Map([...known, [segment.segmentId, segment.text ?? ""]]))
+    }
+  }
+
+  effect function absorb(status: RecordingStatus): void!! {
+    const state = try machine.get()
+    const recordingId = status.recordingId
+    if (status.state === "idle" || recordingId === undefined) {
+      if (state.phase !== "RecClosed" && state.phase !== "RecStarting" && state.phase !== "RecFinishing") try send({ type: "discardRecording" })
+      return
+    }
+    if (!matches(status, try Ref.get(digest), try Ref.get(folder))) return
+    const segments = status.segments ?? []
+    try learn(status)
+    try send({ type: "progress", segments: segments.length, longEnough: (status.durationMs ?? 0) >= 1000 })
+    if (status.state === "stopped" && status.stopReason !== undefined && status.stopReason !== "user") {
+      try send({ type: "nativeStopped", storage: status.stopReason === "storage" })
+    }
+    try SubscriptionRef.update(display, (shown) => ({
+      ...shown, recordingId, durationMs: status.durationMs ?? shown.durationMs,
+      levels: status.state === "recording" ? [...shown.levels, Math.max(0, Math.min(1, status.peak ?? 0))].slice(-44) : shown.levels,
+    }))
+    const words = try transcript(segments)
+    try SubscriptionRef.update(display, (shown) => ({ ...shown, transcript: words }))
+  }
+
+  effect function status(): (RecordingStatus | undefined)!! {
+    return (effect { return try decodeRecordingStatus(try voice("noteRecordingStatus")) } catch () => undefined)
+  }
+
+  effect function drain(): boolean!! {
+    const state = try machine.get()
+    if (state.playback !== "PlaybackPlaying") return true
+    try send({ type: "stopPlayback" })
+    const stopped = (effect { try native.invoke(audioPlugin, "stop"); return true } catch () => false)
+    try send({ type: "playbackSettled", confirmed: stopped })
+    try SubscriptionRef.update(display, (shown) => ({ ...shown, playingAudioId: undefined, positionMs: 0 }))
+    return stopped
+  }
+
+  effect function begin(folderId: string | null, viaControl: boolean): RecordStart!! {
+    const before = try machine.get()
+    if (before.phase !== "RecClosed" && before.phase !== "RecFailed") return "already"
+    if ((try send({ type: "beginRecording", viaControl })) === undefined) return "failed"
+    const wanted = try ownerDigest()
+    if (wanted === undefined) { try send({ type: "startRefused", reason: "RefusedRecovery" }); return "failed" }
+    try Ref.set(digest, wanted)
+    try Ref.set(folder, folderId)
+    if (!(try drain())) { try send({ type: "startRefused", reason: "RefusedMedia" }); return "failed" }
+    const existing = try status()
+    if (existing !== undefined && existing.state !== "idle") {
+      if (!matches(existing, wanted, existing.binding?.folderId ?? null) || existing.recordingId === undefined) {
+        try send({ type: "startRefused", reason: "RefusedRecovery" })
+        return "failed"
+      }
+      try Ref.set(folder, existing.binding?.folderId ?? null)
+      try send({ type: "captured", recording: try numberOf(existing.recordingId) })
+      if (existing.state === "paused" || existing.state === "stopped") try send({ type: "pauseRecording" })
+      try absorb(existing)
+      return "already"
+    }
+    const started = (effect {
+      return try decodeRecordingStatus(try voice("startNoteRecording", { ownerDigest: wanted, folderId }))
+    } catch (error) => error)
+    if (!("state" in started) || started.recordingId === undefined || !matches(started, wanted, folderId)) {
+      try send({ type: "startRefused", reason: startRefusal(started) })
+      return "failed"
+    }
+    try Ref.set(texts, new Map())
+    try send({ type: "captured", recording: try numberOf(started.recordingId) })
+    try absorb(started)
+    return "started"
+  }
+
+  effect function recordingId(): (string | undefined)!! {
+    return (try SubscriptionRef.get(display)).recordingId
+  }
+
+  effect function close(): void!! {
+    try SubscriptionRef.set(display, { ...idle })
+    try Ref.set(texts, new Map())
+  }
+
+  effect function saveVoice(id: string, transcriptText: string, durationMs: number): boolean!! {
+    const current = try collection.current()
+    if (current === undefined) return false
+    const belongs = (note: StickyNote) => note.format?.kind === "voice" && note.format.data.recordingId === id
+    const prior = current.snapshot.notes.filter(belongs)
+    const trashed = (current.snapshot.trash ?? []).some((entry) => belongs(entry.note))
+    const state = try machine.get()
+    const plan = voiceSavePlan(prior.length, trashed, state.savePending)
+    if (plan === "RecordingTrashed" || plan === "AmbiguousPrior" || plan === "WaitForClaim") return false
+    let note: StickyNote | undefined = prior[0]
+    if (plan === "CreateVoiceNote") {
+      const claimed = (effect { return (try decodeClaim(try voice("claimCanonicalNoteSave", { recordingId: id }))).claimed } catch () => false)
+      if (!claimed || (try send({ type: "claim" })) === undefined) return false
+      try record({ type: "claimPending", isOwner: true })
+      const folderId = try Ref.get(folder)
+      const title = nextDefaultTitle([...current.snapshot.notes, ...(current.snapshot.trash ?? []).map((entry) => entry.note)].map((row) => row.title), "Voice note")
+      const data: Record<string, NoteJson> = {
+        recordingId: id, lines: transcriptText === "" ? [] : [{ s: "me", at: 0, t: transcriptText }], summary: [], actions: [],
+        dur: Math.round(durationMs) / 1000, audio: { audioId: id, durationMs }, ...(folderId === null ? {} : { folderId }),
+      }
+      const format: NoteFormat = { kind: "voice", data }
+      const reply = (collection.interact("create-note", { content: contentOf(title, transcriptText === "" ? "" : "\n", transcriptText), forceNew: true,
+        creationId: `voice-${id}`, color: "yellow", format }) catch () => undefined)
+      note = reply?.note
+    }
+    if (note === undefined || !belongs(note)) return false
+    const saved = (effect {
+      return try decodeSavedAudio(try voice("saveNoteRecording", { recordingId: id, noteId: note.id, transcript: transcriptText }))
+    } catch () => undefined)
+    if (saved === undefined || saved.audioId !== id || saved.noteId !== note.id || saved.durationMs !== Math.round(durationMs)) return false
+    try record({ type: "commitPending", isOwner: true, canonical: true })
+    try record({ type: "retirePending" })
+    const draft = try editor.draft()
+    if (draft === undefined) try editor.openNote(note.id)
+    return true
+  }
+
+  effect function finish(): boolean!! {
+    const id = try recordingId()
+    if (id === undefined || (try send({ type: "finishRecording" })) === undefined) return false
+    const stopped = (effect { return try decodeRecordingStatus(try voice("stopNoteRecording", { recordingId: id })) } catch () => undefined)
+    if (stopped === undefined || stopped.recordingId !== id || stopped.state !== "stopped") { try send({ type: "voiceSaveFailed" }); return false }
+    if (stopped.canonicalSavePending === true && !(try machine.get()).savePending) try send({ type: "claim" })
+    try learn(stopped)
+    try record({ type: "stopPending" })
+    const words = try transcript(stopped.segments ?? [])
+    const durationMs = Math.round(stopped.durationMs ?? (try SubscriptionRef.get(display)).durationMs)
+    if (!(try saveVoice(id, words, durationMs))) { try send({ type: "voiceSaveFailed" }); return false }
+    try send({ type: "voiceSaved" })
+    voice("discardNoteRecording", { recordingId: id }) catch () => undefined
+    try close()
+    return true
+  }
+
+  effect function play(row: NoteRow): boolean!! {
+    const audio = row.audio
+    if (audio === undefined || !(try drain())) return false
+    const described = (effect { return try decodeAudioDescription(try native.invoke(audioPlugin, "describe", { audioId: audio.audioId })) } catch () => undefined)
+    const state = try machine.get()
+    if (!playbackAllowed(described?.audioId === audio.audioId, described?.noteId === row.id, described?.deletedAt !== undefined, state.phase === "RecClosed")) return false
+    const started = (effect { try native.invoke(audioPlugin, "play", { audioId: audio.audioId }); return true } catch () => false)
+    if (!started || (try send({ type: "playSaved" })) === undefined) return false
+    try SubscriptionRef.update(display, (shown) => ({ ...shown, playingAudioId: audio.audioId, positionMs: 0 }))
+    try fork.detached effect {
+      while ((try machine.get()).playback === "PlaybackPlaying") {
+        try sleep("250 millis")
+        const now = (effect { return try decodePlayback(try native.invoke(audioPlugin, "state")) } catch () => undefined)
+        if (now === undefined || !now.playing || now.audioId !== audio.audioId) {
+          try send({ type: "playbackEnded" })
+          try SubscriptionRef.update(display, (shown) => ({ ...shown, playingAudioId: undefined, positionMs: 0 }))
+          return
+        }
+        try SubscriptionRef.update(display, (shown) => ({ ...shown, positionMs: now.positionMs }))
+      }
+    }
+    return true
+  }
+
+  effect function adopt(): boolean!! {
+    const existing = try status()
+    if (existing === undefined || existing.state === "idle" || existing.recordingId === undefined) return false
+    const wanted = try ownerDigest()
+    if (!matches(existing, wanted, existing.binding?.folderId ?? null)) return false
+    try Ref.set(digest, wanted)
+    try Ref.set(folder, existing.binding?.folderId ?? null)
+    const adopted = try send({ type: "adopt", recording: try numberOf(existing.recordingId), paused: existing.state !== "recording", segments: (existing.segments ?? []).length })
+    if (adopted === undefined) return false
+    if (existing.state === "stopped") try send({ type: "stopRecording" })
+    if (existing.canonicalSavePending === true && !(try machine.get()).savePending) {
+      try send({ type: "progress", segments: (existing.segments ?? []).length, longEnough: true })
+      if ((try send({ type: "finishRecording" })) !== undefined) {
+        try send({ type: "claim" })
+        try send({ type: "voiceSaveFailed" })
+      }
+    }
+    try absorb(existing)
+    return true
+  }
+
+  return {
+    display: SubscriptionRef.changes(display),
+    absorbStatus: absorb,
+    begin,
+    adopt,
+    effect pause() {
+      const id = try recordingId()
+      if (id === undefined || (try send({ type: "pauseRecording" })) === undefined) return
+      const paused = (effect { return try decodeRecordingStatus(try voice("pauseNoteRecording", { recordingId: id })) } catch () => undefined)
+      if (paused !== undefined) try absorb(paused)
+    },
+    effect resume() {
+      const id = try recordingId()
+      const state = try machine.get()
+      if (id === undefined || state.savePending) return
+      const resumed = (effect { return try decodeRecordingStatus(try voice("resumeNoteRecording", { recordingId: id })) } catch (error) => error)
+      if (!("state" in resumed)) { try send({ type: "resumeRefused", reason: startRefusal(resumed) }); return }
+      try send({ type: "resumeRecording" })
+      try absorb(resumed)
+    },
+    effect stop() {
+      const id = try recordingId()
+      if (id === undefined) return false
+      const stopped = (effect { return try decodeRecordingStatus(try voice("stopNoteRecording", { recordingId: id })) } catch () => undefined)
+      if (stopped === undefined || stopped.state !== "stopped" || stopped.recordingId !== id) return false
+      try send({ type: "stopRecording" })
+      try learn(stopped)
+      try record({ type: "stopPending" })
+      try absorb(stopped)
+      return true
+    },
+    finish,
+    effect askDiscard() { try send({ type: "askDiscard" }) },
+    effect keep() { return (try send({ type: "keepRecording" })) !== undefined },
+    effect discard() {
+      const id = try recordingId()
+      if ((try send({ type: "discardRecording" })) === undefined) return
+      try record({ type: "discardPending", isOwner: true })
+      try record({ type: "retirePending" })
+      if (id !== undefined) (voice("discardNoteRecording", { recordingId: id }) catch () => undefined)
+      try close()
+    },
+    effect leave() {
+      if ((try send({ type: "leaveNotes" })) === undefined) return false
+      try close()
+      return true
+    },
+    effect ownerChanged(present: boolean) {
+      const state = try machine.get()
+      if (!present && state.owned) {
+        const id = try recordingId()
+        try send({ type: "ownerLost" })
+        if (id !== undefined) (voice("stopNoteRecording", { recordingId: id }) catch () => undefined)
+        try close()
+      } else if (present && !state.owned) try send({ type: "ownerBound" })
+    },
+    play,
+    stopPlayback: drain,
+    effect recordStart() { return try begin(try Ref.get(folder), true) },
+    effect recordStop() {
+      const state = try machine.get()
+      if (state.phase === "RecClosed" || state.phase === "RecFailed" || state.phase === "RecStarting") return "none"
+      return (try finish()) ? "saved" : (try machine.get()).phase === "RecStopped" ? "retained" : "failed"
+    },
+  }
+}
+
+/** The recorder with its machine and its pending recording journal. */
+export const recorderLayer = Layer.provideMerge(Layer.effect(NotesRecorder, effect {
+  const recorder = try make
+  const native = try Native
+  try fork.scoped Effect.ignore(effect {
+    for try (const raw of native.listen(voicePlugin, "noteRecordingChanged")) {
+      const status = decodeRecordingStatus(raw) catch () => undefined
+      if (status !== undefined) try recorder.absorbStatus(status)
+    }
+  })
+  return recorder
+}), Layer.merge(recorderMachine(), journalMachine()))

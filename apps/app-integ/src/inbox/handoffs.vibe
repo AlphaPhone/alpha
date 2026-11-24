@@ -1,0 +1,101 @@
+// spec/inbox/accounts.md, "Story: Choose which Gmail account my Inbox shows"; spec/inbox/operations.md, "The phone advertises the agent's local email draft only when the agent offers it"; spec/inbox/operations.md, "A chat-reviewed email is sent once per reviewed version, only as a new email of the selected, checked account"; spec/inbox/attachments.md, "A shared file always starts a new local draft for the account it was reviewed for"
+import type { CameraHandoffs, ReviewedFile } from "../camera/ports.vibe"
+import type { AssistantEmail } from "../assistant/ports.vibe"
+import type { SendAnswer } from "../../gen/assistant__emailCard.ts"
+import { chatEmailSendable, chatBodyLimit, inboxAdvertised, sendStep } from "../../gen/inbox__operations.effect.vibe"
+import { ShellMail, type ReviewedEmail } from "../shell/ports.vibe"
+import { Navigation } from "../shell/navigation.vibe"
+import { InboxAccounts } from "./accounts.vibe"
+import { MailComposer } from "./composer.vibe"
+import { MailOperations, type OperationOutcome } from "./operations.vibe"
+import { addressKey, literalMailAddress, oneLineSubject, versionRequestId } from "./text.ts"
+
+function answerOf(outcome: OperationOutcome | undefined): SendAnswer {
+  switch (outcome) {
+    case "Sent": case "SentBefore": return "Delivered"
+    case "Rejected": return "GmailRejected"
+    case "Unsent": case "Refused": case "Discarded": case "SignedOut": case "NotStarted": case "AwaitingReview": case undefined: return "Unsent"
+    default: return "NoAnswer"
+  }
+}
+
+/** Inbox's send of an email the owner reviewed in the chat: once per reviewed version, through the selected account's reviewed operation. */
+export const assistantEmailSender = effect {
+  const accounts = try InboxAccounts
+  const operations = try MailOperations
+  return {
+    effect send(draft: ReviewedEmail): SendAnswer {
+      const a = try accounts.get()
+      const toList = [...new Set(draft.to.split(/[,;\n]/).map((t) => t.trim()).filter((t) => t !== ""))]
+      const keys = toList.map(addressKey)
+      const email = { recipients: keys, literal: toList.every(literalMailAddress), subjectOneLine: !/[\r\n]/.test(draft.subject), bodyChars: draft.body.trim() === "" ? 0 : draft.body.length }
+      const existing = try operations.current()
+      const requestId = tryPromise({ try: () => versionRequestId(["assistant-email", draft.requestId, a.selected, toList, draft.subject, draft.body]), catch: () => "" }) catch () => ""
+      if (requestId === "" || a.selected === "") return "Unsent" as SendAnswer
+      if (existing !== undefined && existing.requestId === requestId) {
+        if (existing.phase === "Reviewing") return answerOf(try operations.confirm(existing.composer))
+        return answerOf(existing.phase === "Preparing" ? try operations.retry() : try operations.refresh())
+      }
+      const mail = {
+        mode: "ComposeMail" as const, toList, ccList: [], bccList: [], subject: oneLineSubject(draft.subject), body: draft.body,
+        files: [], forwardMessage: "", forwardHistory: "", forwardParts: [], replyMessage: ""
+      }
+      const draftId = `assistant-email:${requestId}`
+      const composer = { draftId, content: JSON.stringify(mail) }
+      const step = existing === undefined ? "PrepareNew" : sendStep(true, existing, composer)
+      const busy = step === "ShowReview" || step === "ReadReceipt"
+      if (!chatEmailSendable(email, a.phase === "Checked" && !a.fromDisk, busy) || draft.body.length > chatBodyLimit) return "Unsent" as SendAnswer
+      if (existing !== undefined) try operations.clear()
+      const prepared = try operations.prepare("SendKind", { tag: "MessageProposal", mail, draftId: "", expectedDigest: "" }, composer, { localDraft: draftId, revision: 1, gmailDraft: "", gmailDigest: "" }, requestId)
+      const reviewing = try operations.current()
+      const outcome = prepared === undefined && reviewing !== undefined && reviewing.requestId === requestId && reviewing.phase === "Reviewing" ? try operations.confirm(composer) : prepared
+      return answerOf(outcome)
+    }
+  }
+}
+
+/** The assistant's email port as Inbox answers it, for the shell to put in its `AssistantEmail` slot: the reviewed send, and the selected connected account's address for a To of "self". */
+export const assistantEmail = effect {
+  const sender = try assistantEmailSender
+  const accounts = try InboxAccounts
+  const port: AssistantEmail.Shape = {
+    send: sender.send,
+    effect address() {
+      const a = try accounts.get()
+      const row = a.rows.find((r) => r.id === a.selected && r.connected)
+      return row === undefined || row.address === "" ? undefined : row.address
+    }
+  }
+  return port
+}
+
+/** Fills the shell's mail port with Inbox's send, so the assistant's email cards are delivered through this layer. */
+export const mailSenderFill = Layer.effectDiscard(effect {
+  const port = try ShellMail
+  const sender = try assistantEmailSender
+  try port.fill(sender.send)
+})
+
+/** Camera's and Photos' email handoff, for the shell to merge into `CameraHandoffs`: reviewed bytes start a new draft of the selected account, which opens in Inbox. */
+export const cameraEmailTarget = effect {
+  const composer = try MailComposer
+  const accounts = try InboxAccounts
+  const navigation = try Navigation
+  const target: Pick<CameraHandoffs.Shape, "emailFile"> = {
+    effect emailFile(file: ReviewedFile) {
+      const a = try accounts.get()
+      const token = try composer.token()
+      if (a.fromDisk || token === "") return false
+      const picked = { name: file.name, mimeType: file.mimeType, dataBase64: file.dataBase64, sha256: file.sha256 }
+      const added = (try composer.shareFile(picked, picked, token)) === "FileAdded"
+      if (added) try navigation.open("inbox")
+      return added
+    }
+  }
+  return target
+}
+
+/** Of the capabilities the agent `offered`, those Inbox advertises in `x-eliza-device-capabilities`: the agent's local email draft, when offered. */
+export function inboxCapabilities(offered: readonly string[]): string[] {
+  return [...inboxAdvertised([...offered])]
+}

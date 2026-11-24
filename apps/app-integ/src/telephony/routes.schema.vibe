@@ -1,0 +1,20 @@
+// spec/telephony/phone.md, "A number handed to Phone fills the keypad once it is idle, and never dials"; spec/telephony/phoneInfo.md, "The page reads only while it is in front, and leaving forgets what it read"; spec/telephony/messages.md, "Only a complete listed conversation opens, with the full identity it was listed with"; spec/telephony/contacts.md, "Alpha's filter is the provider's own query on this phone, closes an open contact and shows a clearable chip"
+const safeText = (value: string) => value.isWellFormed() && !/[\p{Cc}‪-‮⁦-⁩]/u.test(value)
+
+/** A Phone route: the keypad with a number as a contact or voicemail shows it (digits, `*`, `#`, `+` and separators), Recents, Voicemail, or Settings → Phone's details. */
+export const PhoneRoute = Schema.String.check(Schema.isPattern(/^(keypad:[0-9*#+().\- ]{0,60}|recents|voicemail|info)$/))
+
+/** A Messages route: a new message to one number as a contact shows it, one conversation by its provider ID, or the pending new-message notice. */
+export const MessagesRoute = Schema.String.check(Schema.isPattern(/^(compose:\+?[0-9().\- ]{2,40}|thread:thread:[1-9][0-9]{0,17}|notice)$/))
+
+/** A Contacts route: Alpha's filter text for the provider's own query, or the way in from Phone's Contacts tab. */
+export const ContactsRoute = Schema.String.check(
+  Schema.isPattern(/^(filter:.{1,128}|from:phone)$/su),
+  Schema.makeFilter(safeText),
+)
+
+/** The new-message notice `AlphaTelephony.smsNoticePending` reports: the one conversation it names and the token that acknowledges it. */
+export const SmsNotice = Schema.Struct({
+  threadId: Schema.String.check(Schema.isPattern(/^thread:[1-9][0-9]{0,17}$/)),
+  token: Schema.String.check(Schema.isPattern(/^[0-9]{1,19}$/)),
+})

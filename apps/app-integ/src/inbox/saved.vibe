@@ -1,0 +1,151 @@
+// spec/inbox/mailbox.md, "A saved list shows only before the first read, and the next read replaces it"; spec/inbox/accounts.md, "Saved accounts show at once but stay read-only until Cloud confirms them"; spec/inbox/accounts.md, "A confirmed revocation closes the account's mail until a fresh accepted read"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import type { MailAccount, GmailCapability } from "../../gen/inbox__accounts.ts"
+import type { MailRow, SavedList } from "../../gen/inbox__mailbox.ts"
+import type { MailBody } from "../../gen/inbox__reader.ts"
+import {
+  mailCaches, mailReadKey, readSavedMailbox, saveMailbox, clearMailbox, savedMailboxName, mailSaveAllowed, MailStoreFailed,
+  type GmailAccount, type GmailMessage, type GmailReadResult, type MailboxListSnapshot, type MailBodyEntry, type SavedMailboxStore
+} from "@elizaos/plugin-inbox/mailbox"
+
+/** Who the saved mail belongs to and which session and credential may read it. */
+export interface SavedMailScope { readonly owner: string; readonly organization: string; readonly credential: string; readonly session: string }
+
+/** The saved accounts and choice a cold start may show while Cloud restores. */
+export interface RestoredAccounts { readonly accounts: MailAccount[]; readonly selected: string }
+
+const capabilityNames: Record<GmailCapability, string> = {
+  CapIdentity: "google.basic_identity", CapTriage: "google.gmail.triage", CapSend: "google.gmail.send", CapDrafts: "google.gmail.drafts", CapMailbox: "google.gmail.mailbox"
+}
+
+function upstreamAccount(a: MailAccount): GmailAccount {
+  return { configured: true, connected: a.connected, reason: "", connectionId: a.id, grantedCapabilities: a.capabilities.map((c) => capabilityNames[c]), label: a.label }
+}
+
+function ownAccount(a: GmailAccount): MailAccount {
+  return {
+    id: a.connectionId ?? "", label: a.label, address: a.label.includes("@") ? a.label : "", connected: a.connected,
+    capabilities: (Object.keys(capabilityNames) as GmailCapability[]).filter((c) => a.grantedCapabilities.includes(capabilityNames[c]))
+  }
+}
+
+function message(row: MailRow): GmailMessage {
+  return { id: row.id, threadId: row.threadId, subject: row.subject, from: row.sender, fromEmail: row.senderAddress || null, to: [], cc: [], snippet: row.snippet, receivedAt: row.receivedAt, unread: row.unread, starred: row.starred, historyId: null }
+}
+
+function ownRow(m: GmailMessage): MailRow {
+  return { id: m.id, threadId: m.threadId, sender: m.from, senderAddress: m.fromEmail ?? "", subject: m.subject, snippet: m.snippet, receivedAt: m.receivedAt, unread: m.unread, starred: m.starred, attached: false }
+}
+
+function read(body: MailBody): GmailReadResult {
+  return {
+    message: { id: body.id, threadId: body.threadId, subject: body.subject, from: body.sender, fromEmail: body.senderAddress || null, to: body.recipients, cc: body.copied, snippet: body.snippet, receivedAt: body.receivedAt, unread: body.unread, starred: body.starred, historyId: body.historyId || null },
+    bodyText: body.text, ...(body.html === "" ? {} : { bodyHtml: body.html }), ...(body.htmlOmitted ? { bodyHtmlOmitted: true as const } : {}),
+    links: body.links.map((l) => ({ href: l.href, text: l.text })), omittedLinks: body.omittedLinks, historyId: body.historyId || null,
+    attachments: body.parts.map((p) => ({ partId: p.partId, name: p.name, mimeType: p.mimeType, size: p.bytes, supported: p.supported })), authenticationResults: null
+  }
+}
+
+function ownBody(r: GmailReadResult, links: MailBody["links"]): MailBody {
+  const m = r.message
+  return {
+    id: m.id, threadId: m.threadId, sender: m.from, senderAddress: m.fromEmail ?? "", recipients: [...m.to], copied: [...m.cc], replyTo: "", subject: m.subject,
+    snippet: m.snippet, receivedAt: m.receivedAt, text: r.bodyText, html: r.bodyHtml ?? "", htmlOmitted: r.bodyHtmlOmitted === true, links, omittedLinks: r.omittedLinks ?? 0,
+    parts: r.attachments.map((p) => ({ partId: p.partId, name: p.name, mimeType: p.mimeType, bytes: p.size, supported: p.supported })),
+    historyId: r.historyId ?? "", unread: m.unread, starred: m.starred
+  }
+}
+
+/** This phone's saved mail of the signed-in owner: upstream's bounded caches in memory and its owner-bound document on disk. */
+export service SavedMail {
+  /** Reads the owner's saved document into the caches and returns its accounts and choice, or nothing. */
+  restore(scope: SavedMailScope, hint: string | null): (RestoredAccounts | undefined)!!
+  /** Remembers a list of an account and query, read under the current session and credential. */
+  rememberList(scope: SavedMailScope, account: MailAccount, query: string, rows: MailRow[], cursor: string, seen: string[], revision: string, at: number): void!!
+  /** A fresh remembered list of an account and query. */
+  list(scope: SavedMailScope, account: MailAccount, query: string, now: number): (SavedList | undefined)!!
+  /** Remembers a read body. */
+  rememberBody(scope: SavedMailScope, account: MailAccount, body: MailBody, at: number): void!!
+  /** A fresh remembered body, and whether it is new enough to skip reading it again. */
+  body(scope: SavedMailScope, account: MailAccount, id: string, now: number): ({ body: MailBody; skipRead: boolean } | undefined)!!
+  /** Writes the document for the selected account under the current cache epoch; a newer epoch retires the write. */
+  persist(scope: SavedMailScope, accounts: MailAccount[], selected: string, failedRead: boolean): boolean!!
+  /** Drops every list and body and the document, as a switch, revocation or sign-out does, and starts a new cache epoch. */
+  forget(scope: SavedMailScope): void!!
+}
+
+/** Saved mail over upstream's caches and saved-mailbox document, in the KeyValueStore the layer is given. */
+export const layer = Layer.effect(SavedMail, effect {
+  const kv = try KeyValueStore.KeyValueStore
+  const caches = try mailCaches()
+  let cacheEpoch = 0
+  const linkMemory = new Map<string, MailBody["links"]>()
+
+  const store: SavedMailboxStore = {
+    read: (name: string) => kv.get(name) catch effect (cause) => { throw new MailStoreFailed({ cause }) },
+    effect compareExchange(name: string, expected: string | undefined, next: string | undefined) {
+      const actual = kv.get(name) catch effect (cause) => { throw new MailStoreFailed({ cause }) }
+      if (actual !== expected) return "conflict" as const
+      if (next === undefined) kv.remove(name) catch effect (cause) => { throw new MailStoreFailed({ cause }) }
+      else kv.set(name, next) catch effect (cause) => { throw new MailStoreFailed({ cause }) }
+      return "saved" as const
+    }
+  }
+
+  effect function name(scope: SavedMailScope) {
+    return try savedMailboxName(scope.owner, scope.organization, scope.credential)
+  }
+
+  const grant = (scope: SavedMailScope, account: MailAccount) => ({ session: scope.session, credential: scope.credential, account: upstreamAccount(account) })
+
+  return {
+    effect restore(scope: SavedMailScope, hint: string | null) {
+      const raw = store.read(try name(scope)) catch () => undefined
+      if (raw === undefined) return undefined
+      const restored = readSavedMailbox(raw, scope.owner, hint, () => true)
+      if (restored === null) return undefined
+      try caches.restore(restored.lists, restored.bodies, try Clock.currentTimeMillis)
+      return { accounts: restored.accounts.map(ownAccount), selected: restored.selected }
+    },
+    effect rememberList(scope: SavedMailScope, account: MailAccount, query: string, rows: MailRow[], cursor: string, seen: string[], revision: string, at: number) {
+      const key = mailReadKey(grant(scope, account), query)
+      if (key === null) return
+      const snapshot: MailboxListSnapshot = { key, account: account.id, at, firstPageRevision: revision || null, messages: rows.map(message), query, cursor: cursor || null, cursors: seen, shifted: false }
+      try caches.rememberList(snapshot)
+    },
+    effect list(scope: SavedMailScope, account: MailAccount, query: string, now: number) {
+      const key = mailReadKey(grant(scope, account), query)
+      const row = key === null ? undefined : try caches.list(key, now)
+      return row === undefined ? undefined : { rows: row.messages.map(ownRow), cursor: row.cursor ?? "", seen: [...row.cursors], revision: row.firstPageRevision ?? "" } satisfies SavedList
+    },
+    effect rememberBody(scope: SavedMailScope, account: MailAccount, body: MailBody, at: number) {
+      const key = mailReadKey(grant(scope, account), body.id)
+      if (key === null) return
+      linkMemory.set(key, body.links)
+      try caches.rememberBody({ key, account: account.id, at, body: read(body) } satisfies MailBodyEntry)
+    },
+    effect body(scope: SavedMailScope, account: MailAccount, id: string, now: number) {
+      const key = mailReadKey(grant(scope, account), id)
+      const found = key === null ? undefined : try caches.body(key, now)
+      if (found === undefined || key === null) return undefined
+      const links = linkMemory.get(key) ?? found.entry.body.links.map((l) => ({ href: l.href, text: l.text, host: "", mismatch: false }))
+      return { body: ownBody(found.entry.body, links), skipRead: found.skipsRead }
+    },
+    effect persist(scope: SavedMailScope, accounts: MailAccount[], selected: string, failedRead: boolean) {
+      const launched = cacheEpoch
+      const contents = try caches.contents()
+      const lists = contents.lists.filter((l) => l.account === selected)
+      const bodies = contents.bodies.filter((b) => b.account === selected)
+      if (!mailSaveAllowed({ selected, failedRead, capturedEpoch: launched, activeEpoch: cacheEpoch, capturedSelection: selected, listAccount: lists[0]?.account ?? selected })) return false
+      const document = { version: 1 as const, owner: scope.owner, accounts: accounts.map(upstreamAccount), selected, spamTrashSearch: false, lists: lists.slice(0, 8), bodies: bodies.slice(0, 16) }
+      return saveMailbox(store, try name(scope), document, launched, () => cacheEpoch) catch () => false
+    },
+    effect forget(scope: SavedMailScope) {
+      cacheEpoch += 1
+      const launched = cacheEpoch
+      try caches.clear()
+      linkMemory.clear()
+      clearMailbox(store, try name(scope), launched, () => cacheEpoch) catch () => false
+    }
+  }
+})

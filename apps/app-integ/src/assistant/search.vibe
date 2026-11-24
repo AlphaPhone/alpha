@@ -1,0 +1,85 @@
+// spec/assistant/search.md, "Story: Find something I said in an earlier chat"; spec/assistant/search.md, "A search answer shows only while search is open and its owner scope is the one that asked"; spec/assistant/search.md, "A hit in another chat opens only with no attachment waiting"
+import { Machine as SearchMachine, debounceMs, jumpAllowed, minimumQuery, pageSize } from "../../gen/assistant__search.effect.vibe"
+import { ChatAttachments } from "./attachments.vibe"
+import { Composer } from "./composer.vibe"
+import { Conversations } from "./conversations.vibe"
+import { AssistantHost } from "./host.vibe"
+import type { SearchHit } from "./payloads.schema.vibe"
+import { copy } from "./presentation.vibe"
+
+/** Chat search across the owner's conversations. */
+export service ChatSearch {
+  readonly hits: Stream.Stream<readonly SearchHit[]>
+  /** Open search, closing any earlier answer. */
+  start(): void!!
+  /** Ask for a query 250 ms after the owner stopped typing; a newer query or a closed search drops the answer. */
+  query(text: string): void!!
+  /** The next page of the current query. */
+  more(): void!!
+  /** Close search; false when it was not open. */
+  close(): boolean!!
+  /** The owner, agent or account changed: the question is retired. */
+  retire(): void!!
+  /** Open a hit in its conversation, unless an attachment waits in another chat. */
+  openHit(hit: SearchHit): boolean!!
+}
+
+/** Chat search over the search machine and the resident's search route. */
+export const searchLayer = Layer.effect(ChatSearch, effect {
+  const search = try SearchMachine
+  const conversations = try Conversations
+  const composer = try Composer
+  const attachments = try ChatAttachments
+  const host = try AssistantHost
+  const hits = try SubscriptionRef.make<readonly SearchHit[]>([])
+  let latest = ""
+  let asked = 0
+  const quiet = <E>(work: Effect.Effect<unknown, E>) => map(work, () => true) catch () => false
+  effect function ask(text: string, offset: number) {
+    const ticket = ++asked
+    const page = conversations.search(text, offset) catch () => undefined
+    if (ticket !== asked) return
+    if (page === undefined) try host.toast(copy.searchFailed)
+    try quiet(search.send({ type: "answer", count: page?.length ?? 0 }))
+    const state = try search.get()
+    try SubscriptionRef.update(hits, (seen) => state.results ? (offset === 0 ? page ?? [] : [...seen, ...(page ?? [])]) : [])
+  }
+  return {
+    hits: SubscriptionRef.changes(hits),
+    start: () => effect {
+      try quiet(search.send({ type: "openSearch" }))
+      try SubscriptionRef.set(hits, [])
+    },
+    query: (text: string) => effect {
+      latest = text
+      try sleep(debounceMs)
+      if (latest !== text || text.trim().length < minimumQuery) return
+      if (try quiet(search.send({ type: "query", len: text.trim().length }))) try ask(text, 0)
+    },
+    more: () => effect {
+      if (try quiet(search.send({ type: "loadMore" }))) try ask(latest, (try search.get()).page * pageSize)
+    },
+    close: () => effect {
+      const open = (try search.get()).open
+      asked++
+      try quiet(search.send({ type: "closeSearch" }))
+      try SubscriptionRef.set(hits, [])
+      return open
+    },
+    retire: () => effect {
+      asked++
+      try quiet(search.send({ type: "retire" }))
+      try SubscriptionRef.set(hits, [])
+    },
+    openHit: (hit: SearchHit) => effect {
+      const open = (try Stream.runHead(composer.transcript))
+      const same = Option.isSome(open) && open.value.conversation === hit.conversationId
+      if (!jumpAllowed((try attachments.pending()).length, same)) {
+        try host.toast(copy.attachmentChangesChat)
+        return false
+      }
+      try composer.open(hit.conversationId, false, hit.id)
+      return true
+    },
+  }
+})

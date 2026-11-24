@@ -1,0 +1,257 @@
+// spec/voice/dictation.md, "Story: Dictate into the draft I am writing"; spec/voice/dictation.md, "Story: Keep my recording when transcription fails"; spec/voice/route.md, "Story: Use Cloud speech when I have it, and my phone otherwise"; spec/voice/dictation.md, "Recording starts only on a free microphone, after Alpha's speech confirmed it stopped, with the recognizer of the route in use now"; spec/voice/latency.md, "A dictated draft sent unchanged is timed from the recording's end through the send and the first token to the final reply, and its reply is never spoken"
+import { Native } from "../platform/native.vibe"
+import { Machine, maxMsOf, onPhoneMaxMs, type Dictation as DictationState, type DictationEffect, type DictationFailure, type Event, type Recognizer, type SpeechGate } from "../../gen/voice__dictation.effect.vibe"
+import type { Chain, SpeechChains } from "../../gen/voice__speech.ts"
+import type { Route } from "../../gen/voice__route.ts"
+import { Microphone } from "./capture.vibe"
+import { refusalOf } from "./failure.vibe"
+import { Latency } from "./latency.vibe"
+import { newId } from "../platform/ids.ts"
+import { RecordingClip, RecordingStarted, RecordingStopped, TranscriptReply } from "./native.schema.vibe"
+import { VoiceRoute, attemptFailed } from "./route.vibe"
+import { Speech } from "./speech.vibe"
+import { transcription } from "./transcription.vibe"
+
+/** A draft another area owns, which dictation fills and never sends. */
+export interface DictationTarget {
+  /** The draft's stable id: a conversation's composer, a person's message, a note, a filter. */
+  readonly id: string
+  /** The account the draft belongs to. */
+  readonly account: string
+  /** How many characters the draft holds now. */
+  draftLength(): number!!
+  /** Append dictated words to the draft; `voiceOriginated` when the draft was empty. */
+  insert(text: string, voiceOriginated: boolean): void!!
+}
+
+/** Transcribe: record into another area's draft, transcribe on the route in use and insert the words once. */
+export service Dictation {
+  /** The dictation now and after each change. */
+  readonly changes: Stream.Stream<DictationState>
+  /** The dictation at this moment. */
+  get(): DictationState!!
+  /** Open dictation for `target`, replacing any other draft's. */
+  into(target: DictationTarget): void!!
+  /** Start recording on the route in use now. */
+  start(): void!!
+  /** Stop recording, transcribe and insert into the draft. */
+  stop(): void!!
+  /** Transcribe the kept clip again. */
+  retry(): void!!
+  /** Discard the kept clip and close. */
+  discard(): void!!
+  /** End dictation at once and discard what it recorded. */
+  cancel(): void!!
+  /** The route dictation would use now. */
+  route(): Route!!
+  /** The id of the draft dictation is open for, if any. */
+  targetId(): (string | undefined)!!
+  /** The recording's level bars while it records. */
+  levels(): Stream.Stream<readonly number[]>
+}
+
+const decodeStarted = Schema.decodeUnknownOption(RecordingStarted)
+const decodeClip = Schema.decodeUnknownOption(RecordingClip)
+const decodeStopped = Schema.decodeUnknownOption(RecordingStopped)
+const decodeTranscript = Schema.decodeUnknownOption(TranscriptReply)
+
+function failureOfStart(code: string): DictationFailure {
+  if (code === "call-active" || code === "capture-call-active") return "CallActive"
+  if (code === "speech-cleanup-unconfirmed") return "MediaNotStopped"
+  if (code === "permission-denied") return "MicrophoneDenied"
+  return "NoMicrophone"
+}
+
+/** Whether Alpha's speech lets a recording start: clear, still stopping on some channel, or latched after a stop never confirmed. */
+export function speechGateOf(chains: SpeechChains): SpeechGate {
+  const all: readonly Chain[] = [chains.replies, chains.reading, chains.app, chains.cloud]
+  if (chains.replies.stage === "Latched" || chains.reading.stage === "Latched") return "SpeechLatched"
+  if (all.some((chain) => chain.stage === "Retiring" || chain.stage === "Recovering")) return "SpeechStopping"
+  return "SpeechClear"
+}
+
+/** The dictation service over the dictation Machine it is given. */
+export const dictationService = Layer.effect(Dictation, effect {
+  const held = try Machine
+  const native = try Native
+  const routes = try VoiceRoute
+  const microphone = try Microphone
+  const speech = try Speech
+  const latency = try Latency
+  const ids = new Map<string, number>()
+  let target: DictationTarget | undefined
+  let recordingId: string | undefined
+  let micTicket: number | undefined
+  let watcher: Fiber.Fiber<void, never> | undefined
+
+  function idOf(value: string): number {
+    const known = ids.get(value)
+    if (known !== undefined) return known
+    ids.set(value, ids.size + 1)
+    return ids.size
+  }
+
+  effect function releaseMicrophone() {
+    if (micTicket !== undefined) try microphone.release(micTicket)
+    micTicket = undefined
+    if (watcher !== undefined) try Fiber.interrupt(watcher)
+    watcher = undefined
+  }
+
+  effect function discardClip() {
+    if (recordingId !== undefined) native.invoke("AlphaVoiceCloud", "cancelRecording", {}) catch () => undefined
+    recordingId = undefined
+  }
+
+  effect function perform(out: readonly DictationEffect[], text: string) {
+    for (const effectOut of out) {
+      if (effectOut.tag === "Insert" && target !== undefined) {
+        const existing = try target.draftLength()
+        try target.insert(existing > 0 ? `\n${text}` : text, effectOut.voiceOriginated)
+        try latency.noteDraft(effectOut.voiceOriginated && existing === 0 ? text : undefined)
+        recordingId = undefined
+      }
+      if (effectOut.tag === "DiscardClip") try discardClip()
+    }
+  }
+
+  effect function send(event: Event, text = "") {
+    const step = held.send(event) catch () => undefined
+    if (step === undefined) return false
+    try perform(step.out, text)
+    return true
+  }
+
+  effect function recognizerNow() {
+    const route = try routes.route()
+    const recognizer: Recognizer = route === "Device" ? "OnPhone" : "OverNetwork"
+    return recognizer
+  }
+
+  effect function watch(ticket: number, id: string) {
+    const stops = Stream.filter(native.listen("AlphaVoiceCloud", "recordingStopped"), (raw) => Option.getOrUndefined(decodeStopped(raw))?.recordingId === id)
+    const first = Stream.runHead(stops) catch () => Option.none()
+    const stopped = Option.getOrUndefined(first)
+    const decoded = stopped === undefined ? undefined : Option.getOrUndefined(decodeStopped(stopped))
+    if (decoded?.interrupted === "call-active") {
+      try send({ type: "captureLost", ticket, byCall: true })
+      try releaseMicrophone()
+      return
+    }
+    if (decoded?.durationMs !== undefined) {
+      const ms = Math.min(Math.max(1, Math.round(decoded.durationMs)), maxMsOf((try held.get()).recognizer))
+      if (try send({ type: "stop", ticket, ms })) {
+        try latency.beginDraft()
+        try transcribe()
+      }
+      return
+    }
+    try send({ type: "captureLost", ticket, byCall: false })
+    try releaseMicrophone()
+  }
+
+  effect function transcribe() {
+    try releaseMicrophone()
+    const begun = try held.get()
+    const id = recordingId
+    const owner = target
+    if (begun.stage !== "Transcribing" || id === undefined || owner === undefined) return
+    const requestId = newId()
+    const text = routes.run((route: Route, heard) => effect {
+      const now = try held.get()
+      if (route === "Device" && now.recognizer === "OverNetwork") {
+        try send({ type: "transcribeFailed", ticket: now.ticket, fallsBack: true })
+        if ((try held.get()).stage !== "Transcribing") throw attemptFailed({ code: "clip-too-long" })
+      }
+      const account = try routes.account()
+      const call = transcription(route, account, id, requestId)
+      const raw = native.invoke("AlphaVoiceCloud", call.method, call.args) catch effect (error) => { throw attemptFailed(error) }
+      const reply = Option.getOrUndefined(decodeTranscript(raw))
+      if (reply === undefined || reply.local !== (route === "Device")) throw attemptFailed({ code: "voice-stt-response" })
+      try heard()
+      return reply.text.trim()
+    }) catch effect () => {
+      const now = try held.get()
+      if (now.stage === "Transcribing") try send({ type: "transcribeFailed", ticket: now.ticket, fallsBack: false })
+      return undefined
+    }
+    if (text === undefined) return try latency.noteDraft(undefined)
+    const now = try held.get()
+    try send({ type: "transcribed", ticket: now.ticket, target: idOf(owner.id), account: idOf(owner.account), chars: text.length, draftChars: try owner.draftLength() }, text)
+    try latency.noteDraft(undefined)
+  }
+
+  return {
+    changes: held.changes,
+    get: () => held.get(),
+    effect into(next: DictationTarget) {
+      const sent = try send({ type: "open", target: idOf(next.id), account: idOf(next.account) })
+      if (sent) target = next
+    },
+    effect start() {
+      const recognizer = try recognizerNow()
+      const gate = speechGateOf(try speech.get())
+      const ticket = try microphone.acquire("DictationCapture")
+      const sent = try send({ type: "start", recognizer, micFree: ticket !== undefined, speech: gate })
+      if (!sent || (try held.get()).stage !== "Starting") {
+        if (ticket !== undefined) try microphone.release(ticket)
+        return
+      }
+      micTicket = ticket
+      const current = (try held.get()).ticket
+      const raw = native.invoke("AlphaVoiceCloud", "startRecording", { maxDurationMs: recognizer === "OnPhone" ? onPhoneMaxMs : maxMsOf("OverNetwork") }) catch effect (error) => {
+        try send({ type: "openFailed", ticket: current, failure: failureOfStart(refusalOf(error, 0).code) })
+        try releaseMicrophone()
+        return undefined
+      }
+      const started = raw === undefined ? undefined : Option.getOrUndefined(decodeStarted(raw))
+      if (started === undefined) {
+        if (raw !== undefined) {
+          try send({ type: "openFailed", ticket: current, failure: "NoMicrophone" })
+          try releaseMicrophone()
+        }
+        return
+      }
+      recordingId = started.recordingId
+      if (ticket !== undefined) try microphone.opened(ticket)
+      try send({ type: "opened", ticket: current })
+      watcher = fork.detached watch(current, started.recordingId)
+    },
+    effect stop() {
+      const now = try held.get()
+      if (now.stage !== "Recording") return
+      if (watcher !== undefined) try Fiber.interrupt(watcher)
+      watcher = undefined
+      const raw = native.invoke("AlphaVoiceCloud", "stopRecording", {}) catch () => undefined
+      const clip = raw === undefined ? undefined : Option.getOrUndefined(decodeClip(raw))
+      if (clip === undefined) {
+        try send({ type: "captureLost", ticket: now.ticket, byCall: false })
+        try releaseMicrophone()
+        return
+      }
+      const ms = Math.min(Math.max(1, Math.round(clip.durationMs)), maxMsOf(now.recognizer))
+      if (try send({ type: "stop", ticket: now.ticket, ms })) {
+        try latency.beginDraft()
+        try transcribe()
+      }
+    },
+    effect retry() {
+      const now = try held.get()
+      const recognizer: Recognizer = now.clipMs > onPhoneMaxMs ? "OverNetwork" : try recognizerNow()
+      if (try send({ type: "retry", recognizer })) try transcribe()
+    },
+    effect discard() { try send({ type: "discard" }) },
+    effect cancel() {
+      try send({ type: "cancel" })
+      try releaseMicrophone()
+    },
+    route: () => routes.route(),
+    effect targetId() { return (try held.get()).stage === "Closed" ? undefined : target?.id },
+    levels() {
+      return Stream.unwrap(effect {
+        const id = recordingId
+        return id === undefined ? Stream.empty : microphone.levels(id)
+      })
+    },
+  }
+})

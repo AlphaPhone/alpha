@@ -1,0 +1,43 @@
+// spec/assistant/index.md, "The assistant observes the screen only while it is visible, unlocked and not private"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/context.md, "A hosted provider is disclosed wherever the owner can send, and on-device inference is never claimed for it"
+import type { Observation } from "@elizaos/agent/client"
+import type { Inference } from "../../gen/assistant__context.ts"
+import type { Exposure } from "../../gen/assistant.ts"
+
+/** The verified agent session the assistant talks to: one origin, owner, agent and session. */
+export interface AgentIdentity {
+  readonly origin: string
+  readonly owner: string
+  readonly agent: string
+  readonly session: string
+  readonly installationId: string
+  readonly enrollmentId: string
+}
+
+/** What the screen under the assistant is, as the shell knows it. */
+export interface ScreenFacts {
+  readonly exposure: Exposure
+  readonly observation: Observation
+  readonly onCalendar: boolean
+  readonly contextKey: string
+}
+
+/** What the turn's peer understands, learned once per verified connection; `browserPage` when its fresh status declares the Browser page field. */
+export interface PeerFacts { readonly optionalFields: boolean; readonly takesLocation: boolean; readonly browserPage?: boolean }
+
+/** The shell's side of the assistant: who is signed in, what the screen shows, and the views it can open. */
+export service AssistantHost {
+  /** The verified session, or none before sign-in and while the resident is starting. */
+  identity(): (AgentIdentity | undefined)!!
+  /** The screen under the assistant right now. */
+  screen(): ScreenFacts!!
+  /** What the current peer takes beyond the plain observation. */
+  peer(): PeerFacts!!
+  /** Where the resident's inference runs, and the provider's display name. */
+  inference(): { readonly where: Inference; readonly provider: string }!!
+  /** Whether an emergency call is live; an unknown call state counts as live. */
+  emergency(): boolean!!
+  /** Open an app view, keeping the chat detent. */
+  openView(app: string, route?: string): boolean!!
+  /** A short message at the top of the screen. */
+  toast(text: string): void!!
+}

@@ -1,0 +1,100 @@
+// spec/inbox/drafts.md, "A draft the previous version kept comes into its account's Drafts once, and the previous slots clear only after every draft is kept"
+
+/** One slot answer of `ElizaSecureStore.get`. */
+export schema PreviousSlot {
+  value?: string | null
+}
+
+/** An attachment the previous version kept with a draft: its name, type and bytes. */
+export schema PreviousAttachment {
+  name: string
+  mimeType: string
+  dataBase64: string
+}
+
+/** A forwarded original the previous version bound to a draft. */
+export schema PreviousForwardPart {
+  partId: string
+  name: string
+  mimeType: string
+  size: number
+}
+
+/** The message and revision a previous forward was bound to, with its originals. */
+export schema PreviousForward {
+  messageId: string
+  historyId: string
+  parts: PreviousForwardPart[]
+}
+
+/** The message a previous reply answered. */
+export schema PreviousReply {
+  messageId: string
+  threadId: string
+}
+
+/** The Gmail draft a previous local draft was bound to. */
+export schema PreviousProvider {
+  draftId: string
+  providerDigest: string
+}
+
+/** One local draft as the previous version kept it. */
+export schema PreviousDraft {
+  version: number
+  id: string
+  revision: string
+  owner: string
+  to: string[]
+  cc?: string[]
+  bcc?: string[]
+  attachments?: PreviousAttachment[]
+  forward?: PreviousForward
+  provider?: PreviousProvider
+  subject: string
+  body: string
+  mode?: "compose" | "reply" | "reply-all" | "forward"
+  reply?: PreviousReply
+  earlierThanSent?: boolean
+}
+
+/** One set-aside row of the previous Drafts shelf: the draft and its half-typed address. */
+export schema PreviousShelfRow {
+  draft: PreviousDraft
+  toQ: string
+}
+
+/** The previous Drafts shelf of one account. */
+export schema PreviousShelf {
+  version: number
+  owner: string
+  items: PreviousShelfRow[]
+}
+
+/** The previous recovery copy's envelope: its binding and the encoded copy. */
+export schema PreviousRecoveryEnvelope {
+  version: number
+  binding: string
+  revision: string
+  text: string
+}
+
+/** The previous recovery copy of the email being edited. */
+export schema PreviousRecovery {
+  version: number
+  owner: string
+  baseRevision: string | null
+  draft: PreviousDraft
+  toQ: string
+}
+
+/** Decodes an `ElizaSecureStore.get` answer. */
+export const decodePreviousSlot = Schema.decodeUnknownEffect(PreviousSlot)
+/** Decodes a previous saved draft from its stored JSON. */
+export const decodePreviousDraft = Schema.decodeUnknownEffect(Schema.fromJsonString(PreviousDraft))
+/** Decodes a previous Drafts shelf from its stored JSON. */
+export const decodePreviousShelf = Schema.decodeUnknownEffect(Schema.fromJsonString(PreviousShelf))
+/** Decodes a previous recovery envelope from its stored JSON. */
+export const decodePreviousRecoveryEnvelope = Schema.decodeUnknownEffect(Schema.fromJsonString(PreviousRecoveryEnvelope))
+/** Decodes a previous recovery copy from its envelope's text. */
+export const decodePreviousRecovery = Schema.decodeUnknownEffect(Schema.fromJsonString(PreviousRecovery))

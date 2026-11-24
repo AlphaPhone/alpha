@@ -1,0 +1,85 @@
+// spec/shell/routes.md, "Story: Let only my own app reach my agent's records"
+import { crosses, preparedNavigation } from "../../gen/shell__routes.effect.vibe"
+import ownerRoutes from "../platform/owner-routes.json" with { type: "json" }
+
+/** One route group: the prefixes it claims, the id shape of `{id}`, and the method, path and query keys it allows. */
+export interface RouteGroup {
+  readonly prefixes: readonly string[]
+  readonly id?: string
+  readonly routes: readonly { readonly methods: readonly string[]; readonly paths: readonly string[]; readonly query?: readonly string[] }[]
+}
+
+/** The owner route table as Android ships it: one table, src/platform/owner-routes.json, which the APK check compares byte for byte. */
+export const OWNER_ROUTE_TABLE: { readonly unsafe: string; readonly groups: Readonly<Record<string, RouteGroup>> } = ownerRoutes
+
+/** The table's deterministic bytes, as Android's asset holds them. */
+export function serializeOwnerRouteTable(): string {
+  return JSON.stringify(OWNER_ROUTE_TABLE, null, 2) + "\n"
+}
+
+function compiled(source: string, unreadable: RegExp): RegExp {
+  try {
+    return new RegExp(source)
+  } catch {
+    return unreadable
+  }
+}
+
+const UNSAFE = compiled(OWNER_ROUTE_TABLE.unsafe, /[\s\S]/)
+const IDS: Readonly<Record<string, RegExp>> = Object.fromEntries(
+  Object.entries(OWNER_ROUTE_TABLE.groups).flatMap(([name, group]) => group.id === undefined ? [] : [[name, compiled(group.id, /(?!)/)] as const]),
+)
+
+function claimant(path: string): { name: string; group: RouteGroup } | undefined {
+  let best: { name: string; group: RouteGroup; length: number } | undefined
+  for (const [name, group] of Object.entries(OWNER_ROUTE_TABLE.groups)) {
+    for (const prefix of group.prefixes) {
+      if ((path === prefix || path.startsWith(`${prefix}/`)) && (best === undefined || prefix.length > best.length)) best = { name, group, length: prefix.length }
+    }
+  }
+  return best
+}
+
+function matches(pattern: string, path: string, id: RegExp | undefined): { path: boolean; id: boolean } {
+  const [patternPath] = pattern.split("?")
+  const segments = patternPath.split("/")
+  const actual = path.split("/")
+  if (segments.length !== actual.length) return { path: false, id: false }
+  let idOk = true
+  for (let index = 0; index < segments.length; index++) {
+    if (segments[index] === "{id}") idOk = idOk && id !== undefined && id.test(actual[index])
+    else if (segments[index] !== actual[index]) return { path: false, id: false }
+  }
+  return { path: true, id: idOk }
+}
+
+/** Whether a renderer request may cross the bridge on the owner's behalf. */
+export function routeCrosses(method: string, url: string, owner: boolean): boolean {
+  const unsafe = UNSAFE.test(url)
+  const [path, search = ""] = url.split("?")
+  const claim = claimant(path)
+  if (claim === undefined) return crosses({ owner, unsafe, claimed: false, method: false, path: false, query: false, id: false })
+  const keys = [...new URLSearchParams(search).keys()]
+  for (const route of claim.group.routes) {
+    if (!route.methods.includes(method)) continue
+    for (const pattern of route.paths) {
+      const exactQuery = pattern.includes("?")
+      const matched = matches(pattern, path, IDS[claim.name])
+      if (!matched.path) continue
+      const query = exactQuery ? pattern.split("?")[1] === search : route.query === undefined ? keys.length === 0 : keys.every((key) => route.query?.includes(key))
+      if (crosses({ owner, unsafe, claimed: true, method: true, path: true, query, id: matched.id })) return true
+    }
+  }
+  return false
+}
+
+/** Whether a view navigation request is the plain, owner-scoped preparation that may cross. */
+export function preparedViewNavigation(path: string, body: unknown, method = "POST"): boolean {
+  const plainPath = typeof path === "string" && !/[\x00-\x20\x7f%?#\\]/.test(path) && /^\/api\/views\/[A-Za-z0-9_-]+\/navigate$/.test(path)
+  const value = typeof body === "object" && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>) : {}
+  const keys = Object.keys(value)
+  const exactKeys = keys.length === 5 && keys.every((key) => ["clientId", "delivery", "prepareOnly", "viewType", "completedActionHandoffId"].includes(key))
+  const ids = typeof value.clientId === "string" && /^[A-Za-z0-9._-]{1,128}$/.test(value.clientId) &&
+    typeof value.completedActionHandoffId === "string" && /^[A-Za-z0-9._:-]{1,128}$/.test(value.completedActionHandoffId)
+  return preparedNavigation(method === "POST", plainPath, exactKeys, value.delivery === "completed-action", value.prepareOnly === true, value.viewType === "gui", ids)
+}

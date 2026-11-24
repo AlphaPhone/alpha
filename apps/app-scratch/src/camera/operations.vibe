@@ -1,0 +1,160 @@
+// spec/camera/agentCapture.md, "Story: Let the assistant take the photo I asked for"; spec/camera/agentLibrary.md, "Story: Let the assistant point at photos I can see"; spec/camera/libraryReview.md, "Story: Approve each library change the assistant proposes"; spec/camera/libraryReview.md, "Photos operations reach a phone only when the assistant and the phone both offer their capability"
+import type { ExecutorCall } from "@elizaos/agent/client"
+import type { Op, Target } from "../../gen/assistant__review.effect.vibe"
+import type { Result } from "../../gen/assistant__receipts.effect.vibe"
+import { ownPhotoRequest } from "../assistant/grounding.vibe"
+import { AssistantHost } from "../assistant/host.vibe"
+import type { OperationPorts } from "../assistant/review.vibe"
+import { ActionRefused, CameraActions, type ActionCall } from "./actions.vibe"
+import { AgentCamera, type CaptureAttempt } from "./agentCapture.vibe"
+import { reviewText } from "./agentPhotos.vibe"
+import { CameraOperation, PhotosOperation } from "./bridge.schema.vibe"
+import { CameraCallFacts } from "./ports.vibe"
+
+/** A Camera or Photos operation as the phone admits it. */
+export type CameraFamilyOperation = typeof CameraOperation.Type | PhotosOperation
+
+const decodeCamera = Schema.decodeUnknownOption(CameraOperation)
+const decodePhotos = Schema.decodeUnknownOption(PhotosOperation)
+
+/** The operation as Camera or Photos admits it, or undefined when neither runs it. */
+export function admitted(operation: unknown): CameraFamilyOperation | undefined {
+  const photo = decodeCamera(operation)
+  if (Option.isSome(photo)) return photo.value
+  const photos = decodePhotos(operation)
+  return Option.isSome(photos) ? photos.value : undefined
+}
+
+const items = (count: number) => count === 1 ? "1 item" : `${count} items`
+const quoted = (value: string) => `“${value}”`
+const ALBUMS: Readonly<Record<string, string>> = { favorites: "Favorites", videos: "Videos", camera: "Camera", screenshots: "Screenshots" }
+const isVideoId = (id: string) => /^lib:v:/.test(id) || /^m:[a-zA-Z0-9_-]{1,80}:v:/.test(id)
+
+/** The card's title and detail for one Camera or Photos operation: the change itself, nothing else. */
+export function describeOperation(op: CameraFamilyOperation): { readonly title: string; readonly detail: string } {
+  switch (op.type) {
+    case "camera_capture_photo":
+      return { title: "Take photo", detail: `Use the ${op.lens ?? "current"} camera and save one photo in Photos. The photo stays on this device.` }
+    case "photo_library_search": {
+      const what = op.kind === "image" ? "photos" : op.kind === "video" ? "videos" : "photos and videos"
+      const range = op.from !== undefined || op.to !== undefined ? " in the requested date range" : ""
+      return {
+        title: "Search device library",
+        detail: `List up to ${op.limit ?? 20} ${op.favorites === true ? "favorite " : ""}${what} Android lets Alpha read${range}. The agent receives ids, kind, dates, dimensions and duration only: no file or album names, no location, no pixels.`,
+      }
+    }
+    case "photo_library_inspect":
+      return { title: "Inspect one library item", detail: "Share one item’s id, kind, dates, dimensions and duration with the agent. No file or album name, location or pixels." }
+    case "photo_library_select":
+      return { title: `Select ${items(op.ids.length)} in Photos`, detail: "" }
+    case "photo_library_review":
+      return reviewText(op.action, op.items.length)
+    case "photos_filter": {
+      const parts = [
+        op.kind === "image" ? "Photos" : op.kind === "video" ? "Videos" : "",
+        op.favorite === true ? "Favorites" : op.favorite === false ? "Not favorites" : "",
+        op.album === undefined ? "" : op.album.startsWith("custom:") ? "In an album" : ALBUMS[op.album] === undefined ? "" : `In ${ALBUMS[op.album]}`,
+        op.text === undefined || op.text === "" ? "" : quoted(op.text),
+        op.from !== undefined || op.to !== undefined ? "In the requested dates" : "",
+      ].filter((part) => part !== "")
+      return { title: "Filter Photos", detail: parts.length === 0 ? "Everything" : parts.join(" · ") }
+    }
+    case "photos_open":
+      return { title: isVideoId(op.id) ? "Open video" : "Open photo", detail: "" }
+    case "photos_album_create":
+      return { title: `Create album ${quoted(op.name)}`, detail: op.selected === true ? "The item open in Photos" : items(op.ids?.length ?? 0) }
+    case "photos_share":
+      return { title: op.selected === true ? "Share the open item" : `Share ${items(op.ids?.length ?? 0)}`, detail: "Android share sheet" }
+  }
+}
+
+/** The class the assistant's direct pass reasons about: a photo, a Photos view change, or a reviewed library read or change. */
+export function classOfOperation(op: CameraFamilyOperation): Op {
+  if (op.type === "camera_capture_photo") return "CameraCapture"
+  if (op.type === "photos_filter" || op.type === "photos_open" || op.type === "photo_library_select") return "OpenView"
+  return "PhotosChange"
+}
+
+/** The receipt sentence for a settled Camera or Photos result. */
+export function summarizeOperation(op: CameraFamilyOperation, result: Result): string {
+  if (result === "NoResult") return ""
+  if (op.type === "camera_capture_photo") {
+    if (result === "Applied") return "Photo saved in Photos."
+    if (result === "Unknown") return "Alpha can’t tell whether the photo was saved. Check Photos."
+    return "No photo was taken."
+  }
+  if (result === "Unknown") return "Check Photos for the result."
+  if (result !== "Applied") return "Nothing was changed in Photos."
+  switch (op.type) {
+    case "photos_filter": return "Photos filtered."
+    case "photos_open": return "Opened in Photos."
+    case "photo_library_select": return "Selected in Photos."
+    case "photo_library_search": case "photo_library_inspect": return "Shared with the assistant."
+    default: return "Review it in Photos."
+  }
+}
+
+/** Camera's and Photos' operation family for the shell's device executors, over the area's own action service and the assistant's facts about each call. */
+export const operationPorts = effect {
+  const actions = try CameraActions
+  const camera = try AgentCamera
+  const host = try AssistantHost
+  const facts = try CameraCallFacts
+  let message = ""
+
+  effect function callOf(call: ExecutorCall): ActionCall {
+    const known = try facts.of(call)
+    if (known.messageId !== "" && known.messageId !== message) {
+      message = known.messageId
+      try camera.newMessage()
+    }
+    const screen = try host.screen()
+    return {
+      operationId: call.operationId,
+      reviewed: known.reviewed,
+      ownerWords: !known.reviewed && ownPhotoRequest(known.ownerText),
+      sensitive: screen.exposure.privateView || screen.exposure.locked,
+      ...(known.capabilities === undefined ? {} : { capabilities: known.capabilities }),
+    }
+  }
+
+  effect function answer(op: CameraFamilyOperation, call: ExecutorCall) {
+    const done = actions.execute(op, try callOf(call)) catch (refused: ActionRefused) => ({ refusedWith: refused.message })
+    if (typeof done === "object" && done !== null && "refusedWith" in done) return { kind: "refused", code: op.type === "camera_capture_photo" ? "camera_refused" : "photos_refused", result: { message: done.refusedWith } }
+    if (op.type !== "camera_capture_photo") return { kind: "applied", result: done }
+    const attempt = done as CaptureAttempt
+    if (attempt.status === "succeeded") return { kind: "applied", result: attempt.receipt }
+    return { kind: "unknown", result: { summary: attempt.summary } }
+  }
+
+  effect function readBack(op: CameraFamilyOperation, call: ExecutorCall) {
+    const found = actions.readBack(op, try callOf(call)) catch () => undefined
+    return found === undefined ? undefined : { kind: "found", result: found }
+  }
+
+  const ports: OperationPorts = {
+    validate: (operation) => admitted(operation),
+    execute: (operation, call) => {
+      const op = admitted(operation)
+      return op === undefined ? Promise.resolve({ kind: "refused", code: "unsupported" }) : runPromise(answer(op, call))
+    },
+    readBack: (operation, call) => {
+      const op = admitted(operation)
+      return op === undefined ? Promise.resolve({ kind: "refused", code: "unsupported" }) : runPromise(readBack(op, call))
+    },
+    describe: (operation) => {
+      const op = admitted(operation)
+      return op === undefined ? { title: "Action", detail: "" } : describeOperation(op)
+    },
+    classOf: (operation) => {
+      const op = admitted(operation)
+      return op === undefined ? "SettingsWrite" : classOfOperation(op)
+    },
+    target: (): Target => ({ tag: "NoTarget" }),
+    summarize: (operation, result) => {
+      const op = admitted(operation)
+      return op === undefined ? "" : summarizeOperation(op, result)
+    },
+  }
+  return ports
+}

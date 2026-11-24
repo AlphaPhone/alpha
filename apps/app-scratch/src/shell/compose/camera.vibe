@@ -1,0 +1,28 @@
+// spec/camera/media.md, "Story: Send a photo only as a reviewed copy"; spec/camera/media.md, "Story: Ask Alpha about the photo I am looking at"; spec/camera/media.md, "Story: Ask Alpha about what Camera sees"
+import { cameraHandoffsFromAssistant } from "../../assistant/draft.vibe"
+import { CalendarHandoff } from "../../calendar/handoffs.vibe"
+import { CameraHandoffs, type ScannedEvent } from "../../camera/ports.vibe"
+import { cameraEmailTarget } from "../../inbox/handoffs.vibe"
+import { scannedNoteHandoff } from "../../notes/handoffs.vibe"
+import { messagePictureHandoff } from "../../telephony/share.vibe"
+import { Navigation } from "../navigation.vibe"
+
+/** Camera's and Photos' handoffs from the areas built before Camera: the assistant's conversation, Notes' scanned note, Calendar's scanned event, Inbox's email draft, Messages' picture and the shell's navigation. */
+export const cameraHandoffsLive = Layer.effect(CameraHandoffs, effect {
+  const assistant = try cameraHandoffsFromAssistant()
+  const notes = try scannedNoteHandoff()
+  const inbox = try cameraEmailTarget
+  const messages = try messagePictureHandoff
+  const calendar = try CalendarHandoff
+  const navigation = try Navigation
+  return {
+    ...assistant,
+    ...notes,
+    ...inbox,
+    ...messages,
+    reviewScannedEvent: (event: ScannedEvent) => calendar.reviewScan(event),
+    effect open(app: Parameters<CameraHandoffs.Shape["open"]>[0], route?: string) {
+      try navigation.open(app, route)
+    },
+  } satisfies CameraHandoffs.Shape
+})

@@ -1,0 +1,74 @@
+// spec/account/agentAccess.md, "Story: Choose what the agent may change through Google"
+import { type AccessField, type AccessEffect, type AgentAccess, Machine as AccessMachine, enabled, stored as storedAccess } from "../../gen/account__agentAccess.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+
+/** The owner's switches for agent writes through Google, published to the phone's Google host. */
+export service GoogleAgentAccess {
+  readonly changes: Stream.Stream<AgentAccess>
+  current(): AgentAccess!!
+  /** Publish the saved switches once at start, so the host enforces what Settings shows; runs for the app's life. */
+  run(): void!!
+  /** Turn one switch on or off, guarded by the revision the owner saw when `expected` is not 0. */
+  set(field: AccessField, value: boolean, expected: number): void!!
+}
+
+/** The agent access service over its stored machine. */
+export const agentAccessService = Layer.effect(GoogleAgentAccess, effect {
+  const machine = try AccessMachine
+  const native = try Native
+  const turn = try Semaphore.make(1)
+
+  effect function publish() {
+    const a = try machine.get()
+    return effect {
+      try native.invoke("Agent", "setGoogleAgentAccess", { gmailChanges: a.saved.gmailChanges, calendarEdits: a.saved.calendarEdits })
+      return "HostOk" as const
+    } catch (error) => (error._tag === "NativeFailed" ? "HostFailed" as const : "HostLost" as const)
+  }
+
+  effect function perform(out: ReadonlyArray<AccessEffect>): void!! {
+    for (const effectOf of out) {
+      match (effectOf) {
+        when "PublishAccess": try effect {
+          const phase = (try machine.get()).phase
+          const reply = try publish()
+          if (phase === "Primary") {
+            const step = machine.send({ type: "primary", reply, rollbackFails: false }) catch () => undefined
+            if (step !== undefined && "out" in step) try perform(step.out)
+          } else machine.send({ type: "correction", reply }) catch () => undefined
+        };
+      }
+    }
+  }
+
+  effect function drain() {
+    while (enabled(try machine.get(), { type: "acquire" })) {
+      const step = machine.send({ type: "acquire" }) catch () => undefined
+      if (step !== undefined && "out" in step) try perform(step.out)
+      const after = try machine.get()
+      if (after.phase === "Correction") machine.send({ type: "correction", reply: "HostLost" }) catch () => undefined
+    }
+  }
+
+  return {
+    changes: machine.changes,
+    current: () => machine.get(),
+    effect run() {
+      const a = try machine.get()
+      try Semaphore.withPermit(turn, effect {
+        machine.send({ type: "submit", choice: { field: "GmailChanges", value: a.saved.gmailChanges, expected: 0 } }) catch () => undefined
+        try drain()
+      })
+    },
+    effect set(field: AccessField, value: boolean, expected: number) {
+      try Semaphore.withPermit(turn, effect {
+        machine.send({ type: "submit", choice: { field, value, expected } }) catch () => undefined
+        try drain()
+      })
+    }
+  }
+})
+
+/** The switches are the device's: they outlive a sign-out, and a missing host file means off. */
+export const agentAccessLayer = Layer.provideMerge(agentAccessService, storedAccess(ownerKey("device", "account/google-agent-access")))

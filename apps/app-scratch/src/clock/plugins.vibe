@@ -1,0 +1,40 @@
+// spec/clock/reminders.md, "Story: See my reminders as the phone holds them"; spec/clock/notifications.md, "Story: Act on exactly the notification I see"
+// The phone plugins Clock reaches through Native, and one decoded call.
+import { Native, NativeFailed, NativeUnavailable } from "../platform/native.vibe"
+
+/** Alpha's reminder store and Clock handoff. */
+export const DAILY = "DailyApps"
+/** Alpha's notification host: rows, canonical taps, the mirror and delivery status. */
+export const NOTIFICATIONS = "AlphaNotifications"
+/** The shared notification plugin: workflow notice taps. */
+export const WORKFLOW_NOTICES = "ElizaNotifications"
+/** Hosted workflow results waiting for the owner. */
+export const HOSTED_RESULTS = "AlphaHostedResults"
+/** The reviewed deletion window's native journal. */
+export const DELETIONS = "AlphaDeletions"
+/** The native action journal's Clock review. */
+export const ACTION_JOURNAL = "AlphaActionJournal"
+
+/** A plugin answered something that is not its documented reply. */
+export error MalformedReply { plugin: string; method: string }
+
+/** Any way a plugin call can fail. */
+export type PluginFailure = NativeUnavailable | NativeFailed | MalformedReply
+
+/** One call of `method` on `plugin`, its reply decoded by `shape`. */
+export effect function call<A>(plugin: string, method: string, shape: Schema.ConstraintDecoder<A>, args?: unknown): A!PluginFailure {
+  const native = try Native
+  const raw = try native.invoke(plugin, method, args)
+  return try mapError(Schema.decodeUnknownEffect(shape)(raw), () => new MalformedReply({ plugin, method }))
+}
+
+/** One call whose reply carries nothing Clock reads. */
+export effect function command(plugin: string, method: string, args?: unknown): void!(NativeUnavailable | NativeFailed) {
+  const native = try Native
+  try native.invoke(plugin, method, args)
+}
+
+/** Whether `plugin` is registered on this device. */
+export effect function present(plugin: string): boolean {
+  return try (try Native).available(plugin)
+}

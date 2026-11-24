@@ -1,0 +1,67 @@
+// spec/browser/presentation.md, "Story: See the page only when nothing covers it"; spec/browser/presentation.md, "Story: Never let a touch meant for Alpha reach the website"
+import { assert, it } from "@effect/vitest"
+import type { CoverFacts, Placement } from "../../gen/browser__presentation.ts"
+import { BrowserPresenter } from "../../src/browser/presentation.vibe"
+import { callsTo, fakeHost } from "./fakes.vibe"
+
+const shown: CoverFacts = { inBrowser: true, home: true, layered: false, reviewing: false, modal: false, shade: false, viewport: true, tabLive: true, underlay: true, underAssistant: false }
+const toolbar = { x: 0, y: 600, width: 360, height: 56, cornerRadius: 28 }
+const placed: Placement = { tab: "b1", x: 0, y: 56, width: 360, height: 544, below: true, rects: [toolbar] }
+const whole = [{ x: 0, y: 56, width: 360, height: 544, cornerRadius: 0 }]
+
+// spec/browser/presentation.md, "Story: See the page only when nothing covers it"
+it.live("the page is placed under the toolbar only when nothing covers it, sent once per change, and withdrawn for a layer, the shade or the assistant", () => effect {
+  const fake = try fakeHost()
+  try scoped(effect {
+    provide fake.live {
+      const presenter = try BrowserPresenter
+      try presenter.offer(shown, placed)
+      try presenter.offer(shown, placed)
+      try presenter.offer({ ...shown, layered: true }, placed)
+      try presenter.offer({ ...shown, shade: true }, placed)
+      try presenter.forget()
+      try presenter.offer({ ...shown, shade: true }, placed)
+      try presenter.offer({ ...shown, underlay: false, underAssistant: true }, placed)
+      try presenter.offer({ ...shown, underAssistant: true }, placed)
+      try Effect.try(() => assert.deepStrictEqual((try callsTo(fake.calls, "present")).map((c) => ({ ...c.args, session: undefined })), [
+        { session: undefined, id: "b1", x: 0, y: 56, width: 360, height: 544, layer: "below-host", hostRects: [toolbar] },
+        { session: undefined, id: null },
+        { session: undefined, id: null },
+        { session: undefined, id: "b1", x: 0, y: 56, width: 360, height: 544, layer: "below-host", hostRects: whole },
+      ]))
+    }
+  })
+})
+
+// spec/browser/presentation.md, "The native host answers in order; a failure forgets the request so the next frame retries it, and a visible failure is reported once until a success"
+it.live("a failed presentation is retried on the next frame and reported once, and a failed withdrawal says nothing", () => effect {
+  const fake = try fakeHost({ answers: { present: () => new Error("Browser operation failed") } })
+  try scoped(effect {
+    provide fake.live {
+      const presenter = try BrowserPresenter
+      try presenter.offer(shown, placed)
+      try presenter.offer(shown, placed)
+      try presenter.withdraw()
+      try Effect.try(() => assert.deepStrictEqual(
+        { sent: (try callsTo(fake.calls, "present")).length, said: (try Ref.get(fake.toasts)).filter((t) => t === "Browser couldn’t do that. Try again.").length },
+        { sent: 3, said: 1 },
+      ))
+    }
+  })
+})
+
+// spec/browser/presentation.md, "Story: Never let a touch meant for Alpha reach the website"
+it.live("a host control that appears blocks page input over the whole page until the next frame measures it, and hiding Alpha sends nothing", () => effect {
+  const fake = try fakeHost()
+  try scoped(effect {
+    provide fake.live {
+      const presenter = try BrowserPresenter
+      try presenter.offer(shown, placed)
+      try presenter.chromeChanged()
+      try presenter.offer(shown, placed)
+      try presenter.appVisibility(true)
+      try presenter.offer({ ...shown, inBrowser: false }, placed)
+      try Effect.try(() => assert.deepStrictEqual((try callsTo(fake.calls, "present")).map((c) => c.args.hostRects), [[toolbar], whole, [toolbar]]))
+    }
+  })
+})

@@ -1,0 +1,247 @@
+// spec/clock/reminders.md, "Story: See my reminders as the phone holds them"; spec/clock/notifications.md, "Story: Act on exactly the notification I see"; spec/clock/handoff.md, "Clock's answer is shown as it came, and opening Clock is never an alarm result"
+// What the phone's plugins answer, decoded before any of it reaches a machine.
+
+const Instant = Schema.Number.check(Schema.makeFilter((value: number) => Number.isSafeInteger(value) && value >= 0))
+const Version = Schema.optionalKey(Schema.Number)
+
+/** The phone's capability report (`DailyApps.surfaceInfo`). */
+export const SurfaceInfo = Schema.Struct({
+  clockRepeatDaysVersion: Version,
+  reminderTapVersion: Version,
+  reminderTodoVersion: Version,
+  reminderTimingVersion: Version,
+  reminderCreationVersion: Version,
+})
+
+/** What Clock answered a handoff (`DailyApps.clockHandoff`); `package` names the app that received it. */
+export const ClockAnswer = Schema.Struct({
+  action: Schema.Literals(["set", "show", "snooze", "dismiss"]),
+  status: Schema.Literals(["opened", "unavailable", "denied", "failed", "unknown"]),
+  message: Schema.optionalKey(Schema.String),
+  package: Schema.optionalKey(Schema.String),
+})
+
+/** The exact reminder occurrence and revision a change targets. */
+export const ReminderTarget = Schema.Struct({
+  sourceId: Schema.String,
+  sourceRevision: Schema.String,
+  reminderId: Schema.String,
+  occurrenceId: Schema.String,
+  revision: Schema.String,
+  timingVersion: Schema.optionalKey(Schema.Literal(2)),
+})
+
+const Recurrence = Schema.Struct({
+  rule: Schema.Literals(["daily", "weekdays", "weekly"]),
+  zone: Schema.String,
+  date: Schema.String,
+  time: Schema.String,
+  leadMinutes: Schema.Number,
+})
+
+/** One reminder of the store's listing, dated or an undated to-do. */
+export const ReminderRecord = Schema.Struct({
+  id: Schema.String,
+  title: Schema.String,
+  body: Schema.String,
+  occurrenceId: Schema.String,
+  target: ReminderTarget,
+  createdAt: Instant,
+  undated: Schema.optionalKey(Schema.Boolean),
+  at: Schema.optionalKey(Instant),
+  dueAt: Schema.optionalKey(Instant),
+  alertMinutes: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  status: Schema.Literals(["scheduled", "pending", "posted", "permission-denied", "scheduling-failed", "completed", "cancelled", "todo"]),
+  recurrence: Schema.optionalKey(Recurrence),
+  revision: Schema.optionalKey(Schema.String),
+  postedAt: Schema.optionalKey(Instant),
+  completedAt: Schema.optionalKey(Instant),
+  pendingDeletion: Schema.optionalKey(Schema.String),
+  history: Schema.optionalKey(Schema.Array(Schema.Struct({
+    occurrenceId: Schema.String,
+    completedAt: Instant,
+    dueAt: Schema.optionalKey(Instant),
+    skippedDates: Schema.optionalKey(Schema.Number),
+  }))),
+})
+
+/** The store's listing (`DailyApps.listReminders`). */
+export const ReminderListing = Schema.Struct({ reminders: Schema.Array(ReminderRecord), notificationsEnabled: Schema.optionalKey(Schema.Boolean) })
+
+/** The store's answer to a creation (`DailyApps.scheduleReminder`) or a to-do save (`saveTodo`). */
+export const ScheduleAnswer = Schema.Struct({
+  id: Schema.String,
+  status: Schema.Literals(["scheduled", "pending", "saved", "failed", "past", "permission-denied", "storage-full"]),
+})
+
+const ReminderResult = Schema.Struct({
+  version: Schema.Literal(1),
+  reminderId: Schema.String,
+  occurrenceId: Schema.String,
+  revision: Schema.String,
+  status: Schema.Literals(["scheduled", "pending", "posted", "permission-denied", "scheduling-failed", "completed", "cancelled", "todo"]),
+  dueAt: Schema.optionalKey(Instant),
+})
+
+/** The store's receipt of a bound change (`operateReminder`, `reminderOperationReceipt`). */
+export const ReminderReceipt = Schema.Struct({
+  status: Schema.Literals(["succeeded", "unknown"]),
+  result: Schema.optionalKey(ReminderResult),
+})
+
+/** The store's receipt of an agent's bound change, its result kept whole for the operation's own result check. */
+export const AgentReminderReceipt = Schema.Struct({
+  status: Schema.Literals(["succeeded", "unknown"]),
+  result: Schema.optionalKey(Schema.Unknown),
+})
+
+/** The proposal digest the action journal holds for an approved entry (`AlphaActionJournal.get`). */
+export const JournalDigest = Schema.Struct({ digest: Schema.String.check(Schema.makeFilter((s: string) => s.length > 0 && s.length <= 128)) })
+
+/** The action journal's answer to `get`: the approved entry, or null when none is kept. */
+export const JournalEntryReply = Schema.Struct({ entry: Schema.NullOr(JournalDigest) })
+
+/** A to-do decision's answer (`todoDecision`). */
+export const TodoDecided = Schema.Struct({ id: Schema.String, status: Schema.Literals(["todo", "completed", "cancelled"]) })
+
+/** The store's pending reminder tap (`pendingReminderTap`); an empty object when none. */
+export const ReminderTap = Schema.Struct({
+  token: Schema.optionalKey(Schema.String),
+  target: Schema.optionalKey(ReminderTarget),
+  retained: Schema.optionalKey(Schema.Boolean),
+  question: Schema.optionalKey(Schema.Boolean),
+})
+
+/** One current notification row (`AlphaNotifications.list`). */
+export const NoticeRecord = Schema.Struct({
+  id: Schema.String,
+  revision: Schema.String,
+  source: Schema.Literals(["own", "external", "hosted"]),
+  kind: Schema.optionalKey(Schema.String),
+  appLabel: Schema.String,
+  title: Schema.String,
+  text: Schema.String,
+  at: Schema.Number,
+  clearable: Schema.Boolean,
+  canOpen: Schema.Boolean,
+  redacted: Schema.optionalKey(Schema.Boolean),
+})
+
+/** The current notifications and whether calendar alerts could be read. */
+export const NoticeListing = Schema.Struct({
+  items: Schema.Array(NoticeRecord),
+  scope: Schema.String,
+  calendarStatus: Schema.optionalKey(Schema.Literals(["ready", "unavailable", "disabled"])),
+})
+
+/** The phone's answer to consuming one of Alpha's own notices for a question (`AlphaNotifications.consumeOwnNotice`): consumed now, already consumed, or no longer listed at that revision. */
+export const OwnNoticeConsumed = Schema.Struct({ status: Schema.Literals(["consumed", "already-consumed", "changed", "gone", "unavailable"]) })
+
+/** Each cleared row's outcome (`AlphaNotifications.clear`). */
+export const ClearOutcomes = Schema.Struct({ outcomes: Schema.Array(Schema.Struct({ id: Schema.optionalKey(Schema.String), status: Schema.String })) })
+
+/** A tapped canonical notification waiting in Android's custody (`canonicalPending`). */
+export const CanonicalTap = Schema.Struct({
+  token: Schema.optionalKey(Schema.String),
+  ownerId: Schema.optionalKey(Schema.String),
+  agentId: Schema.optionalKey(Schema.String),
+  notificationId: Schema.optionalKey(Schema.String),
+  view: Schema.optionalKey(Schema.String),
+  conversationId: Schema.optionalKey(Schema.String),
+  messageId: Schema.optionalKey(Schema.String),
+})
+
+/** A tapped workflow notice (`pendingWorkflowTap`) or hosted result (`pendingResult`). */
+export const WorkflowTapRecord = Schema.Struct({
+  token: Schema.optionalKey(Schema.String),
+  scope: Schema.optionalKey(Schema.String),
+  origin: Schema.optionalKey(Schema.String),
+  ownerId: Schema.optionalKey(Schema.String),
+  agentId: Schema.optionalKey(Schema.String),
+  runId: Schema.optionalKey(Schema.String),
+  workflowId: Schema.optionalKey(Schema.String),
+  versionId: Schema.optionalKey(Schema.String),
+  workflowVersionId: Schema.optionalKey(Schema.String),
+  retained: Schema.optionalKey(Schema.Boolean),
+  question: Schema.optionalKey(Schema.Boolean),
+  notice: Schema.optionalKey(Schema.Struct({ title: Schema.String, text: Schema.String, revision: Schema.optionalKey(Schema.String) })),
+})
+
+const Titled = Schema.Struct({ title: Schema.optionalKey(Schema.String) })
+
+/** One pending deletion the native journal reports (`AlphaDeletions.pending`). */
+export const DeletionRecord = Schema.Struct({
+  kind: Schema.Literals(["calendar", "reminder"]),
+  id: Schema.String,
+  phase: Schema.String,
+  window: Schema.optionalKey(Schema.String),
+  target: Schema.optionalKey(Schema.Struct({ row: Schema.optionalKey(Titled), fields: Schema.optionalKey(Titled) })),
+  original: Schema.optionalKey(Titled),
+})
+
+/** The pending deletions and the note origins of rows a deletion removed. */
+export const DeletionListing = Schema.Struct({
+  deletions: Schema.Array(DeletionRecord),
+  deletedOrigins: Schema.optionalKey(Schema.Array(Schema.Struct({ kind: Schema.Literals(["event", "reminder"]), id: Schema.String }))),
+})
+
+/** The journal's answer to Undo: `undone` only when the deletion was undone. */
+export const UndoAnswer = Schema.Struct({ phase: Schema.optionalKey(Schema.String), status: Schema.optionalKey(Schema.String) })
+
+/** The phone's deletion review answer (`reviewReminder`). */
+export const DeletionReviewAnswer = Schema.Struct({ status: Schema.String })
+
+/** The native Clock review's answer (`reviewClock`, `confirmClock`). */
+export const ClockReviewAnswer = Schema.Struct({
+  result: Schema.optionalKey(Schema.Struct({
+    action: Schema.String,
+    status: Schema.Literals(["opened", "unavailable", "denied", "failed", "unknown"]),
+    message: Schema.optionalKey(Schema.String),
+  })),
+  reviewToken: Schema.optionalKey(Schema.String),
+})
+
+/** The mirror's status (`crossAppStatus`). */
+export const MirrorRecord = Schema.Struct({
+  revision: Schema.String,
+  enabled: Schema.Boolean,
+  history: Schema.Boolean,
+  paused: Schema.Boolean,
+  accessGranted: Schema.Boolean,
+  apps: Schema.Array(Schema.Struct({ packageName: Schema.String, label: Schema.optionalKey(Schema.String), preview: Schema.Boolean, available: Schema.optionalKey(Schema.Boolean) })),
+})
+
+/** The apps the owner may choose to mirror (`notificationApps`). */
+export const MirrorChoices = Schema.Struct({ apps: Schema.Array(Schema.Struct({ packageName: Schema.String, label: Schema.String })) })
+
+/** The delivery state of Alpha's own notices (`AlphaNotifications.status`). */
+export const DeliveryRecord = Schema.Struct({
+  appEnabled: Schema.Boolean,
+  permissionGranted: Schema.Boolean,
+  channels: Schema.Array(Schema.Struct({ id: Schema.String, blocked: Schema.Boolean, groupBlocked: Schema.optionalKey(Schema.Boolean) })),
+})
+
+/** Notification history rows (`notificationHistory`): app label, time and state only. */
+export const MirrorHistory = Schema.Struct({ items: Schema.Array(Schema.Struct({ id: Schema.String, appLabel: Schema.String, at: Schema.Number, state: Schema.String })) })
+
+/** A Clock request the agent proposes: exactly the fields its action takes, as the native review checks them again. */
+export const AgentClockOperation = Schema.Union([
+  Schema.Struct({
+    action: Schema.Literal("set"),
+    hour: Schema.Int.check(Schema.makeFilter((n: number) => n >= 0 && n <= 23)),
+    minute: Schema.Int.check(Schema.makeFilter((n: number) => n >= 0 && n <= 59)),
+    label: Schema.optionalKey(Schema.String.check(Schema.makeFilter((s: string) => s.length <= 200 && !s.includes("\0")))),
+    timeZone: Schema.String.check(Schema.makeFilter((s: string) => s.length > 0 && s.length <= 100)),
+    days: Schema.optionalKey(Schema.Array(Schema.Int.check(Schema.makeFilter((n: number) => n >= 1 && n <= 7)))),
+  }),
+  Schema.Struct({ action: Schema.Literal("snooze"), snoozeMinutes: Schema.Int.check(Schema.makeFilter((n: number) => n >= 1 && n <= 60)) }),
+  Schema.Struct({ action: Schema.Literals(["show", "dismiss"]) }),
+])
+
+/** Android's Do Not Disturb mode (`ElizaSystem.getSystemFacts`); absent when it did not answer. */
+export const InterruptionFacts = Schema.Struct({ interruptionFilter: Schema.optionalKey(Schema.Literals(["all", "priority", "alarms", "none"])) })
+
+/** Android's stream volumes (`ElizaSystem.getDeviceSettings`). */
+export const DeviceVolumes = Schema.Struct({
+  volumes: Schema.Array(Schema.Struct({ stream: Schema.String, current: Schema.Number, max: Schema.Number })),
+})

@@ -1,0 +1,36 @@
+// spec/telephony/common.md, "A provider is read only while its view is in front on an unlocked phone with the grant"; spec/telephony/callBar.md, "The bar shows only on a trusted reading, where it may show, while a call is live"
+import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
+
+/** Whether a mounted telephony view may read its providers now: the page in front and lit, the phone unlocked. */
+export function readableIn(state: ForegroundState): boolean {
+  return state.visible && !state.locked && state.screen !== "off"
+}
+
+/** Whether the call bar may show now: the screen on and unlocked, outside Android's assistant surface (`AlphaAssistActivity`). */
+export function barEligibleIn(state: ForegroundState): boolean {
+  return readableIn(state) && state.assistantSurface !== true
+}
+
+/** Each change of whether the page is readable, starting with the current one, as a layer captures it. */
+export effect function frontChanges() {
+  const foreground = try Foreground
+  return Stream.changes(Stream.map(foreground.changes, readableIn))
+}
+
+/**
+ * Runs `showing(first)` for each stretch the page is in front on an unlocked phone and interrupts it when that ends, so a
+ * read never runs behind the lock or in the background; `first` is true only for the stretch the view opened in.
+ */
+export effect function whileInFront(front: Stream.Stream<boolean>, showing: (first: boolean) => void!!) {
+  let running: Fiber.Fiber<void> | undefined = undefined
+  let first = true
+  for try (const now of front) {
+    if (now && running === undefined) {
+      running = fork showing(first)
+      first = false
+    } else if (!now && running !== undefined) {
+      try Fiber.interrupt(running)
+      running = undefined
+    }
+  }
+}

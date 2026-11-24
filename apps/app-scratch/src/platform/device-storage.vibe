@@ -1,0 +1,110 @@
+// spec/platform/storage.md, "Story: Reset Alpha's data"; spec/platform/storage.md, "A pending reset blocks startup until it has cleared the owner's namespace"; spec/platform/storage.md, "A stored value that is not a state is held for review and never written over"; spec/platform/index.md, "Every stored key of an owner lies in that owner's namespace, and a reset removes exactly those keys"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { Machine as Device, stored as storedDevice, type Storage } from "../../gen/platform__storage.effect.vibe"
+import { ownerKey } from "./storage.vibe"
+
+/** The device's storage could not do what was asked. */
+export error StorageRefused { message: string }
+
+/** The owner namespaces of the WebView's storage: startup admission, the bound owner, held values and reset. */
+export service DeviceStorage {
+  /** The storage state as spec/platform/storage.md keeps it, then each change of it. */
+  readonly changes: Stream.Stream<Storage>
+  /** Admits startup, first finishing a reset an earlier process left pending. */
+  admitStartup(): void!StorageRefused
+  /** Binds the signed-in owner, whose namespace the areas' stored keys use. */
+  bindOwner(owner: string): void!StorageRefused
+  /** The owner signed out: their namespace stays for their return. */
+  signedOut(): void!!
+  /** Holds the value stored under `key` (the whole stored key, such as `ownerKey(owner, "notes")`) that is not a state, first keeping it apart so the area may start fresh; false when it could not be kept and stays unheld. */
+  hold(key: string): boolean!!
+  /** The value kept apart for a held `key`, as it was stored; undefined when none is kept. */
+  held(key: string): (string | undefined)!!
+  /** The owner reviewed a held value: only its kept copy is removed, never what the area saved since. */
+  resolve(key: string): void!StorageRefused
+  /** Removes everything kept in the bound owner's namespace; startup waits until it has. */
+  reset(): void!StorageRefused
+}
+
+const DEVICE_KEY = "alpha/device/storage"
+
+/** Where the copy of a held value is kept: beside the value, in the same owner namespace, so a reset removes it too. */
+export function heldKeyOf(storedKey: string): string {
+  return `${storedKey}~held`
+}
+
+/** Device storage over the KeyValueStore the program provides. */
+export const deviceStorageLive = Layer.effect(DeviceStorage, effect {
+  const store = try KeyValueStore.KeyValueStore
+  const device = try mapError(Effect.provide(effect { return try Device }, storedDevice(DEVICE_KEY)), () => new StorageRefused({ message: "Device storage could not be read." }))
+  const refused = (message: string) => () => new StorageRefused({ message })
+
+  effect function finishReset() {
+    const now = try device.get()
+    if (!now.resetPending) return
+    if (now.owner !== "") try mapError(store.clearPrefix(ownerKey(now.owner, "")), refused("Reset could not be confirmed. Try again."))
+    try mapError(device.send({ type: "resetCleared" }), refused("Reset could not be confirmed. Try again."))
+  }
+
+  return {
+    changes: device.changes,
+    effect admitStartup() {
+      try finishReset()
+      if ((try device.get()).startupAdmitted) return
+      try mapError(device.send({ type: "admitStartup" }), refused("Startup is waiting for a reset."))
+    },
+    effect bindOwner(owner: string) {
+      if ((try device.get()).owner === owner) return
+      try mapError(device.send({ type: "bindOwner", owner }), refused("Storage is not ready for this account."))
+    },
+    effect signedOut() {
+      device.send({ type: "signedOut" }) catch () => undefined
+    },
+    effect hold(key: string): boolean {
+      const copy = heldKeyOf(key)
+      const earlier = store.get(copy) catch () => null
+      const value = store.get(key) catch () => null
+      if (earlier === null || value === null) return false
+      if (earlier === undefined && value !== undefined) {
+        const copied = store.set(copy, value) catch () => false
+        if (copied === false) return false
+      }
+      device.send({ type: "corruptFound", key }) catch () => undefined
+      return true
+    },
+    effect held(key: string): string | undefined {
+      const kept = store.get(heldKeyOf(key)) catch () => undefined
+      return kept
+    },
+    effect resolve(key: string) {
+      try mapError(store.remove(heldKeyOf(key)), refused("The kept copy could not be removed. Try again."))
+      device.send({ type: "reviewResolved", key }) catch () => undefined
+    },
+    effect reset() {
+      try mapError(device.send({ type: "requestReset" }), refused("Nothing to reset."))
+      try finishReset()
+    },
+  }
+})
+
+/**
+ * The machine `stored` keeps under `key`, unless what is stored there is not a state that `decode` reads: the value is then held for the
+ * owner's review and, once its copy is kept apart, removed, so the area starts fresh and saves its new drafts; where it cannot be kept
+ * apart, or the store cannot be read, the area runs on `fresh` in memory and the value is never written over.
+ */
+export function storedOrHeld<A, E, R>(key: string, decode: (input: unknown) => unknown!unknown, stored: Layer.Layer<A, E, R>, fresh: Layer.Layer<A>) {
+  return Layer.unwrap(effect {
+    const store = try KeyValueStore.KeyValueStore
+    const found = store.get(key) catch () => null
+    if (found === null) return fresh
+    const text = Option.isOption(found) ? Option.getOrUndefined(found) : found
+    if (typeof text !== "string") return stored
+    const valid = effect { try decode(try Effect.try(() => JSON.parse(text) as unknown)); return true } catch () => false
+    if (valid) return stored
+    const storage = try Effect.serviceOption(DeviceStorage)
+    if (Option.isNone(storage)) return fresh
+    if (!(try storage.value.hold(key))) return fresh
+    const cleared = effect { try store.remove(key); return true } catch () => false
+    return cleared ? stored : fresh
+  })
+}

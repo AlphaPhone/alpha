@@ -1,0 +1,132 @@
+// spec/clock/reminderTaps.md, "Story: Open the reminder I tapped"; spec/clock/reminderTaps.md, "Story: Ask about a reminder I tapped"; spec/clock/reminders.md, "A tapped reminder opens its exact occurrence, settled once by the newest refresh within thirty seconds"
+import { Native } from "../platform/native.vibe"
+import { assistantPeer, navigationPeer } from "./peers.vibe"
+import { Machine as TapsMachine } from "../../gen/clock__reminderTaps.effect.vibe"
+import { ReminderListing, ReminderTap, ReminderTarget, SurfaceInfo } from "./native.schema.vibe"
+import { DAILY, call, command } from "./plugins.vibe"
+import { Reminders } from "./reminders.vibe"
+
+type Target = typeof ReminderTarget.Type
+
+function sameTarget(a: Target | undefined, b: Target | undefined): boolean {
+  return a !== undefined && b !== undefined && a.sourceId === b.sourceId && a.sourceRevision === b.sourceRevision &&
+    a.reminderId === b.reminderId && a.occurrenceId === b.occurrenceId && a.revision === b.revision
+}
+
+/** The reviewed question the Ask action of a tapped reminder offers. */
+export interface ReminderQuestion {
+  readonly id: string
+  readonly title: string
+  readonly text: string
+}
+
+/** A tapped reminder notification: opened exactly, consumed only once its detail shows. */
+export service ReminderTaps {
+  /** Looks for a pending tap; an explicit check made during another runs once that ends. */
+  check(explicit: boolean): void!!
+  /** Any pointer, key, navigation or Back while a check runs. */
+  interact(): void!!
+  /** A hidden page, the connection chooser, a sensitive context or an open form holds checks back. */
+  setBlocked(blocked: boolean): void!!
+  /** The question the open review is about, while one is open. */
+  question(): (ReminderQuestion | undefined)!!
+  /** Closes the question review: a draft continues into the composer, none releases the tap. */
+  closeQuestion(draft: string | undefined): void!!
+  /** Dismisses the pending link the banner shows. */
+  dismissBanner(): void!!
+}
+
+/** Reminder taps over the store's tap custody, opening Reminders through the shell's navigator. */
+export const reminderTapsLayer = Layer.effect(ReminderTaps, effect {
+  const taps = try TapsMachine
+  const navigator = try navigationPeer()
+  const composer = try assistantPeer()
+  const asking = try Ref.make<(ReminderQuestion & { readonly token: string; readonly target: Target }) | undefined>(undefined)
+  const step = (event: Parameters<typeof taps.send>[0]) => taps.send(event) catch () => undefined
+
+  effect function pending() {
+    return call(DAILY, "pendingReminderTap", ReminderTap) catch () => undefined
+  }
+
+  effect function run() {
+    while ((try taps.get()).stage === "TapReading") {
+      const tap = try pending()
+      const read = step({ type: "pendingRead", token: tap?.token ?? "", retained: tap?.retained === true && tap.target !== undefined, question: tap?.question === true })
+      if (read?.stage !== "TapListing" || tap?.target === undefined) continue
+      const listed = call(DAILY, "listReminders", ReminderListing) catch () => undefined
+      const row = listed?.reminders.find((r) => sameTarget(r.target, tap.target))
+      if (step({ type: "targetListed", found: row !== undefined })?.stage !== "TapConfirming" || row === undefined) continue
+      const again = try pending()
+      const confirmed = step({ type: "confirmed", token: again?.token ?? "", retained: again?.retained === true && sameTarget(again.target, tap.target) })
+      if (confirmed?.stage !== "TapOpened") continue
+      try navigator.open("reminders", row.id)
+      const at = try navigator.shown()
+      const shown = step({ type: "detailShown", visible: at.app === "reminders" && at.route === row.id })
+      if (shown?.stage === "TapConsuming") {
+        const ok = (command(DAILY, "consumeReminderTap", { token: confirmed.captured }) catch () => false) !== false
+        step({ type: "consumeSettled", ok })
+      } else if (shown?.stage === "TapQuestion") {
+        try Ref.set(asking, { id: row.id, title: row.title, text: row.body, token: confirmed.captured, target: row.target })
+        return
+      }
+    }
+  }
+
+  return {
+    effect check(explicit: boolean) {
+      const info = call(DAILY, "surfaceInfo", SurfaceInfo) catch () => undefined
+      if (info?.reminderTapVersion !== 1) return
+      const before = try taps.get()
+      step({ type: "check", explicit })
+      if (before.stage === "TapIdle") try run()
+    },
+    interact: () => step({ type: "interact" }),
+    setBlocked: (blocked: boolean) => step({ type: "setBlocked", blocked }),
+    effect question() {
+      const open = try Ref.get(asking)
+      return open === undefined ? undefined : { id: open.id, title: open.title, text: open.text }
+    },
+    effect closeQuestion(draft: string | undefined) {
+      const open = try Ref.getAndSet(asking, undefined)
+      if (open === undefined) return
+      const again = try pending()
+      const listed = call(DAILY, "listReminders", ReminderListing) catch () => undefined
+      const unchanged = again?.token === open.token && again.question === true && sameTarget(again.target, open.target) &&
+        listed?.reminders.some((r) => sameTarget(r.target, open.target) && r.title === open.title && r.body === open.text) === true
+      const closed = step({ type: "questionClosed", compose: draft !== undefined && draft.trim() !== "", unchanged })
+      if (closed?.stage === "TapConsuming") {
+        const ok = (command(DAILY, "consumeReminderTap", { token: open.token }) catch () => false) !== false
+        step({ type: "consumeSettled", ok })
+        if (ok && draft !== undefined) try composer.draft(draft.trim())
+      } else {
+        command(DAILY, "releaseReminderQuestion", { token: open.token }) catch () => undefined
+      }
+      try run()
+    },
+    effect dismissBanner() {
+      const tap = try pending()
+      if (tap?.token === undefined) return
+      const dismissed = (command(DAILY, "dismissReminderTap", { token: tap.token }) catch () => false) !== false
+      if (dismissed) step({ type: "dismissBanner" })
+    },
+  }
+})
+
+/** Follows the store's tap, open and resume events for as long as the layer lives. Never returns. */
+export effect function followReminderEvents() {
+  const native = try Native
+  const taps = try ReminderTaps
+  const reminders = try Reminders
+  if (!(try native.available(DAILY))) return
+  const decoded = Schema.decodeUnknownEffect(Schema.Struct({ id: Schema.String, occurrenceId: Schema.optionalKey(Schema.NullOr(Schema.String)) }))
+  try.all [
+    effect { Stream.runForEach(native.listen(DAILY, "pendingReminderTap"), () => taps.check(true)) catch () => undefined },
+    effect { Stream.runForEach(native.listen(DAILY, "appResumed"), () => effect { try reminders.refresh(); try taps.check(false) }) catch () => undefined },
+    effect {
+      Stream.runForEach(native.listen(DAILY, "reminderOpened"), (raw) => effect {
+        const opened = decoded(raw) catch () => undefined
+        if (opened !== undefined) try reminders.openRequested(opened.id, opened.occurrenceId ?? "")
+      }) catch () => undefined
+    },
+  ]
+}

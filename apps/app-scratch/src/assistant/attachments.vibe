@@ -1,0 +1,144 @@
+// spec/assistant/attachments.md, "Story: Attach a photo or file to my message"; spec/assistant/attachments.md, "At most four attachments, each within its cap, and a batch within 19 MiB of base64"; spec/assistant/attachments.md, "A save that settles after the owner, conversation or generation changed keeps its slot and shows nothing here"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import {
+  Machine as CustodyMachine, type Event as CustodyEvent, accepted, batchFits, imageBase64Cap, maxAttachments, needsReencode, reencodeEdges, reencodeQualities, type Kind,
+} from "../../gen/assistant__attachments.effect.vibe"
+import { SavedAttachments } from "./payloads.schema.vibe"
+import { copy } from "./presentation.vibe"
+import type { ChatFile } from "./transcript.vibe"
+import { base64Of as encodeBlob, reencodeImage, thumbnailOf } from "./image-encode.ts"
+
+/** A file the owner picked, before it is read. */
+export interface Picked { readonly id: string; readonly name: string; readonly mimeType: string; readonly blob: Blob }
+
+/** A pick that does not fit, in Alpha's words. */
+export error AttachmentRefused { message: string }
+
+/** The composer's attachments and their custody until the message is recorded. */
+export service ChatAttachments {
+  readonly changes: Stream.Stream<readonly ChatFile[]>
+  /** The files waiting in the composer. */
+  pending(): readonly ChatFile[]!!
+  /** Add picked or handed-over files; at most four in all, each within its cap. */
+  add(picked: readonly Picked[]): readonly ChatFile[]!AttachmentRefused
+  /** Add files another area already read and encoded, such as Files › Ask Alpha or the file picker; at most four in all. */
+  addEncoded(encoded: readonly ChatFile[]): readonly ChatFile[]!AttachmentRefused
+  /** Remove one waiting file. */
+  remove(id: string): void!!
+  /** Save the waiting files beside a message before it is dispatched; false when storage refused. */
+  hold(slot: readonly string[], requestText: string): boolean!!
+  /** The message was recorded by the agent under its id: what was saved under the pending slot moves to the recorded one. */
+  recorded(pending: readonly string[], slot: readonly string[]): void!!
+  /** Nothing reached the agent: the files go back into the composer. */
+  restore(): void!!
+  /** The message settled; the composer is empty of files. */
+  clear(): void!!
+  /** The owner or agent changed, the conversation changed, or the history reloaded: waiting files are dropped. */
+  retire(reason: "owner" | "conversation" | "reload"): void!!
+  /** The files saved beside a recorded message. */
+  savedFor(slot: readonly string[]): readonly ChatFile[]!!
+}
+
+function kindOf(mimeType: string): Kind {
+  return mimeType.startsWith("image/") ? "ImageFile" : mimeType.startsWith("audio/") || mimeType.startsWith("video/") ? "MediaFile" : "DocumentFile"
+}
+
+const nativeImage = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
+
+function keyOf(slot: readonly string[]): string {
+  return `alpha/assistant/chat-attachment-v1/${encodeURIComponent(JSON.stringify(slot))}`
+}
+
+/** Chat attachments over the custody machine and the owner's key-value store. */
+export const attachmentsLayer = Layer.effect(ChatAttachments, effect {
+  const custody = try CustodyMachine
+  const store = try KeyValueStore.KeyValueStore
+  const files = try SubscriptionRef.make<readonly ChatFile[]>([])
+  let held: readonly ChatFile[] = []
+  const quiet = (event: CustodyEvent) => map(custody.send(event), () => true) catch () => false
+  effect function read(item: Picked) {
+    const kind = kindOf(item.mimeType)
+    if (!accepted(kind, item.blob.size, item.name.length)) throw new AttachmentRefused({ message: copy.attachmentTooLarge })
+    const data = needsReencode(kind, item.blob.size, nativeImage.has(item.mimeType))
+      ? try tryPromise({ try: () => reencodeImage(item.blob, reencodeEdges, reencodeQualities, imageBase64Cap), catch: () => new AttachmentRefused({ message: copy.attachmentTooLarge }) })
+      : try tryPromise({ try: () => encodeBlob(item.blob), catch: () => new AttachmentRefused({ message: copy.attachmentTooLarge }) })
+    if (data === undefined) throw new AttachmentRefused({ message: copy.attachmentTooLarge })
+    const thumbnail = kind === "ImageFile" && item.blob.size >= 98304 && item.mimeType !== "image/gif" && item.mimeType !== "image/svg+xml"
+      ? tryPromise(() => thumbnailOf(item.blob)) catch () => undefined
+      : undefined
+    const mimeType = needsReencode(kind, item.blob.size, nativeImage.has(item.mimeType)) ? "image/jpeg" : item.mimeType
+    return { id: item.id, name: item.name.slice(0, 255), mimeType, data, ...(thumbnail === undefined ? {} : { thumbnail }) } satisfies ChatFile
+  }
+  return {
+    changes: SubscriptionRef.changes(files),
+    pending: () => SubscriptionRef.get(files),
+    add: (picked: readonly Picked[]) => effect {
+      const current = try SubscriptionRef.get(files)
+      const fresh = picked.filter((item) => !current.some((file) => file.id === item.id))
+      if (current.length + fresh.length > maxAttachments) throw new AttachmentRefused({ message: copy.attachmentFull })
+      const read_: ChatFile[] = []
+      for (const item of fresh) read_.push(try read(item))
+      const all = [...current, ...read_]
+      if (!batchFits(all.length, all.reduce((total, file) => total + file.data.length, 0))) throw new AttachmentRefused({ message: copy.attachmentTooLarge })
+      try quiet({ type: "attach" })
+      try SubscriptionRef.set(files, all)
+      return all
+    },
+    addEncoded: (encoded: readonly ChatFile[]) => effect {
+      const current = try SubscriptionRef.get(files)
+      const fresh = encoded.filter((item) => !current.some((file) => file.id === item.id))
+      const all = [...current, ...fresh]
+      if (all.length > maxAttachments) throw new AttachmentRefused({ message: copy.attachmentFull })
+      if (fresh.some((file) => !accepted(kindOf(file.mimeType), Math.ceil(file.data.length / 4) * 3, file.name.length))) throw new AttachmentRefused({ message: copy.attachmentTooLarge })
+      if (!batchFits(all.length, all.reduce((total, file) => total + file.data.length, 0))) throw new AttachmentRefused({ message: copy.attachmentTooLarge })
+      try quiet({ type: "attach" })
+      try SubscriptionRef.set(files, all)
+      return all
+    },
+    remove: (id: string) => effect {
+      const left = (try SubscriptionRef.get(files)).filter((file) => file.id !== id)
+      try SubscriptionRef.set(files, left)
+      if (left.length === 0) try quiet({ type: "removeDraft" })
+    },
+    hold: (slot: readonly string[], requestText: string) => effect {
+      const current = try SubscriptionRef.get(files)
+      if (current.length === 0) return true
+      if (!(try quiet({ type: "prepareSend" }))) return false
+      const saved = Schema.encodeUnknownOption(SavedAttachments)({ requestText, files: current.map(({ id, name, mimeType, data }) => ({ id, name, mimeType, data })) })
+      const wrote = Option.isSome(saved) ? (map(store.set(keyOf(slot), JSON.stringify(saved.value)), () => true) catch () => false) : false
+      const written = wrote
+      try quiet({ type: "settleStorage", accepted: written })
+      if (written) {
+        held = current
+        try SubscriptionRef.set(files, [])
+      }
+      return written
+    },
+    recorded: (pending: readonly string[], slot: readonly string[]) => effect {
+      try quiet({ type: "confirmRecorded" })
+      if (held.length === 0) return
+      const raw = store.get(keyOf(pending)) catch () => undefined
+      if (raw !== undefined) store.set(keyOf(slot), raw) catch () => undefined
+    },
+    restore: () => effect {
+      if (try quiet({ type: "refusedBeforeDispatch" })) try SubscriptionRef.set(files, held)
+      held = []
+    },
+    clear: () => effect {
+      try quiet({ type: "finish" })
+      held = []
+    },
+    retire: (reason: "owner" | "conversation" | "reload") => effect {
+      try quiet(reason === "owner" ? { type: "switchOwner" } : reason === "conversation" ? { type: "switchConversation" } : { type: "reload" })
+      held = []
+      try SubscriptionRef.set(files, [])
+    },
+    savedFor: (slot: readonly string[]) => effect {
+      const raw = store.get(keyOf(slot)) catch () => undefined
+      if (raw === undefined) return []
+      const parsed = Effect.try(() => JSON.parse(raw) as unknown) catch () => undefined
+      const decoded = Schema.decodeUnknownOption(SavedAttachments)(parsed)
+      return Option.isSome(decoded) ? decoded.value.files : []
+    },
+  }
+})

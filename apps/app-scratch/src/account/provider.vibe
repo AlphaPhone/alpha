@@ -1,0 +1,216 @@
+// spec/account/provider.md, "Story: Use my own keys instead of Cloud"; spec/account/signIn.md, "Saving own keys ends a readiness check without starting anything, and ends the entry"
+import {
+  type ChangeOutcome, type KeyName, type Provider, type ProviderEffect, type Route,
+  Machine as ProviderMachine, machine as providerMachine
+} from "../../gen/account__provider.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { ownKeysInUse, providerStatus } from "./inference.vibe"
+import { ProviderLease, ProviderStatus, Revealed } from "./provider.schema.vibe"
+import { CloudSession } from "./session.vibe"
+import { AccountSheet } from "./sheet.vibe"
+import { SignInScreen } from "./signIn.vibe"
+
+const agent = "Agent"
+
+/** The model own keys answer with on Cerebras. */
+export const ownModel = "qwen-3.8-27b"
+
+const keyWire = { TextKey: "text", VoiceKey: "voice" } as const satisfies Record<KeyName, string>
+
+/** Whether a typed key has a key's shape: 8 to 1,024 printable characters, no spaces. */
+export function keyShaped(value: string): boolean {
+  return value.length >= 8 && value.length <= 1024 && /^[\x21-\x7e]+$/.test(value)
+}
+
+/** The route a provider status reports, as the form reads it. */
+export function readOf(status: ProviderStatus | undefined) {
+  const keys = status?.keys
+  return {
+    ok: status !== undefined && keys !== undefined && status.revision !== undefined,
+    route: (ownKeysInUse(status) ? "OwnRoute" : "CloudRoute") as Route,
+    textKey: keys?.text.configured === true,
+    voiceKey: keys?.voice.configured === true
+  }
+}
+
+/** How a change's answer reads: confirmed only when the host reports exactly the expected result, lost when no answer came. */
+export function changeOutcomeOf(answer: ProviderStatus | undefined, failed: boolean, matches: (status: ProviderStatus) => boolean): ChangeOutcome {
+  if (failed || answer === undefined) return "ChangeLost"
+  return matches(answer) ? "ChangeConfirmed" : "ChangeDenied"
+}
+
+/** The AI provider: Cloud through the plan, or the owner's own keys held by the native host. */
+export service AiProvider {
+  readonly changes: Stream.Stream<Provider>
+  current(): Provider!!
+  /** Read the host's provider and follow the session; runs for the app's life. */
+  run(): void!!
+  refresh(): void!!
+  /** Save own keys; both go straight to the native host and are never kept here. An empty voice key leaves it unchanged. */
+  save(textKey: string, voiceKey: string): void!!
+  choose(route: Route): void!!
+  askRemove(key: KeyName): void!!
+  cancelRemove(): void!!
+  confirmRemove(): void!!
+  /** Show a saved key in the host's secure dialog. */
+  reveal(key: KeyName): void!!
+  /** The form closed: a sign-in page that sent the owner here returns; whether one did. */
+  leave(): boolean!!
+}
+
+/** The provider service over its in-memory machine. */
+export const providerService = Layer.effect(AiProvider, effect {
+  const machine = try ProviderMachine
+  const native = try Native
+  const session = try CloudSession
+  const signIn = try SignInScreen
+  const sheet = try AccountSheet
+  const revision = try Ref.make("")
+  const typed = try Ref.make({ textKey: "", voiceKey: "" })
+  const revealing = try Ref.make<KeyName>("TextKey")
+
+  effect function send(event: Parameters<typeof machine.send>[0]) {
+    const step = machine.send(event) catch () => undefined
+    if (step !== undefined && "out" in step) try perform(step.out)
+    return step !== undefined
+  }
+
+  effect function leased(method: string, args: Record<string, unknown>) {
+    const lease = try Schema.decodeUnknownEffect(ProviderLease)(try native.invoke(agent, "prepareProviderConfiguration"))
+    const answer = native.invoke(agent, method, { ...args, requestId: lease.requestId }) catch effect (error) => {
+      native.invoke(agent, "cancelProviderConfiguration", { requestId: lease.requestId }) catch () => undefined
+      throw error
+    }
+    return answer
+  }
+
+  effect function change(method: string, args: Record<string, unknown>) {
+    const answer = effect {
+      return { status: try Schema.decodeUnknownEffect(ProviderStatus)(try leased(method, { ...args, expectedRevision: try Ref.get(revision) })), failed: false }
+    } catch () => ({ status: undefined, failed: true })
+    if (answer.status?.revision !== undefined) try Ref.set(revision, answer.status.revision)
+    return answer
+  }
+
+  effect function follow() {
+    const p = try machine.get()
+    const s = try signIn.current()
+    if (p.known && p.route === "OwnRoute" && s.work === "SavingOwnKeys") try signIn.ownKeys(false, true)
+    else if (p.route === "OwnRoute" && !s.ownKeys) try signIn.useOwnKeys(true)
+    if (p.route === "CloudRoute" && s.ownKeys) try signIn.useOwnKeys(false)
+    const mode = p.route === "OwnRoute" ? "DirectMode" : "CloudMode"
+    if ((try sheet.current()).mode !== mode) try sheet.switchMode(mode)
+  }
+
+  effect function readBack() {
+    const status = providerStatus(native) catch () => undefined
+    if (status?.revision !== undefined) try Ref.set(revision, status.revision)
+    const read = readOf(status)
+    try send({ type: "readSettled", ok: read.ok, route: read.route, textKey: read.textKey, voiceKey: read.voiceKey })
+    try follow()
+  }
+
+  effect function saveKeys() {
+    const keys = try Ref.get(typed)
+    try Ref.set(typed, { textKey: "", voiceKey: "" })
+    const answer = effect {
+      return try Schema.decodeUnknownEffect(ProviderStatus)(try leased("configureProvider", {
+        apiKey: keys.textKey, model: ownModel, ...(keys.voiceKey === "" ? {} : { cartesiaKey: keys.voiceKey })
+      }))
+    } catch () => undefined
+    if (answer?.revision !== undefined) try Ref.set(revision, answer.revision)
+    const accepted = answer !== undefined && answer.keys?.text.configured === true
+    try send({ type: "saveSettled", accepted, voice: keys.voiceKey !== "" && answer?.keys?.voice.configured === true })
+    if (accepted && (try signIn.current()).work === "SavingOwnKeys") try signIn.ownKeys(false, true)
+    try follow()
+  }
+
+  effect function selectRoute() {
+    const before = try machine.get()
+    const mode = before.target === "OwnRoute" ? "own" : "cloud"
+    const answer = try change("selectProvider", { mode })
+    const outcome = changeOutcomeOf(answer.status, answer.failed, (status) => {
+      const read = readOf(status)
+      return read.route === before.target && read.textKey === before.textKey && read.voiceKey === before.voiceKey
+    })
+    try send({ type: "routeSettled", result: outcome })
+    try follow()
+  }
+
+  effect function removeKey() {
+    const before = try machine.get()
+    const answer = try change("removeProviderKey", { key: keyWire[before.removing] })
+    const outcome = changeOutcomeOf(answer.status, answer.failed, (status) => {
+      const read = readOf(status)
+      return before.removing === "TextKey" ? !read.textKey && read.voiceKey === before.voiceKey : !read.voiceKey && read.textKey === before.textKey
+    })
+    try send({ type: "removeSettled", result: outcome })
+    try follow()
+  }
+
+  effect function revealKey() {
+    const key = try Ref.get(revealing)
+    const expectedRevision = try Ref.get(revision)
+    Effect.flatMap(leased("revealProviderKey", { key: keyWire[key], expectedRevision }), Schema.decodeUnknownEffect(Revealed)) catch () => undefined
+    try send({ type: "revealEnds" })
+  }
+
+  effect function perform(out: ReadonlyArray<ProviderEffect>): void!! {
+    for (const effectOf of out) {
+      match (effectOf) {
+        when "ReadProvider": try readBack();
+        when "SaveKeys": try saveKeys();
+        when "SelectRoute": try selectRoute();
+        when "RemoveKey": try removeKey();
+        when "RevealKey": try revealKey();
+        when "OpenSignIn": try signIn.open();
+      }
+    }
+  }
+
+  effect function followSession() {
+    for try (const s of session.changes) {
+      const usable = s.phase === "SignedIn" || s.phase === "ActivationPending"
+      if (usable !== (try machine.get()).signedIn) try send({ type: "sessionSeen", signedIn: usable })
+    }
+  }
+
+  return {
+    changes: machine.changes,
+    current: () => machine.get(),
+    effect run() {
+      try send({ type: "read" })
+      try followSession()
+    },
+    effect refresh() { try send({ type: "read" }) },
+    effect save(textKey: string, voiceKey: string) {
+      const text = textKey.trim()
+      const voice = voiceKey.trim()
+      if (!keyShaped(text) || (voice !== "" && !keyShaped(voice))) return
+      try Ref.set(typed, { textKey: text, voiceKey: voice })
+      if (!(try send({ type: "save" }))) try Ref.set(typed, { textKey: "", voiceKey: "" })
+    },
+    effect choose(route: Route) {
+      const p = try machine.get()
+      try send({ type: "chooseRoute", route, expected: p.revision })
+    },
+    effect askRemove(key: KeyName) { try send({ type: "askRemove", key }) },
+    effect cancelRemove() { try send({ type: "cancelRemove" }) },
+    effect confirmRemove() {
+      const p = try machine.get()
+      try send({ type: "confirmRemove", expected: p.revision })
+    },
+    effect reveal(key: KeyName) {
+      try Ref.set(revealing, key)
+      try send({ type: "reveal", key })
+    },
+    effect leave() {
+      if ((try signIn.current()).work !== "SavingOwnKeys") return false
+      try signIn.ownKeys(false, false)
+      return true
+    }
+  }
+})
+
+/** The provider service with its machine in memory: the host's own status is read again at every start. */
+export const providerLayer = Layer.provideMerge(providerService, providerMachine())

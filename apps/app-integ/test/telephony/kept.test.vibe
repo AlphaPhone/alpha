@@ -1,0 +1,214 @@
+// spec/telephony/drafts.md, "A slot holds at most five JPEG, PNG or GIF pictures within the MMS size, and only the owner attaches them"; spec/telephony/drafts.md, "What I wrote signed out becomes the account's that signs in, only where that account kept nothing"; spec/telephony/comms.md, "A proposal restored from the phone's own store is shown, never approved, until Alpha proposes it again"; spec/telephony/actions.md, "An unconfirmed text is settled only by the phone's own send record for its operation ID"; spec/telephony/actions.md, "An action starts once per operation ID, and a number the owner did not write is refused"; spec/telephony/phoneInfo.md, "Story: See my SIM, carrier and number on the image"
+import { assert, it } from "@effect/vitest"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { Machine as CommsMachine } from "../../gen/telephony__comms.effect.vibe"
+import { Machine as DraftsMachine, slotOf } from "../../gen/telephony__drafts.effect.vibe"
+import { Machine as FactsMachine } from "../../gen/telephony__phoneInfo.effect.vibe"
+import { CloudSession } from "../../src/account/layer.vibe"
+import { memoryStore } from "../../src/platform/storage.vibe"
+import { grounded, sendRecordOf, TelephonyActions } from "../../src/telephony/actions.vibe"
+import { CommsStage } from "../../src/telephony/comms.vibe"
+import { commsKept, draftsKept } from "../../src/telephony/layer.vibe"
+import { PhoneInfoView } from "../../src/telephony/phone-info.vibe"
+import { messagesShareTarget } from "../../src/telephony/share.vibe"
+import { fakePhone, until } from "./fakes.vibe"
+
+const quiet = <A, E>(program: A!E) => program catch () => "Rejected" as const
+
+/** A Cloud session that starts signed out and signs in when `signIn` runs. */
+function session() {
+  let signedIn = false
+  const layer = Layer.succeed(CloudSession, {
+    changes: Stream.never,
+    owner: () => sync(() => (signedIn ? 4 : 0)),
+    ownerKey: (key: string) => sync(() => (signedIn ? `alpha/u1.o1/${key}` : `alpha/device/${key}`)),
+  } as unknown as CloudSession.Shape)
+  return { layer, signIn: () => { signedIn = true } }
+}
+
+it.effect("Keep what I wrote before signing in (spec/telephony/drafts.md, \"What I wrote signed out becomes the account's that signs in, only where that account kept nothing\")", () => effect {
+  const owner = session()
+  provide memoryStore {
+    const store = try KeyValueStore.KeyValueStore
+    const kept = Layer.provide(draftsKept, Layer.merge(Layer.succeed(KeyValueStore.KeyValueStore, store), owner.layer))
+    const adopted = try Effect.provide(effect {
+      const drafts = try DraftsMachine
+      try drafts.send({ type: "ownerTyped", thread: "thread:1", recipients: ["4155550100"], text: "Running late" }, "Owner")
+      try sync(owner.signIn)
+      return slotOf((try drafts.get()).slots, "thread:1").text
+    }, kept)
+    const deviceLeft = try store.get("alpha/device/telephony/drafts")
+    const accountHas = (try store.get("alpha/u1.o1/telephony/drafts")) !== undefined
+    try Effect.try(() => assert.deepStrictEqual({ adopted, deviceLeft, accountHas }, { adopted: "Running late", deviceLeft: undefined, accountHas: true }))
+  }
+})
+
+it.effect("An account's own drafts are never replaced by what was written signed out (spec/telephony/drafts.md, \"What I wrote signed out becomes the account's that signs in, only where that account kept nothing\")", () => effect {
+  const owner = session()
+  provide memoryStore {
+    const store = try KeyValueStore.KeyValueStore
+    const kept = Layer.provide(draftsKept, Layer.merge(Layer.succeed(KeyValueStore.KeyValueStore, store), owner.layer))
+    try sync(owner.signIn)
+    try Effect.provide(effect {
+      try (try DraftsMachine).send({ type: "ownerTyped", thread: "thread:1", recipients: ["4155550100"], text: "Mine" }, "Owner")
+    }, kept)
+    try store.set("alpha/device/telephony/drafts", JSON.stringify({ slots: [], requests: [{ subject: "contacts:contact:7", request: "Signed out" }], ownerSends: 0 }))
+    const kept2 = Layer.provide(draftsKept, Layer.merge(Layer.succeed(KeyValueStore.KeyValueStore, store), owner.layer))
+    const text = try Effect.provide(effect { return slotOf((try (try DraftsMachine).get()).slots, "thread:1").text }, kept2)
+    const deviceLeft = (try store.get("alpha/device/telephony/drafts")) !== undefined
+    try Effect.try(() => assert.deepStrictEqual({ text, deviceLeft }, { text: "Mine", deviceLeft: true }))
+  }
+})
+
+it.effect("See what Alpha proposed after a restart, without it ever running from there (spec/telephony/comms.md, \"A proposal restored from the phone's own store is shown, never approved, until Alpha proposes it again\")", () => effect {
+  const owner = session()
+  try sync(owner.signIn)
+  provide memoryStore {
+    const store = try KeyValueStore.KeyValueStore
+    const kept = () => Layer.provide(commsKept, Layer.merge(Layer.succeed(KeyValueStore.KeyValueStore, store), owner.layer))
+    const before = try Effect.provide(effect {
+      const comms = try CommsMachine
+      try comms.send({ type: "proposed", proposalId: "p1", kind: "CallProposal", acts: true, ring: "" }, "Alpha")
+      return try comms.get()
+    }, kept())
+    const after = try Effect.provide(effect {
+      const comms = try CommsMachine
+      const restored = try comms.get()
+      const approved = try quiet(comms.send({ type: "proposalApproved", proposalId: "p1" }, "Owner"))
+      const again = try comms.send({ type: "proposed", proposalId: "p1", kind: "CallProposal", acts: true, ring: "" }, "Alpha")
+      const approvedLive = try comms.send({ type: "proposalApproved", proposalId: "p1" }, "Owner")
+      return { restored, approved, again, approvedLive }
+    }, kept())
+    try Effect.try(() => assert.deepStrictEqual(
+      {
+        live: before.proposal.tag === "Proposed" && before.proposal.live,
+        restored: after.restored.proposal.tag === "Proposed" && !after.restored.proposal.live,
+        approved: after.approved,
+        again: after.again.proposal.tag === "Proposed" && after.again.proposal.live,
+        past: after.again.past.length,
+        approvedLive: after.approvedLive.approved,
+      },
+      { live: true, restored: true, approved: "Rejected", again: true, past: 0, approvedLive: 1 },
+    ))
+  }
+})
+
+it.live("Keep the open card's words only to redraw it, and drop them when it is answered (spec/assistant/approvals.md, \"A card restored from the phone's own store is shown but never executed\")", () => effect {
+  const fake = fakePhone()
+  provide fake.layer {
+    const stage = try CommsStage
+    const store = try KeyValueStore.KeyValueStore
+    const proposed = try stage.propose("p1", "CallProposal", true, "", { text: "Call Maya back?", title: "Call Maya Chen", detail: "(415) 555-0100" })
+    const open = try stage.openCard()
+    const keptRaw = (try store.get("alpha/1/telephony/alpha-proposal:v1")) ?? "null"
+    const kept = try Effect.try(() => JSON.parse(keptRaw) as unknown)
+    const declined = try stage.decline("p1")
+    const gone = try stage.openCard()
+    const clearedRaw = (try store.get("alpha/1/telephony/alpha-proposal:v1")) ?? "null"
+    const cleared = try Effect.try(() => JSON.parse(clearedRaw) as unknown)
+    try Effect.try(() => assert.deepStrictEqual(
+      { proposed, open, kept, declined, gone, cleared, ran: fake.calls.filter((c) => c === "placeCall" || c === "dial") },
+      {
+        proposed: true,
+        open: { proposalId: "p1", live: true, words: { text: "Call Maya back?", title: "Call Maya Chen", detail: "(415) 555-0100" } },
+        kept: { v: 1, briefed: null, open: { text: "Call Maya back?", title: "Call Maya Chen", detail: "(415) 555-0100" } },
+        declined: true, gone: null, cleared: { v: 1, briefed: null, open: null }, ran: [],
+      },
+    ))
+  }
+})
+
+it.live("Settle a lost text from the phone's own send record, never by sending again (spec/telephony/actions.md, \"An unconfirmed text is settled only by the phone's own send record for its operation ID\")", () => effect {
+  const fake = fakePhone()
+  provide fake.layer {
+    const actions = try TelephonyActions
+    const op = { type: "sms_send", recipients: ["4155550100"], body: "On my way", subscriptionId: 7 }
+    const lost = try actions.run(op, "op-rb1", { text: "text 415-555-0100 on my way" })
+    const unknown = try actions.readBack(op, "op-rb1")
+    try sync(() => { fake.world.smsHistory = [{ operationId: "op-other", status: "sent" }, { operationId: "op-rb1", status: "unknown" }] })
+    const stillUnknown = try actions.readBack(op, "op-rb1")
+    try sync(() => { fake.world.smsHistory = [{ operationId: "op-rb1", status: "delivered" }] })
+    const found = try actions.readBack(op, "op-rb1")
+    try sync(() => { fake.world.smsHistory = [{ operationId: "op-rb1", status: "failed" }] })
+    const notSent = try actions.readBack(op, "op-rb1")
+    const call = try actions.readBack({ type: "phone_call", target: { kind: "number", number: "4155550100" } }, "op-rb2")
+    try Effect.try(() => assert.deepStrictEqual(
+      {
+        lost: lost.settled, unknown, stillUnknown, found: found?.settled, notSent: notSent?.settled, call, sentOnce: fake.sent(),
+        records: [sendRecordOf(undefined), sendRecordOf("submitted"), sendRecordOf("denied"), sendRecordOf("unknown")],
+      },
+      {
+        lost: "Unconfirmed", unknown: undefined, stillUnknown: undefined, found: "Applied", notSent: "NotDone", call: undefined, sentOnce: 1,
+        records: ["NoRecord", "RecordTaken", "RecordNotSent", "RecordUnknown"],
+      },
+    ))
+  }
+})
+
+it.live("A number only in the text's body grounds nothing (spec/telephony/actions.md, \"An action starts once per operation ID, and a number the owner did not write is refused\")", () => effect {
+  const fake = fakePhone()
+  provide fake.layer {
+    const actions = try TelephonyActions
+    const fromBody = try actions.run({ type: "sms_send", recipients: ["4155550199"], body: "call me at 415-555-0199", subscriptionId: 7 }, "op-g1", { text: "text mom saying call me at 415-555-0199" })
+    try Effect.try(() => assert.deepStrictEqual(
+      {
+        fromBody: fromBody.settled, sent: fake.sent(),
+        repeated: grounded("text 415-555-0100 saying my number is 415-555-0100", { kind: "number", number: "4155550100" }, "my number is 415-555-0100"),
+        contact: grounded("text Sam at 415-555-0100 saying hi", { kind: "contact", query: "Sam" }, "hi"),
+      },
+      { fromBody: "Refused", sent: 0, repeated: true, contact: true },
+    ))
+  }
+})
+
+it.live("See my SIM, carrier and number, read while the page is open and forgotten when I leave (spec/telephony/phoneInfo.md, \"Story: See my SIM, carrier and number on the image\")", () => effect {
+  const fake = fakePhone()
+  try sync(() => {
+    fake.world.phoneState = false
+    fake.world.carrier = "CarrierReady"
+  })
+  provide fake.layer {
+    const view = try PhoneInfoView
+    const facts = try FactsMachine
+    const visit = fork view.visit()
+    // spec/telephony/phoneInfo.md, "Without phone-state access the SIM list reads as unread, never as no SIM"
+    const unread = try until(facts.changes, (f) => f.phase === "InfoShown")
+    try view.allow()
+    const read = try facts.get()
+    // spec/telephony/phoneInfo.md, "An identifier the launcher cannot read is shown on Android's own status screen"
+    const opened = try view.openStatus("about")
+    // spec/telephony/phoneInfo.md, "The page reads only while it is in front, and leaving forgets what it read"
+    try fake.setFront({ locked: true })
+    const locked = try until(facts.changes, (f) => !f.shown)
+    try Fiber.interrupt(visit)
+    try Effect.try(() => assert.deepStrictEqual(
+      {
+        unread: Option.map(unread, (f) => [f.phoneState, f.lines.length]),
+        read: [read.phase, read.phoneState, read.lines.map((l) => [l.carrier, l.simName, l.number, l.network, l.signal]), read.holders.phoneAlpha, read.voicemail],
+        opened, settings: fake.calls.filter((c) => c.startsWith("ElizaSystem.openSettingsPage")),
+        locked: Option.map(locked, (f) => [f.phase, f.lines.length]),
+      },
+      {
+        unread: Option.some([false, 0]),
+        read: ["InfoShown", true, [["Carrier", "Personal", "+14155550100", "Network5g", 3]], true, "VoicemailOn"],
+        opened: true, settings: ["ElizaSystem.openSettingsPage:about"],
+        locked: Option.some(["InfoClosed", 0]),
+      },
+    ))
+  }
+})
+
+it.live("A picture shared from Files starts a new message only where this phone can send pictures now (spec/telephony/drafts.md, \"A slot holds at most five JPEG, PNG or GIF pictures within the MMS size, and only the owner attaches them\")", () => effect {
+  const fake = fakePhone()
+  provide fake.layer {
+    const target = try messagesShareTarget
+    const bytes = { name: "p.png", mimeType: "image/png", dataBase64: "iVBORw0KGgo=", sha256: "a".repeat(64), size: 8 }
+    const file = { name: "p.png", mimeType: "image/png", size: 8, read: succeed(bytes) }
+    const taken = try target.message(file)
+    const slot = slotOf((try (try DraftsMachine).get()).slots, "new")
+    try Effect.try(() => assert.deepStrictEqual(
+      { listed: target.messages, taken, pictures: slot.pictures.length, sent: fake.sent() },
+      { listed: true, taken: true, pictures: 1, sent: 0 },
+    ))
+  }
+})

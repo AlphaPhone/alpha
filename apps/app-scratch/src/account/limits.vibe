@@ -1,0 +1,98 @@
+// spec/account/limits.md, "Story: Know when I can use a limited service again"; spec/account/limits.md, "A wait is between one second and one day, or there is none"; spec/account/limits.md, "A refusal names a plan, an allowance or a wait, and a limit is shown only until it passes"; spec/account/limits.md, "Semantic end-of-turn has a daily quota, after which only a subscription continues"
+import { type ClefStanding, type PlanCard, type ServiceLimit, boundedReset, boundedWait, clefContinues, limitShown, planCardFor } from "../../gen/account__limits.effect.vibe"
+import type { CloudUnavailable } from "../platform/cloud.vibe"
+
+/** The retry facts of a Cloud refusal: a short limit code, a bounded wait and a bounded reset, never its text. */
+export interface LimitFacts {
+  readonly retryAfterSeconds?: number
+  readonly limitCode?: string
+  readonly resetAt?: number
+}
+
+const httpDate = /^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/
+const isoInstant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/
+const limitCode = /^[a-z][a-z0-9_]{0,39}$/
+
+function row(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+}
+
+function instant(value: unknown): number | undefined {
+  if (typeof value !== "string" || value.length > 64 || !isoInstant.test(value.trim())) return undefined
+  const at = Date.parse(value.trim())
+  return Number.isFinite(at) ? at : undefined
+}
+
+function waitOf(seconds: number): number | undefined {
+  if (!Number.isFinite(seconds)) return undefined
+  const bounded = boundedWait(Math.ceil(seconds))
+  return bounded === 0 ? undefined : bounded
+}
+
+/** Reads a 429's `Retry-After` header and JSON body: the body's wait first, then the header, then `retryAt`. */
+export function readLimit(retryAfter: string | null | undefined, body: unknown, now: number): LimitFacts {
+  const top = row(body)
+  const source = row(top?.error) ?? top
+  let wait = typeof source?.retryAfterSeconds === "number" ? waitOf(source.retryAfterSeconds) : undefined
+  const header = typeof retryAfter === "string" ? retryAfter.trim() : ""
+  if (wait === undefined && /^\d{1,9}$/.test(header)) wait = waitOf(Number(header))
+  if (wait === undefined && httpDate.test(header)) {
+    const at = Date.parse(header)
+    if (Number.isFinite(at) && at > now) wait = waitOf((at - now) / 1000)
+  }
+  if (wait === undefined) {
+    const at = instant(source?.retryAt)
+    if (at !== undefined && at > now) wait = waitOf((at - now) / 1000)
+  }
+  const reset = instant(source?.resetAt)
+  const resetAt = reset === undefined ? 0 : boundedReset(reset, now)
+  return {
+    ...(wait === undefined ? {} : { retryAfterSeconds: wait }),
+    ...(typeof source?.code === "string" && limitCode.test(source.code) ? { limitCode: source.code } : {}),
+    ...(resetAt === 0 ? {} : { resetAt })
+  }
+}
+
+/** The facts a native voice rejection (`voice-http-429`) carries, validated again. */
+export function limitOfError(error: unknown): LimitFacts | undefined {
+  const rejection = row(error)
+  if (rejection?.code !== "voice-http-429") return undefined
+  const data = row(rejection.data) ?? {}
+  const seconds = data.retryAfterSeconds
+  return {
+    ...(typeof seconds === "number" && Number.isSafeInteger(seconds) && boundedWait(seconds) === seconds && seconds >= 1 ? { retryAfterSeconds: seconds } : {}),
+    ...(typeof data.limitCode === "string" && limitCode.test(data.limitCode) ? { limitCode: data.limitCode } : {}),
+    ...(typeof data.resetAt === "number" && Number.isSafeInteger(data.resetAt) && data.resetAt > 0 ? { resetAt: data.resetAt } : {})
+  }
+}
+
+/** The service limit a refusal's facts name. */
+export function limitOf(facts: LimitFacts, now: number): ServiceLimit {
+  if (facts.limitCode === "subscription_required") return { tag: "SubscriptionRequired" }
+  if (facts.limitCode === "billing_refused" || facts.limitCode === "insufficient_credits") return { tag: "BillingRefused" }
+  if (facts.limitCode === "allowance_exhausted" && facts.resetAt !== undefined) return { tag: "AllowanceExhausted", resetsAt: facts.resetAt }
+  if (facts.retryAfterSeconds !== undefined) return { tag: "RateLimited", retryAt: now + facts.retryAfterSeconds * 1000 }
+  return { tag: "NoLimit" }
+}
+
+/** The limit facts of a Cloud refusal as the platform carries it: its code where it is a limit code, its wait bounded to a day and its reset bounded to 400 days ahead. */
+export function limitOfRefusal(error: CloudUnavailable, now: number): LimitFacts {
+  const wait = typeof error.retryAfter === "number" ? waitOf(error.retryAfter) : undefined
+  const reset = typeof error.resetAt === "number" && Number.isSafeInteger(error.resetAt) ? boundedReset(error.resetAt, now) : 0
+  return {
+    ...(wait === undefined ? {} : { retryAfterSeconds: wait }),
+    ...(typeof error.code === "string" && limitCode.test(error.code) ? { limitCode: error.code } : {}),
+    ...(reset === 0 ? {} : { resetAt: reset })
+  }
+}
+
+/** What a refusal's facts show now: the limit they name, whether it is still shown, and the plan card it offers. */
+export function limitDisplay(facts: LimitFacts, now: number): { readonly limit: ServiceLimit; readonly shown: boolean; readonly card: PlanCard } {
+  const limit = limitOf(facts, now)
+  return { limit, shown: limitShown(limit, now), card: planCardFor(limit) }
+}
+
+/** Whether Clef end-of-turn continues for this standing and today's count. */
+export function clefAllows(standing: ClefStanding, usedToday: number): boolean {
+  return clefContinues(standing, usedToday)
+}

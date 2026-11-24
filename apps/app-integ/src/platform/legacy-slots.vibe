@@ -1,0 +1,59 @@
+// spec/platform/storage.md, "Story: Keep what the earlier Alpha kept in its encrypted slots"; spec/platform/storage.md, "A legacy slot is cleared only once the secure store holds a value for it"
+import { adoptionOf, legacyCleared, type SlotAdoption } from "../../gen/platform__storage.effect.vibe"
+import { Native, NativeFailed, NativeUnavailable } from "./native.vibe"
+import { LegacySlotExchange, LegacySlotRead, SecureSlotExchange, SecureSlotRead } from "./native.schema.vibe"
+
+const LEGACY = "AlphaConnection"
+const SECURE = "ElizaSecureStore"
+
+type Read = { readonly kind: "read"; readonly value: string | undefined } | { readonly kind: "absent" } | { readonly kind: "failed" }
+
+/**
+ * Moves what the earlier Alpha kept in its `AlphaConnection` slot `legacySlot` into the `ElizaSecureStore` slot `slot`: copied only
+ * where `slot` is still empty, the legacy slot cleared only once `slot` holds a value, and a newer value saved there never written over.
+ * An area calls it before it first reads `slot`; what could not be moved stays, to be moved on a later call.
+ */
+export effect function adoptLegacySlot(legacySlot: string, slot: string): SlotAdoption!!Native {
+  const native = try Native
+  if (!(try native.available(LEGACY)) || !(try native.available(SECURE))) return "NothingToAdopt"
+
+  effect function read(plugin: string, method: string, args: unknown, decode: (raw: unknown) => { readonly value?: string | null }!unknown): Read!! {
+    const raw = native.invoke(plugin, method, args) catch (error) => error
+    if (raw instanceof NativeUnavailable) return { kind: "absent" }
+    if (raw instanceof NativeFailed) return { kind: "failed" }
+    const said = decode(raw) catch () => undefined
+    if (said === undefined) return { kind: "failed" }
+    return { kind: "read", value: typeof said.value === "string" ? said.value : undefined }
+  }
+
+  const legacy = try read(LEGACY, "secureRead", { slot: legacySlot }, Schema.decodeUnknownEffect(LegacySlotRead))
+  if (legacy.kind === "absent") return "NothingToAdopt"
+  if (legacy.kind === "failed") return "NotAdopted"
+  const kept = legacy.value
+  if (kept === undefined) return adoptionOf(false, false, false)
+
+  const current = try read(SECURE, "get", { key: slot }, Schema.decodeUnknownEffect(SecureSlotRead))
+  if (current.kind !== "read") return "NotAdopted"
+  let held = current.value !== undefined
+  let copied = false
+  if (!held) {
+    const answer = Effect.flatMap(native.invoke(SECURE, "compareAndExchange", { key: slot, expected: null, value: kept }), Schema.decodeUnknownEffect(SecureSlotExchange)) catch () => undefined
+    if (answer !== undefined) {
+      copied = answer.exchanged
+      held = !answer.exchanged
+    }
+  }
+
+  const outcome = adoptionOf(true, held, copied)
+  if (legacyCleared(outcome)) {
+    Effect.flatMap(native.invoke(LEGACY, "secureCompareExchange", { slot: legacySlot, expectedValue: kept, value: null }), Schema.decodeUnknownEffect(LegacySlotExchange)) catch () => undefined
+  }
+  return outcome
+}
+
+/** Moves every pair of `[legacySlot, slot]` as `adoptLegacySlot` does, one after another, answering each outcome in order. */
+export effect function adoptLegacySlots(pairs: ReadonlyArray<readonly [string, string]>): readonly SlotAdoption[]!!Native {
+  const outcomes: SlotAdoption[] = []
+  for (const [legacySlot, slot] of pairs) outcomes.push(try adoptLegacySlot(legacySlot, slot))
+  return outcomes
+}

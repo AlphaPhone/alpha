@@ -1,0 +1,123 @@
+// spec/files/trash.md, "Story: See what is in Trash and how long it stays"; spec/files/trash.md, "Story: Restore or delete several Trash items together"; spec/files/storage.md, "Story: Get my trashed files back for 30 days"; spec/files/mutations.md, "Story: Trust each row's own receipt"
+import { assert, it } from "@effect/vitest"
+import { trashDaysLeft } from "../../gen/files__storage.ts"
+import { showsEmptyTrash } from "../../gen/files__trash.ts"
+import { Machine as TrashMachine } from "../../gen/files__trash.effect.vibe"
+import { FilesBrowser } from "../../src/files/browser.vibe"
+import { FilesChanges } from "../../src/files/changes.vibe"
+import { rowKey } from "../../src/files/paths.vibe"
+import { device, files, granted, noNative, until } from "./harness.vibe"
+
+effect function trashState() {
+  const trash = try TrashMachine
+  return try trash.get()
+}
+
+it.live("Trash lists what was moved there with 30 days left, and says it is empty only after reading all of it (spec/files/trash.md, \"Story: See what is in Trash and how long it stays\")", () => effect {
+  provide files(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      const changes = try FilesChanges
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      try browser.navigate({ tag: "InTrash" })
+      try until((s) => s.place.tag === "InTrash" && !s.loading)
+      const before = try trashState()
+      try browser.goUp()
+      try changes.trash([rowKey("", "Download/lease.pdf")])
+      try browser.navigate({ tag: "InTrash" })
+      try timeout(Stream.runHead(Stream.filter((try TrashMachine).changes, (t) => t.active && !t.loading && t.items.length > 0)), "5 seconds")
+      const after = try trashState()
+      const now = try Clock.currentTimeMillis
+      try Effect.try(() => assert.deepStrictEqual(
+        { empty: showsEmptyTrash(before), items: after.items.map((i) => [i.name, i.origin, i.volume]), days: after.items.map((i) => trashDaysLeft(i.deletedAt, now)), listing: after.listing },
+        { empty: true, items: [["lease.pdf", "Download", ""]], days: [30], listing: "Complete" },
+      ))
+    })
+  }
+})
+
+it.live("an unreadable card keeps the primary storage's Trash and says Trash is incomplete (spec/files/storage.md, \"Story: Get my trashed files back for 30 days\")", () => effect {
+  const now = 1_763_000_000_000
+  const native = device((plugin, method, args) =>
+    plugin !== "AlphaFiles" ? undefined
+    : method === "storageState" ? { ...granted, volumes: [...granted.volumes, { id: "card", name: "SD card", primary: false, free: 0, total: 0 }] }
+    : method === "storageTrashList" ? (args?.volume === "card" ? { status: "unavailable" }
+      : { status: "ready", items: [{ id: "7", name: "old.pdf", origin: "Download", directory: false, mimeType: "application/pdf", size: 3, deletedAt: now - 29 * 86_400_000 - 1 }] })
+    : method === "storageCategory" ? { status: "ready", count: 0 }
+    : { status: "ready" })
+  provide files(native, false) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      try Effect.forkScoped(browser.visit())
+      const counted = try until((s) => s.access === "AccessGranted" && s.counts.length > 0)
+      try browser.navigate({ tag: "InTrash" })
+      try timeout(Stream.runHead(Stream.filter((try TrashMachine).changes, (t) => t.active && !t.loading)), "5 seconds")
+      const trash = try trashState()
+      try Effect.try(() => assert.deepStrictEqual(
+        { trashCount: counted.trashCount, listing: trash.listing, items: trash.items.map((i) => i.key), days: trash.items.map((i) => trashDaysLeft(i.deletedAt, now)), empty: showsEmptyTrash(trash) },
+        { trashCount: -1, listing: "Partial", items: [rowKey("", "7")], days: [1], empty: false },
+      ))
+    })
+  }
+})
+
+it.live("Empty Trash erases only the rows its confirmation showed that Trash still lists (spec/files/trash.md, \"Story: Restore or delete several Trash items together\")", () => effect {
+  provide files(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      const changes = try FilesChanges
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      try changes.trash([rowKey("", "Download/lease.pdf"), rowKey("", "Download/notes.txt")])
+      try browser.navigate({ tag: "InTrash" })
+      const trash = try TrashMachine
+      try timeout(Stream.runHead(Stream.filter(trash.changes, (t) => t.active && !t.loading && t.items.length === 2)), "5 seconds")
+      // spec/files/trash.md, "A permanent deletion first shows the rows it will erase, and erases only those Trash still lists"
+      try browser.dispatchTrash({ type: "reviewEmpty" })
+      const reviewing = try trash.get()
+      const spared = reviewing.items.find((i) => i.name === "notes.txt")!
+      try changes.restore([spared.key])
+      try timeout(Stream.runHead(Stream.filter(trash.changes, (t) => !t.loading && t.items.length === 1)), "5 seconds")
+      const stillConfirming = (try trash.get()).confirming.length
+      try changes.erase()
+      const erased = try changes.batch()
+      try timeout(Stream.runHead(Stream.filter(trash.changes, (t) => !t.loading && t.erasing.length === 0)), "5 seconds")
+      const after = try trash.get()
+      try browser.goUp()
+      try browser.navigate({ tag: "InFolder", path: "Download", volume: "" })
+      const download = try until((s) => s.place.tag === "InFolder" && s.listing === "Complete")
+      try Effect.try(() => assert.deepStrictEqual(
+        { confirming: reviewing.confirming.length, stillConfirming, erased: [erased.op, erased.done], spared: after.spared, left: after.items.length, back: download.rows.map((r) => r.name) },
+        { confirming: 2, stillConfirming: 2, erased: ["EraseFiles", 1], spared: 1, left: 0, back: ["notes.txt"] },
+      ))
+    })
+  }
+})
+
+it.live("a trash the device answered only in part counts the files it named and undoes exactly those (spec/files/mutations.md, \"Story: Trust each row's own receipt\")", () => effect {
+  const native = device((plugin, method) =>
+    plugin !== "AlphaFiles" ? undefined
+    : method === "storageState" ? granted
+    : method === "storageTrash" ? { status: "ready", outcomes: [{ path: "Download/a.pdf", status: "trashed", to: "t1" }, { path: "Download/b.pdf", status: "changed" }, { path: "Download/c.pdf", status: "trashed" }] }
+    : method === "storageRestore" ? { status: "ready", outcomes: [{ path: "t1", status: "restored", to: "Download/a.pdf" }] }
+    : method === "storageCategory" ? { status: "ready", count: 0 }
+    : method === "storageTrashList" ? { status: "ready", items: [] }
+    : { status: "ready", entries: [], truncated: false })
+  provide files(native, false) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      const changes = try FilesChanges
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      try changes.trash(["Download/a.pdf", "Download/b.pdf", "Download/c.pdf"].map((path) => rowKey("", path)))
+      const trashed = try changes.batch()
+      try changes.undo()
+      const undone = try changes.batch()
+      try Effect.try(() => assert.deepStrictEqual(
+        { trashed: [trashed.phase, trashed.answered, trashed.done, trashed.undo], undone: [undone.op, undone.total, undone.done] },
+        { trashed: ["Finished", 3, 1, 1], undone: ["RestoreFiles", 1, 1] },
+      ))
+    })
+  }
+})

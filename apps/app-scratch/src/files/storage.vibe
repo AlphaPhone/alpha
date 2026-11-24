@@ -1,0 +1,127 @@
+// spec/files/storage.md, "Story: Browse my files by category, folder and volume"; spec/files/browser.md, "Only the newest access read decides access, and without access nothing is listed"; spec/files/preview.md, "One open is asked for at a time, and its selection is shown only in the visit that asked"
+import { Native } from "../platform/native.vibe"
+import * as N from "./native.schema.vibe"
+
+/** The files bridge, the selected-documents registry and system picker (on DailyApps), and the attachment reader, as src/platform/native-plugins.ts names them. */
+export const FILES_PLUGIN = "AlphaFiles"
+export const DOCUMENTS_PLUGIN = "DailyApps"
+export const ATTACHMENTS_PLUGIN = "AlphaMailAttachments"
+export const PICKER_PLUGIN = "DailyApps"
+
+/** The device could not be asked, or answered something that is no answer. */
+export error FilesUnavailable { method: string; reason: string }
+
+/** A Browse category as the files bridge names it. */
+export type CategoryId = "downloads" | "images" | "videos" | "audio" | "documents"
+
+/** What an agent filter asks the device to query. */
+export interface QueryInput {
+  readonly text?: string
+  readonly mimePrefix?: string
+  readonly documents?: boolean
+  readonly folders?: boolean
+  readonly folder?: string
+  readonly from?: number
+  readonly to?: number
+}
+
+/** The folder or category whose changes the device reports. */
+export type WatchTarget = { readonly path: string; readonly volume: string } | { readonly category: CategoryId } | {}
+
+/** One call of a native plugin, decoded by its answer's schema. */
+export effect function call<S extends Schema.Top>(plugin: string, method: string, schema: S, args?: unknown) {
+  const native = try Native
+  const raw = native.invoke(plugin, method, args) catch effect (error) => { throw new FilesUnavailable({ method, reason: error._tag }) }
+  return Schema.decodeUnknownEffect(schema)(raw) catch effect () => { throw new FilesUnavailable({ method, reason: "malformed" }) }
+}
+
+/** The bridge argument naming a volume other than the primary one. */
+export function onVolume(volume: string): { readonly volume?: string } {
+  return volume && volume !== "primary" ? { volume } : {}
+}
+
+/** The owner's shared storage, one call at a time, through the files bridge. */
+export service FilesStorage {
+  state(): N.StateAnswer!FilesUnavailable
+  requestAccess(settings: boolean): N.StorageAnswer!FilesUnavailable
+  list(path: string, volume: string): N.ListAnswer!FilesUnavailable
+  category(category: CategoryId, countOnly: boolean): N.CategoryAnswer!FilesUnavailable
+  query(input: QueryInput): N.ListAnswer!FilesUnavailable
+  reviewedIdentities(paths: readonly string[], volume: string): N.ReviewedAnswer!FilesUnavailable
+  transfer(paths: readonly string[], dest: string, copy: boolean, volume: string, reviewed?: readonly string[]): N.OutcomesAnswer!FilesUnavailable
+  rename(path: string, name: string, volume: string): N.PlacedAnswer!FilesUnavailable
+  createFolder(parent: string, name: string, volume: string): N.PlacedAnswer!FilesUnavailable
+  trash(paths: readonly string[], volume: string, reviewed?: readonly string[]): N.OutcomesAnswer!FilesUnavailable
+  trashList(volume: string): N.TrashAnswer!FilesUnavailable
+  restore(ids: readonly string[], volume: string): N.OutcomesAnswer!FilesUnavailable
+  erase(ids: readonly string[], volume: string): N.ErasedAnswer!FilesUnavailable
+  share(paths: readonly string[], volume: string): N.HandoffAnswer!FilesUnavailable
+  open(path: string, volume: string): N.HandoffAnswer!FilesUnavailable
+  select(path: string, volume: string): N.SelectionAnswer!FilesUnavailable
+  watch(target: WatchTarget): N.StorageAnswer!FilesUnavailable
+  unwatch(): N.StorageAnswer!FilesUnavailable
+  /** One element for each change the device reports in what is watched. */
+  readonly changes: Stream.Stream<void, FilesUnavailable>
+}
+
+/** A document chosen in the system picker or selected from storage: described, read, rendered, renamed, shared and given back. */
+export service Documents {
+  pick(): N.SelectedDocument!FilesUnavailable
+  restore(): N.SelectedDocument!FilesUnavailable
+  describe(selectionId: string): N.SelectedDocument!FilesUnavailable
+  rename(selectionId: string, name: string): N.SelectedDocument!FilesUnavailable
+  pdf(selectionId: string, page: number): N.PdfPageAnswer!FilesUnavailable
+  read(selectionId: string): N.DocumentText!FilesUnavailable
+  open(selectionId: string): N.DocumentHandoff!FilesUnavailable
+  share(selectionId: string): N.DocumentHandoff!FilesUnavailable
+  bytes(selectionId: string): N.AttachmentBytes!FilesUnavailable
+  forget(selectionId: string): void!!
+}
+
+/** The files bridge over the device's native plugin. */
+export const nativeStorage = Layer.effect(FilesStorage, effect {
+  const native = try Native
+  const files = <S extends Schema.Top>(method: string, schema: S, args?: unknown) =>
+    provideService(call(FILES_PLUGIN, method, schema, args), Native, native)
+  return {
+    state: () => files("storageState", N.StateAnswer),
+    requestAccess: (settings) => files("storageRequestAccess", N.StorageAnswer, { settings }),
+    list: (path, volume) => files("storageList", N.ListAnswer, { path, ...onVolume(volume) }),
+    category: (category, countOnly) => files("storageCategory", N.CategoryAnswer, { category, countOnly }),
+    query: (input) => files("storageQuery", N.ListAnswer, input),
+    reviewedIdentities: (paths, volume) => files("storageReviewedIdentities", N.ReviewedAnswer, { paths, ...onVolume(volume) }),
+    transfer: (paths, dest, copy, volume, reviewed) =>
+      files("storageTransfer", N.OutcomesAnswer, { paths, dest, copy, ...onVolume(volume), ...(reviewed ? { reviewed } : {}) }),
+    rename: (path, name, volume) => files("storageRename", N.PlacedAnswer, { path, name, ...onVolume(volume) }),
+    createFolder: (parent, name, volume) => files("storageCreateFolder", N.PlacedAnswer, { parent, name, ...onVolume(volume) }),
+    trash: (paths, volume, reviewed) => files("storageTrash", N.OutcomesAnswer, { paths, ...onVolume(volume), ...(reviewed ? { reviewed } : {}) }),
+    trashList: (volume) => files("storageTrashList", N.TrashAnswer, onVolume(volume)),
+    restore: (ids, volume) => files("storageRestore", N.OutcomesAnswer, { ids, ...onVolume(volume) }),
+    erase: (ids, volume) => files("storageEmptyTrash", N.ErasedAnswer, { ids, confirmed: true, ...onVolume(volume) }),
+    share: (paths, volume) => files("storageShare", N.HandoffAnswer, { paths, ...onVolume(volume) }),
+    open: (path, volume) => files("storageOpen", N.HandoffAnswer, { path, ...onVolume(volume) }),
+    select: (path, volume) => files("storageSelect", N.SelectionAnswer, { path, ...onVolume(volume) }),
+    watch: (target) => files("storageWatch", N.StorageAnswer, "path" in target ? { path: target.path, ...onVolume(target.volume) } : target),
+    unwatch: () => files("storageUnwatch", N.StorageAnswer),
+    changes: Stream.map(Stream.mapError(native.listen(FILES_PLUGIN, "storageChanged"), () => new FilesUnavailable({ method: "storageChanged", reason: "NativeUnavailable" })), () => undefined),
+  }
+})
+
+/** The selected-documents registry, the attachment reader and the system picker over their native plugins. */
+export const nativeDocuments = Layer.effect(Documents, effect {
+  const native = try Native
+  const on = <S extends Schema.Top>(plugin: string, method: string, schema: S, args?: unknown) =>
+    provideService(call(plugin, method, schema, args), Native, native)
+  return {
+    pick: () => on(PICKER_PLUGIN, "perform", N.SelectedDocument, { action: "files" }),
+    restore: () => on(DOCUMENTS_PLUGIN, "restoreSelected", N.SelectedDocument),
+    describe: (selectionId) => on(DOCUMENTS_PLUGIN, "describeSelected", N.SelectedDocument, { selectionId }),
+    rename: (selectionId, name) => on(DOCUMENTS_PLUGIN, "renameSelected", N.SelectedDocument, { selectionId, name }),
+    pdf: (selectionId, page) => on(DOCUMENTS_PLUGIN, "pdfSelected", N.PdfPageAnswer, { selectionId, page }),
+    read: (selectionId) => on(DOCUMENTS_PLUGIN, "readSelected", N.DocumentText, { selectionId }),
+    open: (selectionId) => on(DOCUMENTS_PLUGIN, "openSelected", N.DocumentHandoff, { selectionId }),
+    share: (selectionId) => on(DOCUMENTS_PLUGIN, "shareSelected", N.DocumentHandoff, { selectionId }),
+    bytes: (selectionId) => on(ATTACHMENTS_PLUGIN, "readSelected", N.AttachmentBytes, { selectionId }),
+    forget: (selectionId) => ignore(native.invoke(DOCUMENTS_PLUGIN, "forgetSelected", { selectionId })),
+  }
+})

@@ -1,0 +1,649 @@
+// spec/assistant/send.md, "Story: Send a message and know what happened to it"; spec/assistant/draft.md, "Story: Get my message back when it was not sent"; spec/assistant/stoppedReply.md, "Story: Know what became of a reply I stopped"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/conversation.md, "Story: Talk to my agent and approve what it proposes"; spec/assistant/conversation.md, "A changed screen context bumps the revision and drops every proposal; a private screen stops everything"; spec/assistant/recovery.md, "Story: See what still waits for me without the phone polling my agent"; spec/assistant/receipts.md, "A receipt that could not reach the agent keeps its result and says it is not synced yet"; spec/assistant/receipts.md, "A reply's changes are shown once, only for what its action results prove, and each opens its own view"; spec/assistant/context.md, "The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again"; spec/assistant/context.md, "A turn carries the page Browser hands it for the observed tab, beside the observation, only to a peer that declares it"; spec/assistant/context.md, "A turn names the place, route or search Maps shows as its selected object only while Maps is in front"; spec/assistant/views.md, "A prepared view opens once under a returned claim, only while the screen and the session are the ones the turn was sent from, and every claim is settled once"; spec/assistant/emailCard.md, "Cards are kept per message on their conversation's shelf, staged once, edited only at the version shown, and an unedited card goes under its owner turn's identity"; spec/voice/latency.md, "A dictated draft sent unchanged is timed from the recording's end through the send and the first token to the final reply, and its reply is never spoken"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"; spec/assistant/send.md, "A dictated draft sent exactly as inserted is timed as a voice turn, and its reply is never spoken"; spec/assistant/review.md, "A direct effect needs an allow-listed operation of the current message that is not a workflow step, with review-first off"
+import { TurnController, encodeTurnContext, findStoppedUserTurn, type ClientMessageId, type ConversationRecord, type ReplyStreamHooks, type TurnResult } from "@elizaos/agent/client"
+import { Machine as DraftsMachine, shown, slotOf } from "../../gen/assistant__draft.effect.vibe"
+import { Machine as SendsMachine, timedAsVoice, type Event as SendsEvent } from "../../gen/assistant__send.effect.vibe"
+import { Machine as ReplyMachine, machine as replyMachine, refusedBeforeOutput, offersManagePlan, type ReplyView } from "../../gen/assistant__reply.effect.vibe"
+import { Machine as StoppedMachine, recentTurnMs, type ReadKind } from "../../gen/assistant__stoppedReply.effect.vibe"
+import { Machine as ClientMachine, canReplyWith } from "../../gen/assistant__conversation.effect.vibe"
+import { Machine as RecoveryMachine } from "../../gen/assistant__recovery.effect.vibe"
+import { cutOffLabel } from "../../gen/assistant__receipts.effect.vibe"
+import { statesDirectRequests } from "../../gen/assistant__review.effect.vibe"
+import { interruptedAfterEffect, turnEffects } from "./turn-effects.vibe"
+import { observes } from "../../gen/assistant.effect.vibe"
+import { namesMaps, sendsDay, type MapsShown as ShownKind } from "../../gen/assistant__context.effect.vibe"
+import { Preferences } from "../settings/preferences.vibe"
+import { Latency } from "../voice/latency.vibe"
+import type { DictationTarget } from "../voice/dictation.vibe"
+import { browserTabObject, pageForTurn, wirePage } from "./browser-page.vibe"
+import { ChatAttachments } from "./attachments.vibe"
+import { Conversations } from "./conversations.vibe"
+import { AssistantHost, type AgentIdentity } from "./host.vibe"
+import { PhoneLocation } from "./location.vibe"
+import { BrowserPages, CameraComposer, MapsChatCards, MapsRelay, MapsViews, ReplyChanges, TurnSources, type MapsShown } from "./ports.vibe"
+import { changeWords, copy, failureKindOf, failureText, liveWaitOf, planActionOf } from "./presentation.vibe"
+import { DeviceReview, type Approval } from "./review.vibe"
+import { collapseSystemNotices, emailDraftOf, emptyTranscript, historyRows, pendingReply, replyNotices, withReply, type ProposalCard, type Quote, type Row, type Transcript } from "./transcript.vibe"
+import { moveFirstDraft } from "./first-send.vibe"
+import { initial as emailStart } from "../../gen/assistant__emailCard.effect.vibe"
+import { timerCeilingMs } from "../../gen/assistant__approvals.effect.vibe"
+import { turnTransport } from "./transport.vibe"
+import { bindingOf, textOf, unitsOf } from "./units.vibe"
+import { EmailShelf, type EmailRow } from "./email-shelf.vibe"
+import { AgentViews, type ViewDelivery } from "./views.vibe"
+
+/** What the composer is doing to a sent message: quoting it in a reply, or correcting it. */
+export type Target = { readonly kind: "reply"; readonly quote: Quote } | { readonly kind: "edit"; readonly messageId: string; readonly text: string; readonly requestId: string }
+
+/** The composer and the open conversation of the assistant. */
+export service Composer {
+  readonly transcript: Stream.Stream<Transcript>
+  readonly target: Stream.Stream<Target | undefined>
+  /** The owner typed. */
+  edit(text: string): void!!
+  /** Send the composer's text, or a prompt handed over from elsewhere that leaves the composer alone; true when the turn was taken, by the agent or by Camera. */
+  send(handed?: string): boolean!!
+  /** Stop the reply being written. */
+  stop(): void!!
+  /** Open a conversation the owner chose, or one the phone reopened by itself; null starts a new chat. */
+  open(conversation: string | null, automatic: boolean, around?: string): void!!
+  /** Older messages of the open conversation. */
+  older(): void!!
+  /** Quote a message in the next reply, or correct my own. */
+  aim(target: Target | undefined): void!!
+  /** Replace a row, such as a card after a tap. */
+  replaceRow(row: Row): void!!
+  /** The screen under the assistant changed to `contextKey`; `sensitive` when it is one the assistant never observes. */
+  screenChanged(contextKey: string, sensitive: boolean): void!!
+  /** Back while a reply or an edit is aimed: drop the aim; false when nothing was aimed. */
+  back(): boolean!!
+  /** The open draft as voice dictation fills it: dictated words are appended, and words dictated into an empty draft and sent unchanged time the turn as a voice turn. */
+  dictationTarget(): DictationTarget!!
+  static readonly key = "alpha/assistant/Composer"
+}
+
+const stoppedCheckMs = 2000
+
+effect function holdReply() {
+  provide replyMachine() {
+    return try ReplyMachine
+  }
+}
+
+/** The composer over the upstream turn controller, the draft, send, reply and stopped-reply machines. */
+export const composerLayer = Layer.effect(Composer, effect {
+  const host = try AssistantHost
+  const drafts = try DraftsMachine
+  const sends = try SendsMachine
+  const stopped = try StoppedMachine
+  const client = try ClientMachine
+  const recovery = try RecoveryMachine
+  const conversations = try Conversations
+  const attachments = try ChatAttachments
+  const location = try PhoneLocation
+  const review = try DeviceReview
+  const mapsChat = try MapsChatCards
+  const relay = try MapsRelay
+  const camera = try CameraComposer
+  const changes = try ReplyChanges
+  const sources = try TurnSources
+  const preferences = try Preferences
+  const latency = try Latency
+  const pages = try BrowserPages
+  const maps = try MapsViews
+  const views = try AgentViews
+  const shelf = try EmailShelf
+  const transport = try turnTransport()
+  const transcript = try SubscriptionRef.make<Transcript>(emptyTranscript)
+  const target = try SubscriptionRef.make<Target | undefined>(undefined)
+  let session: { readonly key: string; readonly controller: TurnController; records: Map<string, ConversationRecord> } | undefined
+  let ordinal = 0
+  let acting = 0
+  let ownKey: string | undefined
+  let dictated: { readonly text: string; readonly binding: string } | undefined
+  const quiet = <E>(work: Effect.Effect<unknown, E>) => map(work, () => true) catch () => false
+
+  effect function rows(change: (rows: readonly Row[]) => readonly Row[]) {
+    try SubscriptionRef.update(transcript, (t) => ({ ...t, rows: collapseSystemNotices(change(t.rows)) }))
+  }
+  effect function typing() {
+    const state = try sends.get()
+    try SubscriptionRef.update(transcript, (t) => ({ ...t, typing: state.typing }))
+  }
+  effect function controllerFor(identity: AgentIdentity) {
+    const key = JSON.stringify([identity.origin, identity.owner, identity.agent, identity.session])
+    if (session?.key === key) return session
+    if (session !== undefined) {
+      promise(() => session?.controller.reset() ?? Promise.resolve()) catch () => undefined
+      try quiet(sends.send({ type: "sessionSwitch" }))
+      try quiet(client.send({ type: "detach", keepConsumed: false }))
+      try quiet(stopped.send({ type: "agentChanged" }))
+      try review.agentChanged()
+      try SubscriptionRef.set(transcript, emptyTranscript)
+    }
+    try quiet(recovery.send({ type: "rekey" }))
+    fork.detached review.sync()
+    fork.detached location.warm()
+    session = { key, controller: new TurnController(transport), records: new Map() }
+    try quiet(client.send({ type: "attach", session: (try client.get()).session + 1 }))
+    return session
+  }
+  effect function binding(identity: AgentIdentity, conversation: string | null) {
+    return bindingOf(identity.origin, identity.owner, identity.agent, conversation)
+  }
+  effect function load(conversation: string | null, around?: string) {
+    if (conversation === null) {
+      try SubscriptionRef.set(transcript, emptyTranscript)
+      return
+    }
+    const page = conversations.history(conversation) catch () => undefined
+    const near = around === undefined ? undefined : (conversations.around(conversation, around) catch () => undefined)
+    const messages = near ?? page?.messages ?? []
+    const restored = historyRows(messages)
+    const withFiles: Row[] = []
+    for (const row of restored) {
+      if (row.kind !== "user") {
+        withFiles.push(row)
+        continue
+      }
+      const identity = try host.identity()
+      const files = identity === undefined ? [] : try attachments.savedFor([identity.origin, identity.owner, identity.agent, conversation, row.clientMessageId ?? row.id])
+      withFiles.push({ ...row, files })
+    }
+    const owner = try host.identity()
+    const kept = owner === undefined ? [] : try shelf.shelved([owner.origin, owner.owner, owner.agent, conversation])
+    try SubscriptionRef.set(transcript, { conversation, rows: collapseSystemNotices(withShelf(withFiles, kept)), hasMore: page?.hasMore ?? false, typing: false })
+    try quiet(recovery.send({ type: "rekey" }))
+    if (!(try sends.get()).typing) try recoverCards()
+    const last = messages.at(-1)
+    const now = try Clock.currentTimeMillis
+    if (last?.role === "user" && last.createdAt !== undefined && now - Date.parse(last.createdAt) < recentTurnMs) {
+      if (try quiet(stopped.send({ type: "restoredUnanswered" }))) try check(conversation, last.clientMessageId)
+    }
+  }
+  effect function expireLater(card: ProposalCard) {
+    const now = try Clock.currentTimeMillis
+    try sleep(Math.min(timerCeilingMs, Math.max(0, card.expiresAt - now + 1)))
+    const rowsNow = (try SubscriptionRef.get(transcript)).rows
+    const still = rowsNow.find((row) => row.kind === "card" && row.card.proposalId === card.proposalId)
+    if (still === undefined || still.kind !== "card" || (still.card.state !== "LiveCard" && still.card.state !== "RecoveredCard")) return
+    const expired = try review.expire(still.card)
+    try rows((list) => list.map((row) => row.kind === "card" && row.card.proposalId === card.proposalId ? { ...row, card: expired } : row))
+    try quiet(recovery.send({ type: "cardExpires" }))
+    try recoverCards()
+  }
+  effect function watch(cards: readonly ProposalCard[]) {
+    for (const card of cards) fork.detached expireLater(card)
+  }
+  effect function recoverCards() {
+    if (!(try quiet(recovery.send({ type: "readListing" })))) return
+    const found = try review.pending()
+    const dropped = (try recovery.get()).dropped
+    try quiet(recovery.send({ type: "listingSettles", ok: found.ok }))
+    if (!found.ok || (try recovery.get()).dropped > dropped) return
+    const pending = found.cards
+    const shown = (try SubscriptionRef.get(transcript)).rows
+    const said = found.notices.filter((text) => !shown.some((row) => row.kind === "notice" && row.text === text))
+    const listingAt = try Clock.currentTimeMillis
+    const listed = new Set(pending.map((card) => card.proposalId))
+    const fresh = pending.filter((card) => !shown.some((row) => row.kind === "card" && row.card.proposalId === card.proposalId))
+    try rows((list) => [
+      ...list.map((row) => row.kind === "card" && (row.card.state === "LiveCard" || row.card.state === "RecoveredCard") && !listed.has(row.card.proposalId)
+        ? { ...row, card: { ...row.card, state: "UnavailableCard" as const } } : row),
+      ...fresh.map((card): Row => ({ kind: "card", id: `card:${card.proposalId}`, card })),
+      ...said.map((text, at): Row => ({ kind: "notice", id: `listing-notice:${listingAt}:${at}`, text, system: false })),
+    ])
+    try watch(fresh)
+  }
+  effect function bind(identity: AgentIdentity, conversation: string) {
+    const current = try controllerFor(identity)
+    const known = current.records.get(conversation)
+    const record = known ?? (conversations.list() catch () => []).map((row) => ({ id: row.id, roomId: row.roomId })).find((row) => row.id === conversation)
+    if (record === undefined) return
+    current.records.set(conversation, record)
+    promise(() => current.controller.bind(record)) catch () => undefined
+  }
+  effect function stoppedNotice() {
+    const state = try stopped.get()
+    const text = state.notice === "CheckPending" || state.notice === "CancelledPending" ? copy.stoppedPending
+      : state.notice === "LookLater" ? copy.stoppedLookLater : state.notice === "NotRecorded" ? copy.stoppedNotRecorded
+      : state.message === "ConfirmedStopped" ? copy.stoppedConfirmed : ""
+    try rows((list) => {
+      const without = list.filter((row) => row.id !== "stopped-reply-notice")
+      return text === "" ? without : [...without, { kind: "notice", id: "stopped-reply-notice", text, system: false } satisfies Row]
+    })
+  }
+  effect function check(conversation: string, clientMessageId: string | undefined) {
+    try stoppedNotice()
+    try sleep(stoppedCheckMs)
+    if (!(try quiet(stopped.send({ type: "timerFires" })))) return
+    try stoppedNotice()
+    if ((try stopped.get()).check !== "Reading") return
+    const page = conversations.history(conversation) catch () => undefined
+    let kind: ReadKind = "ReadFailed"
+    if (page !== undefined) {
+      const found = clientMessageId === undefined ? undefined : findStoppedUserTurn(page.messages, clientMessageId as ClientMessageId)
+      const at = found === undefined ? -1 : page.messages.indexOf(found)
+      kind = found === undefined ? "Unrecorded" : page.messages.slice(at + 1).some((row) => row.role === "assistant") ? "Finished" : "Unfinished"
+      if (kind === "Finished") try load(conversation)
+    }
+    try quiet(stopped.send({ type: "readSettles", kind }))
+    try stoppedNotice()
+  }
+  effect function settleView(id: string, view: ReplyView, text: string) {
+    try rows((list) => list.map((row) => row.id === id ? withReply(row, text, view, false) : row))
+  }
+  effect function classify(result: TurnResult, attempt: number, streamed: boolean) {
+    const sent = (event: SendsEvent) => quiet(sends.send(event))
+    switch (result.kind) {
+      case "Replied":
+      case "AgentFailed":
+        if (!streamed) try sent({ type: "serverReceives", id: attempt })
+        try sent({ type: "reply", id: attempt })
+        return "dispatched" as const
+      case "MaybeAccepted":
+        if (!streamed) try sent({ type: "serverReceives", id: attempt })
+        try sent({ type: "transportFails", id: attempt })
+        return "dispatched" as const
+      case "StoppedByOwner":
+        try sent({ type: "cancel", id: attempt })
+        try sent({ type: "settleTimeout", id: attempt })
+        return (try sends.get()).attempts.find((a) => a.id === attempt)?.outcome === "Restored" ? "restored" as const : "dispatched" as const
+      case "NotAccepted":
+      case "ConversationLost":
+      case "RefusedBusy":
+      case "RefusedStopUnconfirmed":
+        try sent({ type: "transportRefuses", id: attempt })
+        return "restored" as const
+    }
+  }
+  effect function directly(messageId: string, text: string, pageLinks: readonly string[]) {
+    acting += 1
+    const pass = try ensuring(review.directPass(messageId, text, pageLinks), sync(() => { acting -= 1 }))
+    ownKey = (try host.screen()).contextKey
+    return pass
+  }
+  effect function viewed(results: readonly { readonly action: string; readonly data: unknown }[], contextKey: string) {
+    acting += 1
+    const done = try ensuring(views.deliver(results, contextKey), sync(() => { acting -= 1 }))
+    if (done.status === "delivered") ownKey = (try host.screen()).contextKey
+    return done
+  }
+  effect function send(handed?: string) {
+    const identity = try host.identity()
+    if (identity === undefined) {
+      try host.toast(copy.noAgent)
+      return false
+    }
+    const current = try controllerFor(identity)
+    try views.connect()
+    const draftState = try drafts.get()
+    if (handed === undefined && slotOf(draftState, draftState.active).unsettled) {
+      try host.toast(copy.maySent)
+      return false
+    }
+    const composed = handed ?? textOf(shown(draftState))
+    const files = try attachments.pending()
+    if (composed.trim() === "" && files.length === 0) return false
+    const aimed = try SubscriptionRef.get(target)
+    const taken = try camera.intercept({ text: composed, attachments: files.length, editing: aimed?.kind === "edit" })
+    if (taken !== "none") {
+      if (handed === undefined) try quiet(drafts.send({ type: "edit", text: [] }))
+      return true
+    }
+    const sendsBefore = try sends.get()
+    if (!(try quiet(sends.send({ type: "send", handed: handed !== undefined, fresh: true, prompt: unitsOf(handed ?? "") })))) {
+      try host.toast(copy.busy)
+      return false
+    }
+    const attempt = sendsBefore.nextId
+    ownKey = undefined
+    const bound = try quiet(client.send({ type: "send" }))
+    const unbind = () => effect { if (bound) try quiet(client.send({ type: "sendFailed" })) }
+    try typing()
+    const heldBinding = draftState.active
+    const spoken = dictated
+    if (handed === undefined) dictated = undefined
+    const timed = timedAsVoice(spoken !== undefined, spoken?.text === composed.trim(), spoken?.binding === JSON.stringify(heldBinding), handed !== undefined)
+    const timedEnd = (answered: boolean) => timed ? latency.draftReplied(answered ? "FinalReply" : "Abandoned") : succeed(undefined)
+    const durable = handed === undefined && (try quiet(drafts.send({ type: "hold" })))
+    try quiet(stopped.send({ type: "sendStart" }))
+    try stoppedNotice()
+    let conversation = (try SubscriptionRef.get(transcript)).conversation
+    if (aimed?.kind === "edit" && conversation !== null) {
+      try quiet(drafts.send({ type: "edit", text: [] }))
+      const forked = conversations.branch(conversation, aimed.messageId, aimed.requestId, aimed.text) catch () => undefined
+      if (forked === undefined) {
+        try quiet(sends.send({ type: "transportCall", id: attempt }))
+        try quiet(sends.send({ type: "transportRefuses", id: attempt }))
+        if (durable) try quiet(drafts.send({ type: "release", binding: heldBinding }))
+        try unbind()
+        try typing()
+        try host.toast("Couldn’t open the edited conversation. Nothing was sent.")
+        return false
+      }
+      current.records.set(forked.id, { id: forked.id, roomId: forked.roomId })
+      promise(() => current.controller.bind({ id: forked.id, roomId: forked.roomId })) catch () => undefined
+      try load(forked.id)
+      conversation = forked.id
+    }
+    const pendingSlot = [identity.origin, identity.owner, identity.agent, conversation ?? "new", `pending-${attempt}`]
+    if (!(try attachments.hold(pendingSlot, composed))) {
+      try host.toast(copy.attachmentSaveFailed)
+    }
+    const screen = try host.screen()
+    const observed = observes(screen.exposure)
+    const peer = try host.peer()
+    const place = try location.forTurn(observed, peer.takesLocation)
+    const asksFirst = try preferences.asksBeforeActions()
+    try sources.preferReview(asksFirst)
+    const day = sendsDay(observed, screen.onCalendar, { compared: peer.optionalFields, declaresLocation: peer.takesLocation }) ? try sources.calendarDay() : undefined
+    const notesList = observed && screen.observation.view === "notes" && screen.observation.selectedObject === undefined ? try sources.notesList() : undefined
+    const browserTab = observed && screen.observation.view === "browser" && screen.observation.selectedObject === undefined ? try pages.selected() : undefined
+    const mapsShown = observed && screen.observation.view === "maps" && screen.observation.selectedObject === undefined ? try maps.shown() : undefined
+    const mapsNamed = namesMaps(observed, screen.observation.view === "maps", screen.observation.selectedObject !== undefined, shownKindOf(mapsShown)) ? mapsShown : undefined
+    const zone = Effect.try(() => Intl.DateTimeFormat().resolvedOptions().timeZone) catch () => undefined
+    const observation = observed ? {
+      ...screen.observation,
+      ...(screen.observation.timeZone === undefined && zone !== undefined && zone !== "" ? { timeZone: zone } : {}),
+      ...(notesList === undefined ? {} : { selectedObject: notesList }),
+      ...(browserTab === undefined ? {} : { selectedObject: browserTabObject(browserTab) }),
+      ...(mapsNamed === undefined ? {} : { selectedObject: { kind: mapsNamed.kind, id: mapsNamed.id, revision: mapsNamed.revision } }),
+      ...(day === undefined ? {} : { calendarDay: day }),
+      ...(place === undefined ? {} : { location: place }),
+    } : undefined
+    const page = observation === undefined ? undefined : try pageForTurn(pages, observed, observation, browserTab, peer.optionalFields)
+    const browserPage = page === undefined ? undefined : wirePage(page)
+    const voiceUi = statesDirectRequests(asksFirst ? "PreferenceOn" : "PreferenceOff") ? { agentActionMode: "direct-request-v1" as const } : undefined
+    const context = encodeTurnContext({
+      ...(observation === undefined ? {} : { observation, ...(browserPage === undefined ? {} : { browserPage }) }),
+      ...(voiceUi === undefined ? {} : { voiceUi }),
+    }, { optionalFields: peer.optionalFields })
+    const viewFields = try views.turnFields(observed, screen.observation.view)
+    const pageLinks = browserPage === undefined ? [] : (page?.links ?? []).map((link) => link.url)
+    const userId = `local-user-${attempt}`
+    const replyId = `local-reply-${attempt}`
+    const quote = aimed?.kind === "reply" ? aimed.quote : undefined
+    try rows((list) => [...list,
+      { kind: "user", id: userId, text: composed, files, status: "pending", ...(quote === undefined ? {} : { quote }) } satisfies Row,
+      pendingReply(replyId)])
+    if (aimed !== undefined) try SubscriptionRef.set(target, undefined)
+    const view = try holdReply()
+    let streamed = false
+    let shownText = ""
+    let acknowledgedByFrame = false
+    const pushView = (text: string) => runFork(effect {
+      shownText = text
+      try settleView(replyId, try view.get(), text)
+    })
+    try latency.draftSent(timed ? composed : "")
+    try quiet(sends.send({ type: "transportCall", id: attempt }))
+    const labelled = (label: string) => rows((list) => list.map((row) => row.id === replyId && row.kind === "agent" ? { ...row, label: label.slice(0, 160) } : row))
+    // The agent's acknowledgment frame is the turn's one acknowledgement and stays the working label until text or the
+    // reply arrives; a tool frame never acknowledges, and its label or a status never replaces the acknowledgment.
+    const hooks: ReplyStreamHooks = {
+      onPreview: (text, provisional) => {
+        if (!streamed) {
+          streamed = true
+          runFork(effect {
+            try quiet(sends.send({ type: "serverReceives", id: attempt }))
+            try quiet(sends.send({ type: "streamChunk", id: attempt }))
+            if (timed) try latency.draftReplied("FirstToken")
+          })
+        }
+        runFork(effect { try quiet(view.send({ type: "token", units: Math.max(1, text.length), provisional })) })
+        pushView(text)
+      },
+      onStatus: (activity) => runFork(effect { if (!acknowledgedByFrame) try labelled(activity) }),
+      onAcknowledgment: (text: string) => runFork(effect {
+        if (!(try quiet(view.send({ type: "acknowledge", units: text.length })))) return
+        acknowledgedByFrame = true
+        try labelled(text)
+        pushView("")
+      }),
+      onTool: (_name: string, label: string | undefined) => runFork(effect {
+        try quiet(view.send({ type: "toolStarts" }))
+        if (label !== undefined && !acknowledgedByFrame) try labelled(label)
+        pushView("")
+      }),
+    }
+    const result = try relay.withRelay(conversation ?? current.controller.conversation?.id ?? "", promise(() => current.controller.send(
+      { text: composed, metadata: { ...context, ...(viewFields ?? {}) }, ...(files.length === 0 ? {} : { images: files.map(({ data, mimeType, name }) => ({ data, mimeType, name })) }) },
+      { stream: hooks },
+    )))
+    const outcome = try classify(result, attempt, streamed)
+    try typing()
+    if (outcome === "restored") {
+      try unbind()
+      if (durable) try quiet(drafts.send({ type: "release", binding: heldBinding }))
+      try attachments.restore()
+      try rows((list) => list.filter((row) => row.id !== userId && row.id !== replyId))
+      const attemptState = (try sends.get()).attempts.find((a) => a.id === attempt)
+      const restoredHere = handed === undefined && attemptState?.session === (try sends.get()).session
+      if (restoredHere && !durable) try quiet(drafts.send({ type: "edit", text: unitsOf(composed) }))
+      try host.toast(handed !== undefined ? "Not sent." : restoredHere ? copy.backInComposer : copy.notRestored)
+      try quiet(stopped.send({ type: "sendSettled", dispatched: false }))
+      try stoppedNotice()
+      try timedEnd(false)
+      return false
+    }
+    if (durable) try quiet(drafts.send({ type: "commit", binding: heldBinding }))
+    ordinal += 1
+    try mapsChat.ownerMessage()
+    const userMessageId = result.kind === "Replied" ? result.reply.userMessageId : result.kind === "AgentFailed" ? result.reply?.userMessageId : undefined
+    if (userMessageId !== undefined && conversation !== null) try attachments.recorded(pendingSlot, [identity.origin, identity.owner, identity.agent, conversation, userMessageId])
+    try attachments.clear()
+    if (result.kind === "StoppedByOwner") {
+      try unbind()
+      try quiet(view.send({ type: "stop" }))
+      try settleView(replyId, try view.get(), shownText === "" ? "" : `${shownText}\n\n${copy.stopped}`)
+      try quiet(stopped.send({ type: "sendStopped", dispatched: true, withCancel: true }))
+      const answer = promise(() => current.controller.interrupt()) catch () => ({ kind: "Uncertain" as const })
+      try quiet(stopped.send({ type: "cancelOutcome", aborted: answer.kind === "Stopped" }))
+      const open = (try SubscriptionRef.get(transcript)).conversation ?? current.controller.conversation?.id ?? null
+      if (open !== null) fork.detached check(open, result.clientMessageId)
+      try timedEnd(false)
+      return true
+    }
+    try quiet(stopped.send({ type: "sendSettled", dispatched: true }))
+    try stoppedNotice()
+    if (result.kind === "MaybeAccepted") {
+      try unbind()
+      try quiet(view.send({ type: "failReply", kind: "OtherFailure" }))
+      try settleView(replyId, try view.get(), `${shownText}${shownText === "" ? "" : "\n\n"}${copy.replyFailed} ${copy.maybeSent}`)
+      try rows((list) => list.map((row) => row.id === userId && row.kind === "user" ? { ...row, status: "unconfirmed" } : row))
+      try timedEnd(false)
+      return true
+    }
+    const reply = result.kind === "Replied" ? result.reply : result.kind === "AgentFailed" ? result.reply : undefined
+    if (result.kind === "AgentFailed") {
+      const kind = failureKindOf(result.code)
+      const wait = liveWaitOf(reply?.retryAfterMs)
+      try quiet(view.send({ type: "failReply", kind }))
+      const said = refusedBeforeOutput(kind) ? failureText(kind, wait) : `${reply?.text ?? shownText}\n\n${failureText(kind, wait)}`
+      try settleView(replyId, try view.get(), said)
+      const fix = planActionOf(reply?.planAction) ?? (offersManagePlan(kind) ? "Funding" as const : undefined)
+      if (fix !== undefined) try rows((list) => list.map((row) => row.id === replyId && row.kind === "agent" ? { ...row, plan: fix } : row))
+    } else if (reply !== undefined) {
+      try quiet(view.send({ type: "done", units: reply.text.length }))
+      try settleView(replyId, try view.get(), reply.text)
+    }
+    if (reply === undefined) {
+      try unbind()
+      try timedEnd(false)
+      return true
+    }
+    const live = current.controller.conversation
+    if (live !== null) current.records.set(live.id, live)
+    try SubscriptionRef.update(transcript, (t) => ({ ...t, conversation: live?.id ?? t.conversation }))
+    if (conversation === null && live !== null) {
+      const destination = try binding(identity, live.id)
+      try quiet(drafts.send({ type: "selectDraft", binding: destination }))
+      fork.detached Effect.provideService(moveFirstDraft(heldBinding, destination), DraftsMachine, drafts)
+    }
+    ordinal += 1
+    const replyOrdinal = ordinal
+    const settledRow = (try SubscriptionRef.get(transcript)).rows.find((row) => row.id === replyId)
+    try mapsChat.agentReply(settledRow?.kind === "agent" && settledRow.segments.some((segment) => segment.payload.kind === "choice"))
+    const plan = result.kind === "AgentFailed" ? undefined : planActionOf(reply.planAction)
+    const notices = replyNotices((reply as { readonly notices?: unknown }).notices)
+    const replyLive = bound && canReplyWith(try client.get(), false)
+    const skipped: { readonly receipts: readonly Approval[]; readonly cards: readonly ProposalCard[]; readonly notices: readonly string[] } = { receipts: [], cards: [], notices: [] }
+    const pass = replyLive ? try directly(reply.userMessageId, composed, pageLinks) : skipped
+    const delivered = replyLive && (try quiet(client.send({ type: "replyWith", withProposal: pass.cards.length > 0 })))
+    if (bound && !delivered) try quiet(client.send({ type: "sendFailed" }))
+    const cardsShown = delivered ? pass.cards : []
+    const staged = emailDraftOf(reply.actionResults)
+    const inConversation = live !== null && live.id === (try SubscriptionRef.get(transcript)).conversation
+    const ownerTurn = result.kind === "Replied" || result.kind === "AgentFailed" ? String(result.clientMessageId) : reply.userMessageId
+    const drafted: EmailRow | undefined = staged === undefined || !inConversation || live === null ? undefined
+      : { kind: "email", id: `email:${reply.messageId}`, card: { ...emailStart, recipients: staged.to.trim() !== "", body: staged.body.trim() !== "" }, ...staged, messageId: reply.messageId, ownerTurn }
+    const emailRows: Row[] = drafted === undefined || live === null ? [] : [try shelf.stage([identity.origin, identity.owner, identity.agent, live.id], drafted)]
+    const opened: ViewDelivery = delivered && inConversation ? try viewed(reply.actionResults, screen.contextKey) : { status: "none" }
+    const viewRows: Row[] = opened.status !== "unavailable" ? []
+      : [{ kind: "notice", id: `view-notice:${reply.messageId}`, text: opened.parentView === undefined ? copy.viewUnavailable : copy.viewInside(opened.parentView), system: false }]
+    const changed = delivered && inConversation ? try changes.settle(reply.actionResults) : undefined
+    const effects = turnEffects(reply.actionResults)
+    const changeRows: Row[] = changed === undefined ? [] : [
+      ...changed.workflows.map((change): Row => ({ kind: "change", id: `change:${reply.messageId}:workflow:${change.workflowId}`, text: `${changeWords[change.word]} workflow`, app: "workflows", route: change.workflowId })),
+      ...(changed.notesRevision === undefined ? [] : [{ kind: "change", id: `change:${reply.messageId}:notes`, text: copy.notesChanged, app: "notes" } satisfies Row]),
+      ...(changed.calendar ? [{ kind: "change", id: `change:${reply.messageId}:calendar`, text: copy.calendarChanged, app: "calendar" } satisfies Row] : []),
+      ...(changed.openWorkflows ? [{ kind: "change", id: `change:${reply.messageId}:open-workflows`, text: copy.openWorkflows, app: "workflows" } satisfies Row] : []),
+    ]
+    try rows((list) => [
+      ...list.map((row) =>
+        row.id === userId && row.kind === "user" ? { ...row, id: reply.userMessageId, status: "recorded" as const }
+        : row.id === replyId && row.kind === "agent" ? { ...row, id: reply.messageId, recorded: true, notices, ordinal: replyOrdinal, ...(plan === undefined || plan === "Funding" ? {} : { plan }),
+            cutOff: cutOffLabel(result.kind === "AgentFailed", pass.receipts.filter((r) => r.card.state === "DoneCard").length + effects.applied, effects.approvals,
+              result.kind === "AgentFailed" && result.code === interruptedAfterEffect) }
+        : row),
+      ...pass.notices.map((text, at): Row => ({ kind: "notice", id: `device-notice:${reply.userMessageId}:${at}`, text, system: false })),
+      ...pass.receipts.flatMap((done): Row[] => done.receipt === undefined ? [] : [{ kind: "receipt", id: `device-receipt:${done.card.proposalId}`, proposalId: done.card.proposalId, title: done.receipt.title, summary: done.receipt.summary }]),
+      ...cardsShown.map((card): Row => ({ kind: "card", id: `card:${card.proposalId}`, card })),
+      ...(bound && !delivered ? [{ kind: "notice", id: `stale:${reply.messageId}`, text: copy.stale, system: false } satisfies Row] : []),
+      ...emailRows,
+      ...viewRows,
+      ...changeRows,
+    ])
+    try watch(cardsShown)
+    try timedEnd(result.kind === "Replied" && reply.text.trim() !== "")
+    return true
+  }
+  return {
+    transcript: SubscriptionRef.changes(transcript),
+    target: SubscriptionRef.changes(target),
+    edit: (text: string) => effect {
+      try quiet(drafts.send({ type: "edit", text: unitsOf(text) }))
+      try quiet(sends.send({ type: "typeText", text: unitsOf(text) }))
+    },
+    send,
+    stop: () => effect {
+      const current = session
+      if (current === undefined) return
+      promise(() => current.controller.interrupt()) catch () => undefined
+    },
+    open: (conversation: string | null, automatic: boolean, around?: string) => effect {
+      const identity = try host.identity()
+      if (identity === undefined) return
+      const pending = try attachments.pending()
+      const open = (try SubscriptionRef.get(transcript)).conversation
+      if (!automatic && pending.length > 0 && conversation !== open) {
+        try host.toast(conversation === null ? copy.attachmentNewChat : copy.attachmentChangesChat)
+        return
+      }
+      if (!(try quiet(client.send({ type: "restoreHistory", automatic })))) try quiet(client.send({ type: "attach", session: (try client.get()).session }))
+      try quiet(stopped.send({ type: "explicitReload" }))
+      try quiet(drafts.send({ type: "selectDraft", binding: try binding(identity, conversation) }))
+      try SubscriptionRef.set(target, undefined)
+      if (!automatic) try attachments.retire("conversation")
+      if (conversation !== null) try bind(identity, conversation)
+      else {
+        const current = try controllerFor(identity)
+        promise(() => current.controller.reset()) catch () => undefined
+      }
+      try load(conversation, around)
+    },
+    older: () => effect {
+      const t = try SubscriptionRef.get(transcript)
+      if (t.conversation === null || !t.hasMore) return
+      const first = t.rows.find((row) => row.kind === "user" || row.kind === "agent")
+      const page = conversations.history(t.conversation, { before: t.rows.length, ...(first === undefined ? {} : { beforeId: first.id }) }) catch () => undefined
+      if (page === undefined || page.messages.length === 0) return
+      try SubscriptionRef.update(transcript, (now) => ({ ...now, rows: [...historyRows(page.messages), ...now.rows], hasMore: page.hasMore }))
+    },
+    aim: (next: Target | undefined) => effect {
+      if (next?.kind === "edit" && textOf(shown(try drafts.get())).trim() !== "") {
+        try host.toast(copy.editFirst)
+        return
+      }
+      try SubscriptionRef.set(target, next)
+      if (next?.kind === "edit") try quiet(drafts.send({ type: "handOver", text: unitsOf(next.text) }))
+    },
+    replaceRow: (row: Row) => effect {
+      try rows((list) => list.map((each) => each.id === row.id ? row : each))
+      const identity = try host.identity()
+      const conversation = (try SubscriptionRef.get(transcript)).conversation
+      if (row.kind === "email" && identity !== undefined && conversation !== null) try shelf.keep([identity.origin, identity.owner, identity.agent, conversation], row)
+    },
+    dictationTarget: () => effect {
+      const identity = try host.identity()
+      const binding = JSON.stringify((try drafts.get()).active)
+      const target: DictationTarget = {
+        id: `assistant:${binding}`,
+        account: identity?.owner ?? "",
+        draftLength: () => map(drafts.get(), (now) => JSON.stringify(now.active) === binding ? shown(now).length : 0),
+        insert: (text: string, voiceOriginated: boolean) => effect {
+          const now = try drafts.get()
+          if (JSON.stringify(now.active) !== binding) return
+          const next = `${textOf(shown(now))}${text}`
+          try quiet(drafts.send({ type: "edit", text: unitsOf(next) }))
+          try quiet(sends.send({ type: "typeText", text: unitsOf(next) }))
+          dictated = voiceOriginated && next.trim() !== "" ? { text: next.trim(), binding } : undefined
+        },
+      }
+      return target
+    },
+    back: () => effect {
+      if ((try SubscriptionRef.get(target)) === undefined) return false
+      try SubscriptionRef.set(target, undefined)
+      return true
+    },
+    screenChanged: (contextKey: string, sensitive: boolean) => effect {
+      const own = !sensitive && (acting > 0 || contextKey === ownKey)
+      ownKey = undefined
+      if (own) {
+        try quiet(client.send({ type: "ownView" }))
+        return
+      }
+      try quiet(client.send({ type: "changeView", sensitive }))
+      try review.contextChanged(sensitive)
+      try rows((list) => list.map((row) => row.kind === "card" && row.card.state === "LiveCard" ? { ...row, card: { ...row.card, state: "ReplacedCard" as const } } : row))
+      try quiet(recovery.send({ type: "rekey" }))
+    },
+  }
+})
+
+/** The text of the active draft, for a component that only reads it. */
+export function draftText(state: Parameters<typeof shown>[0]): string {
+  return textOf(shown(state))
+}
+
+/** Whether the active draft may already have been sent and waits for review. */
+export function draftUnsettled(state: Parameters<typeof shown>[0]): boolean {
+  return slotOf(state, state.active).unsettled
+}
+
+/** What Maps shows, as the turn-context rule names it. */
+export function shownKindOf(shown: MapsShown | undefined): ShownKind {
+  return shown === undefined ? "NothingShown" : shown.kind === "map-route" ? "RouteShown" : shown.kind === "map-place" ? "PlaceShown" : "SearchShown"
+}
+
+/** The restored rows with the conversation's kept email cards, each after the agent message that drafted it, or at the end when that message is not shown. */
+export function withShelf(restored: readonly Row[], kept: readonly EmailRow[]): readonly Row[] {
+  const placed: Row[] = []
+  const left = kept.filter((card) => !restored.some((row) => row.id === card.id))
+  for (const row of restored) {
+    placed.push(row)
+    for (const card of left) if (card.messageId !== undefined && card.messageId === row.id) placed.push(card)
+  }
+  return [...placed, ...left.filter((card) => card.messageId === undefined || !restored.some((row) => row.id === card.messageId))]
+}

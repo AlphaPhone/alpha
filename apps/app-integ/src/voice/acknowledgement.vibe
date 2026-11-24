@@ -1,0 +1,88 @@
+// spec/voice/acknowledgement.md, "Story: Hear that Alpha is working on it, never over its answer"; spec/assistant/reply.md, "A spoken cue starts at once and a reply ready before it is audible drops it; an audible cue finishes before the reply, within 2.5 s"
+import type { ReplyStreamHooks } from "@elizaos/agent/client"
+import { spokenCue } from "../assistant/cue.vibe"
+import { Machine, machine, type Event } from "../../gen/voice__acknowledgement.effect.vibe"
+import { Speech } from "./speech.vibe"
+
+/** The one spoken acknowledgement a voice turn may play while its reply is prepared. */
+export interface Acknowledgement {
+  /** The agent's acknowledgment arrived: its line starts at once; `microphoneClear` says whether the capture is closed or held open for barge-in. */
+  readonly acknowledged: (line: string, microphoneClear: () => boolean) => void!!
+  /** The reply is ready: a cue still being prepared is dropped, an audible one is given its bound. */
+  readonly preempt: () => void!!
+  /** Preempt, then settle once the reply may speak: the cue never spoke, ended, or reached its bound. */
+  readonly idle: () => void!!
+  /** The turn aborted, Stop was pressed, the owner spoke over it or voice retired: the cue stops at once. */
+  readonly cancel: () => void!!
+  /** Whether the cue is audible now. */
+  readonly audible: () => boolean!!
+}
+
+/**
+ * The reply-stream hooks of a voice turn: the agent's acknowledgment is the cue, said at once, and the reply is ready at
+ * its `reply_ready` frame. Text streamed before then may be the cue's own text, which the agent restarts before its
+ * tools run, so it never readies the reply; `firstText` hears the first text shown, once.
+ */
+export function voiceReplyHooks(ack: Acknowledgement, microphoneClear: () => boolean, firstText: () => void): ReplyStreamHooks {
+  let first = true
+  return {
+    onAcknowledgment: (text: string) => { runFork(ack.acknowledged(text, microphoneClear)) },
+    onPreview: (text: string, provisional: boolean) => {
+      if (provisional || text === "" || !first) return
+      first = false
+      firstText()
+    },
+    onReady: () => { runFork(ack.preempt()) },
+  }
+}
+
+/** One turn's acknowledgement: its line admitted over a cue Machine of its own, then started, dropped or bounded by the assistant's `spokenCue` and spoken on the reply channel. */
+export effect function acknowledgement() {
+  const speech = try Speech
+  const held = try Effect.provide(effect { return try Machine }, machine())
+  let microphoneClear: () => boolean = () => false
+  let released: Fiber.Fiber<void> | undefined
+
+  effect function send(event: Event) {
+    return held.send(event) catch () => undefined
+  }
+
+  effect function say(line: string, started: void!!) {
+    if (!microphoneClear()) return
+    const heard = () => effect {
+      if ((try send({ type: "audible" })) !== undefined) try started
+    }
+    try ensuring(effect { speech.speak(line, "Replies", { onStarted: heard }) catch () => undefined }, effect { try send({ type: "ended" }) })
+  }
+
+  const cue = try spokenCue(say)
+
+  effect function preempt() {
+    const after = try send({ type: "replyReady" })
+    if (after === undefined) return
+    released = fork.detached cue.replyReady()
+  }
+
+  const shape: Acknowledgement = {
+    effect acknowledged(text: string, clear: () => boolean) {
+      const line = text.trim()
+      const before = try held.get()
+      const after = try send({ type: "acknowledged", labelChars: line.length, microphoneClear: clear() })
+      if (after === undefined || before.used || !after.used) return
+      microphoneClear = clear
+      try cue.say(line)
+    },
+    preempt,
+    effect idle() {
+      try preempt()
+      const waiting = released
+      if (waiting !== undefined) try Fiber.await(waiting)
+    },
+    effect cancel() {
+      try send({ type: "cancel" })
+      try cue.cancel()
+    },
+    effect audible() { return (try held.get()).speaking },
+  }
+  return shape
+}

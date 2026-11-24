@@ -1,0 +1,129 @@
+// spec/workflows/automations.md, "Story: See all my automations even when one source fails"; spec/workflows/automations.md, "Story: Change an automation once, even when the answer is lost"; spec/workflows/runs.md, "Story: Run the version I reviewed exactly once"; spec/workflows/runs.md, "A notice opens exactly the run it names"; spec/workflows/digests.md, "Story: Change a digest once, even when the answer is lost"
+import { assert, describe, it } from "@effect/vitest"
+import { Machine as AutomationsMachine } from "../../gen/workflows__automations.effect.vibe"
+import { Machine as DigestsMachine } from "../../gen/workflows__digests.effect.vibe"
+import { Machine as RunsMachine } from "../../gen/workflows__runs.effect.vibe"
+import { Automations } from "../../src/workflows/automations.vibe"
+import { Digests } from "../../src/workflows/digests.vibe"
+import { WorkflowRuns } from "../../src/workflows/runs.vibe"
+import { type Handler, type Sent, workflowsOf } from "./fakes.vibe"
+
+function workflows(handlers: Handler[], sent: Sent[], variant: "launcher" | "browser" = "launcher") {
+  return workflowsOf(handlers, sent, { variant })
+}
+
+const prompt = { id: "a1", type: "coordinator_text", title: "Plan my day", enabled: false, status: "paused", triggerId: "t1" }
+const status = { engine: "eliza-typed", status: "ready", manualSubmissionProtocol: 1, approvalReceiptProtocol: 1, hostedDigestProtocol: 1 }
+const definition = { id: "w1", name: "Morning", active: true, versionId: "v1", steps: [] }
+const run = (id: string, finished: boolean) => ({ id, workflowId: "w1", status: finished ? "succeeded" : "running", startedAt: "2026-11-22T07:00:00.000Z", finished, workflowVersionId: "v1" })
+
+describe("Workflows (spec/workflows/automations.md, \"Story: See all my automations even when one source fails\")", () => {
+  it.effect("lists every source on its own and holds a change until it is settled (spec/workflows/automations.md, \"Story: Change an automation once, even when the answer is lost\")", () => effect {
+    const sent: Sent[] = []
+    let executes = 0
+    const handlers: Handler[] = [
+      (m, p) => m === "GET" && p === "/api/automations" ? { status: 200, data: { automations: [prompt] } } : undefined,
+      (m, p) => m === "GET" && p.startsWith("/api/scheduled-tasks") ? { status: 500 } : undefined,
+      (m, p) => m === "GET" && p === "/api/lifeops/reminders" ? { status: 200, data: { reminders: [] } } : undefined,
+      (m, p) => m === "PUT" && p === "/api/triggers/t1" ? { status: 429 } : undefined,
+      (m, p) => m === "GET" && p === "/api/triggers/t1" ? { status: 200, data: { trigger: { id: "t1", displayName: "Plan my day", instructions: "Plan", enabled: false } } } : undefined,
+      (m, p) => m === "POST" && p === "/api/triggers/t1/execute" ? (executes++, { status: 503 }) : undefined,
+    ]
+    provide workflows(handlers, sent) {
+      const list = try Automations
+      const held = try AutomationsMachine
+      try list.refresh()
+      const first = try held.get()
+      const enabled = try list.setEnabled("a1", true)
+      const afterEnable = try held.get()
+      const ran = try list.run("a1")
+      const again = try list.run("a1")
+      const unknown = try held.get()
+      try list.allowAnother(unknown.held[0]?.id ?? 0)
+      const released = try held.get()
+      try Effect.try(() => assert.deepStrictEqual({
+        rows: first.rows.map((r) => [r.key, r.kind, r.target]), reads: [first.automations, first.schedules, first.reminders, first.definitions],
+        enabled: [enabled.answer, enabled.word, afterEnable.held.length],
+        ran: [ran.answer, again.answer, executes, unknown.answer, unknown.held.length],
+        released: released.held.length,
+        notSent: sent.some((s) => s.method === "DELETE" || (s.method === "GET" && s.body !== undefined)),
+      }, {
+        rows: [["a1", "PromptRow", "t1"]], reads: ["Listed", "RefreshFailed", "Listed", "NotOnAgent"],
+        enabled: ["refused", "limit", 0],
+        ran: ["unknown", "busy", 1, "AnswerUnknown", 1],
+        released: 0,
+        notSent: false,
+      }))
+    }
+  })
+})
+
+describe("Runs (spec/workflows/runs.md, \"Story: Run the version I reviewed exactly once\")", () => {
+  it.effect("recovers a run whose answer was lost without starting a second (spec/workflows/runs.md, \"An unknown outcome is settled by asking for the same submission, and resent only after review\")", () => effect {
+    const sent: Sent[] = []
+    let submission = ""
+    let posts = 0
+    const handlers: Handler[] = [
+      (m, p) => m === "GET" && p === "/api/workflow/status" ? { status: 200, data: status } : undefined,
+      (m, p) => m === "GET" && p === "/api/workflow/workflows/w1" ? { status: 200, data: definition } : undefined,
+      (m, p) => m === "GET" && p === "/api/workflow/workflows/w1/executions" ? { status: 200, data: { executions: posts > 0 ? [run("r1", false)] : [] } } : undefined,
+      (m, p, b) => {
+        if (m !== "POST" || p !== "/api/workflow/workflows/w1/run") return undefined
+        posts++
+        submission = (b as { submissionId: string }).submissionId
+        return { status: 502 }
+      },
+      (m, p) => m === "GET" && p === `/api/workflow/workflows/w1/submissions/${submission}` ? { status: 200, data: { submissionId: submission, execution: run("r1", false) } } : undefined,
+      (m, p) => m === "GET" && p === "/api/workflow/executions/r1" ? { status: 200, data: { execution: run("r1", posts > 0) } } : undefined,
+      (m, p) => m === "GET" && p === "/api/workflow/executions/r1/approvals" ? { status: 200, data: { runId: "r1", workflowId: "w1", workflowVersionId: "v1", finished: true, cancellationRequested: false, approvals: [] } } : undefined,
+    ]
+    provide workflows(handlers, sent) {
+      const runs = try WorkflowRuns
+      const held = try RunsMachine
+      const opened = try runs.openWorkflow("w1")
+      const reviewed = try runs.review()
+      const lost = try runs.confirm()
+      const kept = try held.get()
+      const recovered = try runs.reconcile()
+      const shown = try held.get()
+      const link = try runs.open("r1")
+      const linked = try held.get()
+      try Effect.try(() => assert.deepStrictEqual({
+        opened, reviewed, lost, kept: [kept.custody, kept.intent.submission === submission, kept.intent.version],
+        recovered, shown: [shown.custody, shown.shown.runId, shown.executions, posts],
+        link: [link.includes("runs/r1"), linked.selected, linked.shown.runId, linked.shown.finished],
+      }, {
+        opened: true, reviewed: true, lost: "unknown", kept: ["Unknown", true, 1],
+        recovered: "recovered", shown: ["NoCustody", "r1", 1, 1],
+        link: [true, "r1", "r1", true],
+      }))
+    }
+  })
+})
+
+describe("Digests (spec/workflows/digests.md, \"Story: Change a digest once, even when the answer is lost\")", () => {
+  it.effect("keeps an unconfirmed change for Retry and clears it once the agent saves it (spec/workflows/digests.md, \"The agent's answer clears the kept request, and only an exact stale refusal asks for review again\")", () => effect {
+    const sent: Sent[] = []
+    let tries = 0
+    const handlers: Handler[] = [
+      (m, p) => m === "GET" && p === "/api/workflow/status" ? { status: 200, data: status } : undefined,
+      (m, p) => m === "GET" && p === "/api/workflow/hosted/loops" ? { status: 200, data: { loops: [] } } : undefined,
+      (m, p) => m === "GET" && p === "/api/workflow/hosted/sources" ? { status: 200, data: { sources: [] } } : undefined,
+      (m, p) => m === "GET" && p.startsWith("/api/workflow/hosted/results?") ? { status: 200, data: { entries: [] } } : undefined,
+      (m, p) => m === "POST" && p === "/api/workflow/hosted/loops" ? (tries++, tries === 1 ? { status: 503 } : { status: 200, data: { ok: true } }) : undefined,
+    ]
+    provide workflows(handlers, sent, "browser") {
+      const digests = try Digests
+      const panel = try DigestsMachine
+      try digests.open()
+      const first = try digests.change({ path: "loops", body: { id: "d1", enabled: false } })
+      const kept = try panel.get()
+      const second = try digests.retry()
+      const cleared = try panel.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        { first, kept: [kept.pending, kept.notice], second, cleared: [cleared.pending, cleared.busy, cleared.stage], posts: tries },
+        { first: "MutationUnconfirmed", kept: ["Dispatched", "ChangeUnconfirmed"], second: "MutationSaved", cleared: ["NoPending", false, "DigestIdle"], posts: 2 },
+      ))
+    }
+  })
+})

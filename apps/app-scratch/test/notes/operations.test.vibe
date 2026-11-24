@@ -1,0 +1,184 @@
+// spec/notes/organize.md, "Story: Let a workflow read the notes I selected for it"; spec/notes/organize.md, "Story: Let a workflow save the note its step wrote"; spec/notes/editor.md, "Story: Leave a note the way Back does"; spec/notes/list.md, "Story: Narrow the list to what I am looking for"
+import { assert, describe, it } from "@effect/vitest"
+import type { StickyNote } from "@elizaos/plugin-notes/types"
+import { Machine as EditorMachine } from "../../gen/notes__editor.effect.vibe"
+import { Machine as TrashMachine } from "../../gen/notes__trash.effect.vibe"
+import { AssistantHost } from "../../src/assistant/host.vibe"
+import { NotesCollection } from "../../src/notes/collection.vibe"
+import { NotesEditor } from "../../src/notes/editor.vibe"
+import { notesRouteOf, notesRouteRequest } from "../../src/notes/list.vibe"
+import { operationPorts } from "../../src/notes/operations.vibe"
+import { NotesHandoff } from "../../src/notes/origins.vibe"
+import { sha256Hex } from "../../src/notes/platform.ts"
+import { NotesRecorder } from "../../src/notes/recorder.vibe"
+import { NotesSources } from "../../src/notes/sources.vibe"
+import { NotesTrash } from "../../src/notes/trash.vibe"
+import { Navigation } from "../../src/shell/navigation.vibe"
+import { bound, check, notesOver, until } from "./harness.vibe"
+import { DeviceFake, NotesAgentFake } from "./resident-fake.ts"
+
+const plan: StickyNote = { id: "plan", title: "Plan", body: "\nBuy milk", color: "yellow", createdAt: "2026-11-20T09:00:00.000Z", updatedAt: "2026-11-20T09:00:00.000Z" }
+
+function seeded(): NotesAgentFake {
+  const agent = new NotesAgentFake()
+  agent.notes.push(structuredClone(plan))
+  agent.revision = 1
+  return agent
+}
+
+/** The assistant's view of the screen: a visible workflow run, or one hidden behind the lock. */
+function host(hidden: boolean, view = "workflows") {
+  const screen = { exposure: { privateView: false, locked: false, hidden, connectionDialog: false }, observation: { view, revision: 1, sensitive: false }, onCalendar: false, contextKey: `${view}:` }
+  return Layer.succeed(AssistantHost, { screen: () => succeed(screen), identity: () => succeed(undefined) } as unknown as AssistantHost.Shape)
+}
+
+interface Place { readonly app: string; readonly route: string; readonly inner: boolean }
+interface Shown { readonly app: string; readonly places: readonly Place[] }
+
+/** The shell's navigation with Notes in front at `route`, keeping every route Notes reports. */
+function navigationAt(navs: SubscriptionRef.SubscriptionRef<Shown>, sent: unknown[]) {
+  return Layer.succeed(Navigation, {
+    changes: SubscriptionRef.changes(navs),
+    get: () => SubscriptionRef.get(navs),
+    send: (event: { readonly type: string; readonly route?: string }) => Effect.map(
+      SubscriptionRef.update(navs, (nav) => event.type === "setRoute" ? { ...nav, places: nav.places.map((place) => place.app === "notes" ? { ...place, route: event.route ?? "" } : place) } : nav),
+      () => { sent.push(event); return true }),
+  } as unknown as Navigation.Shape)
+}
+
+describe("Notes device operations, Back and routes", () => {
+  it.live("A workflow reads only the selected notes it reviewed (spec/notes/organize.md, \"Story: Let a workflow read the notes I selected for it\")", () => effect {
+    const agent = seeded()
+    const device = new DeviceFake()
+    provide notesOver(agent, device), host(false) {
+      try bound()
+      const ports = try operationPorts
+      const editor = try NotesEditor
+      const revision = try promise(() => sha256Hex(JSON.stringify(["Plan", "Buy milk"])))
+      const at = { proposalId: "p1", operationId: "op_1", attemptId: 1 }
+      const operation = { type: "read_selected_notes", notes: [{ id: "plan", revision }] }
+      // spec/notes/organize.md, "A workflow read shares the selected notes only while each still holds the text the owner reviewed"
+      const shared = try promise(() => ports.execute(operation, at))
+      const missing = try promise(() => ports.execute({ type: "read_selected_notes", notes: [{ id: "gone", revision }] }, at))
+      try editor.openNote("plan")
+      try editor.edit({ body: "Buy oat milk" })
+      try editor.save()
+      const changed = try promise(() => ports.execute(operation, at))
+      const readBack = try promise(() => ports.readBack(operation, at))
+      try check(() => assert.deepStrictEqual(
+        { shared, missing, changed, readBack, valid: ports.validate(operation) !== undefined, other: ports.validate({ type: "calendar_lookup" }), kind: ports.classOf(operation), card: ports.describe(operation).title },
+        {
+          shared: { kind: "applied", result: { kind: "notes", notes: [{ id: "plan", revision, title: "Plan", text: "Buy milk" }] } },
+          missing: { kind: "refused", code: "note_missing" }, changed: { kind: "refused", code: "note_changed" }, readBack: { kind: "unresolved" },
+          valid: true, other: undefined, kind: "NotesRead", card: "Share selected notes",
+        },
+      ))
+    }
+  })
+
+  it.live("A workflow read on a hidden screen shares nothing (spec/notes/organize.md, \"Story: Let a workflow read the notes I selected for it\")", () => effect {
+    const agent = seeded()
+    const device = new DeviceFake()
+    provide notesOver(agent, device), host(true) {
+      try bound()
+      const ports = try operationPorts
+      const revision = try promise(() => sha256Hex(JSON.stringify(["Plan", "Buy milk"])))
+      const answer = try promise(() => ports.execute({ type: "read_selected_notes", notes: [{ id: "plan", revision }] }, { proposalId: "p2", operationId: "op_2", attemptId: 1 }))
+      try check(() => assert.deepStrictEqual(answer, { kind: "refused", code: "not_dispatched" }))
+    }
+  })
+
+  it.live("A workflow saves the note its step wrote once, from the open run (spec/notes/organize.md, \"Story: Let a workflow save the note its step wrote\")", () => effect {
+    const agent = seeded()
+    const device = new DeviceFake()
+    provide notesOver(agent, device), host(false) {
+      try bound()
+      const ports = try operationPorts
+      const collection = try NotesCollection
+      const at = { proposalId: "p5", operationId: "op_5", attemptId: 1 }
+      const operation = { type: "create_note", title: "Groceries", body: "Eggs and bread" }
+      // spec/notes/organize.md, "A workflow's note is saved once, into the agent's collection, only from the open run in front"
+      const saved = try promise(() => ports.execute(operation, at))
+      const again = try promise(() => ports.execute(operation, { ...at, attemptId: 2 }))
+      const readBack = try promise(() => ports.readBack(operation, at))
+      const notes = ((try collection.current())?.snapshot.notes ?? []).filter((note) => note.title === "Groceries")
+      try check(() => assert.deepStrictEqual(
+        { saved, again, readBack, count: notes.length, kind: ports.classOf(operation), card: ports.describe(operation).title, summary: ports.summarize(operation, "Applied") },
+        { saved: { kind: "applied" }, again: { kind: "applied" }, readBack: { kind: "unresolved" }, count: 1, kind: "CreateNote", card: "Save a note", summary: "Saved note “Groceries”." },
+      ))
+    }
+  })
+
+  it.live("A workflow note away from the open run saves nothing (spec/notes/organize.md, \"Story: Let a workflow save the note its step wrote\")", () => effect {
+    const agent = seeded()
+    const device = new DeviceFake()
+    provide notesOver(agent, device), host(false, "notes") {
+      try bound()
+      const ports = try operationPorts
+      const collection = try NotesCollection
+      const answer = try promise(() => ports.execute({ type: "create_note", title: "Groceries", body: "" }, { proposalId: "p6", operationId: "op_6", attemptId: 1 }))
+      const count = ((try collection.current())?.snapshot.notes ?? []).length
+      try check(() => assert.deepStrictEqual({ answer, count }, { answer: { kind: "refused", code: "not_dispatched" }, count: 1 }))
+    }
+  })
+
+  it.live("Back closes only what Notes has open (spec/notes/editor.md, \"Story: Leave a note the way Back does\")", () => effect {
+    const agent = seeded()
+    const device = new DeviceFake()
+    provide notesOver(agent, device) {
+      try bound()
+      const trash = try NotesTrash
+      const sources = try NotesSources
+      const recorder = try NotesRecorder
+      const editor = try NotesEditor
+      const nothingOpen = { trash: try trash.close(), ask: try trash.closeAsk(), erase: try trash.cancelErase(), source: try sources.closeDialog(), keep: try recorder.keep(), recorder: try recorder.leave() }
+      try recorder.begin(null, false)
+      const recording = try recorder.leave()
+      try editor.openNote("plan")
+      const deleted = try editor.remove("plan")
+      try until((try TrashMachine).changes, (state) => state.rows === 1)
+      try trash.open()
+      const trashOpen = try trash.close()
+      const trashAgain = try trash.close()
+      try check(() => assert.deepStrictEqual(
+        { nothingOpen, recording, deleted: deleted.deleted, trashOpen, trashAgain },
+        { nothingOpen: { trash: false, ask: false, erase: false, source: false, keep: false, recorder: false }, recording: true, deleted: true, trashOpen: true, trashAgain: false },
+      ))
+    }
+  })
+
+  it.live("A route opens one note or shows one filter, and Notes reports the note it shows (spec/notes/list.md, \"Story: Narrow the list to what I am looking for\")", () => effect {
+    // spec/notes/list.md, "A Notes route opens one note or shows one list filter, and the plain list otherwise"
+    const route = notesRouteOf({ filter: { text: "term sheet", kind: "voice" } })
+    const grammar = {
+      route, filter: notesRouteRequest(route), note: notesRouteRequest("plan"), unknownKind: notesRouteRequest("filter?kind=bogus"),
+      empty: notesRouteRequest(""), none: notesRouteRequest(undefined), list: notesRouteOf({}),
+    }
+    const agent = seeded()
+    const device = new DeviceFake()
+    const sent: unknown[] = []
+    const navs = try SubscriptionRef.make<Shown>({ app: "notes", places: [{ app: "notes", route: "plan", inner: false }] })
+    provide notesOver(agent, device, undefined, navigationAt(navs, sent)) {
+      const machine = try EditorMachine
+      const handoff = try NotesHandoff
+      const editor = try NotesEditor
+      try bound()
+      const opened = try until(machine.changes, (state) => state.present && state.draftId === "plan")
+      const reportedWhileOpen = sent.length
+      try editor.leave()
+      const cleared = try until(SubscriptionRef.changes(navs), (nav) => nav.places[0]?.route === "")
+      try SubscriptionRef.update(navs, (nav) => ({ ...nav, places: [{ app: "notes", route: route ?? "", inner: false }] }))
+      const filtered = try until(handoff.filters, (filter) => filter !== undefined)
+      try check(() => assert.deepStrictEqual(
+        { grammar, opened: opened?.draftId, reportedWhileOpen, cleared: cleared?.places[0]?.route, sent, filtered },
+        {
+          grammar: {
+            route: "filter?text=term+sheet&kind=voice", filter: { filter: { text: "term sheet", kind: "voice" } }, note: { noteId: "plan" }, unknownKind: {},
+            empty: {}, none: {}, list: undefined,
+          },
+          opened: "plan", reportedWhileOpen: 0, cleared: "", sent: [{ type: "setRoute", route: "" }], filtered: { text: "term sheet", kind: "voice" },
+        },
+      ))
+    }
+  })
+})

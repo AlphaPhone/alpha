@@ -1,0 +1,100 @@
+// spec/clock/canonicalTaps.md, "Story: Open the view a notification names"
+import type { AppId } from "../web/app-screen.ts"
+import { Native } from "../platform/native.vibe"
+import { assistantPeer, navigationPeer, ownerPeer } from "./peers.vibe"
+import { Machine as CanonicalMachine, type TapRoute } from "../../gen/clock__canonicalTaps.effect.vibe"
+import { CanonicalTap } from "./native.schema.vibe"
+import { NOTIFICATIONS, nativeCalls } from "./plugins.vibe"
+import { pageVisible } from "./page.ts"
+
+const VIEWS: Readonly<Record<string, AppId>> = {
+  calendar: "calendar",
+  notes: "notes",
+  automations: "workflows",
+  workflows: "workflows",
+  clock: "clock",
+  reminders: "reminders",
+  "apps/tasks": "reminders",
+}
+
+/** Where a tapped notification's view leads: the conversation, an exact message, or an app. */
+export function destinationOf(view: string | undefined, conversationId: string | undefined, messageId: string | undefined): { readonly route: TapRoute; readonly app: AppId; readonly at?: string } {
+  if (view === "chat" && conversationId && messageId) return { route: "MessageRoute", app: "assistant", at: `${conversationId}/${messageId}` }
+  if (view === "chat") return { route: "ChatRoute", app: "assistant" }
+  const app = view === undefined ? undefined : VIEWS[view]
+  return app === undefined ? { route: "UnsupportedRoute", app: "assistant" } : { route: "AppRoute", app }
+}
+
+/** Handles the tapped canonical notification Android holds, once per tap. */
+export service CanonicalTaps {
+  /** A tap arrived, Alpha came to the front, or the session changed: read the pending tap when the owner is not composing. */
+  wake(): void!!
+  /** The layer is going away: nothing is read or acknowledged after this. */
+  retire(): void!!
+}
+
+/** Canonical taps over `AlphaNotifications`, for the signed-in session only. */
+export const canonicalTapsLayer = Layer.effect(CanonicalTaps, effect {
+  const { call, command } = try nativeCalls()
+  const taps = try CanonicalMachine
+  const navigator = try navigationPeer()
+  const composer = try assistantPeer()
+  const session = try ownerPeer()
+  const step = effect (event: Parameters<typeof taps.send>[0]) => taps.send(event) catch () => undefined
+
+  effect function sessionKey() {
+    return (try session.owner())?.key ?? ""
+  }
+
+  effect function quiet() {
+    return pageVisible() && (try composer.quiet())
+  }
+
+  effect function handle() {
+    const key = try sessionKey()
+    if (key !== (try taps.get()).session) try step({ type: "sessionChanged", session: key })
+    if ((try step({ type: "beginTap", quiet: try quiet() }))?.stage !== "CanonReading") return
+    const tap = call(NOTIFICATIONS, "canonicalPending", CanonicalTap) catch () => undefined
+    const owner = try session.owner()
+    const sameAccount = owner !== undefined && tap?.ownerId === owner.ownerId && owner.key === key
+    const to = destinationOf(tap?.view, tap?.conversationId, tap?.messageId)
+    const read = try step({ type: "tapRead", token: tap?.token ?? "", sameAccount, route: to.route })
+    if (read === undefined || read.stage === "CanonIdle") return
+    try navigator.open(to.app, to.at)
+    const at = try navigator.shown()
+    const arrived = at.app === to.app && (to.at === undefined || at.route === to.at)
+    if (read.stage === "CanonRestoring" && (try step({ type: "historyRestored", found: arrived }))?.stage !== "CanonNavigating") return
+    const done = try step({ type: "navigated", arrived, quiet: try quiet() })
+    if (done?.stage !== "CanonAcknowledging") return
+    command(NOTIFICATIONS, "acknowledgeCanonical", { token: read.token }) catch () => undefined
+    try step({ type: "acknowledged" })
+  }
+
+  return {
+    effect wake() {
+      try step({ type: "wake" })
+      while ((try taps.get()).drain && (try taps.get()).stage === "CanonIdle") {
+        const before = (try taps.get()).captures
+        try handle()
+        const after = try taps.get()
+        if (after.captures === before && after.stage === "CanonIdle") return
+      }
+    },
+    retire: () => asVoid(step({ type: "retireTaps" })),
+  }
+})
+
+/** Wakes the canonical tap handler on Android's tap event, on each change of the signed-in owner and when the owner stops holding a draft. Never returns while the plugin is present. */
+export effect function followCanonicalTaps() {
+  const native = try Native
+  const taps = try CanonicalTaps
+  const owners = try ownerPeer()
+  const composer = try assistantPeer()
+  if (!(try native.available(NOTIFICATIONS))) return
+  try taps.wake()
+  try.all [
+    effect { Stream.runForEach(native.listen(NOTIFICATIONS, "canonicalNotificationTap"), () => taps.wake()) catch () => undefined },
+    effect { Stream.runForEach(owners.changes(), () => taps.wake()) catch () => undefined },
+    effect { Stream.runForEach(composer.releases(), () => taps.wake()) catch () => undefined },
+  ]
+}

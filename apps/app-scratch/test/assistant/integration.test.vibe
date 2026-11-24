@@ -1,0 +1,290 @@
+// spec/assistant/review.md, "Story: Approve a call or text where I am talking"; spec/assistant/review.md, "Story: Let a workflow use my phone only for the step I approved"; spec/assistant/review.md, "Story: Find what a card is about"; spec/assistant/review.md, "Story: Act only on what I asked for"; spec/assistant/context.md, "Story: Let my agent see what Maps shows when I ask about it"; spec/assistant/context.md, "Story: Be offered only what this phone can do"; spec/assistant/views.md, "Story: Have my agent open the screen it means"; spec/assistant/views.md, "Story: Let my agent press back or reload only on the page I am looking at"; spec/assistant/emailCard.md, "Story: Send an email my agent drafted, from the chat"; spec/assistant/attachments.md, "Story: Ask Alpha about a file from Files"
+import { assert, it } from "@effect/vitest"
+import { AssistantDraft, questionDraft, workflowStepSource } from "../../src/assistant/draft.vibe"
+import { Composer, withShelf } from "../../src/assistant/composer.vibe"
+import type { ScreenFacts } from "../../src/assistant/host.vibe"
+import { copy } from "../../src/assistant/presentation.vibe"
+import { DeviceExecutors, DeviceReview, cardDestination, commsProposalOf, type OperationPorts } from "../../src/assistant/review.vibe"
+import { emptyTranscript } from "../../src/assistant/transcript.vibe"
+import { CAPABILITIES_HEADER, capabilityHeaders } from "../../src/assistant/transport.vibe"
+import { AgentViews, appOfView, handoffOf } from "../../src/assistant/views.vibe"
+import {
+  assistantOver, browserScreen, countingExecutors, fakeAdvertised, fakeBrowserPages, fakeBrowserViews, fakeComms, fakeFeeds, fakeHost, fakeMapsViews,
+  fakePreferences, fakeResident, homeScreen, journalNative, noNative, wireProposal, type Seen,
+} from "./fakes.vibe"
+
+const digest = (char: string) => char.repeat(64)
+
+const mapsScreen: ScreenFacts = {
+  exposure: { privateView: false, locked: false, hidden: false, connectionDialog: false },
+  observation: { view: "maps", revision: 3, sensitive: false },
+  onCalendar: false,
+  contextKey: "maps:",
+}
+
+effect function transcriptNow() {
+  const composer = try Composer
+  const head = try Stream.runHead(composer.transcript)
+  return Option.isSome(head) ? head.value : emptyTranscript
+}
+
+effect function settle() {
+  for (const _ of [1, 2, 3, 4, 5, 6, 7, 8]) try yieldNow
+  try TestClock.adjust("10 millis")
+}
+
+function turnBody(seen: Seen): unknown {
+  return seen.calls.find((call) => call.method === "STREAM" || (call.method === "POST" && call.path.endsWith("/messages")))?.body
+}
+
+/** Executors whose every operation is a call the owner reviews, counting what ran. */
+function callExecutors(runs: { count: number }) {
+  const ports: OperationPorts = {
+    validate: (operation) => operation,
+    execute: async () => { runs.count += 1; return { kind: "applied" } },
+    readBack: async () => ({ kind: "found" }),
+    describe: () => ({ title: "Call Ann", detail: "+1 415 555 0100", destination: "phone" }),
+    classOf: () => "CommsAct",
+    target: () => ({ tag: "NoTarget" }),
+    summarize: (_operation, result) => result === "Applied" ? "Call started." : "No call.",
+  }
+  return Layer.succeed(DeviceExecutors, { ports })
+}
+
+/** Executors whose every operation is a Browser open its family grounds, as Browser does for a link of the page the message carried. */
+function groundedOpens(runs: { count: number }) {
+  const ports: OperationPorts = {
+    validate: (operation) => operation,
+    execute: async () => { runs.count += 1; return { kind: "applied" } },
+    readBack: async () => ({ kind: "found" }),
+    describe: () => ({ title: "Open the second story", detail: "news.example.com" }),
+    classOf: () => "BrowserNavigate",
+    target: () => ({ tag: "ContactTarget", nameWritten: true }),
+    summarize: () => "Opened the story.",
+  }
+  return Layer.succeed(DeviceExecutors, { ports })
+}
+
+it.effect("Approve a call or text where I am talking (spec/assistant/review.md, \"A comms card is staged on the comms bar when it is listed, and only the stage's open, live proposal is approved, once\")", () => effect {
+  const runs = { count: 0 }
+  const stage: string[] = []
+  const toasts: string[] = []
+  const first = wireProposal("p1", digest("a"), { type: "phone_call", target: { kind: "number", number: "+14155550100" } })
+  const second = wireProposal("p2", digest("b"), { type: "phone_call", target: { kind: "number", number: "+14155550199" } })
+  provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals: [first, second] }), Layer.merge(fakeHost(toasts), fakeComms({ emergency: false }, stage)), callExecutors(runs), journalNative(new Map())) {
+    const composer = try Composer
+    const review = try DeviceReview
+    try composer.open("c1", false)
+    const cards = (try transcriptNow()).rows.flatMap((row) => row.kind === "card" ? [row.card] : [])
+    const replaced = cards.find((card) => card.proposalId === "p1")
+    const open = cards.find((card) => card.proposalId === "p2")
+    const older = replaced === undefined ? undefined : try review.approve(replaced)
+    const newer = open === undefined ? undefined : try review.approve(open)
+    try Effect.try(() => assert.deepStrictEqual(
+      { stage, runs: runs.count, older: older?.card.state, newer: newer?.card.state, toasts, kinds: [commsProposalOf({ type: "phone_call" }), commsProposalOf({ type: "messages_read_selected" })] },
+      {
+        stage: ["propose:p1", "propose:p2", "approve:p2:true"], runs: 1, older: "RecoveredCard", newer: "DoneCard", toasts: [copy.commsReplaced],
+        kinds: [{ kind: "CallProposal", acts: true }, { kind: "OtherProposal", acts: false }],
+      },
+    ))
+  }
+})
+
+it.effect("Let a workflow use my phone only for the step I approved (spec/assistant/review.md, \"A workflow-bound proposal runs only from its own run's step review, once, and its executor knows the run\")", () => effect {
+  const runs = { count: 0 }
+  const plain = wireProposal("w1", digest("c"), { type: "create_note" })
+  const bound = { ...plain, payload: { ...plain.payload, workflow: { workflowId: "wf1", versionId: "v1", runId: "run1", stepId: "s1", specDigest: digest("d") } } }
+  provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals: [bound] }), fakeHost([]), countingExecutors(runs), journalNative(new Map())) {
+    const review = try DeviceReview
+    const listed = try review.pending()
+    const otherStep = try review.workflowStep("run1", "s2")
+    const otherRun = try review.workflowStep("run2", "s1")
+    const ran = try review.workflowStep("run1", "s1")
+    const again = try review.workflowStep("run1", "s1")
+    const facts = try review.callFacts({ proposalId: "w1", operationId: "", attemptId: 1 })
+    try Effect.try(() => assert.deepStrictEqual(
+      { listed: listed.cards.length, otherStep, otherRun, ran: ran?.card.state, again, runs: runs.count, step: facts.workflow, reviewed: facts.reviewed },
+      { listed: 0, otherStep: undefined, otherRun: undefined, ran: "DoneCard", again: undefined, runs: 1, step: { workflowId: "wf1", versionId: "v1", runId: "run1", stepId: "s1" }, reviewed: true },
+    ))
+  }
+})
+
+it.effect("Find what a card is about (spec/assistant/review.md, \"A card opens the view its family names, or else the view of its operation's class\")", () => effect {
+  const reminder = wireProposal("r1", digest("e"), { type: "reminder_create" })
+  provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals: [reminder] }), fakeHost([]), countingExecutors({ count: 0 }, "CreateReminder")) {
+    const composer = try Composer
+    try composer.open("c1", false)
+    const card = (try transcriptNow()).rows.find((row) => row.kind === "card")
+    try Effect.try(() => assert.deepStrictEqual(
+      { listed: card?.kind === "card" ? card.card.destination : undefined, named: cardDestination("phone", "CommsAct"), maps: cardDestination(undefined, "MapsRead"), view: cardDestination(undefined, "OpenView") },
+      { listed: "reminders", named: "phone", maps: "maps", view: undefined },
+    ))
+  }
+})
+
+it.effect("A page link stays a card even when its family grounds it (spec/assistant/review.md, \"The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote\")", () => effect {
+  const runs = { count: 0 }
+  const page = { tabId: "t1", revision: "r1", url: "https://news.example.com/today", title: "Today", capturedAt: 1, links: [{ url: "https://news.example.com/story-2", text: "Second story" }] }
+  const story = wireProposal("p21", digest("f"), { type: "browser_navigate", url: "https://news.example.com/story-2" }, "u1")
+  provide assistantOver(
+    fakeResident({ calls: [] }, { turn: { kind: "reply", text: "Opening it." }, proposals: [story] }),
+    Layer.merge(fakeHost([], browserScreen, [], true), fakeBrowserPages({ on: true }, { id: "t1", revision: "r1" }, page)),
+    groundedOpens(runs), journalNative(new Map()),
+  ) {
+    const composer = try Composer
+    try composer.edit("Open news.example.com/story-2")
+    try composer.send()
+    const cards = (try transcriptNow()).rows.flatMap((row) => row.kind === "card" ? [row.card.proposalId] : [])
+    try Effect.try(() => assert.deepStrictEqual({ cards, runs: runs.count }, { cards: ["p21"], runs: 0 }))
+  }
+})
+
+it.effect("Let my agent see what Maps shows when I ask about it (spec/assistant/context.md, \"A turn names the place, route or search Maps shows as its selected object only while Maps is in front\")", () => effect {
+  const sent = effect function (screen: ScreenFacts) {
+    const seen: Seen = { calls: [] }
+    provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "That is a bakery." }, proposals: [] }), Layer.merge(fakeHost([], screen), fakeMapsViews({ kind: "map-place", id: "maps_1", revision: "4" })), countingExecutors({ count: 0 })) {
+      const composer = try Composer
+      try composer.edit("What is this place?")
+      try composer.send()
+      const text = JSON.stringify(turnBody(seen) ?? {})
+      return text.includes("\"map-place\"") && text.includes("\"maps_1\"")
+    }
+  }
+  const onMaps = try sent(mapsScreen)
+  const offMaps = try sent(homeScreen)
+  try Effect.try(() => assert.deepStrictEqual({ onMaps, offMaps }, { onMaps: true, offMaps: false }))
+})
+
+it.effect("Be offered only what this phone can do (spec/assistant/context.md, \"Every assistant request carries the capabilities this phone advertises of those the agent offered, and none when it offered none\")", () => effect {
+  const headersOf = effect function (names: readonly string[]) {
+    const seen: Seen = { calls: [] }
+    provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "ok" }, proposals: [] }), Layer.merge(fakeHost([]), fakeAdvertised(names)), countingExecutors({ count: 0 })) {
+      const composer = try Composer
+      try composer.edit("Hello")
+      try composer.send()
+      return seen.calls.filter((call) => call.method === "STREAM" || call.path === "/api/client-devices/proposals").map((call) => call.headers?.[CAPABILITIES_HEADER])
+    }
+  }
+  const offered = try headersOf(["maps.selected-read.v1", "files.browser.v1", "maps.selected-read.v1", "Not A Name"])
+  const none = try headersOf([])
+  try Effect.try(() => assert.deepStrictEqual(
+    { offered: [...new Set(offered)], none: [...new Set(none)], empty: capabilityHeaders([]) },
+    { offered: ["maps.selected-read.v1,files.browser.v1"], none: [undefined], empty: {} },
+  ))
+})
+
+it.effect("Have my agent open the screen it means (spec/assistant/views.md, \"A prepared view opens once under a returned claim, only while the screen and the session are the ones the turn was sent from, and every claim is settled once\")", () => effect {
+  const seen: Seen = { calls: [] }
+  const delivered: string[] = []
+  provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "ok" }, proposals: [] }), Layer.merge(fakeHost([]), fakeMapsViews(undefined, delivered)), countingExecutors({ count: 0 })) {
+    const views = try AgentViews
+    const binding = (viewId: string, clientId = views.clientId) => ({ clientId, requestId: `req-${viewId}`, viewId, viewType: "gui", installationId: "i1" })
+    const result = (viewId: string, clientId?: string) => [{ action: "OPEN_VIEW", data: { values: { viewId, label: viewId, navigationPrepared: true, navigationBinding: binding(viewId, clientId) } } }]
+    const home = try views.deliver(result("chat"), homeScreen.contextKey)
+    const unknown = try views.deliver(result("weather"), homeScreen.contextKey)
+    const other = try views.deliver(result("chat", "someone-else"), homeScreen.contextKey)
+    const stale = try views.deliver(result("chat"), "calendar:")
+    const maps = try views.deliver(result("maps"), homeScreen.contextKey)
+    const mapsAgain = try views.deliver(result("maps"), homeScreen.contextKey)
+    const claims = seen.calls.filter((call) => call.path === "/api/views/interact-claim").length
+    const results = seen.calls.filter((call) => call.path === "/api/views/interact-result").map((call) => (call.body as { readonly success?: boolean }).success)
+    try Effect.try(() => assert.deepStrictEqual(
+      { home, unknown, other, stale, maps: maps.status, mapsAgain: mapsAgain.status, delivered, claims, results, chat: appOfView("chat"), flows: appOfView("automations"), none: handoffOf([{ action: "REPLY", data: {} }]) },
+      {
+        home: { status: "delivered", label: "Home" }, unknown: { status: "unavailable" }, other: { status: "none" }, stale: { status: "none" },
+        maps: "unknown", mapsAgain: "unknown", delivered: ["1:1", "2:1"], claims: 1, results: [true], chat: "home", flows: "workflows", none: undefined,
+      },
+    ))
+  }
+})
+
+it.effect("Let my agent press back or reload only on the page I am looking at (spec/assistant/views.md, \"A view command is claimed once, refused under \"Ask before Alpha acts\", run only in Browser, and answered once\")", () => effect {
+  const answered = effect function (asks: boolean) {
+    const seen: Seen = { calls: [] }
+    const calls: string[] = []
+    const frames = [
+      { type: "view:interact", viewType: "gui", viewId: "browser", requestId: "q1", installationId: "i1", capability: "browser-command", params: { command: { subaction: "back" } } },
+      { type: "view:interact", viewType: "gui", viewId: "browser", requestId: "q2", installationId: "i1", capability: "get-text" },
+      { type: "view:interact", viewType: "gui", viewId: "calendar", requestId: "q3", installationId: "i1", capability: "calendar-command" },
+    ]
+    provide assistantOver(
+      fakeResident(seen, { turn: { kind: "reply", text: "ok" }, proposals: [] }),
+      Layer.mergeAll(fakeHost([], browserScreen), fakeFeeds(frames), fakeBrowserViews({ ok: false, code: "UNSUPPORTED", message: "No page read." }, calls)),
+      countingExecutors({ count: 0 }), noNative, fakePreferences({ asks, shares: false }),
+    ) {
+      const views = try AgentViews
+      try views.connect()
+      try settle()
+      const outcomes = seen.calls.filter((call) => call.path === "/api/views/interact-result")
+        .map((call) => call.body as { readonly requestId: string; readonly success: boolean; readonly error?: string })
+        .map((body) => `${body.requestId}:${body.success}:${body.error ?? ""}`).sort()
+      return { outcomes, calls: calls.sort() }
+    }
+  }
+  const allowed = try answered(false)
+  const reviewFirst = try answered(true)
+  try Effect.try(() => assert.deepStrictEqual(
+    { allowed, reviewFirst },
+    {
+      allowed: {
+        outcomes: ["q1:true:", "q2:false:UNSUPPORTED: No page read.", "q3:false:UNSUPPORTED: This phone has no agent command for that view."],
+        calls: ["command:browser-command", "interact:get-text"],
+      },
+      reviewFirst: {
+        outcomes: ["q1:false:review-required: the owner reviews phone actions first", "q2:false:review-required: the owner reviews phone actions first", "q3:false:review-required: the owner reviews phone actions first"],
+        calls: [],
+      },
+    },
+  ))
+})
+
+it.effect("Send an email my agent drafted, from the chat (spec/assistant/emailCard.md, \"Cards are kept per message on their conversation's shelf, staged once, edited only at the version shown, and an unedited card goes under its owner turn's identity\")", () => effect {
+  const history = [{ id: "u1", role: "user", text: "Email Ann the plan" }, { id: "m1", role: "assistant", text: "Here is a draft." }]
+  const actionResults = [{ action: "GMAIL_DRAFT", data: { to: "ann@example.com", subject: "Plan", body: "Hi Ann" } }]
+  provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "Here is a draft." }, proposals: [], history, actionResults }), fakeHost([]), countingExecutors({ count: 0 })) {
+    const composer = try Composer
+    try composer.edit("Email Ann the plan")
+    try composer.send()
+    const sent = (try transcriptNow()).rows.find((row) => row.kind === "email")
+    if (sent?.kind === "email") try composer.replaceRow({ ...sent, subject: "Plan B" })
+    try composer.open(null, false)
+    try composer.open("c1", false)
+    const rows = (try transcriptNow()).rows
+    const at = rows.findIndex((row) => row.kind === "email")
+    const kept = rows[at]
+    try Effect.try(() => assert.deepStrictEqual(
+      { staged: sent?.kind === "email" ? sent.ownerTurn !== undefined : false, after: rows[at - 1]?.id, subject: kept?.kind === "email" ? kept.subject : undefined, emails: rows.filter((row) => row.kind === "email").length },
+      { staged: true, after: "m1", subject: "Plan B", emails: 1 },
+    ))
+  }
+  const card = { kind: "email" as const, id: "email:m9", card: { state: "DraftEmail" as const, version: 1, dispatchedVersion: 0, dispatches: 0, account: true, recipients: true, body: true, typing: false }, to: "a@example.com", subject: "S", body: "B", messageId: "m9" }
+  const placed = withShelf([{ kind: "notice", id: "n1", text: "x", system: false }], [card])
+  try Effect.try(() => assert.deepStrictEqual(placed.map((row) => row.id), ["n1", "email:m9"]))
+})
+
+it.effect("Ask Alpha about a file from Files (spec/assistant/attachments.md, \"A file's question is reviewed before it joins the draft: \"Use excerpt\" for its text, its name alone for a file too large, and its source line only while linked\")", () => effect {
+  provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals: [] }), fakeHost([]), countingExecutors({ count: 0 })) {
+    const draft = try AssistantDraft
+    try draft.askAbout({ name: "notes.txt", text: "Line one", question: "Summarize", file: "ExcerptAsk" })
+    const excerpt = Option.getOrUndefined(try Stream.runHead(draft.review))
+    const secret = excerpt === undefined ? false : try draft.compose(excerpt.id, "Summarize", "password: hunter2-secret-token")
+    const refused = Option.getOrUndefined(try Stream.runHead(draft.review))
+    try draft.askAbout({ name: "video.mp4", text: "ignored", question: "What is this?", file: "SourceAsk" })
+    const large = Option.getOrUndefined(try Stream.runHead(draft.review))
+    const composed = large === undefined ? false : try draft.compose(large.id, "What is this?", "", false)
+    try Effect.try(() => assert.deepStrictEqual(
+      {
+        excerpt: { label: excerpt?.label, text: excerpt?.text }, secret, notice: refused?.notice,
+        large: { label: large?.label, text: large?.text, notice: large?.notice }, composed,
+        unlinked: questionDraft("What is this?", "video.mp4", undefined, "", false), linked: questionDraft("What is this?", "video.mp4", undefined, ""),
+        step: workflowStepSource({ id: "n1", revision: "2" }, "Morning brief", "Read my calendar", "Reads today's events.").notice,
+      },
+      {
+        excerpt: { label: "Use excerpt", text: "Line one" }, secret: false, notice: "Remove secrets first",
+        large: { label: "Ask Alpha", text: "", notice: "Too large to attach. Only its name goes with your question." }, composed: true,
+        unlinked: "What is this?", linked: "What is this?\n\nSource: video.mp4",
+        step: { id: "n1", revision: "2" },
+      },
+    ))
+  }
+})

@@ -1,0 +1,180 @@
+// spec/notes/origins.md, "Story: Turn a note into an event or a reminder I review in Calendar"; spec/notes/origins.md, "The draft text is the note's open action items, then its open checklist items, then its body"; spec/notes/origins.md, "A link resolves only against the open collection it belongs to"; spec/notes/origins.md, "A link is stored only for a record that was saved, and retired with a durable deletion receipt"; spec/notes/share.md, "A share acts on the open note's snapshot, only while it is still the same note"
+import { noteLinkOf, noteOriginTitle, noteScheduleDraft, recordNoteRevision, resolveNoteLink, type NoteLink, type NoteScheduleDraft, type NoteScheduleKind } from "@elizaos/plugin-notes/client"
+import { linkStored, originLabel, originOpensEdited, originResolution, originRetires, type OriginLabel } from "../../gen/notes__origins.effect.vibe"
+import { NotesCollection } from "./collection.vibe"
+import type { NotesFilter } from "./list.vibe"
+import { decodeOrigins, type OriginIndex } from "./notes.schema.vibe"
+import { sha256Hex } from "./platform.ts"
+import { type SlotAccess, slotAccess, slots } from "./slots.vibe"
+
+/** What Notes asks the shell to open in another app; nothing is saved or sent by the request itself. */
+export type NotesRequest =
+  | { readonly kind: "open-notes"; readonly filter?: NotesFilter; readonly noteId?: string }
+  | { readonly kind: "calendar-draft"; readonly draft: NoteScheduleDraft }
+  | { readonly kind: "email-draft"; readonly subject: string; readonly body: string }
+  | { readonly kind: "open-web-source"; readonly url: string }
+
+/** The requests Notes hands to the shell, which opens the app each names, and the list filter a request asked Notes to show. */
+export service NotesHandoff {
+  readonly requests: Stream.Stream<NotesRequest>
+  readonly filters: Stream.Stream<NotesFilter | undefined>
+  request(request: NotesRequest): void!!
+  /** Show a filter another app's route asked for, without asking the shell for anything. */
+  showFilter(filter: NotesFilter): void!!
+  clearFilter(): void!!
+}
+
+/** The handoff stream. */
+export const handoffLayer = Layer.effect(NotesHandoff, effect {
+  const hub = try PubSub.unbounded<NotesRequest>()
+  const filter = try SubscriptionRef.make<NotesFilter | undefined>(undefined)
+  return {
+    requests: Stream.fromPubSub(hub),
+    filters: SubscriptionRef.changes(filter),
+    effect request(request: NotesRequest) {
+      if (request.kind === "open-notes" && request.filter !== undefined) try SubscriptionRef.set(filter, request.filter)
+      try PubSub.publish(hub, request)
+    },
+    showFilter: (asked: NotesFilter) => SubscriptionRef.set(filter, asked),
+    clearFilter: () => SubscriptionRef.set(filter, undefined),
+  }
+})
+
+/** Why a note started no draft. */
+export type ScheduleRefusal = "empty" | "too-long" | "invalid"
+
+/** How a saved event or reminder shows the note it came from. */
+export interface OriginView { readonly label: OriginLabel; readonly title: string; readonly noteId?: string }
+
+/** Back-links from saved events and reminders to their notes. */
+export service NotesOrigins {
+  scheduleDraft(noteId: string, kind: NoteScheduleKind): (ScheduleRefusal | "ready")!!
+  remember(kind: "reminder" | "event", recordId: string, link: unknown, saved: boolean): boolean!!
+  forget(kind: "reminder" | "event", recordId: string, terminalReceipt: boolean): void!!
+  view(kind: "reminder" | "event", recordId: string): (OriginView | undefined)!!
+  open(kind: "reminder" | "event", recordId: string): ("opened" | "edited" | "gone" | "unavailable")!!
+}
+
+/** The most links the index keeps; past it the oldest make room (legacy `NOTE_ORIGIN_LIMIT`). */
+export const ORIGIN_LIMIT = 200
+
+type Links = OriginIndex["links"]
+
+/** The stored index as read: its links, the raw text it was read from, and whether it could be read at all. */
+interface StoredIndex { readonly raw: string | undefined; readonly links: Links; readonly readable: boolean }
+
+const legacyKey = /^(event|reminder):(.{1,256})$/s
+
+/**
+ * The links of an index an earlier version stored, keyed by `<kind>:<id>` with each link's fields and `savedAt` flattened
+ * into one record; undefined when it is not that shape. An agent event was keyed by its event key, which this version names
+ * by the key's digest, as Calendar does.
+ */
+effect function legacyLinks(raw: string): (Links | undefined)!! {
+  const parsed: unknown = (Effect.try(() => JSON.parse(raw) as unknown) catch () => undefined)
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined
+  const document = parsed as { readonly version?: unknown; readonly links?: unknown }
+  if (document.version !== 1 || Object.keys(document).some((key) => key !== "version" && key !== "links")) return undefined
+  const stored = document.links
+  if (typeof stored !== "object" || stored === null || Array.isArray(stored)) return undefined
+  const entries = Object.entries(stored as Record<string, unknown>)
+  if (entries.length > ORIGIN_LIMIT) return undefined
+  const links: Array<Links[number]> = []
+  for (const [key, row] of entries) {
+    const match = legacyKey.exec(key)
+    const link = noteLinkOf(row)
+    const savedAt = typeof row === "object" && row !== null && "savedAt" in row ? (row as { readonly savedAt: unknown }).savedAt : undefined
+    if (match === null || link === undefined || typeof savedAt !== "number" || !Number.isSafeInteger(savedAt) || savedAt < 0) return undefined
+    const kind = match[1] === "event" ? "event" as const : "reminder" as const
+    const id = match[2]
+    const recordId = kind === "event" ? `agent-event:${(tryPromise(() => sha256Hex(id)) catch () => "")}` : id
+    if (recordId === "agent-event:" || recordId.length > 200) return undefined
+    links.push({ kind, recordId, link, linkedAt: savedAt })
+  }
+  return links
+}
+
+effect function index(access: SlotAccess): StoredIndex!! {
+  const raw = access.read(slots.origins) catch () => undefined
+  if (raw === undefined) return { raw, links: [], readable: true }
+  const decoded = (decodeOrigins(raw) catch () => undefined)
+  if (decoded !== undefined) return { raw, links: decoded.links, readable: true }
+  const earlier = try legacyLinks(raw)
+  return earlier === undefined ? { raw, links: [], readable: false } : { raw, links: earlier, readable: true }
+}
+
+/** `links` with `added` kept for its record unless that record already has one, holding at most `ORIGIN_LIMIT`, the oldest first out. */
+export function keepFirst(links: Links, added: Links[number]): Links {
+  if (links.some((row) => row.kind === added.kind && row.recordId === added.recordId)) return links
+  const next = [...links, added]
+  const overflow = next.length - ORIGIN_LIMIT
+  if (overflow <= 0) return next
+  const oldest = new Set([...links].sort((a, b) => a.linkedAt - b.linkedAt).slice(0, overflow))
+  return next.filter((row) => !oldest.has(row))
+}
+
+/** The origin links over the device's origin slot. */
+export const originsLayer = Layer.effect(NotesOrigins, effect {
+  const access = try slotAccess()
+  const collection = try NotesCollection
+  const handoff = try NotesHandoff
+
+  effect function find(kind: "reminder" | "event", recordId: string): (NoteLink | undefined)!! {
+    const stored = (try index(access)).links.find((row) => row.kind === kind && row.recordId === recordId)
+    return stored === undefined ? undefined : noteLinkOf(stored.link)
+  }
+
+  effect function edit(update: (links: Links) => Links): boolean!! {
+    const before = try index(access)
+    if (!before.readable) return false
+    const next: OriginIndex = { version: 1, links: update(before.links) }
+    return access.compareExchange(slots.origins, before.raw, JSON.stringify(next)) catch () => false
+  }
+
+  return {
+    effect scheduleDraft(noteId: string, kind: NoteScheduleKind) {
+      const note = (try collection.current())?.snapshot.notes.find((item) => item.id === noteId)
+      if (note === undefined) return "invalid"
+      const result = (tryPromise(() => noteScheduleDraft(note, kind)) catch () => undefined)
+      if (result === undefined) return "invalid"
+      if (result.status !== "ready") return result.status
+      try handoff.request({ kind: "calendar-draft", draft: result.draft })
+      return "ready"
+    },
+    effect remember(kind: "reminder" | "event", recordId: string, link: unknown, saved: boolean) {
+      const origin = noteLinkOf(link)
+      if (origin === undefined || recordId === "" || !saved) return false
+      const linkedAt = try Clock.currentTimeMillis
+      const written = try edit((links) => keepFirst(links, { kind, recordId, link: origin, linkedAt }))
+      const kept = written ? try find(kind, recordId) : undefined
+      const readBack = kept !== undefined && JSON.stringify(kept) === JSON.stringify(origin)
+      return linkStored(saved, readBack)
+    },
+    effect forget(kind: "reminder" | "event", recordId: string, terminalReceipt: boolean) {
+      if (!originRetires(terminalReceipt, !terminalReceipt)) return
+      try edit((links) => links.filter((row) => !(row.kind === kind && row.recordId === recordId)))
+    },
+    effect view(kind: "reminder" | "event", recordId: string) {
+      const link = try find(kind, recordId)
+      if (link === undefined) return undefined
+      const current = try collection.current()
+      const resolved = current === undefined ? undefined : resolveNoteLink(link, current.snapshot.notes)
+      const resolution = originResolution(current !== undefined, resolved?.status === "found")
+      return { label: originLabel(resolution), title: resolved?.status === "found" ? noteOriginTitle(resolved.note, "Note") : "",
+        ...(resolved?.status === "found" && typeof resolved.note.id === "string" ? { noteId: resolved.note.id } : {}) }
+    },
+    effect open(kind: "reminder" | "event", recordId: string) {
+      const link = try find(kind, recordId)
+      const current = try collection.current()
+      if (link === undefined || current === undefined) return "unavailable"
+      const resolved = resolveNoteLink(link, current.snapshot.notes)
+      if (resolved.status !== "found") return "gone"
+      const note = current.snapshot.notes.find((item) => item.id === resolved.note.id)
+      if (note === undefined) return "gone"
+      const revision = (tryPromise(() => recordNoteRevision(note)) catch () => "")
+      const linkRevision = "revision" in link && typeof link.revision === "string" ? link.revision : ""
+      try handoff.request({ kind: "open-notes", noteId: note.id })
+      return originOpensEdited(originResolution(true, true), revision === linkRevision) ? "edited" : "opened"
+    },
+  }
+})

@@ -1,0 +1,290 @@
+// spec/clock/notifications.md, "Story: Act on exactly the notification I see"; spec/clock/notifications.md, "Story: Ask Alpha about one of its notifications"; spec/clock/canonicalTaps.md, "Story: Open the view a notification names"; spec/clock/workflowNotices.md, "Story: Return to the run a notice names"; spec/clock/deletions.md, "Story: Undo a reviewed deletion in time"; spec/clock/mirror.md, "Story: Choose which apps Alpha may mirror"; spec/clock/mirror.md, "Story: Know whether Alpha's own notices can reach me"; spec/clock/notices.md, "Story: Stay where I am when I leave a notice"; spec/clock/notices.md, "Story: Be told my data was kept"; spec/clock/notices.md, "Story: Recover unreadable data while developing"
+// @vitest-environment happy-dom
+import { assert, describe, it } from "@effect/vitest"
+import { Machine as ShadeMachine } from "../../gen/clock__notifications.effect.vibe"
+import { Machine as DeletionsMachine } from "../../gen/clock__deletions.effect.vibe"
+import { Notifications, notificationsLayer } from "../../src/clock/notifications.vibe"
+import { CanonicalTaps, canonicalTapsLayer } from "../../src/clock/canonical-taps.vibe"
+import { WorkflowNotices, workflowNoticesLayer } from "../../src/clock/workflow-notices.vibe"
+import { Deletions, deletionsLayer } from "../../src/clock/deletions.vibe"
+import { Machine as MirrorMachine } from "../../gen/clock__mirror.effect.vibe"
+import { Machine as NoticesMachine } from "../../gen/clock__notices.effect.vibe"
+import { Mirror, mirrorLayer } from "../../src/clock/mirror.vibe"
+import { ClockRecovery, keepUnreadable, recoveryLayer } from "../../src/clock/recovery.vibe"
+import { memoryStore } from "../../src/platform/storage.vibe"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { build, fakeAssistant, fakeNavigation, fakeOrigins, fakePhone, fakeRuns, machines, refuse, session } from "./phone.vibe"
+
+const headingOf = (retained: { readonly tag: string; readonly heading?: string }) => retained.heading ?? ""
+
+const row = (id: string, revision: string, clearable = true) =>
+  ({ id, revision, source: "own", kind: "reminder", appLabel: "Alpha Phone", title: "Call", text: "", at: 1, clearable, canOpen: true })
+
+describe("Notifications (spec/clock/notifications.md, \"Story: Act on exactly the notification I see\")", () => {
+  it.effect("act only on the listed row and clear exactly the clearable ones (spec/clock/notifications.md, \"Story: Act on exactly the notification I see\")", () => effect {
+    let items = [row("reminder-1", "v1"), row("nav-1", "v1", false)]
+    const phone = fakePhone({
+      "AlphaNotifications.list": () => ({ items, scope: "device" }),
+      "AlphaNotifications.dismiss": () => ({}),
+      "AlphaNotifications.clear": (args) => ({ outcomes: (args as { items: unknown[] }).items.map(() => ({ status: "requested" })) }),
+    })
+    provide Layer.provideMerge(Layer.provideMerge(notificationsLayer, machines), Layer.mergeAll(phone.layer, fakeAssistant().layer)) {
+      const notifications = try Notifications
+      const shade = try ShadeMachine
+      try notifications.open()
+      try notifications.swipe("reminder-1", "v0")
+      const changed = (try shade.get()).report
+      try notifications.swipe("nav-1", "v1")
+      const ongoing = (try shade.get()).report
+      try notifications.clearAll()
+      const cleared = phone.calls.find((c) => c.method === "clear")?.args
+      items = []
+      try notifications.close()
+      const closed = (try shade.get()).rows.length
+      try Effect.try(() => assert.deepStrictEqual(
+        { changed, ongoing, cleared, dismissed: phone.calls.filter((c) => c.method === "dismiss").length, closed },
+        { changed: "ReportChanged", ongoing: "ReportOngoing", cleared: { items: [{ id: "reminder-1", revision: "v1", source: "own" }] }, dismissed: 0, closed: 0 },
+      ))
+    }
+  })
+})
+
+describe("Asking about a notice (spec/clock/notifications.md, \"Story: Ask Alpha about one of its notifications\")", () => {
+  // spec/clock/notifications.md, "The phone consumes a notice once, at the revision asked about; a phone without that call consumes it once for this session"
+  it.effect("the phone consumes a notice once at the revision listed, and a phone without that call consumes it once per session (spec/clock/notifications.md, \"The phone consumes a notice once, at the revision asked about; a phone without that call consumes it once for this session\")", () => effect {
+    const answers = ["consumed", "already-consumed"]
+    const items = [row("reminder-1", "v2")]
+    const phone = fakePhone({
+      "AlphaNotifications.list": () => ({ items, scope: "device" }),
+      "AlphaNotifications.consumeOwnNotice": () => ({ status: answers.shift() ?? "gone" }),
+    })
+    const older = fakePhone({ "AlphaNotifications.list": () => ({ items, scope: "device" }) })
+    let consumed: boolean[] = []
+    let unsupported: boolean[] = []
+    provide Layer.provideMerge(Layer.provideMerge(notificationsLayer, machines), Layer.mergeAll(phone.layer, fakeAssistant().layer)) {
+      const notifications = try Notifications
+      consumed = [try notifications.consume("reminder-1"), try notifications.consume("reminder-1"), try notifications.consume("missing")]
+    }
+    provide Layer.provideMerge(Layer.provideMerge(notificationsLayer, machines), Layer.mergeAll(older.layer, fakeAssistant().layer)) {
+      const notifications = try Notifications
+      unsupported = [try notifications.consume("reminder-1"), try notifications.consume("reminder-1")]
+    }
+    try Effect.try(() => assert.deepStrictEqual(
+      { consumed, unsupported, sent: phone.calls.filter((c) => c.method === "consumeOwnNotice").map((c) => c.args) },
+      { consumed: [true, false, false], unsupported: [true, false], sent: [{ id: "reminder-1", revision: "v2" }, { id: "reminder-1", revision: "v2" }] },
+    ))
+  })
+})
+
+describe("Notification taps (spec/clock/canonicalTaps.md, \"Story: Open the view a notification names\")", () => {
+  it.effect("open the view a tap names for this account and acknowledge it once (spec/clock/canonicalTaps.md, \"Story: Open the view a notification names\")", () => effect {
+    let pending: Record<string, string> = { token: "t1", ownerId: "org:owner-1", agentId: "agent-1", view: "reminders" }
+    const phone = fakePhone({
+      "AlphaNotifications.canonicalPending": () => pending,
+      "AlphaNotifications.acknowledgeCanonical": () => {
+        pending = {}
+        return { ok: true }
+      },
+    })
+    const navigator = fakeNavigation()
+    provide Layer.provideMerge(Layer.provideMerge(canonicalTapsLayer, machines), Layer.mergeAll(phone.layer, navigator.layer, fakeAssistant().layer, session("org:owner-1"))) {
+      const taps = try CanonicalTaps
+      try taps.wake()
+      try taps.wake()
+      pending = { token: "t2", ownerId: "someone-else", agentId: "agent-1", view: "notes" }
+      try taps.wake()
+      try Effect.try(() => assert.deepStrictEqual(
+        { opened: navigator.opened, acknowledged: phone.calls.filter((c) => c.method === "acknowledgeCanonical").map((c) => c.args) },
+        { opened: [{ app: "reminders", route: undefined }], acknowledged: [{ token: "t1" }] },
+      ))
+    }
+  })
+
+  it.effect("hold a tap while the owner keeps an unsent draft in the assistant (spec/clock/canonicalTaps.md, \"Story: Open the view a notification names\")", () => effect {
+    const phone = fakePhone({
+      "AlphaNotifications.canonicalPending": () => ({ token: "t1", ownerId: "org:owner-1", agentId: "agent-1", view: "reminders" }),
+      "AlphaNotifications.acknowledgeCanonical": () => ({ ok: true }),
+    })
+    const navigator = fakeNavigation()
+    provide Layer.provideMerge(Layer.provideMerge(canonicalTapsLayer, machines), Layer.mergeAll(phone.layer, navigator.layer, fakeAssistant(false, true).layer, session("org:owner-1"))) {
+      const taps = try CanonicalTaps
+      try taps.wake()
+      try Effect.try(() => assert.deepStrictEqual(
+        { opened: navigator.opened, acknowledged: phone.calls.filter((c) => c.method === "acknowledgeCanonical").length },
+        { opened: [], acknowledged: 0 },
+      ))
+    }
+  })
+
+  // spec/clock/workflowNotices.md, "A pending tap opens its run only for the signed-in account, and a run opened once is never opened again for the same tap"
+  it.effect("open the exact run a workflow notice names, once (spec/clock/workflowNotices.md, \"Story: Return to the run a notice names\")", () => effect {
+    let consumeOk = false
+    const phone = fakePhone({
+      "ElizaNotifications.pendingWorkflowTap": () => ({ token: "w1", ownerId: "org:owner-1", agentId: "agent-1", runId: "run-7", retained: true }),
+      "ElizaNotifications.consumeWorkflowTap": () => (consumeOk ? {} : { refused: "busy" }),
+      "AlphaHostedResults.pendingResult": () => ({}),
+    })
+    const runs = fakeRuns()
+    const navigation = fakeNavigation()
+    provide Layer.provideMerge(Layer.provideMerge(workflowNoticesLayer, machines), Layer.mergeAll(phone.layer, runs.layer, navigation.layer, fakeAssistant().layer, session("org:owner-1"))) {
+      const notices = try WorkflowNotices
+      try notices.check()
+      consumeOk = true
+      try notices.check()
+      try Effect.try(() => assert.deepStrictEqual(
+        { opened: runs.opened, shown: navigation.opened, consumes: phone.calls.filter((c) => c.method === "consumeWorkflowTap").length },
+        { opened: ["run-7"], shown: [{ app: "workflows", route: "run/run-7" }], consumes: 2 },
+      ))
+    }
+  })
+})
+
+describe("Deletion Undo (spec/clock/deletions.md, \"Story: Undo a reviewed deletion in time\")", () => {
+  it.effect("undo a queued deletion, and know nothing of the old owner after a change (spec/clock/deletions.md, \"Story: Undo a reviewed deletion in time\")", () => effect {
+    let rows = [{ kind: "reminder", id: "op1", phase: "queued", window: "open", target: { row: { title: "Call" } } }]
+    const origins = fakeOrigins()
+    const phone = fakePhone({
+      "AlphaDeletions.pending": () => ({ deletions: rows, deletedOrigins: rows.length ? [] : [{ kind: "reminder", id: "r9" }] }),
+      "AlphaDeletions.undo": () => {
+        rows = []
+        return { phase: "undone" }
+      },
+    })
+    provide Layer.provideMerge(Layer.provideMerge(deletionsLayer, machines), Layer.mergeAll(phone.layer, origins.layer, session("org:owner-1"))) {
+      const deletions = try Deletions
+      const notice = try DeletionsMachine
+      try deletions.refresh()
+      const shown = (try notice.get()).rows.map((r) => r.key)
+      try deletions.undo("reminder:op1")
+      const kept = try notice.get()
+      try deletions.refresh()
+      try Effect.try(() => assert.deepStrictEqual(
+        { shown, report: kept.report, rows: kept.rows.length, undone: phone.calls.filter((c) => c.method === "undo").map((c) => c.args), forgotten: origins.forgotten },
+        { shown: ["reminder:op1"], report: "Kept", rows: 0, undone: [{ kind: "reminder", id: "op1" }], forgotten: [{ kind: "reminder", id: "r9" }] },
+      ))
+    }
+  })
+})
+
+describe("Notification mirror (spec/clock/mirror.md, \"Story: Choose which apps Alpha may mirror\")", () => {
+  it.effect("save a change only on the revision shown, and report history cleared only when none remains (spec/clock/mirror.md, \"Story: Choose which apps Alpha may mirror\")", () => effect {
+    let revision = "r1"
+    let history = [{ id: "h1", appLabel: "Mail", at: 1, state: "posted" }]
+    const status = () => ({ revision, enabled: false, history: true, paused: false, accessGranted: true, apps: [{ packageName: "com.mail", preview: false }] })
+    const phone = fakePhone({
+      "AlphaNotifications.crossAppStatus": status,
+      "AlphaNotifications.status": () => ({ appEnabled: true, permissionGranted: true, channels: [] }),
+      "AlphaNotifications.setNotificationPolicy": (args) => ((args as { expectedRevision: string }).expectedRevision === revision ? (revision = "r2", status()) : refuse("Settings changed")),
+      "AlphaNotifications.clearNotificationHistory": () => ({}),
+      "AlphaNotifications.notificationHistory": () => ({ items: history }),
+    })
+    provide Layer.provideMerge(Layer.provideMerge(mirrorLayer, machines), phone.layer) {
+      const mirror = try Mirror
+      const shown = try MirrorMachine
+      try mirror.refresh()
+      revision = "r9"
+      try mirror.save({ enabled: true })
+      const stale = (try shown.get()).report
+      try mirror.refresh()
+      try mirror.save({ enabled: true })
+      const saved = try shown.get()
+      try mirror.clearHistory()
+      const kept = (try shown.get()).report
+      history = []
+      try mirror.clearHistory()
+      const cleared = (try shown.get()).report
+      try Effect.try(() => assert.deepStrictEqual(
+        { stale, saved: [saved.report, saved.revision], kept, cleared },
+        { stale: "SettingsChanged", saved: ["MirrorSaved", "r2"], kept: "HistoryNotCleared", cleared: "HistoryCleared" },
+      ))
+    }
+  })
+
+  it.effect("call reminder alerts blocked when their channel's group is blocked (spec/clock/mirror.md, \"Story: Know whether Alpha's own notices can reach me\")", () => effect {
+    const phone = fakePhone({
+      "AlphaNotifications.crossAppStatus": () => refuse("unavailable"),
+      "AlphaNotifications.status": () => ({ appEnabled: true, permissionGranted: true, channels: [{ id: "reminders", blocked: false, groupBlocked: true }] }),
+    })
+    provide Layer.provideMerge(Layer.provideMerge(mirrorLayer, machines), phone.layer) {
+      const mirror = try Mirror
+      const shown = try MirrorMachine
+      try mirror.refresh()
+      const after = try shown.get()
+      try Effect.try(() => assert.deepStrictEqual({ blocked: after.remindersBlocked, report: after.report }, { blocked: true, report: "MirrorUnavailable" }))
+    }
+  })
+})
+
+describe("Notice leases (spec/clock/notices.md, \"Story: Stay where I am when I leave a notice\")", () => {
+  it.effect("navigate after Open only while the notice's lease is live, never from a hidden page (spec/clock/notices.md, \"Story: Stay where I am when I leave a notice\")", () => effect {
+    const phone = fakePhone({
+      "AlphaNotifications.list": () => ({ items: [row("reminder-1", "v1")], scope: "device" }),
+      "AlphaNotifications.open": () => ({}),
+    })
+    provide Layer.provideMerge(Layer.provideMerge(notificationsLayer, machines), Layer.mergeAll(phone.layer, fakeAssistant().layer)) {
+      const notifications = try Notifications
+      const notices = try NoticesMachine
+      try notifications.open()
+      try notifications.press("reminder-1", "v1")
+      const first = (try notices.get()).navigations
+      try notices.send({ type: "setVisible", visible: false })
+      try notifications.press("reminder-1", "v1")
+      const hidden = try notices.get()
+      try Effect.try(() => assert.deepStrictEqual({ first, hidden: [hidden.navigations, hidden.leaseLive] }, { first: 1, hidden: [1, false] }))
+    }
+  })
+})
+
+describe("Retained data (spec/clock/notices.md, \"Story: Be told my data was kept\")", () => {
+  it.effect("say plainly that unreadable data was kept, one notice at a time, with no recovery outside test mocks (spec/clock/notices.md, \"Story: Be told my data was kept\")", () => effect {
+    keepUnreadable("Timers", "device/clock/timers")
+    keepUnreadable("Alarms", "device/clock/alarms")
+    provide Layer.provideMerge(Layer.provideMerge(recoveryLayer, machines), Layer.mergeAll(memoryStore, build("launcher"))) {
+      const recovery = try ClockRecovery
+      const notices = try NoticesMachine
+      try recovery.announce()
+      const first = (try notices.get()).retained
+      const download = try recovery.download()
+      try recovery.close()
+      const next = (try notices.get()).retained
+      try recovery.reset()
+      const after = try notices.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        { first, download, next, recovery: after.recovery, resets: after.resets },
+        { first: { tag: "Retained", heading: "Timers" }, download: undefined, next: { tag: "Retained", heading: "Alarms" }, recovery: "NoRecovery", resets: 0 },
+      ))
+    }
+  })
+})
+
+describe("Developer recovery (spec/clock/notices.md, \"Story: Recover unreadable data while developing\")", () => {
+  it.effect("download the kept bytes and reset that one store only after a confirmation (spec/clock/notices.md, \"Story: Recover unreadable data while developing\")", () => effect {
+    keepUnreadable("Stopwatch", "device/clock/stopwatch")
+    provide Layer.provideMerge(Layer.provideMerge(recoveryLayer, machines), Layer.mergeAll(memoryStore, build("browser", true))) {
+      const store = try KeyValueStore.KeyValueStore
+      const recovery = try ClockRecovery
+      const notices = try NoticesMachine
+      try store.set("device/clock/stopwatch", "{broken")
+      try store.set("device/clock/world-clock", "{\"zones\":[]}")
+      try recovery.announce()
+      let guard = 0
+      while (headingOf((try notices.get()).retained) !== "Stopwatch" && guard < 4) {
+        try recovery.close()
+        guard += 1
+      }
+      const shown = (try notices.get()).retained
+      const download = try recovery.download()
+      try recovery.reset()
+      const unconfirmed = try store.get("device/clock/stopwatch")
+      try notices.send({ type: "askReset" })
+      try recovery.reset()
+      const after = try notices.get()
+      const removed = try store.get("device/clock/stopwatch")
+      const other = try store.get("device/clock/world-clock")
+      try Effect.try(() => assert.deepStrictEqual(
+        { shown, download, unconfirmed, recovery: after.recovery, resets: after.resets, removed, other },
+        { shown: { tag: "Retained", heading: "Stopwatch" }, download: "{broken", unconfirmed: "{broken", recovery: "ResetDone", resets: 1, removed: undefined, other: "{\"zones\":[]}" },
+      ))
+    }
+  })
+})
