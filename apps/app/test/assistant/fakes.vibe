@@ -11,7 +11,7 @@ import { layer } from "../../src/assistant/layer.vibe"
 import { AssistantEmail, type ReviewedEmail } from "../../src/assistant/ports.vibe"
 import { Preferences } from "../../src/settings/preferences.vibe"
 import { Latency } from "../../src/voice/latency.vibe"
-import { AdvertisedCapabilities, BrowserPages, BrowserViews, MapsViews, type BrowserPage, type MapsShown, type ObservedTab, type PageObservation, type ViewAnswer } from "../../src/assistant/ports.vibe"
+import { AdvertisedCapabilities, BrowserPages, BrowserViews, MapsViews, NotesViews, type BrowserPage, type MapsShown, type ObservedTab, type PageObservation, type ViewAnswer } from "../../src/assistant/ports.vibe"
 import { ResidentFeeds } from "../../src/platform/view-events.vibe"
 import { CommsStage } from "../../src/telephony/comms.vibe"
 import { Navigation } from "../../src/shell/navigation.vibe"
@@ -320,6 +320,15 @@ export function fakeMapsViews(shown: MapsShown | undefined, delivered: string[] 
       delivered.push(`${request}:${effectKey}`)
       try apply
     },
+  })
+}
+
+/** Notes' editor as a fake: `opens` says whether a saved note opens, and the editor then shows `shows`, or that note; each open asked is collected. */
+export function fakeNotesViews(opens: boolean, shows: string | undefined, asked: string[] = []) {
+  let shown: string | undefined = undefined
+  return Layer.succeed(NotesViews, {
+    openSaved: (noteId: string) => sync(() => { asked.push(noteId); if (opens) shown = shows ?? noteId; return opens }),
+    shown: () => sync(() => shown),
   })
 }
 

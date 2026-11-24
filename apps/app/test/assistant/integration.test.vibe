@@ -9,7 +9,7 @@ import { emptyTranscript } from "../../src/assistant/transcript.vibe"
 import { CAPABILITIES_HEADER, capabilityHeaders } from "../../src/assistant/transport.vibe"
 import { AgentViews, appOfView, handoffOf } from "../../src/assistant/views.vibe"
 import {
-  assistantOver, browserScreen, countingExecutors, fakeAdvertised, fakeBrowserPages, fakeBrowserViews, fakeComms, fakeFeeds, fakeHost, fakeMapsViews,
+  assistantOver, browserScreen, countingExecutors, fakeAdvertised, fakeBrowserPages, fakeBrowserViews, fakeComms, fakeFeeds, fakeHost, fakeMapsViews, fakeNotesViews,
   fakePreferences, fakeResident, homeScreen, journalNative, noNative, wireProposal, type Seen,
 } from "./fakes.vibe"
 
@@ -196,6 +196,42 @@ it.effect("Have my agent open the screen it means (spec/assistant/views.md, \"A 
       },
     ))
   }
+})
+
+const notesScreen: ScreenFacts = {
+  exposure: { privateView: false, locked: false, hidden: false, connectionDialog: false },
+  observation: { view: "notes", revision: 4, sensitive: false },
+  onCalendar: false,
+  contextKey: "notes:",
+}
+
+effect function deliverNote(opens: boolean, shows: string | undefined, viewId: string, noteId: unknown) {
+  const seen: Seen = { calls: [] }
+  const asked: string[] = []
+  provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "ok" }, proposals: [] }), Layer.merge(fakeHost([], notesScreen), fakeNotesViews(opens, shows, asked)), countingExecutors({ count: 0 })) {
+    const views = try AgentViews
+    const binding = { clientId: views.clientId, requestId: `req-${viewId}`, viewId, viewType: "gui", installationId: "i1" }
+    const done = try views.deliver([{ action: "VIEWS", data: { values: { viewId, label: "Notes", navigationPrepared: true, navigationBinding: binding, noteId } } }], notesScreen.contextKey)
+    const fields = try views.turnFields(true, "notes")
+    const claims = seen.calls.filter((call) => call.path === "/api/views/interact-claim").length
+    const results = seen.calls.filter((call) => call.path === "/api/views/interact-result").map((call) => (call.body as { readonly result?: unknown }).result)
+    return { done, asked, claims, results, advertised: fields?.notesEditorNavigation }
+  }
+}
+
+it.effect("A prepared Notes view naming a saved note is delivered only while exactly that note is in front (spec/assistant/views.md, \"A prepared Notes view that names a saved note opens that note's editor, and is delivered only while exactly that note is in front\")", () => effect {
+  const opened = try deliverNote(true, undefined, "notes", "groceries")
+  const otherNote = try deliverNote(true, "recipes", "notes", "groceries")
+  const notOpened = try deliverNote(false, undefined, "notes", "groceries")
+  const outsideNotes = try deliverNote(true, undefined, "chat", "groceries")
+  const notAnId = try deliverNote(true, undefined, "notes", "")
+  try Effect.try(() => assert.deepStrictEqual({ opened, otherNote, notOpened, outsideNotes, notAnId }, {
+    opened: { done: { status: "delivered", label: "Notes" }, asked: ["groceries"], claims: 1, results: [{ switched: true }], advertised: 1 },
+    otherNote: { done: { status: "unknown" }, asked: ["groceries"], claims: 1, results: [{ switched: false }], advertised: 1 },
+    notOpened: { done: { status: "unknown" }, asked: ["groceries"], claims: 1, results: [{ switched: false }], advertised: 1 },
+    outsideNotes: { done: { status: "none" }, asked: [], claims: 0, results: [], advertised: 1 },
+    notAnId: { done: { status: "none" }, asked: [], claims: 0, results: [], advertised: 1 },
+  }))
 })
 
 it.effect("Let my agent press back or reload only on the page I am looking at (spec/assistant/views.md, \"A view command is claimed once, refused under \"Ask before Alpha acts\", run only in Browser, and answered once\")", () => effect {

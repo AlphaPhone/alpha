@@ -1,6 +1,6 @@
-// spec/assistant/views.md, "Story: Have my agent open the screen it means"; spec/assistant/views.md, "A prepared view opens once under a returned claim, only while the screen and the session are the ones the turn was sent from, and every claim is settled once"; spec/assistant/views.md, "Maps' view is delivered by Maps, at most once per effect"; spec/assistant/views.md, "Story: Let my agent press back or reload only on the page I am looking at"; spec/assistant/views.md, "A view command is claimed once, refused under \"Ask before Alpha acts\", run only in Browser, and answered once"
+// spec/assistant/views.md, "Story: Have my agent open the screen it means"; spec/assistant/views.md, "A prepared view opens once under a returned claim, only while the screen and the session are the ones the turn was sent from, and every claim is settled once"; spec/assistant/views.md, "Maps' view is delivered by Maps, at most once per effect"; spec/assistant/views.md, "A prepared Notes view that names a saved note opens that note's editor, and is delivered only while exactly that note is in front"; spec/assistant/views.md, "Story: Let my agent press back or reload only on the page I am looking at"; spec/assistant/views.md, "A view command is claimed once, refused under \"Ask before Alpha acts\", run only in Browser, and answered once"
 import { observes } from "../../gen/assistant.effect.vibe"
-import { answerOf, assistantClaims, claimWaitMs, claims, delivered, interactionWaitMs, mapsDelivers, negativeSent, negativeWaitMs, reported, taken, type Delivered } from "../../gen/assistant__views.effect.vibe"
+import { answerOf, assistantClaims, claimWaitMs, claims, claimsNote, delivered, interactionWaitMs, mapsDelivers, negativeSent, negativeWaitMs, noteInFront, reported, taken, type Delivered } from "../../gen/assistant__views.effect.vibe"
 import { newId } from "../platform/ids.ts"
 import { Resident } from "../platform/resident.vibe"
 import { ResidentFeeds } from "../platform/view-events.vibe"
@@ -10,7 +10,7 @@ import { Navigation } from "../shell/navigation.vibe"
 import type { AppId } from "../web/app-screen.ts"
 import { AssistantHost } from "./host.vibe"
 import { ViewClaim, ViewHandoff, ViewInteraction, ViewResultAnswer } from "./payloads.schema.vibe"
-import { AdvertisedCapabilities, BrowserViews, MapsViews, type ViewAnswer } from "./ports.vibe"
+import { AdvertisedCapabilities, BrowserViews, MapsViews, NotesViews, type ViewAnswer } from "./ports.vibe"
 import { ask } from "./transport.vibe"
 
 const CLAIM = "/api/views/interact-claim"
@@ -24,6 +24,7 @@ export interface ViewTurnFields {
   readonly viewClientId: string
   readonly viewDelivery: "completed-action"
   readonly uiView: string
+  readonly notesEditorNavigation: 1
 }
 
 /** What became of the view a reply prepared: none, opened, unknown, or a view this phone does not have (with the view it does have, for a page inside one). */
@@ -77,6 +78,7 @@ export const viewsLayer = Layer.effect(AgentViews, effect {
   const preferences = try Preferences
   const maps = try MapsViews
   const browser = try BrowserViews
+  const notes = try NotesViews
   const resident = try Resident
   const advertised = try AdvertisedCapabilities
   const post = (path: string, body: unknown) => Effect.provideService(Effect.provideService(ask("POST", path, body), Resident, resident), AdvertisedCapabilities, advertised)
@@ -111,6 +113,17 @@ export const viewsLayer = Layer.effect(AgentViews, effect {
     return observes(screen.exposure) && (target === "home" ? view === "home" || view === "library" : view === target)
   }
 
+  effect function shownAs(target: AppId | "home", noteId: string | undefined) {
+    const front = try inFront(target)
+    return noteId === undefined ? front : noteInFront(front, (try notes.shown()) ?? "", noteId)
+  }
+
+  effect function open(target: AppId | "home", noteId: string | undefined) {
+    if (target === "home") return try navigation.home()
+    if (noteId === undefined) return try host.openView(target)
+    return (try notes.openSaved(noteId)) && (try host.openView(target, noteId))
+  }
+
   effect function effectKeyOf(requestId: string) {
     const known = effects.get(requestId)
     if (known !== undefined) return known
@@ -131,7 +144,7 @@ export const viewsLayer = Layer.effect(AgentViews, effect {
       const parent = appOfView(handoff.viewId)
       return { status: "unavailable", ...(parent === undefined ? {} : { parentView: parent }) } satisfies ViewDelivery
     }
-    if (target === undefined || !claims(true, ours, true, try current(contextKey))) return { status: "none" } satisfies ViewDelivery
+    if (target === undefined || !claimsNote(target, handoff.noteId !== undefined) || !claims(true, ours, true, try current(contextKey))) return { status: "none" } satisfies ViewDelivery
     const label = target === "home" ? "Home" : handoff.label ?? target
     if (mapsDelivers(target)) {
       requests += 1
@@ -146,10 +159,10 @@ export const viewsLayer = Layer.effect(AgentViews, effect {
       if (negativeSent(true, false)) try settle(binding, claimId, { success: false, result: { switched: false } }, negativeWaitMs)
       return { status: "unknown" } satisfies ViewDelivery
     }
-    const opened = target === "home" ? try navigation.home() : try host.openView(target)
-    const switched = opened && (try inFront(target))
+    const opened = try open(target, handoff.noteId)
+    const switched = opened && (try shownAs(target, handoff.noteId))
     const accepted = try settle(binding, claimId, { success: switched, result: { switched } })
-    const outcome = delivered(true, switched, accepted, try inFront(target))
+    const outcome = delivered(true, switched, accepted, try shownAs(target, handoff.noteId))
     return outcome === "DeliveredView" ? { status: "delivered", label } satisfies ViewDelivery : { status: "unknown" } satisfies ViewDelivery
   }
 
@@ -205,7 +218,7 @@ export const viewsLayer = Layer.effect(AgentViews, effect {
     clientId,
     effect turnFields(observed: boolean, view: string) {
       if (!observed || (try host.identity()) === undefined) return undefined
-      return { viewClientId: clientId, viewDelivery: "completed-action", uiView: viewIdOf(view) } satisfies ViewTurnFields
+      return { viewClientId: clientId, viewDelivery: "completed-action", uiView: viewIdOf(view), notesEditorNavigation: 1 } satisfies ViewTurnFields
     },
     deliver,
     effect connect() {
