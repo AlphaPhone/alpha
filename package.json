@@ -55,6 +55,7 @@
   "devDependencies": {
     "@capacitor/cli": "8.5.2",
     "@effect/platform-node": "4.1.1",
+    "@electric-sql/pglite": "catalog:",
     "@elizaos/agent": "workspace:*",
     "@elizaos/os": "workspace:*",
     "@elizaos/plugin-browser": "workspace:*",

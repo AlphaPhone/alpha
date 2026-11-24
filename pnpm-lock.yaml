@@ -170,6 +170,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.1.1
         version: 4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0)
+      '@electric-sql/pglite':
+        specifier: 'catalog:'
+        version: 0.4.6
       '@elizaos/agent':
         specifier: workspace:*
         version: link:vendor/eliza/packages/agent
@@ -226,7 +229,7 @@ importers:
         version: 0.0.13(patch_hash=84f6bd90a8ff37080f66a93718a62ff76b42541194e36701abb285d694f59ee8)(@babel/core@7.29.13)(effect@4.1.1)(typescript@6.0.3)
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
       vibestack:
         specifier: workspace:*
         version: link:vendor/eliza
@@ -394,7 +397,7 @@ importers:
         version: 7.0.0
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@antithesishq/bombadil':
         specifier: 0.7.10
@@ -491,7 +494,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@effect/vitest':
         specifier: 4.1.1
@@ -537,7 +540,7 @@ importers:
         version: 6.0.3
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@effect/vitest':
         specifier: 4.1.1
@@ -643,7 +646,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
       vite:
         specifier: 'catalog:'
         version: 8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)
@@ -699,7 +702,7 @@ importers:
         version: 23.1.0(@types/node@26.6.6)
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@antithesishq/bombadil':
         specifier: 0.7.10
@@ -782,7 +785,7 @@ importers:
         version: 15.0.3
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
@@ -859,7 +862,7 @@ importers:
         version: 7.4.16
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@capacitor/core':
         specifier: 8.5.2
@@ -902,7 +905,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -924,7 +927,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -952,7 +955,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@effect/platform-node':
         specifier: 4.1.1
@@ -989,7 +992,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1017,7 +1020,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@effect/platform-node':
         specifier: 4.1.1
@@ -1057,7 +1060,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@effect/platform-node':
         specifier: 4.1.1
@@ -1088,7 +1091,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1107,7 +1110,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1132,7 +1135,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1160,7 +1163,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1182,7 +1185,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1213,7 +1216,7 @@ importers:
         version: 1.17.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@capacitor/core':
         specifier: 8.5.2
@@ -1253,7 +1256,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1275,7 +1278,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1294,7 +1297,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1313,7 +1316,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1332,7 +1335,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1354,7 +1357,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1379,7 +1382,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@effect/platform-node':
         specifier: 4.1.1
@@ -1410,7 +1413,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1438,7 +1441,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@effect/vitest':
         specifier: 4.1.1
@@ -1475,7 +1478,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@effect/platform-node':
         specifier: 4.1.1
@@ -1512,7 +1515,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1531,7 +1534,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1553,7 +1556,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1572,7 +1575,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@effect/platform-node':
         specifier: 4.1.1
@@ -1606,7 +1609,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1631,7 +1634,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1653,7 +1656,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1675,7 +1678,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1700,7 +1703,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1722,7 +1725,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1747,7 +1750,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1775,7 +1778,7 @@ importers:
         version: 19.3.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1803,7 +1806,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1828,7 +1831,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1850,7 +1853,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1875,7 +1878,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1897,7 +1900,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1919,7 +1922,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1941,7 +1944,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1969,7 +1972,7 @@ importers:
         version: 19.3.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1997,7 +2000,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2019,7 +2022,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2041,7 +2044,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2063,7 +2066,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2091,7 +2094,7 @@ importers:
         version: 19.3.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2116,7 +2119,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2138,7 +2141,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2166,7 +2169,7 @@ importers:
         version: 19.3.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2188,7 +2191,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2213,7 +2216,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2235,7 +2238,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2260,7 +2263,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2285,7 +2288,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2313,7 +2316,7 @@ importers:
         version: 19.3.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2338,7 +2341,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@effect/vitest':
         specifier: 4.1.1
@@ -2375,7 +2378,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@effect/platform-node':
         specifier: 4.1.1
@@ -2412,7 +2415,7 @@ importers:
         version: 1.0.21
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2440,7 +2443,7 @@ importers:
         version: 1.9.1(@napi-rs/canvas@0.1.100)
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2462,7 +2465,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2481,7 +2484,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2500,7 +2503,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2519,7 +2522,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2544,7 +2547,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2566,7 +2569,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2585,7 +2588,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@effect/platform-node':
         specifier: 4.1.1
@@ -2622,7 +2625,7 @@ importers:
         version: 4.16.3
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2641,7 +2644,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2666,7 +2669,7 @@ importers:
         version: 19.3.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2691,7 +2694,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2716,7 +2719,7 @@ importers:
         version: 0.35.5(@types/node@26.6.6)
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2756,7 +2759,7 @@ importers:
         version: 19.3.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@tailwindcss/vite':
         specifier: 'catalog:'
@@ -2793,7 +2796,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2830,7 +2833,7 @@ importers:
         version: 6.0.3
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@effect/platform-node':
         specifier: 4.1.1
@@ -2867,7 +2870,7 @@ importers:
         version: 1.31.0
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2974,7 +2977,7 @@ importers:
         version: 4.1.1
       vibelang-runtime:
         specifier: 0.0.13
-        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
       '@effect/vitest':
         specifier: 4.1.1
@@ -18144,7 +18147,7 @@ snapshots:
   vibelang-linux-x64@0.0.13:
     optional: true
 
-  vibelang-runtime@0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1):
+  vibelang-runtime@0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1):
     dependencies:
       effect: 4.1.1
     optionalDependencies:
