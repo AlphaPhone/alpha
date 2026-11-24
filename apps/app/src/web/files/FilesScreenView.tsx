@@ -240,7 +240,8 @@ export function FilesScreenView({
     if (browser.place.tag === "Browse") navigate({ tag: "InFolder", path: "", volume: "" });
     showNaming({ op: "create", initial: "", parent, volume: browser.place.tag === "InFolder" ? browser.place.volume : "" });
   };
-  // Files is visited once per element and route: a ref callback made anew each render would leave and visit again on every render.
+  // One visit per stretch on screen, or per route Files is opened at: a callback ref React sees as new on every render
+  // would leave and re-enter Files on each render, and each enter's state change renders again, without end.
   const visit = useCallback((node: HTMLElement | null) => {
     if (!node) return;
     const stop = start(Effect.gen(function* () {
