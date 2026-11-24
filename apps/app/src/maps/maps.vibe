@@ -2,6 +2,7 @@
 import { CloudError } from "@elizaos/cloud/client"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Screen from "../../gen/app__maps.effect.vibe"
+import { readable, shown } from "../../gen/app__maps.effect.vibe"
 import type { Effect as Out, Event as Ev, HandOff, Maps as State } from "../../gen/app__maps.effect.vibe"
 import * as Credits from "../../gen/app__maps__credits.effect.vibe"
 import type { Effect as CreditsOut, Event as CreditsEv } from "../../gen/app__maps__credits.effect.vibe"
@@ -66,10 +67,7 @@ effect function asked<A>(call: (client: CloudClient, signal: AbortSignal) => Pro
   if (now < heldUntil) throw new Unanswered({ cause: "Cloud asked Alpha to wait" })
   const { client } = try Cloud
   const sent: A!Unanswered = tryPromise({ try: (signal) => call(client, signal), catch: (cause) => new Unanswered({ cause }) })
-  return try (sent catch effect (failure) => {
-    try held(failure.cause)
-    throw failure
-  })
+  return try Effect.tapError(sent, (failure) => held(failure.cause))
 }
 
 function offerOf(capabilities: Capabilities): Offer {
@@ -306,14 +304,29 @@ function carry(fx: Out): Job<Ev, Cloud | Time | Location | Screen.Machine | KeyV
 
 const screen = reacting(Screen, { carry, open: restored() })
 
+let asked_: { centre: Point; zoom: number } | undefined
+
+/** The half width, in degrees, of the area a copyright is asked for at `zoom`: the view and one view of margin on each side. */
+const spanAt = (zoom: number) => 0.02 * 2 ** (14 - zoom)
+
+// spec/app/maps/credits.md, "When the camera settles outside the area the shown copyright covers, the copyright is asked for that view, and within it nothing changes"
+function coveredNow(state: State): boolean {
+  const centre = centreOf(state)
+  if (centre === undefined || asked_ === undefined || asked_.zoom !== atlas.snapshot().zoom) return false
+  const span = spanAt(asked_.zoom) / 3
+  return Math.abs(centre.lat - asked_.centre.lat) / 1e6 <= span && Math.abs(centre.lng - asked_.centre.lng) / 1e6 <= span
+}
+
 // spec/app/maps/credits.md, "Only the answer to the latest copyright request, for the view in place, is shown, and a failed one never breaks the map"
 effect function copyrighted(token: number): CreditsEv!!(Cloud | Time | Screen.Machine) {
   const state = try (try Screen.Machine).get()
   const centre = centreOf(state) ?? world
-  const span = 0.02 * 2 ** (14 - atlas.snapshot().zoom)
+  const zoom = atlas.snapshot().zoom
+  const span = spanAt(zoom)
+  asked_ = { centre, zoom }
   return effect {
     const found = try asked((client, signal) => client.mapsViewport({
-      zoom: atlas.snapshot().zoom, north: Math.min(90, centre.lat / 1e6 + span), south: Math.max(-90, centre.lat / 1e6 - span),
+      zoom, north: Math.min(90, centre.lat / 1e6 + span), south: Math.max(-90, centre.lat / 1e6 - span),
       east: Math.min(180, centre.lng / 1e6 + span), west: Math.max(-180, centre.lng / 1e6 - span),
     }, { signal }))
     return { type: "copyrightAnswered", token, success: true, text: found.copyright }
@@ -383,7 +396,7 @@ export const maps = together(
   permission,
   following(Shell, (shell) => showing(shell, "Maps"), Screen.Machine, (shown): Ev => (shown ? { type: "comeBack" } : { type: "leaveMaps" })),
   following(Screen.Machine, (state) => [state.link.plane, state.link.basemap === "Cloud"] as const, Credits.Machine, ([plane, raster]): CreditsEv => ({ type: "drawnOn", plane, raster })),
-  following(Screen.Machine, cameraOf, Credits.Machine, (camera): CreditsEv | undefined => (camera === "" ? undefined : { type: "cameraSettled", covered: false })),
+  following(Screen.Machine, (state) => [cameraOf(state), coveredNow(state)] as const, Credits.Machine, ([camera, covered]): CreditsEv | undefined => (camera === "" ? undefined : { type: "cameraSettled", covered })),
   applying(Screen.Machine, cameraOf, (camera) => effect {
     if (camera === "") return
     const state = try (try Screen.Machine).get()
@@ -396,4 +409,29 @@ export effect function zoomed(step: number): void!!(Cloud | Time | Screen.Machin
   atlas.zoomBy(step)
   const state = try (try Screen.Machine).get()
   try ignore(drawnTiles(state.link.plane, state.link.basemap, centreOf(state) ?? world))
+}
+
+// spec/app/maps/index.md, "An event's place opens on its card once Maps is on screen, never over navigation, and Maps remembers the event"
+/** Calendar hands Maps an event's place by its words: Maps comes forward, finds the place and opens it on its card. */
+export effect function enteredFromEvent(meeting: number, address: string): boolean!!(Cloud | Time | Screen.Machine | Shell) {
+  try ignore((try Shell).send({ type: "openView", view: "Maps" }))
+  const found = try (asked((client, signal) => client.mapsGeocode({ query: address, limit: 1 }, { signal })) |> Effect.option(%))
+  const first = Option.isSome(found) ? found.value.places[0] : undefined
+  if (first === undefined) return false
+  const place = atlas.numberOf(spotOf(first))
+  return try (((try Screen.Machine).send({ type: "enterFromEvent", meeting, place })) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))
+}
+
+/** What Maps shows, as the agent's turn names it: the place or route on screen by its handle and revision, or nothing. */
+export interface Selected {
+  readonly kind: "map-place" | "map-route"
+  readonly id: string
+  readonly revision: string
+}
+
+// spec/app/maps/index.md, "While Maps is in front the agent is told what it shows, a place, a route or a search, by a handle that names it on this phone only"
+export function selectedOf(state: State, inFront: boolean): Selected | undefined {
+  const what = shown(state, inFront)
+  if (!readable(what)) return undefined
+  return { kind: what === "ShowsRoute" ? "map-route" : "map-place", id: atlas.handleOf(state.place), revision: String(state.review.revision) }
 }
