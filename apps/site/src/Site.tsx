@@ -1,6 +1,6 @@
 // spec/site/index.md, "Story: Watch Alpha at work"
 import mark from "@repo/design-system/mark.svg";
-import { Button, Mark, Wordmark, cn } from "@repo/ui";
+import { Button, Mark, cn } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import { Pause, Play } from "lucide-react";
 import type { Machine } from "../gen/site.effect.vibe";
@@ -26,21 +26,26 @@ const events = [
 
 /** The staged conversation over the chat's capture: each part from its beat, fading in unless the scene is shown whole. */
 function Conversation({ demo }: { demo: Demo }) {
-  const part = (which: Part) => cn(!shown(demo, which) && "invisible", !demo.whole && "motion-safe:animate-fade");
+  const enter = !demo.whole && "motion-safe:animate-fade";
+  const at = (part: Part) => shown(demo, part);
   return (
     <>
       <div className="absolute inset-x-0 top-[82%] bottom-[11%] bg-card" />
       <div className="absolute inset-x-[5%] top-[49%] text-xs text-card-foreground">
-        <p className={cn("ml-auto w-fit max-w-[88%] rounded-xl rounded-br-sm bg-primary px-2.5 py-2 font-medium text-primary-foreground", part("Asked"))}>
-          What’s on my calendar today?
-        </p>
-        <div className={cn("absolute mt-3 flex gap-1 rounded-xl bg-muted p-2.5", part("Typing"))}>
-          {[0, 1, 2].map((dot) => <i key={dot} className="size-1 rounded-full bg-muted-foreground" />)}
-        </div>
-        <p className={cn("mt-3 mb-2 font-medium", part("Answered"))}>Two things this afternoon.</p>
-        {events.map((event) => (
-          <div key={event.at} className={cn("mt-1 flex min-h-8 items-center gap-2.5 rounded-sm border border-l-2 border-border border-l-primary bg-background px-2.5", part(event.part))}>
-            <time dateTime={event.at} className="w-12 shrink-0 text-muted-foreground tabular-nums">{event.time}</time>
+        {at("Asked") && (
+          <p className={cn("ml-auto w-fit max-w-[88%] rounded-xl rounded-br-sm bg-primary px-2.5 py-2 font-medium text-primary-foreground", enter)}>
+            What’s on my calendar today?
+          </p>
+        )}
+        {at("Typing") && (
+          <div className={cn("absolute mt-3 flex gap-1 rounded-xl bg-muted p-2.5", enter)}>
+            {[0, 1, 2].map((dot) => <i key={dot} className="size-1 rounded-full bg-muted-foreground" />)}
+          </div>
+        )}
+        {at("Answered") && <p className={cn("mt-3 mb-2 font-medium", enter)}>Two things this afternoon.</p>}
+        {events.filter((event) => at(event.part)).map((event) => (
+          <div key={event.at} className={cn("mt-1 flex min-h-8 items-center gap-2.5 rounded-sm border border-l-2 border-border border-l-primary bg-background px-2.5", enter)}>
+            <time dateTime={event.at} className="w-14 shrink-0 whitespace-nowrap text-muted-foreground tabular-nums">{event.time}</time>
             <strong className="font-semibold">{event.title}</strong>
           </div>
         ))}
@@ -62,9 +67,9 @@ export function Site({ runtime }: SiteProps) {
     <div className="mx-auto max-w-[94rem] px-6 md:px-12">
       <link rel="icon" href={mark} type="image/svg+xml" />
       <header className="flex min-h-22 items-center justify-between">
-        <span className="flex items-center gap-2.5 text-2xl">
+        <span className="flex items-center gap-2.5 text-2xl font-semibold tracking-tight">
           <Mark aria-hidden className="text-alpha" />
-          <Wordmark />
+          Alpha
         </span>
         <Button asChild variant="outline" size="sm">
           <a href="https://github.com/eliza-research/alpha">GitHub</a>
@@ -81,11 +86,11 @@ export function Site({ runtime }: SiteProps) {
             Built by <strong className="font-semibold text-foreground underline decoration-border underline-offset-4">Alpha Compute</strong>
           </a>
         </div>
-        <section aria-label="Alpha phone demo" className="relative grid min-h-[34rem] place-items-center overflow-hidden rounded-sheet border border-border bg-secondary perspective-distant">
+        <section aria-label="Alpha phone demo" className="flex flex-col items-center gap-8 overflow-hidden rounded-sheet border border-border bg-secondary py-12 perspective-distant">
           <div
             role="img"
             aria-label="Alpha Home, a chat asking about today’s calendar, and the Calendar app on a phone."
-            className="relative mb-12 aspect-[370/813] w-64 -rotate-z-6 rotate-x-6 -rotate-y-12 rounded-sheet bg-foreground p-1.5 shadow-lg transform-3d"
+            className="relative aspect-[370/813] w-64 -rotate-z-6 rotate-x-6 -rotate-y-12 rounded-sheet bg-foreground p-1.5 shadow-lg transform-3d"
           >
             <div className="relative size-full overflow-hidden rounded-tile bg-background">
               {scenes.map(({ scene, capture }) => (
@@ -97,7 +102,7 @@ export function Site({ runtime }: SiteProps) {
             </div>
           </div>
           {demo.started && (
-            <div role="group" aria-label="Phone demo controls" className="absolute bottom-4 flex items-center rounded-full border border-border bg-background px-1 shadow-sm">
+            <div role="group" aria-label="Phone demo controls" className="flex items-center rounded-full border border-border bg-background px-1 shadow-sm">
               {scenes.map(({ scene }) => {
                 const pick = { type: "pick", scene, now: untimed } as const;
                 const current = demo.scene === scene;

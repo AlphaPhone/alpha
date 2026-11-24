@@ -31,7 +31,7 @@ async function open() {
     await runtime.runPromise(Effect.void);
   });
   closing.push(async () => {
-    await act(() => root.unmount());
+    act(() => root.unmount());
     await runtime.dispose();
   });
   /** Wait until the demo reaches a state `ok` accepts, and React has drawn it. */
@@ -42,16 +42,18 @@ async function open() {
     await until(ok);
   };
   const state = () => runtime.runPromise(Effect.flatMap(Machine, (machine) => machine.get()));
-  return { until, later, state };
+  /** Press the button named `name`, as a visitor does, and wait until what it sent is applied. */
+  const press = (name: string) => act(async () => {
+    const found = button(name);
+    if (!found || found.disabled) throw new Error(`no button ${name} to press`);
+    found.click();
+    await runtime.runPromise(Effect.void);
+  });
+  return { until, later, state, press };
 }
 
 const button = (name: string) => [...document.querySelectorAll("button")].find((found) => found.getAttribute("aria-label") === name);
 
-const press = (name: string) => act(() => {
-  const found = button(name);
-  if (!found || found.disabled) throw new Error(`no button ${name} to press`);
-  found.click();
-});
 
 /** The page in sight, or out of it, as when the visitor switches tabs. */
 function shown(visible: boolean) {
@@ -76,7 +78,7 @@ describe('Watch Alpha at work (spec/site/index.md, "Story: Watch Alpha at work")
   });
 
   it('pauses and goes on, out of sight too, and shows a picked scene (spec/site/index.md, "Pausing keeps the time the beat has left, and playing again goes on from it")', async () => {
-    const { later, until, state } = await open();
+    const { later, until, state, press } = await open();
     await later(1_000);
     await press("Pause automatic playback");
     await later(10_000);
@@ -103,7 +105,7 @@ describe('Watch Alpha at work (spec/site/index.md, "Story: Watch Alpha at work")
     const first = await open();
     await first.later(3_000, (demo) => demo.scene === "Chat");
     motion.matches = true;
-    await act(() => motion.dispatchEvent(new Event("change")));
+    act(() => motion.dispatchEvent(new Event("change")));
     await first.until((demo) => demo.still);
     expect(at(await first.state())).toEqual(["Chat", 0, true, false]);
 
