@@ -4,8 +4,7 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import type { RuntimeJsonBridge, RuntimeStatus, RuntimeStreamFrame } from "@elizaos/agent/client";
-import { packPrepared } from "@repo/eliza-harness/pack";
-import { type Cloud, type DeviceKey, said, scratch, startCloud } from "@repo/eliza-harness/services";
+import { type Cloud, type DeviceKey, packPrepared, said, scratch, startCloud } from "@repo/eliza-harness";
 
 /** The owner every journey of the pack signs in. */
 const owner = "owner@alpha.test";

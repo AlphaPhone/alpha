@@ -215,7 +215,6 @@ function reactor<I, S, Ev, M, Fx, Refused, Undecoded, By extends ReadonlyArray<u
     const time = try Time
     const install = try Install
     const store = try KeyValueStore.KeyValueStore
-    /** What tells this run of the state's attempts from an earlier one under the same key: kept beside the state, and new with each state that starts afresh; in memory, the launch. */
     effect function epoch(): string!! {
       if (!durable) return install.launch
       const found = store.get(`${scope}.epoch`) catch () => undefined
@@ -226,7 +225,6 @@ function reactor<I, S, Ev, M, Fx, Refused, Undecoded, By extends ReadonlyArray<u
     const attempts = attemptsOf(install, `${scope}@${try epoch()}`)
     const running = try FiberMap.make<string>()
     const turn = try Semaphore.make(1)
-    /** Each deadline a job waits on or has told the machine of, so that none is told twice. */
     const armed = new Map<string, number>()
 
     function halt(key: string): void {
