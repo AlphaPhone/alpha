@@ -57,6 +57,7 @@ import type { Alpha } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import type { Time } from "../runtime/time.vibe";
+import { AppBack } from "../shell/AppBack.tsx";
 
 /** What every Settings page reads: where the owner is, the phone's facts, the hand-overs to Android, the preferences, the reset and the developer tools. */
 export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | FactsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ShellMachine | Time, unknown>;
@@ -200,7 +201,7 @@ function useDevice(runtime: SettingsRuntime) {
 function Top({ runtime, alpha, common }: PageProps) {
   const pages = usePages(runtime).state;
   return (
-    <SettingsTopPage {...common} developer={pages?.development ?? false}>
+    <SettingsTopPage {...common} leading={<AppBack alpha={alpha} />} developer={pages?.development ?? false}>
       {alpha.slot("settings/account")}
     </SettingsTopPage>
   );

@@ -42,7 +42,8 @@
     { "module": "location" },
     { "module": "wifi" },
     { "module": "voice-io" },
-    { "module": "cloud-speech" }
+    { "module": "cloud-speech" },
+    { "module": "browser-surface" }
   ],
   "modules": [
     { "name": "capacitor-android", "source": { "root": "dependencies", "path": "@capacitor/android/capacitor" } }
@@ -53,6 +54,7 @@
     { "configuration": "implementation", "module": "androidx.webkit:webkit", "toolchainVersion": "androidxWebkitVersion" },
     { "configuration": "testImplementation", "module": "junit:junit", "toolchainVersion": "junitVersion" }
   ],
+  "appScripts": [{ "root": "consumer", "path": "android/app/browser.gradle" }],
   "agent": {
     "host": { "root": "consumer", "path": "android/agent/host.json" },
     "character": { "root": "consumer", "path": "android/agent/character.json" },

@@ -8,7 +8,8 @@ do next.
 - **Surfaces.** `background` is the page: white, or true black in the dark. `card` is a raised panel,
   `popover` anything floating: a sheet, a menu, a dialog. `secondary` and `muted` are the quiet fill of a
   tile, a chip or a field, `accent` the pressed and selected fill.
-- **Text.** `foreground` by default, `muted-foreground` for what matters less. Every `x-foreground` is
+- **Text.** `foreground` by default, `muted-foreground` for what matters less. Light muted text keeps
+  AA contrast on the pressed surface. Every `x-foreground` is
   the text color on `x`, and each pair meets WCAG AA in both themes.
 - **Edges.** `border` divides and may be faint. `input` is the edge of a control and `ring` the keyboard
   focus: both stand at least 3:1 off `background` and `card` in both themes (WCAG 1.4.11).
@@ -19,8 +20,11 @@ do next.
 - **Type.** `font-sans` is Public Sans, for everything read or pressed. `font-display` is Denton, with
   Fraunces behind it, at weight `light`: a screen's one title, the date on Home, a large figure. The sizes
   are in rem, so Android's text size scales them: `base` is body text, `3xl` a screen title, `4xl` the
-  Home date. `tracking-caps` with `text-xs` is a small uppercase label.
-- **Shape.** `radius` is a card or a row group; `rounded-tile` an app tile, a menu and a dialog;
+  Home date. `tracking-caps` with `text-xs` is a small uppercase label. A list row reads `text-base`,
+  `text-subject` and `text-snippet` line by line; `text-meta` is a status line under a header, and `text-body`
+  the text of a message or of a field being typed.
+- **Shape.** `radius` is a card or a row group; `rounded-home-card` is a Home overview card;
+  `rounded-drawer-icon` rounds an installed app icon. `rounded-tile` is an app tile, a menu and a dialog;
   `rounded-sheet` the top of a bottom sheet; `rounded-full` a button, a chip and the Ask Alpha bar.
   Everything pressed is at least 44px in both directions.
 - **Elevation.** `shadow-sm` lifts a control, `shadow-md` a menu or dialog, `shadow-lg` the Ask Alpha
@@ -57,27 +61,27 @@ this prose into tokens. To change the design, describe it, and have the change w
 | --- | --- | --- |
 | `background` | oklch(1 0 0) | oklch(0 0 0) |
 | `foreground` | oklch(0 0 0) | oklch(1 0 0) |
-| `card` | oklch(0.985 0 0) | oklch(0.15 0 0) |
+| `card` | oklch(0.98510365 0 0) | oklch(0.14957712 0 0) |
 | `card-foreground` | oklch(0 0 0) | oklch(1 0 0) |
-| `popover` | oklch(1 0 0) | oklch(0.196 0 0) |
+| `popover` | oklch(1 0 0) | oklch(0.19573496 0 0) |
 | `popover-foreground` | oklch(0 0 0) | oklch(1 0 0) |
-| `primary` | oklch(0.452 0.313 264.1) | oklch(0.704 0.157 278) |
+| `primary` | oklch(0.45201372 0.31321437 264.05202064) | oklch(0.70366126 0.15682550 277.95756294) |
 | `primary-foreground` | oklch(1 0 0) | oklch(0 0 0) |
-| `secondary` | oklch(0.964 0 0) | oklch(0.196 0 0) |
+| `secondary` | oklch(0.96415350 0 0) | oklch(0.19573496 0 0) |
 | `secondary-foreground` | oklch(0 0 0) | oklch(1 0 0) |
-| `muted` | oklch(0.964 0 0) | oklch(0.196 0 0) |
-| `muted-foreground` | oklch(0.5 0 0) | oklch(0.65 0 0) |
-| `accent` | oklch(0.925 0 0) | oklch(0.269 0 0) |
+| `muted` | oklch(0.96415350 0 0) | oklch(0.19573496 0 0) |
+| `muted-foreground` | oklch(0.51027835 0 0) | oklch(0.65004127 0 0) |
+| `accent` | oklch(0.92493954 0 0) | oklch(0.26861828 0 0) |
 | `accent-foreground` | oklch(0 0 0) | oklch(1 0 0) |
 | `destructive` | oklch(0.532 0.198 27.9) | oklch(0.71 0.183 27) |
 | `destructive-foreground` | oklch(1 0 0) | oklch(0 0 0) |
-| `border` | oklch(0.916 0 0) | oklch(0.269 0 0) |
+| `border` | oklch(0.91583147 0 0) | oklch(0.26861828 0 0) |
 | `input` | oklch(0.64 0 0) | oklch(0.528 0 0) |
-| `ring` | oklch(0.452 0.313 264.1) | oklch(0.704 0.157 278) |
+| `ring` | oklch(0.45201372 0.31321437 264.05202064) | oklch(0.704 0.157 278) |
 | `ok` | oklch(0.509 0.134 149.4) | oklch(0.727 0.208 148.3) |
 | `warn` | oklch(0.514 0.111 70.3) | oklch(0.761 0.159 77.7) |
 | `info` | oklch(0.354 0.245 264.1) | oklch(0.704 0.157 278) |
-| `alpha` | oklch(0.452 0.313 264.1) | — |
+| `alpha` | oklch(0.45201372 0.31321437 264.05202064) | — |
 | `alpha-foreground` | oklch(1 0 0) | — |
 | `call` | oklch(0.509 0.134 149.4) | oklch(0.614 0.162 149.3) |
 | `record` | oklch(0.578 0.206 29) | oklch(0.663 0.224 28.3) |
@@ -87,15 +91,25 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `radius` | 1rem |
 | `rounded.tile` | 1.375rem |
 | `rounded.sheet` | 1.75rem |
+| `rounded.home-card` | 1.875rem |
+| `rounded.drawer-icon` | 1.125rem |
 | `font.sans` | "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif |
 | `font.display` | Denton, Fraunces, Georgia, serif |
 | `font.mono` | ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace |
 | `text.xs.size` | 0.75rem |
 | `text.xs.leading` | 1.25 |
+| `text.meta.size` | 0.8125rem |
+| `text.meta.leading` | 1.25 |
+| `text.snippet.size` | 0.84375rem |
+| `text.snippet.leading` | 1.2 |
 | `text.sm.size` | 0.875rem |
 | `text.sm.leading` | 1.4 |
+| `text.subject.size` | 0.90625rem |
+| `text.subject.leading` | 1.2 |
 | `text.base.size` | 0.9375rem |
 | `text.base.leading` | 1.4 |
+| `text.body.size` | 1rem |
+| `text.body.leading` | 1.6 |
 | `text.lg.size` | 1.0625rem |
 | `text.lg.leading` | 1.4 |
 | `text.xl.size` | 1.25rem |
@@ -108,6 +122,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.4xl.size` | 2.5rem |
 | `text.4xl.leading` | 1.08 |
 | `text.4xl.tracking` | -0.01em |
+| `text.home-display.size` | 1.625rem |
+| `text.home-display.leading` | 1.1 |
 | `weight.light` | 300 |
 | `weight.normal` | 400 |
 | `weight.medium` | 500 |

@@ -31,7 +31,7 @@ export type HomeTileGridProps = Omit<ComponentProps<"nav">, "children"> & {
 };
 
 /** The columns of a grid of app tiles: four on a phone, more on a wider screen, fewer with large text. */
-const tileColumns = "grid grid-cols-[repeat(auto-fill,minmax(max(4rem,22%),1fr))] gap-x-2 gap-y-6";
+export const tileColumns = "grid grid-cols-[repeat(auto-fill,minmax(max(calc(25%_-_.5px),3.875rem),1fr))] gap-y-6";
 
 const steps: Record<string, -1 | 1> = { ArrowLeft: -1, ArrowRight: 1 };
 

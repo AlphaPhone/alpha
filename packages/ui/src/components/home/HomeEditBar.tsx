@@ -21,7 +21,7 @@ export function HomeEditBar({ onShowHidden, onDone, notice, className, ...props 
         <Button variant="secondary" size="icon" aria-label="Add to Home" aria-haspopup="dialog" disabled={!onShowHidden} onClick={onShowHidden}>
           <Plus />
         </Button>
-        <Button disabled={!onDone} onClick={onDone}>Done</Button>
+        <Button variant="ghost" className="h-11 min-w-11 bg-foreground px-4.5 text-sm font-normal text-background hover:bg-foreground/90 active:bg-foreground/80" disabled={!onDone} onClick={onDone}>Done</Button>
       </div>
       {notice ? <HomeNotice notice={notice} place="InEditBar" /> : null}
     </div>

@@ -4,7 +4,6 @@ import { HomeScreen, type HomeTileItem, InstalledAppIcon } from "@repo/ui";
 import { useSyncExternalStore } from "react";
 import * as Home from "../../gen/app__home.ts";
 import { useMachine as useHome } from "../../gen/app__home.react.ts";
-import { useMachine as useCards } from "../../gen/app__home__cards.react.ts";
 import { type Tile, badged } from "../../gen/app__home__tiles.ts";
 import type { View } from "../../gen/app__shell.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
@@ -32,7 +31,7 @@ function tileItem(tile: Tile, known: ReadonlyMap<string, InstalledApp>, said?: s
   if (tile.tag === "Own") {
     const Glyph = views[tile.view].icon;
     const badge = badged(tile, said !== undefined, editing) ? said : undefined;
-    return { id: idOf(tile), label: views[tile.view].label, icon: <Glyph className="size-6" />, ...(badge ? { badge } : {}) };
+    return { id: idOf(tile), label: views[tile.view].label, icon: <Glyph className="size-7.5" />, ...(badge ? { badge } : {}) };
   }
   return { id: idOf(tile), label: labelOf(tile.app), icon: <InstalledAppIcon image={imageOf(known.get(tile.app))} /> };
 }
@@ -41,7 +40,6 @@ function tileItem(tile: Tile, known: ReadonlyMap<string, InstalledApp>, said?: s
 export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   const home = useHome(runtime);
   const shell = useShell(alpha.runtime);
-  const cards = useCards(runtime);
   const known = useSyncExternalStore(catalog.subscribe, catalog.snapshot, catalog.snapshot);
   const inline = useSyncExternalStore(told.subscribe, told.snapshot, told.snapshot);
   const waits = useSyncExternalStore(waiting.subscribe, waiting.snapshot, waiting.snapshot);
@@ -53,13 +51,11 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   const send = (event: Home.Event) => void home.send(event, owner);
   const offered = (event: Home.Event) => (can(event) ? () => send(event) : undefined);
   const notice = inline && inline.place === Home.noticeAt(h, s) ? inline.notice : undefined;
-  const today = cards.state?.today;
   const beginEditing = { type: "beginEditing", shell: s } as const;
   const pullDown = { type: "pullDown", shell: s, locked: false, now: untimed } as const;
   return (
     <>
       <HomeScreen
-        date={today ? new Date(today * 86_400_000).toLocaleDateString([], { weekday: "long", day: "numeric" }) : undefined}
         cards={Home.showsCards(h) ? day : []}
         tiles={h.tiles.load.status === "Loaded" ? Home.tilesShown(h, s).map((tile) => tileItem(tile, known.apps, tile.tag === "Own" ? waits.get(tile.view) : undefined, h.editing)) : undefined}
         editing={h.editing}
