@@ -311,11 +311,10 @@ the agent sends shows:
 
 `pnpm --filter @repo/app aosp` stages, signs, records, verifies and enrolls
 Alpha's image from a launcher APK on eliza's image tools; it never flashes a
-phone or publishes an update. It does not run yet: the package script
-names `scripts/aosp.vibe` while the file is `apps/app/scripts/aosp.ts`,
-which still reads a capabilities file that is not in the tree. Until both
-are fixed, and until this tree builds the launcher, images and APKs come from
-Alpha `develop`.
+phone or publishes an update. It does not run yet: `apps/app/scripts/aosp.ts`
+still reads a capabilities file that is not in the tree. Until that is fixed,
+and until this tree builds the launcher, images and APKs come from Alpha
+`develop`.
 
 - **The launcher APK:** develop's `android:build:inputs` lists what is
   missing, `android:build:local -- --release` builds the debug, release and
@@ -338,7 +337,7 @@ Alpha `develop`.
   with `--listener-apk`, `--listener-descriptor` and its
   `--listener-qualification`, and `--patch` `chip`, `ops`,
   `protected-power` and `sense-policy`; without the qualification it is
-  refused ([`spec/app/release/`](spec/app/release/index.md)), where develop
+  refused ([`spec/app/image/`](spec/app/image/index.md)), where develop
   staged an unqualified record with `--development`.
 - One AOSP build runs at a time, each image with a new `BUILD_NUMBER`, or
   the package manager keeps stale metadata.
