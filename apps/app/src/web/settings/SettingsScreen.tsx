@@ -207,7 +207,7 @@ function General({ model, act, native, erasing, onDialog }: {
       {elsewhereShown("PhoneInfo", model.variant === "aosp", native) && (
         <Section><SettingRow label="Phone" icon={<Phone aria-hidden className="size-5" />} ariaLabel="Phone, SIM and carrier" onOpen={() => act.openElsewhere("PhoneInfo")} /></Section>
       )}
-      {carrierOffered(native) && (
+      {carrierOffered(model.variant === "aosp", native) && (
         <Section>
           <SettingRow label="Carrier & SIM setup" icon={<Smartphone aria-hidden className="size-5" />} ariaLabel="Carrier & SIM setup: IMEI, SIM status and activation"
             onOpen={() => act.open("Carrier")} />

@@ -166,13 +166,14 @@ pure def sometimesCopied(c: Carrier): bool = c.copy.copied
 
 ### General offers the page on the phone only, and the default SMS app choice only where Alpha can take it
 
-A browser has no carrier to read. The choice of default SMS app hands off to Android's default apps
+A browser has no carrier to read; the launcher and the Alpha image both offer the page. The choice of default SMS app hands off to Android's default apps
 page only when Android reports the SMS role available to Alpha and not held by it, which is on the
 Alpha image.
 
 ```quint
-pure def carrierOffered(onPhone: bool): bool = onPhone
-pure def lawNoCarrierPageInABrowser(onPhone: bool): bool = carrierOffered(onPhone) implies onPhone
+pure def carrierOffered(aosp: bool, onPhone: bool): bool = onPhone
+pure def lawNoCarrierPageInABrowser(aosp: bool): bool = not(carrierOffered(aosp, false))
+pure def lawOfferedOnTheLauncherAndTheImage(aosp: bool): bool = carrierOffered(aosp, true)
 pure def smsChoiceOffered(c: Carrier): bool = c.phase == CarrierShown and c.setup.canChooseSms
 pure def alwaysNoSmsChoiceBeforeARead(c: Carrier): bool = c.phase != CarrierShown implies not(smsChoiceOffered(c))
 ```
