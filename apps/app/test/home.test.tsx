@@ -1,12 +1,14 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it } from "vitest";
 import * as Home from "../gen/app__home.effect.vibe";
+import * as Cards from "../gen/app__home__cards.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Toasts } from "../gen/app__notices__toasts.effect.vibe";
 import home from "../src/home/index.tsx";
 import { button, closeAll, drawn, fill, hardware, later, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { waiting } from "../src/home/waiting.vibe";
+import { agendaFrom } from "../src/home/cards.vibe";
 
 underAct();
 afterEach(closeAll);
@@ -65,6 +67,38 @@ describe("Home on a phone", () => {
     const second = await open(world);
     await until(second.alpha, home.runtime(second.alpha), Home.Machine, (h) => h.tiles.load.status === "Loaded" && h.tiles.load.ticket === 2);
     expect(tiles().at(-1)).toBe("view:Notes");
+  });
+
+  // spec/app/home/cards.md, "Story: See my day at a glance"; spec/app/home/cards.md, "Story: The agenda card"; spec/app/home/cards.md, "Story: Open my day from a card"
+  it("See my day at a glance and open it from a card (spec/app/home/cards.md, \"Story: See my day at a glance\"; spec/app/home/cards.md, \"Story: The agenda card\"; spec/app/home/cards.md, \"Story: Open my day from a card\")", async () => {
+    const hour = 3_600_000;
+    const day = 10 * 86_400_000;
+    const world = { ...scene(), phone: true, now: day + 8 * hour };
+    world.calendar.granted = true;
+    world.calendar.calendars.push({ id: "1", name: "Work", writable: true, local: true }, { id: "2", name: "Family", writable: true, local: true });
+    world.calendar.phoneEvents = [
+      { id: "a", calendarId: "1", title: "Standup", begin: day + 10 * hour, end: day + 11 * hour, allDay: false, recurring: false },
+      { id: "b", calendarId: "2", title: "Dentist", begin: day + 9 * hour, end: day + 10 * hour, allDay: false, recurring: false },
+    ];
+    const { alpha } = await open(world);
+    const homes = home.runtime(alpha);
+    const agenda = () => [...document.querySelectorAll("button")].find((found) => /^(Next|Overdue)/.test(found.textContent ?? ""));
+
+    // spec/app/home/cards.md, "When Home shows, when Alpha comes back to the front, and when the local day turns while Home shows, Home asks again for every calendar it has not read today"; spec/app/home/cards.md, "The card leads with an overdue reminder, then the item that begins first; of two alike, the first read"
+    await until(alpha, homes, Cards.Machine, (c) => c.calendar.source === "Ready" && c.calendar.items.length === 2);
+    expect(agenda()?.textContent).toMatch(/^NextDentist/);
+
+    // spec/app/home/cards.md, "The agenda draws on both calendars and the reminders saved on the phone, leaving out a calendar Calendar hides and a reminder already done"
+    await drawn(() => agendaFrom.hidden([2]));
+    expect(agenda()?.textContent).toMatch(/^NextStandup/);
+    await drawn(() => agendaFrom.reminders([{ due: day + 7 * hour, overdue: true, done: false, title: "Call the bank" }, { due: day, overdue: true, done: true, title: "Paid rent" }]));
+    // spec/app/home/cards.md, "Under an overdue reminder the card also names the next item that is not overdue, so the reminder never hides it"
+    expect(agenda()?.textContent).toMatch(/^OverdueCall the bank.*Standup/);
+
+    // spec/app/home/cards.md, "A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed"
+    await drawn(() => agenda()?.click());
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Calendar");
+    await drawn(() => { agendaFrom.reminders([]); agendaFrom.hidden([]); });
   });
 
   // spec/app/home/index.md, "Story: See the apps on this phone"; spec/app/home/index.md, "Story: Find an app and see its details"; spec/app/home/index.md, "Story: Open an app"

@@ -408,6 +408,12 @@ pure def mailCard(m: Mail): Card =
 
 ### The Workflows card shows the first two enabled rows and how many more, marked when they are not current, stale or partly unavailable, and is not drawn without a row
 
+The enabled rows are the agent's workflows that are active and not
+removed and its prompts that are on, as Workflows read them from the
+routes the agent serves (`GET /api/workflow/workflows` and
+`GET /api/triggers`); a list only one of them answered is partly
+unavailable.
+
 ```quint
 pure def flowRows(f: Flows): List[Row] = f.rows.foldl(List(), (l, r) => if (l.length() < 2) l.append(r) else l)
 

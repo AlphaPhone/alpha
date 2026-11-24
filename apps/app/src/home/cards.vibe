@@ -46,6 +46,32 @@ function titled(origin: Origin, rows: ReadonlyArray<{ readonly title: string }>)
   for (const listener of [...listeners]) listener()
 }
 
+/** A reminder saved on the phone, as the area that keeps it tells the agenda: when it is due, whether it is overdue or done, and its title. */
+export interface ToldReminder { readonly due: number; readonly overdue: boolean; readonly done: boolean; readonly title: string }
+
+/** What the agenda takes from the areas that keep it: the reminders saved on the phone and the calendars Calendar hides. */
+export interface Told { readonly reminders: ReadonlyArray<Item>; readonly hidden: ReadonlyArray<number> }
+
+let told: Told = { reminders: [], hidden: [] }
+
+// spec/app/home/cards.md, "The agenda draws on both calendars and the reminders saved on the phone, leaving out a calendar Calendar hides and a reminder already done"
+/** What other areas tell the agenda card, as an external store the card reads without an effect. */
+export const agendaFrom = {
+  snapshot: (): Told => told,
+  subscribe: named.subscribe,
+  /** The reminders saved on the phone now, every one of them. */
+  reminders(rows: ReadonlyArray<ToldReminder>): void {
+    told = { ...told, reminders: rows.map((row, at) => ({ id: at + 1, origin: "Reminder", calendar: 0, begin: row.due, end: row.due, allDay: false, overdue: row.overdue, done: row.done })) }
+    titled("Reminder", rows)
+  },
+  /** The phone's calendars Calendar hides now, by their numbers. */
+  hidden(calendars: ReadonlyArray<number>): void {
+    told = { ...told, hidden: [...calendars] }
+    version += 1
+    for (const listener of [...listeners]) listener()
+  },
+}
+
 /** The span a card reads: from the day before the day asked to two days after it. */
 function span(now: number) {
   const day = Cards.dayOf(now) * Cards.dayLength

@@ -6,6 +6,7 @@ import { shell } from "./shell/shell.vibe"
 import { toasts } from "./notices/toasts.vibe"
 import { haptics } from "./shell/haptics.vibe"
 import { canvas } from "./shell/canvas.vibe"
+import { focus } from "./shell/focus.vibe"
 import { mailbox } from "./inbox/mailbox.vibe"
 import { operations } from "./inbox/operations.vibe"
 import { composer } from "./inbox/composer.vibe"
@@ -43,6 +44,7 @@ const machines = together(
   attention,
   comms,
   paging,
+  focus,
 )
 
 /** The resident machines, closed: each machine one of them follows or tells is among them. */

@@ -1,14 +1,16 @@
-// spec/app/shell/index.md, "Story: Move between Home and the apps"; spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back"; spec/app/shell/layers.md, "The page under a layer or a hold takes no touch, and a covering layer or a hold takes none for Ask Alpha either"; spec/app/update/page.md, "A page that was not mounted mounts its editors only once no update is pending"
+// spec/app/shell/index.md, "Story: Move between Home and the apps"; spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back"; spec/app/shell/gestures.md, "On the launcher a pull down that Home allows opens Android's shade, and a swipe up from the bottom bar goes Home; nothing else is a swipe"; spec/app/shell/layers.md, "The page under a layer or a hold takes no touch, and a covering layer or a hold takes none for Ask Alpha either"; spec/app/update/page.md, "A page that was not mounted mounts its editors only once no update is pending"
 import { Alert, AppHeader, Button } from "@repo/ui";
 import { ChevronLeft } from "lucide-react";
 import { type PointerEvent, useRef } from "react";
 import { useMachine } from "../gen/app__shell.react.ts";
+import { useMachine as useCanvas } from "../gen/app__shell__keyboard.react.ts";
 import { useMachine as useLayers } from "../gen/app__shell__layers.react.ts";
 import { assistantInert, pageInert, takesBack } from "../gen/app__shell__layers.ts";
 import { swipe } from "../gen/app__shell__gestures.ts";
 import { useMachine as usePage } from "../gen/app__update__page.react.ts";
 import { editorsMounted } from "../gen/app__update__page.ts";
 import type { Alpha } from "./runtime/area.tsx";
+import { home } from "./shell/shell.vibe";
 import { views } from "./shell/views.tsx";
 
 export interface AppProps {
@@ -25,6 +27,7 @@ export function App({ alpha }: AppProps) {
   const { state, cause, can } = useMachine(alpha.runtime);
   const layers = useLayers(alpha.runtime).state;
   const page = usePage(alpha.runtime).state;
+  const launcher = useCanvas(alpha.runtime).state?.launcher ?? false;
   const started = useRef<{ x: number; y: number } | undefined>(undefined);
   if (cause) return <Alert variant="destructive" className="m-6">Alpha could not read where you were</Alert>;
   if (!state) return null;
@@ -32,7 +35,9 @@ export function App({ alpha }: AppProps) {
     const from = started.current;
     started.current = undefined;
     const page = event.currentTarget.getBoundingClientRect();
-    if (from && swipe(false, false, page.width, page.height, from.x, from.y, event.clientX - from.x, event.clientY - from.y) === "SwipeBack") void alpha.back();
+    const went = from ? swipe(launcher, false, page.width, page.height, from.x, from.y, event.clientX - from.x, event.clientY - from.y) : "NoSwipe";
+    if (went === "SwipeBack") void alpha.back();
+    else if (went === "SwipeHome") void alpha.runtime.runPromise(home());
   };
   const inert = layers !== undefined && pageInert(layers);
   const showing = state.trail.at(-1);

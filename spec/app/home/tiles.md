@@ -9,7 +9,10 @@ of what was saved and the save on its way.
 
 Old saved names, such as the Workflows tile saved under its earlier name,
 are turned into today's tiles by the storage service as it parses the
-record; a record it cannot parse is unreadable.
+record; a record it cannot parse is unreadable. An earlier Alpha's record
+(`alpha.launcher.favorites.v1`, its versions 1 and 2) is read only while
+Home has no record of its own, so it is taken up once: the first save
+writes today's record, and the earlier one is never read again.
 
 ## Story: Keep my apps on Home
 

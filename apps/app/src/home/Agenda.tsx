@@ -6,12 +6,13 @@ import * as Cards from "../../gen/app__home__cards.ts";
 import type { Machine } from "../../gen/app__home__cards.effect.vibe";
 import { useMachine } from "../../gen/app__home__cards.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
-import { named } from "./cards.vibe";
+import { agendaFrom, named } from "./cards.vibe";
 
-const nothingElse: Cards.Others = {
-  image: false, reminders: [], hidden: [], mail: { connected: false, unread: 0, rows: [], current: false },
+/** The agenda's part of what other areas hold; their own cards are drawn at `home/cards`. */
+const others = (told: ReturnType<typeof agendaFrom.snapshot>): Cards.Others => ({
+  image: false, reminders: [...told.reminders], hidden: [...told.hidden], mail: { connected: false, unread: 0, rows: [], current: false },
   messages: [], phone: [], flows: { rows: [], freshness: "UpToDate" }, brief: "NoBrief",
-};
+});
 
 const where: Readonly<Record<Cards.Origin, string>> = { PhoneCalendar: "Calendar", AgentCalendar: "Alpha", Reminder: "Reminder" };
 
@@ -28,10 +29,11 @@ function shown(item: Cards.Item): HomeAgendaItem {
 export function Agenda({ runtime }: { runtime: ManagedRuntime.ManagedRuntime<Machine, unknown> }) {
   const { state, can, send } = useMachine(runtime);
   useSyncExternalStore(named.subscribe, named.snapshot, named.snapshot);
+  const told = others(useSyncExternalStore(agendaFrom.subscribe, agendaFrom.snapshot, agendaFrom.snapshot));
   if (!state) return null;
   const now = Math.max(state.calendar.since, state.agent.since, state.today * Cards.dayLength);
-  const card = Cards.agendaCard(state, now, nothingElse);
-  const items = Cards.candidates(state, nothingElse);
+  const card = Cards.agendaCard(state, now, told);
+  const items = Cards.candidates(state, told);
   const first = Cards.lead(items, now)[0];
   if (card === "Hidden" || first === undefined) return null;
   const next = first.overdue ? Cards.following(items, now)[0] : undefined;
