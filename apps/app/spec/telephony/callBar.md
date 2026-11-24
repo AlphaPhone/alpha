@@ -5,8 +5,10 @@ screen, a separate activity: every Alpha view is "not the call screen". The `Alp
 plugin reports each call's ID, state and connect time and offers Return (`showCall`) and End
 (`endCall`); `AlphaCallState` reports whether a call is live and whether it may be an emergency
 call. The bar sits at the top of every view while a call is live, says what the call screen says,
-and goes when the call ends. The development phone never has a call here: the bar is not offered
-off the image.
+and goes when the call ends. A ringing call is Android's to present: `AlphaInCallService` posts it
+as a ringing notice that Android shows as a heads-up or full-screen alert with Answer and Decline,
+so the bar draws nothing while a call rings. The development phone never has a call here: the bar
+is not offered off the image.
 
 ## Domain
 
@@ -33,6 +35,7 @@ pure val noCall: LiveCall = { id: "", phase: Dialing, connectedAt: 0 }
 pure val callsValues = Set(List())
   .union(Set(List({ id: "c1", phase: Active, connectedAt: 1000 })))
   .union(Set(List({ id: "c1", phase: Dialing, connectedAt: 0 })))
+  .union(Set(List({ id: "c1", phase: Ringing, connectedAt: 0 })))
   .union(Set(List({ id: "c2", phase: Held, connectedAt: 1000 }, { id: "c1", phase: Ringing, connectedAt: 0 })))
 pure val callIdValues = Set("c1", "c2")
 pure val ticketValues = Set(0, 1, 2, 3)
@@ -45,6 +48,9 @@ pure val atValues = Set(0, 1000, 2500, 4000, 64000)
 > says, returns me to the call and ends it, so that leaving the call screen never hides a call.
 
 ### The bar is about the call that needs me first: a ringing call, then the connected one
+
+The comms stage, End beside the comms bar and the voice gate read this call while a call rings;
+the top bar itself draws nothing then.
 
 ```quint
 pure def inPhase(calls: List[LiveCall], phase: CallPhase): List[LiveCall] = calls.select(c => c.phase == phase)
@@ -64,10 +70,11 @@ the places it may show is not a call ending either.
 type BarPhase = NoBar | LiveBar | EndedBar
 pure def barPhase(b: CallBar): BarPhase =
   if (b.shown) LiveBar else if (b.eligible and b.trusted and b.endedUntil > b.now) EndedBar else NoBar
+pure def ringingIn(calls: List[LiveCall]): bool = calls.some(c => c.phase == Ringing)
 pure def withCalls(calls: List[LiveCall], wellFormed: bool, b: CallBar): CallBar = {
   val kept = if (wellFormed) calls else List()
   val live = b.eligible and wellFormed and kept.length() > 0
-  val endedNow = b.eligible and wellFormed and b.shown and not(live)
+  val endedNow = b.eligible and wellFormed and b.shown and not(ringingIn(b.calls)) and not(live)
   { ...b, calls: kept, trusted: wellFormed, ending: if (kept.some(c => c.id == b.ending)) b.ending else "", shown: live,
     endedUntil: if (live) 0 else if (endedNow) b.now + endedHold else if (b.eligible and wellFormed) b.endedUntil else 0 }
 }
@@ -76,6 +83,21 @@ pure def eligibilityChanged(b: CallBar, eligible: bool): CallBar =
 pure def alwaysALiveBarShowsATrustedCall(b: CallBar): bool = b.shown implies (b.eligible and b.trusted and b.calls.length() > 0)
 pure def alwaysAnUntrustedReadingShowsNoBar(b: CallBar): bool = not(b.trusted) implies (barPhase(b) == NoBar and b.calls.length() == 0)
 pure def sometimesTheBarShowsALiveCall(b: CallBar): bool = barPhase(b) == LiveBar
+```
+
+### While a call rings, Android's incoming alert is the only call bar
+
+Android presents the ringing call over every view with its own Answer and Decline, so the top bar
+draws nothing while any listed call rings, a call waiting behind a held or connected call
+included; a second call bar would cover or repeat that alert. The ringing call stays listed, so
+the comms stage, End beside the comms bar and the voice gate still see it. Once the ring is
+answered or gone the bar draws the call that is left. A ring the bar never drew holds no "Call
+ended" moment when it goes, and a ring that arrives during that moment clears it.
+
+```quint
+pure def barDrawn(b: CallBar): BarPhase = if (ringingIn(b.calls)) NoBar else barPhase(b)
+pure def alwaysARingHoldsNoEndedMoment(b: CallBar): bool = ringingIn(b.calls) implies b.endedUntil == 0
+pure def sometimesARingDrawsNoBar(b: CallBar): bool = ringingIn(b.calls) and barPhase(b) == LiveBar
 ```
 
 ### A reading older than the latest one never replaces it
@@ -93,9 +115,9 @@ pure def stepTheGenerationNeverGoesBack(before: CallBar, after: CallBar): bool =
 
 ### The bar says Calling until the call is active, and only an active call counts a clock from its connect time
 
-"Incoming call" while it rings, "On hold" while held, "On call · m:ss" counted from the connect time
-Android reports, never from when the bar appeared; a dialing or ringing call never shows a clock,
-whatever time it carries.
+"Incoming call" for a ringing call (which the top bar leaves to Android), "On hold" while held,
+"On call · m:ss" counted from the connect time Android reports, never from when the bar appeared;
+a dialing or ringing call never shows a clock, whatever time it carries.
 
 ```quint
 type BarWords = Incoming | Calling | OnHold | OnCall | OnCallFor({ seconds: int }) | CallEnded
@@ -129,8 +151,8 @@ pure def sometimesAnEndedCallHoldsItsPlace(b: CallBar): bool = barPhase(b) == En
 
 ### Return and End act only on the call the bar shows, and End is asked once
 
-End on a ringing call is Decline. While an End is waiting for Telecom a second tap does nothing; a
-refused End releases it and the bar reads Telecom again.
+End on a ringing call, from End beside the comms bar, is Decline. While an End is waiting for
+Telecom a second tap does nothing; a refused End releases it and the bar reads Telecom again.
 
 ```quint
 pure def canEndAsked(b: CallBar, callId: str): bool = barPhase(b) == LiveBar and shownCall(b.calls).id == callId and b.ending != callId
