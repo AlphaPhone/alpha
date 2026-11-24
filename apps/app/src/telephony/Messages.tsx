@@ -9,11 +9,12 @@ import { useMachine as useDrafts } from "../../gen/app__telephony__drafts.react.
 import type { MessageRow, Machine as MessagesMachine, Messages as State } from "../../gen/app__telephony__messages.effect.vibe";
 import { openThreadId, threadCallNumber } from "../../gen/app__telephony__messages.ts";
 import { useMachine as useMessages } from "../../gen/app__telephony__messages.react.ts";
+import { CommsBar, type CommsServices } from "./CommsBar.tsx";
 import { matches, placements } from "./words.ts";
 
 export interface MessagesProps {
   /** Provides the resident Messages and drafts machines. */
-  runtime: ManagedRuntime.ManagedRuntime<MessagesMachine | DraftsMachine, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<MessagesMachine | DraftsMachine | CommsServices, unknown>;
 }
 
 const refusals = { Removed: "", RowMissing: "That message is already gone", RowChanged: "That message changed. Look again before deleting it.", RowInSend: "That message is still sending", RemovalUnknown: "" } as const;
@@ -44,6 +45,7 @@ export function Messages({ runtime }: MessagesProps) {
       {threadId !== "" ? <Conversation state={state} threadId={threadId} runtime={runtime} />
         : state.view.tag === "Composing" ? <NewMessage state={state} runtime={runtime} />
           : <Conversations state={state} runtime={runtime} />}
+      <CommsBar runtime={runtime} />
     </section>
   );
 }

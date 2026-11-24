@@ -1,9 +1,10 @@
 // spec/app/telephony/contacts.md, "Story: Read my contacts only while I am looking at them"; spec/app/telephony/contacts.md, "Story: Change only the contact I reviewed"
 import type { AddressBookRow, ContactDetail, ContactDraft as Saved, ContactId, ContactVersion } from "@elizaos/os/bridges/contacts"
+import { Machine as Comms, type Event as CommsEvent } from "../../gen/app__telephony__comms.effect.vibe"
 import * as Contacts from "../../gen/app__telephony__contacts.effect.vibe"
 import type { ContactDraft, ContactRow, ContactsAnswer, Detail, Effect as Out, Event, WriteAnswer } from "../../gen/app__telephony__contacts.effect.vibe"
 import { Telephony, TelephonyRefused, telephony } from "../platform/telephony.vibe"
-import { type Job, answer, reacting, run, together } from "../runtime/reactor.vibe"
+import { type Job, answer, following, reacting, run, together } from "../runtime/reactor.vibe"
 import { on, visiting } from "./visit.vibe"
 
 function rowOf(row: AddressBookRow): ContactRow {
@@ -99,5 +100,9 @@ const machine = reacting(Contacts, { carry })
 
 const shown = visiting(on("Contacts"), Contacts.Machine, (showing): Event => ({ type: "show", showing }))
 
-/** Contacts: in memory, read while its view is in front, its writes gated on the version shown. */
-export const contacts = together(machine, shown)
+// spec/app/telephony/comms.md, "A view change while the conversation is open keeps the sheet's height and remembers the view it left"
+const subject = following(Contacts.Machine, (state) => (!state.shown ? "" : state.openId === "" ? "contacts:list:" : `contacts:contact:${state.openId}`), Comms,
+  (key): CommsEvent | undefined => (key === "" ? undefined : { type: "subjectShown", app: "ContactsApp", subject: key === "contacts:list:" ? "ListSubject" : "ContactSubject", key }), "Device")
+
+/** Contacts: in memory, read while its view is in front, its writes gated on the version shown, and its subject told to the comms stage. */
+export const contacts = together(machine, shown, subject)

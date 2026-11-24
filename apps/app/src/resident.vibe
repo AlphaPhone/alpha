@@ -3,6 +3,7 @@ import { together, whole } from "./runtime/reactor.vibe"
 import { shell } from "./shell/shell.vibe"
 import { attention } from "./telephony/attention.vibe"
 import { callBar } from "./telephony/callBar.vibe"
+import { comms } from "./telephony/comms.vibe"
 import { messages } from "./telephony/messages.vibe"
 import { phone } from "./telephony/phone.vibe"
 
@@ -17,6 +18,7 @@ const machines = together(
   phone,
   messages,
   attention,
+  comms,
 )
 
 /** The resident machines, closed: each machine one of them follows or tells is among them. */

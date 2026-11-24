@@ -7,11 +7,12 @@ import type { Machine as PhoneMachine, PhoneTab, Recent } from "../../gen/app__t
 import { useMachine as usePhone } from "../../gen/app__telephony__phone.react.ts";
 import type { Machine as VoicemailMachine, VoicemailRow } from "../../gen/app__telephony__voicemail.effect.vibe";
 import { useMachine as useVoicemail } from "../../gen/app__telephony__voicemail.react.ts";
+import { CommsBar, type CommsServices } from "./CommsBar.tsx";
 import { matches, placements } from "./words.ts";
 
 export interface PhoneProps {
   /** Provides Phone's machine, resident, and the Voicemail tab's, the area's own. */
-  runtime: ManagedRuntime.ManagedRuntime<PhoneMachine | VoicemailMachine, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<PhoneMachine | VoicemailMachine | CommsServices, unknown>;
 }
 
 const kinds = { InboundCall: PhoneIncoming, OutboundCall: PhoneOutgoing, MissedCall: PhoneMissed } as const;
@@ -82,6 +83,7 @@ export function Phone({ runtime }: PhoneProps) {
           </TabsContent>
         )}
       </Tabs>
+      <CommsBar runtime={runtime} />
     </section>
   );
 }

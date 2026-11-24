@@ -5,7 +5,6 @@ import { Alert, Avatar, Banner, Button, Chip, ConfirmDialog, EmptyState, Input, 
 import type { ManagedRuntime } from "effect";
 import { MessageSquare, Phone as Call, Plus, Search } from "lucide-react";
 import { useState } from "react";
-import type { Machine as ShellMachine } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { ContactDraft, Machine as ContactsMachine, Contacts as State } from "../../gen/app__telephony__contacts.effect.vibe";
 import { detailFor, visibleRows } from "../../gen/app__telephony__contacts.ts";
@@ -16,10 +15,11 @@ import type { Machine as MessagesMachine } from "../../gen/app__telephony__messa
 import { useMachine as useMessages } from "../../gen/app__telephony__messages.react.ts";
 import type { Machine as PhoneMachine } from "../../gen/app__telephony__phone.effect.vibe";
 import { useMachine as usePhone } from "../../gen/app__telephony__phone.react.ts";
+import { CommsBar, type CommsServices } from "./CommsBar.tsx";
 
 export interface ContactsProps {
   /** Provides the Contacts machine, and the shell, Phone, Messages and drafts it hands a number to. */
-  runtime: ManagedRuntime.ManagedRuntime<ContactsMachine | ShellMachine | PhoneMachine | MessagesMachine | DraftsMachine, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ContactsMachine | PhoneMachine | MessagesMachine | DraftsMachine | CommsServices, unknown>;
 }
 
 const notices = {
@@ -41,6 +41,7 @@ export function Contacts({ runtime }: ContactsProps) {
     <section aria-label="Contacts" className="flex flex-col gap-3 p-4">
       {notices[state.notice] !== "" && <Banner variant="warn" action={state.unsettled && can({ type: "readAsked", query: state.query, explicit: true }) && <Button variant="outline" size="sm" onClick={() => void send({ type: "readAsked", query: state.query, explicit: true })}>Refresh</Button>}>{notices[state.notice]}</Banner>}
       {state.editor.tag === "EditorOpen" ? <Editor state={state} runtime={runtime} /> : state.openId !== "" ? <Contact state={state} runtime={runtime} /> : <List state={state} runtime={runtime} />}
+      <CommsBar runtime={runtime} />
     </section>
   );
 }
