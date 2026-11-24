@@ -135,6 +135,19 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "goBack" })));
     await until(alpha, runtime, Conversation, (s) => !s.context.sensitive);
     expect(Boolean(button("Send"))).toBe(true);
+
+    // spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
+    world.ask.refusal = "allowance_exhausted";
+    await write("Hi");
+    await press("Send");
+    await until(alpha, runtime, Reply, (s) => s.turn === 3 && s.status === "Interrupted");
+    expect([(document.querySelector("section[aria-label='Ask Alpha'] [role=log]")?.textContent ?? "").includes("You’re out of plan allowance and credits, so I couldn’t reply."), Boolean(button("Manage plan"))]).toEqual([true, true]);
+    world.ask.refusal = undefined;
+
+    // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
+    await press("Earlier");
+    await until(alpha, runtime, Chats, (s) => s.around > 0 && s.page.status === "Loaded");
+    expect(lines().slice(0, 2)).toEqual(["Hello", "You said: Hello"]);
   });
 
   // spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/chats.md, "Story: Open a message that search found"

@@ -160,14 +160,19 @@ pure def lawAReadyReplyWaitsAtMostTheBound(cue: Cue, leftMs: int): bool =
 
 The kinds are a refused credential, spent credits, a limit reached, a
 provider issue, a timeout, a missing capability, no provider, a plan limit,
-and any other failure; a stop reads as any other. Every kind but a timeout
+out of funds, and any other failure; a stop reads as any other. Out of funds
+is Cloud refusing the turn with its own code for an account with no plan
+allowance and no credits left, which the agent has no funds to explain: it
+reads as one fixed line in the transcript, the same one Talk posts, and is
+never spoken. Spent credits the agent reports without that code keep their
+own words. Every kind but a timeout
 and any other is refused before output. A reply the agent chose not to give
 removes its bubble. Stop keeps what was shown, and the conversation's check
 of a stopped reply owns the only notice.
 
 ```quint
 type Failure = CredentialInvalid | InsufficientCredits | LimitReached | ProviderIssue | TimedOut
-  | MissingCapability | NoProvider | PlanLimit | OtherFailure
+  | MissingCapability | NoProvider | PlanLimit | OutOfFunds | OtherFailure
 
 pure def refusedBeforeOutput(kind: Failure): bool = kind != OtherFailure and kind != TimedOut
 
@@ -202,8 +207,8 @@ pure def sometimesAFailureReplacesTheText(r: Reply): bool = r.status == Interrup
 
 Sign in offers Sign in, funding offers Manage plan, and retry offers Try
 again, which puts the message back in the composer for the owner to send.
-A reply that names no fix offers Manage plan only for spent credits or a
-plan limit. A limit reached answered live says "Try again in about …"
+A reply that names no fix offers Manage plan only for spent credits, a
+plan limit or out of funds. A limit reached answered live says "Try again in about …"
 (seconds under 90, then minutes under 90, then hours); a reply read again
 from history carries no wait and says to wait a moment. Nothing is sent
 again, bought or upgraded by itself.
@@ -211,7 +216,7 @@ again, bought or upgraded by itself.
 ```quint
 type Fix = NoFix | SignInFix | FundingFix | RetryFix
 
-pure def managesPlan(kind: Failure): bool = kind == PlanLimit or kind == InsufficientCredits
+pure def managesPlan(kind: Failure): bool = kind == PlanLimit or kind == InsufficientCredits or kind == OutOfFunds
 
 pure def fixShown(fix: Fix, kind: Failure): bool = fix != NoFix or managesPlan(kind)
 
@@ -228,6 +233,13 @@ pure def lawOnlyALimitShowsAWait(kind: Failure, waitMs: int): bool = showsWait(k
 pure def lawHistoryShowsNoWait(kind: Failure): bool = not(showsWait(kind, -1))
 
 pure def lawAWaitIsAtLeastASecond(waitMs: int): bool = waitMs >= 0 implies waitSeconds(waitMs) >= 1
+```
+
+### Out of funds is refused before any output, is never spoken, and offers only Manage plan
+
+```quint
+pure def lawOutOfFundsIsNeverSpokenAndManagesThePlan(r: Reply, turn: int): bool =
+  canFailed(r, turn, OutOfFunds) implies (failed(r, turn, OutOfFunds).spoken == 0 and failed(r, turn, OutOfFunds).shown == 0 and fixShown(NoFix, OutOfFunds))
 ```
 
 ### A settled reply carries a plan card only to choose a plan, retry, sign in or check the provider; funding is offered only on a failure

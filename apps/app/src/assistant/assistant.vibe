@@ -79,6 +79,9 @@ const failures: Readonly<Record<string, Reply.Failure>> = {
   no_provider: "NoProvider", billing_refused: "PlanLimit", subscription_required: "PlanLimit", allowance_exhausted: "PlanLimit",
 }
 
+/** Cloud's own codes for an account with no plan allowance and no credits left, as a failed turn names them. */
+const outOfFunds: ReadonlySet<string> = new Set(["insufficient_credits", "allowance_exhausted"])
+
 // spec/app/assistant/reply.md, "The settled reply is the whole final answer, shown and spoken, never the acknowledgment"; spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"
 /** How a reply ended, for the reply as it is shown: whole, failed by its kind, stopped, or not given. */
 function replied(turn: number, result: TurnResult | undefined): Reply.Event {
@@ -86,7 +89,7 @@ function replied(turn: number, result: TurnResult | undefined): Reply.Event {
   if (result === undefined) return { type: "failed", turn, kind: "OtherFailure" }
   return match (result) {
     when { kind: "Replied", let reply }: reply.failureKind === undefined ? (reply.text === "" ? { type: "decline", turn } : { type: "done", turn, units: reply.text.length }) : failed(reply, reply.failureKind);
-    when { kind: "AgentFailed", let reply, let code }: failed(reply, code);
+    when { kind: "AgentFailed", let reply, let code }: outOfFunds.has(code) ? { type: "failed", turn, kind: "OutOfFunds" } : failed(reply, code);
     when { kind: "StoppedByOwner" }: { type: "stop", turn };
     default: { type: "failed", turn, kind: "OtherFailure" };
   }
@@ -252,7 +255,8 @@ effect function listed(ticket: number): Chats.Event!!(Agent | Talk) {
   } catch () => ({ type: "listed", ticket, ok: false, ids: [] })
 }
 
-// spec/app/assistant/chats.md, "A page of the conversation showing is taken only from the newest asking"
+// spec/app/assistant/chats.md, "A page of the conversation showing is taken only from the newest asking"; spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
+/** A page of the conversation showing, each message numbered as Alpha first saw it: the page counts up to its highest number, which a scroll names. */
 effect function paged(conversation: number, around: number, ticket: number): Chats.Event!!(Agent | Talk) {
   return effect {
     const { board } = try Talk
@@ -261,7 +265,8 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
     const pivot = around > 0 ? board.messageId(around) : undefined
     const { messages } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(known.record.id)}/messages`, { urlParams: pivot === undefined ? {} : { around: pivot } }), page())
     board.change({ pages: new Map([...board.snapshot().pages, [ticket, messages.map((one) => ({ id: one.id, mine: one.role === "user", text: one.text }))]]) })
-    return { type: "paged", ticket, ok: true, messages: messages.length }
+    const numbers = messages.map((one) => board.messageNumber(one.id))
+    return { type: "paged", ticket, ok: true, messages: Math.max(0, ...numbers) }
   } catch () => ({ type: "paged", ticket, ok: false, messages: 0 })
 }
 

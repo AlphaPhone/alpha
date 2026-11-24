@@ -60,8 +60,10 @@ export interface Board {
   /** The number of the conversation the agent names `record`, given the first time it is seen; its title where one is given. */
   numberOf(record: ConversationRecord, title?: string): number
   known(conversation: number): Known | undefined
-  /** The number of the message the agent names `id`. */
+  /** The number of the message the agent names `id`, given the first time it is seen. */
   messageNumber(id: string): number
+  /** The number given to the message the agent names `id`, or 0 for one never seen. */
+  numbered(id: string): number
   messageId(message: number): string | undefined
   /** The page under `ticket`, and the page of the newest ticket. */
   page(ticket: number): ReadonlyArray<Line>
@@ -140,6 +142,7 @@ export const talk = Layer.effect(Talk, effect {
       messages.push(id)
       return messages.length
     },
+    numbered: (id) => messages.indexOf(id) + 1,
     messageId: (message) => messages[message - 1],
     page: (ticket) => seen.pages.get(ticket) ?? [],
     latest: () => board.page(Math.max(0, ...seen.pages.keys())),
