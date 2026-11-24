@@ -146,10 +146,10 @@ export function MapPlane(props: MapPlaneProps) {
   const [map, setMap] = useState<MapLibre>();
   const [turn, setTurn] = useState({ bearing: 0, pitch: 0 });
   const { basemap, tileSize = 256, minZoom = 0, maxZoom = 20, generation } = props;
-  const drawn = use(MapsDrawn);
+  const shown = use(MapsDrawn);
 
   const mount = useCallback((node: HTMLDivElement | null) => {
-    if (!node || !drawn || basemap === "NoBasemap") return;
+    if (!node || !shown || basemap === "NoBasemap") return;
     const protocol = `alphamaps${++protocols}`;
     maplibregl.addProtocol(protocol, async (params, abort) => {
       const match = /:\/\/tiles\/(\d{1,2})\/(\d{1,7})\/(\d{1,7})\.png$/.exec(params.url);
@@ -213,7 +213,7 @@ export function MapPlane(props: MapPlaneProps) {
       maplibregl.removeProtocol(protocol);
       setMap(undefined);
     };
-  }, [drawn, basemap, tileSize, minZoom, maxZoom, generation]);
+  }, [shown, basemap, tileSize, minZoom, maxZoom, generation]);
 
   const northUp = () => {
     if (!map) return;
