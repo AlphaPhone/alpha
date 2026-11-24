@@ -28,7 +28,7 @@ export const first = (place: Place, screen: Area): Mount => ({ at: place, load: 
 export const mounts: readonly Mount[] = [
   first("home", home),
   at("assistant", () => import("./ask/index.tsx")),
-  at("notice", () => import("./shell/Notices.tsx")),
+  at("notice", () => import("./notices/Toasts.tsx")),
   at("assistant", () => import("./assistant/index.tsx")),
   at("view:Settings", () => import("./settings/index.tsx")),
   at("view:Inbox", () => import("./inbox/index.tsx")),

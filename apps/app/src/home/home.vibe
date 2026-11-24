@@ -8,12 +8,23 @@ import type { Tile } from "../../gen/app__home__tiles.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import type { View } from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
-import { Launcher, type Presentation, type Why, keyOf } from "../platform/launcher.vibe"
-import { type Job, answer, contained, due, following, hearing, reacting, run, started, untimed } from "../runtime/reactor.vibe"
-import { say } from "../shell/notices.vibe"
+import { Launcher, type Presentation, type Why } from "../platform/launcher.vibe"
+import { type Job, answer, contained, due, following, hearing, reacting, run, started, untimed, together } from "../runtime/reactor.vibe"
+import type { HomeAsk, HomeNoticeMessage } from "@repo/ui"
+import { Said, say } from "../notices/toasts.vibe"
+import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { stepping } from "../shell/shell.vibe"
 import { catalog, labelOf } from "./catalog.vibe"
 import { parsedTiles, savedKey, written } from "./saved.vibe"
+
+module words {
+  import { type HomeNoticeMessage, homeNoticeWords } from "@repo/ui"
+  /** What Home's notice says, in the owner's words. @throws {never} */
+  export function wordsOf(notice: HomeNoticeMessage): string {
+    return homeNoticeWords(notice)
+  }
+}
+import { wordsOf } from words
 
 const owner: Actor = "Owner"
 
@@ -27,7 +38,7 @@ function hostOf(presented: Presentation): Host {
 // spec/app/home/tiles.md, "What was saved comes back as it was saved, an empty Home included; with no record Home shows its defaults"
 effect function readSaved(ticket: number): Event!!KeyValueStore.KeyValueStore {
   const store = try KeyValueStore.KeyValueStore
-  const found = try parsedTiles((key) => store.get(key) catch () => undefined)
+  const found = try parsedTiles((key) => Effect.orElseSucceed(store.get(key), () => undefined))
   return { type: "savedRead", ticket, found: found.found, tiles: found.tiles }
 }
 
@@ -44,7 +55,7 @@ effect function readApps(ticket: number): Event!!(Launcher | Device) {
   const visible = try (try Device).showing()
   if (listed === undefined) return { type: "appsRead", ticket, ok: false, listed: [], visible }
   catalog.listed(listed)
-  return { type: "appsRead", ticket, ok: true, listed: [...new Set(listed.map(keyOf))], visible }
+  return { type: "appsRead", ticket, ok: true, listed: [...new Set(listed.map(({ key }) => key))], visible }
 }
 
 // spec/app/home/index.md, "Android's answer ends the wait; a refusal is told with its reason, and the apps are read again"
@@ -59,35 +70,55 @@ effect function asked(ask: Ask, ticket: number): Event!!Launcher {
   return { type: "answered", ticket, opened: said.done, why: said.done ? "Unable" : said.why }
 }
 
-const reasons: Readonly<Record<Why, (label: string) => string>> = {
-  Gone: (label) => `${label} is no longer on this phone`,
-  TurnedOff: (label) => `${label} is turned off`,
-  ProfileLocked: (label) => `${label}'s profile is locked`,
-  NotInFront: () => "Alpha isn't in front, so Android didn't open it",
-  Unable: (label) => `Android couldn't open ${label}`,
+/** What Android was asked, as Home's notice names it. */
+function askOf(ask: Ask): HomeAsk {
+  return ask.tag === "Shade" ? { tag: "Shade" } : { tag: ask.tag, label: labelOf(ask.app) }
 }
 
-/** What Home says of each failure, in the owner's words. */
-function sentence(fx: Out): string | undefined {
+/** What Home tells the owner of each failure, in the words of Home's own notice, or nothing for an effect that is not one. */
+function noticeOf(fx: Out): HomeNoticeMessage | undefined {
   return match (fx) {
-    when { tag: "TellNotOpened", let ask, let why }: ask.tag === "Shade" ? `Couldn't open notifications. ${reasons[why]("the shade")}` : ask.tag === "AppInfo" ? `Couldn't show App info. ${reasons[why](labelOf(ask.app))}` : reasons[why](labelOf(ask.app));
-    when { tag: "TellNoAnswer" }: "Android didn't answer. Swipe down from the top of the screen for notifications";
-    when { tag: "TellUnlockFirst" }: "Unlock your phone to see notifications";
-    when { tag: "TellNotSaved" }: "Couldn't save Home. Try again";
-    when { tag: "TellSavedUnreadable" }: "Couldn't read your Home, so it shows Alpha's apps";
-    when { tag: "TellAppsUnread" }: "Couldn't load your apps";
+    when { tag: "TellNotOpened", let ask, let why }: { tag: "TellNotOpened", ask: askOf(ask), why };
+    when { tag: "TellNoAnswer" }: { tag: "TellNoAnswer" };
+    when { tag: "TellUnlockFirst" }: { tag: "TellUnlockFirst" };
+    when { tag: "TellNotSaved" }: { tag: "TellNotSaved" };
+    when { tag: "TellSavedUnreadable" }: { tag: "TellSavedUnreadable" };
+    when { tag: "TellAppsUnread" }: { tag: "TellAppsUnread" };
     default: undefined;
   }
 }
 
+/** The notice Home last told inside the drawer or the edit bar, and where: an external store the screen reads without an effect. */
+export interface Told {
+  readonly notice: HomeNoticeMessage
+  readonly place: "InDrawer" | "InEditBar"
+}
+
+let last: Told | undefined
+const listeners = new Set<() => void>()
+
+export const told = {
+  snapshot: (): Told | undefined => last,
+  subscribe(listener: () => void): () => void {
+    listeners.add(listener)
+    return () => { listeners.delete(listener) }
+  },
+}
+
 // spec/app/home/index.md, "A notice shows as a toast on bare Home, inline in the open drawer, and in the edit bar while editing; told while an app or Ask Alpha is up, it is not shown"
 effect function tell(fx: Out) {
-  const message = sentence(fx)
-  if (message === undefined) return
+  const notice = noticeOf(fx)
+  if (notice === undefined) return
   const shell = try (try Shell.Machine).get()
   const home = try (try Home.Machine).get()
-  if (Home.noticeAt(home, shell) === "Nowhere") return
-  try say(message, { failure: true })
+  const place = Home.noticeAt(home, shell)
+  if (place === "Nowhere") return
+  if (place === "AsToast") {
+    try say(wordsOf(notice), true)
+    return
+  }
+  last = { notice, place }
+  for (const listener of [...listeners]) listener()
 }
 
 // spec/app/home/index.md, "A tap on one of Alpha's own tiles on bare Home asks the shell to open that app, never while Home is being edited"
@@ -101,7 +132,7 @@ effect function closeDrawer() {
   if ((try shell.get()).drawer) try contained(shell.send({ type: "goBack" }), "closing the drawer")
 }
 
-function carry(fx: Out): Job<Event, unknown, [Actor]> {
+function carry(fx: Out): Job<Event, KeyValueStore.KeyValueStore | Launcher | Device | Shell.Machine | Home.Machine | Toasts | Said, [Actor]> {
   return match (fx) {
     when { tag: "ReadSaved", let ticket }: answer("saved", readSaved(ticket), { type: "savedRead", ticket, found: "Unreadable", tiles: [] }, owner);
     when { tag: "SaveHome", let tiles, let ticket }: answer("save", saveTiles(tiles, ticket), { type: "homeSaved", ticket, ok: false }, owner);
@@ -127,7 +158,7 @@ const presented = started(effect {
 }, "presenting Home")
 
 /** Home's machine, kept across restarts for its numbers, and what tells it of the phone and the shell. */
-export const home = Layer.mergeAll(
+export const home = together(
   reacting(Home, {
     keep: 1,
     open: [{ type: "restart" }, owner],
@@ -138,8 +169,8 @@ export const home = Layer.mergeAll(
   hearing(Stream.unwrap(effect {
     const device = try Device
     return Stream.mapEffect((try Launcher).changes, () => device.showing())
-  }), Home.Machine, (visible) => ({ type: "appsChanged", visible }), owner),
-  hearing(Stream.unwrap(effect { return Stream.filter((try Device).visible, (shown) => shown) }), Home.Machine, () => ({ type: "resumed" }), owner),
-  following(Shell.Machine, (shell) => shell, Home.Machine, (shell) => ({ type: "shellMoved", shell }), owner),
+  }), Home.Machine, (visible) => ({ type: "appsChanged", visible } as const), owner),
+  hearing(Stream.unwrap(effect { return Stream.filter((try Device).visible, (shown) => shown) }), Home.Machine, () => ({ type: "resumed" } as const), owner),
+  following(Shell.Machine, (shell) => shell, Home.Machine, (shell) => ({ type: "shellMoved", shell } as const), owner),
   stepping("home", Home.Machine, Home.canBackOut),
 )

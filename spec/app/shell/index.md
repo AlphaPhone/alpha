@@ -5,7 +5,6 @@ the Apps drawer and Ask Alpha as layers over it. Every other area is shown
 inside the shell and moves through it.
 
 - [Layers](./layers.md): the sheets, menus and dialogs over the page, and what holds the phone
-- [Notices](./notices.md): toasts, their turn and their time, and the notices kept until dismissed
 - [Keyboard and canvas](./keyboard.md): the window without the keyboard, the canvas, text size and Ask Alpha's footprint
 - [Focus](./focus.md): where focus goes when the screen changes under the owner
 - [Gestures](./gestures.md): what a swipe on the page means

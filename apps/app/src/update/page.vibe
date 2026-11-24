@@ -8,8 +8,8 @@ import { Device } from "../platform/device.vibe"
 import { type Ids, LauncherUpdates } from "../platform/launcherUpdates.vibe"
 import { type Job, answer, contained, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import * as Notices from "../../gen/app__shell__notices.effect.vibe"
-import { Undos, say } from "../shell/notices.vibe"
+import * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
+import { Said, say } from "../notices/toasts.vibe"
 import { Engagements } from "./activity.vibe"
 import { Names } from "./names.vibe"
 import { holder } from "./updates.vibe"
@@ -54,12 +54,12 @@ effect function reconnected(): void!!Agent {
 }
 
 // spec/app/update/page.md, "The refusal is explained only for a manual update this page itself refused"
-effect function told(): void!!(Page.Machine | Notices.Machine | Undos) {
+effect function told(): void!!(Page.Machine | Toasts.Machine | Said) {
   const text = Page.noticeText(try (try Page.Machine).get())
-  if (text !== "") try say(text, { failure: true })
+  if (text !== "") try say(text, true)
 }
 
-function carry(fx: Out): Job<Event, LauncherUpdates | Updates.Machine | Engagements | Agent | Page.Machine | Notices.Machine | Undos, []> {
+function carry(fx: Out): Job<Event, LauncherUpdates | Updates.Machine | Engagements | Agent | Page.Machine | Toasts.Machine | Said, []> {
   return match (fx) {
     when { tag: "Answer", let activation, let ready }: run(`answer ${activation}`, answered(activation, ready));
     when { tag: "Flush", let activation }: answer("flush", flushed(activation), { type: "flushed", activation, saved: false, engaged: Page.calm });

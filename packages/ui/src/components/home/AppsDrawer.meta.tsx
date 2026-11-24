@@ -28,7 +28,7 @@ export const meta: ComponentMeta<AppsDrawerProps> = {
     "Menu on Home": { menu: "com.example.clock/.Main/0" },
     "Not opened": { notice: { tag: "TellNotOpened", ask: { tag: "OpenApp", label: "Music" }, why: "Gone" } },
     "Reading apps": { view: "Spinner", apps: [] },
-    "Cannot read": { view: "CannotRead", apps: [] },
+    "Cannot read": { view: "CannotRead", apps: [], onTryAgain: fn() },
     "No apps installed": { view: "NoAppsInstalled", apps: [] },
     "No match": { view: "NoMatch", query: "zz", apps: [] },
   },

@@ -3,7 +3,7 @@ import { together, whole } from "./runtime/reactor.vibe"
 import { pages } from "./settings/pages.vibe"
 import { preferences } from "./settings/preferences.vibe"
 import { shell } from "./shell/shell.vibe"
-import { notices } from "./shell/notices.vibe"
+import { toasts } from "./notices/toasts.vibe"
 import { haptics } from "./shell/haptics.vibe"
 import { canvas } from "./shell/canvas.vibe"
 import { mailbox } from "./inbox/mailbox.vibe"
@@ -23,7 +23,7 @@ import { paging } from "./update/page.vibe"
  */
 const machines = together(
   shell,
-  notices,
+  toasts,
   haptics,
   canvas,
   pages,

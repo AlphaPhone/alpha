@@ -56,6 +56,8 @@ export type AppsDrawerProps = {
   onAddToHome?: (id: string) => void;
   /** Hands the menu's app to Android's App info; left out while Android is being asked something. */
   onShowAppInfo?: (id: string) => void;
+  /** Reads the apps again after they could not be read; left out where nothing may be read. */
+  onTryAgain?: () => void;
   /** A failure told while the drawer is open. */
   notice?: HomeNoticeMessage;
   className?: string;
@@ -89,7 +91,7 @@ const empty = {
  * @model spec/app/home/index.md
  */
 export function AppsDrawer({
-  view, apps, refreshing = false, query, onSearch, onClose, onOpenApp, opening, menu, onOpenMenu, onCloseMenu, onAddToHome, onShowAppInfo, notice, className,
+  view, apps, refreshing = false, query, onSearch, onClose, onOpenApp, opening, menu, onOpenMenu, onCloseMenu, onAddToHome, onShowAppInfo, onTryAgain, notice, className,
 }: AppsDrawerProps) {
   const entries = arrange(apps, query);
   const open = entries.find(({ app }) => app.id === menu);
@@ -119,7 +121,9 @@ export function AppsDrawer({
       ) : view === "Spinner" ? (
         <div className="flex justify-center py-12 text-muted-foreground"><Spinner label="Reading apps" /></div>
       ) : (
-        <EmptyState {...empty[view]} />
+        <EmptyState {...empty[view]}>
+          {view === "CannotRead" && onTryAgain ? <Button variant="secondary" onClick={onTryAgain}>Try again</Button> : null}
+        </EmptyState>
       )}
       <HomeAppMenu
         open={open !== undefined}

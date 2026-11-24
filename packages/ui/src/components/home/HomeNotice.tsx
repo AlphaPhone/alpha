@@ -36,7 +36,8 @@ const reasons: Record<HomeWhy, string> = {
   Unable: "Android couldn't do it.",
 };
 
-const words = (notice: HomeNoticeMessage): string => {
+/** What Home says of `notice`, in the owner's words. */
+export const homeNoticeWords = (notice: HomeNoticeMessage): string => {
   switch (notice.tag) {
     case "TellNotOpened": {
       const { ask } = notice;
@@ -67,6 +68,6 @@ const words = (notice: HomeNoticeMessage): string => {
  */
 export function HomeNotice({ notice, place, className }: HomeNoticeProps) {
   return place === "AsToast"
-    ? <Toast className={className}>{words(notice)}</Toast>
-    : <Alert variant="warn" className={className}>{words(notice)}</Alert>;
+    ? <Toast className={className}>{homeNoticeWords(notice)}</Toast>
+    : <Alert variant="warn" className={className}>{homeNoticeWords(notice)}</Alert>;
 }
