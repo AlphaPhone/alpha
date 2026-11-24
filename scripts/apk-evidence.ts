@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -15,8 +15,8 @@ import { androidEnv, tool } from "./toolchain.ts";
 import { run } from "./run-os-program.ts";
 import { sha256File } from "./sha256.ts";
 
-// The two-ABI Alpha build carries the resident runtime and on-device voice together.
-const MAX_ALPHA_APK_BYTES = 1024 * 1024 * 1024;
+// Match the native release APK member limit in scripts/ci/app_update_producer.py.
+const MAX_ALPHA_APK_BYTES = 1_500_000_000;
 
 interface EntryBudget {
   readonly label: string;
@@ -41,6 +41,8 @@ export interface ApkEvidence {
 
 /** Scope native tools and archive readers to the same package bytes. */
 export async function withApkEvidence<A>(sourceFile: string, inspect: (apk: ApkEvidence) => Promise<A>): Promise<A> {
+  const before = await lstat(sourceFile);
+  if (!before.isFile() || before.size === 0) throw new Error("APK must be a nonempty regular file: " + sourceFile);
   const snapshot = await run(snapshotAndroidArtifact(sourceFile, { maxArtifactBytes: MAX_ALPHA_APK_BYTES }));
   const names = await run(listAndroidArtifactEntries(sourceFile, { artifactBytes: snapshot.bytes }));
   const privateDir = await mkdtemp(path.join(tmpdir(), "alpha-apk-evidence-"));
@@ -76,8 +78,9 @@ export async function withApkEvidence<A>(sourceFile: string, inspect: (apk: ApkE
       },
     });
     const verify = async (file: string) => {
-      const sizeBytes = (await stat(file)).size;
-      await run(assertAndroidArtifactSnapshotUnchanged(file, snapshot, { sha256: sha256File(file), sizeBytes }));
+      const current = await lstat(file);
+      if (!current.isFile()) throw new Error("APK is no longer a regular file: " + file);
+      await run(assertAndroidArtifactSnapshotUnchanged(file, snapshot, { sha256: sha256File(file), sizeBytes: current.size }));
     };
     await verify(sourceFile);
     await verify(toolFile);

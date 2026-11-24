@@ -50,3 +50,10 @@ test("APK verification refuses evidence after a same-size source replacement", a
   }), /changed during audit/);
   assert.equal(fs.existsSync(toolFile), false);
 });
+
+test("APK evidence refuses symbolic links before the inspection runs", async t => {
+  const apk = artifact(t);
+  const link = path.join(path.dirname(apk), "linked.apk");
+  fs.symlinkSync(apk, link);
+  await assert.rejects(withApkEvidence(link, async () => assert.fail("must not inspect a link")), /nonempty regular file/);
+});
