@@ -79,6 +79,7 @@ pure val weight_recordingStarted = 8
 pure val weight_stopRecording = 6
 pure val weight_transcribed = 8
 pure val weight_agentNavigates = 6
+pure val weight_refusedForFunds = 4
 pure val weight_answerDisclosure = 5
 pure val weight_openRecorder = 3
 ```
@@ -137,7 +138,10 @@ pure def onNetwork(r: R::Route, now: int): bool = R::way(r, now) != R::OnPhone
 
 Warming prepares on-device speech output and cached status probes, and the
 network route when consented, without prompting for or opening the
-microphone. Once warm, redundant prewarm requests are refused until Alpha
+microphone. On a phone with the Cloud speech relay, warming the network
+route also has the relay open its connection to Cloud speech, so the first
+conversation starts on a warm connection; like the rest of the warm-up it
+shows nothing and its failure is ignored. Once warm, redundant prewarm requests are refused until Alpha
 returns to the foreground or the account changes.
 
 ```quint
@@ -340,6 +344,58 @@ pure def stepPlaybackFollowsTheCurrentTurn(before: Voice, after: Voice, out: Lis
   out.every(e => match e { | Play(p) => p.session == after.session and p.turn == after.turn | _ => true })
 ```
 
+### A spoken reply says a written date, clock time, range and percentage in words
+
+A capitalised weekday and month, in full or shortened ("Mon", "Sept."),
+with a day of the month is said in full with the day as an ordinal: "Mon,
+Nov 23" is "Monday, November twenty-third". A clock time is said in words:
+"3:30 pm" is "three thirty P M", "9:05" is "nine oh five", "7:00" is "seven
+o'clock" and "14:30" is "two thirty P M"; twelve with no minutes is "noon"
+in the afternoon and "midnight" in the morning ("12 pm", "0:00"). A range
+of clock times or short numbers joins its ends with "to" ("2-3 p.m.",
+"09:05–10:00", "5–10 minutes"), at the end of a sentence too ("Pages
+10-20."), and "%" is "percent". A range never joins two lines: a time or
+number that ends one line and a list item that starts the next with a dash
+stay apart. A line that ends in a
+colon, such as the Calendar heading "Sun, Nov 22:", ends a sentence, and a
+colon after a word inside a line is a pause. Digits in an ISO date, a phone
+number or an offset such as "UTC+01:00" keep their groups, and a month name
+written in lower case ("you may 3") is left as written. Only what is said
+changes: the reply written in the chat is never changed.
+
+```quint
+type Meridiem = NoMeridiem | Morning | Afternoon
+type ClockWords = NoonWord | MidnightWord | HourAndMinutes | HourOClock | HourAlone
+
+pure def meridiemOf(hour: int, written: Meridiem): Meridiem =
+  if (written != NoMeridiem) written else if (hour >= 13) Afternoon else if (hour == 0) Morning else NoMeridiem
+
+pure def twelveHour(hour: int): int = if (hour % 12 == 0) 12 else hour % 12
+
+pure def clockWords(hour: int, minute: int, written: Meridiem, minutesWritten: bool): ClockWords =
+  if (minute == 0 and twelveHour(hour) == 12 and meridiemOf(hour, written) == Afternoon) NoonWord
+  else if (minute == 0 and twelveHour(hour) == 12 and meridiemOf(hour, written) == Morning) MidnightWord
+  else if (minute != 0) HourAndMinutes
+  else if (minutesWritten and meridiemOf(hour, written) == NoMeridiem) HourOClock
+  else HourAlone
+
+pure val hourValues = Set(0, 1, 9, 11, 12, 13, 23)
+pure val minuteValues = Set(0, 5, 30)
+pure val writtenValues = Set(NoMeridiem, Morning, Afternoon)
+
+pure def lawTwelveInTheAfternoonIsNoon(minutesWritten: bool): bool = clockWords(12, 0, Afternoon, minutesWritten) == NoonWord
+
+pure def lawTwelveInTheMorningIsMidnight(minutesWritten: bool): bool =
+  clockWords(12, 0, Morning, minutesWritten) == MidnightWord and clockWords(0, 0, NoMeridiem, minutesWritten) == MidnightWord
+
+pure def lawALateClockIsAfternoon(hour: int): bool = (hour >= 13 and hour <= 23) implies meridiemOf(hour, NoMeridiem) == Afternoon
+
+pure def lawTheHourIsSaidOnATwelveHourClock(hour: int): bool = (hour >= 0 and hour <= 23) implies (twelveHour(hour) >= 1 and twelveHour(hour) <= 12)
+
+pure def lawMinutesAreAlwaysSaid(hour: int, minute: int, written: Meridiem): bool =
+  minute != 0 implies clockWords(hour, minute, written, true) == HourAndMinutes
+```
+
 ### When the whole reply has been heard, Alpha listens for the next turn
 
 ```quint
@@ -386,6 +442,25 @@ pure def stepReviewKeepsVoiceAndMicrophoneOpen(before: Voice, via: str, after: V
       and out.every(e => match e { | CloseMicrophone(_) => false | Shut(_) => false | _ => true })
       and (not(after.muted) implies (opened(after.mic) or after.mic == Closing))))
     and (via == "reviewSettled" implies (talking(after) and after.phase == before.phase and after.mic == before.mic and not(after.reviewPending)))
+```
+
+### A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does
+
+Cloud's own code for an account with no plan allowance and no credits
+left decides it, never the owner's words. Nothing of the turn is spoken,
+voice shows no text of its own about it, and it does not listen again:
+the conversation shuts down as Stop shuts it.
+
+```quint
+pure def canRefusedForFunds(v: Voice, session: int, turn: int): bool =
+  (v.phase == Thinking or v.phase == Speaking) and session == v.session and turn == v.turn and not(v.replied)
+
+pure def refusedForFunds(v: Voice, session: int, turn: int): Change = shutDown(D::NoFailure, false, v)
+
+pure def stepAFundingRefusalEndsVoiceQuietly(before: Voice, via: str, after: Voice, out: List[Effect]): bool =
+  via == "refusedForFunds" implies
+    (after.phase == Stopping and after.failure == D::NoFailure and after.queued == 0
+      and out.every(e => match e { | Play(_) => false | Listen(_) => false | Send(_) => false | _ => true }))
 ```
 
 ### The conversation can be answered aloud, keep listening while review is pending, and listen again

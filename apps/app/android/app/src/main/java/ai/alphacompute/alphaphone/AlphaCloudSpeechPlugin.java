@@ -32,8 +32,8 @@ public final class AlphaCloudSpeechPlugin extends SpeechStreamBridgePlugin {
 
  @Override protected void handleOnDestroy() {
   PasswordSurfaces.removeListener(secretSurface);
-  if (authority != null) authority.close();
   super.handleOnDestroy();
+  if (authority != null) authority.close();
  }
 
  @Override protected String cloudOrigin(String environment) { return authority.origin(environment); }
