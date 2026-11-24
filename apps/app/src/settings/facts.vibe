@@ -6,6 +6,7 @@ import { StorageUsage } from "../files/usage.vibe"
 import { Build } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"
 import { attempt, call } from "./call.vibe"
+import { CARRIER_PLUGIN } from "./carrier.vibe"
 import { browserGrants } from "./files.ts"
 import { BrowserGrants, DeviceSnapshot, NotificationGrant, PageOpened, PhotoAccess, RoleReply, ShadeReply, StorageAccess, SystemBuild, TextScale } from "./native.schema.vibe"
 
@@ -17,6 +18,8 @@ const PAGE_NAMES: Partial<Record<SettingsPage, string>> = {
   PageNotifications: "notifications", PagePrivacy: "privacy", PageDefaultApps: "default-apps", PageDnd: "dnd",
 }
 const REREAD: ReadonlyArray<SettingsPage> = ["PageFilesAccess", "PagePhotoAccess"]
+/** Android's SIMs and APN pages, which only Alpha's carrier plugin opens. */
+const CARRIER_PAGES: Partial<Record<SettingsPage, string>> = { PageSim: "sim", PageApn: "apn" }
 
 const SHADE: Record<string, ShadeAnswer> = {
   opened: "ShadeOpened", standalone: "ShadeStandalone", "permission-missing": "ShadePermissionMissing",
@@ -179,6 +182,8 @@ export const deviceFacts = Layer.effect(DeviceFacts, effect {
         if (page === "PageAppInfo") return (try attempt(native.invoke("ElizaSystem", "openAppInfo", { packageName: APP_ID }))) === undefined ? undefined : { specific: true }
         if (page === "PageFilesAccess") return (try attempt(native.invoke("AlphaFiles", "storageRequestAccess", { settings: true }))) === undefined ? undefined : { specific: true }
         if (page === "PagePhotoAccess") return (try attempt(call("AlphaPhotoLibrary", "requestAccess", PhotoAccess))) === undefined ? undefined : { specific: true }
+        const carrierPage = CARRIER_PAGES[page]
+        if (carrierPage !== undefined) return try attempt(call(CARRIER_PLUGIN, "openSettings", PageOpened, { page: carrierPage }))
         return try attempt(call("ElizaSystem", "openSettingsPage", PageOpened, { page: PAGE_NAMES[page] ?? "system" }))
       })
       facts.send({ type: "handoffAnswered", opened: opened !== undefined, specific: opened?.specific !== false }) catch () => undefined

@@ -1,0 +1,97 @@
+// spec/settings/carrier.md, "Story: Read what my carrier needs to activate a SIM"
+import { assert, it } from "@effect/vitest"
+import { Machine as CarrierMachine, machine as carrierMachine } from "../../gen/settings__carrier.effect.vibe"
+import { Native, NativeUnavailable } from "../../src/platform/native.vibe"
+import { CarrierSetup, carrierSetup } from "../../src/settings/carrier.vibe"
+import { Foreground, type ForegroundState } from "../../src/shell/foreground.vibe"
+
+const inFront: ForegroundState = { visible: true, locked: false, screen: "home", view: "settings", shade: false, chat: "closed", modal: false }
+const value = (text: string) => ({ status: "available", value: text })
+const IMEI = "123456789012345"
+const EID = "89049032000000000000000000000000"
+/** A launcher with no SIM: Android returns the first slot's IMEI, denies the second and reads no EID. */
+const read = {
+  status: "ready", aospImage: false, canChooseSms: false, smsRole: value("not-held"), dialerRole: value("held"), eid: { status: "not-read" },
+  hardware: { manufacturer: value("Google"), model: value("Pixel 10a"), device: value("fixture"), android: value("17"), baseband: { status: "unavailable" } },
+  slots: [{ slotIndex: 0, imei: value(IMEI), simState: value("No SIM") }, { slotIndex: 1, imei: { status: "permission-denied" }, simState: value("No SIM") }],
+  subscriptions: { status: "available", items: [] },
+}
+
+/** Waits for the first state of `changes` that `ok` accepts, for at most two seconds. */
+effect function until<S>(changes: Stream.Stream<S>, ok: (s: S) => boolean) {
+  return try timeout(Stream.runHead(Stream.filter(changes, ok)), "2 seconds")
+}
+
+it.live("Read what my carrier needs only when I ask, copy one IMEI, and forget it all on leaving (spec/settings/carrier.md, \"Story: Read what my carrier needs to activate a SIM\")", () => effect {
+  const calls: string[] = []
+  const copies: Array<{ readonly text: string }> = []
+  const pauses = try Queue.unbounded<unknown>()
+  const front = try SubscriptionRef.make(inFront)
+  const native = Layer.succeed(Native, {
+    available: () => effect { return true },
+    invoke: (plugin: string, method: string, args?: unknown) => effect {
+      calls.push(`${plugin}.${method}`)
+      if (plugin === "AlphaCarrierSetup" && method === "read") return read
+      if (plugin === "AlphaCarrierSetup" && method === "readEid") return value(EID)
+      if (plugin === "AlphaDevice" && method === "copyText") {
+        copies.push(args as { readonly text: string })
+        return undefined
+      }
+      throw new NativeUnavailable({ plugin, method })
+    },
+    listen: (plugin: string, event: string) => plugin === "AlphaCarrierSetup" && event === "foregroundEnded" ? Stream.fromQueue(pauses) : Stream.empty,
+  } as unknown as Native.Shape)
+  const foreground = Layer.succeed(Foreground, { changes: SubscriptionRef.changes(front), get: () => SubscriptionRef.get(front) })
+  provide Layer.provideMerge(carrierSetup, Layer.mergeAll(carrierMachine(), native, foreground)) {
+    const page = try CarrierSetup
+    const held = try CarrierMachine
+    const visit = fork page.visit()
+    // spec/settings/carrier.md, "The page reads nothing until the owner taps Show identifiers, and leaving forgets what it read"
+    const opened = try until(held.changes, (c) => c.shown)
+    const readOnOpen = calls.length
+    try page.read()
+    const shown = try held.get()
+    // spec/settings/carrier.md, "Copy puts one identifier Android returned on the Android clipboard"
+    try page.copy({ kind: "ImeiTarget", index: 1 })
+    try page.copy({ kind: "IccidTarget", index: 1 })
+    try page.copy({ kind: "ImeiTarget", index: 0 })
+    const copied = (try held.get()).copy
+    // spec/settings/carrier.md, "The EID is its own optional read, after the identifiers, and never delays them"
+    const eidBefore = calls.filter((c) => c === "AlphaCarrierSetup.readEid").length
+    try page.readEid()
+    const eid = (try held.get()).setup.eid
+    // Android paused Alpha: the page stays open and empty.
+    try Queue.offer(pauses, {})
+    const paused = try until(held.changes, (c) => c.phase === "CarrierIdle")
+    try page.read()
+    // The phone locks: the page is left, and a later read asks nothing of Android.
+    try SubscriptionRef.update(front, (state) => ({ ...state, locked: true }))
+    const left = try until(held.changes, (c) => !c.shown)
+    try page.read()
+    try Fiber.interrupt(visit)
+    try Effect.try(() => assert.deepStrictEqual(
+      {
+        opened: Option.map(opened, (c) => [c.phase, c.setup.slots.length]), readOnOpen,
+        shown: [
+          shown.phase, shown.setup.slots.map((s) => [s.slot, s.imei.status, s.imei.value, s.simState.value]), shown.setup.simsStatus, shown.setup.sims.length,
+          shown.setup.smsRole, shown.setup.dialerRole, shown.setup.eid.status, shown.setup.hardware.model.value, shown.setup.hardware.baseband.status,
+        ],
+        copies, copied, eidBefore, eid,
+        paused: Option.map(paused, (c) => [c.shown, c.setup.slots.length, c.copy.copied]),
+        left: Option.map(left, (c) => [c.phase, c.setup.slots.length]),
+        reads: calls.filter((c) => c === "AlphaCarrierSetup.read").length,
+      },
+      {
+        opened: Option.some(["CarrierIdle", 0]), readOnOpen: 0,
+        shown: [
+          "CarrierShown", [[0, "Returned", IMEI, "No SIM"], [1, "Denied", "", "No SIM"]], "Returned", 0,
+          "NotAlpha", "AlphaHolds", "NotRead", "Pixel 10a", "Missing",
+        ],
+        copies: [{ text: IMEI }], copied: { target: { kind: "ImeiTarget", index: 0 }, copied: true }, eidBefore: 0, eid: { status: "Returned", value: EID },
+        paused: Option.some([true, 0, false]),
+        left: Option.some(["CarrierClosed", 0]),
+        reads: 2,
+      },
+    ))
+  }
+})

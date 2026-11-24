@@ -31,7 +31,7 @@ import {
 } from "./words.ts";
 
 const TITLES: Record<Page, string> = {
-  Root: "Settings", General: "General", Display: "Display", Notifications: "Notifications", Network: "Wi-Fi", Privacy: "Privacy", Permissions: "App permissions",
+  Root: "Settings", General: "General", Display: "Display", Notifications: "Notifications", Network: "Wi-Fi", Carrier: "Carrier & SIM setup", Privacy: "Privacy", Permissions: "App permissions",
   Apps: "Apps", Passwords: "Passwords", AppInbox: "Inbox", AppCamera: "Camera", AppMaps: "Maps", AppNotes: "Notes", AppPhotos: "Photos",
   About: "About", Problems: "Problem log", Licenses: "Licenses", LicenseDetail: "License", Developer: "Developer",
 };

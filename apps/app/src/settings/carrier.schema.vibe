@@ -1,0 +1,55 @@
+// spec/settings/carrier.md, "Each field shows what Android returned, or why it returned nothing"
+
+/** One AlphaCarrierSetup field: Android's value, or why it gave none. */
+export schema CarrierFieldRead {
+  status: "available" | "permission-denied" | "unavailable" | "unsupported" | "not-read"
+  value?: string
+}
+
+/** One modem slot: its IMEI and SIM state, whether or not a SIM is in it. */
+export schema CarrierSlotRead { slotIndex: number; imei: CarrierFieldRead; simState: CarrierFieldRead }
+
+/** One active subscription. */
+export schema CarrierSimRead {
+  subscriptionId: number
+  slotIndex: number
+  embedded: boolean
+  defaultData: boolean
+  carrier: CarrierFieldRead
+  name: CarrierFieldRead
+  iccid: CarrierFieldRead
+  operator: CarrierFieldRead
+  operatorCode: CarrierFieldRead
+  dataEnabled: CarrierFieldRead
+  dataState: CarrierFieldRead
+  networkType: CarrierFieldRead
+  roaming: CarrierFieldRead
+}
+
+/** The active subscriptions, or why Android listed none. */
+export schema CarrierSimsRead {
+  status: "available" | "permission-denied" | "unavailable" | "unsupported" | "not-read"
+  items: ReadonlyArray<CarrierSimRead>
+}
+
+/** The phone's hardware and baseband. */
+export schema CarrierHardwareRead {
+  manufacturer: CarrierFieldRead
+  model: CarrierFieldRead
+  device: CarrierFieldRead
+  android: CarrierFieldRead
+  baseband: CarrierFieldRead
+}
+
+/** AlphaCarrierSetup.read: one foreground read of what a carrier asks for; the EID is never read here. */
+export schema CarrierRead {
+  status: "ready"
+  aospImage: boolean
+  canChooseSms: boolean
+  smsRole: CarrierFieldRead
+  dialerRole: CarrierFieldRead
+  eid: CarrierFieldRead
+  hardware: CarrierHardwareRead
+  slots: ReadonlyArray<CarrierSlotRead>
+  subscriptions: CarrierSimsRead
+}

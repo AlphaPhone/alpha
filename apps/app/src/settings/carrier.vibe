@@ -1,0 +1,118 @@
+// spec/settings/carrier.md, "The page reads nothing until the owner taps Show identifiers, and leaving forgets what it read"; spec/settings/carrier.md, "Each field shows what Android returned, or why it returned nothing"; spec/settings/carrier.md, "The EID is its own optional read, after the identifiers, and never delays them"; spec/settings/carrier.md, "Copy puts one identifier Android returned on the Android clipboard"
+import { Machine, copyable, type CopyTarget, type Event, type Field, type FieldStatus, type Hardware, type RoleHolder, type Setup, type Sim, type Slot } from "../../gen/settings__carrier.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { frontChanges, whileInFront } from "../telephony/front.vibe"
+import { CarrierFieldRead, CarrierRead } from "./carrier.schema.vibe"
+
+/** The Alpha plugin that reads carrier activation details and opens Android's SIM and APN pages. */
+export const CARRIER_PLUGIN = "AlphaCarrierSetup"
+
+/** At most this many modem slots and active SIMs are shown; Android reports one or two. */
+const MOST = 8
+
+const STATUS: Record<CarrierFieldRead["status"], FieldStatus> = {
+  available: "Returned", "permission-denied": "Denied", unavailable: "Missing", unsupported: "Unsupported", "not-read": "NotRead",
+}
+
+/** A field as the page holds it: a value only where Android returned a non-empty one. */
+export function fieldOf(read: CarrierFieldRead): Field {
+  const status = STATUS[read.status] ?? "Missing"
+  const value = typeof read.value === "string" ? read.value.trim() : ""
+  if (status !== "Returned") return { status, value: "" }
+  return value === "" ? { status: "Missing", value: "" } : { status, value }
+}
+
+function roleOf(read: CarrierFieldRead): RoleHolder {
+  const field = fieldOf(read)
+  return field.value === "held" ? "AlphaHolds" : field.value === "not-held" ? "NotAlpha" : "RoleUnknown"
+}
+
+function index(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= 0
+}
+
+/** What one read returned, bounded to the slots and SIMs the page shows. */
+export function setupOf(read: CarrierRead): Setup {
+  const slots: Slot[] = read.slots.filter((slot) => index(slot.slotIndex)).slice(0, MOST)
+    .map((slot) => ({ slot: slot.slotIndex, imei: fieldOf(slot.imei), simState: fieldOf(slot.simState) }))
+  const sims: Sim[] = read.subscriptions.items.filter((sim) => index(sim.subscriptionId)).slice(0, MOST).map((sim) => ({
+    subscription: sim.subscriptionId, slot: Number.isSafeInteger(sim.slotIndex) ? sim.slotIndex : -1, embedded: sim.embedded,
+    defaultData: sim.defaultData, carrier: fieldOf(sim.carrier), simName: fieldOf(sim.name), iccid: fieldOf(sim.iccid),
+    operator: fieldOf(sim.operator), operatorCode: fieldOf(sim.operatorCode), dataEnabled: fieldOf(sim.dataEnabled),
+    dataState: fieldOf(sim.dataState), networkType: fieldOf(sim.networkType), roaming: fieldOf(sim.roaming),
+  }))
+  const hardware: Hardware = {
+    manufacturer: fieldOf(read.hardware.manufacturer), model: fieldOf(read.hardware.model), device: fieldOf(read.hardware.device),
+    android: fieldOf(read.hardware.android), baseband: fieldOf(read.hardware.baseband),
+  }
+  const simsStatus = STATUS[read.subscriptions.status] ?? "Missing"
+  return {
+    image: read.aospImage, canChooseSms: read.canChooseSms, smsRole: roleOf(read.smsRole), dialerRole: roleOf(read.dialerRole),
+    slots, simsStatus, sims: simsStatus === "Returned" ? sims : [], eid: fieldOf(read.eid), hardware,
+  }
+}
+
+/** Settings → General → Carrier & SIM setup: reads only on the owner's tap, while the page is in front, and forgets on leaving. */
+export service CarrierSetup {
+  /** One visit of the page: each stretch in front on an unlocked phone opens it empty, and leaving it or Android pausing Alpha forgets what it read. */
+  visit(): void!!
+  /** Show identifiers, or Refresh identifiers: one read of everything but the EID. */
+  read(): void!!
+  /** The optional EID read, after the identifiers. */
+  readEid(): void!!
+  /** Copy one identifier the page shows to the Android clipboard. */
+  copy(target: CopyTarget): void!!
+}
+
+/** The page over its in-memory Machine and `AlphaCarrierSetup`; nothing it reads is stored, logged or given to the agent. */
+export const carrierSetup = Layer.effect(CarrierSetup, effect {
+  const native = try Native
+  const carrier = try Machine
+  const front = try frontChanges()
+  const tell = effect (event: Event) => carrier.send(event) catch () => undefined
+
+  effect function ask<A>(method: string, shape: Schema.ConstraintDecoder<A>) {
+    const raw = try native.invoke(CARRIER_PLUGIN, method)
+    return try Schema.decodeUnknownEffect(shape)(raw)
+  }
+
+  return {
+    effect visit() {
+      try whileInFront(front, effect () => {
+        try ensuring(effect {
+          if ((try tell({ type: "carrierShown" })) === undefined) return
+          effect {
+            for try (const _paused of native.listen(CARRIER_PLUGIN, "foregroundEnded")) {
+              try tell({ type: "carrierPaused" })
+            }
+          } catch () => undefined
+          try Effect.never
+        }, effect { try tell({ type: "carrierHidden" }) })
+      })
+    },
+    effect read() {
+      const asked = try tell({ type: "readAsked" })
+      if (asked === undefined) return
+      const answer = (ask("read", CarrierRead) catch () => undefined)
+      if (answer === undefined) {
+        try tell({ type: "readFailed", ticket: asked.epoch })
+        return
+      }
+      try tell({ type: "readAnswered", ticket: asked.epoch, setup: setupOf(answer) })
+    },
+    effect readEid() {
+      const asked = try tell({ type: "eidAsked" })
+      if (asked === undefined) return
+      const answer = (ask("readEid", CarrierFieldRead) catch () => undefined)
+      const eid: Field = answer === undefined ? { status: "Missing", value: "" } : fieldOf(answer)
+      try tell({ type: "eidAnswered", ticket: asked.epoch, eid })
+    },
+    effect copy(target: CopyTarget) {
+      const before = try carrier.get()
+      const text = copyable(before, target)
+      if (text === "") return
+      const outcome = (Effect.as(native.invoke("AlphaDevice", "copyText", { text }), "copied") catch () => "failed")
+      try tell({ type: "copyAnswered", ticket: before.epoch, target, copied: outcome === "copied" })
+    },
+  }
+})
