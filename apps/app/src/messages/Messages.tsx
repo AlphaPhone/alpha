@@ -3,7 +3,7 @@ import { MMS_ATTACHMENT_TYPES } from "@elizaos/os/bridges/definitions/messages";
 import type { MessageRow, ThreadRow } from "@elizaos/os/bridges/messages";
 import { Alert, Banner, Button, Chip, ConfirmDialog, EmptyState, ListGroup, ListRow, SearchField, Spinner, Textarea } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { ArrowLeft, ImagePlus, Phone as Call, Send, Sparkles } from "lucide-react";
+import { ArrowLeft, Camera, ImagePlus, Phone as Call, Send, Sparkles } from "lucide-react";
 import { useState } from "react";
 import type { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe";
 import { clear } from "../../gen/app__phone.ts";
@@ -188,7 +188,7 @@ function Compose({ runtime }: MessagesProps) {
       {here && uncertain(outgoing) && <Banner variant="warn">Alpha cannot tell whether your message went. Send again checks before sending.</Banner>}
       {here && outgoing.denied && <Banner variant="destructive">The phone did not send the message</Banner>}
       {here && outgoing.op.outcome === "Refused" && !outgoing.denied && outgoing.failed > 0 && <Banner variant="destructive">The message did not reach everyone</Banner>}
-      {here && sentAll(outgoing) && <p className="text-xs text-muted-foreground">{delivered(outgoing) ? "Delivered" : "Sent"}</p>}
+      {here && sentAll(outgoing) && <p role="status" className="text-xs text-muted-foreground">{`${delivered(outgoing) ? "Delivered" : "Sent"} to ${name}`}</p>}
       {pictures.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {pictures.map((picture, at) => (
@@ -209,14 +209,16 @@ function Compose({ runtime }: MessagesProps) {
       {can({ type: "allow", need: "SendAccess" }) && <Banner variant="warn" action={<Button size="sm" onClick={() => void send({ type: "allow", need: "SendAccess" })}>Allow</Button>}>Sending needs access to send texts</Banner>}
       {can({ type: "goToSettings", need: "SendAccess" }) && <Banner variant="warn" action={<Button size="sm" variant="outline" onClick={() => void send({ type: "goToSettings", need: "SendAccess" })}>Open Settings</Button>}>Allow sending texts for Alpha in Android's settings</Banner>}
       <div className="flex items-end gap-2">
-        <label className={`inline-flex size-10 items-center justify-center rounded-md ${can({ type: "attach", fits: true }) ? "cursor-pointer" : "pointer-events-none opacity-50"}`} aria-label="Attach a picture">
-          <ImagePlus />
-          <input type="file" multiple accept={MMS_ATTACHMENT_TYPES.join(",")} className="sr-only" onChange={(event) => {
-            const files = [...(event.target.files ?? [])];
-            event.target.value = "";
-            void runtime.runPromise(attachAll(files));
-          }} />
-        </label>
+        {([["Attach a picture", ImagePlus, false], ["Take a picture", Camera, true]] as const).map(([label, Icon, camera]) => (
+          <label key={label} className={`inline-flex size-10 items-center justify-center rounded-md ${can({ type: "attach", fits: true }) ? "cursor-pointer" : "pointer-events-none opacity-50"}`} aria-label={label}>
+            <Icon />
+            <input type="file" multiple={!camera} capture={camera ? "environment" : undefined} accept={MMS_ATTACHMENT_TYPES.join(",")} className="sr-only" onChange={(event) => {
+              const files = [...(event.target.files ?? [])];
+              event.target.value = "";
+              void runtime.runPromise(attachAll(files));
+            }} />
+          </label>
+        ))}
         <Textarea className="flex-1" aria-label="Message" placeholder="Text message" value={state.slot.author === "Nobody" ? "" : text} onChange={(event) => write(event.target.value)} />
         {can({ type: "suggest" }) && <Button type="button" variant="ghost" size="icon" aria-label="Let Alpha suggest a reply" onClick={() => void send({ type: "suggest" })}><Sparkles /></Button>}
         {can({ type: "handOff", supported: sendNow.supported }) && <Button type="button" variant="outline" onClick={() => void send({ type: "handOff", supported: sendNow.supported })}>Open in messaging app</Button>}

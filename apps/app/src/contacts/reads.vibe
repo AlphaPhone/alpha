@@ -1,5 +1,5 @@
 // spec/app/contacts/agent.md, "Story: Let the agent read what I have open"; spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"
-import { type DeviceOperation, type OperationResultOf, readResult } from "@elizaos/agent/operations"
+import { type DeviceOperation, readResult } from "@elizaos/agent/operations"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Machine as ContactsMachine } from "../../gen/app__contacts.effect.vibe"
 import { type Opened, readOf, senderSaid } from "../../gen/app__contacts__agent.ts"
@@ -33,8 +33,8 @@ export function isReading(operation: DeviceOperation): operation is Reading {
 const openedAs = (open: boolean, read: boolean): Opened => (!open ? "NothingOpen" : read ? "OpenRead" : "OpenUnread")
 
 /** The answer for `operation` as eliza's schema reads it; an answer the schema refuses is the phone's word that it cannot. */
-function checked<T extends Reading["type"]>(operation: Extract<Reading, { type: T }>, raw: unknown, unavailable: unknown): OperationResultOf<T> {
-  return (readResult(operation, raw) ?? readResult(operation, unavailable)) as OperationResultOf<T>
+function checked(operation: Reading, raw: unknown, unavailable: unknown): unknown {
+  return readResult(operation, raw) ?? readResult(operation, unavailable)
 }
 
 // spec/app/contacts/agent.md, "The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it"

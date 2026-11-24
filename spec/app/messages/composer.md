@@ -333,7 +333,8 @@ pure def pickSim(c: Composer, sim: int): Composer = { ...c, sim: sim }
 
 `fits` is the phone's word that the picture is a JPEG, PNG or GIF that keeps
 the message within the carrier's MMS size; any other file is never
-attached. Several recipients or any picture go as one MMS.
+attached. Pictures come from the phone's pictures, several at once, or one
+taken with the camera. Several recipients or any picture go as one MMS.
 
 ```quint
 pure val maxPictures = 5
@@ -376,6 +377,9 @@ pure def send(c: Composer, supported: bool, clear: bool): Moved = withSend(S::se
 ```
 
 ### The phone's answers move the send, and a message sent clears its conversation's draft
+
+The conversation then notes, quietly, that the message was sent, or
+delivered, to the person it names.
 
 ```quint
 pure def sentOff(o: S::Outgoing, c: Composer): Moved =
