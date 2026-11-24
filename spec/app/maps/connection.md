@@ -13,7 +13,8 @@ on screen, and Android's location. The Maps screen holds one connection;
 
 ### A connection holds the signed-in account, the coverage read for it, the provider installed, the base map, the map surface and the location
 
-The provider is named by the account it serves (0 for none). The base map
+The provider is named by the account it serves (0 for none), and says
+whether it is Google's and which ways of travelling it routes. The base map
 is the world map until a provider is installed, then the cloud map inside
 its coverage or the regional map outside it. The map surface is numbered
 and is drawing, drawn or broken. Location is Android's permission, whether
@@ -23,18 +24,19 @@ whose it is (the screen's "Use my location" or guidance) and its number.
 ```quint
 import read as R from "../../kit/read"
 import permission as P from "../../kit/permission"
+import navigation as N from "./navigation"
 
 type Basemap = World | Regional | Cloud
 type Surface = Drawing | Drawn | Broken
 type Locator = Nobody | Finder | Guide
 type Connection = {
-  account: int, coverage: R::Read, provider: int, basemap: Basemap,
+  account: int, coverage: R::Read, provider: int, google: bool, offer: N::Offer, basemap: Basemap,
   plane: int, surface: Surface,
   location: P::Permission, disclosed: bool, locator: Locator, session: int,
 }
 
 pure val initial: Connection = {
-  account: 0, coverage: R::unread, provider: 0, basemap: World,
+  account: 0, coverage: R::unread, provider: 0, google: false, offer: N::noOffer, basemap: World,
   plane: 1, surface: Drawing,
   location: P::unasked, disclosed: false, locator: Nobody, session: 0,
 }
@@ -43,6 +45,10 @@ pure val accountValues = Set(0, 1, 2)
 pure val ticketValues = Set(1, 2, 3)
 pure val planeValues = Set(1, 2, 3)
 pure val sessionValues = Set(1, 2)
+pure val offerValues = Set(
+  { drive: true, transit: true, walk: true, bicycle: true },
+  { drive: true, transit: false, walk: true, bicycle: false },
+)
 
 pure def working(c: Connection): bool = c.provider != 0
 ```
@@ -62,7 +68,7 @@ Signed out, nothing is read.
 pure def canChangeAccount(c: Connection, account: int): bool = account != c.account and account >= 0
 
 pure def changeAccount(c: Connection, account: int): Connection =
-  redrawn(World, { ...c, account: account, provider: 0,
+  redrawn(World, { ...c, account: account, provider: 0, google: false, offer: N::noOffer,
     coverage: if (account != 0) R::ask(c.coverage) else c.coverage })
 ```
 
@@ -80,13 +86,50 @@ pure def connect(c: Connection): Connection = { ...c, coverage: R::ask(c.coverag
 
 ### Only the newest read's answer is taken, while signed in, and a healthy answer installs the provider for that account
 
+Google's map covers the world, so a Google provider is always drawn on its
+own map.
+
 ```quint
-pure def canAnswerCoverage(c: Connection, ticket: int, ok: bool, covered: bool): bool =
+pure def canAnswerCoverage(c: Connection, ticket: int, ok: bool, covered: bool, google: bool, offer: N::Offer): bool =
   R::canAnswer(c.coverage, ticket) and c.account != 0
 
-pure def answerCoverage(c: Connection, ticket: int, ok: bool, covered: bool): Connection =
+pure def answerCoverage(c: Connection, ticket: int, ok: bool, covered: bool, google: bool, offer: N::Offer): Connection =
   val answered = { ...c, coverage: R::answer(c.coverage, ok) }
-  if (ok) redrawn(if (covered) Cloud else Regional, { ...answered, provider: c.account }) else answered
+  if (ok) redrawn(if (covered or google) Cloud else Regional, { ...answered, provider: c.account, google: google, offer: offer })
+  else answered
+```
+
+### Google's content is drawn only on Google's own map, whose only credit is the Google Maps badge
+
+Google's places and routes are never drawn on the world map or the regional
+map. On Google's map the badge is the only credit; tapping it opens the
+copyright of the view and the disclosure. Other maps keep their credit
+links and an information button. Whatever Google served is never kept on
+the phone, shared or renamed, and no prompt for coordinates is offered.
+
+```quint
+pure def badgeOnly(c: Connection): bool = c.google and c.basemap == Cloud
+
+pure def alwaysGoogleIsDrawnOnItsOwnMap(c: Connection): bool =
+  (c.google implies (working(c) and c.basemap == Cloud)) and (not(working(c)) implies c.offer == N::noOffer)
+```
+
+### A wait Cloud names holds every Maps request back until it ends: a rate limit for at most a day, a spent allowance for at most 400 days, and any other wait one minute
+
+```quint
+type Wait = RateLimited | AllowanceSpent | Unnamed
+
+pure def heldSeconds(wait: Wait, seconds: int): int =
+  match wait {
+    | RateLimited => if (seconds >= 1 and seconds <= 86400) seconds else 60
+    | AllowanceSpent => if (seconds >= 1 and seconds <= 34560000) seconds else 60
+    | Unnamed => 60
+  }
+
+pure val secondsValues = Set(-1, 0, 1, 60, 86400, 86401, 34560001)
+
+pure def lawEveryWaitEnds(wait: Wait, seconds: int): bool =
+  heldSeconds(wait, seconds) >= 1 and heldSeconds(wait, seconds) <= 34560000
 ```
 
 ### A provider is installed only after a healthy read
@@ -247,6 +290,20 @@ pure def canLocate(c: Connection, owner: Locator): bool =
 
 pure def locate(c: Connection, owner: Locator): Connection =
   { ...c, locator: owner, session: c.session + 1 }
+```
+
+### "Use my location" gives up after 15 seconds without a fix
+
+While GPS has said nothing for 4 seconds, the network's position stands in,
+approximate, until GPS answers.
+
+```quint
+pure val findTimeoutMs = 15000
+pure val networkGraceMs = 4000
+
+pure def canGiveUp(c: Connection, session: int): bool = c.locator == Finder and session == c.session
+
+pure def giveUp(c: Connection, session: int): Connection = { ...c, locator: Nobody }
 ```
 
 ### Only the session in place gives fixes, and "Use my location" ends with its fix

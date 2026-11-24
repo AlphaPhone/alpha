@@ -15,10 +15,11 @@ holds one trip; the location it follows is the
 ### A trip holds its starting point, its route request, the route shown, and the guidance along it
 
 A route is named by the ticket of the request that brought it and has a
-number of turns. Guidance counts the navigations started (`journey`), points
-at the next turn, and keeps the service that guides with the screen off,
-whether Maps is away from the screen, and the turn whose instruction is
-being spoken (-1 for none).
+number of turns, and is asked for one way of travelling: driving, transit,
+walking or cycling, driving first. Guidance counts the navigations started
+(`journey`), points at the next turn, and keeps the service that guides with
+the screen off, whether Maps is away from the screen, and the turn whose
+instruction is being spoken (-1 for none).
 
 ```quint
 import read as R from "../../kit/read"
@@ -27,14 +28,15 @@ type Origin = Unset | MyLocation | Coordinates | SomePlace
 type Guidance = Stopped | Going | Arrived
 type Service = Unstarted | Starting | Running
 type Fix = Along | Passed | Strayed | There
+type Travel = Drive | Transit | Walk | Bicycle
 type Trip = {
-  origin: Origin, plan: R::Read, route: int, turns: int,
+  origin: Origin, travel: Travel, plan: R::Read, route: int, turns: int,
   guidance: Guidance, journey: int, turn: int, rerouting: bool,
   service: Service, away: bool, speaking: int,
 }
 
 pure val initial: Trip = {
-  origin: Unset, plan: R::unread, route: 0, turns: 0,
+  origin: Unset, travel: Drive, plan: R::unread, route: 0, turns: 0,
   guidance: Stopped, journey: 0, turn: 0, rerouting: false,
   service: Unstarted, away: false, speaking: -1,
 }
@@ -117,6 +119,32 @@ numbered below zero would name a route below zero.
 pure def alwaysTicketsAreNotNegative(t: Trip): bool = t.plan.ticket >= 0
 ```
 
+### A route is asked for one of the ways of travelling the provider offers
+
+The provider's coverage names the ways it routes; a way it does not name is
+never offered. Choosing another way while not navigating keeps the route
+shown until the new one arrives.
+
+```quint
+type Offer = { drive: bool, transit: bool, walk: bool, bicycle: bool }
+
+pure val noOffer: Offer = { drive: false, transit: false, walk: false, bicycle: false }
+
+pure def offers(o: Offer, travel: Travel): bool =
+  match travel {
+    | Drive => o.drive
+    | Transit => o.transit
+    | Walk => o.walk
+    | Bicycle => o.bicycle
+  }
+
+pure def canChooseTravel(t: Trip, travel: Travel): bool = t.guidance == Stopped and travel != t.travel
+
+pure def chooseTravel(t: Trip, travel: Travel): Trip = { ...t, travel: travel }
+
+pure def lawNoOfferRoutesNothing(travel: Travel): bool = not(offers(noOffer, travel))
+```
+
 ### A route can be kept through a failed request
 
 ```quint
@@ -159,6 +187,51 @@ pure def followFix(t: Trip, journey: int, fix: Fix): Trip =
   else if (fix == Passed and t.turn + 1 < t.turns) { ...t, turn: t.turn + 1, speaking: -1 }
   else if (fix == Strayed and not(t.rerouting)) { ...t, rerouting: true, plan: R::ask(t.plan) }
   else t
+```
+
+### A fix moves guidance only when it is precise, fresh and close: arrival within 25 meters, a turn passed within 40 meters or beyond 60, the route left beyond 75
+
+The shell measures each fix against the route: its age when used (at most
+30 seconds old and 5 seconds ahead), its accuracy (at most 50 meters), and
+its distance to the destination, to the route, to the next turn and past
+it. An approximate fix, such as the network position that stands in while
+GPS is silent, shows where the phone is and never moves guidance. Arrival
+needs 25 meters of the place at 30 meters accuracy; leaving the route needs
+more than the larger of 75 meters and twice the accuracy; a turn is passed
+within 40 meters of it, or beyond it by more than the larger of 60 meters
+and twice the accuracy.
+
+```quint
+pure val maxFixAgeMs = 30000
+pure val maxFixAheadMs = 5000
+pure val maxGuidingAccuracy = 50
+pure val arrivalMeters = 25
+pure val arrivalAccuracy = 30
+pure val nearTurnMeters = 40
+
+pure def larger(a: int, b: int): int = if (a > b) a else b
+
+pure def usable(precise: bool, ageMs: int, accuracy: int): bool =
+  precise and ageMs >= 0 - maxFixAheadMs and ageMs <= maxFixAgeMs and accuracy >= 0 and accuracy <= maxGuidingAccuracy
+
+pure def judged(precise: bool, ageMs: int, accuracy: int, toEnd: int, toRoute: int, toTurn: int, beyond: int): Fix =
+  if (not(usable(precise, ageMs, accuracy))) Along
+  else if (toEnd >= 0 and toEnd < arrivalMeters and accuracy <= arrivalAccuracy) There
+  else if (toRoute > larger(75, 2 * accuracy)) Strayed
+  else if ((toTurn >= 0 and toTurn <= nearTurnMeters) or beyond > larger(60, 2 * accuracy)) Passed
+  else Along
+
+pure val ageMsValues = Set(-5001, -5000, 0, 30000, 30001)
+pure val accuracyValues = Set(0, 30, 31, 50, 51)
+pure val metersValues = Set(-1, 0, 24, 40, 61, 76, 120)
+
+pure def lawACoarseOrStaleFixNeverMoves(ageMs: int, accuracy: int, meters: int): bool =
+  judged(false, ageMs, accuracy, meters, meters, meters, meters) == Along
+    and judged(true, maxFixAgeMs + 1, accuracy, meters, meters, meters, meters) == Along
+    and judged(true, 0 - maxFixAheadMs - 1, accuracy, meters, meters, meters, meters) == Along
+
+pure def lawStrayingNeedsMoreThan75Meters(accuracy: int, meters: int): bool =
+  judged(true, 0, accuracy, 100, meters, 100, 0) == Strayed implies meters > 75
 ```
 
 ### The next turn and the one after are turns of the route followed
@@ -370,6 +443,22 @@ pure def speak(t: Trip, at: int): Trip = { ...t, speaking: at }
 pure def canStopSpeaking(t: Trip): bool = t.speaking >= 0
 
 pure def stopSpeaking(t: Trip): Trip = { ...t, speaking: -1 }
+```
+
+### An instruction is spoken for its turn and distance band: now within 50 meters, soon within 250, far beyond
+
+Within 50 meters the instruction is spoken alone; further away the distance
+comes first.
+
+```quint
+type Band = Now | Soon | Far
+
+pure def bandOf(distance: int): Band = if (distance <= 50) Now else if (distance <= 250) Soon else Far
+
+pure val distanceValues = Set(0, 50, 51, 250, 251)
+
+pure def lawTheBandsAreOrdered(distance: int): bool =
+  ((bandOf(distance) == Now) iff (distance <= 50)) and ((bandOf(distance) == Far) iff (distance > 250))
 ```
 
 ### The newest instruction owns speech

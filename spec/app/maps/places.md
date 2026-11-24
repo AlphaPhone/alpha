@@ -41,6 +41,17 @@ pure def named(saved: List[Saved], place: int, name: str): List[Saved] =
   else saved.append({ place: place, name: name })
 ```
 
+### At most 200 places are saved: a full list only renames
+
+```quint
+pure val maxSaved = 200
+
+pure def hasRoom(saved: List[Saved], place: int): bool = isSaved(saved, place) or saved.length() < maxSaved
+
+pure def lawAFullListOnlyRenames(saved: List[Saved], place: int, name: str): bool =
+  (hasRoom(saved, place) and saved.length() <= maxSaved) implies named(saved, place, name).length() <= maxSaved
+```
+
 ### Forgetting a place takes it out of the list
 
 ```quint
