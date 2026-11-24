@@ -8,7 +8,7 @@ const handlers = {
 };
 
 export const meta: ComponentMeta<PlaceSheetProps> = {
-  args: { shown: shownPlace, details: "Ready", restricted: false, saved: false, canDirections: true, canCall: true, ...handlers },
+  args: { shown: shownPlace, subtitle: "Place", details: "Ready", restricted: false, saved: false, canDirections: true, canCall: true, ...handlers },
   examples: {
     Google: { shown: shownGooglePlace, restricted: true },
     LoadingDetails: { details: "Loading", shown: { ...shownPlace, place: undefined } },

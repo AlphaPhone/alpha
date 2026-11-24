@@ -9,6 +9,8 @@ import { Button, Input, Skeleton } from "../components/ui/index.ts";
 /** The shown place, its details' phase, what Google's terms and the build allow, and the place actions. */
 export type PlaceSheetProps = {
   shown: Shown;
+  /** What the place is, under its name (spec/maps/screen.md, "A place says what it is under its name"). */
+  subtitle: string;
   /** The provider details' phase; details are shown only once they belong to this place. */
   details: Phase;
   /** The place is Google's: no save, share, rename or copy. */
@@ -59,6 +61,7 @@ export function PlaceSheet(p: PlaceSheetProps) {
         )}
         <Button variant="ghost" size="icon" aria-label="Close" onClick={p.onClose}><X aria-hidden /></Button>
       </header>
+      {editing === undefined && <p className="-mt-2 text-sm text-muted-foreground">{p.subtitle}</p>}
       <p className="text-muted-foreground">{place?.address ?? coordinateLabel(p.shown.coordinate)}</p>
       {p.details === "Loading" && <Skeleton className="h-5 w-2/3" />}
       {place?.openingHours && <p>{place.openingHours}</p>}

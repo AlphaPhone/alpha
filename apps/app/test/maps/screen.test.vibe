@@ -6,7 +6,7 @@ import { Machine as PlaneMachine } from "../../gen/maps__plane.effect.vibe"
 import { Machine as SavedMachine } from "../../gen/maps__savedPlaces.effect.vibe"
 import { Machine as ScreenMachine } from "../../gen/maps__screen.effect.vibe"
 import { CloudUnavailable } from "../../src/platform/cloud.vibe"
-import { MapsContent } from "../../src/maps/content.vibe"
+import { MapsContent, placeSubtitle, type Shown } from "../../src/maps/content.vibe"
 import { cloudFailure } from "../../src/maps/failure.vibe"
 import { MapsHandoff } from "../../src/maps/handoff.vibe"
 import { MapsSession } from "../../src/maps/layer.vibe"
@@ -226,6 +226,20 @@ it.effect("An allowance reset is counted to the instant Cloud names, else to its
       past: "You have used your Maps allowance for this period.",
       none: "You have used your Maps allowance for this period.",
     },
+  ))
+})
+
+it.effect("A place says what it is under its name (spec/maps/screen.md, \"A place says what it is under its name\")", () => effect {
+  const provider = (categories?: string[]): Shown => ({ id: 1, label: "Corner Drug", coordinate: pier, kind: "OpenProvider", providerId: open.id, providerPlaceId: "p1",
+    place: { providerId: open.id, id: "p1", name: "Corner Drug", coordinate: pier, attribution: "© data", fetchedAt: 1, ...(categories === undefined ? {} : { categories }) } })
+  const pin: Shown = { id: 2, label: "Dropped pin", coordinate: ferry, kind: "NoProvider" }
+  try Effect.try(() => assert.deepStrictEqual(
+    {
+      pharmacy: placeSubtitle(provider(["Pharmacy", "Store"]), "ResultChoice"), none: placeSubtitle(provider(), "ResultChoice"),
+      pin: placeSubtitle(pin, "PinChoice"), named: placeSubtitle({ ...pin, label: "Place" }, "AgentChoice"),
+      saved: placeSubtitle({ ...provider(["Pharmacy"]), savedId: 3 }, "SavedChoice"), here: placeSubtitle({ ...pin, label: "Current location" }, "LocationChoice"),
+    },
+    { pharmacy: "Pharmacy", none: "Place", pin: "Selected location", named: "Selected location", saved: "Saved on this device", here: "Your location" },
   ))
 })
 

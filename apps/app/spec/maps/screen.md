@@ -173,6 +173,27 @@ pure def alwaysDetailsBelongToAPlace(s: Screen): bool = s.details != NotAsked im
 pure def sometimesPlaceDetailed(s: Screen): bool = s.choice == ResultChoice and s.details == Ready
 ```
 
+### A place says what it is under its name
+
+A provider place shows its provider's most specific category (the first one its details list, for
+example "Pharmacy") once its details belong to it, and "Place" when it has none; a saved place says
+"Saved on this device", the phone's position "Your location", and a dropped pin or any other point
+"Selected location". What a place is comes from how it was opened, never from the words shown.
+
+```quint
+type Subtitle = FirstCategory | GenericPlace | SavedOnPhone | YourLocation | SelectedLocation
+pure def subtitleOf(choice: Choice, providerPlace: bool, hasCategory: bool): Subtitle =
+  if (choice == LocationChoice) YourLocation
+  else if (choice == SavedChoice) SavedOnPhone
+  else if (choice == PinChoice or not(providerPlace)) SelectedLocation
+  else if (hasCategory) FirstCategory
+  else GenericPlace
+pure def lawAPinIsNeverNamedAsAProviderPlace(providerPlace: bool, hasCategory: bool): bool =
+  subtitleOf(PinChoice, providerPlace, hasCategory) == SelectedLocation
+pure def lawOnlyAProviderPlaceShowsACategory(choice: Choice, providerPlace: bool, hasCategory: bool): bool =
+  subtitleOf(choice, providerPlace, hasCategory) == FirstCategory implies (providerPlace and hasCategory)
+```
+
 ### Locating shows the phone's position, or uses it as the starting point in directions
 
 Locate is refused while one is pending or the screen is hidden. In
