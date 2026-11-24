@@ -22,3 +22,44 @@ export function matches(query: string, names: string, number = ""): boolean {
 
 /** When a call, message or voicemail was, short. */
 export const when = (date: number) => new Date(date).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+
+/** Caller name as held by the address book or provider, with a readable fallback for a number. */
+export function callerTitle(number: string, name: string | null): string {
+  if (number === "") return "Unknown";
+  return name || displayNumber(number);
+}
+
+/** Show a North American number as it is read out on Phone and keep international numbers intact. */
+export function displayNumber(number: string): string {
+  const digits = number.replace(/\D/g, "");
+  const local = digits.length === 11 && digits[0] === "1" ? digits.slice(1) : digits;
+  return local.length === 10 && !/^\+(?!1)/.test(number.trim()) ? `(${local.slice(0, 3)}) ${local.slice(3, 6)}-${local.slice(6)}` : number;
+}
+
+/** A caller without a name uses the number mark. */
+export function callerInitials(name: string): string {
+  const words = name.trim().split(/\s+/).filter((word) => /^\p{L}/u.test(word));
+  const first = words[0];
+  const last = words.length > 1 ? words.at(-1) : undefined;
+  return first === undefined ? "#" : `${Array.from(first)[0]}${Array.from(last ?? "")[0] ?? ""}`.toUpperCase();
+}
+
+/** Local recency as shown in the call log and voicemail. */
+export function shortWhen(at: number, now: number): string {
+  if (!Number.isFinite(at)) return "";
+  const minute = 60_000;
+  const age = now - at;
+  const date = new Date(at);
+  const today = new Date(now);
+  if (age >= 0 && age < minute) return "now";
+  if (age >= 0 && age < 60 * minute) return `${Math.floor(age / minute)}m`;
+  if (date.toDateString() === today.toDateString()) return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (age >= 0 && age < 6 * 24 * 60 * minute) return date.toLocaleDateString([], { weekday: "short" });
+  return date.toLocaleDateString([], { month: "short", day: "numeric", year: date.getFullYear() === today.getFullYear() ? undefined : "numeric" });
+}
+
+/** Minutes and seconds, rounded down to the current full second. */
+export function clockLength(seconds: number): string {
+  const whole = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+}
