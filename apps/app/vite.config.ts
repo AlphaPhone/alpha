@@ -41,7 +41,7 @@ const guarded: Plugin = {
 
 export default defineConfig({
   plugins: [vibelang(), react(), tailwindcss(), guarded, faked ? fakes(process.env.ALPHA_AGENT, process.env.ALPHA_FAKES === "phone") : eliza()],
-  // eliza's clients are linked from their own checkout, whose Effect and Capacitor are this one's versions: one copy of each in the page.
+  /** eliza's clients are linked from their own checkout, whose Effect and Capacitor are this one's versions: one copy of each in the page. */
   resolve: { dedupe: ["effect", "vibelang-runtime", "@capacitor/core"] },
   // spec/app/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks": the page reads the build's allowance as `import.meta.env.ELIZA_DEV_ALLOW_TEST_MOCKS`.
   envPrefix: ["VITE_", "ELIZA_DEV_ALLOW_TEST_MOCKS"],

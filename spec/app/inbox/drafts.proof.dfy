@@ -215,6 +215,101 @@ lemma resume_ensures(s: Composer, draft: int)
   }
 }
 
+lemma endedOpenRefused(s: Composer, draft: int, attempt: int, result: kit__attempt_Outcome, revision: int, gmail: int)
+  requires inv(s) && canEnded(s, draft, attempt, result, revision, gmail) && (s.open && s.letter.id == draft) && result.Refused?
+  ensures alwaysAnOpenDraftIsWhole(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysAWaitingEditHasItsDeadline(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysTheCopyIsTheDraft(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysOneCheckRunsAtATime(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysAnUnsureDraftIsHandedToNothing(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysTheShelfHoldsOtherDraftsOfThisSession(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepAWriteIsDueOnlyAfterItsPause(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepOneWriteAtATime(s, "ended", ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepAHandedDraftStaysPut(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepADraftIsForgottenOnlyWhenDiscardedOrGone(s, "ended", ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepASentDraftIsForgottenOrMarked(s, "ended", ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepAnUnknownSendIsCheckedOnce(s, ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepEditingASavedDraftReplacesNone(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepADraftComesBackAsItWasSetAside(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+{
+}
+
+lemma endedOpenSaved(s: Composer, draft: int, attempt: int, result: kit__attempt_Outcome, revision: int, gmail: int)
+  requires inv(s) && canEnded(s, draft, attempt, result, revision, gmail) && (s.open && s.letter.id == draft) && !result.Refused? && letterNamed(s, draft).use.ToSave?
+  ensures alwaysAnOpenDraftIsWhole(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysAWaitingEditHasItsDeadline(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysTheCopyIsTheDraft(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysOneCheckRunsAtATime(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysAnUnsureDraftIsHandedToNothing(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysTheShelfHoldsOtherDraftsOfThisSession(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepAWriteIsDueOnlyAfterItsPause(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepOneWriteAtATime(s, "ended", ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepAHandedDraftStaysPut(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepADraftIsForgottenOnlyWhenDiscardedOrGone(s, "ended", ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepASentDraftIsForgottenOrMarked(s, "ended", ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepAnUnknownSendIsCheckedOnce(s, ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepEditingASavedDraftReplacesNone(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepADraftComesBackAsItWasSetAside(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+{
+}
+
+lemma endedOpenDeleteLost(s: Composer, draft: int, attempt: int, result: kit__attempt_Outcome, revision: int, gmail: int)
+  requires inv(s) && canEnded(s, draft, attempt, result, revision, gmail) && (s.open && s.letter.id == draft) && !result.Refused? && letterNamed(s, draft).use.ToDelete? && result.Unknown?
+  ensures alwaysAnOpenDraftIsWhole(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysAWaitingEditHasItsDeadline(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysTheCopyIsTheDraft(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysOneCheckRunsAtATime(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysAnUnsureDraftIsHandedToNothing(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysTheShelfHoldsOtherDraftsOfThisSession(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepAWriteIsDueOnlyAfterItsPause(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepOneWriteAtATime(s, "ended", ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepAHandedDraftStaysPut(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepADraftIsForgottenOnlyWhenDiscardedOrGone(s, "ended", ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepASentDraftIsForgottenOrMarked(s, "ended", ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepAnUnknownSendIsCheckedOnce(s, ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepEditingASavedDraftReplacesNone(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepADraftComesBackAsItWasSetAside(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+{
+}
+
+lemma endedOpenDeleted(s: Composer, draft: int, attempt: int, result: kit__attempt_Outcome, revision: int, gmail: int)
+  requires inv(s) && canEnded(s, draft, attempt, result, revision, gmail) && (s.open && s.letter.id == draft) && !result.Refused? && letterNamed(s, draft).use.ToDelete? && !result.Unknown?
+  ensures alwaysAnOpenDraftIsWhole(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysAWaitingEditHasItsDeadline(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysTheCopyIsTheDraft(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysOneCheckRunsAtATime(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysAnUnsureDraftIsHandedToNothing(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysTheShelfHoldsOtherDraftsOfThisSession(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepAWriteIsDueOnlyAfterItsPause(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepOneWriteAtATime(s, "ended", ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepAHandedDraftStaysPut(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepADraftIsForgottenOnlyWhenDiscardedOrGone(s, "ended", ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepASentDraftIsForgottenOrMarked(s, "ended", ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepAnUnknownSendIsCheckedOnce(s, ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepEditingASavedDraftReplacesNone(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepADraftComesBackAsItWasSetAside(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+{
+}
+
+lemma endedOpenSendUnknown(s: Composer, draft: int, attempt: int, result: kit__attempt_Outcome, revision: int, gmail: int)
+  requires inv(s) && canEnded(s, draft, attempt, result, revision, gmail) && (s.open && s.letter.id == draft) && !result.Refused? && !letterNamed(s, draft).use.ToSave? && !letterNamed(s, draft).use.ToDelete?
+  ensures alwaysAnOpenDraftIsWhole(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysAWaitingEditHasItsDeadline(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysTheCopyIsTheDraft(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysOneCheckRunsAtATime(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysAnUnsureDraftIsHandedToNothing(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures alwaysTheShelfHoldsOtherDraftsOfThisSession(ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepAWriteIsDueOnlyAfterItsPause(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepOneWriteAtATime(s, "ended", ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepAHandedDraftStaysPut(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepADraftIsForgottenOnlyWhenDiscardedOrGone(s, "ended", ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepASentDraftIsForgottenOrMarked(s, "ended", ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepAnUnknownSendIsCheckedOnce(s, ended(s, draft, attempt, result, revision, gmail).state, ended(s, draft, attempt, result, revision, gmail).out)
+  ensures stepEditingASavedDraftReplacesNone(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+  ensures stepADraftComesBackAsItWasSetAside(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
+{
+}
+
 lemma endedOpen(s: Composer, draft: int, attempt: int, result: kit__attempt_Outcome, revision: int, gmail: int)
   requires inv(s) && canEnded(s, draft, attempt, result, revision, gmail) && (s.open && s.letter.id == draft)
   ensures alwaysAnOpenDraftIsWhole(ended(s, draft, attempt, result, revision, gmail).state)
@@ -232,6 +327,17 @@ lemma endedOpen(s: Composer, draft: int, attempt: int, result: kit__attempt_Outc
   ensures stepEditingASavedDraftReplacesNone(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
   ensures stepADraftComesBackAsItWasSetAside(s, "ended", ended(s, draft, attempt, result, revision, gmail).state)
 {
+  if (result.Refused?) {
+    endedOpenRefused(s, draft, attempt, result, revision, gmail);
+  } else if (!result.Refused? && letterNamed(s, draft).use.ToSave?) {
+    endedOpenSaved(s, draft, attempt, result, revision, gmail);
+  } else if (!result.Refused? && letterNamed(s, draft).use.ToDelete? && result.Unknown?) {
+    endedOpenDeleteLost(s, draft, attempt, result, revision, gmail);
+  } else if (!result.Refused? && letterNamed(s, draft).use.ToDelete? && !result.Unknown?) {
+    endedOpenDeleted(s, draft, attempt, result, revision, gmail);
+  } else if (!result.Refused? && !letterNamed(s, draft).use.ToSave? && !letterNamed(s, draft).use.ToDelete?) {
+    endedOpenSendUnknown(s, draft, attempt, result, revision, gmail);
+  }
 }
 
 lemma endedAsideRefused(s: Composer, draft: int, attempt: int, result: kit__attempt_Outcome, revision: int, gmail: int)
