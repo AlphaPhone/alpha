@@ -77,4 +77,24 @@ describe("the shell", () => {
     await until(alpha, alpha.runtime, Focus, (f) => !f.keyboard);
     expect(document.documentElement.hasAttribute("data-alpha-keyboard")).toBe(false);
   });
+
+  // spec/app/shell/gestures.md, "Story: Swipe the way the phone expects"
+  it("Swipe the way the phone expects (spec/app/shell/gestures.md, \"Story: Swipe the way the phone expects\")", async () => {
+    const { alpha } = await open({ ...scene(), phone: true });
+    const swiped = (from: { x: number; y: number }, to: { x: number; y: number }) => drawn(() => {
+      const page = document.querySelector("main");
+      page?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, isPrimary: true, clientX: from.x, clientY: from.y }));
+      page?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, isPrimary: true, clientX: to.x, clientY: to.y }));
+    });
+    await press("Notes");
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Notes");
+
+    // spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back": a short or mid-page swipe scrolls and changes nothing.
+    await swiped({ x: 5, y: 300 }, { x: 40, y: 300 });
+    await swiped({ x: 200, y: 300 }, { x: 300, y: 300 });
+    expect((await alpha.runtime.runPromise(Shell.use((s) => s.get()))).trail).toEqual(["Notes"]);
+    await swiped({ x: 5, y: 300 }, { x: 80, y: 300 });
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
+  });
 });
+
