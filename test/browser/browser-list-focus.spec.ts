@@ -140,23 +140,27 @@ for (const viewport of [{width:390,height:844},{width:1280,height:900}]) {
 
     for (const savedId of ['saved-normal','b0']) {
       test(`restoring saved tabs preserves the focused new tab and its activation (${savedId})`, async ({page}) => {
-        await page.addInitScript((savedId: string) => {
-          localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({kind:'offline'}));
-          localStorage.setItem('alpha.browser.session.v1', JSON.stringify({
-            history:['https://focus.example/saved'],
-            tabs:[{id:savedId,url:'https://focus.example/saved',title:'Saved page'}],
-            cur:savedId,
-          }));
-          // Hold the real document migration while the owner opens the tab chooser.
-          const w = window as any;
-        void navigator.locks.request(
-            JSON.stringify(['browser-document','alpha.browser.documents.v1','alpha.browser.session.v1']),
-            async () => {
-              w.browserRestoreHeld = true;
-              await new Promise<void>(release => {w.releaseBrowserRestore = release;});
-            },
-          );
-        }, savedId);
+        await page.addInitScript(() => localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({kind:'offline'})));
+        // Seed through the same IndexedDB-backed host that owns today's session.
+        // Hold only the completion of the startup read as the owner opens the chooser.
+        await page.route('**/src/browser/browser-surface.ts', async route => {
+          const response = await route.fetch();
+          const source = await response.text();
+          await route.fulfill({response, body: source + `
+            const readSavedBrowsing = BrowserSurface.prototype.browsingState;
+            const setupSavedBrowsing = new BrowserSurface().saveBrowsingState(${JSON.stringify({
+              history:['https://focus.example/saved'],
+              tabs:[{id:savedId,url:'https://focus.example/saved',title:'Saved page'}],
+              cur:savedId,
+            })});
+            BrowserSurface.prototype.browsingState = async function(...args) {
+              await setupSavedBrowsing;
+              window.browserRestoreHeld = true;
+              await new Promise(release => {window.releaseBrowserRestore = release;});
+              return readSavedBrowsing.apply(this,args);
+            };`
+          });
+        });
         await page.goto('/');
         await expect.poll(() => page.evaluate(() => !!(window as any).browserRestoreHeld)).toBe(true);
         await page.getByRole('button',{name:'Browser',exact:true}).click();
