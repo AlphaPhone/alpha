@@ -9,7 +9,6 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { writeWhole } from "../util.ts";
-import { declared, isContract } from "./properties.ts";
 
 /** In every header: a change to what is generated rewrites every file. */
 export const VERSION = 1;
@@ -30,7 +29,7 @@ const sha = (...texts: string[]) => createHash("sha256").update(texts.join("\0")
 export async function generateTests(packageDir: string): Promise<Generated> {
   const root = path.resolve(packageDir), out = path.join(root, OUT);
   const result: Generated = { written: [], unchanged: [], removed: [], skipped: [] };
-  const glob = (pattern: string) => fs.globSync(pattern, { cwd: root }).map(posix).sort();
+  const glob = (pattern: string) => fs.globSync(pattern, { cwd: root }).map(posix).filter((file) => !/(?:^|\/)test\/fixtures?\//.test(file)).sort();
   const read = (file: string) => fs.readFileSync(path.join(root, file), "utf8");
   const files = new Map<string, { source: string; hash: string; tests: number }>();
 
@@ -46,7 +45,18 @@ export async function generateTests(packageDir: string): Promise<Generated> {
   };
   type From = (file: string) => string;
   const importing = (from: From, what: string, file: string) => `import ${what} from ${JSON.stringify(from(file))};`;
-  const library = (file: string) => path.join(import.meta.dirname, file);
+  const resolveTestingSpecifier = (): string | undefined => {
+    try {
+      createRequire(path.join(root, "package.json")).resolve("vibestack/testing");
+      return "vibestack/testing";
+    } catch {
+      return undefined;
+    }
+  };
+  const testingPackage = resolveTestingSpecifier();
+  const testingEntry = path.join(import.meta.dirname, `index${path.extname(import.meta.filename)}`);
+  const importingTesting = (from: From, what: string) =>
+    testingPackage ? `import ${what} from ${JSON.stringify(testingPackage)};` : importing(from, what, testingEntry);
 
   const sources = glob("src/**/*.{schema,contract}.{ts,vibe}");
   if (sources.length) {
@@ -70,10 +80,11 @@ export async function generateTests(packageDir: string): Promise<Generated> {
       const schemas = names.filter((name) => Schema.isSchema(module[name]) && arbitraryOf(module[name] as Schema.Schema<unknown>, (reason) => skip(name, reason)));
       if (!schemas.length) skip("*", names.some((name) => Schema.isSchema(module[name])) ? "no value can be generated for any schema it exports" : "the module exports no Effect Schema");
       else emit(testFile, source, hash, schemas.length * 2, (from) => [
-        `import { describe } from "vitest";`, importing(from, "{ schemaTests }", library("index.ts")), subject(from), "",
+        `import { describe } from "vitest";`, importingTesting(from, "{ schemaTests }"), subject(from), "",
         `describe(${JSON.stringify(source)}, () => {`, ...schemas.map((name) => `  schemaTests(${JSON.stringify(name)}, subject[${JSON.stringify(name)}]);`), "});",
       ]);
     } else {
+      const { declared, isContract } = await import("./properties.ts");
       const contracts = names.filter((name) => isContract(module[name]));
       const tests = contracts.flatMap((name) => {
         const properties = Object.entries(declared(module[name] as never)).flatMap(([property, check]) => check ? [property] : []);
@@ -82,7 +93,7 @@ export async function generateTests(packageDir: string): Promise<Generated> {
       });
       if (!tests.length) skip("*", contracts.length ? "no contract it exports declares a property" : "the module exports no contract({ … })");
       else emit(testFile, source, hash, tests.length, (from) => [
-        `import { describe } from "vitest";`, importing(from, "{ contractTest }", library("index.ts")), subject(from), "",
+        `import { describe } from "vitest";`, importingTesting(from, "{ contractTest }"), subject(from), "",
         `describe(${JSON.stringify(source)}, () => {`, ...tests, "});",
       ]);
     }
@@ -103,7 +114,8 @@ export async function generateTests(packageDir: string): Promise<Generated> {
 /** Whether values of `schema` can be generated; if not, `skip` hears why. */
 function arbitraryOf(schema: Schema.Schema<unknown>, skip: (reason: string) => void) {
   try {
-    Effect.runSync(Arbitrary.sampleEffect(Arbitrary.schema(schema), { count: 1, seed: 1 }));
+    Effect.runSync(Arbitrary.sampleEffect(Arbitrary.schema(schema), { count: 1, seed: 1 }).pipe(Effect.mapError((refused) =>
+      new Error(`its filters refused all ${refused.discards} values tried`))));
     return true;
   } catch (error) {
     skip(`no value can be generated for it: ${error instanceof Error ? error.message : String(error)}`);

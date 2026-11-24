@@ -278,7 +278,7 @@ pnpm check
 |---|---|
 | `.agents/skills/`, `AGENTS.md` | the agent's procedure, skills, bundled references and license notice. Later invocations add missing files and refresh the marked Vibestack section in AGENTS.md |
 | `SPEC.md` | the spec reference |
-| `vibestack/reference/typereferences.md` | the TypeScript type reference |
+| `.agents/skills/typescript-best-practices/references/typereferences.md` | the TypeScript type reference |
 | `.claude/skills/` and the other project agent skill directories | ignored links to the committed skills in `.agents/skills/` |
 | `.agents/claude-settings.json`, `.claude/settings.json` | the committed settings source and its ignored relative symlink for Claude. Claude Code refuses edits to `gen/`, `.spec-cache/`, `.studio/`, `spec/lock.json` and `lemmascript.json`, and asks before `pnpm accept` |
 | `CLAUDE.md` | ignored relative symlink to `AGENTS.md`. A standalone `@AGENTS.md` import is converted to the link. Custom Claude instructions are preserved and import `AGENTS.md` |
@@ -298,6 +298,23 @@ configuration when `test/` first appears, and a driver to fill in when
 types stage; a spec-only package reports that there is no code to typecheck. To hand the generated code to another package, compile `gen/*.ts`
 with `tsc`; it has no dependencies. `gen/*.effect.vibe` needs the VibeLang
 toolchain.
+
+## Configuration
+
+Configure Vibestack in an optional root `vibestack.json` (or under `"vibestack"` in `package.json`):
+
+```json
+{
+  "mode": "vibelang",
+  "spec": {
+    "dir": "spec",
+    "exclude": ["models", "product"],
+    "owners": { "assistant": "packages/plugin-assistant" }
+  },
+  "cacheDir": ".spec-cache",
+  "stages": { "types": "vibelang", "tests": "vitest", "explore": "auto" }
+}
+```
 
 ## Commands
 
@@ -319,6 +336,9 @@ current one. Installed as a package, use `pnpm exec spec <command> [<dir>]`.
 | `node vibestack/spec.ts init [<dir>]` | Sets up an existing project ([above](#using-it-from-another-package)) |
 | `pnpm demo` | Runs the order example's scripted checkout session |
 | `pnpm selftest` | Breaks the pipeline one way at a time and checks each break is caught, checks what the documents name, and installs and checks every example, as five cached tasks |
+| `node vibestack/spec.ts link [<dir>]` | Creates or refreshes the ignored agent skill links and `CLAUDE.md` |
+| `node vibestack/spec.ts doctor [<dir>] [--install-dafny]` | Checks Node, pnpm, Dafny 4.11, Quint, Chromium, the skills and the manifest |
+| `node vibestack/spec.ts conformance [<module>] [--nightly]`, `node vibestack/spec.ts explore [<dir>] [--nightly]` | Runs one stage on its own: the drivers and traces, or Bombadil on each page |
 | `pnpm build` | Compiles the tools into `dist/`, the packaged `spec` command |
 
 | Exit code | Means |
