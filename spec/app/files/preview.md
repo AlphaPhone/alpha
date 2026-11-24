@@ -35,14 +35,14 @@ type Why = Fine | Locked | TooLarge | TooSlow | Unsealed
 type Seen = { item: int, revision: int }
 type Preview = {
   viewer: int, viewers: int, item: int, kind: Kind, revision: int, reachable: bool, siblings: List[str],
-  content: R::Read, playing: bool,
+  content: R::Read, playing: bool, secret: bool,
   page: int, pages: int, drawing: R::Read, drawnAt: int, why: Why,
   attempt: A::Attempt, inserted: Seen, email: V::Review, account: int, draft: int,
 }
 
 pure val initial: Preview = {
   viewer: 0, viewers: 0, item: 0, kind: Photo, revision: 0, reachable: false, siblings: List(),
-  content: R::unread, playing: false,
+  content: R::unread, playing: false, secret: false,
   page: 0, pages: 0, drawing: R::unread, drawnAt: 0, why: Fine,
   attempt: A::plan(0), inserted: { item: 0, revision: 0 }, email: V::unreviewed, account: 0, draft: 0,
 }
@@ -100,7 +100,7 @@ Recent hands over a file the owner chose.
 pure def closing(s: Preview): List[Effect] = if (showing(s)) List(Closed({ viewer: s.viewer, item: s.item })) else List()
 
 pure def emptied(viewer: int, s: Preview): Preview =
-  { ...s, viewer: viewer, reachable: false, content: F::drop(s.content), playing: false,
+  { ...s, viewer: viewer, reachable: false, content: F::drop(s.content), playing: false, secret: false,
     drawing: F::drop(s.drawing), email: V::dismiss(s.email) }
 
 pure def canShow(s: Preview, file: int, kind: Kind, revision: int, siblings: List[str], by: Actor): bool = file > 0
@@ -160,14 +160,14 @@ it has, or why it cannot be shown: locked, too large or too slow; its page
 is then drawn.
 
 ```quint
-pure def canContentRead(s: Preview, ticket: int, by: Actor): bool = by == Phone and usable(s) and R::canAnswer(s.content, ticket)
+pure def canContentRead(s: Preview, ticket: int, secret: bool, by: Actor): bool = by == Phone and usable(s) and R::canAnswer(s.content, ticket)
 
-pure def contentRead(s: Preview, ticket: int, ok: bool, pages: int, why: Why, by: Actor): Moved =
+pure def contentRead(s: Preview, ticket: int, ok: bool, pages: int, why: Why, secret: bool, by: Actor): Moved =
   val pdf = s.kind == Pdf
   val fine = ok and (not(pdf) or (pages > 0 and why == Fine))
   val page = if (s.page < 1) 1 else if (s.page > pages) pages else s.page
   val drawing = R::ask(s.drawing)
-  val answered = { ...s, content: R::answer(s.content, fine), why: if (fine or not(pdf) or why == Fine) Fine else why }
+  val answered = { ...s, content: R::answer(s.content, fine), why: if (fine or not(pdf) or why == Fine) Fine else why, secret: fine and secret }
   if (fine and pdf)
     { state: { ...answered, pages: pages, page: page, drawing: drawing, drawnAt: s.revision },
       out: List(Draw({ ticket: drawing.ticket, item: s.item, revision: s.revision, page: page })) }
@@ -228,6 +228,16 @@ pure def alwaysOnlyTheReadablePdfShownIsDrawn(s: Preview): bool =
     (loaded(s) and s.kind == Pdf and s.drawnAt == s.revision)
 ```
 
+### A page the worker takes too long to draw is given up, and its late answer shows nothing
+
+```quint
+pure def canPageTimedOut(s: Preview, ticket: int, by: Actor): bool = by == Phone and usable(s) and R::canAnswer(s.drawing, ticket)
+
+pure def pageTimedOut(s: Preview, ticket: int, by: Actor): Preview = { ...s, drawing: R::answer(s.drawing, false), why: TooSlow }
+
+pure def sometimesAPageTookTooLong(s: Preview): bool = s.drawing.status == R::Failed and s.why == TooSlow
+```
+
 ### The file can change while it is shown: it is read again, its page drawn again within its new length, and the email review stops counting
 
 ```quint
@@ -235,7 +245,7 @@ pure def canChanged(s: Preview, revision: int, by: Actor): bool = by == Phone an
 
 pure def changed(s: Preview, revision: int, by: Actor): Moved =
   val content = R::ask(s.content)
-  { state: { ...s, revision: revision, content: content, playing: false, drawing: F::drop(s.drawing), email: V::revise(s.email) },
+  { state: { ...s, revision: revision, content: content, playing: false, secret: false, drawing: F::drop(s.drawing), email: V::revise(s.email) },
     out: List(Read({ ticket: content.ticket, item: s.item, revision: revision })) }
 ```
 
@@ -261,7 +271,7 @@ pure def sometimesAPhotoCouldNotBeRead(s: Preview): bool = s.content.status == R
 Transcribe is offered for a recording or a video.
 
 ```quint
-pure def canAskAlpha(s: Preview, by: Actor): bool = by == Owner and usable(s)
+pure def canAskAlpha(s: Preview, by: Actor): bool = by == Owner and loaded(s) and not(s.secret)
 
 pure def askAlpha(s: Preview, by: Actor): Moved = { state: s, out: List(AskAlpha({ item: s.item })) }
 
@@ -273,6 +283,18 @@ pure def canOpenElsewhere(s: Preview, by: Actor): bool = by == Owner and usable(
 
 pure def openElsewhere(s: Preview, by: Actor): Moved =
   { state: s, out: List(OpenElsewhere({ item: s.item, revision: s.revision, writable: false })) }
+```
+
+### A file that holds a verification code or another secret is never handed to Ask Alpha
+
+The phone says so when it reads the file; it is said again each time the
+file is read.
+
+```quint
+pure def stepASecretIsNeverAsked(before: Preview, after: Preview, out: List[Effect]): bool =
+  out.every(e => match e { | AskAlpha(x) => not(before.secret) | _ => true })
+
+pure def sometimesASecretIsHeldBack(s: Preview): bool = loaded(s) and s.secret
 ```
 
 ### Open elsewhere hands the file over to read only

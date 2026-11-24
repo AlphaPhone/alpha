@@ -1,0 +1,31 @@
+// spec/app/files/preview.md, "Story: Look at a file"
+import type { SelectedDocumentsClient } from "@elizaos/os/bridges/definitions/media"
+import { registered } from "./device.vibe"
+
+module held {
+  import { selectedDocumentsClient, selectedDocumentsPlugin } from "@elizaos/os/bridges/media"
+
+  let made: SelectedDocumentsClient | undefined
+  /** eliza's client of the host's documents plugin, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
+  export function client(name: string): SelectedDocumentsClient {
+    return (made ??= selectedDocumentsClient(selectedDocumentsPlugin(name), name))
+  }
+}
+import { client } from held
+
+/**
+ * The documents Android lets Alpha hold, each by the selection the phone gave it: described, read, a PDF page drawn
+ * by its isolated worker, opened in another app, and forgotten. None where the page is no phone or its host did not
+ * register eliza's `SelectedDocuments` plugin.
+ */
+export service Documents {
+  readonly client: Option.Option<SelectedDocumentsClient>
+}
+
+const name = "SelectedDocuments"
+
+/** The phone: eliza's client of the host's `SelectedDocuments` plugin, where the host registered it. */
+export const phoneDocuments = Layer.sync(Documents, () => ({ client: registered(name) ? Option.some(client(name)) : Option.none() }))
+
+/** A browser: no documents the phone holds. */
+export const browserDocuments = Layer.succeed(Documents, { client: Option.none() })
