@@ -13,6 +13,7 @@ import type { SharePanel } from "../../../gen/files__share.ts";
 import { initial as panelInitial } from "../../../gen/files__share.ts";
 import type { Row } from "../../../gen/files__storage.ts";
 import type { TrashView } from "../../../gen/files__trash.ts";
+import type { BuildInfo } from "../../platform/build.vibe";
 import { initial as trashInitial } from "../../../gen/files__trash.ts";
 
 const day = 86_400_000;
@@ -83,3 +84,30 @@ export const picker: Picker = {
   ...pickerInitial, open: true, epoch: 1, ticket: 1, path: "Download", rows, listing: "Complete", maximum: 4, outcome: "Choosing",
   selected: [{ key: rows[1]!.key, name: rows[1]!.name, mimeType: rows[1]!.mimeType, size: rows[1]!.size, token: "A".repeat(43) }],
 };
+
+/** Nothing in Trash read yet, no filter, preview or share panel open. */
+export const noTrash: TrashView = trashInitial;
+export const noFilter: Filtering = filterInitial;
+export const noPreview: PreviewState = previewInitial;
+export const noPages: PdfPages = pagesInitial;
+export const noPanel: SharePanel = panelInitial;
+
+/** A folder of sixty scans with long names, for a long list. */
+export const longFolder: Browser = {
+  ...folder, place: { tag: "InFolder", path: "Documents/Scans", volume: "" }, listedCount: 60,
+  rows: Array.from({ length: 60 }, (_, n): Row => ({
+    key: `primary\nDocuments/Scans/scan-${n}.pdf`, path: `Documents/Scans/scan-${n}.pdf`, folder: "Documents/Scans",
+    name: n % 5 === 0 ? `Signed rental agreement and inventory checklist, all pages, scanned ${n}.pdf` : `scan-${n}.pdf`,
+    kind: "KindPdf", mimeType: "application/pdf", size: 90_000 + n * 1_000, modified: at - n * day, children: -1,
+  })),
+};
+
+/** The two selected rows being moved: every control waits. */
+export const moving: Browser = { ...selecting, mutations: 1 };
+
+/** Trash open in Files. */
+export const inTrash: Browser = { ...browse, place: { tag: "InTrash" } };
+
+/** The launcher build, and the browser build that imports folders and downloads files. */
+export const launcherBuild: BuildInfo = { version: "1.0.0", variant: "launcher", testMocks: false };
+export const browserBuild: BuildInfo = { ...launcherBuild, variant: "browser" };
