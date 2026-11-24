@@ -612,8 +612,8 @@ public abstract class AlphaTelephonyBase extends Plugin {
   final long selectedGeneration=generation.get();
   fencedWrite(call,"sms","Messages",cancel -> {
    String refusal=MessageDeletion.inspect(getContext(),target,cancel,() -> deletionCurrent(selectedGeneration));
-   if (refusal!=null) return MessageDeletion.result(target,refusal);
-   JSObject value=MessageDeletion.result(target,"queued"); value.put("deletion",window.stage("message",target.json())); return value;
+   if (refusal!=null) return AlphaTelephonyAccess.deletionResult(target,refusal);
+   JSObject value=AlphaTelephonyAccess.deletionResult(target,"queued"); value.put("deletion",window.stage("message",target.json())); return value;
   });
  }
 
