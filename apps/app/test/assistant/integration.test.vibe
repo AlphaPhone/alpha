@@ -139,6 +139,50 @@ it.effect("A page link stays a card even when its family grounds it (spec/assist
   }
 })
 
+// spec/assistant/review.md: Browser's executors as the direct pass sees them, where showing the tab list is its own command.
+function tabListExecutors(runs: { count: number }) {
+  const ports: OperationPorts = {
+    validate: (operation) => operation,
+    execute: async () => { runs.count += 1; return { kind: "applied" } },
+    readBack: async () => ({ kind: "found" }),
+    describe: () => ({ title: "Show open tabs", detail: "Shows the list of your open tabs in Browser." }),
+    classOf: () => "BrowserNavigate",
+    target: () => ({ tag: "ContactTarget", nameWritten: true }),
+    summarize: () => "Showing your open tabs in Browser.",
+    ownCommand: (operation) => (operation as { readonly type?: unknown }).type === "browser_tabs_show",
+  }
+  return Layer.succeed(DeviceExecutors, { ports })
+}
+
+it.effect("Showing my open tabs opens without a card in any words, while another control or a grounded open that is not a command keeps its card (spec/assistant/review.md, \"The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote\")", () => effect {
+  const sent = effect function (text: string, operation: unknown) {
+    const runs = { count: 0 }
+    provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "Here they are." }, proposals: [wireProposal("p31", digest("9"), operation, "u1")] }), fakeHost([]), tabListExecutors(runs), journalNative(new Map())) {
+      const composer = try Composer
+      try composer.edit(text)
+      try composer.send()
+      const cards = (try transcriptNow()).rows.flatMap((row) => row.kind === "card" ? [row.card.state] : [])
+      return { cards, runs: runs.count }
+    }
+  }
+  const show = { type: "browser_tabs_show" }
+  const open = { type: "browser_navigate", url: "https://news.example.com/" }
+  const outcomes = {
+    showMine: try sent("Show my open tabs", show),
+    asked: try sent("what tabs do I have open?", show),
+    otherControl: try sent("Show my open tabs", { type: "browser_tab_new" }),
+    openCommand: try sent("Open news.example.com", open),
+    openQuestion: try sent("Is news.example.com any good?", open),
+  }
+  try Effect.try(() => assert.deepStrictEqual(outcomes, {
+    showMine: { cards: [], runs: 1 },
+    asked: { cards: [], runs: 1 },
+    otherControl: { cards: ["LiveCard"], runs: 0 },
+    openCommand: { cards: [], runs: 1 },
+    openQuestion: { cards: ["LiveCard"], runs: 0 },
+  }))
+})
+
 it.effect("Let my agent see what Maps shows when I ask about it (spec/assistant/context.md, \"A turn names the place, route or search Maps shows as its selected object only while Maps is in front\")", () => effect {
   const sent = effect function (screen: ScreenFacts) {
     const seen: Seen = { calls: [] }

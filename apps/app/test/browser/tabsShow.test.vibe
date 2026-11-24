@@ -23,6 +23,7 @@ it.live("showing the open tabs brings Browser's own tab list forward only when p
       const docs = try loadPage(tabs, fake.events, session, "https://docs.example.org/", "1", 1)
       try SubscriptionRef.set(fake.foreground, { ...shownBrowser, view: "" })
       const card = ports.describe(show)
+      const ownCommand = [ports.ownCommand?.(show), ports.ownCommand?.({ type: "browser_navigate", url: "https://news.example/" }), ports.ownCommand?.({ type: "browser_tab_close", all: true })]
       const applied = try promise(() => ports.execute(show, call("show")))
       const openBeforeReceipt = (try tabs.get()).layers.tabsOpen
       const shownBeforeReceipt = (try Ref.get(fake.opened)).includes("browser")
@@ -34,7 +35,7 @@ it.live("showing the open tabs brings Browser's own tab list forward only when p
       const opened = try Ref.get(fake.opened)
       const said = try Ref.get(fake.toasts)
       try Effect.try(() => assert.deepStrictEqual({
-        card, applied, openBeforeReceipt, shownBeforeReceipt, receipt,
+        card, ownCommand, applied, openBeforeReceipt, shownBeforeReceipt, receipt,
         listOpen: after.layers.tabsOpen,
         tabs: after.tabs.map((t) => t.id),
         cur: after.cur,
@@ -43,6 +44,7 @@ it.live("showing the open tabs brings Browser's own tab list forward only when p
         said,
       }, {
         card: { title: "Show open tabs", detail: "Shows the list of your open tabs in Browser. The agent does not see your tabs." },
+        ownCommand: [true, false, false],
         applied: { kind: "applied" },
         openBeforeReceipt: false,
         shownBeforeReceipt: false,
