@@ -1,0 +1,63 @@
+// spec/voice/speech.md, "A sent turn warms the phone's output, and Cloud is warmed at most once a minute for each connection, only in front, online and between turns"
+import type { Net } from "../../gen/platform__lifecycle.ts"
+import { AppLifecycle } from "../platform/lifecycle.vibe"
+import { ResidentControl } from "../platform/resident-control.vibe"
+import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
+import { VoiceConversation } from "./conversation.vibe"
+import { Speech } from "./speech.vibe"
+
+/**
+ * Warms Cloud for the resident's connection when Alpha comes to the front, the assistant sheet opens, Talk starts, a connection
+ * becomes active or Android's network comes back. Each source's first value is where it starts, not a change; the warm-up shows
+ * nothing, and the speech machine decides whether it goes.
+ */
+export const cloudWarmUpLive = Layer.effectDiscard(effect {
+  const speech = try Speech
+  const voice = try VoiceConversation
+  const foreground = try Foreground
+  const lifecycle = try AppLifecycle
+  const control = try ResidentControl
+
+  effect function warm() {
+    const session = try control.session()
+    if (session === undefined) return
+    const front = try foreground.get()
+    const app = try lifecycle.get()
+    try speech.warmCloud(session.generation, { inFront: front.visible, online: app.network !== "NetOffline", idle: app.inFlight === 0 })
+  }
+
+  fork.scoped (effect {
+    let before: ForegroundState | undefined
+    for try (const now of foreground.changes) {
+      const returned = before !== undefined && now.visible && !before.visible
+      const opened = before !== undefined && now.chat !== "closed" && before.chat === "closed"
+      before = now
+      if (returned || opened) try warm()
+    }
+  })
+  fork.scoped (effect {
+    let connected = 0
+    for try (const now of control.changes) {
+      const generation = now.phase === "Connected" ? now.generation : 0
+      const fresh = generation !== 0 && generation !== connected
+      connected = generation
+      if (fresh) try warm()
+    }
+  })
+  fork.scoped (effect {
+    let network: Net | undefined
+    for try (const app of lifecycle.changes) {
+      const back = network === "NetOffline" && app.network === "NetOnline"
+      network = app.network
+      if (back) try warm()
+    }
+  })
+  fork.scoped (effect {
+    let starts: number | undefined
+    for try (const now of voice.changes) {
+      const started = starts !== undefined && now.starts > starts
+      starts = now.starts
+      if (started) try warm()
+    }
+  })
+})

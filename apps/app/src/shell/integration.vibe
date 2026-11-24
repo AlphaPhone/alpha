@@ -14,6 +14,7 @@ import { active } from "../../gen/voice__conversation.effect.vibe"
 import { busy, holdsClip } from "../../gen/voice__dictation.effect.vibe"
 import { Dictation } from "../voice/dictation.vibe"
 import { VoiceConversation } from "../voice/conversation.vibe"
+import { cloudWarmUpLive } from "../voice/warmup.vibe"
 import { executorsLive } from "./compose/executors.vibe"
 import { fillsLive, idleFill } from "./compose/fills.vibe"
 import { Foreground } from "./foreground.vibe"
@@ -159,6 +160,6 @@ export const integrationLive = Layer.effectDiscard(effect {
 
 /**
  * The last step of the runtime: the late ports filled from their providers, the idle facts of Telephony and Account, every
- * area's device executors, Notes' hand-overs and the shell's followers.
+ * area's device executors, Notes' hand-overs, the shell's followers and voice's Cloud warm-up.
  */
-export const shellIntegration = Layer.mergeAll(fillsLive, idleFill, executorsLive, handoffsLive, integrationLive)
+export const shellIntegration = Layer.mergeAll(fillsLive, idleFill, executorsLive, handoffsLive, integrationLive, cloudWarmUpLive)

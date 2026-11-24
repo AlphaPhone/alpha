@@ -113,18 +113,28 @@ pure def lawALatchedReplyChannelRefusesVoice(s: SpeechChains, recorderOpen: bool
 > As the owner, I want the first words of a reply to play as soon as they exist, so that talking to
 > Alpha feels immediate.
 
-### A sent turn warms the phone's output, and Cloud is warmed at most once a minute for each connection
+### A sent turn warms the phone's output, and Cloud is warmed at most once a minute for each connection, only in front, online and between turns
 
 The phone's warm-up is advisory and its failure is ignored. Cloud is warmed when Alpha comes to the
-front, the sheet opens, Talk is pressed or a connection becomes active.
+front, the assistant sheet opens, Talk starts, a connection becomes active or the phone's network
+comes back. It is skipped while Alpha is not in front, while Android confirms the phone is offline
+and while a turn is in flight, so it never queues ahead of the owner's own request. A warm-up shows
+nothing and its failure is ignored.
 
 ```quint
 pure val cloudWarmEveryMs = 60000
-pure def canWarmCloud(s: SpeechChains, connection: int, now: int): bool =
-  connection >= 1 and now >= s.now and (connection != s.warmConnection or now - s.warmedAt >= cloudWarmEveryMs)
-pure def warmCloud(s: SpeechChains, connection: int, now: int): SpeechChains = { ...s, warmConnection: connection, warmedAt: now, now: now }
+pure def canWarmCloud(s: SpeechChains, connection: int, now: int, inFront: bool, online: bool, idle: bool): bool =
+  connection >= 1 and now >= s.now and inFront and online and idle
+    and (connection != s.warmConnection or now - s.warmedAt >= cloudWarmEveryMs)
+pure def warmCloud(s: SpeechChains, connection: int, now: int, inFront: bool, online: bool, idle: bool): SpeechChains =
+  { ...s, warmConnection: connection, warmedAt: now, now: now }
 pure val connectionValues = Set(1, 2)
 pure val nowValues = Set(0, 30000, 60000, 120000)
+pure val inFrontValues = Set(false, true)
+pure val onlineValues = Set(false, true)
+pure val idleValues = Set(false, true)
+pure def lawCloudIsWarmedOnlyInFrontOnlineAndBetweenTurns(s: SpeechChains, connection: int, now: int, inFront: bool, online: bool, idle: bool): bool =
+  canWarmCloud(s, connection, now, inFront, online, idle) implies (inFront and online and idle)
 pure def stepCloudIsWarmedAtMostOnceAMinutePerConnection(before: SpeechChains, via: str, after: SpeechChains): bool =
   (via == "warmCloud" and before.warmConnection == after.warmConnection and before.warmConnection >= 1)
     implies after.warmedAt - before.warmedAt >= cloudWarmEveryMs
