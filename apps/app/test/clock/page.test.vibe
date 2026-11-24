@@ -127,11 +127,11 @@ describe("Workflow notice questions (spec/clock/workflowNotices.md, \"Story: Ret
       const finalState = try machine.get()
       try Effect.try(() => assert.deepStrictEqual(
         {
-          first: first === undefined ? undefined : { name: first.name, text: first.text, notice: first.notice }, cancelled, stale, changed, kept,
+          first: first === undefined ? undefined : { name: first.name, question: first.question, text: first.text, notice: first.notice }, cancelled, stale, changed, kept,
           other, fresh, consumed, again, last, reviews: assistant.reviews.length, opened: runs.opened, state: [finalState.discards, finalState.composed],
         },
         {
-          first: { name: "Alpha Phone notification", text: "Approve the weekly digest\nStep 2 waits for you", notice: { id: "workflow-tap:w1", revision: "n1" } },
+          first: { name: "Workflow step", question: "Help me decide on this workflow step.", text: "Approve the weekly digest\nStep 2 waits for you", notice: { id: "workflow-tap:w1", revision: "n1" } },
           cancelled: [{ token: "w1", discard: true }], stale: undefined, changed: "QuestionChanged", kept: "w2",
           other: undefined, fresh: { id: "workflow-tap:w2", revision: "n2" }, consumed: true, again: false,
           last: { token: "w2", noticeRevision: "n2" }, reviews: 4, opened: [], state: [1, 1],
