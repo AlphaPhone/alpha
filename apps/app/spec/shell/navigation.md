@@ -322,6 +322,20 @@ pure def alwaysHomeKeepsItsBar(s: Nav): bool = keepsItsBar(s.app == "", s.chat)
 pure def sometimesVoiceOverConversation(s: Nav): bool = s.voice and s.chat == Full
 ```
 
+### The app in front opened again keeps voice and its revision, and a page inside Browser is not a new screen
+
+Opening the app already in front again, as Browser is when an applied open loads a page in the tab
+it shows, changes neither voice nor the revision. A later page of that tab (a redirect, a load that
+fails late, a page the agent caused) is inside Browser and does not reach navigation at all. So Talk
+running over Browser keeps running through them; the next turn carries the page shown as it is sent
+(spec/assistant/context.md). This rule says nothing of an app opened over another one.
+
+```quint
+pure def stepReopeningTheAppInFrontKeepsVoiceAndItsRevision(before: Nav, via: str, after: Nav): bool =
+  (via == "openApp" and before.app == after.app) implies (after.voice == before.voice and after.revision == before.revision)
+pure def sometimesVoiceOverAnOpenApp(s: Nav): bool = s.voice and s.app != ""
+```
+
 ### On Phone, Messages and Contacts the app's own bar stands in for the dock until a conversation opens
 
 The comms apps draw their own bar where the assistant's input would rest (PRD AC-01), so the dock

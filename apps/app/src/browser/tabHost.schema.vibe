@@ -17,6 +17,7 @@ export schema StateChanged {
   readonly private?: boolean
   readonly surfaceResumed?: boolean
   readonly externalOnly?: boolean
+  readonly elsewhereUrl?: string
 }
 
 /** A pop-up or `target=_blank` link the host opened as a tab. */

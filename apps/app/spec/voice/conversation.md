@@ -9,7 +9,7 @@ and each failure as events.
 
 ## Domain
 
-### A conversation holds what it shows, its route and duplex, the speaker, its quiet retries, its notice, its retirement and any screen the agent claimed
+### A conversation holds what it shows, its route and duplex, the speaker, its quiet retries, its notice, its retirement, any screen the agent claimed and the one text it may send by voice
 
 ```quint
 type Route = Device | Cloud | Direct
@@ -21,11 +21,13 @@ type Notice = NoNotice | PausedForCall | CallHoldsMicrophone | CannotInterrupt |
 type ScreenClaim = NoClaim | ClaimCommitted | ClaimPinned
 type Conversation = { shown: Shown, route: Route, duplex: Duplex, cloudDisclosed: bool, cartesiaDisclosed: bool,
   muted: bool, muteOffered: bool, retries: int, notice: Notice, mediaUnconfirmed: bool, starts: int,
-  typedAsked: int, typedSent: int, typedDropped: int, typedWaiting: bool, claim: ScreenClaim, claimsRefused: int, pins: int, kept: int, closedByHide: bool }
+  typedAsked: int, typedSent: int, typedDropped: int, typedWaiting: bool, claim: ScreenClaim, claimsRefused: int, pins: int, kept: int, closedByHide: bool,
+  textBound: bool, spokenSends: int }
 pure val initial: Conversation = { shown: Off, route: Device, duplex: TakesTurns, cloudDisclosed: false, cartesiaDisclosed: false,
   muted: false, muteOffered: false, retries: 0, notice: NoNotice, mediaUnconfirmed: false, starts: 0,
-  typedAsked: 0, typedSent: 0, typedDropped: 0, typedWaiting: false, claim: NoClaim, claimsRefused: 0, pins: 0, kept: 0, closedByHide: false }
-pure def retiredAs(shown: Shown, c: Conversation): Conversation = { ...c, shown: shown, muted: false, claim: NoClaim }
+  typedAsked: 0, typedSent: 0, typedDropped: 0, typedWaiting: false, claim: NoClaim, claimsRefused: 0, pins: 0, kept: 0, closedByHide: false,
+  textBound: false, spokenSends: 0 }
+pure def retiredAs(shown: Shown, c: Conversation): Conversation = { ...c, shown: shown, muted: false, claim: NoClaim, textBound: false }
 pure def running(s: Shown): bool =
   s == Starting or s == Listening or s == Thinking or s == Speaking or s == Retrying
 pure def startable(s: Shown): bool = s == Off or s == Failed
@@ -65,7 +67,7 @@ pure def canStart(c: Conversation, route: Route, echoCancelled: bool, live: bool
   startable(c.shown) and not(c.mediaUnconfirmed) and admitted and not(callActive) and disclosedFor(c, route)
 pure def start(c: Conversation, route: Route, echoCancelled: bool, live: bool, muteOffered: bool, admitted: bool, callActive: bool): Conversation = {
   val duplex = duplexOf(echoCancelled, live)
-  { ...c, shown: Starting, route: route, duplex: duplex, muted: false, muteOffered: muteOffered, retries: 0, claim: NoClaim, closedByHide: false,
+  { ...c, shown: Starting, route: route, duplex: duplex, muted: false, muteOffered: muteOffered, retries: 0, claim: NoClaim, closedByHide: false, textBound: false,
     notice: if (duplex == TakesTurns) CannotInterrupt else NoNotice, starts: c.starts + 1 }
 }
 pure def canStartRefusedForCall(c: Conversation): bool = startable(c.shown)
@@ -195,7 +197,7 @@ pure def canSessionFailed(c: Conversation, transient: bool, longWait: bool): boo
 pure def sessionFailed(c: Conversation, transient: bool, longWait: bool): Conversation =
   if (c.route == Direct or not(transient)) { ...retiredAs(Failed, c), notice: NoNotice }
   else if (c.retries >= maxQuietRetries or longWait) { ...retiredAs(Off, c), notice: VoicePaused, retries: 0 }
-  else { ...c, shown: Retrying, retries: c.retries + 1, claim: NoClaim }
+  else { ...c, shown: Retrying, retries: c.retries + 1, claim: NoClaim, textBound: false }
 pure def canRetryWaited(c: Conversation, chatCurrent: bool): bool = c.shown == Retrying
 pure def retryWaited(c: Conversation, chatCurrent: bool): Conversation =
   if (chatCurrent) { ...c, shown: Starting, claim: NoClaim } else { ...retiredAs(Off, c), retries: 0 }
@@ -213,14 +215,80 @@ pure def sometimesPausedQuietly(c: Conversation): bool = c.notice == VoicePaused
 
 ### A reply that needs review stops voice with the microphone off and says it waits in the chat
 
-Nothing streamed before it is spoken.
+A spoken turn's reply is reviewed as a typed one is (`spec/assistant/review.md`): its cards,
+receipts and notices join the chat the voice went to while that chat is the one shown. A reply
+that leaves a card there needs review, unless the card is the one text of the next story. Nothing
+streamed before it is spoken. Settling a card in the chat while voice waits ends voice.
 
 ```quint
 pure def canReviewNeeded(c: Conversation): bool = c.shown == Thinking or c.shown == Speaking
-pure def reviewNeeded(c: Conversation): Conversation = { ...c, shown: AwaitingReview, notice: ReviewInChat, claim: NoClaim }
+pure def reviewNeeded(c: Conversation): Conversation = { ...c, shown: AwaitingReview, notice: ReviewInChat, claim: NoClaim, textBound: false }
 pure def canReviewSettled(c: Conversation): bool = c.shown == AwaitingReview
 pure def reviewSettled(c: Conversation): Conversation = retiredAs(Retiring, c)
 pure def sometimesWaitingForReview(c: Conversation): bool = c.shown == AwaitingReview
+```
+
+## Story: Send a text I reviewed by saying so
+
+> As the owner talking to Alpha, I want to send a text it wrote for me by saying "Send this text"
+> while its one review card shows, and nothing else ever to go out by voice, so that I can text
+> without touching the phone and still see exactly what is sent.
+
+### A reply whose only card is one addressed text keeps voice listening and says the text is ready
+
+A text card is addressed when it sends to the number or numbers it shows (`sms_send`, or an
+`sms_compose` to a number that is not a draft); one to a contact name still has its recipient
+chosen on the phone and is never sent by voice. Every text card shows whether "Ask before Alpha
+acts" is on or off (a text is always reviewed, `spec/assistant/review.md`), and every addressed
+text card reads its button Send. When a spoken turn's reply leaves one addressed text card that
+answers that turn and no other card, and the owner can see it as the reply settles (the chat is
+open on that conversation, on a visible, non-private page with no layer over it and nothing
+holding the phone, and it is the only live addressed text card there), voice keeps listening,
+the conversation binds the card, and the reply is said as "The message is ready for review." in
+place of the agent's words, which never name the phrase: a reply that said "Send this text"
+would make the owner's next words look like its own echo. Any other card, or that card where
+the owner cannot see it, needs review as the story above says. The card adds no words of its
+own for voice.
+
+```quint
+pure def canTextOffered(c: Conversation): bool = c.shown == Listening or c.shown == Thinking or c.shown == Speaking
+pure def textOffered(c: Conversation): Conversation = { ...c, textBound: true }
+pure def alwaysATextIsBoundOnlyWhileVoiceRuns(c: Conversation): bool = c.textBound implies running(c.shown)
+pure def sometimesATextWaitsForTheWord(c: Conversation): bool = c.textBound and c.shown == Listening
+```
+
+### Saying the send phrase sends the bound card once, as its Send tap does, only as the next thing said and only while it is still the one live text shown in that conversation
+
+The owner's next spoken turn ends the binding, whatever it says. It sends the card only when the
+whole turn is the phrase ("Send this text", "Send this message", "Send this" or "Send it",
+optionally after "OK", "yes", "um" or "hmm" and with "please", "I want to", "I'd like to" or
+"let's" before "send") and the bound card is, as it is said, of the same Talk, in the
+conversation the chat shows, still live and unexpired under the screen it was drawn for (a
+changed screen replaces it), the only live addressed text card in that open chat on a
+visible, non-private screen with no layer over it and nothing holding the phone, and no
+approval of it is under way. The send is the card's own approval (`spec/assistant/approvals.md`),
+with every check a tap has, and Alpha says its receipt. The phrase is answered on the phone and
+never reaches the agent: when no card was bound and shown it says "There is no text ready to
+send.", and when the approval did not finish it says "Check Messages before trying to send
+again." A
+"Send it" or "Send this" with no card bound, and any other words, go to the agent as an ordinary
+turn, and a bound card still waits for a tap. A tap on Send works throughout, and a card sent by
+tap or by voice is never sent again.
+
+```quint
+pure def canSpokenTurn(c: Conversation, sendPhrase: bool, cardShown: bool): bool = running(c.shown)
+pure def spokenTurn(c: Conversation, sendPhrase: bool, cardShown: bool): Conversation =
+  { ...c, textBound: false, spokenSends: c.spokenSends + (if (sendPhrase and c.textBound and cardShown) 1 else 0) }
+pure def stepOnlyTheBoundShownTextIsSentBySaying(before: Conversation, via: str, after: Conversation): bool =
+  after.spokenSends != before.spokenSends implies
+    (via == "spokenTurn" and before.textBound and running(before.shown) and not(after.textBound) and after.spokenSends == before.spokenSends + 1)
+pure def stepTheNextSpokenTurnEndsTheBinding(before: Conversation, via: str, after: Conversation): bool =
+  via == "spokenTurn" implies not(after.textBound)
+pure def stepOnlyATurnsReplyBindsAText(before: Conversation, via: str, after: Conversation): bool =
+  (after.textBound and not(before.textBound)) implies via == "textOffered"
+pure def sometimesSentBySaying(c: Conversation): bool = c.spokenSends >= 1 and running(c.shown) and not(c.textBound)
+pure val weight_textOffered = 3
+pure val weight_spokenTurn = 3
 ```
 
 ## Story: Mute the speaker without ending voice
@@ -338,7 +406,11 @@ A turn claims one destination while voice runs and its chat is current; a second
 from a chat that is no longer current, is refused and leaves the first alone. The screen pins its
 context when it commits. Voice continues there only when the change was delivered, pinned and is
 still exactly what is shown; an undelivered, unpinned or changed screen retires voice. Any
-navigation by the owner, or by anything but the claim, retires voice as leaving does.
+navigation by the owner, or by anything but the claim, retires voice as leaving does. A new page
+inside the Browser tab in front (an applied open loading in that tab, a redirect, a load that fails
+late) is not a navigation and keeps voice on (spec/shell/navigation.md, "The app in front opened
+again keeps voice and its revision, and a page inside Browser is not a new screen"); the next turn
+carries the page shown as it is sent.
 
 ```quint
 pure def canClaimScreen(c: Conversation, chatCurrent: bool): bool = running(c.shown)

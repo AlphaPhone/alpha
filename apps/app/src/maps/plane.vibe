@@ -4,7 +4,7 @@ import { type Guidance, Machine as GuidanceMachine } from "../../gen/maps__guida
 import { Machine as ScreenMachine } from "../../gen/maps__screen.effect.vibe"
 import { mode, type Screen } from "../../gen/maps__screen.effect.vibe"
 import { MapsProvider, type MapsTile } from "./cloud.vibe"
-import { MapsContent, type MapsContentState } from "./content.vibe"
+import { MapsContent, type MapsContentState, shownOf } from "./content.vibe"
 import { MapsScreen } from "./screen.vibe"
 import type { MapsFailure } from "./failure.vibe"
 import { viewportArea } from "./geometry.vibe"
@@ -48,7 +48,7 @@ export interface PlaneDrawing {
 export function drawingOf(screen: Screen, guidance: Guidance, c: MapsContentState): PlaneDrawing {
   const guiding = guidance.phase !== "NotGuiding" && c.guidance !== undefined
   const view = mode(screen)
-  const shown = c.shown && c.shown.id === screen.choiceId ? c.shown : undefined
+  const shown = shownOf(screen, c)
   const routes = c.routes.run === screen.routeRun ? c.routes.routes : []
   const results = c.results.run === screen.queryRun ? c.results.places : []
   const candidates = c.originResults.run === screen.originRun ? c.originResults.places : []

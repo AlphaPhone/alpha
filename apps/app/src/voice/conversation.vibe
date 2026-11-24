@@ -1,4 +1,4 @@
-// spec/voice/conversation.md, "Story: Start talking only when Alpha can listen safely"; spec/voice/conversation.md, "Story: Hear my turn end at the right moment"; spec/voice/conversation.md, "Story: Keep voice going through a passing failure"; spec/voice/conversation.md, "Story: Review what voice is about to do"; spec/voice/conversation.md, "Story: Mute the speaker without ending voice"; spec/voice/conversation.md, "Story: End voice cleanly, and never lose what I type"; spec/voice/conversation.md, "An open microphone ends a turn at the first pause and a 400 ms hold interrupts; Cloud streaming waits 400 ms after its final; Stop sends no heard report"; spec/voice/speech.md, "An email draft is said as one line, by whether its card was validated or the action failed; other action replies drop IDs and asides unless I asked for them word for word"; spec/voice/conversation.md, "Story: Keep talking on a screen the agent opens for me"; spec/voice/conversation.md, "Voice closed by hiding the page says once, when the page returns, that a call paused it if a call was live then or since; a plain app switch says nothing"; spec/voice/speech.md, "A reading the owner starts first retires a running voice conversation and waits for its replies to stop"; spec/voice/acknowledgement.md, "Story: Hear that Alpha is working on it, never over its answer"; spec/voice/conversation.md, "A Cloud stream listens, speaks the replies and the cue and mutes the speaker on one relay session, and only voice retiring ends it"; spec/assistant/context.md, "Every assistant request carries the capabilities this phone advertises of those the agent offered, and none when it offered none"; spec/assistant/context.md, "A spoken turn carries the screen context a typed turn sent at that moment would"; spec/voice/conversation.md, "Out of plan allowance and credits ends voice quietly as Stop does, and the chat gets the one line"; spec/assistant/reply.md, "Spent credits that Cloud named with its own code is the one out-of-funds line, with Manage plan"
+// spec/voice/conversation.md, "Story: Start talking only when Alpha can listen safely"; spec/voice/conversation.md, "Story: Hear my turn end at the right moment"; spec/voice/conversation.md, "Story: Keep voice going through a passing failure"; spec/voice/conversation.md, "Story: Review what voice is about to do"; spec/voice/conversation.md, "Story: Mute the speaker without ending voice"; spec/voice/conversation.md, "Story: End voice cleanly, and never lose what I type"; spec/voice/conversation.md, "An open microphone ends a turn at the first pause and a 400 ms hold interrupts; Cloud streaming waits 400 ms after its final; Stop sends no heard report"; spec/voice/speech.md, "An email draft is said as one line, by whether its card was validated or the action failed; other action replies drop IDs and asides unless I asked for them word for word"; spec/voice/conversation.md, "Story: Keep talking on a screen the agent opens for me"; spec/voice/conversation.md, "Voice closed by hiding the page says once, when the page returns, that a call paused it if a call was live then or since; a plain app switch says nothing"; spec/voice/speech.md, "A reading the owner starts first retires a running voice conversation and waits for its replies to stop"; spec/voice/acknowledgement.md, "Story: Hear that Alpha is working on it, never over its answer"; spec/voice/conversation.md, "A Cloud stream listens, speaks the replies and the cue and mutes the speaker on one relay session, and only voice retiring ends it"; spec/assistant/context.md, "Every assistant request carries the capabilities this phone advertises of those the agent offered, and none when it offered none"; spec/assistant/context.md, "A spoken turn carries the screen context a typed turn sent at that moment would"; spec/voice/conversation.md, "Out of plan allowance and credits ends voice quietly as Stop does, and the chat gets the one line"; spec/voice/conversation.md, "A reply whose only card is one addressed text keeps voice listening and says the text is ready"; spec/voice/conversation.md, "Saying the send phrase sends the bound card once, as its Send tap does, only as the next thing said and only while it is still the one live text shown in that conversation"; spec/assistant/reply.md, "Spent credits that Cloud named with its own code is the one out-of-funds line, with Manage plan"
 import { readReplyStream } from "@elizaos/agent/client"
 import type { AssistantCapture, AssistantListenHandlers, CloudStreamingSpeech } from "@elizaos/os/bridges/voice"
 import { VOICE_TRANSCRIPT_STREAM, createLiveVoiceSession, defaultVoiceProfile, type CaptureEvents, type LiveVoiceSession, type SpeakerEvents, type VoiceProfile, type VoiceReply, type VoiceSessionPorts } from "@elizaos/agent/voice"
@@ -25,7 +25,8 @@ import { Listener, type InvocationScreen } from "./listener.vibe"
 import { ClefTurnAnswer, EndOfTurnScore, LiveCaptureEnded, LiveCaptureStarted, LiveCaptureStatus, RecordingClip, RecordingStarted, TranscriptReply, VoiceTurnReply } from "./native.schema.vibe"
 import { VoiceRoute, attemptFailed, type VoiceAccount } from "./route.vibe"
 import { Speech, SpeechNotStopped, type SpeechInterrupted, type SpeechRefused, type SpeechUnavailable } from "./speech.vibe"
-import { planReply, replyActionOf, spokenLineOf } from "./spoken-text.ts"
+import { TEXT_READY, planReply, replyActionOf, spokenLineOf } from "./spoken-text.ts"
+import { talkText, type TalkReview, type TalkText } from "./talk-text.vibe"
 import { cloudStreaming } from "./stream.vibe"
 import { transcription } from "./transcription.vibe"
 import { gateRecording } from "./vad.vibe"
@@ -44,6 +45,8 @@ export interface VoiceStart {
   readonly chatCurrent: () => boolean
   /** Voice ended out of plan allowance and credits: post the one out-of-funds line to the chat it went to. */
   readonly outOfFunds?: () => void!!
+  /** The chat the turns go to, which reviews their cards. */
+  readonly review?: TalkReview
 }
 
 /** The voice assistant: listens, sends each finished turn by itself, speaks the reply and can be interrupted. */
@@ -388,10 +391,9 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
       throw new Error("The agent's voice reply failed.")
     }
     if (outcome.kind === "Done") {
-      const awaitingReview = "awaitingReview" in outcome && outcome.awaitingReview === true
       const cloudCode = "cloudCode" in outcome && typeof outcome.cloudCode === "string" ? outcome.cloudCode : undefined
       const done: VoiceTurnReply = {
-        messageId: outcome.messageId, text: outcome.text, ...(outcome.action === undefined ? {} : { action: outcome.action }), ...(awaitingReview ? { awaitingReview } : {}),
+        messageId: outcome.messageId, text: outcome.text, userMessageId: outcome.userMessageId, actionResults: outcome.actionResults, ...(outcome.action === undefined ? {} : { action: outcome.action }),
         ...(outcome.failureKind === undefined ? {} : { failureKind: outcome.failureKind }), ...(cloudCode === undefined ? {} : { cloudCode }),
       }
       return done
@@ -405,7 +407,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     return resent
   }
 
-  function ports(start: VoiceStart, route: Route, sessionId: string, liveCapture: boolean, streamed: StreamSession | undefined): VoiceSessionPorts {
+  function ports(start: VoiceStart, route: Route, sessionId: string, liveCapture: boolean, streamed: StreamSession | undefined, text: TalkText): VoiceSessionPorts {
     let captureId = newId()
     let opened: CaptureEvents | undefined
     const capture = {
@@ -473,6 +475,12 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
       send: (turn: TurnBody, signal: AbortSignal) => runPromise(effect {
         try latency.endpointed("LongGap")
         try latency.mark("Request")
+        // spec/voice/conversation.md, "Saying the send phrase sends the bound card once …": the send phrase is answered here, never by the agent.
+        const local = try text.heard(turn.text)
+        if (local !== undefined) {
+          const answered: VoiceReply = { messageId: `voice-review:${turn.clientMessageId}`, text: local }
+          return answered
+        }
         if (route === "Device") try speech.warmDevice()
         const ack = try Effect.provideService(acknowledgement(), Speech, speech)
         cue = ack
@@ -499,7 +507,15 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
           try fundsStop()
           throw new Error("The agent's voice reply failed.")
         }
-        if (reply.awaitingReview === true) {
+        // spec/voice/conversation.md, "A reply that needs review …": the reply's cards join the chat; one addressed text card alone keeps voice listening.
+        const cards = try text.replied(reply.userMessageId, reply.actionResults === undefined || reply.actionResults.length > 0, turn.text)
+        if (cards === "TextBound") {
+          try ack.idle()
+          if (cue === ack) cue = undefined
+          const ready: VoiceReply = { messageId: reply.messageId, text: TEXT_READY }
+          return ready
+        }
+        if (cards === "Review") {
           try ack.cancel()
           if (cue === ack) cue = undefined
           try send({ type: "reviewNeeded" })
@@ -551,7 +567,8 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     const liveRoute = try liveRouteNow(route)
     const streamed = route === "Cloud" && liveRoute ? (try openStream(sessionId)) : undefined
     const session = createLiveVoiceSession({
-      ...ports(start, route, sessionId, liveRoute, streamed),
+      // A retried session is a new one: it binds no text the earlier one held (spec/voice/conversation.md).
+      ...ports(start, route, sessionId, liveRoute, streamed, talkText(held, start.review)),
       sessionId,
       subscribe: (listen) => {
         listeners.add(listen)

@@ -182,3 +182,40 @@ it.live("moving a file keeps both names when the destination has one, and says h
     })
   }
 })
+
+it.live("Files opened at Downloads shows the Download folder (spec/files/browser.md, \"Story: Walk my folders and categories\")", () => effect {
+  provide files(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      try Effect.forkScoped(browser.visit("downloads"))
+      const shown = try until((s) => s.place.tag === "InFolder" && s.listing === "Complete")
+      try Effect.try(() => assert.deepStrictEqual(
+        { place: shown.place, rows: shown.rows.map((r) => r.folder) },
+        { place: { tag: "InFolder", path: "Download", volume: "" }, rows: ["Download", "Download"] },
+      ))
+    })
+  }
+})
+
+it.live("Files opened at Downloads on a device with no Download folder stays in the Downloads category (spec/files/browser.md, \"Story: Walk my folders and categories\")", () => effect {
+  const native = device((plugin, method) =>
+    plugin !== "AlphaFiles" ? undefined
+    : method === "storageState" ? granted
+    : method === "storageList" ? { status: "missing" }
+    : method === "storageCategory" ? { status: "ready", count: 0 }
+    : method === "storageTrashList" ? { status: "ready", items: [] }
+    : { status: "ready" })
+  provide files(native, false) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      try Effect.forkScoped(browser.visit("downloads"))
+      try until((s) => s.place.tag === "InCategory" && s.listing === "Complete")
+      try Effect.sleep("50 millis")
+      const settled = try browser.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        { place: settled.place, rows: settled.rows.length, loading: settled.loading },
+        { place: { tag: "InCategory", category: "Downloads" }, rows: 0, loading: false },
+      ))
+    })
+  }
+})

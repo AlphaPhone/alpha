@@ -66,6 +66,7 @@ function pageOf(event: StateChanged, prior: TabPage): TabPage {
     canForward: event.canForward === true,
     externalOnly: event.externalOnly === true,
     problem: event.error ?? "",
+    elsewhere: event.elsewhereUrl ?? "",
     ...pageFacts(url),
   }
 }

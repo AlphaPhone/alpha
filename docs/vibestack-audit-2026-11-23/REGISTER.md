@@ -9,9 +9,9 @@ Alpha still pinned eliza `vibestack-dp` 6451775c35a at that commit; rows about u
 | Side | Rows | Open | Partly fixed | Needs a build or device | Recorded in open-items | Fixed | Refuted | Retired | Not applicable |
 |---|---|---|---|---|---|---|---|---|---|
 | Alpha app, Android and tooling | 450 | 40 | 64 | 9 | 204 | 117 | 10 | 4 | 2 |
-| Upstream eliza | 278 | 138 | 42 | 6 | 20 | 36 | 4 | 1 | 31 |
+| Upstream eliza | 278 | 137 | 42 | 6 | 20 | 37 | 4 | 1 | 31 |
 
-The port is not at parity. 113 Alpha rows and 186 upstream rows are still live, and
+The port is not at parity. 113 Alpha rows and 185 upstream rows are still live, and
 224 more are open but already written down in
 [`../vibestack-open-items.md`](../vibestack-open-items.md) ([`REGISTER-recorded.md`](REGISTER-recorded.md)). Closed rows are in
 [`REGISTER-closed.md`](REGISTER-closed.md).
@@ -555,7 +555,7 @@ unblock the phone.
   - Now: alpha-vs cloud/deployment.json still has shipped.production api https://api.eliza.app. cloud/generated/client-deployment.ts:5 still has alphaCloudCutover = false. account/entitlement.vibe:123-131 uses the vibestack checkEntitlement, and a refusal is SignedInvalid. Upstream client/entitlement.vibe:40,134 needs ver >= 3. No open-items bullet names the wire mismatch: lines 180 and 129 mention the cutover only for saved keys and drafts.
   - To do: Point the vibestack build only at a vibestack-wire Cloud: flip cloud/deployment.json to the Alpha Cloud hosts and regenerate client-deployment.ts, cutting app and Cloud over together. Record it in docs/vibestack-open-items.md. If a develop Cloud must still be served, add a develop-wire reader in account/billing.vibe and entitlement.vibe.
 
-### High (24)
+### High (23)
 
 **Android**
 
@@ -598,9 +598,6 @@ unblock the phone.
 - **E-027** (open; [`eliza-cloud-services.md`](eliza-cloud-services.md)) eliza-cloud-services-03: Linked Google Calendar sync (sync-v1 capabilities and event GET/POST/PATCH/DELETE) has no Cloud route while callers remain.
   - Now: spec/cloud/services/google/calendar.md:11 still says '`sync-v1` is gone'; no sync-v1 route in packages/cloud/src; calendar.md:75-97 event routes still refuse a recurrence rule. Upstream packages/plugin-calendar/src/linked-sync/google-port.vibe:40-60 (calendarSyncHttp, used by linked-sync/index.vibe and plugin/linked-routes.vibe under spec/calendar/linkedSync.md) still builds /api/v1/eliza/google/calendar/sync-v1/ paths. Alpha Android still calls them: AlphaConnectionPlugin.java:206, CalendarSyncConsent.java:11, connection/CloudConnectionPolicy.java:159-161, CalendarSyncBridge.java. docs/vibestack-open-items.md:346 only asks the owner whether to retire CalendarSyncBridge/AlphaCalendar.sync a…
   - To do: Upstream: either restore the five sync-v1 routes in packages/cloud/src/services/google/calendar.vibe with a rule in spec/cloud/services/google/calendar.md, or move plugin-calendar linked-sync to calendar/events and add recurrence + exact-reference reads; then retire Alpha's Android sync-v1 callers (owner item at open-items:346).
-- **E-029** (open; [`eliza-device-proposals.md`](eliza-device-proposals.md)) eliza-device-proposals-01: a receipt saying the phone never dispatched the request does not settle it as "nothing ran" (client sends not_dispatched, server expects DEVICE_NOT_DISPATCHED).
-  - Now: Unchanged in eliza-vs 0d7436199. Server: packages/agent/src/device-actions/operations.schema.vibe:92 `notDispatchedCode = "DEVICE_NOT_DISPATCHED"`, :105 codeOf compares only to it. Spec: spec/agent/deviceActions/operations.md:415 notDispatchedFailure, :508 and :516-518. Client: packages/agent/src/client/device-execution.vibe:86 `NOT_DISPATCHED = "not_dispatched"`, sent at :291. The test adapter still translates it: packages/agent/test/device-execution.test.vibe:80. Alpha: apps/app/src/assistant/review.vibe:177-184 wireReceipt passes `code` through unchanged. Calendar (src/calendar/operations.vibe:238-348), Clock (src/clock/operations.vibe:216-286), Notes (src/notes/operations.vibe:109,133)…
-  - To do: Upstream: export NOT_DISPATCHED as the wire code "DEVICE_NOT_DISPATCHED" in packages/agent/src/client/device-execution.vibe:86 and remove the translation at packages/agent/test/device-execution.test.vibe:80. Interim fix on the Alpha side: map code "not_dispatched" to "DEVICE_NOT_DISPATCHED" in wireReceipt (apps/app/src/assistant/review.vibe:181), and add a rule for it to apps/app/spec/assistant.
 - **E-031** (open; [`eliza-device-proposals.md`](eliza-device-proposals.md)) eliza-device-proposals-03: an agent store enrolls one device key for one owner, once; a new key, another owner, or any registration after a revoke is refused for good.
   - Now: Unchanged. spec/agent/deviceActions/index.md:31-39 ("another key, another owner or a revoked enrollment is refused"), canRegisterDevice at :60, stepRevokedStaysRevoked. packages/agent/src/device-actions/enrollment.vibe:62 sets the owner from launch.account?.userId ?? ownerEntityId, and :96-97 answers 409 registration_refused. packages/agent/test/device-enrollment.test.vibe:65 and :86-87 still assert 409 for another key and for re-enrolling after a revoke. Alpha: apps/app/src/account/enrollment.vibe:193-198 treats registration_refused as a plain failure (fail(connection)), with no recovery. This bites at least when a phone enrolls under the local account and the Cloud account user id arrives…
   - To do: In spec/agent/deviceActions/index.md, change "A device enrolls under its own key…" so that an owner-authenticated registration with a new key, or after a revoke, replaces the enrollment and retires open offers as revoke does. Implement it in canRegisterDevice/registerDevice and in packages/agent/src/device-actions/enrollment.vibe and store.vibe changeEnrollment, and update device-enrollment.test.vibe:65 and :86-87.

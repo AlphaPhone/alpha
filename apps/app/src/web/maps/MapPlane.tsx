@@ -2,6 +2,7 @@
 import * as maplibregl from "maplibre-gl";
 import type { GeoJSONSource, Map as MapLibre, StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import mapWorker from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { Compass } from "lucide-react";
 import { use, useCallback, useState } from "react";
 import type { Basemap } from "../../../gen/maps__plane.ts";
@@ -11,6 +12,12 @@ import type { PlaneDrawing } from "../../maps/plane.vibe";
 import { Button } from "../components/ui/index.ts";
 import { tileOf, watch } from "./actions.ts";
 import { MapsDrawn } from "./map-drawing.ts";
+
+// MapLibre looks for its worker beside its own module, which neither Vite's prebundled dependency nor the built page
+// keeps: the worker is bundled as one of the page's own scripts and MapLibre is told where it is. One worker, as the
+// phone's map always ran with: MapLibre otherwise starts one per few cores, each loading the whole worker bundle.
+maplibregl.setWorkerUrl(mapWorker);
+maplibregl.setWorkerCount(1);
 
 const WORLD_STYLE = "https://tiles.openfreemap.org/styles/bright";
 const OPENING: { center: [number, number]; zoom: number } = { center: [-98, 39], zoom: 2.6 };
@@ -160,12 +167,20 @@ export function MapPlane(props: MapPlaneProps) {
       return { data: tile.bytes.buffer.slice(tile.bytes.byteOffset, tile.bytes.byteOffset + tile.bytes.byteLength) };
     });
     const raster = basemap !== "WorldMap";
-    const instance = new maplibregl.Map({
-      container: node, style: styleFor(basemap, protocol, tileSize, minZoom, maxZoom), center: OPENING.center,
-      zoom: raster ? Math.max(OPENING.zoom, minZoom) : OPENING.zoom,
-      ...(raster ? { minZoom, maxZoom: Math.min(maxZoom, 22) } : {}),
-      attributionControl: false, cancelPendingTileRequestsWhileZooming: false,
-    });
+    let instance: MapLibre;
+    try {
+      instance = new maplibregl.Map({
+        container: node, style: styleFor(basemap, protocol, tileSize, minZoom, maxZoom), center: OPENING.center,
+        zoom: raster ? Math.max(OPENING.zoom, minZoom) : OPENING.zoom,
+        ...(raster ? { minZoom, maxZoom: Math.min(maxZoom, 22) } : {}),
+        attributionControl: false, cancelPendingTileRequestsWhileZooming: false,
+      });
+    } catch {
+      // A map that cannot be built, such as one without WebGL2, failed before its style loaded and not on a tile: it fails the plane, which offers Retry.
+      maplibregl.removeProtocol(protocol);
+      if (failsThePlane(false, false, false)) props.onState(generation, "PlaneFailed");
+      return;
+    }
     const painted = painter(instance, props.onPin);
     let stop: (() => void) | undefined;
     let styleLoaded = false;

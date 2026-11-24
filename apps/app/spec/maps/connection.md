@@ -88,7 +88,8 @@ pure def lawSignedOutReadSendsNothing(s: MapsConnection, opened: bool): bool =
 ### Only the newest read for the bound account installs the provider
 
 A reply names the attempt it answers. One for an older attempt, or after the
-account changed, settles nothing. A valid reply with no provider, or with no
+account changed, settles nothing, and a read retired that way before it went
+out is never sent. A valid reply with no provider, or with no
 travel mode, is the deployment not offering Maps.
 
 ```quint

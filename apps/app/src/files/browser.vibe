@@ -272,7 +272,10 @@ export const layer = Layer.effect(FilesBrowser, effect {
     try ensuring(effect {
       if (route === "downloads") {
         try read()
-        try navigate({ tag: "InFolder", path: DOWNLOAD_FOLDER, volume: "" })
+        // Files at Downloads: the Download folder, or, where the device has none yet (a browser library before its
+        // first import), the Downloads category, which shows no downloads instead of walking back up to Browse.
+        const folder = storage.list(DOWNLOAD_FOLDER, "") catch () => undefined
+        try navigate(folder?.status === "missing" ? { tag: "InCategory", category: "Downloads" } : { tag: "InFolder", path: DOWNLOAD_FOLDER, volume: "" })
       } else try read()
       try.all [Effect.orElseSucceed(settleChanges(), () => undefined), followReturns()]
       try never
