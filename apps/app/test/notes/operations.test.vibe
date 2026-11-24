@@ -1,5 +1,6 @@
 // spec/notes/organize.md, "Story: Let a workflow read the notes I selected for it"; spec/notes/organize.md, "Story: Let a workflow save the note its step wrote"; spec/notes/editor.md, "Story: Leave a note the way Back does"; spec/notes/list.md, "Story: Narrow the list to what I am looking for"
 import { assert, describe, it } from "@effect/vitest"
+import { NOT_DISPATCHED } from "@elizaos/agent/client"
 import type { StickyNote } from "@elizaos/plugin-notes/types"
 import { Machine as EditorMachine } from "../../gen/notes__editor.effect.vibe"
 import { Machine as TrashMachine } from "../../gen/notes__trash.effect.vibe"
@@ -84,7 +85,7 @@ describe("Notes device operations, Back and routes", () => {
       const ports = try operationPorts
       const revision = try promise(() => sha256Hex(JSON.stringify(["Plan", "Buy milk"])))
       const answer = try promise(() => ports.execute({ type: "read_selected_notes", notes: [{ id: "plan", revision }] }, { proposalId: "p2", operationId: "op_2", attemptId: 1 }))
-      try check(() => assert.deepStrictEqual(answer, { kind: "refused", code: "not_dispatched" }))
+      try check(() => assert.deepStrictEqual(answer, { kind: "refused", code: NOT_DISPATCHED }))
     }
   })
 
@@ -118,7 +119,7 @@ describe("Notes device operations, Back and routes", () => {
       const collection = try NotesCollection
       const answer = try promise(() => ports.execute({ type: "create_note", title: "Groceries", body: "" }, { proposalId: "p6", operationId: "op_6", attemptId: 1 }))
       const count = ((try collection.current())?.snapshot.notes ?? []).length
-      try check(() => assert.deepStrictEqual({ answer, count }, { answer: { kind: "refused", code: "not_dispatched" }, count: 1 }))
+      try check(() => assert.deepStrictEqual({ answer, count }, { answer: { kind: "refused", code: NOT_DISPATCHED }, count: 1 }))
     }
   })
 

@@ -1,6 +1,6 @@
 // spec/maps/guidance.md, "Story: Reroute the guidance I started only when my agent asks, from a fresh fix"; spec/maps/agentSurface.md, "Story: Let my agent bring Maps forward only when I can see it"; spec/maps/selectedRead.md, "Story: Let the agent see only what the Maps screen shows now"; spec/maps/delivery.md, "Story: Carry my agent's Maps requests to the phone once"; spec/maps/cards.md, "Story: Answer my agent's Maps question with one tap"
 import { assert, it } from "@effect/vitest"
-import type { ExecutorCall } from "@elizaos/agent/client"
+import { NOT_DISPATCHED, type ExecutorCall } from "@elizaos/agent/client"
 import { Machine as CardsMachine } from "../../gen/maps__cards.effect.vibe"
 import { Machine as ConnectionMachine } from "../../gen/maps__connection.effect.vibe"
 import { Machine as DeliveryMachine } from "../../gen/maps__delivery.effect.vibe"
@@ -143,7 +143,7 @@ it.live("The agent's reviewed Maps read runs once for the place its card named, 
       },
       {
         id: true, kind: "map-place", valid: true, done: ["applied", "map-place", "Pier 39", "r1"],
-        sameId: false, stale: ["refused", "not_dispatched"], card: "Share the place shown in Maps", receipt: "Shared the place shown in Maps.",
+        sameId: false, stale: ["refused", NOT_DISPATCHED], card: "Share the place shown in Maps", receipt: "Shared the place shown in Maps.",
       },
     ))
   }
