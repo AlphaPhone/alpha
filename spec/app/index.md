@@ -15,3 +15,4 @@ rules.
 - [Ask Alpha](./ask/): one conversation with the resident agent
 - [Reminders](./sample/): the sample area, which only its own journeys mount: a read, a feed, an undo window and an attempt outside
 - [Text size](./sample/size.md): the second sample, which only its own journeys mount: senders, an opening that asks the phone, the phone's signals and a page-wide effect
+- [Platform](./platform/): the world outside the page as services: the phone, the resident agent, the cloud, what the build allows and what the earlier Alpha kept

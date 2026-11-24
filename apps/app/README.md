@@ -7,12 +7,24 @@ checks this package's types, proofs, tests and page (SPEC.md, "One spec tree").
 | Piece | Is |
 |---|---|
 | `src/runtime/` | what every area is built on: `reacting`, `following`, `hearing`, `applying` and the jobs of `reactor.vibe`; `area` of `area.tsx`; Alpha's time and the attempts' keys; each screen contained, and one page per store |
-| `src/platform/` | the world as services: eliza's agent and cloud, the phone itself and its secure store, each with the layer a phone runs, which is eliza's own client of its plugin, and the one a browser runs; `plugins.vibe` lists the services of the phone's other plugins |
+| `src/platform/` | the world as services: eliza's agent and cloud, the phone itself and its secure store, each with the layer a phone runs, which is eliza's own client of its plugin, and the one a browser runs; `plugins.vibe` lists the services of the phone's other plugins, and `adoption.vibe` moves what the earlier Alpha kept into the new stores |
 | `src/areas.ts`, `src/resident.vibe` | every screen and where it is drawn; the machines that live from launch |
 | `src/shell/`, `src/ask/` | the shell (Home, the trail, Back) and Ask Alpha, over eliza's turn controller: the areas to read before writing one |
 | `test/sample/`, `spec/app/sample/` | the two sample areas, which only their own journeys mount: the reminders (a read, a feed, an undo window, an attempt outside, kept across restarts) and the text size (senders, an opening that asks the phone, the phone's signals, a page-wide effect) |
 | `test/fakes/` | the world faked once at each boundary: the agent's and the cloud's routes for a browser's fetch, and `phone.ts`, what Capacitor's runtime calls on a phone, with eliza's plugins behind it, typed by eliza's definitions |
 | `test/eliza/` | the world of a journey over eliza's real agent and cloud, and `pnpm eliza:page`; the processes themselves are `@repo/eliza-harness`'s, for the journeys `*.eliza.test.tsx` and `pnpm dev` |
+
+## What one area offers another
+
+An area never holds another's service in a cell to be filled once that area is built. What it offers is one of
+three things, and the area that offers it owns it:
+
+| Offered | As | Read by |
+|---|---|---|
+| a fact or a request another area acts on (a draft to open in Inbox, an alarm a workflow sets in Clock, a place to show in Maps, a file to share) | a resident machine of the offering area in `src/resident.vibe`, which the other area follows or tells (`following`, `tell` of `reactor.vibe`) | the machine's events and state, through the rules of both specs |
+| something drawn inside another area's screen (a Maps or Calendar card in Ask Alpha, a share sheet, a notice) | a place `<area>/<name>` in `src/areas.ts`, drawn with `alpha.slot` | the screen of the area that draws it |
+| what the phone, the agent or the cloud says (what this phone admits, the agent's live feed of a screen, the device headers a request names) | a service of `src/platform/` | every area |
+
 
 ## eliza's agent and cloud
 
