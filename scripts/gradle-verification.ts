@@ -284,8 +284,8 @@ async function write(root: string) {
   const env: NodeJS.ProcessEnv = {...androidEnv()};
   delete env.ELIZA_DEV_ALLOW_TEST_MOCKS;
   execFileSync(process.execPath, [path.join(root, 'scripts/android-build-preflight.ts')], {cwd: root, stdio: 'inherit', env});
-  execFileSync(process.execPath, [path.join(root, 'scripts/android-host.ts')], {cwd: root, stdio: 'inherit', env});
-  execFileSync(process.execPath, ['run', 'android:sync'], {cwd: root, stdio: 'inherit', env});
+  execFileSync(process.execPath, ['--conditions=eliza-source', '--import', 'vibelang/register', path.join(root, 'scripts/android-host.ts')], {cwd: root, stdio: 'inherit', env});
+  execFileSync('pnpm', ['android:sync'], {cwd: root, stdio: 'inherit', env});
   // No ALPHA_NOTIFICATION_FIXTURE_KEYSTORE here: the fixture then takes the default debug key, and
   // its dependencies resolve exactly as in scripts/build-notification-fixture.ts.
   execFileSync('./gradlew', ['--no-daemon', '--write-verification-metadata', 'sha256', ...VERIFIED_TASKS], {cwd: path.join(root, 'android'), stdio: 'inherit', env});

@@ -77,7 +77,7 @@ export async function preparePortableNativeInputs(root:string) {
         command('git',['fetch','--no-tags','--depth','1',readJson<{url:string}>(path.join(root,'upstream.lock.json')).url,existing.producer.sdkCommit],path.join(root,'vendor/eliza'));
       }
       validateNativeBuildReceipt(root,existing,{currentConsumer:false});
-      verifyNativeBuildFiles(cacheOutput,existing);verifyNativeBuildLibraries(cacheOutput,existing);
+      verifyNativeBuildFiles(cacheOutput,existing);verifyNativeBuildLibraries(cacheOutput,existing,root);
       receipt=existing;
     }
   }
@@ -152,11 +152,16 @@ export async function preparePortableNativeInputs(root:string) {
     stageVoiceModels(cacheOutput,{from:[voiceOutput],record:voice});
     for(const prepared of preparations)for(const library of prepared.libraries){if(fs.statSync(library.path).size!==library.bytes||fileDigest(library.path)!==library.sha256)throw Error('Built embedding library changed');fs.copyFileSync(library.path,path.join(cacheOutput,'android/app/src/main/jniLibs',prepared.abi,path.basename(library.path)));}
     receipt.files=[...nativeOutputInventory(receipt).keys()].sort().map(file=>({path:file,bytes:fs.statSync(path.join(cacheOutput,file)).size,sha256:fileDigest(path.join(cacheOutput,file))}));
-    validateNativeBuildReceipt(root,receipt);verifyNativeBuildFiles(cacheOutput,receipt);verifyNativeBuildLibraries(cacheOutput,receipt);assertHeld();writeNativeBuildReceipt(cacheOutput,receipt);
+    validateNativeBuildReceipt(root,receipt);verifyNativeBuildFiles(cacheOutput,receipt);verifyNativeBuildLibraries(cacheOutput,receipt,root);assertHeld();writeNativeBuildReceipt(cacheOutput,receipt);
   }
   // Owned generated directories may be replaced after a recipe changes. Never modify vendor or committed admission data.
   assertHeld();
   clearStagedNativeInputs(root);
+  const ffiRelative=`${'.eliza/inference-engine'}/${recipe.engineCommit}/tools/omnivoice/include`;
+  assertNativeOutputPath(root,ffiRelative);
+  const ffiTarget=path.join(root,ffiRelative);
+  fs.rmSync(ffiTarget,{recursive:true,force:true});
+  fs.cpSync(path.join(fork,'tools/omnivoice/include'),ffiTarget,{recursive:true});
   stageVoiceModels(root,{from:[path.join(cacheOutput,'.eliza/paradee-voice/native'),path.join(cacheOutput,'android/app/src/main')],record:{...receipt.voice,pin} as Parameters<typeof stageVoiceModels>[1]['record']});
   for(const abi of embeddingAbiLibraries<any>(receipt.embedding as any))for(const library of abi.libraries) {
     const source=path.join(cacheOutput,'android/app/src/main/jniLibs',abi.abi,library.name);

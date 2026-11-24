@@ -24,7 +24,7 @@
     "android:host": "node --conditions=eliza-source --import vibelang/register scripts/android-host.ts",
     "android:build": "node --conditions=eliza-source --import vibelang/register scripts/build-android.ts",
     "android:build:inputs": "node scripts/android-build-preflight.ts --report",
-    "android:build:local": "node scripts/android-build-preflight.ts && pnpm -s agent:build-embedding-host && pnpm -s agent:build-workflow-worker && pnpm -s agent:bundle && pnpm -s agent:stage-android && pnpm -s licenses:packaged-runtime && pnpm -s android:build",
+    "android:build:local": "node scripts/android-build-preflight.ts && pnpm -s agent:build-embedding-host && pnpm -s build:upstream && pnpm -s agent:build-workflow-worker && pnpm -s agent:bundle && pnpm -s agent:stage-android && pnpm -s licenses:packaged-runtime && pnpm -s android:build",
     "android:build:fast": "node --conditions=eliza-source --import vibelang/register scripts/build-android-fast.ts",
     "android:verify": "node --conditions=eliza-source --import vibelang/register scripts/verify-apks.ts",
     "android:deps:check": "node scripts/gradle-verification.ts --check",

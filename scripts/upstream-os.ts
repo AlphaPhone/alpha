@@ -6,7 +6,8 @@
 import {execFileSync} from 'node:child_process';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {Effect} from 'effect';
+import {Effect, Layer} from 'effect';
+import {FetchHttpClient} from 'effect/http';
 import * as NodeServices from '@effect/platform-node/NodeServices';
 import * as osBuild from '@elizaos/os/build';
 import * as osImage from '@elizaos/os/image';
@@ -22,9 +23,11 @@ export const OS_CLI = path.join(OS_PACKAGE, 'src/cli.vibe');
 
 type Program<A> = Effect.Effect<A, unknown, never> | Effect.Effect<A, unknown, unknown>;
 
-/** Run one upstream Effect program with the Node platform services. */
+const runtimeLayer = Layer.mergeAll(NodeServices.layer, FetchHttpClient.layer);
+
+/** Run one upstream Effect program with the Node platform and HTTP client services. */
 export function run<A>(program: Program<A>): Promise<A> {
-  return Effect.runPromise(Effect.provide(program as Effect.Effect<A, unknown, NodeServices.NodeServices>, NodeServices.layer) as Effect.Effect<A, unknown, never>);
+  return Effect.runPromise(Effect.provide(program as Effect.Effect<A, unknown, Layer.Success<typeof runtimeLayer>>, runtimeLayer) as Effect.Effect<A, unknown, never>);
 }
 
 /** Run the upstream os command line with the given arguments, inheriting output. */

@@ -171,8 +171,8 @@ export function verifyNativeFileBytes(root:string,files:NativeFile[]) {
   }
 }
 /** Inspect executable structure separately from frozen-byte custody checks. */
-export function verifyNativeBuildLibraries(root:string,receipt:NativeBuildReceipt) {
-  const {assertAndroidVoiceLibrary,minElfLoadAlignment}=createRequire(import.meta.url)(path.join(root,'vendor/eliza',nativeModule,'scripts/build-helpers/verify-fused-symbols.ts'));
+export function verifyNativeBuildLibraries(root:string,receipt:NativeBuildReceipt,productRoot=path.resolve(import.meta.dirname,'..')) {
+  const {assertAndroidVoiceLibrary,minElfLoadAlignment}=createRequire(import.meta.url)(path.join(productRoot,'vendor/eliza',nativeModule,'scripts/build-helpers/verify-fused-symbols.ts'));
   const sdk=nativeAndroidSdk();
   const prebuilt=path.join(sdk,'ndk',receipt.producer.ndk,'toolchains/llvm/prebuilt');
   const host=fs.readdirSync(prebuilt).find(name=>fs.existsSync(path.join(prebuilt,name,'bin/llvm-nm')));
