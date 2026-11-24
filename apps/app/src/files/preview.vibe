@@ -66,7 +66,7 @@ export service FilesPreview {
   /** The picture or recording of opening `serial` could not be played here. */
   mediaFailed(serial: number): void!!
   /** The shown file for another area: its bytes are read fresh, and only while it is still the file shown. */
-  sharedFile(): SharedFile | undefined!!
+  sharedFile(): (SharedFile | undefined)!!
   /** Whether the shown file is still the one with this opening number. */
   stillShowing(serial: number): boolean!!
   openViewer(): void!!

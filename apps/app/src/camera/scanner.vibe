@@ -130,14 +130,14 @@ export const scanner = Layer.effect(Scanner, effect {
     })
   }
 
-  effect function readDraft(): StoredDraft | undefined!! {
+  effect function readDraft(): (StoredDraft | undefined)!!{
     const raw = kv.get(DRAFT) catch () => undefined
     if (raw === undefined) return undefined
     const parsed = Effect.try({ try: (): unknown => JSON.parse(raw), catch: () => undefined }) catch () => undefined
     return Schema.decodeUnknownEffect(StoredDraftShape)(parsed) catch () => undefined
   }
 
-  effect function writeDraft(expected: number): number | undefined!! {
+  effect function writeDraft(expected: number): (number | undefined)!!{
     const stored = try readDraft()
     if ((stored?.revision ?? 0) !== expected) return undefined
     const ids = (try scan.get()).pageIds

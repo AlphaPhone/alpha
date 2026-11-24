@@ -8,9 +8,9 @@ export type NetworkFix = Position
 /** The phone's position from its visible Wi-Fi and cell towers, read from the one network client the assistant's chat location also uses. */
 export service MapsNetworkLocation {
   /** The kept answer while it may still stand for the phone's position; never a lookup. */
-  cached(): NetworkFix | undefined!!
+  cached(): (NetworkFix | undefined)!!
   /** A position now: the kept one while recent, else one lookup shared with every caller waiting on it; undefined when none is known. */
-  locate(): NetworkFix | undefined!!
+  locate(): (NetworkFix | undefined)!!
 }
 
 /** The shared network answer as a Maps position. */

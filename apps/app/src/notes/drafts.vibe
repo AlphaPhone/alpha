@@ -14,7 +14,7 @@ export interface KeptRead { readonly raw: string | undefined; readonly draft: Ke
 /** The kept draft service: one encrypted slot per phone, keyed to the owner's digest. */
 export service NotesDrafts {
   read(ownerDigest: string): KeptRead!!
-  keep(ownerDigest: string, change: KeptChange): void!DraftSlotBlocked | DraftNotKept | SlotUnavailable
+  keep(ownerDigest: string, change: KeptChange): void!(DraftSlotBlocked | DraftNotKept | SlotUnavailable)
   offer(ownerDigest: string, noteId: string, currentPrint: string): { readonly offer: KeptDraftOffer; readonly change?: KeptChange }!!
   clear(ownerDigest: string, noteId: string, read: KeptRead, confirmedOrDiscarded: boolean): boolean!!
 }

@@ -17,7 +17,7 @@ export const pictureFits = (mimeType: string, size: number) => MMS_PICTURE_TYPES
 /** Pictures for a draft, chosen in Files' picker. */
 export service PictureAttach {
   /** Let the owner choose, in Files' picker, up to the pictures the draft has room for, and attach them; the answer says what was refused. */
-  attach(thread: string): "attached" | "none" | "refused"!!FilePicker
+  attach(thread: string): ("attached" | "none" | "refused")!!FilePicker
 }
 
 /** Attaching from Files' picker: never more than the draft has room for, and never into a send in flight. */

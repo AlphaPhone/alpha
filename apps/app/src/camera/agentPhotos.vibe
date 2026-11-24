@@ -27,7 +27,7 @@ export service AgentPhotos {
   visit(inPhotos: boolean): void!!
   page(hidden: boolean): void!!
   run(operation: PhotosOperation, offersSelected: boolean): unknown!PhotosRefused
-  card(): ReviewCard | undefined!!
+  card(): (ReviewCard | undefined)!!
   confirm(): void!!
   cancel(): void!!
   /** Back while the assistant's review card shows: the card is cancelled; false when no card shows. */

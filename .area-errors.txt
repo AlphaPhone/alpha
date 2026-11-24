@@ -1,0 +1,19 @@
+src/calendar/agent.vibe(309,12): error EK3101: agentLayer.create looks up unknown each time it is called, but AgentCalendar.create(request: CreateRequest): WriteOutcome!! allows no call-time requirements.
+src/calendar/agent.vibe(309,12): error EK9201: unknown can escape agentLayer.create, but AgentCalendar.create's contract allows no failures.
+src/calendar/agent.vibe(320,27): error TS2349: This expression is not callable.
+src/calendar/agent.vibe(328,12): error EK3101: agentLayer.update looks up unknown each time it is called, but AgentCalendar.update(request: UpdateRequest): WriteOutcome!! allows no call-time requirements.
+src/calendar/agent.vibe(328,12): error EK9201: unknown can escape agentLayer.update, but AgentCalendar.update's contract allows no failures.
+src/calendar/agent.vibe(340,18): error TS2349: This expression is not callable.
+src/calendar/agent.vibe(343,12): error EK3101: agentLayer.remove looks up unknown each time it is called, but AgentCalendar.remove(request: DeleteRequest): WriteOutcome!! allows no call-time requirements.
+src/calendar/agent.vibe(343,12): error EK9201: unknown can escape agentLayer.remove, but AgentCalendar.remove's contract allows no failures.
+src/calendar/agent.vibe(352,27): error TS2349: This expression is not callable.
+src/calendar/binding.vibe(33,22): error EK9202: currentWindow needs Machine, but its contract says R = never.
+src/calendar/observation.vibe(17,22): error EK9202: calendarDayObservation needs Foreground, but its contract says R = never.
+src/calendar/observation.vibe(18,22): error EK9202: calendarDayObservation needs Machine, but its contract says R = never.
+src/calendar/observation.vibe(19,22): error EK9202: calendarDayObservation needs AgentCalendar, but its contract says R = never.
+src/calendar/requests.vibe(127,12): error EK3101: requestsLayer.namedRead looks up Machine each time it is called, but AgentRequests.namedRead(operation: unknown, operationId: string, context: NamedCalendarReadContext, current: () => NamedCalendarReadContext, journalIdentity?: { readonly scope: string; readonly proposalId: string; } | undefined): ...!! allows no call-time requirements.
+src/calendar/screen.vibe(29,21): error EK9202: agentEvent needs AgentCalendar, but its contract says R = never.
+src/inbox/back.vibe(9,20): error EK9202: inboxBack needs MailComposer, but its contract says R = never.
+src/inbox/back.vibe(10,18): error EK9202: inboxBack needs Reader, but its contract says R = never.
+src/inbox/back.vibe(11,21): error EK9202: inboxBack needs MailSelection, but its contract says R = never.
+src/inbox/back.vibe(12,19): error EK9202: inboxBack needs Mailbox, but its contract says R = never.

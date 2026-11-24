@@ -37,7 +37,7 @@ export interface MapsTile {
 /** The installed Cloud Maps provider, each request fenced by the account and generation it started under. */
 export service MapsProvider {
   search(query: string, near?: Coordinate): ReadonlyArray<Place>!MapsFailure
-  details(id: string): Place | undefined!MapsFailure
+  details(id: string): (Place | undefined)!MapsFailure
   routes(from: Coordinate, to: Coordinate, travel: Travel, alternatives: boolean): ReadonlyArray<Route>!MapsFailure
   viewport(area: { readonly north: number; readonly south: number; readonly east: number; readonly west: number }, zoom: number): string!MapsFailure
   tile(z: number, x: number, y: number): MapsTile!MapsFailure

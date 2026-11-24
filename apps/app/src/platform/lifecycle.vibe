@@ -15,7 +15,7 @@ export service AppLifecycle {
   /** Reads Android's network for the app now, unknown where Android does not answer within 1.5 s. */
   refreshNetwork(): Net!!
   /** Whether the active network is metered, null where Android could not tell. */
-  metered(): boolean | null!!
+  metered(): (boolean | null)!!
   /** A turn is about to be sent: refused only when Android confirms there is no network. */
   turnSent(): void!Offline
   /** A turn settled, answered or not. */

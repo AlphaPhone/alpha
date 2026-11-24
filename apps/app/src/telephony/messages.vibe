@@ -41,7 +41,7 @@ export service MessagesView {
   /** A new-message notice's tap, taken only while the composer is idle: no text, picture, pick or send in flight. */
   openNotice(): void!!
   /** The owner's Call in a one-person conversation's header: Telecom places it, and the draft stays as it was. */
-  callThread(): CallOutcome | undefined!!
+  callThread(): (CallOutcome | undefined)!!
   /** Ask Android for SMS read access, then read again. */
   allow(access: "sms" | "sendSms" | "phoneState"): void!!
   /** Search the recipient picker's contacts. */
@@ -53,11 +53,11 @@ export service MessagesView {
   /** Delete the confirmed message. */
   deleteConfirmed(): void!!
   /** The open conversation as Alpha may read it, or null. */
-  readSelected(): OpenThreadRead | null!!
+  readSelected(): (OpenThreadRead | null)!!
   /** The open conversation's identity: its thread and every address, or null. */
-  selected(): { readonly threadId: string; readonly addresses: readonly string[] } | null!!
+  selected(): ({ readonly threadId: string; readonly addresses: readonly string[] } | null)!!
   /** The newest incoming text's sender, never its body. */
-  latestSender(includeAddress: boolean): SmsLatestSender | "unavailable"!!
+  latestSender(includeAddress: boolean): (SmsLatestSender | "unavailable")!!
 }
 
 /** A provider thread as Messages lists it; an incomplete one carries no content. */

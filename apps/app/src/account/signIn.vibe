@@ -41,7 +41,7 @@ export service SignInScreen {
   /** The host holds own keys in use, or no longer: the entry ends, or comes back. */
   useOwnKeys(using: boolean): void!!
   /** The deployment's Terms and Privacy, or undefined when they cannot be read. */
-  serviceInfo(): ServiceInfo | undefined!!
+  serviceInfo(): (ServiceInfo | undefined)!!
   /** Opens Android's network settings from the network notice; whether they opened. */
   openWifiSettings(): boolean!!
 }

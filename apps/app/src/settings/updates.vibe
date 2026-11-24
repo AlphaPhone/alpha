@@ -24,7 +24,7 @@ const INSTALL: Record<string, InstallAnswer> = {
 /** Alpha's launcher updates: the offer, checks, installs, the hands-off schedule and Android's activation. */
 export service Updates {
   /** The offer the saved feed holds for this install, for the Install row. */
-  offer(): Offer | undefined!!
+  offer(): (Offer | undefined)!!
   check(manual: boolean): void!!
   install(): void!!
   /** Open Android's page that allows installs from Alpha. */

@@ -41,7 +41,7 @@ export interface KeptReview { readonly noteId: string; readonly title: string; r
 export service NotesEditor {
   readonly drafts: Stream.Stream<DraftContent | undefined>
   readonly keptReviews: Stream.Stream<KeptReview | undefined>
-  draft(): DraftContent | undefined!!
+  draft(): (DraftContent | undefined)!!
   openNote(id: string): boolean!!
   newNote(kind: "text" | "list", folderId?: string): boolean!!
   edit(patch: DraftPatch): boolean!!
@@ -51,8 +51,8 @@ export service NotesEditor {
   restore(id: string): boolean!!
   retry(): RetryOutcome!!
   discard(): void!!
-  createFromText(content: string, creationId: string): { readonly id: string; readonly revision: number } | undefined!NotesFailure | NotesBusy | NotesRetired
-  selection(): { readonly kind: "canonical-note"; readonly id: string; readonly revision: string } | undefined!!
+  createFromText(content: string, creationId: string): ({ readonly id: string; readonly revision: number } | undefined)!(NotesFailure | NotesBusy | NotesRetired)
+  selection(): ({ readonly kind: "canonical-note"; readonly id: string; readonly revision: string } | undefined)!!
 }
 
 function stable(value: unknown): unknown {
@@ -95,18 +95,18 @@ const make = effect {
   const keptReview = try SubscriptionRef.make<KeptReview | undefined>(undefined)
   const writing = try Semaphore.make(1)
 
-  effect function send(event: EditorEvent): Editor | undefined!! {
+  effect function send(event: EditorEvent): (Editor | undefined)!! {
     return try (machine.send(event) catch () => undefined)
   }
 
-  effect function owned(): { owner: string; snapshot: NotesSnapshot; digest: string } | undefined!! {
+  effect function owned(): ({ owner: string; snapshot: NotesSnapshot; digest: string } | undefined)!! {
     const current = try collection.current()
     if (current === undefined) return undefined
     const digest = try (tryPromise(() => sha256Hex(`notes-owner:${current.owner}`)) catch () => "")
     return digest === "" ? undefined : { ...current, digest }
   }
 
-  effect function note(id: string): StickyNote | undefined!! {
+  effect function note(id: string): (StickyNote | undefined)!! {
     return (try collection.current())?.snapshot.notes.find((row) => row.id === id)
   }
 

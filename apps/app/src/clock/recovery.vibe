@@ -24,7 +24,7 @@ export service ClockRecovery {
   /** The owner closed the notice: it is not shown again, and the next unreadable store's notice follows. */
   close(): void!!
   /** The kept bytes of the store the notice names, for a download; only in a test-mocks build. */
-  download(): string | undefined!!
+  download(): (string | undefined)!!
   /** Removes the saved state of the store the notice names, after its confirmation; only in a test-mocks build. */
   reset(): void!!
 }

@@ -36,7 +36,7 @@ export service CommsStage {
   /** Follow the call bar's calls into the stage for as long as it runs. */
   follow(): void!!
   /** The briefing due now for the subject on screen, marked briefed, or null when none is due or nothing is known. */
-  briefing(): BriefingFacts | null!!
+  briefing(): (BriefingFacts | null)!!
   /** Alpha proposes one action card, with the words its card shows; a newer one replaces the open one, and the same ID again makes a restored one live. False when it was dropped. */
   propose(proposalId: string, kind: ProposalKind, acts: boolean, ring: string, words?: CardWords): boolean!!
   /** The owner's tap on the open proposal's one button; false when it is not the open, live proposal. */
@@ -44,7 +44,7 @@ export service CommsStage {
   /** The owner dismissed the open proposal, live or restored. */
   decline(proposalId: string): boolean!!
   /** The open proposal and its kept words, or null when none is open. */
-  openCard(): OpenCard | null!!
+  openCard(): (OpenCard | null)!!
 }
 
 /** The comms stage over its stored machine and the call bar, Phone and voicemail machines. */

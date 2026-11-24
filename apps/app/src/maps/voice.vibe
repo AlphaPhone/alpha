@@ -27,7 +27,7 @@ export const voiceLayer = Layer.effect(NavigationVoice, effect {
     effect offer(key: string, text: string, allowed: boolean) { try voice.offer(key, text, allowed) },
     effect pause() { try voice.pause() },
     effect toggle(allowed: boolean) { try voice.toggle(allowed) },
-    effect setHidden(hidden: boolean, allowed: boolean) { if (hidden) try voice.hide() else try voice.show(allowed) },
+    effect setHidden(hidden: boolean, allowed: boolean) { if (hidden) { try voice.hide() } else { try voice.show(allowed) } },
     effect setAuthority(authority: string) { try voice.authority(authority) },
     effect setSheet(open: boolean) { try voice.sheet(open) },
     voiceOn: Stream.map(voice.changes, (v) => v.voiceOn),

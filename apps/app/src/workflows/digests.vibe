@@ -32,17 +32,17 @@ export service Digests {
   /** A poll tick: a full read when the panel is open or `full` asks for one. */
   poll(full: boolean): void!!
   /** Keep a reviewed change and send it. */
-  change(change: DigestChange): MutationReply | "busy"!!
+  change(change: DigestChange): (MutationReply | "busy")!!
   /** Send the kept change again. */
-  retry(): MutationReply | "busy"!!
+  retry(): (MutationReply | "busy")!!
   /** Discard a kept change still in review. */
   discard(): void!!
   /** Pause or resume the digest `loopId`, keeping its saved time, zone and source, under its current version. */
-  toggle(loopId: string, on: boolean): MutationReply | "busy" | "withdrawn"!!
+  toggle(loopId: string, on: boolean): (MutationReply | "busy" | "withdrawn")!!
   /** The agent's Run now offer for the missed result `runId`, as the review names it; undefined when none is offered now. */
-  runNowOffer(runId: string): MissedRunNow | undefined!!
+  runNowOffer(runId: string): (MissedRunNow | undefined)!!
   /** Keep and send the reviewed Run now of the missed result `runId`, under that offer's source, revision and mutation id. */
-  runMissedNow(runId: string, reviewed: MissedRunNow): MutationReply | "busy" | "withdrawn"!!
+  runMissedNow(runId: string, reviewed: MissedRunNow): (MutationReply | "busy" | "withdrawn")!!
   /** The loops, sources and results as last read, for the review sheets and the result notices. */
   catalog(): { readonly loops: ReadonlyArray<DigestLoop>; readonly sources: ReadonlyArray<DigestSource>; readonly results: ReadonlyArray<DigestResult> }!!
 }

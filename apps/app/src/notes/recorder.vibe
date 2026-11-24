@@ -90,7 +90,7 @@ const make = effect {
   const digest = try Ref.make<string | undefined>(undefined)
   const folder = try Ref.make<string | null>(null)
 
-  effect function send(event: RecorderEvent): Recorder | undefined!! {
+  effect function send(event: RecorderEvent): (Recorder | undefined)!! {
     return try (machine.send(event) catch () => undefined)
   }
   effect function record(event: JournalEvent): void!! {
@@ -108,7 +108,7 @@ const make = effect {
     return try native.invoke(voicePlugin, method, args)
   }
 
-  effect function ownerDigest(): string | undefined!! {
+  effect function ownerDigest(): (string | undefined)!! {
     const owner = (try collection.current())?.owner
     if (owner === undefined) return undefined
     const value = try (tryPromise(() => sha256Hex(owner)) catch () => "")
@@ -187,7 +187,7 @@ const make = effect {
     if (status.state === "recording" || status.state === "stopped") try pump(status)
   }
 
-  effect function status(): RecordingStatus | undefined!! {
+  effect function status(): (RecordingStatus | undefined)!! {
     return try (effect { return try decodeRecordingStatus(try voice("noteRecordingStatus")) } catch () => undefined)
   }
 
@@ -235,7 +235,7 @@ const make = effect {
     return "started"
   }
 
-  effect function recordingId(): string | undefined!! {
+  effect function recordingId(): (string | undefined)!! {
     return (try SubscriptionRef.get(display)).recordingId
   }
 
