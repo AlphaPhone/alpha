@@ -61,7 +61,9 @@ pure val ownerValues = Set(0, 1, 2, 3)
 
 A start while another is still being admitted is refused. A quiet fix is
 taken at most once per visit and never replaces a session in use. A start
-after a watch waits for its native cleanup before checking permission.
+after a watch waits for its native cleanup before checking permission. A
+retired watch that ends later clears only its own native watch and never stops
+the session that retired it.
 
 ```quint
 pure def canBeginLocate(s: Locator, purpose: Purpose): bool =

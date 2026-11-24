@@ -1,4 +1,4 @@
-// spec/assistant/reply.md, "Story: Read a reply with its cards"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/emailCard.md, "Story: Send an email my agent drafted, from the chat"; spec/assistant/suggestion.md, "Story: Use a suggested wording exactly as I reviewed it"; spec/assistant/search.md, "Story: Find something I said in an earlier chat"; spec/assistant/receipts.md, "Story: Settle an action whose outcome is unknown"
+// spec/assistant/reply.md, "Story: Read a reply with its cards"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/emailCard.md, "Story: Send an email my agent drafted, from the chat"; spec/assistant/suggestion.md, "Story: Use a suggested wording exactly as I reviewed it"; spec/assistant/search.md, "Story: Find something I said in an earlier chat"; spec/assistant/receipts.md, "Story: Settle an action whose outcome is unknown"; spec/voice/conversation.md, "A reply whose only card is one addressed text keeps voice listening and says the text is ready"
 import { initial as emailStart, type EmailCard } from "../../../gen/assistant__emailCard.ts";
 import { initial as replyStart } from "../../../gen/assistant__reply.ts";
 import type { Target } from "../../assistant/composer.vibe";
@@ -28,6 +28,11 @@ export const closeTabsCard: ProposalCard = {
 
 /** A card whose family names where it acts, so it can be opened and still approved. */
 export const notesCard: ProposalCard = { ...liveCard, proposalId: "p-5", destination: "notes" };
+
+/** A text to the number its card shows, which a voice conversation may send when the owner says so. */
+export const textCard: ProposalCard = {
+  ...liveCard, proposalId: "p-6", title: "Send a text", detail: "To +14155550100: Running ten minutes late", destination: "messages", addressedText: true,
+};
 
 /** A card whose review time passed. */
 export const expiredCard: ProposalCard = { ...liveCard, proposalId: "p-3", state: "ExpiredCard" };

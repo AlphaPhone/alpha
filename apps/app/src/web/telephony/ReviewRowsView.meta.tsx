@@ -5,7 +5,7 @@ import type { ReviewRowsViewProps } from "./ReviewRowsView.tsx";
 
 export const meta: ComponentMeta<ReviewRowsViewProps> = {
   args: { actions: choosing, details: {}, onChoose: fn(), onDismiss: fn() },
-  states: { ContactChange: { actions: choosingChange, details: reviewChange } },
+  examples: { ContactChange: { actions: choosingChange, details: reviewChange } },
   play: {
     Default: async ({ canvasElement, args }) => {
       await userEvent.click(within(canvasElement).getByRole("button", { name: /Call Maya Ortiz/ }));

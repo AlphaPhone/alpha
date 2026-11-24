@@ -84,6 +84,13 @@ it.live("another tab's change to the bookmark document is read again, and anothe
       const marks = try BrowserBookmarks
       try settledTabs(tabs)
       const session = try sessionOf(fake.calls)
+      // Launch and Browser coming to the front each read the list once; counting starts after both have settled.
+      let startup = 0
+      for (let waited = 0; waited < 400; waited++) {
+        startup = (try callsTo(fake.calls, "bookmarks")).length
+        if (startup >= 2 && (try marks.get()).stage === "Idle") break
+        try sleep("5 millis")
+      }
       const before = (try callsTo(fake.calls, "bookmarks")).length
       try Ref.set(saved, ["https://elsewhere.test/"])
       try emit(fake.events, "bookmarksChanged", { session: "another-session" })
@@ -92,8 +99,8 @@ it.live("another tab's change to the bookmark document is read again, and anothe
       const after = (try callsTo(fake.calls, "bookmarks")).length
       const now = try marks.get()
       try Effect.try(() => assert.deepStrictEqual(
-        { ignored: ignored - before, read: after - before, marks: now.marks.map((m) => m.url) },
-        { ignored: 0, read: 1, marks: ["https://elsewhere.test/"] },
+        { startup, ignored: ignored - before, read: after - before, marks: now.marks.map((m) => m.url) },
+        { startup: 2, ignored: 0, read: 1, marks: ["https://elsewhere.test/"] },
       ))
     }
   })

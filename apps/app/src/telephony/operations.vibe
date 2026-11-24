@@ -1,4 +1,4 @@
-// spec/telephony/actions.md, "Story: Call or text only the person I approved"; spec/telephony/actions.md, "A view change that shows the outcome waits for the reply that carries it"; spec/telephony/actions.md, "An action starts once per operation ID, and a number the owner did not write is refused"; spec/telephony/actions.md, "A dispatched effect settles with what the phone answered, and a lost answer is unconfirmed, never nothing"; spec/telephony/actions.md, "A read, a keypad, a filtered list or a draft settles without any effect"; spec/telephony/actions.md, "An unconfirmed text is settled only by the phone's own send record for its operation ID"; spec/assistant/review.md, "A direct effect needs an allow-listed operation of the current message that is not a workflow step, with review-first off"; spec/assistant/receipts.md, "An action is reconciled as applied only with its exact saved receipt, and only a handoff may stay unresolved"
+// spec/telephony/actions.md, "Story: Call or text only the person I approved"; spec/telephony/actions.md, "A view change that shows the outcome waits for the reply that carries it"; spec/telephony/actions.md, "An action starts once per operation ID, and a number the owner did not write is refused"; spec/telephony/actions.md, "A dispatched effect settles with what the phone answered, and a lost answer is unconfirmed, never nothing"; spec/telephony/actions.md, "A read, a keypad, a filtered list or a draft settles without any effect"; spec/telephony/actions.md, "An unconfirmed text is settled only by the phone's own send record for its operation ID"; spec/assistant/review.md, "A direct effect needs an allow-listed operation of the current message that is not a workflow step, with review-first off"; spec/assistant/receipts.md, "An action is reconciled as applied only with its exact saved receipt, and only a handoff may stay unresolved"; spec/voice/conversation.md, "A reply whose only card is one addressed text keeps voice listening and says the text is ready"
 import type { ExecutorCall } from "@elizaos/agent/client"
 import type { Op, Target } from "../../gen/assistant__review.effect.vibe"
 import type { Result } from "../../gen/assistant__receipts.effect.vibe"
@@ -120,6 +120,16 @@ export function titleOf(op: TelephonyOperation): string {
 export function classOf(op: TelephonyOperation | undefined): Op {
   if (op?.type === "contact_show" || (op?.type === "phone_keypad" && op.number === undefined)) return "OpenView"
   return "CommsAct"
+}
+
+/**
+ * Whether the operation is a text that sends to the number or numbers its card shows: an `sms_send`, or an `sms_compose` to a
+ * number that is not a draft. A text to a contact name still has its recipient chosen on the phone (spec/voice/conversation.md,
+ * "A reply whose only card is one addressed text keeps voice listening and says the text is ready").
+ */
+export function addressedTextOf(op: TelephonyOperation | undefined): boolean {
+  if (op?.type === "sms_send") return true
+  return op?.type === "sms_compose" && !("draft" in op && op.draft === true) && composeTargetOf(op).kind === "number"
 }
 
 const READS: ReadonlySet<string> = new Set(["messages_read_selected", "voicemail_read_selected", "contact_read_selected", "sms_latest_sender"])
@@ -249,6 +259,7 @@ export const operationPorts = effect {
       return op === undefined ? "" : sentenceOf(op.type, settled.get(JSON.stringify(operation)), result)
     },
     handoff: (operation) => handoffOf(telephonyOperationOf(operation)),
+    addressedText: (operation) => addressedTextOf(telephonyOperationOf(operation)),
     present: (_operation, call) => {
       const present = shows.get(call.operationId)
       if (present === undefined) return

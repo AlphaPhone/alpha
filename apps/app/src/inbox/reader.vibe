@@ -163,7 +163,18 @@ export const layer = Layer.effect(Reader, effect {
     try send({ type: "threadRead", visit, thread })
   }
 
+  /** Binds the reader to the selected account when the selection moved, which starts a new opening. */
+  effect function follow() {
+    const selected = (try accounts.get()).selected
+    if (selected !== (try machine.get()).account) try send({ type: "bind", account: selected })
+  }
+
+  fork.scoped (effect {
+    for try (const _ of accounts.changes) try follow()
+  })
+
   effect function open(row: MailRow) {
+    try follow()
     try send({ type: "preferenceRead", on: try preferences.loadsMailImages() })
     const a = try accounts.get()
     const header: MailHeader = row
