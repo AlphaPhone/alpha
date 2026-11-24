@@ -21,13 +21,13 @@ const called = { id: "call_1", type: "function", function: { name: "CALCULATE", 
 const usage = { prompt_tokens: 40, completion_tokens: 8, total_tokens: 48 };
 
 /** Ask `cloud`'s chat route as its owner's agent does, with `tools`: its status and the whole of its answer, a stream's frames included. */
-function chat(cloud: Cloud, tools: readonly object[], stream: boolean) {
-  const body = JSON.stringify({ model: cloud.model, messages: [{ role: "system", content: "You are Alpha." }, { role: "user", content: "what's 17 times 24" }], tools, max_tokens: 64, stream });
-  return new Promise<{ status: number; text: string }>((done, fail) => {
+function chat(cloud: Cloud, tools: readonly object[], stream: boolean, said = "what's 17 times 24") {
+  const body = JSON.stringify({ model: cloud.model, messages: [{ role: "system", content: "You are Alpha." }, { role: "user", content: said }], tools, max_tokens: 64, stream });
+  return new Promise<{ status: number; text: string; wait?: string }>((done, fail) => {
     const headers = { "content-type": "application/json", authorization: `Bearer ${cloud.owners.get(owner)!.token}` };
     http.request(`${cloud.local}/api/v1/chat/completions`, { method: "POST", headers }, (answer) => {
       let text = "";
-      answer.setEncoding("utf8").on("data", (part: string) => { text += part; }).on("end", () => done({ status: answer.statusCode ?? 0, text }));
+      answer.setEncoding("utf8").on("data", (part: string) => { text += part; }).on("end", () => done({ status: answer.statusCode ?? 0, text, wait: answer.headers["retry-after"] }));
     }).on("error", fail).end(body);
   });
 }
@@ -44,21 +44,27 @@ async function withCloud<A>(real: RealModel | undefined, use: (cloud: Cloud, sta
   }
 }
 
-/** A model provider in place of Cerebras: what each call it was sent carried, and a tool call for an answer, streamed where asked. */
+/**
+ * A model provider in place of Cerebras: what each call it was sent carried, and a tool call for an answer, streamed
+ * where asked; a rate limit for the owner who says "busy", and a stream cut off after its first piece for one who says "cut".
+ */
 async function startUpstream() {
-  const heard: { authorization?: string; body: { model: string; stream?: boolean; tools?: { function: { strict?: boolean } }[] } }[] = [];
+  const heard: { authorization?: string; body: { model: string; stream?: boolean; messages: { content: string }[]; tools?: { function: { strict?: boolean } }[] } }[] = [];
   const server = http.createServer((incoming, outgoing) => {
     let text = "";
     incoming.setEncoding("utf8").on("data", (part: string) => { text += part; }).on("end", () => {
       const body = JSON.parse(text) as (typeof heard)[number]["body"];
       heard.push({ authorization: incoming.headers.authorization, body });
       const named = { id: "chatcmpl-upstream", created: 1_790_000_000, model: body.model };
+      const said = body.messages.at(-1)?.content;
+      if (said === "busy") return void outgoing.writeHead(429, { "content-type": "application/json", "retry-after": "7" }).end(JSON.stringify({ message: "Too many requests", type: "too_many_requests_error", code: "request_quota_exceeded" }));
       if (body.stream !== true) {
         return void outgoing.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ...named, object: "chat.completion", choices: [{ index: 0, message: { role: "assistant", content: null, tool_calls: [called] }, finish_reason: "tool_calls" }], usage }));
       }
       const frame = (data: unknown) => `data: ${typeof data === "string" ? data : JSON.stringify(data)}\n\n`;
       const piece = (delta: object, finish: string | null) => frame({ ...named, object: "chat.completion.chunk", choices: [{ index: 0, delta, finish_reason: finish }] });
       outgoing.writeHead(200, { "content-type": "text/event-stream" });
+      if (said === "cut") return void outgoing.write(piece({ role: "assistant", content: "17" }, null), () => outgoing.destroy());
       outgoing.end([piece({ role: "assistant", tool_calls: [{ index: 0, ...called }] }, null), piece({}, "tool_calls"), frame({ ...named, object: "chat.completion.chunk", choices: [], usage }), frame("[DONE]")].join(""));
     });
   });
@@ -79,13 +85,15 @@ describe("the eliza harness", () => {
     expect(await Effect.runPromise(pinnedCheckout())).toEqual({ commit: lock.commit, dir: checkout().root });
   });
 
-  it("starts eliza's cloud on a free loopback port, which answers until it is stopped", async () => {
+  it("starts eliza's cloud on a free loopback port, which answers its owner with the scripted model, repeating them, until it is stopped", async () => {
     const state = scratch();
     try {
-      const cloud = await startCloud(state, [], 0);
+      const cloud = await startCloud(state, [owner], 1_000_000);
       const health = `${cloud.local}/api/public/service`;
       expect(new URL(cloud.local).hostname).toBe("127.0.0.1");
       await expect(said(health)).resolves.toBeDefined();
+      const answer = await chat(cloud, [strictTool, looseTool], false);
+      expect([answer.status, JSON.parse(answer.text)]).toMatchObject([200, { model: "alpha-chat", choices: [{ message: { role: "assistant", content: "You said: what's 17 times 24" }, finish_reason: "stop" }] }]);
       await cloud.stop();
       await expect(said(health)).rejects.toThrow();
     } finally {
@@ -93,25 +101,23 @@ describe("the eliza harness", () => {
     }
   }, 300_000);
 
-  it("answers its owner with the scripted model, which repeats them, where no real model is given", async () => {
-    const answer = await withCloud(undefined, (cloud) => chat(cloud, [strictTool, looseTool], false));
-    expect(answer.status).toBe(200);
-    expect(JSON.parse(answer.text)).toMatchObject({ model: "alpha-chat", choices: [{ message: { role: "assistant", content: "You said: what's 17 times 24" }, finish_reason: "stop" }] });
-  }, 300_000);
-
-  it("forwards its owner's calls to a real model under that model's key, with a uniform tool list, and answers with what the model said, streamed or not", async () => {
+  it("forwards its owner's calls to a real model under that model's key, with a uniform tool list, and answers with what the model said, streamed or not, its rate limit or its cut-off stream", async () => {
     const upstream = await startUpstream();
     const key = `test-upstream-${randomBytes(12).toString("hex")}`;
     try {
-      const { answers, leaked } = await withCloud({ baseUrl: upstream.baseUrl, model: "qwen-3.8-27b", key }, async (cloud, state) => {
+      const { answers, busy, cut, leaked } = await withCloud({ baseUrl: upstream.baseUrl, model: "qwen-3.8-27b", defaultMaxTokens: 40_960, key }, async (cloud, state) => {
         const answers = [await chat(cloud, [strictTool, looseTool], false), await chat(cloud, [strictTool, looseTool], true), await chat(cloud, [strictTool, strictTool], false)];
-        return { answers, leaked: holding(state, key) };
+        const busy = await chat(cloud, [strictTool], false, "busy");
+        const cut = await chat(cloud, [strictTool], true, "cut").then(({ status }) => status, () => "reset");
+        return { answers, busy, cut, leaked: holding(state, key) };
       });
-      expect(upstream.heard.map(({ authorization, body }) => ({ authorization, model: body.model, stream: body.stream === true, strict: body.tools?.map((tool) => tool.function.strict) }))).toEqual([
+      expect(upstream.heard.slice(0, 3).map(({ authorization, body }) => ({ authorization, model: body.model, stream: body.stream === true, strict: body.tools?.map((tool) => tool.function.strict) }))).toEqual([
         { authorization: `Bearer ${key}`, model: "qwen-3.8-27b", stream: false, strict: [undefined, undefined] },
         { authorization: `Bearer ${key}`, model: "qwen-3.8-27b", stream: true, strict: [undefined, undefined] },
         { authorization: `Bearer ${key}`, model: "qwen-3.8-27b", stream: false, strict: [true, true] },
       ]);
+      expect({ status: busy.status, wait: busy.wait }).toEqual({ status: 429, wait: "7" });
+      expect([200, "reset"]).toContain(cut);
       expect(answers.map(({ status }) => status)).toEqual([200, 200, 200]);
       expect(JSON.parse(answers[0].text)).toMatchObject({ model: "qwen-3.8-27b", choices: [{ message: { tool_calls: [called] }, finish_reason: "tool_calls" }] });
       expect(answers[1].text).toContain(`"arguments":${JSON.stringify(called.function.arguments)}`);

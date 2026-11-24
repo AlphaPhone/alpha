@@ -6,6 +6,7 @@ import https from "node:https";
 import { type AddressInfo, createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { pipeline } from "node:stream";
 import { prepared } from "./checkout.ts";
 
 /** What the model answers next: the pieces of a reply, or one piece and then nothing until the caller gives up. */
@@ -22,11 +23,13 @@ export interface DeviceKey {
 
 /**
  * A real model the local cloud's provider forwards every call to, in place of the scripted one: an OpenAI-compatible
- * endpoint, the model it is asked for, and its key, which stays in this process and goes only to that endpoint.
+ * endpoint, the model it is asked for, the output cap the cloud holds for a call that names none, and its key, which
+ * stays in this process and goes only to that endpoint.
  */
 export interface RealModel {
   readonly baseUrl: string;
   readonly model: string;
+  readonly defaultMaxTokens: number;
   readonly key: string;
 }
 
@@ -131,9 +134,9 @@ interface Message { readonly role: string; readonly content?: unknown }
 interface Tool { readonly type: string; readonly function: { readonly name: string; readonly strict?: boolean } }
 
 /**
- * `tools` strict only where every one is, and otherwise none of them: Cerebras, which serves Alpha's model on its own
- * API and behind Cloud, refuses a list that mixes them, and the agent offers its strict actions beside a host tool that
- * is not (elizaOS/eliza#40482, #40485), which it makes uniform itself only for the model ids it knows Cerebras serves.
+ * `tools` strict only where every one is, and otherwise none of them, as Cerebras takes them: it refuses a list that
+ * mixes them (elizaOS/eliza#40482, #40485). The agent already sends Alpha's model a uniform list; this keeps any other
+ * caller of the local cloud, such as a journey's own call, from a refusal the phone never meets.
  */
 const uniformTools = (tools: readonly Tool[]): Tool[] =>
   tools.every((tool) => tool.function.strict === true) ? [...tools] : tools.map(({ function: { strict: _strict, ...declared }, ...tool }) => ({ ...tool, function: declared }));
@@ -143,10 +146,12 @@ function forwarded(real: RealModel, input: Record<string, unknown>, outgoing: Se
   const tools = input.tools as readonly Tool[] | undefined;
   const url = new URL(`${real.baseUrl}/chat/completions`);
   const upstream = (url.protocol === "https:" ? https : http).request(url, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${real.key}` } }, (answer) => {
-    outgoing.writeHead(answer.statusCode ?? 502, { "content-type": answer.headers["content-type"] ?? "application/json", "cache-control": "no-store" }).flushHeaders();
-    answer.pipe(outgoing);
+    const wait = answer.headers["retry-after"];
+    outgoing.writeHead(answer.statusCode ?? 502, { "content-type": answer.headers["content-type"] ?? "application/json", "cache-control": "no-store", ...(wait === undefined ? {} : { "retry-after": wait }) }).flushHeaders();
+    pipeline(answer, outgoing, () => undefined);
   });
   upstream.on("error", (cause) => {
+    if (outgoing.destroyed) return;
     if (outgoing.headersSent) return void outgoing.destroy();
     outgoing.writeHead(502, { "content-type": "application/json" }).end(JSON.stringify({ error: { type: "upstream_unreachable", message: cause.message } }));
   });
@@ -317,7 +322,7 @@ export async function startCloud(state: string, emails: readonly string[], credi
       apiUrl: `${provider.origin}/stripe`, secretKeyEnv: "STRIPE_SECRET_KEY", webhookSecretEnv: "STRIPE_WEBHOOK_SECRET", publishableKey: "pk_test_local",
       plans: Object.fromEntries(Object.entries(plans).map(([plan, { priceId, productId }]) => [plan, { priceId, productId }])),
     },
-    inference: { providers: [{ id: "scripted", baseUrl: `${provider.origin}/v1`, apiKeyEnv: "CLOUD_UPSTREAM_KEY" }], models: [{ id: model, provider: "scripted", upstreamModel: model, vision: false, defaultMaxTokens: 1024 }] },
+    inference: { providers: [{ id: "scripted", baseUrl: `${provider.origin}/v1`, apiKeyEnv: "CLOUD_UPSTREAM_KEY" }], models: [{ id: model, provider: "scripted", upstreamModel: model, vision: false, defaultMaxTokens: real?.defaultMaxTokens ?? 1024 }] },
   };
   const signInReturn = `${web}/alphaphone/auth/callback`;
   const seed = { clients: [{ ...client, signInReturn, billingReturn: `${web}/alphaphone/billing/return` }], prices: [{ modelId: model, inputPer1K: 150, outputPer1K: 600 }] };
