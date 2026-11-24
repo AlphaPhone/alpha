@@ -61,6 +61,14 @@ public class FreshTest {
    subprocess.run([java_binary('javac'),'--release','11','-d',d,str(BRAND/'provision/AlphaFreshSetupPolicy.java'),str(p)],check=True,capture_output=True)
    self.assertIn('PASS fresh preset policy',subprocess.check_output([java_binary('java'),'-cp',d,'com.android.provision.FreshTest'],text=True))
 
+ def test_navigation_permission_is_added_only_to_os_provisioning(self):
+  baseline='<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <application>\n    </application>\n</manifest>'
+  tag='{http://schemas.android.com/apk/res/android}name'
+  old=ET.fromstring(stage.previous_manifest(baseline))
+  new=ET.fromstring(stage.project_manifest(baseline))
+  permissions=lambda node:{part.attrib[tag] for part in node.findall('uses-permission')}
+  self.assertEqual(permissions(new)-permissions(old),{'android.permission.CHANGE_OVERLAY_PACKAGES'})
+
  def fixture(self,root,vendor=True):
   project='packages/apps/Provision'
   for name in ['src/com/android/provision/DefaultActivity.java','AndroidManifest.xml']:
@@ -384,6 +392,7 @@ public class CompletionTest {
  }
  static class AlphaFreshPresets {
   static boolean eligible(Activity activity){return AlphaFreshSetupPolicy.eligible(activity.complete,activity.managed,activity.primary);}
+  static void defaultToGestureNavigation(Activity activity){check(eligible(activity),"navigation defaults require live first-run authority");activity.effects.add("navigation");}
   static boolean applyPalette(Activity activity){activity.effects.add("palette");activity.afterPalette.run();return activity.paletteAccepted;}
   static AlphaFreshSetupPolicy.ImeResult ensureKeyboard(Activity activity){activity.effects.add("keyboard");return activity.keyboard;}
  }
@@ -416,10 +425,10 @@ public class CompletionTest {
   retry.failure(R.string.alpha_roles_failed,Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS);
   retry.effects("prepare",HOME,DIALER,SMS);
   retry.setup.begin();retry.activity.prepared(Activity.RESULT_OK);retry.roles.grant(SMS);
-  retry.effects("prepare",HOME,DIALER,SMS,"prepare",SMS,"keyboard","finish");retry.complete();
+  retry.effects("prepare",HOME,DIALER,SMS,"prepare",SMS,"keyboard","navigation","finish");retry.complete();
   retry.roles.holders.put(DIALER,List.of(OTHER));retry.setup.begin();
   check(retry.roles.holders.get(DIALER).equals(List.of(OTHER)),"completed setup preserves owner change");
-  retry.effects("prepare",HOME,DIALER,SMS,"prepare",SMS,"keyboard","finish");retry.complete();
+  retry.effects("prepare",HOME,DIALER,SMS,"prepare",SMS,"keyboard","navigation","finish");retry.complete();
 
   Fixture mismatch=new Fixture();
   mismatch.setup.begin();mismatch.activity.prepared(Activity.RESULT_OK);
@@ -450,7 +459,7 @@ public class CompletionTest {
   timedOut.setup.begin();timedOut.roles.holders.put(HOME,List.of(ALPHA));lateHome.accept(true);
   timedOut.effects("prepare",HOME,"prepare");
   timedOut.activity.prepared(Activity.RESULT_OK);timedOut.roles.grant(DIALER);timedOut.roles.grant(SMS);
-  timedOut.effects("prepare",HOME,"prepare",DIALER,SMS,"keyboard","finish");timedOut.complete();
+  timedOut.effects("prepare",HOME,"prepare",DIALER,SMS,"keyboard","navigation","finish");timedOut.complete();
 
   Fixture stalePrepare=new Fixture();
   stalePrepare.setup.begin();var stale=stalePrepare.activity.prepareReply;
@@ -468,11 +477,11 @@ public class CompletionTest {
   Fixture nonTelephony=new Fixture();
   nonTelephony.activity.telephony=false;nonTelephony.roles.unavailable.addAll(List.of(DIALER,SMS));
   nonTelephony.setup.begin();nonTelephony.roles.grant(HOME);
-  nonTelephony.effects(HOME,"keyboard","finish");nonTelephony.complete();
+  nonTelephony.effects(HOME,"keyboard","navigation","finish");nonTelephony.complete();
   Fixture development=new Fixture();
   development.activity.factoryTelephony=false;development.roles.unavailable.addAll(List.of(DIALER,SMS));
   development.setup.begin();development.roles.grant(HOME);
-  development.effects(HOME,"keyboard","finish");development.complete();
+  development.effects(HOME,"keyboard","navigation","finish");development.complete();
   for(int condition=0;condition<3;condition++){
    Fixture blocked=new Fixture();blocked.activity.complete=condition==0;
    blocked.activity.managed=condition==1;blocked.activity.primary=condition!=2;blocked.setup.begin();
