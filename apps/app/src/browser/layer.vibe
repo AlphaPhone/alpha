@@ -24,6 +24,7 @@ const running = Layer.effectDiscard(effect {
   const presenter = try BrowserPresenter
   const foreground = try Foreground
   const host = try TabHost
+  const initialForeground = try foreground.get()
   try marks.refresh(true)
   fork.scoped effect {
     for try (const changed of host.events("bookmarksChanged")) {
@@ -36,14 +37,11 @@ const running = Layer.effectDiscard(effect {
   fork.scoped reading.follow()
   fork.scoped effect { for try (const _ of tabs.resumed) { try presenter.forget() } }
   fork.scoped effect {
-    let inBrowser = false
+    let inBrowser = initialForeground.visible && initialForeground.view === "browser"
     let visible = true
     for try (const state of foreground.changes) {
       const shown = state.visible && state.view === "browser"
-      if (state.visible !== visible) {
-        try presenter.appVisibility(!state.visible)
-        if (state.visible && shown) try marks.refresh(false)
-      }
+      if (state.visible !== visible) try presenter.appVisibility(!state.visible)
       if (shown && !inBrowser) try marks.refresh(false)
       if (!shown && inBrowser) try presenter.withdraw()
       inBrowser = shown

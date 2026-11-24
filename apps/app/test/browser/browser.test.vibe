@@ -6,7 +6,7 @@ import { BrowserReviews } from "../../src/browser/reviews.vibe"
 import { BrowserEgress } from "../../src/browser/egress.vibe"
 import { typedAddress } from "../../src/browser/address.ts"
 import { snapshotOf } from "../../gen/browser__session.effect.vibe"
-import { callsTo, fakeHost, report, settledTabs, shownBrowser } from "./fakes.vibe"
+import { callsTo, fakeHost, loadPage, report, sessionOf, settledTabs, shownBrowser } from "./fakes.vibe"
 
 // spec/browser/session.md, "Story: Browse in tabs"
 it.live("browse in tabs: a typed address loads in its own WebView, only a normal tab's page enters history, and eight tabs are the limit", () => effect {
@@ -208,9 +208,11 @@ it.live("an approved open is shown only while the foreground it was approved in 
       const tabs = try BrowserTabs
       const agent = try BrowserAgent
       try settledTabs(tabs)
+      const original = try loadPage(tabs, fake.events, try sessionOf(fake.calls), "https://original.test/", "1", 1)
       const home = { ...shownBrowser, view: "" }
       try SubscriptionRef.set(fake.foreground, home)
       const left = try agent.openApproved("https://example.test/", true)
+      try Effect.try(() => assert.notEqual(left.tab, original))
       try SubscriptionRef.set(fake.foreground, { ...shownBrowser, view: "maps" })
       try left.present
       const afterLeaving = { selected: (try tabs.get()).cur === left.tab, shown: (try Ref.get(fake.opened)).includes("browser") }
