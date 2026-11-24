@@ -25,6 +25,7 @@
     "@elizaos/os": "link:../../.eliza/packages/os",
     "@repo/design-system": "workspace:*",
     "@repo/ui": "workspace:*",
+    "dompurify": "3.4.17",
     "effect": "4.1.1",
     "lucide-react": "catalog:",
     "react": "catalog:",
