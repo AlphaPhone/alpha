@@ -163,7 +163,7 @@ it.effect(`A turn tells the agent direct requests are allowed only with review-f
   try Effect.try(() => assert.deepStrictEqual({ direct, asking }, { direct: { agentActionMode: "direct-request-v1" }, asking: undefined }))
 })
 
-it.effect("An open of a link from the page my message carried keeps its card (spec/assistant/review.md, \"The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote\")", () => effect {
+it.effect("An open of a link from the page my message carried keeps its card (spec/assistant/review.md, \"The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote or my own ask for its tab list\")", () => effect {
   const runs = { count: 0 }
   const story = wireProposal("p11", "f".repeat(64), { type: "browser_navigate", url: "https://news.example.com/story-2" }, "u1")
   const stranger = wireProposal("p12", "a".repeat(64), { type: "browser_navigate", url: "https://elsewhere.example.com/" }, "u1")
