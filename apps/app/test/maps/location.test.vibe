@@ -67,13 +67,16 @@ it.effect("Maps shares the chat's network client: a refused lookup waits two min
   const confirmed = try Effect.provide(effect {
     const network = try MapsNetworkLocation
     const shared = try NetworkLocation
+    // Both scenarios share the test clock, which the first moved on: times are counted from this one's start.
+    const start = try Clock.currentTimeMillis
+    const at = (timestamp: number | undefined) => timestamp === undefined ? undefined : timestamp - start
     const first = try network.locate()
     const reused = try network.locate()
     try TestClock.adjust("16 minutes")
     const second = try network.locate()
     const chat = try shared.cached()
     return {
-      first: first?.timestamp, reused: reused?.timestamp, second: second?.timestamp, precision: second?.precision, chat: chat?.timestamp,
+      first: at(first?.timestamp), reused: at(reused?.timestamp), second: at(second?.timestamp), precision: second?.precision, chat: at(chat?.timestamp),
       lookups: kept.nativeCalls.filter((c) => c === "AlphaNetworkLocation.locate").length,
     }
   }, kept.layer)
