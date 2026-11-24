@@ -43,6 +43,8 @@ export interface TelephonyScene {
   live: Live[];
   emergency: boolean | null;
   ended: string[];
+  /** The calls whose screen the strip's Return brought to the front. */
+  returned: string[];
   /** The phone's own report of its calls, pushed as the in-call service does. */
   report: () => void;
   /** The providers' change notice, as the SMS provider's observer sends it. */
@@ -81,6 +83,7 @@ export function telephonyScene(): TelephonyScene {
     live: [],
     emergency: false,
     ended: [],
+    returned: [],
     report: () => {},
     changed: () => {},
     deliver: () => {},
@@ -311,7 +314,10 @@ function ongoing(world: TelephonyScene): Faked {
     };
     return {
       ongoingCall: () => Promise.resolve(snapshot()),
-      showCall: ({ id }: { id: string }) => Promise.resolve({ shown: world.live.some((one) => one.id === id) }),
+      showCall: ({ id }: { id: string }) => {
+        world.returned.push(id);
+        return Promise.resolve({ shown: world.live.some((one) => one.id === id) });
+      },
       endCall: ({ id }: { id: string }) => {
         world.ended.push(id);
         const found = world.live.some((one) => one.id === id);

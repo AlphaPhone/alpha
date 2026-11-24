@@ -134,6 +134,13 @@ describe("The call strip on an Alpha image", () => {
     await until(alpha, alpha.runtime, Strip, (s) => s.shown && s.calls[0]?.phase === "Active");
 
     // spec/app/phone/call.md, "Return and End act only on the call the bar shows, and End is asked once"
+    await act(async () => {
+      const bar = document.querySelector("[role=region][aria-label='Ongoing call'] button");
+      if (!(bar instanceof HTMLButtonElement)) throw new Error("no call bar");
+      bar.click();
+    });
+    await until(alpha, alpha.runtime, Strip, () => world.telephony.returned.length === 1);
+    expect(world.telephony.returned).toEqual(["c1"]);
     await press("End call");
     await until(alpha, alpha.runtime, Strip, (s) => !s.shown);
     expect(world.telephony.ended).toEqual(["c1"]);
