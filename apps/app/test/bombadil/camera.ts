@@ -1,4 +1,4 @@
-// spec/camera/viewfinder.md, "Story: Take photos"; spec/camera/viewfinder.md, "Story: Record videos"; spec/camera/viewfinder.md, "Story: Recover when the camera is denied or stops"; spec/camera/browse.md, "Story: Select what I see"; spec/camera/browse.md, "Delete forever runs only from Recently deleted, on the items its confirmation prepared"; spec/camera/scanDialogs.md, "Save to Notes runs once per review; an unconfirmed save stays latched because the text may already be saved"; spec/camera/scanDialogs.md, "Keep text needs the recognised text; a PDF request already sent is unconfirmed if the dialog closes"
+// spec/camera/viewfinder.md, "Story: Take photos"; spec/camera/viewfinder.md, "Story: Record videos"; spec/camera/viewfinder.md, "Story: Recover when the camera is denied or stops"; spec/camera/browse.md, "Story: Select what I see"; spec/camera/browse.md, "Delete forever runs only from Recently deleted, on the items its confirmation prepared"; spec/camera/scanDialogs.md, "Save to Notes runs once per review; an unconfirmed save stays latched because the text may already be saved"; spec/camera/scanDialogs.md, "Keep text needs the recognised text; a PDF request already sent is unconfirmed if the dialog closes"; spec/camera/browse.md, "Sharing hands up to 100 selected items to Android's share sheet; nothing is sent until the owner picks an app there"
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
 
@@ -98,3 +98,12 @@ const searchable = extract(({ document }) => {
 
 /** The searchable PDF cannot be made before its text has been read for review. */
 export const cameraSearchablePdfWaitsForReviewedText = always(() => searchable.current);
+
+const share = extract(({ document }) => {
+  const bar = document.querySelector('footer[aria-label="Selection"]');
+  const button = bar?.querySelector<HTMLButtonElement>('button[aria-label="Share"]');
+  return { offered: button !== null && button !== undefined && !button.disabled, count: Number(bar?.querySelector("span")?.textContent?.trim() ?? "0") };
+});
+
+/** Share is offered only for one to 100 selected items. */
+export const cameraShareTakesOneToAHundred = always(() => !share.current.offered || (share.current.count >= 1 && share.current.count <= 100));

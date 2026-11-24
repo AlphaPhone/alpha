@@ -20,6 +20,10 @@ import type { Runs } from "../../../gen/workflows__runs.ts";
 import { initial as runsInitial } from "../../../gen/workflows__runs.ts";
 import type { Digests } from "../../../gen/workflows__digests.ts";
 import { initial as digestsInitial } from "../../../gen/workflows__digests.ts";
+import { initial as placeInitial, type Place } from "../../../gen/workflows__place.ts";
+import { initial as clockDraftInitial, type ClockDraft } from "../../../gen/workflows__clockDraft.ts";
+import type { PlaceSheet } from "../../workflows/place.vibe";
+import type { WorkflowsGates } from "./WorkflowsScreenView.tsx";
 
 const prompt: Row = {
   key: "a1", id: "a1", target: "t1", kind: "PromptRow", enabled: true, status: "active", title: "Plan my day",
@@ -153,3 +157,70 @@ export const resultTapped: HostedResults = {
 
 /** The owner is reviewing a question about the tapped result. */
 export const resultQuestion: HostedResults = { ...resultTapped, asks: true, question: "QuestionReview" };
+
+const workflow: Row = {
+  key: "workflow:w1", id: "w1", target: "w1", kind: "WorkflowRow", enabled: true, status: "active", title: "Morning brief",
+  description: "Reads my calendar and mail at seven and tells me what matters.", system: false, schedule: "cron:0 7 * * *|Europe/Paris",
+};
+
+/** Every source listed: a typed workflow, a prompt and a snoozed scheduled item. */
+export const listedWithWorkflow: Automations = { ...listed, rows: [workflow, prompt, scheduled] };
+
+/** Every source listed, and nothing in any of them. */
+export const listedEmpty: Automations = { ...listed, rows: [] };
+
+/** Twelve rows to scroll through, some with long titles. */
+export const listedMany: Automations = {
+  ...listed,
+  rows: [workflow, prompt, scheduled, ...Array.from({ length: 9 }, (_, i): Row => ({
+    ...prompt, key: `p${i}`, id: `p${i}`, target: `pt${i}`, enabled: i % 2 === 0,
+    title: i % 3 === 0 ? "Every Friday afternoon, summarize what the team shipped this week and draft the newsletter" : `Prompt ${i + 2}`,
+  }))],
+};
+
+/** Workflows removed earlier, listed apart for Restore. */
+export const removedWorkflows: ReadonlyArray<Row> = [{ ...workflow, key: "workflow:w0", id: "w0", target: "w0", enabled: false, status: "removed", title: "Evening digest" }];
+
+/** The list, nothing open over it. */
+export const atList: Place = placeInitial;
+
+/** The prompt row open. */
+export const atPrompt: Place = { ...placeInitial, view: "AutomationView", target: "a1" };
+
+/** The typed workflow open with its runs. */
+export const atWorkflow: Place = { ...placeInitial, view: "WorkflowView", target: "w1" };
+
+/** The digest panel with the agent's Run now offer under review. */
+export const atRunNow: Place = { ...placeInitial, view: "DigestsView", target: "", overlay: "RunNowOverlay" };
+
+/** The Add to Workflows sheet over the list. */
+export const atAdding: Place = { ...placeInitial, overlay: "AddingOverlay" };
+
+/** The workflow draft sheet over the list. */
+export const atDraft: Place = { ...placeInitial, overlay: "DraftOverlay" };
+
+/** No sheet has anything to show. */
+export const emptySheet: PlaceSheet = { phoneSources: [], renewing: undefined, impact: undefined, removalGrant: undefined, step: undefined };
+
+/** A Clock draft that has not been opened. */
+export const clockDraftClosed: ClockDraft = clockDraftInitial;
+
+/** Every control the machines allow. */
+export const allowedGates: WorkflowsGates = {
+  allowAnother: true, changeRow: true, savePrompt: true, tapStep: true, openClock: true, approveClock: true,
+  runs: { review: true, confirm: false, reviewResend: false, resend: false, cancel: false, reconcile: false },
+  lifecycle: { remove: true, restore: false, rename: true, reviewResend: false, back: false },
+  digests: { retry: false, discard: false, change: true },
+  authoring: { edit: true, save: true, resend: false, recover: false, discard: true },
+  sources: { startGrant: true, approve: true, cancel: true, consent: true, revokeConsent: true, revokeGrant: true },
+};
+
+/** A change is held for this owner: the machines refuse every new one. */
+export const refusedGates: WorkflowsGates = {
+  allowAnother: false, changeRow: false, savePrompt: false, tapStep: false, openClock: false, approveClock: false,
+  runs: { review: false, confirm: false, reviewResend: false, resend: false, cancel: false, reconcile: true },
+  lifecycle: { remove: false, restore: false, rename: false, reviewResend: true, back: false },
+  digests: { retry: false, discard: false, change: false },
+  authoring: { edit: false, save: false, resend: false, recover: false, discard: false },
+  sources: { startGrant: false, approve: false, cancel: false, consent: false, revokeConsent: false, revokeGrant: false },
+};
