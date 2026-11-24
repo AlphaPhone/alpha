@@ -235,7 +235,7 @@ public class AlphaFilesPlugin extends Plugin {
   String path=call.getString("path");String category=call.getString("category");
   java.io.File folder=path!=null?b.resolve(path,true):"downloads".equals(category)?new java.io.File(primaryBrowser().root,StorageCatalog.DOWNLOAD_FOLDER):null;
   watch.install(ticket,()->{
-   Runnable changed=()->{if(watch.isCurrent(ticket))notifyListeners("storageChanged",new JSObject());};
+   Runnable changed=()->{if(watch.observe(ticket))notifyListeners("storageChanged",new JSObject());};
    FileObserver files=folder!=null&&folder.isDirectory()?new FileObserver(folder,FileObserver.CREATE|FileObserver.DELETE|FileObserver.MOVED_FROM|FileObserver.MOVED_TO|FileObserver.CLOSE_WRITE|FileObserver.DELETE_SELF|FileObserver.MOVE_SELF){@Override public void onEvent(int event,String name){burst(changed);}}:null;
    android.database.ContentObserver media=new android.database.ContentObserver(main){@Override public void onChange(boolean self){burst(changed);}};
    StorageBrowser.WatchSlot.Watch resources=()->{
@@ -249,9 +249,9 @@ public class AlphaFilesPlugin extends Plugin {
    return resources;
   });
   return new JSObject();
- },()->watch.fail(ticket));}
+ },()->watch.refuse(ticket));}
  @PluginMethod public void storageUnwatch(PluginCall call){stopWatching();call.resolve(new JSObject());}
  private void burst(Runnable changed){main.removeCallbacks(changed);main.postDelayed(changed,400);}
- private void stopWatching(){watch.clear();}
+ private void stopWatching(){watch.unwatch();}
  @Override protected void handleOnDestroy(){stopWatching();storageWorker.shutdownNow();}
 }

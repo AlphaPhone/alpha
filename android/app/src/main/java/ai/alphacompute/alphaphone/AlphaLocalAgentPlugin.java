@@ -1049,7 +1049,7 @@ private static final class ResidentAttachDiagnostic {
     JSONObject record=NativeNotificationSession.record(expected,identity,installation,provider);
     stage=NativeNotificationDiagnostics.Persist.PREVIOUS;
     String previous=store.readCredentialSlot(NativeNotificationSession.SLOT);
-    if(previous!=null){String old=new JSONObject(previous).optString("projectionOwner","");if(old.matches("[a-f0-9]{64}")&&!old.equals(record.getString("projectionOwner")))NativeNotificationProjector.retireOwner(context,old);}
+    if(previous!=null){String old=new JSONObject(previous).optString("projectionOwner","");if(old.matches("[a-f0-9]{64}")&&!old.equals(record.getString("projectionOwner")))ai.elizaos.app.AlphaNotificationProjection.retireOwner(context,old);}
     stage=NativeNotificationDiagnostics.Persist.STORE;
     notificationAgent=identity.getString("agentId");
     store.writeCredentialSlot(NativeNotificationSession.SLOT,record.toString());
@@ -1063,7 +1063,7 @@ private static final class ResidentAttachDiagnostic {
    if(enrollmentPresent())return;
    if(expected!=null&&new AlphaCredentialStore(context).compareExchangeCredentialSlot(NativeNotificationSession.SLOT,expected,null)){
     String prior=new JSONObject(expected).optString("projectionOwner","");
-    if(prior.matches("[a-f0-9]{64}"))NativeNotificationProjector.retireOwner(context,prior);
+    if(prior.matches("[a-f0-9]{64}"))ai.elizaos.app.AlphaNotificationProjection.retireOwner(context,prior);
    }
   }}
  }
