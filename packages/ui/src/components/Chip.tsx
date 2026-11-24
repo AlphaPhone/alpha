@@ -10,21 +10,22 @@ export type ChipProps = ComponentProps<typeof TogglePrimitive.Root> & {
   clearLabel?: string;
 };
 
-/** A filter that is on or off, and with `onClear` a second control that removes it. */
+/** A filter that is on or off, 44px tall; with `onClear`, a 32px filter in force with a second control that removes it. */
 export function Chip({ onClear, clearLabel, disabled, className, children, ...props }: ChipProps) {
   const name = typeof children === "string" ? children : props["aria-label"];
   return (
     <span
       className={cn(
-        "inline-flex h-9 items-center rounded-full bg-secondary text-sm font-medium text-secondary-foreground transition-colors duration-fast ease-standard has-disabled:opacity-50 has-data-[state=on]:bg-foreground has-data-[state=on]:text-background",
+        "inline-flex items-center rounded-full bg-secondary text-secondary-foreground transition-colors duration-fast ease-standard has-disabled:opacity-50 has-data-[state=on]:bg-foreground has-data-[state=on]:text-background",
+        onClear ? "h-8 gap-1 pl-3 text-caption" : "h-11 text-sm font-semibold",
         className,
       )}
     >
-      <TogglePrimitive.Root disabled={disabled} className={cn(focusRing, "relative h-9 min-w-11 rounded-full px-4 before:absolute before:inset-x-0 before:-inset-y-1 disabled:pointer-events-none", onClear && "pr-1")} {...props}>
+      <TogglePrimitive.Root disabled={disabled} className={cn(focusRing, "relative inline-flex min-w-11 items-center gap-1.5 rounded-full disabled:pointer-events-none", onClear ? "h-8 before:absolute before:inset-x-0 before:-inset-y-1.5" : "h-11 justify-center px-3")} {...props}>
         {children}
       </TogglePrimitive.Root>
       {onClear ? (
-        <button type="button" aria-label={clearLabel ?? (name ? `Clear ${name}` : "Clear")} disabled={disabled} onClick={onClear} className={cn(focusRing, "relative flex size-9 items-center justify-center rounded-full before:absolute before:-inset-1 disabled:pointer-events-none")}>
+        <button type="button" aria-label={clearLabel ?? (name ? `Clear ${name}` : "Clear")} disabled={disabled} onClick={onClear} className={cn(focusRing, "-my-1.5 flex size-11 items-center justify-center rounded-full disabled:pointer-events-none")}>
           <X aria-hidden className="size-4" />
         </button>
       ) : null}

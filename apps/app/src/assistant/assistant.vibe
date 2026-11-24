@@ -9,9 +9,11 @@ import { zoneOf } from "../../gen/app__assistant__context.effect.vibe"
 import * as Reply from "../../gen/app__assistant__reply.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
 import * as Search from "../../gen/app__assistant__search.effect.vibe"
-import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import * as Comms from "../../gen/app__phone__comms.effect.vibe"
+import { Machine as Shell, canReturnCommsView } from "../../gen/app__shell.effect.vibe"
 import { stepping } from "../shell/shell.vibe"
 import { Agent } from "../platform/agent.vibe"
+import { CommsPrompts, type CommsPrompt, commsViewOf } from "../phone/comms.vibe"
 import { ask, outcomeOf } from "../platform/remote.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { MailQuestions, withMail } from "../inbox/mail-context.vibe"
@@ -136,8 +138,8 @@ function observed(told: boolean, context: Conversation.Context) {
 
 // spec/app/assistant/index.md, "Every message asked is posted exactly once, under a new ticket, whoever gave the text, with the screen showing and never a sensitive one"; spec/app/assistant/index.md, "The first word of a reply shows that the agent has the message, and a withdrawal that came too late stops it there"
 // spec/app/assistant/composer.md, "A quoted message goes with the next send, until the owner removes the quote"
-function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | MailQuestions | MediaReview> {
-  return Stream.callback<Conversation.Event, never, Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | MailQuestions | MediaReview>((queue) => effect {
+function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions | MediaReview> {
+  return Stream.callback<Conversation.Event, never, Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions | MediaReview>((queue) => effect {
     const { controller } = try Turns
     const { board } = try Talk
     const reply = try Reply.Machine
@@ -145,18 +147,21 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const show = (event: Reply.Event) => { shown.queue(() => runPromise(ignore(reply.send(event)))) }
     const chats = try (try Chats.Machine).get()
     const known = board.known(chats.chosen)
-    const text = board.outgoing
+    const request = board.postingRequest
+    board.postingRequest = undefined
+    const text = request?.text ?? board.outgoing
     const held = (try (try Composer.Machine).get()).held
-    const files = board.snapshot().files.slice(0, held.files)
-    const quoted = held.quote > 0 ? board.latest()[held.quote - 1] : undefined
+    const files = request === undefined ? board.snapshot().files.slice(0, held.files) : []
+    const quoted = request === undefined && held.quote > 0 ? board.latest()[held.quote - 1] : undefined
     if (known === undefined || (text === "" && files.length === 0)) {
       Queue.offerUnsafe(queue, { type: "refuse", ticket })
       Queue.endUnsafe(queue)
       return
     }
     const mail = try MailQuestions
-    const attachment = held.mail ? mail.attached() : undefined
-    const outgoing = attachment === undefined ? (held.mail ? undefined : text) : (withMail(text, attachment) catch () => undefined)
+    const includesMail = request === undefined && held.mail
+    const attachment = includesMail ? mail.attached() : undefined
+    const outgoing = attachment === undefined ? (includesMail ? undefined : text) : (withMail(text, attachment) catch () => undefined)
     if (outgoing === undefined) {
       mail.show({ failure: "changed" })
       Queue.offerUnsafe(queue, { type: "refuse", ticket })
@@ -200,6 +205,11 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     show(ending)
     try promise(() => shown.drain())
     const event = ended(ticket, heard, result)
+    if (request !== undefined && (heard || event.type === "finish")) {
+      const comms = try Comms.Machine
+      const current = (try comms.get()).requests.find((one) => one.about === request.about)
+      if (current?.request === request.text) try contained(comms.send({ type: "requestSent", about: request.about }, "Owner"), "clearing the accepted request")
+    }
     const finishing = Conversation.canFinish(try (try Conversation.Machine).get(), ticket)
     if (result?.kind === "Replied" && finishing) {
       if (result.reply.userMessageId !== undefined) board.rename(mine, result.reply.userMessageId)
@@ -262,7 +272,7 @@ effect function uploaded(ticket: number, attachments: number): Conversation.Even
   return { type: "uploaded", ticket, ok }
 }
 
-function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Agent | Turns | Talk | Chats.Machine | Composer.Machine | Conversation.Machine | Reply.Machine | Shell | MailQuestions | MediaReview, []> {
+function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Agent | Turns | Talk | Chats.Machine | Composer.Machine | Conversation.Machine | Reply.Machine | Comms.Machine | Shell | MailQuestions | MediaReview, []> {
   return match (fx) {
     when { tag: "CheckSupport", let support }: answer("support", supported(support), { type: "supported", ticket: support, ok: false, takes: false });
     when { tag: "Upload", let ticket, let attachments }: answer("upload", uploaded(ticket, attachments), { type: "uploaded", ticket, ok: false });
@@ -509,6 +519,49 @@ const bound = started(effect {
   })
 }, "binding the composer")
 
+// spec/app/phone/comms.md, "Each subject keeps one request to Alpha, separate from its draft"
+effect function postRequest(request: CommsPrompt): void!!(Comms.Machine | Conversation.Machine | Talk) {
+  const comms = try (try Comms.Machine).get()
+  if (comms.key !== request.about || !comms.requests.some((one) => one.about === request.about && one.request === request.text)) return
+  const conversation = try Conversation.Machine
+  const where = try conversation.get()
+  const event: Conversation.Event = { type: "ask", hold: 0, prompt: where.turn.send.id + 1, attachments: 0 }
+  if (!Conversation.enabled(where, event)) return
+  const { board } = try Talk
+  board.postingRequest = request
+  if (!(try contained(conversation.send(event), "asking about the subject"))) board.postingRequest = undefined
+}
+
+// spec/app/assistant/index.md, "A message is asked when the agent can be reached, the screen may be sent and no turn is in flight"
+export effect function askComms(request: CommsPrompt): void!!(Chats.Machine | Composer.Machine | Comms.Machine | Conversation.Machine | Talk) {
+  const { board } = try Talk
+  const conversation = try (try Conversation.Machine).get()
+  if (request.text.trim() === "" || request.text.length > Composer.textLimit || !Conversation.askable(conversation) || board.postingRequest !== undefined || board.waitingRequest !== undefined || board.sendWhenMade) return
+  const chats = try Chats.Machine
+  if ((try chats.get()).chosen !== 0) {
+    try postRequest(request)
+    return
+  }
+  board.waitingRequest = request
+  const free = freedom(conversation, try (try Composer.Machine).get(), 0)
+  if (!(try contained(chats.send({ type: "start", ...free }), "opening a conversation for the request"))) board.waitingRequest = undefined
+}
+
+const requested = started(effect {
+  const chats = try Chats.Machine
+  const { board } = try Talk
+  try Stream.runForEach(chats.changes, effect (shown) => {
+    const request = board.waitingRequest
+    if (request === undefined || Chats.making(shown)) return
+    board.waitingRequest = undefined
+    if (shown.chosen !== 0) try postRequest(request)
+  })
+}, "sending a request after opening its conversation")
+
+const submitted = started(effect {
+  try Stream.runForEach((try CommsPrompts).submissions, askComms)
+}, "asking what was typed on the communications dock")
+
 // spec/app/assistant/dock.md, "A drag released asks the shell once for where it landed, and keeps a sheet's height"; spec/app/assistant/dock.md, "A gesture asks the shell to raise Ask Alpha, to go back a step or two, or nothing; a press that did not move is a tap on its control"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"
 function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell, []> {
   return match (fx) {
@@ -541,6 +594,15 @@ export const assistantBack = effect {
   const composer = try Composer.Machine
   if ((try search.get()).open) return try contained(search.send({ type: "closeSearch" }), "back")
   if ((try composer.get()).editor.quote > 0) return try contained(composer.send({ type: "unquote" }), "back")
+  const comms = try Comms.Machine
+  const previous = (try comms.get()).stage.at(-1)
+  if (previous !== undefined) {
+    const shell = try Shell
+    const view = commsViewOf(previous.app)
+    if (canReturnCommsView(try shell.get(), view) && (try contained(comms.send({ type: "stageReturned" }, "Owner"), "returning to the earlier communications stage"))) {
+      return try contained(shell.send({ type: "returnCommsView", previous: view }), "returning to the earlier communications app")
+    }
+  }
   return false
 }
 
@@ -554,7 +616,7 @@ export const assisting = Layer.provideMerge(
     reacting(Reply, {}),
     reacting(Dock, { carry: carryDock }),
     stepping("assistant", Search.Machine, (search) => search.open),
-    reached, looked, left, opening, saving, bound, resting,
+    reached, looked, left, opening, saving, bound, requested, submitted, resting,
   ),
   Layer.merge(Layer.fresh(turns), talk),
 )

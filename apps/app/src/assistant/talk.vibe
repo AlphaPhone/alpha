@@ -4,6 +4,7 @@ import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type { MediaCard } from "./media-review.vibe"
 import type { Attachment } from "./attachments.vibe"
 import type { Failure, Fix } from "../../gen/app__assistant__reply.ts"
+import type { CommsPrompt } from "../phone/comms.vibe"
 
 /** One message of the conversation showing, as the agent keeps it. */
 export interface Line {
@@ -68,6 +69,8 @@ export interface Board {
   /** The id the last message was posted under, as the agent keeps it, or "" where its post never said. */
   lastSentId: string
   sendWhenMade: boolean
+  waitingRequest: CommsPrompt | undefined
+  postingRequest: CommsPrompt | undefined
   change(patch: Partial<Seen>): void
   /** The number of the conversation the agent names `record`, given the first time it is seen; its title where one is given. */
   numberOf(record: ConversationRecord, title?: string): number
@@ -131,6 +134,8 @@ export const talk = Layer.effect(Talk, effect {
     lastSent: "",
     lastSentId: "",
     sendWhenMade: false,
+    waitingRequest: undefined,
+    postingRequest: undefined,
     change: (patch) => {
       seen = { ...seen, ...patch }
       for (const listener of listeners) listener()

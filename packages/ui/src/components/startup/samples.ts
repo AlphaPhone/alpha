@@ -1,5 +1,4 @@
 import { createElement, type ReactNode } from "react";
-import { ListGroup } from "../ListGroup.tsx";
 import type { StartupAccessRowState } from "./StartupAccessPanel.tsx";
 import type { StartupAccess, StartupAccessAction, StartupAccessWord } from "./vocabulary.ts";
 
@@ -14,8 +13,8 @@ export const sampleHome: ReactNode = createElement(
 /** What stands in for Ask Alpha's conversation, which the assistant area draws. */
 export const sampleChat: ReactNode = createElement("p", { className: "px-4 text-base" }, "What can I do for you?");
 
-/** Shows a row where it lives, on the card of a group. */
-export const inGroup = (story: () => ReactNode) => createElement(ListGroup, null, story());
+/** Shows a row where it lives, in the access checklist. */
+export const inGroup = (story: () => ReactNode) => createElement("ol", null, story());
 
 /** Sizes a page to the viewport, as the app shell does. */
 export const fullHeight = (story: () => ReactNode) => createElement("div", { className: "flex h-dvh flex-col" }, story());
