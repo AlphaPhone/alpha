@@ -1,4 +1,4 @@
-// spec/notes/trash.md, "Erase needs the three-day choice, a review of that exact deletion at the current revision, and no shared recording"; spec/notes/recorder.md, "Discard asks once for a recording of a second or more, and never while its save is claimed"; spec/notes/list.md, "The list holds every row once, pinned rows first, then by time, ties in stored order"; spec/notes/list.md, "Each checklist row keeps its own place and a name a screen reader can say"; spec/notes/folders.md, "A folder is created once per name, up to a hundred folders"; spec/notes/trash.md, "Every Trash dialog is named by the actions it offers and the note it reviews"; spec/notes/webSource.md, "One action per dialog, only while the dialog is fresh over the note it reviewed"
+// spec/notes/trash.md, "Erase needs the three-day choice, a review of that exact deletion at the current revision, and no shared recording"; spec/notes/recorder.md, "Discard asks once for a recording of a second or more, and never while its save is claimed"; spec/notes/list.md, "The list holds every row once, pinned rows first, then by time, ties in stored order"; spec/notes/list.md, "Each checklist row keeps its own place and a name a screen reader can say"; spec/notes/folders.md, "A folder is created once per name, up to a hundred folders"; spec/notes/trash.md, "Every Trash dialog is named by the actions it offers and the note it reviews"; spec/notes/webSource.md, "One action per dialog, only while the dialog is fresh over the note it reviewed"; spec/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks"
 // What Bombadil checks of the Notes app in every state it reaches.
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
@@ -72,3 +72,18 @@ const sourceDialog = extract(({ document }) => {
 
 /** A source dialog whose removal could not be confirmed accepts no further action. */
 export const notesSourceDialogUnconfirmedStaysBusy = always(() => !sourceDialog.current.open || !sourceDialog.current.unconfirmed || !sourceDialog.current.actionable);
+
+const folderNames = extract(({ document }) => {
+  const names = Array.from(document.querySelectorAll('button[aria-label^="Delete folder "]'))
+    .map((button) => (button.getAttribute("aria-label") ?? "").slice("Delete folder ".length).replace(/\s+/g, " ").trim());
+  return names.every((name) => name !== "" && [...name].length <= 40) && new Set(names).size === names.length;
+});
+
+/** Each folder is listed once by its name, of 1 to 40 characters. */
+export const notesFolderNamesListedOnce = always(() => folderNames.current);
+
+const importOffered = extract(({ document }) =>
+  document.documentElement.dataset.testMocks === "false" && Array.from(document.querySelectorAll('[role="menuitem"]')).some((item) => item.textContent?.trim() === "Import text file"));
+
+/** Import text file is a developer surface, never offered in a build without test mocks. */
+export const notesImportOnlyWithTestMocks = always(() => !importOffered.current);

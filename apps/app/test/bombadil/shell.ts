@@ -1,4 +1,4 @@
-// spec/shell/navigation.md, "Back closes the topmost layer first, then Home's launcher layers, then the assistant, then the app"; spec/shell/navigation.md, "The library, its entry menu and Home's edit mode exist only over Home"; spec/shell/toasts.md, "A toast leaves when its time is up, its Undo ran or the owner dismissed it, and the next one takes its place"; spec/shell/toasts.md, "A persistent notice is listed until dismissed, at most three, each once"; spec/shell/permissions.md, "The first-run walkthrough says which step of how many it shows"; spec/shell/permissions.md, "An allowed step says how much Android allowed, and a browser request left off says so"; spec/shell/navigation.md, "A layer is listed once, closes with its owner or with Back, and holds the phone while open"; spec/shell/navigation.md, "The stand-in shade opens only over Home"; spec/shell/geometry.md, "The dock's footprint is published while a dock shows, and kept while none does"
+// spec/shell/navigation.md, "Back closes the topmost layer first, then Home's launcher layers, then the assistant, then the app"; spec/shell/navigation.md, "The library, its entry menu and Home's edit mode exist only over Home"; spec/shell/toasts.md, "A toast leaves when its time is up, its Undo ran or the owner dismissed it, and the next one takes its place"; spec/shell/toasts.md, "A persistent notice is listed until dismissed, at most three, each once"; spec/shell/permissions.md, "The first-run walkthrough says which step of how many it shows"; spec/shell/permissions.md, "An allowed step says how much Android allowed, and a browser request left off says so"; spec/shell/navigation.md, "A layer is listed once, closes with its owner or with Back, and holds the phone while open"; spec/shell/navigation.md, "The stand-in shade opens only over Home"; spec/shell/geometry.md, "The dock's footprint is published while a dock shows, and kept while none does"; spec/shell/overview.md, "A card shows only when it has something, and the date stands in when none does"; spec/shell/favorites.md, "Every key is current and listed once"; spec/shell/recovery.md, "Switch Home is offered only where Android reports a launcher build"
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
 
@@ -87,3 +87,34 @@ const dockLengthsAgree = extract(({ document }) => {
 
 /** The dock's two published lengths come together, as whole pixels, the bar never more than everything the dock covers. */
 export const shellDockLengthsAgree = always(() => dockLengthsAgree.current);
+
+const overview = extract(({ document }) => {
+  const today = document.querySelector('[role="list"][aria-label="Today"]');
+  return { date: document.querySelector("[data-alpha-home-date]") !== null, list: today !== null, cards: today?.children.length ?? 0 };
+});
+
+/** Home shows its cards or, when none has something, the date: never both, and never an empty row of cards. */
+export const shellHomeShowsCardsOrTheDate = always(() => !(overview.current.date && overview.current.list) && (!overview.current.list || overview.current.cards > 0));
+
+const homeTilesOnce = extract(({ document }) => {
+  const keys = Array.from(document.querySelectorAll('[role="list"][aria-label="Apps on Home"] [data-alpha-tile]')).map((tile) => tile.getAttribute("data-alpha-tile") ?? "");
+  return new Set(keys).size === keys.length;
+});
+
+/** Every app on Home is listed once. */
+export const shellHomeListsEachAppOnce = always(() => homeTilesOnce.current);
+
+const editingOverHome = extract(({ document }) =>
+  document.querySelector("[data-alpha-home-editing]") === null || document.querySelector("[data-alpha-app]:not([hidden])") === null);
+
+/** Home's edit mode is never kept under an open app. */
+export const shellEditModeOnlyOverHome = always(() => editingOverHome.current);
+
+const switchHome = extract(({ document }) => {
+  const offered = Array.from(document.querySelectorAll('[role="alertdialog"] button')).some((button) => button.textContent?.trim() === "Switch Home");
+  const variant = document.documentElement.dataset.alphaVariant;
+  return !offered || variant === "launcher" || variant === "aosp";
+});
+
+/** The recovery screen offers Switch Home only on a phone build, never on the browser page. */
+export const shellSwitchHomeOnlyOnThePhone = always(() => switchHome.current);
