@@ -11,8 +11,8 @@
 // other upstream packages are not.
 //
 // `--gen` runs only upstream's root generation step (//#gen), which writes each package's gitignored gen/
-// directory. Root tests that import an upstream `.vibe` module (scripts/apk.ts reads @elizaos/os/image) need
-// it, and they run before any upstream build does in `pnpm verify`.
+// directory. Use it when generation is the only prerequisite. `pnpm verify` builds the packages
+// before running root tests because the runtime-license tests also load the agent's SDK declarations.
 import {spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
