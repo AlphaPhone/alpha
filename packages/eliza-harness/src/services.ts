@@ -137,12 +137,14 @@ function catalogued(route: string, authorization: string | undefined): [number, 
 /**
  * The model provider a deployment's cloud pays: an OpenAI-compatible `chat/completions`, which says what a journey
  * scripted, or repeats the owner's last message, and reports the tokens it is paid for. An agent is told apart by
- * its character's system prompt, so journeys share one cloud.
+ * its character's system prompt, which begins the system message eliza sends, so journeys share one cloud.
  */
 async function startProvider(key: string) {
   const replies = new Map<string, Reply[]>();
   const asked = new Map<string, Message[][]>();
   const listed = <A>(lists: Map<string, A[]>, system: string) => lists.get(system) ?? lists.set(system, []).get(system)!;
+  const scripted = (system: string) => [...replies.keys()].filter((character) => system.startsWith(character)).sort((a, b) => b.length - a.length)[0] ?? system;
+  const heard = (character: string) => [...asked].filter(([system]) => system.startsWith(character)).flatMap(([, calls]) => calls);
   const frame = (data: unknown) => `data: ${typeof data === "string" ? data : JSON.stringify(data)}\n\n`;
   const usage = (messages: readonly Message[], text: string) => ({ prompt_tokens: JSON.stringify(messages).length, completion_tokens: text.length, total_tokens: JSON.stringify(messages).length + text.length });
   const json = (outgoing: ServerResponse, status: number, data: unknown) => void outgoing.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(data));
@@ -157,7 +159,7 @@ async function startProvider(key: string) {
     const system = typeof character === "string" ? character : "";
     listed(asked, system).push(messages);
     const last = messages.findLast((message) => message.role === "user")?.content;
-    const reply = listed(replies, system).shift() ?? { kind: "text", parts: ["You said: ", typeof last === "string" ? last : JSON.stringify(last)] };
+    const reply = listed(replies, scripted(system)).shift() ?? { kind: "text", parts: ["You said: ", typeof last === "string" ? last : JSON.stringify(last)] };
     const text = reply.kind === "text" ? reply.parts.join("") : reply.first;
     const named = { id: "chatcmpl-local", created: 1_790_000_000, model: input.model };
     if (input.stream !== true) {
@@ -178,7 +180,7 @@ async function startProvider(key: string) {
       const body = await read(incoming);
       return json(outgoing, 200, { scripted: listed(replies, String(body.system)).push(body.reply as Reply) });
     }
-    if (url.pathname === "/operator/asked") return json(outgoing, 200, listed(asked, url.searchParams.get("system") ?? ""));
+    if (url.pathname === "/operator/asked") return json(outgoing, 200, heard(url.searchParams.get("system") ?? ""));
     if (url.pathname.startsWith("/stripe/")) return json(outgoing, ...catalogued(url.pathname.slice("/stripe".length), incoming.headers.authorization));
     if (incoming.method !== "POST" || url.pathname !== "/v1/chat/completions") return json(outgoing, 404, { error: { type: "invalid_request_error", message: "no such route" } });
     if (incoming.headers.authorization !== `Bearer ${key}`) return json(outgoing, 401, { error: { type: "authentication_error", message: "bad key" } });
