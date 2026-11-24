@@ -89,7 +89,7 @@ export function BrowserScreen({ route, onClose }: BrowserScreenProps) {
         <Button variant="ghost" size="icon" aria-label="Home" onClick={onClose}><ChevronDown aria-hidden /></Button>
         {finding && <div className="flex-1"><FindBar session={session} onQuery={(q) => run(({ tabs }) => tabs.typeFind(q))} onMove={(forward) => run(({ tabs }) => tabs.dispatch({ type: "moveFind", forward }))} onClose={() => run(({ tabs }) => tabs.dispatch({ type: "closeFind" }))} /></div>}
       </div>
-      <PageViewport key={session.cur} session={session} measure={measure} />
+      <PageViewport key={session.cur} session={session} measure={measure} onOpenElsewhere={() => run(({ handoff }) => handoff.openFailed())} />
       <BrowserToolbar session={session}
         onCommand={(command) => run(({ tabs }) => tabs.dispatch({ type: "runCommand", command }))}
         onAddress={() => run(({ tabs }) => tabs.dispatch({ type: "startEditing" }))}

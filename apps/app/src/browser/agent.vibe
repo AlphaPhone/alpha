@@ -172,12 +172,6 @@ export const agentLayer = Layer.provide(Layer.effect(BrowserAgent, effect {
     return settled
   }
 
-  effect function tabList() {
-    const state = try tabs.get()
-    if (!canAgentShowTabs(state, state.cur)) throw new BrowserOpenRefused({ message: "Browser is unavailable." })
-    return deferred("PresentTabList", { type: "agentShowTabs", selected: state.cur })
-  }
-
   effect function viewCommand(raw: unknown, selection: unknown) {
     const parsed = parseNativeHistoryCommand(raw, selection)
     if (!parsed.ok) return { ok: false, code: "UNSUPPORTED", message: parsed.message } as const
@@ -211,6 +205,12 @@ export const agentLayer = Layer.provide(Layer.effect(BrowserAgent, effect {
     return { ok: true, data: { dispatched: true, completed: false, requiresReadback: true } } as const
   }
 
+  effect function presentTabList() {
+    const state = try tabs.get()
+    if (!canAgentShowTabs(state, state.cur)) throw new BrowserOpenRefused({ message: "Browser is unavailable." })
+    return deferred("PresentTabList", { type: "agentShowTabs", selected: state.cur })
+  }
+
   return {
     effect openApproved(url: string, newTab: boolean) {
       const parsed = parseBrowserNavigate({ type: "browser_navigate", url, ...(newTab ? { newTab: true } : {}) })
@@ -228,7 +228,7 @@ export const agentLayer = Layer.provide(Layer.effect(BrowserAgent, effect {
       const observedTab = observed === undefined ? "" : observed.id.slice(observed.id.indexOf(":") + 1)
       const observedRevision = observed === undefined ? 0 : Number(observed.revision)
       switch (operation.type) {
-        case "browser_tabs_show": return try tabList()
+        case "browser_tabs_show": return try presentTabList()
         case "browser_search": {
           const opened = try open(searchAddress(operation.query), false)
           return map(opened.present, () => presentedRan("BringForward", true))
@@ -263,7 +263,7 @@ export const agentLayer = Layer.provide(Layer.effect(BrowserAgent, effect {
         }
       }
     },
-    showTabs: tabList,
+    showTabs: presentTabList,
     command: viewCommand,
     effect interact(capability: string, raw: unknown, selection: unknown) {
       const kind: Interaction = capability === "get-text" ? "GetText" : capability === "browser-command" ? "BrowserCommand" : "OtherInteraction"

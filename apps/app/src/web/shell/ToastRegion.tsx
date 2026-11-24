@@ -1,8 +1,9 @@
-// spec/shell/toasts.md, "Story: Read what just happened, at my own pace"; spec/shell/toasts.md, "A toast leaves when its time is up, its Undo ran or the owner dismissed it, and the next one takes its place"; spec/shell/toasts.md, "A persistent notice is listed until dismissed, at most three, each once"
+// spec/shell/toasts.md, "Story: Read what just happened, at my own pace"; spec/shell/toasts.md, "A toast leaves when its time is up, its Undo ran or the owner dismissed it, and the next one takes its place"; spec/shell/toasts.md, "A persistent notice is listed until dismissed, at most three, each once"; spec/browser/presentation.md, "A host control that appears or goes withdraws page input over the whole page until the next frame publishes its bounds"
 import { X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Toasts } from "../../../gen/shell__toasts.ts";
+import { HOST_CHROME } from "../browser/measure.ts";
 import { cn, focusRing } from "../lib/cn.ts";
 
 /** The toast region: the shown toast, where it lives and its hold, release and Undo. */
@@ -64,7 +65,7 @@ export function ToastRegion({ toasts, inDialog = false, onHold, onRelease, onAct
       }}
     >
       {shown.message !== "" && (
-        <div className="pointer-events-auto flex min-h-12 max-w-full items-center gap-3 rounded-xl bg-foreground py-2 pr-1 pl-4 text-background shadow-lg">
+        <div {...{ [HOST_CHROME]: "" }} className="pointer-events-auto flex min-h-12 max-w-full items-center gap-3 rounded-xl bg-foreground py-2 pr-1 pl-4 text-background shadow-lg">
           <button type="button" aria-label={`${shown.message} Dismiss`} onClick={onDismiss}
             className={cn(focusRing, "min-h-10 min-w-0 flex-1 break-words rounded-lg text-left")}>
             {shown.message}
@@ -93,7 +94,7 @@ export function NoticesSlot({ notices, onDismiss }: NoticesSlotProps) {
   return (
     <ul aria-label="Notices" className="flex flex-col gap-2 px-3">
       {notices.map((notice) => (
-        <li key={notice} data-alpha-persistent-notice className="flex items-start gap-3 rounded-lg bg-card p-3 text-card-foreground">
+        <li key={notice} data-alpha-persistent-notice {...{ [HOST_CHROME]: "" }} className="flex items-start gap-3 rounded-lg bg-card p-3 text-card-foreground">
           <span aria-hidden className="mt-1.5 size-2 shrink-0 rounded-full bg-warn" />
           <span className="flex-1 text-sm">{notice}</span>
           <button type="button" aria-label={`Dismiss: ${notice}`} onClick={() => onDismiss(notice)} className={cn(focusRing, "-m-2 flex size-12 shrink-0 items-center justify-center rounded-md")}>

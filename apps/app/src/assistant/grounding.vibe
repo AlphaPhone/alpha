@@ -1,4 +1,4 @@
-// spec/assistant/review.md, "Story: Act only on what I asked for"; spec/assistant/review.md, "A call, dial or text that contradicts the number I wrote gets a notice instead of a card, and is rejected so a reload cannot bring it back"; spec/assistant/review.md, "The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote"
+// spec/assistant/review.md, "Story: Act only on what I asked for"; spec/assistant/review.md, "A call, dial or text that contradicts the number I wrote gets a notice instead of a card, and is rejected so a reload cannot bring it back"; spec/assistant/review.md, "The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote or my own ask for its tab list"
 import { writtenDigits, photoRequestLimit, photoPrefixLimit, type Target } from "../../gen/assistant__review.effect.vibe"
 
 const numberRun = /\+?\(?\d[\d\s().-]{5,}\d/g

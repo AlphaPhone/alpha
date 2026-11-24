@@ -146,10 +146,10 @@ export function MapPlane(props: MapPlaneProps) {
   const [map, setMap] = useState<MapLibre>();
   const [turn, setTurn] = useState({ bearing: 0, pitch: 0 });
   const { basemap, tileSize = 256, minZoom = 0, maxZoom = 20, generation } = props;
-  const shown = use(MapsDrawn);
+  const drawn = use(MapsDrawn);
 
   const mount = useCallback((node: HTMLDivElement | null) => {
-    if (!node || !shown || basemap === "NoBasemap") return;
+    if (!node || !drawn || basemap === "NoBasemap") return;
     const protocol = `alphamaps${++protocols}`;
     maplibregl.addProtocol(protocol, async (params, abort) => {
       const match = /:\/\/tiles\/(\d{1,2})\/(\d{1,7})\/(\d{1,7})\.png$/.exec(params.url);
@@ -166,14 +166,14 @@ export function MapPlane(props: MapPlaneProps) {
       ...(raster ? { minZoom, maxZoom: Math.min(maxZoom, 22) } : {}),
       attributionControl: false, cancelPendingTileRequestsWhileZooming: false,
     });
-    const drawn = painter(instance, props.onPin);
+    const painted = painter(instance, props.onPin);
     let stop: (() => void) | undefined;
     let styleLoaded = false;
     instance.once("style.load", () => { styleLoaded = true; });
     instance.on("load", () => {
       instance.addSource("route", { type: "geojson", data: lineOf([]) });
       instance.addLayer({ id: "route-line", type: "line", source: "route", paint: { "line-width": 6, "line-color": getComputedStyle(node).getPropertyValue("--primary") || "currentColor" } });
-      stop = watch((s) => s.plane.drawing, drawn.paint);
+      stop = watch((s) => s.plane.drawing, painted.paint);
       props.onState(generation, "PlaneReady");
     });
     instance.on("error", (e) => {
@@ -208,12 +208,12 @@ export function MapPlane(props: MapPlaneProps) {
     setMap(instance);
     return () => {
       stop?.();
-      drawn.clear();
+      painted.clear();
       instance.remove();
       maplibregl.removeProtocol(protocol);
       setMap(undefined);
     };
-  }, [shown, basemap, tileSize, minZoom, maxZoom, generation]);
+  }, [drawn, basemap, tileSize, minZoom, maxZoom, generation]);
 
   const northUp = () => {
     if (!map) return;

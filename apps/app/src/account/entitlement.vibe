@@ -121,13 +121,13 @@ export const entitlementService = Layer.effect(Entitlement, effect {
   }
 
   effect function signedPlan(now: number) {
+    // The signed plan must name the account signed in now: its subject and organization are checked, not only its signature.
+    const account = (try session.current()).account
     const keysBody = try read(cloud, "/api/v1/subscription/entitlement-keys")
     const keys = parseEntitlementKeys(keysBody)
     if (keys === undefined) return { signed: "SignedInvalid" as SignedPlan, planEndsAt: null, expires: 0 }
     const body = try read(cloud, "/api/v1/subscription/entitlement")
     const token = typeof body === "object" && body !== null && typeof (body as { entitlement?: unknown }).entitlement === "string" ? (body as { entitlement: string }).entitlement : ""
-    // A record signed for another account or organization than this sign-in's is not this account's plan.
-    const account = (try session.current()).account
     const checked = tryPromise(() => checkEntitlement(token, { keys, issuer: authority.api, audience: authority.entitlementAudience, userId: account.userId, organizationId: account.organizationId, now })) catch () => undefined
     if (checked === undefined) return { signed: "SignedInvalid" as SignedPlan, planEndsAt: null, expires: 0 }
     return { signed: signedOf(checked.plan.status), planEndsAt: checked.planEndsAt, expires: checked.expiresAt }

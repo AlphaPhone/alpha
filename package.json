@@ -18,7 +18,7 @@
     "test:root": "node --conditions=eliza-source --import vibelang/register scripts/run-root-tests.ts",
     "typecheck": "turbo run typecheck --filter=@alphacompute/alphaphone-app --filter=@alphacompute/alpha-cloud",
     "lint": "turbo run lint --filter=@alphacompute/alphaphone-app",
-    "verify": "pnpm -s cloud:deployment:check && pnpm -s test:root && pnpm -s licenses:check && turbo run check typecheck test lint --filter=@alphacompute/alphaphone-app --filter=@alphacompute/alpha-cloud && pnpm -s build && pnpm -s audit:bundle",
+    "verify": "pnpm -s cloud:deployment:check && pnpm -s build:upstream --gen && pnpm -s test:root && pnpm -s licenses:check && turbo run check typecheck test lint --filter=@alphacompute/alphaphone-app --filter=@alphacompute/alpha-cloud && pnpm -s build && pnpm -s audit:bundle",
     "audit:bundle": "node scripts/audit-production-bundle.ts web-dist",
     "android:sync": "pnpm -s build && cap sync android && node scripts/android-gzip-assets.ts protect",
     "android:host": "node --conditions=eliza-source --import vibelang/register scripts/android-host.ts",

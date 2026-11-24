@@ -39,13 +39,18 @@ def previous_activity(original):
         '            finishSetup();\n            return;\n        }\n'
         '        AlphaWelcome.show(this, this::finishSetup);\n    }\n\n    private void finishSetup()', 1)
 
-def project_manifest(original):
+def previous_manifest(original):
     assert original.count('    <application>') == 1
     return original.replace('    <application>',
         '    <uses-permission android:name="android.permission.MANAGE_ROLE_HOLDERS"/>\n'
         '    <uses-permission android:name="android.permission.SET_WALLPAPER"/>\n\n'
         '    <application android:label="@string/alpha_name" android:icon="@drawable/alpha_mark" android:theme="@android:style/Theme.Material.NoActionBar">\n'
         '        <activity android:name="AlphaAppearance" android:exported="true" android:label="@string/alpha_name"/>',1)
+
+def project_manifest(original):
+    anchor = '    <uses-permission android:name="android.permission.MANAGE_ROLE_HOLDERS"/>\n'
+    return previous_manifest(original).replace(anchor, anchor +
+        '    <uses-permission android:name="android.permission.CHANGE_OVERLAY_PACKAGES"/>\n', 1)
 
 def project_role_controller(original):
     field = '    private RoleManager mUserRoleManager;'
@@ -236,6 +241,7 @@ def build_plan(root, assets, report_hash, source_inputs, prior=None, product_mk_
         original = baseline.read_text(); candidate = transform(original).encode()
         admitted = [row['sha256']]
         if filename.endswith('DefaultActivity.java'): admitted.append(digest(previous_activity(original).encode()))
+        if filename == 'AndroidManifest.xml': admitted.append(digest(previous_manifest(original).encode()))
         put(project+'/'+filename,candidate,admitted)
     previous = json.loads((BRAND/'provision/admitted-previous-sources.json').read_text())
     for name in ['AlphaWelcome.java','AlphaAppearance.java','AlphaFreshPresets.java','AlphaFreshSetupPolicy.java']:

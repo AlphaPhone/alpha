@@ -1,5 +1,6 @@
 // spec/calendar/presentation.md, "Story: Read the presentation of times"; spec/calendar/device.md, "A read covers the month before through the month after next, and its first instant is never negative"
-import { type CalendarEvent, type CalendarSummary, sourceKeyId, utcInstant } from "@elizaos/plugin-calendar"
+import type { CalendarEvent, CalendarSummary } from "@elizaos/plugin-calendar"
+import { sourceKeyId, utcInstant } from "./source-key.ts"
 import { civilDay, deviceZone, midnightAfter } from "./time.ts"
 
 export const DAY = 86_400_000

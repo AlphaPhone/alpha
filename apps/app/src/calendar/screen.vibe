@@ -1,4 +1,4 @@
-// spec/calendar/presentation.md, "Story: Create or edit an event in a form"; spec/calendar/presentation.md, "Story: Open an event and come back"; spec/calendar/presentation.md, "Back closes one layer at a time: the form, the delete sheet, the event, the Calendars sheet, the date picker, then search"; spec/calendar/approvals.md, "A changed conversation, a hidden page or Back retires the review"; spec/calendar/presentation.md, "The Calendars sheet is a modal over the view, opened only with no form or delete sheet open"; spec/notes/origins.md, "Story: Go from a saved event or reminder back to its note"; spec/calendar/deletions.md, "Story: Undo a deletion before it is sent"; spec/calendar/agent.md, "A write runs only between reads, from a ready feed, for the current binding"; spec/calendar/editor.md, "A missing or repeated wall time is refused, and nothing is saved"
+// spec/calendar/presentation.md, "Story: Create or edit an event in a form"; spec/calendar/presentation.md, "Story: Open an event and come back"; spec/calendar/presentation.md, "Back closes one layer at a time: the form, the delete sheet, the event, the Calendars sheet, the date picker, then search"; spec/calendar/approvals.md, "A changed conversation, a hidden page or Back retires the review"; spec/calendar/presentation.md, "The Calendars sheet is a modal over the view, opened only with no form or delete sheet open"; spec/notes/origins.md, "Story: Go from a saved event or reminder back to its note"; spec/calendar/deletions.md, "Story: Undo a deletion before it is sent"; spec/calendar/agent.md, "A write runs only between reads, from a ready feed, for the current binding"; spec/calendar/editor.md, "A missing or repeated wall time is refused, and nothing is saved"; spec/calendar/editor.md, "An invitee answers Going or Maybe from the invitation; Decline stays the deletion's decline"
 import { Machine as PresentationMachine, type EventSource, canBack } from "../../gen/calendar__presentation.effect.vibe"
 import { agentCalendarAccepts, agentRepeatSendable, defaultStart, deviceRoute, newEventTarget, recurrenceEditAllowed, timingChangeAllowed, timingLocked, wallTimeSavable, type WallTime } from "../../gen/calendar__editor.effect.vibe"
 import { NotesOrigins, type OriginView } from "../notes/origins.vibe"
@@ -18,7 +18,7 @@ import { calendarWall, civil, civilDay, deviceZone, isoInstant, midnightAfter, r
 import { sha256Hex } from "./digest.ts"
 import { CalendarMaps } from "./ports.vibe"
 import { AgentRequests } from "./requests.vibe"
-import { sourceKeyId } from "@elizaos/plugin-calendar"
+import { sourceKeyId } from "./source-key.ts"
 
 /** The source of a row as the presentation names it. */
 function sourceOf(row: CalendarRow): EventSource {
@@ -161,6 +161,50 @@ export effect function deleteRow(row: CalendarRow, scope: CalendarWriteScope | "
   return result
 }
 
+/** Wait, up to ten seconds, for the agent Calendar's read or write in flight to settle, so a write is not refused only for being busy. */
+effect function agentSettled(agent: AgentCalendar.Shape) {
+  let waited = 0
+  while (waited < 40) {
+    const busy = (try agent.view()).state
+    if (busy.read.id === 0 && busy.write.id === 0) return
+    try sleep("250 millis")
+    waited += 1
+  }
+}
+
+/** What the owner is told when an invitation answer did not go through or was not confirmed; "" when it was saved or sent. */
+export function answerProblem(outcome: WriteOutcome): string {
+  switch (outcome) {
+    case "WriteQueuedForApproval": return "Waiting for your approval"
+    case "WriteBusy": return "Calendar is still updating. No answer was sent. Try again in a moment."
+    case "WriteNotAdmitted": return "Refresh this invitation before answering it. No answer was sent."
+    case "WriteOwnerChanged": return "Another account is signed in now. No answer was sent."
+    case "WriteTransport": return "Couldn’t reach your agent. No answer was sent. Try again."
+    case "WriteRefused": return "Your agent’s Calendar refused this answer."
+    case "WriteForeign": return "Another agent answered. Check Calendar before answering again."
+    case "WriteUnknown": return "Not confirmed. Check Calendar before answering again."
+    case "NotDeleted": case "NoOutcome": case "Saved": case "SentUnverified": case "Deleted": case "DeletedByReceipt": return ""
+  }
+}
+
+/** Answer the open agent invitation Going or Maybe at the version shown, then read Calendar again; says why when it did not go through. */
+export effect function answerRow(row: CalendarRow, answer: "accepted" | "tentative") {
+  const event = try agentEvent(row)
+  const agent = try AgentCalendar
+  let outcome: WriteOutcome = "WriteNotAdmitted"
+  if (event !== undefined && row.source === "agent" && row.revision !== "") {
+    try agentSettled(agent)
+    const invitee = event.attendees.some((guest) => guest.self && !guest.organizer)
+    outcome = try agent.answer({ eventKey: agentEventKey(event), invitee, request: {
+      responseStatus: answer, calendarId: event.calendarId, expectedProviderVersion: row.revision,
+      idempotencyKey: `answer-${answer}-${row.revision.replace(/[^-a-zA-Z0-9_]/g, "").slice(0, 60)}` } })
+  }
+  const problem = answerProblem(outcome)
+  if (problem !== "") try (try Notices).show(problem)
+  if (outcome === "Saved" || outcome === "SentUnverified") try readCalendar(true, false)
+  return outcome
+}
+
 effect function stageDeletion(row: CalendarRow, scope: CalendarWriteScope | "event", mode: "organizer_cancel" | "decline_invitation" | "remove_private_copy") {
   const presentation = try PresentationMachine
   if (row.source === "device") {
@@ -182,13 +226,7 @@ effect function stageDeletion(row: CalendarRow, scope: CalendarWriteScope | "eve
   const recordId = try noteRecordId(row.id)
   const origins = try NotesOrigins
   const send = effect {
-    let waited = 0
-    while (waited < 40) {
-      const busy = (try agent.view()).state
-      if (busy.read.id === 0 && busy.write.id === 0) break
-      try sleep("250 millis")
-      waited += 1
-    }
+    try agentSettled(agent)
     const outcome = try agent.remove({ eventKey: key, admitted: true, ...(confirmed === undefined ? {} : { confirmed }), request: {
       calendarId: event.calendarId, grantId: event.grantId, side: event.side, expectedProviderVersion: row.revision, idempotencyKey: operation,
       cancellationMode: mode, ...(scope !== "event" ? { recurrenceScope: scope } : {}),

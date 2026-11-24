@@ -261,6 +261,31 @@ pure def left(c: Conversation): Conversation = retiredAs(Retiring, c)
 pure def sometimesPausedForACall(c: Conversation): bool = c.shown == Off and c.notice == PausedForCall
 ```
 
+### Out of plan allowance and credits ends voice quietly as Stop does, and the chat gets the one line
+
+Cloud's own code for it (`insufficient_credits` or `allowance_exhausted`)
+as the speech relay's refusal code, the reason only a funding end carries,
+is never retried as busy: voice retires as Stop does, nothing is spoken, no
+voice notice shows, and the chat the voice went to, while it is the one
+shown, gets one ordinary transcript line with Manage plan: "You’re out of
+plan allowance and credits, so Talk stopped.", adding "Your allowance
+resets on <month> <day>." only while the plan Alpha last read names a reset
+still ahead. It is never a toast and never near the composer. Only the
+failure that ended this conversation decides it, never a cause left from an
+earlier one. A speech 429 that names the plan's voice allowance is a limit
+of the route (`route.md`), not this. Neither is a refusal on the agent's
+reply: its `insufficient_credits` kind stands for every Cloud 402, a billing
+hold included, and for an own key's provider quota, so it never posts this
+line (a typed turn keeps the billing wording of `spec/assistant/reply.md`)
+until the reply carries Cloud's own code.
+
+```quint
+pure def canOutOfFunds(c: Conversation, media: bool): bool = active(c.shown)
+pure def outOfFunds(c: Conversation, media: bool): Conversation = { ...stop(c, media), notice: NoNotice }
+pure def stepOutOfFundsEndsVoiceQuietly(before: Conversation, via: str, after: Conversation): bool =
+  via == "outOfFunds" implies (not(active(after.shown)) and after.notice == NoNotice)
+```
+
 ### Voice closed by hiding the page says once, when the page returns, that a call paused it if a call was live then or since; a plain app switch says nothing
 
 On the Alpha image the call screen is its own activity, so a call hides Alpha before Telecom's

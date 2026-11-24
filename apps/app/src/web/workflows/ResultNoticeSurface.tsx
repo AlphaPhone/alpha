@@ -1,5 +1,5 @@
 // spec/workflows/hostedResults.md, "Story: Be told when my digest is ready, and open exactly that result"; spec/workflows/hostedResults.md, "Story: Ask Alpha about a result from its notice"
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMachine } from "../../../gen/workflows__hostedResults.react.ts";
 import { Assistant } from "../../assistant/assistant.vibe";
 import { HostedResults, type ResolvedTap } from "../../workflows/results.vibe";
@@ -20,10 +20,13 @@ export interface ResultNoticeSurfaceProps {
  */
 export function ResultNoticeSurface({ open }: ResultNoticeSurfaceProps) {
   const results = useMachine(runtime);
-  const [tap, setTap] = useState<ResolvedTap>(() => {
-    void perform(HostedResults.use((h) => h.pendingTap())).then(setTap);
-    return { kind: "none" };
-  });
+  const [tap, setTap] = useState<ResolvedTap>({ kind: "none" });
+  // The tap that opened the app, read once on mount.
+  useEffect(() => {
+    let live = true;
+    void perform(HostedResults.use((h) => h.pendingTap())).then((pending) => { if (live) setTap(pending); }, () => undefined);
+    return () => { live = false; };
+  }, []);
   const [excerpt, setExcerpt] = useState("Help me understand this saved result.");
   if (results.state === undefined) return null;
   const state = results.state;

@@ -1,12 +1,12 @@
-// spec/assistant/reply.md, "Story: Understand why a reply did not finish"; spec/assistant/context.md, "Story: Let my agent read the page I have open in Browser"; spec/voice/latency.md, "Story: Know how long a dictated message waits for its answer"; spec/assistant/review.md, "Story: Act only on what I asked for"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/send.md, "Story: Send what I dictated and have it timed like a voice turn"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
+// spec/assistant/reply.md, "Story: Understand why a reply did not finish"; spec/voice/conversation.md, "Out of plan allowance and credits ends voice quietly as Stop does, and the chat gets the one line"; spec/assistant/context.md, "A spoken turn carries the screen context a typed turn sent at that moment would"; spec/assistant/context.md, "Story: Let my agent read the page I have open in Browser"; spec/voice/latency.md, "Story: Know how long a dictated message waits for its answer"; spec/assistant/review.md, "Story: Act only on what I asked for"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/send.md, "Story: Send what I dictated and have it timed like a voice turn"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
 import { assert, it } from "@effect/vitest"
 import { Composer } from "../../src/assistant/composer.vibe"
 import { spokenCue } from "../../src/assistant/cue.vibe"
-import { copy, failureKindOf, failureText, planCardTitle, retryDuration } from "../../src/assistant/presentation.vibe"
+import { copy, failureKindOf, failureText, outOfFundsLine, planCardTitle, retryDuration } from "../../src/assistant/presentation.vibe"
 import { DeviceExecutors, DeviceReview, type OperationPorts } from "../../src/assistant/review.vibe"
 import { emptyTranscript } from "../../src/assistant/transcript.vibe"
 import {
-  assistantOver, browserScreen, countingExecutors, fakeBrowserPages, fakeHost, fakeLatency, fakePreferences, fakeResident, fakeResidentControl, journalNative, noNative,
+  assistantOver, browserScreen, countingExecutors, privateScreen, fakeBrowserPages, fakeHost, fakeLatency, fakePreferences, fakeResident, fakeResidentControl, journalNative, noNative,
   wireProposal, type Seen,
 } from "./fakes.vibe"
 import type { PageObservation } from "../../src/assistant/ports.vibe"
@@ -88,6 +88,44 @@ it.effect("A failed reply shows the agent's fix and its live wait, and nothing i
   ))
 })
 
+it.effect("Talk ended out of plan allowance and credits posts one line to the chat it went to, and a typed refusal keeps the billing wording (spec/voice/conversation.md, \"Out of plan allowance and credits ends voice quietly as Stop does, and the chat gets the one line\")", () => effect {
+  const resetsAt = Date.UTC(2030, 0, 15, 12)
+  const day = new Intl.DateTimeFormat(undefined, { month: "long", day: "numeric" }).format(resetsAt)
+  const typed = effect function (reset: number | undefined) {
+    const toasts: string[] = []
+    provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "fail", failureKind: "insufficient_credits" }, proposals: [] }), fakeHost(toasts, undefined, [], false, reset), countingExecutors({ count: 0 })) {
+      const composer = try Composer
+      try composer.edit("Plan my week")
+      try composer.send()
+      const row = (try transcriptNow()).rows.find((each) => each.kind === "agent")
+      return { text: row?.kind === "agent" ? row.text : "", plan: row?.kind === "agent" ? row.plan : undefined, toasts }
+    }
+  }
+  const talk = effect function (conversation: string) {
+    const toasts: string[] = []
+    provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals: [] }), fakeHost(toasts, undefined, [], false, resetsAt), countingExecutors({ count: 0 })) {
+      const composer = try Composer
+      try composer.open("c1", false)
+      const before = (try transcriptNow()).rows.length
+      try composer.talkOutOfFunds(conversation)
+      const rows = (try transcriptNow()).rows
+      const last = rows.at(-1)
+      return { added: rows.length - before, text: rows.length > before && last?.kind === "agent" ? last.text : "", plan: rows.length > before && last?.kind === "agent" ? last.plan : undefined, toasts }
+    }
+  }
+  // The reply's insufficient_credits kind stands for every Cloud 402 and an own key's quota, so a typed turn keeps the billing wording.
+  const typedWithReset = try typed(resetsAt)
+  const stopped = try talk("c1")
+  const elsewhere = try talk("c2")
+  try Effect.try(() => assert.deepStrictEqual({ typedWithReset, stopped, elsewhere, undated: outOfFundsLine(undefined, 10), past: outOfFundsLine(5, 10) }, {
+    typedWithReset: { text: "Your plan is out of credits. Manage your plan to keep chatting.", plan: "Funding", toasts: [] },
+    undated: "You’re out of plan allowance and credits, so Talk stopped.",
+    stopped: { added: 1, text: `You’re out of plan allowance and credits, so Talk stopped. Your allowance resets on ${day}.`, plan: "Funding", toasts: [] },
+    elsewhere: { added: 0, text: "", plan: undefined, toasts: [] },
+    past: "You’re out of plan allowance and credits, so Talk stopped.",
+  }))
+})
+
 it.effect("Approve an action card once, over the agent's own review routes (spec/assistant/approvals.md, \"A recovered card lists again at the tap and reuses a result it already tracks\")", () => effect {
   const seen: Seen = { calls: [] }
   const digest = "b".repeat(64)
@@ -148,6 +186,35 @@ it.effect("Let my agent read the page I have open in Browser (spec/assistant/con
   ))
 })
 
+it.effect("A spoken turn carries what a typed turn sent then would (spec/assistant/context.md, \"A spoken turn carries the screen context a typed turn sent at that moment would\")", () => effect {
+  const read = effect function (screen: typeof browserScreen, asks: boolean) {
+    const seen: Seen = { calls: [] }
+    provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "Here is the summary." }, proposals: [] }), Layer.merge(fakeHost([], screen, [], true), fakeBrowserPages({ on: true }, { id: "t1", revision: "r1" }, page)),
+      countingExecutors({ count: 0 }), noNative, fakePreferences({ asks, shares: false })) {
+      const composer = try Composer
+      const spoken = try composer.turnContext()
+      try composer.edit("Summarize this page")
+      try composer.send()
+      const typed = (turnBodies(seen)[0] as { readonly metadata?: { readonly [key: string]: unknown } } | undefined)?.metadata ?? {}
+      const keys = Object.keys(spoken).sort()
+      return { keys, same: keys.every((key) => JSON.stringify(spoken[key]) === JSON.stringify(typed[key])), page: spoken.browserPage, mode: (spoken.voiceUi as { readonly agentActionMode?: unknown } | undefined)?.agentActionMode, tab: JSON.stringify(spoken).includes("\"browser-tab\"") }
+    }
+  }
+  const browser = try read(browserScreen, false)
+  const asking = try read(browserScreen, true)
+  const hidden = try read(privateScreen, false)
+  // voiceUi also names the turn's renderer and its saved Notes editor (spec/assistant/views.md), so it is present with review-first on too.
+  const direct = "direct-request-v1"
+  try Effect.try(() => assert.deepStrictEqual(
+    { browser, asking, hidden },
+    {
+      browser: { keys: ["browserPage", "observation", "voiceUi"], same: true, page, mode: direct, tab: true },
+      asking: { keys: ["browserPage", "observation", "voiceUi"], same: true, page, mode: undefined, tab: true },
+      hidden: { keys: ["voiceUi"], same: true, page: undefined, mode: direct, tab: false },
+    },
+  ))
+})
+
 it.effect(`A turn tells the agent direct requests are allowed only with review-first off (spec/assistant/review.md, "A direct effect needs an allow-listed operation of the current message that is not a workflow step, with review-first off")`, () => effect {
   const sent = effect function (asks: boolean) {
     const seen: Seen = { calls: [] }
@@ -155,15 +222,15 @@ it.effect(`A turn tells the agent direct requests are allowed only with review-f
       const composer = try Composer
       try composer.edit("Open Settings")
       try composer.send()
-      return (turnBodies(seen)[0] as { readonly metadata?: { readonly voiceUi?: unknown } } | undefined)?.metadata?.voiceUi
+      return (turnBodies(seen)[0] as { readonly metadata?: { readonly voiceUi?: { readonly agentActionMode?: unknown } } } | undefined)?.metadata?.voiceUi?.agentActionMode
     }
   }
   const direct = try sent(false)
   const asking = try sent(true)
-  try Effect.try(() => assert.deepStrictEqual({ direct, asking }, { direct: { agentActionMode: "direct-request-v1" }, asking: undefined }))
+  try Effect.try(() => assert.deepStrictEqual({ direct, asking }, { direct: "direct-request-v1", asking: undefined }))
 })
 
-it.effect("An open of a link from the page my message carried keeps its card (spec/assistant/review.md, \"The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote\")", () => effect {
+it.effect("An open of a link from the page my message carried keeps its card (spec/assistant/review.md, \"The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote or my own ask for its tab list\")", () => effect {
   const runs = { count: 0 }
   const story = wireProposal("p11", "f".repeat(64), { type: "browser_navigate", url: "https://news.example.com/story-2" }, "u1")
   const stranger = wireProposal("p12", "a".repeat(64), { type: "browser_navigate", url: "https://elsewhere.example.com/" }, "u1")
