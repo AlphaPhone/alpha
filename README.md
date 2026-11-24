@@ -115,7 +115,12 @@ is the owner's decision, for an image and a phone named by serial.
 - **After boot:** the new fingerprint, a higher versionCode, the launcher under
   `/product/priv-app` with no update in `/data`, its signer, privileged
   permissions and roles, the crash buffer and any SELinux denials of Alpha's.
-  Then the on-device checks with the owner. Run only silent, read-only checks
+  Then compare with the baseline: the signed-in screen, account and plan kept;
+  Home, the app library, conversations, workflows and reminders; Notes, Files,
+  Calendar and Inbox content present, without copying private data; Maps,
+  Browser and Camera; and on an image with telephony Phone, Contacts and
+  Messages, with the target of each approval card checked. Record what Alpha
+  does apart from the APK, the boot and the owner's acceptance. Run only silent, read-only checks
   yourself: spoken, open-mic, real-call and approved-send checks are the
   owner's, and a call or SMS card is declined unless its target is verified.
 - **Repairs:** `adb shell cmd role add-role-holder android.app.role.SMS ai.alphacompute.alphaphone` (and `android.app.role.DIALER`) restores a lost
@@ -123,7 +128,13 @@ is the owner's decision, for an image and a phone named by serial.
   removes a debuggable update over the system app and keeps its data. A phone
   that cannot reach the network may hold a dead reverse-tether VPN: `adb shell dumpsys connectivity` shows it; stop it, then `adb shell pm verify-app-links --re-verify ai.alphacompute.alphaphone`.
 - **Rollback:** reflash the kept image the same way, without wiping. It
-  restores the system partitions, not Alpha's data.
+  restores the system partitions, not Alpha's data, and does not show that the old runtime
+  reads state the new one wrote.
+- **Carrier & SIM setup** (Settings → General) reads, on request, each slot's
+  IMEI, each active SIM's ICCID and network, and the hardware and baseband;
+  the EID is a separate read. Android decides what it may read, and shown
+  identifiers say nothing of carrier compatibility, activation or working
+  calls and data.
 
 ### Releases
 

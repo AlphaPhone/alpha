@@ -99,7 +99,9 @@ describe('Watch Alpha at work (spec/site/index.md, "Story: Watch Alpha at work")
     const first = await open();
     await first.later(3_000, (demo) => demo.scene === "Chat");
     motion.matches = true;
-    act(() => motion.dispatchEvent(new Event("change")));
+    act(() => {
+      motion.dispatchEvent(new Event("change"));
+    });
     await first.until((demo) => demo.still);
     expect(at(await first.state())).toEqual(["Chat", 0, true, false]);
 
