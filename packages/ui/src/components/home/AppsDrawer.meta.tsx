@@ -38,15 +38,15 @@ export const meta: ComponentMeta<AppsDrawerProps> = {
       onOpenApp.mockClear();
       onClose.mockClear();
       const canvas = within(canvasElement);
-      const names = canvas.getAllByRole("button").map((button) => button.textContent);
-      await expect(names).toEqual(["", "Atlas Maps", "Calculator", "Câmera", "Clock", "Mail", "Mail (Work)", "Music"]);
+      const names = canvas.getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent);
+      await expect(names).toEqual(["Close apps", "Atlas Maps", "Calculator", "Câmera", "Clock", "Mail", "Mail (Work)", "Music"]);
       await userEvent.type(canvas.getByRole("searchbox", { name: "Search apps" }), "c");
       await userEvent.click(canvas.getByRole("button", { name: "Clock" }));
       await userEvent.click(canvas.getByRole("button", { name: "Close apps" }));
       await expect([onSearch.mock.calls, onOpenApp.mock.calls, onClose.mock.calls.length]).toEqual([[["c"]], [["com.example.clock/.Main/0"]], 1]);
     },
     Search: ({ canvasElement }: { canvasElement: HTMLElement }) => {
-      const tiles = within(canvasElement).getAllByRole("button", { name: /^(Mail|Atlas)/ }).map((button) => button.textContent);
+      const tiles = within(canvasElement).getAllByRole("button", { name: /^(Mail|Atlas)/ }).map((button) => button.getAttribute("aria-label") ?? button.textContent);
       return expect(tiles).toEqual(["Mail", "Mail (Work)", "Atlas Maps"]);
     },
     Opening: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
@@ -55,8 +55,8 @@ export const meta: ComponentMeta<AppsDrawerProps> = {
       await expect(canvas.getByRole("button", { name: "Music" })).toBeDisabled();
     },
     Menu: async () => {
-      const menu = await screen.findByRole("dialog", { name: "Mail (Work)" });
-      await expect(within(menu).getByRole("button", { name: "Add to Home" })).toBeTruthy();
+      const menu = await screen.findByRole("menu", { name: "Mail (Work)" });
+      await expect(within(menu).getByRole("menuitem", { name: "Add to Home" })).toBeTruthy();
     },
     "No match": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).getByText("No apps match")).toBeTruthy(),
   },

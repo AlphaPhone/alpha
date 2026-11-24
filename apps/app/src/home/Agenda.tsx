@@ -15,12 +15,19 @@ const others = (told: ReturnType<typeof agendaFrom.snapshot>): Cards.Others => (
 });
 
 const where: Readonly<Record<Cards.Origin, string>> = { PhoneCalendar: "Calendar", AgentCalendar: "Alpha", Reminder: "Reminder" };
+const time = (date: Date) => date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+const day = (date: Date) => date.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
 
-function shown(item: Cards.Item): HomeAgendaItem {
-  const time = new Date(item.begin).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+function shown(item: Cards.Item, now: number): HomeAgendaItem {
+  const begin = new Date(item.begin);
+  const end = new Date(item.end);
+  const start = time(begin);
+  const sameDay = begin.toDateString() === end.toDateString();
+  const due = begin.toDateString() === new Date(now).toDateString() ? start : `${day(begin)} ${start}`;
+  const span = item.end > item.begin ? `${start} – ${sameDay ? time(end) : `${day(end)}, ${time(end)}`}` : start;
   return {
     title: named.title(item.origin, item.id) || "Event",
-    when: item.allDay ? "All day" : item.overdue ? `Due ${time}` : time,
+    when: item.overdue ? `Due ${due}` : item.allDay ? "All day" : span,
     source: where[item.origin],
   };
 }
@@ -37,12 +44,18 @@ export function Agenda({ runtime }: { runtime: ManagedRuntime.ManagedRuntime<Mac
   const first = Cards.lead(items, now)[0];
   if (card === "Hidden" || first === undefined) return null;
   const next = first.overdue ? Cards.following(items, now)[0] : undefined;
+  const overdueCount = items.filter((item) => item.overdue).length;
+  const heading = first.overdue ? (overdueCount > 1 ? `${overdueCount} overdue reminders` : "Overdue reminder") : day(new Date(first.begin));
+  const item = shown(first, now);
   const open = { type: "openCard", kind: "AgendaCard", now } as const;
   return (
     <HomeAgendaCard
-      item={shown(first)}
+      item={item}
+      heading={heading}
+      aria-label={first.overdue ? `Open overdue reminder: ${item.title}, ${item.when}` : `Open calendar event: ${item.title}, ${heading}, ${item.when}`}
+      aria-description={card === "NotUpdated" ? "Not up to date" : undefined}
       overdue={first.overdue}
-      next={next && shown(next)}
+      next={next && shown(next, now)}
       notCurrent={card === "NotUpdated"}
       disabled={!can(open)}
       onClick={() => void send(open)}

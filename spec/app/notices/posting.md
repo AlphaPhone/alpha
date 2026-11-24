@@ -70,6 +70,35 @@ pure def lawPostingNeedsNotificationsAndTheChannel(p: Posting, id: int, signedIn
   not(canPost(p, id, false, true, signedIn)) and not(canPost(p, id, true, false, signedIn))
 ```
 
+### A channel in a group the owner blocked is off, and reminder, call and text channels are in no group
+
+Android's settings show Alpha's channels in four groups: Assistant (the
+shared alerts, notifications, updates and quiet channels), Mail and briefs,
+Workflows, and Ongoing activity (a note recording, navigation). A channel
+the owner or Android already put in a group keeps it. Reminders, calls and
+texts are in no group, so blocking a group never hides them. Alpha names
+its groups to the shared notice routing before any notice is posted, so its
+own grouping is never read as the owner's choice.
+
+```quint
+type NoticeChannel = AssistantChannel | MailOrBriefChannel | WorkflowChannel | OngoingChannel | ReminderChannel | CallOrTextChannel
+type ChannelGroup = AssistantGroup | MailAndBriefsGroup | WorkflowsGroup | OngoingGroup | Ungrouped
+
+pure def groupOf(channel: NoticeChannel): ChannelGroup =
+  if (channel == AssistantChannel) AssistantGroup else if (channel == MailOrBriefChannel) MailAndBriefsGroup
+  else if (channel == WorkflowChannel) WorkflowsGroup else if (channel == OngoingChannel) OngoingGroup else Ungrouped
+
+pure def channelOn(channel: NoticeChannel, channelBlocked: bool, groupBlocked: bool): bool =
+  not(channelBlocked) and not(groupBlocked and groupOf(channel) != Ungrouped)
+
+pure def lawABlockedGroupNeverHidesAReminderACallOrAText(channelBlocked: bool, groupBlocked: bool): bool =
+  channelOn(ReminderChannel, channelBlocked, groupBlocked) == not(channelBlocked)
+    and channelOn(CallOrTextChannel, channelBlocked, groupBlocked) == not(channelBlocked)
+
+pure def lawABlockedGroupPostsNothing(p: Posting, id: int, signedIn: int, channel: NoticeChannel, channelBlocked: bool): bool =
+  groupOf(channel) != Ungrouped implies not(canPost(p, id, true, channelOn(channel, channelBlocked, true), signedIn))
+```
+
 ### A queued delivery that notifications or its channel keep from showing is reported to its publisher once, and still posted once they allow it
 
 ```quint

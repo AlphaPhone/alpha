@@ -50,7 +50,7 @@ export function Review({ runtime }: ReviewProps) {
   const target = held.matches.find((one) => one.id === state.contact);
   const before = target === undefined ? blank : linesOf(target);
   return (
-    <Card role="dialog" aria-label={asks[state.ask]} className="fixed inset-x-4 bottom-24 z-40 flex flex-col gap-3 p-4">
+    <Card role="dialog" data-alpha-review="" aria-label={asks[state.ask]} className="fixed inset-x-4 bottom-24 z-40 flex flex-col gap-3 p-4">
       <h2 className="font-semibold">{asks[state.ask]}</h2>
       {state.stage === "Choosing" && (
         <ListGroup aria-label={reachesANumber(state.ask) ? "Which number" : "Which contact"}>
@@ -86,7 +86,7 @@ export function Review({ runtime }: ReviewProps) {
         </>
       )}
       <div className="flex gap-2">
-        {can(approve, "Owner") && <Button aria-label={state.ask === "Text" ? "Send this text" : undefined} onClick={() => void send(approve, "Owner")}>{state.ask === "Text" ? "Send" : state.ask === "Dial" ? "Call" : "Approve"}</Button>}
+        {can(approve, "Owner") && <Button aria-label={state.ask === "Text" ? "Send this text" : undefined} data-alpha-review-send="" onClick={() => void send(approve, "Owner")}>{state.ask === "Text" ? "Send" : state.ask === "Dial" ? "Call" : "Approve"}</Button>}
         {can({ type: "decline" }, "Owner") && <Button variant="ghost" onClick={() => void send({ type: "decline" }, "Owner")}>Not now</Button>}
       </div>
     </Card>
