@@ -405,7 +405,7 @@ if (descriptor) {
 const cameraSource = verifySecureCameraSource(source, undefined, reviewedSourceOverrides({physicalSource, source, appliedPatches}));
 const env = androidEnv();
 if (!descriptor) {
-  const signer = signerDigest(apk);
+  const signer = await signerDigest(apk);
   fs.mkdirSync("artifacts", { recursive: true });
   descriptor = `artifacts/launcher-${hash.slice(0, 12)}.json`;
   fs.writeFileSync(

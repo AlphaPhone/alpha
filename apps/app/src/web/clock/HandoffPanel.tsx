@@ -3,6 +3,7 @@ import { useState } from "react";
 import { AlarmClock, BellOff, ExternalLink, TimerReset } from "lucide-react";
 import type { Event, Handoff } from "../../../gen/clock__handoff.ts";
 import type { HandoffAction, HandoffStatus } from "../../../gen/clock__vocabulary.ts";
+import { testMocksBuilt } from "../../platform/build-flags.ts";
 import { Alert, Button, Card, CardFooter, Input, Label, Switch, Tabs, TabsList, TabsTrigger } from "../components/ui/index.ts";
 import { DayPicker } from "./DayPicker.tsx";
 import { describeHandoff, handoffMessage, lastHandoff, wall } from "./text.ts";
@@ -93,7 +94,7 @@ export function HandoffPanel({ handoff, zone, lastStatus, can, send, onPrepare, 
           <p>{describeHandoff(handoff, handoff.reviewedZone || zone)}</p>
           <CardFooter>
             <Button variant="ghost" onClick={() => send({ type: "cancelReview" })}>Cancel</Button>
-            <Button disabled={!can({ type: "confirm", zone })} onClick={onConfirm}>{handoff.simulated ? "Simulate Clock request" : "Open Clock"}</Button>
+            <Button disabled={!can({ type: "confirm", zone })} onClick={onConfirm}>{testMocksBuilt && handoff.simulated ? "Simulate Clock request" : "Open Clock"}</Button>
           </CardFooter>
         </Card>
       ) : (

@@ -2,8 +2,9 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { androidEnv, tool } from "./toolchain.ts";
+import { run } from "./run-os-program.ts";
 import { withApkEvidence, withPackagedWeb, type ApkEvidence } from "./apk-evidence.ts";
-import { manifestFacts as readManifestFacts, parseApkSignerDigest, parseXmlTree } from "@elizaos/os/image";
+import { manifestFacts as readManifestFacts, parseXmlTree, readApkSignerDigest } from "@elizaos/os/image";
 
 export { parseXmlTree };
 export const manifestFacts = (xml: string, badging?: string) => {
@@ -319,22 +320,11 @@ export function auditBundle(directory: string, { script = AUDIT_SCRIPT } = {}) {
   }
 }
 
-/** Select the verified certificate for the requested Android API. */
-export function parseSignerDigest(output: string, { apiLevel }: { apiLevel?: number } = {}): string {
-  const certificate = parseApkSignerDigest(output, apiLevel);
-  if (certificate === undefined) throw new Error("The APK has no unambiguous verified SHA-256 signer digest");
-  return certificate;
-}
-
-/** Standalone signer check for synchronous device and release admission callers. */
-export function signerDigest(file: string, { apiLevel }: { apiLevel?: number } = {}) {
+/** Read the verified signer of an APK already held by the caller. */
+export async function signerDigest(file: string, { apiLevel }: { apiLevel?: number } = {}) {
   if (apiLevel !== undefined && (!Number.isSafeInteger(apiLevel) || apiLevel < 1))
     throw new Error("Invalid Android API level");
-  const apiArgs = apiLevel === undefined ? [] : ["--min-sdk-version", String(apiLevel), "--max-sdk-version", String(apiLevel)];
-  const output = execFileSync(tool("apksigner"), ["verify", "--print-certs", ...apiArgs, file], {
-    encoding: "utf8", env: androidEnv(), timeout: 120_000, maxBuffer: 16 << 20, stdio: ["ignore", "pipe", "pipe"],
-  });
-  return parseSignerDigest(output, { apiLevel });
+  return run(readApkSignerDigest(file, { apksigner: tool("apksigner"), apiLevel, env: androidEnv() }));
 }
 
 /** The image provisioner must be able to prepare the launcher before its first activity starts. */

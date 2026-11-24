@@ -12,7 +12,7 @@ import {
   snapshotAndroidArtifact,
 } from "@elizaos/os/image";
 import { androidEnv, tool } from "./toolchain.ts";
-import { run } from "./upstream-effect.ts";
+import { run } from "./run-os-program.ts";
 import { sha256File } from "./sha256.ts";
 
 // The two-ABI Alpha build carries the resident runtime and on-device voice together.

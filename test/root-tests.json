@@ -66,6 +66,7 @@
   "test/release-signing.test.mjs",
   "test/shared-ui-overrides.test.mjs",
   "test/sign-release-apks.test.mjs",
+  "test/stage-agent-runtime.test.mjs",
   "test/update-apk-admission.test.mjs",
   "test/update-channel-status.test.mjs",
   "test/update-channel.test.mjs",

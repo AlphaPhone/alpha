@@ -37,10 +37,10 @@ const io = () => { const out = [], err = []; return { out, err, inspectApk: () =
 const written = dir => path.join(dir, "artifacts/app-stable", MANIFEST_NAME);
 
 
-test("a distributable signed release becomes the manifest phones parse, beside its APK copy", t => {
+test("a distributable signed release becomes the manifest phones parse, beside its APK copy", async t => {
   const dir = fixture(t);
   const run = io();
-  assert.equal(main(["--variant", "launcher", "--notes", "Fixes"], { root: dir, ...run }), 0, run.err.join("\n"));
+  assert.equal(await main(["--variant", "launcher", "--notes", "Fixes"], { root: dir, ...run }), 0, run.err.join("\n"));
   const update = JSON.parse(fs.readFileSync(written(dir), "utf8"));
   const { updateManifestUrl } = JSON.parse(fs.readFileSync(path.join(root, "app.config.json"), "utf8"));
   assert.deepEqual(update, {
@@ -50,7 +50,7 @@ test("a distributable signed release becomes the manifest phones parse, beside i
   assert.equal(fs.readFileSync(path.join(dir, "artifacts/app-stable/alpha-phone-2.apk"), "utf8"), "launcher bytes");
 });
 
-test("a release that is not distributable, unsigned, signed otherwise or not the verified file writes nothing", t => {
+test("a release that is not distributable, unsigned, signed otherwise or not the verified file writes nothing", async t => {
   const cases = [
     [{ distributable: false }, /not distributable/],
     [{ signed: false }, /unsigned release/],
@@ -60,23 +60,23 @@ test("a release that is not distributable, unsigned, signed otherwise or not the
   for (const [row, message] of cases) {
     const dir = fixture(t, { launcher: row });
     const run = io();
-    assert.equal(main(["--variant", "launcher"], { root: dir, ...run }), 1, String(message));
+    assert.equal(await main(["--variant", "launcher"], { root: dir, ...run }), 1, String(message));
     assert.match(run.err.join("\n"), message);
     assert.equal(fs.existsSync(written(dir)), false);
   }
 });
 
-test("an unknown variant or overlong notes are a usage error", t => {
+test("an unknown variant or overlong notes are a usage error", async t => {
   const dir = fixture(t);
-  assert.equal(main(["--variant", "debug"], { root: dir, ...io() }), 2);
-  assert.equal(main(["--variant", "launcher", "--notes", "x".repeat(501)], { root: dir, ...io() }), 2);
+  assert.equal(await main(["--variant", "debug"], { root: dir, ...io() }), 2);
+  assert.equal(await main(["--variant", "launcher", "--notes", "x".repeat(501)], { root: dir, ...io() }), 2);
   assert.equal(fs.existsSync(written(dir)), false);
 });
 
-test("a release row cannot override contradictory archive facts", t => {
+test("a release row cannot override contradictory archive facts", async t => {
   const dir = fixture(t), run = io();
   let inspected = false;
-  assert.equal(main(["--variant", "launcher"], { root: dir, ...run, inspectApk(apk, { descriptor }) {
+  assert.equal(await main(["--variant", "launcher"], { root: dir, ...run, inspectApk(apk, { descriptor }) {
     inspected = true;
     assert.equal(apk.sha256, sha("launcher bytes"));
     assert.equal(descriptor.signerSha256, SIGNER);
@@ -87,8 +87,8 @@ test("a release row cannot override contradictory archive facts", t => {
   assert.equal(fs.existsSync(written(dir)), false);
 });
 
-test("the feed selects the APK's verified original signing family after approved rotation", t => {
+test("the feed selects the APK's verified original signing family after approved rotation", async t => {
   const dir = fixture(t), run = io(), originalRoot = 'b'.repeat(64);
-  assert.equal(main(['--variant','launcher'],{root:dir,...run,inspectApk:()=>({signerRootSha256:originalRoot})}),0);
+  assert.equal(await main(['--variant','launcher'],{root:dir,...run,inspectApk:()=>({signerRootSha256:originalRoot})}),0);
   assert.equal(JSON.parse(fs.readFileSync(written(dir),'utf8')).signerSha256,originalRoot);
 });

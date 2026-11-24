@@ -60,7 +60,10 @@ export function updateRow(manifestFile: string, variant: ApkVariant, descriptor:
     : { row, admitted, problems };
 }
 
-export function main(argv: readonly string[], { root = process.cwd(), log = console.log, error = console.error, inspectApk = inspectUpdateApk } = {}) {
+type InspectUpdate = (...args: Parameters<typeof inspectUpdateApk>) =>
+  ReturnType<typeof inspectUpdateApk> | Awaited<ReturnType<typeof inspectUpdateApk>>;
+
+export async function main(argv: readonly string[], { root = process.cwd(), log = console.log, error = console.error, inspectApk = inspectUpdateApk as InspectUpdate } = {}) {
   const options = parseArgs(argv);
   if (!options) { error(USAGE); return 2; }
   if (options.notes !== null && options.notes.length > 500) { error("--notes must be at most 500 characters; phones do not show longer notes."); return 2; }
@@ -85,7 +88,7 @@ export function main(argv: readonly string[], { root = process.cwd(), log = cons
   try {
     const versionCode = admitted.versionCode;
     if (versionCode === null) throw Error('Verified APK versionCode is missing');
-    ({ signerRootSha256 } = inspectApk({...admitted, file: apk, versionCode}, { descriptor }));
+    ({ signerRootSha256 } = await inspectApk({...admitted, file: apk, versionCode}, { descriptor }));
     if (!/^[0-9a-f]{64}$/.test(signerRootSha256 || '')) throw Error('Verified signing-family root is missing');
   }
   catch (failed) { fs.rmSync(apk,{force:true}); error(`Refusing to publish ${options.variant}: ${failed instanceof Error ? failed.message : String(failed)}`); return 1; }
@@ -106,4 +109,4 @@ export function main(argv: readonly string[], { root = process.cwd(), log = cons
   return 0;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = main(process.argv.slice(2));
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = await main(process.argv.slice(2));

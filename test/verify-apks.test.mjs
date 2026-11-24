@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { archiveWebPayload, parseXmlTree, readBuildFlags, telephonySetupReceiverProblems, validateApk, verifyOwnerRouteTable } from "../scripts/apk.ts";
+import { withApkEvidence } from "../scripts/apk-evidence.ts";
 import { webViewFilterProblems, webViewFilters } from "../scripts/render-assetlinks.ts";
 import { voiceBundleAdmission, VOICE_BUNDLE_FORMAT } from "../scripts/voice-host.ts";
 const root = path.resolve(import.meta.dirname, "..");
@@ -16,7 +17,7 @@ test("Cloud voice evidence is one readable file for a genuine build, before any 
     [["--cloud-voice-evidence=a.json", "--cloud-voice-evidence=b.json"], /Specify --cloud-voice-evidence only once/],
     [["--cloud-voice-evidence=missing.json"], /Cloud voice evidence could not be read as JSON/],
   ]) {
-    const result=spawnSync(process.execPath,["scripts/verify-apks.ts",...args],{cwd:root,encoding:"utf8"});
+    const result=spawnSync(process.execPath,["--conditions=eliza-source", "--import", "vibelang/register", "scripts/verify-apks.ts",...args],{cwd:root,encoding:"utf8"});
     assert.notEqual(result.status,0,args.join(" "));
     assert.match(result.stderr,message,args.join(" "));
   }
@@ -157,21 +158,21 @@ test("AOSP production staging refuses a missing or foreign descriptor", () => {
   }
 });
 
-test("APK verification requires the packaged owner route table to match the generated asset byte for byte", t => {
+test("APK verification requires the packaged owner route table to match the generated asset byte for byte", async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alpha-owner-routes-apk-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const table = fs.readFileSync(path.join(root, "apps/app/src/platform/owner-routes.json"), "utf8"), apk = path.join(dir, "app.apk");
   zip(apk, { "classes.dex": "app", "assets/owner-routes.json": table });
-  verifyOwnerRouteTable(apk);
+  await withApkEvidence(apk, verifyOwnerRouteTable);
   zip(apk, { "classes.dex": "app" });
-  assert.throws(() => verifyOwnerRouteTable(apk), /assets\/owner-routes\.json is missing/);
+  await assert.rejects(() => withApkEvidence(apk, verifyOwnerRouteTable), /owner-routes\.json/);
   for (const other of [table + "\n", table.replace("/api/notes/state", "/api/notes/x"), ""]) {
     zip(apk, { "assets/owner-routes.json": other });
-    assert.throws(() => verifyOwnerRouteTable(apk), /assets\/owner-routes\.json differs from the generated owner-route table/);
+    await assert.rejects(() => withApkEvidence(apk, verifyOwnerRouteTable), /assets\/owner-routes\.json differs from the generated owner-route table/);
   }
 });
 
-test('archive retains actual flag-off APK web bytes and refuses a mock payload', t => {
+test('archive retains actual flag-off APK web bytes and refuses a mock payload', async t => {
   const testMocks = false;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-archive-web-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -184,13 +185,14 @@ test('archive retains actual flag-off APK web bytes and refuses a mock payload',
   // Working assets may be restored to a different mode after the APK was built.
   fs.writeFileSync(path.join(publicDir, 'build-flags.json'), JSON.stringify({ testMocks: !testMocks }));
   const archived = path.join(dir, 'archived-web');
-  archiveWebPayload(apkFile, archived);
+  const digest = file => createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+  await archiveWebPayload(apkFile, archived, digest(apkFile));
   assert.equal(readBuildFlags(archived).testMocks, testMocks);
   assert.equal(fs.readFileSync(path.join(archived, 'index.html'), 'utf8'), '<html>Actual APK payload</html>');
   fs.writeFileSync(path.join(dir, 'assets/public/build-flags.json'), JSON.stringify({ testMocks: true }));
   const mockApk = path.join(dir, 'mock.apk');
   execFileSync('zip', ['-q', '-r', mockApk, 'assets'], { cwd: dir });
-  assert.throws(() => archiveWebPayload(mockApk, path.join(dir, 'wrong-mode')), /testMocks/);
+  await assert.rejects(() => archiveWebPayload(mockApk, path.join(dir, 'wrong-mode'), digest(mockApk)), /testMocks/);
   assert.equal(fs.existsSync(path.join(dir, 'wrong-mode')), false);
 });
 

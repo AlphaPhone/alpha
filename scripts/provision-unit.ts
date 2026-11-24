@@ -71,7 +71,7 @@ interface UnitArgs {
 interface ApkConsistencyOptions {
   descriptor?: ReleaseSigner;
   apiLevel?: number;
-  facts?: ReturnType<typeof apkFacts>;
+  facts?: Awaited<ReturnType<typeof apkFacts>>;
 }
 type Adb = ReturnType<typeof adbFor>;
 
@@ -137,14 +137,14 @@ export function admitUnitApk(manifestFile: string, { variant, build }: {variant:
 }
 
 /** Facts read from the APK file itself. A fact that cannot be read is null, which no check accepts. */
-export function apkFacts(file: string, {apiLevel}: {apiLevel?: number} = {}) {
+export async function apkFacts(file: string, {apiLevel}: {apiLevel?: number} = {}) {
   const attempt = <T,>(read: () => T): T | null => { try { return read(); } catch { return null; } };
   const tree = attempt(() => aaptManifestTree(file, {aapt: tool("aapt"), env: androidEnv()}));
   return {
     testMocks: attempt(() => (readApkBuildFlags(file) as {testMocks?: unknown} | null)?.testMocks ?? null),
     debuggable: tree === null ? null : manifestTreeIsDebuggable(tree),
     updateChannel: tree === null ? null : attempt(() => apkUpdateChannelOrLegacy(parseXmlTree(tree), {appId: PACKAGE}) ?? ("legacy" as const)),
-    signerSha256: attempt(() => signerDigest(file, {apiLevel})),
+    signerSha256: await signerDigest(file, {apiLevel}).catch(() => null),
     runtime: attempt(() => apkRuntimeIdentity(file).runtime),
   };
 }
@@ -158,7 +158,7 @@ export function apkFacts(file: string, {apiLevel}: {apiLevel?: number} = {}) {
  * from the file; for those the manifest written by verify-apks remains the record.
  */
 export function apkContradictions(apk: {file: string; build: ApkMode; updateChannel?: UpdateChannel | null},
-  { descriptor = readReleaseSigner(), apiLevel, facts = apkFacts(apk.file, {apiLevel}) }: ApkConsistencyOptions = {}) {
+  { descriptor = readReleaseSigner(), facts }: Omit<ApkConsistencyOptions, 'facts'> & { facts: Awaited<ReturnType<typeof apkFacts>> }) {
   const problems: string[] = [];
   if (facts.testMocks !== false) problems.push("its web bundle is not a verified flag-off build");
   if (apk.build === "release") {
@@ -179,8 +179,9 @@ export function apkContradictions(apk: {file: string; build: ApkMode; updateChan
 }
 
 /** Refuse, before any device is touched, an APK whose own contents contradict its admitted row. */
-export function requireConsistentApk(apk: Parameters<typeof apkContradictions>[0], options?: ApkConsistencyOptions) {
-  const problems = apkContradictions(apk, options);
+export async function requireConsistentApk(apk: Parameters<typeof apkContradictions>[0], options: ApkConsistencyOptions = {}) {
+  const facts = options.facts ?? await apkFacts(apk.file, {apiLevel: options.apiLevel});
+  const problems = apkContradictions(apk, { descriptor: options.descriptor, facts });
   if (problems.length) throw new Error(`${apk.file} contradicts the manifest row that admitted it:\n${problems.map(item => `  - ${item}`).join("\n")}`);
 }
 
@@ -272,7 +273,7 @@ async function main() {
   let runtimeIdentity: ReturnType<typeof apkRuntimeIdentity>;
   try {
     const candidate = snapshotUnitApk(apk, directory);
-    requireConsistentApk(candidate, {apiLevel: device.sdk});
+    await requireConsistentApk(candidate, {apiLevel: device.sdk});
     // Read before install so an unreadable bundle fails with nothing on the unit.
     runtimeIdentity = apkRuntimeIdentity(candidate.file);
     adb(["install", candidate.file], { timeout: 600_000 });

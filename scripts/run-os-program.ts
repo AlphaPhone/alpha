@@ -1,9 +1,10 @@
 import {Effect, Layer} from 'effect';
-import {FetchHttpClient} from 'effect/unstable/http';
+import {FetchHttpClient} from 'effect/http';
 import * as NodeServices from '@effect/platform-node/NodeServices';
 
 type Program<A> = Effect.Effect<A, unknown, never> | Effect.Effect<A, unknown, unknown>;
 
+/** The Node platform services and an HTTP client: staging the runtime payload downloads the Node runtime archive. */
 const platform = Layer.mergeAll(NodeServices.layer, FetchHttpClient.layer);
 
 /** Run one upstream Effect program with the Node platform services and an HTTP client. */

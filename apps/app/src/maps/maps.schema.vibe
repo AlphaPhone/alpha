@@ -1,6 +1,6 @@
 // spec/maps/connection.md, "Only the newest read for the bound account installs the provider"; spec/maps/delivery.md, "A navigation effect runs only under a returned claim, and a redelivery never runs it twice"; spec/maps/vocabulary.md, "A fix guides only when precise, at most 30 seconds old, at most 5 seconds ahead, and within 50 meters"; spec/maps/eventReturn.md, "One check per tap, and only its reply for the current origin returns, once"
 
-import { Route, TravelMode } from "@elizaos/plugin-maps/client/contracts"
+import { TravelMode } from "@elizaos/plugin-maps/client/contracts"
 
 const controls = /^[^\u0000-\u0008\u000b\u000c\u000e-\u001f]*\S[^\u0000-\u0008\u000b\u000c\u000e-\u001f]*$/
 const text = (maximum: number) => Schema.String.check(Schema.isMaxLength(maximum), Schema.isPattern(controls))
@@ -9,13 +9,14 @@ const whole = (minimum: number, maximum: number) => Schema.Int.check(Schema.isBe
 const meters = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))
 const ProviderId = Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9._-]{0,79}$/))
 
-export { Coordinate, Maneuver, Route, RouteStep, TravelMode, type Place } from "@elizaos/plugin-maps/client/contracts"
+export type { Coordinate, Maneuver, Place, Route, TravelMode } from "@elizaos/plugin-maps/client/contracts"
 
 /** Places as Cloud Maps returns them; each one is checked by the client contract's `place`. */
 export const PlacesAnswer = Schema.Struct({ providerId: ProviderId, attribution: text(2000), places: Schema.Array(Schema.Unknown).check(Schema.isMaxLength(50)) })
 export const PlaceAnswer = Schema.Struct({ providerId: ProviderId, attribution: text(2000), place: Schema.Unknown })
 
-export const RoutesAnswer = Schema.Struct({ providerId: ProviderId, attribution: text(2000), routes: Schema.Array(Route.check(Schema.makeFilter((r: Route) => r.geometry.length <= 20000 && r.steps.length <= 2000))).check(Schema.isMinLength(1), Schema.isMaxLength(3)) })
+/** Each route is checked by the SDK codec at the Cloud boundary. */
+export const RoutesAnswer = Schema.Struct({ providerId: ProviderId, attribution: text(2000), routes: Schema.Array(Schema.Unknown).check(Schema.isMinLength(1), Schema.isMaxLength(3)) })
 export const ViewportAnswer = Schema.Struct({ providerId: ProviderId, copyright: text(500), maxZoom: Schema.optionalKey(whole(0, 22)) })
 
 /** The image types a raster tile may come back as; the tile is the image itself, at most 1 MiB. */
