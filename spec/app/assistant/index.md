@@ -11,6 +11,7 @@ for its reply. The rest of the area:
 - [Search](./search.md): searching every conversation and opening a hit
 - [Cards](./cards.md): what a reply carries, and each card's life
 - [Dock](./dock.md): how a drag of Ask Alpha chooses a height, and the keyboard
+- [Device actions](./actions.md): an action the agent proposes for the phone, reviewed and run at most once
 - [Kit extensions](./extend.md): what the area needs of the kit that it lacks
 
 Speaking a turn and reading a reply aloud belong to the voice area, the
@@ -684,6 +685,10 @@ pure def told(showing: Showing, zone: str, day: int, selected: bool, sensitive: 
 
 ### A sensitive screen says only that it is sensitive: no selection and no day
 
+A sensitive screen is the passwords view, a password surface in Settings,
+a locked or secure screen, a screen that is off, a hidden page, and the
+agent connection dialog.
+
 ```quint
 pure def lawASensitiveScreenTellsNothingOfItself(showing: Showing, zone: str, day: int, selected: bool, sensitive: bool, revision: int): bool =
   val t = told(showing, zone, day, selected, sensitive, revision)
@@ -777,4 +782,31 @@ pure def stepAViewIsOpenedOncePerTurn(before: Conversation, via: str, after: Con
 
 ```quint
 pure def sometimesAViewIsOpenedForAReply(c: Conversation): bool = c.opening.outcome == A::Confirmed
+```
+
+## Story: Close what Ask Alpha opened before leaving it
+
+> As the owner, I want Back to close what I opened inside Ask Alpha, one
+> thing at a time, before it lowers Ask Alpha.
+
+### Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's
+
+```quint
+type Opened = { review: bool, search: bool, aim: bool }
+
+pure val oValues = Set({ review: true, search: true, aim: true }, { review: false, search: true, aim: true },
+  { review: false, search: false, aim: true }, { review: false, search: false, aim: false }, { review: true, search: false, aim: false })
+
+pure def takesBack(o: Opened): bool = o.review or o.search or o.aim
+
+pure def backed(o: Opened): Opened =
+  if (o.review) { ...o, review: false } else if (o.search) { ...o, search: false } else { ...o, aim: false }
+
+pure def openings(o: Opened): int = (if (o.review) 1 else 0) + (if (o.search) 1 else 0) + (if (o.aim) 1 else 0)
+
+pure def lawBackClosesOneThing(o: Opened): bool = takesBack(o) implies openings(backed(o)) == openings(o) - 1
+
+pure def lawWithNothingOpenBackIsTheShells(o: Opened): bool = not(takesBack(o)) implies backed(o) == o
+
+pure def lawAReviewClosesFirst(o: Opened): bool = o.review implies (not(backed(o).review) and backed(o).search == o.search and backed(o).aim == o.aim)
 ```

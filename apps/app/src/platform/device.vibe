@@ -3,7 +3,18 @@ import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { reachable, variantOf } from "../../gen/app__platform.effect.vibe"
 
 module web {
-  import { Capacitor } from "@capacitor/core"
+  import { Capacitor, registerPlugin } from "@capacitor/core"
+
+  /** Alpha's own Android plugin: Android's touch feedback and its accessibility timeout. */
+  interface AlphaDevice {
+    haptic(options: { kind: string }): Promise<void>
+    recommendedTimeout(options: { baseMs: number }): Promise<{ timeoutMs: number }>
+  }
+  let alphaDevice: AlphaDevice | undefined
+  /** @throws {never} */
+  export function alpha(): AlphaDevice {
+    return (alphaDevice ??= registerPlugin<AlphaDevice>("AlphaDevice"))
+  }
 
   /** Whether the phone's host registered `plugin` in this build. @throws {never} */
   export function registered(plugin: string): boolean {
@@ -30,7 +41,7 @@ module web {
   /** @throws {never} */
   export const showing = (): boolean => document.visibilityState === "visible"
 }
-import { marked, native, page, pages, registered, showing, zoom } from web
+import { alpha, marked, native, page, pages, registered, showing, zoom } from web
 export { native, registered }
 
 /** What this phone admits: an Alpha image's apps, and Contacts where the image grants them. */
@@ -60,6 +71,14 @@ export service Device {
   readonly buttons: Stream.Stream<Button>
   /** Each time the page is shown or hidden, and which: a page that was hidden may have slept. */
   readonly visible: Stream.Stream<boolean>
+  /** Whether the page shows now. */
+  showing(): boolean!!
+  /** How much longer than asked Android shows what asks for action, in percent, where it says. */
+  timeoutScale(): Option.Option<number>!!
+  /** Android's touch feedback of `kind`, where the phone plays it; nothing elsewhere. */
+  haptic(kind: string): void!!
+  /** Whether the phone plays touch feedback. */
+  feels(): boolean!!
 }
 
 /**
@@ -92,7 +111,18 @@ effect function paged() {
     mark: (name: string, value: string | undefined) => sync(() => marked(name, value)),
     buttons,
     visible: Stream.suspend(() => Stream.map(Stream.fromEventListener(pages(), "visibilitychange"), () => showing())),
+    showing: () => sync(showing),
   }
+}
+
+/** The plugin of Alpha's own Android host for touch feedback and the accessibility timeout. */
+const alphaDevice = "AlphaDevice"
+
+/** Android's recommended timeout for a five-second base, as a percent of it. */
+effect function scaleOf(): Option.Option<number>!! {
+  if (!registered(alphaDevice)) return Option.none()
+  const answer = tryPromise(() => alpha().recommendedTimeout({ baseMs: 5000 })) catch () => ({ timeoutMs: 0 })
+  return Number.isFinite(answer.timeoutMs) && answer.timeoutMs > 0 ? Option.some(Math.round(answer.timeoutMs / 50)) : Option.none()
 }
 
 /** The plugins whose presence in this build is what the phone admits: eliza's telephony plugin, which a host registers only on an Alpha image, and its contacts plugin where that image grants contacts. */
@@ -103,6 +133,9 @@ const contacts = "ElizaContacts"
 export const phoneDevice = Layer.effect(Device, effect {
   return {
     ...(try paged()),
+    timeoutScale: scaleOf,
+    haptic: (kind: string) => registered(alphaDevice) ? ignore(tryPromise(() => alpha().haptic({ kind }))) : Effect.void,
+    feels: () => sync(() => registered(alphaDevice)),
     effect capabilities() {
       const variant = variantOf(native(), registered(telephony))
       return { image: variant === "Image", contacts: reachable("ImageOnly", variant) && registered(contacts) }
@@ -112,5 +145,11 @@ export const phoneDevice = Layer.effect(Device, effect {
 
 /** A browser: no Alpha image. */
 export const browserDevice = Layer.effect(Device, effect {
-  return { ...(try paged()), effect capabilities() { return { image: false, contacts: false } } }
+  return {
+    ...(try paged()),
+    effect capabilities() { return { image: false, contacts: false } },
+    timeoutScale: () => succeed(Option.none<number>()),
+    haptic: () => Effect.void,
+    feels: () => succeed(false),
+  }
 })

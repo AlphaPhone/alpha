@@ -1,0 +1,62 @@
+// spec/cloud/edge.md, "Story: Bring me back to the app when its link did not open"
+import { edgeAnswer, edgeRoute, type Route } from "../gen/cloud__edge.effect.vibe"
+import { EdgeRequest, EdgeResponse, forwardedHeaders } from "./edge-platform.ts"
+
+/** The API Worker as the web host reaches it: a Cloudflare service binding, never a public fetch. */
+export interface ApiService {
+  fetch(request: Request): Promise<Response>
+}
+
+/** The web host Worker's bindings: its environment's origins, the same the API Worker reads, and the binding to that API Worker. */
+export interface EdgeEnv {
+  readonly CLOUD_ENVIRONMENT: "production" | "staging"
+  readonly PUBLIC_API_ORIGIN: string
+  readonly WEB_ORIGIN: string
+  readonly API: ApiService
+}
+
+/** Where an address of the web host goes: the same path and query on the API origin, when that stays on it. */
+function onApi(url: URL, env: EdgeEnv): URL | null {
+  const target = URL.parse(`${url.pathname}${url.search}`, env.PUBLIC_API_ORIGIN)
+  return target !== null && target.origin === env.PUBLIC_API_ORIGIN ? target : null
+}
+
+/** What the web host does with an address, and where a forwarded one goes. */
+export function edgeRouteOf(url: URL, env: EdgeEnv): { readonly route: Route; readonly target: URL | null } {
+  const target = onApi(url, env)
+  const route = edgeRoute(url.protocol === "https:", url.username !== "" || url.password !== "", url.origin === env.WEB_ORIGIN, url.pathname === "/health", target !== null)
+  return { route, target }
+}
+
+const noStore = { "Cache-Control": "no-store" }
+
+async function forwarded(request: Request, url: URL, target: URL, env: EdgeEnv): Promise<Response | null> {
+  const bodied = request.method !== "GET" && request.method !== "HEAD"
+  try {
+    return await env.API.fetch(new EdgeRequest(target, {
+      method: request.method,
+      headers: forwardedHeaders(request.headers, url.host),
+      redirect: "manual",
+      ...(bodied ? { body: request.body, duplex: "half" } : {}),
+    }))
+  } catch {
+    return null
+  }
+}
+
+/** The web host Worker: its own health, and every other address of its origin answered by the API Worker, through its binding, as the web origin. */
+export const edgeWorker = {
+  async fetch(request: Request, env: EdgeEnv): Promise<Response> {
+    const url = new URL(request.url)
+    const { route, target } = edgeRouteOf(url, env)
+    const answer = route === "Forward" && target !== null ? await forwarded(request, url, target, env) : null
+    switch (edgeAnswer(route, answer !== null)) {
+      case "Healthy": return EdgeResponse.json({ ok: true }, { headers: noStore })
+      case "Missing": return new EdgeResponse("Not Found", { status: 404, headers: noStore })
+      case "Retry": return EdgeResponse.json({ error: "service_unavailable" }, { status: 503, headers: { ...noStore, "Retry-After": "30" } })
+      case "Answered": return answer ?? new EdgeResponse(null, { status: 502 })
+    }
+  },
+}
+
+export default edgeWorker

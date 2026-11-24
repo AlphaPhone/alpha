@@ -1,9 +1,16 @@
 // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
 import { type AskScene, askRoutes, askScene } from "./ask.ts";
+import { type CalendarScene, calendarRoutes, calendarScene } from "./calendar.ts";
+import { type MapsScene, mapsRoutes, mapsScene } from "./maps.ts";
 import { cloudRoutes } from "./cloud.ts";
+import { type InboxScene, inboxRoutes, inboxScene } from "./inbox.ts";
 import { type PlatformScene, platformRoutes, platformScene } from "./platform.ts";
 import { type Route, answering } from "./routes.ts";
 import { type SampleScene, sampleRoutes, sampleScene } from "./sample.ts";
+import { type LauncherScene, launcherScene } from "./launcher.ts";
+import { type SettingsScene, settingsScene } from "./settings.ts";
+import { type FilesScene, filesScene } from "./files.ts";
+import { type TelephonyScene, telephonyScene } from "./telephony.ts";
 
 /** Everything the fake world holds, one field per area; a journey reads and changes it. */
 export interface Scene {
@@ -20,6 +27,13 @@ export interface Scene {
   readonly slots: Set<string>;
   readonly sample: SampleScene;
   readonly ask: AskScene;
+  readonly launcher: LauncherScene;
+  readonly settings: SettingsScene;
+  readonly inbox: InboxScene;
+  readonly calendar: CalendarScene;
+  readonly files: FilesScene;
+  readonly maps: MapsScene;
+  readonly telephony: TelephonyScene;
   readonly platform: PlatformScene;
 }
 
@@ -29,6 +43,13 @@ export function scene(): Scene {
     phone: false, image: false, now: 0, signedIn: true, secrets: new Map(), slots: new Set(),
     sample: sampleScene(),
     ask: askScene(),
+    launcher: launcherScene(),
+    settings: settingsScene(),
+    inbox: inboxScene(),
+    calendar: calendarScene(),
+    files: filesScene(),
+    maps: mapsScene(),
+    telephony: telephonyScene(),
     platform: platformScene(),
   };
 }
@@ -43,10 +64,13 @@ export function services(world: Scene) {
       health,
       ...sampleRoutes(world.sample),
       ...askRoutes(world.ask),
+      ...calendarRoutes(world.calendar),
       ...platformRoutes(world.platform),
     ]),
     cloud: answering([
       ...cloudRoutes(),
+      ...inboxRoutes(world.inbox),
+      ...mapsRoutes(world.maps),
     ]),
   };
 }

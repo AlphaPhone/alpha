@@ -1,0 +1,108 @@
+// spec/app/telephony/contacts.md, "Story: Read my contacts only while I am looking at them"; spec/app/telephony/contacts.md, "Story: Change only the contact I reviewed"
+import type { AddressBookRow, ContactDetail, ContactDraft as Saved, ContactId, ContactVersion } from "@elizaos/os/bridges/contacts"
+import { Machine as Comms, type Event as CommsEvent } from "../../gen/app__telephony__comms.effect.vibe"
+import * as Contacts from "../../gen/app__telephony__contacts.effect.vibe"
+import type { ContactDraft, ContactRow, ContactsAnswer, Detail, Effect as Out, Event, WriteAnswer } from "../../gen/app__telephony__contacts.effect.vibe"
+import { Telephony, TelephonyRefused, telephony } from "../platform/telephony.vibe"
+import { type Job, answer, following, reacting, run, together } from "../runtime/reactor.vibe"
+import { on, visiting } from "./visit.vibe"
+
+function rowOf(row: AddressBookRow): ContactRow {
+  return "incomplete" in row
+    ? { id: row.id, title: "", phones: [], emails: [], complete: false }
+    : { id: row.id, title: row.name, phones: row.phones, emails: row.emails, complete: true }
+}
+
+function detailOf(found: ContactDetail): Detail {
+  return {
+    tag: "DetailRead", contactId: found.id, version: found.version, displayName: found.displayName, givenName: found.givenName, familyName: found.familyName,
+    notes: found.notes ?? "", notesEditable: found.notes !== undefined,
+    phoneFields: found.phoneNumbers.map((phone) => ({ number: phone.number, phoneType: phone.type })),
+    emailFields: found.emailAddresses.map((email) => ({ address: email.address, emailType: email.type })),
+  }
+}
+
+// spec/app/telephony/contacts.md, "A read starts only in the open view, and only the latest read publishes"
+effect function listed(ticket: number, query: string, limit: number, asking: boolean): Event!!Telephony {
+  const read: ContactsAnswer = effect {
+    const status = try telephony("open", (c) => c.contacts.open())
+    const granted = asking && !status.readable ? try telephony("requestPermissions", (c) => c.contacts.requestPermissions()) : status
+    if (!granted.readable) return { tag: "ContactsNoAccess" } satisfies ContactsAnswer
+    const page = try telephony("list", (c) => c.contacts.list({ query, limit, kind: "ExplicitRead" }))
+    return { tag: "ContactsPage", contacts: page.contacts.map(rowOf), hasMore: page.next !== null, writable: granted.writable } satisfies ContactsAnswer
+  } catch (failure) => (failure instanceof TelephonyRefused && failure.tag === "ContactReadRefused" ? { tag: "ContactsNoAccess" } : { tag: "ContactsUnreadable" }) satisfies ContactsAnswer
+  return { type: "readAnswered", ticket, answer: read }
+}
+
+// spec/app/telephony/contacts.md, "An open contact shows the fields the phone holds now, read under its own ticket"
+effect function detail(ticket: number, contactId: string): Event!!Telephony {
+  const found: Detail = Effect.map(telephony("get", (c) => c.contacts.get(contactId as ContactId, "ExplicitRead")), detailOf) catch (): Detail => ({ tag: "NoDetail" })
+  return { type: "detailAnswered", ticket, detail: found }
+}
+
+/** What the owner wrote, as the phone saves it; notes the phone cannot edit as one value are left out. */
+function savedOf(draft: ContactDraft, notesEditable: boolean): Saved {
+  return {
+    displayName: [draft.givenName, draft.familyName].filter((part) => part !== "").join(" "),
+    givenName: draft.givenName, familyName: draft.familyName,
+    ...(notesEditable ? { notes: draft.notes } : {}),
+    phoneNumbers: draft.phones.map((number) => ({ number, type: "mobile" })),
+    emailAddresses: draft.emails.map((address) => ({ address, type: "home" })),
+  }
+}
+
+/** A write's answer as the gate takes it; a refusal that came back is known, and one that never did is unknown. */
+const lostWrite = (failure: unknown): WriteAnswer => (failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === "" ? "WriteUnknown" : "WriteFailed")
+
+// spec/app/telephony/contacts.md, "A save names the version shown, and a changed contact keeps the editor and writes nothing"
+effect function saved(id: number, editId: string, editVersion: string, draft: ContactDraft, notesEditable: boolean): Event!!Telephony {
+  const result = effect {
+    const done = editId === ""
+      ? try telephony("createContact", (c) => c.contacts.createContact(savedOf(draft, true)))
+      : try telephony("updateContact", (c) => c.contacts.updateContact({ id: editId as ContactId, version: editVersion as ContactVersion }, savedOf(draft, notesEditable)))
+    const written: WriteAnswer = done.status === "saved" ? "WriteSaved" : done.status === "stale" ? "WriteStale" : done.status === "not-found" ? "WriteMissing" : done.status === "unknown" ? "WriteUnknown" : "WriteFailed"
+    return { written, savedId: done.status === "saved" && done.id !== null ? done.id : editId }
+  } catch (failure) => ({ written: lostWrite(failure), savedId: "" })
+  return { type: "saveAnswered", id, ...result }
+}
+
+// spec/app/telephony/contacts.md, "A removal needs the owner's confirmation of the contact read whole, at its version"
+effect function removed(id: number, contactId: string, version: string): Event!!Telephony {
+  const written: WriteAnswer = effect {
+    const done = try telephony("remove", (c) => c.contacts.remove({ id: contactId as ContactId, version: version as ContactVersion }))
+    return (done.status === "queued" ? "WriteDeleted" : done.status === "stale" ? "WriteStale" : done.status === "not-found" ? "WriteMissing" : "WriteFailed") satisfies WriteAnswer
+  } catch (failure) => lostWrite(failure)
+  return { type: "deleteAnswered", id, written }
+}
+
+// spec/app/telephony/contacts.md, "The in-app editor opens only with write access and no write unsettled; otherwise the system editor opens"
+effect function systemEditor(ticket: number, query: string, limit: number, contactId: string): Event!!Telephony {
+  const page = telephony("list", (c) => c.contacts.list({ query, limit })) catch () => undefined
+  const row = contactId === "" ? undefined : page?.contacts.find((one) => one.id === contactId)
+  try ignore(telephony("edit", (c) => (row === undefined || "incomplete" in row ? c.contacts.create() : c.contacts.edit(row))))
+  return try listed(ticket, query, limit, false)
+}
+
+function carry(fx: Out): Job<Event, Telephony, []> {
+  const failed = (ticket: number): Event => ({ type: "readAnswered", ticket, answer: { tag: "ContactsUnreadable" } })
+  return match (fx) {
+    when { tag: "ReadContacts", let ticket, let query, let limit }: answer("list", listed(ticket, query, limit, false), failed(ticket));
+    when { tag: "AskContacts", let ticket, let query, let limit }: answer("list", listed(ticket, query, limit, true), failed(ticket));
+    when { tag: "ReadContact", let ticket, let contactId }: answer("detail", detail(ticket, contactId), { type: "detailAnswered", ticket, detail: { tag: "NoDetail" } });
+    when { tag: "OpenSystemEditor", let ticket, let query, let limit, let contactId }: answer("list", systemEditor(ticket, query, limit, contactId), failed(ticket));
+    when { tag: "SaveContact", let id, let editId, let editVersion, let draft, let notesEditable }: answer(`write ${id}`, saved(id, editId, editVersion, draft, notesEditable), { type: "saveAnswered", id, written: "WriteUnknown", savedId: "" });
+    when { tag: "RemoveContact", let id, let contactId, let version }: answer(`write ${id}`, removed(id, contactId, version), { type: "deleteAnswered", id, written: "WriteUnknown" });
+    when { tag: "CloseBook" }: run("close", ignore(telephony("close", (c) => c.contacts.close())));
+  }
+}
+
+const machine = reacting(Contacts, { carry })
+
+const shown = visiting(on("Contacts"), Contacts.Machine, (showing): Event => ({ type: "show", showing }))
+
+// spec/app/telephony/comms.md, "A view change while the conversation is open keeps the sheet's height and remembers the view it left"
+const subject = following(Contacts.Machine, (state) => (!state.shown ? "" : state.openId === "" ? "contacts:list:" : `contacts:contact:${state.openId}`), Comms,
+  (key): CommsEvent | undefined => (key === "" ? undefined : { type: "subjectShown", app: "ContactsApp", subject: key === "contacts:list:" ? "ListSubject" : "ContactSubject", key }), "Device")
+
+/** Contacts: in memory, read while its view is in front, its writes gated on the version shown, and its subject told to the comms stage. */
+export const contacts = together(machine, shown, subject)

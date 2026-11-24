@@ -1,0 +1,14 @@
+{
+  "production": {
+    "workerName": "alphacompute-cloud-api",
+    "accountId": "00000000000000000000000000000000",
+    "zone": "alphacompute.cc",
+    "hyperdriveId": "00000000000000000000000000000021"
+  },
+  "staging": {
+    "workerName": "alphacompute-cloud-api-staging",
+    "accountId": "00000000000000000000000000000000",
+    "zone": "alphacompute.cc",
+    "hyperdriveId": "00000000000000000000000000000011"
+  }
+}

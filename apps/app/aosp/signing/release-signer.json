@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "description": "Private canonical Alpha signing input for retained installations. Use the existing signer, package and update channel.",
+  "signerSha256": "edbfcacb1da689008bf4e7d675176c302decf83161a877eb8b1de4ffae0445ed",
+  "lastRelease": {
+    "versionCode": null,
+    "versionName": null,
+    "recordedAt": null
+  },
+  "privateProducerApproval": {
+    "approval": "approved",
+    "alphaCommit": "6ed84c289615d83165a0c5821dac309e5f5d34f9",
+    "sdkCommit": "57588dc08a8d561a29fe754e3dadb50a6cd8f04e",
+    "versionCode": 121,
+    "updateChannel": {
+      "kind": "public",
+      "manifestUrlSha256": "b56b3eb2b60e62e105a66de55a15519ff0ac1c3162eb55d61f511b05c0b1e3ca"
+    },
+    "archiveBytes": 1258219803,
+    "archiveSHA256": "5c908d762a338ee5233ecca4b0efc3cd0c21cb10d8f46bc6256915a791126791",
+    "producerManifestSHA256": "33de15e2c5efbd845ce823c34f7b8c9b29939fa7e65037c5652e9477777a21b8",
+    "privateProducerReceiptSHA256": "80c99ed972141e1857473587775dee49e02340b3ac4efb8bf9d5b1b7223162a8",
+    "unsignedApkSHA256": {
+      "launcher": "8081a76854411dd4deaccfa15acee3270ce44c0e586ededbdfb18309fa6e959e"
+    },
+    "applicationId": "ai.alphacompute.alphaphone",
+    "purpose": "retained-installation-update"
+  }
+}

@@ -1,0 +1,280 @@
+// spec/app/inbox/index.md, "Story: See my mail"; spec/app/inbox/index.md, "Story: See my last list when offline"; spec/app/inbox/message.md, "Story: Read a message"
+import { CloudError, type GoogleStatus, type MailCard, type MailMessage, type MailOperation } from "@elizaos/cloud/client"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import type { Failure, Folder, Linked, Mailbox, Selection } from "../../gen/app__inbox.ts"
+import type { Fault } from "../../gen/app__inbox__message.ts"
+import { Cloud } from "../platform/cloud.vibe"
+import { Attempts } from "../runtime/attempts.vibe"
+
+module pure {
+  import type { MailCard } from "@elizaos/cloud/client"
+  import type { Selection } from "../../gen/app__inbox.ts"
+
+  /** One message of a list as the screen shows it: Alpha's number for it, and eliza's card of it. */
+  export interface Letter {
+    readonly message: number
+    readonly card: MailCard
+  }
+
+  /** A list kept for a selection, to show as saved while Gmail cannot be reached. */
+  export interface Kept {
+    readonly selection: Selection
+    readonly letters: ReadonlyArray<Letter>
+  }
+
+  /** What Alpha keeps of Gmail on the phone: its own numbers for accounts, credentials and messages, and the list last read. */
+  export interface Ledger {
+    readonly accounts: Record<string, number>
+    readonly credentials: Record<string, number>
+    readonly grants: Record<string, string>
+    readonly messages: Record<string, number>
+    readonly cards: Record<string, MailCard>
+    readonly next: number
+    readonly kept: Kept | undefined
+  }
+
+  /** The ledger kept under `text`, or a blank one where nothing readable is kept. @throws {never} */
+  export function readLedger(text: string | undefined): Ledger | undefined {
+    if (text === undefined) return undefined
+    try {
+      const found = JSON.parse(text) as Partial<Ledger> | null
+      return found !== null && typeof found === "object" && typeof found.next === "number" ? found as Ledger : undefined
+    } catch { return undefined }
+  }
+}
+import { type Kept, type Ledger, type Letter, readLedger } from pure
+export type { Letter }
+
+const blank: Ledger = { accounts: {}, credentials: {}, grants: {}, messages: {}, cards: {}, next: 1, kept: undefined }
+const key = "alpha/inbox/mail"
+
+/** The Gmail search each folder is, before the owner's own words. */
+const folders: Record<Folder, string> = {
+  Incoming: "in:inbox", Starred: "is:starred", Sent: "in:sent", DraftsFolder: "in:drafts", AllMail: "in:all",
+  Archived: "in:all -in:inbox -in:spam -in:trash -in:sent -in:drafts", Spam: "in:spam", Trashed: "in:trash",
+}
+
+/** The search Gmail is asked for `folder` and the owner's `query`. */
+export function searchOf(folder: Folder, query: string): string {
+  return query.trim() === "" ? folders[folder] : `${folders[folder]} ${query.trim()}`
+}
+
+/** How many messages one page of a list holds. */
+const pageSize = 25
+
+/**
+ * Alpha's side of Gmail: the numbers the rules know accounts, credentials, messages and page cursors by, each the
+ * same for the same thing of Google's, kept across restarts; the list of the selection on screen and the list kept
+ * for it; and the bodies read, by the ticket of their read. A screen reads it at the state its machine shows.
+ */
+export service Mail {
+  account(email: string): number!!
+  credential(connection: string): number!!
+  /** The address of `account`, as Google named it. */
+  email(account: number): string
+  /** The grant eliza's client names an account by, as the newest account check gave it. */
+  grant(account: number): string | undefined
+  granted(account: number, grant: string): void!!
+  message(account: number, card: MailCard): number!!
+  card(message: number): MailCard | undefined
+  gmailId(message: number): string | undefined
+  cursor(token: string): number
+  token(cursor: number): string | undefined
+  /** Take a page read for `selection`: the first page replaces the list, a further one adds to it; either is kept. */
+  listed(selection: Selection, first: boolean, letters: ReadonlyArray<Letter>): void!!
+  /** A mark Gmail confirmed, on the message as the list shows it. */
+  relabelled(message: number, unread: boolean): void!!
+  /** Whether the mailbox moved since the first page of the list, by its history. */
+  moved(first: boolean, history: string): boolean
+  /** The list on screen for `state`: none, the one kept, or the one read. */
+  shown(state: Mailbox): ReadonlyArray<Letter>
+  read(ticket: number, body: MailMessage): void
+  body(ticket: number): MailMessage | undefined
+  /** Forget every account, message and list of the session before. */
+  forget(): void!!
+}
+
+export const mail = Layer.effect(Mail, effect {
+  const store = try KeyValueStore.KeyValueStore
+  let ledger = readLedger(store.get(key) catch () => undefined) ?? blank
+  let current: ReadonlyArray<Letter> = []
+  let history = ""
+  const cursors = new Map<string, number>()
+  const bodies = new Map<number, MailMessage>()
+  effect function keep(changed: Ledger): void!! {
+    ledger = changed
+    try ignore(store.set(key, JSON.stringify(ledger)))
+  }
+  effect function numbered(table: "accounts" | "credentials" | "messages", name: string): number!! {
+    const found = ledger[table][name]
+    if (found !== undefined) return found
+    try keep({ ...ledger, [table]: { ...ledger[table], [name]: ledger.next }, next: ledger.next + 1 })
+    return ledger.next - 1
+  }
+  const named = (table: Record<string, number>, number: number) => Object.keys(table).find((name) => table[name] === number)
+  return {
+    account: (email: string) => numbered("accounts", email.toLowerCase()),
+    effect credential(connection: string) {
+      return try numbered("credentials", connection)
+    },
+    email: (account: number) => named(ledger.accounts, account) ?? "",
+    grant: (account: number) => ledger.grants[String(account)],
+    effect granted(account: number, grant: string) {
+      if (ledger.grants[String(account)] !== grant) try keep({ ...ledger, grants: { ...ledger.grants, [String(account)]: grant } })
+    },
+    effect message(account: number, card: MailCard) {
+      const number = try numbered("messages", `${account}/${card.id}`)
+      try keep({ ...ledger, cards: { ...ledger.cards, [String(number)]: card } })
+      return number
+    },
+    card: (message: number) => ledger.cards[String(message)],
+    gmailId: (message: number) => named(ledger.messages, message)?.replace(/^\d+\//, ""),
+    cursor(token: string) {
+      const found = cursors.get(token)
+      if (found !== undefined) return found
+      cursors.set(token, cursors.size + 1)
+      return cursors.size
+    },
+    token: (cursor: number) => [...cursors.keys()].find((token) => cursors.get(token) === cursor),
+    effect listed(selection: Selection, first: boolean, letters: ReadonlyArray<Letter>) {
+      current = first ? letters : [...current, ...letters]
+      try keep({ ...ledger, kept: { selection, letters: current } })
+    },
+    effect relabelled(message: number, unread: boolean) {
+      const card = ledger.cards[String(message)]
+      if (card === undefined) return
+      const changed = { ...card, isUnread: unread }
+      current = current.map((letter) => (letter.message === message ? { ...letter, card: changed } : letter))
+      try keep({ ...ledger, cards: { ...ledger.cards, [String(message)]: changed } })
+    },
+    moved(first: boolean, read: string) {
+      const before = history
+      history = read
+      return !first && before !== "" && before !== read
+    },
+    shown(state: Mailbox) {
+      if (state.pages === 0) return []
+      return state.saved ? ledger.kept?.letters ?? [] : current
+    },
+    read(ticket: number, body: MailMessage) {
+      bodies.set(ticket, body)
+    },
+    body: (ticket: number) => bodies.get(ticket),
+    effect forget() {
+      current = []
+      bodies.clear()
+      try keep(blank)
+    },
+  }
+})
+
+/** What Google consented to, as the grant the rules read: reading, sending, and changing the mailbox. */
+function consentOf(status: GoogleStatus) {
+  const has = (capability: GoogleStatus["grantedCapabilities"][number]) => status.grantedCapabilities.includes(capability)
+  const read = status.reason === "connected" && (has("google.gmail.triage") || has("google.gmail.mailbox"))
+  return { read, send: read && has("google.gmail.send"), modify: read && has("google.gmail.manage") }
+}
+
+/** The failure of a read, as the list tells it: offline, access withdrawn, or Gmail not reached for another reason. */
+export function failureOf(failed: unknown): Failure {
+  const cause = failed instanceof Asked ? failed.cause : failed
+  if (!(cause instanceof CloudError)) return "Unreachable"
+  const failure = cause.failure
+  if (failure.tag === "CloudNetwork") return "Offline"
+  if (failure.tag === "CloudRefused" && (failure.code === "GoogleReauthRequired" || failure.reason === "CredentialRevoked" || failure.reason === "GrantRequired" || failure.reason === "CapabilityMissing")) return "Revoked"
+  return "Unreachable"
+}
+
+/** Why a message could not be read, as the message view tells it. */
+export function faultOf(failed: unknown): Fault {
+  const cause = failed instanceof Asked ? failed.cause : failed
+  const failure = failureOf(cause)
+  if (failure === "Revoked") return "Revoked"
+  if (!(cause instanceof CloudError) || cause.failure.tag !== "CloudRefused") return "Unreachable"
+  const code = cause.failure.code
+  return code === "NotFound" ? "Gone" : code === "StaleRevision" ? "Stale" : code === "ContentTooLarge" ? "TooLarge" : code === "PreconditionFailed" ? "Moved" : "Unreachable"
+}
+
+/** The connected Google accounts, as the cloud's status of the owner's Google connection names them. */
+export effect function connections(): ReadonlyArray<Linked>!unknown!(Cloud | Mail) {
+  const { client } = try Cloud
+  const ledger = try Mail
+  const status = try asked(() => client.googleStatus())
+  if (!status.connected && status.reason !== "needs_reauth") return []
+  if (status.identity === null) return []
+  const account = try ledger.account(status.identity.email)
+  const connection = status.connectionId ?? status.identity.email
+  try ledger.granted(account, connection)
+  return [{ account, credential: try ledger.credential(connection), grant: consentOf(status) }]
+}
+
+/** What eliza's client threw: a `CloudError` where the cloud refused or could not be reached. */
+export error Asked { cause: unknown }
+
+/** What eliza's client answers, failing with what it threw: a `CloudError` where the cloud refused or could not be reached. */
+export effect function asked<A>(call: () => Promise<A>): A!Asked {
+  return try tryPromise({ try: call, catch: (cause) => new Asked({ cause }) })
+}
+
+const grantChoice = (grant: string | undefined) => (grant === undefined ? {} : { grantId: grant })
+
+/** One page of `folder` searched for `query`, from the page `cursor` names. */
+export effect function page(account: number, folder: Folder, query: string, cursor: number) {
+  const { client } = try Cloud
+  const ledger = try Mail
+  const token = cursor === 0 ? undefined : ledger.token(cursor)
+  const found = try asked(() => client.gmailSearch({
+    ...grantChoice(ledger.grant(account)), query: searchOf(folder, query), maxResults: pageSize, ...(token === undefined ? {} : { pageToken: token }),
+  }))
+  const letters: Letter[] = []
+  for (const card of found.messages) letters.push({ message: try ledger.message(account, card), card })
+  const following = found.nextPageToken === null ? 0 : ledger.cursor(found.nextPageToken)
+  return { letters, following, history: found.mailboxHistoryId, spamTrash: found.supportsSpamTrash }
+}
+
+/** The message `message` of `account`, read whole. */
+export effect function body(account: number, message: number): MailMessage!unknown!(Cloud | Mail) {
+  const { client } = try Cloud
+  const ledger = try Mail
+  const id = ledger.gmailId(message)
+  if (id === undefined) throw new CloudError({ failure: { tag: "CloudRefused", code: "NotFound", reason: "NoReason" }, cause: "no such message" })
+  return try asked(() => client.gmailRead({ ...grantChoice(ledger.grant(account)), messageId: id }))
+}
+
+/** The revision a message is at, as a number the rules can compare: Gmail's history id. */
+export function revisionOf(card: MailCard | undefined): number {
+  const history = Number(card?.metadata.historyId ?? "0")
+  return Number.isSafeInteger(history) ? history : 0
+}
+
+/** How a change to the mailbox Gmail was asked for under attempt `id` ended. */
+export interface Changed {
+  readonly done: boolean
+  readonly known: boolean
+}
+
+function endedAs(operation: MailOperation): Changed {
+  const state = operation.receipt.state
+  return state === "succeeded" ? { done: true, known: true } : state === "rejected" ? { done: false, known: true } : { done: false, known: false }
+}
+
+/**
+ * Change one message's labels in Gmail, once, as attempt `id` of the machine whose job this is: prepared under the
+ * attempt's own key (the `at`th message of the attempt under a key of its own), then dispatched as Gmail reviewed it. A refusal before the dispatch is known; any failure of the
+ * dispatch itself leaves it unknown.
+ */
+export effect function relabel(id: number, account: number, message: number, kind: "mark-read" | "mark-unread" | "archive" | "unarchive" | "trash" | "untrash", at = 0): Changed!!(Cloud | Mail | Attempts) {
+  const { client } = try Cloud
+  const ledger = try Mail
+  const key = try (try Attempts).key(id)
+  const requestId = at === 0 ? key : `${key.slice(0, -4)}${at.toString(16).padStart(4, "0")}`
+  const grantId = ledger.grant(account)
+  const messageId = ledger.gmailId(message)
+  if (grantId === undefined || messageId === undefined) return { done: false, known: true }
+  const proposal = { kind, messageId, expectedHistoryId: ledger.card(message)?.metadata.historyId ?? "" }
+  const prepared = asked(() => client.gmailPrepare({ grantId, requestId, proposal })) catch () => undefined
+  if (prepared === undefined) return { done: false, known: true }
+  if (prepared.receipt.state !== "prepared") return endedAs(prepared)
+  const dispatched = asked(() => client.gmailDispatch({ grantId, requestId, reviewDigest: prepared.receipt.reviewDigest, proposal })) catch () => undefined
+  return dispatched === undefined ? { done: false, known: false } : endedAs(dispatched)
+}
