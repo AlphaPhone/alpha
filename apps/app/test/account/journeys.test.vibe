@@ -221,8 +221,8 @@ it.live(`A code is sent to the typed phone number in international form (spec/ac
   }
 })
 
-// spec/account/signIn.md, "Story: Leave sign-in"
-it.live(`Back during a verification adopts the key the host stored, and otherwise returns to the choice (spec/account/signIn.md, "Story: Leave sign-in")`, () => effect {
+// spec/account/signIn.md, "Story: Sign in with a code"
+it.live(`Back during a verification adopts the key the host stored, and otherwise returns to the choice (spec/account/signIn.md, "Story: Sign in with a code")`, () => effect {
   // The host commits (or not) and then holds its answer until Back's cancel reaches it, as a phone does when Back loses the race.
   effect function backDuring(commits: boolean) {
     const calls: Calls = []
