@@ -149,7 +149,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const known = board.known(chats.chosen)
     const request = board.postingRequest
     board.postingRequest = undefined
-    const text = request?.text ?? board.outgoing
+    const text = (request?.text ?? board.outgoing).trim()
     const held = (try (try Composer.Machine).get()).held
     const files = request === undefined ? board.snapshot().files.slice(0, held.files) : []
     const quoted = request === undefined && held.quote > 0 ? board.latest()[held.quote - 1] : undefined

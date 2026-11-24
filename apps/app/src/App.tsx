@@ -57,13 +57,13 @@ export function App({ alpha }: AppProps) {
         {page === undefined || !editorsMounted(page) ? null : showing === undefined
           ? alpha.slot("home")
           : (
-            <>
+            <div key={showing} className="flex min-h-0 flex-1 flex-col motion-safe:animate-rise">
               {!viewHasHeader(showing) && <AppHeader
                 title={views[showing].label}
                 leading={back && <AppBack alpha={alpha} />}
               />}
               {alpha.slot(`view:${showing}`)}
-            </>
+            </div>
           )}
       </div>
       <div className={comms ? "shrink-0" : undefined} inert={layers !== undefined && assistantInert(layers)}>{alpha.slot("assistant")}</div>
