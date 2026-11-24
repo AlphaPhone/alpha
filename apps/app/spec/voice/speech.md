@@ -207,6 +207,29 @@ pure def lawAnEmailIsNeverReadOut(validatedCard: bool): bool =
   spokenLineOf(EmailDraft({ validatedCard: validatedCard })) != WholeReply
 ```
 
+## Story: Hear dates and times as a person says them
+
+> As the owner, I want a date or time in a reply or reading said the way a person says it, so that
+> "Sun, Nov 22, 12:00 PM - 12:30 PM" is not read out as letters, digits and dashes.
+
+### A named date, a clock time and a percent sign are said in words; other digits keep their groups, and a likely secret is never rewritten
+
+Every route speaks the same planned passage, so Cloud and the phone say a date or time alike. A
+named date, its weekday and month possibly shortened, is said with an ordinal ("Sunday, November
+twenty-second"); a clock time or range is said in words ("noon to twelve thirty P M", "nine oh
+five"), a percent sign as "percent", and a colon after a word as a pause. A phone number, an ISO
+date, an amount and a UTC offset keep their digits, grouped by pauses. A passage that looks like it
+holds a secret is left as written, so the secret check still refuses it. The written reply is never
+changed.
+
+```quint
+type SpokenForm = SaidInWords | KeptAsWritten
+pure def spokenFormOf(dateOrClock: bool, likelySecret: bool): SpokenForm =
+  if (dateOrClock and not(likelySecret)) SaidInWords else KeptAsWritten
+pure def lawALikelySecretIsNeverRewritten(dateOrClock: bool): bool =
+  spokenFormOf(dateOrClock, true) == KeptAsWritten
+```
+
 ## Story: Keep a page I read and my voicemail on my phone
 
 > As the owner, I want a page I asked to hear read aloud and my voicemail transcribed only by my

@@ -1,4 +1,4 @@
-// spec/voice/dictation.md, "Story: Dictate into the draft I am writing"; spec/voice/dictation.md, "Story: Keep my recording when transcription fails"; spec/voice/listener.md, "Story: Use the listener only on the image that admits it"; spec/voice/speech.md, "Story: Never have a secret read aloud"; spec/voice/conversation.md, "Story: Start talking only when Alpha can listen safely"; spec/voice/capture.md, "Story: One voice surface at a time hears me"
+// spec/voice/dictation.md, "Story: Dictate into the draft I am writing"; spec/voice/dictation.md, "Story: Keep my recording when transcription fails"; spec/voice/listener.md, "Story: Use the listener only on the image that admits it"; spec/voice/speech.md, "Story: Never have a secret read aloud"; spec/voice/speech.md, "Story: Hear dates and times as a person says them"; spec/voice/conversation.md, "Story: Start talking only when Alpha can listen safely"; spec/voice/capture.md, "Story: One voice surface at a time hears me"
 import { assert, it } from "@effect/vitest"
 import { Build } from "../../src/platform/build.vibe"
 import { Cloud, CloudUnavailable } from "../../src/platform/cloud.vibe"
@@ -14,7 +14,7 @@ import { layer } from "../../src/voice/layer.vibe"
 import { Listener } from "../../src/voice/listener.vibe"
 import { VoiceRoute } from "../../src/voice/route.vibe"
 import { Speech } from "../../src/voice/speech.vibe"
-import { replyActionOf, spokenLineOf, EMAIL_DRAFT_READY } from "../../src/voice/spoken-text.ts"
+import { formatSpeechText, planReading, planReply, replyActionOf, spokenLineOf, EMAIL_DRAFT_READY } from "../../src/voice/spoken-text.ts"
 import { ReadingVoice } from "../../src/browser/ports.vibe"
 import { VoicemailTranscriber } from "../../src/telephony/ports.vibe"
 
@@ -242,4 +242,22 @@ it.effect(`Hear a short line for an action (spec/voice/speech.md, "Story: Hear a
   const plain = spokenLineOf("It is sunny.", replyActionOf(undefined))
   const verbatim = spokenLineOf("Event ID: ev_123 is booked.", replyActionOf({ kind: "CALENDAR_CREATE", validatedCard: false, verbatimAsked: true }))
   try Effect.try(() => assert.deepStrictEqual({ drafted, plain, verbatim }, { drafted: EMAIL_DRAFT_READY, plain: "It is sunny.", verbatim: "Event ID: ev_123 is booked." }))
+})
+
+it.effect(`Hear dates and times as a person says them (spec/voice/speech.md, "Story: Hear dates and times as a person says them")`, () => effect {
+  // spec/voice/speech.md, "A named date, a clock time and a percent sign are said in words; other digits keep their groups, and a likely secret is never rewritten"
+  const said = (plan: ReturnType<typeof planReply>) => plan.kind === "speak" ? plan.pieces.join(" ") : plan.reason
+  const reply = said(planReply("Availability: Sun, Nov 22, 12:00 PM - 12:30 PM."))
+  const abbreviated = said(planReply("Sun Microsystems. Deadline: Sept. 1 at 9:05 a.m."))
+  const reading = said(planReading("Booked 9:30-10:00 today. Due on 2026-11-06 at 10:30. Call 555-123-4567 later."))
+  const kept = formatSpeechText("2% of $1,299.50. Ratio 2:10. Call 415-555-0100 on 2026-11-21. UTC+01:00. See Nov 22:30.")
+  const secret = formatSpeechText("Your wifi password is: hunter2 at 9:30 PM")
+  try Effect.try(() => assert.deepStrictEqual({ reply, abbreviated, reading, kept, secret, refused: said(planReply("The secret: abc at 9:30 PM")) }, {
+    reply: "Availability, Sunday, November twenty second, noon to twelve thirty P M.",
+    abbreviated: "Sun Microsystems. Deadline, September first at nine oh five A M.",
+    reading: "Booked nine thirty to ten o'clock today. Due on 2026, 11, 06 at ten thirty. Call 555, 123, 4567 later.",
+    kept: "2 percent of $1,299.50. Ratio 2:10. Call 415-555-0100 on 2026-11-21. UTC+01:00. See Nov 22:30.",
+    secret: "Your wifi password is: hunter2 at 9:30 PM",
+    refused: "secret",
+  }))
 })

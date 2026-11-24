@@ -354,10 +354,10 @@ The canonical package reads the `app-stable-alphacompute` release. The publisher
 still checks the version floor from `app-stable`. Android may require
 installation confirmation.
 
-The app and OS update URLs target `alphacompute/alpha`. Release hosting must be
-available there before distribution. Verify anonymous readback of the app
-manifest, the pilot OTA manifest and their downloads at the new URLs. Existing
-release pointers may need their APK URLs updated to the canonical repository.
+The app update URL uses `eliza-research/alpha`. Verify anonymous readback of the
+app manifest and its APK there before distribution. Devices with an older
+canonical APK built for the planned `alphacompute/alpha` URL need one in-place
+signed installation to switch feeds. The OS pilot uses its separate enrollment URL.
 
 Protected release jobs bind dispatches to the reviewed commit on `main`.
 After the repository moves, the release owner applies the repository ID,

@@ -367,3 +367,30 @@ vibestack-dp is an upstream question.
   - when more contacts match, the card says "More than N contacts match …, including" (the on-phone review now reads one row past the ten and shows its note; the card is drawn before the lookup and says nothing);
   - a new contact's numbers are also looked up with Android's exact number matching, so a number saved under another name is shown before it is added again. The port now looks each number up through the provider's own query (`contacts.list`), not Android's exact number matching.
 
+## After porting develop 208ea0ad4 (v119-demo)
+
+The in-call presentation (simulated ringing is ringing; Android's notice alone presents an
+incoming call, with one fallback screen when the ringing channel cannot alert; a portrait call
+screen), spoken dates and times (`spec/voice/speech.md`, "Story: Hear dates and times as a person
+says them") and the `eliza-research/alpha` update repository are ported. These parts are not:
+
+- **Upstream (os), view-request diagnostic:** Vibestack sends resident requests through upstream's
+  `AgentPlugin` (`agentRequest` in `src/platform/resident-bridge.vibe`). `AlphaLocalAgentPlugin` has no
+  `request` method, and nothing calls its `logRequestFailure`. Develop's `ViewRequestDiagnostic`
+  appended `navigation=claim|result|prepare` and a 16-hex SHA-256 fingerprint of the request's
+  `requestId` or `completedActionHandoffId` to the failed-request log line for POSTs to
+  `/api/views/interact-claim`, `/api/views/interact-result` and `/api/views/<id>/navigate`. It never
+  logged the path or the body. That hint belongs in upstream `AgentPlugin`'s failure log.
+- **Upstream (agent/voice), echo gate:** develop also compared a heard turn against the spoken form of
+  the last reply ("Sunday, November twenty-second", not "Sun, Nov 22"), so an ASR echo of a formatted
+  date or time was still rejected. Echo rejection is `VoiceSession`'s, and Alpha has no
+  `shouldRespond` port. Upstream needs to compare echoes against the spoken form too, or accept one
+  from Alpha.
+- **Not applicable, workflow-step turn guard:** develop stopped a workflow step's text generation
+  (`generateWorkflowText`) from reading the phone's position or the browser page. Vibestack has no
+  renderer-side workflow text turn, because workflow steps run in the resident's workflow worker.
+  `spec/assistant/conversation.md` still models `WorkflowText` with no implementation.
+- **Not applicable, development voice bridge:** the lease-renewal tunnel fix was in
+  `scripts/local-agent-dev-bridge.ts`, which Vibestack removed (`scripts/legacy-retirement.json`).
+  `test/local-agent-voice-bridge.test.mjs` is held.
+
