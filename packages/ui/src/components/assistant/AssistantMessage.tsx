@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import { CornerUpLeft, GitBranch, Pencil, Volume2 } from "lucide-react";
+import { Copy, CornerUpLeft, GitBranch, Mail, Pencil, Volume2 } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { Mark } from "../Mark.tsx";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
@@ -20,6 +20,10 @@ export type AssistantMessageProps = Omit<ComponentProps<"article">, "children"> 
   onPreview?: (id: string) => void;
   /** Quotes the message in the next one. */
   onQuote?: () => void;
+  /** Copies the message's text. */
+  onCopy?: () => void;
+  /** Opens an Inbox review for using Alpha's answer in an email draft. */
+  onUseInEmail?: () => void;
   /** Puts the owner's message back in an empty composer to edit and send as a new one. */
   onEditAgain?: () => void;
   /** Takes another conversation from here, with the way back. */
@@ -33,11 +37,11 @@ export type AssistantMessageProps = Omit<ComponentProps<"article">, "children"> 
  * with the cards of its reply. Pressing the text opens what can be done with it, each action only where it is offered.
  * @model spec/app/assistant/chats.md
  */
-export function AssistantMessage({ author, text, quote, attachments = [], children, onPreview, onQuote, onEditAgain, onFork, onReadAloud, className, ...props }: AssistantMessageProps) {
+export function AssistantMessage({ author, text, quote, attachments = [], children, onPreview, onQuote, onCopy, onUseInEmail, onEditAgain, onFork, onReadAloud, className, ...props }: AssistantMessageProps) {
   const owner = author === "owner";
   const body = <span className="break-words whitespace-pre-line">{text}</span>;
   const bubble = cn("max-w-full text-left text-base", owner && "rounded-tile bg-secondary px-4 py-2.5 text-secondary-foreground");
-  const actions = onQuote || onEditAgain || onFork || onReadAloud;
+  const actions = onQuote || onCopy || onUseInEmail || onEditAgain || onFork || onReadAloud;
   return (
     <article aria-label={owner ? "You" : "Alpha"} className={cn("flex flex-col gap-2", owner ? "items-end pl-10" : "items-start", className)} {...props}>
       {attachments.length ? (
@@ -55,6 +59,8 @@ export function AssistantMessage({ author, text, quote, attachments = [], childr
             </MenuTrigger>
             <MenuContent align={owner ? "end" : "start"}>
               {onQuote ? <MenuItem onSelect={onQuote}><CornerUpLeft aria-hidden />Reply</MenuItem> : null}
+              {onCopy ? <MenuItem onSelect={onCopy}><Copy aria-hidden />Copy</MenuItem> : null}
+              {onUseInEmail ? <MenuItem onSelect={onUseInEmail}><Mail aria-hidden />Use in email</MenuItem> : null}
               {onEditAgain ? <MenuItem onSelect={onEditAgain}><Pencil aria-hidden />Edit and resend</MenuItem> : null}
               {onFork ? <MenuItem onSelect={onFork}><GitBranch aria-hidden />New chat from here</MenuItem> : null}
               {onReadAloud ? <MenuItem onSelect={onReadAloud}><Volume2 aria-hidden />Read aloud</MenuItem> : null}

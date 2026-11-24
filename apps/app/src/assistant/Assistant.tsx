@@ -9,7 +9,7 @@ import type { Conversation as Talking, Machine as ConversationMachine } from "..
 import { askable, inFlight, pending } from "../../gen/app__assistant.ts";
 import { useMachine as useConversation } from "../../gen/app__assistant.react.ts";
 import type { Machine as ChatsMachine } from "../../gen/app__assistant__chats.effect.vibe";
-import { making, unsure } from "../../gen/app__assistant__chats.ts";
+import { copyableText, making, textForEmail, unsure } from "../../gen/app__assistant__chats.ts";
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import type { Composer as Writing, Machine as ComposerMachine } from "../../gen/app__assistant__composer.effect.vibe";
 import { content, textLimit } from "../../gen/app__assistant__composer.ts";
@@ -28,10 +28,12 @@ import { untimed } from "../runtime/reactor.vibe";
 import { isCommsView } from "../shell/views.tsx";
 import { freedom } from "./assistant.vibe";
 import { acceptedFiles, insertFiles, removeFile, sameBinding } from "./attachments.vibe";
+import type { MessageSelection } from "./message-actions.vibe";
 import { type Attached, Talk } from "./talk.vibe";
 
 export interface AssistantProps {
   runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | Talk, unknown>;
+  messageActions?: { copy: (selection: MessageSelection) => void; useInEmail?: (selection: MessageSelection) => void };
 }
 
 function turnOf(talking: Talking, label: string): AssistantTurnNoteProps["status"] | undefined {
@@ -103,7 +105,7 @@ const detached = { mail: "Mail", transcript: "Transcript", shown: "Shown" } as c
 const barHeight = 80;
 
 /** @model spec/app/assistant/index.md */
-export function Assistant({ runtime }: AssistantProps) {
+export function Assistant({ runtime, messageActions }: AssistantProps) {
   const conversation = useConversation(runtime);
   const chats = useChats(runtime);
   const composer = useComposer(runtime);
@@ -170,6 +172,10 @@ export function Assistant({ runtime }: AssistantProps) {
   const messages = lines.map((line): AssistantMessageProps & { id: string } => {
     const message = board.numbered(line.id);
     const settled = message > 0 && settledLine(line.id);
+    const selection = { conversation: shown.chosen, page: shown.page.ticket, message };
+    const blank = line.text.trim() === "";
+    const copy = messageActions?.copy;
+    const useInEmail = messageActions?.useInEmail;
     const fork = { type: "fork", message, ...free } as const;
     const quote = { type: "quote", message, recorded: settled } as const;
     const editAgain = { type: "editAgain", message, mine: line.mine, recorded: settled } as const;
@@ -183,6 +189,8 @@ export function Assistant({ runtime }: AssistantProps) {
       ...(line.failure === undefined ? {} : { children: failureCard({ kind: line.failure, fix: "NoFix", waitMs: -1 }, false) }),
       onFork: settled && chats.can(fork) ? () => void chats.send(fork) : undefined,
       onQuote: composer.can(quote) ? () => void composer.send(quote) : undefined,
+      onCopy: copy && copyableText(settled, blank) ? () => copy(selection) : undefined,
+      onUseInEmail: useInEmail && textForEmail(settled, blank, line.mine) ? () => useInEmail(selection) : undefined,
       onEditAgain: composer.can(editAgain) ? () => { board.type(line.text); void composer.send(editAgain); } : undefined,
       onReadAloud: message > 0 && chats.can(readAloud) ? () => void chats.send(readAloud) : undefined,
     };
