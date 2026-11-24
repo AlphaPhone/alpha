@@ -254,6 +254,7 @@ describe("Settings", () => {
     const { alpha, machines } = await settingsOpen();
     await press("General");
     await press("Carrier & SIM setup");
+    await until(alpha, machines, Carrier.Machine, (s) => s.showing);
     // spec/app/settings/carrier.md, "Opening the page reads nothing; leaving it, the phone locking or Alpha going to the background forgets everything it read, and an answer that comes later is refused"
     expect((await machines.runPromise(Carrier.Machine.use((carrier) => carrier.get()))).read.read.ticket).toBe(0);
     await press("Show identifiers");

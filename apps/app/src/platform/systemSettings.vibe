@@ -7,20 +7,23 @@ import type { Access, AccessGrant, Holder, Reading } from "../../gen/app__settin
 import type { Grant } from "../../gen/kit__permission.ts"
 
 module held {
-  import { systemClient } from "@elizaos/os/bridges/system"
+  import type { SystemClient } from "@elizaos/os/bridges/system"
   import { locationClient } from "@elizaos/os/bridges/location"
   import { wifiClient } from "@elizaos/os/bridges/wifi"
   import { filesClient } from "@elizaos/os/bridges/files"
 
-  let system: ReturnType<typeof systemClient> | undefined
+  let system: Promise<SystemClient> | undefined
   let location: ReturnType<typeof locationClient> | undefined
   let wifi: ReturnType<typeof wifiClient> | undefined
   let files: ReturnType<typeof filesClient> | undefined
-  /** eliza's clients of the plugins, each made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
-  export function systemOf(): ReturnType<typeof systemClient> {
-    return (system ??= systemClient())
+  /**
+   * eliza's client of `ElizaSystem`, which its bridge makes as it loads: loaded at first use, once the phone's host is
+   * up, since Capacitor binds a plugin to the platform it finds when the plugin is first registered.
+   */
+  export function systemOf(): Promise<SystemClient> {
+    return (system ??= import("@elizaos/os/bridges/system").then((bridge) => bridge.System))
   }
-  /** @throws {never} */
+  /** eliza's clients of the other plugins, each made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
   export function locationOf(): ReturnType<typeof locationClient> {
     return (location ??= locationClient())
   }
@@ -118,10 +121,9 @@ function filesGrantOf(access: FilesAccess | undefined): Grant | undefined {
 
 /** What the phone reports, through eliza's clients of `ElizaSystem` and `ElizaLocation`. */
 effect function phoneReport(): PhoneReport!! {
-  const system = systemOf()
-  const facts = try settled(() => system.getSystemFacts())
-  const status = try settled(() => system.getStatus())
-  const build = try settled(() => system.getBuildInfo())
+  const facts = try settled(async () => (await systemOf()).getSystemFacts())
+  const status = try settled(async () => (await systemOf()).getStatus())
+  const build = try settled(async () => (await systemOf()).getBuildInfo())
   const located = try settled(() => locationOf().checkPermissions())
   const stored = try settled(() => filesOf().storageState())
   const storage = Option.isSome(stored) ? storageOf(stored.value.volumes) : undefined
@@ -174,8 +176,8 @@ function openedOf(target: Target, handoff: Pick<SettingsHandoff, "outcome" | "sp
 }
 
 effect function opening(target: Target): Opened!! {
-  const system = systemOf()
   const handed = effect {
+    const system = try tryPromise(() => systemOf())
     if (target === "AndroidHome") return try tryPromise(() => system.openSettings())
     if (target === "InternetPanel") return { outcome: try tryPromise(() => wifiOf().openInternetPanel()), specific: true }
     if (alphasOwn.includes(target)) {
@@ -193,10 +195,10 @@ effect function opening(target: Target): Opened!! {
 /** The phone, through eliza's clients of its plugins. */
 export const phoneSystemSettings = Layer.succeed(SystemSettings, {
   report: phoneReport,
-  requestHome: () => ignore(tryPromise(() => systemOf().requestRole({ role: "home" }))),
+  requestHome: () => ignore(tryPromise(async () => (await systemOf()).requestRole({ role: "home" }))),
   open: (target: Target, _channel: number) => opening(target),
-  problems: () => Effect.map(settled(() => systemOf().crashLog()), Option.map((log) => log.entries.map(problemOf))),
-  clearProblems: () => Effect.map(settled(() => systemOf().clearCrashLog()), Option.isSome),
+  problems: () => Effect.map(settled(async () => (await systemOf()).crashLog()), Option.map((log) => log.entries.map(problemOf))),
+  clearProblems: () => Effect.map(settled(async () => (await systemOf()).clearCrashLog()), Option.isSome),
 })
 
 /** A browser: none of the phone's facts, roles, pages or log. */
