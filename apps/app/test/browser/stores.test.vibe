@@ -84,6 +84,8 @@ it.live("another tab's change to the bookmark document is read again, and anothe
       const marks = try BrowserBookmarks
       try settledTabs(tabs)
       const session = try sessionOf(fake.calls)
+      // Launch and Browser coming to the front each read the list once; those reads land before the counting starts.
+      try sleep("100 millis")
       const before = (try callsTo(fake.calls, "bookmarks")).length
       try Ref.set(saved, ["https://elsewhere.test/"])
       try emit(fake.events, "bookmarksChanged", { session: "another-session" })
