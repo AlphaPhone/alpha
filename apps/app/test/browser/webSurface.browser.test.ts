@@ -69,3 +69,17 @@ it("the browser build's bookmark document keeps each name with its address, and 
     localStorage.removeItem(key);
   }
 });
+
+// spec/browser/bookmarks.md, "A read replaces the marks with the store's list, keeping each saved name, and a failed read is reported, or offered for recovery once when the list is damaged"
+it("a saved row without a usable name reads as its address, and control characters in a name become spaces", async () => {
+  const { call } = frameHost();
+  const key = "alpha/browser/bookmarks", a = "https://a.test/", b = "https://b.test/", c = "https://c.test/";
+  localStorage.setItem(key, JSON.stringify([{ url: a }, { url: b, title: 7 }, { url: c, title: "C\u0085page" }]));
+  try {
+    expect(await call("bookmarks")).toEqual({ urls: [a, b, c], entries: [{ url: a }, { url: b }, { url: c, title: "C page" }] });
+    localStorage.setItem(key, JSON.stringify([a, { title: "no address" }]));
+    await expect(call("bookmarks")).rejects.toThrow("Saved bookmarks could not be read");
+  } finally {
+    localStorage.removeItem(key);
+  }
+});

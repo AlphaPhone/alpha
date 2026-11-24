@@ -29,20 +29,26 @@ function readJson(key: string): unknown {
 }
 
 /** A saved bookmark in the native record's format: a bare address, or `{url,title}` when it has a name. */
-type MarkRow = string | { url: string; title: string };
+type MarkRow = string | { url: string; title?: string };
 const rowUrl = (row: MarkRow) => (typeof row === "string" ? row : row.url);
+/** A page name as the native store keeps it: control characters become spaces, at most 300 characters. */
+const markTitle = (title: unknown) => (typeof title === "string" ? title.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").trim().slice(0, 300) : "");
 
-/** The bookmark document; one written before names holds bare addresses and reads back untitled. */
+/** The bookmark document; one written before names holds bare addresses and reads back untitled. A row with no usable name reads as its address alone. */
 function markRows(value: unknown): MarkRow[] {
   if (value === undefined) return [];
-  const row = (x: unknown) => typeof x === "string" || (typeof x === "object" && x !== null && typeof (x as { url?: unknown }).url === "string" && typeof (x as { title?: unknown }).title === "string");
+  const row = (x: unknown) => typeof x === "string" || (typeof x === "object" && x !== null && typeof (x as { url?: unknown }).url === "string");
   if (!Array.isArray(value) || !value.every(row)) throw new Error("Saved bookmarks could not be read. Existing bookmarks were not changed.");
-  return value as MarkRow[];
+  return value.map((x: string | { url: string; title?: unknown }) => {
+    if (typeof x === "string") return x;
+    const title = markTitle(x.title);
+    return title ? { url: x.url, title } : { url: x.url };
+  });
 }
 
 /** The tab host's bookmark answer: the addresses, and each with its name when it has one. */
 function markList(rows: readonly MarkRow[]) {
-  return { urls: rows.map(rowUrl), entries: rows.map((row) => (typeof row === "string" ? { url: row } : { url: row.url, title: row.title })) };
+  return { urls: rows.map(rowUrl), entries: rows.map((row) => (typeof row === "string" || !row.title ? { url: rowUrl(row) } : { url: row.url, title: row.title })) };
 }
 
 function webOnly(raw: unknown): string {
@@ -224,7 +230,7 @@ export class WebTabHost {
     if (title !== undefined && title !== null && typeof title !== "string") throw new Error("A bookmark title must be text.");
     const rows = markRows(readJson(MARKS_KEY));
     const before = rows.find((row) => rowUrl(row) === url);
-    const name = typeof title === "string" ? title.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 300) : before !== undefined && typeof before !== "string" ? before.title : "";
+    const name = typeof title === "string" ? markTitle(title) : before !== undefined && typeof before !== "string" ? (before.title ?? "") : "";
     const next = rows.filter((row) => rowUrl(row) !== url);
     if (saved) next.unshift(name ? { url, title: name } : url);
     if (next.length > MAX_MARKS) throw new Error("Bookmark could not be saved. The device stores up to 100 bookmarks; existing data was not changed.");
