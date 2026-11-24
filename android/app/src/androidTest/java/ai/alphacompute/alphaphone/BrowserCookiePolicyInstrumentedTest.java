@@ -1,6 +1,8 @@
 package ai.alphacompute.alphaphone;
 
 import android.webkit.*;
+import android.view.View;
+import android.widget.FrameLayout;
 import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.webkit.*;
 import java.io.ByteArrayInputStream;
@@ -62,6 +64,39 @@ public final class BrowserCookiePolicyInstrumentedTest {
   fail("Cross-site iframe did not report its cookie result");
  }
  @Test public void normalEmbeddedCookiesShareOnlyNormalProfileAndHostPolicyStaysUnchanged()throws Exception{exercise(false);}
+ /** Exercise the product's native commit callback directly. The active app account is outside this fixture. */
+ @Test public void nativeBrowserShowsAddressRewrittenBeforeFirstPaint()throws Exception{
+  AtomicReference<WebView> child=new AtomicReference<>();
+  try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
+   // The host's initial navigation disposes any tabs owned by its previous document.
+   // Wait for the product shell or its sign-in screen before creating the fixture tab.
+   String ready="document.readyState==='complete' && !!document.querySelector('#root > *')";
+   boolean hostReady=false;
+   for(int attempt=0;attempt<150;attempt++){
+    if("true".equals(WebViewTestDriver.evaluate(ready))){hostReady=true;break;}
+    android.os.SystemClock.sleep(100);
+   }
+   assertTrue("The product host finished startup navigation",hostReady);
+   WebViewTestDriver.withActivity(MainActivity.class,activity->{try{
+    WebView web=build(activity,"rewrite_probe",false,AlphaBrowserStores.PERSISTENT_PROFILE);
+    BrowserFlowInstrumentedTest.installSameDocumentFixture(web);
+    View frame=(View)web.getParent();
+    frame.setLayoutParams(new FrameLayout.LayoutParams(-1,-1));
+    frame.bringToFront();
+    frame.setVisibility(View.VISIBLE);
+    child.set(web);
+    web.loadUrl(BrowserFlowInstrumentedTest.SAME+"head");
+   }catch(Exception failure){throw new AssertionError(failure);}});
+   AtomicReference<String> observed=new AtomicReference<>();
+   for(int attempt=0;attempt<150;attempt++){
+    WebView web=child.get();
+    BoundedActivityScenario.main(()->observed.set(web.getUrl()+"|"+web.getTitle()+"|"+web.isShown()));
+    if((BrowserFlowInstrumentedTest.SAME+"replaced|Replaced fixture|true").equals(observed.get()))return;
+    android.os.SystemClock.sleep(100);
+   }
+   fail("Rewritten document must be committed and shown by the Browser host: "+observed.get());
+  }
+ }
  @Test public void privateEmbeddedCookiesRemainBlockedAndIsolated()throws Exception{
   org.junit.Assume.assumeTrue("Private tabs require secure scoped deletion",WebViewFeature.isFeatureSupported(WebViewFeature.DELETE_BROWSING_DATA));exercise(true);
  }
