@@ -354,14 +354,13 @@ The canonical package reads the `app-stable-alphacompute` release. The publisher
 still checks the version floor from `app-stable`. Android may require
 installation confirmation.
 
-The app and OS update URLs target `alphacompute/alpha`. Release hosting must be
-available there before distribution. Verify anonymous readback of the app
-manifest, the pilot OTA manifest and their downloads at the new URLs. Existing
-release pointers may need their APK URLs updated to the canonical repository.
+New launcher builds read the app update manifest from `eliza-research/alpha`.
+Previous Alpha repository URLs remain accepted for retained APKs. Verify
+anonymous readback of the app manifest and its APK before distribution.
 
 Protected release jobs bind dispatches to the reviewed commit on `main`.
-After the repository moves, the release owner applies the repository ID,
-Alpha Compute owner ID and workflow reference allowlist in
+The release owner applies the repository ID, owner ID and workflow reference
+allowlist in
 [`scripts/ci/private-artifact-identity.json`](../scripts/ci/private-artifact-identity.json)
 to the existing Workload Identity Federation provider before protected signing
 or publication uses private artifact storage.
