@@ -4,7 +4,7 @@ import {
   type AgentCalendar as AgentState, type FeedReply, type ProviderReply, type Readback, type SourcesReply,
   type UpcomingReply, type WriteKind, type Event as AgentEvent, type WriteOutcome, type EventReturn, type ReturnFeed, Machine as AgentMachine, eventReturn,
 } from "../../gen/calendar__agent.effect.vibe"
-import { sourceKeyId, utcInstant } from "@elizaos/plugin-calendar"
+import { sourceKeyId, utcInstant } from "./source-key.ts"
 import { namedReadWindow } from "@elizaos/plugin-calendar/client"
 import { Resident, ResidentRefused, ResidentUnavailable } from "../platform/resident.vibe"
 import { ownerKey } from "../platform/storage.vibe"

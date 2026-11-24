@@ -19,7 +19,7 @@ import { calendarWall, civil, civilDay, deviceZone, isoInstant, midnightAfter, r
 import { sha256Hex } from "./digest.ts"
 import { CalendarMaps } from "./ports.vibe"
 import { AgentRequests } from "./requests.vibe"
-import { sourceKeyId } from "@elizaos/plugin-calendar"
+import { sourceKeyId } from "./source-key.ts"
 
 /** The source of a row as the presentation names it. */
 function sourceOf(row: CalendarRow): EventSource {
