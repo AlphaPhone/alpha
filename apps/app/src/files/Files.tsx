@@ -1,6 +1,6 @@
 // spec/app/files/index.md, "Story: Browse my storage"; spec/app/files/index.md, "Story: Arrange and filter what I see"; spec/app/files/index.md, "Story: Change my files"
 import { Alert, Button, Checkbox, Chip, Dialog, DialogContent, DialogTitle, EmptyState, Input, ListGroup, ListRow, Progress, SearchField, Sheet, SheetContent, Spinner } from "@repo/ui";
-import { Option, type ManagedRuntime } from "effect";
+import { Effect, Option, type ManagedRuntime } from "effect";
 import { useState } from "react";
 import type { Machine, Order } from "../../gen/app__files.effect.vibe";
 import { browse, chosen, empty, filled } from "../../gen/app__files.ts";
@@ -35,7 +35,7 @@ const changeWords: Record<Work, string> = { NewFolder: "make the folder", Rename
 
 /** The name the phone's storage gives a number: its volume's name at a volume's root, else the last step of its path. */
 function labelOf(runtime: FilesProps["runtime"], handle: number): string {
-  return Option.getOrElse(runtime.runSync(Handles.use((handles) => handles.label(handle))), () => "…");
+  return Option.getOrElse(runtime.runSync(Effect.flatMap(Handles, (handles) => handles.label(handle))), () => "…");
 }
 
 /**
@@ -65,7 +65,7 @@ export function Files({ runtime }: FilesProps) {
   if (state.trash) return <Trash runtime={runtime} onBack={owner({ type: "closeTrash" }) ? () => tell({ type: "closeTrash" }) : undefined} />;
   const looked = finding(state.search);
   const picked = chosen(state);
-  const weight = (handle: number) => runtime.runSync(Handles.use((handles) => handles.weight(handle)));
+  const weight = (handle: number) => runtime.runSync(Effect.flatMap(Handles, (handles) => handles.weight(handle)));
   const sorted = [...state.items].sort((a, b) => {
     const by = state.order === "ByName" ? a.name.localeCompare(b.name) : state.order === "ByDate" ? b.revision - a.revision : weight(b.id) - weight(a.id);
     return (a.kind === "Folder" ? 0 : 1) - (b.kind === "Folder" ? 0 : 1) || (state.reversed ? -by : by);

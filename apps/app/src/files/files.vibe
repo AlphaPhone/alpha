@@ -2,7 +2,6 @@
 import type { ElizaFilesPlugin, FileOutcomeRow, FilesCategory, StorageEntry } from "@elizaos/os/bridges/definitions/files"
 import * as Browser from "../../gen/app__files.effect.vibe"
 import type { Actor, Count, Effect as Out, Event, Tally, Volume } from "../../gen/app__files.effect.vibe"
-import type { Place } from "../../gen/app__files__change.effect.vibe"
 import type { Filter, Where } from "../../gen/app__files__search.effect.vibe"
 import type { Item, Kind } from "../../gen/app__files__shared.effect.vibe"
 import * as Bin from "../../gen/app__files__trash.effect.vibe"

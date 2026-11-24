@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Browser } from "../gen/app__files.effect.vibe";
 import { Machine as Bin } from "../gen/app__files__trash.effect.vibe";
@@ -163,7 +164,7 @@ describe("Files on a phone", () => {
       await pressOnTop("Documents");
       await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded" && s.sheet.trail.length === 2);
       await pressOnTop("Copy here");
-      if (runtime.runSync(Browser.use((m) => m.get())).change.clash.showing) await press("Replace");
+      if (runtime.runSync(Effect.flatMap(Browser, (m) => m.get())).change.clash.showing) await press("Replace");
       await until(alpha, runtime, Browser, (s) => s.change.work === "CopyTo" && s.change.attempt.outcome === "Confirmed" && s.listing.status === "Loaded");
     }
     expect([paths(world).filter((path) => path.startsWith("primary:Documents/beach")), world.files.trash.map((one) => one.was.path)]).toEqual([["primary:Documents/beach.jpg"], ["Documents/beach.jpg"]]);
