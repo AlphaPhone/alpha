@@ -1,0 +1,148 @@
+// spec/app/calendar/link.md, "Story: Link a Google calendar I can write to, and be told it is synced only when it is"; spec/app/calendar/link.md, "Story: See whether my agent's Calendar reaches Google"; spec/app/calendar/link.md, "Story: Disconnect Google from Calendar without leaving sync running"
+import type { GoogleStatus } from "@elizaos/cloud/client"
+import * as Link from "../../gen/app__calendar__link.effect.vibe"
+import type { Effect as Out, Event, Grant, LinksRead, Planned } from "../../gen/app__calendar__link.effect.vibe"
+import { grantOf } from "../../gen/app__calendar__link.ts"
+import * as View from "../../gen/app__calendar.effect.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { Cloud } from "../platform/cloud.vibe"
+import { ask } from "../platform/remote.vibe"
+import { type Job, answer, contained, following, reacting, run, started, together } from "../runtime/reactor.vibe"
+
+const base = "/api/lifeops/calendar"
+
+/** One of the owner's Google calendars, as eliza's linked sync names a destination. */
+schema Destination { readonly connectorAccountId: string; readonly providerCalendarId: string }
+
+/** The agent's linked sync control (eliza's `LinkedCalendarControlView` of `@elizaos/plugin-calendar/client`). */
+schema Control {
+  readonly revision: number
+  readonly paused: boolean
+  readonly destination: Destination | null
+  readonly pendingDispatch: { readonly linkId: string; readonly reference: string | null } | null
+}
+
+/** The calendars the control may link to (eliza's `LinkedCalendarDestinations`). */
+schema Destinations {
+  readonly candidates: ReadonlyArray<{ readonly connectorAccountId: string; readonly providerCalendarId: string; readonly primary: boolean; readonly accountEmail: string | null }>
+}
+
+/** The linked events and the state of each (eliza's `LinkedCalendarMapping`). */
+schema Mappings { readonly links: ReadonlyArray<{ readonly destination: Destination | null; readonly state: string }> }
+
+const same = (a: Destination, b: Destination) => a.connectorAccountId === b.connectorAccountId && a.providerCalendarId === b.providerCalendarId
+
+/** A dispatch the agent has pending, as the number the rules compare: 0 is none. @throws {never} */
+function dispatchNumber(pending: Control["pendingDispatch"]): number {
+  if (pending === null) return 0
+  const name = pending.reference ?? pending.linkId
+  let hash = 7
+  for (const char of name) hash = (hash * 31 + char.charCodeAt(0)) % 1_000_003
+  return hash + 1
+}
+
+/** What the cloud says Google allows for the owner's calendar, and the address of the Google account that allows it. */
+effect function googleNow(): { readonly grant: Grant; readonly email: string }!unknown!Cloud {
+  const { client } = try Cloud
+  const status: GoogleStatus = try tryPromise({ try: () => client.googleStatus(), catch: (cause) => cause })
+  const has = (capability: GoogleStatus["grantedCapabilities"][number]) => status.connected && status.grantedCapabilities.includes(capability)
+  return { grant: grantOf(has("google.calendar.read"), has("google.calendar.write")), email: (status.identity?.email ?? "").toLowerCase() }
+}
+
+// spec/app/calendar/link.md, "The account area's read says what Google allows now; a grant that no longer writes stops a setup under way"
+/** The account read, as the link takes it. */
+export effect function accountRead(): Event!!Cloud {
+  return effect {
+    const now = try googleNow()
+    return { type: "accountRead", ok: true, grant: now.grant } as Event
+  } catch () => ({ type: "accountRead", ok: false, grant: "NoGrant" })
+}
+
+// spec/app/calendar/link.md, "Each control review is checked against the revision this setup wrote, and its destination against the owner's writable calendars"
+/** The agent's control and the calendars it may link to, checked against the Google account that may write them. */
+effect function review(ticket: number): Event!!(Agent | Cloud) {
+  return effect {
+    const control = try ask(Agent, HttpClientRequest.get(`${base}/sync-control`), Control)
+    const listed = try ask(Agent, HttpClientRequest.get(`${base}/sync-control/destinations`), Destinations)
+    const { email } = try googleNow()
+    const approved = (candidate: Destinations["candidates"][number]) => email !== "" && (candidate.accountEmail ?? "").toLowerCase() === email
+    const saved = control.destination
+    const found = saved === null ? undefined : listed.candidates.find((candidate) => same(candidate, saved))
+    return {
+      type: "reviewed", ticket, revision: control.revision, destination: saved !== null, listed: found !== undefined,
+      authorized: found !== undefined && approved(found), paused: control.paused, pending: dispatchNumber(control.pendingDispatch),
+      onePrimary: listed.candidates.filter((candidate) => candidate.primary && approved(candidate)).length === 1,
+    } as Event
+  } catch () => ({ type: "reviewFailed", ticket })
+}
+
+// spec/app/calendar/link.md, "A write is sent only while the owner and the reviewed revision still hold, and its answer starts another review"
+/** Select the one authorized primary calendar, or resume the saved one, at the revision reviewed, under a key of what is written. */
+effect function write(ticket: number, planned: Planned, revision: number): Event!!(Agent | Cloud) {
+  return effect {
+    const idempotencyKey = `alpha.calendar.link:${planned}:${revision}`
+    const body = planned === "SelectDestination"
+      ? effect {
+          const listed = try ask(Agent, HttpClientRequest.get(`${base}/sync-control/destinations`), Destinations)
+          const { email } = try googleNow()
+          const primary = listed.candidates.filter((candidate) => candidate.primary && email !== "" && (candidate.accountEmail ?? "").toLowerCase() === email)
+          const chosen = primary.length === 1 ? primary[0] : undefined
+          if (chosen === undefined) return undefined
+          return { operation: "select", destination: { connectorAccountId: chosen.connectorAccountId, providerCalendarId: chosen.providerCalendarId }, expectedRevision: revision, idempotencyKey }
+        }
+      : { operation: "resume", expectedRevision: revision, idempotencyKey }
+    if (body === undefined) return { type: "writeFailed", ticket } as Event
+    const answered = try ask(Agent, HttpClientRequest.post(`${base}/sync-control`) |> HttpClientRequest.bodyJsonUnsafe(%, body), Control)
+    return { type: "written", ticket, revision: answered.revision } as Event
+  } catch () => ({ type: "writeFailed", ticket })
+}
+
+// spec/app/calendar/link.md, "Synced needs a clean read back of the linked events; held or many conflicts are named"
+/** How many of the links to the control's destination are held in conflict. */
+effect function links(ticket: number): Event!!Agent {
+  return effect {
+    const control = try ask(Agent, HttpClientRequest.get(`${base}/sync-control`), Control)
+    const mapped = try ask(Agent, HttpClientRequest.get(`${base}/links`), Mappings)
+    const target = control.destination
+    const held = mapped.links.filter((link) => (link.state === "conflicted" || link.state === "quarantined") && target !== null && link.destination !== null && same(link.destination, target)).length
+    const read: LinksRead = held === 0 ? "Clean" : held === 1 ? "Held" : "Many"
+    return { type: "linksListed", ticket, links: read } as Event
+  } catch () => ({ type: "linksListed", ticket, links: "Unread" })
+}
+
+// spec/app/calendar/link.md, "A linked, unpaused destination is paused first at the revision just reviewed; the revoke never waits on it"; spec/app/calendar/link.md, "A pause is confirmed only when the control answered paused at a revision past the one reviewed"
+effect function pause(ticket: number, revision: number): Event!!Agent {
+  return effect {
+    const body = { operation: "pause", expectedRevision: revision, idempotencyKey: `alpha.calendar.link:pause:${revision}` }
+    const answered = try ask(Agent, HttpClientRequest.post(`${base}/sync-control`) |> HttpClientRequest.bodyJsonUnsafe(%, body), Control)
+    return { type: "pauseAnswered", ticket, answered: true, paused: answered.paused, revision: answered.revision } as Event
+  } catch () => ({ type: "pauseAnswered", ticket, answered: false, paused: false, revision: 0 })
+}
+
+function carry(fx: Out): Job<Event, Agent | Cloud | Shell.Machine, []> {
+  return match (fx) {
+    when { tag: "Ask", let ticket, let asked }:
+      asked === "AskControl" ? answer("review", review(ticket), { type: "reviewFailed", ticket }) : answer("links", links(ticket), { type: "linksListed", ticket, links: "Unread" });
+    when { tag: "WriteControl", let ticket, let planned, let revision }: answer("write", write(ticket, planned, revision), { type: "writeFailed", ticket });
+    when { tag: "PauseControl", let ticket, let revision }: answer("pause", pause(ticket, revision), { type: "pauseAnswered", ticket, answered: false, paused: false, revision: 0 });
+    when { tag: "AskConsent" }: run("consent", effect { try contained((try Shell.Machine).send({ type: "openView", view: "Settings" }), "opening Google's access in Settings") });
+  }
+}
+
+// spec/app/calendar/link.md, "Setup waits while Calendar reads or writes, and makes at most three control reviews, two writes and one link read"
+/** Whether Calendar can be read now, and whether a read or a write of it is under way, each time either changes. */
+const calendar = following(View.Machine, (view) => `${view.phone.status !== "Failed" || view.google.status !== "Failed"}:${view.writing || view.phone.status === "Loading" || view.google.status === "Loading"}`,
+  Link.Machine, (both): Event => ({ type: "calendarChanged", ready: both.startsWith("true"), busy: both.endsWith("true") }))
+
+// spec/app/calendar/link.md, "Story: See whether my agent's Calendar reaches Google"
+/** The account area's read of Google, taken each time Calendar reads the agent's calendar, so the Google row says what the account allows now. */
+const account = started(effect {
+  const view = try View.Machine
+  const link = try Link.Machine
+  try Stream.runForEach(Stream.changesWith(view.changes, (a, b) => a.google.ticket === b.google.ticket && a.owner === b.owner), (state) =>
+    state.owner === 0 ? Effect.void : contained(flatMap(accountRead(), (event) => link.send(event)), "reading what Google allows"))
+}, "reading the Google account for the link")
+
+/** The link: in memory, a run at a time, its answers refused once another owner signs in. */
+export const linking = together(reacting(Link, { carry }), calendar, account)

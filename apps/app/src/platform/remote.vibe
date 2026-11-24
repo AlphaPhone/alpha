@@ -164,14 +164,13 @@ export effect function attempted<I>(remote: Context.Key<I, Remote>, request: Htt
 
 /**
  * Carry out the kit attempt `id` as `attempted` does, where the request itself names the attempt's idempotency key, as
- * eliza's calendar routes ask in their body: `build` makes it from the key. Beside how it ended, what a confirmed
- * answer decodes to by `schema`, which the asking area owns, or nothing where it does not decode.
+ * eliza's calendar routes ask in their body or query: `build` makes it from the key, and no header carries it. Beside
+ * how it ended, the answer's body, untrusted, where it came.
  */
-export effect function attemptedWith<I, A>(remote: Context.Key<I, Remote>, build: (key: string) => HttpClientRequest.HttpClientRequest, id: number, schema: Schema.Decoder<A>): { readonly outcome: Outcome; readonly answer: Option.Option<A> }!!(I | Attempts) {
+export effect function attemptedWith<I>(remote: Context.Key<I, Remote>, build: (key: string) => HttpClientRequest.HttpClientRequest, id: number): (Outcome & { readonly body: unknown })!!(I | Attempts) {
   const key = try (try Attempts).key(id)
   return effect {
-    const body = try (try remote).call(HttpClientRequest.setHeader(build(key), "idempotency-key", key))
-    const answer = Schema.decodeUnknownEffect(schema)(body) |> Effect.option(%)
-    return { outcome: { confirmed: true, known: true }, answer: try answer }
-  } catch (failure) => ({ outcome: outcomeOf(failure), answer: Option.none<A>() })
+    const body = try (try remote).call(build(key))
+    return { confirmed: true, known: true, body }
+  } catch (failure) => ({ ...outcomeOf(failure), body: undefined })
 }
