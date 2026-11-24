@@ -1,6 +1,8 @@
 // spec/settings/index.md, "Story: Find a setting in a few taps"; spec/settings/passwords.md, "Story: Use my saved passwords only after Android unlocks them"
 import { initial as nav } from "../../../gen/settings.ts";
 import { initial as appearance } from "../../../gen/settings__appearance.ts";
+import type { CarrierSetup } from "../../../gen/settings__carrier.ts";
+import { initial as carrierIdle, nothingRead } from "../../../gen/settings__carrier.ts";
 import type { Diagnostics } from "../../../gen/settings__diagnostics.ts";
 import { initial as diagnostics } from "../../../gen/settings__diagnostics.ts";
 import { initial as facts, unread } from "../../../gen/settings__facts.ts";
@@ -95,3 +97,32 @@ export const notices: Diagnostics = {
 
 /** A paused activation Android lets the owner continue. */
 export const pausedActivation = { ...updates, activation: "Paused", canContinue: true, pending: true } as const;
+
+const value = (text: string) => ({ status: "Available", value: text }) as const;
+
+/** Carrier & SIM setup after Show identifiers on a launcher phone without a SIM: one IMEI, one withheld, no active SIM. */
+export const carrierNoSim: CarrierSetup = {
+  ...carrierIdle, epoch: 1, phase: "CarrierShown",
+  reading: {
+    ...nothingRead, canChooseSms: true, smsRole: value("Alpha Phone is not the default SMS app"), dialerRole: value("Alpha Phone is not the default phone app"),
+    slots: [{ slot: 0, imei: value("123456789012345"), simState: value("No SIM") }, { slot: 1, imei: { status: "Denied", value: "" }, simState: value("No SIM") }],
+    sims: "Available", eid: { status: "NotRead", value: "" },
+    hardware: { manufacturer: value("Google"), model: value("Pixel 10a"), device: value("fixture"), android: value("17"), baseband: { status: "Unreadable", value: "" } },
+  },
+};
+/** Carrier & SIM setup with an activated physical SIM and the EID read. */
+export const carrierActive: CarrierSetup = {
+  ...carrierNoSim,
+  reading: {
+    ...carrierNoSim.reading, aospImage: true, canChooseSms: false, smsRole: value("Alpha Phone is the default SMS app"),
+    slots: [{ slot: 0, imei: value("123456789012345"), simState: value("Ready") }], eid: value("89012345678901234567890123456789"),
+    active: [{
+      subscription: 3, slot: 0, embedded: false, defaultData: true, carrier: value("Carrier"), simName: value("Carrier"), iccid: value("8901260000000000000"),
+      operator: value("Carrier"), operatorCode: value("310260"), dataEnabled: value("On"), dataState: value("Connected"), networkType: value("LTE"), roaming: value("Not roaming"),
+    }],
+  },
+};
+/** Carrier & SIM setup while a read runs, and after one failed. */
+export const carrierReading: CarrierSetup = { ...carrierIdle, epoch: 1, phase: "CarrierReading" };
+export const carrierFailed: CarrierSetup = { ...carrierIdle, epoch: 1, phase: "CarrierFailed" };
+export { carrierIdle };

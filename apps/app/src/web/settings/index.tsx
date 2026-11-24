@@ -37,6 +37,7 @@ import { Updates } from "../../settings/updates.vibe";
 import { useAccountRows } from "../account/index.tsx";
 import type { AppScreen, AppSurface, ScreenProps } from "../app-screen.ts";
 import { NotificationsSettings } from "../shell/NotificationsPage.tsx";
+import { CarrierSetupPanel } from "./CarrierSetupPanel.tsx";
 import type { DevCommand } from "./DeveloperPage.tsx";
 import { backDialog, closeDialog, openDialog, useDialog } from "./dialogs.ts";
 import { PasswordsScreen } from "./PasswordsScreen.tsx";
@@ -119,6 +120,7 @@ function SettingsApp({ onClose }: ScreenProps) {
       dialog={dialog}
       onDialog={(next) => (next === undefined ? closeDialog() : openDialog(nav, next))}
       notifications={<NotificationsSettings />}
+      carrier={<CarrierSetupPanel native={variant !== "browser"} />}
       privacy={{ route, listener: privacyMachine.state ?? privacyStart, aosp: variant === "aosp" }}
       privacyActs={{
         stop: (stop) => void perform(Effect.flatMap(Effect.service(PrivacyRow), (p) => p.stop(stop))),

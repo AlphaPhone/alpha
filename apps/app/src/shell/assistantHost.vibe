@@ -14,6 +14,7 @@ import { FilesAgent } from "../files/agent.vibe"
 import { inboxCapabilities } from "../inbox/handoffs.vibe"
 import { mapsDeviceCapabilities } from "../maps/agent.vibe"
 import { NotesOrganize } from "../notes/organize.vibe"
+import { Machine as SettingsPagesMachine, privatePage } from "../../gen/settings.effect.vibe"
 import { Build } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
@@ -27,7 +28,7 @@ import { Foreground } from "./foreground.vibe"
 import { Navigation } from "./navigation.vibe"
 import { Notices } from "./notices.vibe"
 
-/** Apps whose screen the assistant never observes. */
+/** Apps whose screen the assistant never observes; Settings' own private pages are named by `privatePage`. */
 export const PRIVATE_APPS: ReadonlySet<string> = new Set(["passwords", "account"])
 
 /** What a client knows of the agent process it talks to: nothing yet, the one instance it learned, or ordinary context only. */
@@ -72,6 +73,7 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
   const calls = try CallWatch
   const voice = try VoiceConversation
   const resident = try Resident
+  const settingsPages = try SettingsPagesMachine
   const learned = try Ref.make<{ readonly connection: string; readonly support: PeerSupport }>({ connection: "", support: { tag: "NotLearned" } })
 
   effect function status() {
@@ -118,7 +120,7 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
       const nav = try navigation.get()
       const front = try foreground.get()
       const view = nav.app === "" ? (nav.library ? "library" : "home") : nav.app
-      const privateView = PRIVATE_APPS.has(nav.app)
+      const privateView = PRIVATE_APPS.has(nav.app) || (nav.app === "settings" && privatePage((try settingsPages.get()).page))
       const route = nav.places.find((place) => place.app === nav.app)?.route ?? ""
       const connectionDialog = (try bindings.idle()).signInOpen || nav.layers.some((layer) => layer.id.startsWith("account"))
       return {

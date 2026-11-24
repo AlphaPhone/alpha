@@ -46,8 +46,8 @@ handing area.
 
 ### The assistant observes the screen only while it is visible, unlocked and not private
 
-A private screen is the passwords view, a password surface in Settings, a
-secure or locked screen, a screen that is off, a hidden or suspended page,
+A private screen is the passwords view, a password surface in Settings,
+Settings' Carrier & SIM setup, a secure or locked screen, a screen that is off, a hidden or suspended page,
 and the agent connection dialog. Nothing about such a screen leaves the
 phone, and no proposal admitted on another screen may act on it.
 

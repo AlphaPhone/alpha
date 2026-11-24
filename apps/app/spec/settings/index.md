@@ -16,6 +16,7 @@ test mocks.
 - [Reset](./reset.md): erasing Alpha's data after a native review.
 - [Diagnostics](./diagnostics.md): the problem log, the diagnostics export and the licences.
 - [Passwords](./passwords.md): Alpha's password vault, unlocked only by Android.
+- [Carrier & SIM setup](./carrier.md): IMEI, SIM and carrier facts read on request and forgotten on leaving.
 - [Native custody](./native.md): what the native updater, reset and stores guarantee the renderer.
 
 ## Story: Find a setting in a few taps
@@ -25,23 +26,24 @@ test mocks.
 
 ### Settings has a root, four categories and the pages each category opens
 
-General's Notifications opens the notifications page Clock's mirror keeps. The root's Account row
+General's Notifications opens the notifications page Clock's mirror keeps, and its Carrier & SIM
+setup opens the page [Carrier & SIM setup](./carrier.md) specifies. The root's Account row
 shows the account's email or sign-in state and its AI provider row Own key or Cloud, as the account
 reports them.
 
 ```quint
-type Page = Root | General | Display | Notifications | Network | Privacy | Permissions | Apps | Passwords
+type Page = Root | General | Display | Notifications | Network | Carrier | Privacy | Permissions | Apps | Passwords
   | AppInbox | AppCamera | AppMaps | AppNotes | AppPhotos | About | Problems | Licenses | LicenseDetail | Developer
 type Settings = { page: Page, licence: int, developer: bool, opened: int }
 pure val initial: Settings = { page: Root, licence: -1, developer: false, opened: 0 }
 pure def parent(p: Page): Page =
-  if (p == Display or p == Notifications or p == Network) General
+  if (p == Display or p == Notifications or p == Network or p == Carrier) General
   else if (p == Permissions) Privacy
   else if (p == Passwords or p == AppInbox or p == AppCamera or p == AppMaps or p == AppNotes or p == AppPhotos) Apps
   else if (p == Problems or p == Licenses) About
   else if (p == LicenseDetail) Licenses
   else Root
-pure val pageValues = Set(Root, General, Display, Notifications, Network, Privacy, Permissions, Apps, Passwords, AppInbox, AppPhotos, About, Problems, Licenses, Developer)
+pure val pageValues = Set(Root, General, Display, Notifications, Network, Carrier, Privacy, Permissions, Apps, Passwords, AppInbox, AppPhotos, About, Problems, Licenses, Developer)
 pure val sValues = Set(initial).union(Set({ ...initial, developer: true }))
 ```
 
@@ -59,6 +61,16 @@ pure def open(s: Settings, page: Page): Settings = { ...s, page: page, opened: s
 pure def canBack(s: Settings): bool = s.page != Root
 pure def back(s: Settings): Settings = { ...s, page: parent(s.page), licence: if (s.page == LicenseDetail) -1 else s.licence }
 pure def sometimesTwoLevelsDeep(s: Settings): bool = s.page == Display or s.page == Permissions
+```
+
+### Carrier & SIM setup is private: the assistant never observes it
+
+The page shows the phone's identifiers, so while it is open the assistant sees no screen, as on the
+Passwords app, and no surface can open it by a route.
+
+```quint
+pure def privatePage(p: Page): bool = p == Carrier
+pure def lawThePrivatePageIsUnderGeneral(p: Page): bool = privatePage(p) implies parent(p) == General
 ```
 
 ### Developer pages open only in a build with test mocks

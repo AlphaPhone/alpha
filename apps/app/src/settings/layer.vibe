@@ -1,4 +1,5 @@
 // spec/settings/index.md, "Story: Find a setting in a few taps"
+import { machine as carrierMachine } from "../../gen/settings__carrier.effect.vibe"
 import { machine as diagnosticsMachine } from "../../gen/settings__diagnostics.effect.vibe"
 import { machine as factsMachine } from "../../gen/settings__facts.effect.vibe"
 import { machine as networkMachine } from "../../gen/settings__network.effect.vibe"
@@ -6,6 +7,7 @@ import { machine as vaultMachine } from "../../gen/settings__passwords.effect.vi
 import { machine as privacyMachine } from "../../gen/settings__privacy.effect.vibe"
 import { machine as resetMachine } from "../../gen/settings__reset.effect.vibe"
 import { appearance, appearanceFollow } from "./appearance.vibe"
+import { carrierFollow, carrierSetup } from "./carrier.vibe"
 import { diagnostics } from "./diagnostics.vibe"
 import { deviceFacts } from "./facts.vibe"
 import { pagesMachine, settingsFollow, settingsPages } from "./navigation.vibe"
@@ -30,8 +32,11 @@ const services = Layer.mergeAll(
 
 const pages = Layer.provideMerge(settingsPages, pagesMachine)
 
-/** Every Settings service and the Machines behind them, the pages' navigation and what follows the front; over the platform services, Voice's route and listener, Files' StorageUsage and the shell's Navigation, Permissions and Activity. */
+/** Carrier & SIM setup reads over the pages' Machine, so it knows which page is shown. */
+const carrier = Layer.provideMerge(carrierSetup, carrierMachine())
+
+/** Every Settings service and the Machines behind them, the pages' navigation and what follows the front; over the platform services, Voice's route and listener, Files' StorageUsage and the shell's Navigation, Foreground, Permissions and Activity. */
 export const layer = Layer.provideMerge(
-  Layer.merge(settingsFollow, appearanceFollow),
-  Layer.provideMerge(pages, services),
+  Layer.mergeAll(settingsFollow, appearanceFollow, carrierFollow),
+  Layer.provideMerge(carrier, Layer.provideMerge(pages, services)),
 )

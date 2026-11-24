@@ -1,0 +1,172 @@
+// spec/settings/carrier.md, "Opening the page reads nothing; Show identifiers reads once, and only the latest read answers"; spec/settings/carrier.md, "The EID is a separate, optional read that never holds up the IMEI read"; spec/settings/carrier.md, "Leaving the page, the app going to the background or losing focus forgets everything read"; spec/settings/carrier.md, "Only a value Android returned can be copied, one identifier at a time"; spec/settings/carrier.md, "Android's own screens are a tap away, at fixed destinations"
+import { type ActiveSim, type CarrierScreen, type Copyable, type Fact, type FactStatus, type ModemSlot, type Reading, Machine, copyable, nothingRead, screenName } from "../../gen/settings__carrier.effect.vibe"
+import { Machine as PagesMachine } from "../../gen/settings.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
+import { pageEvents } from "../shell/page.ts"
+import { attempt, call } from "./call.vibe"
+import { CarrierFact, CarrierRead, CarrierScreenOpened, type CarrierSubscription } from "./carrier.schema.vibe"
+
+/** Alpha's own plugin for the explicit, foreground-only carrier reads; it is never given to the agent. */
+export const CARRIER_PLUGIN = "AlphaCarrierSetup"
+
+/** At most this many modem slots and subscriptions are shown; Android reports one or two. */
+const MOST = 8
+
+const STATUSES: Readonly<Record<string, FactStatus>> = {
+  available: "Available", "permission-denied": "Denied", unsupported: "Unsupported", unavailable: "Unreadable", "not-read": "NotRead",
+}
+
+const unreadable: Fact = { status: "Unreadable", value: "" }
+
+function statusOf(raw: string): FactStatus {
+  return Object.hasOwn(STATUSES, raw) ? STATUSES[raw] : "Unreadable"
+}
+
+/** A fact as the page keeps it: a value only where Android returned one, and a withheld fact as why. */
+export function factOf(raw: CarrierFact | undefined): Fact {
+  if (raw === undefined) return unreadable
+  const status = statusOf(raw.status)
+  if (status !== "Available") return { status, value: "" }
+  const value = typeof raw.value === "string" ? raw.value.trim() : ""
+  return value === "" ? unreadable : { status, value }
+}
+
+function index(value: number | undefined): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : -1
+}
+
+function simOf(sub: CarrierSubscription): ActiveSim {
+  return {
+    subscription: index(sub.subscriptionId), slot: index(sub.slotIndex), embedded: sub.embedded === true, defaultData: sub.defaultData === true,
+    carrier: factOf(sub.carrier), simName: factOf(sub.name), iccid: factOf(sub.iccid), operator: factOf(sub.operator),
+    operatorCode: factOf(sub.operatorCode), dataEnabled: factOf(sub.dataEnabled), dataState: factOf(sub.dataState),
+    networkType: factOf(sub.networkType), roaming: factOf(sub.roaming),
+  }
+}
+
+/** The page's reading of one native answer; a slot or subscription without a usable number is left out. */
+export function readingOf(raw: CarrierRead): Reading {
+  const slots: ModemSlot[] = (raw.slots ?? []).filter((s) => index(s.slotIndex) >= 0).slice(0, MOST)
+    .map((s) => ({ slot: index(s.slotIndex), imei: factOf(s.imei), simState: factOf(s.simState) }))
+  const subscriptions = raw.subscriptions
+  const reported = subscriptions === undefined ? "Unreadable" : statusOf(subscriptions.status)
+  const sims: FactStatus = reported === "NotRead" ? "Unreadable" : reported
+  return {
+    ...nothingRead,
+    aospImage: raw.aospImage === true, canChooseSms: raw.canChooseSms === true,
+    smsRole: factOf(raw.smsRole), dialerRole: factOf(raw.dialerRole), slots,
+    sims, active: sims === "Available" ? (subscriptions?.items ?? []).filter((s) => index(s.subscriptionId) >= 0).slice(0, MOST).map(simOf) : [],
+    eid: raw.eid === undefined ? { status: "Unsupported", value: "" } : factOf(raw.eid),
+    hardware: {
+      manufacturer: factOf(raw.hardware?.manufacturer), model: factOf(raw.hardware?.model), device: factOf(raw.hardware?.device),
+      android: factOf(raw.hardware?.android), baseband: factOf(raw.hardware?.baseband),
+    },
+  }
+}
+
+/** What opening one of Android's screens did. */
+export type ScreenAnswer = "Specific" | "Broader" | "Refused"
+
+/** Carrier & SIM setup's effects: reads only on the owner's request while the page is in front, copies one identifier, and forgets. */
+export service CarrierSetup {
+  /** Show or refresh the identifiers: one read, only while the page is in front on an unlocked, focused phone. */
+  show(): void!!
+  /** Read the eSIM's EID, apart from the identifiers. */
+  showEid(): void!!
+  /** Copy one identifier the latest read returned to Android's clipboard; false where nothing was copied. */
+  copy(what: Copyable): boolean!!
+  /** Forget everything read, and discard any read still running. */
+  forget(): void!!
+  /** Open one of Android's own screens. */
+  openScreen(screen: CarrierScreen): ScreenAnswer!!
+}
+
+/** Whether a read or copy may run now: Settings shows Carrier & SIM setup in front of an unlocked phone that has focus. */
+export function carrierInFront(front: ForegroundState, page: string, focused: boolean): boolean {
+  return front.visible && !front.locked && front.screen !== "off" && front.view === "settings" && front.assistantSurface !== true &&
+    page === "Carrier" && focused
+}
+
+function focused(): boolean {
+  return typeof document === "undefined" || document.hasFocus()
+}
+
+const NOT_COPIED = Symbol("not copied")
+
+/** CarrierSetup over the Machine it is given, Settings' pages, the foreground and AlphaCarrierSetup. */
+export const carrierSetup = Layer.effect(CarrierSetup, effect {
+  const held = try Machine
+  const pages = try PagesMachine
+  const foreground = try Foreground
+  const native = try Native
+
+  effect function current() {
+    return carrierInFront(try foreground.get(), (try pages.get()).page, focused())
+  }
+
+  effect function forget() {
+    if ((try held.get()).phase === "CarrierIdle") return
+    held.send({ type: "carrierForgotten" }) catch () => undefined
+  }
+
+  return {
+    effect show() {
+      if (!(try current())) return
+      const asked = (held.send({ type: "identifiersAsked" }) catch () => undefined)
+      if (asked === undefined) return
+      const raw = try attempt(call(CARRIER_PLUGIN, "read", CarrierRead))
+      if (!(try current())) { try forget(); return }
+      if (raw === undefined) held.send({ type: "identifiersFailed", ticket: asked.epoch }) catch () => undefined
+      else held.send({ type: "identifiersRead", ticket: asked.epoch, reading: readingOf(raw) }) catch () => undefined
+    },
+    effect showEid() {
+      if (!(try current())) return
+      const asked = (held.send({ type: "eidAsked" }) catch () => undefined)
+      if (asked === undefined) return
+      const raw = try attempt(call(CARRIER_PLUGIN, "readEid", CarrierFact))
+      if (!(try current())) { try forget(); return }
+      held.send({ type: "eidRead", ticket: asked.epoch, eid: raw === undefined ? unreadable : factOf(raw) }) catch () => undefined
+    },
+    effect copy(what: Copyable) {
+      if (!(try current())) return false
+      const text = copyable(try held.get(), what)
+      if (text === "") return false
+      const copied = (native.invoke("AlphaDevice", "copyText", { text }) catch () => NOT_COPIED)
+      return copied !== NOT_COPIED
+    },
+    forget,
+    effect openScreen(screen: CarrierScreen) {
+      const opened = try attempt(call(CARRIER_PLUGIN, "openSettings", CarrierScreenOpened, { page: screenName(screen) }))
+      return (opened === undefined ? "Refused" : opened.specific === false ? "Broader" : "Specific") as ScreenAnswer
+    },
+  }
+})
+
+/** Forgets what the page read when it stops being in front: another page or app, the screen off or locked, focus lost, or Android pausing Alpha. */
+export const carrierFollow = Layer.effectDiscard(effect {
+  const carrier = try CarrierSetup
+  const foreground = try Foreground
+  const pages = try PagesMachine
+  const native = try Native
+  try fork.scoped (effect {
+    for try (const front of foreground.changes) {
+      if (!front.visible || front.locked || front.screen === "off" || front.view !== "settings") try carrier.forget()
+    }
+  })
+  try fork.scoped (effect {
+    for try (const nav of pages.changes) {
+      if (nav.page !== "Carrier") try carrier.forget()
+    }
+  })
+  if (try native.available(CARRIER_PLUGIN)) {
+    try fork.scoped (effect {
+      for try (const _ of Stream.ignore(native.listen(CARRIER_PLUGIN, "foregroundEnded"))) try carrier.forget()
+    })
+  }
+  if (typeof window !== "undefined") {
+    try fork.scoped (effect {
+      for try (const _ of pageEvents("blur")) try carrier.forget()
+    })
+  }
+})

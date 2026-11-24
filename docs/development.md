@@ -284,6 +284,25 @@ product build configuration. Dependency checksums remain in
 `android/gradle/verification-metadata.xml`; regenerate and review them with
 `pnpm android:deps:write-verification` after dependency changes.
 
+### Carrier activation details
+
+On Android, **Settings → General → Carrier & SIM setup → Show identifiers** reads
+this phone’s IMEI slots before a SIM is installed, active SIM/ICCID and network
+state, and hardware/baseband facts. **Read eSIM EID (optional)** is a separate
+explicit read so an unavailable eSIM service cannot block physical-SIM setup.
+Each available identifier has its own Copy action. Values stay in the page’s
+in-memory Machine (`apps/app/spec/settings/carrier.md`) and clear on
+leaving/backgrounding; they are excluded from normal snapshots, diagnostics,
+saved app state and agent context.
+
+Android controls access. Default SMS/carrier eligibility or an actual signature
+grant can permit identifiers; an ordinary APK install does not acquire privileged
+phone access. The launcher declares the optional signature permission without
+changing its nonprivileged image placement or claiming a grant. The page shows
+denial/unavailable states and opens Android About phone, SIM, mobile and APN
+settings. Displayed identifiers do not establish carrier compatibility,
+activation, working calls/data or physical-device acceptance.
+
 ## Device and image tooling
 
 ```sh

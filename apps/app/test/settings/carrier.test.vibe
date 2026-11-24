@@ -1,0 +1,200 @@
+// spec/settings/carrier.md, "Story: Get my phone ready for a carrier's SIM"
+import { assert, it } from "@effect/vitest"
+import { Machine as CarrierMachine, machine as carrierMachine, copyable } from "../../gen/settings__carrier.effect.vibe"
+import { Machine as PagesMachine, initial as pagesStart, machine as pagesMachine, privatePage } from "../../gen/settings.effect.vibe"
+import { Native, NativeFailed, NativeUnavailable } from "../../src/platform/native.vibe"
+import { Foreground, type ForegroundState } from "../../src/shell/foreground.vibe"
+import { CarrierSetup, carrierFollow, carrierInFront, carrierSetup, factOf, readingOf } from "../../src/settings/carrier.vibe"
+
+const inFront: ForegroundState = { visible: true, locked: false, screen: "home", view: "settings", shade: false, chat: "closed", modal: false }
+const field = (value: string) => ({ status: "available", value })
+
+/** What AlphaCarrierSetup.read answers on a launcher phone with no SIM: one IMEI, one Android withholds, no active SIM. */
+const noSim = {
+  status: "ready", aospImage: true, canChooseSms: false, smsRole: field("Alpha Phone is the default SMS app"), modemCount: field("2"),
+  eid: { status: "not-read" }, hardware: { model: field("Fixture"), baseband: { status: "unavailable" } },
+  slots: [{ slotIndex: 0, imei: field("123456789012345"), simState: field("No SIM") }, { slotIndex: 1, imei: { status: "permission-denied" }, simState: field("No SIM") }],
+  subscriptions: { status: "available", items: [] },
+}
+
+/** Android at its plugin boundary: answers by `plugin.method` (an Error refuses; a function may wait), the calls it saw, and the pause event. */
+function android(answers: Record<string, unknown>) {
+  const calls: Array<{ readonly name: string; readonly args: unknown }> = []
+  const paused = Effect.runSync(Queue.unbounded<unknown>())
+  const native = Layer.succeed(Native, {
+    available: (plugin: string) => effect { return plugin === "AlphaCarrierSetup" || plugin === "AlphaDevice" },
+    invoke: (plugin: string, method: string, args?: unknown) => effect {
+      const name = `${plugin}.${method}`
+      calls.push({ name, args })
+      if (!Object.hasOwn(answers, name)) throw new NativeUnavailable({ plugin, method })
+      const answer = answers[name]
+      const value = typeof answer === "function" ? try (answer as () => Effect.Effect<unknown>)() : answer
+      if (value instanceof Error) throw new NativeFailed({ plugin, method, message: value.message })
+      return value
+    },
+    listen: (plugin: string, event: string) => plugin === "AlphaCarrierSetup" && event === "foregroundEnded" ? Stream.fromQueue(paused) : Stream.never,
+  } as unknown as Native.Shape)
+  return { calls, native, paused, named: (name: string) => calls.filter((c) => c.name === name) }
+}
+
+/** Settings on Carrier & SIM setup in front, the carrier Machine, and a foreground the test moves. */
+function page(native: Layer.Layer<Native>) {
+  const front = Effect.runSync(SubscriptionRef.make(inFront))
+  const foreground = Layer.succeed(Foreground, { changes: SubscriptionRef.changes(front), get: () => SubscriptionRef.get(front) })
+  const below = Layer.mergeAll(native, foreground, pagesMachine({ ...pagesStart, page: "Carrier" }), carrierMachine())
+  return { front, layer: Layer.provideMerge(carrierSetup, below), followed: Layer.provideMerge(carrierFollow, Layer.provideMerge(carrierSetup, below)) }
+}
+
+effect function until<A>(changes: Stream.Stream<A>, ok: (a: A) => boolean) {
+  return try Effect.timeout(Stream.runHead(Stream.filter(changes, ok)), "2 seconds")
+}
+
+it.effect("Get my phone ready for a carrier's SIM (spec/settings/carrier.md, \"Story: Get my phone ready for a carrier's SIM\")", () => effect {
+  const phone = android({ "AlphaCarrierSetup.read": noSim, "AlphaCarrierSetup.readEid": field("89012345678901234567890123456789"), "AlphaDevice.copyText": undefined })
+  const { layer } = page(phone.native)
+  provide layer {
+    const carrier = try CarrierSetup
+    const held = try CarrierMachine
+    // spec/settings/carrier.md, "Opening the page reads nothing; Show identifiers reads once, and only the latest read answers"
+    const opened = try held.get()
+    const readsOnOpen = phone.named("AlphaCarrierSetup.read").length
+    try carrier.show()
+    const shown = try held.get()
+    // spec/settings/carrier.md, "The EID is a separate, optional read that never holds up the IMEI read"
+    const eidReadsOnShow = phone.named("AlphaCarrierSetup.readEid").length
+    // spec/settings/carrier.md, "Only a value Android returned can be copied, one identifier at a time"
+    const copiedImei = try carrier.copy({ tag: "CopyImei", slot: 0 })
+    const withheld = try carrier.copy({ tag: "CopyImei", slot: 1 })
+    const missing = try carrier.copy({ tag: "CopyImei", slot: 7 })
+    const noIccid = try carrier.copy({ tag: "CopyIccid", subscription: 1 })
+    const eidUnread = try carrier.copy({ tag: "CopyEid" })
+    try carrier.showEid()
+    const eid = (try held.get()).reading.eid
+    const copiedEid = try carrier.copy({ tag: "CopyEid" })
+    try Effect.try(() => assert.deepStrictEqual(
+      {
+        opened: opened.phase, readsOnOpen, phase: shown.phase, imei: shown.reading.slots.map((s) => [s.imei.status, s.imei.value, s.simState.value]),
+        sims: [shown.reading.sims, shown.reading.active.length], model: shown.reading.hardware.model.value, baseband: shown.reading.hardware.baseband.status,
+        eidReadsOnShow, copiedImei, withheld, missing, noIccid, eidUnread, eid, copiedEid,
+        clipboard: phone.named("AlphaDevice.copyText").map((c) => c.args),
+      },
+      {
+        opened: "CarrierIdle", readsOnOpen: 0, phase: "CarrierShown", imei: [["Available", "123456789012345", "No SIM"], ["Denied", "", "No SIM"]],
+        sims: ["Available", 0], model: "Fixture", baseband: "Unreadable",
+        eidReadsOnShow: 0, copiedImei: true, withheld: false, missing: false, noIccid: false, eidUnread: false,
+        eid: { status: "Available", value: "89012345678901234567890123456789" }, copiedEid: true,
+        clipboard: [{ text: "123456789012345" }, { text: "89012345678901234567890123456789" }],
+      },
+    ))
+  }
+})
+
+it.effect("A read or copy runs only while Carrier & SIM setup is in front, and a failed read keeps nothing (spec/settings/carrier.md, \"Opening the page reads nothing; Show identifiers reads once, and only the latest read answers\")", () => effect {
+  let fail = false
+  const phone = android({ "AlphaCarrierSetup.read": () => effect { return fail ? new Error("no hardware") : noSim }, "AlphaDevice.copyText": undefined })
+  const { front, layer } = page(phone.native)
+  provide layer {
+    const carrier = try CarrierSetup
+    const held = try CarrierMachine
+    const pages = try PagesMachine
+    try carrier.show()
+    try sync(() => { fail = true })
+    try carrier.show()
+    const failed = try held.get()
+    try SubscriptionRef.update(front, (f) => ({ ...f, locked: true }))
+    try sync(() => { fail = false })
+    try carrier.show()
+    const lockedReads = phone.named("AlphaCarrierSetup.read").length
+    try SubscriptionRef.set(front, inFront)
+    try carrier.show()
+    try SubscriptionRef.update(front, (f) => ({ ...f, visible: false }))
+    const hiddenCopy = try carrier.copy({ tag: "CopyImei", slot: 0 })
+    try SubscriptionRef.set(front, inFront)
+    try pages.send({ type: "back" })
+    try carrier.show()
+    try Effect.try(() => assert.deepStrictEqual(
+      {
+        failed: [failed.phase, failed.reading.slots.length], lockedReads, hiddenCopy, otherPageReads: phone.named("AlphaCarrierSetup.read").length,
+        clipboard: phone.named("AlphaDevice.copyText").length,
+        gate: [carrierInFront(inFront, "Carrier", true), carrierInFront(inFront, "Carrier", false), carrierInFront({ ...inFront, view: "phone" }, "Carrier", true), carrierInFront(inFront, "General", true)],
+      },
+      { failed: ["CarrierFailed", 0], lockedReads: 2, hiddenCopy: false, otherPageReads: 3, clipboard: 0, gate: [true, false, false, false] },
+    ))
+  }
+})
+
+it.live("Refreshing while the EID is read discards its answer (spec/settings/carrier.md, \"The EID is a separate, optional read that never holds up the IMEI read\")", () => effect {
+  const eid = Effect.runSync(Deferred.make<unknown>())
+  const phone = android({ "AlphaCarrierSetup.read": noSim, "AlphaCarrierSetup.readEid": () => Deferred.await(eid) })
+  const { layer } = page(phone.native)
+  provide layer {
+    const carrier = try CarrierSetup
+    const held = try CarrierMachine
+    try carrier.show()
+    const reading = fork carrier.showEid()
+    try until(held.changes, (c) => c.eidReading)
+    const second = fork carrier.showEid()
+    try Fiber.join(second)
+    try carrier.show()
+    const refreshed = try held.get()
+    try Deferred.succeed(eid, field("89012345678901234567890123456789"))
+    try Fiber.join(reading)
+    const after = try held.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { eidCalls: phone.named("AlphaCarrierSetup.readEid").length, imei: refreshed.reading.slots[0]?.imei.value, eid: after.reading.eid.status, eidReading: after.eidReading },
+      { eidCalls: 1, imei: "123456789012345", eid: "NotRead", eidReading: false },
+    ))
+  }
+})
+
+it.live("Leaving, the screen locking, focus loss or Android pausing Alpha forgets everything read (spec/settings/carrier.md, \"Leaving the page, the app going to the background or losing focus forgets everything read\")", () => effect {
+  const phone = android({ "AlphaCarrierSetup.read": noSim })
+  const { front, followed } = page(phone.native)
+  provide followed {
+    const carrier = try CarrierSetup
+    const held = try CarrierMachine
+    const pages = try PagesMachine
+    effect function shownThen() {
+      try carrier.show()
+      return (try held.get()).phase
+    }
+    const first = try shownThen()
+    try pages.send({ type: "back" })
+    const leftPage = try until(held.changes, (c) => c.phase === "CarrierIdle")
+    try pages.send({ type: "open", page: "Carrier" })
+    const second = try shownThen()
+    try SubscriptionRef.update(front, (f) => ({ ...f, locked: true }))
+    const locked = try until(held.changes, (c) => c.phase === "CarrierIdle")
+    try SubscriptionRef.set(front, inFront)
+    const third = try shownThen()
+    try Queue.offer(phone.paused, {})
+    const paused = try until(held.changes, (c) => c.phase === "CarrierIdle")
+    try Effect.try(() => assert.deepStrictEqual(
+      {
+        shown: [first, second, third], forgotten: [leftPage, locked, paused].map((c) => c._tag === "Some" ? [c.value.reading.slots.length, c.value.reading.eid.status] : "never"),
+        readsAfter: phone.named("AlphaCarrierSetup.read").length,
+      },
+      { shown: ["CarrierShown", "CarrierShown", "CarrierShown"], forgotten: [[0, "NotRead"], [0, "NotRead"], [0, "NotRead"]], readsAfter: 3 },
+    ))
+  }
+})
+
+it.effect("A fact is Android's value or why there is none, and Carrier & SIM setup is private (spec/settings/carrier.md, \"Only a value Android returned can be copied, one identifier at a time\")", () => effect {
+  const reading = readingOf({ ...noSim, status: "ready", subscriptions: { status: "permission-denied", items: [{ subscriptionId: 3, iccid: field("8901") }] } } as never)
+  // spec/settings/index.md, "Carrier & SIM setup is private: the assistant never observes it"
+  try Effect.try(() => assert.deepStrictEqual(
+    {
+      facts: [factOf(field(" 1 ")), factOf({ status: "permission-denied", value: "leaked" }), factOf({ status: "unsupported" }), factOf({ status: "available", value: "  " }), factOf({ status: "__proto__" }), factOf(undefined)],
+      sims: [reading.sims, reading.active.length],
+      nothingBeforeARead: copyable({ epoch: 0, phase: "CarrierIdle", eidReading: false, reading }, { tag: "CopyImei", slot: 0 }),
+      privatePages: (["Carrier", "General", "Passwords", "Root"] as const).map(privatePage),
+    },
+    {
+      facts: [
+        { status: "Available", value: "1" }, { status: "Denied", value: "" }, { status: "Unsupported", value: "" },
+        { status: "Unreadable", value: "" }, { status: "Unreadable", value: "" }, { status: "Unreadable", value: "" },
+      ],
+      sims: ["Denied", 0], nothingBeforeARead: "", privatePages: [true, false, false, false],
+    },
+  ))
+})

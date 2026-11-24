@@ -13,7 +13,7 @@ const act = {
 
 export const meta: ComponentMeta<SettingsScreenProps> = {
   args: {
-    model: general, act, onClose: none, dialog: undefined, onDialog: none, notifications: null, privacy: { route: "OnPhone", listener: listenerOn, aosp: true }, privacyActs: { stop: none, listenerSettings: none },
+    model: general, act, onClose: none, dialog: undefined, onDialog: none, notifications: null, carrier: null, privacy: { route: "OnPhone", listener: listenerOn, aosp: true }, privacyActs: { stop: none, listenerSettings: none },
     diagnostics, aboutActs: { readLog: none, askClear: none, cancelClear: none, clear: none, exportReport: none, loadLicences: none },
     developerActs: { profile: "app", command: none, requestRole: none, toggleProfile: none },
   },

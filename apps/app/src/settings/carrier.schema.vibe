@@ -1,0 +1,65 @@
+// spec/settings/carrier.md, "The page holds what the latest read returned, and nothing until the owner asks"
+
+/** One fact as AlphaCarrierSetup reports it: `available` with its value, or why Android withheld it. */
+export schema CarrierFact {
+  status: string
+  value?: string
+}
+
+/** One logical modem slot: its IMEI and SIM state, read whether or not a SIM is in it. */
+export schema CarrierSlot {
+  slotIndex: number
+  imei?: CarrierFact
+  simState?: CarrierFact
+}
+
+/** One active subscription Android reports. */
+export schema CarrierSubscription {
+  subscriptionId: number
+  slotIndex?: number
+  embedded?: boolean
+  defaultData?: boolean
+  carrier?: CarrierFact
+  name?: CarrierFact
+  iccid?: CarrierFact
+  operator?: CarrierFact
+  operatorCode?: CarrierFact
+  dataEnabled?: CarrierFact
+  dataState?: CarrierFact
+  networkType?: CarrierFact
+  roaming?: CarrierFact
+}
+
+/** The phone's hardware as Android's Build reports it. */
+export schema CarrierHardware {
+  manufacturer?: CarrierFact
+  model?: CarrierFact
+  device?: CarrierFact
+  android?: CarrierFact
+  baseband?: CarrierFact
+}
+
+/** The active subscriptions, or why Android withheld them. */
+export schema CarrierSubscriptions {
+  status: string
+  items?: Array<CarrierSubscription>
+}
+
+/** AlphaCarrierSetup.read: one explicit foreground read. */
+export schema CarrierRead {
+  status: "ready"
+  aospImage?: boolean
+  canChooseSms?: boolean
+  smsRole?: CarrierFact
+  dialerRole?: CarrierFact
+  eid?: CarrierFact
+  hardware?: CarrierHardware
+  slots?: Array<CarrierSlot>
+  subscriptions?: CarrierSubscriptions
+}
+
+/** AlphaCarrierSetup.openSettings: whether the specific Android screen opened, or Android's Settings in its place. */
+export schema CarrierScreenOpened {
+  status: "opened"
+  specific?: boolean
+}
