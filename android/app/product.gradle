@@ -46,6 +46,12 @@ if (!(updateManifestUrl instanceof String) || new URI(updateManifestUrl).scheme 
 def updateManifestSha256 = java.security.MessageDigest.getInstance('SHA-256').digest(updateManifestUrl.getBytes('UTF-8')).encodeHex().toString()
 
 android {
+ testOptions {
+  unitTests.all {
+   // Robolectric resolves its framework JARs outside Gradle's Maven Central configuration.
+   systemProperty 'robolectric.dependency.repo.url', 'https://repo.maven.apache.org/maven2'
+  }
+ }
  buildTypes {
   debug {
    // Match the resident runtime and reviewed native libraries; dependencies may also ship 32-bit ABIs.
