@@ -1,12 +1,12 @@
 // spec/app/telephony/common.md, "A provider is read only while its view is in front on an unlocked phone with the grant"; spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
-import type { AddressBookClient } from "@elizaos/os/bridges/contacts"
+import type { AddressBookClient, ContactNamesClient, NameSurface } from "@elizaos/os/bridges/contacts"
 import type { MessagesClient } from "@elizaos/os/bridges/messages"
 import type { PhoneClient } from "@elizaos/os/bridges/phone"
 
 module held {
   import { actionJournalPlugin } from "@elizaos/os/bridges/action-journal"
   import { rejectionCode } from "@elizaos/os/bridges/bridge"
-  import { addressBookPlugin, createAddressBookClient } from "@elizaos/os/bridges/contacts"
+  import { addressBookPlugin, createAddressBookClient, createContactNames } from "@elizaos/os/bridges/contacts"
   import { messagesClient, messagesPlugin } from "@elizaos/os/bridges/messages"
   import { phoneClient, telephonyPlugin } from "@elizaos/os/bridges/phone"
   function make() {
@@ -15,6 +15,7 @@ module held {
       phone: phoneClient(telephonyPlugin(), journal),
       messages: messagesClient(messagesPlugin(), journal),
       contacts: createAddressBookClient({ install: "WritingInstall", plugin: addressBookPlugin(), journal }),
+      names: createContactNames(addressBookPlugin()),
     }
   }
   let made: ReturnType<typeof make> | undefined
@@ -39,6 +40,7 @@ export interface TelephonyClients {
   readonly phone: PhoneClient
   readonly messages: MessagesClient
   readonly contacts: AddressBookClient
+  readonly names: ContactNamesClient
 }
 
 /** Phone, Messages and Contacts are not on this phone: nothing reached its native side. */
@@ -53,6 +55,14 @@ export error TelephonyRefused { method: string; code: string | undefined; tag: s
 /** The phone's telephony, through eliza's clients of the image's plugins; absent off the image. */
 export service Telephony {
   clients(): TelephonyClients!TelephonyAbsent
+}
+
+/** The contacts' names for `numbers`, as the phone names a number for `surface`; a number it cannot name, or a phone that cannot be asked, has none. */
+export effect function namesOf(surface: NameSurface, numbers: ReadonlyArray<string>): ReadonlyMap<string, string>!!Telephony {
+  const asked = [...new Set(numbers.filter((number) => number !== ""))]
+  if (asked.length === 0) return new Map()
+  const named = telephony("names", (c) => c.names.resolve({ surface, numbers: asked })) catch () => []
+  return new Map(named.flatMap((one) => (one.name === null ? [] : [[one.number, one.name as string] as const])))
 }
 
 /** One call of eliza's clients: refused before the phone where there is no image, and typed where the phone refused. */

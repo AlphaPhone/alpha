@@ -175,7 +175,9 @@ pure def olderThreads(s: Messages): Moved = askThreads(true, s)
 
 ### Only the newest read of the list is shown, with what Android says about SMS access
 
-A read that fails or finds access missing shows no conversations.
+A read that fails or finds access missing shows no conversations. A
+conversation is titled by the names of the contacts on the phone that hold
+its numbers, and a number no contact holds is shown as it is.
 
 ```quint
 pure def canThreadsRead(s: Messages, ticket: int, count: int): bool =

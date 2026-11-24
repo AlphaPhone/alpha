@@ -133,7 +133,9 @@ pure def retry(s: Phone): Moved = readLog(s.chip, s)
 ### Only the newest read of the log is shown, with what Android says about access
 
 A read that fails or finds access missing shows no rows. Rows shown on
-Recents mark the missed calls seen.
+Recents mark the missed calls seen. Each row is named by the contact on
+the phone that holds its number, else by the name the log kept, else by
+its number.
 
 ```quint
 pure def canRecentsRead(s: Phone, ticket: int, count: int): bool =

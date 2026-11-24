@@ -47,7 +47,7 @@ describe("Messages on an Alpha image", () => {
     await until(alpha, alpha.runtime, Messages, (s) => s.list.status === "Loaded" && s.threads === 1);
 
     // spec/app/messages/index.md, "Only the newest read of the open conversation is shown, and it marks the shown messages read only where Alpha is the phone's SMS app"
-    await press("+14155550100");
+    await press("Maya Chen");
     await until(alpha, alpha.runtime, Messages, (s) => s.pane === "Conversation" && s.page.status === "Loaded" && s.shown.rows === 1);
     await until(alpha, alpha.runtime, Messages, () => world.telephony.texts[0]!.read);
 

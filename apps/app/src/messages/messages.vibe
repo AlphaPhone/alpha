@@ -8,7 +8,7 @@ import * as Messages from "../../gen/app__messages.effect.vibe"
 import type { Effect as Out, Event, Need, Page } from "../../gen/app__messages.effect.vibe"
 import { CarrierSetup } from "../platform/carrier.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { Telephony, TelephonyRefused, telephony } from "../platform/telephony.vibe"
+import { Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
 import { type Job, Whole, answer, hearing, reacting, run, together } from "../runtime/reactor.vibe"
 import { Dialer, grantOf, prefilled } from "../phone/phone.vibe"
 import { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
@@ -79,9 +79,15 @@ export interface Texts {
   readonly choices: ReadonlyArray<AddressBookContact>
   readonly choicesNext: string | undefined
   readonly typed: string
+  readonly names: ReadonlyMap<string, string>
 }
 
-const empty: Texts = { threads: [], threadsNext: undefined, sought: "", messages: [], messagesNext: undefined, chosen: "", choices: [], choicesNext: undefined, typed: "" }
+const empty: Texts = { threads: [], threadsNext: undefined, sought: "", messages: [], messagesNext: undefined, chosen: "", choices: [], choicesNext: undefined, typed: "", names: new Map() }
+
+/** A conversation's title: the contacts' names for its numbers, and a number no contact holds as it is. */
+export function titleOf(addresses: ReadonlyArray<string>, names: ReadonlyMap<string, string>): string {
+  return addresses.map((address) => names.get(address) ?? address).join(", ")
+}
 
 /** The rows behind Messages' counts. */
 export service Inbox {
@@ -105,9 +111,11 @@ effect function threadsRead(ticket: number, further: boolean): Event!!(Telephony
   if (grant !== "Granted") return { type: "threadsRead", ticket, ok: true, grant, count: 0, further: false }
   const page = telephony("threadPage", (c) => c.messages.threadPage(further ? held.threadsNext : undefined)) catch () => undefined
   if (page === undefined) return { type: "threadsRead", ticket, ok: false, grant, count: 0, further: false }
-  const fitting = page.rows.filter((row) => "incomplete" in row || ((chip === "AllThreads" || row.unread) && matches(held.sought, `${row.addresses.join(" ")} ${row.snippet}`, row.addresses.join(" "))))
+  const names = try namesOf("messages", page.rows.flatMap((row) => ("incomplete" in row ? [] : row.addresses)))
+  const titled = (row: ThreadRow) => ("incomplete" in row ? "" : row.addresses.map((address) => names.get(address) ?? address).join(", "))
+  const fitting = page.rows.filter((row) => "incomplete" in row || ((chip === "AllThreads" || row.unread) && matches(held.sought, `${titled(row)} ${row.snippet}`, row.addresses.join(" "))))
   const rows = further ? [...held.threads, ...fitting] : fitting
-  try store.set({ threads: rows, threadsNext: page.next ?? undefined })
+  try store.set({ threads: rows, threadsNext: page.next ?? undefined, names: new Map([...held.names, ...names]) })
   return { type: "threadsRead", ticket, ok: true, grant, count: rows.length, further: page.next !== null }
 }
 

@@ -15,7 +15,7 @@ import { delivered, sentAll, uncertain } from "../../gen/app__messages__sending.
 import { useMachine as useComposer } from "../../gen/app__messages__composer.react.ts";
 import { when } from "../phone/words.ts";
 import { Drafts, prepare } from "./composer.vibe";
-import { Conversations, Inbox } from "./messages.vibe";
+import { Conversations, Inbox, titleOf } from "./messages.vibe";
 import { CommsBar, type CommsServices } from "../phone/CommsBar.tsx";
 
 export interface MessagesProps {
@@ -23,7 +23,6 @@ export interface MessagesProps {
   runtime: ManagedRuntime.ManagedRuntime<MessagesMachine | ComposerMachine | PhoneMachine | Inbox | Conversations | Drafts | CommsServices, unknown>;
 }
 
-const titleOf = (row: ThreadRow) => ("incomplete" in row ? "Conversation" : row.addresses.join(", "));
 
 /**
  * Messages: the conversation list, one conversation with its composer, and the picker that starts a new message.
@@ -70,7 +69,7 @@ export function Messages({ runtime }: MessagesProps) {
           {state.threads > 0 && (
             <ListGroup aria-label="Conversations">
               {held.threads.map((row) => (
-                <ListRow key={row.id} aria-label={titleOf(row)} title={titleOf(row)} detail={"incomplete" in row ? "Open in your messaging app" : row.snippet} trailing={!("incomplete" in row) && row.unread ? <span className="size-2 rounded-full bg-primary" aria-label="Unread" /> : when(row.date)}
+                <ListRow key={row.id} aria-label={"incomplete" in row ? "Conversation" : titleOf(row.addresses, held.names)} title={"incomplete" in row ? "Conversation" : titleOf(row.addresses, held.names)} detail={"incomplete" in row ? "Open in your messaging app" : row.snippet} trailing={!("incomplete" in row) && row.unread ? <span className="size-2 rounded-full bg-primary" aria-label="Unread" /> : when(row.date)}
                   onClick={() => {
                     const thread = runtime.runSync(Conversations.use((numbering) => numbering.of({ id: row.id, addresses: "incomplete" in row ? [] : row.addresses })));
                     if (can({ type: "openThread", thread })) void send({ type: "openThread", thread });
@@ -109,7 +108,7 @@ function Conversation({ runtime }: MessagesProps) {
   if (!state || !phone) return null;
   const held = runtime.runSync(Inbox.use((inbox) => inbox.get()));
   const conversation = runtime.runSync(Conversations.use((numbering) => numbering.get(state.thread)));
-  const title = conversation._tag === "Some" ? conversation.value.addresses.join(", ") : "Conversation";
+  const title = conversation._tag === "Some" ? titleOf(conversation.value.addresses, held.names) : "Conversation";
   const choose = (id: string) => runtime.runSync(Inbox.use((inbox) => inbox.set({ chosen: id })));
   const confirm = { type: "confirmDelete", clear: clear(phone) } as const;
   return (

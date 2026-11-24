@@ -6,7 +6,7 @@ import type { Effect as Out, Event, Filter, Telecom, Typed } from "../../gen/app
 import type { Grant } from "../../gen/kit__permission.ts"
 import { Calls } from "../platform/calls.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { Telephony, telephony } from "../platform/telephony.vibe"
+import { Telephony, namesOf, telephony } from "../platform/telephony.vibe"
 import { type Job, answer, hearing, reacting, run, together } from "../runtime/reactor.vibe"
 import { on, visiting } from "./visit.vibe"
 import { judge, matches } from "./words.ts"
@@ -55,7 +55,9 @@ effect function readLog(ticket: number): Event!!(Telephony | Dialer | Phone.Mach
   }
   const page = telephony("recentCalls", (c) => c.phone.recentCalls({ limit: recentsLimit })) catch () => undefined
   const query = (try store.get()).sought
-  const rows = (page?.calls ?? []).filter((entry) => (chip === "AllCalls" || missedTypes.has(entry.type)) && matches(query, entry.cachedName ?? "", entry.number))
+  const calls = page?.calls ?? []
+  const names = try namesOf("phone", calls.map((entry) => entry.number))
+  const rows = calls.map((entry) => ({ ...entry, cachedName: names.get(entry.number) ?? entry.cachedName })).filter((entry) => (chip === "AllCalls" || missedTypes.has(entry.type)) && matches(query, entry.cachedName ?? "", entry.number))
   try store.set({ rows })
   return { type: "recentsRead", ticket, ok: page !== undefined, grant, count: rows.length }
 }
