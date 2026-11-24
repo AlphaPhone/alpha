@@ -5,7 +5,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Contacts } from "../gen/app__contacts.effect.vibe";
 import { Machine as Agent } from "../gen/app__contacts__agent.effect.vibe";
 import { Machine as Phone } from "../gen/app__phone.effect.vibe";
-import { Requested } from "../src/contacts/requests.vibe";
+import { type Asking, propose } from "../src/contacts/requests.vibe";
 import { closeAll, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
@@ -68,27 +68,57 @@ describe("Contacts on an Alpha image", () => {
     expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
   });
 
-  it("Approve a text the agent asked to send (spec/app/contacts/agent.md, \"Story: Let the agent ask for a call or a contact change\"; spec/app/contacts/agent.md, \"Story: Approve what the agent asked\"; spec/app/contacts/agent.md, \"Story: Learn how the request ended\")", async () => {
+  it("Approve what the agent asked: a text, a change, a new contact (spec/app/contacts/agent.md, \"Story: Let the agent ask for a call or a contact change\"; spec/app/contacts/agent.md, \"Story: Approve what the agent asked\"; spec/app/contacts/agent.md, \"Story: Learn how the request ended\")", async () => {
     const world = image();
     const { alpha } = await open(world);
     await until(alpha, alpha.runtime, Phone, (s) => s.telecom === "NoCall");
-    const ask = (event: Parameters<Agent["send"]>[0]) => alpha.runtime.runPromise(Agent.use((agent) => agent.send(event, "Agent")));
-    const name = (text: string, search: string) => alpha.runtime.runPromise(Requested.use((requested) => requested.set({ ask: "Text", number: "", search, text })));
+    const ask = (operation: Asking, written = false) => alpha.runtime.runPromise(propose(operation, written));
 
     // spec/app/contacts/agent.md, "A call or a text to a number reaches only a number the owner wrote"
-    await alpha.runtime.runPromise(Requested.use((requested) => requested.set({ ask: "Text", number: "+14155550199", text: "Hi" })));
-    await ask({ type: "asked", ask: "Text", byName: false, emergency: false, written: false, pictures: false });
+    await ask({ type: "sms_send", recipients: ["+14155550199"], body: "Hi", subscriptionId: 1 });
     await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "NotWritten");
 
-    // spec/app/contacts/agent.md, "Only the phone answers the newest search, and the request goes on by how many contacts it found"
-    await name("Running late", "Maya");
-    await ask({ type: "asked", ask: "Text", byName: true, emergency: false, written: false, pictures: false });
-    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Shown" && s.matches === 1);
+    // spec/app/contacts/agent.md, "The agent never calls an emergency number, and is told why"
+    await ask({ type: "phone_call", target: { kind: "number", number: "911" } }, true);
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "EmergencyRefused");
+    expect(world.telephony.dialed).toEqual([]);
+
+    // spec/app/contacts/agent.md, "Only the phone answers the newest search, and the request goes on by what it found": a text to a contact lets the owner pick the number, even the only one.
+    await ask({ type: "sms_compose", query: "Maya", body: "Running late" });
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Choosing" && s.matches === 1);
     expect(world.telephony.sent).toEqual([]);
+
+    // spec/app/contacts/agent.md, "The owner picks the exact number or the one contact, and that one is shown"
+    await press("Maya Chen");
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Shown" && s.number === "+14155550100" && !s.addressed);
 
     // spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call"
     await press("Send this text");
     await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "Done");
     expect(world.telephony.sent.map(({ recipients, body }) => ({ recipients, body }))).toEqual([{ recipients: ["+14155550100"], body: "Running late" }]);
+
+    // spec/app/contacts/agent.md, "The owner can decline, and a review Alpha stops showing is withdrawn"
+    await ask({ type: "phone_call", target: { kind: "contact", query: "Ben" } });
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Choosing");
+    await press("Not now");
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "Declined");
+
+    // spec/app/contacts/agent.md, "A change that would leave the contact as it is is never offered"
+    await ask({ type: "contact_update", query: "Ben", add: { phoneNumbers: ["+14155550122"] } });
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "Unchanged");
+
+    // spec/app/contacts/agent.md, "A change is shown line by line, and a removed value never reads as kept"
+    await ask({ type: "contact_update", query: "Ben", add: { phoneNumbers: ["+14155550123"] } });
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Shown" && s.contact === "8");
+    await press("Approve");
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "Done");
+    expect(world.telephony.people.find((one) => one.id === "8")).toMatchObject({ displayName: "Ben Ortiz", givenName: "Ben", phoneNumbers: [{ number: "+14155550122", type: "mobile" }, { number: "+14155550123", type: "mobile" }] });
+
+    // spec/app/contacts/agent.md, "Only the phone answers the newest search, and the request goes on by what it found": a new contact whose name is already in Contacts is shown with that contact.
+    await ask({ type: "contact_create", contact: { displayName: "Maya Chen", phoneNumbers: ["+14155550177"], emailAddresses: [] } });
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Shown" && s.ask === "AddContact" && s.twins === 1);
+    await press("Approve");
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "Done");
+    expect(world.telephony.people.filter((one) => one.displayName === "Maya Chen").length).toBe(2);
   });
 });

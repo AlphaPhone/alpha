@@ -71,8 +71,9 @@ describe("Messages on an Alpha image", () => {
     expect(world.telephony.texts.map((one) => one.body)).toEqual(["On my way"]);
 
     // spec/app/messages/index.md, "Back returns from a conversation or the picker to the list, and reads it again"
+    const read = (await alpha.runtime.runPromise(Messages.use((machine) => machine.get()))).list.ticket;
     await hardware("back");
-    await until(alpha, alpha.runtime, Messages, (s) => s.pane === "Threads");
+    await until(alpha, alpha.runtime, Messages, (s) => s.pane === "Threads" && s.list.ticket > read && s.list.status === "Loaded");
   });
 
   it("Start a new message to a number I type (spec/app/messages/index.md, \"Story: Start a new message\")", async () => {

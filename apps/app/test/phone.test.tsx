@@ -1,13 +1,13 @@
 // @vitest-environment happy-dom
-import { Effect } from "effect";
 import { act } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Phone } from "../gen/app__phone.effect.vibe";
 import { Machine as Strip } from "../gen/app__phone__call.effect.vibe";
 import { Machine as Voicemail } from "../gen/app__phone__voicemail.effect.vibe";
-import { Dialer } from "../src/phone/phone.vibe";
-import { button, closeAll, open, press, underAct, until } from "./alpha.tsx";
+import { Machine as Agent } from "../gen/app__contacts__agent.effect.vibe";
+import { propose } from "../src/contacts/requests.vibe";
+import { button, closeAll, hardware, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -22,6 +22,9 @@ const tab = (name: string) => act(async () => {
   if (!found) throw new Error(`no tab ${name}`);
   found.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
 });
+
+/** The button named `name` in the agent's request, if it offers one. */
+const inReview = (name: string) => [...document.querySelectorAll("[role=dialog] button")].find((one) => one.textContent === name);
 
 /** Press `name` in the open confirmation. */
 const confirm = (name: string) => act(async () => {
@@ -72,8 +75,10 @@ describe("Phone on an Alpha image", () => {
     expect(world.telephony.dialed).toEqual(["14155550100"]);
 
     // spec/app/phone/index.md, "Leaving Phone, or leaving Recents, forgets the rows"
-    const digits = await alpha.runtime.runPromise(Effect.flatMap(Dialer, (dialer) => dialer.get()));
-    expect(digits.digits).toBe("14155550100");
+    await tab("Recents");
+    await until(alpha, alpha.runtime, Phone, (s) => s.tab === "Recents" && s.recents.status === "Loaded" && s.rows === 2);
+    await hardware("home");
+    await until(alpha, alpha.runtime, Phone, (s) => !s.front && s.rows === 0);
   });
 
   it("Listen to a voicemail, and delete it (spec/app/phone/voicemail.md, \"Story: Listen to a voicemail\"; spec/app/phone/voicemail.md, \"Story: Delete a voicemail\")", async () => {
@@ -138,6 +143,9 @@ describe("The call strip on an Alpha image", () => {
     world.telephony.emergency = null;
     world.telephony.report();
     await until(alpha, alpha.runtime, Phone, (s) => s.telecom === "MaybeEmergencyCall");
+    await alpha.runtime.runPromise(propose({ type: "phone_call", target: { kind: "number", number: "+14155550122" } }, true));
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Shown" && s.ask === "Dial");
+    expect([inReview("Call"), world.telephony.dialed]).toEqual([undefined, []]);
   });
 
   it("Off an Alpha image there is no call strip and no Phone, Messages or Contacts (spec/app/shell/index.md, \"Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it\")", async () => {
