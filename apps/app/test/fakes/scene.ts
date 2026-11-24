@@ -11,6 +11,7 @@ import { type LauncherScene, launcherScene } from "./launcher.ts";
 import { type SettingsScene, settingsScene } from "./settings.ts";
 import { type FilesScene, filesScene } from "./files.ts";
 import { type TelephonyScene, telephonyScene } from "./telephony.ts";
+import { type UpdateScene, updateScene } from "./update.ts";
 
 /** Everything the fake world holds, one field per area; a journey reads and changes it. */
 export interface Scene {
@@ -35,6 +36,7 @@ export interface Scene {
   readonly maps: MapsScene;
   readonly telephony: TelephonyScene;
   readonly platform: PlatformScene;
+  readonly update: UpdateScene;
 }
 
 /** A fresh world: each area adds its field here, one line each. */
@@ -51,6 +53,7 @@ export function scene(): Scene {
     maps: mapsScene(),
     telephony: telephonyScene(),
     platform: platformScene(),
+    update: updateScene(),
   };
 }
 

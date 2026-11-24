@@ -142,8 +142,9 @@ const phone = started(effect {
 // spec/app/update/index.md, "Alpha knows whether it is on screen and what the owner is doing"
 const shown = started(effect {
   const updates = try Updates.Machine
-  try ignore(updates.send({ type: "show", visible: true }))
-  try Stream.runForEach((try Device).visible, (visible) => ignore(updates.send({ type: "show", visible })))
+  const device = try Device
+  try ignore(updates.send({ type: "show", visible: try device.showing() }))
+  try Stream.runForEach(device.visible, (visible) => ignore(updates.send({ type: "show", visible })))
 }, "following whether Alpha is on screen for updates")
 
 /** The owner's activity as the shell knows it, and whether a call is up: what an automatic update waits on. */
