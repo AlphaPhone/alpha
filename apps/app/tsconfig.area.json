@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/telephony", "src/camera", "src/web/telephony", "src/web/camera", "test/telephony", "test/camera", "gen/*.ts", "gen/*.vibe"],
+  "exclude": ["src/**/*.meta.tsx"]
+}
