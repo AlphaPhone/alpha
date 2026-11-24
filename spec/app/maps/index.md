@@ -205,6 +205,10 @@ pure def chosen(place: int, m: Maps): Maps =
     startPlace: 0, origins: cleared(m.origins), originsFound: 0, copyNotice: Uncopied, guideNotice: Quiet }
 
 pure def cleared(r: R::Read): R::Read = { ...N::withdrawn(r), status: R::Idle }
+
+pure def stepAnotherPlaceForgetsTheOldRoute(before: Maps, via: str, after: Maps): bool =
+  (via == "pickResult" and after.place != before.place) implies
+    (after.trip.route == 0 and after.question == NoQuestion and not(after.directions))
 ```
 
 ### Back leaves one mode: navigation to its directions, directions to the place, the place to the search, the search to the map
@@ -443,6 +447,9 @@ pure def handOver(m: Maps, query: str): Stepped =
       copyNotice: Uncopied, startPlace: 0, origins: cleared(m.origins), originsFound: 0,
       question: NoQuestion, review: voided(m.review) },
     out: List(FindPlaces({ ticket: asked.ticket, query: query })).concat(finderStops(m.link)) }
+
+pure def stepAHandedQueryNeverInterruptsGuidance(before: Maps, via: str, after: Maps): bool =
+  via == "handOver" implies (before.trip.guidance == N::Stopped and after.searching and after.place == 0)
 ```
 
 ### Results answer the query typed, in an open search
@@ -460,6 +467,9 @@ pure def canPickResult(m: Maps, place: int): bool =
   mode(m) == Search and m.search.status == R::Loaded and m.results > 0 and place > 0
 
 pure def pickResult(m: Maps, place: int): Maps = chosen(place, m)
+
+pure def stepAResultOpensItsPlace(before: Maps, via: str, after: Maps): bool =
+  via == "pickResult" implies (after.place > 0 and mode(after) == Place)
 ```
 
 ### A search can find nothing
@@ -512,6 +522,9 @@ pure def canPickSaved(m: Maps, place: int): bool =
   (mode(m) == Browse or mode(m) == Search) and S::isSaved(m.saved, place) and not(m.trip.away)
 
 pure def pickSaved(m: Maps, place: int): Maps = chosen(place, m)
+
+pure def stepASavedPlaceOpensOnlyWhenSaved(before: Maps, via: str, after: Maps): bool =
+  via == "pickSaved" implies S::isSaved(after.saved, after.place)
 ```
 
 ### Saved places are kept on the phone, and are what survives a restart
@@ -657,6 +670,10 @@ A route kept from an earlier visit to this place shows again.
 pure def canOpenDirections(m: Maps): bool = mode(m) == Place and C::working(m.link)
 
 pure def openDirections(m: Maps): Maps = { ...m, directions: true, sheet: Half }
+
+pure def stepDirectionsOpenOnlyFromACard(before: Maps, via: str, after: Maps): bool =
+  (not(before.directions) and after.directions) implies
+    (C::working(after.link) and Set("openDirections", "proposeRoute").contains(via))
 ```
 
 ### A route is asked from coordinates or another place, which ends a pending "Use my location"
@@ -830,6 +847,10 @@ pure def startGuidance(m: Maps): Stepped =
   { state: { ...m, link: link, trip: trip, sheet: Peek, question: NoQuestion, review: V::dismiss(m.review),
       following: true, guideNotice: Quiet },
     out: List(StartLocation({ session: link.session, once: false }), GuideWithScreenOff({ journey: trip.journey })) }
+
+pure def stepGuidanceStartsOnTheRouteShown(before: Maps, via: str, after: Maps): bool =
+  (before.trip.guidance == N::Stopped and after.trip.guidance == N::Going) implies
+    (after.trip.route == before.trip.route and after.link.locator == C::Guide)
 ```
 
 ### Guidance follows the phone until the owner moves the map, and Recenter follows it again
@@ -885,6 +906,10 @@ pure def endGuidance(m: Maps): Stepped =
   { state: { ...m, trip: N::endGuidance(m.trip),
       link: if (m.link.locator == C::Guide) C::stopLocating(m.link) else m.link, sheet: Half },
     out: List(StopGuidance) }
+
+pure def stepEndKeepsTheRoute(before: Maps, via: str, after: Maps): bool =
+  via == "endGuidance" implies
+    (after.trip.route == before.trip.route and after.trip.guidance == N::Stopped and after.link.locator != C::Guide)
 ```
 
 ### A fix goes to whoever holds the location
@@ -912,6 +937,9 @@ pure def locationFix(m: Maps, session: int, fix: N::Fix): Stepped =
     { state: { ...m, link: link, trip: followed },
       out: List(asked(m, followed, m.place)) }
   else { state: { ...m, link: link, trip: followed }, out: List() }
+
+pure def stepAFixIsForTheSessionInPlace(before: Maps, via: str, after: Maps): bool =
+  via == "locationFix" implies before.link.locator != C::Nobody
 ```
 
 ### "Use my location" without a fix in 15 seconds stops locating and says nothing
@@ -921,6 +949,9 @@ pure def canFindTimedOut(m: Maps, session: int): bool = C::canGiveUp(m.link, ses
 
 pure def findTimedOut(m: Maps, session: int): Stepped =
   { state: { ...m, link: C::giveUp(m.link, session) }, out: List(StopLocation) }
+
+pure def stepGivingUpStopsLocating(before: Maps, via: str, after: Maps, out: List[Effect]): bool =
+  via == "findTimedOut" implies (after.link.locator == C::Nobody and out == List(StopLocation))
 ```
 
 ### Losing the location ends what held it
@@ -933,6 +964,9 @@ pure def locationLost(m: Maps, session: int): Stepped =
   { state: { ...m, link: C::stopLocating(m.link), trip: if (guided) N::endGuidance(m.trip) else m.trip,
       sheet: if (guided) Half else m.sheet },
     out: if (guided) List(StopGuidance) else List() }
+
+pure def stepLosingTheLocationEndsWhatHeldIt(before: Maps, via: str, after: Maps): bool =
+  via == "locationLost" implies (after.link.locator == C::Nobody and after.trip.guidance != N::Going)
 ```
 
 ### Guidance holds the location session while it guides, and nothing else does
@@ -1009,6 +1043,10 @@ pure def leaveMaps(m: Maps): Stepped =
 pure def canComeBack(m: Maps): bool = N::canComeBack(m.trip)
 
 pure def comeBack(m: Maps): Maps = { ...m, trip: N::comeBack(m.trip) }
+
+pure def stepLeavingWithoutTheServiceEndsGuidance(before: Maps, via: str, after: Maps): bool =
+  (via == "leaveMaps" and before.trip.guidance == N::Going) implies
+    ((after.trip.guidance == N::Going) == (before.trip.service != N::Unstarted))
 ```
 
 ### Android confirms or loses the service of this journey
