@@ -196,21 +196,30 @@ it.effect("A spoken turn carries what a typed turn sent then would (spec/assista
       try composer.edit("Summarize this page")
       try composer.send()
       const typed = (turnBodies(seen)[0] as { readonly metadata?: { readonly [key: string]: unknown } } | undefined)?.metadata ?? {}
-      const keys = Object.keys(spoken).sort()
-      return { keys, same: keys.every((key) => JSON.stringify(spoken[key]) === JSON.stringify(typed[key])), page: spoken.browserPage, mode: (spoken.voiceUi as { readonly agentActionMode?: unknown } | undefined)?.agentActionMode, tab: JSON.stringify(spoken).includes("\"browser-tab\"") }
+      type Ui = { agentActionMode?: unknown; viewDelivery?: unknown; uiClientId?: unknown; uiNotesEditor?: unknown }
+      const { voiceUi: spokenUi, ...spokenScreen } = spoken
+      const { voiceUi: typedUi, ...typedScreen } = typed
+      return {
+        sameScreen: JSON.stringify(spokenScreen) === JSON.stringify(typedScreen),
+        page: spoken.browserPage,
+        modes: [(spokenUi as Ui | undefined)?.agentActionMode, (typedUi as Ui | undefined)?.agentActionMode],
+        spokenDelivery: [(spokenUi as Ui | undefined)?.viewDelivery, (spokenUi as Ui | undefined)?.uiClientId, (spokenUi as Ui | undefined)?.uiNotesEditor],
+        tab: JSON.stringify(spokenScreen).includes("\"browser-tab\"")
+      }
     }
   }
   const browser = try read(browserScreen, false)
   const asking = try read(browserScreen, true)
   const hidden = try read(privateScreen, false)
-  // voiceUi also names the turn's renderer and its saved Notes editor (spec/assistant/views.md), so it is present with review-first on too.
+  // View delivery is advertised only for a turn that can finish a prepared view (spec/assistant/views.md).
   const direct = "direct-request-v1"
+  const spokenDelivery = [undefined, undefined, undefined]
   try Effect.try(() => assert.deepStrictEqual(
     { browser, asking, hidden },
     {
-      browser: { keys: ["browserPage", "observation", "voiceUi"], same: true, page, mode: direct, tab: true },
-      asking: { keys: ["browserPage", "observation", "voiceUi"], same: true, page, mode: undefined, tab: true },
-      hidden: { keys: ["voiceUi"], same: true, page: undefined, mode: direct, tab: false },
+      browser: { sameScreen: true, page, modes: [direct, direct], spokenDelivery, tab: true },
+      asking: { sameScreen: true, page, modes: [undefined, undefined], spokenDelivery, tab: true },
+      hidden: { sameScreen: true, page: undefined, modes: [direct, direct], spokenDelivery, tab: false },
     },
   ))
 })

@@ -35,7 +35,7 @@ it.live(`Enroll under the phone's own key and use it only once the agent's conte
       const enrolled = try enrollment.enrolled()
       const headers = try enrollment.headers()
       const register = calls.find((c) => c.name === "POST /api/client-devices/register")
-      const wrote = calls.find((c) => c.name === "POST /api/client-devices/view-profile")?.args as { views?: Array<string>; expectedRevision?: unknown } | undefined
+      const wrote = calls.find((c) => c.name === "POST /api/client-devices/view-profile")?.args as { version?: number; views?: Array<string>; expectedRevision?: unknown } | undefined
       const saved = [...slots.entries()]
       const key = register?.headers?.["x-eliza-device-key"] ?? ""
       // spec/account/enrollment.md, "The workflow protocol starts at what the phone can present and steps down only on a 409, never below 2"
@@ -52,7 +52,7 @@ it.live(`Enroll under the phone's own key and use it only once the agent's conte
         otherConnection: agentSessionOf({ owner: "owner-1", agent: "agent-1", generation: 2, epoch: 1 }, enrolled).enrollmentId
       }, {
         phase: "Enrolled", protocol: 5, deviceId: "agent-1", keyShape: true, slot: true,
-        views: { views: ["calendar", "home", "notes"], expectedRevision: null }, contextCarriedKey: true,
+        views: { version: 1, views: ["calendar", "home", "notes"], expectedRevision: null }, contextCarriedKey: true,
         enrolled: ["agent-1", "a".repeat(64), 5], headerKey: true,
         session: { origin: "resident", owner: "owner-1", agent: "agent-1", session: "1:1", installationId: "agent-1", enrollmentId: "a".repeat(64) },
         otherConnection: ""

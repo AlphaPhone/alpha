@@ -189,6 +189,9 @@ it.live("A question a turn took leaves the bar (spec/telephony/common.md, \"A qu
   const layer = Layer.merge(fake.layer, heard(true))
   provide layer {
     const phone = try PhoneMachine
+    const view = try PhoneView
+    fork view.visit()
+    try until(phone.changes, (state) => state.shown)
     asked.length = 0
     try phone.send({ type: "queryTyped", typed: QUESTION })
     const line = try askFromList("phone", "phone:recents:", QUESTION)
@@ -209,6 +212,9 @@ it.live("A question no turn took stays where it was typed (spec/telephony/common
   const layer = Layer.merge(fake.layer, heard(false))
   provide layer {
     const phone = try PhoneMachine
+    const view = try PhoneView
+    fork view.visit()
+    try until(phone.changes, (state) => state.shown)
     try phone.send({ type: "queryTyped", typed: QUESTION })
     const line = try askFromList("phone", "phone:recents:", QUESTION)
     const after = (try phone.get()).listQuery
