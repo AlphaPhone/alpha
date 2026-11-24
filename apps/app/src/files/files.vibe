@@ -9,7 +9,7 @@ import * as Bin from "../../gen/app__files__trash.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { Files, FilesFailed, called } from "../platform/files.vibe"
-import { type Job, answer, following, hearing, reacting, run, stop, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, due, following, hearing, reacting, run, stop, together, untimed } from "../runtime/reactor.vibe"
 import { Handles, type Spot, handles } from "./handles.vibe"
 
 module names {
@@ -321,7 +321,7 @@ effect function allowed(settings: boolean): Event!!(Files | Browser.Machine) {
 function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Machine, [by: Actor]> {
   return match (fx) {
     when { tag: "AskAccess" }: answer("access", allowed(false), { type: "accessReported", grant: "Denied", supported: true }, "Phone");
-    when { tag: "OpenSettings" }: run("settings", ignore(called("storageRequestAccess", (plugin) => plugin.storageRequestAccess({ settings: true }))), "Phone");
+    when { tag: "OpenSettings" }: answer("access", allowed(true), { type: "accessReported", grant: "Denied", supported: true }, "Phone");
     when { tag: "Measure", let ticket }: answer("measure", measured(ticket), { type: "storageRead", ticket, ok: false, volumes: [] }, "Phone");
     when { tag: "Look", let ticket, let trail, let category, let inCategory }: answer("look", looked(ticket, trail, category, inCategory), { type: "listed", ticket, ok: false, gone: false, complete: false, entries: [] }, "Phone");
     when { tag: "Search", let ticket, let where, let filter }: answer("search", searched(ticket, where, filter), { type: "searched", ticket, ok: false, complete: false, entries: [] }, "Phone");
@@ -489,7 +489,13 @@ function carryBin(fx: Bin.Effect): Job<Bin.Event, Files | Handles | Browser.Mach
 }
 
 // spec/app/files/trash.md, "A restart closes the Trash, reports a job cut off as unknown, drops what was waiting and what was read, and closes the confirmation and the moment to undo"
-const binning = reacting(Bin, { keep: 1, open: [{ type: "restart" }, "Phone"], carry: carryBin })
+// spec/app/files/trash.md, "When the moment to undo has passed, the phone ends it, and Undo is no longer offered"
+const binning = reacting(Bin, {
+  keep: 1,
+  open: [{ type: "restart" }, "Phone"],
+  carry: carryBin,
+  timers: (s) => (s.undo.holding === "Held" ? [due("undo", s.undo.until, { type: "letGo", now: untimed } as Bin.Event, "Phone" as Bin.Actor)] : []),
+})
 
 // spec/app/files/trash.md, "Looking at the Trash reads its list when it is free and Alpha may read the storage; leaving it, or losing access, drops the list but what a job or the moment to undo still holds"
 const trashAccess = following(Browser.Machine, Browser.allowed, Bin.Machine, (allowed): Bin.Event => ({ type: "accessReported", allowed }), "Phone")

@@ -3,15 +3,16 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Browser } from "../gen/app__files.effect.vibe";
 import { Machine as Bin } from "../gen/app__files__trash.effect.vibe";
 import files from "../src/files/index.tsx";
-import { button, closeAll, fill, hardware, later, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, fill, hardware, later, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
 
-const listed = () => [...document.querySelectorAll("[aria-label=Listed] button, [aria-label=Listed] [role=button]")].map((row) => row.textContent);
+const listed = () => [...document.querySelectorAll("[aria-label=Listed] button:not([role=checkbox])")].map((row) => row.textContent);
 const paths = (world: ReturnType<typeof scene>) => world.files.stored.map((one) => `${one.volume}:${one.path}`).sort();
 const select = (name: string) => press(`Select ${name}`);
+const buttonOnTop = (name: string) => [...([...document.querySelectorAll("[role=dialog]")].at(-1)?.querySelectorAll("button") ?? [])].find((one) => (one.getAttribute("aria-label") ?? one.textContent) === name);
 
 /** Alpha on a phone with Files on screen, its storage read. */
 async function onFiles(world = { ...scene(), phone: true }) {
@@ -116,11 +117,11 @@ describe("Files on a phone", () => {
     // spec/app/files/index.md, "A change starts from the selection, of the folder showing, into a destination only as the Move to sheet last read it, as Changes allows it"
     await select("lease.pdf");
     await press("Move or copy");
-    await press("Internal storage");
+    await pressOnTop("Internal storage");
     await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded");
-    await press("Documents");
+    await pressOnTop("Documents");
     await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded" && s.sheet.trail.length === 2);
-    await press("Move here");
+    await pressOnTop("Move here");
     // spec/app/files/index.md, "A change ends as its answer says, what a move took away is told, and the place is read again"
     await until(alpha, runtime, Browser, (s) => s.change.attempt.outcome === "Confirmed" && s.listing.status === "Loaded");
     expect([listed(), paths(world).includes("primary:Documents/lease.pdf")]).toEqual([["beach.jpg"], true]);
@@ -128,11 +129,11 @@ describe("Files on a phone", () => {
     // spec/app/files/change.md, "A change starts when none is under way and nothing of it is still unknown; when names clash in the destination the owner is asked first, and an approved request keeps both"
     await select("beach.jpg");
     await press("Move or copy");
-    await press("Internal storage");
+    await pressOnTop("Internal storage");
     await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded");
-    await press("Download");
+    await pressOnTop("Download");
     await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded" && s.sheet.trail.length === 2);
-    await press("Copy here");
+    await pressOnTop("Copy here");
     await until(alpha, runtime, Browser, (s) => s.change.clash.showing);
     await press("Keep both");
     await until(alpha, runtime, Browser, (s) => s.change.attempt.outcome === "Confirmed" && s.listing.status === "Loaded");
@@ -142,11 +143,11 @@ describe("Files on a phone", () => {
     for (let round = 0; round < 2; round += 1) {
       await select("beach.jpg");
       await press("Move or copy");
-      await press("Internal storage");
+      await pressOnTop("Internal storage");
       await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded");
-      await press("Documents");
+      await pressOnTop("Documents");
       await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded" && s.sheet.trail.length === 2);
-      await press("Copy here");
+      await pressOnTop("Copy here");
       if (runtime.runSync(Browser.use((m) => m.get())).change.clash.showing) await press("Replace");
       await until(alpha, runtime, Browser, (s) => s.change.work === "CopyTo" && s.change.attempt.outcome === "Confirmed" && s.listing.status === "Loaded");
     }
@@ -161,9 +162,9 @@ describe("Files on a phone", () => {
     await select("beach.jpg (2)");
     await press("Rename");
     await fill("Name", "Taxes");
-    expect(button("Rename")?.hasAttribute("disabled")).toBe(true);
+    expect(buttonOnTop("Rename")?.hasAttribute("disabled")).toBe(true);
     await fill("Name", "dunes.jpg");
-    await press("Rename");
+    await pressOnTop("Rename");
     await until(alpha, runtime, Browser, (s) => s.change.work === "Rename" && s.change.attempt.outcome === "Confirmed" && s.listing.status === "Loaded");
     expect(listed().sort()).toEqual(["Taxes", "beach.jpg", "dunes.jpg"]);
 
@@ -185,7 +186,7 @@ describe("Files on a phone", () => {
     // spec/app/files/index.md, "Deleting shows what goes to the Trash, and only a confirmation of the selection as shown hands it over"
     await select("lease.pdf");
     await press("Delete");
-    await press("Delete");
+    await pressOnTop("Delete");
     // spec/app/files/trash.md, "Undo, for a moment, brings back exactly what was just deleted and nothing else"
     await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Confirmed" && s.binned.length === 1);
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 1);
@@ -198,7 +199,7 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 2);
     await select("beach.jpg");
     await press("Delete");
-    await press("Delete");
+    await pressOnTop("Delete");
     await until(alpha, runtime, Bin, (s) => s.binned.length === 1);
     await later(alpha, 5_000);
     expect(button("Undo")).toBeUndefined();
@@ -217,7 +218,7 @@ describe("Files on a phone", () => {
     await press("Refresh");
     await until(alpha, runtime, Bin, (s) => s.listing.status === "Loaded" && s.entries.length === 1);
     await press("Erase old.txt");
-    await press("Erase");
+    await pressOnTop("Erase");
     await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Confirmed" && s.entries.length === 0);
     expect(world.files.trash).toEqual([]);
 

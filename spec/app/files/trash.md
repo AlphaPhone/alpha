@@ -201,6 +201,19 @@ pure def stepUndoBringsBackWhatWasDeleted(before: Trash, via: str, after: Trash,
   out.every(e => match e { | Restore(x) => via != "undoDelete" or x.entries == before.binned | _ => true })
 ```
 
+### When the moment to undo has passed, the phone ends it, and Undo is no longer offered
+
+The time it ends is the one the answer gave; the phone says when it has
+come, since no screen keeps a clock.
+
+```quint
+pure def canLetGo(s: Trash, now: int, by: Actor): bool = by == Phone and U::canRelease(s.undo, now)
+
+pure def letGo(s: Trash, now: int, by: Actor): Trash = { ...s, undo: U::release(s.undo) }
+
+pure def sometimesTheMomentToUndoPassed(s: Trash): bool = s.undo.holding == U::Released and s.binned.length() > 0
+```
+
 ### A job under way ends
 
 ```quint

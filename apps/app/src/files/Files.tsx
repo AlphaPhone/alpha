@@ -65,13 +65,15 @@ export function Files({ runtime }: FilesProps) {
     const toggle = { type: "toggle", target: item.id } as const;
     const open = item.kind === "Folder" ? ({ type: "openFolder", target: item.id } as const) : ({ type: "view", file: item } as const);
     return (
-      <ListRow
-        key={item.id}
-        title={item.name}
-        selected={state.picked.includes(item.id)}
-        onClick={owner(open) && state.picked.length === 0 ? () => tell(open) : owner(toggle) && state.picked.length > 0 ? () => tell(toggle) : undefined}
-        trailing={owner(toggle) && <Checkbox aria-label={`Select ${item.name}`} checked={state.picked.includes(item.id)} onClick={(event) => { event.stopPropagation(); tell(toggle); }} />}
-      />
+      <div key={item.id} className="flex items-center pr-4">
+        <ListRow
+          className="flex-1"
+          title={item.name}
+          selected={state.picked.includes(item.id)}
+          onClick={owner(open) && state.picked.length === 0 ? () => tell(open) : owner(toggle) && state.picked.length > 0 ? () => tell(toggle) : undefined}
+        />
+        {owner(toggle) && <Checkbox aria-label={`Select ${item.name}`} checked={state.picked.includes(item.id)} onCheckedChange={() => tell(toggle)} />}
+      </div>
     );
   };
   const { change } = state;
