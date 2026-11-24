@@ -2,7 +2,7 @@
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { type Draft, type DraftFields, type Mode, Machine as DraftsMachine, accountOf, emptyFields, noDraft, noForward, noProvider, meaningful, previousKept, previousSlotsClear } from "../../gen/inbox__drafts.effect.vibe"
 import type { OutgoingFile } from "../../gen/inbox__attachments.ts"
-import { GoogleAccounts } from "../account/layer.vibe"
+import { GoogleAccounts } from "../account/google.vibe"
 import { adoptLegacySlot } from "../platform/legacy-slots.vibe"
 import { Native } from "../platform/native.vibe"
 import { mailAccountOf } from "./accounts.vibe"
