@@ -1,8 +1,8 @@
 // spec/telephony/actions.md, "Story: Call or text only the person I approved"; spec/telephony/actions.md, "An action starts once per operation ID, and a number the owner did not write is refused"; spec/telephony/actions.md, "A name is looked up on the phone and the owner picks the exact number, even for one match"; spec/telephony/actions.md, "The owner's Not now, leaving the app or a changed context ends a run that has not dispatched"; spec/telephony/actions.md, "An effect dispatches only after a fresh call-state reading allows it"; spec/telephony/actions.md, "A dispatched effect settles with what the phone answered, and a lost answer is unconfirmed, never nothing"; spec/telephony/actions.md, "A read, a keypad, a filtered list or a draft settles without any effect"; spec/telephony/actions.md, "An unconfirmed text is settled only by the phone's own send record for its operation ID"
-import { operationOf, readLatestSender, type DeviceOperationType } from "@elizaos/agent/operations"
-import { contactWriteAdvertised, type ContactDetail, type ContactDraft, type ContactId, type ContactVersion } from "@elizaos/os/bridges/contacts"
-import { operationIdOf } from "@elizaos/os/bridges/definitions/messages"
-import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone"
+import { operationOf, readLatestSender, type DeviceOperationType } from "@elizaos/agent"
+import { contactWriteAdvertised, type ContactDetail, type ContactDraft, type ContactId, type ContactVersion } from "@elizaos/os-bridges"
+import { operationIdOf } from "@elizaos/os-bridges"
+import { normalizePhoneNumber } from "@elizaos/os-bridges"
 import {
   Machine as ActionsMachine, isChoosing, readBackOf, runIdOf, type ActionKind, type Candidate, type Event as ActionsEvent, type SendRecord, type Settled, type TargetForm,
 } from "../../gen/telephony__actions.effect.vibe"

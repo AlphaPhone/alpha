@@ -1,6 +1,6 @@
 // spec/calendar/device.md, "Story: Edit or delete exactly the event I reviewed"; spec/calendar/device.md, "Story: Read my device calendars over a range that makes sense"; spec/calendar/selection.md, "Story: Let the assistant act only on the event I have open"; spec/calendar/selection.md, "Story: Let the assistant fill in a new event on the calendar I chose"; spec/calendar/deviceActions.md, "Story: Let the agent change my phone's calendar only through my reviews"; spec/calendar/deviceActions.md, "Story: Delete only after I answered yes"; spec/calendar/namedRead.md, "Story: Be told plainly what a named read shared"; spec/calendar/availability.md, "Story: Choose the calendars and see the answer before it is shared"
 import { assert, describe, it } from "@effect/vitest"
-import type { NamedCalendarReadContext } from "@elizaos/plugin-calendar/client"
+import type { NamedCalendarReadContext } from "@elizaos/plugin-calendar"
 import { DeviceCalendar } from "../../src/calendar/device.vibe"
 import { readWindow } from "../../src/calendar/model.vibe"
 import { AgentRequests } from "../../src/calendar/requests.vibe"

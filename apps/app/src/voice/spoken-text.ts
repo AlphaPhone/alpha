@@ -1,5 +1,5 @@
 // spec/voice/speech.md, "A spoken reply refuses only a likely password, key or card; everything else it cannot say becomes a pause"; spec/voice/speech.md, "A reading also refuses a link or email address, characters it cannot say and more than 16,000 characters"; spec/voice/speech.md, "Each finished sentence is spoken while the rest is generated, in order, and streamed audio is never kept"; spec/voice/speech.md, "An email draft is said as one line, by whether its card was validated or the action failed; other action replies drop IDs and asides unless I asked for them word for word"
-import type { VoiceReplyAction } from "@elizaos/agent/voice";
+import type { VoiceReplyAction } from "@elizaos/agent";
 
 /** Why a passage was not spoken: a likely secret, a link or address, a character it cannot say, a length, or a word too long. */
 export type SpokenRefusal = "secret" | "link" | "characters" | "length" | "word";

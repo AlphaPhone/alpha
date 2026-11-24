@@ -6,7 +6,7 @@ import {
 import {
   checkoutFromResponse, commandFromResponse, paymentFromResponse, redeemResultFromResponse, reviewFromResponse,
   snapshotFromResponse, type BillingSnapshot
-} from "@elizaos/cloud/client"
+} from "@elizaos/cloud"
 import { Build } from "../platform/build.vibe"
 import { buildCloudEnvironment } from "../platform/build-live.vibe"
 import { Cloud } from "../platform/cloud.vibe"

@@ -1,5 +1,5 @@
 // spec/camera/agentCapture.md, "Story: Let the assistant take the photo I asked for"; spec/camera/agentLibrary.md, "Story: Let the assistant point at photos I can see"; spec/camera/libraryReview.md, "Story: Approve each library change the assistant proposes"; spec/camera/libraryReview.md, "Photos operations reach a phone only when the assistant and the phone both offer their capability"
-import type { ExecutorCall } from "@elizaos/agent/client"
+import type { ExecutorCall } from "@elizaos/agent"
 import type { Op, Target } from "../../gen/assistant__review.effect.vibe"
 import type { Result } from "../../gen/assistant__receipts.effect.vibe"
 import { ownPhotoRequest } from "../assistant/grounding.vibe"

@@ -1,5 +1,5 @@
 // spec/voice/listener.md, "Story: Use the listener only on the image that admits it"; spec/voice/listener.md, "Story: See and stop what the listener is doing"; spec/voice/listener.md, "Story: Start voice from my listener or the power button, once"; spec/voice/listener.md, "Invocations are bound to the agent session the resident verified, and none is taken while no session is bound"; spec/voice/listener.md, "A pending power press is discarded, never kept, while the screen cannot start voice"
-import { parseAssistantInvocation, parseInvocationUnlocked, parseListenerStatus, parseListenerStopReceipt, type AssistantInvocation } from "@elizaos/os/bridges/sense"
+import { parseAssistantInvocation, parseInvocationUnlocked, parseListenerStatus, parseListenerStopReceipt, type AssistantInvocation } from "@elizaos/os-bridges"
 import { Build } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"
 import { ResidentControl, type ResidentSession } from "../platform/resident-control.vibe"

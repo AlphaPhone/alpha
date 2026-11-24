@@ -1,6 +1,6 @@
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import * as osImage from '@elizaos/os/image';
+import * as osImage from '@elizaos/os';
 import {run} from './upstream-os.ts';
 
 type Bundle = 'ops' | 'chip' | 'assist' | 'power';

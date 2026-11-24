@@ -1,8 +1,8 @@
 // spec/workflows/vocabulary.md, "Only an owner route of Workflows is sent, and a read or delete carries no body"; spec/workflows/automations.md, "Each source is read on its own, and its failure is a note beside the other sources' rows"
 import { Resident, ResidentRefused, ResidentUnavailable } from "../platform/resident.vibe"
 import { type Method, type RouteFamily, sendable } from "../../gen/workflows__vocabulary.effect.vibe"
-import { type WorkflowClient, type WorkflowRequest, workflowClient, workflowHttpError } from "@elizaos/plugin-workflow/client"
-import { type HostedDigestProtocol, hostedDigestProtocol } from "@elizaos/plugin-workflow/digests"
+import { type WorkflowClient, type WorkflowRequest, workflowClient, workflowHttpError } from "@elizaos/plugin-workflow-client"
+import { type HostedDigestProtocol, hostedDigestProtocol } from "@elizaos/plugin-workflow-client"
 import { AuthMe } from "./wire.schema.vibe"
 
 /** A request Workflows does not own, or a body where none belongs: nothing was sent. */

@@ -1,6 +1,6 @@
 // spec/notes/editor.md, "Story: Edit a note without losing a word"; spec/notes/editor.md, "A draft opens from a note at the current revision, or starts as a new note"; spec/notes/editor.md, "A save captures the draft, runs only on its own base, and queues a later edit"; spec/notes/editor.md, "Only a clean draft at the current revision is selected for the agent"; spec/notes/editor.md, "Leaving saves an edited draft first, drops an untouched new note and otherwise just closes"; spec/notes/editor.md, "A delete of an edited note waits for its save, and a changed draft cancels it"; spec/notes/editor.md, "A delete or restore is confirmed only when the reply moves exactly that note"; spec/notes/editor.md, "Try again confirms words already saved, rebases only onto an untouched record, and otherwise keeps the draft"; spec/notes/editor.md, "A failed save keeps its changes in the encrypted draft slot, merged with earlier kept changes"; spec/notes/collection.md, "Reviewed text becomes one note under its own creation identity"
-import { parseNoteFormat } from "@elizaos/plugin-notes/format"
-import type { NoteFormat, NoteJson, NotesSnapshot, StickyColor, StickyNote } from "@elizaos/plugin-notes/types"
+import { parseNoteFormat } from "@elizaos/plugin-notes-client"
+import type { NoteFormat, NoteJson, NotesSnapshot, StickyColor, StickyNote } from "@elizaos/plugin-notes-client"
 import { textCreationAllowed } from "../../gen/notes__collection.effect.vibe"
 import {
   type Editor, type Event as EditorEvent, Machine as EditorMachine, dirty, leavePlan, machine as editorMachine, selectionCurrent,

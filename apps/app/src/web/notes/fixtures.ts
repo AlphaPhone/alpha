@@ -1,5 +1,5 @@
 // States the Notes components reach, for their stories (`*.meta.tsx`).
-import type { StickyNote } from "@elizaos/plugin-notes/types";
+import type { StickyNote } from "@elizaos/plugin-notes-client";
 import type { Recorder } from "../../../gen/notes__recorder.ts";
 import { initial as recorderInitial } from "../../../gen/notes__recorder.ts";
 import type { TrashView } from "../../../gen/notes__trash.ts";

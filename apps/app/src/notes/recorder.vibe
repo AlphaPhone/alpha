@@ -1,5 +1,5 @@
 // spec/notes/recorder.md, "Story: Record a voice note"; spec/notes/recorder.md, "A recording starts only for the current owner, after any playback has confirmed it stopped"; spec/notes/recorder.md, "A recording is audio only, and shows only text its journal already holds, never past the audio"; spec/notes/recorder.md, "Pause, resume and stop act only on the owner's open recording"; spec/notes/recorder.md, "Done claims the save once, and the recording closes only after its note is confirmed"; spec/notes/recorder.md, "Discard asks once for a recording of a second or more, and never while its save is claimed"; spec/notes/recorder.md, "Another owner or leaving Notes detaches the view and keeps the recording"; spec/notes/recordingJournal.md, "A stopped recording is claimed once and committed only to its canonical note"; spec/notes/audio.md, "Playback starts only for the open note's own live recording, and stops before any change to it"
-import type { NoteFormat, NoteJson, StickyNote } from "@elizaos/plugin-notes/types"
+import type { NoteFormat, NoteJson, StickyNote } from "@elizaos/plugin-notes-client"
 import { playbackAllowed } from "../../gen/notes__audio.effect.vibe"
 import {
   type Event as RecorderEvent, Machine as RecorderMachine, type Recorder, type StartRefusal, machine as recorderMachine, voiceSavePlan,

@@ -1,5 +1,5 @@
 // spec/browser/session.md, "Story: Browse in tabs"; spec/browser/page.md, "Story: Type an address or search words"; spec/browser/session.md, "A link the owner taps outside Browser opens in a new tab and is never searched"; spec/browser/session.md, "Story: Keep my normal tabs and history across restarts"; spec/browser/session.md, "Story: Clear my browsing data"; spec/browser/persistence.md, "Story: Save my tabs without ever losing the saved record"; spec/browser/downloads.md, "Show in Files opens Files at Downloads only for this Browser session's list"
-import { BROWSER_FIND_TEXT_MAX } from "@elizaos/plugin-browser/contract"
+import { BROWSER_FIND_TEXT_MAX } from "@elizaos/plugin-browser"
 import { type AgentSettled, type Event, type NativeReport, type Session, type SessionEffect, Machine, curTab, machine, mayPersist, snapshotOf, tabOf } from "../../gen/browser__session.effect.vibe"
 import { type WriterEffect, Machine as WriterMachine, machine as writerMachine } from "../../gen/browser__persistence.effect.vibe"
 import type { SavedSession, TabPage } from "../../gen/browser__page.ts"

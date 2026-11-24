@@ -1,5 +1,5 @@
 // spec/telephony/attention.md, "Story: See what is new from Home"; spec/telephony/attention.md, "A card exists only for a source that was read and has something new"
-import { isIncompleteSmsRow } from "@elizaos/os/bridges/definitions/messages"
+import { isIncompleteSmsRow } from "@elizaos/os-bridges"
 import { Machine as AttentionMachine, type AttentionRead, type Event as AttentionEvent, type NewMissed, type NewVoicemail, type UnreadThread } from "../../gen/telephony__attention.effect.vibe"
 import { callerOf, TelephonyBridges } from "./bridges.vibe"
 import { frontChanges, whileInFront } from "./front.vibe"

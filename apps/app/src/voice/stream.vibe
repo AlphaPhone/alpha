@@ -1,5 +1,5 @@
 // spec/voice/conversation.md, "A Cloud stream listens, speaks the replies and the cue and mutes the speaker on one relay session, and only voice retiring ends it"
-import { createCloudStreamingSpeech, type CloudSpeechListenerHandle, type CloudSpeechStarted as RelayStarted, type CloudStreamEvent, type CloudStreamPort, type CredentialId, type EnvironmentName, type SpeechSessionId } from "@elizaos/os/bridges/voice"
+import { createCloudStreamingSpeech, type CloudSpeechListenerHandle, type CloudSpeechStarted as RelayStarted, type CloudStreamEvent, type CloudStreamPort, type CredentialId, type EnvironmentName, type SpeechSessionId } from "@elizaos/os-bridges"
 import { Native, NativeFailed } from "../platform/native.vibe"
 import { currentness } from "./cloud-stream.ts"
 import { CloudSpeechStarted } from "./native.schema.vibe"

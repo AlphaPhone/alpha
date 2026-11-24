@@ -11,7 +11,7 @@ import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {parseArgs} from 'node:util';
 import {Effect} from 'effect';
-import {WORKER_EXECUTABLE, workerProvenance, verifyWorkerArtifact} from '@elizaos/plugin-workflow/worker';
+import {WORKER_EXECUTABLE, workerProvenance, verifyWorkerArtifact} from '@elizaos/plugin-workflow-worker';
 import {sha256File} from './sha256.ts';
 import {pinnedCommit} from './upstream-pin.ts';
 

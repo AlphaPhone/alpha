@@ -1,7 +1,7 @@
 // spec/notes/editor.md, "Story: Edit a note without losing a word"; spec/notes/list.md, "Each checklist row keeps its own place and a name a screen reader can say"; spec/notes/editor.md, "Leaving saves an edited draft first, drops an untouched new note and otherwise just closes"; spec/notes/share.md, "A share acts on the open note's snapshot, only while it is still the same note"; spec/notes/origins.md, "The draft text is the note's open action items, then its open checklist items, then its body"; spec/notes/audio.md, "Playback starts only for the open note's own live recording, and stops before any change to it"
 import { ArrowLeft, Calendar, Copy, Ellipsis, ExternalLink, Globe, ListChecks, Mail, Paperclip, Pause, Pin, PinOff, Play, Plus, Share2, Sparkles, Trash2, Type, X } from "lucide-react";
 import { useState } from "react";
-import type { NoteFormat } from "@elizaos/plugin-notes/types";
+import type { NoteFormat } from "@elizaos/plugin-notes-client";
 import { Button, Checkbox, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, Input, Textarea } from "../components/ui/index.ts";
 import type { DraftContent, DraftPatch } from "../../notes/editor.vibe";
 import { type CheckItem, type NoteRow, checklistItems, checklistText } from "../../notes/list.vibe";

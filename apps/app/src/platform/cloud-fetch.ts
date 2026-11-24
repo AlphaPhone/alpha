@@ -1,5 +1,5 @@
 // spec/platform/index.md, "The phone's key stays with native, and a leaving screen cancels only its own call"; spec/platform/index.md, "Only a route the Cloud client lists is requested"
-import type { CloudClient as NativeCloud, CloudMethod, CloudPath, EnvironmentName } from "@elizaos/os/bridges/definitions/cloud";
+import type { CloudClient as NativeCloud, CloudMethod, CloudPath, EnvironmentName } from "@elizaos/os-bridges";
 
 const methods = new Set<string>(["GET", "POST", "PATCH", "DELETE"]);
 

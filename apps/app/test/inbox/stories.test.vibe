@@ -1,6 +1,6 @@
 // spec/inbox/accounts.md, "Story: Grant Gmail access a step at a time"; spec/inbox/failures.md, "Story: Understand why Gmail did not answer"; spec/inbox/mailbox.md, "Story: See my saved mail at once"; spec/inbox/reader.md, "Story: Read a message and its conversation"; spec/inbox/drafts.md, "Story: Write replies and forwards that go where I mean"; spec/inbox/operations.md, "Story: Clean up after a send, and say Sent once"
 import { assert, it } from "@effect/vitest"
-import { MailProtocolFailed, sha256Hex } from "@elizaos/plugin-inbox/mailbox"
+import { MailProtocolFailed, sha256Hex } from "@elizaos/plugin-inbox-client"
 import { fakeNative } from "../../src/platform/layers.vibe"
 import { failureOf } from "../../src/inbox/gmail.vibe"
 import { suggestRecipients } from "../../src/inbox/composer.vibe"

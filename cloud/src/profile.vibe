@@ -1,5 +1,5 @@
 // spec/cloud/deployment.md, "Story: Configure a deployment from one reviewed profile"
-import { parseProfile, type CloudEnvironment, type CloudProfile, type EnvironmentProfile, type ProfileInvalid } from "@elizaos/cloud/profile"
+import { parseProfile, type CloudEnvironment, type CloudProfile, type EnvironmentProfile, type ProfileInvalid } from "@elizaos/cloud"
 import deployment from "../deployment.json" with { type: "json" }
 
 /** The model Alpha Phone requests for chat on Alpha Cloud. */

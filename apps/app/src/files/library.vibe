@@ -1,5 +1,5 @@
 // spec/files/storage.md, "Story: Browse my files by category, folder and volume"; spec/files/pdf.md, "Story: Read a PDF page by page on the phone"; spec/files/preview.md, "The document viewer opens over the preview and closes exactly once"; spec/files/picker.md, "Story: Choose a file from my phone for another app on Alpha"
-import { FilesVolume, LibraryStore, VolumeRefused, importLibraryFile, importLibraryFolder, indexedLibrary, libraryVolume, librarySelections, type FilesFilter, type RowOutcome } from "@elizaos/plugin-files/client"
+import { FilesVolume, LibraryStore, VolumeRefused, importLibraryFile, importLibraryFolder, indexedLibrary, libraryVolume, librarySelections, type FilesFilter, type RowOutcome } from "@elizaos/plugin-files-client"
 import { Documents, FilesStorage, FilesUnavailable, type QueryInput } from "./storage.vibe"
 import { type ChosenFile, chooseFromComputer, objectUrl, renderPdfPage, sha256 } from "./library-glue.ts"
 import { handOver } from "./download.ts"

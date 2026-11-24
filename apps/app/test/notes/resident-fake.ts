@@ -1,6 +1,6 @@
 // spec/notes/collection.md, "Story: Read my notes under the account I am signed in as"; spec/notes/trash.md, "Story: Let deleted notes expire after three days when I choose that"; spec/notes/recordingOpen.md, "Story: Return to my recording from its notification"
 // The resident agent's Notes routes in memory, faked once at the network boundary: the agent cannot run in a unit test.
-import type { NoteFormat, NotesSnapshot, NotesTrashRecordingCleanup, StickyNote } from "@elizaos/plugin-notes/types";
+import type { NoteFormat, NotesSnapshot, NotesTrashRecordingCleanup, StickyNote } from "@elizaos/plugin-notes-client";
 
 interface Answer { readonly status: number; readonly data: unknown }
 

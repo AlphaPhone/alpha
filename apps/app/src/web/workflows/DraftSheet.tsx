@@ -1,5 +1,5 @@
 // spec/workflows/authoring.md, "Story: Describe a workflow and keep only what this phone can do"; spec/workflows/authoring.md, "Story: Save exactly the draft I reviewed, once"; spec/workflows/authoring.md, "The unsent description is kept for its owner across closing and reopening"
-import { WORKFLOW_OPERATION_LABELS } from "@elizaos/plugin-workflow/scope";
+import { WORKFLOW_OPERATION_LABELS } from "@elizaos/plugin-workflow-client";
 import type { Authoring } from "../../../gen/workflows__authoring.ts";
 import type { ChangeOutcome, Described, ScheduleNote } from "../../workflows/definitions.vibe";
 import { Alert, Button, Sheet, SheetContent, Textarea } from "../components/ui/index.ts";

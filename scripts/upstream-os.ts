@@ -8,9 +8,9 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {Effect} from 'effect';
 import * as NodeServices from '@effect/platform-node/NodeServices';
-import * as osBuild from '@elizaos/os/build';
-import * as osImage from '@elizaos/os/image';
-import {buildAgentBundle as upstreamBuildAgentBundle, readBundleManifest, residentLoadList} from '@elizaos/agent/bundle';
+import * as osBuild from '@elizaos/os';
+import * as osImage from '@elizaos/os';
+import {buildAgentBundle as upstreamBuildAgentBundle, readBundleManifest, residentLoadList} from '@elizaos/agent-host';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 /** The upstream checkout the workspace links its @elizaos packages from. */

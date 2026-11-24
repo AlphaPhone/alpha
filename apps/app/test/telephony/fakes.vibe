@@ -1,5 +1,5 @@
 // spec/telephony/index.md
-import type { TelephonyStatus } from "@elizaos/os/bridges/phone"
+import type { TelephonyStatus } from "@elizaos/os-bridges"
 import { CloudSession } from "../../src/account/layer.vibe"
 import { Build } from "../../src/platform/build.vibe"
 import { Native } from "../../src/platform/native.vibe"

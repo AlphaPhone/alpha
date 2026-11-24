@@ -3,11 +3,11 @@ import type { MailRow, MailPage, DraftRow, DraftsPage } from "../../gen/inbox__m
 import type { MailBody, MailPart, ThreadView } from "../../gen/inbox__reader.ts"
 import type { Capabilities, Receipt, Review, OpKind, ReceiptState, Proposal, MailMode, FileLine } from "../../gen/inbox__operations.ts"
 import type { FailureKind } from "../../gen/inbox__failures.ts"
-import { managedGmailClient, type ManagedGmailTransport } from "@elizaos/plugin-inbox/client"
+import { managedGmailClient, type ManagedGmailTransport } from "@elizaos/plugin-inbox-client"
 import {
   MailProtocolFailed, MailUnreachable, AttachmentRefused, classifyGmailFailure, attachmentReadFailure, linkTextMismatch, sha256Hex,
   type GmailFailureKind, type GmailInboxOperationKind, type GmailInboxReceipt, type GmailMessage, type GmailReadResult, type MailFailure
-} from "@elizaos/plugin-inbox/mailbox"
+} from "@elizaos/plugin-inbox-client"
 import { Cloud, CloudUnavailable, CloudSignedOut } from "../platform/cloud.vibe"
 import { WireReview, WireProviderResult, type WireReviewedFile } from "./wire.schema.vibe"
 import { checkMailFile, isRefusal } from "./files.ts"

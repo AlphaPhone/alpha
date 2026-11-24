@@ -1,5 +1,5 @@
 // spec/platform/index.md, "Story: Reach the phone's native capabilities"; spec/platform/index.md, "Story: Talk to the resident agent"; spec/platform/index.md, "Story: Use Eliza Cloud's managed services when signed in"; spec/platform/index.md, "Story: Keep my phone's state across restarts"; spec/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks"
-import { createCloudClient } from "@elizaos/cloud/client"
+import { createCloudClient } from "@elizaos/cloud"
 import { initial as connectionStart, type Resident as ResidentConnection } from "../../gen/platform__resident.ts"
 import { adviceOf, cloudOutcomeOf, pathAdmitted, resetCarried } from "../../gen/platform.effect.vibe"
 import { Build, type BuildInfo } from "./build.vibe"

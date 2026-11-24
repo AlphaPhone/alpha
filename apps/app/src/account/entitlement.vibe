@@ -3,7 +3,7 @@ import {
   type Admission, type AdmissionEffect, type EndsAt, type SignedPlan, type SnapshotPlan,
   Machine as PlanMachine, admittedKind, admits, enabled, stored as storedPlan
 } from "../../gen/account__plan.effect.vibe"
-import { checkEntitlement, nextRefreshDelay, parseEntitlementKeys, snapshotFromResponse, subscriptionView, type SubscriptionView } from "@elizaos/cloud/client"
+import { checkEntitlement, nextRefreshDelay, parseEntitlementKeys, snapshotFromResponse, subscriptionView, type SubscriptionView } from "@elizaos/cloud"
 import { Build } from "../platform/build.vibe"
 import { AppLifecycle } from "../platform/lifecycle.vibe"
 import { buildCloudEnvironment } from "../platform/build-live.vibe"

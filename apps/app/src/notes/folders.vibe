@@ -1,5 +1,5 @@
 // spec/notes/folders.md, "Story: Keep my notes in folders I name"; spec/notes/folders.md, "A folder is created once per name, up to a hundred folders"; spec/notes/folders.md, "Renaming keeps the folder's ID, so every note stays in it"; spec/notes/folders.md, "Deleting a folder removes it first, and its notes then read as in no folder"
-import { notesFolderName } from "@elizaos/plugin-notes/organize"
+import { notesFolderName } from "@elizaos/plugin-notes-client"
 import { type Event as FolderEvent, type FolderList, Rejected, apply } from "../../gen/notes__folders.effect.vibe"
 import { decodeFolders, type FoldersDocument } from "./notes.schema.vibe"
 import { randomId } from "./platform.ts"

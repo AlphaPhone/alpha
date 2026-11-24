@@ -1,5 +1,5 @@
 // spec/maps/guidance.md, "Start begins a new session from a ready route"; spec/maps/guidance.md, "A fix guides only when usable, and only for the current session"; spec/maps/guidance.md, "Ending, the provider's retirement, a failed watch or the navigation service ends the session"; spec/maps/guidance.md, "A reroute belongs to its session; a failed or late one keeps the current route"
-import { backgroundNavigation, type NavigationBridge, NavigationBridgeFailed } from "@elizaos/plugin-maps/client/device-navigation"
+import { backgroundNavigation, type NavigationBridge, NavigationBridgeFailed } from "@elizaos/plugin-maps-client"
 import { type Guidance, type NavEffect, type NavStep, Machine as GuidanceMachine, readingUsable } from "../../gen/maps__guidance.effect.vibe"
 import { Machine as ScreenMachine } from "../../gen/maps__screen.effect.vibe"
 import { maySpeak, usableFix } from "../../gen/maps__vocabulary.ts"

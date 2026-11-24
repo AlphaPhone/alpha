@@ -1,5 +1,5 @@
 // spec/notes/audio.md, "Story: Generate a transcript of a saved recording when I ask"; spec/notes/audio.md, "A transcript is read in 25-second windows, each checked against the exact recording first"
-import type { NoteJson } from "@elizaos/plugin-notes/types"
+import type { NoteJson } from "@elizaos/plugin-notes-client"
 import { mayUploadWindow, transcriptSaved, windowAllowed, windowCount, windowMs } from "../../gen/notes__audio.effect.vibe"
 import { Machine as EditorMachine } from "../../gen/notes__editor.effect.vibe"
 import { Native } from "../platform/native.vibe"

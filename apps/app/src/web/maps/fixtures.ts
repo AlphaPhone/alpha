@@ -1,5 +1,5 @@
 // States the Maps components reach, for their stories (`*.meta.tsx`); test-mock builds only.
-import type { MapsCard } from "@elizaos/plugin-maps/cards";
+import type { MapsCard } from "@elizaos/plugin-maps-client";
 import type { Guidance } from "../../../gen/maps__guidance.ts";
 import { initial as guidanceStart } from "../../../gen/maps__guidance.ts";
 import type { GuidanceContent, Shown } from "../../maps/content.vibe";

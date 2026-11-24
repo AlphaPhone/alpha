@@ -1,8 +1,8 @@
 // spec/telephony/messages.md, "Delete passes the exact listed row after confirmation, and an unconfirmed delete keeps the row and blocks another"; spec/telephony/voicemail.md, "A delete needs the owner's confirmation of the open voicemail, and a refused delete keeps it"; spec/telephony/contacts.md, "A removal needs the owner's confirmation of the contact read whole, at its version"
-import type { ReviewedContact } from "@elizaos/os/bridges/contacts"
-import { deletionNoticeOf, recordKindOf, type DeferredDeletionEntry, type DeletionNoticeView, type StagedDeletion, type StagedRecordKind } from "@elizaos/os/bridges/deletion-window"
-import type { MessageDeleteReference } from "@elizaos/os/bridges/messages"
-import type { VoicemailId } from "@elizaos/os/bridges/phone"
+import type { ReviewedContact } from "@elizaos/os-bridges"
+import { deletionNoticeOf, recordKindOf, type DeferredDeletionEntry, type DeletionNoticeView, type StagedDeletion, type StagedRecordKind } from "@elizaos/os-bridges"
+import type { MessageDeleteReference } from "@elizaos/os-bridges"
+import type { VoicemailId } from "@elizaos/os-bridges"
 import { callerOf, TelephonyBridges, TelephonyRefused } from "./bridges.vibe"
 import { frontChanges, whileInFront } from "./front.vibe"
 

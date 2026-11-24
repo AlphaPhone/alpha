@@ -1,5 +1,5 @@
 // spec/maps/screen.md, "Story: Find a place"; spec/maps/guidance.md, "Story: Guide me along the route I started"; spec/maps/connection.md, "A wait Cloud names is shown and kept when it is at most a day, an allowance reset when at most 400 days, and any other wait is one minute"
-import { MapsFailure } from "@elizaos/plugin-maps/client/contracts";
+import { MapsFailure } from "@elizaos/plugin-maps-client";
 import { Effect, type Stream } from "effect";
 import { MapsAgent } from "../../maps/agent.vibe";
 import type { MapsTile } from "../../maps/cloud.vibe";

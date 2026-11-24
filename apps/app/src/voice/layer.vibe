@@ -1,5 +1,5 @@
 // spec/voice/conversation.md, "Story: Start talking only when Alpha can listen safely"; spec/voice/dictation.md, "Story: Dictate into the draft I am writing"; spec/voice/listener.md, "Story: Use the listener only on the image that admits it"; spec/voice/speech.md, "Story: Keep a page I read and my voicemail on my phone"
-import { speechRouting } from "@elizaos/plugin-local-inference/speech-route"
+import { speechRouting } from "@elizaos/plugin-local-inference-client"
 import { machine as captureMachine } from "../../gen/voice__capture.effect.vibe"
 import { machine as conversationMachine } from "../../gen/voice__conversation.effect.vibe"
 import { machine as dictationMachine } from "../../gen/voice__dictation.effect.vibe"

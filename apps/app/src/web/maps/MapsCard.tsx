@@ -1,5 +1,5 @@
 // spec/maps/cards.md, "A card's Map button runs one flow, chosen from what the card carries"; spec/maps/cards.md, "Only the newest agent message offers its choice and its card, in the session and conversation that showed them"
-import type { MapsCard as Card } from "@elizaos/plugin-maps/cards";
+import type { MapsCard as Card } from "@elizaos/plugin-maps-client";
 import { Map as MapIcon, MapPin, Navigation, Route as RouteIcon } from "lucide-react";
 import { guidanceDistance, guidanceDuration } from "../../maps/geometry.vibe";
 import { Button } from "../components/ui/index.ts";

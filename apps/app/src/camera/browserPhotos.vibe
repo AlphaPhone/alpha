@@ -1,6 +1,6 @@
 // spec/camera/albums.md, "Story: Keep album storage consistent with my photos"; spec/camera/edit.md, "A copy is written only by the save that still owns the session, over an unchanged source"; spec/camera/edit.md, "An unconfirmed save is resolved only by reading its outcome, and a read that finds nothing retires it"; spec/camera/scan.md, "A scanned frame reaches Photos only by its explicit Keep, retried under the same identity after an unknown answer"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { MediaItem as MediaItemShape, MediaPage as MediaPageShape } from "@elizaos/os/bridges/media.schema"
+import { MediaItem as MediaItemShape, MediaPage as MediaPageShape } from "@elizaos/os-bridges"
 import { albumAnswer } from "../../gen/camera__albums.effect.vibe"
 import { PhotosFailed, PhotoStore, type AlbumChange, type PhotoEditRequest, type Reviewed, type VideoEditRequest } from "./photos.vibe"
 import { renderPhotoEdit } from "./imageEdit.ts"

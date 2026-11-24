@@ -1,6 +1,6 @@
 // spec/platform/viewEvents.md, "Story: Follow what my agent does on my screen"; spec/platform/viewEvents.md, "Only this subscription's frames for this client reach the screen, until it ends"; spec/platform/viewEvents.md, "Closing removes the listener and unsubscribes whatever was dispatched"
-import { agentClient, agentPlugin } from "@elizaos/os/bridges/agent"
-import type { ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent"
+import { agentClient, agentPlugin } from "@elizaos/os-bridges"
+import type { ElizaAgentPlugin } from "@elizaos/os-bridges"
 import { Machine as Feed, machine as feedMachine, type FrameKind } from "../../gen/platform__viewEvents.effect.vibe"
 import { ResidentUnavailable } from "./resident.vibe"
 import { ResidentControl } from "./resident-control.vibe"

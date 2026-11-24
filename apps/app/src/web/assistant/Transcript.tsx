@@ -1,5 +1,5 @@
 // spec/assistant/reply.md, "Story: Read a reply with its cards"; spec/assistant/receipts.md, "A receipt's title says what the journal proves"; spec/assistant/conversation.md, "Only a recorded message of this session that is settled can be quoted, and only my own can be edited, from an empty composer"; spec/assistant/receipts.md, "A reply's changes are shown once, only for what its action results prove, and each opens its own view"
-import type { MapsCard } from "@elizaos/plugin-maps/cards";
+import type { MapsCard } from "@elizaos/plugin-maps-client";
 import { ArrowUpRight, CircleAlert, CircleCheck, CircleHelp, Paperclip, Quote as QuoteIcon, SquarePen, Volume2 } from "lucide-react";
 import { editable, quotable } from "../../../gen/assistant__conversation.ts";
 import { copy, cutOffText, planCardTitle } from "../../assistant/presentation.vibe";

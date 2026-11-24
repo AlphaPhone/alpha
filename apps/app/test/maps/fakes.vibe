@@ -1,5 +1,5 @@
 // spec/maps/index.md: the Maps layer over a fake Cloud, phone, resident and launcher, faked only at their boundary, with the assistant's shared network client over the fake phone.
-import { createCloudClient } from "@elizaos/cloud/client"
+import { createCloudClient } from "@elizaos/cloud"
 import { Cloud, CloudUnavailable } from "../../src/platform/cloud.vibe"
 import { CloudServices } from "../../src/platform/cloud-services.vibe"
 import { Build } from "../../src/platform/build.vibe"

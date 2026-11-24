@@ -1,6 +1,6 @@
 // spec/voice/acknowledgement.md, "Story: Hear that Alpha is working on it, never over its answer"
 import { assert, it } from "@effect/vitest"
-import { readReplyStream } from "@elizaos/agent/client"
+import { readReplyStream } from "@elizaos/agent"
 import { acknowledgement, voiceReplyHooks } from "../../src/voice/acknowledgement.vibe"
 import { Speech, SpeechInterrupted, type SpeakOptions } from "../../src/voice/speech.vibe"
 import { initial as speechInitial } from "../../gen/voice__speech.ts"

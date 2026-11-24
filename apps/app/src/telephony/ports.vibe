@@ -1,5 +1,5 @@
 // spec/telephony/voicemail.md, "A transcript is made on this phone or not at all"; spec/telephony/actions.md, "An action starts once per operation ID, and a number the owner did not write is refused"; spec/telephony/actions.md, "A view change that shows the outcome waits for the reply that carries it"
-import type { ExecutorCall } from "@elizaos/agent/client"
+import type { ExecutorCall } from "@elizaos/agent"
 
 /** The on-device recognizer did not transcribe a window. */
 export error TranscriptFailed { reason: string }

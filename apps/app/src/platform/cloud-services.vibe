@@ -1,5 +1,5 @@
 // spec/platform/index.md, "Story: Use Eliza Cloud's managed services when signed in"
-import type { CloudClient } from "@elizaos/cloud/client"
+import type { CloudClient } from "@elizaos/cloud"
 import type { CloudAuthority } from "./build-flags.ts"
 import type { CloudUnavailable } from "./cloud.vibe"
 

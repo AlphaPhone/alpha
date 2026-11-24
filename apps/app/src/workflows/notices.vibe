@@ -2,7 +2,7 @@
 import {
   type WorkflowApproval, type WorkflowNoticeRoute, type WorkflowPhoneReview, type WorkflowRun, revalidateWorkflowApprovalNotice, workflowApprovalNoticeIdentity,
   workflowApprovalProposalId, workflowNoticeReads,
-} from "@elizaos/plugin-workflow/client"
+} from "@elizaos/plugin-workflow-client"
 import { type NoticeRoute, Machine as NoticesMachine, stored as noticesStored } from "../../gen/workflows__notices.effect.vibe"
 import { type Performed, Machine as StepsMachine, machine as stepsMachine } from "../../gen/workflows__deviceSteps.effect.vibe"
 import { type Approval, DeviceReview } from "../assistant/review.vibe"

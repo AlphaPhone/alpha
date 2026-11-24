@@ -1,7 +1,7 @@
 // spec/telephony/messages.md, "Story: Read my conversations while Messages is open"; spec/telephony/messages.md, "Only the latest read publishes, and a conversation shows only its own messages"; spec/telephony/messages.md, "Only a complete listed conversation opens, with the full identity it was listed with"; spec/telephony/messages.md, "The recipient picker reads contacts only while a new message is open, and answers only its latest query"; spec/telephony/messages.md, "Delete passes the exact listed row after confirmation, and an unconfirmed delete keeps the row and blocks another"; spec/telephony/messages.md, "A local bubble lasts until the provider lists its row, the send is refused, or the visit ends"; spec/telephony/messages.md, "A sent text reads Delivered only on the radio's confirmed delivery report, and a picture message never does"; spec/telephony/messages.md, "Call in a one-person conversation's header calls its one number and keeps the draft"
-import { isIncompleteSmsRow, parseMessageDeleteReference, threadIdOf } from "@elizaos/os/bridges/definitions/messages"
-import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone"
-import type { MessageCursor, MessageRow as BridgeMessage, SmsLatestSender, ThreadCursor, ThreadId, ThreadRow as BridgeThread } from "@elizaos/os/bridges/messages"
+import { isIncompleteSmsRow, parseMessageDeleteReference, threadIdOf } from "@elizaos/os-bridges"
+import { normalizePhoneNumber } from "@elizaos/os-bridges"
+import type { MessageCursor, MessageRow as BridgeMessage, SmsLatestSender, ThreadCursor, ThreadId, ThreadRow as BridgeThread } from "@elizaos/os-bridges"
 import type { CallOutcome } from "../../gen/telephony__common.effect.vibe"
 import { Machine as DraftsMachine, slotOf, type Drafts } from "../../gen/telephony__drafts.effect.vibe"
 import {

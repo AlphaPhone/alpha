@@ -3,9 +3,9 @@ import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import {
   type PhoneWorkflowCatalog, type PhoneWorkflowSpec, type PhoneWorkflowTrigger, type RemoteWorkflow, WorkflowActivationRejected, WorkflowLifecycleRejected,
   WorkflowMetadataRejected, WorkflowPauseRejected, WorkflowResponseInvalid, WorkflowTypedRejected, phoneTriggerClockChangeNote, workflowSpecDigest, workflowUuid,
-} from "@elizaos/plugin-workflow/client"
+} from "@elizaos/plugin-workflow-client"
 import { type TypedTrigger, generatedKeepsSchedule, missedWindowMs, validTrigger } from "../../gen/workflows__scheduling.effect.vibe"
-import { type WorkflowScopeCategory, checkWorkflowScope } from "@elizaos/plugin-workflow/scope"
+import { type WorkflowScopeCategory, checkWorkflowScope } from "@elizaos/plugin-workflow-client"
 import { type LifeOp, type LifeReply, Machine as LifecycleMachine, stored as lifecycleStored } from "../../gen/workflows__lifecycle.effect.vibe"
 import { type Category, Machine as DraftMachine, keptTextShown, scopeRefused, stored as draftStored } from "../../gen/workflows__authoring.effect.vibe"
 import { ownerKey } from "../platform/storage.vibe"

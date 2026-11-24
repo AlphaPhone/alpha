@@ -1,5 +1,5 @@
 // spec/notes/origins.md, "Story: Turn a note into an event or a reminder I review in Calendar"; spec/notes/origins.md, "The draft text is the note's open action items, then its open checklist items, then its body"; spec/notes/origins.md, "A link resolves only against the open collection it belongs to"; spec/notes/origins.md, "A link is stored only for a record that was saved, and retired with a durable deletion receipt"; spec/notes/share.md, "A share acts on the open note's snapshot, only while it is still the same note"
-import { noteLinkOf, noteOriginTitle, noteScheduleDraft, recordNoteRevision, resolveNoteLink, type NoteLink, type NoteScheduleDraft, type NoteScheduleKind } from "@elizaos/plugin-notes/client"
+import { noteLinkOf, noteOriginTitle, noteScheduleDraft, recordNoteRevision, resolveNoteLink, type NoteLink, type NoteScheduleDraft, type NoteScheduleKind } from "@elizaos/plugin-notes-client"
 import { linkStored, originLabel, originOpensEdited, originResolution, originRetires, type OriginLabel } from "../../gen/notes__origins.effect.vibe"
 import { NotesCollection } from "./collection.vibe"
 import type { NotesFilter } from "./list.vibe"

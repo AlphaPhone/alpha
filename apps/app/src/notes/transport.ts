@@ -1,5 +1,5 @@
 // spec/notes/collection.md, "Story: Read my notes under the account I am signed in as"
-import type { NotesTransport } from "@elizaos/plugin-notes/client";
+import type { NotesTransport } from "@elizaos/plugin-notes-client";
 
 /** A resident answer that refused the request, with its HTTP status. */
 export class ResidentAnswerRefused extends Error {

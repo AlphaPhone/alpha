@@ -6,7 +6,7 @@ import type { CardState } from "../../gen/assistant__approvals.ts"
 import type { EmailCard } from "../../gen/assistant__emailCard.ts"
 import { offerAccepted, validDraft } from "../../gen/assistant__emailCard.effect.vibe"
 import { StagedEmail } from "./payloads.schema.vibe"
-import { systemNoticeText as storedNoticeText } from "@elizaos/core/protocol"
+import { systemNoticeText as storedNoticeText } from "@elizaos/core"
 import { systemNoticeText } from "./presentation.vibe"
 import { classify, type Segment } from "./reply-lines.vibe"
 

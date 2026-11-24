@@ -1,5 +1,5 @@
 // spec/camera/media.md, "Story: Ask Alpha about the photo I am looking at"; spec/camera/media.md, "Story: Send a photo only as a reviewed copy"; spec/camera/scanDialogs.md, "Story: Review the text I scanned before anything is saved"; spec/camera/agentCapture.md, "Story: Let the assistant take the photo I asked for"; spec/camera/libraryReview.md, "Photos operations reach a phone only when the assistant and the phone both offer their capability"
-import type { ExecutorCall } from "@elizaos/agent/client"
+import type { ExecutorCall } from "@elizaos/agent"
 
 /** A photo reviewed for the conversation that asked about it. */
 export interface PhotoAttachment {

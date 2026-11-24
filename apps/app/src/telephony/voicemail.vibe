@@ -1,5 +1,5 @@
 // spec/telephony/voicemail.md, "Story: See my voicemail only when my carrier offers it"; spec/telephony/voicemail.md, "Opening a voicemail asks for its audio once, and a carrier transcript is shown as it is"; spec/telephony/voicemail.md, "Playing marks a voicemail heard, and nothing plays during a call or behind the lock"; spec/telephony/voicemail.md, "A transcript is made on this phone or not at all"; spec/telephony/voicemail.md, "A delete needs the owner's confirmation of the open voicemail, and a refused delete keeps it"; spec/telephony/phone.md, "The Voicemail tab exists only while the carrier's visual voicemail is ready"
-import type { VoicemailId, VoicemailListing } from "@elizaos/os/bridges/phone"
+import type { VoicemailId, VoicemailListing } from "@elizaos/os-bridges"
 import { Machine as CallBarMachine } from "../../gen/telephony__callBar.effect.vibe"
 import { Machine as PhoneMachine } from "../../gen/telephony__phone.effect.vibe"
 import { Machine as VoicemailMachine, type Event as VoicemailEvent, type Voicemail, type VoicemailAnswer, type VoicemailWritten } from "../../gen/telephony__voicemail.effect.vibe"

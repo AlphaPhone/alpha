@@ -1,5 +1,5 @@
 // spec/agent/host/launch.md, "Story: Start the agent from one launch document"; spec/agent/host/launch.md, "Story: Keep the credential out of every file and reply"; spec/agent/models/binding.md, "Story: Answer with the backend the host chose"
-import { decodeLaunchDocument, type LaunchDocument } from "@elizaos/agent/launch"
+import { decodeLaunchDocument, type LaunchDocument } from "@elizaos/agent"
 import { agentCloudBase, cloudEnvironments, type ClientDeployment, type ClientEnvironment } from "./deployment.vibe"
 import { alphaModel } from "./profile.vibe"
 

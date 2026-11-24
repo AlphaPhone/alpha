@@ -8,7 +8,7 @@ import { contradicts } from "../../gen/assistant__review.ts"
 import { browserCommand, ownPhotoRequest, targetOf, writtenNumbers } from "../../src/assistant/grounding.vibe"
 import { StoredSuggestion } from "../../src/assistant/payloads.schema.vibe"
 import { actionResultText, copy, cutOffText, failureKindOf, failureText, receiptTitle, unsyncedSummary } from "../../src/assistant/presentation.vibe"
-import { systemNoticeText as storedNoticeText } from "@elizaos/core/protocol"
+import { systemNoticeText as storedNoticeText } from "@elizaos/core"
 import { emailDraftOf, historyRows, replyNotices } from "../../src/assistant/transcript.vibe"
 
 it.effect("Understand why a reply did not finish (spec/assistant/reply.md, \"A failure refused before any output replaces the streamed text; any other failure is added after it\")", () => effect {

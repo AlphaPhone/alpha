@@ -1,4 +1,4 @@
-// spec/notes/previous-device.md, "Story: Read Notes kept by an earlier installation of Alpha"
+// spec/notes/previousDevice.md, "Story: Read Notes kept by an earlier installation of Alpha"
 import { deepEqual, rejects } from "node:assert/strict";
 import { test } from "vitest";
 import { previousDeviceSlots, readPreviousDeviceNotes } from "../../src/notes/previous-device-notes.ts";

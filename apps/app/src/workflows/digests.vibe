@@ -1,10 +1,10 @@
 // spec/workflows/digests.md, "Story: See my digests and the newest brief, read only for my account"; spec/workflows/digests.md, "Story: Change a digest once, even when the answer is lost"; spec/workflows/digests.md, "Run now is offered only for a missed occurrence the agent offers, never for an overlap or an unavailable source"; spec/workflows/digests.md, "Story: Read a digest's state plainly"; spec/workflows/digests.md, "Pausing or resuming keeps the saved time, zone and source"; spec/workflows/digestInbox.md, "Story: Keep every digest result on my phone before my agent is told I have it"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { WorkflowHttpError } from "@elizaos/plugin-workflow/client"
+import { WorkflowHttpError } from "@elizaos/plugin-workflow-client"
 import {
   type DigestInbox, type DigestLoop, type DigestResult, type DigestSource, type HostedDigestMutationPath, type MissedRunNow, HostedSourceRejected, digestInbox,
   digestRan, digestSourceState, missedRunNowOffers, parseDigestResult,
-} from "@elizaos/plugin-workflow/digests"
+} from "@elizaos/plugin-workflow-client"
 import { type LoopRow, type MutationReply, type ResultRow, Machine as PanelMachine, briefOf, loopWord, runNowOffered, runNowRequestValid, stored as panelStored } from "../../gen/workflows__digests.effect.vibe"
 import { Machine as QueueMachine, machine as queueMachine } from "../../gen/workflows__digestInbox.effect.vibe"
 import { Build } from "../platform/build.vibe"

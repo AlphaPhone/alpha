@@ -1,7 +1,7 @@
 // spec/notes/list.md, "The list holds every row once, pinned rows first, then by time, ties in stored order"; spec/notes/list.md, "A record is shown as its kind only when it carries that kind's data"; spec/notes/list.md, "A row carries only an opaque recording handle, checked against its own recording"; spec/notes/list.md, "A row is shown when it matches every part of the filter"; spec/notes/list.md, "A Notes route opens one note or shows one list filter, and the plain list otherwise"; spec/notes/list.md, "A default title takes the next number after the highest one in use, Trash included"; spec/notes/list.md, "Only a named, quoted or plainly titled note opens locally; a relative reference goes to the agent"; spec/notes/list.md, "A checked item is written with an [x] mark, and an unchecked item that looks marked gets an empty mark"
 import { itemMark, nextDefaultNumber, opensLocally, routeAsk, rowMatches, shownKind, shownOrder, voiceAudioValid, type NoteKind } from "../../gen/notes__list.effect.vibe"
-import { authoredNoteText } from "@elizaos/plugin-notes/format"
-import { projectNoteForModel, reconstructNoteContent, type NoteFormat, type StickyNote } from "@elizaos/plugin-notes/types"
+import { authoredNoteText } from "@elizaos/plugin-notes-client"
+import { projectNoteForModel, reconstructNoteContent, type NoteFormat, type StickyNote } from "@elizaos/plugin-notes-client"
 
 /** A note's kind as the records name it. */
 export type KindName = "text" | "list" | "voice" | "link"

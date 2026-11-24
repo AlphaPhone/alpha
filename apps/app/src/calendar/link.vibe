@@ -3,8 +3,8 @@ import {
   type GoogleLink, type GoogleRow, type LinksReply, type PauseReport, type Event as LinkEvent,
   Machine as LinkMachine, accessContinuation, googleRow, grantOf, pauseNeeded, pauseReport,
 } from "../../gen/calendar__googleLink.effect.vibe"
-import { controlOperationKey, type LinkedCalendarCandidate, type LinkedCalendarDestination } from "@elizaos/plugin-calendar/linked-sync"
-import type { LinkedCalendarControlView } from "@elizaos/plugin-calendar/client"
+import { controlOperationKey, type LinkedCalendarCandidate, type LinkedCalendarDestination } from "@elizaos/plugin-calendar"
+import type { LinkedCalendarControlView } from "@elizaos/plugin-calendar"
 import { type GoogleAccount, GoogleAccounts } from "../account/google.vibe"
 import { Resident } from "../platform/resident.vibe"
 import { Navigation } from "../shell/navigation.vibe"

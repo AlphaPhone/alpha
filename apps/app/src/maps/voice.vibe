@@ -1,5 +1,5 @@
 // spec/maps/vocabulary.md, "A Google place is never saved, shared, renamed or copied, and Google guidance is never spoken"; spec/maps/guidance.md, "A fix guides only when usable, and only for the current session"
-import { navigationVoice } from "@elizaos/plugin-maps/client/guidance"
+import { navigationVoice } from "@elizaos/plugin-maps-client"
 import { MapsContent } from "./content.vibe"
 import { GuidanceSpeaker } from "./ports.vibe"
 

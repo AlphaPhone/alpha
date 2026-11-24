@@ -1,5 +1,5 @@
 // spec/telephony/drafts.md, "Only the owner's Send binds a draft to an operation, and Send again reuses the bound operation"
-import type { MessagesNativePlugin } from "@elizaos/os/bridges/definitions/messages";
+import type { MessagesNativePlugin } from "@elizaos/os-bridges";
 
 /** How long the owner's send waits for the composer's reply before its outcome reads unknown. */
 export const COMPOSER_REPLY_MS = 30_000;

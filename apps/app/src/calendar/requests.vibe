@@ -5,11 +5,11 @@ import { checkOffered } from "../../gen/calendar__availability.effect.vibe"
 import {
   type AvailabilityOutcome, type AvailabilitySource, type NamedCalendarReadContext, type NamedReadOutcome,
   executeCalendarAvailability, executeNamedCalendarRead, CALENDAR_CAPABILITY, CALENDAR_NAMED_READ_CAPABILITY,
-} from "@elizaos/plugin-calendar/client"
+} from "@elizaos/plugin-calendar"
 import {
   type CalendarAvailabilityOperation, type CalendarAvailabilityResult, type ReadAnswer, type SourcesAnswer, AvailabilityUnavailable,
-} from "@elizaos/plugin-calendar/availability"
-import { NamedReadUnavailable } from "@elizaos/plugin-calendar/client"
+} from "@elizaos/plugin-calendar"
+import { NamedReadUnavailable } from "@elizaos/plugin-calendar"
 import { Native } from "../platform/native.vibe"
 import { decodeAccess, decodeAgentReply, decodeAvailability, decodeAvailabilitySources } from "./device.schema.vibe"
 import { deviceZone } from "./time.ts"

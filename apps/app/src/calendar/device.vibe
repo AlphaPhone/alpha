@@ -1,8 +1,8 @@
 // spec/calendar/device.md, "Story: Create an event on my phone without making it twice"; spec/calendar/device.md, "Story: Edit or delete exactly the event I reviewed"; spec/calendar/device.md, "Story: Read my device calendars over a range that makes sense"; spec/calendar/selection.md, "Story: Let the assistant act only on the event I have open"
 import { type DeviceWrites, type Event as DeviceEvent, type InspectReply, type EditReply, type DeleteReply, Machine as DeviceMachine, readLimited } from "../../gen/calendar__device.effect.vibe"
 import { type CalendarSelection, type Event as SelectionEvent, Machine as SelectionMachine, exposed } from "../../gen/calendar__selection.effect.vibe"
-import { readClearsHold, deleteScope } from "@elizaos/plugin-calendar/series"
-import { readRange } from "@elizaos/os/bridges/calendar"
+import { readClearsHold, deleteScope } from "@elizaos/plugin-calendar"
+import { readRange } from "@elizaos/os-bridges"
 import { Native } from "../platform/native.vibe"
 import {
   type DeviceCalendarRecord, type DeviceEventRecord, decodeAccess, decodeCreations, decodeHandoff, decodeInspect, decodeList, decodeOptions,

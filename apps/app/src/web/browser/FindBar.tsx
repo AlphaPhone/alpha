@@ -1,7 +1,7 @@
 // spec/browser/session.md, "Typing changes the query, and a debounced search reaches only the tab that still shows the bar, with the query it still holds"; spec/browser/session.md, "Next and previous step through matches only when there are matches, and closing clears the native search"
 import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { BROWSER_FIND_TEXT_MAX } from "@elizaos/plugin-browser/contract";
+import { BROWSER_FIND_TEXT_MAX } from "@elizaos/plugin-browser";
 import { type Session, canMoveFind } from "../../../gen/browser__session.ts";
 import { Button, Input } from "../components/ui/index.ts";
 import { HOST_CHROME } from "./measure.ts";

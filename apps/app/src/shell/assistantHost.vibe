@@ -1,5 +1,5 @@
 // spec/assistant/index.md, "The assistant observes the screen only while it is visible, unlocked and not private"; spec/shell/navigation.md, "Story: Keep the assistant within reach"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/voice/conversation.md, "Voice starts only from the owner, on a lit, visible phone with no sensitive screen, no reset and no call"
-import { comparePeer, learnPeer, statusRead, statusReadFailed, type PeerSupport, type StatusRead } from "@elizaos/agent/client"
+import { comparePeer, learnPeer, statusRead, statusReadFailed, type PeerSupport, type StatusRead } from "@elizaos/agent"
 import { AssistantHost, type AgentIdentity, type PeerFacts, type ScreenFacts } from "../assistant/host.vibe"
 import { DeviceExecutors, type OperationPorts } from "../assistant/review.vibe"
 import { AccountBindings, ownRouteOf, usableSession } from "../account/bindings.vibe"

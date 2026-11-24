@@ -1,5 +1,5 @@
 // spec/telephony/messages.md, "Story: Read my conversations while Messages is open"; spec/telephony/messages.md, "Story: Open a conversation"; spec/telephony/messages.md, "Story: Start a new message"; spec/telephony/messages.md, "Story: Find a conversation"; spec/telephony/messages.md, "Story: Copy or delete one message"; spec/telephony/drafts.md, "Story: Send only what I reviewed, once"; spec/telephony/comms.md, "Story: Address the person or Alpha from one bar"
-import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone";
+import { normalizePhoneNumber } from "@elizaos/os-bridges";
 import { ArrowLeft, Phone as PhoneIcon, Plus, Search, X } from "lucide-react";
 import { useCallback, useState } from "react";
 import { slotOf } from "../../../gen/telephony__drafts.ts";

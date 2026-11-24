@@ -2,7 +2,7 @@
 // spec/cloud/deployment.md, "Story: Configure a deployment from one reviewed profile"; spec/cloud/operator.md, "Story: Operate the deployment without reading secrets"
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"
-import type { CloudEnvironment } from "@elizaos/cloud/profile"
+import type { CloudEnvironment } from "@elizaos/cloud"
 import { checkOutputs, deploymentOutputs, selectDeployment, writeOutputs } from "./deployment.vibe"
 import { localProfile, OperatorInputs, readAlphaProfile } from "./profile.vibe"
 import { applyArguments, environmentRegistration, registrationFile, seedDocument, type AppIdentity, type ReleaseSigner } from "./registration.vibe"

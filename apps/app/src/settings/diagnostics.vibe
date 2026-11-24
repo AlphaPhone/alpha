@@ -1,5 +1,5 @@
 // spec/settings/diagnostics.md, "Story: See what went wrong and share it with support"; spec/settings/diagnostics.md, "Story: Read the licences Alpha ships"; spec/settings/native.md, "The problem log keeps fifty entries, newest last, with only the fields its source allows"
-import { sanitizeCrashEntries, type NativeCrashEntry } from "@elizaos/os/bridges/system"
+import { sanitizeCrashEntries, type NativeCrashEntry } from "@elizaos/os-bridges"
 import { type Export, type Notice, type Problem, Machine, mayRecordInference } from "../../gen/settings__diagnostics.effect.vibe"
 import type { DeviceRead } from "../../gen/settings__facts.ts"
 import { Build } from "../platform/build.vibe"

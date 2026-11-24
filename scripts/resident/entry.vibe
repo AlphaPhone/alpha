@@ -1,9 +1,8 @@
 // spec/agent/plugins/bundle.md, "A consumer entry ships only as a named package's code inside the source root, and passes the same load smoke as the generated entry"; spec/agent/plugins/bundle.md, "A host module is named only for a bundled package that is not an agent module, and runs with its entry's services over the resident's platform layer"; spec/agent/plugins/profile.md, "A host service never takes an agent service's name"; spec/agent/host/process.md
-import { runAgentCli } from "@elizaos/agent/cli"
-import type { AgentPlugin, ModuleFactory } from "@elizaos/agent"
+import { runAgentCli, type AgentPlugin, type ModuleFactory } from "@elizaos/agent-host"
 import { localInferenceModule, localInferencePluginName } from "@elizaos/plugin-local-inference"
 import * as localInference from "@elizaos/plugin-local-inference"
-import { AndroidInferenceEngine, androidInferenceLayer } from "@elizaos/os/inference"
+import { AndroidInferenceEngine, androidInferenceLayer } from "@elizaos/os"
 import * as assistant from "@elizaos/plugin-personal-assistant"
 import * as calendar from "@elizaos/plugin-calendar"
 import * as inbox from "@elizaos/plugin-inbox"

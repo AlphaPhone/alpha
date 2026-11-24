@@ -1,8 +1,8 @@
 // spec/maps/guidance.md, "A fix guides only when usable, and only for the current session"; spec/maps/vocabulary.md, "A spoken instruction is keyed by its route, step and distance band"
 import type { Reading } from "../../gen/maps__guidance.ts"
 import { bandOf } from "../../gen/maps__vocabulary.effect.vibe"
-import type { Position } from "@elizaos/plugin-maps/client/location"
-import { distanceToRoute, routeProgress } from "@elizaos/plugin-maps/client/route-distance"
+import type { Position } from "@elizaos/plugin-maps-client"
+import { distanceToRoute, routeProgress } from "@elizaos/plugin-maps-client"
 import type { Coordinate, Route } from "./maps.schema.vibe"
 
 export type { Position }

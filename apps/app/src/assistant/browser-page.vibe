@@ -1,5 +1,5 @@
 // spec/assistant/context.md, "Story: Let my agent read the page I have open in Browser"; spec/assistant/context.md, "A turn carries the page Browser hands it for the observed tab, beside the observation, only to a peer that declares it"
-import type { BrowserPage as WirePage } from "@elizaos/agent/client"
+import type { BrowserPage as WirePage } from "@elizaos/agent"
 import { asksForPage, sendsBrowserPage } from "../../gen/assistant__context.effect.vibe"
 import type { BrowserPage, BrowserPages, ObservedTab, PageObservation } from "./ports.vibe"
 

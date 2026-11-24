@@ -1,5 +1,5 @@
 // spec/workflows/index.md; spec/workflows/place.md, "Story: Move inside Workflows and come back with Back"; spec/workflows/automations.md, "Story: See all my automations even when one source fails"; spec/workflows/runs.md, "A notice opens exactly the run it names"; spec/workflows/clockDraft.md, "Story: Set an alarm a workflow suggests, from Workflows"; spec/workflows/digestSources.md, "Story: Renew my phone source before its week ends"; spec/workflows/digestSources.md, "Removing a grant Account names needs only Alpha in front, and clears this session's grant only once confirmed"; spec/workflows/authoring.md, "The unsent description is kept for its owner across closing and reopening"
-import type { MissedRunNow } from "@elizaos/plugin-workflow/digests";
+import type { MissedRunNow } from "@elizaos/plugin-workflow-client";
 import { Effect } from "effect";
 import { ArrowLeft, Plus } from "lucide-react";
 import { useState } from "react";

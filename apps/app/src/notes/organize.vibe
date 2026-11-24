@@ -2,12 +2,12 @@
 import {
   NOTES_LIST_FILTER_CAPABILITY, NOTES_ORGANIZE_CAPABILITY, NOTES_RECORD_CAPABILITY, type NotesDeviceContext, type NotesOrganizeOperation,
   decodeNotesOrganizeOperation, describeNotesOrganizeOperation, notesOrganizeContextAllowed, notesOrganizeOffered, notesOrganizeRunsDirectly,
-} from "@elizaos/plugin-notes/organize"
-import type { NoteJson } from "@elizaos/plugin-notes/types"
+} from "@elizaos/plugin-notes-client"
+import type { NoteJson } from "@elizaos/plugin-notes-client"
 import {
   type ReceiptStatus, type RestoreResult, folderCreateReceipt, moveReceipt, recordStartReceipt, recordStopReceipt, restoreReceipt,
 } from "../../gen/notes__organize.effect.vibe"
-import { recordNoteRevision } from "@elizaos/plugin-notes/client"
+import { recordNoteRevision } from "@elizaos/plugin-notes-client"
 import { NotesCollection } from "./collection.vibe"
 import { NotesEditor } from "./editor.vibe"
 import { NotesFolders } from "./folders.vibe"

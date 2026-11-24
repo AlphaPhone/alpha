@@ -1,7 +1,7 @@
 // spec/calendar/deletions.md, "Story: Undo a deletion before it is sent"; spec/calendar/deletions.md, "The window ends only once its Undo notice is no longer shown"; spec/calendar/deletions.md, "Leaving the app sends a waiting deletion at once; another account or session drops it unsent"
 import { type DeferredDeletes as HeldState, type Event as HeldEvent, type HideScope, Machine as HeldMachine, hides } from "../../gen/calendar__deletions.effect.vibe"
-import { deleteUndoMs } from "@elizaos/os/bridges/deletion-window"
-import type { CalendarDeleteRequest } from "@elizaos/plugin-calendar/client"
+import { deleteUndoMs } from "@elizaos/os-bridges"
+import type { CalendarDeleteRequest } from "@elizaos/plugin-calendar"
 import { Notices } from "../shell/notices.vibe"
 
 /** A write scope of a repeating event, as upstream series scope names it. */

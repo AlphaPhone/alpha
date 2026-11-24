@@ -1,5 +1,5 @@
 // spec/files/preview.md, "A shown document is the device's selection of one file and what Files knew of it"
-import { parentOf } from "@elizaos/plugin-files/client";
+import { parentOf } from "@elizaos/plugin-files-client";
 import type { FileKind } from "../../../gen/files__storage.ts";
 import { Button, Dialog, DialogContent, DialogTitle } from "../components/ui/index.ts";
 import { countLabel, formatSize, fullDate, locationLabel, typeLabel } from "./format.ts";

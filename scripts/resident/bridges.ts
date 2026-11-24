@@ -5,12 +5,11 @@ import {mkdir, readFile, rename, writeFile} from 'node:fs/promises';
 import {connect} from 'node:net';
 import path from 'node:path';
 import {Effect} from 'effect';
-import {workflowDeviceOffer, type WorkflowDeviceOffer, type WorkflowStep, type WorkflowStepTarget} from '@elizaos/agent';
-import type {AgentCli, ResidentHost} from '@elizaos/agent/cli';
-import {MapsFailure} from '@elizaos/plugin-maps/client/contracts';
+import {workflowDeviceOffer, type AgentCli, type ResidentHost, type WorkflowDeviceOffer, type WorkflowStep, type WorkflowStepTarget} from '@elizaos/agent-host';
+import {MapsFailure} from '@elizaos/plugin-maps-client';
 import type {AgentSavedPlaceStore, StoredSaves} from '@elizaos/plugin-maps';
 import {WORKFLOW_DEVICE_SERVICE, WORKFLOW_NATIVE_DIGEST_SERVICE} from '@elizaos/plugin-workflow';
-import {workflowCalendarRevisionInput, workflowSha} from '@elizaos/plugin-workflow/client';
+import {workflowCalendarRevisionInput, workflowSha} from '@elizaos/plugin-workflow-client';
 
 type ServiceClass = ReturnType<NonNullable<AgentCli['runtimeServices']>>[number];
 type Runtime = Parameters<ServiceClass['start']>[0];

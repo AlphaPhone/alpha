@@ -70,7 +70,7 @@ export function alphaCloud(args: string[], env: NodeJS.ProcessEnv = process.env)
 
 /** Run upstream's `elizaos-cloud` from the workspace with the given environment (secrets included, never logged). */
 function elizaosCloud(args: string[], env: NodeJS.ProcessEnv) {
-  const main = path.join(root, 'vendor/eliza/packages/cloud/src/main.vibe');
+  const main = path.join(root, 'vendor/eliza/packages/cloud-worker/src/main.vibe');
   const result = spawnSync(process.execPath, ['--conditions=eliza-source', '--import', 'vibelang/register', main, ...args], {cwd: cloudDir, stdio: 'inherit', env});
   if (result.status !== 0) throw new Error(`elizaos-cloud ${args.slice(0, 2).join(' ')} failed (exit ${result.status})`);
 }

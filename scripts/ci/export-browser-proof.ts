@@ -92,7 +92,7 @@ if(mode==='renderer'){
 }else{
  // The artifact scripts/build-workflow-worker.ts built, checked by upstream's verifier against this checkout's identity.
  const {Effect}=await import('effect');
- const {verifyWorkerArtifact}=await import('@elizaos/plugin-workflow/worker');
+ const {verifyWorkerArtifact}=await import('@elizaos/plugin-workflow-worker');
  const {workerIdentity}=await import('../build-workflow-worker.ts');
  const identity=workerIdentity();
  const worker=await Effect.runPromise(verifyWorkerArtifact(source,identity));

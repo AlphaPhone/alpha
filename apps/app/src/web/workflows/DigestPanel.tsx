@@ -1,5 +1,5 @@
 // spec/workflows/digests.md, "Story: See my digests and the newest brief, read only for my account"; spec/workflows/digests.md, "Story: Change a digest once, even when the answer is lost"; spec/workflows/digests.md, "Story: Read a digest's state plainly"; spec/workflows/hostedResults.md, "A result shown in the panel withdraws its notice, and the panel's scope posts silently"
-import type { MissedRunNow } from "@elizaos/plugin-workflow/digests";
+import type { MissedRunNow } from "@elizaos/plugin-workflow-client";
 import { Newspaper } from "lucide-react";
 import { useState } from "react";
 import { loopWord, type Digests, type LoopRow, type ResultRow } from "../../../gen/workflows__digests.ts";

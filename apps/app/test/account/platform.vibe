@@ -1,5 +1,5 @@
 // spec/account/session.md, "Story: Sign in once for Cloud's managed services"; spec/account/enrollment.md, "Story: Let my agent act on my phone once it knows this phone"
-import { createCloudClient } from "@elizaos/cloud/client"
+import { createCloudClient } from "@elizaos/cloud"
 import { Build } from "../../src/platform/build.vibe"
 import { elizaCloud } from "../../src/platform/build-flags.ts"
 import { Cloud, CloudUnavailable } from "../../src/platform/cloud.vibe"

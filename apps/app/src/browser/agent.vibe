@@ -1,6 +1,6 @@
 // spec/browser/session.md, "Story: Let the agent open and drive my tabs"; spec/browser/session.md, "Story: Close every tab from one listed review"; spec/browser/agent.md, "Story: Open the site I asked for"; spec/browser/agent.md, "Story: Go back, forward or reload only on the page I was looking at"; spec/browser/agent.md, "The native call names the admitted revision, is sent at most once per claim, and its result is a dispatch, never a finished page"; spec/browser/pageContext.md, "The agent has no separate page read: a page-text request is refused with where the page comes from, and only back, forward and reload are view commands"
-import { type BrowserControlOperation, browserControlReviewNotice, describeBrowserControl, parseBrowserControl, parseBrowserNavigate } from "@elizaos/plugin-browser/contract"
-import { observedTabCurrent, parseNativeHistoryCommand } from "@elizaos/plugin-browser/native-command"
+import { type BrowserControlOperation, browserControlReviewNotice, describeBrowserControl, parseBrowserControl, parseBrowserNavigate } from "@elizaos/plugin-browser"
+import { observedTabCurrent, parseNativeHistoryCommand } from "@elizaos/plugin-browser"
 import { type AgentOutcome, type AgentSettled, type BrowserTab, type Event as SessionEvent, type ListedTab, curTab, isPrivateTab, keptOf, listingCurrent, listingOf, selectionOf, visibleTabs } from "../../gen/browser__session.effect.vibe"
 import { type Preference, Machine, machine } from "../../gen/browser__agent.effect.vibe"
 import type { PageCommand } from "../../gen/browser__page.ts"

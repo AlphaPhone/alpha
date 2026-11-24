@@ -1,5 +1,5 @@
 // spec/cloud/deployment.md, "Story: Configure a deployment from one reviewed profile"; spec/cloud/deployment.md, "Story: Answer only the deployment's own callers"
-import type { CloudEnvironment, CloudProfile } from "@elizaos/cloud/profile"
+import type { CloudEnvironment, CloudProfile } from "@elizaos/cloud"
 import { alphaModel, type EnvironmentInputs } from "./profile.vibe"
 import { registryVariable, type SeedClient } from "./registration.vibe"
 import { sha256Hex } from "./digest.ts"

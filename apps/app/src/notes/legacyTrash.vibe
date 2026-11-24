@@ -1,6 +1,6 @@
 // spec/notes/trash.md, "Story: Keep the notes I deleted before this version"; spec/notes/trash.md, "An earlier device Trash row comes into the canonical Trash once, and the device slot clears only after every row is settled"
-import { parseNoteFormat } from "@elizaos/plugin-notes/format"
-import type { NoteFormat, NoteJson, NotesSnapshot } from "@elizaos/plugin-notes/types"
+import { parseNoteFormat } from "@elizaos/plugin-notes-client"
+import type { NoteFormat, NoteJson, NotesSnapshot } from "@elizaos/plugin-notes-client"
 import { legacyRowKept, legacySlotClears } from "../../gen/notes__trash.effect.vibe"
 import { NotesCollection } from "./collection.vibe"
 import { contentOf } from "./list.vibe"

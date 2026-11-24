@@ -1,5 +1,5 @@
 // spec/telephony/phoneInfo.md, "The page reads only while it is in front, and leaving forgets what it read"; spec/telephony/phoneInfo.md, "Without phone-state access the SIM list reads as unread, never as no SIM"; spec/telephony/phoneInfo.md, "An identifier the launcher cannot read is shown on Android's own status screen"
-import type { PhoneInfo, PhoneLine, PhoneNetworkType, TelephonyStatus, VoicemailListing } from "@elizaos/os/bridges/phone"
+import type { PhoneInfo, PhoneLine, PhoneNetworkType, TelephonyStatus, VoicemailListing } from "@elizaos/os-bridges"
 import { Machine as FactsMachine, type Event as FactsEvent, type Holders, type Line, type Network, type VoicemailSetup } from "../../gen/telephony__phoneInfo.effect.vibe"
 import { Native } from "../platform/native.vibe"
 import { callerOf, TelephonyBridges } from "./bridges.vibe"

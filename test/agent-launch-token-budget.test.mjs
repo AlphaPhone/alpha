@@ -27,8 +27,8 @@ test('the phone launches its agent with secret swap and no retired cap or hold s
 
 test('the pinned runtime sends no output cap and keeps references stable without a setting', () => {
   // The agent's chat request carries a cap only when its caller asks for one; no setting adds one.
-  assert.match(read('vendor/eliza/packages/agent/src/models/chat.vibe'), /params\.maxTokens === undefined \? \{ tag: "NoCapAsked" \}/);
-  for (const file of ['packages/agent/src/conversation/planning.vibe', 'packages/agent/src/models/binding.vibe', 'packages/agent/src/device-actions/reply-draft.vibe'])
+  assert.match(read('vendor/eliza/packages/agent-host/src/models/chat.vibe'), /params\.maxTokens === undefined \? \{ tag: "NoCapAsked" \}/);
+  for (const file of ['packages/agent-host/src/conversation/planning.vibe', 'packages/agent-host/src/models/binding.vibe', 'packages/agent-host/src/device-actions/reply-draft.vibe'])
     assert.doesNotMatch(read(`vendor/eliza/${file}`), /PLANNER_DEFAULT_MAX_TOKENS|ELIZA_PLANNER_MAX_TOKENS|DRAFT_MAX_TOKENS|outputCapSettingsFromEnv/, file);
   const swap = read('vendor/eliza/packages/core/src/security/secret-swap.vibe');
   assert.match(swap, /SECRET_SWAP_ENABLED_SETTING = "ELIZA_SECRET_SWAP_ENABLED"/);
@@ -39,7 +39,7 @@ test('the pinned runtime sends no output cap and keeps references stable without
 // shorten how long a rate limit holds the account"); the phone sets none (first test), so the pinned
 // runtime's own handling of a refused step decides how long a turn waits.
 test('the pinned runtime reads the Cerebras rate-limit hold only as a launch override', () => {
-  const binding = read('vendor/eliza/packages/agent/src/models/binding.vibe');
+  const binding = read('vendor/eliza/packages/agent-host/src/models/binding.vibe');
   assert.match(binding, /holdSettings = \["OPENAI_RATE_LIMIT_MAX_HOLD_SECONDS", "CEREBRAS_RATE_LIMIT_MAX_HOLD_SECONDS"\]/);
   assert.match(binding, /maxHold: rateLimitHold\(launch\.environment\)/);
 });

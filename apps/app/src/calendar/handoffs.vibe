@@ -1,5 +1,5 @@
 // spec/calendar/drafts.md, "Story: Turn a note or a scan into an event I review"; spec/calendar/drafts.md, "A note or scan opens a draft only when no editor is open and the owner's slot is empty"
-import type { NoteScheduleDraft } from "@elizaos/plugin-notes/client"
+import type { NoteScheduleDraft } from "@elizaos/plugin-notes-client"
 import { NotesHandoff } from "../notes/origins.vibe"
 import { newId } from "../platform/ids.ts"
 import { Navigation } from "../shell/navigation.vibe"
