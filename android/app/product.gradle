@@ -62,6 +62,9 @@ android {
    ndk { abiFilters.addAll(runtimeAbis) }
   }
  }
+ // The staged Node runtime (scripts/stage-agent-runtime.ts) ships as the exact bytes its inventory and the
+ // Node lock name; the device refuses to start a runtime whose digest differs, so packaging never strips it.
+ packaging { jniLibs { keepDebugSymbols += ['**/libeliza_node.so'] } }
  defaultConfig {
   manifestPlaceholders.put('appLinkHost', appLinkHost)
   manifestPlaceholders.put('alphaUpdateChannel', 'public')
