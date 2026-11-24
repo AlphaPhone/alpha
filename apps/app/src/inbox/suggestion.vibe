@@ -4,7 +4,7 @@ import type { Effect as Out, Event, Target } from "../../gen/app__inbox__suggest
 import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Actor } from "../../gen/app__inbox__access.ts"
 import { held } from "../../gen/app__inbox__shelf.effect.vibe"
-import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { type Job, contained, hearing, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import { Letters, policy } from "./composer.vibe"
 import { Mail } from "./gmail.vibe"
@@ -114,7 +114,9 @@ export effect function useInEmail(text: string, source: string, aim: Aim): boole
   }
   const sent = try exit((try Suggestion.Machine).send(event, "Owner"))
   if (!Exit.isSuccess(sent)) return false
-  try ignore((try Shell).send({ type: "openView", view: "Inbox" }))
+  const shell = try Shell
+  if (!(showing(try shell.get(), "Inbox"))) try ignore(shell.send({ type: "openView", view: "Inbox" }))
+  try ignore(shell.send({ type: "raise", detent: "Bar" }))
   return true
 }
 

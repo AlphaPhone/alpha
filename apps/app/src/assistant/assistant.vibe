@@ -172,7 +172,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const known = board.known(chats.chosen)
     const request = board.postingRequest
     board.postingRequest = undefined
-    const text = request?.text ?? board.outgoing
+    const text = (request?.text ?? board.outgoing).trim()
     const held = (try (try Composer.Machine).get()).held
     const quoted = request === undefined && held.quote > 0 ? board.latest()[held.quote - 1] : undefined
     if (known === undefined || text === "") {
@@ -180,20 +180,8 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       Queue.endUnsafe(queue)
       return
     }
-    const mail = try MailQuestions
-    const includesMail = request === undefined && held.mail
-    const attachment = includesMail ? mail.attached() : undefined
-    const outgoing = attachment === undefined ? (includesMail ? undefined : text) : (withMail(text, attachment) catch () => undefined)
-    if (outgoing === undefined) {
-      mail.show({ failure: "changed" })
-      Queue.offerUnsafe(queue, { type: "refuse", ticket })
-      Queue.endUnsafe(queue)
-      return
-    }
     if (controller.conversation?.id !== known.record.id) try ignore(tryPromise(() => controller.bind(known.record)))
     const mine: Line = { id: `sent ${ticket}`, mine: true, text, ...(quoted === undefined ? {} : { quote: quoted.text }) }
-    board.append(mine)
-    board.lastSent = text
     let heard = false
     try ignore(reply.send({ type: "begin", turn: ticket }))
     board.change({ label: "", failure: undefined })
@@ -216,6 +204,21 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       },
     }
     const metadata = { ...observed(told, context), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
+    const mail = try MailQuestions
+    const includesMail = request === undefined && held.mail
+    const attachment = includesMail ? mail.attached() : undefined
+    const outgoing = attachment === undefined ? (includesMail ? undefined : text) : (withMail(text, attachment) catch () => undefined)
+    if (outgoing === undefined) {
+      mail.show({ failure: "changed" })
+      try ignore(reply.send({ type: "decline", turn: ticket }))
+      Queue.offerUnsafe(queue, { type: "refuse", ticket })
+      Queue.endUnsafe(queue)
+      return
+    }
+    board.append(mine)
+    board.lastSent = text
+    board.lastSentWire = outgoing
+    board.lastSentId = ""
     const result = tryPromise(() => controller.send({ text: outgoing, ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks })) catch () => undefined
     board.change({ reply: "", label: "" })
     board.lastSentId = result !== undefined && "clientMessageId" in result ? result.clientMessageId : ""
@@ -257,7 +260,7 @@ effect function checked(recheck: number): Conversation.Event!!(Agent | Talk | Ch
     const known = board.known(chats.chosen)
     if (known === undefined) return { type: "reconcile", ticket: recheck, found: "Unread" }
     const { messages } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(known.record.id)}/messages`), page())
-    const asked = messages.findLastIndex((one) => one.role === "user" && (board.lastSentId === "" ? one.text === board.lastSent : one.clientMessageId === board.lastSentId))
+    const asked = messages.findLastIndex((one) => one.role === "user" && (board.lastSentId === "" ? one.text === board.lastSentWire : one.clientMessageId === board.lastSentId))
     const found: Conversation.Found = asked < 0 ? "Unrecorded" : messages.slice(asked + 1).some((one) => one.role === "assistant") ? "Ended" : "Unended"
     return { type: "reconcile", ticket: recheck, found }
   } catch () => ({ type: "reconcile", ticket: recheck, found: "Unread" })
