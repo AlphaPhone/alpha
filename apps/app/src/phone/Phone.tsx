@@ -55,10 +55,7 @@ export function Phone({ runtime }: PhoneProps) {
     set({ digits });
     void send(event);
   };
-  const dialRecent = (row: TelephonyCallLogEntry) => {
-    set({ tapped: row.number });
-    void send({ type: "dialRecent" });
-  };
+  const dialRecent = (row: TelephonyCallLogEntry) => void send({ type: "dialRecent", number: row.number });
   const rows = state.rows > 0 ? dialer.rows : [];
   return (
     <section aria-label="Phone" className="flex flex-col gap-4 p-4">
@@ -87,7 +84,7 @@ export function Phone({ runtime }: PhoneProps) {
           {rows.length > 0 && (
             <ListGroup aria-label="Recent calls">
               {rows.map((row) => (
-                <RecentRow key={row.id} row={row} onCall={can({ type: "dialRecent" }) ? () => dialRecent(row) : undefined} />
+                <RecentRow key={row.id} row={row} onCall={can({ type: "dialRecent", number: row.number }) ? () => dialRecent(row) : undefined} />
               ))}
             </ListGroup>
           )}

@@ -14,16 +14,15 @@ import { judge, matches } from "./words.ts"
 /** The largest call-log page Phone reads: eliza's own bound. */
 export const recentsLimit = 50
 
-/** What Phone's machine counts, kept beside it: the recent calls last read, the one the owner tapped, the search, and the keypad's digits. */
+/** What Phone's machine counts, kept beside it: the recent calls last read, the search, and the keypad's digits. */
 export interface Dialing {
   readonly rows: ReadonlyArray<TelephonyCallLogEntry>
-  readonly tapped: string
   readonly sought: string
   readonly digits: string
   readonly matched: string
 }
 
-const none: Dialing = { rows: [], tapped: "", sought: "", digits: "", matched: "" }
+const none: Dialing = { rows: [], sought: "", digits: "", matched: "" }
 
 /** The numbers and rows behind Phone's counts: what the screens show and what a handoff dials. */
 export service Dialer {
@@ -80,9 +79,9 @@ effect function askLog(): Event!!Telephony {
 }
 
 // spec/app/phone/index.md, "Call hands the typed number to the dialer, only if the phone says it is a number it can dial"; spec/app/phone/index.md, "Tapping a recent call hands its number to the dialer"
-effect function handoff(ticket: number, typed: boolean): Event!!(Telephony | Dialer) {
+effect function handoff(ticket: number, typed: boolean, tapped: string): Event!!(Telephony | Dialer) {
   const held = try (try Dialer).get()
-  const number = typed ? held.digits : held.tapped
+  const number = typed ? held.digits : tapped
   const report = telephony("dial", (c) => c.phone.dial(number)) catch () => undefined
   return { type: "dialAnswered", ticket, opened: report?.dialStatus === "DialHandedOff" }
 }
@@ -94,7 +93,7 @@ function carry(fx: Out): Job<Event, Telephony | Dialer | Phone.Machine | SystemS
     when { tag: "AskLog" }: answer("ask", askLog(), { type: "logReported", grant: "Unasked" });
     when { tag: "OpenSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", 0) });
     when { tag: "MarkSeen" }: run("seen", effect {});
-    when { tag: "Handoff", let ticket, let source }: answer(`dial ${ticket}`, handoff(ticket, source === "TypedNumber"), { type: "dialAnswered", ticket, opened: false });
+    when { tag: "Handoff", let ticket, let source, let number }: answer(`dial ${ticket}`, handoff(ticket, source === "TypedNumber", number), { type: "dialAnswered", ticket, opened: false });
   }
 }
 

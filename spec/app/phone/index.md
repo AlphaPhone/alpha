@@ -53,7 +53,7 @@ pure val initial: Phone = {
 A read of the call log, a lookup of the typed number among the contacts,
 Android's prompt for call-log access, Android's Settings, marking missed
 calls seen, and a handoff to the dialer: of the typed number, or of a recent
-call's number.
+call's number, which the handoff names.
 
 ```quint
 type Source = TypedNumber | RecentCall
@@ -63,7 +63,7 @@ type Effect =
   | AskLog
   | OpenSettings
   | MarkSeen
-  | Handoff({ ticket: int, source: Source })
+  | Handoff({ ticket: int, source: Source, number: str })
 
 type Moved = { state: Phone, out: List[Effect] }
 
@@ -74,6 +74,7 @@ pure def handoffIn(out: List[Effect]): bool =
 ### What the simulator tries
 
 ```quint
+pure val numberValues = Set("", "+14155550100")
 pure val ticketValues = Set(1, 2, 3)
 pure val countValues = Set(-1, 0, 2)
 pure val weight_recentsRead = 3
@@ -315,21 +316,23 @@ number is.
 pure def dialable(s: Phone): bool =
   s.typed == Emergency or (s.typed == Dialable and s.carrier)
 
-pure def handOff(source: Source, s: Phone): Moved =
+pure def handOff(source: Source, number: str, s: Phone): Moved =
   val dial = R::ask(s.dial)
-  { state: { ...s, dial: dial, dialled: true, failedDial: false }, out: List(Handoff({ ticket: dial.ticket, source: source })) }
+  { state: { ...s, dial: dial, dialled: true, failedDial: false }, out: List(Handoff({ ticket: dial.ticket, source: source, number: number })) }
 
 pure def canDialTyped(s: Phone): bool = s.front and s.tab == Keypad and not(s.dialled) and dialable(s)
 
-pure def dialTyped(s: Phone): Moved = handOff(TypedNumber, s)
+pure def dialTyped(s: Phone): Moved = handOff(TypedNumber, "", s)
 ```
 
 ### Tapping a recent call hands its number to the dialer
 
-```quint
-pure def canDialRecent(s: Phone): bool = s.rows > 0 and s.carrier and not(s.dialled)
+The handoff names the number of the call tapped.
 
-pure def dialRecent(s: Phone): Moved = handOff(RecentCall, s)
+```quint
+pure def canDialRecent(s: Phone, number: str): bool = s.rows > 0 and s.carrier and not(s.dialled) and number != ""
+
+pure def dialRecent(s: Phone, number: str): Moved = handOff(RecentCall, number, s)
 ```
 
 ### One handoff is made each time Phone is showing
