@@ -1,32 +1,58 @@
-// spec/app/maps/index.md, "Story: Move between the screen's modes"; spec/app/maps/index.md, "Story: Search for a place"; spec/app/maps/index.md, "Story: Look at a place"; spec/app/maps/index.md, "Story: Get directions"; spec/app/maps/index.md, "Story: Navigate"; spec/app/maps/index.md, "Story: Use my location"; spec/app/maps/index.md, "Story: Let the agent help with Maps"
-import { Alert, Banner, Button, Input, ListGroup, ListRow, MapView, SearchField, Spinner } from "@repo/ui";
-import { Crosshair, Info, MapPin, Minus, Navigation, Plus, Share2, Star } from "lucide-react";
+// spec/app/maps/index.md, "Story: Move between the screen's modes"; spec/app/maps/index.md, "Story: Search for a place"; spec/app/maps/index.md, "Story: Look at a place"; spec/app/maps/index.md, "Story: Get directions"; spec/app/maps/index.md, "Story: Navigate"; spec/app/maps/index.md, "Story: Use my location"; spec/app/maps/index.md, "Story: Let the agent help with Maps"; spec/app/maps/credits.md, "Story: See the map for what I am looking at"
+import { Alert, Banner, Button, Input, ListGroup, ListRow, type MapCamera, type MapStyle, MapView, SearchField, Spinner } from "@repo/ui";
+import { Crosshair, Info, MapPin, Navigation, Share2, Star } from "lucide-react";
 import { useState, useSyncExternalStore } from "react";
 import type { Resident, Shown } from "../runtime/area.tsx";
+import { untimed } from "../runtime/reactor.vibe";
 import { useMachine as useScreen } from "../../gen/app__maps.react.ts";
-import { googleShown, mode } from "../../gen/app__maps.ts";
+import { googleShown, mode, panPixels } from "../../gen/app__maps.ts";
+import type { Maps as State, SavedNotice } from "../../gen/app__maps.ts";
 import type { Machine as ScreenMachine } from "../../gen/app__maps.effect.vibe";
 import { useMachine as useCredits } from "../../gen/app__maps__credits.react.ts";
+import { breaksThePlane, cameraAim, compassShown, northUpAfterGuidance, placeZoom, resultsMaxZoom, routeMaxZoom } from "../../gen/app__maps__credits.ts";
 import type { Machine as CreditsMachine } from "../../gen/app__maps__credits.effect.vibe";
-import { badgeOnly } from "../../gen/app__maps__connection.ts";
+import { badgeOnly, holding } from "../../gen/app__maps__connection.ts";
 import { offers } from "../../gen/app__maps__navigation.ts";
 import type { Travel } from "../../gen/app__maps__navigation.ts";
-import { type Spot, atlas } from "./atlas.vibe";
-import { type Point, pixelOf, pointIn } from "./geometry.ts";
-import { zoomed } from "./maps.vibe";
+import { hasRoom } from "../../gen/app__maps__places.ts";
+import { type Seen, type Spot, atlas } from "./atlas.vibe";
+import { degreesOf, pointIn } from "./geometry.ts";
+import googleMaps from "./google-maps-attribution.svg";
+import { coverageOf, settled, tile } from "./maps.vibe";
 
 const ways: ReadonlyArray<{ travel: Travel; label: string }> = [
   { travel: "Drive", label: "Drive" }, { travel: "Transit", label: "Transit" }, { travel: "Walk", label: "Walk" }, { travel: "Bicycle", label: "Bike" },
 ];
 
+/** The open map drawn where no provider is working, and outside the provider's coverage. */
+const worldStyle = "https://tiles.openfreemap.org/styles/bright";
+
+const notices: Record<SavedNotice, string> = {
+  NoNotice: "",
+  PlaceSaved: "Place saved on this device.",
+  PlaceRenamed: "Saved place renamed.",
+  PlaceRemoved: "Place removed from saved.",
+  NotKept: "Saved places could not be changed.",
+};
+
 const minutes = (seconds: number) => `${Math.max(1, Math.round(seconds / 60))} min`;
 const distance = (meters: number) => (meters < 1000 ? `${meters} m` : `${(meters / 1000).toFixed(1)} km`);
-const viewWidth = 360;
-const viewHeight = 288;
 
-/** A pin dropped where the owner typed coordinates, numbered as a place of the map. */
-function pinAt(at: Point, text: string): number {
-  return atlas.numberOf({ name: text.trim(), category: "Dropped pin", at, providerId: "", id: "", google: false });
+// spec/app/maps/credits.md, "The camera goes to what the owner picked, on every map"
+/** Where the camera goes for `state`, named so the map applies each aim once. */
+function cameraOf(state: State, seen: Seen, following: boolean): MapCamera {
+  const way = state.trip.route === 0 ? undefined : seen.ways.get(state.trip.route);
+  const spot = atlas.spot(state.place);
+  const results = state.place === 0 && state.search.status === "Loaded" ? seen.results.slice(0, state.results) : [];
+  const aim = cameraAim(following, way !== undefined, true, spot !== undefined, true, true, results.length);
+  if (aim === "FollowPhone" && seen.here !== undefined) return { kind: "follow", key: `here:${seen.here.at.lat}:${seen.here.at.lng}`, at: degreesOf(seen.here.at) };
+  if (aim === "FitRoute" && way !== undefined) return { kind: "fit", key: `route:${state.trip.route}`, points: way.line.map(degreesOf), maxZoom: routeMaxZoom };
+  if (aim === "CenterOnPlace" && spot !== undefined) return { kind: "centre", key: `place:${state.place}`, at: degreesOf(spot.at), zoom: placeZoom };
+  if (aim === "FitResults") {
+    const points = results.flatMap((place) => atlas.spot(place)?.at ?? []).map(degreesOf);
+    return { kind: "fit", key: `results:${state.search.ticket}`, points, maxZoom: resultsMaxZoom };
+  }
+  return northUpAfterGuidance(state.trip.journey > 0, following) ? { kind: "northUp", key: `north:${state.trip.journey}` } : { kind: "keep" };
 }
 
 /**
@@ -47,47 +73,51 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
   const now = mode(state);
   const spot: Spot | undefined = atlas.spot(state.place);
   const way = state.trip.route === 0 ? undefined : seen.ways.get(state.trip.route);
+  const coverage = coverageOf(state);
+  const tiles = coverage?.available ? coverage.tiles : undefined;
   const saved = state.saved.flatMap((entry) => {
     const found = atlas.spot(entry.place);
     return found === undefined ? [] : [{ ...entry, spot: found }];
   });
   const kept = saved.find((entry) => entry.place === state.place);
-  const centre = seen.tiles?.centre ?? spot?.at ?? seen.here?.at ?? { lat: 0, lng: 0 };
-  const zoom = seen.tiles?.zoom ?? seen.zoom;
-  const placed = (at: Point) => {
-    const { x, y } = pixelOf(at, centre, zoom, viewWidth, viewHeight);
-    return { x: x - viewWidth / 2, y: y - viewHeight / 2 };
+  const following = state.trip.guidance === "Going" && seen.here !== undefined;
+  const style: MapStyle = state.link.basemap === "Cloud" && tiles !== undefined
+    ? { kind: "raster", tileSize: tiles.tileSize, minZoom: tiles.minZoom, maxZoom: tiles.maxZoom, tile: (z, x, y, signal) => runtime.runPromise(tile(z, x, y, signal)) }
+    : { kind: "vector", url: worldStyle };
+  const shownPins = now === "Search" ? seen.results.slice(0, state.results) : state.place !== 0 ? [state.place] : [];
+  const pins = shownPins.flatMap((place) => {
+    const found = atlas.spot(place);
+    return found === undefined ? [] : [{ key: String(place), label: found.name, chosen: place === state.place, at: degreesOf(found.at) }];
+  });
+  const pick = (key: string) => {
+    const place = Number(key);
+    if (can({ type: "pickResult", place })) void send({ type: "pickResult", place });
   };
-  const pins = now === "Search" ? seen.results.slice(0, state.results) : state.place !== 0 ? [state.place] : [];
-  const markers = [
-    ...pins.flatMap((place) => {
-      const found = atlas.spot(place);
-      return found === undefined ? [] : [{ key: String(place), label: found.name, chosen: place === state.place, ...placed(found.at) }];
-    }),
-    ...(seen.here === undefined ? [] : [{ key: "here", label: "Your location", here: true, ...placed(seen.here.at) }]),
-  ];
+  const lift = () => { if (can({ type: "liftPress" })) void send({ type: "liftPress" }); };
   const submit = () => {
     const at = pointIn(typed);
-    if (at !== undefined && can({ type: "dropPin", place: 1 })) return void send({ type: "dropPin", place: pinAt(at, typed) });
+    if (at !== undefined && can({ type: "pinAt", lat: at.lat, lng: at.lng })) return void send({ type: "pinAt", lat: at.lat, lng: at.lng });
     if (can({ type: "search", query: typed.trim() })) void send({ type: "search", query: typed.trim() });
   };
+  const startAt = pointIn(start);
   const startFrom = () => {
-    const at = pointIn(start);
-    if (at === undefined || !can({ type: "planFrom", origin: "Coordinates" })) return;
-    atlas.startAt(at);
-    void send({ type: "planFrom", origin: "Coordinates" });
+    if (startAt !== undefined && can({ type: "planFrom", origin: "Coordinates", lat: startAt.lat, lng: startAt.lng })) {
+      void send({ type: "planFrom", origin: "Coordinates", lat: startAt.lat, lng: startAt.lng });
+    }
   };
   const turn = way?.turns[state.trip.turn];
   const after = way?.turns[state.trip.turn + 1];
   const ahead = way?.turns.slice(state.trip.turn) ?? [];
+  const room = hasRoom(state.saved, state.place);
   return (
     <section aria-label="Maps" className="flex flex-col gap-3 p-4">
-      {state.link.coverage.status === "Failed" && (
+      {state.link.coverage.status === "Failed" && !holding(state.link) && (
         <Banner variant="warn" action={can({ type: "connect" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "connect" })}>Retry</Button>}>
           Maps could not be reached.
         </Banner>
       )}
-      {state.link.account === 0 && <Alert variant="info">Sign in to Alpha Cloud to use Maps.</Alert>}
+      {holding(state.link) && <Alert variant="warn">{`Maps request limit reached. Try again in ${Math.max(1, Math.ceil(state.link.held / 60))} minutes.`}</Alert>}
+      {state.link.known && state.link.account === 0 && <Alert variant="info">Sign in to Alpha Cloud to use Maps.</Alert>}
 
       {now === "Navigating" && (
         <Banner variant={state.trip.rerouting ? "warn" : "info"} action={can({ type: "endGuidance" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "endGuidance" })}>End</Button>}>
@@ -100,6 +130,7 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
           <SearchField
             aria-label="Search Maps"
             placeholder="Search Maps"
+            maxLength={300}
             value={typed}
             onFocus={() => { if (can({ type: "openSearch" })) void send({ type: "openSearch" }); }}
             onValueChange={setTyped}
@@ -107,15 +138,34 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
         </form>
       )}
 
-      <MapView label={spot === undefined ? "Map" : `Map of ${spot.name}`} tiles={seen.tiles?.images ?? []} markers={markers} line={way?.line.map(placed)}>
+      <MapView
+        label={spot === undefined ? "Map" : `Map of ${spot.name}`}
+        surface={state.link.plane}
+        style={style}
+        pins={pins}
+        here={seen.here === undefined ? undefined : degreesOf(seen.here.at)}
+        line={way?.line.map(degreesOf)}
+        camera={cameraOf(state, seen, following)}
+        compass={(bearing, pitch) => compassShown(bearing, pitch, following)}
+        onReady={(plane) => { if (can({ type: "reportMap", plane, ok: true })) void send({ type: "reportMap", plane, ok: true }); }}
+        onTrouble={(plane, trouble) => {
+          if (breaksThePlane(trouble.styleLoaded, trouble.tileError, trouble.cancelled) && can({ type: "reportMap", plane, ok: false })) void send({ type: "reportMap", plane, ok: false });
+        }}
+        onPin={pick}
+        onPress={(at) => {
+          const event = { type: "pressMap", lat: Math.round(at.lat * 1e6), lng: Math.round(at.lng * 1e6), now: untimed } as const;
+          if (can(event)) void send(event);
+        }}
+        onPressMove={(pixels) => { if (pixels > panPixels) lift(); }}
+        onPressEnd={lift}
+        onSettled={(view) => void runtime.runPromise(settled(view))}
+      >
         <div className="absolute right-2 bottom-2 flex flex-col gap-1">
-          <Button size="icon" variant="outline" aria-label="Zoom in" onClick={() => void runtime.runPromise(zoomed(1))}><Plus /></Button>
-          <Button size="icon" variant="outline" aria-label="Zoom out" onClick={() => void runtime.runPromise(zoomed(-1))}><Minus /></Button>
           {can({ type: "useMyLocation" }) && <Button size="icon" variant="outline" aria-label="My location" onClick={() => void send({ type: "useMyLocation" })}><Crosshair /></Button>}
         </div>
         <div className="absolute bottom-2 left-2">
           {credits.can({ type: "openInfo" }) && (badgeOnly(state.link)
-            ? <Button size="sm" variant="outline" onClick={() => void credits.send({ type: "openInfo" })}>Google Maps</Button>
+            ? <button type="button" aria-label="Google Maps" onClick={() => void credits.send({ type: "openInfo" })}><img src={googleMaps} alt="Google Maps" width={98} height={18} /></button>
             : <Button size="icon" variant="outline" aria-label="Map credits" onClick={() => void credits.send({ type: "openInfo" })}><Info /></Button>)}
         </div>
       </MapView>
@@ -124,8 +174,10 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
       )}
       {credits.state.infoOpen && (
         <Alert variant="info" role="dialog" aria-label="Map credits">
-          <p>{credits.state.copyrightShown ? credits.state.copyright : state.link.google ? "Map data ©Google" : "Map data from the Maps provider"}</p>
-          <p>Searches and route points go to the Maps provider through Alpha Cloud, which keeps only the kind of each request and its result.</p>
+          <p>{credits.state.copyrightShown ? credits.state.copyright : coverage?.available ? coverage.attribution : "Map data © OpenStreetMap contributors, OpenFreeMap"}</p>
+          {coverage?.available && (
+            <p>{`Searches and route points go to ${coverage.disclosure.recipients.map((r) => `${r.name} (${r.operator})`).join(", ")} through Alpha Cloud, which keeps only the kind of each request and its result.`}</p>
+          )}
           <Button size="sm" variant="ghost" onClick={() => void credits.send({ type: "closeInfo" })}>Close</Button>
         </Alert>
       )}
@@ -140,7 +192,7 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
       {now === "Search" && (
         <>
           {state.search.status === "Loading" && <Spinner label="Searching" />}
-          {state.search.status === "Failed" && <Alert variant="warn">The search failed.</Alert>}
+          {state.search.status === "Failed" && !holding(state.link) && <Alert variant="warn">The search failed.</Alert>}
           {state.search.status === "Loaded" && state.results === 0 && <Alert variant="info">No places found.</Alert>}
           {state.results > 0 && (
             <ListGroup heading="Results">
@@ -158,13 +210,17 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
             <ListGroup heading="Recent">
               {state.recent.map((query) => (
                 <ListRow key={query} asChild title={query}>
-                  <button type="button" aria-label={query} onClick={() => { setTyped(query); void send({ type: "search", query }); }} />
+                  <button type="button" aria-label={query} disabled={!can({ type: "search", query })} onClick={() => { setTyped(query); void send({ type: "search", query }); }} />
                 </ListRow>
               ))}
+              {can({ type: "clearRecent" }) && <Button size="sm" variant="ghost" onClick={() => void send({ type: "clearRecent" })}>Clear</Button>}
             </ListGroup>
           )}
         </>
       )}
+
+      {!state.keepable && <Alert variant="warn">Saved places could not be read. Existing data has not been replaced.</Alert>}
+      {state.notice !== "NoNotice" && <p role="status" className="text-sm text-muted-foreground">{notices[state.notice]}</p>}
 
       {(now === "Browse" || now === "Search") && saved.length > 0 && (
         <ListGroup heading="Saved">
@@ -192,11 +248,11 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
           </div>
           {can({ type: "namePlace", name: name.trim() || spot.name }) && (
             <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); void send({ type: "namePlace", name: name.trim() || spot.name }); setName(""); }}>
-              <Input aria-label="Name" placeholder={kept?.name ?? spot.name} value={name} onChange={(event) => setName(event.target.value)} />
+              <Input aria-label="Name" placeholder={kept?.name ?? spot.name} maxLength={300} value={name} onChange={(event) => setName(event.target.value)} />
               <Button type="submit" variant="outline"><Star />{kept === undefined ? "Save" : "Rename"}</Button>
             </form>
           )}
-          {googleShown(state) && <p className="text-xs text-muted-foreground">Google Maps</p>}
+          {!room && !googleShown(state) && <p className="text-sm text-muted-foreground">Saved places are full. Remove one before adding another.</p>}
         </section>
       )}
 
@@ -214,18 +270,20 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
                 ))}
               </div>
               {can({ type: "useMyLocation" }) && <Button variant="outline" onClick={() => void send({ type: "useMyLocation" })}><Crosshair />From my location</Button>}
-              <form onSubmit={(event) => { event.preventDefault(); startFrom(); }}>
-                <Input aria-label="Starting point" placeholder="Latitude, longitude" value={start} onChange={(event) => setStart(event.target.value)} />
-              </form>
+              {can({ type: "planFrom", origin: "Coordinates", lat: 0, lng: 0 }) && (
+                <form onSubmit={(event) => { event.preventDefault(); startFrom(); }}>
+                  <Input aria-label="Starting point" placeholder="Latitude, longitude" value={start} onChange={(event) => setStart(event.target.value)} />
+                </form>
+              )}
               {saved.filter((entry) => entry.place !== state.place).map((entry) => (
-                can({ type: "planFrom", origin: "SomePlace" }) && (
-                  <Button key={entry.place} size="sm" variant="ghost" onClick={() => { atlas.startAt(entry.spot.at); void send({ type: "planFrom", origin: "SomePlace" }); }}>{`From ${entry.name}`}</Button>
+                can({ type: "planFrom", origin: "SomePlace", lat: entry.spot.at.lat, lng: entry.spot.at.lng }) && (
+                  <Button key={entry.place} size="sm" variant="ghost" onClick={() => void send({ type: "planFrom", origin: "SomePlace", lat: entry.spot.at.lat, lng: entry.spot.at.lng })}>{`From ${entry.name}`}</Button>
                 )
               ))}
             </>
           )}
           {state.trip.plan.status === "Loading" && <Spinner label="Planning the route" />}
-          {state.trip.plan.status === "Failed" && <Alert variant="warn">No route was found.</Alert>}
+          {state.trip.plan.status === "Failed" && !holding(state.link) && <Alert variant="warn">No route was found.</Alert>}
           {way !== undefined && <p>{`${minutes(way.seconds)}, ${distance(way.meters)}`}</p>}
           {now === "Navigating" && ahead.length > 0 && (
             <ListGroup heading="Next">

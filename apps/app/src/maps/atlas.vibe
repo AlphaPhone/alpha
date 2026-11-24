@@ -1,5 +1,9 @@
 // spec/app/maps/index.md, "The screen holds its connection, its trip, the search, the place on the card, the directions sheet, the saved places, the Calendar event it came from, the agent's question and the agent's last read"
+import type { CloudClient } from "../platform/cloud.vibe"
 import type { Point } from "./geometry.ts"
+
+/** What Cloud answered about the account's Maps: its provider, coverage, tiles and credits. */
+export type Coverage = Awaited<ReturnType<CloudClient["mapsCapabilities"]>>
 
 module web {
   /** A random id for a handle that names a place on this phone only. @throws {never} */
@@ -46,12 +50,13 @@ export interface Here {
   readonly approximate: boolean
 }
 
-/** The map's tiles as last drawn: the surface, its zoom and each tile's image at its place in the view. */
-export interface Tiles {
-  readonly plane: number
+/** A view of the map: its bounds in degrees and its whole zoom. */
+export interface View {
+  readonly north: number
+  readonly south: number
+  readonly east: number
+  readonly west: number
   readonly zoom: number
-  readonly centre: Point
-  readonly images: ReadonlyArray<{ readonly key: string; readonly url: string; readonly left: number; readonly top: number }>
 }
 
 /** What Maps last learned of the world, by the numbers its machine keeps. */
@@ -60,14 +65,15 @@ export interface Seen {
   readonly results: ReadonlyArray<number>
   readonly ways: ReadonlyMap<number, Way>
   readonly here: Here | undefined
-  readonly tiles: Tiles | undefined
-  readonly zoom: number
-  readonly copyright: string
-  /** The starting point the owner gave for directions: typed coordinates or another place. */
-  readonly start: Point | undefined
+  /** Each coverage read's answer, by the ticket of the read: the machine decides which one is in force. */
+  readonly coverages: ReadonlyMap<number, Coverage>
+  /** The view the camera last settled on, and the area the last copyright request covers. */
+  readonly view: View | undefined
+  readonly credited: View | undefined
 }
 
-const empty: Seen = { spots: new Map(), results: [], ways: new Map(), here: undefined, tiles: undefined, zoom: 14, copyright: "", start: undefined }
+const empty: Seen = { spots: new Map(), results: [], ways: new Map(), here: undefined, coverages: new Map(), view: undefined, credited: undefined }
+const accounts = new Map<string, number>()
 let current: Seen = empty
 const listeners = new Set<() => void>()
 const byProvider = new Map<string, number>()
@@ -108,21 +114,26 @@ export const atlas = {
     change({ ways: new Map(current.ways).set(ticket, way) })
   },
   way: (ticket: number): Way | undefined => current.ways.get(ticket),
-  startAt(start: Point): void {
-    change({ start })
-  },
   located(here: Here): void {
     change({ here })
   },
-  drawn(tiles: Tiles | undefined): void {
-    change({ tiles })
+  /** The answer of the coverage read `ticket`. */
+  covered(ticket: number, coverage: Coverage): void {
+    change({ coverages: new Map(current.coverages).set(ticket, coverage) })
   },
-  /** The owner zooms the map in or out, by whole steps between 3 and 19. */
-  zoomBy(step: number): void {
-    change({ zoom: Math.max(3, Math.min(19, current.zoom + step)) })
+  coverage: (ticket: number): Coverage | undefined => current.coverages.get(ticket),
+  viewed(view: View): void {
+    change({ view })
   },
-  credited(copyright: string): void {
-    change({ copyright })
+  /** The area the copyright now asked for covers. */
+  creditedFor(credited: View): void {
+    change({ credited })
+  },
+  /** The number the machine knows the account `id` by: the one it already has, or the next. */
+  accountOf(id: string): number {
+    const known = accounts.get(id) ?? accounts.size + 1
+    accounts.set(id, known)
+    return known
   },
   /** The handle that names `place` to the agent on this phone: `maps_` and a random id, never a provider's id. */
   handleOf(place: number): string {
@@ -132,17 +143,12 @@ export const atlas = {
     handles.set(place, made)
     return made
   },
-  /** The place a handle names, where this phone gave it. */
-  placeOf(handle: string): number | undefined {
-    for (const [place, known] of handles) if (known === handle) return place
-    return undefined
-  },
   /** Everything of the last account, which another account never sees. */
   forget(): void {
     byProvider.clear()
     handles.clear()
     const kept = new Map([...current.spots].filter(([, spot]) => !spot.google))
-    current = { ...empty, spots: kept, zoom: current.zoom, here: current.here }
+    current = { ...empty, spots: kept, here: current.here, view: current.view }
     for (const listener of [...listeners]) listener()
   },
 }

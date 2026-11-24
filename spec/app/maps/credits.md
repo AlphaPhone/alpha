@@ -188,7 +188,8 @@ pure def sometimesRecoveredAfterAFailure(s: Credits): bool = s.copyrightShown an
 
 On a portrait screen the credits, My location and the sheets beneath them
 end above Ask Alpha's bar, so a taller composer never covers them; in
-guidance, Recenter sits in the guidance bar at the top.
+guidance, Recenter sits in the guidance bar at the top. Back closes an
+open panel before it leaves anything else of Maps.
 
 ```quint
 pure def canOpenInfo(s: Credits): bool = s.plane > 0 and not(s.infoOpen)

@@ -1,4 +1,4 @@
-// spec/app/maps/location.md, "Only the owner's own locate or the guidance they started may prompt for permission"
+// spec/app/maps/connection.md, "Story: Use my location"; spec/app/maps/index.md, "Continuing past the disclosure asks Android, once"
 import type { LocationResult, LocationPermissionStatus } from "@elizaos/os/bridges/location"
 
 module held {

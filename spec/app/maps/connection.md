@@ -13,13 +13,17 @@ on screen, and Android's location. The Maps screen holds one connection;
 
 ### A connection holds the signed-in account, the coverage read for it, the provider installed, the base map, the map surface and the location
 
-The provider is named by the account it serves (0 for none), and says
+The account is 0 while signed out, and `known` once it has been read, so a
+phone that could not read it yet is never told to sign in. The provider is
+named by the account it serves (0 for none), and says
 whether it is Google's and which ways of travelling it routes. The base map
 is the world map until a provider is installed, then the cloud map inside
 its coverage or the regional map outside it. The map surface is numbered
 and is drawing, drawn or broken. Location is Android's permission, whether
 the owner has seen Alpha's location disclosure, and the location session:
 whose it is (the screen's "Use my location" or guidance) and its number.
+A wait Cloud named is `held` seconds long, the `holds`-th named, and ends at
+`holdEnds`.
 
 ```quint
 import read as R from "../../kit/read"
@@ -30,15 +34,17 @@ type Basemap = World | Regional | Cloud
 type Surface = Drawing | Drawn | Broken
 type Locator = Nobody | Finder | Guide
 type Connection = {
-  account: int, coverage: R::Read, provider: int, google: bool, offer: N::Offer, basemap: Basemap,
+  account: int, known: bool, coverage: R::Read, provider: int, google: bool, offer: N::Offer, basemap: Basemap,
   plane: int, surface: Surface,
   location: P::Permission, disclosed: bool, locator: Locator, session: int,
+  held: int, holds: int, holdEnds: int,
 }
 
 pure val initial: Connection = {
-  account: 0, coverage: R::unread, provider: 0, google: false, offer: N::noOffer, basemap: World,
+  account: 0, known: false, coverage: R::unread, provider: 0, google: false, offer: N::noOffer, basemap: World,
   plane: 1, surface: Drawing,
   location: P::unasked, disclosed: false, locator: Nobody, session: 0,
+  held: 0, holds: 0, holdEnds: 0,
 }
 
 pure val accountValues = Set(0, 1, 2)
@@ -62,13 +68,16 @@ pure def redrawn(basemap: Basemap, c: Connection): Connection =
 
 ### Signing in, out or to another account retires the provider and reads the new account's coverage
 
-Signed out, nothing is read.
+The account is read again each time Maps comes on screen. Signed out,
+nothing is read; an account that could not be read changes nothing. The
+last account's wait ends with it.
 
 ```quint
-pure def canChangeAccount(c: Connection, account: int): bool = account != c.account and account >= 0
+pure def canChangeAccount(c: Connection, account: int): bool =
+  (account != c.account or not(c.known)) and account >= 0
 
 pure def changeAccount(c: Connection, account: int): Connection =
-  redrawn(World, { ...c, account: account, provider: 0, google: false, offer: N::noOffer,
+  redrawn(World, { ...c, account: account, known: true, provider: 0, google: false, offer: N::noOffer, held: 0,
     coverage: if (account != 0) R::ask(c.coverage) else c.coverage })
 ```
 
@@ -79,7 +88,7 @@ alone.
 
 ```quint
 pure def canConnect(c: Connection): bool =
-  c.account != 0 and not(working(c)) and c.coverage.status != R::Loading
+  c.account != 0 and not(working(c)) and c.coverage.status != R::Loading and not(holding(c))
 
 pure def connect(c: Connection): Connection = { ...c, coverage: R::ask(c.coverage) }
 ```
@@ -116,8 +125,31 @@ pure def alwaysGoogleIsDrawnOnItsOwnMap(c: Connection): bool =
 
 ### A wait Cloud names holds every Maps request back until it ends: a rate limit for at most a day, a spent allowance for at most 400 days, and any other wait one minute
 
+A rate limit or a spent allowance that names no end, or names one outside
+its bound, and any other wait Cloud asks for, hold one minute. A later wait
+replaces the one in force. While a wait holds, the owner reads "Maps request
+limit reached. Try again in N minutes.", nothing is searched, routed or read
+again, and the shell answers any tile, copyright, reroute or route from a
+fix asked in that time as failed without asking Cloud. The wait ends at its
+time, or with the account.
+
 ```quint
 type Wait = RateLimited | AllowanceSpent | Unnamed
+
+pure def holding(c: Connection): bool = c.held > 0
+
+pure def canHoldRequests(c: Connection, wait: Wait, seconds: int, now: int): bool = c.account != 0 and now >= 0
+
+pure def holdRequests(c: Connection, wait: Wait, seconds: int, now: int): Connection =
+  val held = heldSeconds(wait, seconds)
+  { ...c, held: held, holds: c.holds + 1, holdEnds: now + held * 1000 }
+
+pure def canWaitEnded(c: Connection, hold: int): bool = holding(c) and hold == c.holds
+
+pure def waitEnded(c: Connection, hold: int): Connection = { ...c, held: 0 }
+
+pure val nowValues = Set(0, 1000)
+pure val holdValues = Set(1, 2)
 
 pure def heldSeconds(wait: Wait, seconds: int): int =
   match wait {
@@ -130,6 +162,12 @@ pure val secondsValues = Set(-1, 0, 1, 60, 86400, 86401, 34560001)
 
 pure def lawEveryWaitEnds(wait: Wait, seconds: int): bool =
   heldSeconds(wait, seconds) >= 1 and heldSeconds(wait, seconds) <= 34560000
+
+pure def alwaysAWaitIsBounded(c: Connection): bool =
+  c.held >= 0 and c.held <= 34560000 and c.holds >= 0 and (holding(c) implies c.holds > 0)
+
+pure def stepOnlyTheNewestWaitEnds(before: Connection, via: str, after: Connection): bool =
+  (holding(before) and not(holding(after))) implies (via == "waitEnded" or via == "changeAccount")
 ```
 
 ### A provider is installed only after a healthy read
