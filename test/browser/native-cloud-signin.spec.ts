@@ -395,7 +395,7 @@ test.describe('in-app Eliza Cloud sign-in on the production Android composition'
  });
 });
 
-test.beforeEach(async({page})=>seedCompletedAccessSetup(page));
+test.beforeEach(async({page})=>seedCompletedAccessSetup(page,'android'));
 
 for (const mode of ['ok','mfa'] as const) test(`phone code stays inside Alpha through ${mode === 'mfa' ? 'MFA' : 'verification'}`,async({page})=>{
  await boot(page,{...await entitlements(),signIn:mode});

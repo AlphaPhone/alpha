@@ -1,5 +1,6 @@
 import {test, expect, type Page} from '@playwright/test';
 import {installTelephonyFixture} from '../../scripts/fixtures/native-telephony';
+import {shouldRespondToVoiceTurn} from '../../.eliza/client-features/packages/voice/src/respond-gate';
 import {preloadPageModules} from './helpers/page-modules';
 
 // The owner's Send on Alpha's "Review SMS" card is the confirmation: tapping it sends the text,
@@ -274,15 +275,27 @@ for(const reviewFirst of [true,false])test(`with global approvals ${reviewFirst?
   const card=await setup(page,'one',reviewFirst);
   const reply=await page.evaluate(()=>(window as any).smsCardFixture.voice('Send a text to Carson. On my way.'));
   expect(reply.speechText??reply.text).toContain('confirm by voice');
+  // The spoken prompt never makes the owner's confirmation look like its own playback echo.
+  for(const confirmation of ['Send this text.','Send it.','Send the text.'])expect(shouldRespondToVoiceTurn(confirmation,{
+    recentAgentReply:reply.speechText??reply.text,replyAgeMs:300,echoCancelled:false,
+  })).toBe(true);
   await expect(card).toContainText(`Carson (${NUMBER})`);
   await expect(card.locator('[data-alpha-telephony-review-body]')).toHaveText(BODY);
   await expect(card).toContainText('Say “Send this text”');
   expect((await state(page)).sendSms).toBe(0);
   await card.evaluate(node=>node.scrollIntoView({block:'center'}));
-  await expect.poll(()=>card.evaluate(row=>{
+  // The chat sheet is still settling after the reply: wait until the card holds still inside the
+  // transcript for a few frames, the way it is on screen when the owner speaks, before confirming.
+  await expect.poll(()=>card.evaluate(async row=>{
+    const sample=()=>{
+      const clip=row.closest('[data-alpha-transcript]')?.getBoundingClientRect(), rect=row.getBoundingClientRect();
+      return clip?[clip.top,clip.bottom,rect.top,rect.bottom].map(value=>Math.round(value*4)/4).join():'';
+    };
+    const first=sample();
+    for(let frame=0;frame<3;frame++)await new Promise(requestAnimationFrame);
     const clip=row.closest('[data-alpha-transcript]')?.getBoundingClientRect();
     const rect=row.getBoundingClientRect();
-    return !!clip&&rect.top>=Math.max(clip.top,0)-1&&rect.bottom<=Math.min(clip.bottom,window.innerHeight)+1
+    return !!first&&sample()===first&&!!clip&&rect.top>=Math.max(clip.top,0)-1&&rect.bottom<=Math.min(clip.bottom,window.innerHeight)+1
       &&row.contains(document.elementFromPoint(rect.left+rect.width/2,rect.top+rect.height/2));
   })).toBe(true);
   const confirmed=await page.evaluate(()=>(window as any).smsCardFixture.voice('Send this text.'));

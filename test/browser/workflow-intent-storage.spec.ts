@@ -17,12 +17,32 @@ test('old completion cannot clear an identical replacement intent',async({page})
 test('failed acknowledgement preserves exact request and other owners remain independent',async({page})=>{
  expect(await page.evaluate(async owner=>{const {WorkflowIntentStore,workflowIntentKey}=await import('/src/runtime/workflow-intents.ts'),s=new WorkflowIntentStore(owner),key=workflowIntentKey(owner,'flow'),raw=await s.admit(key,{versionId:'v1'}),put=IDBObjectStore.prototype.put;let failed=false;IDBObjectStore.prototype.put=function(v,k){if(k===s.documentKey)throw Error('Synthetic full storage');return put.call(this,v,k);};try{await s.acknowledge(key,raw);}catch{failed=true;}finally{IDBObjectStore.prototype.put=put;}const other={...owner,ownerId:'other'},otherStore=new WorkflowIntentStore(other);await otherStore.admit(workflowIntentKey(other,'flow'),{versionId:'v1'});return {failed,retained:await s.read(key)===raw,other:Object.keys(await otherStore.load()).length};},owner)).toEqual({failed:true,retained:true,other:1});
 });
-test('legacy malformed requests are backed up exactly and stale reset cannot erase a new request',async({page})=>{
- expect(await page.evaluate(async owner=>{const {WorkflowIntentStore,workflowIntentKey}=await import('/src/runtime/workflow-intents.ts'),s=new WorkflowIntentStore(owner),key=workflowIntentKey(owner,'flow')+':lifecycle';localStorage.setItem(key,'  {broken');await s.load();const pending=s.pendingLifecycle(),domain=await s.recoveryDocument(),captured=await domain.capture();await s.admit(workflowIntentKey(owner,'other'),{versionId:'v2'});let refused=false;try{await domain.reset(captured);}catch{refused=true;}return {backup:JSON.parse(captured.raw!).entries[key],pending,refused,count:Object.keys(await s.load()).length,legacy:localStorage.getItem(key)};},owner)).toEqual({backup:'  {broken',pending:['flow'],refused:true,count:2,legacy:'  {broken'});
+test('malformed saved requests are backed up exactly and stale reset cannot erase a new request',async({page})=>{
+ expect(await page.evaluate(async owner=>{
+  const {WorkflowIntentStore,workflowIntentKey}=await import('/src/runtime/workflow-intents.ts');
+  const store=new WorkflowIntentStore(owner),key=workflowIntentKey(owner,'flow')+':lifecycle',domain=await store.recoveryDocument();
+  await domain.edit(()=>({entries:{} as Record<string,string>}),archive=>{archive.entries[key]='  {broken';});
+  await store.load();
+  const pending=store.pendingLifecycle(),captured=await domain.capture();
+  await store.admit(workflowIntentKey(owner,'other'),{versionId:'v2'});
+  let refused=false;try{await domain.reset(captured);}catch{refused=true;}
+  const retained=await store.load();
+  return {backup:JSON.parse(captured.raw!).entries[key],pending,refused,count:Object.keys(retained).length,retained:retained[key]};
+ },owner)).toEqual({backup:'  {broken',pending:['flow'],refused:true,count:2,retained:'  {broken'});
 });
-test('lifecycle discovery survives reload and legacy writers require recovery',async({page})=>{
- await page.evaluate(async owner=>{const {WorkflowIntentStore,workflowIntentKey}=await import('/src/runtime/workflow-intents.ts');await new WorkflowIntentStore(owner).admit(workflowIntentKey(owner,'removed-flow')+':lifecycle',{versionId:'v1',operation:'remove'});},owner);await page.reload();
- expect(await page.evaluate(async owner=>{const {WorkflowIntentStore,workflowIntentKey}=await import('/src/runtime/workflow-intents.ts'),s=new WorkflowIntentStore(owner);await s.load();const pending=s.pendingLifecycle();localStorage.setItem(workflowIntentKey(owner,'old-writer'),'legacy');let refused=false;try{await s.load();}catch{refused=true;}return {pending,refused};},owner)).toEqual({pending:['removed-flow'],refused:true});
+test('lifecycle discovery survives reload and ignores retired browser slots',async({page})=>{
+ await page.evaluate(async owner=>{
+  const {WorkflowIntentStore,workflowIntentKey}=await import('/src/runtime/workflow-intents.ts');
+  await new WorkflowIntentStore(owner).admit(workflowIntentKey(owner,'removed-flow')+':lifecycle',{versionId:'v1',operation:'remove'});
+ },owner);
+ await page.reload();
+ expect(await page.evaluate(async owner=>{
+  const {WorkflowIntentStore,workflowIntentKey}=await import('/src/runtime/workflow-intents.ts');
+  const store=new WorkflowIntentStore(owner),legacyKey=workflowIntentKey(owner,'old-writer')+':lifecycle';
+  localStorage.setItem(legacyKey,'legacy');
+  await store.load();
+  return {pending:store.pendingLifecycle(),legacy:localStorage.getItem(legacyKey)};
+ },owner)).toEqual({pending:['removed-flow'],legacy:'legacy'});
 });
 test('cancelled queued admission does not create a pending request',async({page})=>{
  expect(await page.evaluate(async owner=>{const {WorkflowIntentStore,workflowIntentKey}=await import('/src/runtime/workflow-intents.ts'),s=new WorkflowIntentStore(owner),key=workflowIntentKey(owner,'flow');let release!:()=>void,ready!:()=>void;const acquired=new Promise<void>(r=>ready=r),held=navigator.locks.request(JSON.stringify(['browser-document','alpha.browser.documents.v1',s.documentKey]),async()=>{ready();await new Promise<void>(r=>release=r);});await acquired;const c=new AbortController(),attempt=s.admit(key,{versionId:'v1'},c.signal).then(()=>false,()=>true);c.abort();release();await held;return {cancelled:await attempt,pending:await s.read(key)};},owner)).toEqual({cancelled:true,pending:null});
@@ -39,10 +59,21 @@ for(const operation of ['run','metadata','lifecycle'])for(const outcome of ['sav
 for(const mode of ['reset','leave'])test(`workflow request recovery uses the captured account: ${mode}`,async({page})=>{
  test.setTimeout(120_000);
  await page.goto('/?mode=dev&workflows=agent');await page.getByRole('button',{name:'Settings',exact:true}).click();await openConnectionDiagnostics(page);await page.getByRole('button',{name:'Connect development profile'}).click();await expect(page.getByRole('dialog',{name:'Development connections'})).toHaveCount(0);await returnToApps(page);
- const {key,capturedOwner}=await page.evaluate(async()=>{const {connectionController}=await import('/src/runtime/connection-ui.tsx'),{workflowIntentKey}=await import('/src/runtime/workflow-intents.ts');const {origin,ownerId,agentId}=connectionController.getSnapshot().session!,capturedOwner={origin,ownerId,agentId};const key=workflowIntentKey(capturedOwner,'lost-flow')+':lifecycle';localStorage.setItem(key,' {unreadable intent ');return {key,capturedOwner};});
+ const {key,capturedOwner}=await page.evaluate(async()=>{
+  const {connectionController}=await import('/src/runtime/connection-ui.tsx');
+  const {WorkflowIntentStore,workflowIntentKey}=await import('/src/runtime/workflow-intents.ts');
+  const {origin,ownerId,agentId}=connectionController.getSnapshot().session!,capturedOwner={origin,ownerId,agentId};
+  const key=workflowIntentKey(capturedOwner,'lost-flow')+':lifecycle';
+  const store=new WorkflowIntentStore(capturedOwner),domain=await store.recoveryDocument();
+  await domain.edit(()=>({entries:{} as Record<string,string>}),archive=>{archive.entries[key]=' {unreadable intent ';});
+  return {key,capturedOwner};
+ });
  await page.getByRole('button',{name:'Workflows',exact:true}).click();await expect(page.getByText('Recovery',{exact:true})).toBeVisible();await expect(page.getByText('Loading workflows…',{exact:true})).toHaveCount(0);await page.getByText('Recovery',{exact:true}).click();
  const dialog=page.getByRole('dialog',{name:'Browser workflow request recovery'});await expect(dialog).toContainText('does not cancel executions');
- if(mode==='leave'){await page.evaluate(()=>window.dispatchEvent(new Event('pagehide')));await expect(dialog).toHaveCount(0);expect(await page.evaluate(key=>localStorage.getItem(key),key)).toBe(' {unreadable intent ');return;}
+ if(mode==='leave'){await page.evaluate(()=>window.dispatchEvent(new Event('pagehide')));await expect(dialog).toHaveCount(0);expect(await page.evaluate(async({key,capturedOwner})=>{
+  const {WorkflowIntentStore}=await import('/src/runtime/workflow-intents.ts');
+  return new WorkflowIntentStore(capturedOwner).read(key);
+ },{key,capturedOwner})).toBe(' {unreadable intent ');return;}
  const download=page.waitForEvent('download');await dialog.getByRole('button',{name:'Download workflow requests backup',exact:true}).click();const stream=await(await download).createReadStream(),chunks:Buffer[]=[];for await(const chunk of stream!)chunks.push(Buffer.from(chunk));expect(JSON.parse(Buffer.concat(chunks).toString()).entries[key]).toBe(' {unreadable intent ');
  await dialog.getByRole('button',{name:'Reset app workflow requests',exact:true}).click();await dialog.getByRole('button',{name:'Confirm workflow requests reset',exact:true}).click();await expect(dialog).toHaveCount(0);
  await expect.poll(()=>page.evaluate(async()=>{const session=(await import('/src/runtime/connection-ui.tsx')).connectionController.getSnapshot().session;return session?{origin:session.origin,ownerId:session.ownerId,agentId:session.agentId}:null;}),{timeout:45000}).toEqual(capturedOwner);

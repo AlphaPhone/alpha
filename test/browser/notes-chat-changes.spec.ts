@@ -11,8 +11,6 @@ const at='2026-11-17T09:00:00.000Z';
 async function connect(page:Page){
  await page.addInitScript(at=>{
   const w=window as any,store=new Map();
-  // The phone's own folder list (runtime/notes-folders.ts); the agent stores only each note's folderId.
-  localStorage.setItem('alpha.browser.notes-folders:v1:device',JSON.stringify({version:1,folders:[{id:'f-travel',name:'Travel',createdAt:1}]}));
   const f=w.notesChat={bodies:[] as any[],saves:[] as any[],state:{revision:1,trash:[] as any[],notes:[
    {id:'pack',title:'Packing list',body:'\nPassport',color:'yellow',createdAt:at,updatedAt:at},
    {id:'old',title:'Old plan',body:'\nCancelled',color:'yellow',createdAt:at,updatedAt:at},
@@ -76,6 +74,11 @@ const fixture=(page:Page)=>page.evaluate(()=>(window as any).notesChat);
 
 test('Notes follows each note change a chat reply reports: create, update, move, delete and restore',async({page})=>{
  await connect(page);
+ // The agent stores only the folder ID. Use the browser's current folder document.
+ await page.evaluate(async()=>{
+  const {editNotesFolders}=await import('/src/runtime/notes-folders.ts');
+  await editNotesFolders(doc=>({...doc,folders:[{id:'f-travel',name:'Travel',createdAt:1}]}));
+ });
  await page.getByRole('button',{name:'Notes',exact:true}).click();
  const row=(id:string)=>page.locator(`[data-alpha-subview="notes-list"] button.notes-row[data-alpha-note-id="${id}"]`),body=page.getByRole('textbox',{name:'Note',exact:true});
  await expect(row('pack')).toHaveCount(1);await expect(row('new')).toHaveCount(0);

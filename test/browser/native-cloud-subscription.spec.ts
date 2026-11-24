@@ -698,7 +698,7 @@ test('failed native provider binding keeps inference unconfirmed and keeps the l
 });
 
 // UI progress only: this feature fixture does not manufacture OS/provider grants.
-test.beforeEach(async({page})=>seedCompletedAccessSetup(page));
+test.beforeEach(async({page})=>seedCompletedAccessSetup(page,'android'));
 
 
 test('Code can close and reopen without closing the account or sending its text',async({page})=>{

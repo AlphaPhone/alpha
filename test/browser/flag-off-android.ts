@@ -477,16 +477,17 @@ export async function expectNoDevelopmentSurface(page: Page) {
 /** Existing-installation fixtures seed UI progress only. OS/plugin grants remain independent.
  * The record's format follows the platform: the browser reads version 1 (four steps), Android
  * reads version 4 (seven steps). Specs often install `androidBridge` in a later init script, so
- * the native record is written when the bridge is installed rather than when this script runs. */
-export async function seedCompletedAccessSetup(page: Page) {
-  await page.addInitScript(()=>{
+ * the native record is written when the bridge is installed. Android compositions without
+ * a bridge specify the platform explicitly. */
+export async function seedCompletedAccessSetup(page: Page, platform?: 'android') {
+  await page.addInitScript(platform=>{
     const w=window as any;
     const seed=(native:boolean)=>localStorage.setItem('alpha:startup-permission-walkthrough:v1',JSON.stringify(native?{version:4,status:'completed',step:7}:{version:1,status:'completed',step:4}));
-    if('androidBridge' in w){seed(true);return;}
+    if(platform==='android'||w.androidBridge){seed(true);return;}
     seed(false);
     let bridge:unknown;
-    Object.defineProperty(w,'androidBridge',{configurable:true,enumerable:true,get:()=>bridge,set:(value:unknown)=>{bridge=value;seed(true);}});
-  });
+    Object.defineProperty(w,'androidBridge',{configurable:true,enumerable:true,get:()=>bridge,set:(value:unknown)=>{bridge=value;seed(Boolean(value));}});
+  },platform);
 }
 /** Dismiss the explicit post-auth Ready card; quiet restoration of completed setup opens no card.
  * Waits for one of the two outcomes: the Ready card is showing, or no panel and completed setup is stored. */

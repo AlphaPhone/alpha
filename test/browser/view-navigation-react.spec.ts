@@ -24,7 +24,7 @@ async function ready(page:Page,scenario='valid',target='notes'){
    if(path==='/api/conversations')return data(input.method==='POST'?{conversation:{id:'owned-view-room',title:'Owned view turn'}}:{conversations:[{id:'owned-view-room',title:'Owned view turn'}]});
    if(path==='/api/conversations/owned-view-room/messages'){
     if(input.method!=='POST')return data({messages:[]});f.sent.push(body);const clientId=body.metadata?.viewClientId;if(!clientId||body.metadata.viewDelivery!=='completed-action')throw Error('Originating renderer metadata missing');
-    return data({text:'Opening '+f.label+'.',agentName:'Owned navigation',userMessageId:crypto.randomUUID(),messageId:crypto.randomUUID(),actionResults:[{actionName:f.scenario==='unknown-child'?'VIEWS_LIST':'VIEWS_SHOW',success:true,values:{mode:'show',viewId:f.target,viewPath:'/'+f.target,viewType:'gui',label:f.label,completedActionDelivered:false,completedActionHandoffId:'owned-promoted-handoff',navigationPrepared:true,navigationBinding:{requestId:'owned-promoted-handoff',clientId:f.scenario==='wrong-client'?'other-client':clientId,viewId:f.target,viewType:'gui',installationId:f.installationId}}}]});
+    return data({text:'Opening '+f.label+'.',agentName:'Owned navigation',userMessageId:crypto.randomUUID(),messageId:crypto.randomUUID(),actionResults:[{actionName:f.scenario==='unknown-child'?'VIEWS_LIST':'VIEWS_SHOW',success:true,values:{mode:'show',viewId:f.target,viewPath:'/'+f.target,viewType:'gui',label:f.label,completedActionDelivered:false,completedActionHandoffId:'owned-promoted-handoff',navigationPrepared:true,...(f.scenario==='saved-note'?{noteId:'groceries'}:{}),navigationBinding:{requestId:'owned-promoted-handoff',clientId:f.scenario==='wrong-client'?'other-client':clientId,viewId:f.target,viewType:'gui',installationId:f.installationId}}}]});
    }
    if(path==='/api/views/interact-claim'){
     if(body.clientId!==f.sent[0]?.metadata.viewClientId||body.installationId!==f.installationId||body.requestId!=='owned-promoted-handoff')throw Error('Claim does not match originating turn');f.claims.push(body);
@@ -37,11 +37,40 @@ async function ready(page:Page,scenario='valid',target='notes'){
    }
    return data({},404);
   }};
- },{scenario,target});await page.goto('/');await page.evaluate(async()=>{const c=(await import('/src/runtime/connection-ui.tsx')).connectionController;await c.pair('remote','https://owned-views.invalid','owned-fixture-code');if(!c.getSnapshot().phoneActionsAvailable)throw Error('Owned device enrollment did not complete');});
- const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await input.fill('Open '+(target==='automations'?'Workflows':target));await input.press('Enter');
+ },{scenario,target});await page.goto('/');await page.evaluate(async scenario=>{
+  const c=(await import('/src/runtime/connection-ui.tsx')).connectionController;
+  await c.pair('remote','https://owned-views.invalid','owned-fixture-code');
+  const {session,phoneActionsAvailable}=c.getSnapshot();
+  if(!phoneActionsAvailable||!session)throw Error('Owned device enrollment did not complete');
+  if(scenario==='saved-note'){
+   c.getAppRecordClient=()=>({sessionId:session.sessionId,identity:session,current:()=>c.getSnapshot().session===session,
+    request:async(path,method,_body,signal)=>{
+     signal.throwIfAborted();
+     if(path!=='/api/notes/state'||method!=='GET')throw Error('The note handoff cannot write Notes');
+     const at='2026-11-23T00:00:00Z';
+     const note=(id:string,title:string,body:string)=>({id,title,body,color:'yellow',createdAt:at,updatedAt:at});
+     return {success:true,data:{revision:1,trash:[],notes:[
+      note('dinner','Taco Night Plan','Guests arrive at six.'),
+      note('groceries','Taco Night Groceries','Avocados and limes.'),
+     ]}};
+    }});
+  }
+ },scenario);
+ // A topic reference ("about …") reaches the agent; "called <title>" opens locally (owner-request.ts).
+ const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await input.fill(scenario==='saved-note'?'Open the note about taco night groceries.':'Open '+(target==='automations'?'Workflows':target));await input.press('Enter');
 }
 test('promoted prepared receipt crosses actual React chat, current-client claim and committed Notes acknowledgment',async({page},info)=>{
  await ready(page);await expect(page.locator('html')).toHaveAttribute('data-active-view','notes');await expect(page.getByRole('heading',{name:'Notes',exact:true})).toBeVisible();await expect.poll(()=>page.evaluate(()=>(window as any).promotedViewFixture.acks.length)).toBe(1);const f=await page.evaluate(()=>(window as any).promotedViewFixture);expect(f.sent).toHaveLength(1);expect(f.sent[0].metadata.uiView).toBe('chat');expect(f.sent[0].metadata.viewClientId).toMatch(/^[a-f0-9-]{36}$/);expect(f.claims).toHaveLength(1);expect(f.acks[0]).toMatchObject({shown:'notes',heading:true,body:{success:true,result:{switched:true},claimId:'owned-renderer-claim'}});expect(Object.keys(f.acks[0].body).sort()).toEqual(['claimId','clientId','installationId','requestId','result','success','viewId','viewType']);await page.screenshot({path:'test-results/promoted-view-react/notes-committed.png',animations:'disabled'});
+});
+test('a prepared saved-note handoff opens that note from Home and keeps chat open',async({page})=>{
+ await ready(page,'saved-note');
+ const editor=page.locator('[data-alpha-subview="notes-editor"]');
+ await expect(editor.getByRole('textbox',{name:'Title',exact:true})).toHaveValue('Taco Night Groceries');
+ await expect(editor.getByRole('textbox',{name:'Note',exact:true})).toHaveValue('Avocados and limes.');
+ await expect(page.getByRole('textbox',{name:'Message Alpha',exact:true})).toBeVisible();
+ await expect.poll(()=>page.evaluate(()=>(window as any).promotedViewFixture.acks)).toMatchObject([
+  {shown:'notes',body:{success:true,result:{switched:true}}},
+ ]);
 });
 for(const scenario of ['unknown-child','wrong-client'])test(`actual React chat does not deliver ${scenario}`,async({page})=>{
  await ready(page,scenario);await expect(page.getByText('Opening Notes.',{exact:true})).toBeVisible();await expect(page.locator('html')).toHaveAttribute('data-active-view','home');await expect(page.getByRole('heading',{name:'Notes',exact:true})).toHaveCount(0);const f=await page.evaluate(()=>(window as any).promotedViewFixture);expect(f.claims).toHaveLength(0);expect(f.acks).toHaveLength(0);
