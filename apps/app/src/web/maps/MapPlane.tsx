@@ -164,14 +164,14 @@ export function MapPlane(props: MapPlaneProps) {
       ...(raster ? { minZoom, maxZoom: Math.min(maxZoom, 22) } : {}),
       attributionControl: false, cancelPendingTileRequestsWhileZooming: false,
     });
-    const drawn = painter(instance, props.onPin);
+    const painted = painter(instance, props.onPin);
     let stop: (() => void) | undefined;
     let styleLoaded = false;
     instance.once("style.load", () => { styleLoaded = true; });
     instance.on("load", () => {
       instance.addSource("route", { type: "geojson", data: lineOf([]) });
       instance.addLayer({ id: "route-line", type: "line", source: "route", paint: { "line-width": 6, "line-color": getComputedStyle(node).getPropertyValue("--primary") || "currentColor" } });
-      stop = watch((s) => s.plane.drawing, drawn.paint);
+      stop = watch((s) => s.plane.drawing, painted.paint);
       props.onState(generation, "PlaneReady");
     });
     instance.on("error", (e) => {
@@ -204,7 +204,7 @@ export function MapPlane(props: MapPlaneProps) {
     setMap(instance);
     return () => {
       stop?.();
-      drawn.clear();
+      painted.clear();
       instance.remove();
       maplibregl.removeProtocol(protocol);
       setMap(undefined);
