@@ -16,6 +16,7 @@ export const meta: ComponentMeta<ReviewRowsViewProps> = {
       const row = within(canvasElement).getByRole("button", { name: /Replace Maya Chen/ });
       await expect(row).toHaveAccessibleName("Replace Maya Chen Remove (415) 555-0100 Add (415) 555-0123 Keep maya@example.com");
       await expect(within(row).getByText("(415) 555-0100")).toHaveClass("line-through");
+      await expect(within(row).getByText("Replace")).toHaveClass("font-semibold");
     },
   },
 };

@@ -40,11 +40,14 @@ export function ReviewRowsView({ actions, details, onChoose, onDismiss }: Review
             : kind === "ContactAdd" ? [`${c.title} is already in Contacts`] : [displayNumber(c.number)];
         const verb = kind === "PlaceCall" || kind === "DialNumber" ? "Call" : kind === "ComposeText" ? "Message" : kind === "ContactRemove" ? "Delete"
           : kind === "ContactAdd" ? "Add anyway" : c.candidateId.endsWith(":add") ? "Add (keep existing)" : c.candidateId.endsWith(":replace") ? "Replace" : "Save changes to";
+        // A change offered both ways shows its way, so the Add and Replace rows never look alike (#1453).
+        const way = c.candidateId.endsWith(":add") || c.candidateId.endsWith(":replace") ? verb : undefined;
         return (
           <button key={c.candidateId} type="button" onClick={() => onChoose(c.candidateId)} aria-label={`${verb} ${c.title} ${lines.join(" ")}`}
             className="flex items-center gap-3 rounded-md px-3 py-2 text-left active:bg-accent">
             <Avatar name={c.title} size="sm" />
             <span className="min-w-0 flex-1">
+              {way !== undefined && <span className="block text-sm font-semibold">{way}</span>}
               <span className="block truncate">{kind === "ContactAdd" ? "Add anyway" : c.title}</span>
               {changed !== undefined
                 ? changed.map((line, at) => (

@@ -97,7 +97,9 @@ the existing values) and its explicit `add` and `remove` values applied; a chang
 contact exactly as it is is never offered. Each of its numbers and addresses is a line of its own,
 never cut short, that says in words what the change does to it: "Remove" with the value struck
 through, "Add" with the value in bold, or "Keep"; a new name also shows "Rename from" with the old
-name struck through. A removed value never reads as kept, even where the strike is not seen. A name
+name struck through. A removed value never reads as kept, even where the strike is not seen. A
+change offered both ways names its way above the contact in bold, "Add (keep existing)" or
+"Replace", so the two rows never look alike. A name
 is looked up in at most ten contacts, reading one more to tell whether more matched; when more did,
 the review says that only the first ten are listed. A removal the phone stages in its Undo window is
 the deletion the owner approved, and reads as deleted.
