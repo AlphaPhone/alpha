@@ -352,6 +352,7 @@ public class AlphaBrowserPlugin extends Plugin {
  /** A load gets 30 seconds while its tab is on screen. A hidden or paused tab cannot draw its first frame, so its timer stops and starts again when it shows. */
  private void armTimeout(Tab t) {
   clearTimeout(t);
+  if(paused||!t.frame.isShown())return;
   t.timeout=()->{t.timeout=null;if(!t.loading||t.dead||!t.error.isEmpty())return;if(paused||!t.frame.isShown())return;fail(t,PAGE_LOAD_TIMEOUT,t.url);};
   navigationHandler.postDelayed(t.timeout,30000);
  }
@@ -1021,7 +1022,7 @@ public class AlphaBrowserPlugin extends Plugin {
  /** Invalid geometry withdraws the old input authority rather than routing through stale chrome. */
  private void rejectPresentation(PluginCall call,String reason) {
   selectPresentation(null);cancelFile();dismissSiteDialogs();exitFullscreen(true);if(reading!=null)reading.check();
-  for(Tab tab:tabs.values()){disableAutofill(tab);tab.frame.setHostRectsReceived(false);tab.frame.setVisibility(View.GONE);}
+  for(Tab tab:tabs.values()){clearTimeout(tab);disableAutofill(tab);tab.frame.setHostRectsReceived(false);tab.frame.setVisibility(View.GONE);}
   call.reject(reason);
  }
  @PluginMethod public void present(PluginCall call) { getActivity().runOnUiThread(() -> {if(closed(call))return;
@@ -1052,7 +1053,7 @@ public class AlphaBrowserPlugin extends Plugin {
   }
   // Revoke selected-tab authority before any synchronous framework callback.
   selectPresentation(nextId);if(reading!=null)reading.check();
-  for(Tab old:tabs.values())if(!Objects.equals(old.id,presentedId)){disableAutofill(old);clearFind(old);if(siteDialogTab==old)dismissSiteDialogs();if(fullscreenTab==old)exitFullscreen(true);old.frame.setVisibility(View.GONE);}
+  for(Tab old:tabs.values())if(!Objects.equals(old.id,presentedId)){clearTimeout(old);disableAutofill(old);clearFind(old);if(siteDialogTab==old)dismissSiteDialogs();if(fullscreenTab==old)exitFullscreen(true);old.frame.setVisibility(View.GONE);}
   Tab t=tabs.get(call.getString("id")); if(t!=null) { float d=getContext().getResources().getDisplayMetrics().density;
    presentLayer(t,layer,host,branch);
    FrameLayout.LayoutParams p=new FrameLayout.LayoutParams(Math.max(0,Math.round(width*d)),Math.max(0,Math.round(height*d)));p.leftMargin=Math.round(x*d);p.topMargin=Math.round(y*d);
@@ -1263,7 +1264,7 @@ public class AlphaBrowserPlugin extends Plugin {
  /** Whether website password fill can work in this browser (no secrets, no tab state). */
  @PluginMethod public void loginFillStatus(PluginCall call) { JSObject result=new JSObject(); boolean available=BrowserLoginFields.supported(); result.put("available",available); if(!available)result.put("reason",BrowserFieldOrigin.UNSUPPORTED); call.resolve(result); }
  @PluginMethod public void close(PluginCall call) { getActivity().runOnUiThread(() -> {if(closed(call))return; if (!Objects.equals(session,call.getString("session"))) { call.reject("Expired browser session"); return; } Tab t=tabs.remove(call.getString("id")); if(t!=null) dispose(t); call.resolve(); }); }
- @Override protected void handleOnPause() { paused=true;if(reading!=null)reading.cancel();flushCookies();exitFullscreen(true); for(Tab t:tabs.values()) { syncAutofill(t); t.frame.setHostRectsReceived(false);t.frame.setVisibility(View.GONE); if(!t.dead)t.web.onPause(); } }
+ @Override protected void handleOnPause() { paused=true;if(reading!=null)reading.cancel();flushCookies();exitFullscreen(true); for(Tab t:tabs.values()) { clearTimeout(t); syncAutofill(t); t.frame.setHostRectsReceived(false);t.frame.setVisibility(View.GONE); if(!t.dead)t.web.onPause(); } }
  /** Persist normal-tab sign-in cookies promptly; the process may be killed in background. */
  private void flushCookies() {
   try{if(WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)){androidx.webkit.Profile profile=ProfileStore.getInstance().getProfile(config().persistentProfile);if(profile!=null)profile.getCookieManager().flush();}}catch(Exception unavailable){/* Chromium also flushes periodically. */}
