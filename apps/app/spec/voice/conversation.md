@@ -333,19 +333,19 @@ pure def sometimesPausedForACall(c: Conversation): bool = c.shown == Off and c.n
 
 Cloud's own code for it (`insufficient_credits` or `allowance_exhausted`)
 as the speech relay's refusal code, the reason only a funding end carries,
-is never retried as busy: voice retires as Stop does, nothing is spoken, no
-voice notice shows, and the chat the voice went to, while it is the one
-shown, gets one ordinary transcript line with Manage plan: "You’re out of
-plan allowance and credits, so Talk stopped.", adding "Your allowance
-resets on <month> <day>." only while the plan Alpha last read names a reset
-still ahead. It is never a toast and never near the composer. Only the
-failure that ended this conversation decides it, never a cause left from an
-earlier one. A speech 429 that names the plan's voice allowance is a limit
-of the route (`route.md`), not this. Neither is a refusal on the agent's
-reply: its `insufficient_credits` kind stands for every Cloud 402, a billing
-hold included, and for an own key's provider quota, so it never posts this
-line (a typed turn keeps the billing wording of `spec/assistant/reply.md`)
-until the reply carries Cloud's own code.
+or as the `cloudCode` of the agent's spent-credits reply to a spoken turn
+(`spec/assistant/reply.md`), is never retried as busy: voice retires as
+Stop does, nothing is spoken, no voice notice shows, and the chat the voice
+went to, while it is the one shown, gets one ordinary transcript line with
+Manage plan: "You’re out of plan allowance and credits, so Talk stopped.",
+adding "Your allowance resets on <month> <day>." only while the plan Alpha
+last read names a reset still ahead. It is never a toast and never near the
+composer. Only the failure or reply that ended this conversation decides
+it, never a cause left from an earlier one. A speech 429 that names the
+plan's voice allowance is a limit of the route (`route.md`), not this.
+Neither is a spent-credits reply without Cloud's own code: that kind stands
+for every Cloud 402, a billing hold included, and for an own key's provider
+quota, so the turn keeps its handling.
 
 ```quint
 pure def canOutOfFunds(c: Conversation, media: bool): bool = active(c.shown)

@@ -52,7 +52,7 @@ export schema EndOfTurnScore { readonly available: boolean; readonly complete?: 
 export schema ReplyActionLabel { readonly kind: string; readonly validatedCard: boolean; readonly verbatimAsked: boolean }
 
 /** The resident's answer to a voice turn: the reply, the owner message it answers and the actions it ran. */
-export schema VoiceTurnReply { readonly messageId: string; readonly text: string; readonly userMessageId?: string; readonly actionResults?: readonly Schema.Unknown[]; readonly action?: ReplyActionLabel }
+export schema VoiceTurnReply { readonly messageId: string; readonly text: string; readonly userMessageId?: string; readonly actionResults?: readonly Schema.Unknown[]; readonly action?: ReplyActionLabel; readonly failureKind?: string; readonly cloudCode?: string }
 
 /** The resident's answer to a heard report. */
 export schema HeardRecorded { readonly ok: boolean; readonly messageId: string; readonly changed: boolean }

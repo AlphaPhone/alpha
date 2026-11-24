@@ -22,11 +22,11 @@ import type { Detent } from "../../gen/assistant__detents.ts"
 /** What the fake resident was asked, in order. */
 export interface Seen { readonly calls: { readonly method: string; readonly path: string; readonly body: unknown; readonly headers?: { readonly [name: string]: string } }[] }
 
-/** How the fake resident answers a chat turn: a reply, a refusal, or a failed reply naming its kind, the owner's fix and a live wait. */
+/** How the fake resident answers a chat turn: a reply, a refusal, or a failed reply naming its kind, Cloud's own code, the owner's fix and a live wait. */
 export type TurnScript =
   | { readonly kind: "reply"; readonly text: string }
   | { readonly kind: "refuse"; readonly status: number }
-  | { readonly kind: "fail"; readonly failureKind: string; readonly planAction?: "sign-in" | "funding" | "retry"; readonly retryAfterMs?: number }
+  | { readonly kind: "fail"; readonly failureKind: string; readonly cloudCode?: string; readonly planAction?: "sign-in" | "funding" | "retry"; readonly retryAfterMs?: number }
 
 /** A pending proposal as the agent's `/api/client-devices/proposals` listing gives it. */
 export function wireProposal(id: string, digest: string, operation: unknown, requestMessageId?: string, expiresAt = "2099-01-01T00:00:00.000Z") {
@@ -39,7 +39,10 @@ export function wireProposal(id: string, digest: string, operation: unknown, req
 function replyOf(turn: TurnScript, actionResults: readonly unknown[] = []) {
   const base = { agentName: "Alpha", messageId: "m1", userMessageId: "u1", actionResults }
   if (turn.kind === "fail") {
-    return { ...base, text: "", failureKind: turn.failureKind, ...(turn.planAction === undefined ? {} : { planAction: turn.planAction }), ...(turn.retryAfterMs === undefined ? {} : { retryAfterMs: turn.retryAfterMs }) }
+    return {
+      ...base, text: "", failureKind: turn.failureKind, ...(turn.cloudCode === undefined ? {} : { cloudCode: turn.cloudCode }),
+      ...(turn.planAction === undefined ? {} : { planAction: turn.planAction }), ...(turn.retryAfterMs === undefined ? {} : { retryAfterMs: turn.retryAfterMs }),
+    }
   }
   return { ...base, text: turn.kind === "reply" ? turn.text : "" }
 }

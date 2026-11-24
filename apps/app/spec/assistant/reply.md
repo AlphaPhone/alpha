@@ -224,6 +224,36 @@ pure def lawAFixNeverResendsTheMessage(fix: OwnerFix): bool = not(resendsOnItsOw
 pure val waitMsValues = Set(-1, 0, 999, 2400, 120000)
 ```
 
+### Spent credits that Cloud named with its own code is the one out-of-funds line, with Manage plan
+
+The reply's `insufficient_credits` stands for every Cloud 402, a billing
+hold included, and for an own key's provider quota. Only a reply that also
+carries Cloud's own code for it as `cloudCode` (`insufficient_credits` or
+`allowance_exhausted`, elizaOS/eliza `spec/agent/conversation/turns.md`)
+means the account is out of plan allowance and credits. A typed turn's
+reply then reads "You’re out of plan allowance and credits, so I couldn’t
+reply." and a spoken turn's ends voice (`spec/voice/conversation.md`), whose
+line reads "…, so Talk stopped."; either adds "Your allowance resets on
+<month> <day>." only while the plan Alpha last read names a reset still
+ahead, and offers Manage plan. It is an ordinary transcript entry, never
+spoken, never a toast and never near the composer. A spent-credits reply
+without that code keeps "Your plan is out of credits. Manage your plan to
+keep chatting."
+
+```quint
+type FundsCode = NoFundsCode | CloudCreditsSpent | CloudAllowanceSpent
+type FundsSurface = TypedTurnRefused | TalkStopped
+pure def fundsCodeOf(wireCode: str): FundsCode =
+  if (wireCode == "insufficient_credits") CloudCreditsSpent else if (wireCode == "allowance_exhausted") CloudAllowanceSpent else NoFundsCode
+pure def outOfFundsReply(kind: FailureKind, code: FundsCode): bool = kind == InsufficientCredits and code != NoFundsCode
+pure val wireCodeValues = Set("", "insufficient_credits", "allowance_exhausted", "billing_hold_active", "payment_required")
+pure def lawOutOfFundsReplacesTheReplyAndOffersManagePlan(kind: FailureKind, code: FundsCode): bool =
+  outOfFundsReply(kind, code) implies (refusedBeforeOutput(kind) and offersManagePlan(kind))
+pure def lawWithoutCloudsCodeNoReplyIsOutOfFunds(kind: FailureKind): bool = not(outOfFundsReply(kind, NoFundsCode))
+pure def lawOnlyCloudsTwoCodesAreOutOfFunds(wireCode: str): bool =
+  fundsCodeOf(wireCode) != NoFundsCode iff (wireCode == "insufficient_credits" or wireCode == "allowance_exhausted")
+```
+
 ### A settled reply carries a plan card only for plan, retry, sign-in or provider, and the billing card is Manage plan
 
 ```quint
