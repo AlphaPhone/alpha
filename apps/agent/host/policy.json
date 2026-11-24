@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "actions": {
+    "allowed": ["REPLY", "IGNORE", "NONE"],
+    "refused": {
+      "CALCULATE": "No area of the phone asks the agent to calculate.",
+      "VIEWS": "The phone declares no agent views while the bundle carries no plugin (D11)."
+    }
+  },
+  "plugins": { "load": [] }
+}
