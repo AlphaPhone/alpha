@@ -1,10 +1,11 @@
 // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
+import type { DeferredDeletionsClient } from "@elizaos/os/bridges/action-journal"
 import type { AddressBookClient, ContactNamesClient, NameSurface } from "@elizaos/os/bridges/contacts"
 import type { MessagesClient } from "@elizaos/os/bridges/messages"
 import type { PhoneClient } from "@elizaos/os/bridges/phone"
 
 module held {
-  import { actionJournalPlugin } from "@elizaos/os/bridges/action-journal"
+  import { actionJournalPlugin, createDeferredDeletions } from "@elizaos/os/bridges/action-journal"
   import { rejectionCode } from "@elizaos/os/bridges/bridge"
   import { addressBookPlugin, createAddressBookClient, createContactNames } from "@elizaos/os/bridges/contacts"
   import { messagesClient, messagesPlugin } from "@elizaos/os/bridges/messages"
@@ -12,6 +13,7 @@ module held {
   function make() {
     const journal = actionJournalPlugin()
     return {
+      deletions: createDeferredDeletions(journal),
       phone: phoneClient(telephonyPlugin(), journal),
       messages: messagesClient(messagesPlugin(), journal),
       contacts: createAddressBookClient({ install: "WritingInstall", plugin: addressBookPlugin(), journal }),
@@ -41,6 +43,7 @@ export interface TelephonyClients {
   readonly messages: MessagesClient
   readonly contacts: AddressBookClient
   readonly names: ContactNamesClient
+  readonly deletions: DeferredDeletionsClient
 }
 
 /** Phone, Messages and Contacts are not on this phone: nothing reached its native side. */

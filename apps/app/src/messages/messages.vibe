@@ -1,20 +1,39 @@
 // spec/app/messages/index.md, "Story: See my conversations"; spec/app/messages/index.md, "Story: Read a conversation"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/messages/index.md, "Story: Start a new message"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type { AddressBookContact } from "@elizaos/os/bridges/contacts"
+import { threadIdOf } from "@elizaos/os/bridges/definitions/messages"
 import type { MessageCursor, MessageRow, ThreadCursor, ThreadId, ThreadRow } from "@elizaos/os/bridges/messages"
 import type { PhoneNumber } from "@elizaos/os/bridges/phone"
-import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import * as Messages from "../../gen/app__messages.effect.vibe"
 import type { Effect as Out, Event, Need, Page } from "../../gen/app__messages.effect.vibe"
 import { CarrierSetup } from "../platform/carrier.vibe"
+import { registered } from "../platform/device.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
-import { type Job, Whole, answer, contained, hearing, reacting, run, together } from "../runtime/reactor.vibe"
+import { type Job, Whole, answer, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Dialer, grantOf, prefilled } from "../phone/phone.vibe"
 import { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
 import { Callers } from "../phone/voicemail.vibe"
 import { on, visiting } from "../phone/visit.vibe"
 import { matches } from "../phone/words.ts"
+
+module nativeNotice {
+  import { type PluginListenerHandle, registerPlugin } from "@capacitor/core"
+
+  interface Transport {
+    smsNoticePending(): Promise<{ threadId?: unknown; token?: unknown }>
+    acknowledgeSmsNotice(input: { token: string }): Promise<void>
+    addListener(name: "smsNotice", wake: () => void): Promise<PluginListenerHandle>
+  }
+
+  let made: Transport | undefined
+  /** The Alpha image's extension of the telephony plugin. @throws {never} */
+  export function noticeTransport(): Transport {
+    return (made ??= registerPlugin<Transport>("ElizaTelephony"))
+  }
+}
+import { noticeTransport } from nativeNotice
 
 /** A conversation Messages has given a number: the phone's thread, where it has one, and the numbers it is with. */
 export interface Conversation {
@@ -253,7 +272,52 @@ const shown = visiting(on("Messages"), Messages.Machine, (showing): Event => (sh
 // spec/app/messages/index.md, "A new message, or one sent, reads the list or the open conversation again"
 const heard = hearing(arrivals, Messages.Machine, (event: Event) => event)
 
-// spec/app/phone/voicemail.md, "Call back and Message open Phone or Messages with the caller's number, and do nothing else"; spec/app/contacts/index.md, "Call and Message open Phone or Messages with the number filled in, and do nothing else"
+// spec/app/messages/index.md, "A message notification opens its exact conversation once access is available"
+/** A native notice may arrive before its WebView or Messages' permissions have finished loading. */
+const notices = started(effect {
+  if (!registered("ElizaTelephony")) return
+  const transport = noticeTransport()
+  const shell = try Shell
+  const machine = try Messages.Machine
+  const inbox = try Inbox
+  const conversations = try Conversations
+  const wake = Stream.callback<"Native">((queue) => effect {
+    const listener = tryPromise(() => transport.addListener("smsNotice", () => { Queue.offerUnsafe(queue, "Native") })) catch () => undefined
+    if (listener !== undefined) {
+      try acquireRelease(succeed(listener), (handle) => ignore(tryPromise(() => handle.remove())))
+    }
+  })
+  const accepting = Stream.changesWith(Stream.map(machine.changes, (state) => Messages.canOpenNotice(state, 1)), (a, b) => a === b)
+  const ready = Stream.map(Stream.filter(accepting, (can) => can), () => "Readable" as const)
+  const events = Stream.merge(Stream.concat(Stream.succeed("Native" as const), wake), ready)
+  try Stream.runForEach(events, effect (event) => {
+    const pending = tryPromise(() => transport.smsNoticePending()) catch () => undefined
+    const id = threadIdOf(pending?.threadId)
+    const token = pending?.token
+    if (id === null || typeof token !== "string" || !/^\d{1,19}$/.test(token)) return
+    if (!showing(try shell.get(), "Messages")) {
+      if (event !== "Native" || !(try contained(shell.send({ type: "openView", view: "Messages" }), "the message notification"))) return
+    }
+    if (!Messages.canOpenNotice(try machine.get(), 1)) return
+    const held = try inbox.get()
+    const listed = held.threads.find((row) => row.id === id)
+    const loaded = listed !== undefined && !("incomplete" in listed) ? [] : (telephony("listMessages", (c) => c.messages.listMessages(id)) catch () => undefined)
+    if (loaded === undefined) return
+    const first = loaded.find((row) => !("incomplete" in row))
+    const addresses = listed !== undefined && !("incomplete" in listed) ? listed.addresses : first !== undefined && !("incomplete" in first) ? first.addresses : []
+    const names = try namesOf("messages", addresses)
+    const latest = tryPromise(() => transport.smsNoticePending()) catch () => undefined
+    if (latest?.token !== token || latest?.threadId !== id || !showing(try shell.get(), "Messages")) return
+    const thread = try conversations.of({ id, addresses })
+    if (!Messages.canOpenNotice(try machine.get(), thread)) return
+    try inbox.set({ chosen: "", names: new Map([...held.names, ...names]) })
+    if (try contained(machine.send({ type: "openNotice", thread }), "the message notification")) {
+      try ignore(tryPromise(() => transport.acknowledgeSmsNotice({ token })))
+    }
+  })
+}, "message notifications")
+
+// spec/app/phone/voicemail.md, "Call back hands the caller's number to Phone and Message opens Messages with it"; spec/app/contacts/index.md, "Call and Message open Phone or Messages with the number filled in, and do nothing else"
 /** A number handed to Messages: Messages opens on the conversation with it, through the picker, as if the owner typed it. */
 const callers = Layer.effect(Callers, effect {
   const whole = try Whole
@@ -273,4 +337,4 @@ const callers = Layer.effect(Callers, effect {
 })
 
 /** Messages: resident, since Phone, Voicemail, Contacts and the agent hand it a number and Home reads its unread count; it reads only while its view is in front. */
-export const messages = together(machine, inbox, conversations, shown, heard, callers)
+export const messages = together(machine, inbox, conversations, shown, heard, notices, callers)

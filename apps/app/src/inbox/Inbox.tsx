@@ -274,7 +274,9 @@ export function Inbox({ runtime }: InboxProps) {
   const changes = useTimed(runtime, useChanges);
   const drafts = useDrafts(runtime);
   const shell = useShell(runtime);
-  const [typed, setTyped] = useState<{ text: string; over: string } | undefined>();
+  const remote = usePreferences(runtime).state?.images ?? false;
+  const [typed, setTyped] = useState<{ text: string; over: string; folder: string } | undefined>();
+  const [selection, setSelection] = useState<string>();
   const [choosing, setChoosing] = useState(false);
   const [shelf, setShelf] = useState(false);
   if (cause) return <Alert variant="destructive" className="m-4">Alpha could not open Inbox</Alert>;
@@ -293,26 +295,34 @@ export function Inbox({ runtime }: InboxProps) {
   const review = <ChangeReview runtime={runtime} list={state} cards={cards} />;
   if (message.state.message !== 0) return <>{<Opened runtime={runtime} list={state} onRefresh={refresh} onBegin={onBegin} />}{review}</>;
   const settings = shell.can({ type: "openView", view: "Settings" }) ? () => void shell.send({ type: "openView", view: "Settings" }) : undefined;
-  const held = changes.state ? aside(changes.state) : [];
-  const letters = mailOf(runtime, (mail) => mail.shown(state)).filter(({ message: number }) => !held.includes(number));
-  const account = state.selected.account;
+  const hidden = new Set(changes.state ? aside(changes.state) : []);
+  const letters = mailOf(runtime, (mail) => mail.shown(state)).filter(({ message: number }) => !hidden.has(number));
+  const { account, folder, query } = state.selected;
+  const folderKey = `${account}/${folder}`;
+  const typedHere = typed && typed.over === query && typed.folder === folderKey ? typed.text : undefined;
+  const searching = typedHere !== undefined || query !== "";
+  const selecting = selection === folderKey && !searching && readable(state) && !state.saved && state.pages > 0;
+  const chosenMessages = new Set(state.chosen);
   const access = accessOf(state, account);
   const today = runtime.runSync(Time.use((time) => time.latest()));
   const checking = state.accounts.status === "Loading";
   const row = ({ message: number, card }: Letter): InboxListRow => {
-    const open = { type: "open", access, account, message: number, thread: 1, remote: false } as const;
+    const open = { type: "open", access, account, message: number, thread: 1, remote } as const;
     const saved = { type: "openSaved", account, message: number, thread: 1, checking, kept: state.saved } as const;
     const opening = message.can(open) ? open : message.can(saved) ? saved : undefined;
-    const chosen = state.chosen.includes(number);
+    const chosen = chosenMessages.has(number);
     const toggle = chosen ? ({ type: "unchoose", message: number } as const) : ({ type: "choose", message: number } as const);
     const swipe = { type: "swipe", message: number } as const;
+    const canArchive = !selecting && folder !== "Archived" && folder !== "Trashed" && can(swipe) && changes.can(changeOf(state, "Archive", [number], revisionOf(card)), "Owner");
     return {
-      id: String(number), sender: senderName(card.from), subject: card.subject || "(no subject)", snippet: card.snippet,
-      time: arrived(card.receivedAt, today), unread: card.isUnread, chosen,
+      id: String(number), sender: folder === "Sent" ? `To: ${card.to.length ? card.to.join(", ") : "(no recipients)"}` : senderName(card.from),
+      subject: card.subject || "(no subject)", snippet: card.snippet,
+      time: arrived(card.receivedAt, today), unread: card.isUnread, chosen, selecting,
       onOpen: opening ? () => void message.send(opening) : undefined,
-      onChosenChange: can(toggle) ? () => void send(toggle) : undefined,
-      onSwipe: can(swipe) ? () => void send(swipe).then(() => {
-        const archive = changeOf({ ...state, chosen: [number], revision: state.revision + 1 }, "Archive", [number], revisionOf(card));
+      onChosenChange: selecting && can(toggle) ? () => void send(toggle) : undefined,
+      onSwipe: canArchive ? () => void send(swipe).then((applied) => {
+        if (applied._tag !== "Success") return;
+        const archive = changeOf(applied.value.state, "Archive", [number], revisionOf(card));
         if (changes.can(archive, "Owner")) void changes.send(archive, "Owner");
       }) : undefined,
     };
@@ -324,25 +334,56 @@ export function Inbox({ runtime }: InboxProps) {
   const kind = letters.length === 0 ? emptyOf(state) : undefined;
   // spec/app/inbox/index.md, "Select all chooses every message the list shows, in one change"
   const chooseAll = { type: "chooseAll", shown: letters.map((letter) => letter.message) } as const;
+  const canSearch = readable(state) && searchableIn(folder, state);
+  const clearSearch = { type: "clearSearch" } as const;
+  const clearSelection = () => {
+    for (const message of chosenMessages) void send({ type: "unchoose", message });
+  };
+  const finishSelection = () => {
+    setSelection(undefined);
+    clearSelection();
+  };
   const accounts = state.connected.map((linked) => ({ id: String(linked.account), email: mailOf(runtime, (mail) => mail.email(linked.account)), grant: linked.grant }));
   const chooseAccount = (id: string) => {
     const event = { type: "chooseAccount", account: Number(id) } as const;
-    if (can(event)) void send(event);
+    if (can(event)) {
+      setSelection(undefined);
+      setTyped(undefined);
+      void send(event);
+    }
   };
   const mustChoose = state.accounts.status === "Loaded" && account === 0 && state.connected.length > 0;
   return (
     <>
       <InboxListScreen
         account={account === 0 ? undefined : mailOf(runtime, (mail) => mail.email(account))}
-        folder={folderNames[state.selected.folder]}
+        folder={folderNames[folder]}
         unavailable={!state.searchable}
         onChooseFolder={readable(state) ? (name) => {
           const event = { type: "chooseFolder", folder: folderOf[name] } as const;
-          if (can(event)) void send(event);
+          if (can(event)) {
+            setSelection(undefined);
+            setTyped(undefined);
+            void send(event);
+          }
         } : undefined}
-        search={typed && typed.over === state.selected.query ? typed.text : state.selected.query}
-        onSearchChange={(text) => setTyped({ text, over: state.selected.query })}
-        onSearch={readable(state) && searchableIn(state.selected.folder, state) ? (text) => {
+        searching={searching}
+        search={typedHere ?? query}
+        onOpenSearch={canSearch ? () => {
+          finishSelection();
+          setTyped({ text: query, over: query, folder: folderKey });
+        } : undefined}
+        onCloseSearch={() => {
+          setTyped(undefined);
+          if (can(clearSearch)) void send(clearSearch);
+        }}
+        onSearchChange={(text) => {
+          if (text === "" && can(clearSearch)) {
+            setTyped({ text, over: "", folder: folderKey });
+            void send(clearSearch);
+          } else setTyped({ text, over: query, folder: folderKey });
+        }}
+        onSearch={canSearch ? (text) => {
           const event = { type: "search", query: text } as const;
           if (can(event)) {
             setTyped(undefined);
@@ -354,6 +395,9 @@ export function Inbox({ runtime }: InboxProps) {
         state={mustChoose ? undefined : kind}
         onStateAction={kind === "offline" || kind === "failed" ? retryList : settings}
         chosen={state.chosen.length}
+        onStartSelection={!selecting && can(chooseAll) ? () => setSelection(folderKey) : undefined}
+        onFinishSelection={selecting || chosenMessages.size > 0 ? finishSelection : undefined}
+        onClearSelection={selecting && chosenMessages.size > 0 ? clearSelection : undefined}
         onChooseAll={can(chooseAll) ? () => void send(chooseAll) : undefined}
         onArchive={state.selected.folder === "Archived" ? undefined : chosenChange("Archive")}
         onTrash={state.selected.folder === "Trashed" ? undefined : chosenChange("Trash")}
