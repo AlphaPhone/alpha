@@ -4,6 +4,7 @@ import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Inbox from "../../gen/app__inbox.effect.vibe"
 import type { Effect as Out, Event, Folder } from "../../gen/app__inbox.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { waiting } from "../home/waiting.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { type Job, answer, contained, following, reacting, started, together, untimed } from "../runtime/reactor.vibe"
 import { Mail, asked, connections, failureOf, mail, page } from "./gmail.vibe"
@@ -71,5 +72,19 @@ const session = started(effect {
 // spec/app/inbox/index.md, "Opening Inbox, and every change to Google access, checks the accounts again, even while a check is out"
 const opened = following(Shell, (shell) => showing(shell, "Inbox"), Inbox.Machine, (shown): Event | undefined => (shown ? { type: "checkAccess" } : undefined))
 
+// spec/app/inbox/index.md, "Attention says whether the owner is signed out, has no account, is being checked, or has a count of unread messages, fresh or no longer fresh, or could not be read"
+/** What Home's Inbox tile says waits: the unread messages of the first page, counted, and nothing else of the mail. */
+function waitingOf(said: Inbox.Attention): string | undefined {
+  if ((said.standing !== "Ready" && said.standing !== "Stale") || said.unread < 1) return undefined
+  return `${said.unread}${said.more ? "+" : ""} unread`
+}
+
+const home = started(effect {
+  const list = try Inbox.Machine
+  try Stream.runForEach(Stream.changes(Stream.map(list.changes, (state) => waitingOf(Inbox.attention(state)))), effect (said) => {
+    waiting.tell("Inbox", said)
+  })
+}, "telling Home")
+
 /** Gmail's list, from launch: kept across restarts, read through the owner's cloud, and checked again each time Inbox opens. */
-export const mailbox = together(Layer.provideMerge(kept, mail), session, opened)
+export const mailbox = together(Layer.provideMerge(kept, mail), session, opened, home)

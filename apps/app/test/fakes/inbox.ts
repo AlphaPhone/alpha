@@ -23,6 +23,8 @@ export interface InboxScene {
   revoked: boolean;
   /** Every change asked of Gmail, as `<kind> <message>`, once it was dispatched. */
   readonly changes: string[];
+  /** The name of every file a dispatched send carried. */
+  readonly attached: string[];
 }
 
 const everything: GoogleStatus["grantedCapabilities"] = ["google.basic_identity", "google.gmail.triage", "google.gmail.send", "google.gmail.manage"];
@@ -48,7 +50,7 @@ export function inboxScene(): InboxScene {
       letter(3, "Win a prize", ["SPAM"]),
       letter(4, "Notes from me", ["SENT"]),
     ],
-    history: 500, offline: false, revoked: false, changes: [],
+    history: 500, offline: false, revoked: false, changes: [], attached: [],
   };
 }
 
@@ -134,8 +136,9 @@ export function inboxRoutes(scene: InboxScene): Route[] {
     (request, url) => {
       const requestId = new RegExp(`^${operations}/([^/]+)/dispatch$`, "u").exec(url.pathname)?.[1];
       if (request.method !== "POST" || requestId === undefined || asked.get(requestId)?.kind !== "send") return;
-      return request.json().then(({ proposal }: { proposal: { to: string[]; subject: string; bodyText: string } }) => {
+      return request.json().then(({ proposal }: { proposal: { to: string[]; subject: string; bodyText: string; attachments?: { name: string }[] } }) => {
         scene.changes.push(`send ${proposal.to.join(",")} ${proposal.subject}`);
+        scene.attached.push(...(proposal.attachments ?? []).map((file) => file.name));
         scene.mail.push({ ...letter(scene.mail.length + 100, proposal.subject, ["SENT"], proposal.bodyText), card: { ...letter(scene.mail.length + 100, proposal.subject, ["SENT"]).card, to: proposal.to } });
         return Response.json(operation(requestId, "send", "succeeded"));
       });

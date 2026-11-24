@@ -5,8 +5,10 @@ import { Machine as Marks } from "../gen/app__inbox__marking.effect.vibe";
 import { Machine as Shown } from "../gen/app__inbox__message.effect.vibe";
 import { Machine as Changes } from "../gen/app__inbox__sending.effect.vibe";
 import { Machine as Writing } from "../gen/app__inbox__drafts.effect.vibe";
+import { Machine as Offering } from "../gen/app__inbox__suggestion.effect.vibe";
+import { useInEmail } from "../src/inbox/suggestion.vibe";
 import inbox from "../src/inbox/index.tsx";
-import { button, closeAll, drawn, fill, later, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, open, press, underAct, until } from "./alpha.tsx";
 import { letter } from "./fakes/inbox.ts";
 import { scene } from "./fakes/scene.ts";
 
@@ -74,6 +76,11 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, List, (s) => s.selected.query === "tax" && s.list.status === "Loaded");
     step("3");
     expect(rows()).toEqual(["Your tax return"]);
+
+    // spec/app/inbox/index.md, "Back from a search shows its folder without the search, before Back leaves Inbox"
+    await hardware("back");
+    await until(alpha, runtime, List, (s) => s.selected.query === "" && s.list.status === "Loaded");
+    expect([rows().length, (document.querySelector("input[aria-label='Search mail']") as HTMLInputElement | null)?.value]).toEqual([25, ""]);
     await press("Spam");
     await until(alpha, runtime, List, (s) => s.selected.folder === "Spam" && s.list.status === "Loaded");
     step("4");
@@ -87,7 +94,6 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded");
     step("6");
     await later(alpha, 1000);
-    process.stderr.write(`DEBUG ${JSON.stringify(await runtime.runPromise(Marks.use((m) => m.get())))} ${JSON.stringify(world.inbox.changes)}\n`);
     await until(alpha, runtime, Marks, (s) => s.attempt.outcome === "Confirmed");
     step("7");
     expect([title(), world.inbox.changes]).toEqual(["Lunch on Friday", ["mark-read g1"]]);
@@ -181,7 +187,7 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   expect([rows(), told()]).toEqual([[], expect.stringContaining("Alpha cannot read this mail")]);
 });
 
-it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I reviewed\"; spec/app/inbox/drafts.md, \"Story: Write a message\")", async () => {
+it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I reviewed\"; spec/app/inbox/drafts.md, \"Story: Write a message\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\"; spec/app/inbox/suggestion.md, \"Story: Review what is offered into my email\")", async () => {
   const world = { ...scene(), phone: false };
   const { alpha } = await open(world);
   const runtime = inbox.runtime(alpha);
@@ -199,12 +205,32 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await later(alpha, 10);
   await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded" && s.letter.revision >= 2);
 
+  // spec/app/inbox/suggestion.md, "Only the owner puts it in, once, as it was last shown, into the draft as it still is, adding or replacing as the owner chooses; text that does not fit is refused whole and the offer stays"
+  await runtime.runPromise(useInEmail("See you on Friday.", "Notes", { target: "NewEmail", account: 1, message: 0 }));
+  await press("Review email suggestion");
+  await until(alpha, runtime, Offering, (s) => s.review.showing && s.target === "ToDraft");
+  await confirm("Add");
+  await until(alpha, runtime, Offering, (s) => s.used === 1 && s.text === 0);
+  await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
+  expect((document.querySelector("textarea[aria-label=Message]") as HTMLTextAreaElement | null)?.value).toBe("Thanks, it is all in order.\n\nSee you on Friday.");
+
+  // spec/app/inbox/adding.md, "A file is attached to the draft open only once the picker gives one that fits within the room its account leaves; one too large, unreadable or without room is refused and said so"
+  await press("Attach a file");
+  await drawn(() => {
+    const picker = document.querySelector("input[type=file]");
+    if (!(picker instanceof HTMLInputElement)) throw new Error("no file picker");
+    Object.defineProperty(picker, "files", { value: [new File(["the receipt"], "receipt.txt", { type: "text/plain" })] });
+    picker.dispatchEvent(new Event("change"));
+  });
+  await until(alpha, runtime, Writing, (s) => s.letter.attachments === 1);
+  expect(told()).toContain("receipt.txt");
+
   // spec/app/inbox/sending.md, "Only the owner confirms, only the review of the thing as it is now, while the account's grant allows it and, for a send, it has a valid recipient"
   await press("Send");
   await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "Send");
   await confirm("Send");
   await until(alpha, runtime, Changes, (s) => s.attempt.outcome === "Confirmed");
-  expect(world.inbox.changes).toEqual(["send s2@mail.test Re: Your tax return"]);
+  expect([world.inbox.changes, world.inbox.attached]).toEqual([["send s2@mail.test Re: Your tax return"], ["receipt.txt"]]);
 
   // spec/app/inbox/drafts.md, "Once its send is confirmed, a draft unchanged since the revision sent is forgotten; one edited after it, or whose write is in flight, is kept and marked as sent"
   await until(alpha, runtime, Writing, (s) => !s.open && s.shelf.shelved.length === 0);
