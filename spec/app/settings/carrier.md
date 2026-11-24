@@ -65,9 +65,9 @@ pure def canShow(s: Carrier): bool = not(s.showing)
 
 pure def show(s: Carrier): Carrier = forgotten(true, s)
 
-pure def canHide(s: Carrier): bool = s.showing
+pure def canConceal(s: Carrier): bool = s.showing
 
-pure def hide(s: Carrier): Carrier = forgotten(false, s)
+pure def conceal(s: Carrier): Carrier = forgotten(false, s)
 ```
 
 ### The identifiers are read only when the owner taps Show identifiers, one read at a time, with ten seconds to answer, and a new read forgets the last

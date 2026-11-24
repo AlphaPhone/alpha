@@ -43,6 +43,12 @@ describe("Files on a phone", () => {
     await press("Internal storage");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded");
     expect(listed().sort()).toEqual(["Documents", "Download"]);
+    // spec/app/files/index.md, "Opening Files reads the storage and the place it left, and leaving Files drops every read, the selection, the confirmation and the sheets": a place is read once, however often the screen draws it
+    const reads = world.files.calls.filter((call) => call === "storageList").length;
+    await press("Grid");
+    await press("List");
+    await press("Name");
+    expect([world.files.calls.filter((call) => call === "storageList").length, runtime.runSync(Browser.use((m) => m.get())).trail.length]).toEqual([reads, 1]);
     await press("Documents");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 2);
     expect(listed().sort()).toEqual(["Old", "notes.txt"]);
