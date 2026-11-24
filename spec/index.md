@@ -8,3 +8,4 @@ Calendar and Maps, and never hosts the agent.
 
 - [App](./app/): the phone's interface, in `apps/app`
 - [Kit](./kit/): rules several areas keep
+- [Cloud](./cloud/): Alpha Cloud, Alpha's own deployment of eliza's cloud, in `apps/cloud`

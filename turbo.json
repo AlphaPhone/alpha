@@ -320,7 +320,10 @@
         "@repo/eliza-harness#test",
         "@repo/deployment#build",
         "@repo/deployment#typecheck",
-        "@repo/deployment#test"
+        "@repo/deployment#test",
+        "@repo/cloud#build",
+        "@repo/cloud#typecheck",
+        "@repo/cloud#test"
       ],
       "cache": false
     },
@@ -330,6 +333,7 @@
         "@repo/app#typecheck",
         "@repo/eliza-harness#typecheck",
         "@repo/deployment#typecheck",
+        "@repo/cloud#typecheck",
         "vibestack-studio#typecheck"
       ],
       "inputs": [

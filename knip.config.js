@@ -87,6 +87,18 @@ export default {
         "test/**/*.{ts,vibe,vibex}"
       ]
     },
+    "apps/cloud": {
+      "entry": [
+        "src/worker.vibe",
+        "src/edge.vibe",
+        "src/cli.vibe",
+        "test/**/*.test.{ts,vibe}"
+      ],
+      "project": [
+        "src/**/*.{ts,vibe,vibex}",
+        "test/**/*.{ts,vibe,vibex}"
+      ]
+    },
     "vibestack/studio": {
       "entry": [
         "scripts/build.mjs",
