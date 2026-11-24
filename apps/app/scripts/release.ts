@@ -950,12 +950,12 @@ export function osBuildOf(zip: string, plan: OsSigningPlan, pin: ToolsPin, bindi
   if (new Set(names).size !== names.length || names.some(unsafeName)) throw new ReleaseRefused({ message: "the OS build's archive names an entry twice or outside itself" });
   const misc = fieldsOf(unzipText(zip, "META/misc_info.txt"));
   const partitions = unzipText(zip, "META/ab_partitions.txt").split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== "");
-  const signers: Record<string, { certificate: string | undefined; private_key: string | undefined }> = {};
+  const signers: Record<string, { certificate: string | null; private_key: string | null }> = {};
   for (const line of unzipText(zip, "META/apkcerts.txt").split(/\r?\n/)) {
     const values = Object.fromEntries([...line.matchAll(/(\w+)="([^"]*)"/g)].map(([, name, value]) => [name, value]));
     if (values.name === undefined) continue;
     if (Object.hasOwn(signers, values.name)) throw new ReleaseRefused({ message: `${values.name} has two signer rows` });
-    signers[values.name] = { certificate: values.certificate, private_key: values.private_key };
+    signers[values.name] = { certificate: values.certificate ?? null, private_key: values.private_key ?? null };
   }
   const avb = Object.fromEntries(Object.entries(misc).filter(([name]) => name.startsWith("avb_") && /_(key_path|algorithm|rollback_index_location)$/.test(name)));
   const product = fieldsOf(unzipText(zip, "PRODUCT/etc/build.prop"));
