@@ -16,7 +16,7 @@ const ALL = { ELIZAOS_KEYSTORE_PATH: "/k", ELIZAOS_KEYSTORE_PASSWORD: "p", ELIZA
 const SIGNER = "a".repeat(64);
 const descriptor = (signerSha256 = SIGNER, versionCode = null) => ({ schema: 1, signerSha256, lastRelease: { versionCode, versionName: null, recordedAt: null } });
 
-test("the documented pnpm separator preserves the Android release option", () => {
+test("the documented Bun separator preserves the Android release option", () => {
   assert.deepEqual(parseBuildArgs(["--", "--release"]), { release: true });
   assert.deepEqual(parseBuildArgs(["--release"]), { release: true });
   assert.throws(() => parseBuildArgs(["--", "--unknown"]), /Unknown option --unknown/);
