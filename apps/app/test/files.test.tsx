@@ -14,12 +14,26 @@ import { scene } from "./fakes/scene.ts";
 underAct();
 afterEach(closeAll);
 
-const listed = () => [...document.querySelectorAll("[aria-label=Listed] button:not([role=checkbox])")].map((row) => row.textContent);
+const listed = () => [...document.querySelectorAll("[aria-label=Listed] button:not([role=checkbox])")].map((row) => row.getAttribute("aria-label"));
 const openRow = (name: string) => drawn(() => {
-  const found = [...document.querySelectorAll("[aria-label=Listed] button:not([role=checkbox])")].find((row) => row.textContent === name);
+  const found = [...document.querySelectorAll("[aria-label=Listed] button:not([role=checkbox])")].find((row) => row.getAttribute("aria-label") === name);
   if (!(found instanceof HTMLElement)) throw new Error(`no listed row ${name}`);
   found.click();
 });
+const openMenu = (label: string) => drawn(() => {
+  const trigger = button(label);
+  if (!trigger) throw new Error(`no menu ${label}`);
+  trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+});
+const menuItem = (name: string) => [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent === name);
+const choose = async (name: string, menu = "Files options") => {
+  await openMenu(menu);
+  await drawn(() => {
+    const item = menuItem(name);
+    if (!item) throw new Error(`no menu item ${name}`);
+    item.click();
+  });
+};
 const paths = (world: ReturnType<typeof scene>) => world.files.stored.map((one) => `${one.volume}:${one.path}`).sort();
 const select = (name: string) => press(`Select ${name}`);
 const buttonOnTop = (name: string) => [...([...document.querySelectorAll("[role=dialog]")].at(-1)?.querySelectorAll("button") ?? [])].find((one) => (one.getAttribute("aria-label") ?? one.textContent) === name);
@@ -51,9 +65,9 @@ describe("Files on a phone", () => {
     expect(listed().sort()).toEqual(["Documents", "Download"]);
     // spec/app/files/index.md, "Opening Files reads the storage and the place it left, and leaving Files drops every read, the selection, the confirmation and the sheets": a place is read once, however often the screen draws it
     const reads = world.files.calls.filter((call) => call === "storageList").length;
-    await press("Grid");
-    await press("List");
-    await press("Name");
+    await choose("Grid");
+    await choose("List");
+    await choose("Name");
     expect([world.files.calls.filter((call) => call === "storageList").length, runtime.runSync(Browser.use((m) => m.get())).trail.length]).toEqual([reads, 1]);
     await openRow("Documents");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 2);
@@ -72,7 +86,7 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 1);
     expect([listed().length, document.body.textContent?.includes("Only part of this place could be read")]).toEqual([1, true]);
     world.files.listMost = 0;
-    await press("Refresh");
+    await choose("Refresh");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 0);
     expect([document.body.textContent?.includes("Nothing here"), document.body.textContent?.includes("Only part of this place could be read")]).toEqual([false, true]);
     world.files.listMost = 5_000;
@@ -109,6 +123,7 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Browser, (s) => s.details === 0 && s.picked.length === 1);
     await hardware("back");
     await until(alpha, runtime, Browser, (s) => s.picked.length === 0);
+    await choose("Filter files");
     await fill("Filter", "beach");
     await press("Filter");
     await until(alpha, runtime, Browser, (s) => s.search.query.status === "Loaded");
@@ -156,15 +171,16 @@ describe("Files on a phone", () => {
     await press("Download");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 2);
     // spec/app/files/index.md, "The owner chooses a grid or a list, and a sort; choosing the same sort again reverses it"
-    await press("Name");
+    await choose("Name");
     expect(listed()).toEqual(["beach.jpg", "lease.pdf"]);
-    await press("Name");
+    await choose("Name");
     expect(listed()).toEqual(["lease.pdf", "beach.jpg"]);
-    await press("Size");
+    await choose("Size");
     expect(listed()).toEqual(["beach.jpg", "lease.pdf"]);
-    await press("Size");
+    await choose("Size");
     expect(listed()).toEqual(["lease.pdf", "beach.jpg"]);
     // spec/app/files/index.md, "The owner sets a filter of a kind and a text for the place showing, as a chip the owner sees and clears; only what matches both is shown"
+    await choose("Filter files");
     await fill("Filter", "LEASE");
     await press("Filter");
     await until(alpha, runtime, Browser, (s) => s.search.query.status === "Loaded");
@@ -176,7 +192,7 @@ describe("Files on a phone", () => {
     expect(runtime.runSync(Browser.use((m) => m.get())).search.hits.map((hit) => hit.name)).toEqual(["beach.jpg"]);
     // spec/app/files/index.md, "A refresh asks the filter on again for the place showing, so what it found is never older than what the place lists"
     world.files.stored.push({ volume: "primary", path: "Download/dunes.png", directory: false, mimeType: "image/png", size: 1, modified: 8 });
-    await press("Refresh");
+    await choose("Refresh");
     await until(alpha, runtime, Browser, (s) => s.search.query.status === "Loaded" && s.search.hits.length === 2);
     world.files.stored.pop();
     await press("Clear the filter");
@@ -241,7 +257,7 @@ describe("Files on a phone", () => {
     world.files.trash.splice(0);
 
     // spec/app/files/index.md, "One request leaves for each change, for items listed as they are now or the file shown, and only when the owner starts, chooses or renames it, or approved it"
-    await press("New folder");
+    await choose("New folder");
     await fill("Name", "Taxes");
     await press("Make");
     await until(alpha, runtime, Browser, (s) => s.change.work === "NewFolder" && s.change.attempt.outcome === "Confirmed" && s.listing.status === "Loaded");
@@ -296,7 +312,9 @@ describe("Files on a phone", () => {
     await press("notes.txt");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.kind === "Text");
     expect(document.querySelector("pre")?.textContent).toBe("The words of notes.txt");
-    expect(Boolean(button("Ask Alpha"))).toBe(true);
+    await openMenu("File actions");
+    expect(Boolean(menuItem("Ask Alpha"))).toBe(true);
+    await drawn(() => menuItem("Ask Alpha")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
     // spec/app/files/preview.md, "The owner closes the viewer, and so does leaving the screen or the phone locking"
     await press("Close");
     await until(alpha, runtime, Shown, (s) => s.viewer === 0);
@@ -312,21 +330,23 @@ describe("Files on a phone", () => {
     await press("Next page");
     await until(alpha, runtime, Shown, (s) => s.drawing.status === "Loaded" && s.page === 2);
     // spec/app/files/preview.md, "Open elsewhere hands the file over to read only"
-    await press("Open elsewhere");
+    await choose("Open elsewhere", "File actions");
     await until(alpha, runtime, Shown, () => world.files.opened.includes("selection:Download/lease.pdf"));
     // spec/app/files/preview.md, "Forget removes the file from Recent, with or without access, and closes the viewer"
-    await press("Forget");
+    await choose("Forget", "File actions");
     await until(alpha, runtime, Recent, (s) => s.rows.length === 1 && s.shown.grant === 0);
     expect(world.files.forgotten).toEqual(["selection:Download/lease.pdf"]);
 
     // spec/app/files/preview.md, "A file that holds a verification code or another secret is never handed to Ask Alpha"
     world.files.stored.push({ volume: "primary", path: "Download/code.txt", directory: false, mimeType: "text/plain", size: 30, modified: 4 });
     world.files.texts["Download/code.txt"] = "Your verification code is 482913";
-    await press("Refresh");
+    await choose("Refresh");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 3);
     await press("code.txt");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.secret);
-    expect(button("Ask Alpha")).toBeUndefined();
+    await openMenu("File actions");
+    expect(menuItem("Ask Alpha")).toBeUndefined();
+    await drawn(() => menuItem("Open elsewhere")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
     await press("Close");
 
     // spec/app/files/recent.md, "Opening a row again asks the phone first: it opens, moves to the front and is the document open, or its access has ended and it must be selected again, or its provider cannot be reached and it stays"
@@ -411,8 +431,8 @@ describe("Files on a phone", () => {
     await press("Internal storage");
     await openRow("Documents");
     await until(first.alpha, first.runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 2);
-    await press("Name");
-    await press("Grid");
+    await choose("Name");
+    await choose("Grid");
     await press("notes.txt");
     await until(first.alpha, first.runtime, Shown, (s) => s.content.status === "Loaded");
     await first.close();
@@ -453,7 +473,7 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Confirmed" && s.job.kind === "Binning" && s.binned.length === 0);
     expect([world.files.trash.length, paths(world).includes("primary:Download/lease.pdf")]).toEqual([0, true]);
 
-    await press("Refresh");
+    await choose("Refresh");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 2);
     await select("beach.jpg");
     await press("Delete");
@@ -463,7 +483,7 @@ describe("Files on a phone", () => {
     expect(button("Undo")).toBeUndefined();
 
     // spec/app/files/trash.md, "A job ends as its answer says for each item: only what the phone confirmed is done, and the rest was refused or is unknown": a file changed since it was shown is not put in the Trash
-    await press("Refresh");
+    await choose("Refresh");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 1);
     await select("lease.pdf");
     const lease = world.files.stored.find((one) => one.path === "Download/lease.pdf");

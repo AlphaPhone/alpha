@@ -76,7 +76,9 @@ describe("Settings", () => {
   });
 
   it("See what the phone says (spec/app/settings/facts.md, \"Story: See what the phone says\")", async () => {
-    const { alpha, machines, world } = await settingsOpen();
+    const initial = { ...scene(), phone: true };
+    initial.maps.precision = "approximate";
+    const { alpha, machines, world } = await settingsOpen(initial);
     await until(alpha, machines, Facts.Machine, (s) => s.read.read.status === "Loaded");
     const shown = await machines.runPromise(Facts.Machine.use((facts) => facts.get()));
     // spec/app/settings/facts.md, "Only the newest asking's answer is taken, and it replaces everything shown": what the phone did not report is unavailable, never guessed.
@@ -212,6 +214,11 @@ describe("Settings", () => {
   it("Read the problem log (spec/app/settings/developer.md, \"Story: Read the problem log\")", async () => {
     const world = { ...scene(), phone: true };
     world.settings.crashes = [{ at: Date.now() - 2000, source: "uncaught", errorClass: "java.lang.IllegalStateException" }, { at: Date.now() - 1000, source: "renderer", kind: "render", errorClass: "TypeError" }];
+    const row = (session: number, stage: string, elapsedMs: number) => ({ session, stage, elapsedMs, clock: "monotonic-observed", sentFrames: 0, sentBytes: 0, receivedFrames: 0, receivedBytes: 0 });
+    world.voice.streamTiming = {
+      format: "alpha-cloud-stream-timing-v1",
+      records: [row(4, "start", 0), row(4, "capture-open", 41), row(4, "consent-retry", 300), row(4, "stt-connected", 812), row(4, "first-frame-sent", 815), row(5, "start", 0), row(5, "stt-connected", 390)],
+    };
     const { alpha, machines } = await settingsOpen(world);
     await press("Developer");
     await press("Problem log");
@@ -224,8 +231,9 @@ describe("Settings", () => {
     await until(alpha, machines, Developer.Machine, (s) => s.exporting.read.status === "Loaded");
     const text = await sharedFiles[0]?.text();
     const report = JSON.parse(text ?? "{}");
-    expect([report.format, report.roles, report.problems.count, report.permissions, text?.includes("launcher3"), text?.includes("ai.alphacompute")]).toEqual([
-      "alpha-diagnostics/v1", [{ role: "home", held: false, available: true }, { role: "assistant", held: false, available: true }], 2, { FilesAccess: true, LocationAccess: true }, false, false,
+    expect([report.format, report.roles, report.problems.count, report.permissions, text?.includes("launcher3"), text?.includes("ai.alphacompute"), text?.includes("\"session\""), report.talk]).toEqual([
+      "alpha-diagnostics/v1", [{ role: "home", held: false, available: true }, { role: "assistant", held: false, available: true }], 2, { FilesAccess: true, LocationAccess: true }, false, false, false,
+      { format: "alpha-cloud-stream-timing-v1", sessions: [{ sttConnectedMs: 812, firstFrameSentMs: 815, consentRetry: true }, { sttConnectedMs: 390, firstFrameSentMs: null, consentRetry: false }] },
     ]);
     // spec/app/settings/developer.md, "Clear is offered only for a log with problems, one at a time; once the startup area answers, the log is read again": Clear asks first, and backing out clears nothing.
     await press("Clear");

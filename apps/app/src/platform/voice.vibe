@@ -1,5 +1,5 @@
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "Starting asks for the microphone the first time, opens it once it is allowed, and holds the speech engine while talking"
-import { type CloudStreamingSpeech, cloudSpeechPlugin, createCloudStreamingSpeech, type CredentialId, type EnvironmentName } from "@elizaos/os/bridges/voice"
+import { type CloudStreamingSpeech, createCloudStreamingSpeech, type CredentialId, type EnvironmentName } from "@elizaos/os/bridges/voice"
 import { fresh } from "../runtime/attempts.vibe"
 import { Agent } from "./agent.vibe"
 import { registered } from "./device.vibe"
@@ -26,6 +26,8 @@ export interface RecordedClip {
 
 module capacitor {
   import { registerPlugin } from "@capacitor/core"
+  import type { ElizaCloudSpeechPlugin } from "@elizaos/os/bridges/definitions/voice"
+  import { type SignInClient, signInClient } from "@elizaos/os/bridges/sign-in"
 
   export interface ListenerHandle { remove(): Promise<void> }
 
@@ -55,6 +57,24 @@ module capacitor {
     return (made ??= registerPlugin<LocalVoicePlugin>("AlphaVoiceCloud"))
   }
 
+  /** eliza's Cloud speech relay with the methods its TypeScript definition does not list yet: the warm-up and the timing records. */
+  export interface CloudRelay extends ElizaCloudSpeechPlugin {
+    prewarmCloudSpeech(options: { environment: string }): Promise<unknown>
+    cloudStreamTiming(options: Record<string, never>): Promise<unknown>
+  }
+
+  let relay: CloudRelay | undefined
+  /** @throws {never} */
+  export function relayPlugin(): CloudRelay {
+    return (relay ??= registerPlugin<CloudRelay>("ElizaCloudSpeech"))
+  }
+
+  let signIn: SignInClient | undefined
+  /** eliza's client of the phone's sign-in, made once. @throws {never} */
+  export function signInAccounts(): SignInClient {
+    return (signIn ??= signInClient())
+  }
+
   /** @throws {never} */
   export function makeAbort(): AbortController {
     return new AbortController()
@@ -67,7 +87,7 @@ module capacitor {
     }
   }
 }
-import { localPlugin, makeAbort, makeSessionGuard } from capacitor
+import { localPlugin, makeAbort, makeSessionGuard, relayPlugin, signInAccounts } from capacitor
 
 export error VoiceBridgeFailed { method: string; cause: unknown }
 
@@ -76,6 +96,7 @@ export service VoiceBridge {
   checkPermission(): VoiceGrant!!
   requestPermission(): VoiceGrant!!
   prewarm(network: boolean): void!!Agent
+  streamTimings(): unknown!!
   probeStatus(ttsOnly: boolean): SpeechStatus!!
   invalidateCache(): void!!
   holdEngine(): boolean!!
@@ -93,8 +114,10 @@ export service VoiceBridge {
 
 const LOCAL_PLUGIN = "AlphaVoiceCloud"
 const CLOUD_STREAM_PLUGIN = "ElizaCloudSpeech"
-const DEFAULT_ENV = "production" as EnvironmentName
-const DEFAULT_CREDENTIAL = "device" as CredentialId
+/** The cloud the phone signs in to, whose account the relay speaks for. */
+const CLOUD_ENVIRONMENT = "production" as EnvironmentName
+/** How long a background call to the relay, a warm-up or its timing records, may run before it is dropped. */
+const RELAY_WARMUP_BOUND = "5 seconds"
 
 function parseGrant(raw: string | undefined): VoiceGrant {
   return raw === "granted" ? "granted" : raw === "denied" ? "denied" : "prompt"
@@ -156,12 +179,23 @@ function makeNativeEvents(
   })
 }
 
+/** The id of the key the phone's sign-in holds for the cloud now: the relay speaks only for that key, and refuses any other. */
+effect function signedInKey(accounts: ReturnType<typeof signInAccounts>): CredentialId!VoiceBridgeFailed {
+  const status = try tryPromise({
+    try: () => accounts.status({ environment: CLOUD_ENVIRONMENT }),
+    catch: (cause) => new VoiceBridgeFailed({ method: "status", cause }),
+  })
+  if (status.account.kind !== "signedIn") throw new VoiceBridgeFailed({ method: "status", cause: "signed-out" })
+  return status.account.credentialId
+}
+
 export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   let cachedStatus: SpeechStatus | undefined
   let statusFlight: Deferred.Deferred<SpeechStatus> | undefined
   let prewarmFlight: Deferred.Deferred<void> | undefined
   let activeSession = 0
   let cloudStream: CloudStreamingSpeech | undefined
+  let cloudKey: CredentialId | undefined
   let cloudCapture: { close(): Promise<void>; cancel(): Promise<void> } | undefined
   let cloudSpeechAbort: AbortController | undefined
   let activePlaybackRequest: string | undefined
@@ -217,6 +251,14 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       const warmCloud = network
         ? ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/cloud/warm"), {}), Schema.Unknown))
         : Effect.void
+      if (network && registered(CLOUD_STREAM_PLUGIN)) {
+        const relay = relayPlugin()
+        const accounts = signInAccounts()
+        fork.detached ignore(timeout(Effect.all([
+          effect { cloudKey = signedInKey(accounts) catch () => undefined },
+          ignore(tryPromise(() => relay.prewarmCloudSpeech({ environment: CLOUD_ENVIRONMENT }))),
+        ], { concurrency: "unbounded" }), RELAY_WARMUP_BOUND))
+      }
       try Effect.all([warmDevice, warmCloud], { concurrency: "unbounded" })
     }, effect {
       prewarmFlight = undefined
@@ -229,14 +271,15 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     if (network && registered(CLOUD_STREAM_PLUGIN)) {
       const currentSession = session
       const stream = cloudStream ?? createCloudStreamingSpeech({
-        environment: DEFAULT_ENV,
-        credentialId: DEFAULT_CREDENTIAL,
+        environment: CLOUD_ENVIRONMENT,
+        credentialId: cloudKey ?? (try signedInKey(signInAccounts())),
         assertCurrent: makeSessionGuard(() => activeSession, currentSession),
         onInterim: (text) => publish({ kind: "transcript", session: currentSession, text, final: false }),
-      }, cloudSpeechPlugin(CLOUD_STREAM_PLUGIN))
+      }, relayPlugin())
+      if (activeSession !== currentSession) throw new VoiceBridgeFailed({ method: "startCloudSpeech", cause: "session-changed" })
       cloudStream = stream
       const abort = makeAbort()
-      const capture = try tryPromise({
+      const capture = tryPromise({
         try: () => stream.listen({
           signal: abort.signal,
           onSpeechStart: () => publish({ kind: "speechStart", session: currentSession }),
@@ -247,7 +290,11 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
           onEnd: (cause) => publish({ kind: "ended", session: currentSession, reason: cause === undefined ? "ended" : "error" }),
         }),
         catch: (cause) => new VoiceBridgeFailed({ method: "startCloudSpeech", cause }),
-      })
+      }) catch effect (failure) => {
+        cloudStream = undefined
+        cloudKey = undefined
+        throw failure
+      }
       cloudCapture = capture
       return capture.fullDuplex
     }
@@ -346,8 +393,14 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       ? Effect.orElseSucceed(Effect.map(tryPromise(() => localPlugin().requestPermissions()), (res) => parseGrant(res.microphone)), (): VoiceGrant => "denied")
       : succeed<VoiceGrant>("granted"),
     prewarm,
+    streamTimings: () => registered(CLOUD_STREAM_PLUGIN)
+      ? Effect.orElseSucceed(timeout(tryPromise(() => relayPlugin().cloudStreamTiming({})), RELAY_WARMUP_BOUND), (): unknown => undefined)
+      : succeed<unknown>(undefined),
     probeStatus,
-    invalidateCache: () => sync(() => { cachedStatus = undefined }),
+    invalidateCache: () => sync(() => {
+      cachedStatus = undefined
+      cloudKey = undefined
+    }),
     holdEngine: () => registered(LOCAL_PLUGIN)
       ? Effect.orElseSucceed(Effect.map(tryPromise(() => localPlugin().holdSpeechEngine({})), (res) => res.held === true), () => false)
       : succeed(false),
@@ -405,6 +458,7 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
       warmedCloud = true
       try ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/cloud/warm"), {}), Schema.Unknown))
     },
+    streamTimings: () => succeed<unknown>(undefined),
     probeStatus: () => succeed<SpeechStatus>({ ready: false, ttsReady: false, liveCapture: false }),
     invalidateCache: () => sync(() => { warmedCloud = false }),
     holdEngine: () => succeed(false),

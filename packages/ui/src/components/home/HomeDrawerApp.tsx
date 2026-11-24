@@ -1,7 +1,6 @@
 import type { ComponentProps } from "react";
+import { LayoutGrid } from "lucide-react";
 import { AppTile } from "../AppTile.tsx";
-import { Spinner } from "../Spinner.tsx";
-import { InstalledAppIcon } from "./InstalledAppIcon.tsx";
 
 export type HomeDrawerAppProps = Omit<ComponentProps<"button">, "children"> & {
   /** The app's name, as Android gives it. */
@@ -10,7 +9,7 @@ export type HomeDrawerAppProps = Omit<ComponentProps<"button">, "children"> & {
   detail?: string;
   /** The icon Android gave for the app, as an image URL. */
   image?: string;
-  /** Android is being asked to open this app: a spinner in place of its icon. */
+  /** Android is being asked to open this app. */
   opening?: boolean;
   /** Opens the app's menu, from a long press or the context menu key; left out where it may not open. */
   onOpenMenu?: () => void;
@@ -20,8 +19,10 @@ export type HomeDrawerAppProps = Omit<ComponentProps<"button">, "children"> & {
 export function HomeDrawerApp({ label, detail, image, opening = false, onOpenMenu, ...props }: HomeDrawerAppProps) {
   return (
     <AppTile
-      label={detail ? `${label} (${detail})` : label}
-      icon={opening ? <Spinner /> : <InstalledAppIcon image={image} />}
+      label={label}
+      detail={detail}
+      variant="drawer"
+      icon={image ? <img alt="" src={image} className="size-full rounded-drawer-icon object-cover" /> : <LayoutGrid className="size-6.5" />}
       aria-busy={opening || undefined}
       aria-keyshortcuts={onOpenMenu ? "Shift+F10" : undefined}
       onContextMenu={onOpenMenu && ((event) => {

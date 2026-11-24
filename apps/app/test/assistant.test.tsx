@@ -141,7 +141,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     }
 
     // spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
-    world.ask.refusal = "allowance_exhausted";
+    world.ask.refusal = { failureKind: "insufficient_credits", cloudCode: "allowance_exhausted", planAction: "funding" };
     await write("Hi");
     await press("Send");
     await until(alpha, runtime, Reply, (s) => s.turn === 3 && s.status === "Interrupted");

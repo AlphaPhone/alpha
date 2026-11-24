@@ -1,10 +1,11 @@
-// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"
+// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"; spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"
 import { ConversationRecord, TurnController } from "@elizaos/agent/client"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { ask } from "../platform/remote.vibe"
+import { isCloudFundsRefusal } from "../assistant/assistant.vibe"
 import { type VoiceEvent, VoiceBridge } from "../platform/voice.vibe"
 import { fresh } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, due, hearing, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
@@ -82,23 +83,10 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
 })
 
 module pure {
-  const sentenceBoundary = /^(.*?[.!?])(?:\s+|$)([\s\S]*)$/
+  import { clockWords, meridiemOf, twelveHour } from "../../gen/app__voice.ts"
+
   const reviewTag = /\[(APPROVAL|PROPOSAL|REVIEW|DRAFT|CALENDAR_APPROVAL|EMAIL_DRAFT)\b/i
   const navigateTag = /\[NAVIGATE:([a-zA-Z]+)\]/i
-
-  /** @throws {never} */
-  export function takeCompleteSentences(buffer: string): { readonly ready: readonly string[]; readonly rest: string } {
-    const ready: string[] = []
-    let rest = buffer
-    for (let i = 0; i < 32; i += 1) {
-      const matched = sentenceBoundary.exec(rest)
-      if (matched === null) break
-      const head = (matched[1] ?? "").trim()
-      if (head !== "") ready.push(head)
-      rest = (matched[2] ?? "").trimStart()
-    }
-    return { ready, rest }
-  }
 
   /** @throws {never} */
   export function replyNeedsReview(text: string): boolean {
@@ -111,16 +99,121 @@ module pure {
     return found?.[1]
   }
 
-  /** @throws {never} */
+  /** The reply's speakable text: each run of spaces is one space and each line break is kept as one, so no spoken form joins two lines. @throws {never} */
   export function speakableText(text: string): string {
     return text
       .replace(/\[NAVIGATE:[a-zA-Z]+\]/gi, "")
       .replace(/\[(APPROVAL|PROPOSAL|REVIEW|DRAFT|CALENDAR_APPROVAL|EMAIL_DRAFT)[^\]]*\]/gi, "")
+      .replace(/:[ \t]*(?=\r?\n)/g, ".")
+      .replace(/\s*\n\s*/g, "\n")
+      .replace(/[^\S\n]+/g, " ")
+      .trimStart()
+  }
+
+  const weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+  const ordinals = [
+    "", "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth",
+    "eleventh", "twelfth", "thirteenth", "fourteenth", "fifteenth", "sixteenth", "seventeenth", "eighteenth", "nineteenth", "twentieth",
+    "twenty-first", "twenty-second", "twenty-third", "twenty-fourth", "twenty-fifth", "twenty-sixth", "twenty-seventh", "twenty-eighth",
+    "twenty-ninth", "thirtieth", "thirty-first",
+  ]
+  const ones = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+    "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"]
+  const tens = ["", "", "twenty", "thirty", "forty", "fifty"]
+
+  function numberWords(n: number): string {
+    if (n < 20) return ones[n] ?? String(n)
+    return n % 10 === 0 ? tens[n / 10] ?? String(n) : `${tens[Math.floor(n / 10)] ?? ""} ${ones[n % 10] ?? ""}`
+  }
+
+  function namesPattern(names: readonly string[]): string {
+    return names.flatMap((name) => (name.length > 3 ? [name, name.slice(0, 3)] : [name])).flatMap((name) => [name, name.toUpperCase()]).join("|")
+  }
+
+  const weekdayNames = namesPattern(weekdays)
+  const monthNames = `${namesPattern(months)}|Sept|SEPT`
+  const namedDate = new RegExp(
+    String.raw`\b(?:(${weekdayNames})\.?,?[ \t]+)?(${monthNames})\.?[ \t]+(0?[1-9]|[12]\d|3[01])(?:st|nd|rd|th)?(?![\p{L}\d/-]|[.:]\d)`,
+    "gu",
+  )
+  const clock = String.raw`(?:0?[1-9]|1[0-2])(?::[0-5]\d)?`
+  const bareClock = String.raw`(?:[01]?\d|2[0-3]):[0-5]\d`
+  const meridiem = String.raw`[ \t]*[ap]\.?[ \t]*m(?:\.(?=[ \t]*[,;–—−-]|[ \t]+to[ \t]))?`
+  const rangeSeparator = String.raw`(?:[ \t]*[-–—−][ \t]*|[ \t]+to[ \t]+)`
+  const clockEnd = String.raw`(?![\p{L}\d:/-]|\.\d)`
+  const clockStart = String.raw`(?<![\p{L}\d:+./−-])`
+  const clockRange = new RegExp(String.raw`${clockStart}(?:(${clock}(?:${meridiem})?)${rangeSeparator}(${clock}${meridiem})|(${bareClock})${rangeSeparator}(${bareClock}))${clockEnd}`, "giu")
+  const clockWithMeridiem = new RegExp(String.raw`${clockStart}(${clock}${meridiem})${clockEnd}`, "giu")
+  const bareClockTime = new RegExp(String.raw`${clockStart}${bareClock}${clockEnd}`, "gu")
+  const unfinishedWeekday = new RegExp(String.raw`\b(?:${weekdayNames})\.,?(?:[ \t]+([A-Z][A-Za-z]*)\.?(?:[ \t]+0)?)?[ \t]*$`, "u")
+  const unfinishedMonth = new RegExp(String.raw`\b(?:${monthNames})\.(?:[ \t]+0)?[ \t]*$`, "u")
+  const unfinishedClock = new RegExp(String.raw`${clockStart}${clock}[ \t]*[ap](?:\.|\.?[ \t]*m\.(?:[ \t]+t(?:o)?)?)[ \t]*$`, "iu")
+
+  function hidePeriods(text: string): string {
+    return text.replaceAll(".", "·")
+  }
+
+  /** Returns complete written sentences and how much of the unchanged input they consumed. @throws {never} */
+  export function takeCompleteSentences(buffer: string, final: boolean): { readonly ready: readonly string[]; readonly consumed: number } {
+    const scan = (final ? buffer : buffer
+      .replace(unfinishedWeekday, (tail, month?: string) =>
+        month === undefined || months.some((name) => name.startsWith(month) || name.toUpperCase().startsWith(month)) ? hidePeriods(tail) : tail)
+      .replace(unfinishedMonth, hidePeriods)
+      .replace(unfinishedClock, hidePeriods))
+      .replace(namedDate, hidePeriods)
+      .replace(clockRange, hidePeriods)
+      .replace(clockWithMeridiem, hidePeriods)
+    const ready: string[] = []
+    let consumed = 0
+    for (const boundary of scan.matchAll(/[.!?](?=\s|$)\s*/g)) {
+      if (!final && boundary[0] === "." && boundary.index + 1 === scan.length && /\d/.test(scan.charAt(boundary.index - 1))) break
+      ready.push(buffer.slice(consumed, boundary.index + 1).trim())
+      consumed = boundary.index + boundary[0].length
+    }
+    if (final) {
+      const tail = buffer.slice(consumed).trim()
+      if (tail !== "") ready.push(tail)
+      consumed = buffer.length
+    }
+    return { ready, consumed }
+  }
+
+  function clockSaid(value: string): string {
+    const found = /^(\d{1,2})(?::(\d{2}))?[ \t]*([ap])?/i.exec(value)
+    if (found === null) return value
+    const hour = Number(found[1])
+    const minute = Number(found[2] ?? "0")
+    const written = found[3] === undefined ? "NoMeridiem" : found[3].toLowerCase() === "p" ? "Afternoon" : "Morning"
+    const period = meridiemOf(hour, written)
+    const suffix = period === "Afternoon" ? " P M" : period === "Morning" ? " A M" : ""
+    switch (clockWords(hour, minute, written, found[2] !== undefined)) {
+      case "NoonWord": return "noon"
+      case "MidnightWord": return "midnight"
+      case "HourAndMinutes": return `${numberWords(twelveHour(hour))} ${minute < 10 ? "oh " : ""}${numberWords(minute)}${suffix}`
+      case "HourOClock": return `${numberWords(twelveHour(hour))} o'clock`
+      case "HourAlone": return `${numberWords(twelveHour(hour))}${suffix}`
+    }
+  }
+
+  /** What Alpha says for a sentence of its reply: dates, clock times, ranges and percentages in words. @throws {never} */
+  export function spokenForm(sentence: string): string {
+    return sentence
+      .replace(namedDate, (_, day: string | undefined, month: string, date: string) => {
+        const fullDay = day === undefined ? undefined : weekdays.find((name) => name.toLowerCase().startsWith(day.toLowerCase()))
+        const fullMonth = months.find((name) => name.toLowerCase().startsWith(month.toLowerCase())) ?? month
+        return `${fullDay === undefined ? "" : `${fullDay}, `}${fullMonth} ${ordinals[Number(date)] ?? date}`
+      })
+      .replace(clockRange, (_, from?: string, to?: string, fromBare?: string, toBare?: string) => `${clockSaid(from ?? fromBare ?? "")} to ${clockSaid(to ?? toBare ?? "")}`)
+      .replace(clockWithMeridiem, clockSaid)
+      .replace(bareClockTime, clockSaid)
+      .replace(/(?<![\p{L}\d:./-])(\d{1,2})[ \t]*[-–][ \t]*(\d{1,2})(?![\p{L}\d:/-]|\.\d)/gu, "$1 to $2")
+      .replace(/(?<=\d)[ \t]?%(?![\p{L}\d])/gu, " percent")
+      .replace(/(?<=\p{L}):(?=[ \t]+\S)/gu, ",")
       .replace(/\s+/g, " ")
-      .trim()
   }
 }
-import { replyNeedsReview, requestedDestination, speakableText, takeCompleteSentences } from pure
+import { replyNeedsReview, requestedDestination, speakableText, spokenForm, takeCompleteSentences } from pure
 
 function placeForDestination(name: string): number | undefined {
   const lowered = name.toLowerCase()
@@ -156,8 +249,8 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     }
     const controller = new TurnController(runtime)
     try ignore(tryPromise(() => controller.bind(record)))
-    let emittedOffset = 0
-    let pending = ""
+    let shown = ""
+    let said = 0
     let navClaimed = false
     const emitNavigation = (raw: string) => {
       if (navClaimed) return
@@ -168,22 +261,31 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       navClaimed = true
       Queue.offerUnsafe(queue, { type: "agentNavigates", session, place })
     }
+    const say = (sentence: string) => {
+      memory.enqueueSentence(turn, spokenForm(sentence))
+      Queue.offerUnsafe(queue, { type: "sentence", session, turn })
+    }
+    const sayFrom = (written: string, final: boolean) => {
+      const split = takeCompleteSentences(written.slice(said), final)
+      said += split.consumed
+      for (const sentence of split.ready) say(sentence)
+    }
     const feed = (written: string, provisional: boolean) => {
       if (provisional) return
       emitNavigation(written)
       if (replyNeedsReview(written)) return
       const clean = speakableText(written)
-      if (clean.length <= emittedOffset) return
-      const delta = clean.slice(emittedOffset)
-      emittedOffset = clean.length
-      const split = takeCompleteSentences(pending + delta)
-      pending = split.rest
-      for (const sentence of split.ready) {
-        memory.enqueueSentence(turn, sentence)
-        Queue.offerUnsafe(queue, { type: "sentence", session, turn })
-      }
+      if (clean.length <= shown.length) return
+      shown = clean
+      sayFrom(clean, false)
     }
     const result = tryPromise(() => controller.send({ text: spoken }, { stream: { onPreview: feed } })) catch () => undefined
+    if (isCloudFundsRefusal(result)) {
+      memory.lastReply = ""
+      Queue.offerUnsafe(queue, { type: "refusedForFunds", session, turn })
+      Queue.endUnsafe(queue)
+      return
+    }
     const finalText = result?.kind === "Replied" ? result.reply.text : ""
     memory.lastReply = finalText
     emitNavigation(finalText)
@@ -194,17 +296,8 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       Queue.endUnsafe(queue)
       return
     }
-    const cleanFinal = speakableText(finalText)
-    if (cleanFinal.length > emittedOffset) {
-      const remaining = (pending + cleanFinal.slice(emittedOffset)).trim()
-      if (remaining !== "") {
-        memory.enqueueSentence(turn, remaining)
-        Queue.offerUnsafe(queue, { type: "sentence", session, turn })
-      }
-    } else if (pending.trim() !== "") {
-      memory.enqueueSentence(turn, pending.trim())
-      Queue.offerUnsafe(queue, { type: "sentence", session, turn })
-    }
+    const full = speakableText(finalText)
+    sayFrom(full.length >= shown.length ? full : shown, true)
     Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false })
     Queue.endUnsafe(queue)
   })

@@ -1,0 +1,159 @@
+// spec/app/contacts/agent.md, "Story: Let the agent read what I have open"; spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"
+import { type DeviceOperation, readResult } from "@elizaos/agent/operations"
+import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Machine as ContactsMachine } from "../../gen/app__contacts.effect.vibe"
+import { type Opened, readOf, senderSaid } from "../../gen/app__contacts__agent.effect.vibe"
+import { Machine as MessagesMachine } from "../../gen/app__messages.effect.vibe"
+import { Machine as ComposerMachine } from "../../gen/app__messages__composer.effect.vibe"
+import { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
+import { Machine as VoicemailMachine } from "../../gen/app__phone__voicemail.effect.vibe"
+import { Telephony, telephony } from "../platform/telephony.vibe"
+import { contained } from "../runtime/reactor.vibe"
+import { Drafts } from "../messages/composer.vibe"
+import { Conversations, Inbox, titleOf } from "../messages/messages.vibe"
+import { Dialer, prefilled } from "../phone/phone.vibe"
+import { Callers, Voicemails } from "../phone/voicemail.vibe"
+import { Rows } from "./contacts.vibe"
+
+/** What the agent reads, opens or drafts on the phone, answered at once from what is open, and never a call, a send or a write. */
+export type Reading = Extract<DeviceOperation, { type: "sms_latest_sender" | "messages_read_selected" | "voicemail_read_selected" | "contact_read_selected" | "phone_keypad" | "contact_show" | "sms_reply_selected" | "sms_compose" }>
+
+/** Whether the phone answers `operation` as a read, an opening or a draft: an `sms_compose` only when it asks for a draft to a number. */
+export function isReading(operation: DeviceOperation): operation is Reading {
+  switch (operation.type) {
+    case "sms_latest_sender": case "messages_read_selected": case "voicemail_read_selected": case "contact_read_selected":
+    case "phone_keypad": case "contact_show": case "sms_reply_selected":
+      return true
+    case "sms_compose": return "draft" in operation && operation.draft === true && operation.target.kind === "number"
+    default: return false
+  }
+}
+
+/** How far what the agent reads is open: nothing, open and not yet read, or open as the phone last read it. */
+const openedAs = (open: boolean, read: boolean): Opened => (!open ? "NothingOpen" : read ? "OpenRead" : "OpenUnread")
+
+/** The answer for `operation` as eliza's schema reads it; an answer the schema refuses is the phone's word that it cannot. */
+function checked(operation: Reading, raw: unknown, unavailable: unknown): unknown {
+  return readResult(operation, raw) ?? readResult(operation, unavailable)
+}
+
+// spec/app/contacts/agent.md, "The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it"
+effect function thread(): unknown!!(MessagesMachine | Inbox | Conversations) {
+  const state = try (try MessagesMachine).get()
+  const open = state.pane === "Conversation" && state.thread > 0
+  if (readOf(openedAs(open, state.page.status === "Loaded")) === "NoneSelected") return { kind: "messages-read", status: "none-selected" }
+  const held = try (try Inbox).get()
+  const conversation = try (try Conversations).get(state.thread)
+  const rows = held.messages.flatMap((row) => ("incomplete" in row ? [] : [{ direction: row.direction === "incoming" ? "in" : "out", date: row.date, body: row.body.slice(0, 1600) }]))
+  const tail = [...rows].sort((a, b) => a.date - b.date).slice(-20)
+  const participant = Option.isSome(conversation) && conversation.value.addresses.length > 0 ? titleOf(conversation.value.addresses, held.names).slice(0, 128) : null
+  return { kind: "messages-read", status: "read", participant, messages: tail, truncated: rows.length > tail.length }
+}
+
+// spec/app/contacts/agent.md, "The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it"
+effect function voicemail(): unknown!!(VoicemailMachine | Voicemails) {
+  const state = try (try VoicemailMachine).get()
+  const held = try (try Voicemails).get()
+  const row = held.rows.find((one) => one.id === held.open)
+  if (readOf(openedAs(state.open, row !== undefined)) === "NoneSelected" || row === undefined) return { kind: "voicemail-read", status: "none-selected" }
+  const said = { kind: "voicemail-read", status: "read", caller: (row.cachedName ?? row.number).slice(0, 128) || null, date: row.date, durationSeconds: row.durationSeconds }
+  const carrier = row.carrierTranscript ?? ""
+  if (carrier !== "") return { ...said, transcriptState: "ready", engine: "carrier", transcript: carrier.slice(0, 8000) }
+  if (state.transcript.status === "Loaded" && held.transcript !== "") return { ...said, transcriptState: "ready", engine: "device", transcript: held.transcript.slice(0, 8000) }
+  const transcriptState = state.transcript.status === "Loading" ? "pending" : state.transcript.status === "Failed" ? "failed" : "unavailable"
+  return { ...said, transcriptState, engine: null, transcript: null }
+}
+
+// spec/app/contacts/agent.md, "The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it"
+effect function contact(): unknown!!(ContactsMachine | Rows) {
+  const state = try (try ContactsMachine).get()
+  const card = (try (try Rows).get()).card
+  if (readOf(openedAs(state.opened, state.card.status === "Loaded" && card !== undefined)) === "NoneSelected" || card === undefined) return { kind: "contact-read", status: "none-selected" }
+  const values = (all: ReadonlyArray<string>) => all.map((one) => one.trim()).filter((one) => one !== "").slice(0, 32)
+  return {
+    kind: "contact-read", status: "read",
+    contact: { displayName: card.displayName.trim() === "" ? null : card.displayName.trim().slice(0, 128), phoneNumbers: values(card.phoneNumbers.map((one) => one.number)), emailAddresses: values(card.emailAddresses.map((one) => one.address)) },
+  }
+}
+
+// spec/app/contacts/agent.md, "The latest text's sender is named by its number alone, and the whole number only where the agent asked for it"
+effect function sender(whole: boolean): unknown!!Telephony {
+  const found = telephony("latestIncomingSender", (c) => c.messages.latestIncomingSender(whole)) catch () => undefined
+  const said = senderSaid(found !== undefined, found !== undefined && found.status !== "empty", found?.status === "found", whole)
+  switch (said) {
+    case "ReadFailed": return { kind: "sms-latest-sender", status: "unavailable" }
+    case "NoText": return { kind: "sms-latest-sender", status: "empty" }
+    case "NotANumber": return { kind: "sms-latest-sender", status: "sender-unavailable" }
+    case "WholeNumber":
+    case "LastFour": return { kind: "sms-latest-sender", ...found }
+  }
+}
+
+/** The keypad, opened filled in with `number` where there is one: nothing is dialed. */
+effect function keypad(number: string | undefined): unknown!!(Dialer | PhoneMachine | Shell) {
+  const phone = try PhoneMachine
+  const handed = number === undefined ? undefined : prefilled(number)
+  if (number !== undefined && handed === undefined) return { kind: "phone-keypad", status: "unavailable" }
+  if (handed !== undefined) {
+    try (try Dialer).set({ digits: handed.digits })
+    try ignore(phone.send(handed.event))
+  }
+  try contained((try Shell).send({ type: "openView", view: "Phone" }), "the agent's keypad")
+  if (handed === undefined) {
+    try Stream.runHead(Stream.filter(phone.changes, (s) => s.front))
+    try ignore(phone.send({ type: "pickTab", tab: "Keypad" }))
+  }
+  return { kind: "phone-keypad", status: "opened" }
+}
+
+/** Contacts, opened on `query`: the agent learns only whether a contact matched. */
+effect function shown(query: string): unknown!!(Telephony | Rows | ContactsMachine | Shell) {
+  const page = effect {
+    try telephony("open", (c) => c.contacts.open())
+    return try telephony("list", (c) => c.contacts.list({ query, limit: 1 }))
+  } catch () => undefined
+  if (page === undefined) return { kind: "contact-show", status: "unavailable" }
+  try (try Rows).set({ sought: query })
+  try contained((try Shell).send({ type: "openView", view: "Contacts" }), "the agent's search")
+  const machine = try ContactsMachine
+  try Stream.runHead(Stream.filter(machine.changes, (s) => s.front))
+  try ignore(machine.send({ type: "search", typed: true }))
+  return { kind: "contact-show", status: page.contacts.length > 0 ? "shown" : "not-found" }
+}
+
+// spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"
+/** `body` as Alpha's draft in the conversation open on screen, or, with `number`, in that number's conversation, which Messages opens first. */
+effect function drafted(body: string, number: string | undefined): ("drafted" | "none-selected" | "occupied" | "unavailable")!!(ComposerMachine | MessagesMachine | Drafts | Callers | Conversations) {
+  const composer = try ComposerMachine
+  if (number !== undefined) {
+    const thread = try (try Conversations).of({ id: "", addresses: [number] })
+    try (try Callers).message(number)
+    const messages = try (try MessagesMachine).get()
+    if (messages.pane !== "Conversation" || messages.thread !== thread) return "unavailable"
+    try Stream.runHead(Stream.filter(composer.changes, (s) => s.thread === thread))
+  }
+  const state = try composer.get()
+  if (state.thread === 0) return "none-selected"
+  if (state.slot.author !== "Nobody") return "occupied"
+  try (try Drafts).write(state.thread, body)
+  if (!(try contained(composer.send({ type: "agentDrafted", thread: state.thread }), "the agent's draft"))) return "unavailable"
+  return (try composer.get()).slot.author === "AlphaWrote" ? "drafted" : "occupied"
+}
+
+/** The phone's answer to the agent's read, opening or draft, as eliza's schema for it reads it. Nothing it does calls, sends or writes. */
+export effect function answerReading(operation: Reading): unknown!!(Telephony | MessagesMachine | Inbox | Conversations | VoicemailMachine | Voicemails | ContactsMachine | Rows | Dialer | PhoneMachine | Shell | ComposerMachine | Drafts | Callers) {
+  switch (operation.type) {
+    case "messages_read_selected": return checked(operation, try thread(), { kind: "messages-read", status: "unavailable" })
+    case "voicemail_read_selected": return checked(operation, try voicemail(), { kind: "voicemail-read", status: "unavailable" })
+    case "contact_read_selected": return checked(operation, try contact(), { kind: "contact-read", status: "unavailable" })
+    case "sms_latest_sender": return checked(operation, try sender("includeAddress" in operation), { kind: "sms-latest-sender", status: "unavailable" })
+    case "phone_keypad": return checked(operation, try keypad(operation.number), { kind: "phone-keypad", status: "unavailable" })
+    case "contact_show": return checked(operation, try shown(operation.query), { kind: "contact-show", status: "unavailable" })
+    case "sms_reply_selected": return checked(operation, { kind: "sms-reply", status: try drafted(operation.body, undefined) }, { kind: "sms-reply", status: "unavailable" })
+    case "sms_compose": {
+      const number = "target" in operation && operation.target.kind === "number" ? operation.target.number : undefined
+      const status = try drafted(operation.body, number)
+      return checked(operation, { kind: "sms-compose", status: status === "drafted" ? "drafted" : status === "none-selected" ? "not-found" : "unavailable" }, { kind: "sms-compose", status: "unavailable" })
+    }
+  }
+}

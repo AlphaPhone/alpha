@@ -12,7 +12,7 @@ export const meta: ComponentMeta<InboxListProps> = {
     "Loading first page": { rows: [], loading: true, onLoadMore: undefined },
     Refreshing: { loading: true, onLoadMore: undefined },
     "Loading more": { loadingMore: true },
-    "Two chosen": { rows: rows.map((row, n) => ({ ...row, chosen: n < 2, onChosenChange: fn() })) },
+    "Two chosen": { rows: rows.map((row, n) => ({ ...row, selecting: true, chosen: n < 2, onChosenChange: fn() })) },
   },
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {

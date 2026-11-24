@@ -250,7 +250,7 @@ function buildTool(name: string, env: NodeJS.ProcessEnv): string {
 }
 
 const INFERENCE_ENTRY = /\.(gguf|onnx|ort|tflite|safetensors|pte|task)$|(^|\/)lib[^/]*(llama|ggml|mtmd|onnxruntime|sherpa|whisper|piper|executorch|elizainference|omnivoice)[^/]*\.so|(^|\/)llama(-omnivoice)?-server$|^assets\/([^/]+\/)*models?\//i;
-const REQUIRED_CLASSES = ["AlphaDevicePlugin", "AlphaCarrierSetupPlugin", "AlphaCallStatePlugin", "AlphaOngoingCallPlugin", "AlphaAgentService", "AlphaCalendarPlugin", "AlphaTelephonyPlugin", "AlphaResetPlugin", "AlphaActionJournalPlugin"]
+const REQUIRED_CLASSES = ["AlphaDevicePlugin", "AlphaCloudSpeechPlugin", "AlphaBrowserPlugin", "AlphaCarrierSetupPlugin", "AlphaCallStatePlugin", "AlphaOngoingCallPlugin", "AlphaAgentService", "AlphaCalendarPlugin", "AlphaTelephonyPlugin", "AlphaResetPlugin", "AlphaActionJournalPlugin"]
   .map((name) => `Lai/alphacompute/alphaphone/${name};`);
 
 interface Row {
