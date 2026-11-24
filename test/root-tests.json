@@ -51,6 +51,7 @@
   "test/maps-dataset-manifest.test.mjs",
   "test/native-review-mode.test.mjs",
   "test/os-update-enrollment.test.mjs",
+  "test/packaged-runtime.test.mjs",
   "test/paradee-runtime.test.mjs",
   "test/pilot-install-lock.test.mjs",
   "test/pilot-update-export.test.mjs",
