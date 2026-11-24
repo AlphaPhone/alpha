@@ -1,4 +1,4 @@
-// spec/shell/navigation.md, "Hiding the page retires what the owner was in the middle of"; spec/shell/navigation.md, "HOME returns to Home and dismisses what is open above it"; spec/shell/navigation.md, "The assistant moves between its detents, and Home keeps its bar"; spec/voice/conversation.md, "Voice starts only from the owner, on a lit, visible phone with no sensitive screen, no reset and no call"; spec/shell/overview.md, "Reminders that are overdue are reported by the reminder store and stay until handled"; spec/assistant/dock.md, "While voice owns the chat its open sheet's drag is not captured, one under way is let go, and the drag resizes again once voice ends"; spec/assistant/context.md, "A spoken turn carries the screen context a typed turn sent at that moment would"; spec/voice/conversation.md, "Out of plan allowance and credits ends voice quietly as Stop does, and the chat gets the one line"
+// spec/shell/navigation.md, "Hiding the page retires what the owner was in the middle of"; spec/shell/navigation.md, "HOME returns to Home and dismisses what is open above it"; spec/shell/navigation.md, "The assistant moves between its detents, and Home keeps its bar"; spec/voice/conversation.md, "Voice starts only from the owner, on a lit, visible phone with no sensitive screen, no reset and no call"; spec/shell/overview.md, "Reminders that are overdue are reported by the reminder store and stay until handled"; spec/assistant/dock.md, "While voice owns the chat its open sheet's drag is not captured, one under way is let go, and the drag resizes again once voice ends"; spec/assistant/context.md, "A spoken turn carries the screen context a typed turn sent at that moment would"; spec/voice/conversation.md, "Out of plan allowance and credits ends voice quietly as Stop does, and the chat gets the one line"; spec/voice/conversation.md, "Story: Send a text I reviewed by saying so"
 import { AccountBindings } from "../account/bindings.vibe"
 import { AccountSheet } from "../account/sheet.vibe"
 import { Entitlement } from "../account/entitlement.vibe"
@@ -21,6 +21,7 @@ import { handoffsLive } from "./handoffs.vibe"
 import { Navigation } from "./navigation.vibe"
 import { Overview } from "./overview.vibe"
 import { pageEvents, pageHidden } from "./page.ts"
+import { talkReview } from "./talk-review.vibe"
 
 /**
  * What the other areas follow of the shell: the foreground, HOME, covering screens, voice leaving and returning, the assistant's
@@ -62,6 +63,7 @@ export const integrationLive = Layer.effectDiscard(effect {
       chatCurrent: () => true,
       context: () => composer.turnContext(),
       outOfFunds: () => composer.talkOutOfFunds(latest?.id ?? ""),
+      review: talkReview(latest?.id ?? "", composer, navigation),
     }
     if (try voice.startFromInvocation(screen, start)) try navigation.send({ type: "startVoice" })
   }
@@ -84,6 +86,7 @@ export const integrationLive = Layer.effectDiscard(effect {
       chatCurrent: () => chatNow === started,
       context: () => composer.turnContext(),
       outOfFunds: () => composer.talkOutOfFunds(started),
+      review: talkReview(started, composer, navigation),
     }
     try voice.start(start)
     if ((try voice.get()).shown === "Starting") try navigation.send({ type: "startVoice" })
@@ -98,6 +101,7 @@ export const integrationLive = Layer.effectDiscard(effect {
     for try (const now of voice.changes) {
       talking = active(now.shown) || now.shown === "Retiring"
       try assistant.voiceOwnsChat(talking || dictating)
+      if (!now.textBound) try composer.talkReleased()
     }
   })
   fork.scoped (effect {
