@@ -20,6 +20,7 @@ const IDENTITY = ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.i
 const noVoiceCheck = () => ({status: 'not-packaged'});
 function fixture(t, {
   pin = 'B', mainPin = 'B', shallow = false, vibestack = false, vibestackPin = null, promoted = false,
+  refactoredBranch = 'vibestack',
 } = {}) {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-pin-guard-')));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
@@ -50,7 +51,11 @@ function fixture(t, {
   fs.writeFileSync(path.join(product, '.gitignore'), 'vendor/\n');
   const lock = (name, onVibestack = false) => fs.writeFileSync(
     path.join(product, 'upstream.lock.json'),
-    JSON.stringify({commit: commits[name] ?? name, ...(onVibestack ? {branch: 'vibestack'} : {})}),
+    JSON.stringify({
+      commit: commits[name] ?? name,
+      appSource: onVibestack ? 'apps/app' : 'packages/app',
+      ...(onVibestack ? {branch: refactoredBranch} : {}),
+    }),
   );
   const release = (ref, name, onVibestack) => {
     lock(name, onVibestack);
@@ -98,7 +103,7 @@ test('Vibestack requires a fetched baseline and uses main immediately after prom
   const missing = fixture(t, {pin: 'E', mainPin: 'C', vibestack: true});
   assert.match(releasePinProblem(missing.root, missing.pin), /requires a reviewed SDK baseline on origin\/vibestack/);
 
-  const promoted = fixture(t, {pin: 'E', mainPin: 'F', vibestack: true, vibestackPin: 'E', promoted: true});
+  const promoted = fixture(t, {pin: 'E', mainPin: 'F', vibestack: true, vibestackPin: 'E', promoted: true, refactoredBranch: 'develop'});
   assert.deepEqual(releasePinStatus(promoted.root, promoted.pin), {state: 'older', releasePin: promoted.commits.F, ref: 'refs/remotes/origin/main'});
 });
 

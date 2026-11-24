@@ -59,7 +59,7 @@ function readHead(directory: string) {
 
 const git = (directory: string, args: string[]) => execFileSync('git', ['-C', directory, ...args], {encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore']});
 
-function releaseLock(root: string, ref: string): {branch?: string; commit?: string} | null {
+function releaseLock(root: string, ref: string): {appSource?: string; commit?: string} | null {
   try {
     return JSON.parse(git(root, ['show', `${ref}:upstream.lock.json`]));
   } catch {
@@ -71,13 +71,15 @@ function releaseLock(root: string, ref: string): {branch?: string; commit?: stri
 export function releasePinStatus(root: string, pin: string) {
   const mainRef = 'refs/remotes/origin/main';
   const main = releaseLock(root, mainRef);
-  const vibestack = readUpstreamPin(root).branch === 'vibestack';
-  const ref = vibestack && main?.branch !== 'vibestack'
+  const appSource = readUpstreamPin(root).appSource;
+  // Upstream's branch name can change without changing the SDK lineage.
+  const vibestack = appSource === 'apps/app';
+  const ref = vibestack && main?.appSource !== appSource
     ? 'refs/remotes/origin/vibestack'
     : mainRef;
   const baseline = ref === mainRef ? main : releaseLock(root, ref);
   const releasePin = baseline?.commit;
-  if (!releasePin || !/^[a-f0-9]{40}$/.test(releasePin) || (vibestack && baseline?.branch !== 'vibestack')) {
+  if (!releasePin || !/^[a-f0-9]{40}$/.test(releasePin) || (vibestack && baseline?.appSource !== appSource)) {
     return {state: vibestack ? 'baselineMissing' : 'unavailable', releasePin: null, ref};
   }
   if (releasePin === pin) return {state: 'equal', releasePin, ref};

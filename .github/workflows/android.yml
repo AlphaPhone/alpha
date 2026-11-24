@@ -80,7 +80,11 @@ jobs:
             exit 1
           fi
       - name: Verify launcher overlay staging from the pinned SDK
-        run: pnpm --dir vendor/eliza/packages/os run test test/image.test.vibe test/image-product.test.vibe test/cli.test.vibe
+        run: |
+          pnpm --dir vendor/eliza/packages/os run test \
+            --fsModuleCachePath "$RUNNER_TEMP/alpha-os-vitest/modules" \
+            --attachmentsDir "$RUNNER_TEMP/alpha-os-vitest/attachments" \
+            test/image.test.vibe test/image-product.test.vibe test/cli.test.vibe
       # The normal chain builds and verifies its native source/model inputs.
       - name: Record tracked source frame before the Android build
         timeout-minutes: 1
