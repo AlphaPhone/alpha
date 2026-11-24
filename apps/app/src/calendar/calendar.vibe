@@ -1,5 +1,5 @@
 // spec/app/calendar/index.md, "Story: See my days"; spec/app/calendar/index.md, "Story: Look at an event"; spec/app/calendar/index.md, "Story: Keep what I see current"
-import type * as KeyValueStore from "effect/persistence/KeyValueStore"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as View from "../../gen/app__calendar.effect.vibe"
 import type { Effect as Out, Event, Source } from "../../gen/app__calendar.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
@@ -102,9 +102,14 @@ export effect function readFeed(day: number): Option.Option<ReadonlyArray<Read>>
   return Option.some(feed.events.map(googleRow).filter((row) => Number.isFinite(row.begin) && Number.isFinite(row.end)))
 }
 
+// spec/app/calendar/editor.md, "The form's edits always build on the revision of the event as last read"
+/** Where the revisions counted for the phone's events are kept, since Android gives its events no version. */
+const revisionsKey = "alpha.calendar.revisions"
+const decodeRevisions = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Schema.Tuple([Schema.String, Schema.String, Schema.Number]))))
+
 // spec/app/calendar/index.md, "Only the newest answer for each source is shown, and only while it may still be read"; spec/app/calendar/index.md, "A read the phone cut short is shown as limited, never as complete"
 /** What `source` holds for `day`, as the answer to the read numbered `ticket`. */
-effect function readDay(source: Source, ticket: number, day: number): Event!!(PhoneCalendar | Agent) {
+effect function readDay(source: Source, ticket: number, day: number): Event!!(PhoneCalendar | Agent | KeyValueStore.KeyValueStore) {
   if (source === "Google") {
     return effect {
       const read = try readFeed(day)
@@ -123,6 +128,7 @@ effect function readDay(source: Source, ticket: number, day: number): Event!!(Ph
       return { type: "accessAnswered", grant: "Denied" } as Event
     }
     const rows = shown.keep("Phone", day, listed.events.map(phoneRow))
+    try ignore((try KeyValueStore.KeyValueStore).set(revisionsKey, JSON.stringify(shown.revisions())))
     return { type: "phoneAnswered", ticket, ok: true, rows: rows.length, limited: listed.truncated } as Event
   } catch () => ({ type: "phoneAnswered", ticket, ok: false, rows: 0, limited: false })
 }
@@ -156,7 +162,7 @@ effect function hand(id: number, to: "Maps" | "AndroidCalendar" | "VideoCall" | 
   if (row.source === "Phone") return try (try PhoneCalendar).open(row.key, row.begin, row.end)
 }
 
-function carry(fx: Out): Job<Event, PhoneCalendar | Agent | SystemSettings | Shell.Machine | Time, []> {
+function carry(fx: Out): Job<Event, PhoneCalendar | Agent | SystemSettings | Shell.Machine | Time | KeyValueStore.KeyValueStore, []> {
   return match (fx) {
     when { tag: "ReadDay", let source, let ticket, let day }:
       answer(`read ${source}`, readDay(source, ticket, day), source === "Google" ? { type: "googleAnswered", ticket, ok: false, rows: 0 } : { type: "phoneAnswered", ticket, ok: false, rows: 0, limited: false });
@@ -192,6 +198,8 @@ const kept = reacting(View, {
 const told = started(effect {
   const view = try View.Machine
   const phone = try PhoneCalendar
+  const kept = (try KeyValueStore.KeyValueStore).get(revisionsKey) catch () => undefined
+  if (kept !== undefined) shown.restore(decodeRevisions(kept) catch () => [])
   shown.phone(phone.present)
   if (phone.present) try contained(view.send({ type: "accessAnswered", grant: try phone.grant() }), "telling Calendar of its access")
 }, "reading what Calendar may read")

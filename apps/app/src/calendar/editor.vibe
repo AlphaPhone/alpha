@@ -10,7 +10,7 @@ import { ask, attemptedWith } from "../platform/remote.vibe"
 import type { AndroidCalendarDeletionScope, AndroidCalendarEditorFields, CalendarPick } from "@elizaos/os/bridges/calendar"
 import { PhoneCalendar, type Written } from "../platform/calendar.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
-import { type Job, answer, contained, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { type Row, shown } from "./shown.ts"
 import { civilDay, dayStart, feedParams, zone } from "./time.ts"
@@ -241,8 +241,23 @@ const reread = started(effect {
   })
 }, "following the calendars' reads for the form")
 
+module web {
+  /** The keys another page of Alpha changed in the store this one shares, as the browser says; none where there is no window. @throws {never} */
+  export function storeChanged(): Stream.Stream<string> {
+    const target = globalThis as unknown as Partial<EventTarget>
+    if (typeof target.addEventListener !== "function") return Stream.empty
+    return Stream.map(Stream.fromEventListener<StorageEvent>(target as EventTarget, "storage"), (changed) => changed.key ?? "")
+  }
+}
+import { storeChanged } from web
+
+// spec/app/calendar/editor.md, "When another copy replaced the kept draft, the owner keeps theirs or takes the other"
+/** Another page of Alpha kept a draft over this one's: the form asks the owner which to keep. */
+const elsewhere = hearing(Stream.filter(storeChanged(), (key) => key.includes("alpha.calendar.form.")), Editor.Machine, (): Event => ({ type: "replacedElsewhere" }))
+
 /** The editor: kept on the phone across restarts, which ends what was in flight; its writes go to the phone's calendar once. */
 export const editor = together(
   reacting(Editor, { keep: 1, open: [{ type: "restart" }], carry }),
   reread,
+  elsewhere,
 )

@@ -138,6 +138,14 @@ export const shown = {
     present = has;
     told();
   },
+  /** The revisions counted for events whose calendar keeps no version, to keep on the phone across restarts. @throws {never} */
+  revisions(): ReadonlyArray<readonly [string, string, number]> {
+    return [...seen].map(([name, { content, revision }]) => [name, content, revision] as const);
+  },
+  /** Take back the revisions kept before a restart, so a draft or a change in doubt meets the event at the revision it began from. @throws {never} */
+  restore(kept: ReadonlyArray<readonly [string, string, number]>): void {
+    for (const [name, content, revision] of kept) if (!seen.has(name)) seen.set(name, { content, revision });
+  },
   /** The event numbered `id`, wherever it was last read. @throws {never} */
   find(id: number): Row | undefined {
     for (const rows of windows.values()) {

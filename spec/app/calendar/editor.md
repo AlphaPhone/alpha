@@ -112,7 +112,9 @@ pure def editEvent(s: Editor, id: int, revision: int, day: int, repeats: bool): 
 ### A note or a scan opens a new event already filled in, as edits to review, only when no other draft is kept
 
 What the note or the scan said is the form's first edit: nothing is saved
-until the owner saves it.
+until the owner saves it. Where Calendar refuses it, because a draft is
+already open or kept, or the phone cannot keep it, the note or the scan
+stays as it was and says Calendar did not take it.
 
 ```quint
 pure def canFromNote(s: Editor): bool = s.form == NoForm
@@ -519,6 +521,10 @@ pure def discard(s: Editor): Editor = withoutForm(s.write, s)
 ```
 
 ### When the phone cannot keep the draft, a banner says so and Retry keeps it again
+
+A draft too large for the phone's store is one it cannot keep; a kept
+draft the phone can no longer read opens as a blank form, never as a
+crash.
 
 ```quint
 pure def canKeepFailed(s: Editor): bool = s.shown and s.banner == NoBanner and s.draft.sync != D::Saving

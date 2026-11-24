@@ -5,10 +5,9 @@ import { Machine as Changes } from "../gen/app__calendar__agent.effect.vibe";
 import { Machine as Editor } from "../gen/app__calendar__editor.effect.vibe";
 import { Machine as Held } from "../gen/app__calendar__deletions.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
-import { Machine as Sync } from "../gen/app__calendar__sync.effect.vibe";
+import { Machine as Link } from "../gen/app__calendar__link.effect.vibe";
 import calendar from "../src/calendar/index.tsx";
 import { shown } from "../src/calendar/shown.ts";
-import { rowOf as Sync_rowOf } from "../gen/app__calendar__sync.ts";
 import { civilDay, dateOf, dayStart } from "../src/calendar/time.ts";
 import type { Alpha } from "../src/runtime/area.tsx";
 import { button, closeAll, fill, hardware, later, only, open, press, underAct, until } from "./alpha.tsx";
@@ -197,32 +196,37 @@ describe("on a phone", () => {
     expect(world.calendar.phoneEvents.map((event) => event.title)).not.toContain("Gym");
   });
 
-  it("Copy my phone's changes to Google, once (spec/app/calendar/sync.md, \"Story: Link my Google calendar\"; spec/app/calendar/sync.md, \"Story: Turn sync on knowingly\"; spec/app/calendar/sync.md, \"Story: Copy my phone's changes to Google, once\")", async () => {
+  it("Link a Google calendar I can write to, and be told it is synced only when it is (spec/app/calendar/link.md, \"Story: Link a Google calendar I can write to, and be told it is synced only when it is\"; spec/app/calendar/link.md, \"Story: Disconnect Google from Calendar without leaving sync running\")", async () => {
     const world = morning(true);
     world.calendar.granted = true;
+    world.inbox.google = { email: "owner@alpha.test", connection: "google-owner", capabilities: ["google.basic_identity", "google.calendar.read"] };
     const { alpha } = await open(world, only("view:Calendar"));
     const runtime = calendar.runtime(alpha);
     await openCalendar(alpha);
-    await until(alpha, runtime, Sync, (y) => y.granted);
+    await until(alpha, runtime, Link, (l) => l.owner > 0);
 
-    // spec/app/calendar/sync.md, "Linking asks Google for the account's calendars, and only with access granted"; spec/app/calendar/sync.md, "The owner chooses the calendar to copy to while sync is off"
+    // spec/app/calendar/link.md, "Setup starts only from a write grant, for the owner signed in; a read-only grant goes on to consent for more access, and a missing one sends nothing"
     await press("Link Google Calendar");
-    await until(alpha, runtime, Sync, (y) => y.link === "Linked");
-    await tap("Alpha");
-    await until(alpha, runtime, Sync, (y) => y.target === 1);
-    expect(button("Turn on")).toBe(undefined);
+    await until(alpha, runtime, Link, (l) => l.ending === "NeedsGrant" && l.said === "ReadOnlyAccess");
+    expect(world.calendar.writes).toEqual([]);
 
-    // spec/app/calendar/sync.md, "The owner reviews what sync will copy and where, and turning it on confirms that review"
-    await press("Review");
-    await press("Turn on");
-    await until(alpha, runtime, Sync, (y) => y.on && Sync_rowOf(y) === "UpToDate");
+    // spec/app/calendar/link.md, "A write is sent only while the owner and the reviewed revision still hold, and its answer starts another review"; spec/app/calendar/link.md, "Synced needs a clean read back of the linked events; held or many conflicts are named"
+    world.inbox.google = { email: "owner@alpha.test", connection: "google-owner", capabilities: ["google.basic_identity", "google.calendar.read", "google.calendar.write"] };
+    await openCalendar(alpha);
+    await press("Check again");
+    await until(alpha, runtime, Link, (l) => l.phase === "Done" && l.ending === "Synced" && l.writes === 1 && l.linkReads === 1);
+    expect(world.calendar.writes).toEqual(["sync select"]);
+    expect(world.calendar.control.destination).toEqual({ connectorAccountId: "google-owner", providerCalendarId: "primary" });
 
-    // spec/app/calendar/sync.md, "An unchanged event is written once, under a new number; one changed in Google is a conflict for the owner"
-    await press("New event");
-    await fill("Title", "Coffee");
-    await press("Save");
-    await until(alpha, runtime, Sync, (y) => y.phase === "Done" && y.write.outcome === "Confirmed");
-    expect(world.calendar.writes).toEqual(["create ev-coffee"]);
+    // spec/app/calendar/link.md, "A linked, unpaused destination is paused first at the revision just reviewed; the revoke never waits on it"; spec/app/calendar/link.md, "A pause is confirmed only when the control answered paused at a revision past the one reviewed"
+    await press("Pause sync");
+    await until(alpha, runtime, Link, (l) => l.pause === "PauseConfirmed");
+    expect(world.calendar.control.paused).toBe(true);
+
+    // spec/app/calendar/link.md, "Synced needs a clean read back of the linked events; held or many conflicts are named"
+    world.calendar.control.links.push("conflicted", "conflicted");
+    await press("Check again");
+    await until(alpha, runtime, Link, (l) => l.phase === "Done" && l.said === "ConflictMany");
   });
 
   it("Approve what the agent changes (spec/app/calendar/agent.md, \"Story: Approve what the agent changes\"; spec/app/calendar/agent.md, \"Story: Know what the agent's change did\")", async () => {

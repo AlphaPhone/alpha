@@ -61,6 +61,8 @@ export interface CalendarScene {
   readonly creations: Map<string, string>;
   lost: boolean;
   handedOff: number;
+  /** The agent's linked sync control: its revision, whether it is paused, the Google calendar it writes to, and the state of each linked event. */
+  readonly control: { revision: number; paused: boolean; destination: { connectorAccountId: string; providerCalendarId: string } | null; links: string[] };
 }
 
 export function calendarScene(): CalendarScene {
@@ -68,6 +70,7 @@ export function calendarScene(): CalendarScene {
     events: [], writes: [], keys: new Map(), down: false, stalled: false, queued: false,
     calendars: [{ id: "local", name: "Phone", writable: true, local: true }], phoneEvents: [], granted: false, asked: 0,
     creations: new Map(), lost: false, handedOff: 0,
+    control: { revision: 0, paused: true, destination: null, links: [] },
   };
 }
 
@@ -93,7 +96,27 @@ function changed(scene: CalendarScene, key: string, event: FakeEvent, reply: unk
 }
 
 export function calendarRoutes(scene: CalendarScene): Route[] {
+  const primary = { connectorAccountId: "google-owner", providerCalendarId: "primary" };
+  const controlView = () => ({ revision: scene.control.revision, paused: scene.control.paused, destination: scene.control.destination, pendingDispatch: null, conflicts: 0 });
   return [
+    (request, url) => (request.method === "GET" && url.pathname === `${base}/sync-control` ? Response.json(controlView()) : undefined),
+    (request, url) => {
+      if (request.method !== "GET" || url.pathname !== `${base}/sync-control/destinations`) return;
+      const choice = scene.control.destination === null ? "SelectPrimary" : "ResumeDestination";
+      return Response.json({ revision: scene.control.revision, choice, destination: scene.control.destination ?? primary, candidates: [{ ...primary, side: "owner", accessRole: "owner", primary: true, accountEmail: "owner@alpha.test" }] });
+    },
+    (request, url) => {
+      if (request.method !== "POST" || url.pathname !== `${base}/sync-control`) return;
+      return request.json().then((body: { expectedRevision: number; operation: string; destination?: { connectorAccountId: string; providerCalendarId: string } | null }) => {
+        if (body.expectedRevision !== scene.control.revision) return Response.json({ error: "stale_revision" }, { status: 409 });
+        if (body.operation === "select") scene.control.destination = body.destination ?? null;
+        scene.control.paused = body.operation === "pause";
+        scene.control.revision += 1;
+        scene.writes.push(`sync ${body.operation}`);
+        return Response.json({ ...controlView(), receipt: { id: `r${scene.control.revision}`, operationKey: body.operation, committedAt: "", revision: scene.control.revision, replayed: false } });
+      });
+    },
+    (request, url) => (request.method === "GET" && url.pathname === `${base}/links` ? Response.json({ links: scene.control.links.map((state, at) => ({ linkId: `l${at}`, localEventId: `e${at}`, destination: primary, providerEventId: null, handoffKey: "", localOnly: false, staged: false, state })) }) : undefined),
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== `${base}/feed`) return;
       if (scene.down) return Response.json({ error: "starting" }, { status: 503 });
