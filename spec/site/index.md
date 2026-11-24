@@ -36,7 +36,7 @@ pure def running(d: Demo): bool = d.started and d.playing and not(d.hidden)
 
 pure def begun(now: int, d: Demo): Demo = { ...d, due: now + hold(d), left: hold(d) }
 
-pure val nowValues = Set(0, 1000000000)
+pure val nowValues = 0.to(12).map(i => i * 5000).union(Set(1000000000))
 pure val weight_tick = 5
 ```
 
@@ -52,7 +52,9 @@ pure def start(d: Demo, now: int, still: bool, hidden: bool): Demo =
 ### A beat moves on only while the demo plays in sight, once its time has come
 
 The next beat is due when this one was, plus its own time, so the demo
-keeps its pace however late a beat is told.
+keeps its pace however late a beat is told. A beat told so late that the
+next would already be due, after the page stalled, has its full time from
+then, so the demo never runs through several beats at once.
 
 ```quint
 pure def canTick(d: Demo, now: int): bool = running(d) and now >= d.due
@@ -60,7 +62,8 @@ pure def canTick(d: Demo, now: int): bool = running(d) and now >= d.due
 pure def tick(d: Demo, now: int): Demo =
   val staged = not(d.whole) and d.beat + 1 < beats(d.scene).length()
   val ahead = if (staged) { ...d, beat: d.beat + 1 } else { ...d, scene: following(d.scene), beat: 0, whole: d.still }
-  { ...ahead, due: d.due + hold(ahead), left: hold(ahead) }
+  val paced = d.due + hold(ahead)
+  { ...ahead, due: if (paced > now) paced else now + hold(ahead), left: hold(ahead) }
 ```
 
 ### A scene the visitor picks is shown from its start, and whole where the demo is not playing or the visitor asks for less motion
