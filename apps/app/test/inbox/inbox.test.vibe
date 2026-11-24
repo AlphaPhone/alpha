@@ -4,6 +4,7 @@ import { sha256Hex } from "@elizaos/plugin-inbox/mailbox"
 import { initial as sessionInitial } from "../../gen/account__session.ts"
 import { fakeCloud, fakeNative, fakeResident, buildInfo } from "../../src/platform/layers.vibe"
 import { memoryStore } from "../../src/platform/storage.vibe"
+import { NativeFailed } from "../../src/platform/native.vibe"
 import { CloudSession, GoogleAccounts } from "../../src/account/layer.vibe"
 import { Navigation } from "../../src/shell/navigation.vibe"
 import { Overview } from "../../src/shell/overview.vibe"
@@ -14,6 +15,7 @@ import { FilePicker } from "../../src/files/picker.vibe"
 import { Preferences } from "../../src/settings/preferences.vibe"
 import { Assistant } from "../../src/assistant/assistant.vibe"
 import { layer as inbox, DraftsKept, InboxAccounts, Mailbox, MailComposer, MailOperations, MailNoticesShell } from "../../src/inbox/layer.vibe"
+import { composerRef } from "../../src/inbox/operations.vibe"
 import { losingAnswer } from "./lost.ts"
 
 const grantA = "grant-a"
@@ -261,6 +263,71 @@ it.live("A send the phone cannot keep a record of says so, and nothing is dispat
     try composer.flush()
     const outcome = try operations.sendDraft((try composer.mine()).open, "r-send")
     try Effect.try(() => assert.deepStrictEqual({ outcome, dispatches: calls.filter((c) => c === "dispatch").length }, { outcome: "NotKept", dispatches: 0 }))
+  }
+})
+
+/**
+ * `ElizaSecureStore` that refuses a value over the 8 MiB each Inbox slot is given on the phone (RendererCredentialSlots,
+ * `device:alpha/device/inbox/...`), keeping the largest value written to each slot.
+ */
+function boundedSlots(largest: Map<string, number>, kept: Map<string, string>) {
+  const limit = 8 * 1024 * 1024
+  return fakeNative({
+    ElizaSecureStore: {
+      get: (args: unknown) => ({ value: kept.get((args as { key: string }).key) ?? null }),
+      set: (args: unknown) => {
+        const { key, value } = args as { key: string; value: string }
+        const bytes = new TextEncoder().encode(value).length
+        if (bytes > limit) return new NativeFailed({ plugin: "ElizaSecureStore", method: "set", message: "Value too large for its slot" })
+        largest.set(key, Math.max(largest.get(key) ?? 0, bytes))
+        kept.set(key, value)
+        return {}
+      },
+      remove: (args: unknown) => ({ removed: kept.delete((args as { key: string }).key) }),
+      compareAndExchange: () => ({ exchanged: false }),
+    }
+  })
+}
+
+// spec/inbox/operations.md, "A proposal is recorded under its request id before Gmail reviews it"; spec/inbox/drafts.md, "A confirmed send removes only the exact copy that was sent and marks other versions as earlier"
+it.live("A send with a large attachment is recorded with its bytes once, fits its slot, and cleans up its draft once sent", () => effect {
+  const calls: Calls = []
+  const pdf = "%PDF-1.4\n" + "A".repeat(3670016 - 9)
+  const dataBase64 = btoa(pdf)
+  const sha256 = try sha256Hex(pdf)
+  const review = {
+    kind: "send", from: "ann@example.com", to: ["bo@example.com"], cc: [], bcc: [], subject: "Plans", mode: "compose", bodyText: "Attached.",
+    attachments: [{ name: "plans.pdf", mimeType: "application/pdf", size: pdf.length, sha256 }], forwardedAttachments: [],
+  }
+  const digest = try sha256Hex(JSON.stringify(review))
+  const largest = new Map<string, number>()
+  const kept = new Map<string, string>()
+  const journalSlot = "device:alpha/device/inbox/operations"
+  provide app(gmailCloud(calls, { review, digest }), boundedSlots(largest, kept)) {
+    const composer = try MailComposer
+    const operations = try MailOperations
+    const mailbox = try Mailbox
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try settle(operations.changes, (j) => j.capabilities.known)
+    try composer.compose()
+    const open = (try composer.mine()).open
+    try composer.edit({ ...open.fields, toList: ["bo@example.com"], subject: "Plans", body: "Attached." }, "")
+    try composer.flush()
+    const attached = try composer.attach({ name: "plans.pdf", mimeType: "application/pdf", dataBase64 })
+    const draft = (try composer.mine()).open
+    const recordedRef = composerRef(draft)
+    const sent = try operations.sendDraft(draft, "r-send")
+    const after = try composer.mine()
+    const record = kept.get(journalSlot) ?? ""
+    try Effect.try(() => assert.deepStrictEqual({
+      attached, sent, dispatches: calls.filter((c) => c === "dispatch").length, openDraftCleared: after.open.id === "",
+      refHoldsBytes: recordedRef.content.includes(dataBase64), refNamesDigest: recordedRef.content.includes(sha256),
+      journalFits: (largest.get(journalSlot) ?? 0) > dataBase64.length && (largest.get(journalSlot) ?? 0) < 8 * 1024 * 1024,
+      bytesInRecord: record.split(dataBase64).length - 1,
+    }, {
+      attached: undefined, sent: "Sent", dispatches: 1, openDraftCleared: true,
+      refHoldsBytes: false, refNamesDigest: true, journalFits: true, bytesInRecord: 1,
+    }))
   }
 })
 
