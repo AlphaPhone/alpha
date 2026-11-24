@@ -61,7 +61,7 @@ describe("Stage Alpha into an image (spec/app/image/index.md, \"Story: Stage Alp
   });
 });
 
-describe("Update an Alpha Pixel by cable, and get back (spec/app/image/index.md, \"Story: Update an Alpha Pixel by cable, and get back\")", () => {
+describe("Update an Alpha Pixel by cable, and get back (spec/app/image/index.md, \"Story: Update an Alpha Pixel by cable, and get back\"; spec/release/os.md, \"Story: Update an image by hand\")", () => {
   const channel = JSON.parse(readFileSync(place("aosp/pixel10a-ota-channel.json"), "utf8")) as { otaCertificateSha256: string; avbPublicKeySha256: string };
   const fingerprint = (build: number) => `Alpha/alpha_stallion_phone/stallion:17/CP2A.${build}/${build}:user/release-keys`;
   const release = (build: number, rollbackIndex: number) => ({
