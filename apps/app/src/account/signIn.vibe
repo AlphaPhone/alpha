@@ -1,4 +1,4 @@
-// spec/account/signIn.md, "Story: Choose how to sign in"; spec/account/signIn.md, "Story: Sign in with Google"; spec/account/signIn.md, "Story: Sign in with a code"; spec/account/signIn.md, "A typed phone number is sent in international form"; spec/account/signIn.md, "Story: Leave sign-in"; spec/account/signIn.md, "Story: Read the service's terms before signing in"
+// spec/account/signIn.md, "Story: Choose how to sign in"; spec/account/signIn.md, "Story: Sign in with Google"; spec/account/signIn.md, "Story: Sign in with a code"; spec/account/signIn.md, "A typed phone number is sent in international form"; spec/account/signIn.md, "Back during a verification adopts a key the host already stored"; spec/account/signIn.md, "Story: Leave sign-in"; spec/account/signIn.md, "Story: Read the service's terms before signing in"
 import {
   type CodeMethod, type FactorKind, type Host, type Methods, type Net, type SignIn, type SignInEffect, type VerifyOutcome,
   Machine as SignInMachine, canTapGoogle, countryOf, enabled, entryOf, machine as signInMachine, mayReopenGoogle, readinessWaitMs, unknownMethods
@@ -13,7 +13,7 @@ import { Resident } from "../platform/resident.vibe"
 import { freshKey } from "./deployment.ts"
 import { ensureResident } from "./inference.vibe"
 import { CloudSession, noNews, newsOf, type SignInNews } from "./session.vibe"
-import { CodeStarted, HostStatus, MfaRequired, MfaResumed, NetworkStatus, ReadinessChanged, ServiceAnswer, SignInAnswer } from "./signIn.schema.vibe"
+import { CodeStarted, HeldKey, HostStatus, MfaRequired, MfaResumed, NetworkStatus, ReadinessChanged, ServiceAnswer, SignInAnswer } from "./signIn.schema.vibe"
 
 const plugin = "AlphaCloudSignIn"
 
@@ -109,6 +109,8 @@ export const signInService = Layer.effect(SignInScreen, effect {
   const news = try Ref.make<SignInNews>(noNews)
   const epoch = try Ref.make(0)
   const retained = try Ref.make<MfaRequired | undefined>(undefined)
+  // The key the host held when the verification in flight began; undefined when it could not be read.
+  const priorKey = try Ref.make<string | null | undefined>(undefined)
 
   effect function send(event: Parameters<typeof machine.send>[0]) {
     const step = machine.send(event) catch () => undefined
@@ -149,6 +151,25 @@ export const signInService = Layer.effect(SignInScreen, effect {
   /** What the host is sent for the address the owner typed: a phone number in international form. */
   effect function sentAddress(address: string) {
     return (try machine.get()).method === "PhoneCode" ? internationalNumber(address) : address.trim()
+  }
+
+  /** Which key the host holds now: its ID, null for none, undefined when the host could not say. */
+  effect function heldKey() {
+    const read = effect {
+      return try Schema.decodeUnknownEffect(HeldKey)(try native.invoke(plugin, "credentialIdentity", { environment }))
+    } catch () => undefined
+    return read === undefined ? undefined : read.credentialId ?? null
+  }
+
+  /** Back during a verification: the host may have stored its key already, and a cancel after that commit announces nothing. */
+  effect function settleVerification() {
+    // The verification's own answer is dropped from here on; the host's store says whether it committed.
+    try Ref.update(epoch, (n) => n + 1)
+    const prior = try Ref.get(priorKey)
+    if (prior === undefined) return
+    native.invoke(plugin, "cancel", { requestId: try Ref.get(requestId) }) catch () => undefined
+    const now = try heldKey()
+    if (now !== undefined && now !== null && now !== prior) try send({ type: "hostCommitsKey" })
   }
 
   effect function held<A>(work: A!!) {
@@ -220,6 +241,10 @@ export const signInService = Layer.effect(SignInScreen, effect {
     try Ref.update(typed, (t) => ({ ...t, code: "" }))
     try Ref.set(news, noNews)
     const method = s.screen === "FactorStep" ? "verifyMfa" : methodNames[s.method].verify
+    // An unreadable store records nothing, so a Back during this verification then adopts nothing.
+    try Ref.set(priorKey, undefined)
+    try Ref.set(priorKey, try heldKey())
+    if (!(try stillCurrent(turn))) return
     const verified = try held(effect {
       const call = Effect.map(native.invoke(plugin, method, { attemptId: attempt, code }), (value) => ({ ok: true as const, value }))
       const result = call catch (error) => ({ ok: false as const, code: error._tag === "NativeFailed" ? error.code : undefined })
@@ -228,6 +253,7 @@ export const signInService = Layer.effect(SignInScreen, effect {
       if (answer === undefined) return { tag: "CodeFailed" } as VerifyOutcome
       if (answer.status === "authenticated") {
         try Ref.set(news, newsOf(answer))
+        if (try stillCurrent(turn)) try send({ type: "hostCommitsKey" })
         return { tag: "CodeAccepted" } as VerifyOutcome
       }
       if (answer.attemptId !== undefined) try Ref.set(attemptId, answer.attemptId)
@@ -356,7 +382,10 @@ export const signInService = Layer.effect(SignInScreen, effect {
     effect back() {
       const before = try machine.get()
       if (before.work === "GoogleWork") try send({ type: "backDuringGoogle" })
-      else try send({ type: "back" })
+      else {
+        if (before.work === "Verifying") try settleVerification()
+        try send({ type: "back" })
+      }
       const after = try machine.get()
       if (after.work !== before.work || after.screen !== before.screen) try Ref.update(epoch, (n) => n + 1)
       return entryOf(before) !== "NoEntry"
