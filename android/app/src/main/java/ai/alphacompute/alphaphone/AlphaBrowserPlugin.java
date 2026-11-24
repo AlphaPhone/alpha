@@ -73,8 +73,8 @@ import java.util.*;
  * once no tab (for example their pop-up) still uses them, and again at the next start.
  *
  * <p>The host owns pop-ups (a tapped {@code target=_blank} or {@code window.open} becomes a tab in
- * the opener's profile), app links ({@code tel:}, {@code mailto:}, {@code sms:}, {@code geo:}, {@code intent:}, {@code market:}
- * handed to Android once per tap), confirmed clearing of all or one site's data, find in page,
+ * the opener's profile), app links ({@code tel:}, {@code mailto:}, {@code sms:}, {@code geo:}, {@code intent:}, {@code market:},
+ * and apps' own schemes such as {@code whatsapp:} or {@code zoommtg:}, handed to Android once per tap), confirmed clearing of all or one site's data, find in page,
  * site permission and HTTP sign-in prompts, engine-attested login fields, downloads, fullscreen
  * video, sharing and the reviewed page excerpt read in an isolated world.
  *
@@ -475,7 +475,7 @@ public class AlphaBrowserPlugin extends Plugin {
     @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
      String target = r.getUrl().toString();
      // mailto/tel/sms/geo/intent/market belong to other apps. The current page stays.
-     if (BrowserExternalHandoff.external(target)) { if (r.isForMainFrame()) handoff(t, target, r.hasGesture()); return true; }
+     if (BrowserExternalHandoff.external(target, config())) { if (r.isForMainFrame()) handoff(t, target, r.hasGesture()); return true; }
      // A page that already shows keeps showing: only a tap gets a notice, a script's scheme probe stays silent.
      if (!safe(target)) { if (r.isForMainFrame()) { if (t.committed && t.error.isEmpty()) { if (r.hasGesture()) notice(t,"This address type is not supported."); } else fail(t,"This address type is not supported."); } return true; }
      if (r.isForMainFrame()) {
@@ -916,7 +916,7 @@ public class AlphaBrowserPlugin extends Plugin {
   if(fresh)t.handedOff=true;
   boolean shownSelf=Objects.equals(presentedId,t.id),shownOpener=fresh&&Objects.equals(presentedId,opener.id);
   // Resolve the app link only for a tab that may hand off at all.
-  Intent intent=(fresh?(shownSelf||shownOpener):(shownSelf&&gesture))?BrowserExternalHandoff.intentFor(raw,getContext().getPackageName(),config().hostSchemes):null;
+  Intent intent=(fresh?(shownSelf||shownOpener):(shownSelf&&gesture))?BrowserExternalHandoff.intentFor(raw,getContext().getPackageName(),config()):null;
   boolean supported=intent!=null&&(BrowserExternalLinkPolicy.systemLink(raw)||!ownsRoute(intent));
   // A private tab leaves private browsing only after the owner says so, as the menu's
   // "Open in another browser" does. The tap and pop-up rules hold first (LinkHandoff).
