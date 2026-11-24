@@ -17356,9 +17356,10 @@
   },
   {
    "legacy": "scripts/runtime-profile.ts",
-   "area": "files",
-   "spec": "apps/app/spec/files/index.md",
-   "status": "removed"
+   "area": "tooling",
+   "replacement": "scripts/verify-packaged-runtime.py (each APK packages the native runtime profile marker scripts/stage-agent-runtime.ts writes; verify-apks.ts runs it after every Android build)",
+   "status": "removed",
+   "note": "--verify-native checked the staged native Google host against its built artifact; no native Google host is built or staged at the Vibestack pin, so only the profile marker remains to verify"
   },
   {
    "legacy": "scripts/stage-local-agent-runtime.ts",
@@ -17534,7 +17535,8 @@
    "legacy": "scripts/test-device-timing-source.ts",
    "area": "platform",
    "spec": "apps/app/spec/platform/index.md",
-   "status": "removed"
+   "status": "removed",
+   "note": "Retired: it ran the pinned plugin-assistant device-action suite (vitest.device-actions.config.ts: authenticated HTTP, approval service and disk-backed SQL), which no longer exists at the Vibestack pin; device-action lifecycle belongs to the platform area spec and its tests. resident-android.yml has no replacement step."
   },
   {
    "legacy": "scripts/test-digest-cancellation.ts",

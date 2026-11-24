@@ -21,6 +21,8 @@ REQUIRED = ('agent.mjs', 'manifest.json', 'inventory.json', 'alpha-source.json',
 WORKER = 'workflow-worker/'
 WORKER_REQUIRED = ('src/worker/main.js', 'manifest.json', 'workflow-worker.json', 'dependencies.json')
 ABIS = ('arm64-v8a', 'x86_64')
+# The one runtime profile scripts/stage-agent-runtime.ts writes: every APK packages the native resident runtime.
+RUNTIME_PROFILE = {'version': 1, 'runtimeProfile': 'native'}
 NOT_DISTRIBUTABLE = 3
 
 
@@ -62,6 +64,9 @@ def verify(apk, release=False):
             raise ValueError('Packaged runtime was staged from a different pin or stager')
         if stamp != json.loads((STAGED / 'alpha-source.json').read_text()):
             raise ValueError('Packaged runtime differs from the staged payload')
+        profile = json.loads(archive.read('assets/agent/alpha-runtime-profile.json'))
+        if profile != RUNTIME_PROFILE:
+            raise ValueError('Packaged runtime profile is not the native profile the stager writes')
         bundle = json.loads(archive.read('assets/agent/manifest.json'))
         worker_sha = bundle.get('workflowWorkerSha256') if isinstance(bundle, dict) else None
         if not isinstance(worker_sha, str) or len(worker_sha) != 64:
@@ -96,7 +101,7 @@ def verify(apk, release=False):
             if node not in names or packaged(node) != pins.get(abi):
                 raise ValueError(f'Packaged {abi} Node differs from the pinned runtime')
             checks += 1
-        return {'apk': str(apk), 'runtime': 'PACKAGED', 'runtimeProfile': 'native', 'upstreamCommit': stamp['base'],
+        return {'apk': str(apk), 'runtime': 'PACKAGED', 'runtimeProfile': profile['runtimeProfile'], 'upstreamCommit': stamp['base'],
                 'nodeVersion': lock.get('version'), 'verifiedEntries': checks, 'runtimeExecution': False}
 
 
