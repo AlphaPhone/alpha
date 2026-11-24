@@ -71,8 +71,9 @@ test("key files sign the launcher release, replace the unsigned files only after
   const real = fs.realpathSync(dir);
   assert.deepEqual(calls()[0].argv, ["sign", "--key", path.join(real, "alphaphone_app.pk8"), "--cert", path.join(real, "alphaphone_app.x509.pem"),
     "--v4-signing-enabled", "false", "--out", path.join(root, "artifacts/launcher-release.apk.partial"), path.join(root, "artifacts/launcher-release-unsigned.apk")]);
-  assert.deepEqual(result.ran.map(args => args[0]), ["scripts/verify-apks.ts", "scripts/generate-sbom.ts"]);
-  assert.deepEqual(result.ran[0], ["scripts/verify-apks.ts"]);
+  assert.deepEqual(result.ran.map(args => args[3]), ["scripts/verify-apks.ts", "scripts/generate-sbom.ts"]);
+  assert.deepEqual(result.ran[0], ["--conditions=eliza-source", "--import", "vibelang/register", "scripts/verify-apks.ts"]);
+  assert.deepEqual(result.ran[1].slice(0, 3), ["--conditions=eliza-source", "--import", "vibelang/register"]);
   assert.ok(result.ran[1].includes("--apks"));
 });
 
@@ -82,7 +83,7 @@ test("re-verification takes no profile option; a build record that is not the na
   fs.writeFileSync(path.join(current, "artifacts/build-config.json"), JSON.stringify({ testMocks: false, runtimeProfile: "native" }));
   const signed = await sign(current, ["--keys-dir", keys(t), "--apksigner", tool]);
   assert.equal(signed.code, 0, signed.err);
-  assert.deepEqual(signed.ran[0], ["scripts/verify-apks.ts"]);
+  assert.deepEqual(signed.ran[0], ["--conditions=eliza-source", "--import", "vibelang/register", "scripts/verify-apks.ts"]);
   for (const record of [{ testMocks: false, runtimeProfile: "cloud" }, { testMocks: false, runtimeProfile: "native", localEmbeddings: true }]) {
     const stale = product(t);
     fs.writeFileSync(path.join(stale, "artifacts/build-config.json"), JSON.stringify(record));

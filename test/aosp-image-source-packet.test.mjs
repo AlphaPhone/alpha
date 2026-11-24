@@ -95,6 +95,8 @@ test('the stage-aosp CLI refuses a development or non-Pixel source packet before
     '--development', '--branding-assets', '/assets'), /exact report SHA-256/);
 });
 
+// stage-aosp.ts loads upstream VibeLang (@elizaos/os/image), so it runs as package.json's aosp:stage runs it.
+const VIBE = ['--conditions=eliza-source', '--import', import.meta.resolve('vibelang/register')];
 function execFileSyncLocal(args) {
-  return execFileSync(process.env.ALPHA_BUN || process.execPath, args, {encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']});
+  return execFileSync(process.execPath, [...VIBE, ...args], {encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']});
 }

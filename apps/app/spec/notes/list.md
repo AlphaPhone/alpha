@@ -141,21 +141,24 @@ pure def lawDefaultTitleIsNew(highest: int): bool = nextDefaultNumber(highest) =
 
 ## Story: Open a note by saying its title
 
-> As the owner, I want "open the note called Groceries" to open that note on the phone, and "open my
-> most recent note" to be answered by the agent, which knows which note that is.
+> As the owner, I want "open the note called Groceries", "open my most recent note" or "open that note"
+> to open exactly that saved note on the phone, without losing an edit I have not saved.
 
-### Only a named, quoted or plainly titled note opens locally; a relative reference goes to the agent
+### The agent opens the one saved note I named, and never over another note's unsaved edit
 
-A request opens a note locally when it names the note with called, named or titled, quotes its title, or
-uses a title in the shorthand open X note. A generic or relative reference such as a new note, the last
-note, my most recent note or the note I just created stays in the conversation, unless it was named or
-quoted, so an old note literally titled Most Recent never answers for the newest one.
+The request goes to the agent with the turn, which finds exactly one saved note by its title, its recency
+or an earlier reference, asks which one when several match, and prepares Notes' saved editor at that note
+(spec/assistant/views.md). Notes then opens it in the editor as opening it from the list does, but saves
+nothing on the owner's behalf: while another note, or a new note, has an unsaved edit, nothing opens and
+that edit stays as it is. A note the collection on the phone does not hold yet, such as one the agent
+saved in the same turn, is read again from the agent first, and the editor is given at most 2 seconds to
+learn of it. The note already open counts as opened; a note the agent's Notes no longer hold does not
+open, and the note on screen stays open.
 
 ```quint
-pure def opensLocally(named: bool, quoted: bool, generic: bool, relative: bool, hasTitle: bool): bool =
-  hasTitle and (named or quoted or not(generic or relative))
-pure def lawRelativeReferenceStaysWithTheAgent(hasTitle: bool): bool = not(opensLocally(false, false, false, true, hasTitle))
-pure def lawQuotedTitleAlwaysOpens(generic: bool, relative: bool): bool = opensLocally(false, true, generic, relative, true)
+pure def agentOpensNote(alreadyOpen: bool, otherEdited: bool): bool = alreadyOpen or not(otherEdited)
+pure def lawAnotherNotesUnsavedEditIsNeverReplaced(alreadyOpen: bool): bool = agentOpensNote(alreadyOpen, true) == alreadyOpen
+pure val noteOpenWaitMs = 2000
 ```
 
 ## Story: Turn text into a checklist and back

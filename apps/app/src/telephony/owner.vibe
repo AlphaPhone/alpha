@@ -1,7 +1,7 @@
 // spec/telephony/drafts.md, "Story: Write to someone, in my own words or Alpha's"; spec/telephony/drafts.md, "What I wrote signed out becomes the account's that signs in, only where that account kept nothing"; spec/telephony/comms.md, "Story: See what Alpha is acting on"; spec/platform/storage.md, "A stored value that is not a state is held for review and never written over"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { adoptsDeviceSlot, type Kept } from "../../gen/telephony__drafts.effect.vibe"
-import { CloudSession } from "../account/layer.vibe"
+import { CloudSession } from "../account/session.vibe"
 import { DeviceStorage } from "../platform/device-storage.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 

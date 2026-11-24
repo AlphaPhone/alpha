@@ -11,7 +11,8 @@ import { AiProvider } from "../../src/account/provider.vibe"
 import { AccountPresentation } from "../../src/account/presentation.vibe"
 import { CloudSession } from "../../src/account/session.vibe"
 import { AccountSheet } from "../../src/account/sheet.vibe"
-import { SignInScreen } from "../../src/account/signIn.vibe"
+import { SignInScreen, internationalNumber } from "../../src/account/signIn.vibe"
+import { NativeFailed } from "../../src/platform/native.vibe"
 import { type Answer, type Calls, account, cloudAnswers, expiresAt, found, names, now, providerStatus, signedInNative, snapshot, until } from "./platform.vibe"
 
 /** A signed-out host whose next sign-in stores `key-2`. */
@@ -203,6 +204,88 @@ it.live(`A wrong code keeps the step and the right one signs in (spec/account/si
       }))
     })
   }
+})
+
+// spec/account/signIn.md, "Story: Sign in with a code"
+it.effect(`A typed phone number reads as the international number the host takes (spec/account/signIn.md, "Story: Sign in with a code")`, () => effect {
+  // spec/account/signIn.md, "A typed phone number is sent in international form"
+  const typed = [" (415) 555-0100 ", "415.555.0100", "1-415-555-0100", "+1 415 555 0100", "0044 20 7946 0958", "+44 (20) 7946-0958", "020 7946 0958", "+1 (415) 555-010a", "4155550100x"]
+  try Effect.try(() => assert.deepStrictEqual(typed.map(internationalNumber), [
+    "+14155550100", "+14155550100", "+14155550100", "+14155550100", "+442079460958", "+442079460958", "02079460958", "+1415555010a", "4155550100x"
+  ]))
+})
+
+// spec/account/signIn.md, "Story: Sign in with a code"
+it.live(`A code is sent to the typed phone number in international form (spec/account/signIn.md, "Story: Sign in with a code")`, () => effect {
+  const calls: Calls = []
+  const host = {
+    ...signedOutNative({ key: false }),
+    "AlphaCloudSignIn.status": { inApp: true, methodsKnown: true, google: true, email: true, phone: true },
+    "AlphaCloudSignIn.startPhone": { attemptId: "attempt-1", expiresAt, resendAt: now }
+  }
+  provide account(calls, host) {
+    try scoped(effect {
+      const session = try CloudSession
+      const signIn = try SignInScreen
+      fork.scoped session.run()
+      fork.scoped signIn.run()
+      try until(signIn.changes, (s) => s.screen === "Choose" && s.methods.known)
+      try signIn.choose("PhoneCode")
+      // spec/account/signIn.md, "A typed phone number is sent in international form"
+      try signIn.submit(" (415) 555-0100 ")
+      const step = try found(try until(signIn.changes, (s) => s.screen === "CodeStep" && s.work === "NoWork"))
+      try Effect.try(() => assert.deepStrictEqual(
+        { phone: (calls.find((c) => c.name === "AlphaCloudSignIn.startPhone")?.args as { phone?: string } | undefined)?.phone, step: [step.screen, step.method] },
+        { phone: "+14155550100", step: ["CodeStep", "PhoneCode"] }
+      ))
+    })
+  }
+})
+
+// spec/account/signIn.md, "Story: Sign in with a code"
+it.live(`Back during a verification adopts the key the host stored, and otherwise returns to the choice (spec/account/signIn.md, "Story: Sign in with a code")`, () => effect {
+  // The host commits (or not) and then holds its answer until Back's cancel reaches it, as a phone does when Back loses the race.
+  effect function backDuring(commits: boolean) {
+    const calls: Calls = []
+    const held = { key: false }
+    const asked = try Deferred.make<void>()
+    const cancelled = try Deferred.make<void>()
+    const host = {
+      ...signedOutNative(held),
+      "AlphaCloudSignIn.credentialIdentity": () => (held.key ? { environment: "production", credentialId: "key-2", expiresAt } : { environment: "production", credentialId: null }),
+      "AlphaCloudSignIn.verifyEmail": () => {
+        held.key = commits
+        const refusal = new NativeFailed({ plugin: "AlphaCloudSignIn", method: "verifyEmail", message: "cancelled", code: "cancelled" })
+        return Effect.andThen(Deferred.succeed(asked, undefined), Effect.flatMap(Deferred.await(cancelled), () => Effect.fail(refusal)))
+      },
+      "AlphaCloudSignIn.cancel": () => Effect.as(Deferred.succeed(cancelled, undefined), {})
+    }
+    return try scoped(effect {
+      provide account(calls, host) {
+        const session = try CloudSession
+        const signIn = try SignInScreen
+        fork.scoped session.run()
+        fork.scoped signIn.run()
+        try until(signIn.changes, (s) => s.screen === "Choose" && s.methods.known)
+        try signIn.submit("owner@example.com")
+        try until(signIn.changes, (s) => s.screen === "CodeStep" && s.work === "NoWork")
+        fork.scoped signIn.verify("123456")
+        try Deferred.await(asked)
+        const took = try signIn.back()
+        const screen = try signIn.current()
+        const signedIn = commits ? (try found(try until(session.changes, (s) => s.phase === "SignedIn"))).account.credentialId : (try session.current()).phase
+        return { took, screen: [screen.screen, screen.work, screen.adoptedByBack, screen.fault], signedIn, cancelled: names(calls).includes("AlphaCloudSignIn.cancel") }
+      }
+    })
+  }
+  // spec/account/signIn.md, "Back during a verification adopts a key the host already stored"
+  const committed = try backDuring(true)
+  // spec/account/signIn.md, "Back ends the step in flight, then the code step, then the dialog; the required page keeps its chooser"
+  const refused = try backDuring(false)
+  try Effect.try(() => assert.deepStrictEqual({ committed, refused }, {
+    committed: { took: true, screen: ["ScreenClosed", "NoWork", true, "NoFault"], signedIn: "key-2", cancelled: true },
+    refused: { took: true, screen: ["Choose", "NoWork", false, "NoFault"], signedIn: "SignedOut", cancelled: true }
+  }))
 })
 
 // spec/account/signIn.md, "Story: Leave sign-in"

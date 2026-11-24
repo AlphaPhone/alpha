@@ -2,7 +2,7 @@ import {androidIdentity, stageAndroidIdentity, verifyAndroidIdentity} from './an
 /**
  * Verify the launcher APKs of one build and record the result in apk-manifest.json.
  *
- *   node scripts/verify-apks.ts [--signer-api-level=N] [--cloud-voice-evidence=FILE]
+ *   node --conditions=eliza-source --import vibelang/register scripts/verify-apks.ts [--signer-api-level=N] [--cloud-voice-evidence=FILE]
  *
  * It verifies the debug APK, and the release APK unless the build record says the build was
  * debug-only (`release: false`, a local `pnpm android:build:local`).
@@ -38,11 +38,10 @@ import {apkUpdateChannel,validateUpdateChannel} from './update-channel.ts';
 import type {UpdateChannel} from './update-channel.ts';
 import {releaseBlockers} from './release-blockers.ts';
 import {
-  auditBundle, distributionProblems, extractWebPayload, parseXmlTree, readBuildFlags, signerDigest, validateApk, verifyOwnerRouteTable,
+  apkEntries, auditBundle, distributionProblems, extractWebPayload, parseXmlTree, readBuildFlags, signerDigest, validateApk, verifyOwnerRouteTable,
 } from "./apk.ts";
 import type {ApkMode, ApkVariant} from "./apk.ts";
 import { androidEnv, tool } from "./toolchain.ts";
-import { readApkEntries } from "../vendor/eliza/packages/os/android/apk-distribution.mjs";
 import { readReleaseSigner, releaseAdmission, RELEASE_SIGNER_FILE, SIGNING_ENV } from "./build-android.ts";
 import { RUNTIME_ENTRY } from "./generate-licenses.ts";
 import { fontCheckFailedItem, fontLicenceCheck, fontLicenceLine } from "./font-license-blockers.ts";
@@ -55,7 +54,7 @@ import {readNativeBuildReceipt} from './native-build-inputs.ts';
 import { apkPermissions, checkListenerPermissions, checkListenerSpeechBundle, listenerPackage } from "./aosp-listener.ts";
 
 import {cloudVoiceAdmission} from './os-ported/os/apk-release-record.mjs';
-const USAGE = "Usage: node scripts/verify-apks.ts [--signer-api-level=N] [--cloud-voice-evidence=FILE]";
+const USAGE = "Usage: node --conditions=eliza-source --import vibelang/register scripts/verify-apks.ts [--signer-api-level=N] [--cloud-voice-evidence=FILE]";
 interface RuntimePackaging {
   apk: string;
   runtime: "PACKAGED";
@@ -342,12 +341,14 @@ for (const row of results.filter(row => row.mode === "debug")) {
 
 // Inspect the separate image-only listener APKs when they are present beside the app APKs.
 function listenerFacts(file: string, mode: ApkMode, signed: boolean) {
+  // Upstream's archive reader needs the bytes in memory; read them once for the digest and the entries.
+  const bytes = fs.readFileSync(file);
   const facts: {
     file: string; mode: ApkMode; signed: boolean; sha256: string;
     signerSha256?: string | null; permissionProblem?: string;
     packageName?: string | null; requested?: string[];
     voiceBundle?: {packaged: boolean; abis?: ReturnType<typeof checkListenerSpeechBundle>; problem?: string};
-  } = { file, mode, signed, sha256: sha256File(file) };
+  } = { file, mode, signed, sha256: sha256(bytes) };
   if (signed) {
     try { facts.signerSha256 = signerDigest(file, {apiLevel: signerApiLevel}); }
     catch (error) { facts.permissionProblem = `apksigner verify failed: ${message(error)}`; }
@@ -356,7 +357,7 @@ function listenerFacts(file: string, mode: ApkMode, signed: boolean) {
   Object.assign(facts, apkPermissions(dump));
   try { checkListenerPermissions(dump, renderSensePermissions(identity.appId), listenerPackage(identity.appId)); }
   catch (error) { facts.permissionProblem ??= message(error); }
-  const entries = readApkEntries(file);
+  const entries = apkEntries(file, bytes);
   try {
     const abis = checkListenerSpeechBundle(entries, readVoiceHost("."), (entry: string) => execFileSync("unzip", ["-p", file, entry], { encoding: "utf8", maxBuffer: 1 << 20 }));
     facts.voiceBundle = { packaged: true, abis };

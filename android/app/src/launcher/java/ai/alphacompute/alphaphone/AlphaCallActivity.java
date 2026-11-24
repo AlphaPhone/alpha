@@ -208,9 +208,9 @@ public final class AlphaCallActivity extends Activity {
         Call call = AlphaInCallService.call(selected);
         if (call == null) return;
         String command = intent.getStringExtra("command");
-        if ("answer".equals(command) && call.getState() == Call.STATE_RINGING) {
+        if ("answer".equals(command) && AlphaCallPresentation.ringing(call.getState())) {
             AlphaInCallService.answerCall(selected, VideoProfile.STATE_AUDIO_ONLY);
-        } else if ("reject".equals(command) && call.getState() == Call.STATE_RINGING) {
+        } else if ("reject".equals(command) && AlphaCallPresentation.ringing(call.getState())) {
             AlphaInCallService.rejectCall(selected, false, null);
         } else if ("disconnect".equals(command)) {
             AlphaInCallService.disconnectCall(selected);
@@ -226,8 +226,8 @@ public final class AlphaCallActivity extends Activity {
         String id = selected;
         int state = call.getState();
         tones.retain(id, state == Call.STATE_ACTIVE);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) setTurnScreenOn(state == Call.STATE_RINGING);
-        else if (state == Call.STATE_RINGING) getWindow().addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) setTurnScreenOn(AlphaCallPresentation.ringing(state));
+        else if (AlphaCallPresentation.ringing(state)) getWindow().addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
         else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
         for (Iterator<String> keys = names.keySet().iterator(); keys.hasNext(); ) {
             String key = keys.next();

@@ -1,0 +1,67 @@
+// spec/telephony/actions.md, "A name is looked up on the phone and the owner picks the exact number, even for one match"
+import { assert, it } from "@effect/vitest"
+import type { ContactDetail, ContactId, ContactVersion } from "@elizaos/os/bridges/contacts"
+import { Machine as ActionsMachine } from "../../gen/telephony__actions.effect.vibe"
+import { changeLines, TelephonyActions } from "../../src/telephony/actions.vibe"
+import { fakePhone, until } from "./fakes.vibe"
+
+const maya: ContactDetail = {
+  id: "7" as ContactId, lookup: "k7", displayName: "Maya Chen", givenName: "Maya", familyName: "Chen", starred: false,
+  phoneNumbers: [{ number: "4155550100", type: "mobile" }, { number: "4155550111", type: "work" }], emailAddresses: [{ address: "Maya@example.com", type: "home" }],
+  version: "a".repeat(64) as ContactVersion,
+}
+
+// spec/telephony/actions.md, "A name is looked up on the phone and the owner picks the exact number, even for one match"
+it("a contact change says Remove, Add, Keep or Rename from on each of its lines, and a removed number never reads as kept", () => {
+  const replaced = changeLines(maya, {
+    displayName: "Maya C.",
+    phoneNumbers: [{ number: "(415) 555-0111", type: "work" }, { number: "4155550123", type: "mobile" }],
+    emailAddresses: [{ address: "maya@example.com", type: "home" }],
+  })
+  const unchanged = changeLines(maya, { displayName: "Maya Chen", phoneNumbers: maya.phoneNumbers, emailAddresses: [] })
+  assert.deepStrictEqual(
+    { replaced, unchanged: unchanged.map((line) => `${line.word} ${line.value}`) },
+    {
+      replaced: [
+        { word: "Rename from", value: "Maya Chen", number: false },
+        { word: "Remove", value: "4155550100", number: true },
+        { word: "Keep", value: "(415) 555-0111", number: true },
+        { word: "Add", value: "4155550123", number: true },
+        { word: "Keep", value: "maya@example.com", number: false },
+      ],
+      unchanged: ["Remove Maya@example.com", "Keep 4155550100", "Keep 4155550111"],
+    },
+  )
+})
+
+// spec/telephony/actions.md, "A name is looked up on the phone and the owner picks the exact number, even for one match"
+it.live("a new contact's number saved under another name is shown before it is added again, and a new number adds without a review", () => effect {
+  const fake = fakePhone()
+  fake.world.holders = { "4155550199": "Mother" }
+  provide fake.layer {
+    const actions = try TelephonyActions
+    const machine = try ActionsMachine
+    const mom = { type: "contact_create", contact: { displayName: "Mom", phoneNumbers: ["4155550199"], emailAddresses: [] } }
+    const running = fork actions.run(mom, "op-twin", { text: "add Mom 415-555-0199" })
+    const asked = try until(machine.changes, (a) => a.ongoing.tag === "Choosing")
+    try machine.send({ type: "reviewDismissed", runId: "op-twin" }, "Owner")
+    const twin = try Fiber.join(running)
+    fake.world.saveAnswer = () => Promise.resolve({ status: "saved" })
+    const fresh = { type: "contact_create", contact: { displayName: "Ana", phoneNumbers: ["4155550177"], emailAddresses: [] } }
+    const added = try actions.run(fresh, "op-new", { text: "add Ana 415-555-0177" })
+    try Effect.try(() => assert.deepStrictEqual(
+      {
+        asked: Option.map(asked, (a) => a.ongoing.tag === "Choosing" ? a.ongoing.candidates : []),
+        twin: twin.settled,
+        added: added.settled,
+        looked: fake.calls.filter((c) => c.startsWith("holders:")),
+      },
+      {
+        asked: Option.some([{ candidateId: "add-anyway", title: "Mother", number: "4155550199" }]),
+        twin: "OwnerCancelled",
+        added: "Applied",
+        looked: ["holders:4155550199", "holders:4155550177"],
+      },
+    ))
+  }
+})

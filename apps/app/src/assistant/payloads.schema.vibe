@@ -140,6 +140,9 @@ export schema ViewBinding {
   readonly installationId: Schema.NonEmptyString
 }
 
+/** A saved note's id as the agent's Notes name it. */
+const SavedNoteId = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/))
+
 /** A view an agent action prepared for this renderer: the completed-action handoff of its result values. */
 export schema ViewHandoff {
   readonly mode?: string
@@ -147,15 +150,21 @@ export schema ViewHandoff {
   readonly viewPath?: string
   readonly viewType?: string
   readonly label?: string
-  readonly subview?: boolean
+  readonly subview?: boolean | "saved-note-v1"
   readonly completedActionDelivered?: boolean
   readonly completedActionHandoffId?: string
   readonly navigationPrepared: true
   readonly navigationBinding: ViewBinding
 }
 
-/** The claim route's answer: the claim id that settles it. */
-export schema ViewClaim { readonly claimId: Schema.NonEmptyString }
+/** The saved note a saved Notes editor claim names. */
+export schema SavedNoteTarget {
+  readonly kind: "saved-note"
+  readonly noteId: SavedNoteId
+}
+
+/** The claim route's answer: the claim id that settles it, and for a saved Notes editor the note it opens. */
+export schema ViewClaim { readonly claimId: Schema.NonEmptyString; readonly target?: SavedNoteTarget }
 
 /** The result route's answer: whether the host took the result. */
 export schema ViewResultAnswer { readonly accepted: boolean }

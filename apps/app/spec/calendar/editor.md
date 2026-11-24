@@ -96,6 +96,38 @@ pure def lawUnknownOrganizerCannotDelete(selfAttendeeOrganizes: bool): bool =
   cancellationMode(false, false, selfAttendeeOrganizes, false) == NoCancellation
 ```
 
+### An invitee answers Going or Maybe from the invitation; Decline stays the deletion's decline
+
+The owner's answer is the reply of the owner's own attendee who does not organize the event:
+Google's `needsAction`, `accepted`, `tentative` or `declined`, or an imported feed's lowercased
+`PARTSTAT`. The detail says the answer and offers Going and Maybe, each except the one already
+given; Decline stays the deletion's decline, with its Undo window. Answers are offered only for a
+one-off invitation the owner declines rather than cancels, on a writable calendar that is not the
+managed Google calendar, whose answers the agent refuses: those are answered in Google Calendar.
+An answer changes nothing else of the event and goes to the agent once, as the
+[agent's Calendar](./agent.md) sends it.
+
+```quint
+type OwnAnswer = NotInvited | AnswerAwaited | AnsweredGoing | AnsweredMaybe | AnsweredDeclined
+pure def ownAnswer(invitee: bool, status: str): OwnAnswer =
+  if (not(invitee)) NotInvited
+  else if (status == "needsAction" or status == "needs-action") AnswerAwaited
+  else if (status == "accepted") AnsweredGoing
+  else if (status == "tentative") AnsweredMaybe
+  else if (status == "declined") AnsweredDeclined
+  else NotInvited
+pure def answersOffered(mode: CancellationMode, answer: OwnAnswer, writable: bool, managed: bool, recurring: bool): bool =
+  mode == DeclineInvitation and answer != NotInvited and writable and not(managed) and not(recurring)
+pure def goingOffered(answer: OwnAnswer, offered: bool): bool = offered and answer != AnsweredGoing
+pure def maybeOffered(answer: OwnAnswer, offered: bool): bool = offered and answer != AnsweredMaybe
+pure def lawOnlyAnInviteeAnswers(mode: CancellationMode, answer: OwnAnswer, writable: bool, managed: bool, recurring: bool): bool =
+  answersOffered(mode, answer, writable, managed, recurring) implies (mode == DeclineInvitation and answer != NotInvited)
+pure def lawTheManagedCalendarIsAnsweredInGoogle(mode: CancellationMode, answer: OwnAnswer, writable: bool, recurring: bool): bool =
+  not(answersOffered(mode, answer, writable, true, recurring))
+pure def lawTheGivenAnswerIsNotOfferedAgain(offered: bool): bool =
+  not(goingOffered(AnsweredGoing, offered)) and not(maybeOffered(AnsweredMaybe, offered))
+```
+
 ### A repeating event changes its repeat only for the entire series
 
 ```quint

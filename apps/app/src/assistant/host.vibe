@@ -40,4 +40,6 @@ export service AssistantHost {
   openView(app: string, route?: string): boolean!!
   /** A short message at the top of the screen. */
   toast(text: string): void!!
+  /** When the plan Alpha last read resets its allowance, while that lies ahead; undefined when no reset is known. */
+  allowanceResetsAt(): (number | undefined)!!
 }
