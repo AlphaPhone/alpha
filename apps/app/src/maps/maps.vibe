@@ -73,10 +73,10 @@ function waitOf(failure: unknown, now: number): { readonly wait: Wait; readonly 
 }
 
 // spec/app/maps/connection.md, "A wait Cloud names holds every Maps request back until it ends: a rate limit for at most a day, a spent allowance for at most 400 days, and any other wait one minute"
-effect function held(failure: unknown): void!!(Time | Screen.Machine) {
+effect function held(failure: unknown, account: number): void!!(Time | Screen.Machine) {
   const named = waitOf(failure, try (try Time).now())
   if (named === undefined) return
-  try ignore((try Screen.Machine).send({ type: "cloudWaits", wait: named.wait, seconds: named.seconds, now: untimed }))
+  try ignore((try Screen.Machine).send({ type: "cloudWaits", wait: named.wait, seconds: named.seconds, now: untimed, account }))
 }
 
 /** A call of eliza's cloud client for Maps under `signal`, refused while a wait Cloud named still holds. */
@@ -85,7 +85,7 @@ effect function askedUnder<A>(call: (client: CloudClient, signal: AbortSignal) =
   if (holding(link)) throw new Unanswered({ cause: "Cloud asked Alpha to wait" })
   const { client } = try Cloud
   const sent: A!Unanswered = tryPromise({ try: (own) => call(client, signal ?? own), catch: (cause) => new Unanswered({ cause }) })
-  return try Effect.tapError(sent, (failure) => held(failure.cause))
+  return try Effect.tapError(sent, (failure) => held(failure.cause, link.account))
 }
 
 const asked = <A>(call: (client: CloudClient, signal: AbortSignal) => Promise<A>) => askedUnder(call)
@@ -105,12 +105,13 @@ export function coverageOf(state: State): Coverage | undefined {
   return state.link.provider === 0 ? undefined : atlas.coverage(state.link.coverage.ticket)
 }
 
-// spec/app/maps/connection.md, "Only the newest read's answer is taken, while signed in, and a healthy answer installs the provider for that account"
-effect function covered(ticket: number): Ev!!(Cloud | Time | Screen.Machine) {
+// spec/app/maps/connection.md, "Only the newest read's answer is taken, while signed in, and a healthy answer installs the provider for that account"; spec/app/maps/connection.md, "Opening Maps, regaining the network or Retry reads the coverage again only when no provider is working"
+effect function covered(ticket: number): Ev!!Cloud {
+  const { client } = try Cloud
   return effect {
-    const found = try asked((client, signal) => client.mapsCapabilities({ signal }))
+    const found = try tryPromise({ try: (signal) => client.mapsCapabilities({ signal }), catch: (cause) => new Unanswered({ cause }) })
     atlas.covered(ticket, found)
-    if (!found.available) return { type: "answerCoverage", ticket, ok: false, covered: false, google: false, offer: noOffer }
+    if (!found.available) return { type: "answerCoverage", ticket, ok: true, covered: false, google: false, offer: noOffer }
     return { type: "answerCoverage", ticket, ok: true, covered: found.capabilities.map, google: isGoogle(found), offer: offerOf(found) }
   } catch () => ({ type: "answerCoverage", ticket, ok: false, covered: false, google: false, offer: noOffer })
 }
@@ -162,8 +163,10 @@ effect function foundForAgent(query: string): void!!(Cloud | Time | Screen.Machi
 // spec/app/maps/index.md, "A place's details are read from its provider once it is on the card, and shown only while it still is"
 effect function detailed(ticket: number, place: number): Ev!!(Cloud | Time | Screen.Machine) {
   const spot = atlas.spot(place)
+  const serving = coverageOf(try (try Screen.Machine).get())
   return effect {
     if (spot === undefined || spot.id === "") throw new Unanswered({ cause: "a pin has no provider details" })
+    if (serving?.available !== true || serving.providerId !== spot.providerId) throw new Unanswered({ cause: "another provider named the place" })
     const found = try asked((client, signal) => client.mapsPlaceDetails({ id: spot.id }, { signal }))
     if (found.place === null) throw new Unanswered({ cause: "the provider no longer knows the place" })
     atlas.numberOf(spotOf(found.place))
@@ -218,7 +221,7 @@ function located(session: number, once: boolean): Stream.Stream<Ev, never, Locat
       |> Stream.mapEffect(%, (fix) => effect {
         if (fix === undefined) return undefined
         const ageMs = (try time.now()) - fix.taken
-        if (once && fix.precise && (ageMs > maxFixAgeMs || ageMs < -maxFixAheadMs)) return undefined
+        if (once && (ageMs > maxFixAgeMs || ageMs < -maxFixAheadMs)) return undefined
         return { fix, ageMs }
       })
       |> Stream.filterMap(%, (seen) => (seen === undefined ? Option.none() : Option.some(seen)))
