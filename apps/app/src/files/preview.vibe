@@ -1,11 +1,12 @@
-// spec/files/preview.md, "Story: Open the file I tapped, and only in the visit I tapped it"; spec/files/preview.md, "One open is asked for at a time, and its selection is shown only in the visit that asked"; spec/files/preview.md, "A rename shows the same file under its new name, or asks to choose it again"; spec/files/pdf.md, "Story: Read a PDF page by page on the phone"; spec/files/recent.md, "Story: Reopen what I opened recently"; spec/files/recent.md, "Story: Come back to the document I had open"
+// spec/files/preview.md, "Story: Open the file I tapped, and only in the visit I tapped it"; spec/files/preview.md, "One open is asked for at a time, and its selection is shown only in the visit that asked"; spec/files/preview.md, "A rename shows the same file under its new name, or asks to choose it again"; spec/files/pdf.md, "Story: Read a PDF page by page on the phone"; spec/files/recent.md, "Story: Reopen what I opened recently"; spec/files/recent.md, "Story: Come back to the document I had open"; spec/files/recent.md, "A phone updated from the previous Alpha keeps its Recent and the document it had open"
 import { type Content, type Doc, type PreviewState, type RenameAnswer, Machine as PreviewMachine, emailable, linkable, messageable } from "../../gen/files__preview.effect.vibe"
 import { type PageOutcome, type PdfPages, Machine as PdfMachine } from "../../gen/files__pdf.effect.vibe"
-import { type Recent, type RecentRow, Machine as RecentMachine } from "../../gen/files__recent.effect.vibe"
+import { type Recent, type RecentRow, Machine as RecentMachine, canAdoptPrevious } from "../../gen/files__recent.effect.vibe"
 import { Machine as BrowserMachine } from "../../gen/files__browser.effect.vibe"
 import type { Row } from "../../gen/files__storage.ts"
 import { Native } from "../platform/native.vibe"
 import { keyPath, kindOf, parentOf, previewable } from "./paths.vibe"
+import { forgetPreviousRecent, previousRecent } from "./previous.ts"
 import { Documents, FILES_PLUGIN, FilesStorage, FilesUnavailable } from "./storage.vibe"
 import type { SharedFile } from "./share.vibe"
 import type * as N from "./native.schema.vibe"
@@ -83,6 +84,16 @@ export const layer = Layer.effect(FilesPreview, effect {
   const recent = try RecentMachine
   const browser = try BrowserMachine
   const send = <E>(machine: { send(event: E): unknown!unknown }, event: E) => ignore(machine.send(event))
+
+  // An unused Recent takes the previous Alpha's index once; the previous index goes only once Recent reads back with it.
+  const previous = previousRecent()
+  if (previous !== undefined) {
+    const before = try recent.get()
+    if (canAdoptPrevious(before, [...previous.rows], previous.wasOpen)) {
+      try ignore(recent.send({ type: "adoptPrevious", previous: [...previous.rows], wasOpen: previous.wasOpen }))
+      if ((try recent.get()).rows.length > 0) forgetPreviousRecent()
+    }
+  }
 
   effect function release() {
     const { toRelease } = try recent.get()

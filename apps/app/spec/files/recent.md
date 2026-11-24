@@ -199,3 +199,47 @@ pure def forgetOpen(s: Recent): Recent = { ...s, restoreOpen: "" }
 pure def alwaysRestoreNamesARememberedPick(s: Recent): bool = s.restoreOpen == "" or remembered(s.rows, s.restoreOpen)
 pure def sometimesRestorable(s: Recent): bool = s.restoreOpen != "" and s.opened == ""
 ```
+
+### A phone updated from the previous Alpha keeps its Recent and the document it had open
+
+The previous Alpha kept Recent and the picked document showing when it last closed in its own index
+on this phone. When this version's Recent is empty, holds no grant and has nothing open or to
+restore, it takes that index once, newest first: a picked row stays a picked document with its
+selection, an exported scan stays a scan with none, a row whose access had ended asks to be chosen
+again, and a row without its key, a second row of the same key or selection, a ready row without a
+selection and anything past 24 are skipped. The grants of the rows it keeps are held as before, a
+ready row it skips gives its grant back unless a kept row names it, and the document that was open is
+restored only when it is a kept, ready picked document. The previous index is removed only after
+Recent reads back with what it took; a Recent already in use leaves both as they are.
+
+```quint
+pure def asPrevious(r: RecentRow): RecentRow = if (r.status == Ready) r else { ...r, selection: "" }
+pure def keepsPrevious(acc: List[RecentRow], r: RecentRow): bool =
+  acc.length() < recentLimit and r.key != "" and not(acc.some(o => o.key == r.key))
+    and (r.status != Ready or (r.selection != "" and not(names(acc, r.selection))))
+pure def canAdoptPrevious(s: Recent, previous: List[RecentRow], wasOpen: str): bool =
+  s == initial and previous.length() > 0
+pure def adoptPrevious(s: Recent, previous: List[RecentRow], wasOpen: str): Recent = {
+  val kept = previous.foldl(List(), (acc, r) => if (keepsPrevious(acc, asPrevious(r))) acc.append(asPrevious(r)) else acc)
+  val held = kept.foldl(List(), (ids, r) => if (r.selection != "") ids.append(r.selection) else ids)
+  val gone = previous.foldl(List(), (ids, r) =>
+    if (r.status == Ready and r.selection != "" and not(names(kept, r.selection)) and not(ids.includes(r.selection))) ids.append(r.selection) else ids)
+  { rows: kept, opened: "", grants: held, toRelease: gone, restoreOpen: if (remembered(kept, wasOpen)) wasOpen else "" }
+}
+pure def stepThePreviousIndexIsTakenOnlyByAnUnusedRecent(before: Recent, via: str, after: Recent): bool =
+  via == "adoptPrevious" implies (before == initial and after.opened == "")
+pure def lawAPreviousRowWhoseAccessEndedAsksAgain(row: RecentRow): bool =
+  row.status == Revoked implies adoptPrevious(initial, List(row), "").rows.every(r => r.selection == "" and r.status == Revoked)
+pure def lawOnlyAKeptPickIsRestored(previous: List[RecentRow], wasOpen: str): bool = {
+  val r = adoptPrevious(initial, previous, wasOpen)
+  r.restoreOpen == "" or remembered(r.rows, r.restoreOpen)
+}
+pure val previousScan: RecentRow = { key: "scan:a", kind: ScanPdf, name: "a.pdf", mimeType: "application/pdf", openedAt: 3, status: Saved, selection: "" }
+pure val previousEnded: RecentRow = { ...pickedRow, key: "picked:s9", selection: "s9", status: Revoked }
+pure val previousValues = Set(
+  List(pickedRow, { ...pickedRow, key: "picked:s2", selection: "s2" }, previousScan),
+  List(previousEnded, pickedRow, { ...pickedRow, key: "picked:s3" }, { ...pickedRow, key: "", selection: "s4" }))
+pure val wasOpenValues = Set("", "s1", "s2", "s9")
+pure val rowValues = Set(pickedRow, previousEnded, previousScan)
+pure def sometimesThePreviousIndexIsTaken(s: Recent): bool = s.rows.length() >= 2 and s.restoreOpen != "" and s.opened == ""
+```
