@@ -280,7 +280,7 @@ export async function inspectApk(apk: ApkEvidence): Promise<ApkInspection> {
     packageName: /package: name='([^']+)'/.exec(badging)?.[1],
     home: xml.includes("android.intent.category.HOME"),
     launcher: xml.includes("android.intent.category.LAUNCHER"),
-    debuggable: facts.application.debuggable === "0xffffffff",
+    debuggable: facts.application.debuggable !== null && facts.application.debuggable !== "0x0",
     webPayload: apk.names.includes("assets/public/index.html"),
     sha256: apk.sha256,
     badging,

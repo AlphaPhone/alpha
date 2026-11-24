@@ -74,7 +74,11 @@ export function fakeResident(seen: Seen, script: ResidentScript) {
     ensureRunning: () => succeed(undefined),
     json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown, headers?: { readonly [name: string]: string }) => effect {
       seen.calls.push({ method, path, body, ...(headers === undefined ? {} : { headers }) })
-      if (path === "/api/views/interact-claim") return { status: 200, data: { claimId: "claim-1", ...(script.viewClaimTarget === undefined ? {} : { target: script.viewClaimTarget }) } }
+      if (path === "/api/views/interact-claim") {
+        if (script.viewClaimTarget === undefined) return { status: 200, data: { claimId: "claim-1" } }
+        const supports = (body as { readonly targetProtocol?: unknown } | undefined)?.targetProtocol === "saved-note-v1"
+        return supports ? { status: 200, data: { claimId: "claim-1", target: script.viewClaimTarget } } : { status: 409, data: { error: "claim_refused" } }
+      }
       if (path === "/api/views/interact-result") return { status: 200, data: { accepted: true } }
       if (path === "/api/conversations" && method === "POST") return { status: 200, data: { conversation: { id: "c1", roomId: "r1" } } }
       if (path === "/api/conversations") return { status: 200, data: { conversations: [{ id: "c1", roomId: "r1" }] } }

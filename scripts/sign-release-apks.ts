@@ -3,9 +3,9 @@
  * Sign Alpha's unsigned release APKs with the application key held outside Gradle
  * through a reviewed signing ceremony.
  *
- *   node scripts/sign-release-apks.ts --keys-dir DIR [--key-name alphaphone_app] [OPTIONS]
- *   node scripts/sign-release-apks.ts --pkcs11-config FILE --key-label LABEL [OPTIONS]
- *   node scripts/sign-release-apks.ts --keystore FILE --key-label LABEL [OPTIONS]
+ *   node --conditions=eliza-source --import vibelang/register scripts/sign-release-apks.ts --keys-dir DIR [--key-name alphaphone_app] [OPTIONS]
+ *   node --conditions=eliza-source --import vibelang/register scripts/sign-release-apks.ts --pkcs11-config FILE --key-label LABEL [OPTIONS]
+ *   node --conditions=eliza-source --import vibelang/register scripts/sign-release-apks.ts --keystore FILE --key-label LABEL [OPTIONS]
  *   OPTIONS: [--apk UNSIGNED.apk --out SIGNED.apk] [--apksigner PATH] [--no-verify] [--dry-run]
  *
  * Gradle signs a release only from a keystore file (ELIZAOS_KEYSTORE_*). Alpha's application key
@@ -258,13 +258,14 @@ export async function main(argv: readonly string[], { root = process.cwd(), env 
     log(`Signed ${path.relative(root, target.output)} with the release certificate ${signer}.`);
   }
   if (!options.verify || options.apk) {
-    if (!options.apk) log("Skipped verify-apks: apk-manifest.json still describes the unsigned build. Run npm run android:verify before using these APKs.");
+    if (!options.apk) log("Skipped verify-apks: apk-manifest.json still describes the unsigned build. Run pnpm -s android:verify before using these APKs.");
     return 0;
   }
   const runner = run ?? ((command, args) => execFileSync(command, args, { cwd: root, stdio: "inherit" }));
   const { sbomArgs } = await import("./build-android.ts");
-  runner(process.execPath, ["--conditions=eliza-source", "--import", "vibelang/register", "scripts/verify-apks.ts"]);
-  runner(process.execPath, ["scripts/generate-sbom.ts", ...sbomArgs("artifacts", root)]);
+  const vibe = ["--conditions=eliza-source", "--import", "vibelang/register"];
+  runner(process.execPath, [...vibe, "scripts/verify-apks.ts"]);
+  runner(process.execPath, [...vibe, "scripts/generate-sbom.ts", ...sbomArgs("artifacts", root)]);
   log("apk-manifest.json and the SBOM now describe the signed releases. A signed release is distributable only when verify-apks says so; it is not installation, image or device evidence.");
   return 0;
 }
