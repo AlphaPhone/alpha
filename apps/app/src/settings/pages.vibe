@@ -7,7 +7,6 @@ import { Device, native } from "../platform/device.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type Job, answer, due, following, hearing, reacting, run, stop, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-
 import { development } from "./build.ts"
 
 const settingsShowing = (shell: Parameters<typeof showing>[0]) => showing(shell, "Settings")
@@ -19,7 +18,7 @@ const admitting = effect {
   return [admit] as const
 }
 
-// spec/app/settings/index.md, "Each page links to what another area owns there": what the shell can open is opened; every other neighbour draws its own row at `settings/<neighbour>`.
+// spec/app/settings/index.md, "Each page links to what another area owns there": what the shell can open is opened; the other neighbours draw on the places Settings offers them.
 function handed(fx: Pages.Effect): Job<Pages.Event, Shell | Device, []> {
   return match (fx) {
     when { tag: "Handed", let neighbour }: run(`hand ${neighbour}`, effect {
