@@ -58,7 +58,7 @@ pure val ticketValues = Set(1, 2, 3, 4)
 pure val tabValues = Set(1, 2)
 pure val accountValues = Set(-1, 1, 2)
 pure val nowValues = Set(0, 30, 100, 1000)
-pure val addressValues = Set("", "owner@example.com", "+15550100")
+pure val addressValues = Set("", "owner@example.com", "+15550100", "555-0100")
 pure val codeValues = Set("123456")
 pure val weight_sent = 10
 pure val weight_verified = 10
@@ -246,15 +246,50 @@ pure def sometimesOwnKeyEndsTheRequiredSignIn(s: SignIn): bool = s.ended == OwnK
 ```quint
 pure def canSendCode(s: SignIn, method: S::Method, address: str, now: int, online: bool): bool =
   s.step == Choose and s.work == Resting and online and method != S::Google and offered(s, method) and address != ""
-    and (address != s.sentTo or now >= s.resendAt)
+    and (sentAs(method, address) != s.sentTo or now >= s.resendAt)
 
 pure def sendCode(s: SignIn, method: S::Method, address: str, now: int, online: bool): Moved =
-  { state: { ...s, work: Sending, ticket: s.ticket + 1, method: method, address: address, trouble: Fine, prefill: false },
-    out: List(SendCode({ ticket: s.ticket + 1, method: method, address: address, keeps: 0 })) }
+  { state: { ...s, work: Sending, ticket: s.ticket + 1, method: method, address: sentAs(method, address), trouble: Fine, prefill: false },
+    out: List(SendCode({ ticket: s.ticket + 1, method: method, address: sentAs(method, address), keeps: 0 })) }
 
 pure def lawTheChoiceKeepsTheMinute(now: int): bool =
   val back = { ...initial, step: Choose, sentTo: "owner@example.com", resendAt: now + 1 }
   not(canSendCode(back, S::Email, "owner@example.com", now, true)) and canSendCode(back, S::Email, "+15550100", now, true)
+```
+
+### The phone writes a typed number in international form, and leaves a number already in that form as it is
+
+The phone's sign-in takes a number in international form only. Spaces,
+dashes, dots and parentheses are dropped. A leading `+` keeps the country
+the owner dialled, and a leading `00` dials a country too and becomes
+`+`. A bare ten-digit number, or eleven digits starting with 1, is a North
+American number and takes `+1`. Any other number keeps its digits with no
+country guessed, and so does a number with letters or other symbols,
+which are never dropped: the phone refuses either when the code is sent.
+So ` (415) 555-0100 ` is written `+14155550100` and `0044 20 7946 0958`
+is written `+442079460958`. How the number is read is not modelled;
+something typed is never written as nothing.
+
+```quint
+const international: (str) => str
+pure def lawSomethingTypedIsNeverWrittenAsNothing(address: str): bool = address != "" implies international(address) != ""
+pure def lawANumberInInternationalFormStaysAsItIs(address: str): bool = international(international(address)) == international(address)
+```
+
+### A text goes to the number in international form, an email to the address as typed, and the same number written another way waits its minute
+
+The address kept on screen, for another code or to fill in again, is the
+one the code went to.
+
+```quint
+pure def sentAs(method: S::Method, address: str): str = if (method == S::Phone) international(address) else address
+
+pure def lawATextGoesToTheNumberInInternationalForm(address: str, now: int): bool =
+  val choosing = { ...initial, step: Choose, readiness: { status: R::Loaded, ticket: 1 }, sms: true }
+  val back = { ...choosing, sentTo: international(address), resendAt: now + 1 }
+  sendCode(choosing, S::Phone, address, now, true).out == List(SendCode({ ticket: 1, method: S::Phone, address: international(address), keeps: 0 }))
+    and sendCode(choosing, S::Email, address, now, true).out == List(SendCode({ ticket: 1, method: S::Email, address: address, keeps: 0 }))
+    and not(canSendCode(back, S::Phone, address, now, true))
 ```
 
 ### A code that went out starts a new attempt, good for ten minutes, with another offered after a minute
