@@ -44,6 +44,7 @@ export schema MfaRequired {
   status: "mfa"
   method: "totp" | "sms" | "passkey"
   attemptId: string
+  requestId?: string
   expiresAt: number
 }
 
@@ -65,8 +66,8 @@ export schema ReadinessChanged {
 
 /** The installed key's local generation and expiry; never the key. */
 export schema CredentialIdentity {
-  credentialId: string
-  expiresAt: number
+  credentialId: string | null
+  expiresAt?: number
   activationPending?: boolean
 }
 
@@ -94,7 +95,7 @@ export schema Incomplete {
 export schema UserRow {
   id: string
   organization_id: string
-  email?: string
+  email?: string | null
 }
 
 /** The `/api/v1/user` envelope. */

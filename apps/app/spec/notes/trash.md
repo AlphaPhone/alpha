@@ -16,6 +16,10 @@ device Trash come into the canonical Trash once, and nothing writes the device T
 > As the owner, I want to restore a note I deleted, exactly as it was, so that a deletion is never final
 > until I decide it is.
 
+From Notes options, Select notes switches the list to selection. Delete applies to the selected
+saved rows one at a time, in selection order, stopping at the first unconfirmed delete or a change
+of owner. Undo is offered for four seconds and restores each confirmed deletion by ID and time.
+
 ### Recently deleted opens while it has rows, one action runs at a time, and it closes once empty
 
 Opening Recently deleted leaves the open note as Back does and reads Trash again. Each row, and the
@@ -87,6 +91,9 @@ pure def undo(s: TrashView, exact: bool): TrashView =
   if (exact and s.rows > 0) { ...s, busy: Restoring, undoOffered: false } else { ...s, staleReview: true, undoOffered: false }
 pure def canDismissUndo(s: TrashView): bool = s.undoOffered
 pure def dismissUndo(s: TrashView): TrashView = { ...s, undoOffered: false }
+pure val deleteUndoMs: int = 4000
+pure def canUndoNext(s: TrashView, exact: bool): bool = canUndo(s, exact)
+pure def undoNext(s: TrashView, exact: bool): TrashView = { ...undo(s, exact), undoOffered: true }
 pure def canFinishRestore(s: TrashView, restored: bool): bool = s.busy == Restoring
 pure def finishRestore(s: TrashView, restored: bool): TrashView =
   if (restored) closedIfEmpty(if (s.rows > 0) s.rows - 1 else 0, { ...s, busy: TrashIdle, restoredTotal: s.restoredTotal + 1 })

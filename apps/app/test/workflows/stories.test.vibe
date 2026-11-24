@@ -276,6 +276,39 @@ describe("Lifecycle (spec/workflows/lifecycle.md, \"Story: Remove a workflow onl
       ))
     }
   })
+
+  it.effect("only the reviewed workflow version can be paused (spec/workflows/lifecycle.md, \"A change is reviewed before it is kept, never while a run is going, and an interrupted run is stopped first\")", () => effect {
+    const sent: Sent[] = []
+    let versionId = "v1"
+    let typedScheduleProtocol = 1
+    const workflowPath = "/api/workflow/workflows/w1"
+    const handlers: Handler[] = [
+      (method, path) => method === "GET" && path === "/api/workflow/status" ? { status: 200, data: { ...engineStatus, typedScheduleProtocol } } : undefined,
+      (method, path) => method === "GET" && path === workflowPath ? { status: 200, data: { ...definition, versionId } } : undefined,
+      (method, path) => method === "POST" && path === workflowPath + "/deactivate" ? { status: 200, data: { ...definition, active: false, versionId } } : undefined,
+      ...workflowRoutes([]),
+    ]
+    provide workflowsOf(handlers, sent) {
+      const definitions = try WorkflowDefinitions
+      const lifecycle = try LifecycleMachine
+      try definitions.open("w1")
+      const first = try lifecycle.get()
+      const review = { owner: first.owner, workflowId: first.workflowId, version: first.version, on: false }
+      versionId = "v2"
+      const stale = try definitions.setActive(review)
+      try definitions.refresh()
+      const latest = try lifecycle.get()
+      const rereview = { ...review, version: latest.version }
+      typedScheduleProtocol = 0
+      const unsupported = try definitions.setActive(rereview)
+      typedScheduleProtocol = 1
+      const saved = try definitions.setActive(rereview)
+      try Effect.try(() => assert.deepStrictEqual(
+        { stale, unsupported, saved, mutations: sent.filter((request) => request.method === "POST").map((request) => request.body) },
+        { stale: "stale", unsupported: "refused", saved: "saved", mutations: [{ expectedVersionId: "v2" }] },
+      ))
+    }
+  })
 })
 
 describe("Typed drafts (spec/workflows/authoring.md, \"Story: Describe a workflow and keep only what this phone can do\")", () => {

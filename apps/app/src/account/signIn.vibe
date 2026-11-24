@@ -104,7 +104,7 @@ export const signInService = Layer.effect(SignInScreen, effect {
   const environment = environmentName(buildCloudEnvironment(build.info))
   const android = build.info.variant !== "browser"
   const attemptId = try Ref.make("")
-  const requestId = try Ref.make("")
+  const requestId = try Ref.make<string | undefined>(undefined)
   const typed = try Ref.make({ address: "", code: "" })
   const news = try Ref.make<SignInNews>(noNews)
   const epoch = try Ref.make(0)
@@ -112,24 +112,29 @@ export const signInService = Layer.effect(SignInScreen, effect {
   // The key the host held when the verification in flight began; undefined when it could not be read.
   const priorKey = try Ref.make<string | null | undefined>(undefined)
 
-  effect function send(event: Parameters<typeof machine.send>[0]) {
+  effect function send(event: Parameters<typeof machine.send>[0], adoptionKey?: string) {
     const step = machine.send(event) catch () => undefined
-    if (step !== undefined) try perform(step.out)
+    if (step !== undefined) try perform(step.out, adoptionKey)
     return step !== undefined
   }
 
-  effect function perform(out: ReadonlyArray<SignInEffect>): void!! {
+  effect function perform(out: ReadonlyArray<SignInEffect>, adoptionKey?: string): void!! {
     for (const effectOf of out) {
       match (effectOf) {
         when "ReadMethods": fork.in(scope) readMethods();
         when "StartGoogle": try runGoogle();
         when "SendCode": try runSend();
         when "VerifyCode": try runVerify();
-        when "CancelAttempt": native.invoke(plugin, "cancel", { requestId: try Ref.get(requestId) }) catch () => undefined;
+        when "CancelAttempt": try cancelAttempt();
         when "EnsureResident": try ensureResident(resident);
-        when "Adopted": try session.adopt(try Ref.get(news));
+        when "Adopted": try session.adopt(try Ref.get(news), adoptionKey);
       }
     }
+  }
+
+  effect function cancelAttempt() {
+    const id = try Ref.get(requestId)
+    native.invoke(plugin, "cancel", id === undefined ? {} : { requestId: id }) catch () => undefined
   }
 
   effect function readMethods(): void!! {
@@ -166,10 +171,12 @@ export const signInService = Layer.effect(SignInScreen, effect {
     // The verification's own answer is dropped from here on; the host's store says whether it committed.
     try Ref.update(epoch, (n) => n + 1)
     const prior = try Ref.get(priorKey)
-    if (prior === undefined) return
-    native.invoke(plugin, "cancel", { requestId: try Ref.get(requestId) }) catch () => undefined
+    if (prior === undefined) return undefined
+    try cancelAttempt()
     const now = try heldKey()
-    if (now !== undefined && now !== null && now !== prior) try send({ type: "hostCommitsKey" })
+    if (now === undefined || now === null || now === prior) return undefined
+    try send({ type: "hostCommitsKey" })
+    return now
   }
 
   effect function held<A>(work: A!!) {
@@ -276,6 +283,7 @@ export const signInService = Layer.effect(SignInScreen, effect {
     } catch () => ({ active: false })
     if (!resumed.active) return
     try Ref.set(attemptId, waiting.attemptId)
+    try Ref.set(requestId, waiting.requestId)
     try send({ type: "factorReturned", returnedFactor: factor })
   }
 
@@ -383,8 +391,8 @@ export const signInService = Layer.effect(SignInScreen, effect {
       const before = try machine.get()
       if (before.work === "GoogleWork") try send({ type: "backDuringGoogle" })
       else {
-        if (before.work === "Verifying") try settleVerification()
-        try send({ type: "back" })
+        const adoptionKey = before.work === "Verifying" ? try settleVerification() : undefined
+        try send({ type: "back" }, adoptionKey)
       }
       const after = try machine.get()
       if (after.work !== before.work || after.screen !== before.screen) try Ref.update(epoch, (n) => n + 1)

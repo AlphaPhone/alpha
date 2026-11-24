@@ -15,7 +15,7 @@ export const meta: ComponentMeta<NotesScreenViewProps> = {
   args: {
     onClose: none, collection: ready, editor: editorClosed, trash: trashClosed, recorder: recorderClosed, sourceDialog: sourceClosed, rows,
     draft: undefined, kept: undefined, deleted: [], display: recordingDisplay, folders, agentFilter: undefined, requestedFilter: undefined,
-    receipt: undefined, earlierNotesAvailable: false, now, can: allowed, recorderCan, foldersLayer: closed, call: pending,
+    receipt: undefined, earlierNotesAvailable: false, now, can: allowed, recorderCan, foldersLayer: closed, selectionLayer: closed, call: pending,
   },
   examples: {
     Opening: { collection: opening, rows: [] },

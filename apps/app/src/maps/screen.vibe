@@ -50,8 +50,6 @@ export service MapsScreen {
   toggleSaved(label: string): void!!
   /** Rename the shown place: a saved one in storage, a pin on screen only. */
   renamePlace(label: string): void!!
-  /** Ask for coordinates in Search instead of a location fix. */
-  enterCoordinates(): void!!
   readonly states: Stream.Stream<Screen>
 }
 
@@ -432,10 +430,6 @@ export const screenLayer = Layer.effect(MapsScreen, effect {
       if (!renamed) return try tell("The place name could not be saved.")
       try content.update((c) => c.shown?.id === shown.id ? { ...c, shown: { ...c.shown, label: name } } : c)
       try tell(row ? "Saved place renamed." : "Name updated. Tap Save to keep this place.")
-    },
-    effect enterCoordinates() {
-      try send({ type: "clearQuery" })
-      try tell("Type a latitude and longitude in Search, then press Enter.")
     },
     states: screen.changes,
   }
