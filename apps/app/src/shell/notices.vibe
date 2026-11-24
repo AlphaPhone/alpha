@@ -1,0 +1,78 @@
+// spec/app/shell/notices.md, "Story: Read what just happened, at my own pace"
+import * as Notices from "../../gen/app__shell__notices.effect.vibe"
+import { Device } from "../platform/device.vibe"
+import { contained, due, reacting, started, untimed } from "../runtime/reactor.vibe"
+
+/** What a toast offers besides its sentence: whether it reports a failure, or the Undo it runs once if the owner takes it. */
+export interface Said {
+  readonly failure?: boolean
+  readonly undo?: void!!
+}
+
+/** The Undo of each toast that offers one, by its name, until the toast has gone. */
+export service Undos {
+  offer(undo: void!!): string!!
+  take(name: string): Option.Option<void!!>!!
+}
+
+const undos = Layer.sync(Undos, () => {
+  const offered = new Map<string, void!!>()
+  let made = 0
+  return {
+    offer: (undo: void!!) => sync(() => {
+      const name = `undo-${++made}`
+      offered.set(name, undo)
+      return name
+    }),
+    take: (name: string) => sync(() => {
+      const found = offered.get(name)
+      offered.delete(name)
+      return Option.fromNullishOr(found)
+    }),
+  }
+})
+
+/** Tell the owner `message`, in turn: a failure is announced, an Undo is offered for its ten seconds. */
+export effect function say(message: string, said: Said = {}): void!!(Notices.Machine | Undos) {
+  const undo = said.undo === undefined ? "" : (try (try Undos).offer(said.undo))
+  try contained((try Notices.Machine).send({ type: "showToast", message, chars: message.length, undo, failure: said.failure === true && undo === "", now: untimed }), "a toast")
+}
+
+/** Keep `message` listed until the owner dismisses it, and announce it once. */
+export effect function keep(message: string): void!!Notices.Machine {
+  try contained((try Notices.Machine).send({ type: "keep", message, chars: message.length, now: untimed }), "a kept notice")
+}
+
+// spec/app/shell/notices.md, "A toast leaves when its time is up, when its Undo is taken, or when the owner dismisses it, and the next one takes its place"
+/** The owner took the Undo of the toast shown: it runs once, and the toast goes. */
+export effect function takeUndo(): void!!(Notices.Machine | Undos) {
+  const machine = try Notices.Machine
+  const state = try machine.get()
+  const undo = try (try Undos).take(state.shown.undo)
+  if (!(try contained(machine.send({ type: "takeUndo", seq: state.seq, now: untimed }), "an Undo"))) return
+  if (Option.isSome(undo)) try undo.value
+}
+
+// spec/app/shell/notices.md, "The newest reading of Android's timeout setting is taken; a failed reading, or one that gives none, keeps the last good scale"
+effect function readScale(): void!!(Notices.Machine | Device) {
+  const machine = try Notices.Machine
+  const asked = try exit(machine.send({ type: "askScale" }))
+  if (Exit.isFailure(asked)) return
+  const scale = try (try Device).timeoutScale()
+  try contained(machine.send({ type: "scaleRead", ticket: asked.value.reading.ticket, ok: Option.isSome(scale), scale: Option.getOrElse(scale, () => 0) }), "the timeout scale")
+}
+
+const scaled = started(effect {
+  const device = try Device
+  try readScale()
+  try Stream.runForEach(Stream.filter(device.visible, (shown) => shown), () => readScale())
+}, "reading the timeout scale")
+
+/** The toasts and the notices kept, in memory: each toast's time is told once it is up. */
+export const notices = Layer.mergeAll(
+  reacting(Notices, {
+    timers: (n) => (n.shown.message !== "" && !n.held ? [due(`toast ${n.seq}`, n.until, { type: "expire", seq: n.seq, now: untimed })] : []),
+  }),
+  undos,
+  scaled,
+)

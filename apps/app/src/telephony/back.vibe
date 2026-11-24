@@ -1,0 +1,65 @@
+// spec/app/telephony/phone.md, "Back clears Alpha's filter before it leaves Phone"; spec/app/telephony/voicemail.md, "Opening a voicemail asks for its audio once, and a carrier transcript is shown as it is"; spec/app/telephony/messages.md, "Back closes Messages' own layers one at a time, innermost first, before it leaves Messages"; spec/app/telephony/contacts.md, "Back closes Contacts' own layers one at a time, innermost first, before it leaves Contacts"
+import * as Contacts from "../../gen/app__telephony__contacts.effect.vibe"
+import * as Messages from "../../gen/app__telephony__messages.effect.vibe"
+import * as Phone from "../../gen/app__telephony__phone.effect.vibe"
+import * as Info from "../../gen/app__telephony__phoneInfo.effect.vibe"
+import * as Voicemail from "../../gen/app__telephony__voicemail.effect.vibe"
+import { contained } from "../runtime/reactor.vibe"
+
+/** Whether `event` was a step of the screen's own: held, or taken by the rules. */
+effect function stepped<Ev>(machine: { send(event: Ev): unknown!unknown }, event: Ev | "held" | undefined): boolean!! {
+  if (event === undefined) return false
+  if (event === "held") return true
+  return try contained(machine.send(event), "back")
+}
+
+/** Back on Phone: the open voicemail's layers first, then Alpha's filter on Recents. */
+export const phoneBack = effect {
+  const voicemail = try Voicemail.Machine
+  const phone = try Phone.Machine
+  const step = match (Voicemail.voicemailBack(try voicemail.get())) {
+    when "VoicemailDeleteHolds": "held" as const;
+    when "ConfirmCloses": { type: "deleteDeclined" } as const;
+    when "VoicemailCloses": { type: "voicemailClosed" } as const;
+    when "NoVoicemailBack": undefined;
+  }
+  if (step !== undefined) return try stepped(voicemail, step)
+  return try stepped(phone, Phone.phoneBack(try phone.get()) === "PhoneChipClears" ? { type: "queryCleared" } : undefined)
+}
+
+/** Back on Messages: a message's menu, the conversation, the picker, the new message, the search, then Alpha's filter. */
+export const messagesBack = effect {
+  const messages = try Messages.Machine
+  const step = match (Messages.messagesBack(try messages.get())) {
+    when "MessagesDeleteHolds": "held" as const;
+    when "MenuCloses": { type: "menuClosed" } as const;
+    when "ThreadCloses": { type: "threadClosed" } as const;
+    when "PickerCloses": { type: "composeClosed" } as const;
+    when "ComposeCloses": { type: "composeClosed" } as const;
+    when "SearchCloses": { type: "searchClosed" } as const;
+    when "MessagesChipClears": { type: "queryCleared" } as const;
+    when "LeavesMessages": undefined;
+  }
+  return try stepped(messages, step)
+}
+
+/** Back on Contacts: the editor, a delete confirmation, the open contact, Alpha's chip, then the owner's search. */
+export const contactsBack = effect {
+  const contacts = try Contacts.Machine
+  const step = match (Contacts.contactsBack(try contacts.get())) {
+    when "ContactsWriteHolds": "held" as const;
+    when "EditorCloses": { type: "editorClosed" } as const;
+    when "DeleteDeclines": { type: "deleteDeclined" } as const;
+    when "ContactCloses": { type: "contactClosed" } as const;
+    when "ChipClears": { type: "chipCleared" } as const;
+    when "SearchClears": { type: "searchClosed" } as const;
+    when "LeavesContacts": undefined;
+  }
+  return try stepped(contacts, step)
+}
+
+/** Back on Settings → Phone closes the page. */
+export const phoneInfoBack = effect {
+  const info = try Info.Machine
+  return try stepped(info, (try info.get()).shown ? { type: "show", showing: false } as const : undefined)
+}

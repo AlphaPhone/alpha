@@ -16,6 +16,8 @@ function observedDocument(key:string,event:string){
  };
 }
 export const bookmarkDocument=observedDocument('alpha.browser.bookmarks.v1','alpha:bookmarks-document-changed');
+/** Optional bookmark titles beside the address list, bound to that exact list (see browser-surface.ts). */
+export const bookmarkTitleDocument=observedDocument('alpha.browser.bookmark-titles.v1','alpha:bookmarks-document-changed');
 /** Normal-tab history and restorable tabs; private tabs are never written. */
 export const browsingSessionDocument=observedDocument('alpha.browser.session.v1','alpha:browser-session-document-changed');
 export const alertSoundDocument=observedDocument('alpha.browser.alert-sounds.v1','alpha:alert-sounds-document-changed');

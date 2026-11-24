@@ -11,7 +11,9 @@
     "test:browser": "eliza-harness --ready && vitest run --project browser",
     "prepare": "eliza-harness --link",
     "eliza": "eliza-harness",
-    "eliza:page": "node test/eliza/page.ts"
+    "eliza:page": "node test/eliza/page.ts",
+    "aosp": "node --import vibelang/register scripts/aosp.vibe",
+    "licences": "node --import vibelang/register scripts/licences.vibe"
   },
   "dependencies": {
     "@capacitor/core": "8.5.2",
