@@ -23,7 +23,7 @@ export function AppTile({ label, icon, badge, detail, variant = "home", type = "
         <span className="flex transition-opacity duration-fast ease-out group-active:opacity-55 motion-reduce:transition-none">{icon}</span>
         {badge ? <span className="absolute top-3 right-3 size-2 rounded-full bg-alpha" /> : null}
       </span>
-      <span className={cn("max-w-full text-center text-xs wrap-anywhere text-muted-foreground", drawer && "text-foreground")}>{label}</span>
+      <span className={cn("max-w-full text-center text-label wrap-anywhere text-muted-foreground", drawer && "text-foreground")}>{label}</span>
       {detail ? <span className="max-w-full text-center text-xs wrap-anywhere text-muted-foreground">{detail}</span> : null}
       {badge ? <span className="sr-only">{badge}</span> : null}
     </button>

@@ -24,6 +24,7 @@
    <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.HOME" /><category android:name="android.intent.category.DEFAULT" /></intent-filter>
   </activity>
   <receiver android:name=".AlphaSmsSendReceiver" android:exported="false" />
+  <receiver android:name=".AlphaTelephonyDeletionWakeup" android:exported="false" />
   <receiver android:name=".AlphaTelephonySetupReceiver" android:exported="true" android:permission="android.permission.MANAGE_ROLE_HOLDERS" />
   <service android:name=".AlphaInCallService" android:enabled="false" android:exported="true" android:permission="android.permission.BIND_INCALL_SERVICE">
    <meta-data android:name="android.telecom.IN_CALL_SERVICE_UI" android:value="true" />
