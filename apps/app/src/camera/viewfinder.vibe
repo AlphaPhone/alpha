@@ -176,7 +176,7 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
     try send({ type: "previewFails", ticket, kind: denied ? "CameraNotice" : "UnavailableNotice" })
   }
 
-  /** The photo ratios the camera of the preview started at `ticket` lists; a list that cannot be read offers no choice. */
+  /** The photo ratios the camera of the preview started or flipped to at `ticket` lists; a list that cannot be read offers no choice. */
   effect function readRatios(ticket: number, deviceId: string): void!! {
     const listed = bridge.devices() catch () => ({ devices: [] })
     const ratios = listed.devices.find((device) => device.deviceId === deviceId)?.supportedCaptureAspectRatios ?? []
@@ -422,7 +422,8 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
         if (now.zoom !== 10) try bridge.setZoom(1)
         return try bridge.switchCamera(lensOf(now) === "back" ? "front" : "back")
       } catch () => undefined
-      try send({ type: "flip", ok: turned !== undefined })
+      const flipped = try send({ type: "flip", ok: turned !== undefined })
+      if (flipped !== undefined && turned !== undefined) try forkDetach(readRatios(flipped.epoch, turned.deviceId))
       if (turned === undefined) {
         if (bridge.browser) try send({ type: "bindStopsPreview" })
         else try say("Not supported")
@@ -521,6 +522,7 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
         return try bridge.switchCamera(lens)
       } catch () => undefined
       const after = try send({ type: "flip", ok: turned !== undefined })
+      if (after !== undefined && turned !== undefined) try forkDetach(readRatios(after.epoch, turned.deviceId))
       return after !== undefined && lensOf(after) === lens
     },
   }

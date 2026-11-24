@@ -299,19 +299,20 @@ pure def toggleGrid(c: Camera): Camera = { ...c, grid: not(c.grid) }
 
 ### Photo mode offers 4:3 or 16:9 when the bound camera lists both, and a new ratio restarts the preview with it
 
-Once a preview is ready Camera reads the photo ratios its camera lists: Android lists 4:3 and 16:9,
-the browser none, so the browser offers no choice. 4:3 is the camera's default and the preview is
-started without a ratio; 16:9 is started as the preview's capture ratio. A new ratio stops the
-preview and starts another with it, so it is chosen only over an idle Photo preview: no countdown,
-capture, recording, mode change, request, notice or dialog. A camera that no longer lists 16:9 goes
-back to 4:3 the same way. The ratio is kept like the grid, across cameras. The preview fills the
+Once a preview is ready, and again after each flip to the other camera, Camera reads the photo
+ratios its camera lists: Android lists 4:3 and 16:9, the browser none, so the browser offers no
+choice. 4:3 is the camera's default and the preview is started without a ratio; 16:9 is started as
+the preview's capture ratio. A new ratio stops the preview and starts another with it, so it is
+chosen only over an idle Photo preview: no countdown, capture, recording, mode change, request,
+notice or dialog. A list read during a capture or a recording still offers or withdraws the choice.
+A camera that no longer lists 16:9 goes back to 4:3 the same way, so that waits for an idle preview. The ratio is kept like the grid, across cameras. The preview fills the
 viewfinder and shows a centred part of the photo in either ratio, so the grid stays drawn over the
 whole viewfinder.
 
 ```quint
 pure def aspectAfter(a: Aspect): Aspect = if (a == Aspect4x3) Aspect16x9 else Aspect4x3
 pure def canAspectsListed(c: Camera, both: bool): bool =
-  ready(c) and not(recordingBusy(c)) and not(c.capturing) and c.notice == NoNotice
+  ready(c) and c.notice == NoNotice and (both or c.aspect == Aspect4x3 or (not(recordingBusy(c)) and not(c.capturing)))
 pure def aspectsListed(c: Camera, both: bool): Camera =
   if (both) { ...c, aspectChoice: true }
   else if (c.aspect == Aspect16x9) { ...stopView(NoStop, c), aspect: Aspect4x3, aspectChoice: false }
