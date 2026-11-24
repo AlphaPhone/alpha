@@ -2,9 +2,10 @@
 
 The views the agent opens on this phone and the commands it gives inside
 them. A turn tells the agent which renderer it may deliver to
-(`viewClientId`, `viewDelivery: "completed-action"`, the view in front,
-`uiView`, and `notesEditorNavigation: 1`, since this phone's Notes editor
-shows the agent's own Notes records) unless the screen is private. A reply whose action results
+(`viewClientId`, `viewDelivery: "completed-action"` and the view in front,
+`uiView`; and in its voice context `viewDelivery`, `uiClientId` and
+`uiNotesEditor: "saved-note-v1"`, since this phone's Notes editor shows the
+agent's own Notes records) unless the screen is private. A reply whose action results
 prepared a view (`navigationPrepared` with a `navigationBinding` for this
 renderer) is delivered by the owner-bound claim of the agent's view routes:
 `POST /api/views/interact-claim` with the binding, then exactly one
@@ -54,23 +55,29 @@ pure def lawAnAcknowledgedClaimSendsNoNegative(claimed: bool): bool = not(negati
 
 ### A prepared Notes view that names a saved note opens that note's editor, and is delivered only while exactly that note is in front
 
-A show of Notes may name one saved note by its `noteId` (the agent's views
-admit it only on a turn that said `notesEditorNavigation: 1`). It is
-claimed like any other view. After the claim, Notes opens that note in its
-editor as spec/notes/list.md's "The agent opens the one saved note I named,
-and never over another note's unsaved edit" allows, then comes to the front
-at that note. The one result says switched only when Notes is in front on a
+A show of Notes whose handoff says `subview: "saved-note-v1"` is the
+agent's saved Notes editor (the agent prepares it only for a turn that said
+`uiNotesEditor: "saved-note-v1"`, and the handoff carries no note id). Its
+claim adds `targetProtocol: "saved-note-v1"`, and the claim's answer names
+the note as `target: { kind: "saved-note", noteId }`. After the claim, Notes
+opens that note in its editor as spec/notes/list.md's "The agent opens the
+one saved note I named, and never over another note's unsaved edit" allows,
+then comes to the front at that note. The one result says switched, with
+`shown: { kind: "saved-note", noteId }`, only when Notes is in front on a
 screen that is not private with exactly that saved note in its editor, and
-the delivery says delivered only then; a note that did not open sends one
-negative result and is unknown. A `noteId` on any other view is not
-claimed.
+the delivery says delivered only then. A claim answer that names no note, or
+a note that did not open, sends one negative result and is unknown. A saved
+editor on any other view is not claimed, and every other claim is sent as
+before, without the target protocol.
 
 ```quint
 pure def noteInFront(inFront: bool, shownNote: str, noteId: str): bool = inFront and noteId != "" and shownNote == noteId
-pure def claimsNote(target: str, named: bool): bool = not(named) or target == "notes"
+pure def claimsNote(target: str, savedEditor: bool): bool = not(savedEditor) or target == "notes"
 pure def lawANamedNoteIsDeliveredOnlyWhileItIsInFront(inFront: bool, shownNote: str, noteId: str, accepted: bool): bool =
   delivered(true, noteInFront(inFront, shownNote, noteId), accepted, noteInFront(inFront, shownNote, noteId)) == DeliveredView implies (inFront and shownNote == noteId)
 pure def lawANoteIsNeverClaimedOutsideNotes(target: str): bool = target != "notes" implies not(claimsNote(target, true))
+pure def lawAClaimNamingNoNoteIsNeverDelivered(inFront: bool, shownNote: str, accepted: bool): bool =
+  delivered(true, noteInFront(inFront, shownNote, ""), accepted, noteInFront(inFront, shownNote, "")) != DeliveredView
 pure val shownNoteValues = Set("", "groceries", "recipes")
 pure val noteIdValues = Set("", "groceries")
 pure val targetValues = Set("notes", "home", "maps")
