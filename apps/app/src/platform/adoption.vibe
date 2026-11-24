@@ -1,7 +1,23 @@
-// spec/app/platform/adoption.md, "Story: Keep what the earlier Alpha kept"
+// spec/app/platform/adoption.md, "Story: Keep what the earlier Alpha kept"; spec/app/platform/adoption.md, "A value is moved by copying it only where the new place is still empty, and its earlier place is cleared only once the new place holds a value"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { type Adoption, adoptionOf, earlierCleared } from "../../gen/app__platform__adoption.effect.vibe"
 import { type Slot, Vault } from "./vault.vibe"
+
+module earlier {
+  import { registerPlugin } from "@capacitor/core"
+
+  /** The earlier Alpha's own connection plugin, which the Alpha APK keeps only so its encrypted slots can be read and cleared (`AlphaConnectionPlugin.java`). */
+  export interface Connection {
+    secureRead(options: { slot: string }): Promise<{ value?: string | null }>
+    secureCompareExchange(options: { slot: string; expectedValue: string; value: null }): Promise<{ status: "saved" | "conflict" }>
+  }
+  let made: Connection | undefined
+  /** @throws {never} */
+  export function connection(): Connection {
+    return (made ??= registerPlugin<Connection>("AlphaConnection"))
+  }
+}
+import { connection } from earlier
 
 /** A place a value is kept: what it holds now, keeping a value there, and clearing it. Each fails where the place cannot be reached. */
 export interface Place<A> {
@@ -37,6 +53,31 @@ export effect function keptAt(key: string): Place<string>!!KeyValueStore.KeyValu
     },
     write: (value: string) => store.set(key, value),
     clear: () => store.remove(key),
+  }
+}
+
+/** A place the earlier Alpha only kept things in: nothing new is ever written there. */
+export error EarlierOnly { place: string }
+
+/**
+ * What the earlier Alpha kept in its connection plugin's encrypted slot `slot`, as one text: read, and cleared only
+ * while it still holds the value last read from it, so a value written there since is never lost. On a page that is
+ * no phone, or a phone without that plugin, the slot fails to read and its value stays for a later reading.
+ */
+export function earlierSlot(slot: string): Place<string> {
+  let seen: string | undefined
+  return {
+    effect read() {
+      const said = try tryPromise(() => connection().secureRead({ slot }))
+      seen = typeof said.value === "string" ? said.value : undefined
+      return seen === undefined ? Option.none() : Option.some(seen)
+    },
+    write: () => Effect.fail(new EarlierOnly({ place: slot })),
+    effect clear() {
+      const expectedValue = seen
+      if (expectedValue === undefined) return
+      try tryPromise(() => connection().secureCompareExchange({ slot, expectedValue, value: null }))
+    },
   }
 }
 

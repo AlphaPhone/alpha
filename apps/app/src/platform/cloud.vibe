@@ -3,7 +3,7 @@ import { createCloudClient } from "@elizaos/cloud/client"
 import { BridgeUnavailable } from "@elizaos/os/bridges/bridge"
 import { CloudRefused } from "@elizaos/os/bridges/cloud"
 import type { CloudClient as Relay, CloudFailure, CloudMethod, CloudPath, CloudRequest } from "@elizaos/os/bridges/definitions/cloud"
-import { type Failure, type Remote, type Wired, Refused, Unreachable, Unsent, parsed, patience, remoteAt } from "./remote.vibe"
+import { type Failure, type Remote, type Wired, Unreachable, Unsent, parsed, patience, refusal, remoteAt } from "./remote.vibe"
 
 module held {
   import { cloudClient } from "@elizaos/os/bridges/cloud"
@@ -123,7 +123,7 @@ function plugged(relay: Relay): Remote {
         when Unsent: throw cause;
         default: throw new Unreachable({ cause });
       }
-      if (reply.status < 200 || reply.status >= 300) throw new Refused({ status: reply.status })
+      if (reply.status < 200 || reply.status >= 300) throw refusal(reply.status, reply.retryAfter)
       return try parsed(new TextDecoder().decode(reply.body))
     },
     events: () => Stream.fail(new Unsent({ cause: "the phone's cloud plugin streams nothing" })),

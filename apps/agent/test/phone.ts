@@ -51,7 +51,7 @@ export async function launchFor(cloud: Cloud, key: DeviceKey, state: string, ext
   fs.writeFileSync(file, JSON.stringify({
     schema: 1, character: read("character.json"), policy: { actions: { allowed: policy.actions.allowed }, plugins: policy.plugins }, model,
     account: { userId: key.accountId, organizationId: key.organizationId }, embeddings: host.embeddings, persistMemory: host.persistMemory,
-    callerRole: host.callerRole, ...extra,
+    callerRole: host.callerRole, privacy: host.privacy, ...extra,
   }), { mode: 0o600 });
   return file;
 }

@@ -7,8 +7,8 @@ import { defineRoutes } from "@elizaos/agent/routes"
 import { deployment } from "@repo/deployment"
 import { pinnedCheckout } from "@repo/eliza-harness/pinned"
 import {
-  type Environment, type Manifest, characterAdmitted, cloudModel, localEmbeddings, packAdmitted, packedFor, persistMemory, policyAdmitted,
-  refusedActions, routeListAdmitted,
+  type Environment, type Manifest, characterAdmitted, cloudModel, localEmbeddings, packAdmitted, packedFor, persistMemory, personalDetailSwap,
+  policyAdmitted, privacyAdmitted, refusedActions, routeListAdmitted, secretSwap,
 } from "../gen/agent.effect.vibe"
 
 module node {
@@ -36,7 +36,7 @@ schema Service { service: string; notification: { channel: string; title: string
 schema Model { backend: "cloud"; cloudBaseUrl: string; smallModel: string; largeModel: string; imageModel: string }
 schema Host {
   schema: 1; service: string; notification: { channel: string; title: string; text: string }; routes: RouteLine[]; model: Model
-  embeddings: "none" | "local"; persistMemory: boolean; callerRole: "owner" | "user"
+  embeddings: "none" | "local"; persistMemory: boolean; callerRole: "owner" | "user"; privacy: { secretSwap: boolean; piiSwap: boolean }
 }
 
 /** Where the pack is written: the bundle as `buildAgentBundle` publishes it, and the three files eliza's agent service reads beside it. */
@@ -105,9 +105,10 @@ effect function admittedHost(host: string, registered: readonly string[]) {
   }
   const written = try decoded(`${host}/host.json`, Host)
   try admitRoutes(written.routes)
+  if (!privacyAdmitted(written.privacy.secretSwap, written.privacy.piiSwap)) throw new Refused({ reason: "the launch must ask eliza's privacy service to swap secrets and personal details" })
   const document = JSON.stringify({
     schema: 1, character, policy: { actions: { allowed: policy.actions.allowed }, plugins: policy.plugins },
-    model: written.model, embeddings: written.embeddings, persistMemory: written.persistMemory, callerRole: written.callerRole,
+    model: written.model, embeddings: written.embeddings, persistMemory: written.persistMemory, callerRole: written.callerRole, privacy: written.privacy,
     account: { userId: "the owner signed in on the phone", organizationId: "their organization" },
   })
   decodeLaunchDocument(document) catch effect () => { throw new Refused({ reason: "eliza's agent would refuse the launch the phone writes from these files" }) }
@@ -139,7 +140,7 @@ effect function build(name: string) {
   const host: Host = {
     schema: 1, service: service.service, notification: service.notification, routes: try routeLines(`${at.data}/routes.jsonl`),
     model: { backend: "cloud", cloudBaseUrl: where.cloud, smallModel: cloudModel, largeModel: cloudModel, imageModel: "" },
-    embeddings: localEmbeddings ? "local" : "none", persistMemory, callerRole: "owner",
+    embeddings: localEmbeddings ? "local" : "none", persistMemory, callerRole: "owner", privacy: { secretSwap, piiSwap: personalDetailSwap },
   }
   try fs.writeFileString(`${at.host}/host.json`, `${JSON.stringify(host, null, 2)}\n`)
   try check()

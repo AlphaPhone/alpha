@@ -5,7 +5,7 @@ import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { at, mounts } from "../src/areas.ts";
-import { adopt, keptAt, vaulted } from "../src/platform/adoption.vibe";
+import { adopt, earlierSlot, keptAt, vaulted } from "../src/platform/adoption.vibe";
 import { Agent } from "../src/platform/agent.vibe";
 import { Cloud } from "../src/platform/cloud.vibe";
 import { type Slot, Vault } from "../src/platform/vault.vibe";
@@ -95,6 +95,23 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([Exit.isSuccess(await flooded(1000)), failed(await flooded(3_000_000))?._tag]).toEqual([true, "Unreachable"]);
   });
 
+  // spec/app/platform/index.md, "Story: Be told when to try again"
+  it("Be told when to try again: only a 429 carries the wait it named (spec/app/platform/index.md, \"Story: Be told when to try again\")", async () => {
+    const { alpha } = await open({ ...scene(), phone }, only("home"));
+    const busy = (status: number) => HttpClientRequest.get(`/api/platform/busy?status=${status}`);
+    const cloudBusy = (status: number) => HttpClientRequest.get(`/api/v1/platform/busy?status=${status}`);
+    const refused = async (work: Effect.Effect<unknown, unknown, Agent | Cloud>) => {
+      const failure = failed(await alpha.runtime.runPromiseExit(work)) as { _tag?: string; status?: number; wait?: number } | undefined;
+      return [failure?._tag, failure?.status, failure?.wait];
+    };
+    const agent = (status: number) => refused(Effect.flatMap(Agent, (one) => one.call(busy(status))));
+    const cloud = (status: number) => refused(Effect.flatMap(Cloud, (one) => one.call(cloudBusy(status))));
+    // spec/app/platform/index.md, "A refusal carries a wait only when the other side answered 429 with a whole number of seconds, at most a day"
+    expect([await agent(429), await agent(503)]).toEqual([["Refused", 429, 30], ["Refused", 503, undefined]]);
+    if (phone) return;
+    expect([await cloud(429), await cloud(503)]).toEqual([["Refused", 429, 30], ["Refused", 503, undefined]]);
+  });
+
   // spec/app/platform/feed.md, "Story: Follow what my agent does on my screen"
   it("Follow what my agent does on my screen: only its own steps reach it, until it stops reading (spec/app/platform/feed.md, \"Story: Follow what my agent does on my screen\")", async () => {
     const world = { ...scene(), phone };
@@ -136,5 +153,11 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([await secret(shut), localStorage.getItem(earlier)]).toEqual(["NotAdopted", "Work"]);
     if (!phone) return void expect(await secret(open_)).toBe("NotAdopted");
     expect([await secret(open_), localStorage.getItem(earlier), world.secrets.get("alpha.test.open")]).toEqual(["Adopted", null, "\"Work\""]);
+    // spec/app/platform/adoption.md, "A value is moved by copying it only where the new place is still empty, and its earlier place is cleared only once the new place holds a value": the earlier Alpha's encrypted slot moves into the secure store, and leaves only once it is there.
+    world.secrets.delete("alpha.test.open");
+    world.platform.earlier.set("assistant-draft:v1:device", "Draft");
+    const slotted = (slot: Slot) => run(Effect.flatMap(vaulted(slot), (to) => adopt(earlierSlot("assistant-draft:v1:device"), to, (value: string) => Option.some(Redacted.make(value)))));
+    expect([await slotted(shut), world.platform.earlier.get("assistant-draft:v1:device")]).toEqual(["NotAdopted", "Draft"]);
+    expect([await slotted(open_), world.platform.earlier.has("assistant-draft:v1:device"), world.secrets.get("alpha.test.open")]).toEqual(["Adopted", false, "\"Draft\""]);
   });
 });

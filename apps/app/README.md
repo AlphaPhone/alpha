@@ -27,6 +27,24 @@ three things, and the area that offers it owns it:
 | something drawn inside another area's screen (a Maps or Calendar card in Ask Alpha, a share sheet, a notice) | a place `<area>/<name>` in `src/areas.ts`, drawn with `alpha.slot` | the screen of the area that draws it |
 | what the phone, the agent or the cloud says (what this phone admits, the agent's live feed of a screen, the device headers a request names) | a service of `src/platform/` | every area |
 
+Each port the earlier line late-filled between areas is one of those three, owned by the area that offers it:
+
+| Earlier port | Offered by | As | Read by |
+|---|---|---|---|
+| Files' share targets: an email, a text, Ask Alpha | Inbox, Messages, Ask Alpha | a resident machine of each (Inbox's `mailbox`, Messages' `messages`, Ask Alpha's conversation) that Files tells with the files chosen; the sheet is the place `files/share` | Files |
+| Browser's page mail | Inbox | Inbox's resident `mailbox`, told to open a draft | Browser |
+| Calendar's Maps (an event's place) | Maps | a resident machine of Maps, told to show a place | Calendar |
+| Workflows' Clock (prepare, confirm, retire an alarm) | Clock | a resident machine of Clock, told the alarm a workflow suggests | Workflows |
+| the assistant's email (send, the account's address) | Inbox | Inbox's resident `operations`, told to send; the address followed from `mailbox` | Ask Alpha |
+| Clock's own notices (current, consume) | the shell | the shell's resident `notices`, followed and told | Ask Alpha |
+| Maps' chat cards | Maps | the place `maps/card` drawn in Ask Alpha's conversation | Ask Alpha |
+| Camera's composer (a scan request) | Camera | a resident machine of Camera, told the request | Ask Alpha |
+| Maps' relay of a conversation, Maps' and Browser's views | the agent | `Agent.feed("view", clientId)` of `src/platform/agent.vibe`, read by the screen that shows the view | Maps, Browser |
+| Workflows' reply changes | Workflows | a resident machine of Workflows, followed | Ask Alpha |
+| Browser's page for a turn | Browser | a resident machine of Browser holding the selected page, followed | Ask Alpha |
+| the device's capabilities and the enrolled device's headers | the phone | `Device` and the headers a request names (`spec/app/platform/index.md`) | every area |
+| the idle facts (a call, account work, the sign-in card) | Telephony, Account | Telephony's resident `callBar` and Account's resident machine, followed | Settings' `updating` |
+
 
 ## eliza's agent and cloud
 

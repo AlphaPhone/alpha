@@ -39,9 +39,9 @@ pure def characterAdmitted(name: str, system: str): bool = name == characterName
 ### The agent may run exactly the actions Alpha's stories need, and every other action the bundle registers is listed as refused
 
 A turn is answered by `REPLY`, and core's own `IGNORE` and `NONE` let it end
-without one. Nothing else the bundle registers (today `CALCULATE` and
-`VIEWS`) is needed by an area of the phone, so each is named in the policy's
-refused list with its reason. The policy loads no module of the agent: no
+without one. Nothing else the bundle registers (today `CALCULATE`, `VIEWS`
+and `PROPOSE_DEVICE_ACTION`) is needed by an area of the phone, so each is
+named in the policy's refused list with its reason. The policy loads no module of the agent: no
 route the page reaches belongs to one.
 
 ```quint
@@ -89,6 +89,20 @@ memory is kept without embeddings.
 ```quint
 pure val persistMemory: bool = true
 pure val localEmbeddings: bool = false
+```
+
+### The agent swaps the owner's secrets and personal details out of what it sends the cloud
+
+The old agent was launched with eliza's secret swap and personal-detail
+swap on (`legacy/android/app/src/main/java/ai/alphacompute/alphaphone/AlphaLocalAgentPlugin.java`,
+`ELIZA_SECRET_SWAP_ENABLED` and `ELIZA_PII_SWAP_ENABLED`), so a key, a
+number or an address the owner writes reaches the model only as a stable
+reference. The launch asks eliza's privacy service for both.
+
+```quint
+pure val secretSwap: bool = true
+pure val personalDetailSwap: bool = true
+pure def privacyAdmitted(secrets: bool, details: bool): bool = secrets == secretSwap and details == personalDetailSwap
 ```
 
 ### The agent's text goes to the owner's cloud account, which is asked for the model the old agent used

@@ -5,7 +5,7 @@ import type { AgentEvent, AgentMethod, AgentRoute, AgentStatus, AgentStreamData,
 import { chunkTaken, deliveryOf } from "../../gen/app__platform.effect.vibe"
 import { Machine as Feed, type FrameKind, machine as feedMachine } from "../../gen/app__platform__feed.effect.vibe"
 import { fresh } from "../runtime/attempts.vibe"
-import { type Failure, type Listening, type Opened, type Remote, type Wired, Refused, Unreachable, Unsent, parsed, patience, remoteAt, sse } from "./remote.vibe"
+import { type Failure, type Listening, type Opened, type Remote, type Wired, Refused, Unreachable, Unsent, parsed, patience, refusal, remoteAt, sse } from "./remote.vibe"
 
 module held {
   import { agentClient } from "@elizaos/os/bridges/agent"
@@ -156,7 +156,7 @@ function over(bridge: RuntimeJsonBridge, direct: Remote, feed: Reached["feed"]):
       if (Option.isNone(sent)) return try direct.call(request)
       return try tryPromise({
         try: () => runtime.request(sent.value.path, sent.value.body, sent.value.headers),
-        catch: (cause): Failure => cause instanceof RuntimeRequestError ? new Refused({ status: cause.status })
+        catch: (cause): Failure => cause instanceof RuntimeRequestError ? refusal(cause.status, cause.retryAfter)
           : cause instanceof Error && refusedByTheClient.includes(cause.message) ? new Unsent({ cause })
           : new Unreachable({ cause }),
       })
