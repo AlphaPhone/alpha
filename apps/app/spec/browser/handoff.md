@@ -13,6 +13,15 @@ Every step checks again that the same page is still the one shown.
 > As the owner, I want to send the HTTPS page I am looking at to another browser, and when it is a
 > private page, to be asked first, so that nothing else ever leaves Alpha.
 
+### A timed-out HTTPS navigation in a normal tab can offer another browser
+
+The timeout belongs to one navigation. An earlier timeout cannot stop a
+replacement load. A timeout on the current normal HTTPS tab offers
+**Open in another browser**. Only the owner's tap on that still-visible
+offer sends the exact timed-out address to Android's browser chooser.
+A certificate failure, a private tab, or a changed or hidden navigation
+cannot open a browser through that offer.
+
 ### A handoff binds the selected tab's settled HTTPS page, and every later step needs that page still shown
 
 `ShownPage` is what the shell reads at each step: whether Alpha shows the Browser view now (not

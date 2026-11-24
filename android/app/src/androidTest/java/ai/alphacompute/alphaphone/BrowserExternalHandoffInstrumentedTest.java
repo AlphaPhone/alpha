@@ -45,9 +45,9 @@ public final class BrowserExternalHandoffInstrumentedTest {
   IntentFilter missing=new IntentFilter(Intent.ACTION_VIEW);missing.addDataScheme("https");assertFalse(BrowserExternalHandoff.genericHttps(missing));
  }
  private static ResolveInfo browser(String pkg,boolean browser){ResolveInfo info=new ResolveInfo();info.filter=new IntentFilter(Intent.ACTION_VIEW);info.filter.addCategory(Intent.CATEGORY_DEFAULT);info.filter.addCategory(Intent.CATEGORY_BROWSABLE);info.filter.addDataScheme("https");if(!browser)info.filter.addDataAuthority("accounts.example",null);info.activityInfo=new ActivityInfo();info.activityInfo.packageName=pkg;info.activityInfo.name=pkg+".Main";info.activityInfo.enabled=true;info.activityInfo.exported=true;info.activityInfo.applicationInfo=new ApplicationInfo();info.activityInfo.applicationInfo.enabled=true;return info;}
- @Test public void normalHandoffUsesOnlyExactPageAndRefusesStaleOrUnresolvableTargets()throws Exception{exercise(false);}
+ @Test public void normalHandoffUsesOnlyExactPageAndRefusesStaleOrUnresolvableTargets()throws Exception{exercise(false,false);}
  @Test public void privateHandoffRequiresExplicitReviewAndTransfersNoProfileData()throws Exception{
-  org.junit.Assume.assumeTrue("Private tabs need secure scoped deletion",WebViewFeature.isFeatureSupported(WebViewFeature.DELETE_BROWSING_DATA));exercise(true);
+  org.junit.Assume.assumeTrue("Private tabs need secure scoped deletion",WebViewFeature.isFeatureSupported(WebViewFeature.DELETE_BROWSING_DATA));exercise(true,false);
  }
  /** A tapped phone link in a private tab asks "Leave private browsing?" first; the dial pad opens
   * only after Open app. In a normal tab the same tap opens it at once. The dial pad is intercepted. */
@@ -94,7 +94,10 @@ public final class BrowserExternalHandoffInstrumentedTest {
    }finally{instrumentation.removeMonitor(monitor);}
   }
  }
- private void exercise(boolean priv)throws Exception{
+ @Test public void timedOutHttpsPageOffersAnExplicitBrowserHandoff()throws Exception{
+  exercise(false,true);
+ }
+ private void exercise(boolean priv,boolean retry)throws Exception{
   String session=UUID.randomUUID().toString();AtomicReference<AlphaBrowserPlugin> plugin=new AtomicReference<>();AtomicReference<WebView> web=new AtomicReference<>();AtomicReference<Object> tab=new AtomicReference<>();AtomicReference<Intent> outgoing=new AtomicReference<>();
   Instrumentation instrumentation=InstrumentationRegistry.getInstrumentation();CountDownLatch loaded=new CountDownLatch(1);
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
@@ -126,6 +129,50 @@ public final class BrowserExternalHandoffInstrumentedTest {
    Instrumentation.ActivityMonitor monitor=new Instrumentation.ActivityMonitor(){@Override public Instrumentation.ActivityResult onStartActivity(Intent intent){outgoing.set(new Intent(intent));return new Instrumentation.ActivityResult(Activity.RESULT_CANCELED,null);}};
    instrumentation.addMonitor(monitor);
    try{
+    if(retry){
+     BoundedActivityScenario.main(()->{try{
+      AlphaBrowserPlugin p=plugin.get();Object t=tab.get();
+      View button=(View)get(t,"browserRetry");
+      Method loading=AlphaBrowserPlugin.class.getDeclaredMethod("loading",t.getClass());
+      loading.setAccessible(true);
+      loading.invoke(p,t);
+      assertFalse("A loading page offers no handoff",button.isShown());
+      Runnable oldTimeout=(Runnable)get(t,"timeout");
+      loading.invoke(p,t);
+      oldTimeout.run();
+      assertTrue("A retired timeout cannot stop the replacement load",(Boolean)get(t,"loading"));
+      assertFalse("A retired timeout cannot offer a handoff",button.isShown());
+      ((Runnable)get(t,"timeout")).run();
+      assertTrue("A timed-out HTTPS page offers the handoff",button.isShown());
+      assertNull("Timeout alone opens nothing",outgoing.get());
+      FrameLayout frame=(FrameLayout)get(t,"frame");
+      frame.setVisibility(View.GONE);
+      button.performClick();
+      assertNull("A hidden tab opens nothing",outgoing.get());
+      frame.setVisibility(View.VISIBLE);
+      set(t,"url",URL+"changed");
+      button.performClick();
+      assertNull("The button is bound to the failed address",outgoing.get());
+      set(t,"url",URL);
+      button.performClick();
+      Intent chooser=outgoing.getAndSet(null);
+      assertNotNull("A tap opens the browser chooser",chooser);
+      Intent target=chooser.getParcelableExtra(Intent.EXTRA_INTENT);
+      assertEquals(URL,target.getDataString());
+      assertEquals("fixture.browser",target.getComponent().getPackageName());
+      assertNull(target.getExtras());
+      loading.invoke(p,t);
+      assertFalse("A new load retires the handoff",button.isShown());
+      Runnable retiredTimeout=(Runnable)get(t,"timeout");
+      Method fail=AlphaBrowserPlugin.class.getDeclaredMethod("fail",t.getClass(),String.class);
+      fail.setAccessible(true);
+      fail.invoke(p,t,"Secure connection failed. The certificate was not accepted.");
+      retiredTimeout.run();
+      assertFalse("A certificate failure offers no external retry",button.isShown());
+      assertNull(outgoing.get());
+     }catch(Exception failure){throw new AssertionError(failure);}});
+     return;
+    }
     if(priv){Call unconfirmed=new Call(session,false);plugin.get().openExternalBrowser(unconfirmed);unconfirmed.await();assertNotNull(unconfirmed.error);assertNull(outgoing.get());}
     for(String field:new String[]{"session","navigation","url"}){
      Call stale=new Call(session,true);stale.getData().put(field,field.equals("url")?URL+"changed":"stale");plugin.get().openExternalBrowser(stale);stale.await();assertNotNull("Stale "+field+" refused",stale.error);assertNull(outgoing.get());
