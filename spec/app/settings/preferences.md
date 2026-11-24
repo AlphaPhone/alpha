@@ -85,6 +85,18 @@ pure def canPhoneLookChanged(s: Preferences, look: Look, by: Sender): bool = ans
 pure def phoneLookChanged(s: Preferences, look: Look, by: Sender): Preferences = { ...s, phoneLook: look }
 ```
 
+### Android's status and navigation bars follow the look Alpha draws
+
+On a phone the shell tells Android each time the look drawn changes, and
+never twice in a row for the same look; a browser has no bars to tell.
+
+```quint
+pure def barsDark(s: Preferences): bool = shown(s) == DarkLook
+
+pure def lawTheBarsAreDarkExactlyWhenAlphaIs(theme: Theme, look: Look): bool =
+  barsDark({ ...initial, theme: theme, phoneLook: look }) iff (theme == Dark or (theme == System and look == DarkLook))
+```
+
 ### A choice shows at once and is kept on the phone, one at a time, with ten seconds to be kept
 
 ```quint

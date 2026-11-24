@@ -26,7 +26,6 @@ const machines = together(
   canvas,
   pages,
   preferences,
-  updating,
   mailbox,
   operations,
   callBar,

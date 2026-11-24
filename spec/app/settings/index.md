@@ -93,7 +93,10 @@ pure def refocused(places: List[int], focused: int): List[int] =
 The Developer page and its Problem log exist only in a development build,
 Network and Carrier & SIM setup only on a phone, which a browser is not,
 and the Phone page only on an Alpha image, which is a phone. What the build
-and the phone are never changes while Alpha runs.
+and the phone are never changes while Alpha runs. A development build is
+the development server or a build that allows test mocks
+([platform](../platform/index.md)); a production build, a release or a
+debug one, never shows the developer pages or their controls.
 
 ```quint
 pure def admitted(s: Settings, page: Page): bool =
@@ -217,6 +220,19 @@ pure def sometimesProblemLogShowing(s: Settings): bool = s.page == Problems
 
 ```quint
 pure def sometimesPhonePageShowing(s: Settings): bool = s.page == PhonePage
+```
+
+### Carrier & SIM setup is a sensitive screen, and only on a phone
+
+While it shows, the identifiers stay on the phone: the assistant is told
+only that the screen is sensitive, and admits nothing that acts on it
+([assistant](../assistant/index.md)). No other page of Settings is
+sensitive.
+
+```quint
+pure def sensitive(s: Settings): bool = s.page == CarrierPage
+
+pure def alwaysASensitivePageIsOnAPhone(s: Settings): bool = sensitive(s) implies s.phone
 ```
 
 ### Carrier & SIM setup can be showing on a phone that is no Alpha image

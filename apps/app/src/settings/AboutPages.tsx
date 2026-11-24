@@ -1,6 +1,7 @@
 // spec/app/settings/licences.md, "Story: Read the licences"; spec/app/settings/developer.md, "Story: Read the problem log"
-import { SettingsLicenceDetail, SettingsLicencesPage, SettingsProblemLogPage, type SettingsProblemLogPageProps } from "@repo/ui";
+import { ConfirmDialog, SettingsLicenceDetail, SettingsLicencesPage, SettingsProblemLogPage, type SettingsProblemLogPageProps } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
+import { useState } from "react";
 import * as DeveloperGen from "../../gen/app__settings__developer.ts";
 import { useMachine as useDeveloper } from "../../gen/app__settings__developer.react.ts";
 import type { Machine as DeveloperMachine } from "../../gen/app__settings__developer.effect.vibe";
@@ -71,12 +72,27 @@ const storesNamed = Object.fromEntries(Object.entries(stores).map(([store, name]
 /** The Problem log: what it holds, Retry when it could not be read, Clear and Export, and each store to recover. */
 export function Problems({ runtime, common }: AboutProps) {
   const { state, can, send } = useTimed(runtime, useDeveloper);
+  const [asking, setAsking] = useState(false);
   if (!state) return null;
   const clear = { type: "clearLog", at: untimed } as const;
   const retry = { type: "openLog", at: untimed } as const;
   const startExport = { type: "startExport", at: untimed } as const;
   const word = logWords[DeveloperGen.logWord(state)];
   return (
+    <>
+    <ConfirmDialog
+      open={asking && can(clear)}
+      title="Clear the problem log?"
+      confirmLabel="Clear"
+      destructive
+      onConfirm={() => {
+        setAsking(false);
+        if (can(clear)) void send(clear);
+      }}
+      onCancel={() => setAsking(false)}
+    >
+      The problems Alpha recorded are deleted from this phone.
+    </ConfirmDialog>
     <SettingsProblemLogPage
       onBack={common.onBack}
       log={word}
@@ -85,12 +101,13 @@ export function Problems({ runtime, common }: AboutProps) {
       clearing={state.clearing.read.status === "Loading"}
       exporting={state.exporting.read.status === "Loading"}
       onRetry={word === "unavailable" && can(retry) ? () => void send(retry) : undefined}
-      onClear={can(clear) ? () => void send(clear) : undefined}
+      onClear={can(clear) ? () => setAsking(true) : undefined}
       onExport={can(startExport) ? () => void send(startExport) : undefined}
       onRecover={(store) => {
         const recover = { type: "recoverStore", store: storesNamed[store] } as const;
         if (can(recover)) void send(recover);
       }}
     />
+    </>
   );
 }

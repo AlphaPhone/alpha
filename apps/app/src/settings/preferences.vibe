@@ -179,6 +179,11 @@ const looked = applying(Prefs.Machine, (state) => Prefs.shown(state), effect (sh
   try sync(() => drawn(shown === "DarkLook"))
 })
 
+// spec/app/settings/preferences.md, "Android's status and navigation bars follow the look Alpha draws"
+const bars = applying(Prefs.Machine, Prefs.barsDark, effect (dark) => {
+  try (try Device).bars(dark)
+})
+
 // spec/app/settings/preferences.md, "Legible text is turned on or off by the owner and kept with the appearance, the same way"
 const legible = applying(Prefs.Machine, (state) => state.legible, effect (on) => {
   try (try Device).mark("legible", on ? "" : undefined)
@@ -190,4 +195,4 @@ const large = applying(Prefs.Machine, Prefs.largeText, effect (on) => {
 })
 
 /** The owner's preferences, from launch: the look and the text the whole page follows, and what other areas ask before they act. */
-export const preferences = together(machine, opened, resumed, phoneLook, looked, legible, large)
+export const preferences = together(machine, opened, resumed, phoneLook, looked, bars, legible, large)
