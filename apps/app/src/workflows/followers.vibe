@@ -2,7 +2,7 @@
 import { type DigestResult, digestRan, digestStatusLabel, digestSummaryText } from "@elizaos/plugin-workflow/digests"
 import type { BriefOutcome } from "../../gen/shell__overview.effect.vibe"
 import { briefOf } from "../../gen/workflows__digests.effect.vibe"
-import { CloudSession, ownerOf } from "../account/layer.vibe"
+import { CloudSession, ownerOf } from "../account/session.vibe"
 import { Build } from "../platform/build.vibe"
 import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
 import { Overview } from "../shell/overview.vibe"

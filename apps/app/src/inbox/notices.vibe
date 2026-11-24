@@ -3,7 +3,7 @@ import { type Event as NoticesEvent, type MailNotices as NoticesState, type Back
 import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
 import { Build } from "../platform/build.vibe"
-import { GoogleAccounts } from "../account/layer.vibe"
+import { GoogleAccounts } from "../account/google.vibe"
 import { Navigation } from "../shell/navigation.vibe"
 import { Assistant } from "../assistant/assistant.vibe"
 import { InboxAccounts } from "./accounts.vibe"
