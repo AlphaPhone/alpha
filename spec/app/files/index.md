@@ -13,6 +13,7 @@ the startup area asks for; Files is told the answer.
 - [Recent](./recent.md): the files opened lately, the access Alpha keeps for them, and the system picker
 - [Trash](./trash.md): what was deleted, and bringing it back or erasing it
 - [Preview](./preview.md): one file, shown and acted on
+- [Scan](./scan.md): pages made into a PDF
 - [Shared](./shared.md): the file vocabulary and the free-name rule
 
 ## Story: Browse my storage
@@ -38,21 +39,21 @@ import search as S from "./search"
 import destination as M from "./destination"
 
 type Actor = Owner | Agent | Phone
-type Volume = { id: int, name: str, used: int, total: int }
+type Volume = { id: int, used: int, total: int }
 type Layout = Grid | Rows
 type Order = ByDate | ByName | BySize
 type Action = Making | Naming | Moving | Copying | Deleting | Sharing
 type Files = {
   access: P::Grant, supported: bool, open: bool, storage: R::Read, volumes: List[Volume],
-  trail: List[int], inCategory: bool, category: F::Kind, listing: R::Read, items: List[F::Item], partial: bool, picked: List[int], missing: bool,
-  layout: Layout, order: Order, reversed: bool, trash: bool,
+  trail: List[int], inCategory: bool, category: F::Kind, listing: R::Read, items: List[F::Item], picked: List[int], missing: bool,
+  layout: Layout, order: Order, reversed: bool,
   search: S::Search, deleting: V::Review, change: C::Change, sheet: M::Sheet,
 }
 
 pure val initial: Files = {
   access: P::Unasked, supported: true, open: false, storage: R::unread, volumes: List(),
-  trail: List(), inCategory: false, category: F::Other, listing: R::unread, items: List(), partial: false, picked: List(), missing: false,
-  layout: Rows, order: ByDate, reversed: false, trash: false,
+  trail: List(), inCategory: false, category: F::Other, listing: R::unread, items: List(), picked: List(), missing: false,
+  layout: Rows, order: ByDate, reversed: false,
   search: S::initial, deleting: V::unreviewed, change: C::initial, sheet: M::initial,
 }
 ```
@@ -78,7 +79,7 @@ type Effect =
   | LookInto({ ticket: int, trail: List[int] })
   | AgentLook({ ticket: int, folder: int, filter: S::Filter })
   | Tell({ request: int, ok: bool, items: List[F::Item] })
-  | Perform({ ticket: int, work: C::Work, items: List[F::Item], name: str, folder: int, dest: int })
+  | Perform({ ticket: int, work: C::Work, items: List[F::Item], name: str, folder: int, dest: int, replace: bool })
   | ToTrash({ items: List[int], approval: int })
   | Show({ item: F::Item, siblings: List[str] })
   | Share({ ticket: int, channel: C::Dest, items: List[F::Item] })
@@ -90,52 +91,57 @@ type Moved = { state: Files, out: List[Effect] }
 ### What the simulator tries
 
 ```quint
-pure val ticketValues = Set(1, 2, 3)
-pure val lookValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20)
+pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20)
 pure val requestValues = Set(7, 8)
 pure val targetValues = Set(1, 4)
 pure val folderValues = Set(1)
 pure val depthValues = Set(0, 1)
 pure val nameValues = Set("", "c")
+pure val labelValues = Set("c")
 pure val siblingsValues = Set(List(), List("b"))
 pure val doneValues = Set(List(), List(1), List(1, 2))
 pure val failedValues = Set(List(), List(2))
-pure val volumesValues = Set(List()).union(Set(List({ id: 1, name: "a", used: 3, total: 8 }, { id: 9, name: "b", used: 0, total: 0 })))
+pure val volumesValues = Set(List({ id: 1, used: 3, total: 8 }, { id: 9, used: 0, total: 0 }))
 pure val fileValues = Set({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1 })
 pure val wantedValues = Set({ text: "", kind: F::Image, anyKind: false }).union(Set({ text: "b", kind: F::Other, anyKind: true }))
 pure val destValues = Set({ folder: 1, path: List(), names: List("b") }).union(Set({ folder: 4, path: List(1), names: List() }))
 pure val weight_enter = 30
-pure val weight_accessReported = 3
+pure val weight_accessReported = 15
 pure val weight_storageRead = 100
 pure val weight_openVolume = 40
-pure val weight_openFolder = 30
+pure val weight_openFolder = 10
 pure val weight_listed = 100
 pure val weight_openCategory = 5
 pure val weight_toggle = 30
 pure val weight_selectAll = 15
 pure val weight_askToDelete = 20
-pure val weight_confirmDelete = 5
+pure val weight_confirmDelete = 15
 pure val weight_openMoveTo = 40
 pure val weight_moveInto = 40
-pure val weight_moveUp = 5
+pure val weight_moveUp = 15
 pure val weight_destRead = 100
-pure val weight_begin = 25
+pure val weight_begin = 40
 pure val weight_keepBoth = 40
-pure val weight_goBack = 5
+pure val weight_replaceThem = 40
+pure val weight_goBack = 40
 pure val weight_finished = 100
-pure val weight_searchFor = 10
+pure val weight_searchFor = 3
 pure val weight_searched = 100
 pure val weight_openShare = 30
 pure val weight_shareTo = 40
 pure val weight_shareEnded = 100
-pure val weight_approve = 10
-pure val weight_renameShown = 3
+pure val weight_approve = 2
+pure val weight_renameShown = 1
 pure val weight_refresh = 3
-pure val weight_agentLook = 5
+pure val weight_agentLook = 1
 pure val weight_agentLooked = 100
-pure val weight_agentFilter = 5
-pure val weight_agentOpen = 3
-pure val weight_restart = 3
+pure val weight_agentFilter = 1
+pure val weight_agentOpen = 1
+pure val weight_restart = 1
+pure val weight_cancelSelection = 8
+pure val weight_keepFiles = 8
+pure val weight_closeMoveTo = 8
+pure val weight_closeShare = 8
 pure val entriesValues =
   Set(List())
     .union(Set(List({ id: 4, name: "a", revision: 1, kind: F::Folder, volume: 1 }, { id: 2, name: "b", revision: 1, kind: F::Image, volume: 1 })))
@@ -214,7 +220,7 @@ pure def entered(trail: List[int], inCategory: bool, category: F::Kind, s: Files
   val there = { trail: trail, inCategory: inCategory, category: category }
   val reading = s.open and allowed(s)
   val search = if (reading) S::follow(s.search, there) else s.search
-  val placed = { ...s, trail: trail, inCategory: inCategory, category: category, items: List(), partial: false, picked: List(), missing: false, trash: false,
+  val placed = { ...s, trail: trail, inCategory: inCategory, category: category, items: List(), picked: List(), missing: false,
     deleting: V::dismiss(s.deleting), change: C::invalidate(s.change), sheet: M::close(s.sheet), search: search }
   val asked = if (reading and search.searching) List(Search({ ticket: search.query.ticket, where: there, filter: search.filter })) else List()
   if (reading and not(trail.length() == 0 and not(inCategory)))
@@ -237,7 +243,7 @@ pure def canEnter(s: Files, by: Actor): bool = by == Phone and not(s.open)
 pure def enter(s: Files, by: Actor): Moved = arrived(entered(s.trail, s.inCategory, s.category, { ...s, open: true }))
 
 pure def shut(open: bool, s: Files): Moved =
-  { state: { ...s, open: open, storage: F::drop(s.storage), volumes: List(), listing: F::drop(s.listing), items: List(), partial: false, picked: List(),
+  { state: { ...s, open: open, storage: F::drop(s.storage), volumes: List(), listing: F::drop(s.listing), items: List(), picked: List(),
       search: S::stop(s.search), deleting: V::dismiss(s.deleting), change: C::retire(s.change), sheet: M::close(s.sheet) },
     out: unanswered(s.search) }
 
@@ -328,27 +334,6 @@ pure def stepMovingStartsAfresh(before: Files, via: str, after: Files): bool =
       and (atTop(after) or (after.listing.status == R::Loading and after.listing.ticket == before.listing.ticket + 1)))
 ```
 
-### The top offers the Trash, which shows until the owner goes back or anywhere else
-
-The [Trash](./trash.md) is told whether it shows and whether Alpha may read
-the storage.
-
-```quint
-pure def canOpenTrash(s: Files, by: Actor): bool = by == Owner and browse(s) == AtTop and not(s.trash)
-
-pure def openTrash(s: Files, by: Actor): Files = { ...s, trash: true }
-
-pure def canCloseTrash(s: Files, by: Actor): bool = by == Owner and s.trash
-
-pure def closeTrash(s: Files, by: Actor): Files = { ...s, trash: false }
-
-pure def trashShows(s: Files): bool = s.open and allowed(s) and s.trash
-
-pure def alwaysTheTrashShowsAtTheTop(s: Files): bool = s.trash implies atTop(s)
-
-pure def sometimesTheTrashShows(s: Files): bool = trashShows(s)
-```
-
 ### The place showing is read again when asked, and only its newest answer is taken; a folder that no longer exists brings the owner back to the top and says so, never that the storage is unavailable
 
 The owner pulls to refresh, or the phone says the storage changed. The
@@ -362,32 +347,20 @@ pure def refresh(s: Files, by: Actor): Moved =
   val listing = R::ask(s.listing)
   { state: { ...s, listing: listing }, out: List(Look({ ticket: listing.ticket, trail: s.trail, category: s.category, inCategory: s.inCategory })) }
 
-pure def canListed(s: Files, look: int, by: Actor): bool = by == Phone and R::canAnswer(s.listing, look)
+pure def canListed(s: Files, ticket: int, by: Actor): bool = by == Phone and R::canAnswer(s.listing, ticket)
 
-pure def listed(s: Files, look: int, ok: bool, gone: bool, complete: bool, entries: List[F::Item], by: Actor): Moved =
+pure def listed(s: Files, ticket: int, ok: bool, gone: bool, entries: List[F::Item], by: Actor): Moved =
   val items = if (not(ok)) List() else if (s.inCategory) entries.select(i => i.kind == s.category) else entries
   val picked = s.picked.select(id => has(items, id))
   val same = chosen(s) == items.select(i => picked.includes(i.id))
   val back = entered(List(), false, F::Other, s)
   if (not(ok) and gone and not(s.inCategory)) { state: { ...back.state, missing: true }, out: back.out }
-  else { state: { ...s, listing: R::answer(s.listing, ok), items: items, partial: ok and not(complete), picked: picked,
+  else { state: { ...s, listing: R::answer(s.listing, ok), items: items, picked: picked,
       deleting: if (s.deleting.showing and not(same)) V::revise(s.deleting) else s.deleting,
       change: if (picked != s.picked) C::invalidate(s.change) else s.change,
       sheet: if (picked != s.picked) M::close(s.sheet) else s.sheet }, out: List() }
 
 pure def alwaysAMissingFolderIsToldAtTheTop(s: Files): bool = s.missing implies atTop(s)
-```
-
-### A place is called empty only after the phone read all of it; a reading cut short keeps what it read
-
-The phone says when a listing stopped before its end.
-
-```quint
-pure def empty(s: Files): bool = browse(s) == Showing and s.items.length() == 0 and not(s.partial)
-
-pure def alwaysOnlyAReadPlaceIsPartial(s: Files): bool = s.partial implies (s.listing.status == R::Loaded or s.listing.status == R::Loading)
-
-pure def sometimesAPlaceWasReadInPart(s: Files): bool = browse(s) == Showing and s.partial and s.items.length() > 0
 ```
 
 ### A place that was not read lists nothing, and an open place is always being read or read
@@ -422,7 +395,7 @@ pure def sometimesTheStorageIsShown(s: Files): bool = browse(s) == AtTop and s.v
 pure def sometimesTheStorageIsUnavailable(s: Files): bool = browse(s) == AtTop and s.storage.status == R::Failed
 pure def sometimesAFolderWasMissing(s: Files): bool = browse(s) == AtTop and s.missing
 pure def sometimesInACategory(s: Files): bool = browse(s) == Showing and s.inCategory and s.items.length() > 0
-pure def sometimesAnEmptyFolder(s: Files): bool = empty(s) and not(s.inCategory)
+pure def sometimesAnEmptyFolder(s: Files): bool = browse(s) == Showing and not(s.inCategory) and s.items.length() == 0
 pure def sometimesInsideAFolder(s: Files): bool = browse(s) == Showing and s.trail.length() > 1 and s.items.length() > 0
 ```
 
@@ -451,8 +424,8 @@ How names are compared is not modelled.
 
 ```quint
 const containsText: (str, str) => bool
-pure def lawEveryNameContainsNoText(name: str): bool = containsText(name, "")
-pure def lawEveryNameContainsItself(name: str): bool = containsText(name, name)
+pure def lawEveryNameContainsNoText(label: str): bool = containsText(label, "")
+pure def lawEveryNameContainsItself(label: str): bool = containsText(label, label)
 ```
 
 ### The owner sets a filter of a kind and a text for the place showing, as a chip the owner sees and clears; only what matches both is shown
@@ -472,8 +445,8 @@ pure def searchFor(s: Files, wanted: S::Filter, by: Actor): Moved = asking(wante
 
 pure def canSearched(s: Files, ticket: int, by: Actor): bool = by == Phone and S::canSearched(s.search, ticket)
 
-pure def searched(s: Files, ticket: int, ok: bool, complete: bool, entries: List[F::Item], by: Actor): Moved =
-  val search = S::searched(s.search, ticket, ok, complete, entries.select(i => containsText(i.name, s.search.filter.text)))
+pure def searched(s: Files, ticket: int, ok: bool, entries: List[F::Item], by: Actor): Moved =
+  val search = S::searched(s.search, ticket, ok, entries.select(i => containsText(i.name, s.search.filter.text)))
   { state: { ...s, search: search }, out: if (s.search.asker != 0) List(Tell({ request: s.search.asker, ok: ok, items: search.hits })) else List() }
 
 pure def canClearFilter(s: Files, by: Actor): bool = by == Owner and S::canClearFilter(s.search)
@@ -502,7 +475,6 @@ pure def view(s: Files, file: F::Item, by: Actor): Moved =
 ```quint
 pure def sometimesAFilterFoundFilesInAFolder(s: Files): bool = S::finding(s.search) == S::Found and browse(s) == Showing
 pure def sometimesAFilterFoundNothing(s: Files): bool = S::finding(s.search) == S::Nothing
-pure def sometimesAFilterWasCutShort(s: Files): bool = S::finding(s.search) == S::Unfinished
 pure def sometimesAFilterFoundAFileByName(s: Files): bool = S::finding(s.search) == S::Found and s.search.filter.text != ""
 pure def sometimesAFilterFollowedTheOwner(s: Files): bool = S::finding(s.search) == S::Looking and s.trail.length() > 1
 ```
@@ -685,7 +657,7 @@ pure def alwaysTheSheetKeepsItsRules(s: Files): bool =
 ```quint
 pure def performing(c: C::Change, s: Files): List[Effect] =
   if (C::busy(c) and not(C::busy(s.change)))
-    List(Perform({ ticket: c.attempt.id, work: c.work, items: c.items, name: c.name, folder: c.folder, dest: c.dest.folder }))
+    List(Perform({ ticket: c.attempt.id, work: c.work, items: c.items, name: c.name, folder: c.folder, dest: c.dest.folder, replace: c.replace }))
   else List()
 
 pure def moving(work: C::Work): bool = work == C::MoveTo or work == C::CopyTo
@@ -706,6 +678,10 @@ pure def stepADestinationIsAFolderAsRead(before: Files, via: str, after: Files):
 pure def canKeepBoth(s: Files, by: Actor): bool = by == Owner and C::canKeepBoth(s.change)
 
 pure def keepBoth(s: Files, by: Actor): Moved = { state: { ...s, change: C::keepBoth(s.change) }, out: performing(C::keepBoth(s.change), s) }
+
+pure def canReplaceThem(s: Files, by: Actor): bool = by == Owner and C::canReplaceThem(s.change)
+
+pure def replaceThem(s: Files, by: Actor): Moved = { state: { ...s, change: C::replaceThem(s.change) }, out: performing(C::replaceThem(s.change), s) }
 
 pure def canGoBack(s: Files, by: Actor): bool = by == Owner and C::canGoBack(s.change)
 
@@ -744,24 +720,20 @@ pure def finished(s: Files, ticket: int, done: List[int], failed: List[int], by:
 ```quint
 pure def stepOneRequestPerChange(before: Files, via: str, after: Files, out: List[Effect]): bool =
   out.every(e => match e {
-    | Perform(p) => (via == "begin" or via == "approve" or via == "keepBoth" or via == "renameShown")
+    | Perform(p) => (via == "begin" or via == "approve" or via == "keepBoth" or via == "replaceThem" or via == "renameShown")
         and not(C::busy(before.change)) and p.ticket == after.change.attempt.id
-        and (via == "keepBoth" or via == "renameShown" or p.items.every(i => before.items.includes(i)))
+        and (via == "keepBoth" or via == "replaceThem" or via == "renameShown" or p.items.every(i => before.items.includes(i)))
     | _ => true
   })
 ```
 
-### The owner opens the share sheet for a selection of one to a hundred files and no folder while none is open, shares from it, and Android says whether it could open it
+### The owner opens the share sheet for the selection while none is open, shares from it, and Android says whether it could open it
 
 Whether an email account is set up is the mail area's fact.
 
 ```quint
-pure val shareMost = 100
-
-pure def shareable(items: List[F::Item]): bool = items.length() > 0 and items.length() <= shareMost and not(items.some(i => i.kind == F::Folder))
-
 pure def canOpenShare(s: Files, mail: bool, by: Actor): bool =
-  by == Owner and browse(s) == Showing and shareable(chosen(s)) and s.change.panel == 0
+  by == Owner and browse(s) == Showing and s.picked.length() > 0 and s.change.panel == 0
 
 pure def openShare(s: Files, mail: bool, by: Actor): Files = { ...s, change: C::openShare(s.change, chosen(s), mail, 0) }
 
@@ -825,7 +797,7 @@ pure def stepAnApprovalActsOnItsItemAlone(before: Files, via: str, after: Files,
 
 ```quint
 pure def alwaysTheChangeKeepsItsRules(s: Files): bool =
-  C::alwaysNothingMovesIntoItself(s.change)
+  C::alwaysTheAgentNeverReplaces(s.change) and C::alwaysNothingMovesIntoItself(s.change)
     and C::alwaysOnlyItemsOfTheChangeAreDone(s.change) and C::alwaysNoTextMessageShare(s.change)
     and C::alwaysTheSheetWasNumbered(s.change) and C::alwaysAChoiceComesBeforeSending(s.change)
     and C::alwaysAChoiceWaitsOnAFittingChange(s.change) and C::alwaysAStaleSheetIsClosed(s.change)

@@ -11,8 +11,8 @@ it.
 ## Story: Change my files
 
 > As the owner, I want to make a folder, rename, move or copy, one change
-> at a time, never over a file of the same name, and to be told honestly
-> what each item came to.
+> at a time, never over a file of the same name unless I chose to replace
+> it, and to be told honestly what each item came to.
 
 ### A change holds its attempt, what it acts on and where, the choice when names clash, what each item came to, and the share sheet
 
@@ -29,7 +29,7 @@ type Place = { folder: int, path: List[int], names: List[str] }
 type Dest = Email | Chooser | Messages | Copy | SaveTo
 type Change = {
   attempt: A::Attempt, work: Work, items: List[F::Item], name: str, folder: int, dest: Place, approval: int,
-  clash: V::Review, done: List[int], unsure: List[F::Item],
+  clash: V::Review, replace: bool, done: List[int], unsure: List[F::Item],
   panel: int, panels: int, sharing: List[F::Item], mail: bool, asker: int, stale: bool,
   sending: A::Attempt, sentTo: Dest,
 }
@@ -37,7 +37,7 @@ type Change = {
 pure val nowhere: Place = { folder: 0, path: List(), names: List() }
 pure val initial: Change = {
   attempt: A::plan(0), work: NewFolder, items: List(), name: "", folder: 0, dest: nowhere, approval: 0,
-  clash: V::unreviewed, done: List(), unsure: List(),
+  clash: V::unreviewed, replace: false, done: List(), unsure: List(),
   panel: 0, panels: 0, sharing: List(), mail: false, asker: 0, stale: false,
   sending: A::plan(0), sentTo: Chooser,
 }
@@ -89,18 +89,18 @@ pure def canBegin(c: Change, work: Work, items: List[F::Item], names: List[str],
 
 pure def begin(c: Change, work: Work, items: List[F::Item], names: List[str], folder: int, name: str, dest: Place, approval: int): Change =
   val planned = { ...c, attempt: A::plan(c.attempt.id + 1), work: work, items: items, name: name, folder: folder,
-    dest: if (work == MoveTo or work == CopyTo) dest else nowhere, approval: approval, done: List() }
+    dest: if (work == MoveTo or work == CopyTo) dest else nowhere, approval: approval, replace: false, done: List() }
   if (clashes(work, items, dest) and approval == 0) { ...planned, clash: V::present(c.clash) }
   else { ...planned, attempt: A::dispatch(A::record(planned.attempt)) }
 ```
 
-### The owner keeps both or goes back, and nothing is sent while the choice is open
+### The owner keeps both, replaces, or goes back, and nothing is sent while the choice is open
 
 ```quint
 pure def alwaysAChoiceComesBeforeSending(c: Change): bool = asking(c) implies c.attempt.outcome == A::Planned
 ```
 
-### A choice waits only on a move or a copy that fits, of items not left unknown
+### A choice waits only on a move or a copy that fits, of items not left unknown, and replacing nothing yet
 
 Discovered by the proof: were the change waiting on the owner's choice
 not one that fits, keeping both could send what begin would have refused.
@@ -108,21 +108,34 @@ not one that fits, keeping both could send what begin would have refused.
 ```quint
 pure def alwaysAChoiceWaitsOnAFittingChange(c: Change): bool =
   asking(c) implies
-    ((c.work == MoveTo or c.work == CopyTo) and c.items.length() > 0 and c.approval == 0
+    ((c.work == MoveTo or c.work == CopyTo) and c.items.length() > 0 and not(c.replace) and c.approval == 0
       and not(c.items.some(i => i.id == c.dest.folder or c.dest.path.includes(i.id)))
       and not(c.items.some(i => c.unsure.some(u => u.id == i.id))))
 ```
 
-### Keeping both sends the change as it was begun, and the phone gives each item a free name beside the one it would have taken
+### Keeping both or replacing sends the change as it was begun
 
 ```quint
 pure def canKeepBoth(c: Change): bool = V::canConfirm(c.clash)
 
 pure def keepBoth(c: Change): Change = { ...c, clash: V::confirm(c.clash), attempt: A::dispatch(A::record(c.attempt)) }
 
+pure def canReplaceThem(c: Change): bool = V::canConfirm(c.clash) and c.approval == 0
+
+pure def replaceThem(c: Change): Change = { ...c, clash: V::confirm(c.clash), replace: true, attempt: A::dispatch(A::record(c.attempt)) }
+
 pure def canGoBack(c: Change): bool = asking(c)
 
 pure def goBack(c: Change): Change = { ...c, clash: V::dismiss(c.clash) }
+```
+
+### A file of the same name is replaced only when the owner chose to replace it, never for the agent
+
+```quint
+pure def stepReplacingIsTheOwnersChoice(before: Change, via: str, after: Change): bool =
+  (after.replace and busy(after) and not(busy(before))) implies (via == "replaceThem" and V::canConfirm(before.clash))
+
+pure def alwaysTheAgentNeverReplaces(c: Change): bool = c.replace implies c.approval == 0
 ```
 
 ### Nothing moves into itself or into a folder inside itself
@@ -155,10 +168,11 @@ pure def stepAnUnknownItemIsNotSentAgain(before: Change, via: str, after: Change
   (busy(after) and not(busy(before))) implies after.items.every(i => not(before.unsure.some(u => u.id == i.id)))
 ```
 
-### A change can wait on the owner's choice, be done, be partly done, and leave items unknown
+### A change can wait on the owner's choice, replace, be done, be partly done, and leave items unknown
 
 ```quint
 pure def sometimesNamesClash(c: Change): bool = V::canConfirm(c.clash) and c.items.length() > 1
+pure def sometimesAFileIsReplaced(c: Change): bool = busy(c) and c.replace
 pure def sometimesAChangeIsDone(c: Change): bool = c.attempt.outcome == A::Confirmed and c.done.length() > 1
 pure def sometimesAChangeIsPartlyDone(c: Change): bool = c.attempt.outcome == A::Refused and c.done.length() > 0
 pure def sometimesAnItemIsUnknown(c: Change): bool = c.attempt.outcome == A::Unknown and c.unsure.length() > 0 and c.done.length() > 0
