@@ -31,6 +31,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaDevicePlugin.class);
   registerPlugin(AlphaCarrierSetupPlugin.class);
   registerPlugin(AlphaCallStatePlugin.class);
+  registerPlugin(AlphaCloudSpeechPlugin.class);
   boolean image = AlphaImageCapability.verified(this);
   if (image) registerPlugin(AlphaTelephonyPlugin.class);
   if (AlphaImageCapabilities.aospImage(this)) registerPlugin(ai.eliza.plugins.contacts.ContactsPlugin.class);
