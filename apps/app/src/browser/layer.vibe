@@ -55,6 +55,9 @@ const running = Layer.effectDiscard(effect {
 const base = Layer.provideMerge(tabsLayer, Layer.mergeAll(reviewsLayer, bookmarksLayer, presenterLayer))
 const features = Layer.provideMerge(Layer.mergeAll(egressLayer, handoffLayer, readingLayer, agentLayer, autofillLayer, pageContextLayer), base)
 
+/** Every Browser service over a tab host: the layer below without the platform's own host, so a test can give the browser build's. */
+export const layerOver = Layer.provideMerge(running, Layer.mergeAll(features, cloudRequestsLayer, googleLinkLayer))
+
 /** Every Browser service, over the platform's Native, Cloud and Build, Settings' Preferences, the shell's Navigation, Toasts and Foreground, the assistant's Assistant, and the ReadingVoice and PageMail ports of src/browser/ports.vibe. */
-export const layer = Layer.provideMerge(running, Layer.mergeAll(features, cloudRequestsLayer, googleLinkLayer)).pipe(Layer.provide(tabHostLayer))
+export const layer = layerOver.pipe(Layer.provide(tabHostLayer))
 

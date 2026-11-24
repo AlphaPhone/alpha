@@ -112,16 +112,41 @@ it("showing the tab list is its own exact form with no field, advertised wheneve
 
 // spec/browser/session.md, "The agent shows Browser's own list of open tabs only after its receipt, only while the tab the request came from is still selected, and changes no tab"
 it.live("a Browser with no session refuses the tab list before its receipt, and a started one accepts it", () => effect {
-  const fake = try fakeHost()
+  // The saved session is never read, so Browser has not started when the request arrives.
+  const fake = try fakeHost({ answers: { browsingState: () => Effect.never } })
   try scoped(effect {
     provide fake.live {
       const tabs = try BrowserTabs
+      const ports = try operationPorts
+      try sleep("30 millis")
+      const refused = try promise(() => ports.execute(show, call("early")))
+      const unstarted = try tabs.get()
+      ports.present(show, call("early"))
+      try sleep("30 millis")
+      const said = try Ref.get(fake.toasts)
+      try Effect.try(() => assert.deepStrictEqual({
+        refused,
+        startedBefore: canAgentShowTabs(unstarted, unstarted.cur),
+        listOpen: unstarted.layers.tabsOpen,
+        said,
+      }, {
+        refused: { kind: "refused", code: "not_started", result: { message: "Browser is unavailable." } },
+        startedBefore: false,
+        listOpen: false,
+        said: [],
+      }))
+    }
+  })
+  const started = try fakeHost()
+  try scoped(effect {
+    provide started.live {
+      const tabs = try BrowserTabs
       const agent = try BrowserAgent
-      const started = try settledTabs(tabs)
+      const settled = try settledTabs(tabs)
       const presented = try agent.showTabs()
       try Effect.try(() => assert.deepStrictEqual({
         unstarted: canAgentShowTabs(initial, initial.cur),
-        started: canAgentShowTabs(started, started.cur),
+        started: canAgentShowTabs(settled, settled.cur),
         presented: Effect.isEffect(presented),
       }, { unstarted: false, started: true, presented: true }))
     }

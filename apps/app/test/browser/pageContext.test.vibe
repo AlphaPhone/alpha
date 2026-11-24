@@ -360,6 +360,66 @@ it.effect("the page is captured ahead only on Browser, of a normal tab, with the
   })
 })
 
+// spec/browser/pageContext.md, "On the phone Browser captures the shown page ahead of a message, and a message with a capture of its page waits at most 250 ms for a fresher read"
+it.effect("a read that never answers is shared until its 10 seconds end, and then the next message reads again", () => effect {
+  let mode = "never"
+  const fake = try fakeHost({ answers: { pageContext: () => mode === "never" ? Effect.never : story } })
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const agent = try BrowserAgent
+      const context = try BrowserPageContext
+      try settledTabs(tabs)
+      try loaded(tabs, fake.events, try sessionOf(fake.calls), "https://news.example/story", "1", 1)
+      try pass(750)
+      const ahead = (try callsTo(fake.calls, "pageContext")).length
+      const hung = try waiting(context, try observing(agent), 1300)
+      const sharedHung = (try callsTo(fake.calls, "pageContext")).length
+      mode = "now"
+      const stillHung = try waiting(context, try observing(agent), 1300)
+      const sharedStill = (try callsTo(fake.calls, "pageContext")).length
+      try pass(10000)
+      const after = try waiting(context, try observing(agent), 300)
+      const reads = (try callsTo(fake.calls, "pageContext")).length
+      try Effect.try(() => assert.deepStrictEqual({
+        ahead, hung, sharedHung, stillHung, sharedStill, after: after?.text, reads,
+      }, { ahead: 1, hung: undefined, sharedHung: 1, stillHung: undefined, sharedStill: 1, after: story.text, reads: 2 }))
+    }
+  })
+})
+
+// spec/browser/pageContext.md, "On the phone Browser captures the shown page ahead of a message, and a message with a capture of its page waits at most 250 ms for a fresher read"
+it.live("the browser build captures nothing ahead of a message, and keeps the read a message made for the next one as on the phone", () => effect {
+  let mode = "text"
+  let fetched = 0
+  const original = globalThis.fetch
+  const fake = try fakeHost({ build: "browser" })
+  try scoped(effect {
+    try addFinalizer(() => sync(() => { globalThis.fetch = original }))
+    globalThis.fetch = (async () => {
+      fetched += 1
+      return mode === "never" ? await new Promise<Response>(() => undefined) : new Response(story.text, { headers: { "content-type": "text/plain" } })
+    }) as typeof fetch
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const agent = try BrowserAgent
+      const context = try BrowserPageContext
+      try settledTabs(tabs)
+      try loadPage(tabs, fake.events, try sessionOf(fake.calls), "https://news.example/story", "1", 1)
+      try sleep("900 millis")
+      const ahead = fetched
+      const first = try context.forTurn(try observing(agent), true)
+      mode = "never"
+      const started = try Clock.currentTimeMillis
+      const second = try context.forTurn(try observing(agent), true)
+      const waited = (try Clock.currentTimeMillis) - started
+      try Effect.try(() => assert.deepStrictEqual({
+        ahead, texts: [first?.text, second?.text], fetched, shortWait: waited < 1000,
+      }, { ahead: 0, texts: [story.text, story.text], fetched: 2, shortWait: true }))
+    }
+  })
+})
+
 // spec/browser/pageContext.md, "An exact link of the page the latest message carried keeps its open card, and opens only after the owner approves it"
 it.live("an exact link of the page the message carried gets a card, never opens unreviewed, and opens once approved", () => effect {
   const fake = try fakeHost({ answers: { pageContext: () => story } })

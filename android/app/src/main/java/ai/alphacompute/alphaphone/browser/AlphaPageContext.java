@@ -106,7 +106,7 @@ public final class AlphaPageContext {
   }
  }
 
- /** The page-context script. Its JavaScript source is test/browser/page-context fixtures' subject. */
+ /** The page-context script. Its JavaScript source is apps/app/test/browser/pageContextScript.browser.test.ts' subject. */
  public static final String SCRIPT = """
     (()=>{
     const deadline=performance.now()+400,late=()=>performance.now()>deadline;

@@ -25,9 +25,7 @@ do for one message.
 
 The observation must be the non-sensitive Browser view, and its selected `browser-tab` must be the
 tab Browser shows on the unlocked phone, at the same revision. A message that fails any of these
-reads nothing and waits for nothing. Preferences that cannot be read share no page. The peer's
-fresh status is read beside the page, not before it, so the read begins as for a peer that takes
-it; the page stays on the phone, and the read is withdrawn once that status does not declare it.
+reads nothing and waits for nothing. Preferences that cannot be read share no page.
 
 ```quint
 type PageSetting = SettingOn | SettingOff | SettingUnreadable
@@ -111,8 +109,10 @@ revision and navigation it was read from, and is cleared once it is older than 1
 nowhere outside a message. With the setting off no capture is served, and the next capture, message
 or move to or from Browser clears it; Browser's teardown clears it too. Reads of one page share one
 read, a read of another page stops it, and a finished read is let go, so its page is held only by
-the capture and the messages awaiting it. The browser build captures nothing ahead, since its read
-fetches the address again. A message whose page has a capture waits at most 250 ms for a fresh read
+the capture and the messages awaiting it. A read that has not answered within 10 seconds is
+dropped, so a read that never answers does not stand in for the next one. The browser build
+captures nothing ahead of a message, since its read fetches the address again; the read a message
+itself makes is kept there as on the phone. A message whose page has a capture waits at most 250 ms for a fresh read
 and sends the capture when none answers in time; a fresh read that answers decides, and a refused
 one also drops the capture. A message with no capture waits for the read as above. Either way the
 page is handed to the message only after the setting and the shown page are checked again.
@@ -123,6 +123,7 @@ pure val warmAgeMs = 20000
 pure val warmGapMs = 5000
 pure val freshWaitMs = 250
 pure val captureMaxAgeMs = 600000
+pure val readTimeoutMs = 10000
 type CaptureFacts = { enabled: bool, priv: bool, onDevice: bool, shown: bool, loaded: bool }
 pure def capturesAhead(c: CaptureFacts): bool = c.enabled and not(c.priv) and c.onDevice and c.shown and c.loaded
 pure def warmsAgain(kept: bool, keptAge: int, sinceWarm: int): bool = sinceWarm >= warmGapMs and not(kept and keptAge < warmAgeMs)

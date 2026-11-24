@@ -8,7 +8,8 @@ import { Foreground, type ForegroundState } from "../../src/shell/foreground.vib
 import { Assistant } from "../../src/assistant/assistant.vibe"
 import { Preferences } from "../../src/settings/preferences.vibe"
 import { PageMail, ReadingSpeechFailed, ReadingVoice } from "../../src/browser/ports.vibe"
-import { layer } from "../../src/browser/layer.vibe"
+import { layer, layerOver } from "../../src/browser/layer.vibe"
+import { BrowserCallFailed, TabHost } from "../../src/browser/tabHost.vibe"
 import type { BrowserTabs } from "../../src/browser/session.vibe"
 import { typedAddress } from "../../src/browser/address.ts"
 
@@ -33,6 +34,8 @@ export interface FakeOptions {
   readonly voice?: { readonly binding: boolean; readonly ready: boolean; readonly speaks: boolean }
   /** Whether Inbox can open a draft. */
   readonly mail?: boolean
+  /** The browser build, whose pages are frames and whose tab host reads no page itself; the phone's native host when not given. */
+  readonly build?: "browser"
 }
 
 function defaultAnswer(method: string): unknown {
@@ -55,27 +58,36 @@ export effect function fakeHost(options: FakeOptions = {}) {
   const foreground = try SubscriptionRef.make(shownBrowser)
   const voice = options.voice ?? { binding: false, ready: false, speaks: true }
   const sharing = options.sharing ?? (try Ref.make(true))
+  const answer = effect function (method: string, args?: unknown) {
+    const given = typeof args === "object" && args !== null ? { ...args } : {}
+    try Ref.update(calls, (all) => [...all, { method, args: given }])
+    const answered = answers[method]
+    if (answered === undefined) return defaultAnswer(method)
+    const made = answered(given)
+    const result = Effect.isEffect(made) ? try (made as Effect.Effect<unknown>) : made
+    if (result instanceof Error) throw new NativeFailed({ plugin: "AlphaBrowser", method, message: result.message })
+    return result
+  }
   const native = Layer.succeed(Native, {
     available: () => succeed(true),
-    effect invoke(_plugin: string, method: string, args?: unknown) {
-      const given = typeof args === "object" && args !== null ? { ...args } : {}
-      try Ref.update(calls, (all) => [...all, { method, args: given }])
-      const answer = answers[method]
-      if (answer === undefined) return defaultAnswer(method)
-      const answered = answer(given)
-      const result = Effect.isEffect(answered) ? try (answered as Effect.Effect<unknown>) : answered
-      if (result instanceof Error) throw new NativeFailed({ plugin: "AlphaBrowser", method, message: result.message })
-      return result
-    },
+    invoke: (_plugin: string, method: string, args?: unknown) => answer(method, args),
     listen: (_plugin: string, name: string) => Stream.map(Stream.filter(Stream.fromPubSub(events), (e) => e.name === name), (e) => e.event),
   })
   const speech = (text: string) => effect {
     try Ref.update(spoken, (all) => [...all, text])
     if (!voice.speaks) throw new ReadingSpeechFailed({ reason: "Speech stopped" })
   }
+  // The browser build's tab host: it reads no page, so Browser fetches the address, and it answers the rest from the same fake.
+  const web = Layer.succeed(TabHost, {
+    session: "web-test",
+    onDevice: false,
+    call: effect (method: string, args: Record<string, unknown> = {}) =>
+      answer(method, { ...args, session: "web-test" }) catch effect (error) => { throw new BrowserCallFailed({ method, message: error instanceof Error ? error.message : String(error), unavailable: false }) },
+    events: (name: string) => Stream.map(Stream.filter(Stream.fromPubSub(events), (e) => e.name === name), (e) => e.event),
+  })
   const platform = Layer.mergeAll(
     native,
-    Layer.succeed(Build, { info: { version: "test", variant: "launcher", testMocks: true } }),
+    Layer.succeed(Build, { info: { version: "test", variant: options.build ?? "launcher", testMocks: true } }),
     Layer.succeed(Cloud, {
       base: "https://cloud.test",
       json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown) => effect {
@@ -107,7 +119,7 @@ export effect function fakeHost(options: FakeOptions = {}) {
       },
     }),
   )
-  return { calls, events, opened, toasts, drafts, mails, spoken, cloudCalls, foreground, sharing, live: Layer.provide(layer, platform) }
+  return { calls, events, opened, toasts, drafts, mails, spoken, cloudCalls, foreground, sharing, live: options.build === "browser" ? Layer.provide(layerOver, Layer.merge(platform, web)) : Layer.provide(layer, platform) }
 }
 
 /** The calls the fake host received for `method`. */
