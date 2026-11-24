@@ -40,7 +40,7 @@ The proof stage needs Dafny 4.11.0 on `PATH`; `verify.yml` and the promotion spe
 hash-pinned release with `scripts/ci/prepare-dafny.sh`.
 
 A pull request runs one CI job, `pnpm verify` (`verify.yml`). The Android build
-(`android.yml`: `pnpm android:build:local -- --release`, then the post-build checks) also runs when a
+(`android.yml`: `pnpm android:build:local --release`, then the post-build checks) also runs when a
 pull request changes Android, renderer, script, lockfile or upstream-pin paths; documentation-only
 changes do not run it. The browser tests are not run by PR CI: run `pnpm test:browser` and
 `pnpm test:browser:production` before finalising a PR and say so in its description. CI runs
@@ -177,7 +177,7 @@ tool, which is not merged upstream yet.
 ```sh
 pnpm android:build:inputs       # report missing build inputs
 pnpm android:build:local        # prepare, build worker, stage runtime and build (debug only)
-pnpm android:build:local -- --release   # the same, also building the release APK (CI)
+pnpm android:build:local --release   # the same, also building the release APK (CI)
 pnpm android:verify            # inspect APK contents and signatures
 pnpm android:build:fast -- --install   # developer rebuild after build:local; never distributable
 ```

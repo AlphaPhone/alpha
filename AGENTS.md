@@ -25,7 +25,7 @@ own profile, behind `ALPHA_CLOUD_CUTOVER`, default off; never flip the default w
 `scripts/legacy-retirement.json` maps every legacy root test, Quint model and removed script to the
 area spec under `apps/app/spec/<area>/` that now owns it; delete a legacy file only once that rule
 and its generated conformance test cover it.
-Run `pnpm verify` and the Android build: `pnpm android:build:local -- --release` (input check,
+Run `pnpm verify` and the Android build: `pnpm android:build:local --release` (input check,
 `agent:build-embedding-host`, `agent:bundle`, `agent:stage-android`, `licenses:packaged-runtime`,
 `android:build`; see README). There is one Android product/flavor: the launcher, with the resident
 runtime and on-device voice always packaged. Verify its debug and release artifacts with

@@ -109,7 +109,7 @@ pnpm android:verify
 
 The first command lists anything that is missing. The second prepares the agent
 and builds the debug APK and its instrumentation APK into `artifacts/`; add
-`-- --release` (`pnpm android:build:local -- --release`) to build the release
+`--release` (`pnpm android:build:local --release`) to build the release
 APK too, as CI does. The third checks their contents and signatures.
 
 While iterating on a phone, rebuild after that first `android:build:local` with:
