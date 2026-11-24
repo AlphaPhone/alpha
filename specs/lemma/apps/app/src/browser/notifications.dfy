@@ -58,12 +58,25 @@ method retainDismissed(dismissed: seq<string>, live: set<string>, limit: int) re
     invariant (Then(kept, DropGone(dismissed[i..], live, excess)) == DropGone(dismissed, live, (|dismissed| - limit)))
   {
     var mark := dismissed[i];
+    assert dismissed[i..][0] == mark && dismissed[i..][1..] == dismissed[i + 1..];
     if ((excess > 0) && !((mark in live))) {
       excess := (excess - 1);
     } else {
+      assert Then(kept + [mark], DropGone(dismissed[i + 1..], live, excess)) == Then(kept, DropGone(dismissed[i..], live, excess));
       kept := (kept + [mark]);
     }
     i := (i + 1);
+  }
+  assert dismissed[i..] == [];
+  assert DropGone(dismissed[i..], live, excess) == [];
+  assert Then(kept, []) == kept;
+  assert kept == DropGone(dismissed, live, |dismissed| - limit);
+  assert kept[(|kept| - limit)..] == Newest(kept, limit) by {
+    if limit == 0 {
+      assert kept[(|kept| - limit)..] == [];
+    } else if |kept| == limit {
+      assert kept[(|kept| - limit)..] == kept;
+    }
   }
   return kept[(|kept| - limit)..];
 }

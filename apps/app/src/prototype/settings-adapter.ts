@@ -1287,11 +1287,12 @@ export function installSettingsAdapter(Component: any, views: Bag) {
       const {data,busy,eidBusy,failed}=carrierSession.snapshot();
       const native=Capacitor.isNativePlatform();
       const openCarrier=(page:string)=>()=>void carrierSetup.openSettings({page}).then(result=>{if(result.specific===false)api.toast('Android Settings opened. Search for '+(page==='identifiers'?'IMEI or About phone':page==='apn'?'access point names':page==='default-sms'?'default SMS app':'SIMs or mobile network')+'.');},()=>api.toast('This Android settings page is unavailable.'));
+      const note=(label:string,sub:string):Bag=>({kInfo:true,label,val:'',hasVal:false,hasSub:true,sub,noAB:true});
       const identifier=(label:string,field:CarrierField,token:string):Bag=>field.status==='available'&&field.value?{
         ...action(label,()=>void carrierSession.copy(token).then(copied=>{if(copied&&carrierCurrent())api.toast(label+' copied to the Android clipboard.');},()=>api.toast('Could not copy. Keep Alpha open and unlocked.'))),
         lbl:'Copy '+label,sub:carrierFieldText(field),hasSub:true,val:'Copy',hasVal:true,
       }:info(label,carrierFieldText(field));
-      const groups=[group([
+      const groups:Bag[]=[group([
         ...(native?[{...action(busy?'Reading identifiers…':data?'Refresh identifiers':'Show identifiers',()=>void carrierSession.show()),busy}]:[info('Device identifiers','Available only on an Android phone')]),
         note('Private device information','Read only when you tap above. Values clear when you leave this page. Copy uses the Android clipboard.'),
         ...(failed?[note('Read unavailable','Keep Alpha in front and the phone unlocked, then try again. You can also use Android device identifiers below.')]:[]),
