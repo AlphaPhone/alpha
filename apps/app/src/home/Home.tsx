@@ -4,7 +4,7 @@ import { AppsDrawer, HomeScreen, type HomeInstalledApp, type HomeTileItem, Insta
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import * as Home from "../../gen/app__home.ts";
 import { useMachine as useHome } from "../../gen/app__home.react.ts";
-import { type Tile, badged, saving } from "../../gen/app__home__tiles.ts";
+import { type Tile, badged, ready, saving } from "../../gen/app__home__tiles.ts";
 import type { View } from "../../gen/app__shell.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Resident, Shown } from "../runtime/area.tsx";
@@ -76,8 +76,13 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
     <>
       <HomeScreen
         covered={s.drawer}
-        cards={Home.showsCards(h) ? [<Agenda key="agenda" runtime={runtime} />, <div key="others" className="contents">{alpha.slot("home/cards")}</div>, <MailOnHome key="mail" runtime={alpha.runtime} />] : []}
-        tiles={h.tiles.load.status === "Loaded" ? Home.tilesShown(h, s).map((tile) => tileItem(tile, known.apps, tile.tag === "Own" ? waits.get(tile.view) : undefined, h.editing)) : undefined}
+        cards={Home.showsCards(h) ? [
+          <Agenda key="agenda" runtime={runtime} />,
+          <div key="calls" className="contents">{alpha.slot("home/cards")}</div>,
+          <MailOnHome key="mail" runtime={alpha.runtime} />,
+          <div key="workflows" className="contents">{alpha.slot("home/workflows")}</div>,
+        ] : []}
+        tiles={ready(h.tiles) ? Home.tilesShown(h, s).map((tile) => tileItem(tile, known.apps, tile.tag === "Own" ? waits.get(tile.view) : undefined, h.editing)) : undefined}
         editing={h.editing}
         onOpenTile={(id) => {
           const tile = tileOf(id);

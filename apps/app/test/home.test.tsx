@@ -9,6 +9,7 @@ import { button, closeAll, drawn, fill, hardware, later, open, press, seen, unde
 import { scene } from "./fakes/scene.ts";
 import { waiting } from "../src/home/waiting.vibe";
 import { agendaFrom } from "../src/home/cards.vibe";
+import { savedKey } from "../src/home/saved.vibe";
 import type { Scene } from "./fakes/scene.ts";
 
 underAct();
@@ -79,6 +80,13 @@ describe("Home on a phone", () => {
     const second = await open(world);
     await until(second.alpha, home.runtime(second.alpha), Home.Machine, (h) => h.tiles.load.status === "Loaded" && h.tiles.load.ticket === 2);
     expect(tiles().at(-1)).toBe("view:Notes");
+
+    // spec/app/home/tiles.md, "What was saved comes back as it was saved, an empty Home included; with no record Home shows its defaults"
+    await second.close();
+    localStorage.setItem(savedKey, "{invalid");
+    const recovered = await open(world);
+    await until(recovered.alpha, home.runtime(recovered.alpha), Home.Machine, (h) => h.tiles.load.status === "Failed");
+    expect([tiles(), localStorage.getItem(savedKey)]).toEqual([alphaApps, "{invalid"]);
   });
 
   // spec/app/home/cards.md, "Story: See my day at a glance"; spec/app/home/cards.md, "Story: The agenda card"; spec/app/home/cards.md, "Story: Open my day from a card"
