@@ -9,7 +9,7 @@ const roots=['apps/app/src','apps/app/spec','apps/app/public','apps/app/package.
 roots.push('android/app/src/launcher','android/app/src/release',
  // The Gradle host the pinned upstream generator writes from android/consumer-host.json.
  'android/consumer-host.json','android/app/product.gradle','scripts/android-host.ts','scripts/android-identity.ts',
- 'android/app/cloud-deployment.generated.gradle','scripts/cloud-deployment-policy.ts','scripts/upstream-os.ts',
+ 'android/app/cloud-deployment.generated.gradle','scripts/cloud-deployment-policy.ts','scripts/upstream-os.ts','scripts/upstream-effect.ts',
  'android/.eliza-consumer-profile.json','android/eliza-consumer-host',
  'vendor/eliza/packages/os/src/build','vendor/eliza/packages/os/android/host-templates',
  'android/build.gradle','android/gradle.properties',
@@ -19,7 +19,7 @@ roots.push('android/app/src/launcher','android/app/src/release',
  'android/gradlew','android/gradlew.bat','android/app/proguard-rules.pro',
  'android/notification-fixture/build.gradle','android/notification-fixture/src',
  'scripts/build-android.ts','scripts/android-abis.ts','scripts/update-channel.ts','scripts/android-build-preflight.ts','scripts/toolchain.ts','scripts/verify-upstream.ts',
- 'scripts/pinned-upstream-source.ts','scripts/upstream-pin.ts','scripts/sha256.ts','scripts/verify-apks.ts','scripts/verify-packaged-runtime.py','scripts/apk.ts','scripts/source-snapshot.ts');
+ 'scripts/pinned-upstream-source.ts','scripts/upstream-pin.ts','scripts/sha256.ts','scripts/verify-apks.ts','scripts/verify-packaged-runtime.py','scripts/apk-evidence.ts','scripts/apk.ts','scripts/source-snapshot.ts');
 // The on-device voice record and its staging/verification code are APK inputs. The staged voice
 // outputs and their record are streamed into the freeze so large model files do not require large buffers.
 roots.push('android/voice-host','android/embedding-host','android/paradee-voice','android/local-speech/build.gradle',

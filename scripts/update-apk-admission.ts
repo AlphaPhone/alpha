@@ -10,7 +10,6 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {requireConsistentApk, PACKAGE} from './provision-unit.ts';
 import {androidEnv, tool} from './toolchain.ts';
-import {apkArchiveFacts} from '../vendor/eliza/packages/os/android/apk-distribution.mjs';
 import {updateArtifactDigest} from './update-artifact.ts';
 import {parseXmlTree} from './apk.ts';
 import {apkUpdateChannel, type UpdateChannel} from './update-channel.ts';
@@ -88,7 +87,12 @@ function updateArchive(file: string) {
   const options: ExecFileSyncOptionsWithStringEncoding={env:androidEnv(),encoding:'utf8',timeout:120_000,maxBuffer:16 << 20,stdio:['ignore','pipe','pipe']};
   const badging=execFileSync(tool('aapt'),['dump','badging',file],options);
   const xml=execFileSync(tool('aapt'),['dump','xmltree',file,'AndroidManifest.xml'],options);
-  return {...apkArchiveFacts({badging,xml,names:[]}),xml};
+  return {
+    packageName: /package: name='([^']+)'/.exec(badging)?.[1],
+    home: xml.includes('android.intent.category.HOME'),
+    launcher: xml.includes('android.intent.category.LAUNCHER'),
+    xml,
+  };
 }
 
 /** Production default: inspect exact admitted bytes, then return the original

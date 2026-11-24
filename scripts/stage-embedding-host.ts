@@ -125,7 +125,7 @@ export function verifyEmbeddingHost(productRoot: string,{requireProducerInputs=f
 /** Every packaged resident ABI needs its own exact engine, STL and product JNI bridge. */
 export function embeddingApkProblems(bundle:{names:readonly string[];read:(name:string)=>Buffer},manifest:Pick<EmbeddingManifest,'abi'|'libraries'|'additionalAbis'>) {
  const problems:string[]=[],abis=embeddingAbiLibraries(manifest);
- const residentAbis=[...new Set(bundle.names.flatMap(name=>/^lib\/([^/]+)\/libeliza_bun\.so$/.exec(name)?.[1]??[]))];
+ const residentAbis=[...new Set(bundle.names.flatMap(name=>/^lib\/([^/]+)\/libeliza_(?:bun|node)\.so$/.exec(name)?.[1]??[]))];
  for(const abi of residentAbis){
   const record=abis.find(row=>row.abi===abi);
   if(!record){problems.push('Resident embedding ABI is not admitted: '+abi);continue;}

@@ -152,7 +152,7 @@ test("production stage-aosp --target pixel10a refuses a missing trust identity b
   const product = JSON.parse(fs.readFileSync(path.join(repo.dir, PIXEL10A_PRODUCT), "utf8"));
   product.signer.platformCertificateSha256 = "UNSET";
   repo.write(PIXEL10A_PRODUCT, product);
-  const out = spawnSync(process.execPath, [path.join(root, "scripts/stage-aosp.ts"), "--target", "pixel10a", "--descriptor", "reviewed.json",
+  const out = spawnSync(process.execPath, ["--conditions=eliza-source", "--import", import.meta.resolve("vibelang/register"), path.join(root, "scripts/stage-aosp.ts"), "--target", "pixel10a", "--descriptor", "reviewed.json",
     "--apk", "absent.apk", "--aosp-source", "/absent/source", "--factory-image", "/absent/factory.zip"], { cwd: repo.dir, encoding: "utf8" });
   assert.notEqual(out.status, 0);
   assert.match(out.stderr, /Refusing production staging: the Pixel 10a production product \(android\/aosp\/pixel10a-product\.json\) is incomplete\.[\s\S]*platformCertificateSha256/);

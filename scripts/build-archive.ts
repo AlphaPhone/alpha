@@ -2,7 +2,7 @@ import {androidIdentity} from './android-identity.ts';
 /**
  * Verify, build the launcher APKs and retain immutable matching app/test artifacts.
  *
- *   node scripts/build-archive.ts test-results/<new-archive>
+ *   node --conditions=eliza-source --import vibelang/register scripts/build-archive.ts test-results/<new-archive>
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -14,7 +14,7 @@ import {buildEnv as androidBuildEnv} from './build-android.ts';
 import {publicUpdateChannel} from './update-channel.ts';
 const cli=process.argv.slice(2);
 const runtimeProfile='native';
-assert.ok(cli.length===1&&!cli[0].startsWith('--'),'Use: node scripts/build-archive.ts test-results/<new-archive>');
+assert.ok(cli.length===1&&!cli[0].startsWith('--'),'Use: node --conditions=eliza-source --import vibelang/register scripts/build-archive.ts test-results/<new-archive>');
 const [destination]=cli;
 // Full verification compiles Calendar host tests which run real SQLite queries.
 // Check this before preparation or model verification starts.
@@ -92,6 +92,6 @@ if(fs.existsSync(mapping)){
 fs.writeFileSync(path.join(destination,'release-mappings.json'),JSON.stringify(mappings,null,2)+'\n',{flag:'wx'});
 fs.copyFileSync(path.join(sourceDir,'apk-manifest.json'),path.join(destination,'apk-verification.json'),fs.constants.COPYFILE_EXCL);
 // Preserve the exact web payload from the hash-checked, archived APK.
-archiveWebPayload(path.join(destination,'launcher-debug.apk'),path.join(destination,'web-dist'));
+await archiveWebPayload(path.join(destination,'launcher-debug.apk'),path.join(destination,'web-dist'),manifest['launcher-debug.apk']);
 fs.writeFileSync(path.join(destination,'apk-manifest.json'),JSON.stringify(manifest,null,2));
 console.log(JSON.stringify({archive:destination,sourceFingerprint:after.digest,apks:Object.keys(manifest).length}));

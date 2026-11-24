@@ -6,11 +6,12 @@
 import {execFileSync} from 'node:child_process';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {Effect} from 'effect';
-import * as NodeServices from '@effect/platform-node/NodeServices';
+import {run} from './upstream-effect.ts';
 import * as osBuild from '@elizaos/os/build';
 import * as osImage from '@elizaos/os/image';
 import {buildAgentBundle as upstreamBuildAgentBundle, readBundleManifest, residentLoadList} from '@elizaos/agent/bundle';
+
+export {run};
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 /** The upstream checkout the workspace links its @elizaos packages from. */
@@ -19,13 +20,6 @@ export const UPSTREAM = path.join(ROOT, 'vendor/eliza');
 export const OS_PACKAGE = path.join(UPSTREAM, 'packages/os');
 /** The upstream os command line (stage-launcher, qualify-device, ota, keys, chromium). */
 export const OS_CLI = path.join(OS_PACKAGE, 'src/cli.vibe');
-
-type Program<A> = Effect.Effect<A, unknown, never> | Effect.Effect<A, unknown, unknown>;
-
-/** Run one upstream Effect program with the Node platform services. */
-export function run<A>(program: Program<A>): Promise<A> {
-  return Effect.runPromise(Effect.provide(program as Effect.Effect<A, unknown, NodeServices.NodeServices>, NodeServices.layer) as Effect.Effect<A, unknown, never>);
-}
 
 /** Run the upstream os command line with the given arguments, inheriting output. */
 export function osCli(args: readonly string[], options: {cwd?: string; env?: NodeJS.ProcessEnv} = {}) {

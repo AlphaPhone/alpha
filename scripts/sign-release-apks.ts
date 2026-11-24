@@ -258,12 +258,12 @@ export async function main(argv: readonly string[], { root = process.cwd(), env 
     log(`Signed ${path.relative(root, target.output)} with the release certificate ${signer}.`);
   }
   if (!options.verify || options.apk) {
-    if (!options.apk) log("Skipped verify-apks: apk-manifest.json still describes the unsigned build. Run node scripts/verify-apks.ts before using these APKs.");
+    if (!options.apk) log("Skipped verify-apks: apk-manifest.json still describes the unsigned build. Run npm run android:verify before using these APKs.");
     return 0;
   }
   const runner = run ?? ((command, args) => execFileSync(command, args, { cwd: root, stdio: "inherit" }));
   const { sbomArgs } = await import("./build-android.ts");
-  runner(process.execPath, ["scripts/verify-apks.ts"]);
+  runner(process.execPath, ["--conditions=eliza-source", "--import", "vibelang/register", "scripts/verify-apks.ts"]);
   runner(process.execPath, ["scripts/generate-sbom.ts", ...sbomArgs("artifacts", root)]);
   log("apk-manifest.json and the SBOM now describe the signed releases. A signed release is distributable only when verify-apks says so; it is not installation, image or device evidence.");
   return 0;

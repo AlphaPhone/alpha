@@ -82,7 +82,7 @@ test("re-verification takes no profile option; a build record that is not the na
   fs.writeFileSync(path.join(current, "artifacts/build-config.json"), JSON.stringify({ testMocks: false, runtimeProfile: "native" }));
   const signed = await sign(current, ["--keys-dir", keys(t), "--apksigner", tool]);
   assert.equal(signed.code, 0, signed.err);
-  assert.deepEqual(signed.ran[0], ["scripts/verify-apks.ts"]);
+  assert.deepEqual(signed.ran[0], ["--conditions=eliza-source", "--import", "vibelang/register", "scripts/verify-apks.ts"]);
   for (const record of [{ testMocks: false, runtimeProfile: "cloud" }, { testMocks: false, runtimeProfile: "native", localEmbeddings: true }]) {
     const stale = product(t);
     fs.writeFileSync(path.join(stale, "artifacts/build-config.json"), JSON.stringify(record));

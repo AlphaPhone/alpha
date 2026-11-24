@@ -42,10 +42,10 @@ test("AOSP staging refuses test-mocks and non-distributable inputs before any st
     fs.copyFileSync(path.join(root, "app.config.json"), path.join(dir, "app.config.json"));
     completeAospLock(dir);
     fs.mkdirSync(path.join(dir, "artifacts/test-mocks"), { recursive: true });
-    const stage = args => spawnSync(process.execPath, [path.join(root, "scripts/stage-aosp.ts"), "--target", "cuttlefish", "--aosp-source", "absent-source", ...args], { cwd: dir, encoding: "utf8" });
+    const stage = args => spawnSync(process.execPath, ["--conditions=eliza-source", "--import", import.meta.resolve("vibelang/register"), path.join(root, "scripts/stage-aosp.ts"), "--target", "cuttlefish", "--aosp-source", "absent-source", ...args], { cwd: dir, encoding: "utf8" });
     const flagOn = path.join(dir, "artifacts/test-mocks/launcher-debug.apk");
     zip(flagOn, { "assets/public/build-flags.json": JSON.stringify({ testMocks: true }) });
-    const raw = args => spawnSync(process.execPath, [path.join(root, "scripts/stage-aosp.ts"), ...args], { cwd: dir, encoding: "utf8" });
+    const raw = args => spawnSync(process.execPath, ["--conditions=eliza-source", "--import", import.meta.resolve("vibelang/register"), path.join(root, "scripts/stage-aosp.ts"), ...args], { cwd: dir, encoding: "utf8" });
     let out = raw(["--aosp-source", "absent-source", "--apk", flagOn, "--development"]);
     assert.notEqual(out.status, 0);
     assert.match(out.stderr, /Staging requires --target pixel10a or --target cuttlefish/);
@@ -121,7 +121,7 @@ test("AOSP production staging refuses a missing or foreign descriptor", () => {
   try {
     fs.copyFileSync(path.join(root, "app.config.json"), path.join(dir, "app.config.json"));
     completeAospLock(dir);
-    const stage = args => spawnSync(process.execPath, [path.join(root, "scripts/stage-aosp.ts"), "--target", "cuttlefish", "--aosp-source", "absent-source", ...args], { cwd: dir, encoding: "utf8" });
+    const stage = args => spawnSync(process.execPath, ["--conditions=eliza-source", "--import", import.meta.resolve("vibelang/register"), path.join(root, "scripts/stage-aosp.ts"), "--target", "cuttlefish", "--aosp-source", "absent-source", ...args], { cwd: dir, encoding: "utf8" });
     // The missing-APK message says which staging was asked for.
     assert.match(stage(["--development"]).stderr, /Development staging: supply --apk PATH to a flag-off debug launcher APK\./);
     assert.match(stage(["--descriptor", "reviewed.json"]).stderr, /Production staging: supply --apk PATH to the signed launcher release APK that verify-apks recorded as distributable\./);
