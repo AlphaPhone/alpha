@@ -700,6 +700,23 @@ it.live("Be told exactly what happened (spec/telephony/actions.md, \"Story: Be t
   }
 })
 
+it.live("An approved SMS uses its own send record without dispatching again", () => effect {
+  // spec/telephony/actions.md, "A dispatched effect settles with what the phone answered, and a lost answer is unconfirmed, never nothing"
+  const fake = fakePhone()
+  provide fake.layer {
+    const actions = try TelephonyActions
+    try sync(() => {
+      fake.world.smsAnswer = async () => ({ kind: "sms-send", operationId: "op-watch", subscriptionId: 7, bindingHash: "", status: "submitted", parts: [], createdAt: 9 })
+      fake.world.smsHistory = [{ operationId: "another-send", status: "delivered" }, { operationId: "op-watch", status: "failed" }]
+    })
+    const done = try actions.run({ type: "sms_send", recipients: ["4155550100"], body: "On my way", subscriptionId: 7 }, "op-watch", { text: "text 415-555-0100 on my way" })
+    try Effect.try(() => assert.deepStrictEqual(
+      { settled: done.settled, status: (done.result as { status: string }).status, calls: fake.calls.filter((call) => call === "sendSms" || call === "smsSendResult") },
+      { settled: "NotDone", status: "failed", calls: ["sendSms", "smsSendResult"] },
+    ))
+  }
+})
+
 it.live("See what is new from Home (spec/telephony/attention.md, \"Story: See what is new from Home\")", () => effect {
   // spec/telephony/attention.md, "A card exists only for a source that was read and has something new"
   const fake = fakePhone()

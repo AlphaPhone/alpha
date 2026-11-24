@@ -9,7 +9,7 @@ import {
 import { Machine as CallBarMachine } from "../../gen/telephony__callBar.effect.vibe"
 import { sameLine, withoutBody, writtenNumbers } from "../assistant/grounding.vibe"
 import { OwnerRequest } from "./actions.schema.vibe"
-import { callerOf, TelephonyBridges, TelephonyRefused, TelephonyUnavailable } from "./bridges.vibe"
+import { callerOf, TelephonyBridges, TelephonyRefused, TelephonyUnavailable, watchSubmittedSms } from "./bridges.vibe"
 import { CallWatch } from "./call-bar.vibe"
 import { ContactsView } from "./contacts.vibe"
 import { DraftSends } from "./drafts.vibe"
@@ -297,13 +297,15 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
     return { result, settled } satisfies ActionExecution
   }
 
-  effect function sendText(runId: string, recipients: readonly string[], body: string, operationId: string, subscriptionId?: number) {
+  effect function sendText(recipients: readonly string[], body: string, operationId: string, subscriptionId?: number) {
     const status = try bridgeCall("status", (c) => c.messages.status())
     const sim = subscriptionId ?? status.defaultSmsSubscriptionId ?? (status.subscriptions?.length === 1 ? status.subscriptions[0]!.id : undefined)
     const id = operationIdOf(operationId)
     const numbers = recipients.map(normalizePhoneNumber).filter((n) => n !== null)
     if (sim === undefined || id === null || numbers.length !== recipients.length) return undefined
-    return try bridgeCall("sendSms", (c) => c.messages.sendSms({ recipients: numbers, body, subscriptionId: sim }, id))
+    const review = { recipients: numbers, body, subscriptionId: sim }
+    const sent = try bridgeCall("sendSms", (c) => c.messages.sendSms(review, id))
+    return try watchSubmittedSms(bridgeCall, review, id, sent)
   }
 
   /** Alpha's draft into `thread` for `recipients`, then Messages shows it; it never sends. */
@@ -346,7 +348,7 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
     }
     if (draftOnly) return try drafted(runId, "new", [number], op.body, `compose:${number}`)
     if (!(try guard(runId))) return { result: result("unavailable"), settled: "Refused", refusal: "emergency" } satisfies ActionExecution
-    const sent = (sendText(runId, [number], op.body, operationId) catch (failure) => failure)
+    const sent = (sendText([number], op.body, operationId) catch (failure) => failure)
     if (sent === undefined || sent instanceof TelephonyUnavailable) return try finish(runId, result("unavailable"), "unavailable")
     if (sent instanceof TelephonyRefused) return sent.code === undefined ? try lost(runId, result("unknown")) : try finish(runId, result("unavailable"), "unavailable")
     const status = sent.status === "denied" ? "unavailable" : sent.status
@@ -441,7 +443,7 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
         case "sms_send": {
           if ((try tell({ type: "numberReady", runId: operationId, number: op.recipients[0] }, "Device")) === undefined) return try cancelled(operationId, undefined)
           if (!(try guard(operationId))) return { result: undefined, settled: "Refused", refusal: "emergency" } satisfies ActionExecution
-          const sent = (sendText(operationId, op.recipients, op.body, operationId, op.subscriptionId) catch (failure) => failure)
+          const sent = (sendText(op.recipients, op.body, operationId, op.subscriptionId) catch (failure) => failure)
           if (sent === undefined || sent instanceof TelephonyUnavailable || sent instanceof TelephonyRefused)
             return sent instanceof TelephonyRefused && sent.code === undefined ? try lost(operationId, undefined) : try finish(operationId, undefined, "unavailable")
           return try finish(operationId, sent, sent.status)

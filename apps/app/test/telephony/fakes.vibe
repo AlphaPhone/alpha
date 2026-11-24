@@ -1,4 +1,5 @@
 // spec/telephony/index.md
+import type { DirectSmsReview, OperationId } from "@elizaos/os/bridges/messages"
 import type { TelephonyStatus } from "@elizaos/os/bridges/phone"
 import { CloudSession } from "../../src/account/layer.vibe"
 import { Build } from "../../src/platform/build.vibe"
@@ -101,7 +102,11 @@ export function fakePhone(variant: "aosp" | "launcher" | "browser" = "aosp") {
       return queued("MessageRecord", reference.id)
     },
     sendSms: async () => { log("sendSms"); sent++; return await world.smsAnswer() },
-    smsSendResult: async () => (log("smsSendResult"), { kind: "sms-send", operationId: "x", subscriptionId: 7, bindingHash: "", status: "sent", parts: [], createdAt: 9 }),
+    smsSendResult: async (review: DirectSmsReview, operationId: OperationId) => {
+      log("smsSendResult")
+      const record = world.smsHistory.find((entry) => entry.operationId === operationId)
+      return { kind: "sms-send", operationId, subscriptionId: review.subscriptionId, bindingHash: "", status: record?.status ?? "sent", parts: [], createdAt: 9 }
+    },
     smsSendHistory: async () => (log("smsSendHistory"), world.smsHistory.map((entry) => ({ kind: "sms-send", subscriptionId: 7, bindingHash: "", parts: [], createdAt: 9, ...entry }))),
     sendMms: async () => { log("sendMms"); sent++; return { status: "submitted", createdAt: 9 } },
     mmsSendResult: async () => ({ status: "sent", createdAt: 9 }),
