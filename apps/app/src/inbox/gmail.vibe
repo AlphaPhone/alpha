@@ -1,8 +1,9 @@
 // spec/app/inbox/index.md, "Story: See my mail"; spec/app/inbox/index.md, "Story: See my last list when offline"; spec/app/inbox/message.md, "Story: Read a message"
-import { CloudError, type GoogleStatus, type MailCard, type MailMessage, type MailOperation } from "@elizaos/cloud/client"
+import { CloudError, type GoogleStatus, type MailCapabilities, type MailCard, type MailMessage, type MailOperation } from "@elizaos/cloud/client"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type { Failure, Folder, Linked, Mailbox, Selection } from "../../gen/app__inbox.ts"
 import type { Fault } from "../../gen/app__inbox__message.ts"
+import type { Policy } from "../../gen/app__inbox__letter.ts"
 import { Cloud } from "../platform/cloud.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 
@@ -44,6 +45,27 @@ module pure {
 }
 import { type Kept, type Ledger, type Letter, readLedger } from pure
 export type { Letter }
+
+/** What one account may attach to an email, and whether a forward from it can carry the original's attachments. */
+export interface Limits {
+  readonly policy: Policy
+  readonly forwards: boolean
+}
+
+/** What an account may attach until the cloud reports its own limits: ten files, five MiB in all, and forwards as text. */
+export const unreported: Limits = { policy: { files: 10, mib: 5 }, forwards: false }
+
+/** How many files the cloud takes on one email. */
+const filesPerEmail = 10
+
+// spec/app/inbox/letter.md, "Attachments stay within what the From account accepts: so many files, and so much in all"
+/** The limits the cloud reports with an account's capabilities: its largest total in whole MiB, and forwarding attachments where it reads them and sends. */
+export function limitsOf(capabilities: MailCapabilities): Limits {
+  return {
+    policy: { files: filesPerEmail, mib: Math.max(0, Math.floor(capabilities.attachmentPolicy.maxBytes / 1_048_576)) },
+    forwards: (capabilities.reads ?? []).includes("attachment") && capabilities.kinds.includes("send"),
+  }
+}
 
 const blank: Ledger = { accounts: {}, credentials: {}, grants: {}, messages: {}, cards: {}, next: 1, kept: undefined }
 const key = "alpha/inbox/mail"
@@ -90,6 +112,9 @@ export service Mail {
   shown(state: Mailbox): ReadonlyArray<Letter>
   read(ticket: number, body: MailMessage): void
   body(ticket: number): MailMessage | undefined
+  /** What `account` may attach, as the newest account check read it from the cloud. */
+  limits(account: number): Limits
+  limited(account: number, limits: Limits): void
   /** Forget every account, message and list of the session before. */
   forget(): void!!
 }
@@ -101,6 +126,7 @@ export const mail = Layer.effect(Mail, effect {
   let history = ""
   const cursors = new Map<string, number>()
   const bodies = new Map<number, MailMessage>()
+  const reported = new Map<number, Limits>()
   effect function keep(changed: Ledger): void!! {
     ledger = changed
     try ignore(store.set(key, JSON.stringify(ledger)))
@@ -160,9 +186,14 @@ export const mail = Layer.effect(Mail, effect {
       bodies.set(ticket, body)
     },
     body: (ticket: number) => bodies.get(ticket),
+    limits: (account: number) => reported.get(account) ?? unreported,
+    limited(account: number, limits: Limits) {
+      reported.set(account, limits)
+    },
     effect forget() {
       current = []
       bodies.clear()
+      reported.clear()
       try keep(blank)
     },
   }
@@ -205,7 +236,13 @@ export effect function connections(): ReadonlyArray<Linked>!unknown!(Cloud | Mai
   const account = try ledger.account(status.identity.email)
   const connection = status.connectionId ?? status.identity.email
   try ledger.granted(account, connection)
-  return [{ account, credential: try ledger.credential(connection), grant: consentOf(status) }]
+  const grant = consentOf(status)
+  // spec/app/inbox/drafts.md, "Story: Write a message": the From account's attachment limits as the cloud reports them.
+  if (grant.read) {
+    const capabilities = asked(() => client.gmailCapabilities({ grantId: connection })) catch () => undefined
+    if (capabilities !== undefined) ledger.limited(account, limitsOf(capabilities))
+  }
+  return [{ account, credential: try ledger.credential(connection), grant }]
 }
 
 /** What eliza's client threw: a `CloudError` where the cloud refused or could not be reached. */

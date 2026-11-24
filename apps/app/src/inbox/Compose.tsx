@@ -21,7 +21,7 @@ import { untimed } from "../runtime/reactor.vibe";
 import type { Time } from "../runtime/time.vibe";
 import { Incoming, mibOf } from "./adding.vibe";
 import { Offers, fits } from "./suggestion.vibe";
-import { Letters, type Words, acceptable, policy } from "./composer.vibe";
+import { Letters, type Words, acceptable } from "./composer.vibe";
 import { Mail } from "./gmail.vibe";
 
 export interface ComposeProps {
@@ -62,6 +62,7 @@ export function Compose({ runtime, list }: ComposeProps) {
   const words = runtime.runSync(Letters.use((all) => Effect.sync(() => all.words(draft))));
   const access = accessOf(list, letter.account);
   const from = runtime.runSync(Mail.use((mail) => Effect.sync(() => mail.email(letter.account))));
+  const { policy } = runtime.runSync(Mail.use((mail) => Effect.sync(() => mail.limits(letter.account))));
   const write = { type: "write", now: untimed } as const;
   const change = (next: Partial<Words>) => {
     if (!can(write, "Owner")) return;
@@ -100,12 +101,17 @@ export function Compose({ runtime, list }: ComposeProps) {
   const attach = { type: "attach", draft } as const;
   const refused = adding.state.draft === draft && adding.state.refused !== "Accepted" ? refusals[adding.state.refused] : undefined;
   // spec/app/inbox/drafts.md, "A file joins the draft open only within its account's limits, and one is removed with its size"
+  const forwarded = words.forwarded;
   const detach = (id: string) => {
-    const file = words.files[Number(id)];
+    const part = forwarded?.parts.find((one) => `f${one.partId}` === id);
+    const file = part ?? words.files[Number(id)];
     const event = { type: "detach", now: untimed, mib: mibOf(file?.size ?? 0) } as const;
     if (!file || !can(event, "Owner")) return undefined;
+    const left = part === undefined || forwarded === undefined
+      ? { files: words.files.filter((_, at) => at !== Number(id)) }
+      : { forwarded: { ...forwarded, parts: forwarded.parts.filter((one) => one !== part) } };
     return () => {
-      runtime.runSync(Letters.use((all) => Effect.sync(() => all.set(draft, { ...words, files: words.files.filter((_, at) => at !== Number(id)) }))));
+      runtime.runSync(Letters.use((all) => Effect.sync(() => all.set(draft, { ...words, ...left }))));
       void send(event, "Owner");
     };
   };
@@ -122,7 +128,7 @@ export function Compose({ runtime, list }: ComposeProps) {
         onSubjectChange={(subject) => change({ subject })}
         text={words.text}
         onTextChange={(text) => change({ text })}
-        attachments={words.files.map((file, at) => ({ id: String(at), name: file.name }))}
+        attachments={[...(forwarded?.parts ?? []).map((part) => ({ id: `f${part.partId}`, name: part.name })), ...words.files.map((file, at) => ({ id: String(at), name: file.name }))]}
         onRemoveAttachment={(id) => detach(id)?.()}
         onAttach={adding.can(attach) && canAttach(letter, policy, 1) ? () => void adding.send(attach) : undefined}
         notice={refused}
@@ -194,6 +200,7 @@ export function FileOffer({ runtime }: { runtime: ComposeProps["runtime"] }) {
   if (!state || !drafts.state) return null;
   const held = runtime.runSync(Incoming.use((files) => Effect.sync(() => files.file())));
   const open = state.thing !== 0 && held !== undefined && held.source !== "Picker";
+  const { policy } = runtime.runSync(Mail.use((mail) => Effect.sync(() => mail.limits(drafts.state?.letter.account ?? 0))));
   const room = state.into === 0 || (drafts.state.open && drafts.state.letter.id === state.into && canAttach(drafts.state.letter, policy, state.mib));
   const takeIn = { type: "takeIn", room } as const;
   return (

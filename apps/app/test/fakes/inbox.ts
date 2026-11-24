@@ -1,5 +1,5 @@
 // spec/app/inbox/index.md, "Story: See my mail"
-import type { GoogleStatus, MailCard, MailMessage, MailOperation, MailSearch } from "@elizaos/cloud/client";
+import type { GoogleStatus, MailCapabilities, MailCard, MailMessage, MailOperation, MailSearch } from "@elizaos/cloud/client";
 import type { Route } from "./routes.ts";
 
 /** A message of the fake mailbox: eliza's card of it, and what reading it whole gives. */
@@ -25,6 +25,12 @@ export interface InboxScene {
   readonly changes: string[];
   /** The name of every file a dispatched send carried. */
   readonly attached: string[];
+  /** The largest total of attachments, in bytes, the cloud reports Gmail takes on one email of the account. */
+  limit: number;
+  /** Whether the cloud reads a message's attachments for the account, so that a forward can carry them. */
+  forwards: boolean;
+  /** Each part of an original a dispatched send carried, as `<message>/<part>`. */
+  readonly forwarded: string[];
 }
 
 const everything: GoogleStatus["grantedCapabilities"] = ["google.basic_identity", "google.gmail.triage", "google.gmail.send", "google.gmail.manage"];
@@ -51,6 +57,7 @@ export function inboxScene(): InboxScene {
       letter(4, "Notes from me", ["SENT"]),
     ],
     history: 500, offline: false, revoked: false, changes: [], attached: [],
+    limit: 25 * 1_048_576, forwards: true, forwarded: [],
   };
 }
 
@@ -110,6 +117,15 @@ export function inboxRoutes(scene: InboxScene): Route[] {
     },
     (request, url) => (request.method === "GET" && url.pathname === `${google}/status` ? Response.json(status(scene)) : undefined),
     (request, url) => {
+      if (request.method !== "GET" || url.pathname !== `${google}/gmail/inbox-v1/capabilities`) return;
+      const capabilities: MailCapabilities = {
+        version: 1, from: scene.google?.email ?? "", reads: scene.forwards ? ["search", "read", "attachment"] : ["search", "read"],
+        kinds: ["send", "draft-create", "draft-replace", "draft-delete", "archive", "unarchive", "trash", "untrash", "mark-read", "mark-unread"],
+        attachmentPolicy: { mimeTypes: [], maxBytes: scene.limit },
+      };
+      return Response.json(capabilities);
+    },
+    (request, url) => {
       if (request.method !== "GET" || url.pathname !== `${google}/gmail/search`) return;
       const size = Number(url.searchParams.get("maxResults") ?? "25");
       const from = Number((url.searchParams.get("pageToken") ?? "p0").slice(1));
@@ -137,9 +153,10 @@ export function inboxRoutes(scene: InboxScene): Route[] {
     (request, url) => {
       const requestId = new RegExp(`^${operations}/([^/]+)/dispatch$`, "u").exec(url.pathname)?.[1];
       if (request.method !== "POST" || requestId === undefined || asked.get(requestId)?.kind !== "send") return;
-      return request.json().then(({ proposal }: { proposal: { to: string[]; subject: string; bodyText: string; attachments?: { name: string }[] } }) => {
+      return request.json().then(({ proposal }: { proposal: { to: string[]; subject: string; bodyText: string; attachments?: { name: string }[]; forwardAttachments?: { messageId: string; partIds: string[] } } }) => {
         scene.changes.push(`send ${proposal.to.join(",")} ${proposal.subject}`);
         scene.attached.push(...(proposal.attachments ?? []).map((file) => file.name));
+        scene.forwarded.push(...(proposal.forwardAttachments?.partIds ?? []).map((part) => `${proposal.forwardAttachments?.messageId}/${part}`));
         scene.mail.push({ ...letter(scene.mail.length + 100, proposal.subject, ["SENT"], proposal.bodyText), card: { ...letter(scene.mail.length + 100, proposal.subject, ["SENT"]).card, to: proposal.to } });
         return Response.json(operation(requestId, "send", "succeeded"));
       });

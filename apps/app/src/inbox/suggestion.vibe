@@ -7,7 +7,7 @@ import type { Actor } from "../../gen/app__inbox__access.ts"
 import { held } from "../../gen/app__inbox__shelf.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { type Job, contained, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
-import { Letters, policy } from "./composer.vibe"
+import { Letters } from "./composer.vibe"
 import { Mail } from "./gmail.vibe"
 
 /** The longest text a draft takes, in characters: Gmail's own limit on a message, with room to spare. */
@@ -62,7 +62,7 @@ effect function startedWith(target: Target, account: number, message: number, te
   const card = message === 0 ? undefined : ledger.card(message)
   const sender = card === undefined ? "" : /<([^>]+)>/u.exec(card.from)?.[1] ?? card.from.trim()
   const replying = target === "NewReply"
-  const event: Drafts.Event = { type: "startedWith", kind: replying ? "Reply" : "Fresh", account, replyTo: false, addressable: !replying || sender !== "", policy }
+  const event: Drafts.Event = { type: "startedWith", kind: replying ? "Reply" : "Fresh", account, replyTo: false, addressable: !replying || sender !== "", policy: ledger.limits(account).policy }
   const sent = try exit(composer.send(event, "Owner"))
   if (!Exit.isSuccess(sent) || !sent.value.state.open) return
   const subject = card === undefined ? "" : card.subject.toLowerCase().startsWith("re:") ? card.subject : `Re: ${card.subject}`

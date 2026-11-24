@@ -192,7 +192,10 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const file = files.at(state.attachment - 1);
   const outcome = state.file.outcome;
   const link = loaded ? linksOf(read.bodyText).at(state.link - 1) : undefined;
-  const answered = card === undefined ? undefined : { id: card.id, from: card.from, others: [...card.to, ...card.cc], subject: card.subject, files: files.length };
+  const answered = card === undefined ? undefined : {
+    id: card.id, from: card.from, others: [...card.to, ...card.cc], subject: card.subject, history: card.metadata.historyId ?? "",
+    files: files.filter((one) => one.supported).map(({ partId, name, size }) => ({ partId, name, size })),
+  };
   return (
     <>
       <InboxMessageScreen

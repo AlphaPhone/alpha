@@ -199,8 +199,10 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   expect([rows(), told()]).toEqual([[], expect.stringContaining("Alpha cannot read this mail")]);
 });
 
-it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I reviewed\"; spec/app/inbox/drafts.md, \"Story: Write a message\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\"; spec/app/inbox/suggestion.md, \"Story: Review what is offered into my email\"; spec/app/inbox/sending.md, \"Story: Save my draft to Gmail, or delete it there, knowingly\")", async () => {
+it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I reviewed\"; spec/app/inbox/drafts.md, \"Story: Write a message\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\"; spec/app/inbox/suggestion.md, \"Story: Review what is offered into my email\"; spec/app/inbox/sending.md, \"Story: Save my draft to Gmail, or delete it there, knowingly\"; spec/app/inbox/letter.md, \"Story: Begin a draft\")", async () => {
   const world = { ...scene(), phone: false };
+  const lunch = world.inbox.mail.find((stored) => stored.card.subject === "Lunch on Friday");
+  if (lunch) lunch.files = [{ partId: "2", name: "menu.pdf", mimeType: "application/pdf", size: 3 * 1_048_576, supported: true }];
   const { alpha } = await open(world);
   const runtime = inbox.runtime(alpha);
   await press("Inbox");
@@ -254,4 +256,21 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
 
   // spec/app/inbox/drafts.md, "Once its send is confirmed, a draft unchanged since the revision sent is forgotten; one edited after it, or whose write is in flight, is kept and marked as sent"
   await until(alpha, runtime, Writing, (s) => !s.open && s.shelf.shelved.length === 0);
+
+  // spec/app/inbox/letter.md, "A reply goes to the Reply-To address when the message has one, else to its sender; a reply to all adds everyone else on its To and Cc; a forward carries the original's attachments only where the account may forward them and they fit, and is otherwise text only and says so"; spec/app/inbox/letter.md, "Attachments stay within what the From account accepts: so many files, and so much in all"
+  await press("Back to the list");
+  await until(alpha, runtime, Shown, (s) => s.message === 0);
+  await row("Lunch on Friday");
+  await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded");
+  await menu("Forward");
+  await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "Forward" && s.letter.attachments === 1 && s.letter.mib === 3 && !s.letter.textOnly);
+  expect(told()).toContain("menu.pdf");
+  await write("Add to To", "friend@mail.test");
+  await drawn(() => document.querySelector("input[aria-label='Add to To']")?.closest("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  await until(alpha, runtime, Writing, (s) => s.letter.recipients === 1);
+  await press("Send");
+  await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "Send");
+  await confirm("Send");
+  await until(alpha, runtime, Writing, (s) => !s.open);
+  expect([world.inbox.changes.at(-1), world.inbox.forwarded]).toEqual(["send friend@mail.test Fwd: Lunch on Friday", ["g1/2"]]);
 });

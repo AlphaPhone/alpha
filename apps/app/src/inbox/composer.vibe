@@ -3,7 +3,7 @@ import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Inbox from "../../gen/app__inbox.effect.vibe"
 import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Composer, Effect as Out, Event } from "../../gen/app__inbox__drafts.effect.vibe"
-import type { Kind, Policy } from "../../gen/app__inbox__letter.ts"
+import type { Kind } from "../../gen/app__inbox__letter.ts"
 import type { Actor } from "../../gen/app__inbox__access.ts"
 import { Cloud } from "../platform/cloud.vibe"
 import { Device } from "../platform/device.vibe"
@@ -31,6 +31,15 @@ module pure {
     readonly answers: string | undefined
     /** How Gmail is asked to send it. */
     readonly mode: "compose" | "reply" | "reply-all" | "forward"
+    /** The attachments of the message a forward carries, which Gmail copies from it at the revision it was read at. */
+    readonly forwarded?: Forwarded
+  }
+
+  /** The original's attachments a forward carries: the message, its history revision, and each part still carried. */
+  export interface Forwarded {
+    readonly messageId: string
+    readonly history: string
+    readonly parts: ReadonlyArray<{ readonly partId: string; readonly name: string; readonly size: number }>
   }
 
   /** The drafts kept under `text`, or none where nothing readable is kept. @throws {never} */
@@ -47,14 +56,11 @@ module pure {
     return /^[^\s@<>,;"]+@[^\s@<>,;"]+\.[^\s@<>,;"]+$/u.test(address)
   }
 }
-import { type Attached, type Words, acceptable, readWords } from pure
-export { type Attached, type Words, acceptable }
+import { type Attached, type Forwarded, type Words, acceptable, readWords } from pure
+export { type Attached, type Forwarded, type Words, acceptable }
 
 /** A draft with nothing written yet. */
 export const nothing: Words = { to: [], cc: [], bcc: [], subject: "", text: "", files: [], answers: undefined, mode: "compose" }
-
-/** What an account may attach until the cloud reports its own limits: ten files, five MiB in all. */
-export const policy: Policy = { files: 10, mib: 5 }
 
 const key = "alpha/inbox/letters"
 
@@ -189,9 +195,15 @@ const sessions = started(effect {
 export interface Beginning {
   readonly kind: Kind
   readonly account: number
-  /** The message answered, as Gmail names it, with its sender, other recipients, subject and attachments. */
-  readonly message?: { readonly id: string; readonly from: string; readonly others: ReadonlyArray<string>; readonly subject: string; readonly files: number }
+  /** The message answered, as Gmail names it, with its sender, other recipients, subject, history revision and attachments. */
+  readonly message?: {
+    readonly id: string; readonly from: string; readonly others: ReadonlyArray<string>; readonly subject: string; readonly history: string
+    readonly files: ReadonlyArray<{ readonly partId: string; readonly name: string; readonly size: number }>
+  }
 }
+
+/** The MiB a total of `bytes` counts for against an account's limits. */
+const mibIn = (bytes: number) => Math.ceil(bytes / 1_048_576)
 
 const addressOf = (from: string) => /<([^>]+)>/u.exec(from)?.[1] ?? from.trim()
 
@@ -206,17 +218,21 @@ export effect function begin(beginning: Beginning): boolean!!(Drafts.Machine | L
   const own = ledger.email(account).toLowerCase()
   const others = message === undefined ? [] : message.others.map(addressOf).filter((one) => one.toLowerCase() !== own && one !== sender)
   const replying = kind === "Reply" || kind === "ReplyAll"
+  const { policy, forwards } = ledger.limits(account)
+  // spec/app/inbox/letter.md, "A reply goes to the Reply-To address when the message has one, else to its sender; a reply to all adds everyone else on its To and Cc; a forward carries the original's attachments only where the account may forward them and they fit, and is otherwise text only and says so"
+  const parts = kind === "Forward" ? message?.files ?? [] : []
   const event: Event = {
     type: "compose", kind, account, others: kind === "ReplyAll" ? others.length : 0, replyTo: false,
-    addressable: acceptable(sender), files: kind === "Forward" ? message?.files ?? 0 : 0, mib: 0, forwardable: false, policy,
+    addressable: acceptable(sender), files: parts.length, mib: mibIn(parts.reduce((total, part) => total + part.size, 0)), forwardable: forwards, policy,
   }
   const sent = try exit(composer.send(event, "Owner"))
   if (!Exit.isSuccess(sent) || !sent.value.state.open) return false
+  const carried = sent.value.state.letter.attachments > 0 && message !== undefined ? { messageId: message.id, history: message.history, parts } : undefined
   const prefix = replying ? "Re: " : kind === "Forward" ? "Fwd: " : ""
   const subject = message === undefined || message.subject.toLowerCase().startsWith(prefix.toLowerCase()) ? message?.subject ?? "" : `${prefix}${message.subject}`
   words.set(sent.value.state.letter.id, {
     ...nothing, subject, answers: message?.id, mode: kind === "Reply" ? "reply" : kind === "ReplyAll" ? "reply-all" : kind === "Forward" ? "forward" : "compose",
-    to: replying ? [sender] : [], cc: kind === "ReplyAll" ? others : [],
+    to: replying ? [sender] : [], cc: kind === "ReplyAll" ? others : [], ...(carried === undefined ? {} : { forwarded: carried }),
   })
   return true
 }
