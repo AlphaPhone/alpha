@@ -10,7 +10,7 @@ import {join} from 'node:path';
 import {runJvm,jvmSkip,nativeSource,fixture} from './fixtures/jvm-tools.mjs';
 
 const {BROWSER_PAGE_ERRORS,browserPageErrorText}=await import('../apps/app/src/ui/browser/browser-messages.ts');
-const sources=['AlphaBrowserCopy','HostRect','LinkHandoff','TabLayer'].map(name=>nativeSource(join('browser',name+'.java')));
+const sources=['AlphaBrowserCopy','HostRect','LinkHandoff','TabLayer','TabNavigation'].map(name=>nativeSource(join('browser',name+'.java')));
 
 test('Browser prompt text, page errors and tab geometry',{skip:jvmSkip('javac')},()=>{
  const out=JSON.parse(runJvm([...sources,fixture('browser-native-jvm/BrowserNativeCopyTest.java')],'BrowserNativeCopyTest').trim());
