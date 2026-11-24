@@ -359,6 +359,8 @@ installation confirmation.
 The app and OS update URLs target `eliza-research/alpha`. Before distribution,
 verify anonymous readback of the app manifest, the pilot OTA manifest and their
 downloads in that repository. Retained release pointers may use historical URLs.
+An older canonical APK configured for `alphacompute/alpha` switches feeds
+through an in-place signed update. The OS pilot uses its separate enrollment URL.
 
 Protected release jobs bind dispatches to the reviewed commit on `main`.
 The repository ID, owner ID and workflow reference allowlist in
