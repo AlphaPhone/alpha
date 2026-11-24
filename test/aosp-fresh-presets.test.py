@@ -25,6 +25,16 @@ public class FreshTest {
   public boolean enableIfUnchanged(String expected,String value){if(failEnable)return false;enabled=value;writes++;if(changedAfterEnable)selected="owner.keyboard/.IME";return true;}
   public boolean selectIfEmpty(String value){if(failSelect||selected!=null&&!selected.isEmpty())return false;selected=value;writes++;return true;}
  }
+ static class Navigation implements AlphaFreshSetupPolicy.NavigationPort {
+  boolean fresh=true,chosen,available=true,ownerSelects;int writes;
+  public boolean eligible(){return fresh;}
+  public boolean hasEnabledMode(){return chosen;}
+  public boolean selectGesturesIfUnchosen(){
+   if(ownerSelects)chosen=true;
+   if(!fresh||chosen||!available)return false;
+   writes++;chosen=true;return true;
+  }
+ }
  public static void main(String[] args){
   for(boolean done:new boolean[]{false,true})for(boolean managed:new boolean[]{false,true})for(boolean primary:new boolean[]{false,true})
    check(AlphaFreshSetupPolicy.eligible(done,managed,primary)==(!done&&!managed&&primary));
@@ -39,6 +49,12 @@ public class FreshTest {
   Port failure=new Port();failure.failEnable=true;check(AlphaFreshSetupPolicy.ensureKeyboard(failure)==AlphaFreshSetupPolicy.ImeResult.FAILED&&failure.writes==0);
   Port selection=new Port();selection.failSelect=true;check(AlphaFreshSetupPolicy.ensureKeyboard(selection)==AlphaFreshSetupPolicy.ImeResult.FAILED&&selection.selected==null);
   Port race=new Port();race.changedAfterEnable=true;check(AlphaFreshSetupPolicy.ensureKeyboard(race)==AlphaFreshSetupPolicy.ImeResult.EXISTING_CHOICE);check(race.selected.equals("owner.keyboard/.IME")&&race.writes==1);
+  Navigation nav=new Navigation();check(AlphaFreshSetupPolicy.ensureNavigation(nav)==AlphaFreshSetupPolicy.NavigationResult.READY&&nav.writes==1);
+  check(AlphaFreshSetupPolicy.ensureNavigation(nav)==AlphaFreshSetupPolicy.NavigationResult.EXISTING_CHOICE&&nav.writes==1);
+  Navigation choice=new Navigation();choice.chosen=true;check(AlphaFreshSetupPolicy.ensureNavigation(choice)==AlphaFreshSetupPolicy.NavigationResult.EXISTING_CHOICE&&choice.writes==0);
+  Navigation retained=new Navigation();retained.fresh=false;check(AlphaFreshSetupPolicy.ensureNavigation(retained)==AlphaFreshSetupPolicy.NavigationResult.SKIPPED&&retained.writes==0);
+  Navigation fallback=new Navigation();fallback.available=false;check(AlphaFreshSetupPolicy.ensureNavigation(fallback)==AlphaFreshSetupPolicy.NavigationResult.FAILED&&fallback.writes==0);
+  Navigation concurrent=new Navigation();concurrent.ownerSelects=true;check(AlphaFreshSetupPolicy.ensureNavigation(concurrent)==AlphaFreshSetupPolicy.NavigationResult.EXISTING_CHOICE&&concurrent.writes==0);
   System.out.println("PASS fresh preset policy "+checks+" checks");
  }
 }''')
