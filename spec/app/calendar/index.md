@@ -228,11 +228,11 @@ pure def alwaysColumnsOnlyOnAWideScreen(s: Calendar): bool = s.layout == Columns
 ### The layout menu and the month dialog open over the days, never over an open event
 
 ```quint
-pure def canOpenLayoutMenu(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0
+pure def canOpenLayoutMenu(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0 and s.front
 
 pure def openLayoutMenu(s: Calendar): Calendar = { ...s, overlay: LayoutMenu }
 
-pure def canOpenMonth(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0
+pure def canOpenMonth(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0 and s.front
 
 pure def openMonth(s: Calendar): Calendar = { ...s, overlay: MonthDialog }
 
@@ -554,11 +554,11 @@ and says which dates it covers. The Calendars sheet lists the agent's
 calendar and the phone's, each with its switch.
 
 ```quint
-pure def canOpenSearch(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0
+pure def canOpenSearch(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0 and s.front
 
 pure def openSearch(s: Calendar): Calendar = { ...s, overlay: Search }
 
-pure def canOpenCalendars(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0
+pure def canOpenCalendars(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0 and s.front
 
 pure def openCalendars(s: Calendar): Calendar = { ...s, overlay: CalendarsSheet }
 ```
@@ -646,10 +646,19 @@ pure def readOrWait(day: int, s: Calendar): Viewed =
 pure def canFrontChanged(s: Calendar, front: bool, now: int): bool = front != s.front
 
 pure def frontChanged(s: Calendar, front: bool, now: int): Viewed =
-  if (front) readOrWait(s.anchor, { ...s, front: true, readAt: now }) else { state: { ...s, front: false }, out: List() }
+  if (front) readOrWait(s.anchor, { ...s, front: true, readAt: now }) else { state: { ...s, front: false, overlay: NoOverlay }, out: List() }
 ```
 
-### While Calendar is in front it reads again once a minute, never during a read
+### Leaving Calendar closes its search, its sheets and its dialogs
+
+```quint
+pure def alwaysAnOverlayIsInFront(s: Calendar): bool = s.overlay != NoOverlay implies s.front
+```
+
+### While Calendar is in front it reads again once a minute, never during a read and never under an open event
+
+An open event is read again on its own when it comes back from Maps or
+Android Calendar; the minute's read waits until it closes.
 
 ```quint
 pure def reading(s: Calendar): bool = s.phone.status == R::Loading or s.google.status == R::Loading
@@ -658,7 +667,9 @@ pure def canMinutePassed(s: Calendar, now: int): bool = s.front and now >= s.rea
 
 pure def minutePassed(s: Calendar, now: int): Viewed =
   val timed = { ...s, readAt: now }
-  if (reading(s)) { state: timed, out: List() } else readOrWait(s.anchor, timed)
+  if (reading(s) or s.open != 0) { state: timed, out: List() } else readOrWait(s.anchor, timed)
+
+pure def sometimesAMinutePassesUnderAnOpenEvent(s: Calendar): bool = s.open != 0 and s.readAt >= 60000
 ```
 
 ### A committed Calendar change in a reply reads the day again once, in front or not
