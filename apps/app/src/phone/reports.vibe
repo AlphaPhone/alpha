@@ -1,0 +1,30 @@
+// spec/app/phone/index.md, "The phone reports missed calls not yet seen"; spec/app/messages/index.md, "The phone reports how many conversations are unread, for the list and Home"; spec/app/phone/voicemail.md, "The phone reports how many voicemails are unheard, for Home and the tab"
+import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
+import { Machine as Phone } from "../../gen/app__phone.effect.vibe"
+import { Machine as Voicemail } from "../../gen/app__phone__voicemail.effect.vibe"
+import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Device } from "../platform/device.vibe"
+import { Telephony, telephony } from "../platform/telephony.vibe"
+import { contained, started } from "../runtime/reactor.vibe"
+import { recentsLimit } from "./phone.vibe"
+
+/** The phone's counts for Home's cards, each read on its own; one that cannot be read is not told. */
+effect function report(): void!!(Telephony | Phone | Messages | Voicemail) {
+  const calls = telephony("recentCalls", (c) => c.phone.recentCalls({ limit: recentsLimit })) catch () => undefined
+  if (calls !== undefined) try contained((try Phone).send({ type: "missedReported", count: calls.calls.filter((call) => call.type === "missed" && call.isNew).length }), "missed calls")
+  const threads = telephony("threadPage", (c) => c.messages.threadPage()) catch () => undefined
+  if (threads !== undefined) try contained((try Messages).send({ type: "unreadReported", count: threads.rows.filter((row) => !("incomplete" in row) && row.unread).length }), "unread conversations")
+  const listing = telephony("refreshVoicemail", (c) => c.phone.refreshVoicemail("AutomaticRead")) catch () => undefined
+  if (listing !== undefined && listing.carrier === "CarrierReady") try contained((try Voicemail).send({ type: "unheardReported", count: listing.voicemails.filter((one) => !one.heard).length }), "unheard voicemail")
+}
+
+/** Each time Home comes to the front on a visible page, the phone's counts are read for its cards. */
+export const reports = started(effect {
+  const shell = try Shell
+  const device = try Device
+  const visible = Stream.concat(Stream.succeed(true), device.visible)
+  const home = Stream.map(Stream.zipLatest(Stream.map(shell.changes, (where) => where.trail.length === 0), visible), ([bare, seen]) => bare && seen)
+  try Stream.runForEach(Stream.changesWith(home, (a, b) => a === b), effect (shown) => {
+    if (shown) try report()
+  })
+}, "the phone's counts for Home")

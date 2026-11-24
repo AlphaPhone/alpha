@@ -13,6 +13,7 @@ import { callStrip } from "./phone/call.vibe"
 import { comms } from "./phone/comms.vibe"
 import { phone } from "./phone/phone.vibe"
 import { voicemail } from "./phone/voicemail.vibe"
+import { reports } from "./phone/reports.vibe"
 import { composer } from "./messages/composer.vibe"
 import { messages } from "./messages/messages.vibe"
 import { contacts } from "./contacts/contacts.vibe"
@@ -41,6 +42,7 @@ const machines = together(
   contacts,
   requests,
   comms,
+  reports,
 )
 
 /** The resident machines, closed: each machine one of them follows or tells is among them. */
