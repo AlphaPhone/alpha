@@ -94,6 +94,8 @@ pure def alwaysTheNewestUnansweredIsTheLastRequest(p: Presenter): bool =
   (p.fresh and p.unanswered.length() > 0) implies p.unanswered.nthOr(p.unanswered.length() - 1, Withdrawn) == p.last
 pure def alwaysAWithdrawnPageHasNoAcknowledgedGeometry(p: Presenter): bool =
   (p.fresh and p.last == Withdrawn) implies p.acknowledged == Withdrawn
+pure def lawOffTheBrowserAWithdrawnPageSendsNothing(wanted: PresentRequest): bool =
+  offer({ ...initial, fresh: true }, wanted, false).out == List()
 pure def sometimesAStaleAnswerWaits(p: Presenter): bool = p.unanswered.length() > 1
 pure def sometimesKeptWhileTheAppIsHidden(p: Presenter): bool = p.appHidden and p.acknowledged != Withdrawn and p.unanswered.length() == 0
 ```

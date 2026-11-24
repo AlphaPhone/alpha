@@ -13274,16 +13274,16 @@
   {
    "legacy": "specs/lemma/apps/app/src/browser/browser-poll.dfy",
    "area": "browser",
-   "spec": "apps/app/spec/browser/index.md",
-   "status": "mapped",
-   "note": "LemmaScript/Dafny proof of a legacy renderer module; vibestack proofs are spec-level (*.proof.dfy beside the area spec)"
+   "spec": "apps/app/spec/browser/presentation.md",
+   "status": "removed",
+   "note": "Proved surfaceIdleForView of the deleted browser-poll.ts; spec/browser/presentation.md states it as lawOffTheBrowserAWithdrawnPageSendsNothing (off the Browser with the page already withdrawn nothing is sent)."
   },
   {
    "legacy": "specs/lemma/apps/app/src/browser/browser-poll.dfy.gen",
    "area": "browser",
-   "spec": "apps/app/spec/browser/index.md",
-   "status": "mapped",
-   "note": "LemmaScript/Dafny proof of a legacy renderer module; vibestack proofs are spec-level (*.proof.dfy beside the area spec)"
+   "spec": "apps/app/spec/browser/presentation.md",
+   "status": "removed",
+   "note": "Proved surfaceIdleForView of the deleted browser-poll.ts; spec/browser/presentation.md states it as lawOffTheBrowserAWithdrawnPageSendsNothing (off the Browser with the page already withdrawn nothing is sent)."
   },
   {
    "legacy": "specs/lemma/apps/app/src/browser/edit-receipt.dfy",

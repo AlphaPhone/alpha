@@ -156,7 +156,6 @@ obligations for the file (run of 2026-11-10, LemmaScript 0.6.6, Dafny 4.11.0).
 
 | File (verified) | Function | Properties proved | Trusted assumptions |
 | --- | --- | --- | --- |
-| `browser/browser-poll.ts` (1) | `surfaceIdleForView` | True exactly when the view is not the browser and the last geometry equals the hidden geometry. | None |
 | `browser/edit-receipt.ts` (2) | `editReceiptAbandoned` | True exactly when the status is `prepared` and more than 86400000 ms have passed since `at` (0 when absent); never true for a settled record. | None |
 | | `editReceiptSettled` | True exactly for `saved`, `failed`, `cancelled`, `unchanged`. | |
 | `browser/journal-retention.ts` (16) | `journalRowRetires` | A row retires exactly when it is older than the newest `KEEP` rows by position or older than `AGE`; a row without a time retires by position only. Hand-written `RetireJournalPassBound`: after one pass over all rows at most `KEEP` survive, and every survivor is among the newest `KEEP` and within `AGE`. | None |
