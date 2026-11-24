@@ -24,6 +24,10 @@ export const activeCall: CallBar = {
 };
 /** A call that rings. */
 export const ringingCall: CallBar = { ...activeCall, calls: [{ id: "c2", phase: "Ringing", connectedAt: 0 }] };
+/** A held call with a second call ringing behind it. */
+export const heldWhileRinging: CallBar = {
+  ...activeCall, calls: [{ id: "c1", phase: "Held", connectedAt: at - 90_000 }, { id: "c2", phase: "Ringing", connectedAt: 0 }],
+};
 /** A call that just ended, holding its place. */
 export const endedCall: CallBar = { ...activeCall, calls: [], shown: false, endedUntil: at + 1_500 };
 
