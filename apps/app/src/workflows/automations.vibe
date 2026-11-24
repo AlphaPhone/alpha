@@ -5,10 +5,10 @@ import {
   saveConfirmed, snoozeConfirmed, snoozeUntil, taskEnded, taskOn, taskSnoozed,
 } from "../../gen/workflows__agentSchedules.effect.vibe"
 import { ownerKey } from "../platform/storage.vibe"
-import { AgentRefused, AgentUnavailable, NotSent, Unrecognized, WorkflowApi, decoded } from "./api.vibe"
+import { AgentRefused, AgentUnavailable, NotSent, Unrecognized, WorkflowApi, decoded, readAutomationRoutes } from "./api.vibe"
 import { deviceZone, instant, sameLocalDay } from "./ids.ts"
 import {
-  DefinitionList, DefinitionReply, Deleted, ExecuteReply, FireReply, ReminderList, ScheduledTaskList, TriggerList,
+  DefinitionList, DefinitionReply, Deleted, ExecuteReply, FireReply, ReminderList, ScheduledTaskList,
   type ScheduledTaskRecord, type TaskTrigger, TaskReply, TriggerReply, TriggerRuns,
 } from "./wire.schema.vibe"
 
@@ -142,11 +142,7 @@ export const automations = Layer.provideMerge(Layer.effect(Automations, effect {
   effect function read(source: Source) {
     switch (source) {
       case "AutomationSource": {
-        // The agent lists workflows (`/api/workflow/workflows`) and prompts (`/api/triggers`) on their own routes; a list that read
-        // only one of them is partial, and only when neither reads does the source fail with the prompts' refusal.
-        const workflows = agent.workflow.list() catch () => undefined
-        const readPrompts = effect { return (try decoded(TriggerList, "/api/triggers", try agent.request("GET", "/api/triggers"))).triggers }
-        const prompts = workflows === undefined ? try readPrompts : readPrompts catch () => undefined
+        const { workflows, prompts } = try readAutomationRoutes(agent)
         const rows: Row[] = [
           ...(workflows ?? []).filter((w) => !w.removed).map((w): Row => ({
             key: w.id, id: w.id, target: w.id, kind: "WorkflowRow", enabled: w.active, status: w.active ? "active" : "paused",

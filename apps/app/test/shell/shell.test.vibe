@@ -22,7 +22,11 @@ const journal = Layer.succeed(CrashJournal, {
   read: () => succeed({ entries: [], exitHistory: false }),
   clear: () => succeed(undefined),
 })
-const platform = Layer.mergeAll(fakeNative({}), buildInfo({ variant: "browser" }), fakeResident({ "GET /api/automations": { automations: [] } }), journal)
+const platform = Layer.mergeAll(fakeNative({}), buildInfo({ variant: "browser" }), fakeResident({
+  "GET /api/workflow/status": { engine: "eliza-typed", status: "ready" },
+  "GET /api/workflow/workflows": { workflows: [] },
+  "GET /api/triggers": { triggers: [] },
+}), journal)
 const navigationOnly = Layer.provideMerge(navigationLive, storedNavigation(NAVIGATION_KEY))
 
 it.effect("Open an app from Home and keep my place (spec/shell/index.md, \"Story: Open an app from Home and keep my place\")", () => effect {

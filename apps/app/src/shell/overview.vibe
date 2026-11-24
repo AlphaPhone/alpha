@@ -1,7 +1,8 @@
 // spec/shell/overview.md, "Story: See my day on Home"
 import { Machine as OverviewMachine, nextChange, type Attention, type BriefOutcome, type Event as OverviewEvent, type FeedState, type Item } from "../../gen/shell__overview.effect.vibe"
 import { Resident } from "../platform/resident.vibe"
-import { AutomationList, CalendarFeed } from "./overview.schema.vibe"
+import { WorkflowApi, api as workflowApi, readAutomationRoutes } from "../workflows/api.vibe"
+import { CalendarFeed } from "./overview.schema.vibe"
 import { localDay, nextMidnight, pageEvents, pageHidden } from "./page.ts"
 
 /** What another area reports for Home's overview: the mail it loaded, the newest brief, overdue reminders. */
@@ -50,20 +51,19 @@ effect function readAgenda(machine: OverviewMachine.Shape) {
   else try sendTo(machine, { type: "agendaRead", ok: true, feed: FEED_STATES[feed.state], items: itemsOf(feed.events), at, day })
 }
 
-effect function readWorkflows(machine: OverviewMachine.Shape) {
-  const resident = try Resident
+effect function readWorkflows(machine: OverviewMachine.Shape, agent: WorkflowApi.Shape) {
+  const list = readAutomationRoutes(agent) catch () => undefined
+  if (list?.workflows === undefined || list.prompts === undefined) return
+  const count = list.workflows.filter((row) => row.active && !row.removed).length + list.prompts.filter((row) => row.enabled).length
   const at = try Clock.currentTimeMillis
-  const list = effect { return try Schema.decodeUnknownEffect(AutomationList)((try resident.json("GET", "/api/automations")).data) } catch () => undefined
-  if (list === undefined) return
-  const count = list.automations.filter((row) => row.enabled === true || row.status === "active").length
   try sendTo(machine, { type: "workflowsRead", count, at })
 }
 
-effect function readAll(machine: OverviewMachine.Shape) {
-  try.all [readAgenda(machine), readWorkflows(machine)]
+effect function readAll(machine: OverviewMachine.Shape, agent: WorkflowApi.Shape) {
+  try.all [readAgenda(machine), readWorkflows(machine, agent)]
 }
 
-effect function ticker(machine: OverviewMachine.Shape) {
+effect function ticker(machine: OverviewMachine.Shape, agent: WorkflowApi.Shape) {
   while (true) {
     const now = try Clock.currentTimeMillis
     const state = try machine.get()
@@ -72,7 +72,7 @@ effect function ticker(machine: OverviewMachine.Shape) {
     try sleep(Duration.millis(Math.max(1000, wake - now)))
     const at = try Clock.currentTimeMillis
     try sendTo(machine, { type: "tick", day: localDay(at), now: at })
-    if ((try machine.get()).refreshDue) try readAll(machine)
+    if ((try machine.get()).refreshDue) try readAll(machine, agent)
   }
 }
 
@@ -80,16 +80,17 @@ effect function ticker(machine: OverviewMachine.Shape) {
 export const overviewLive = Layer.effect(Overview, effect {
   const machine = try OverviewMachine
   const resident = try Resident
+  const agent = try WorkflowApi
   const now = try Clock.currentTimeMillis
   try sendTo(machine, { type: "mount", day: localDay(now), now })
-  fork.scoped readAll(machine)
-  fork.scoped ticker(machine)
+  fork.scoped readAll(machine, agent)
+  fork.scoped ticker(machine, agent)
   fork.scoped (effect {
     for try (const _ of pageEvents("visibilitychange", "document")) {
       if (pageHidden()) continue
       const at = try Clock.currentTimeMillis
       try sendTo(machine, { type: "tick", day: localDay(at), now: at })
-      try readAll(machine)
+      try readAll(machine, agent)
     }
   })
   return {
@@ -103,6 +104,6 @@ export const overviewLive = Layer.effect(Overview, effect {
       const overdue = reminders.map((row) => ({ id: row.id, title: row.title, begin: row.at, end: row.at, allDay: false, overdue: true, video: false }))
       try sendTo(machine, { type: "remindersRead", overdue })
     },
-    refresh: () => Effect.provideService(readAll(machine), Resident, resident),
+    refresh: () => Effect.provideService(readAll(machine, agent), Resident, resident),
   }
-})
+}).pipe(Layer.provide(workflowApi))

@@ -160,6 +160,7 @@
             "/api/lifeops/reminders",
             "/api/lifeops/scheduled-tasks?ownerVisibleOnly=1",
             "/api/lifeops/scheduled-tasks/{id}",
+            "/api/triggers",
             "/api/triggers/{id}",
             "/api/triggers/{id}/runs"
           ]

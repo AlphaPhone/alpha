@@ -19,9 +19,3 @@ export schema CalendarFeed {
   readonly events: FeedEvent[]
   readonly state: "complete" | "partial" | "unavailable"
 }
-
-/** One automation of `GET /api/automations`; it counts as on when it says so. */
-export schema AutomationRow { readonly enabled?: boolean; readonly status?: string }
-
-/** `GET /api/automations`. */
-export schema AutomationList { readonly automations: AutomationRow[] }

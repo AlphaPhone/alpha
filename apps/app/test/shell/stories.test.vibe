@@ -17,6 +17,7 @@ import { BrowserAgent, BrowserOpenRefused } from "../../src/browser/agent.vibe"
 import { MailComposer } from "../../src/inbox/composer.vibe"
 import { NotesHandoff } from "../../src/notes/origins.vibe"
 import { buildInfo, fakeNative, fakeResident } from "../../src/platform/layers.vibe"
+import { ResidentRefused } from "../../src/platform/resident.vibe"
 import { memoryStore } from "../../src/platform/storage.vibe"
 import { CrashJournal } from "../../src/platform/crash-journal.vibe"
 import { handoffsLive, layer as shell, operationPorts } from "../../src/shell/layer.vibe"
@@ -36,7 +37,11 @@ const journal = Layer.succeed(CrashJournal, {
   read: () => succeed({ entries: [], exitHistory: false }),
   clear: () => succeed(undefined),
 })
-const resident = fakeResident({ "GET /api/automations": { automations: [] } })
+const resident = fakeResident({
+  "GET /api/workflow/status": { engine: "eliza-typed", status: "ready" },
+  "GET /api/workflow/workflows": { workflows: [] },
+  "GET /api/triggers": { triggers: [] },
+})
 
 let notificationsGranted = false
 let haptics: string[] = []
@@ -409,6 +414,36 @@ describe("Recovery and Home (spec/shell/recovery.md, \"Story: Get my phone back 
         try overview.reportOverdue([{ id: "rent", title: "Pay rent", at: -86_400_000 }])
         const due = try machine.get()
         try Effect.try(() => assert.deepStrictEqual([quiet, agenda(due).id, dateLine(due)], [true, "rent", false]))
+      }
+    }
+  })
+
+  it.effect("Home keeps the last complete count when a workflow source fails (spec/shell/overview.md, \"Story: See my day on Home\")", () => effect {
+    let promptsAvailable = true
+    const saved = { id: "morning", name: "Morning", active: true, versionId: "v1" }
+    const active = { id: "check-in", displayName: "Check in", instructions: "Check in", enabled: true }
+    const automationResident = fakeResident({
+      "GET /api/workflow/status": { engine: "eliza-typed", status: "ready" },
+      "GET /api/workflow/workflows": { workflows: [saved, { ...saved, id: "paused", active: false }, { ...saved, id: "removed", removed: true, triggerCleanup: "complete" }] },
+      "GET /api/triggers": () => promptsAvailable
+        ? { triggers: [active, { ...active, id: "disabled", enabled: false }] }
+        : new ResidentRefused({ status: 503, message: "Prompt list unavailable" }),
+    })
+    provide memoryStore, Layer.mergeAll(fakeNative({}), buildInfo({ variant: "browser" }), automationResident, journal) {
+      provide shell {
+        const overview = try Overview
+        const machine = try OverviewMachine
+        try TestClock.adjust("1 millis")
+        try overview.refresh()
+        const complete = try machine.get()
+        promptsAvailable = false
+        try TestClock.adjust("1 millis")
+        try overview.refresh()
+        const incomplete = try machine.get()
+        try Effect.try(() => assert.deepStrictEqual(
+          [complete.workflows, incomplete.workflows, incomplete.workflowsAt],
+          [2, 2, complete.workflowsAt],
+        ))
       }
     }
   })

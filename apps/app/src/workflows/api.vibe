@@ -3,7 +3,7 @@ import { Resident, ResidentRefused, ResidentUnavailable } from "../platform/resi
 import { type Method, type RouteFamily, sendable } from "../../gen/workflows__vocabulary.effect.vibe"
 import { type WorkflowClient, type WorkflowRequest, workflowClient, workflowHttpError } from "@elizaos/plugin-workflow/client"
 import { type HostedDigestProtocol, hostedDigestProtocol } from "@elizaos/plugin-workflow/digests"
-import { AuthMe } from "./wire.schema.vibe"
+import { AuthMe, TriggerList } from "./wire.schema.vibe"
 
 /** A request Workflows does not own, or a body where none belongs: nothing was sent. */
 export error NotSent { path: string }
@@ -62,6 +62,14 @@ export const NOT_SENT_CODE = "ALPHA_NOT_SENT"
 /** Decode an answer of `path` with `schema`, or fail with Unrecognized. */
 export effect function decoded<A>(schema: Schema.Codec<A>, path: string, value: unknown) {
   return (Schema.decodeUnknownEffect(schema)(value) catch effect () => { throw new Unrecognized({ path }) })
+}
+
+/** Read the separately reported workflow and prompt lists. A missing half is partial. */
+export effect function readAutomationRoutes(agent: WorkflowApi.Shape) {
+  const workflows = agent.workflow.list() catch () => undefined
+  const readPrompts = effect { return (try decoded(TriggerList, "/api/triggers", try agent.request("GET", "/api/triggers"))).triggers }
+  const prompts = workflows === undefined ? try readPrompts : readPrompts catch () => undefined
+  return { workflows, prompts }
 }
 
 /** WorkflowApi over the resident's local API. */

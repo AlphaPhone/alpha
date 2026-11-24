@@ -10,7 +10,9 @@ Gmail setup link when no Google account is connected.
 
 Times are milliseconds since the epoch and days are local day numbers, both given by the shell.
 The calendar feed is the resident agent's (`GET /api/lifeops/calendar/feed`); overdue reminders,
-the mail summary and the brief are reported by the areas that own them.
+the mail summary and the brief are reported by the areas that own them. Home reports the count
+of active workflows and enabled prompts after both owner routes (`GET /api/workflow/workflows` and
+`GET /api/triggers`) answer. An incomplete read keeps the previous count and its read time.
 
 ## Story: See my day on Home
 
