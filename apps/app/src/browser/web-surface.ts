@@ -228,14 +228,18 @@ export class WebTabHost {
   private setBookmark(url: string, saved: boolean, title: unknown) {
     if (!isSecureWebAddress(url)) throw new Error("Only HTTPS addresses without embedded credentials can be bookmarked.");
     if (title !== undefined && title !== null && typeof title !== "string") throw new Error("A bookmark title must be text.");
-    const rows = markRows(readJson(MARKS_KEY));
-    const before = rows.find((row) => rowUrl(row) === url);
-    const name = typeof title === "string" ? markTitle(title) : before !== undefined && typeof before !== "string" ? (before.title ?? "") : "";
-    const next = rows.filter((row) => rowUrl(row) !== url);
-    if (saved) next.unshift(name ? { url, title: name } : url);
-    if (next.length > MAX_MARKS) throw new Error("Bookmark could not be saved. The device stores up to 100 bookmarks; existing data was not changed.");
-    globalThis.localStorage.setItem(MARKS_KEY, JSON.stringify(next));
-    return markList(next);
+    const write = () => {
+      const rows = markRows(readJson(MARKS_KEY));
+      const before = rows.find((row) => rowUrl(row) === url);
+      const name = typeof title === "string" ? markTitle(title) : before !== undefined && typeof before !== "string" ? (before.title ?? "") : "";
+      const next = rows.filter((row) => rowUrl(row) !== url);
+      if (saved) next.unshift(name ? { url, title: name } : url);
+      if (next.length > MAX_MARKS) throw new Error("Bookmark could not be saved. The device stores up to 100 bookmarks; existing data was not changed.");
+      globalThis.localStorage.setItem(MARKS_KEY, JSON.stringify(next));
+      return markList(next);
+    };
+    const locks = globalThis.navigator?.locks;
+    return locks ? locks.request(MARKS_KEY, write) : write();
   }
 
   private clearBrowsingData() {

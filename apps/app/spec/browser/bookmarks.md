@@ -67,7 +67,8 @@ pure def alwaysOneRefreshWaits(b: Bookmarks): bool =
 ### A bookmark change waits its turn, reads the list first when it was not read, and is applied only by the store
 
 A save sends the page's name with its address; a removal, or a page with no name of its own, sends
-none, and the store then keeps the name it has.
+none, and the store then keeps the name it has. The browser host uses the origin's Web Locks service when available, so writes
+from different tabs reread the latest list before replacing it.
 
 ```quint
 pure def canRequestSave(b: Bookmarks, url: str, title: str, saved: bool): bool = not(b.disposed) and url != ""

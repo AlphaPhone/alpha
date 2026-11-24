@@ -83,3 +83,38 @@ it("a saved row without a usable name reads as its address, and control characte
     localStorage.removeItem(key);
   }
 });
+
+// spec/browser/bookmarks.md, "A bookmark change waits its turn, reads the list first when it was not read, and is applied only by the store"
+it("bookmark writes wait for the origin lock and keep both tabs' names", async () => {
+  const key = "alpha/browser/bookmarks";
+  const first = new WebTabHost("bookmark-first");
+  const second = new WebTabHost("bookmark-second");
+  const admitted = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const holder = navigator.locks.request(key, async () => {
+    admitted.resolve();
+    await release.promise;
+  });
+  await admitted.promise;
+  const writes = Promise.all([
+    first.call("setBookmark", { session: "bookmark-first", url: "https://first.test/", saved: true, title: "First" }),
+    second.call("setBookmark", { session: "bookmark-second", url: "https://second.test/", saved: true, title: "Second" }),
+  ]);
+  try {
+    const completed = await Promise.race([writes.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 30))]);
+    expect(completed).toBe(false);
+  } finally {
+    release.resolve();
+    await holder;
+    try {
+      await writes;
+      const saved = await first.call("bookmarks", { session: "bookmark-first" });
+      expect(saved).toMatchObject({ entries: expect.arrayContaining([
+        { url: "https://first.test/", title: "First" },
+        { url: "https://second.test/", title: "Second" },
+      ]) });
+    } finally {
+      localStorage.removeItem(key);
+    }
+  }
+});
