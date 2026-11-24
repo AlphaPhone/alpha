@@ -117,24 +117,24 @@ describe("Home on a phone", () => {
       fromAreas.phone([]);
       fromAreas.mail({ connected: true, unread: 4, rows: [{ title: "Bank", detail: "Statement ready" }], current: false });
     });
-    expect([card("Messages") !== undefined, card("Phone") !== undefined, card("Unread")?.textContent]).toEqual([true, false, expect.stringMatching(/Not up to date/)]);
+    expect([card("Messages") !== undefined, card("Phone") !== undefined, card("4 unread")?.textContent]).toEqual([true, false, expect.stringMatching(/Not up to date/)]);
 
     // spec/app/home/cards.md, "The Workflows card shows the first two enabled rows and how many more, marked when they are not current, stale or partly unavailable, and is not drawn without a row"; spec/app/home/cards.md, "The brief card shows the brief kept for Home, or that its run failed, and is not drawn without one"
     await drawn(() => {
       fromAreas.flows({ rows: [{ title: "Morning brief", detail: "Daily" }, { title: "Inbox sweep", detail: "Hourly" }, { title: "Rent", detail: "Monthly" }], freshness: "SomeUnavailable" });
       fromAreas.brief({ outcome: "RunFailed", at: 7 * 3_600_000 });
     });
-    expect(card("Workflows")?.textContent).toMatch(/Morning brief.*Inbox sweep.*\+1 more/);
-    expect(card("Workflows")?.textContent).not.toMatch(/Rent/);
+    expect(card("Morning brief")?.textContent).toMatch(/Morning brief.*Inbox sweep.*\+1 more/);
+    expect(card("Morning brief")?.textContent).not.toMatch(/Rent/);
 
     // spec/app/home/cards.md, "The row holds the agenda, Messages, Phone, mail, brief and Workflows cards in that order, each only when drawn, and is not drawn when none is"
-    expect([...document.querySelectorAll("section[aria-label='Your day'] > button")].map((found) => ["Messages", "Unread", "Brief", "Workflows"].find((title) => found.textContent?.startsWith(title)))).toEqual(["Messages", "Unread", "Brief", "Workflows"]);
+    expect([...document.querySelectorAll("section[aria-label='Your day'] > button")].map((found) => ["Messages", "4 unread", "Latest brief", "Morning brief"].find((title) => found.textContent?.startsWith(title)))).toEqual(["Messages", "4 unread", "Latest brief", "Morning brief"]);
 
     // spec/app/home/cards.md, "A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed"
-    await drawn(() => card("Unread")?.click());
+    await drawn(() => card("4 unread")?.click());
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Inbox");
     await hardware("home");
-    await drawn(() => card("Brief")?.click());
+    await drawn(() => card("Latest brief")?.click());
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Workflows");
 
     await drawn(() => { fromAreas.messages([]); fromAreas.mail({ connected: false, unread: 0, rows: [], current: false }); fromAreas.flows({ rows: [], freshness: "UpToDate" }); fromAreas.brief(undefined); });
