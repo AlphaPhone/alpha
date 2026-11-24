@@ -5,7 +5,7 @@ import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { at, mounts } from "../src/areas.ts";
-import { adopt, keptAt, vaulted } from "../src/platform/adoption.vibe";
+import { adopt, earlierSlot, keptAt, vaulted } from "../src/platform/adoption.vibe";
 import { Agent } from "../src/platform/agent.vibe";
 import { Cloud } from "../src/platform/cloud.vibe";
 import { type Slot, Vault } from "../src/platform/vault.vibe";
@@ -153,5 +153,11 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([await secret(shut), localStorage.getItem(earlier)]).toEqual(["NotAdopted", "Work"]);
     if (!phone) return void expect(await secret(open_)).toBe("NotAdopted");
     expect([await secret(open_), localStorage.getItem(earlier), world.secrets.get("alpha.test.open")]).toEqual(["Adopted", null, "\"Work\""]);
+    // spec/app/platform/adoption.md, "A value is moved by copying it only where the new place is still empty, and its earlier place is cleared only once the new place holds a value": the earlier Alpha's encrypted slot moves into the secure store, and leaves only once it is there.
+    world.secrets.delete("alpha.test.open");
+    world.platform.earlier.set("assistant-draft:v1:device", "Draft");
+    const slotted = (slot: Slot) => run(Effect.flatMap(vaulted(slot), (to) => adopt(earlierSlot("assistant-draft:v1:device"), to, (value: string) => Option.some(Redacted.make(value)))));
+    expect([await slotted(shut), world.platform.earlier.get("assistant-draft:v1:device")]).toEqual(["NotAdopted", "Draft"]);
+    expect([await slotted(open_), world.platform.earlier.has("assistant-draft:v1:device"), world.secrets.get("alpha.test.open")]).toEqual(["Adopted", false, "\"Draft\""]);
   });
 });

@@ -1,6 +1,6 @@
-// spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"; spec/app/platform/index.md, "Story: Reach the phone's native capabilities"
+// spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"; spec/app/platform/index.md, "Story: Reach the phone's native capabilities"; spec/app/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { reachable, variantOf } from "../../gen/app__platform.effect.vibe"
+import { fixturesAllowed, reachable, variantOf } from "../../gen/app__platform.effect.vibe"
 
 module web {
   import { Capacitor, registerPlugin } from "@capacitor/core"
@@ -40,9 +40,16 @@ module web {
   export const pages = (): EventTarget => document
   /** @throws {never} */
   export const showing = (): boolean => document.visibilityState === "visible"
+  /** Whether this build was made with `ELIZA_DEV_ALLOW_TEST_MOCKS=1`. @throws {never} */
+  export const allowsTestMocks = (): boolean => import.meta.env.ELIZA_DEV_ALLOW_TEST_MOCKS === "1"
 }
-import { alpha, marked, native, page, pages, registered, showing, zoom } from web
+import { allowsTestMocks, alpha, marked, native, page, pages, registered, showing, zoom } from web
 export { native, registered }
+
+/** Whether this build may load fixtures, the fake world and developer surfaces: only one made with `ELIZA_DEV_ALLOW_TEST_MOCKS=1`. */
+export function testMocks(): boolean {
+  return fixturesAllowed(allowsTestMocks())
+}
 
 /** What this phone admits: an Alpha image's apps, and Contacts where the image grants them. */
 export interface Capabilities {

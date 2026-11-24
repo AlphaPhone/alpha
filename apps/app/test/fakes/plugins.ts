@@ -7,6 +7,7 @@ import { elizaFiles } from "./files.ts";
 import type { Scene } from "./scene.ts";
 import { alphaCarrierSetup, elizaLocation, elizaPasswords, elizaReset, elizaSystem, elizaWiFi } from "./settings.ts";
 import { telephonyPlugins } from "./telephony.ts";
+import { alphaConnection } from "./platform.ts";
 
 /**
  * The plugins the fake phone's host registers, by the names their `@CapacitorPlugin` gives: one line per plugin, and
@@ -30,5 +31,6 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     ElizaPasswords: elizaPasswords(world.settings),
     AlphaCarrierSetup: alphaCarrierSetup(world.settings),
     ...(world.image ? telephonyPlugins(world.telephony) : {}),
+    AlphaConnection: alphaConnection(world.platform),
   };
 }
