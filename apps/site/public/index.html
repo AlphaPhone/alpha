@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#ffffff">
+    <meta name="theme-color" content="#faf9f6">
     <meta name="description" content="Your phone. Your agent. Meet Alpha, the mobile operating system with a personal agent that lives on your device.">
     <meta property="og:title" content="Alpha — Your phone. Your agent.">
     <meta property="og:type" content="website">
@@ -13,19 +13,62 @@
     <link rel="canonical" href="https://alphaphone.dev/">
     <link rel="icon" href="/alpha-mark.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/demo.css">
+    <script type="module" src="/demo.js"></script>
     <title>Alpha — Your phone. Your agent.</title>
   </head>
   <body>
-    <header class="masthead">
+    <header class="masthead layout">
       <div class="wordmark">
-        <img src="/alpha-mark.svg" width="26" height="26" alt="">
+        <img src="/alpha-mark.svg" width="30" height="30" alt="">
         <span>Alpha</span>
       </div>
       <a class="github" href="https://github.com/eliza-research/alpha">GitHub</a>
     </header>
-    <main class="hero">
-      <h1>Your phone.<br><span>Your agent.</span></h1>
-      <img class="phone" src="/alpha-home.webp" width="380" height="823" alt="Alpha Home with a calendar card, app grid, and Ask Alpha bar." fetchpriority="high">
+    <main class="hero layout">
+      <div class="hero-copy">
+        <h1>Your phone.<br><em>Your agent.</em></h1>
+        <a class="credit" href="https://alphacompute.ai/">Built by <strong>Alpha Compute</strong></a>
+      </div>
+      <section class="demo" aria-label="Alpha phone demo">
+        <div class="stage">
+          <div class="pedestal" aria-hidden="true"></div>
+          <div class="handset" role="img" aria-label="Alpha Home, a chat asking about today’s calendar, and the Calendar app on a 3D phone.">
+            <div class="handset-back" aria-hidden="true"></div>
+            <div class="handset-rail" aria-hidden="true"></div>
+            <div class="handset-keys" aria-hidden="true"></div>
+            <div class="handset-front" aria-hidden="true">
+              <div class="demo-screen">
+                <div class="demo-scene demo-home" data-scene="home" data-active="true">
+                  <img class="demo-capture" src="/alpha-home.webp" width="370" height="813" alt="" fetchpriority="high">
+                </div>
+                <div class="demo-scene demo-chat" data-scene="chat">
+                  <img class="demo-capture" src="/alpha-chat.webp" width="370" height="813" alt="">
+                  <div class="demo-messages">
+                    <p class="demo-request">What’s on my calendar today?</p>
+                    <div class="demo-typing"><i></i><i></i><i></i></div>
+                    <div class="demo-answer">
+                      <p>Two things this afternoon.</p>
+                      <div class="demo-event"><time datetime="13:00">1:00 PM</time><strong>Lunch · Priya</strong></div>
+                      <div class="demo-event"><time datetime="15:00">3:00 PM</time><strong>Design review</strong></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="demo-scene demo-calendar" data-scene="calendar">
+                  <img class="demo-capture" src="/alpha-calendar.webp" width="370" height="813" alt="">
+                </div>
+              </div>
+              <span class="handset-camera"></span>
+            </div>
+          </div>
+          <div class="demo-controls" role="group" aria-label="Phone demo controls" hidden>
+            <button type="button" data-show="home" aria-label="Show Home" aria-pressed="true"></button>
+            <button type="button" data-show="chat" aria-label="Show Chat" aria-pressed="false"></button>
+            <button type="button" data-show="calendar" aria-label="Show Calendar" aria-pressed="false"></button>
+            <button type="button" data-toggle aria-label="Pause automatic playback" aria-pressed="false"><span></span></button>
+          </div>
+        </div>
+      </section>
     </main>
   </body>
 </html>

@@ -1,7 +1,7 @@
 {
   "url": "https://github.com/elizaOS/eliza.git",
-  "branch": "vibestack-dp",
-  "commit": "6451775c35a21f41f7eddf428d46826baf2c9194",
+  "branch": "vibestack",
+  "commit": "082828fdb077c4e4d3e6b3b43b75ffc556167615",
   "appSource": "apps/app",
   "osSource": "packages/os",
   "androidSource": "packages/os/android",
@@ -9,6 +9,5 @@
   "agentSource": "packages/agent",
   "agentBundle": "@elizaos/agent/bundle",
   "cloudSource": "packages/cloud",
-  "vibestackSource": "vibestack",
-  "pullRequest": "https://github.com/elizaOS/eliza/pull/40258"
+  "vibestackSource": "vibestack"
 }
