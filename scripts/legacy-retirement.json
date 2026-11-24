@@ -100,8 +100,8 @@
   },
   {
    "legacy": "test/agent-email-draft.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/agentDrafts.md",
+   "area": "assistant",
+   "spec": "apps/app/spec/assistant/emailCard.md",
    "status": "mapped"
   },
   {
@@ -736,8 +736,8 @@
   },
   {
    "legacy": "test/browser/agent-email-card.production.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/agentDrafts.md",
+   "area": "assistant",
+   "spec": "apps/app/spec/assistant/emailCard.md",
    "status": "mapped"
   },
   {
@@ -1762,26 +1762,26 @@
   },
   {
    "legacy": "test/browser/dev-digest-delegation.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestSources.md",
    "status": "mapped"
   },
   {
    "legacy": "test/browser/dev-digest-live.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestSources.md",
    "status": "mapped"
   },
   {
    "legacy": "test/browser/dev-digest-schedule.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
    "legacy": "test/browser/dev-digest-storage.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestInbox.md",
    "status": "mapped"
   },
   {
@@ -2092,50 +2092,50 @@
   },
   {
    "legacy": "test/browser/digest-authorization-migration.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestSources.md",
    "status": "mapped"
   },
   {
    "legacy": "test/browser/digest-execution-migration.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
    "legacy": "test/browser/digest-inbox-migration.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestInbox.md",
    "status": "mapped"
   },
   {
    "legacy": "test/browser/digest-native-sources.production.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestSources.md",
    "status": "mapped"
   },
   {
    "legacy": "test/browser/digest-resident-schedule.production.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/scheduling.md",
    "status": "mapped"
   },
   {
    "legacy": "test/browser/digest-schedule-removal.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
    "legacy": "test/browser/digest-source-renewal.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestSources.md",
    "status": "mapped"
   },
   {
    "legacy": "test/browser/digest-summary.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
@@ -4876,26 +4876,26 @@
   },
   {
    "legacy": "test/digest-capabilities.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
    "legacy": "test/digest-missed-run-now.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
    "legacy": "test/digest-occurrence-delivery.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestInbox.md",
    "status": "mapped"
   },
   {
    "legacy": "test/digest-restart-input.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/scheduling.md",
    "status": "mapped"
   },
   {
@@ -5206,8 +5206,8 @@
   },
   {
    "legacy": "test/fixtures/NativeDigestSourcesTest.java",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestSources.md",
    "status": "mapped"
   },
   {
@@ -5998,8 +5998,8 @@
   },
   {
    "legacy": "test/fixtures/hosted-digest-refresh.jsx",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestInbox.md",
    "status": "mapped"
   },
   {
@@ -6479,8 +6479,8 @@
   {
    "legacy": "test/gmail-agent-read-host.test.mjs",
    "area": "inbox",
-   "spec": "apps/app/spec/inbox/agentDrafts.md",
-   "status": "mapped"
+   "status": "removed",
+   "note": "the agent's Gmail body reads and mailbox changes have no counterpart in the port; retired pending the owner's decision (docs/vibestack-open-items.md, A-149)"
   },
   {
    "legacy": "test/gmail-background-binding.test.mjs",
@@ -6646,20 +6646,20 @@
   },
   {
    "legacy": "test/hosted-digest-mutation-ownership.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
    "legacy": "test/hosted-digest-panel.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
    "legacy": "test/hosted-digest-refresh-ownership.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestInbox.md",
    "status": "mapped"
   },
   {
@@ -7078,8 +7078,8 @@
   },
   {
    "legacy": "test/native-digest-sources.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestSources.md",
    "status": "mapped"
   },
   {
@@ -8362,8 +8362,8 @@
   },
   {
    "legacy": "test/quint-development-digest-pending.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
@@ -8560,14 +8560,14 @@
   },
   {
    "legacy": "test/quint-hosted-digest-mutation.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-hosted-digest-refresh.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestInbox.md",
    "status": "mapped"
   },
   {
@@ -8926,8 +8926,8 @@
   },
   {
    "legacy": "test/quint-native-digest-consent.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestSources.md",
    "status": "mapped"
   },
   {
@@ -9382,8 +9382,8 @@
   },
   {
    "legacy": "test/quint-renderer-digest-queue.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestInbox.md",
    "status": "mapped"
   },
   {
@@ -11388,14 +11388,14 @@
   },
   {
    "legacy": "specs/quint/application/HostedDigestMutation.qnt",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
    "legacy": "specs/quint/application/HostedDigestRefresh.qnt",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestInbox.md",
    "status": "mapped"
   },
   {
@@ -11802,8 +11802,8 @@
   },
   {
    "legacy": "specs/quint/application/RendererDigestQueue.qnt",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestInbox.md",
    "status": "mapped"
   },
   {
@@ -12399,8 +12399,8 @@
   },
   {
    "legacy": "specs/quint/native/NativeDigestConsent.qnt",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestSources.md",
    "status": "mapped"
   },
   {
@@ -12885,8 +12885,8 @@
   },
   {
    "legacy": "specs/quint/services/DevelopmentDigestPending.qnt",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
@@ -14511,8 +14511,8 @@
   },
   {
    "legacy": "specs/quint/refinement/application/hosted-digest-refresh.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestInbox.md",
    "status": "mapped",
    "note": "LemmaScript/Dafny proof of a legacy renderer module; vibestack proofs are spec-level (*.proof.dfy beside the area spec)"
   },
@@ -15330,8 +15330,8 @@
   },
   {
    "legacy": "specs/quint/refinement/native/NativeDigestTraces.java",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestSources.md",
    "status": "mapped",
    "note": "LemmaScript/Dafny proof of a legacy renderer module; vibestack proofs are spec-level (*.proof.dfy beside the area spec)"
   },
@@ -15988,15 +15988,15 @@
   },
   {
    "legacy": "specs/quint/refinement/native/native-digest-platform.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestSources.md",
    "status": "mapped",
    "note": "LemmaScript/Dafny proof of a legacy renderer module; vibestack proofs are spec-level (*.proof.dfy beside the area spec)"
   },
   {
    "legacy": "specs/quint/refinement/native/native-digest.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestSources.md",
    "status": "mapped",
    "note": "LemmaScript/Dafny proof of a legacy renderer module; vibestack proofs are spec-level (*.proof.dfy beside the area spec)"
   },
@@ -16429,15 +16429,15 @@
   },
   {
    "legacy": "specs/quint/refinement/services/development-digest-pending-probe.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped",
    "note": "LemmaScript/Dafny proof of a legacy renderer module; vibestack proofs are spec-level (*.proof.dfy beside the area spec)"
   },
   {
    "legacy": "specs/quint/refinement/services/development-digest-pending.md",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped",
    "note": "LemmaScript/Dafny proof of a legacy renderer module; vibestack proofs are spec-level (*.proof.dfy beside the area spec)"
   },
@@ -17137,10 +17137,10 @@
   },
   {
    "legacy": "scripts/fixtures/hosted-digest-protocol.ts",
-   "area": "inbox",
+   "area": "workflows",
    "note": "fixture of a removed legacy script flow",
    "status": "removed",
-   "spec": "apps/app/spec/inbox/digest.md"
+   "spec": "apps/app/spec/workflows/digests.md"
   },
   {
    "legacy": "scripts/fixtures/hosted-live-source/entry.tsx",
@@ -17203,14 +17203,14 @@
   {
    "legacy": "scripts/gmail-agent-dev-broker.ts",
    "area": "inbox",
-   "spec": "apps/app/spec/inbox/agentDrafts.md",
-   "status": "removed"
+   "status": "removed",
+   "note": "the agent's Gmail body reads and mailbox changes have no counterpart in the port; retired pending the owner's decision (docs/vibestack-open-items.md, A-149)"
   },
   {
    "legacy": "scripts/gmail-agent-read-host.ts",
    "area": "inbox",
-   "spec": "apps/app/spec/inbox/agentDrafts.md",
-   "status": "removed"
+   "status": "removed",
+   "note": "the agent's Gmail body reads and mailbox changes have no counterpart in the port; retired pending the owner's decision (docs/vibestack-open-items.md, A-149)"
   },
   {
    "legacy": "scripts/host-test-runtime.json",
@@ -17538,8 +17538,8 @@
   },
   {
    "legacy": "scripts/test-digest-cancellation.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "note": "legacy script-level behaviour test or dev surface bound to the replaced renderer or resident host; the area spec and its tests own the behaviour",
    "status": "removed"
   },
@@ -17640,14 +17640,14 @@
   },
   {
    "legacy": "scripts/test-local-digest-restart.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/scheduling.md",
    "status": "removed"
   },
   {
    "legacy": "scripts/test-local-digest-storage.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestInbox.md",
    "status": "removed"
   },
   {
