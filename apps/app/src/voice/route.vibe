@@ -1,6 +1,6 @@
 // spec/voice/route.md, "Story: Use Cloud speech when I have it, and my phone otherwise"; spec/voice/route.md, "Story: Stay within my plan's voice limits"; spec/voice/route.md, "Story: Know what leaves my phone when I talk"
 import {
-  SpeechAttemptFailed, SpeechBusy, SpeechRoutingMachine, SpeechUnavailable as NoRouteSpoke, deviceSpeechUnavailable, nextSpeechRoute,
+  SpeechAttemptFailed, SpeechRoutingMachine, deviceSpeechUnavailable, nextSpeechRoute,
   serviceLimitOf, speakOnRoute, speechFailureOf, speechKeyChanged, speechLimitChanged,
   type MisroutedSpeech, type NetworkKey, type ObservedLimit, type SpeechRoute, type SpeechRouting,
 } from "@elizaos/plugin-local-inference/speech-route"
@@ -90,9 +90,9 @@ export const routeService = Layer.effect(VoiceRoute, effect {
   effect function runOnce<A>(attempt: RouteAttempt<A>) {
     provide SpeechRoutingMachine = routing {
       while (true) {
-        const outcome = speakOnRoute((route: SpeechRoute, heard) => effect { return { value: try attempt(routeName(route), heard) } }) catch effect (error) => match (error) {
-          when SpeechBusy: undefined;
-          when NoRouteSpoke: throw new VoiceRouteFailed({ route: routeName(error.route), cause: error.failure });
+        const outcome = speakOnRoute((route: SpeechRoute, heard) => effect { return { value: try attempt(routeName(route), heard) } }) catch effect (error) => {
+          if (error._tag === "SpeechBusy") return undefined
+          throw new VoiceRouteFailed({ route: routeName(error.route), cause: error.failure })
         }
         if (outcome !== undefined) return outcome.value
         try sleep(BUSY_WAIT)
