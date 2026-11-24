@@ -36,8 +36,8 @@ function relayBridge(calls: Calls, events: Queue.Queue<unknown>) {
   })
 }
 
-/** The rest of the platform at its boundary: the resident and Cloud refuse, nothing leaves the test. */
-function platform(native: Layer.Layer<Native>) {
+/** The rest of the platform at its boundary: Cloud refuses, the resident streams `replies` to a turn, and nothing leaves the test. */
+function platform(native: Layer.Layer<Native>, replies: () => Stream.Stream<Uint8Array> = () => Stream.empty) {
   return Layer.mergeAll(
     native,
     Layer.succeed(Cloud, {
@@ -48,7 +48,7 @@ function platform(native: Layer.Layer<Native>) {
       status: () => Effect.succeed("running" as const),
       ensureRunning: () => Effect.void,
       json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string) => Effect.succeed({ status: 200, data: { method, path } }),
-      stream: () => Stream.empty,
+      stream: () => replies(),
     }),
     Layer.succeed(ResidentControl, {
       changes: Stream.never,
@@ -203,4 +203,51 @@ it.live(`the relay's funding refusal ends Talk quietly with one chat line, and t
       relayStarts: 2,
     }))
   }
+})
+
+/** A resident that answers each voice turn with a failed reply of spent credits, carrying Cloud's own code when one is given. */
+function spentCredits(turns: string[], cloudCode: string | undefined) {
+  return () => {
+    turns.push(cloudCode ?? "")
+    const done = { type: "done", fullText: "", messageId: `m${turns.length}`, userMessageId: `u${turns.length}`, agentName: "Alpha", actionResults: [], failureKind: "insufficient_credits", planAction: "funding", ...(cloudCode === undefined ? {} : { cloudCode }) }
+    return Stream.make(new TextEncoder().encode(`data: ${JSON.stringify(done)}\n\n`))
+  }
+}
+
+it.live(`a spoken turn's reply refused for spent credits with Cloud's own code ends Talk quietly with one chat line, and one without the code keeps Talk on (spec/voice/conversation.md, "Out of plan allowance and credits ends voice quietly as Stop does, and the chat gets the one line"; spec/assistant/reply.md, "Spent credits that Cloud named with its own code is the one out-of-funds line, with Manage plan")`, () => effect {
+  const talkTurn = effect function (cloudCode: string | undefined) {
+    const calls: Calls = []
+    const events = try Queue.unbounded<unknown>()
+    const turns: string[] = []
+    provide Layer.provide(layer, platform(relayBridge(calls, events), spentCredits(turns, cloudCode))) {
+      const routes = try VoiceRoute
+      try routes.observeAccount({ kind: "cloud", environment: "production", credentialId: "credential-1" })
+      const conversation = try VoiceConversation
+      let posted = 0
+      try conversation.disclose()
+      try conversation.start({ admitted: true, callActive: false, conversationId: "c1", roomId: "c1", chatCurrent: () => true, outOfFunds: () => Effect.sync(() => { posted += 1 }) })
+      for (let wait = 0; wait < 40 && !calls.some((call) => call.method === "startCloudSpeech"); wait += 1) try sleep("25 millis")
+      const sessionId = calls.find((call) => call.method === "startCloudSpeech")?.args.sessionId
+      try Queue.offer(events, { sessionId, type: "speech-start" })
+      try Queue.offer(events, { sessionId, type: "speech-end", text: "what is on today" })
+      for (let wait = 0; wait < 80 && turns.length === 0; wait += 1) try sleep("25 millis")
+      try sleep("300 millis")
+      const seen = try conversation.get()
+      const ended = { shown: seen.shown, notice: seen.notice, posted, turns: turns.length }
+      try conversation.stop()
+      return ended
+    }
+  }
+  const coded = try talkTurn("insufficient_credits")
+  const allowance = try talkTurn("allowance_exhausted")
+  const uncoded = try talkTurn(undefined)
+  try Effect.try(() => assert.deepStrictEqual({
+    coded: { ended: coded.shown === "Off" || coded.shown === "Retiring", notice: coded.notice, posted: coded.posted, turns: coded.turns },
+    allowance: { ended: allowance.shown === "Off" || allowance.shown === "Retiring", posted: allowance.posted },
+    uncoded: { ended: uncoded.shown === "Off" || uncoded.shown === "Retiring", posted: uncoded.posted, turns: uncoded.turns },
+  }, {
+    coded: { ended: true, notice: "NoNotice", posted: 1, turns: 1 },
+    allowance: { ended: true, posted: 1 },
+    uncoded: { ended: false, posted: 0, turns: 1 },
+  }))
 })

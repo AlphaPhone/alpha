@@ -1,14 +1,16 @@
-// spec/voice/conversation.md, "Story: Start talking only when Alpha can listen safely"; spec/voice/conversation.md, "Story: Hear my turn end at the right moment"; spec/voice/conversation.md, "Story: Keep voice going through a passing failure"; spec/voice/conversation.md, "Story: Review what voice is about to do"; spec/voice/conversation.md, "Story: Mute the speaker without ending voice"; spec/voice/conversation.md, "Story: End voice cleanly, and never lose what I type"; spec/voice/conversation.md, "An open microphone ends a turn at the first pause and a 400 ms hold interrupts; Cloud streaming waits 400 ms after its final; Stop sends no heard report"; spec/voice/speech.md, "An email draft is said as one line, by whether its card was validated or the action failed; other action replies drop IDs and asides unless I asked for them word for word"; spec/voice/conversation.md, "Story: Keep talking on a screen the agent opens for me"; spec/voice/conversation.md, "Voice closed by hiding the page says once, when the page returns, that a call paused it if a call was live then or since; a plain app switch says nothing"; spec/voice/speech.md, "A reading the owner starts first retires a running voice conversation and waits for its replies to stop"; spec/voice/acknowledgement.md, "Story: Hear that Alpha is working on it, never over its answer"; spec/voice/conversation.md, "A Cloud stream listens, speaks the replies and the cue and mutes the speaker on one relay session, and only voice retiring ends it"; spec/assistant/context.md, "Every assistant request carries the capabilities this phone advertises of those the agent offered, and none when it offered none"; spec/assistant/context.md, "A spoken turn carries the screen context a typed turn sent at that moment would"; spec/voice/conversation.md, "Out of plan allowance and credits ends voice quietly as Stop does, and the chat gets the one line"
+// spec/voice/conversation.md, "Story: Start talking only when Alpha can listen safely"; spec/voice/conversation.md, "Story: Hear my turn end at the right moment"; spec/voice/conversation.md, "Story: Keep voice going through a passing failure"; spec/voice/conversation.md, "Story: Review what voice is about to do"; spec/voice/conversation.md, "Story: Mute the speaker without ending voice"; spec/voice/conversation.md, "Story: End voice cleanly, and never lose what I type"; spec/voice/conversation.md, "An open microphone ends a turn at the first pause and a 400 ms hold interrupts; Cloud streaming waits 400 ms after its final; Stop sends no heard report"; spec/voice/speech.md, "An email draft is said as one line, by whether its card was validated or the action failed; other action replies drop IDs and asides unless I asked for them word for word"; spec/voice/conversation.md, "Story: Keep talking on a screen the agent opens for me"; spec/voice/conversation.md, "Voice closed by hiding the page says once, when the page returns, that a call paused it if a call was live then or since; a plain app switch says nothing"; spec/voice/speech.md, "A reading the owner starts first retires a running voice conversation and waits for its replies to stop"; spec/voice/acknowledgement.md, "Story: Hear that Alpha is working on it, never over its answer"; spec/voice/conversation.md, "A Cloud stream listens, speaks the replies and the cue and mutes the speaker on one relay session, and only voice retiring ends it"; spec/assistant/context.md, "Every assistant request carries the capabilities this phone advertises of those the agent offered, and none when it offered none"; spec/assistant/context.md, "A spoken turn carries the screen context a typed turn sent at that moment would"; spec/voice/conversation.md, "Out of plan allowance and credits ends voice quietly as Stop does, and the chat gets the one line"; spec/assistant/reply.md, "Spent credits that Cloud named with its own code is the one out-of-funds line, with Manage plan"
 import { readReplyStream } from "@elizaos/agent/client"
 import type { AssistantCapture, AssistantListenHandlers, CloudStreamingSpeech } from "@elizaos/os/bridges/voice"
 import { VOICE_TRANSCRIPT_STREAM, createLiveVoiceSession, defaultVoiceProfile, type CaptureEvents, type LiveVoiceSession, type SpeakerEvents, type VoiceProfile, type VoiceReply, type VoiceSessionPorts } from "@elizaos/agent/voice"
 import { AdvertisedCapabilities } from "../assistant/ports.vibe"
+import { failureKindOf, replyFundsCode } from "../assistant/presentation.vibe"
 import { deviceHeaders } from "../assistant/transport.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
 import { ResidentControl } from "../platform/resident-control.vibe"
 import { ResidentFeeds } from "../platform/view-events.vibe"
+import { outOfFundsReply } from "../../gen/assistant__reply.effect.vibe"
 import { Machine, active, endpointerOf, openMicHangoverMs, profileOf, running, type Conversation, type Event, type Route, type SessionPhase } from "../../gen/voice__conversation.effect.vibe"
 import { busy, holdsClip } from "../../gen/voice__dictation.effect.vibe"
 import { readingMayStart } from "../../gen/voice__speech.effect.vibe"
@@ -387,7 +389,11 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     }
     if (outcome.kind === "Done") {
       const awaitingReview = "awaitingReview" in outcome && outcome.awaitingReview === true
-      const done: VoiceTurnReply = { messageId: outcome.messageId, text: outcome.text, ...(outcome.action === undefined ? {} : { action: outcome.action }), ...(awaitingReview ? { awaitingReview } : {}) }
+      const cloudCode = "cloudCode" in outcome && typeof outcome.cloudCode === "string" ? outcome.cloudCode : undefined
+      const done: VoiceTurnReply = {
+        messageId: outcome.messageId, text: outcome.text, ...(outcome.action === undefined ? {} : { action: outcome.action }), ...(awaitingReview ? { awaitingReview } : {}),
+        ...(outcome.failureKind === undefined ? {} : { failureKind: outcome.failureKind }), ...(cloudCode === undefined ? {} : { cloudCode }),
+      }
       return done
     }
     const answer = resident.json("POST", path, body, headers) catch effect (error) => {
@@ -487,6 +493,12 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
           throw new Error("The agent's voice reply was not usable.")
         }
         try latency.mark("FirstToken")
+        if (outOfFundsReply(failureKindOf(reply.failureKind), replyFundsCode(reply))) {
+          try ack.cancel()
+          if (cue === ack) cue = undefined
+          try fundsStop()
+          throw new Error("The agent's voice reply failed.")
+        }
         if (reply.awaitingReview === true) {
           try ack.cancel()
           if (cue === ack) cue = undefined

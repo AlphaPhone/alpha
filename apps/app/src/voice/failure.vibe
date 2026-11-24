@@ -1,5 +1,6 @@
 // spec/voice/route.md, "A Cloud refusal's limit is a rate limit, a used allowance, a missing plan or a billing refusal, with a wait of one second to a day"; spec/voice/conversation.md, "A busy Cloud is retried quietly at most twice in a row; a long wait pauses voice; own keys and other failures are shown"; spec/voice/conversation.md, "Out of plan allowance and credits ends voice quietly as Stop does, and the chat gets the one line"
 import { boundedWaitSeconds, type LimitKind, type Route } from "../../gen/voice__route.effect.vibe"
+import { fundsCodeOf } from "../../gen/assistant__reply.ts"
 import { limitOf } from "../account/limits.vibe"
 import { NativeRefusal, RefusalData } from "./native.schema.vibe"
 
@@ -55,12 +56,9 @@ export function limitKindOf(facts: RefusalFacts): LimitKind {
   return "RateLimit"
 }
 
-/** Cloud's own codes for an account out of plan allowance and credits, on an agent reply or as the speech relay's refusal code. */
-const OUT_OF_FUNDS_CODES: ReadonlySet<string> = new Set(["insufficient_credits", "allowance_exhausted"])
-
-/** Whether Cloud's own code says the plan allowance and credits are used up; a speech 429's limit code is the route's voice limit, never this. */
+/** Whether Cloud's own code, on an agent reply or as the speech relay's refusal code, says the plan allowance and credits are used up; a speech 429's limit code is the route's voice limit, never this. */
 export function outOfFundsCode(code: string | undefined): boolean {
-  return code !== undefined && OUT_OF_FUNDS_CODES.has(code)
+  return fundsCodeOf(code ?? "") !== "NoFundsCode"
 }
 
 /** Whether a failure is a call taking the microphone or the speaker. */
