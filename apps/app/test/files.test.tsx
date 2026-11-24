@@ -29,6 +29,11 @@ describe("Files on a phone", () => {
     // spec/app/files/index.md, "The top shows each volume with a storage bar that is never fuller than the volume, or says the storage is unavailable"
     await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded" && s.access === "Granted");
     expect([Boolean(button("Internal storage")), Boolean(button("SD card")), Boolean(button("Trash"))]).toEqual([true, true, true]);
+    // spec/app/files/index.md, "The top shows how many files each category holds and the room they take, and how many items the Trash holds, as the storage was last read"
+    expect(runtime.runSync(Browser.use((m) => m.get())).tally).toEqual({
+      counts: [{ kind: "Download", items: 2, bytes: 5_000 }, { kind: "Image", items: 1, bytes: 3_000 }, { kind: "Video", items: 0, bytes: 0 }, { kind: "Audio", items: 0, bytes: 0 }, { kind: "Document", items: 2, bytes: 2_010 }],
+      trashed: 0,
+    });
 
     // spec/app/files/index.md, "The owner opens a volume, a category, a listed folder, a step of the path, or goes back to the top; a category lists exactly the files of its kind"
     await press("Internal storage");

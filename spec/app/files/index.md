@@ -40,18 +40,21 @@ import destination as M from "./destination"
 
 type Actor = Owner | Agent | Phone
 type Volume = { id: int, used: int, total: int }
+type Count = { kind: F::Kind, items: int, bytes: int }
+type Tally = { counts: List[Count], trashed: int }
 type Layout = Grid | Rows
 type Order = ByDate | ByName | BySize
 type Action = Making | Naming | Moving | Copying | Deleting | Sharing
 type Files = {
-  access: P::Grant, supported: bool, open: bool, storage: R::Read, volumes: List[Volume],
+  access: P::Grant, supported: bool, open: bool, storage: R::Read, volumes: List[Volume], tally: Tally,
   trail: List[int], inCategory: bool, category: F::Kind, listing: R::Read, items: List[F::Item], partial: bool, picked: List[int], missing: bool,
   layout: Layout, order: Order, reversed: bool, trash: bool,
   search: S::Search, deleting: V::Review, change: C::Change, sheet: M::Sheet,
 }
 
+pure val untallied: Tally = { counts: List(), trashed: 0 }
 pure val initial: Files = {
-  access: P::Unasked, supported: true, open: false, storage: R::unread, volumes: List(),
+  access: P::Unasked, supported: true, open: false, storage: R::unread, volumes: List(), tally: untallied,
   trail: List(), inCategory: false, category: F::Other, listing: R::unread, items: List(), partial: false, picked: List(), missing: false,
   layout: Rows, order: ByDate, reversed: false, trash: false,
   search: S::initial, deleting: V::unreviewed, change: C::initial, sheet: M::initial,
@@ -102,6 +105,7 @@ pure val siblingsValues = Set(List(), List("b"))
 pure val doneValues = Set(List(), List(1), List(1, 2))
 pure val failedValues = Set(List(), List(2))
 pure val volumesValues = Set(List({ id: 1, used: 3, total: 8 }, { id: 9, used: 0, total: 0 }))
+pure val tallyValues = Set({ counts: List({ kind: F::Image, items: 2, bytes: 9 }), trashed: 1 })
 pure val fileValues = Set({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1 })
 pure val wantedValues = Set({ text: "", kind: F::Image, anyKind: false }).union(Set({ text: "b", kind: F::Other, anyKind: true }))
 pure val destValues = Set({ folder: 1, path: List(), names: List("b") }).union(Set({ folder: 4, path: List(1), names: List() }))
@@ -243,7 +247,7 @@ pure def canEnter(s: Files, by: Actor): bool = by == Phone and not(s.open)
 pure def enter(s: Files, by: Actor): Moved = arrived(entered(s.trail, s.inCategory, s.category, { ...s, open: true }))
 
 pure def shut(open: bool, s: Files): Moved =
-  { state: { ...s, open: open, storage: F::drop(s.storage), volumes: List(), listing: F::drop(s.listing), items: List(), partial: false, picked: List(),
+  { state: { ...s, open: open, storage: F::drop(s.storage), volumes: List(), tally: untallied, listing: F::drop(s.listing), items: List(), partial: false, picked: List(),
       search: S::stop(s.search), deleting: V::dismiss(s.deleting), change: C::retire(s.change), sheet: M::close(s.sheet) },
     out: unanswered(s.search) }
 
@@ -268,7 +272,7 @@ pure def accessReported(s: Files, grant: P::Grant, supported: bool, by: Actor): 
   else arrived(entered(s.trail, s.inCategory, s.category, told))
 ```
 
-### Without access Files reads nothing, and shows no volumes, no items, no selection, no results, no confirmation and no Move to sheet
+### Without access Files reads nothing, and shows no volumes, no counts, no items, no selection, no results, no confirmation and no Move to sheet
 
 Discovered by the proof: an answer to a read asked before access was taken
 away could otherwise fill Files again.
@@ -280,7 +284,7 @@ pure def alwaysNothingIsReadWithoutAccess(s: Files): bool =
 
 pure def alwaysNothingIsShownWithoutAccess(s: Files): bool =
   allowed(s) or (s.items.length() == 0 and s.picked.length() == 0 and s.search.hits.length() == 0 and not(s.deleting.showing)
-    and s.volumes.length() == 0 and not(s.sheet.open))
+    and s.volumes.length() == 0 and s.tally == untallied and not(s.sheet.open))
 ```
 
 ### The top shows each volume with a storage bar that is never fuller than the volume, or says the storage is unavailable
@@ -288,8 +292,8 @@ pure def alwaysNothingIsShownWithoutAccess(s: Files): bool =
 ```quint
 pure def canStorageRead(s: Files, ticket: int, by: Actor): bool = by == Phone and R::canAnswer(s.storage, ticket)
 
-pure def storageRead(s: Files, ticket: int, ok: bool, volumes: List[Volume], by: Actor): Files =
-  { ...s, storage: R::answer(s.storage, ok), volumes: if (ok) volumes else List() }
+pure def storageRead(s: Files, ticket: int, ok: bool, volumes: List[Volume], tally: Tally, by: Actor): Files =
+  { ...s, storage: R::answer(s.storage, ok), volumes: if (ok) volumes else List(), tally: if (ok) tally else untallied }
 
 pure def filled(used: int, total: int): int =
   if (total <= 0 or used <= 0) 0 else if (used >= total) 100 else used * 100 / total
@@ -299,6 +303,18 @@ pure def lawTheStorageBarStaysInItsTrack(used: int, total: int): bool =
 
 pure def alwaysAStorageThatCouldNotBeReadShowsNoVolume(s: Files): bool =
   s.storage.status == R::Failed implies s.volumes.length() == 0
+```
+
+### The top shows how many files each category holds and the room they take, and how many items the Trash holds, as the storage was last read
+
+The phone counts them with the volumes; a storage that could not be read
+shows no count.
+
+```quint
+pure def alwaysAStorageThatCouldNotBeReadShowsNoCount(s: Files): bool =
+  s.storage.status == R::Failed implies s.tally == untallied
+
+pure def sometimesTheCategoriesAreCounted(s: Files): bool = browse(s) == AtTop and s.tally.counts.length() > 0 and s.tally.trashed > 0
 ```
 
 ### The owner opens a volume, a category, a listed folder, a step of the path, or goes back to the top; a category lists exactly the files of its kind

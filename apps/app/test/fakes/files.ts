@@ -116,7 +116,7 @@ export function elizaFiles(scene: FilesScene): Faked {
           : category === "documents" ? one.mimeType === "application/pdf" || one.mimeType.startsWith("text/")
           : one.mimeType.startsWith(`${category.replace(/s$/, "")}/`);
         const entries = scene.stored.filter((one) => one.volume === "primary" && !one.directory && of(one)).map(entry);
-        return Promise.resolve({ status: "ready", entries, count: entries.length, truncated: false });
+        return Promise.resolve({ status: "ready", entries, count: entries.length, bytes: entries.reduce((sum, one) => sum + one.size, 0), truncated: false });
       },
       storageQuery({ text, mimePrefix, documents, folder }) {
         called("storageQuery");

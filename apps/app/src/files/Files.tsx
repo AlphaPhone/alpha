@@ -23,6 +23,14 @@ const orders: readonly [Order, string][] = [["ByName", "Name"], ["ByDate", "Date
 const shares: readonly [Dest, string][] = [["Chooser", "Share to an app"], ["Email", "Email"], ["Copy", "Copy"], ["SaveTo", "Save to"]];
 /** A name no folder holds, since it is a path's separator: what asks whether a new name would be taken at all. */
 const unnamed = "/";
+/** A size in the units the owner reads, to one decimal above a kilobyte. */
+function sized(bytes: number): string {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let at = 0;
+  let value = bytes;
+  while (value >= 1024 && at < units.length - 1) { value /= 1024; at += 1; }
+  return `${at === 0 ? value : value.toFixed(1)} ${units[at]}`;
+}
 const changeWords: Record<Work, string> = { NewFolder: "make the folder", Rename: "rename it", MoveTo: "move them", CopyTo: "copy them" };
 
 /** The name the phone's storage gives a number: its volume's name at a volume's root, else the last step of its path. */
@@ -100,10 +108,12 @@ export function Files({ runtime }: FilesProps) {
             ))}
           </ListGroup>
           <ListGroup heading="Categories">
-            {categories.map(([kind, name]) => (
-              <ListRow key={kind} title={name} onClick={owner({ type: "openCategory", kind }) ? () => tell({ type: "openCategory", kind }) : undefined} />
-            ))}
-            {owner({ type: "openTrash" }) && <ListRow title="Trash" onClick={() => tell({ type: "openTrash" })} />}
+            {categories.map(([kind, name]) => {
+              const counted = state.tally.counts.find((count) => count.kind === kind);
+              const told = counted && `${counted.items} · ${sized(counted.bytes)}`;
+              return <ListRow key={kind} title={name} aria-label={name} aria-description={told} detail={told} onClick={owner({ type: "openCategory", kind }) ? () => tell({ type: "openCategory", kind }) : undefined} />;
+            })}
+            {owner({ type: "openTrash" }) && <ListRow title="Trash" aria-label="Trash" aria-description={state.tally.trashed > 0 ? String(state.tally.trashed) : undefined} trailing={state.tally.trashed > 0 && state.tally.trashed} onClick={() => tell({ type: "openTrash" })} />}
           </ListGroup>
         </>
       ) : (

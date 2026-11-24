@@ -1,7 +1,7 @@
 // spec/app/files/index.md, "Story: Browse my storage"
 import type { ElizaFilesPlugin, FileOutcomeRow, FilesCategory, StorageEntry } from "@elizaos/os/bridges/definitions/files"
 import * as Browser from "../../gen/app__files.effect.vibe"
-import type { Actor, Effect as Out, Event, Volume } from "../../gen/app__files.effect.vibe"
+import type { Actor, Count, Effect as Out, Event, Tally, Volume } from "../../gen/app__files.effect.vibe"
 import type { Place } from "../../gen/app__files__change.effect.vibe"
 import type { Filter, Where } from "../../gen/app__files__search.effect.vibe"
 import type { Item, Kind } from "../../gen/app__files__shared.effect.vibe"
@@ -81,7 +81,7 @@ effect function folderOf(trail: ReadonlyArray<number>): Option.Option<Spot>!!Han
 effect function measured(ticket: number): Event!!(Files | Handles) {
   return effect {
     const state = try called("storageState", (plugin) => plugin.storageState())
-    if (state.status !== "ready") return { type: "storageRead", ticket, ok: false, volumes: [] }
+    if (state.status !== "ready") return { type: "storageRead", ticket, ok: false, volumes: [], tally: Browser.untallied }
     const numbered = try Handles
     const volumes: Volume[] = []
     for (const volume of [...(state.volumes ?? [])].sort((a, b) => Number(b.primary) - Number(a.primary))) {
@@ -89,8 +89,23 @@ effect function measured(ticket: number): Event!!(Files | Handles) {
       try numbered.name(id, volume.name)
       volumes.push({ id, used: Math.max(0, Math.trunc(volume.total - volume.free)), total: Math.max(0, Math.trunc(volume.total)) })
     }
-    return { type: "storageRead", ticket, ok: true, volumes }
-  } catch () => ({ type: "storageRead", ticket, ok: false, volumes: [] })
+    return { type: "storageRead", ticket, ok: true, volumes, tally: try tallied((state.volumes ?? []).map((volume) => volume.id)) }
+  } catch () => ({ type: "storageRead", ticket, ok: false, volumes: [], tally: Browser.untallied })
+}
+
+// spec/app/files/index.md, "The top shows how many files each category holds and the room they take, and how many items the Trash holds, as the storage was last read"
+effect function tallied(volumes: ReadonlyArray<string>): Tally!!Files {
+  const counts: Count[] = []
+  for (const [kind, category] of Object.entries(categories) as [Kind, FilesCategory][]) {
+    const reply = called("storageCategory", (plugin) => plugin.storageCategory({ category, countOnly: true })) catch () => undefined
+    if (reply?.status === "ready") counts.push({ kind, items: Math.max(0, Math.trunc(reply.count ?? reply.entries?.length ?? 0)), bytes: Math.max(0, Math.trunc(reply.bytes ?? 0)) })
+  }
+  let trashed = 0
+  for (const volume of volumes.length === 0 ? [primary] : volumes) {
+    const reply = called("storageTrashList", (plugin) => plugin.storageTrashList({ volume })) catch () => undefined
+    if (reply?.status === "ready") trashed += (reply.items ?? []).length
+  }
+  return { counts, trashed }
 }
 
 // spec/app/files/index.md, "The place showing is read again when asked, and only its newest answer is taken; a folder that no longer exists brings the owner back to the top and says so, never that the storage is unavailable"
@@ -322,7 +337,7 @@ function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Mach
   return match (fx) {
     when { tag: "AskAccess" }: answer("access", allowed(false), { type: "accessReported", grant: "Denied", supported: true }, "Phone");
     when { tag: "OpenSettings" }: answer("access", allowed(true), { type: "accessReported", grant: "Denied", supported: true }, "Phone");
-    when { tag: "Measure", let ticket }: answer("measure", measured(ticket), { type: "storageRead", ticket, ok: false, volumes: [] }, "Phone");
+    when { tag: "Measure", let ticket }: answer("measure", measured(ticket), { type: "storageRead", ticket, ok: false, volumes: [], tally: Browser.untallied }, "Phone");
     when { tag: "Look", let ticket, let trail, let category, let inCategory }: answer("look", looked(ticket, trail, category, inCategory), { type: "listed", ticket, ok: false, gone: false, complete: false, entries: [] }, "Phone");
     when { tag: "Search", let ticket, let where, let filter }: answer("search", searched(ticket, where, filter), { type: "searched", ticket, ok: false, complete: false, entries: [] }, "Phone");
     when { tag: "LookInto", let ticket, let trail }: answer("sheet", destination(ticket, trail), { type: "destRead", ticket, ok: false, entries: [] }, "Phone");
