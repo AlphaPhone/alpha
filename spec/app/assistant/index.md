@@ -11,7 +11,6 @@ for its reply. The rest of the area:
 - [Search](./search.md): searching every conversation and opening a hit
 - [Cards](./cards.md): what a reply carries, and each card's life
 - [Dock](./dock.md): how a drag of Ask Alpha chooses a height, and the keyboard
-- [Device actions](./actions.md): an action the agent proposes for the phone, reviewed and run at most once
 - [Kit extensions](./extend.md): what the area needs of the kit that it lacks
 
 Speaking a turn and reading a reply aloud belong to the voice area, the
