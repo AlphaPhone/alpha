@@ -302,7 +302,7 @@ export const composerLayer = Layer.effect(Composer, effect {
     const viewFields = canDeliverView ? try views.turnFields(observed, screen.observation.view) : undefined
     const voiceUi = {
       ...(statesDirectRequests(asksFirst ? "PreferenceOn" : "PreferenceOff") ? { agentActionMode: "direct-request-v1" as const } : {}),
-      ...(viewFields === undefined ? {} : { uiClientId: viewFields.viewClientId, viewDelivery: viewFields.viewDelivery, uiNotesEditor: SAVED_NOTE_PROTOCOL }),
+      ...(viewFields === undefined ? {} : { uiClientId: viewFields.viewClientId, viewDelivery: viewFields.viewDelivery, uiNotesEditor: SAVED_NOTE_PROTOCOL } as const),
     }
     const context = encodeTurnContext({
       ...(observation === undefined ? {} : { observation, ...(browserPage === undefined ? {} : { browserPage }) }),

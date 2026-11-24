@@ -101,12 +101,12 @@ test('stage-aosp refuses --owner-telephony on any target but pixel10a or cuttlef
 test('stage-aosp wires --owner-telephony admission, the launcher check and the image telephony write', () => {
   const source = fs.readFileSync(path.join(root, 'scripts/stage-aosp.ts'), 'utf8');
   for (const call of [/if \(ownerTelephony\) assertOwnerTelephonyOptions\(\{development, target: get\('--target'\), senseImage\}\)/,
-    /if \(ownerTelephony\)\s+admitOwnerTelephonyApk\(/, /if \(ownerTelephony\) assertOwnerTelephonyLauncher\(provisioningTree, identity\.appId\)/,
+    /if \(ownerTelephony\)\s+await admitOwnerTelephonyApk\(/, /if \(ownerTelephony\) assertOwnerTelephonyLauncher\(provisioningTree, identity\.appId\)/,
     /if \(ownerTelephony\) \{\s+const components = writeOwnerImageTelephony\(output, provisioningTree, identity\.appId\)/])
     assert.match(source, call);
 });
 
-test('owner admission takes only a release, non-test-mocks launcher, even when it is not distributable', () => {
+test('owner admission takes only a release, non-test-mocks launcher, even when it is not distributable', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-owner-admit-'));
   try {
     const apk = path.join(dir, 'launcher-release.apk');
@@ -118,28 +118,28 @@ test('owner admission takes only a release, non-test-mocks launcher, even when i
     const admit = (options = {}) => admitOwnerTelephonyApk({apk, hash: 'a'.repeat(64), manifestFile, testMocksDir,
       readBuildFlags: () => ({testMocks: false}), readManifestTree: release, auditPayload: file => { audited.push(file); }, ...options});
     // No verify-apks row (a locally signed release): admitted only after the payload audit runs.
-    assert.doesNotThrow(() => admit());
+    await assert.doesNotReject(() => admit());
     assert.deepEqual(audited, [apk]);
-    assert.throws(() => admit({auditPayload: () => { throw Error('Development surface in bundle'); }}),
+    await assert.rejects(() => admit({auditPayload: () => { throw Error('Development surface in bundle'); }}),
       /fails the production checks: Development surface in bundle/);
-    assert.throws(() => admit({readManifestTree: () => launcherTree({debuggable: true})}), /release \(non-debuggable\)/);
-    assert.throws(() => admit({readBuildFlags: () => ({testMocks: true})}), /test mocks enabled/);
-    assert.throws(() => admit({readBuildFlags: () => { throw Error('no flags'); }}), /test-mocks flag is unverified/);
+    await assert.rejects(() => admit({readManifestTree: () => launcherTree({debuggable: true})}), /release \(non-debuggable\)/);
+    await assert.rejects(() => admit({readBuildFlags: () => ({testMocks: true})}), /test mocks enabled/);
+    await assert.rejects(() => admit({readBuildFlags: () => { throw Error('no flags'); }}), /test-mocks flag is unverified/);
     fs.mkdirSync(testMocksDir);
     const mocked = path.join(testMocksDir, 'launcher-release.apk');
     fs.writeFileSync(mocked, 'apk');
-    assert.throws(() => admit({apk: mocked}), /test-mocks builds are never staged/);
+    await assert.rejects(() => admit({apk: mocked}), /test-mocks builds are never staged/);
     const record = row => fs.writeFileSync(manifestFile, JSON.stringify({testMocks: false, results: [{sha256: 'a'.repeat(64), ...row}]}));
     record({mode: 'release', distributable: false, signed: true});
     audited = [];
-    assert.doesNotThrow(() => admit());
+    await assert.doesNotReject(() => admit());
     assert.deepEqual(audited, [apk], 'a recorded release row does not skip the payload audit');
     fs.writeFileSync(manifestFile, JSON.stringify({testMocks: true, results: [{sha256: 'a'.repeat(64), mode: 'release'}]}));
-    assert.throws(() => admit(), /records it as a test-mocks build/);
+    await assert.rejects(() => admit(), /records it as a test-mocks build/);
     record({mode: 'release', testMocks: true});
-    assert.throws(() => admit(), /records it as a test-mocks build/);
+    await assert.rejects(() => admit(), /records it as a test-mocks build/);
     record({mode: 'debug'});
-    assert.throws(() => admit(), /records a debug build/);
+    await assert.rejects(() => admit(), /records a debug build/);
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 });
 
