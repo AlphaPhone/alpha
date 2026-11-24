@@ -1,0 +1,33 @@
+{
+  "name": "@repo/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "build": "eliza-harness --ready && node -e \"fs.rmSync('dist', { recursive: true, force: true })\" && vibelang -p tsconfig.build.json && node dist/src/main.js build --env production",
+    "typecheck": "eliza-harness --ready && vibelang --noEmit -p .",
+    "test": "eliza-harness --ready && vitest run",
+    "prepare": "eliza-harness --link"
+  },
+  "dependencies": {
+    "@effect/platform-node": "4.1.1",
+    "@elizaos/agent": "link:../../.eliza/packages/agent",
+    "@repo/deployment": "workspace:*",
+    "@repo/eliza-harness": "workspace:*",
+    "effect": "4.1.1",
+    "vibelang-runtime": "0.0.13"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.1.1",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vibelang": "0.0.13",
+    "vibelang-vite": "0.0.13",
+    "vibestack": "workspace:*",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}

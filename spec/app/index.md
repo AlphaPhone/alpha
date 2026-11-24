@@ -12,6 +12,7 @@ rules.
 - [Inbox](./inbox/): Gmail's list, a message, drafts and the agent's operations
 - [Account](./account/): the agent as the owner sees it, signing in to Alpha Cloud and the session
 - [Notes](./notes/): the notes list, a note, the editor and what the agent may propose
+- [Files](./files/): shared storage, folders, selections and approved changes
 - [Ask Alpha](./ask/): one conversation with the resident agent
 - [Reminders](./sample/): the sample area, which only its own journeys mount: a read, a feed, an undo window and an attempt outside
 - [Text size](./sample/size.md): the second sample, which only its own journeys mount: senders, an opening that asks the phone, the phone's signals and a page-wide effect
