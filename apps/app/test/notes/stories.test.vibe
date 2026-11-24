@@ -21,7 +21,7 @@ import { NotesAudio } from "../../src/notes/audio.vibe"
 import { NotesCollection } from "../../src/notes/collection.vibe"
 import { NotesEditor } from "../../src/notes/editor.vibe"
 import { NotesFolders } from "../../src/notes/folders.vibe"
-import { checklistItems, checklistText, filterRows, folderOf, namedNoteOpenRequest, nextDefaultTitle, rowOf, shownRows } from "../../src/notes/list.vibe"
+import { checklistItems, checklistText, filterRows, folderOf, nextDefaultTitle, rowOf, shownRows } from "../../src/notes/list.vibe"
 import { NotesListFilter } from "../../src/notes/listFilter.vibe"
 import { NotesOrganize } from "../../src/notes/organize.vibe"
 import { NotesOrigins } from "../../src/notes/origins.vibe"
@@ -102,15 +102,6 @@ describe("Notes stories", () => {
     }
   })
 
-  it.effect("A named note opens on the phone and a relative one stays with the agent (spec/notes/list.md, \"Story: Open a note by saying its title\")", () => effect {
-    // spec/notes/list.md, "Only a named, quoted or plainly titled note opens locally; a relative reference goes to the agent"
-    const asked = [
-      "Open the note called Groceries.", "Hey Alpha, could you show my groceries note", "open “Most Recent Recipes” in Notes",
-      "Open my most recent note", "open the note I just created", "open a new note",
-    ].map(namedNoteOpenRequest)
-    try check(() => assert.deepStrictEqual(asked, ["Groceries", "groceries", "Most Recent Recipes", undefined, undefined, undefined]))
-  })
-
   it.effect("A checklist written as text reads back with every item and tick (spec/notes/list.md, \"Story: Turn text into a checklist and back\")", () => effect {
     // spec/notes/list.md, "A checked item is written with an [x] mark, and an unchecked item that looks marked gets an empty mark"
     const items = [{ t: "Milk", done: true }, { t: "[x] on the label", done: false }, { t: "Eggs", done: false }]
@@ -150,6 +141,25 @@ describe("Notes stories", () => {
       try check(() => assert.deepStrictEqual(
         { dropped, afterDrop, saved, afterSave, closed, unchanged: agent.revision === revision, open },
         { dropped: true, afterDrop: 1, saved: true, afterSave: ["\nCall Sam", "\nAs it was"], closed: true, unchanged: true, open: true },
+      ))
+    }
+  })
+
+  it.live("A claimed saved note leaves an edited draft untouched (spec/notes/list.md, \"Story: Open a note by saying its title\")", () => effect {
+    const agent = seeded(note("ferry", "Ferry", "\nBook the ferry", 1), note("dinner", "Dinner", "\nMake a reservation", 2))
+    provide notesOver(agent, new DeviceFake()) {
+      const editor = try NotesEditor
+      try bound()
+      const first = try editor.openClaimedNote("ferry", succeed(true))
+      const selected = (try editor.selection())?.id
+      try editor.edit({ body: "Change not saved" })
+      const revision = agent.revision
+      const alreadyShown = try editor.openClaimedNote("ferry", succeed(true))
+      const refused = try editor.openClaimedNote("dinner", succeed(true))
+      const kept = (try editor.draft())?.body
+      try check(() => assert.deepStrictEqual(
+        { first, selected, alreadyShown, refused, kept, unchanged: agent.revision === revision },
+        { first: true, selected: "ferry", alreadyShown: true, refused: false, kept: "Change not saved", unchanged: true },
       ))
     }
   })
