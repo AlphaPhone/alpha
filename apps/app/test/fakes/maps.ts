@@ -129,7 +129,7 @@ export function elizaLocation(scene: MapsScene, now: () => number): Faked {
     return {
       checkPermissions: () => Promise.resolve({ location: scene.allowed, accuracy: "precise" }),
       requestPermissions: () => Promise.resolve({ location: scene.allowed === "prompt" ? "granted" : scene.allowed, accuracy: "precise" }),
-      getCurrentPosition: () => Promise.reject(new Error("not used by Maps")),
+      getCurrentPosition: () => (scene.here && scene.allowed === "granted" ? Promise.resolve({ coords: { ...scene.here, timestamp: now() }, cached: false }) : Promise.reject(new Error("no position"))),
       watchPosition: () => {
         const watchId = `w${++next}`;
         scene.watches.add(watchId);

@@ -156,6 +156,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await press("Send");
     await until(alpha, runtime, Conversation, (s) => s.turn.send.id === 4 && s.turn.reply === "Complete");
     expect([world.ask.metadata?.at(-1), world.ask.said.at(-1)]).toEqual([expect.objectContaining({ replyToMessageId: "m1a" }), "Why?"]);
+    // spec/app/assistant/context.md, "A turn carries the location only while the owner allows it, from a screen that is not sensitive, to a peer that declares it, and only a GPS fix at most thirty minutes old or a network answer that still stands": the phone's last fix, read behind an earlier turn, goes with this one.
+    expect((world.ask.metadata?.at(-1) as { observation?: { location?: unknown } } | undefined)?.observation?.location).toEqual(phone ? { latitude: 43.73, longitude: 7.42, accuracyMeters: 8, capturedAt: expect.any(Number) } : undefined);
   });
 
   // spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/chats.md, "Story: Open a message that search found"

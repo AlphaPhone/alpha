@@ -39,6 +39,8 @@ export service Location {
   watch(): Stream.Stream<Heard, Unavailable>
   /** Remove every native watch this page started: whether Android confirmed it. */
   clear(): boolean!!
+  /** One rough position, never prompting: a fix at most five minutes old, or none where Android gave none. */
+  fix(): Option.Option<Sighting>!!
 }
 
 export function grantOf(status: LocationPermissionStatus): Grant {
@@ -47,7 +49,7 @@ export function grantOf(status: LocationPermissionStatus): Grant {
   return status.accuracy === "approximate" ? "approximate" : "precise"
 }
 
-export function sightingOf(result: LocationResult): Sighting {
+export function sightingOf(result: Pick<LocationResult, "coords">): Sighting {
   const { latitude, longitude, accuracy, timestamp } = result.coords
   return { lat: Math.round(latitude * 1e6), lng: Math.round(longitude * 1e6), accuracy: Math.round(accuracy), precise: accuracy <= 100, taken: timestamp }
 }
@@ -75,6 +77,9 @@ export const phoneLocation = Layer.sync(Location, () => {
       }
       return confirmed
     },
+    fix: () => tryPromise(() => native.getCurrentPosition({ accuracy: "medium", maxAge: 300000 }))
+      |> Effect.map(%, (reading) => (reading.kind === "fix" ? Option.some(sightingOf(reading)) : Option.none<Sighting>()))
+      |> Effect.orElseSucceed(%, () => Option.none<Sighting>()),
   }
 })
 
@@ -84,4 +89,5 @@ export const browserLocation = Layer.succeed(Location, {
   request: () => succeed<Grant>("denied"),
   watch: () => Stream.fail(new Unavailable({ cause: "a browser gives Maps no location" })),
   clear: () => succeed(true),
+  fix: () => succeed(Option.none<Sighting>()),
 })
