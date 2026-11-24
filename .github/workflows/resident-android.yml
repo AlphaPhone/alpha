@@ -171,6 +171,28 @@ jobs:
           assert re.fullmatch(r'[1-9][0-9]{0,9}', value) and 25 <= int(value) <= 2100000000, 'Dispatched candidate requires versionCode > retained V24'
           PYCODE
       - run: pnpm install --frozen-lockfile
+      - name: Capture the installed workspace lock and dependency graph
+        run: |
+          mkdir -p test-results/resident-ci
+          sha256sum pnpm-lock.yaml > test-results/resident-ci/workspace-lock.sha256
+          # One line per installed package directory (name, version and peer resolution); the JSON tree is over 100 MB.
+          pnpm ls --recursive --depth Infinity --parseable > test-results/resident-ci/graph-before.txt
+          python3 -c 'from pathlib import Path; assert Path("test-results/resident-ci/graph-before.txt").stat().st_size <= 16*1024**2'
+      - name: Reinstall the workspace graph with the OS network denied
+        timeout-minutes: 10
+        run: |
+          pnpm_executable="$(command -v pnpm)"
+          store="$(pnpm store path)"
+          # sudo only creates the fresh network namespace. unshare drops to the
+          # runner UID/GID BEFORE pnpm runs; no token is forwarded.
+          # shellcheck disable=SC2016
+          sudo unshare --net --setgid "$(id -g)" --setuid "$(id -u)" -- \
+            env -i HOME="$HOME" PATH="$PATH" TMPDIR="$RUNNER_TEMP" NO_COLOR=1 CI=1 \
+            /bin/sh -c 'cd "$1" && shift && exec "$@"' sh "$GITHUB_WORKSPACE" \
+            "$pnpm_executable" install --frozen-lockfile --offline --ignore-scripts --store-dir "$store"
+          sha256sum --check test-results/resident-ci/workspace-lock.sha256
+          pnpm ls --recursive --depth Infinity --parseable > test-results/resident-ci/graph-after.txt
+          cmp test-results/resident-ci/graph-before.txt test-results/resident-ci/graph-after.txt
       - name: Verify the pinned upstream source
         run: pnpm upstream:verify
       - name: Prepare archive host-test prerequisites in the selected cache
