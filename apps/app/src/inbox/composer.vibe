@@ -38,7 +38,10 @@ export interface Prefill { readonly toList: string[]; readonly subject: string; 
 export service MailComposer {
   readonly changes: Stream.Stream<Drafts>
   get(): Drafts!!
-  /** The selected account's drafts. */
+  /**
+   * The selected account's drafts. Binds to the selected account first, writing a waiting edit to the account it was typed for, so
+   * it must not be called while that write is in progress.
+   */
   mine(): AccountDrafts!!
   /** Starts a new email, setting the open one aside first. */
   compose(prefill?: Prefill): (ComposerRefusal | undefined)!!
@@ -72,7 +75,7 @@ export service MailComposer {
   saveToGmail(): (OperationOutcome | ComposerRefusal | undefined)!!
   /** A file from Files or Photos, read twice with the same bytes, starts a new email for the account `token` names. */
   shareFile(first: PickedFile, again: PickedFile, token: string): HandoffOutcome!!
-  /** The token of the account a share or suggestion is reviewed for. */
+  /** The token of the account a share or suggestion is reviewed for; binds to the selected account first, as `mine` does. */
   token(): string!!
 }
 
