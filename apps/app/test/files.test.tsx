@@ -103,6 +103,10 @@ describe("Files on a phone", () => {
     expect(listed()).toEqual(["beach.jpg", "lease.pdf"]);
     await press("Name");
     expect(listed()).toEqual(["lease.pdf", "beach.jpg"]);
+    await press("Size");
+    expect(listed()).toEqual(["beach.jpg", "lease.pdf"]);
+    await press("Size");
+    expect(listed()).toEqual(["lease.pdf", "beach.jpg"]);
     // spec/app/files/index.md, "The owner sets a filter of a kind and a text for the place showing, as a chip the owner sees and clears; only what matches both is shown"
     await fill("Filter", "LEASE");
     await press("Filter");

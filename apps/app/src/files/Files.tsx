@@ -65,8 +65,9 @@ export function Files({ runtime }: FilesProps) {
   if (state.trash) return <Trash runtime={runtime} onBack={owner({ type: "closeTrash" }) ? () => tell({ type: "closeTrash" }) : undefined} />;
   const looked = finding(state.search);
   const picked = chosen(state);
+  const weight = (handle: number) => runtime.runSync(Handles.use((handles) => handles.weight(handle)));
   const sorted = [...state.items].sort((a, b) => {
-    const by = state.order === "ByName" ? a.name.localeCompare(b.name) : state.order === "ByDate" ? b.revision - a.revision : a.name.localeCompare(b.name);
+    const by = state.order === "ByName" ? a.name.localeCompare(b.name) : state.order === "ByDate" ? b.revision - a.revision : weight(b.id) - weight(a.id);
     return (a.kind === "Folder" ? 0 : 1) - (b.kind === "Folder" ? 0 : 1) || (state.reversed ? -by : by);
   });
   const row = (item: Item) => {

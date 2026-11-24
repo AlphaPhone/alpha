@@ -52,8 +52,10 @@ const primary = "primary"
 /** What the phone's storage is, numbered. */
 effect function itemOf(volume: string, entry: StorageEntry, kind: Kind): Item!!Handles {
   const numbered = try Handles
+  const id = try numbered.of({ volume, path: entry.path })
+  if (!entry.directory) try numbered.weigh(id, Math.max(0, Math.trunc(entry.size)))
   return {
-    id: try numbered.of({ volume, path: entry.path }),
+    id,
     name: entry.name,
     revision: Math.max(0, Math.trunc(entry.modified)),
     kind,
