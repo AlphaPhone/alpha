@@ -151,7 +151,7 @@ pure def answering(d: Done, before: Camera): Done =
 ```quint
 pure val levelValues = Set(4, 5, 10, 20, 100)
 pure val pieceValues = Set(41943040, 73400320)
-pure val sizeValues = Set(1, 41943040, 104857600)
+pure val totalBytesValues = Set(1, 41943040, 104857600)
 pure val nowValues = Set(0, 150000, 300000, 450000)
 pure val atValues = Set(0, 150000)
 pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8)
@@ -718,11 +718,11 @@ pure def canChunk(s: Camera, piece: int, by: Actor): bool = by == Phone and F::c
 
 pure def chunk(s: Camera, piece: int, now: int, by: Actor): Done = filming(F::chunk(s.film, piece, now), now, s)
 
-pure def canRecordingSize(s: Camera, size: int, by: Actor): bool =
-  by == Phone and size > s.film.bytes and size <= F::maxBytes and F::canChunk(s.film, size - s.film.bytes)
+pure def canRecordingSize(s: Camera, totalBytes: int, by: Actor): bool =
+  by == Phone and totalBytes > s.film.bytes and totalBytes <= F::maxBytes and F::canChunk(s.film, totalBytes - s.film.bytes)
 
-pure def recordingSize(s: Camera, size: int, now: int, by: Actor): Done =
-  chunk(s, size - s.film.bytes, now, by)
+pure def recordingSize(s: Camera, totalBytes: int, now: int, by: Actor): Done =
+  chunk(s, totalBytes - s.film.bytes, now, by)
 
 pure def canStopRecording(s: Camera, by: Actor): bool = by == Owner and F::canStop(s.film)
 
@@ -841,13 +841,11 @@ pure def canAgentLens(s: Camera, requested: RequestedLens, by: Actor): bool =
 pure def agentLens(s: Camera, requested: RequestedLens, by: Actor): Done =
   val choice = { ...s, requestedLens: requested }
   val lens = chosenLens(choice)
+  val switched = { ...choice, lens: lens, zoom: oneTime, flash: false, flashAuto: false }
   if (lens == s.lens) emit(List(), choice)
-  else {
-    val next = { ...choice, lens: lens, zoom: oneTime, flash: false, flashAuto: false }
-    if (s.phase == Ready) starting(List(StopPreview({ ticket: s.preview })), next)
-    else if (s.phase == Starting or mayStart(next)) starting(List(), next)
-    else emit(List(), next)
-  }
+  else if (s.phase == Ready) starting(List(StopPreview({ ticket: s.preview })), switched)
+  else if (s.phase == Starting or mayStart(switched)) starting(List(), switched)
+  else emit(List(), switched)
 ```
 
 ### The agent asks only over a Camera that is showing, unlocked and allowed; an idle preview is started for it, and Ask Alpha over it is lowered

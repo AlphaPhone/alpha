@@ -142,7 +142,7 @@ effect function take(ticket: number): Camera.Event!!(CameraPort | CameraAssets |
 effect function observeSize(bytes: number): void!!Camera.Machine {
   const camera = try Camera.Machine
   const size = Math.min(Film.maxBytes, Math.floor(bytes))
-  if (Camera.canRecordingSize(try camera.get(), size, "Phone")) try tell({ type: "recordingSize", size, now: untimed })
+  if (Camera.canRecordingSize(try camera.get(), size, "Phone")) try tell({ type: "recordingSize", totalBytes: size, now: untimed })
 }
 
 effect function finish(): Camera.Event!!(CameraPort | CameraAssets | Camera.Machine) {
