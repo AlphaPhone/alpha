@@ -79,7 +79,7 @@ export const nativePlugins = {
     reach: "AnyNative",
     methods: [
       "requestPermissions", "cloudStreamTiming", "startCloudSpeech", "stopCloudSpeech", "setCloudSpeechOutputMuted",
-      "setCloudSpeechMuted", "speakCloudSpeech", "cancelCloudSpeech",
+      "setCloudSpeechMuted", "speakCloudSpeech", "cancelCloudSpeech", "prewarmCloudSpeech",
     ],
     events: ["cloudSpeechEvent"],
   },

@@ -119,6 +119,9 @@ The phone's warm-up is advisory and its failure is ignored. Cloud is warmed when
 front, the assistant sheet opens, Talk starts, a connection becomes active or the phone's network
 comes back. It is skipped while Alpha is not in front and while Android confirms the phone is
 offline. A warm-up shows nothing, never holds up what triggered it, and its failure is ignored.
+With a Cloud account, the same warm-up also asks the native speech relay to open its connection to
+that account's Cloud origin, so Talk's consent, mint and socket reuse it; the relay sends no key
+and asks no consent.
 
 ```quint
 pure val cloudWarmEveryMs = 60000

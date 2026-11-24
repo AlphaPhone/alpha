@@ -337,7 +337,10 @@ export const speechService = Layer.effect(Speech, effect {
     effect warmCloud(connection: number, facts: WarmFacts) {
       const now = try Clock.currentTimeMillis
       const sent = held.send({ type: "warmCloud", connection, now, inFront: facts.inFront, online: facts.online }) catch () => undefined
-      if (sent !== undefined) fork.detached effect { timeout(resident.json("POST", "/api/cloud/warm", {}), WARM_LIMIT) catch () => undefined }
+      if (sent === undefined) return
+      fork.detached effect { timeout(resident.json("POST", "/api/cloud/warm", {}), WARM_LIMIT) catch () => undefined }
+      const account = try routes.account()
+      if (account.kind === "cloud") fork.detached effect { timeout(native.invoke("AlphaCloudSpeechStream", "prewarmCloudSpeech", { environment: account.environment }), WARM_LIMIT) catch () => undefined }
     },
     effect setMuted(muted: boolean) {
       const through = stream

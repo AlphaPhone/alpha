@@ -298,6 +298,7 @@ it.effect(`Hear the reply start at once (spec/voice/speech.md, "Story: Hear the 
   const app = Layer.provideMerge(Layer.mergeAll(lifecycleOver(() => () => undefined), shown), phone)
   const settle = effect { for (let round = 0; round < 20; round += 1) try Effect.yieldNow }
   const warms = () => names(calls).filter((n) => n === "resident POST /api/cloud/warm").length
+  const prewarmed = () => calls.filter((c) => c.name === "AlphaCloudSpeechStream.prewarmCloudSpeech").map((c) => (c.args as { environment?: string }).environment)
   const see = (change: Partial<ForegroundState>) => effect {
     try SubscriptionRef.update(front, (now) => ({ ...now, ...change }))
     try settle
@@ -332,10 +333,15 @@ it.effect(`Hear the reply start at once (spec/voice/speech.md, "Story: Hear the 
     try conversation.start({ admitted: true, callActive: false, conversationId: "c1", roomId: "c1", chatCurrent: () => true })
     try settle
     seen.push(warms())
+    // Without a Cloud account the speech relay is never asked to open its connection; with one, an admitted warm-up asks once.
+    const relayBefore = prewarmed().length
+    const routes = try VoiceRoute
+    try routes.observeAccount({ kind: "cloud", environment: "production", credentialId: "key-1" })
     try SubscriptionRef.update(connection, (now) => ({ ...now, generation: 2 }))
     try settle
     seen.push(warms())
-    try Effect.try(() => assert.deepStrictEqual(seen, [1, 1, 2, 2, 3, 4, 5]))
+    try settle
+    try Effect.try(() => assert.deepStrictEqual({ seen, relayBefore, relay: prewarmed() }, { seen: [1, 1, 2, 2, 3, 4, 5], relayBefore: 0, relay: ["production"] }))
   }
 })
 
