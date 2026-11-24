@@ -234,6 +234,18 @@ jobs:
         run: |
           node --conditions=eliza-source --import vibelang/register scripts/app-update-candidate.ts version test-results/resident-ci-candidate/version.json
           echo "ELIZAOS_VERSION_CODE=$(node -p 'require("./test-results/resident-ci-candidate/version.json").versionCode')" >> "$GITHUB_ENV"
+      - name: Prepare pinned JSON dependency for host contract tests
+        shell: bash
+        run: bash scripts/ci/prepare-host-test-json.sh
+      # The voice host record (against the receipt the native build just wrote) and the recorded upstream compare,
+      # before the resident runtime is prepared. native-build-inputs and embedding-host-admission join once the
+      # embedding producer is requalified at the pin (test/root-tests.json holds them until then).
+      - name: Verify source metadata and voice contracts before resident preparation
+        timeout-minutes: 5
+        run: |
+          node --conditions=eliza-source --import vibelang/register --test --test-concurrency=1 \
+            test/upstream-reachability.test.mjs \
+            test/voice-host-record.test.mjs
       - name: Build the workflow worker from the pinned source
         timeout-minutes: 20
         run: pnpm agent:build-workflow-worker
