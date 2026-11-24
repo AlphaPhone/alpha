@@ -104,6 +104,7 @@ const make = effect {
   const keptReview = try SubscriptionRef.make<KeptReview | undefined>(undefined)
   const writing = try Semaphore.make(1)
   const following = try Semaphore.make(1)
+  const scope = try Scope.Scope
   const lastOwner = try Ref.make<OwnedSnapshot | undefined>(undefined)
   const unsaved = try PubSub.unbounded<string>()
 
@@ -227,8 +228,10 @@ const make = effect {
         try show(undefined)
         try SubscriptionRef.set(keptReview, undefined)
         if (state.present && dirty(state) && held !== undefined && previous !== undefined) {
-          try keepFailedDraft(state, held, previous)
-          try PubSub.publish(unsaved, held.title.trim() === "" ? (held.defaultTitle ?? "Untitled") : held.title.trim())
+          fork.in(scope) effect {
+            try keepFailedDraft(state, held, previous)
+            try PubSub.publish(unsaved, held.title.trim() === "" ? (held.defaultTitle ?? "Untitled") : held.title.trim())
+          }
         }
       }
       if (current === undefined || (try collection.current()) !== current) return undefined
