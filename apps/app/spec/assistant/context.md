@@ -89,28 +89,31 @@ pure def sometimesSentFromTheNetwork(l: Locator): bool = sendsLocation(l, true, 
 pure def sometimesTurnedOffForgetsTheFix(l: Locator): bool = l.native and not(l.enabled) and l.gps == NoFix and l.network == NoFix and l.reads >= 1
 pure val ageSValues = Set(0, 30, 299)
 pure val secondsValues = Set(1, 120, 1800)
-pure val lValues = Set(initial).union(Set({ ...initial, granted: true, gps: HasFix({ ageS: 1801 }) })).union(Set({ ...initial, granted: true, gps: HasFix({ ageS: 10 }), gpsWaitS: 300 }))
+pure val lValues = Set(initial).union(Set({ ...initial, granted: true, gps: HasFix({ ageS: 1801 }) })).union(Set({ ...initial, granted: true, gps: HasFix({ ageS: 10 }), gpsWaitS: 300 })).union(Set({ ...initial, granted: true, network: HasFix({ ageS: 10 }), networkWaitS: 900 }))
 ```
 
 ### The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again
 
 Only the resident connection's warm-up, a Maps action or a locate card
-looks up; a chat turn only reads the last answer. The warm-up first waits
-for its GPS read and looks up only when that read left no current fix. An
-answer is reused for 15 minutes; after that the same visible networks keep
-it, confirmed without a request, for up to an hour from when it was
-resolved; a failed lookup is not retried for 2 minutes. An answer Maps
-looked up is the same answer, and a turn carries it too. Only access point
-and cell identities and signal leave the phone, never network names.
+looks up while an answer may still stand; a chat turn reads the last
+answer without waiting, and starts at most one background lookup behind
+the turn when GPS and the network cache both have nothing. Warm-up and
+background reads first wait for the GPS read and look up only when that
+read left no current fix. An answer is reused for 15 minutes; after that
+the same visible networks keep it, confirmed without a request, for up
+to an hour from when it was resolved; a failed lookup is not retried for
+2 minutes. An answer Maps looked up is the same answer, and a turn
+carries it too. Only access point and cell identities and signal leave
+the phone, never network names.
 
 ```quint
-pure def canLookUp(l: Locator, warm: bool): bool = allowed(l) and warm and not(gpsCurrent(l)) and l.networkWaitS <= 0
+pure def canLookUp(l: Locator, warm: bool): bool = allowed(l) and (warm or not(located(l))) and not(gpsCurrent(l)) and l.networkWaitS <= 0
 pure def lookUp(l: Locator, warm: bool): Locator = { ...l, lookups: l.lookups + 1, networkWaitS: networkRetryS }
 pure def canNetworkArrives(l: Locator, ageS: int): bool = allowed(l) and ageS >= 0 and ageS <= networkUnchangedS
 pure def networkArrives(l: Locator, ageS: int): Locator = { ...l, network: HasFix({ ageS: ageS }), networkWaitS: networkReuseS }
 pure def canNetworkConfirmed(l: Locator): bool = allowed(l) and l.lookups >= 1 and networkCurrent(l)
 pure def networkConfirmed(l: Locator): Locator = { ...l, networkWaitS: networkReuseS }
-pure def lawATurnNeverLooksUp(l: Locator): bool = not(canLookUp(l, false))
+pure def lawATurnWithAFixNeverLooksUp(l: Locator): bool = located(l) implies not(canLookUp(l, false))
 pure def lawAFreshGpsFixNeedsNoLookup(l: Locator): bool = gpsCurrent(l) implies not(canLookUp(l, true))
 pure def alwaysANetworkLookupBacksOff(l: Locator): bool = l.networkWaitS <= networkReuseS
 pure def sometimesLookedUp(l: Locator): bool = l.lookups >= 1 and usesNetwork(l)

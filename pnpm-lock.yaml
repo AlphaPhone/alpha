@@ -236,6 +236,9 @@ importers:
 
   apps/app:
     dependencies:
+      '@alphacompute/alpha-cloud':
+        specifier: workspace:*
+        version: link:../../cloud
       '@capacitor/android':
         specifier: 8.5.2
         version: 8.5.2(@capacitor/core@8.5.2)

@@ -2,7 +2,7 @@
 import { actionJournalPlugin, createDeferredDeletions, type DeferredDeletionsClient } from "@elizaos/os/bridges/action-journal"
 import { rejectionCode } from "@elizaos/os/bridges/bridge"
 import { addressBookPlugin, createAddressBookClient, createContactNames, type AddressBookClient, type ContactNamesClient, type NameSurface } from "@elizaos/os/bridges/contacts"
-import { messagesClient, messagesPlugin, type MessagesClient } from "@elizaos/os/bridges/messages"
+import { messagesClient, messagesPlugin, type MessagesClient, type MessagesNativePlugin } from "@elizaos/os/bridges/messages"
 import { phoneClient, telephonyPlugin, type PhoneClient } from "@elizaos/os/bridges/phone"
 import { telephonyOffered, type BuildVariant } from "../../gen/telephony__common.effect.vibe"
 import { Build, type BuildInfo } from "../platform/build.vibe"
@@ -36,6 +36,8 @@ export interface TelephonyClients {
   readonly names: ContactNamesClient
   /** The deletion window's pending deletions, Undo and dismissal. */
   readonly deletions: DeferredDeletionsClient
+  /** Binds the next approved `sendSms` call for `operationId` to its `DeviceExecutionJournal` `proposalId`. */
+  readonly approveSms?: (operationId: string, proposalId: string) => void
 }
 
 /** Whether the image offers telephony here, and the clients that reach it. */
@@ -97,14 +99,32 @@ export const bridgesLayer = Layer.effect(TelephonyBridges, effect {
   const registered = try native.available(TELEPHONY_PLUGIN)
   const offered = telephonyOffered(variantOf(build.info), registered)
   const journal = actionJournalPlugin(JOURNAL_PLUGIN)
+  const proposalIds = new Map<string, string>()
+  const rawMessages = messagesPlugin(TELEPHONY_PLUGIN)
+  const nativeMessages: MessagesNativePlugin = new Proxy(rawMessages, {
+    get(target, prop) {
+      if (prop === "sendSms") {
+        return (options: Parameters<MessagesNativePlugin["sendSms"]>[0]) => {
+          const proposalId = proposalIds.get(options.operationId)
+          proposalIds.delete(options.operationId)
+          return target.sendSms(proposalId === undefined ? options : ({ ...options, journalIdentity: { proposalId } } as Parameters<MessagesNativePlugin["sendSms"]>[0]))
+        }
+      }
+      const value = Reflect.get(target, prop, target)
+      return typeof value === "function" ? value.bind(target) : value
+    },
+  })
   const clients: TelephonyClients | undefined = offered
     ? {
         phone: phoneClient(telephonyPlugin(TELEPHONY_PLUGIN), journal),
-        messages: messagesClient(messagesPlugin(TELEPHONY_PLUGIN), journal),
-        composer: messagesClient(composerPlugin(messagesPlugin(TELEPHONY_PLUGIN)), journal),
+        messages: messagesClient(nativeMessages, journal),
+        composer: messagesClient(composerPlugin(rawMessages), journal),
         contacts: createAddressBookClient({ install: "WritingInstall", plugin: addressBookPlugin(CONTACTS_PLUGIN), journal }),
         names: createContactNames(addressBookPlugin(CONTACTS_PLUGIN)),
         deletions: createDeferredDeletions(journal),
+        approveSms: (operationId: string, proposalId: string) => {
+          proposalIds.set(operationId, proposalId)
+        },
       }
     : undefined
   return {

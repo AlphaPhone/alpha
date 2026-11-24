@@ -216,6 +216,10 @@ public final class ElizaAgentService extends AgentService {
   int timeout = timeout(request, path);
   String body = body(request, method);
   JSONObject answered = exchange(method, path, body, timeout);
+  if (answered.getInt("status") >= 400) {
+   String suffix = ViewRequestDiagnostic.failedPostSuffix(method, path, body);
+   if (!suffix.isEmpty()) android.util.Log.w("AlphaAgentRequest", "category=view method=POST status=" + answered.getInt("status") + " reason=http" + suffix);
+  }
   if (answered.getInt("status") == 200 && "GET".equals(method) && "/api/auth/status".equals(path)) return authStatus(answered);
   if (answered.getInt("status") == 200 && "GET".equals(method) && "/api/auth/me".equals(path)) return ownerSession(answered, bearer(request));
   return answered.toString();

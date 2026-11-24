@@ -1,4 +1,5 @@
 // spec/assistant/index.md, "The assistant observes the screen only while it is visible, unlocked and not private"; spec/shell/navigation.md, "Story: Keep the assistant within reach"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/voice/conversation.md, "Voice starts only from the owner, on a lit, visible phone with no sensitive screen, no reset and no call"
+import { comparePeer, learnPeer, statusRead, statusReadFailed, type PeerSupport, type StatusRead } from "@elizaos/agent/client"
 import { AssistantHost, type AgentIdentity, type PeerFacts, type ScreenFacts } from "../assistant/host.vibe"
 import { DeviceExecutors, type OperationPorts } from "../assistant/review.vibe"
 import { AccountBindings, ownRouteOf, usableSession } from "../account/bindings.vibe"
@@ -30,30 +31,6 @@ import { Notices } from "./notices.vibe"
 /** Apps whose screen the assistant never observes. */
 export const PRIVATE_APPS: ReadonlySet<string> = new Set(["passwords", "account"])
 
-/** What a client knows of the agent process it talks to: nothing yet, the one instance it learned, or ordinary context only. */
-export type PeerSupport = { readonly tag: "NotLearned" } | { readonly tag: "SamePeer"; readonly instance: string } | { readonly tag: "OrdinaryOnly" }
-
-/** One authenticated status read: the process instance it named, none, or a failed read. */
-export type StatusRead = { readonly tag: "Read"; readonly instance: string } | { readonly tag: "NoInstance" } | { readonly tag: "ReadFailed" }
-
-/** The first learn of a connection: the instance a status names, ordinary context for a status that names none, and nothing from a failed read. */
-export function learnPeer(support: PeerSupport, read: StatusRead): PeerSupport {
-  if (support.tag !== "NotLearned") return support
-  return read.tag === "Read" ? { tag: "SamePeer", instance: read.instance } : read.tag === "NoInstance" ? { tag: "OrdinaryOnly" } : support
-}
-
-/** A turn's comparison: the learned instance stays only while the status names exactly it; anything else ends optional fields. */
-export function comparePeer(support: PeerSupport, read: StatusRead): PeerSupport {
-  if (support.tag !== "SamePeer") return support
-  return read.tag === "Read" && read.instance === support.instance ? support : { tag: "OrdinaryOnly" }
-}
-
-/** The status read of an agent's `GET /api/status` answer. */
-export function statusReadOf(status: unknown): StatusRead {
-  const instance = typeof status === "object" && status !== null && !Array.isArray(status) ? (status as { serverInstanceId?: unknown }).serverInstanceId : undefined
-  return typeof instance === "string" && instance !== "" ? { tag: "Read", instance } : { tag: "NoInstance" }
-}
-
 function connectionOf(identity: AgentIdentity): string {
   return JSON.stringify([identity.origin, identity.owner, identity.agent, identity.session])
 }
@@ -76,7 +53,7 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
 
   effect function status() {
     const answer = resident.json("GET", "/api/status") catch () => undefined
-    return answer === undefined || answer.status < 200 || answer.status >= 300 ? { tag: "ReadFailed" } as StatusRead : statusReadOf(answer.data)
+    return answer === undefined || answer.status < 200 || answer.status >= 300 ? statusReadFailed : statusRead(answer.data)
   }
 
   effect function peer() {
@@ -105,6 +82,15 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
     }
   })
 
+  fork.scoped (effect {
+    let carrierPrivate = false
+    for try (const nav of navigation.changes) {
+      const nowCarrier = nav.layers.some((layer) => layer.id.startsWith("carrier"))
+      if (nowCarrier && !carrierPrivate) try voice.left()
+      carrierPrivate = nowCarrier
+    }
+  })
+
   effect function open(app: AppId | "", route: string | undefined) {
     if (try navigation.switchForAgent(app, route ?? "")) return true
     if (app === "") return false
@@ -120,7 +106,7 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
       const nav = try navigation.get()
       const front = try foreground.get()
       const view = nav.app === "" ? (nav.library ? "library" : "home") : nav.app
-      const privateView = PRIVATE_APPS.has(nav.app)
+      const privateView = PRIVATE_APPS.has(nav.app) || nav.layers.some((layer) => layer.id.startsWith("carrier"))
       const route = nav.places.find((place) => place.app === nav.app)?.route ?? ""
       const connectionDialog = (try bindings.idle()).signInOpen || nav.layers.some((layer) => layer.id.startsWith("account"))
       return {

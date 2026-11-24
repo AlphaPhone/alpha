@@ -5,6 +5,8 @@ import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { flushSync } from "react-dom";
 import { clampSheet, halfHeight, initial, isFlick, isTap, zoneOf, type Control } from "../../../gen/assistant__dock.ts";
 import { useMachine } from "../../../gen/assistant__dock.react.ts";
+import { useMachine as useNavigation } from "../../../gen/shell__navigation.react.ts";
+import { useMachine as useDictation } from "../../../gen/voice__dictation.react.ts";
 import type { AppId } from "../app-screen.ts";
 import { Assistant } from "../../assistant/assistant.vibe";
 import { Button } from "../components/ui/index.ts";
@@ -36,6 +38,9 @@ const floorOffset = 90;
  */
 export function AssistantDock({ open }: AssistantDockProps) {
   const { state = initial, can, send } = useMachine(runtime);
+  const { state: nav } = useNavigation(runtime);
+  const { state: dictation } = useDictation(runtime);
+  const voiceLocked = Boolean(nav?.voice) || (dictation !== undefined && dictation.stage !== "Closed" && dictation.stage !== "Recorded");
   const track = useRef<Track | undefined>(undefined);
   const [height, setHeight] = useState<number | undefined>(undefined);
   const [openingSheet, setOpeningSheet] = useState(false);
@@ -51,6 +56,11 @@ export function AssistantDock({ open }: AssistantDockProps) {
       setFocusSeq(0);
     }
   }, [openSheet, focusSeq]);
+  useEffect(() => {
+    if (!voiceLocked || track.current === undefined) return;
+    track.current = undefined;
+    if (can({ type: "cancelDrag" })) void send({ type: "cancelDrag" });
+  }, [can, send, voiceLocked]);
   const viewport = typeof window === "undefined" ? 800 : window.visualViewport?.height ?? window.innerHeight;
   const full = Math.max(200, viewport - 72);
   const half = halfHeight(viewport, full);
@@ -67,7 +77,7 @@ export function AssistantDock({ open }: AssistantDockProps) {
   };
   const press = (label: Control) => (event: PointerEvent<HTMLElement>) => {
     event.stopPropagation();
-    if (event.button !== 0 || !event.isPrimary || !can({ type: "down", label })) return;
+    if (voiceLocked || event.button !== 0 || !event.isPrimary || !can({ type: "down", label })) return;
     try { event.currentTarget.setPointerCapture(event.pointerId); } catch {}
     track.current = {
       label,
@@ -149,7 +159,7 @@ export function AssistantDock({ open }: AssistantDockProps) {
           onPointerDown={press("OpenControl")} onPointerMove={drag} onPointerUp={lift("OpenControl")} onPointerCancel={cancel}>
           <Button variant="ghost" className="flex-1 justify-start text-muted-foreground" aria-label="Open conversation"
             onClick={(event) => {
-              if (event.detail !== 0 || !can({ type: "down", label: "OpenControl" })) return;
+              if (voiceLocked || event.detail !== 0 || !can({ type: "down", label: "OpenControl" })) return;
               void send({ type: "down", label: "OpenControl" });
               openWithFocus(send({ type: "tap" }));
             }}>

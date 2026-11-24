@@ -2,7 +2,7 @@
 import { paymentPageOpens } from "../../gen/account__billing.ts";
 import type { ConsentPage } from "../../gen/account__google.ts";
 import type { Deployment, Environment } from "../../gen/account__session.ts";
-import deploymentText from "../../../../cloud/deployment.json?raw";
+import deploymentText from "@alphacompute/alpha-cloud/deployment.json?raw";
 import { alphaCloud, alphaCloudCutover, elizaCloud, type CloudAuthority as PlatformAuthority } from "../platform/build-flags.ts";
 
 /** The public identity of one Cloud environment, with the agents host its Google callbacks may name: never a credential. */

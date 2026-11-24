@@ -44,7 +44,7 @@ export service TelephonyActions {
   /** The capabilities this device advertises: none off the image. */
   capabilities(): readonly string[]!!
   /** Run one approved operation under its operation ID; `request` is the owner's own message it came from. */
-  run(operation: unknown, operationId: string, request: unknown): ActionExecution!(NotATelephonyOperation | AlreadyRan)
+  run(operation: unknown, operationId: string, request: unknown, proposalId?: string): ActionExecution!(NotATelephonyOperation | AlreadyRan)
   /** The owner's Not now, a hidden or locked phone, or another view replacing the review's. */
   dismiss(): void!!
   /** What the open review shows beside its candidates: a text's body, a contact's fields before and after. */
@@ -290,13 +290,16 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
     return { result, settled } satisfies ActionExecution
   }
 
-  effect function sendText(runId: string, recipients: readonly string[], body: string, operationId: string, subscriptionId?: number) {
+  effect function sendText(runId: string, recipients: readonly string[], body: string, operationId: string, subscriptionId?: number, proposalId?: string) {
     const status = try bridgeCall("status", (c) => c.messages.status())
     const sim = subscriptionId ?? status.defaultSmsSubscriptionId ?? (status.subscriptions?.length === 1 ? status.subscriptions[0]!.id : undefined)
     const id = operationIdOf(operationId)
     const numbers = recipients.map(normalizePhoneNumber).filter((n) => n !== null)
     if (sim === undefined || id === null || numbers.length !== recipients.length) return undefined
-    return try bridgeCall("sendSms", (c) => c.messages.sendSms({ recipients: numbers, body, subscriptionId: sim }, id))
+    return try bridgeCall("sendSms", (c) => {
+      if (proposalId !== undefined) c.approveSms?.(id, proposalId)
+      return c.messages.sendSms({ recipients: numbers, body, subscriptionId: sim }, id)
+    })
   }
 
   /** Alpha's draft into `thread` for `recipients`, then Messages shows it; it never sends. */
@@ -307,7 +310,7 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
     return try finishEarly(runId, result("unavailable"), placed === "occupied" ? "Occupied" : "Unavailable")
   }
 
-  effect function compose(runId: string, op: Wire, operationId: string) {
+  effect function compose(runId: string, op: Wire, operationId: string, proposalId?: string) {
     const result = (status: string) => ({ kind: "sms-compose", status })
     const draftOnly = op.draft === true
     const target = composeTargetOf(op)
@@ -339,7 +342,7 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
     }
     if (draftOnly) return try drafted(runId, "new", [number], op.body, `compose:${number}`)
     if (!(try guard(runId))) return { result: result("unavailable"), settled: "Refused", refusal: "emergency" } satisfies ActionExecution
-    const sent = try (sendText(runId, [number], op.body, operationId) catch (failure) => failure)
+    const sent = try (sendText(runId, [number], op.body, operationId, undefined, proposalId) catch (failure) => failure)
     if (sent === undefined) return try finish(runId, result("unavailable"), "unavailable")
     if (sent instanceof TelephonyRefused) return sent.code === undefined ? try lost(runId, result("unknown")) : try finish(runId, result("unavailable"), "unavailable")
     const status = sent.status === "denied" ? "unavailable" : sent.status
@@ -405,7 +408,7 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
       const status = try (bridgeCall("status", (c) => c.contacts.status()) catch () => undefined)
       return status !== undefined && contactWriteAdvertised("WritingInstall", status) ? [...base, "contacts.write.v1"] : base
     },
-    effect run(operation: unknown, operationId: string, request: unknown) {
+    effect run(operation: unknown, operationId: string, request: unknown, proposalId?: string) {
       const op = try decodeOperation(operation)
       const owner = try (Schema.decodeUnknownEffect(OwnerRequest)(request) catch () => ({ text: "" }))
       const kind = KINDS[op.type]!
@@ -422,7 +425,7 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
       switch (op.type) {
         case "phone_dial": return try callOrDial(operationId, op, true)
         case "phone_call": return try callOrDial(operationId, op, false)
-        case "sms_compose": return try compose(operationId, op, operationId)
+        case "sms_compose": return try compose(operationId, op, operationId, proposalId)
         case "contact_create": case "contact_update": case "contact_delete": {
           if (!contactNumbersGrounded(owner.text, contactNumbersOf(op)))
             return { ...(try finishEarly(operationId, { kind: "contact-write", status: "unavailable" }, "Refused")), refusal: "ungrounded" } satisfies ActionExecution
@@ -431,7 +434,7 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
         case "sms_send": {
           if ((try tell({ type: "numberReady", runId: operationId, number: op.recipients[0] }, "Device")) === undefined) return try cancelled(operationId, undefined)
           if (!(try guard(operationId))) return { result: undefined, settled: "Refused", refusal: "emergency" } satisfies ActionExecution
-          const sent = try (sendText(operationId, op.recipients, op.body, operationId, op.subscriptionId) catch (failure) => failure)
+          const sent = try (sendText(operationId, op.recipients, op.body, operationId, op.subscriptionId, proposalId) catch (failure) => failure)
           if (sent === undefined || sent instanceof TelephonyRefused) return sent instanceof TelephonyRefused && sent.code === undefined ? try lost(operationId, undefined) : try finish(operationId, undefined, "unavailable")
           return try finish(operationId, sent, sent.status)
         }

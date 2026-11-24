@@ -66,6 +66,7 @@ export const nativePlugins = {
     events: [],
   },
   AlphaCallState: { reach: "AnyNative", methods: ["callState"], events: ["callState"] },
+  AlphaCarrierSetup: { reach: "AnyNative", methods: ["read", "readEid", "openSettings"], events: ["foregroundEnded"] },
   AlphaCloudSignIn: {
     reach: "AnyNative",
     methods: [

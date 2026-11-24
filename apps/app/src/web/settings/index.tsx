@@ -2,6 +2,9 @@
 import { Effect } from "effect";
 import { KeyRound, Settings as Gear } from "lucide-react";
 import { useState } from "react";
+import { CARRIER_SETUP_LAYER_ID } from "../../settings/carrier-setup.ts";
+import { useLayer } from "../shell/useLayer.ts";
+import { CarrierSetupDialog } from "./CarrierSetupDialog.tsx";
 import { useMachine as useNavigation } from "../../../gen/settings.react.ts";
 import { initial as navigationStart } from "../../../gen/settings.ts";
 import { useMachine as useAppearance } from "../../../gen/settings__appearance.react.ts";
@@ -83,8 +86,10 @@ function SettingsApp({ onClose }: ScreenProps) {
   const route = now(Effect.flatMap(Effect.service(PrivacyRow), (p) => p.route()), "RouteUnavailable");
   const account = useAccountRows();
   const dialog = useDialog(nav);
+  const carrier = useLayer(CARRIER_SETUP_LAYER_ID, "DialogLayer", true);
   if (nav.page === "Passwords") return <PasswordsApp onClose={() => void pages((p) => p.back())} />;
   return (
+    <>
     <SettingsScreen
       model={{
         nav, facts, appearance, network, updates, reset, variant, account,
@@ -97,6 +102,7 @@ function SettingsApp({ onClose }: ScreenProps) {
         openApp: (app) => void pages((p) => p.openApp(app)),
         openAccount: (section) => void pages((p) => p.openAccount(section)),
         openElsewhere: (elsewhere) => void pages((p) => p.openElsewhere(elsewhere)),
+        openCarrierSetup: carrier.show,
         accessSetup: () => void pages((p) => p.accessSetup()),
         openPage: (page) => void perform(Effect.flatMap(Effect.service(DeviceFacts), (f) => f.openPage(page))),
         openShade: () => void perform(Effect.flatMap(Effect.service(DeviceFacts), (f) => f.openShade())),
@@ -139,6 +145,8 @@ function SettingsApp({ onClose }: ScreenProps) {
         toggleProfile: () => { if (!mocks) return; const url = new URL(location.href); if (profile === "development") url.searchParams.delete("mode"); else url.searchParams.set("mode", "dev"); setProfile(profile === "development" ? "app" : "development"); location.assign(url.href); },
       }}
     />
+    <CarrierSetupDialog open={carrier.open} native={variant !== "browser"} onClose={carrier.hide} />
+    </>
   );
 }
 
