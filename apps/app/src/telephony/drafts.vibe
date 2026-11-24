@@ -10,7 +10,7 @@ import {
 import { Machine as MessagesMachine, type OutgoingState } from "../../gen/telephony__messages.effect.vibe"
 import { callerOf, refusalTag, TelephonyBridges, TelephonyRefused, TelephonyUnavailable } from "./bridges.vibe"
 import { newId as newOperationId } from "../platform/ids.ts"
-import { CloudSession } from "../account/layer.vibe"
+import { CloudSession } from "../account/session.vibe"
 
 /** How long a text Android has only handed to the carrier is watched for the radio's answer. */
 export const SMS_SETTLE = { reads: 6, every: "500 millis" } as const
