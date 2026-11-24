@@ -50,7 +50,9 @@ pure val linesValues = Set(List())
   .union(Set(List(
     { slot: 0, carrier: "Carrier", simName: "Work", number: "", network: NoService, roaming: false, signal: -1, embedded: false, imei: "", simSerial: "" },
     { slot: 1, carrier: "Other", simName: "", number: "4155550111", network: Network4g, roaming: true, signal: 1, embedded: true, imei: "", simSerial: "" })))
-pure val holdersValues = Set(noHolders, { phoneApp: "ai.alphacompute.alphaphone", phoneAlpha: true, smsApp: "com.android.messaging", smsAlpha: false })
+pure val holdersValues = Set(noHolders,
+  { phoneApp: "ai.alphacompute.alphaphone", phoneAlpha: true, smsApp: "com.android.messaging", smsAlpha: false },
+  { phoneApp: "com.android.dialer", phoneAlpha: false, smsApp: "ai.alphacompute.alphaphone", smsAlpha: true })
 ```
 
 ### The page reads only while it is in front, and leaving forgets what it read
