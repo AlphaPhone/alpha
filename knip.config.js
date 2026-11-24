@@ -99,6 +99,8 @@ export default {
     "apps/cloud": {
       "entry": [
         "src/main.vibe",
+        "src/worker.vibe",
+        "src/edge.vibe",
         "test/**/*.test.{ts,vibe}"
       ],
       "project": [
