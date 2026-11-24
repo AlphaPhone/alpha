@@ -88,6 +88,13 @@ export effect function propose(operation: Asking, written: boolean): boolean!!(R
   return try contained(machine.send(event, "Agent"), "the agent's request")
 }
 
+// spec/app/contacts/agent.md, "The owner can decline, and a review Alpha stops showing is withdrawn"
+/** Withdraw the open request when Alpha stops showing it: the desk retired its proposal. Answers whether one was open. */
+export effect function withdrawn(): boolean!!Agent.Machine {
+  const machine = try Agent.Machine
+  return try contained(machine.send({ type: "withdraw" }, "Device"), "withdrawing the agent's request")
+}
+
 /** The contact as the request would leave it: a new contact, or `before` with the change applied. */
 export function afterOf(operation: Asking | undefined, before: Lines): Lines {
   if (operation?.type === "contact_create") return { name: operation.contact.displayName, phones: operation.contact.phoneNumbers, emails: operation.contact.emailAddresses }

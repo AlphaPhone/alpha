@@ -5,7 +5,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Contacts } from "../gen/app__contacts.effect.vibe";
 import { Machine as Agent } from "../gen/app__contacts__agent.effect.vibe";
 import { Machine as Phone } from "../gen/app__phone.effect.vibe";
-import { type Asking, propose } from "../src/contacts/requests.vibe";
+import { type Asking, propose, withdrawn } from "../src/contacts/requests.vibe";
 import { closeAll, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
@@ -119,6 +119,11 @@ describe("Contacts on an Alpha image", () => {
     await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Choosing");
     await press("Not now");
     await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "Declined");
+    await ask({ type: "phone_call", target: { kind: "contact", query: "Ben" } });
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Choosing");
+    expect(await alpha.runtime.runPromise(withdrawn())).toBe(true);
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "Withdrawn");
+    expect(document.querySelector("[role=dialog]")).toBeNull();
 
     // spec/app/contacts/agent.md, "A change that would leave the contact as it is is never offered"
     await ask({ type: "contact_update", query: "Ben", add: { phoneNumbers: ["+14155550122"] } });
