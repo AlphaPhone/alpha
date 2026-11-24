@@ -4,7 +4,7 @@ import { Machine as PhoneMachine, liveCall } from "../../gen/app__phone.effect.v
 import * as Voicemail from "../../gen/app__phone__voicemail.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__phone__voicemail.effect.vibe"
 import { Telephony, TelephonyRefused, telephony } from "../platform/telephony.vibe"
-import { type Job, answer, following, reacting, run, together } from "../runtime/reactor.vibe"
+import { type Job, answer, applying, following, hearing, reacting, run, together } from "../runtime/reactor.vibe"
 import { Dialer, prefilled } from "./phone.vibe"
 
 /** What Voicemail counts, kept beside it: the voicemails last listed, the one open, its audio as a playable source and its transcript. */
@@ -111,6 +111,37 @@ const shown = following(PhoneMachine, (phone) => phone.front && phone.tab === "V
 // spec/app/phone/voicemail.md, "A call that starts pauses playback"
 const calls = following(PhoneMachine, liveCall, Voicemail.Machine, (live): Event | undefined => (live ? { type: "callStarted" } : undefined))
 
+/** The one audio element the open voicemail plays in, outside any screen. */
+export service Player {
+  element(): HTMLAudioElement!!
+}
+
+const player = Layer.sync(Player, () => {
+  const element = new Audio()
+  return { element: () => sync(() => element) }
+})
+
+// spec/app/phone/voicemail.md, "Play needs the audio, and never plays during a call"
+const played = applying(Voicemail.Machine, (state) => (state.open ? state.playback : "Stopped"), effect (playback) => {
+  const element = try (try Player).element()
+  if (playback !== "Playing") {
+    element.pause()
+    if (playback === "Stopped") element.currentTime = 0
+    return
+  }
+  const audio = (try (try Voicemails).get()).audio
+  if (element.src !== audio) element.src = audio
+  promise(() => element.play()) catch effect () => {
+    try ignore((try Voicemail.Machine).send({ type: "pause" }))
+  }
+})
+
+/** The open voicemail's audio reaching its end. */
+const ends: Stream.Stream<Event, never, Player> = Stream.unwrap(effect {
+  const element = try (try Player).element()
+  return Stream.callback<Event>((queue) => sync(() => element.addEventListener("ended", () => { Queue.offerUnsafe(queue, { type: "ended" }) })))
+})
+
 /** Voicemail: resident, so that Home's unheard count and a call starting reach it; its list is read while its tab shows. */
-export const voicemail = together(machine, voicemails, shown, calls)
+export const voicemail = together(machine, voicemails, shown, calls, player, played, hearing(ends, Voicemail.Machine, (event: Event) => event))
 

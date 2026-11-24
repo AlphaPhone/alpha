@@ -162,17 +162,6 @@ function VoicemailTab({ runtime }: PhoneProps) {
         <section aria-label="Open voicemail" className="flex flex-col gap-2">
           {state.audio.status === "Loading" && <Spinner label="Getting the audio" />}
           {can({ type: "retryAudio" }) && <Button variant="outline" onClick={() => void send({ type: "retryAudio" })}>Get the audio again</Button>}
-          {state.audio.status === "Loaded" && held.audio !== "" && (
-            <audio
-              src={held.audio}
-              ref={(element) => {
-                if (!element) return;
-                if (state.playback === "Playing" && element.paused) void element.play()?.catch(() => void send({ type: "pause" }));
-                else if (state.playback !== "Playing" && !element.paused) element.pause();
-              }}
-              onEnded={() => void (can({ type: "ended" }) && send({ type: "ended" }))}
-            />
-          )}
           <div className="flex flex-wrap gap-2">
             {can({ type: "play", live }) && <Button onClick={() => void send({ type: "play", live })}>Play</Button>}
             {can({ type: "pause" }) && <Button variant="secondary" onClick={() => void send({ type: "pause" })}>Pause</Button>}
