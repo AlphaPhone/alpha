@@ -19,7 +19,7 @@ do next.
 - **Type.** `font-sans` is Public Sans, for everything read or pressed. `font-display` is Denton, with
   Fraunces behind it, at weight `light`: a screen's one title, the date on Home, a large figure. The sizes
   are in rem, so Android's text size scales them: `base` is body text, `3xl` a screen title, `4xl` the
-  Home date. `tracking-caps` with `text-xs` is a small uppercase label.
+  Home date, `5xl` and `6xl` the public site's headline on a narrow and a wide screen. `tracking-caps` with `text-xs` is a small uppercase label.
 - **Shape.** `radius` is a card or a row group; `rounded-tile` an app tile, a menu and a dialog;
   `rounded-sheet` the top of a bottom sheet; `rounded-full` a button, a chip and the Ask Alpha bar.
   Everything pressed is at least 44px in both directions.
@@ -108,6 +108,12 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.4xl.size` | 2.5rem |
 | `text.4xl.leading` | 1.08 |
 | `text.4xl.tracking` | -0.01em |
+| `text.5xl.size` | 3.25rem |
+| `text.5xl.leading` | 1.04 |
+| `text.5xl.tracking` | -0.05em |
+| `text.6xl.size` | 5.5rem |
+| `text.6xl.leading` | 1.04 |
+| `text.6xl.tracking` | -0.06em |
 | `weight.light` | 300 |
 | `weight.normal` | 400 |
 | `weight.medium` | 500 |

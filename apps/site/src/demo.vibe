@@ -1,0 +1,65 @@
+// spec/site/index.md, "Story: Watch Alpha at work"
+import * as Demo from "../gen/site.effect.vibe"
+import { type Event, running } from "../gen/site.effect.vibe"
+
+module web {
+  /** @throws {never} */
+  export const calmQuery = (): EventTarget => matchMedia("(prefers-reduced-motion: reduce)")
+  /** @throws {never} */
+  export const asksStill = (): boolean => matchMedia("(prefers-reduced-motion: reduce)").matches
+  /** @throws {never} */
+  export const pages = (): EventTarget => document
+  /** @throws {never} */
+  export const outOfSight = (): boolean => document.visibilityState === "hidden"
+}
+import { asksStill, calmQuery, outOfSight, pages } from web
+
+/** What a screen writes for an event's `now`: the shell sends every event at the page's time. */
+export const untimed = 0
+
+/** The visitor's page: whether they ask for less motion and whether it is out of sight, now and at each change. */
+export service Page {
+  still(): boolean!!
+  hidden(): boolean!!
+  readonly stilled: Stream.Stream<boolean>
+  readonly hid: Stream.Stream<boolean>
+}
+
+/** The page in a browser. */
+export const browserPage = Layer.succeed(Page, {
+  still: () => sync(asksStill),
+  hidden: () => sync(outOfSight),
+  stilled: Stream.suspend(() => Stream.map(Stream.fromEventListener(calmQuery(), "change"), () => asksStill())),
+  hid: Stream.suspend(() => Stream.map(Stream.fromEventListener(pages(), "visibilitychange"), () => outOfSight())),
+})
+
+/**
+ * The demo: the spec's machine, each event sent at the page's time, opened with what the page says of the visitor,
+ * told each time that changes, and each beat told once its time has come.
+ */
+export const demo = Layer.provide(Layer.effect(Demo.Machine, effect {
+  const inner = try Demo.Machine
+  const page = try Page
+  effect function send(event: Event) {
+    const now = try Clock.currentTimeMillis
+    return try inner.send({ ...event, now })
+  }
+  const told = (event: Event) => ignore(send(event))
+  // spec/site/index.md, "When the page opens it plays from Home, unless the visitor asks for less motion"
+  try told({ type: "start", now: untimed, still: try page.still(), hidden: try page.hidden() })
+  // spec/site/index.md, "Pausing keeps the time the beat has left, and playing again goes on from it"
+  try fork.scoped Stream.runForEach(page.hid, (hidden) => told({ type: "sight", hidden, now: untimed }))
+  // spec/site/index.md, "A visitor who comes to ask for less motion has the demo paused and the scene shown whole"
+  try fork.scoped Stream.runForEach(page.stilled, (still) => told({ type: "calm", still, now: untimed }))
+  // spec/site/index.md, "A beat moves on only while the demo plays in sight, once its time has come"
+  const due = Stream.switchMap(inner.changes, (state) => running(state)
+    ? Stream.fromEffect(effect { try sleep(Math.max(0, state.due - (try Clock.currentTimeMillis))) })
+    : Stream.empty)
+  try fork.scoped Stream.runForEach(due, () => told({ type: "tick", now: untimed }))
+  return {
+    changes: inner.changes,
+    get: () => inner.get(),
+    send,
+    receive: (input: unknown) => flatMap(Demo.decodeEvent(input), send),
+  }
+}), Demo.machine())
