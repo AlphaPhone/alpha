@@ -5,12 +5,47 @@ import { Machine as GuidanceMachine } from "../../gen/maps__guidance.effect.vibe
 import { Machine as ScreenMachine } from "../../gen/maps__screen.effect.vibe"
 import { Machine as OpenMachine } from "../../gen/maps__notificationOpen.effect.vibe"
 import { MapsContent } from "../../src/maps/content.vibe"
+import { MapsProvider } from "../../src/maps/cloud.vibe"
 import { MapsHandoff } from "../../src/maps/handoff.vibe"
 import { MapsSession } from "../../src/maps/layer.vibe"
 import { MapsNavigation } from "../../src/maps/navigation.vibe"
 import { SavedPlacesStore } from "../../src/maps/saved.vibe"
 import { MapsScreen } from "../../src/maps/screen.vibe"
-import { ferry, fixAt, harness, pier, until } from "./fakes.vibe"
+import { ferry, fixAt, harness, pier, route, until } from "./fakes.vibe"
+
+it.live("Cloud Maps decodes each route and refuses malformed route replies (spec/maps/connection.md, \"Every Maps request goes through the Cloud client, with its own request key, and a tile comes back as its image\")", () => effect {
+  const providerId = "alpha-osm"
+  const h = try harness({ id: providerId, data: "OpenStreetMap" })
+  provide h.layer {
+    const connection = try ConnectionMachine
+    const provider = try MapsProvider
+    try (try MapsSession).open()
+    try until(connection.changes, (s) => s.phase === "Installed")
+
+    const valid = route("r1", ferry, pier, "drive", providerId)
+    const invalid = [
+      { ...valid, geometry: Array.from({ length: 20001 }, () => ferry) },
+      { ...valid, steps: Array.from({ length: 2001 }, () => valid.steps[0]) },
+      { ...valid, steps: [{ instruction: " ", coordinate: ferry, distanceMeters: 1 }] },
+      { ...valid, steps: [{ instruction: "Board", coordinate: ferry, distanceMeters: 1, transit: {
+        line: "4", vehicle: "Bus", departureStop: "Ferry", arrivalStop: "Pier", departureTime: "invalid",
+      } }] },
+    ]
+    const reply = (value: unknown) => ({ providerId, attribution: "© data", routes: [value] })
+    try Ref.set(h.routesAnswer, reply(valid))
+    const accepted = try provider.routes(ferry, pier, "Drive", false)
+    const codes: Array<string | undefined> = []
+    for (const value of invalid) {
+      try Ref.set(h.routesAnswer, reply(value))
+      const result = try Effect.result(provider.routes(ferry, pier, "Drive", false))
+      codes.push(result._tag === "Failure" ? result.failure.code : undefined)
+    }
+    try Effect.try(() => assert.deepStrictEqual(
+      { ids: accepted.map((item) => item.id), codes },
+      { ids: ["r1"], codes: Array.from({ length: invalid.length }, () => "invalid-response") },
+    ))
+  }
+})
 
 it.live("Find a place, plan directions, choose a route and follow it (spec/maps/screen.md, \"Story: Find a place\"; spec/maps/screen.md, \"Story: Plan directions and choose a route\"; spec/maps/guidance.md, \"Story: Guide me along the route I started\")", () => effect {
   const h = try harness({ id: "alpha-osm", data: "OpenStreetMap" })

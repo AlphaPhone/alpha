@@ -106,3 +106,12 @@ export const mirrorHistory = [
   { id: "h1", appLabel: "Mail", at: Date.UTC(2026, 10, 20, 9, 30), state: "Shown" },
   { id: "h2", appLabel: "Chat", at: Date.UTC(2026, 10, 20, 11, 5), state: "Dismissed" },
 ] as const;
+
+/** Forty installed apps, more than a sheet shows at once. */
+export const manyTiles: TileFace[] = Array.from({ length: 40 }, (_, at) => ({ key: `org.fixture.app${at + 1}`, label: `App ${at + 1}` }));
+
+/** The cleaned link back into Alpha after Cloud authorized a connection; its values are placeholders. */
+export const landingContinue = "alphaphone://cloud-delegation?state=fixture-state&code=fixture-code";
+
+/** The cleaned link back into Alpha after the owner cancelled the authorization. */
+export const landingDenied = "alphaphone://cloud-delegation?state=fixture-state&error=access_denied";

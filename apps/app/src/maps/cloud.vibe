@@ -8,11 +8,12 @@ import { nativeFailureOf } from "../platform/cloud-live.vibe"
 import { CloudServices } from "../platform/cloud-services.vibe"
 import { type CoverageInfo, MapsContent } from "./content.vibe"
 import { type MapsFailure, cloudFailure, decoded, failure, pauseOf } from "./failure.vibe"
-import { place as checkedPlace } from "@elizaos/plugin-maps/client/contracts"
-import { Capabilities, type Coordinate, type Place, PlaceAnswer, PlacesAnswer, type Route, RoutesAnswer, TileTypes, type TravelMode, ViewportAnswer } from "./maps.schema.vibe"
+import { place as checkedPlace, Route } from "@elizaos/plugin-maps/client/contracts"
+import { Capabilities, type Coordinate, type Place, PlaceAnswer, PlacesAnswer, RoutesAnswer, TileTypes, type TravelMode, ViewportAnswer } from "./maps.schema.vibe"
 
 const GOOGLE_PROVIDER = "eliza-cloud-google"
 const FUTURE_SKEW_MS = 60000
+const CloudRoute = Route.check(Schema.makeFilter((route: Route) => route.geometry.length <= 20000 && route.steps.length <= 2000))
 
 /** The wire mode of a model travel mode. */
 export function wireMode(travel: Travel): TravelMode {
@@ -171,17 +172,19 @@ export const providerLayer = Layer.effect(MapsProvider, effect {
       const mode = wireMode(travel)
       const asked = alternatives && coverage.offer.alternatives
       const answer = try decoded(RoutesAnswer, try request((c, signal) => c.mapsRoutes(asked ? { from, to, mode, alternatives: true } : { from, to, mode }, { signal })))
+      const routes: Route[] = []
+      for (const raw of answer.routes) routes.push(try decoded(CloudRoute, raw))
       const now = try Clock.currentTimeMillis
       const traffic = coverage.offer.liveTraffic ? "live" : "none"
-      const ids = new Set(answer.routes.map((r) => r.id))
-      if (ids.size !== answer.routes.length) throw failure("invalid-response", "The provider returned duplicate routes.")
-      if (!asked && answer.routes.length !== 1) throw failure("invalid-response", "The Maps route response is invalid.")
-      for (const route of answer.routes) {
+      const ids = new Set(routes.map((r) => r.id))
+      if (ids.size !== routes.length) throw failure("invalid-response", "The provider returned duplicate routes.")
+      if (!asked && routes.length !== 1) throw failure("invalid-response", "The Maps route response is invalid.")
+      for (const route of routes) {
         if (route.providerId !== coverage.providerId || route.mode !== mode || !same(route.from, from) || !same(route.to, to)
           || route.fetchedAt > now + FUTURE_SKEW_MS || (route.traffic !== "none" && route.traffic !== traffic))
           throw failure("invalid-response", "The provider route is invalid.")
       }
-      return answer.routes
+      return routes
     },
     effect viewport(area, zoom: number) {
       const coverage = try installed()
