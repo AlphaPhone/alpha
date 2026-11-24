@@ -4,7 +4,9 @@ import type { Actor, Effect as Out, Event, Query, Reply } from "../../gen/app__c
 import { Agent } from "../platform/agent.vibe"
 import { ask, attemptedWith } from "../platform/remote.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
-import { type Job, answer, reacting, run } from "../runtime/reactor.vibe"
+import { type Job, answer, following, reacting, run, together } from "../runtime/reactor.vibe"
+import * as View from "../../gen/app__calendar.effect.vibe"
+import { refreshes } from "../../gen/app__calendar__agent.ts"
 import { Time } from "../runtime/time.vibe"
 import { type Row, shown } from "./shown.ts"
 import { civilDay, dayStart, readWindow, zone } from "./time.ts"
@@ -80,5 +82,9 @@ function carry(fx: Out): Job<Event, Agent | Time, [by: Actor]> {
   }
 }
 
+// spec/app/calendar/agent.md, "Only a change the calendar applied refreshes Calendar and Home"; spec/app/calendar/index.md, "A committed Calendar change in a reply reads the day again once, in front or not"
+const applied = following(Changes.Machine, (a) => (a.stage === "Idle" && refreshes(a.result) ? a.write.id : 0), View.Machine,
+  (write): View.Event | undefined => (write === 0 ? undefined : { type: "changeCommitted" }))
+
 /** The agent's changes to the owner's Google Calendar: kept across restarts, which end what was in flight. */
-export const changes = reacting(Changes, { keep: 1, open: [{ type: "restart" }, world], carry })
+export const changes = together(reacting(Changes, { keep: 1, open: [{ type: "restart" }, world], carry }), applied)

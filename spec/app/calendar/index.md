@@ -713,3 +713,33 @@ pure def openOn(s: Calendar, day: int): Viewed =
     layout: if (s.layout == Agenda and day != s.today) Timeline else s.layout }
   readFor(day, cleared)
 ```
+
+## Story: Let the assistant act only on what I have open
+
+> As the owner, I want Ask Alpha to take the event I have open as the one I
+> mean, and the day I am looking at as context only when nothing else is
+> over it, so that it never acts on something I closed or another account's.
+
+### The assistant is given the open event only while it shows, and the day shown only on a plain, current day
+
+The event is given while its detail shows, never while it is away in Maps
+or read again; closing it, or another owner signing in, retires it. The day
+is given only with nothing open over it, no write under way, and an owner
+signed in.
+
+```quint
+pure def selectedEvent(s: Calendar): int = if (s.open != 0 and s.detail == Showing) s.open else 0
+
+pure def dayGiven(s: Calendar): bool = s.open == 0 and s.overlay == NoOverlay and not(s.writing) and s.owner > 0
+
+pure def alwaysTheSelectionIsWhatShows(s: Calendar): bool =
+  (selectedEvent(s) != 0 implies (s.open == selectedEvent(s) and s.detail == Showing)) and not(dayGiven(s) and selectedEvent(s) != 0)
+```
+
+### The day can be given as context, and an event selected
+
+```quint
+pure def sometimesDayGiven(s: Calendar): bool = dayGiven(s) and s.phoneRows > 0
+
+pure def sometimesEventSelected(s: Calendar): bool = selectedEvent(s) != 0 and s.local
+```

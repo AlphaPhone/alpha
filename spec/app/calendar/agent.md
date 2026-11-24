@@ -332,3 +332,65 @@ pure def sometimesNotFound(s: AgentCalendar): bool = s.result == NotFound
 
 pure def sometimesInDoubt(s: AgentCalendar): bool = s.result == InDoubt and s.write.outcome == A::Unknown
 ```
+
+## Story: Read where a Calendar request stands
+
+> As the owner, I want a request's card to say whether it waits for me, was
+> declined, expired or may not have been applied, and to be offered for
+> approval only when Alpha could check exactly what it would change.
+
+### The status follows the request's state and whether its owner was verified
+
+The approvals area keeps the request; its card says Waiting for you,
+Expired, Approval unavailable, Retryable, Declined, Closed or Not
+confirmed, and a request it cannot find is unavailable.
+
+```quint
+type RequestState = RequestPending | RequestExpired | RequestRetryable | RequestRejected | RequestDone | RequestFailed
+type RequestStatus = StatusUnavailable | StatusExpired | StatusAwaiting | StatusApprovalUnavailable | StatusRetryable
+  | StatusDeclined | StatusClosed | StatusNotConfirmed
+
+pure def requestStatus(found: bool, verified: bool, request: RequestState): RequestStatus =
+  if (not(found)) StatusUnavailable
+  else if (request == RequestExpired) StatusExpired
+  else if (request == RequestPending) (if (verified) StatusAwaiting else StatusApprovalUnavailable)
+  else if (request == RequestRetryable) StatusRetryable
+  else if (request == RequestRejected) StatusDeclined
+  else if (request == RequestDone) StatusClosed
+  else StatusNotConfirmed
+
+pure def lawUnverifiedIsNeverAwaiting(request: RequestState): bool = requestStatus(true, false, request) != StatusAwaiting
+```
+
+### A card is complete only with known fields, a valid time and, for a change, a verified target
+
+A change, a deletion or an answer is verified only when exactly one
+calendar and one event match it, the event still starts when the request
+says, and it still has the version the request was made against; an event
+outside the window read is verified by one read of its own calendar at its
+start. The card's `complete` is this.
+
+```quint
+pure def targetVerified(sources: int, events: int, startMatches: bool, versionMatches: bool): bool =
+  sources == 1 and events == 1 and startMatches and versionMatches
+
+pure def cardComplete(change: Change, onlyKnownFields: bool, verified: bool, timeValid: bool): bool =
+  onlyKnownFields and timeValid and (change == Create or verified)
+
+pure def lawAnUnverifiedChangeIsIncomplete(onlyKnownFields: bool, timeValid: bool): bool =
+  not(cardComplete(Update, onlyKnownFields, false, timeValid)) and not(cardComplete(Delete, onlyKnownFields, false, timeValid))
+
+pure def lawTwoMatchesNeverVerify(startMatches: bool, versionMatches: bool): bool =
+  not(targetVerified(1, 2, startMatches, versionMatches)) and not(targetVerified(2, 1, startMatches, versionMatches))
+```
+
+### Only a change the calendar applied refreshes Calendar and Home
+
+A declined or withdrawn card, a refused or doubtful write and a change
+read back missing refresh nothing.
+
+```quint
+pure def refreshes(result: Result): bool = result == Done or result == DeletedByReceipt or result == Unverified
+
+pure def lawADeclinedCardRefreshesNothing(change: Change): bool = not(refreshes(Declined)) and not(refreshes(Withdrawn)) and not(refreshes(Refused))
+```
