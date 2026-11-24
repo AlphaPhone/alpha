@@ -1,0 +1,37 @@
+// spec/cloud/index.md, "Story: Serve one reviewed profile"; spec/cloud/index.md, "The API Worker serves only while the profile in its assets is the text its pinned digest names, and otherwise asks the caller to retry"
+import { cloudWorker, type CloudBindings, type WorkerExecution } from "@elizaos/cloud/worker"
+import { profileUnavailable, readProfileAsset, type AssetFetcher } from "./profile-asset.ts"
+
+/** The API Worker's bindings: eliza's, with the profile read from the static assets and pinned by its digest, since the profile is larger than a Worker variable may be. */
+export type AlphaCloudBindings = Omit<CloudBindings, "CLOUD_PROFILE" | "ASSETS"> & {
+  readonly CLOUD_PROFILE_SHA256: string
+  readonly ASSETS: AssetFetcher
+}
+
+const upstream = cloudWorker<CloudBindings>()
+const profiled = new WeakMap<object, CloudBindings>()
+
+async function bindingsOf(env: AlphaCloudBindings): Promise<CloudBindings | undefined> {
+  const known = profiled.get(env)
+  if (known !== undefined) return known
+  const profile = await readProfileAsset(env.ASSETS, env.CLOUD_PROFILE_SHA256)
+  if (profile === undefined) return undefined
+  const bound: CloudBindings = { ...env, CLOUD_PROFILE: profile }
+  profiled.set(env, bound)
+  return bound
+}
+
+/** Alpha Cloud's API Worker: eliza's whole Cloud Worker, with its profile from the ASSETS copy that CLOUD_PROFILE_SHA256 names, its return pages from ASSETS and its web-origin requests through the web host's X-Forwarded-Host. */
+export const alphaCloudWorker = {
+  async scheduled(event: { readonly scheduledTime: number }, env: AlphaCloudBindings): Promise<void> {
+    const bound = await bindingsOf(env)
+    if (bound === undefined) throw new Error("Alpha Cloud's profile asset is missing or differs from CLOUD_PROFILE_SHA256")
+    await upstream.scheduled(event, bound)
+  },
+  async fetch(request: Request, env: AlphaCloudBindings, execution?: WorkerExecution): Promise<Response> {
+    const bound = await bindingsOf(env)
+    return bound === undefined ? profileUnavailable() : upstream.fetch(request, bound, execution)
+  },
+}
+
+export default alphaCloudWorker
