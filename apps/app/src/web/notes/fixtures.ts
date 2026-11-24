@@ -1,16 +1,19 @@
 // States the Notes components reach, for their stories (`*.meta.tsx`).
 import type { StickyNote } from "@elizaos/plugin-notes/types";
+import { initial as collectionInitial, type Collection } from "../../../gen/notes__collection.ts";
+import { initial as editorInitial, type Editor } from "../../../gen/notes__editor.ts";
 import type { Recorder } from "../../../gen/notes__recorder.ts";
 import { initial as recorderInitial } from "../../../gen/notes__recorder.ts";
 import type { TrashView } from "../../../gen/notes__trash.ts";
 import { initial as trashInitial } from "../../../gen/notes__trash.ts";
 import type { SourceDialog } from "../../../gen/notes__webSource.ts";
 import { initial as sourceDialogInitial } from "../../../gen/notes__webSource.ts";
-import type { DraftContent } from "../../notes/editor.vibe";
+import type { DraftContent, KeptReview } from "../../notes/editor.vibe";
 import type { NotesFolder } from "../../notes/folders.vibe";
 import { rowOf, type NoteRow, type WebSource } from "../../notes/list.vibe";
 import type { RecorderDisplay } from "../../notes/recorder.vibe";
 import type { TrashRow } from "../../notes/trash.vibe";
+import type { PreviousDeviceNotes as PreviousNotesData } from "../../notes/previous-device-notes.ts";
 
 const day = 24 * 60 * 60 * 1000;
 /** The fixed now the stories render dates against. */
@@ -48,3 +51,54 @@ export const folders: NotesFolder[] = [{ id: "f-work", name: "Work", createdAt: 
 export const webSource: WebSource = { name: "Planning the week", url: "https://example.com/articles/planning-the-week" };
 export const sourceOpen: SourceDialog = { ...sourceDialogInitial, opened: true, gen: 1 };
 export const sourceUnconfirmed: SourceDialog = { ...sourceOpen, busy: true, acted: 1, unconfirmed: true };
+
+/** Notes reading the owner's collection for the first time. */
+export const opening: Collection = { ...collectionInitial, owner: 1, ticket: 1, phase: "Loading" };
+
+/** The collection read and current. */
+export const ready: Collection = { ...opening, phase: "Ready", revision: 3 };
+
+/** A save in flight. */
+export const saving: Collection = { ...ready, phase: "Saving" };
+
+/** The collection could not be read. */
+export const readFailed: Collection = { ...opening, phase: "Review", review: "ReadReview", failure: "ReadFailed" };
+
+/** A change whose save could not be confirmed. */
+export const saveUnconfirmed: Collection = { ...ready, phase: "Review", review: "ChangeReview", failure: "WriteFailed", uncertain: true };
+
+/** The editor bound to the owner, no note open. */
+export const editorClosed: Editor = { ...editorInitial, current: true, revision: 3 };
+
+/** The text note open in the editor. */
+export const editorOpen: Editor = { ...editorClosed, present: true, token: 1, draftId: "standup", base: 3, nextToken: 2 };
+
+/** A draft kept after its save could not be confirmed. */
+export const keptDraft: KeptReview = { noteId: "standup", title: "Standup", body: "Ship the Trash review and the recorder fixes." };
+
+/** Forty notes over two months, for a long list. */
+export const manyRows: NoteRow[] = Array.from({ length: 40 }, (_, at): StickyNote => ({
+  id: `note-${at}`, title: at % 7 === 0 ? `Meeting notes ${at}: quarterly planning with the design, platform and support teams` : `Note ${at}`,
+  body: "\nA few lines about what was decided and who follows up.", color: "yellow",
+  createdAt: new Date(now - at * 1.5 * day).toISOString(), updatedAt: new Date(now - at * 1.5 * day).toISOString(),
+})).map(rowOf);
+
+/** Recently deleted, the recorder and the web source dialog, all closed. */
+export const trashClosed: TrashView = { ...trashInitial, retentionOn: true };
+export const recorderClosed: Recorder = recorderInitial;
+export const sourceClosed: SourceDialog = sourceDialogInitial;
+
+/** What an earlier installation kept: two saved notes and pending deletions in its draft. */
+export const earlierNotes: PreviousNotesData = {
+  saved: { status: "available", pendingRemovals: 0, notes: [
+    { id: "p1", title: "Packing list", body: "Passport\nCharger\nRain jacket", details: [] },
+    { id: "p2", title: "", body: "Call the landlord about the heating before the end of the month.", details: ["Checklist: 1 of 3 done"] },
+  ] },
+  draft: { status: "available", pendingRemovals: 2, notes: [{ id: "p3", title: "Gift ideas", body: "A book for Sam", details: [] }] },
+};
+
+/** Nothing was kept by an earlier installation. */
+export const noEarlierNotes: PreviousNotesData = { saved: { status: "empty" }, draft: { status: "empty" } };
+
+/** The saved notes could not be read; the draft held nothing. */
+export const earlierUnreadable: PreviousNotesData = { saved: { status: "unavailable" }, draft: { status: "empty" } };

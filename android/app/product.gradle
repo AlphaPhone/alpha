@@ -95,6 +95,8 @@ dependencies {
  implementation 'androidx.credentials:credentials:1.6.0'
  implementation 'androidx.credentials:credentials-play-services-auth:1.6.0'
  implementation 'com.google.android.libraries.identity.googleid:googleid:1.1.1'
+ // Google authorization (NativeGoogleCredential); the os sign-in module uses the same version internally.
+ implementation 'com.google.android.gms:play-services-auth:21.1.1'
  implementation 'androidx.browser:browser:1.9.0'
  implementation 'com.squareup.okhttp3:okhttp:5.3.2'
  implementation 'androidx.media3:media3-transformer:1.11.1'

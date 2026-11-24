@@ -1,12 +1,12 @@
 // Node entry points into the pinned upstream @elizaos/os and @elizaos/agent packages for Alpha's build tools.
-// Their operations are Effect programs (VibeLang); each wrapper here runs one with the Node platform layer and
+// Their operations are Effect programs (VibeLang); each wrapper here runs one with the Node platform layer and an HTTP client, and
 // returns a Promise. Scripts that import this module run as
 //   node --conditions=eliza-source --import vibelang/register scripts/<tool>.ts
 // so the workspace packages resolve to their VibeLang sources at the pin.
 import {execFileSync} from 'node:child_process';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {Effect} from 'effect';
+import {Effect, Layer} from 'effect';
 import {FetchHttpClient} from 'effect/http';
 import * as NodeServices from '@effect/platform-node/NodeServices';
 import * as osBuild from '@elizaos/os/build';
@@ -23,9 +23,12 @@ export const OS_CLI = path.join(OS_PACKAGE, 'src/cli.vibe');
 
 type Program<A> = Effect.Effect<A, unknown, never> | Effect.Effect<A, unknown, unknown>;
 
-/** Run one upstream Effect program with the Node platform services. */
+/** The Node platform services and an HTTP client: staging the runtime payload downloads the Node runtime archive. */
+const platform = Layer.mergeAll(NodeServices.layer, FetchHttpClient.layer);
+
+/** Run one upstream Effect program with the Node platform services and an HTTP client. */
 export function run<A>(program: Program<A>): Promise<A> {
-  return Effect.runPromise(Effect.provide(program as Effect.Effect<A, unknown, NodeServices.NodeServices>, NodeServices.layer) as Effect.Effect<A, unknown, never>);
+  return Effect.runPromise(Effect.provide(program as Effect.Effect<A, unknown, NodeServices.NodeServices>, platform) as Effect.Effect<A, unknown, never>);
 }
 
 /** Run the upstream os command line with the given arguments, inheriting output. */
@@ -39,8 +42,7 @@ export const exportCommittedSources = (source: string, commit: string, into: str
   run(osBuild.exportCommittedSources(source, commit, into, paths));
 export const generateAndroidHost = (options: Parameters<typeof osBuild.generateAndroidHost>[0]) => run(osBuild.generateAndroidHost(options));
 export const buildAndroid = (options: Parameters<typeof osBuild.buildAndroid>[0]) => run(osBuild.buildAndroid(options));
-export const stageRuntimePayload = (options: Parameters<typeof osBuild.stageRuntimePayload>[0]) =>
-  run(Effect.provide(osBuild.stageRuntimePayload(options), FetchHttpClient.layer));
+export const stageRuntimePayload = (options: Parameters<typeof osBuild.stageRuntimePayload>[0]) => run(osBuild.stageRuntimePayload(options));
 
 export const resolveAndroidSdkRoot = () => run(osImage.resolveAndroidSdkRoot());
 export const resolveJavaHome = () => run(osImage.resolveJavaHome());

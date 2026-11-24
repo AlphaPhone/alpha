@@ -1,4 +1,4 @@
-// spec/clock/alarms.md, "A new alarm needs an unused id, a valid time and days, a next instant still to come, and room"; spec/clock/reminders.md, "One reminder write runs at a time, and only from a current listing of the shown revision"; spec/clock/notices.md, "One retained-data notice at a time, shown only on a visible page, and hiding closes it"; spec/clock/stopwatch.md, "A lap records the elapsed time while running, laps only grow, and at most 99 are kept"; spec/clock/deletions.md, "An uncertain outcome can be dismissed, which keeps its receipt and repeats nothing"; spec/clock/handoff.md, "Confirming records the handoff before Clock is opened, and a review that went stale opens nothing"; spec/clock/worldClock.md, "A zone is added once, up to twenty, and can be removed"; spec/clock/ringer.md, "The sound lasts at most a minute, and silencing stops it at once"
+// spec/clock/alarms.md, "A new alarm needs an unused id, a valid time and days, a next instant still to come, and room"; spec/clock/reminders.md, "One reminder write runs at a time, and only from a current listing of the shown revision"; spec/clock/notices.md, "One retained-data notice at a time, shown only on a visible page, and hiding closes it"; spec/clock/stopwatch.md, "A lap records the elapsed time while running, laps only grow, and at most 99 are kept"; spec/clock/deletions.md, "An uncertain outcome can be dismissed, which keeps its receipt and repeats nothing"; spec/clock/handoff.md, "Confirming records the handoff before Clock is opened, and a review that went stale opens nothing"; spec/clock/worldClock.md, "A zone is added once, up to twenty, and can be removed"; spec/clock/ringer.md, "The sound lasts at most a minute, and silencing stops it at once"; spec/clock/handoff.md, "Simulation is possible only in a test-mocks build, and a simulated request opens nothing"; spec/clock/notices.md, "Downloading and resetting exist only in a test-mocks build, and a reset needs a confirmation and runs once"
 // What Bombadil checks of Clock on every state it reaches.
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
@@ -79,3 +79,28 @@ const lapsAscend = extract(({ document }) =>
 
 /** The stopwatch's lap totals, newest first, never run back. */
 export const clockLapsNeverRunBack = always(() => lapsAscend.current);
+
+const worldClock = extract(({ document }) => {
+  const add = document.querySelector<HTMLButtonElement>('button[aria-label="Add city"]');
+  const panel = add?.closest("section");
+  if (!add || !panel) return { open: false, cities: 0, addEnabled: false };
+  return { open: true, cities: panel.querySelectorAll(":scope > ul > li").length, addEnabled: !add.disabled };
+});
+
+/** At most twenty cities are listed, and none can be added at twenty. */
+export const clockAtMostTwentyCities = always(() => !worldClock.current.open || (worldClock.current.cities <= 20 && (worldClock.current.cities < 20 || !worldClock.current.addEnabled)));
+
+const simulation = extract(({ document }) =>
+  document.documentElement.dataset.testMocks === "false" && (document.querySelector("#handoff-simulate") !== null
+    || Array.from(document.querySelectorAll("button")).some((button) => button.textContent?.trim() === "Simulate Clock request")));
+
+/** A Clock request can be simulated only in a build with test mocks. */
+export const clockSimulationOnlyWithTestMocks = always(() => !simulation.current);
+
+const retainedDataTools = extract(({ document }) =>
+  document.documentElement.dataset.testMocks === "false" && Array.from(document.querySelectorAll('[role="dialog"]'))
+    .filter((dialog) => Array.from(dialog.querySelectorAll("p")).some((line) => line.textContent?.trim() === "Data kept"))
+    .some((dialog) => Array.from(dialog.querySelectorAll("button")).some((button) => ["Download", "Reset…", "Reset"].includes(button.textContent?.trim() ?? ""))));
+
+/** Kept data is downloaded or reset only in a build with test mocks; otherwise its notice only explains. */
+export const clockRetainedDataToolsOnlyWithTestMocks = always(() => !retainedDataTools.current);

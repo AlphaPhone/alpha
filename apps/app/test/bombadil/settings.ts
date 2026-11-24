@@ -1,4 +1,4 @@
-// spec/settings/passwords.md, "An entry opens from the list, and only a listed entry stays open"; spec/settings/passwords.md, "Each visit of the page has its own generation, and only its own answers count"; spec/settings/passwords.md, "Only Android's own authentication unlocks the vault, and the list follows the unlock"; spec/settings/index.md, "Developer pages open only in a build with test mocks"; spec/settings/updates.md, "One check or install runs at a time, and an explicit check keeps its answer in Settings"; spec/settings/reset.md, "The native answer is worded by Alpha, and one Alpha does not know claims nothing"; spec/settings/reset.md, "Settings offers no backup, import or export of the owner's data"; spec/settings/preferences.md, "Preferences that cannot be read ask before every action and share nothing"; spec/settings/preferences.md, "The open Browser page goes with a chat turn only while Browser page for Alpha is on"; spec/settings/diagnostics.md, "One export runs at a time, and it is shared only when Android's chooser opened"; spec/settings/vocabulary.md, "A reported switch is on or off, and anything else is unknown"
+// spec/settings/passwords.md, "An entry opens from the list, and only a listed entry stays open"; spec/settings/passwords.md, "Each visit of the page has its own generation, and only its own answers count"; spec/settings/passwords.md, "Only Android's own authentication unlocks the vault, and the list follows the unlock"; spec/settings/index.md, "Developer pages open only in a build with test mocks"; spec/settings/updates.md, "One check or install runs at a time, and an explicit check keeps its answer in Settings"; spec/settings/reset.md, "The native answer is worded by Alpha, and one Alpha does not know claims nothing"; spec/settings/reset.md, "Settings offers no backup, import or export of the owner's data"; spec/settings/preferences.md, "Preferences that cannot be read ask before every action and share nothing"; spec/settings/preferences.md, "The open Browser page goes with a chat turn only while Browser page for Alpha is on"; spec/settings/diagnostics.md, "One export runs at a time, and it is shared only when Android's chooser opened"; spec/settings/vocabulary.md, "A reported switch is on or off, and anything else is unknown"; spec/settings/index.md, "General's Phone row opens Phone's line details on the Alpha image only, and About's Agent activity opens the assistant's activity on the phone"; spec/settings/facts.md, "Storage use is shown only as a used and a total Android reported, used never above total"
 // What Bombadil checks of Settings and Passwords in every state it reaches.
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
@@ -86,3 +86,17 @@ export const settingsOneExportAtATime = always(() => exports.current <= 1);
 
 /** A switch Android did not report is never drawn as Off. */
 export const settingsUnknownIsNeverOff = always(() => unknownSwitches.current === 0);
+
+const phoneRow = extract(({ document }) =>
+  document.querySelector('[aria-label="Phone, SIM and carrier"]') === null || document.documentElement.dataset.alphaVariant === "aosp");
+
+/** General's Phone row exists only on the Alpha image. */
+export const settingsPhoneRowOnlyOnTheImage = always(() => phoneRow.current);
+
+const storageShare = extract(({ document }) => {
+  const shown = /(\d+)%/.exec(document.querySelector('[aria-label="Storage, opens Android settings"]')?.textContent ?? "");
+  return shown === null || Number(shown[1]) <= 100;
+});
+
+/** Storage never reads as more than full. */
+export const settingsStorageNeverAboveTotal = always(() => storageShare.current);
