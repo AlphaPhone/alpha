@@ -10,13 +10,15 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { archiveWebPayload, parseXmlTree, readBuildFlags, telephonySetupReceiverProblems, validateApk, verifyOwnerRouteTable } from "../scripts/apk.ts";
 import { webViewFilterProblems, webViewFilters } from "../scripts/render-assetlinks.ts";
 import { voiceBundleAdmission, VOICE_BUNDLE_FORMAT } from "../scripts/voice-host.ts";
+// Scripts that load scripts/apk.ts read upstream VibeLang (@elizaos/os/image), so they run as package.json runs them.
+const VIBE = ["--conditions=eliza-source", "--import", import.meta.resolve("vibelang/register")];
 const root = path.resolve(import.meta.dirname, "..");
 test("Cloud voice evidence is one readable file for a genuine build, before any APK work", () => {
   for (const [args, message] of [
     [["--cloud-voice-evidence=a.json", "--cloud-voice-evidence=b.json"], /Specify --cloud-voice-evidence only once/],
     [["--cloud-voice-evidence=missing.json"], /Cloud voice evidence could not be read as JSON/],
   ]) {
-    const result=spawnSync(process.execPath,["scripts/verify-apks.ts",...args],{cwd:root,encoding:"utf8"});
+    const result=spawnSync(process.execPath,[...VIBE,"scripts/verify-apks.ts",...args],{cwd:root,encoding:"utf8"});
     assert.notEqual(result.status,0,args.join(" "));
     assert.match(result.stderr,message,args.join(" "));
   }
@@ -42,10 +44,10 @@ test("AOSP staging refuses test-mocks and non-distributable inputs before any st
     fs.copyFileSync(path.join(root, "app.config.json"), path.join(dir, "app.config.json"));
     completeAospLock(dir);
     fs.mkdirSync(path.join(dir, "artifacts/test-mocks"), { recursive: true });
-    const stage = args => spawnSync(process.execPath, [path.join(root, "scripts/stage-aosp.ts"), "--target", "cuttlefish", "--aosp-source", "absent-source", ...args], { cwd: dir, encoding: "utf8" });
+    const stage = args => spawnSync(process.execPath, [...VIBE, path.join(root, "scripts/stage-aosp.ts"), "--target", "cuttlefish", "--aosp-source", "absent-source", ...args], { cwd: dir, encoding: "utf8" });
     const flagOn = path.join(dir, "artifacts/test-mocks/launcher-debug.apk");
     zip(flagOn, { "assets/public/build-flags.json": JSON.stringify({ testMocks: true }) });
-    const raw = args => spawnSync(process.execPath, [path.join(root, "scripts/stage-aosp.ts"), ...args], { cwd: dir, encoding: "utf8" });
+    const raw = args => spawnSync(process.execPath, [...VIBE, path.join(root, "scripts/stage-aosp.ts"), ...args], { cwd: dir, encoding: "utf8" });
     let out = raw(["--aosp-source", "absent-source", "--apk", flagOn, "--development"]);
     assert.notEqual(out.status, 0);
     assert.match(out.stderr, /Staging requires --target pixel10a or --target cuttlefish/);
@@ -121,7 +123,7 @@ test("AOSP production staging refuses a missing or foreign descriptor", () => {
   try {
     fs.copyFileSync(path.join(root, "app.config.json"), path.join(dir, "app.config.json"));
     completeAospLock(dir);
-    const stage = args => spawnSync(process.execPath, [path.join(root, "scripts/stage-aosp.ts"), "--target", "cuttlefish", "--aosp-source", "absent-source", ...args], { cwd: dir, encoding: "utf8" });
+    const stage = args => spawnSync(process.execPath, [...VIBE, path.join(root, "scripts/stage-aosp.ts"), "--target", "cuttlefish", "--aosp-source", "absent-source", ...args], { cwd: dir, encoding: "utf8" });
     // The missing-APK message says which staging was asked for.
     assert.match(stage(["--development"]).stderr, /Development staging: supply --apk PATH to a flag-off debug launcher APK\./);
     assert.match(stage(["--descriptor", "reviewed.json"]).stderr, /Production staging: supply --apk PATH to the signed launcher release APK that verify-apks recorded as distributable\./);
@@ -243,7 +245,7 @@ if(args[1]==='android:build'){
   if (inherited) Object.assign(env, {ELIZA_DEV_ALLOW_TEST_MOCKS:'1'});
   if (mode === 'wrong-profile') env.FIXTURE_WRONG_PROFILE='1';
   if(mode==='wrong-channel')env.FIXTURE_WRONG_CHANNEL='1';
-  const run = spawnSync(process.execPath, [path.join(root, 'scripts/build-archive.ts'), 'test-results/archive'], {cwd:dir, env, encoding:'utf8'});
+  const run = spawnSync(process.execPath, [...VIBE, path.join(root, 'scripts/build-archive.ts'), 'test-results/archive'], {cwd:dir, env, encoding:'utf8'});
   const archive = path.join(dir, 'test-results/archive');
   if (mode === 'wrong-profile'||mode==='wrong-channel') {
     assert.notEqual(run.status, 0);
@@ -272,7 +274,7 @@ if(args[1]==='android:build'){
 test('archive rejects unsupported options before creating output', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-build-archive-invalid-'));
   t.after(() => fs.rmSync(dir, {recursive:true, force:true}));
-  const run = spawnSync(process.execPath, [path.join(root, 'scripts/build-archive.ts'), '--unknown', 'test-results/archive'], {cwd:dir, encoding:'utf8'});
+  const run = spawnSync(process.execPath, [...VIBE, path.join(root, 'scripts/build-archive.ts'), '--unknown', 'test-results/archive'], {cwd:dir, encoding:'utf8'});
   assert.notEqual(run.status, 0);
   assert.ok(!fs.existsSync(path.join(dir, 'test-results')));
 });
