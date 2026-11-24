@@ -149,6 +149,5 @@ export effect function setUp(): void!!(Cloud | Link.Machine) {
   try contained(link.send(try accountRead()), "reading what Google allows")
   try contained(link.send({ type: "start" }), "starting Google Calendar link setup")
 }
-
 /** The link: in memory, a run at a time, its answers refused once another owner signs in. */
 export const linking = together(reacting(Link, { carry }), calendar, account)

@@ -1,0 +1,362 @@
+// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"
+import { ConversationRecord, TurnController } from "@elizaos/agent/client"
+import * as Shell from "../../gen/app__shell.effect.vibe"
+import * as Voice from "../../gen/app__voice.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { Device } from "../platform/device.vibe"
+import { ask } from "../platform/remote.vibe"
+import { type VoiceEvent, VoiceBridge } from "../platform/voice.vibe"
+import { fresh } from "../runtime/attempts.vibe"
+import { type Job, answer, contained, due, hearing, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
+
+const views: ReadonlyArray<Shell.View> = [
+  "Phone", "Messages", "Inbox", "Calendar", "Browser", "Camera", "Photos", "Maps", "Notes", "Contacts", "Files", "Workflows", "Settings",
+]
+
+export function placeOf(view: Shell.View | undefined): number {
+  if (view === undefined) return 1
+  const at = views.indexOf(view)
+  return at >= 0 ? at + 2 : 1
+}
+
+export function viewOfPlace(place: number): Shell.View | undefined {
+  return place >= 2 ? views[place - 2] : undefined
+}
+
+export interface VoiceMemory {
+  conversation: ConversationRecord | undefined
+  heardText: string
+  lastReply: string
+  readonly queuedSentences: string[]
+  dispatchedSentences: number
+  playbackTurn: number
+  playbackEpoch: number
+  readonly playLock: Semaphore.Semaphore
+  reviewNotice: string
+  dictatedText: string
+  enqueueSentence(turn: number, text: string): void
+  dequeueSentence(turn: number): { readonly text: string; readonly append: boolean } | undefined
+  clearQueued(): void
+}
+
+export service VoiceWords {
+  readonly memory: VoiceMemory
+}
+
+export const voiceWords = Layer.effect(VoiceWords, effect {
+  const playLock = try Semaphore.make(1)
+  const memory: VoiceMemory = {
+    conversation: undefined,
+    heardText: "",
+    lastReply: "",
+    queuedSentences: [],
+    dispatchedSentences: 0,
+    playbackTurn: 0,
+    playbackEpoch: 0,
+    playLock,
+    reviewNotice: "",
+    dictatedText: "",
+    enqueueSentence(turn: number, text: string) {
+      if (memory.playbackTurn !== turn) {
+        memory.playbackTurn = turn
+        memory.queuedSentences.length = 0
+        memory.dispatchedSentences = 0
+      }
+      memory.queuedSentences.push(text)
+    },
+    dequeueSentence(turn: number) {
+      if (memory.playbackTurn !== turn) return undefined
+      const text = memory.queuedSentences.shift()
+      if (text === undefined) return undefined
+      const append = memory.dispatchedSentences > 0
+      memory.dispatchedSentences += 1
+      return { text, append }
+    },
+    clearQueued() {
+      memory.playbackEpoch += 1
+      memory.queuedSentences.length = 0
+      memory.dispatchedSentences = 0
+    },
+  }
+  return { memory }
+})
+
+module pure {
+  const sentenceBoundary = /^(.*?[.!?])(?:\s+|$)([\s\S]*)$/
+  const reviewTag = /\[(APPROVAL|PROPOSAL|REVIEW|DRAFT|CALENDAR_APPROVAL|EMAIL_DRAFT)\b/i
+  const navigateTag = /\[NAVIGATE:([a-zA-Z]+)\]/i
+
+  /** @throws {never} */
+  export function takeCompleteSentences(buffer: string): { readonly ready: readonly string[]; readonly rest: string } {
+    const ready: string[] = []
+    let rest = buffer
+    for (let i = 0; i < 32; i += 1) {
+      const matched = sentenceBoundary.exec(rest)
+      if (matched === null) break
+      const head = (matched[1] ?? "").trim()
+      if (head !== "") ready.push(head)
+      rest = (matched[2] ?? "").trimStart()
+    }
+    return { ready, rest }
+  }
+
+  /** @throws {never} */
+  export function replyNeedsReview(text: string): boolean {
+    return reviewTag.test(text)
+  }
+
+  /** @throws {never} */
+  export function requestedDestination(text: string): string | undefined {
+    const found = navigateTag.exec(text)
+    return found?.[1]
+  }
+
+  /** @throws {never} */
+  export function speakableText(text: string): string {
+    return text
+      .replace(/\[NAVIGATE:[a-zA-Z]+\]/gi, "")
+      .replace(/\[(APPROVAL|PROPOSAL|REVIEW|DRAFT|CALENDAR_APPROVAL|EMAIL_DRAFT)[^\]]*\]/gi, "")
+      .replace(/\s+/g, " ")
+      .trim()
+  }
+}
+import { replyNeedsReview, requestedDestination, speakableText, takeCompleteSentences } from pure
+
+function placeForDestination(name: string): number | undefined {
+  const lowered = name.toLowerCase()
+  if (lowered === "home") return 1
+  const matched = views.find((view) => view.toLowerCase() === lowered)
+  return matched === undefined ? undefined : placeOf(matched)
+}
+
+const createdConversation = Schema.Struct({ conversation: Schema.Struct({ ...ConversationRecord.fields, title: Schema.String }) })
+
+effect function ensureConversation(): (ConversationRecord | undefined)!!(Agent | VoiceWords) {
+  const { memory } = try VoiceWords
+  if (memory.conversation !== undefined) return memory.conversation
+  return effect {
+    const created = try ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/conversations"), { title: "Voice" }), createdConversation)
+    const record = { id: created.conversation.id, roomId: created.conversation.roomId } as ConversationRecord
+    memory.conversation = record
+    return record
+  } catch () => undefined
+}
+
+function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event, never, Agent | VoiceWords> {
+  return Stream.callback<Voice.Event, never, Agent | VoiceWords>((queue) => effect {
+    const { runtime } = try Agent
+    const { memory } = try VoiceWords
+    const record = try ensureConversation()
+    const spoken = memory.heardText.trim()
+    memory.heardText = ""
+    if (record === undefined || spoken === "") {
+      Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false })
+      Queue.endUnsafe(queue)
+      return
+    }
+    const controller = new TurnController(runtime)
+    try ignore(tryPromise(() => controller.bind(record)))
+    let emittedOffset = 0
+    let pending = ""
+    let navClaimed = false
+    const emitNavigation = (raw: string) => {
+      if (navClaimed) return
+      const target = requestedDestination(raw)
+      if (target === undefined) return
+      const place = placeForDestination(target)
+      if (place === undefined) return
+      navClaimed = true
+      Queue.offerUnsafe(queue, { type: "agentNavigates", session, place })
+    }
+    const feed = (written: string, provisional: boolean) => {
+      if (provisional) return
+      emitNavigation(written)
+      if (replyNeedsReview(written)) return
+      const clean = speakableText(written)
+      if (clean.length <= emittedOffset) return
+      const delta = clean.slice(emittedOffset)
+      emittedOffset = clean.length
+      const split = takeCompleteSentences(pending + delta)
+      pending = split.rest
+      for (const sentence of split.ready) {
+        memory.enqueueSentence(turn, sentence)
+        Queue.offerUnsafe(queue, { type: "sentence", session, turn })
+      }
+    }
+    const result = tryPromise(() => controller.send({ text: spoken }, { stream: { onPreview: feed } })) catch () => undefined
+    const finalText = result?.kind === "Replied" ? result.reply.text : ""
+    memory.lastReply = finalText
+    emitNavigation(finalText)
+    const asks = replyNeedsReview(finalText)
+    if (asks) {
+      memory.reviewNotice = finalText
+      Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: true })
+      Queue.endUnsafe(queue)
+      return
+    }
+    const cleanFinal = speakableText(finalText)
+    if (cleanFinal.length > emittedOffset) {
+      const remaining = (pending + cleanFinal.slice(emittedOffset)).trim()
+      if (remaining !== "") {
+        memory.enqueueSentence(turn, remaining)
+        Queue.offerUnsafe(queue, { type: "sentence", session, turn })
+      }
+    } else if (pending.trim() !== "") {
+      memory.enqueueSentence(turn, pending.trim())
+      Queue.offerUnsafe(queue, { type: "sentence", session, turn })
+    }
+    Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false })
+    Queue.endUnsafe(queue)
+  })
+}
+
+effect function navigateForVoice(place: number): (Voice.Event | undefined)!!(Shell.Machine | Voice.Machine) {
+  const shell = try Shell.Machine
+  const current = try shell.get()
+  const currentPlace = placeOf(current.trail.at(-1))
+  if (currentPlace === place) return { type: "navigated", place }
+  const target = viewOfPlace(place)
+  const moved = target === undefined
+    ? try contained(shell.send({ type: "agentGoHome" }), "voice navigating home")
+    : try contained(shell.send({ type: "agentOpenView", view: target }), "voice navigating to view")
+  if (moved) return undefined
+  const voice = try (try Voice.Machine).get()
+  return { type: "claimReleased", session: voice.session }
+}
+
+function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | VoiceBridge | VoiceWords | Shell.Machine | Voice.Machine, []> {
+  return match (fx) {
+    when { tag: "Prewarm", let network }: run("prewarm", effect { try (try VoiceBridge).prewarm(network) });
+    when { tag: "HoldEngine" }: run("holdEngine", effect { try (try VoiceBridge).holdEngine() });
+    when { tag: "ReleaseEngineHold" }: run("releaseEngineHold", effect { try (try VoiceBridge).releaseEngineHold() });
+    when { tag: "AskMicrophone" }: answer("permission", effect {
+      const grant = try (try VoiceBridge).requestPermission()
+      return { type: "answerPrompt", granted: grant === "granted" }
+    }, { type: "answerPrompt", granted: false });
+    when { tag: "OpenSettings" }: run("openSettings", Effect.void);
+    when { tag: "Listen", let session, let network }: answer("mic", effect {
+      const opened = effect { try (try VoiceBridge).openMic(session, network); return true } catch () => false
+      return opened ? { type: "micOpened", session } : { type: "micFailed", session }
+    }, { type: "micFailed", session });
+    when { tag: "CloseMicrophone", let session }: answer("mic", effect {
+      const closed = effect { try (try VoiceBridge).closeMic(session); return true } catch () => false
+      return closed ? { type: "micClosed", session } : { type: "micCloseFailed", session }
+    }, { type: "micCloseFailed", session });
+    when { tag: "Send", let session, let turn }: stream(`send ${session}:${turn}`, sendVoiceTurn(session, turn), { type: "replyEnds", session, turn, asks: false });
+    when { tag: "Play", let session, let turn }: answer(`play ${session}:${turn}:${fresh()}`, effect {
+      const { memory } = try VoiceWords
+      const epoch = memory.playbackEpoch
+      try Semaphore.withPermit(memory.playLock, effect {
+        if (memory.playbackEpoch !== epoch) return
+        const piece = memory.dequeueSentence(turn)
+        if (piece !== undefined) {
+          try ignore((try VoiceBridge).playSentence(session, turn, piece.text, piece.append))
+        }
+      })
+      return { type: "sentencePlayed", session, turn }
+    }, { type: "sentencePlayed", session, turn });
+    when { tag: "Hush", let turn }: run("hush", effect {
+      (try VoiceWords).memory.clearQueued()
+      try (try VoiceBridge).hush(turn)
+    });
+    when { tag: "Shut", let session }: answer("shut", effect {
+      (try VoiceWords).memory.clearQueued()
+      const confirmed = try (try VoiceBridge).shut(session)
+      return { type: "stopped", confirmed }
+    }, { type: "stopped", confirmed: false });
+    when { tag: "Navigate", let place }: stream("navigate", Stream.unwrap(effect {
+      const immediate = try navigateForVoice(place)
+      return immediate === undefined ? Stream.empty : Stream.succeed(immediate)
+    }), { type: "navigated", place });
+    when { tag: "Record", let ticket }: answer("record", effect {
+      const started = effect { try (try VoiceBridge).startRecording(ticket); return true } catch () => false
+      return started ? { type: "recordingStarted", ticket } : { type: "recordingFailed", ticket, failure: "NoMicrophone" }
+    }, { type: "recordingFailed", ticket, failure: "NoMicrophone" });
+    when { tag: "Transcribe", let ticket, let network }: answer("transcribe", effect {
+      const text = (try VoiceBridge).transcribe(ticket, network) catch () => ""
+      const trimmed = text.trim()
+      if (trimmed !== "") {
+        (try VoiceWords).memory.dictatedText = trimmed
+        return { type: "transcribed", ticket, failure: "NoFailure" } as Voice.Event
+      }
+      return { type: "transcribed", ticket, failure: "NoSpeech" } as Voice.Event
+    }, { type: "transcribed", ticket, failure: "Recognition" });
+    when { tag: "Abandon", let recording }: run("abandon", effect { try (try VoiceBridge).abandon(recording) });
+    when { tag: "Fill" }: run("fill", Effect.void);
+  }
+}
+
+const autoPrewarm = started(effect {
+  const voice = try Voice.Machine
+  try Stream.runForEach(voice.changes, effect (state) => {
+    if (!state.warmed && !state.latched && !state.prompting) {
+      try contained(voice.send({ type: "prewarm", now: untimed }), "prewarming voice")
+    }
+  })
+}, "auto-prewarming voice")
+
+const visibility = started(effect {
+  const device = try Device
+  const bridge = try VoiceBridge
+  const voice = try Voice.Machine
+  try Stream.runForEach(device.visible, effect (shown) => {
+    if (shown) {
+      try bridge.invalidateCache()
+      try contained(voice.send({ type: "returned" }), "voice foreground return")
+    } else {
+      try contained(voice.send({ type: "pageHidden" }), "voice page hidden")
+    }
+  })
+}, "voice visibility")
+
+const navigation = started(effect {
+  const shell = try Shell.Machine
+  const voice = try Voice.Machine
+  let lastPlace: number | undefined
+  try Stream.runForEach(shell.changes, effect (state) => {
+    const place = placeOf(state.trail.at(-1))
+    if (lastPlace === undefined) {
+      lastPlace = place
+      return
+    }
+    if (place === lastPlace) return
+    lastPlace = place
+    try contained(voice.send({ type: "navigated", place }), "voice observing navigation")
+  })
+}, "voice observing shell navigation")
+
+const bridgeEvents = hearing(
+  Stream.unwrap(effect {
+    const bridge = try VoiceBridge
+    const { memory } = try VoiceWords
+    return Stream.map(bridge.events, (event): VoiceEvent => {
+      if (event.kind === "speechEnd" && event.text !== "") memory.heardText = event.text
+      else if (event.kind === "transcript" && event.final && event.text !== "") memory.heardText = event.text
+      return event
+    })
+  }),
+  Voice.Machine,
+  (event): Voice.Event | undefined => match (event) {
+    when { kind: "speechStart", let session }: { type: "speechHeard", session };
+    when { kind: "transcript", let session, let final }: final ? { type: "turnEnded", session } : { type: "speechHeard", session };
+    when { kind: "speechEnd", let session }: { type: "turnEnded", session };
+    when { kind: "bargeIn", let session, let echo }: { type: "bargeIn", session, echo };
+    when { kind: "ended" }: undefined;
+  },
+)
+
+export const voicing = Layer.provideMerge(
+  together(
+    reacting(Voice, {
+      keep: 1,
+      open: [{ type: "restart" }],
+      carry: carryVoice,
+      timers: (v) => (v.retryAt > 0 ? [due("retry", v.retryAt, { type: "retryDue", now: untimed })] : []),
+    }),
+    autoPrewarm,
+    visibility,
+    navigation,
+    bridgeEvents,
+  ),
+  voiceWords,
+)

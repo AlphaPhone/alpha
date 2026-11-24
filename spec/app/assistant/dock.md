@@ -267,14 +267,18 @@ pure def lawTheKeyboardLiftsNothingElse(keyboard: int, navigation: int): bool =
   composerLift(false, keyboard, navigation) == navigation
 ```
 
-### Focusing the composer on the bar raises Ask Alpha to typing
+### Focusing or tapping the composer on the bar opens Ask Alpha as a sheet
+
+Tapping or focusing the input bar from rest opens the half-screen conversation
+sheet immediately without requiring an upward drag, while leaving an already
+open sheet or full screen where it is.
 
 ```quint
-pure def focused(detent: S::Detent): List[Effect] = if (detent == S::Bar) List(Raise({ detent: S::Typing })) else List()
+pure def focused(detent: S::Detent): List[Effect] = if (not(isOpen(detent))) List(Raise({ detent: S::Sheet })) else List()
 
-pure def lawFocusingTheBarTypes(phone: S::Shell): bool =
+pure def lawFocusingTheBarOpensSheet(phone: S::Shell): bool =
   not(phone.drawer) implies
-    applied(focused(phone.assistant), phone).assistant == (if (phone.assistant == S::Bar) S::Typing else phone.assistant)
+    applied(focused(phone.assistant), phone).assistant == (if (not(isOpen(phone.assistant))) S::Sheet else phone.assistant)
 ```
 
 ### A keyboard closed while typing puts Ask Alpha back on the bar

@@ -9,14 +9,10 @@ import { type Files, browserFiles, phoneFiles } from "./files.vibe"
 import { type Location, browserLocation, phoneLocation } from "./location.vibe"
 import { type Calls, browserCalls, phoneCalls } from "./calls.vibe"
 import { type Telephony, browserTelephony, phoneTelephony } from "./telephony.vibe"
+import { type VoiceBridge, browserVoiceBridge, phoneVoiceBridge } from "./voice.vibe"
 import { type Documents, browserDocuments, phoneDocuments } from "./documents.vibe"
 import { type Navigation, browserNavigation, phoneNavigation } from "./navigation.vibe"
 
-/**
- * The services over the phone's other plugins, one line per plugin in each of the three lists below: its service in
- * `Plugins`, its phone layer in `phonePlugins` and its browser layer in `browserPlugins`. Lines are only ever added,
- * and git keeps every branch's (`.gitattributes`). A plugin's own file is `src/platform/<plugin>.vibe`.
- */
 export type Plugins =
   | never
   | Launcher
@@ -29,10 +25,10 @@ export type Plugins =
   | Location
   | Telephony
   | Calls
+  | VoiceBridge
   | Documents
   | Navigation
 
-/** On the phone: each plugin's service over eliza's client of it (`@elizaos/os/bridges/<plugin>`). */
 export const phonePlugins = Layer.mergeAll(
   Layer.empty,
   phoneLauncher,
@@ -45,11 +41,11 @@ export const phonePlugins = Layer.mergeAll(
   phoneLocation,
   phoneTelephony,
   phoneCalls,
+  phoneVoiceBridge,
   phoneDocuments,
   phoneNavigation,
 )
 
-/** In a browser: each plugin's service saying the phone's part is absent. */
 export const browserPlugins = Layer.mergeAll(
   Layer.empty,
   browserLauncher,
@@ -62,6 +58,7 @@ export const browserPlugins = Layer.mergeAll(
   browserLocation,
   browserTelephony,
   browserCalls,
+  browserVoiceBridge,
   browserDocuments,
   browserNavigation,
 )

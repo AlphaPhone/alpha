@@ -28,7 +28,7 @@ type Track = { start: number; prev: Sample; last: Sample; moved: boolean };
 
 const capture = (element: HTMLElement, pointer: number) => {
   try {
-    element.setPointerCapture(pointer);
+    if (!element.hasPointerCapture?.(pointer)) element.setPointerCapture(pointer);
   } catch {
     return;
   }

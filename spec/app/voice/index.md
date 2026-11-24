@@ -17,17 +17,21 @@ Alpha is raised; voice asks it to move and hears where it went.
 ### Voice holds the conversation's phase, its session and turn, the microphone, what was heard, the reply being spoken, and the recorder, permission and route it shares
 
 The conversation is idle, starting, listening, transcribing, thinking,
-speaking, waiting for the owner, paused, stopping, or failed. A session
-counts conversations and a turn counts what was said in one; every answer
-from the voice service names them, and an answer to an earlier one is
-refused. The microphone is off, asked for, opening, on or closing.
+speaking, paused, stopping, or failed. A session counts conversations and a
+turn counts what was said in one; every answer from the voice service names
+them, and an answer to an earlier one is refused. The microphone is off,
+asked for, opening, on or closing. Voice also tracks whether the speech
+pipeline has been prewarmed for the current foreground and account, whether
+the native speech engine is held open for the active conversation, and
+whether an agent action is waiting for the owner's review in chat while
+voice keeps listening.
 
 ```quint
 import dictation as D from "./dictation"
 import route as R from "./route"
 import permission as P from "../../kit/permission"
 
-type Phase = Idle | Starting | Listening | Transcribing | Thinking | Speaking | Waiting | Paused | Stopping | Failed
+type Phase = Idle | Starting | Listening | Transcribing | Thinking | Speaking | Paused | Stopping | Failed
 type Mic = Off | Asking | Opening | On | Closing
 
 type Voice = {
@@ -35,6 +39,7 @@ type Voice = {
   network: bool, disclosing: bool, retries: int, retryAt: int,
   queued: int, played: int, replied: bool, playing: int,
   failure: D::Failure, latched: bool, claim: int, followed: int,
+  warmed: bool, engineHeld: bool, reviewPending: bool,
   prompting: bool, recorder: D::Recorder, permission: P::Permission, route: R::Route,
 }
 
@@ -43,6 +48,7 @@ pure val initial: Voice = {
   network: false, disclosing: false, retries: 0, retryAt: 0,
   queued: 0, played: 0, replied: false, playing: 0,
   failure: D::NoFailure, latched: false, claim: 0, followed: 0,
+  warmed: false, engineHeld: false, reviewPending: false,
   prompting: false, recorder: D::initial, permission: P::unasked, route: R::signedOut,
 }
 
@@ -62,26 +68,35 @@ pure val weight_replyEnds = 8
 pure val weight_stopped = 6
 pure val weight_answerPrompt = 10
 pure val weight_startTalking = 6
+pure val weight_prewarm = 6
+pure val weight_returned = 4
+pure val weight_reviewSettled = 8
+pure val weight_claimReleased = 4
 pure val weight_speechFailed = 4
 pure val weight_retryDue = 6
 pure val weight_startRecording = 5
 pure val weight_recordingStarted = 8
 pure val weight_stopRecording = 6
 pure val weight_transcribed = 8
-pure val weight_agentNavigates = 5
+pure val weight_agentNavigates = 6
 pure val weight_answerDisclosure = 5
 pure val weight_openRecorder = 3
 ```
 
 ### What voice asks the phone and the voice service to do
 
-Ask for the microphone, open app settings, listen or record, close the
-microphone, send a turn, play a sentence of the reply, hush the reply, shut
-the conversation down, open a screen, transcribe a clip, abandon a
-recording, or fill a field with dictated text.
+Prewarm speech output and status without opening the microphone, hold or
+release the native speech engine across an active conversation, ask for the
+microphone, open app settings, listen or record, close the microphone, send
+a turn, play a sentence of the reply, hush the reply, shut the conversation
+down, open a screen, transcribe a clip, abandon a recording, or fill a field
+with dictated text.
 
 ```quint
 type Effect =
+  | Prewarm({ network: bool })
+  | HoldEngine
+  | ReleaseEngineHold
   | AskMicrophone
   | OpenSettings
   | Listen({ session: int, network: bool })
@@ -109,34 +124,82 @@ pure def closedMic(m: Mic): Mic = if (opened(m)) Closing else if (m == Asking) O
 pure def closeOut(v: Voice): List[Effect] =
   if (opened(v.mic)) List(CloseMicrophone({ session: v.session })) else List()
 
+pure def holdOut(v: Voice): List[Effect] =
+  if (v.engineHeld) List() else List(HoldEngine)
+
+pure def releaseOut(v: Voice): List[Effect] =
+  if (v.engineHeld) List(ReleaseEngineHold) else List()
+
 pure def onNetwork(r: R::Route, now: int): bool = R::way(r, now) != R::OnPhone
 ```
 
-### Starting asks for the microphone the first time, and opens it once it is allowed
+### The speech pipeline warms on startup, foreground return and account readiness without opening the microphone
+
+Warming prepares on-device speech output and cached status probes, and the
+network route when consented, without prompting for or opening the
+microphone. Once warm, redundant prewarm requests are refused until Alpha
+returns to the foreground or the account changes.
+
+```quint
+pure def canPrewarm(v: Voice, now: int): bool = not(v.warmed) and not(v.latched) and not(v.prompting)
+
+pure def prewarm(v: Voice, now: int): Change =
+  { state: { ...v, warmed: true }, out: List(Prewarm({ network: onNetwork(v.route, now) })) }
+
+pure def canReturned(v: Voice): bool = quiet(v) and v.warmed
+
+pure def returned(v: Voice): Voice = { ...v, warmed: false }
+
+pure def stepPrewarmNeverOpensTheMicrophone(before: Voice, via: str, after: Voice, out: List[Effect]): bool =
+  via == "prewarm" implies (after.mic == before.mic and after.prompting == before.prompting and after.phase == before.phase)
+
+pure def sometimesWarmedBeforeTalking(v: Voice): bool = quiet(v) and v.warmed and v.mic == Off
+```
+
+### Starting asks for the microphone the first time, opens it once it is allowed, and holds the speech engine while talking
 
 A conversation starts only when no other voice is running: the recorder is
 closed, no stop is left unconfirmed, and Android's prompt is not showing.
 Each start is a new session and a new turn. A conversation that starts over
-while muted listens with the microphone off until the owner unmutes.
+while muted listens with the microphone off until the owner unmutes. Holding
+the speech engine while talking keeps models warm across turns until the
+conversation stops or fails.
 
 ```quint
 pure def begin(network: bool, v: Voice): Change =
-  if (v.muted) { state: { ...v, phase: Listening, network: network, mic: Off }, out: List() }
+  if (v.muted)
+    { state: { ...v, phase: Listening, network: network, mic: Off, engineHeld: true }, out: holdOut(v) }
   else if (P::allows(v.permission))
-    { state: { ...v, network: network, mic: Opening }, out: List(Listen({ session: v.session, network: network })) }
+    { state: { ...v, network: network, mic: Opening, engineHeld: true },
+      out: holdOut(v).concat(List(Listen({ session: v.session, network: network }))) }
   else if (P::canAsk(v.permission))
     { state: { ...v, network: network, mic: Asking, prompting: true, permission: P::ask(v.permission) }, out: List(AskMicrophone) }
   else
-    { state: { ...v, phase: Failed, failure: D::Denied, network: false, mic: Off }, out: List() }
+    { state: { ...v, phase: Failed, failure: D::Denied, network: false, mic: Off, engineHeld: false, reviewPending: false, claim: 0 },
+      out: releaseOut(v) }
 
 pure def canStartTalking(v: Voice, now: int): bool =
   quiet(v) and v.recorder.stage == D::Closed and not(v.latched) and not(v.prompting)
 
 pure def startTalking(v: Voice, now: int): Change =
   val fresh = { ...v, phase: Starting, session: v.session + 1, turn: v.turn + 1, heard: false, muted: false,
-    failure: D::NoFailure, retries: 0, retryAt: 0, followed: 0, network: false }
+    failure: D::NoFailure, retries: 0, retryAt: 0, followed: 0, network: false, reviewPending: false }
   if (R::asksConsent(v.route, now)) { state: { ...fresh, disclosing: true }, out: List() }
   else begin(onNetwork(v.route, now), fresh)
+
+pure def alwaysEngineHeldOnlyWhileTalking(v: Voice): bool =
+  v.engineHeld implies talking(v)
+
+pure def stepEngineHoldIsBalanced(before: Voice, via: str, after: Voice, out: List[Effect]): bool =
+  out.every(e => match e {
+    | HoldEngine => not(before.engineHeld) and after.engineHeld
+    | ReleaseEngineHold => before.engineHeld and not(after.engineHeld)
+    | _ => true
+  })
+    and ((not(before.engineHeld) and after.engineHeld) implies out.includes(HoldEngine))
+    and ((before.engineHeld and not(after.engineHeld) and via != "restart") implies out.includes(ReleaseEngineHold))
+
+pure def sometimesEngineHeldWhileListening(v: Voice): bool = v.phase == Listening and v.engineHeld and v.mic == On
 ```
 
 ### Before audio first leaves the phone, the owner is shown what is sent and where, and decides
@@ -163,8 +226,12 @@ pure def canAnswerPrompt(v: Voice, granted: bool): bool = v.prompting
 pure def answerPrompt(v: Voice, granted: bool): Change =
   val base = { ...v, prompting: false, permission: P::observe(v.permission, if (granted) P::Granted else P::Denied) }
   if (v.mic == Asking)
-    (if (granted) { state: { ...base, mic: Opening }, out: List(Listen({ session: v.session, network: v.network })) }
-     else { state: { ...base, phase: Failed, failure: D::Denied, network: false, mic: Off }, out: List() })
+    (if (granted)
+      { state: { ...base, mic: Opening, engineHeld: true },
+        out: holdOut(v).concat(List(Listen({ session: v.session, network: v.network }))) }
+     else
+      { state: { ...base, phase: Failed, failure: D::Denied, network: false, mic: Off, engineHeld: false, reviewPending: false },
+        out: releaseOut(v) })
   else if (v.recorder.stage == D::Starting)
     (if (granted) { state: base, out: List(Record({ ticket: v.recorder.ticket })) }
      else { state: { ...base, recorder: D::recordingFailed(v.recorder, v.recorder.ticket, D::Denied) }, out: List() })
@@ -205,7 +272,9 @@ pure def micOpened(v: Voice, session: int): Voice =
 pure def canMicFailed(v: Voice, session: int): bool = v.mic == Opening and session == v.session and talking(v)
 
 pure def micFailed(v: Voice, session: int): Change =
-  if (v.phase == Starting) { state: { ...v, phase: Failed, failure: D::NoMicrophone, network: false, mic: Off }, out: List() }
+  if (v.phase == Starting)
+    { state: { ...v, phase: Failed, failure: D::NoMicrophone, network: false, mic: Off, engineHeld: false, reviewPending: false },
+      out: releaseOut(v) }
   else shutDown(D::NoMicrophone, false, v)
 ```
 
@@ -277,7 +346,7 @@ pure def stepPlaybackFollowsTheCurrentTurn(before: Voice, after: Voice, out: Lis
 pure def nextTurn(heard: bool, v: Voice): Change =
   val reopen = not(v.muted) and v.mic == Off
   { state: { ...v, phase: Listening, turn: v.turn + 1, heard: heard, queued: 0, played: 0, replied: false, playing: 0,
-      claim: 0, mic: if (reopen) Opening else v.mic },
+      mic: if (reopen) Opening else v.mic },
     out: if (reopen) List(Listen({ session: v.session, network: v.network })) else List() }
 
 pure def canSentencePlayed(v: Voice, session: int, turn: int): bool =
@@ -288,53 +357,52 @@ pure def sentencePlayed(v: Voice, session: int, turn: int): Change =
   if (v.replied and heardOne.played == v.queued) nextTurn(false, heardOne) else { state: heardOne, out: List() }
 ```
 
-### A reply that needs the owner waits for them with the microphone closed, and its speech is stopped
+### A reply that needs the owner's review in chat keeps voice listening with the microphone open
 
-The owner answers in the chat; voice never approves anything itself.
-Discovered in the existing app: unmuting during this wait opened the
-microphone.
+The owner reviews and approves in the chat; voice never approves anything
+itself. Any pre-review reply speech is hushed and a non-blocking review
+notice is shown, while the conversation returns straight to listening with
+the microphone open (when unmuted) for the next turn. Settling the review
+clears the notice and never stops voice.
 
 ```quint
 pure def canReplyEnds(v: Voice, session: int, turn: int, asks: bool): bool =
   (v.phase == Thinking or v.phase == Speaking) and session == v.session and turn == v.turn and not(v.replied)
 
 pure def replyEnds(v: Voice, session: int, turn: int, asks: bool): Change =
+  val listening = nextTurn(false, { ...v, reviewPending: true })
   if (asks)
-    { state: { ...v, phase: Waiting, queued: 0, played: 0, playing: 0, replied: false, mic: closedMic(v.mic) },
-      out: List(Hush({ turn: v.turn })).concat(closeOut(v)) }
+    { state: listening.state, out: List(Hush({ turn: v.turn })).concat(listening.out) }
   else if (v.queued == v.played) nextTurn(false, v)
   else { state: { ...v, replied: true }, out: List() }
+
+pure def canReviewSettled(v: Voice): bool = talking(v) and v.reviewPending
+
+pure def reviewSettled(v: Voice): Voice = { ...v, reviewPending: false }
+
+pure def stepReviewKeepsVoiceAndMicrophoneOpen(before: Voice, via: str, after: Voice, out: List[Effect]): bool =
+  ((via == "replyEnds" and after.reviewPending and not(after.replied)) implies
+    (after.phase == Listening and talking(after)
+      and out.every(e => match e { | CloseMicrophone(_) => false | Shut(_) => false | _ => true })
+      and (not(after.muted) implies (opened(after.mic) or after.mic == Closing))))
+    and (via == "reviewSettled" implies (talking(after) and after.phase == before.phase and after.mic == before.mic and not(after.reviewPending)))
 ```
 
-### When the owner has answered, the reply resumes and is heard from its start
-
-Discovered in the existing app: a resumed reply lost the sentences streamed
-before the wait.
-
-```quint
-pure def canResume(v: Voice, session: int, turn: int): bool = v.phase == Waiting and session == v.session and turn == v.turn
-
-pure def resume(v: Voice, session: int, turn: int): Voice = { ...v, phase: Thinking }
-
-pure def stepAResumedReplyIsHeardInFull(before: Voice, via: str, after: Voice): bool =
-  via == "resume" implies (after.queued == 0 and after.played == 0)
-```
-
-### The conversation can be answered aloud, wait for the owner, and listen again
+### The conversation can be answered aloud, keep listening while review is pending, and listen again
 
 ```quint
 pure def sometimesSpeaking(v: Voice): bool = v.phase == Speaking and v.mic == On
 
-pure def sometimesWaitingForTheOwner(v: Voice): bool = v.phase == Waiting and v.sent >= 1
+pure def sometimesListeningWithReviewPending(v: Voice): bool = v.phase == Listening and v.reviewPending and v.mic == On and v.sent >= 1
 
 pure def sometimesListeningAgain(v: Voice): bool = v.phase == Listening and v.sent >= 1
 ```
 
-### The microphone is off while Alpha transcribes, thinks, waits for the owner or is paused
+### The microphone is off while Alpha transcribes, thinks, is paused or is stopping
 
 ```quint
 pure def alwaysTheMicrophoneIsClosedWhileAlphaWorks(v: Voice): bool =
-  (v.phase == Transcribing or v.phase == Thinking or v.phase == Waiting or v.phase == Paused or v.phase == Stopping)
+  (v.phase == Transcribing or v.phase == Thinking or v.phase == Paused or v.phase == Stopping)
     implies not(opened(v.mic) or v.mic == Asking)
 ```
 
@@ -348,13 +416,14 @@ pure def alwaysTheMicrophoneIsAskedForOnlyWhileStarting(v: Voice): bool =
     and (opened(v.mic) implies (v.phase == Starting or v.phase == Listening or v.phase == Speaking))
 ```
 
-### A quiet or stopping conversation holds nothing: no disclosure, no speech, no wait and no claim, and a quiet one no microphone
+### A quiet or stopping conversation holds nothing: no disclosure, no speech, no engine hold, no review notice and no claim, and a quiet one no microphone
 
 ```quint
 pure def alwaysAQuietConversationHoldsNothing(v: Voice): bool =
   (quiet(v) implies v.mic == Off)
     and ((quiet(v) or v.phase == Stopping) implies
-      (not(v.disclosing) and v.retryAt == 0 and v.queued == 0 and v.playing == 0 and v.claim == 0))
+      (not(v.disclosing) and v.retryAt == 0 and v.queued == 0 and v.playing == 0 and v.claim == 0
+        and not(v.engineHeld) and not(v.reviewPending)))
 ```
 
 ### What was heard but not sent is never counted as sent
@@ -445,8 +514,8 @@ A stop is settled once the microphone and speech are confirmed off.
 ```quint
 pure def shutDown(failure: D::Failure, keyboard: bool, v: Voice): Change =
   { state: { ...v, phase: Stopping, failure: failure, mic: closedMic(v.mic), disclosing: false, retryAt: 0,
-      queued: 0, played: 0, replied: false, playing: 0, claim: 0 },
-    out: List(Shut({ session: v.session, keyboard: keyboard })) }
+      queued: 0, played: 0, replied: false, playing: 0, claim: 0, engineHeld: false, reviewPending: false },
+    out: List(Shut({ session: v.session, keyboard: keyboard })).concat(releaseOut(v)) }
 
 pure def canStop(v: Voice, keyboard: bool): bool = talking(v)
 
@@ -534,7 +603,7 @@ failure with the phone's speech unavailable holds nothing.
 ```quint
 pure def canSpeechFailed(v: Voice, session: int, fault: R::Fault, wait: int, deviceReady: bool, now: int): bool =
   talking(v) and session == v.session and v.mic != Asking and not(v.disclosing) and v.retryAt == 0
-    and v.phase != Waiting and v.phase != Paused and now >= 0
+    and v.phase != Paused and now >= 0
 
 pure def speechFailed(v: Voice, session: int, fault: R::Fault, wait: int, deviceReady: bool, now: int): Change =
   val route = if (deviceReady) R::noteFailure(v.route, fault, wait, now) else R::clearHold(v.route)
@@ -575,14 +644,26 @@ pure def sometimesSecondQuietRetry(v: Voice): bool = v.retries == 2 and v.retryA
 > As the owner, I want Alpha to open the screen it is talking about and
 > keep talking there, and to stop talking when I go somewhere else myself.
 
-### A turn may ask the shell to open one screen
+### An active voice conversation may ask the shell to open Home or any admitted screen
+
+Place 1 names Home and every higher place names an admitted app. The claim
+survives across turn boundaries until the shell finishes or declines the
+navigation, so an agent navigation that completes after the reply returns
+to listening never stops voice.
 
 ```quint
 pure def canAgentNavigates(v: Voice, session: int, place: int): bool =
-  (v.phase == Thinking or v.phase == Speaking) and session == v.session and v.claim == 0 and place > 0
+  (v.phase == Listening or v.phase == Thinking or v.phase == Speaking)
+    and session == v.session and v.claim == 0 and place > 0
 
 pure def agentNavigates(v: Voice, session: int, place: int): Change =
   { state: { ...v, claim: place }, out: List(Navigate({ place: place })) }
+
+pure def canClaimReleased(v: Voice, session: int): bool =
+  talking(v) and session == v.session and v.claim != 0
+
+pure def claimReleased(v: Voice, session: int): Voice =
+  { ...v, claim: 0 }
 ```
 
 ### Voice keeps talking after a navigation only when it is the one the conversation asked for; any other ends it
@@ -598,10 +679,12 @@ pure def navigated(v: Voice, place: int): Change =
 pure def stepVoiceFollowsOnlyItsOwnNavigation(before: Voice, via: str, after: Voice): bool =
   (via == "navigated" and talking(before) and talking(after)) implies (before.claim != 0 and after.followed == before.claim)
 
-pure def alwaysAClaimBelongsToATurnInFlight(v: Voice): bool =
-  (v.claim != 0 implies (v.phase == Thinking or v.phase == Speaking or v.phase == Waiting)) and v.claim >= 0
+pure def alwaysAClaimBelongsToAnActiveConversation(v: Voice): bool =
+  (v.claim != 0 implies (v.phase == Listening or v.phase == Transcribing or v.phase == Thinking or v.phase == Speaking)) and v.claim >= 0
 
 pure def sometimesFollowedItsNavigation(v: Voice): bool = v.followed != 0 and talking(v)
+
+pure def sometimesFollowedAgentNavigationWhileListening(v: Voice): bool = v.phase == Listening and v.followed != 0 and v.mic == On
 ```
 
 ## Story: Choose where my speech goes
@@ -609,13 +692,13 @@ pure def sometimesFollowedItsNavigation(v: Voice): bool = v.followed != 0 and ta
 > As the owner, I want my account, its limits and my answer to the
 > disclosure to decide where speech is processed.
 
-### Signing in, out or to another account changes the route and ends a running conversation
+### Signing in, out or to another account changes the route, invalidates warmup, and ends a running conversation
 
 ```quint
 pure def canAccountChanged(v: Voice, account: R::Account, key: int): bool = key > 0
 
 pure def accountChanged(v: Voice, account: R::Account, key: int): Change =
-  val signedIn = { ...v, route: R::changeAccount(v.route, account, key) }
+  val signedIn = { ...v, warmed: false, route: R::changeAccount(v.route, account, key) }
   if (talking(v)) shutDown(D::NoFailure, false, signedIn) else { state: signedIn, out: List() }
 ```
 
@@ -640,6 +723,7 @@ pure def chooseNetworkSpeech(v: Voice, agree: bool): Voice = { ...v, route: R::d
 ```quint
 pure def stepAudioLeavesOnlyWithConsent(before: Voice, after: Voice, out: List[Effect]): bool =
   out.every(e => match e {
+    | Prewarm(x) => x.network implies after.route.consent
     | Listen(x) => x.network implies after.route.consent
     | Send(x) => x.network implies after.route.consent
     | Transcribe(x) => x.network implies after.route.consent

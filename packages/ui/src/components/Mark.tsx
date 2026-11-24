@@ -8,7 +8,7 @@ export type MarkProps = Omit<ComponentProps<"svg">, "children">;
 /** The Alpha symbol, in the color of the text around it and as tall as that text unless sized. */
 export function Mark({ className, ...props }: MarkProps) {
   return (
-    <svg role="img" aria-label="Alpha" viewBox="0 0 200 200" fill="currentColor" className={cn("size-[1em]", className)} {...props}>
+    <svg role="img" aria-label="Alpha" width="1em" height="1em" viewBox="0 0 200 200" fill="currentColor" className={cn("size-[1em]", className)} {...props}>
       {symbol.map((d) => <path key={d} fillRule="evenodd" clipRule="evenodd" d={d} />)}
     </svg>
   );

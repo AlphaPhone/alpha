@@ -1,10 +1,10 @@
-// spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
+// spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
 import {
   Alert, AssistantCard, AssistantChatHistorySheet, AssistantConversation, AssistantGrabber, AssistantSearchSheet,
   type AssistantAttachment, type AssistantDraftNoticeProps, type AssistantMessageProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
-import { useState, useSyncExternalStore } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import type { Conversation as Talking, Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe";
 import { askable, inFlight, pending } from "../../gen/app__assistant.ts";
 import { useMachine as useConversation } from "../../gen/app__assistant.react.ts";
@@ -15,6 +15,7 @@ import type { Composer as Writing, Machine as ComposerMachine } from "../../gen/
 import { textLimit } from "../../gen/app__assistant__composer.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import type { Machine as DockMachine } from "../../gen/app__assistant__dock.effect.vibe";
+import { focused as dockFocused, isOpen as dockOpen } from "../../gen/app__assistant__dock.ts";
 import { useMachine as useDock } from "../../gen/app__assistant__dock.react.ts";
 import type { Failure, Fix, Machine as ReplyMachine } from "../../gen/app__assistant__reply.effect.vibe";
 import { fixShown, managesPlan, showsWait, waitSeconds } from "../../gen/app__assistant__reply.ts";
@@ -28,11 +29,9 @@ import { freedom } from "./assistant.vibe";
 import { Talk } from "./talk.vibe";
 
 export interface AssistantProps {
-  /** Provides the assistant's machines and its board, `assisting` of assistant.vibe, and the shell, which holds Ask Alpha's height. */
   runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | Talk, unknown>;
 }
 
-/** Where the last turn stands, below the last message, or nothing once it has settled with a reply. */
 function turnOf(talking: Talking, label: string): AssistantTurnNoteProps["status"] | undefined {
   const { turn, check } = talking;
   if (turn.stopping) return "stopping";
@@ -49,7 +48,6 @@ function turnOf(talking: Talking, label: string): AssistantTurnNoteProps["status
   return undefined;
 }
 
-/** What the composer says about its draft, if anything. */
 function noticeOf(writing: Writing): AssistantDraftNoticeProps["status"] | undefined {
   if (writing.read.status === "Loading") return "opening";
   if (writing.slot === "Damaged") return "damaged";
@@ -61,7 +59,6 @@ function noticeOf(writing: Writing): AssistantDraftNoticeProps["status"] | undef
   return undefined;
 }
 
-/** What waits to go with the message that the composer counts but no file names: what a view offered, and a question. */
 function waiting(writing: Writing): AssistantAttachment[] {
   const { editor } = writing;
   return [
@@ -73,7 +70,6 @@ function waiting(writing: Writing): AssistantAttachment[] {
   ];
 }
 
-/** Alpha's words for why a reply did not finish. */
 const failures: Record<Failure, string> = {
   CredentialInvalid: "Your provider refused its key", InsufficientCredits: "Out of credits", LimitReached: "Too many requests",
   ProviderIssue: "The provider had a problem", TimedOut: "The reply timed out", MissingCapability: "Your agent cannot do that yet",
@@ -81,7 +77,6 @@ const failures: Record<Failure, string> = {
   OutOfFunds: "You’re out of plan allowance and credits, so I couldn’t reply.", OtherFailure: "The reply did not finish",
 };
 
-/** "about …" for a wait: seconds under 90, then minutes under 90, then hours. */
 function about(waitMs: number): string {
   const seconds = waitSeconds(waitMs);
   if (seconds < 90) return `${seconds} s`;
@@ -89,7 +84,6 @@ function about(waitMs: number): string {
   return minutes < 90 ? `${minutes} min` : `${Math.round(minutes / 60)} h`;
 }
 
-/** The action a failed reply's card offers, if any. */
 function actionOf(kind: Failure, fix: Fix): "signIn" | "funding" | "retry" | undefined {
   if (fix === "SignInFix") return "signIn";
   if (fix === "FundingFix" || (fix === "NoFix" && managesPlan(kind))) return "funding";
@@ -99,14 +93,9 @@ function actionOf(kind: Failure, fix: Fix): "signIn" | "funding" | "retry" | und
 
 const detached = { mail: "Mail", transcript: "Transcript", shown: "Shown" } as const;
 
-/** The height of Ask Alpha resting on its bar, in CSS pixels: where a drag's floor zone is measured from. */
 const barHeight = 80;
 
-/**
- * Ask Alpha: the conversation showing with the reply as it is written, the owner's conversations, search and the
- * composer, from the assistant's components, each control offered exactly when its machine's rules allow its event.
- * @model spec/app/assistant/index.md
- */
+/** @model spec/app/assistant/index.md */
 export function Assistant({ runtime }: AssistantProps) {
   const conversation = useConversation(runtime);
   const chats = useChats(runtime);
@@ -115,10 +104,11 @@ export function Assistant({ runtime }: AssistantProps) {
   const reply = useReply(runtime);
   const shell = useShell(runtime);
   const dock = useDock(runtime);
-  const [board] = useState(() => runtime.runSync(Talk.use((talk) => Effect.succeed(talk.board))));
-  const seen = useSyncExternalStore(board.subscribe, board.snapshot);
+  const board = runtime.runSync(Effect.map(Talk, (talk) => talk.board));
+  const seen = useSyncExternalStore((listener) => board.subscribe(listener), () => board.snapshot());
   const [listing, setListing] = useState(false);
   const [words, setWords] = useState("");
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   if (conversation.cause || chats.cause || composer.cause || reply.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Ask Alpha</Alert>;
   const [talking, shown, writing, finding] = [conversation.state, chats.state, composer.state, search.state];
   if (!talking || !shown || !writing || !finding) return null;
@@ -139,13 +129,14 @@ export function Assistant({ runtime }: AssistantProps) {
     void composer.send({ type: "edit", blank: text.trim() === "", long: text.length > textLimit });
   };
   const send = () => {
+    const talk = runtime.runSync(Effect.map(Talk, (t) => t.board));
     if (newChat) {
-      board.sendWhenMade = true;
+      talk.sendWhenMade = true;
       void chats.send(start);
       return;
     }
-    board.outgoing = seen.typed;
-    board.type("");
+    talk.outgoing = seen.typed;
+    talk.type("");
     void composer.send(hold);
   };
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"
@@ -194,10 +185,22 @@ export function Assistant({ runtime }: AssistantProps) {
   const failed = seen.failure === undefined ? [] : [{ id: "failure", author: "alpha", text: "", children: failureCard(seen.failure, true) } as const];
   const quoted = writing.editor.quote > 0 ? lines[writing.editor.quote - 1]?.text : undefined;
   const view = talking.context.showing.tag === "App" ? talking.context.showing.view : "Home";
+  const assistantDetent = shell.state?.assistant ?? "Bar";
+  const open = dockOpen(assistantDetent);
+  const keptHeight = assistantDetent === "Sheet" && dock.state && dock.state.kept > 0 ? dock.state.kept : undefined;
+  const openWithFocus = (focusField: boolean) => {
+    for (const ask of dockFocused(assistantDetent)) {
+      if (ask.tag === "Raise" && shell.can({ type: "raise", detent: ask.detent })) void shell.send({ type: "raise", detent: ask.detent });
+    }
+    if (focusField) composerRef.current?.focus();
+  };
 
   return (
     <>
       <AssistantConversation
+        detent={assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
+        className={open ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
+        style={keptHeight ? { height: keptHeight } : undefined}
         header={{
           title: seen.titles.get(shown.chosen) ?? "Ask Alpha",
           context: { view, selected: talking.context.selected, sensitive: talking.context.sensitive },
@@ -207,21 +210,26 @@ export function Assistant({ runtime }: AssistantProps) {
           },
           onSearch: search.can({ type: "openSearch" }) ? () => { void chats.send({ type: "browse" }); void search.send({ type: "openSearch" }); } : undefined,
           onNew: chats.can(start) ? () => void chats.send(start) : undefined,
+          onClose: open && shell.can({ type: "goBack" }) ? () => void shell.send({ type: "goBack" }) : undefined,
           making: making(shown),
           grabber: shell.state ? (
             <AssistantGrabber
               onPress={() => {
-                const press = { type: "press", detent: shell.state?.assistant ?? "Bar", now: untimed } as const;
-                if (dock.can(press)) void dock.send(press);
+                void dock.send({ type: "press", detent: assistantDetent, now: untimed });
               }}
-              onDrag={() => { if (dock.can({ type: "drag" })) void dock.send({ type: "drag" }); }}
+              onDrag={() => { void dock.send({ type: "drag" }); }}
               onRelease={({ direction, flick, y }) => {
-                const release = { type: "release", direction: direction === "up" ? "Up" : "Down", flick, height: Math.max(0, Math.round(window.innerHeight - y)), floor: barHeight, full: window.innerHeight, now: untimed } as const;
-                if (dock.can(release)) void dock.send(release);
+                void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height: Math.max(0, Math.round(window.innerHeight - y)), floor: barHeight, full: window.innerHeight, now: untimed });
               }}
-              onLift={() => { if (dock.can({ type: "lift", now: untimed })) void dock.send({ type: "lift", now: untimed }); }}
-              onCancel={() => { if (dock.can({ type: "shift", now: untimed })) void dock.send({ type: "shift", now: untimed }); }}
-              onTap={() => { if (dock.can({ type: "click", now: untimed })) void dock.send({ type: "click", now: untimed }); }}
+              onLift={() => {
+                void dock.send({ type: "lift", now: untimed });
+                if (!open) composerRef.current?.focus();
+              }}
+              onCancel={() => { void dock.send({ type: "shift", now: untimed }); }}
+              onTap={() => {
+                void dock.send({ type: "click", now: untimed });
+                if (!open) composerRef.current?.focus();
+              }}
             />
           ) : undefined,
         }}
@@ -235,6 +243,7 @@ export function Assistant({ runtime }: AssistantProps) {
           onReturnToOriginal: chats.can({ type: "returnToOriginal", ...free }) ? () => void chats.send({ type: "returnToOriginal", ...free }) : undefined,
         }}
         composer={{
+          fieldRef: composerRef,
           value: seen.typed,
           onValueChange: type,
           closed: !composer.can({ type: "edit", blank: false, long: false }),
@@ -255,12 +264,15 @@ export function Assistant({ runtime }: AssistantProps) {
           attachments: waiting(writing),
           quote: quoted,
           editing: writing.editor.editing > 0,
+          onOpen: !open ? () => openWithFocus(true) : undefined,
           onSend: sendable && !inFlight(talking.turn) ? send : undefined,
           onStop: conversation.can({ type: "stop" }) ? () => void conversation.send({ type: "stop" }) : undefined,
           stopping: talking.turn.stopping,
-          onFocusField: () => {
-            if (shell.state?.assistant === "Bar" && shell.can({ type: "raise", detent: "Typing" })) void shell.send({ type: "raise", detent: "Typing" });
-          },
+          onFocusField: () => openWithFocus(false),
+          onClick: !open ? (event) => {
+            if (event.target instanceof Element && event.target.closest("button, textarea")) return;
+            openWithFocus(true);
+          } : undefined,
           onRemoveAttachment: (id) => {
             if (id === "question") void composer.send({ type: "removeQuestion" });
             else if (id.startsWith("file ")) void composer.send({ type: "removeFile" });

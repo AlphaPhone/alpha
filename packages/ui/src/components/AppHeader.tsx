@@ -13,7 +13,7 @@ export type AppHeaderProps = Omit<ComponentProps<"header">, "title"> & {
 /** The top of a screen: where the owner is, the way back and what can be done here. */
 export function AppHeader({ title, leading, className, children, ...props }: AppHeaderProps) {
   return (
-    <header className={cn("flex min-h-14 items-center gap-1 px-2", className)} {...props}>
+    <header data-host-chrome="" className={cn("flex min-h-14 items-center gap-1 px-2", className)} {...props}>
       {leading}
       <h1 className={cn("min-w-0 flex-1 py-2 font-display text-3xl font-light break-words", leading ? null : "pl-3")}>{title}</h1>
       {children}
