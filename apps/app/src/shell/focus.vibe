@@ -90,9 +90,9 @@ const frame = Effect.sleep("16 millis")
 /** The control the owner last focused outside a sheet, menu or dialog: the opener of the next layer. */
 let outside = ""
 
-/** What the screen showing gives focus to: the drawer's search, Home's first control, or the app's title. */
+/** What the screen showing gives focus to: Home's first control, or the app's title. */
 function targetFor(s: Shown): Target {
-  return s.trail.length > 0 ? "Title" : s.drawer ? "Search" : "HomeStart"
+  return s.trail.length > 0 ? "Title" : "HomeStart"
 }
 
 effect function tell(event: Event): (Focus.Focus | undefined)!!Focus.Machine {
@@ -124,7 +124,7 @@ const framed = started(effect {
   })
 }, "focus")
 
-// spec/app/shell/focus.md, "Home's tiles and the drawer's apps show a focus ring only while the owner moves by keyboard; every other control, a field above all, shows its ring whenever it has focus"
+// spec/app/shell/focus.md, "Home's tiles show a focus ring only while the owner moves by keyboard; every other control, a field above all, shows its ring whenever it has focus"
 const watching = started(effect {
   if (!paged()) return
   const focus = try Focus.Machine
@@ -174,7 +174,7 @@ const layering = started(effect {
 /** Focus, in memory: given to each new screen, back to a layer's opener, told as it moves, and marked on the page while the owner moves by keyboard. */
 export const focus = together(
   reacting(Focus, {}),
-  following(Shell.Machine, (s) => ({ screen: s.trail.at(-1) ?? (s.drawer ? "drawer" : "home"), target: targetFor(s) }), Focus.Machine, ({ target }) => ({ type: "screenChanged", target } as const)),
+  following(Shell.Machine, (s) => ({ screen: s.trail.at(-1) ?? "home", target: targetFor(s) }), Focus.Machine, ({ target }) => ({ type: "screenChanged", target } as const)),
   framed,
   watching,
   layering,

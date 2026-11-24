@@ -10,7 +10,7 @@ export type AppTileProps = Omit<ComponentProps<"button">, "children"> & {
   badge?: string;
 };
 
-/** An app on Home or in the Apps drawer: pressing it opens the app. */
+/** An app on Home: pressing it opens the app. */
 export function AppTile({ label, icon, badge, type = "button", className, ...props }: AppTileProps) {
   return (
     <button type={type} className={cn(launcherRing, "group flex min-w-16 flex-col items-center gap-2 rounded-tile disabled:pointer-events-none disabled:opacity-50", className)} {...props}>

@@ -74,7 +74,7 @@ describe("the shell", () => {
     await until(alpha, alpha.runtime, Focus, (f) => f.restores === 1);
     expect(focused()).toBe("Back");
 
-    // spec/app/shell/focus.md, "Home's tiles and the drawer's apps show a focus ring only while the owner moves by keyboard; every other control, a field above all, shows its ring whenever it has focus"
+    // spec/app/shell/focus.md, "Home's tiles show a focus ring only while the owner moves by keyboard; every other control, a field above all, shows its ring whenever it has focus"
     await drawn(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab" })));
     await until(alpha, alpha.runtime, Focus, (f) => f.keyboard);
     expect(document.documentElement.hasAttribute("data-alpha-keyboard")).toBe(true);

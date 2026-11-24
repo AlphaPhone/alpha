@@ -5,8 +5,9 @@ import * as Cards from "../gen/app__home__cards.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Toasts } from "../gen/app__notices__toasts.effect.vibe";
 import home from "../src/home/index.tsx";
-import { button, closeAll, drawn, fill, hardware, later, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, hardware, later, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
+import { savedKey, written } from "../src/home/saved.vibe";
 import { waiting } from "../src/home/waiting.vibe";
 import { fromAreas } from "../src/home/cards.vibe";
 
@@ -31,9 +32,9 @@ describe("Home on a phone", () => {
     const { alpha } = first;
     const homes = home.runtime(alpha);
 
-    // spec/app/home/index.md, "Startup says once per run how Alpha is presented, and Home then reads its saved tiles": with nothing saved Home shows Alpha's own apps that this phone admits.
+    // spec/app/home/index.md, "Startup says once per run how Alpha is presented, and Home then reads its saved tiles": with nothing saved Home shows Alpha's own apps that this phone admits, and no Apps drawer tile.
     await until(alpha, homes, Home.Machine, (h) => h.host === "AsLauncher" && h.tiles.load.status === "Loaded");
-    expect(tiles()).toEqual(alphaApps);
+    expect([tiles(), Boolean(button("Apps"))]).toEqual([alphaApps, false]);
 
     // spec/app/home/tiles.md, "Only Phone, Messages and Inbox carry a badge, only when something waits there, and no tile does while Home is being edited"
     await drawn(() => { waiting.tell("Inbox", "3 unread"); waiting.tell("Notes", "1 shared"); });
@@ -57,7 +58,7 @@ describe("Home on a phone", () => {
     await until(alpha, homes, Home.Machine, (h) => !h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 2);
     expect(tiles().at(-1)).toBe("view:Notes");
 
-    // spec/app/home/index.md, "Back closes one layer of Home's own: an app's menu, then Add to Home, then editing; Done ends editing"
+    // spec/app/home/index.md, "Back closes one layer of Home's own: Add to Home, then editing; Done ends editing"
     await hardware("back");
     await until(alpha, homes, Home.Machine, (h) => !h.editing);
     expect(Boolean(button("Done"))).toBe(false);
@@ -140,39 +141,18 @@ describe("Home on a phone", () => {
     expect(document.querySelector("section[aria-label='Your day']")).toBeNull();
   });
 
-  // spec/app/home/index.md, "Story: See the apps on this phone"; spec/app/home/index.md, "Story: Find an app and see its details"; spec/app/home/index.md, "Story: Open an app"
-  it("See the apps on this phone, find one and open it (spec/app/home/index.md, \"Story: See the apps on this phone\"; spec/app/home/index.md, \"Story: Find an app and see its details\"; spec/app/home/index.md, \"Story: Open an app\")", async () => {
+  // spec/app/home/index.md, "Story: See the apps on this phone"; spec/app/home/index.md, "Story: Open an app"
+  it("Keep saved installed apps on Home up to date and open them (spec/app/home/index.md, \"Story: See the apps on this phone\"; spec/app/home/index.md, \"Story: Open an app\")", async () => {
     const world = { ...scene(), phone: true };
+    localStorage.setItem(savedKey, written([{ tag: "Own", view: "Notes" }, { tag: "Installed", app: "org.fixture.clock/org.fixture.clock.Main" }]));
     const { alpha } = await open(world);
     const homes = home.runtime(alpha);
-    await until(alpha, homes, Home.Machine, (h) => h.tiles.load.status === "Loaded");
 
-    // spec/app/home/index.md, "When the shell moves, what no longer fits closes: anything over Home ends editing, the drawer opening included, and a closed drawer drops its search and menu": the drawer opening reads the apps.
-    world.launcher.unlisted = true;
-    await press("Apps");
-    await until(alpha, homes, Home.Machine, (h) => h.installed.read.status === "Failed");
-
-    // spec/app/home/index.md, "In the open drawer that could not read the apps, Try again reads them once more"
-    world.launcher.unlisted = false;
-    await press("Try again");
+    // spec/app/home/index.md, "Once the saved tiles are read, the phone's apps are read if Home holds an installed app, and a record that could not be read is told"
     await until(alpha, homes, Home.Machine, (h) => h.installed.read.status === "Loaded");
-    expect([Boolean(button("Clock")), Boolean(button("Mail"))]).toEqual([true, true]);
+    expect([tiles(), Boolean(button("Apps"))]).toEqual([["view:Notes", "app:org.fixture.clock/org.fixture.clock.Main"], false]);
 
-    // spec/app/home/index.md, "A new search in the open drawer replaces the last and closes any open menu"
-    await fill("Search apps", "cl");
-    await until(alpha, homes, Home.Machine, (h) => h.query === "cl");
-    expect([Boolean(button("Clock")), Boolean(button("Mail"))]).toEqual([true, false]);
-
-    // spec/app/home/index.md, "An app's menu opens in the open drawer, for an app in the last reading, and says Add to Home or On Home"
-    held("Clock");
-    await until(alpha, homes, Home.Machine, (h) => Home.menuIsOpen(h.menu));
-    // spec/app/home/index.md, "Add to Home adds one of Alpha's own apps it lists, and an app's menu in the drawer adds that app; adding from the menu closes the drawer"
-    await press("Add to Home");
-    await until(alpha, alpha.runtime, Shell, (s) => !s.drawer);
-    await until(alpha, homes, Home.Machine, (h) => h.tiles.save.outcome === "Confirmed");
-    expect(tiles().at(-1)).toBe("app:org.fixture.clock/org.fixture.clock.Main");
-
-    // spec/app/home/index.md, "Only an app in the last reading is opened, never while Home is being edited, and never by the touch that opened its menu"
+    // spec/app/home/index.md, "Only an app in the last reading is opened, never while Home is being edited"
     await press("Clock");
     await until(alpha, homes, Home.Machine, (h) => h.handoff.attempt.outcome === "Confirmed");
     expect(world.launcher.opened).toEqual(["org.fixture.clock"]);
@@ -184,7 +164,7 @@ describe("Home on a phone", () => {
     await until(alpha, alpha.runtime, Toasts, (t) => t.showing);
     expect([toast(), world.launcher.opened.length]).toEqual(["Couldn't open Clock. It's turned off.", 2]);
 
-    // spec/app/home/index.md, "A reading's answer closes a menu whose app has gone, and a failed one that takes an installed tile off Home says so"; spec/app/home/index.md, "Home shows a tile only while its app is on this phone; a tile whose app has gone keeps its place and comes back with the app"
+    // spec/app/home/index.md, "A failed reading that takes an installed tile off Home says so"; spec/app/home/index.md, "Home shows a tile only while its app is on this phone; a tile whose app has gone keeps its place and comes back with the app"
     const clock = world.launcher.apps[0]!;
     world.launcher.apps = world.launcher.apps.slice(1);
     world.launcher.changed();
@@ -228,7 +208,7 @@ describe("Home in a browser", () => {
     const homes = home.runtime(alpha);
     await until(alpha, homes, Home.Machine, (h) => h.tiles.load.status === "Loaded");
 
-    // spec/app/home/index.md, "Off the phone Home reads no apps, opens nothing of the drawer, edits nothing and asks Android nothing"
+    // spec/app/home/index.md, "Off the phone Home reads no apps, edits nothing and asks Android nothing"
     await pulled();
     expect([Boolean(button("Apps")), (await homes.runPromise(Home.Machine.use((m) => m.get()))).handoff.attempt.id]).toEqual([false, 0]);
     held("Notes");

@@ -23,8 +23,6 @@ export type HomeScreenProps = {
   onRemoveTile?: (id: string) => void;
   /** While editing, moves a tile beside another; left out while a change is being saved. */
   onMoveTile?: (move: HomeTileMove) => void;
-  /** Opens the Apps drawer; left out off the phone and while Home is being edited. */
-  onOpenDrawer?: () => void;
   /** Asks Android for its notifications, from a pull down on empty Home; left out unless Alpha is the launcher and Android is free. */
   onPullDown?: () => void;
   /** Opens Add to Home; left out when it is open or nothing is left to add. */
@@ -77,7 +75,7 @@ function PullZone({ onPull, className, ...props }: ComponentProps<"div"> & { onP
  * @model spec/app/home/index.md
  */
 export function HomeScreen({
-  date, cards = [], tiles, editing = false, onOpenTile, onBeginEditing, onRemoveTile, onMoveTile, onOpenDrawer, onPullDown,
+  date, cards = [], tiles, editing = false, onOpenTile, onBeginEditing, onRemoveTile, onMoveTile, onPullDown,
   onShowHidden, onDone, notice, adding = false, hidden = [], onAddToHome, onCloseAdding = () => undefined, className,
 }: HomeScreenProps) {
   return (
@@ -97,7 +95,6 @@ export function HomeScreen({
             onBeginEditing={onBeginEditing}
             onRemove={onRemoveTile}
             onMove={onMoveTile}
-            onOpenDrawer={onOpenDrawer}
             className="pt-4"
           />
         ) : (

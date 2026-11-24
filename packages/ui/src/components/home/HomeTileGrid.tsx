@@ -1,7 +1,5 @@
 import { type ComponentProps, type KeyboardEvent, type PointerEvent, type ReactNode, useRef, useState } from "react";
-import { LayoutGrid } from "lucide-react";
 import { cn } from "../../lib/cn.ts";
-import { AppTile } from "../AppTile.tsx";
 import { HomeTile } from "./HomeTile.tsx";
 
 /** One tile Home shows: one of Alpha's own apps or an installed app, named by the launcher's own id. */
@@ -30,12 +28,10 @@ export type HomeTileGridProps = Omit<ComponentProps<"nav">, "children"> & {
   onRemove?: (id: string) => void;
   /** While editing, moves a tile, by dragging it onto another or with the arrow keys; left out while a change is being saved. */
   onMove?: (move: HomeTileMove) => void;
-  /** Opens the Apps drawer from the tile after the others; left out where there is no drawer. */
-  onOpenDrawer?: () => void;
 };
 
 /** The columns of a grid of app tiles: four on a phone, more on a wider screen, fewer with large text. */
-export const tileColumns = "grid grid-cols-[repeat(auto-fill,minmax(max(4rem,22%),1fr))] gap-x-2 gap-y-6";
+const tileColumns = "grid grid-cols-[repeat(auto-fill,minmax(max(4rem,22%),1fr))] gap-x-2 gap-y-6";
 
 const steps: Record<string, -1 | 1> = { ArrowLeft: -1, ArrowRight: 1 };
 
@@ -48,11 +44,11 @@ const dropTarget = (event: PointerEvent, id: string): HomeTileMove | undefined =
 };
 
 /**
- * Home's tiles and the Apps tile. While editing, a tile is dragged onto another, moved with the arrow keys and
+ * Home's tiles. While editing, a tile is dragged onto another, moved with the arrow keys and
  * removed with Delete; keyboard focus stays on the tile it moved.
  * @model spec/app/home/tiles.md
  */
-export function HomeTileGrid({ tiles, editing = false, onOpen, onBeginEditing, onRemove, onMove, onOpenDrawer, className, ...props }: HomeTileGridProps) {
+export function HomeTileGrid({ tiles, editing = false, onOpen, onBeginEditing, onRemove, onMove, className, ...props }: HomeTileGridProps) {
   const [drag, setDrag] = useState<{ id: string; over?: HomeTileMove } | null>(null);
   const movedRef = useRef<string | null>(null);
 
@@ -121,7 +117,6 @@ export function HomeTileGrid({ tiles, editing = false, onOpen, onBeginEditing, o
               })}
         />
       ))}
-      {onOpenDrawer && !editing ? <AppTile label="Apps" icon={<LayoutGrid className="size-6" />} aria-haspopup="dialog" onClick={onOpenDrawer} /> : null}
     </nav>
   );
 }
