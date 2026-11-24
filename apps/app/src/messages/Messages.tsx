@@ -1,5 +1,5 @@
 // spec/app/messages/index.md, "Story: See my conversations"; spec/app/messages/index.md, "Story: Read a conversation"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/messages/index.md, "Story: Start a new message"; spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/messages/composer.md, "Story: Send a message"
-import type { MessageRow, ThreadRow } from "@elizaos/os/bridges/messages";
+import { MMS_ATTACHMENT_TYPES, type MessageRow, type ThreadRow } from "@elizaos/os/bridges/messages";
 import { Alert, Banner, Button, Chip, ConfirmDialog, EmptyState, ListGroup, ListRow, SearchField, Spinner, Textarea } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import { ArrowLeft, ImagePlus, Phone as Call, Send, X } from "lucide-react";
@@ -14,7 +14,7 @@ import type { Machine as ComposerMachine } from "../../gen/app__messages__compos
 import { delivered, sentAll, uncertain } from "../../gen/app__messages__sending.ts";
 import { useMachine as useComposer } from "../../gen/app__messages__composer.react.ts";
 import { when } from "../phone/words.ts";
-import { Drafts, prepare } from "./composer.vibe";
+import { Drafts, attachAll, prepare, supported } from "./composer.vibe";
 import { Conversations, Inbox, titleOf } from "./messages.vibe";
 import { CommsBar, type CommsServices } from "../phone/CommsBar.tsx";
 
@@ -144,7 +144,6 @@ function Conversation({ runtime }: MessagesProps) {
 function Compose({ runtime }: MessagesProps) {
   const composer = useComposer(runtime);
   const phone = usePhone(runtime).state;
-  const [, redraw] = useState(0);
   const { state, can, send } = composer;
   if (!state || !phone || state.thread === 0) return null;
   const text = runtime.runSync(Drafts.use((drafts) => drafts.text(state.thread)));
@@ -155,7 +154,7 @@ function Compose({ runtime }: MessagesProps) {
     runtime.runSync(Drafts.use((drafts) => drafts.write(state.thread, next)));
     void send(event);
   };
-  const sendNow = { type: "send", supported: true, clear: clear(phone) } as const;
+  const sendNow = { type: "send", supported: runtime.runSync(supported(state.recipients, pictures.length)), clear: clear(phone) } as const;
   const outgoing = state.outgoing;
   const here = outgoing.thread === state.thread;
   return (
@@ -198,21 +197,15 @@ function Compose({ runtime }: MessagesProps) {
       <div className="flex items-end gap-2">
         <label className={`inline-flex size-10 items-center justify-center rounded-md ${can({ type: "attach", fits: true }) ? "cursor-pointer" : "pointer-events-none opacity-50"}`} aria-label="Attach a picture">
           <ImagePlus />
-          <input type="file" accept="image/jpeg,image/png,image/gif" className="sr-only" onChange={(event) => {
-            const file = event.target.files?.[0];
+          <input type="file" multiple accept={MMS_ATTACHMENT_TYPES.join(",")} className="sr-only" onChange={(event) => {
+            const files = [...(event.target.files ?? [])];
             event.target.value = "";
-            if (!file) return;
-            const fits = ["image/jpeg", "image/png", "image/gif"].includes(file.type) && file.size > 0 && pictures.reduce((sum, one) => sum + one.bytes.length, 0) + file.size <= 1_000_000;
-            if (!can({ type: "attach", fits })) return;
-            void file.arrayBuffer().then((buffer) => {
-              runtime.runSync(Drafts.use((drafts) => drafts.setPictures([...pictures, { name: file.name, contentType: file.type as "image/jpeg", bytes: new Uint8Array(buffer) }])));
-              void send({ type: "attach", fits });
-              redraw((n) => n + 1);
-            });
+            void runtime.runPromise(attachAll(files));
           }} />
         </label>
         <Textarea className="flex-1" aria-label="Message" placeholder="Text message" value={text} onChange={(event) => write(event.target.value)} />
         {can({ type: "undo" }) && <Button type="button" variant="ghost" size="icon" aria-label="Undo Alpha's draft" onClick={() => void send({ type: "undo" })}><X /></Button>}
+        {can({ type: "handOff", supported: sendNow.supported }) && <Button type="button" variant="outline" onClick={() => void send({ type: "handOff", supported: sendNow.supported })}>Open in messaging app</Button>}
         <Button type="submit" size="icon" aria-label="Send" disabled={!can(sendNow)}><Send /></Button>
       </div>
     </form>

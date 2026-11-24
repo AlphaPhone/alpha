@@ -1,6 +1,6 @@
 // spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/messages/composer.md, "Story: Let Alpha suggest a draft"; spec/app/messages/composer.md, "Story: Send a message"; spec/app/messages/sending.md, "Story: Send a message once"; spec/app/messages/sending.md, "Story: Know whether it arrived"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import type { MmsAttachmentType, MmsReview, OperationId, SmsReview, SmsSendStatus } from "@elizaos/os/bridges/messages"
+import { MMS_ATTACHMENT_TYPES, MMS_MAX_RECIPIENTS, MMS_MAX_TOTAL_BYTES, SMS_DIRECT_MAX_RECIPIENTS, type MmsAttachmentType, type MmsReview, type OperationId, type SmsReview, type SmsSendStatus } from "@elizaos/os/bridges/messages"
 import type { PhoneNumber } from "@elizaos/os/bridges/phone"
 import * as Composer from "../../gen/app__messages__composer.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__messages__composer.effect.vibe"
@@ -41,6 +41,9 @@ export service Drafts {
   setPictures(pictures: ReadonlyArray<Picture>): void!!
   outgoing(): Option.Option<Outgoing>!!
   setOutgoing(outgoing: Option.Option<Outgoing>): void!!
+  /** What the phone last said it can send itself: texts directly, and pictures. */
+  sending(): { readonly direct: boolean; readonly pictures: boolean }!!
+  setSending(sending: { readonly direct: boolean; readonly pictures: boolean }): void!!
 }
 
 const draftKey = (thread: number) => `alpha/messages/draft/${thread}@1`
@@ -69,6 +72,7 @@ import { keepSend, keptSend } from text
 const drafts = Layer.effect(Drafts, effect {
   const store = try KeyValueStore.KeyValueStore
   let pictures: ReadonlyArray<Picture> = []
+  let sending = { direct: true, pictures: true }
   let outgoing: Option.Option<Outgoing> = Option.fromNullishOr(keptSend(store.get(outgoingKey) catch () => undefined))
   return {
     effect text(thread: number): string!! {
@@ -79,6 +83,8 @@ const drafts = Layer.effect(Drafts, effect {
     pictures: () => sync(() => pictures),
     setPictures: (next: ReadonlyArray<Picture>) => sync(() => { pictures = next }),
     outgoing: () => sync(() => outgoing),
+    sending: () => sync(() => sending),
+    setSending: (next: { readonly direct: boolean; readonly pictures: boolean }) => sync(() => { sending = next }),
     effect setOutgoing(next: Option.Option<Outgoing>): void!! {
       outgoing = next
       try ignore(Option.isSome(next) ? store.set(outgoingKey, keepSend(next.value)) : store.remove(outgoingKey))
@@ -184,6 +190,7 @@ const opened = started(effect {
     if (thread === 0) return
     const status = telephony("status", (c) => c.messages.status()) catch () => undefined
     const count = status?.subscriptions?.length ?? 0
+    if (status !== undefined) try (try Drafts).setSending({ direct: status.sendMode === "direct", pictures: status.mmsSend })
     if (count >= 1) try contained(composer.send({ type: "simsReported", count }), "the SIMs")
   })
 }, "the composer's conversation")
@@ -214,6 +221,13 @@ const reports: Stream.Stream<Event, never, Telephony | Drafts | Composer.Machine
 // spec/app/messages/sending.md, "A finished record is retired by a tombstone"
 const retiring = following(Composer.Machine, (state) => (Composer.canRetire(state, state.outgoing.op.id) ? state.outgoing.op.id : 0), Composer.Machine, (id): Event | undefined => (id === 0 ? undefined : { type: "retire", id }))
 
+// spec/app/messages/composer.md, "What Alpha cannot send is handed to the messaging app"
+/** Whether Alpha can send this message itself, as the phone last said: texts directly, pictures as MMS, and no more recipients than one send takes. */
+export effect function supported(recipients: number, pictures: number): boolean!!Drafts {
+  const can = try (try Drafts).sending()
+  return can.direct && (pictures === 0 ? recipients <= SMS_DIRECT_MAX_RECIPIENTS : can.pictures && recipients <= MMS_MAX_RECIPIENTS)
+}
+
 /** What the owner's Send carries, put in hand just before it: the draft, the conversation's numbers, the SIM and the pictures; a send whose outcome is unknown keeps what it carried. */
 export effect function prepare(thread: number, sim: number | null): void!!(Drafts | Conversations | Composer.Machine) {
   const state = try (try Composer.Machine).get()
@@ -223,6 +237,22 @@ export effect function prepare(thread: number, sim: number | null): void!!(Draft
   const to = Option.isSome(conversation) ? conversation.value.addresses : []
   const pictures = try store.pictures()
   try store.setOutgoing(Option.some({ thread, to, body: state.slot.author === "Nobody" ? "" : try store.text(thread), sim, pictures, pictured: pictures.length > 0, operation: undefined, status: undefined }))
+}
+
+// spec/app/messages/composer.md, "The owner attaches up to five pictures, and removes them one by one"
+/** Attach the owner's chosen files in turn: each the phone's MMS takes, a JPEG, PNG or GIF within its size with those before, is attached while the composer takes one. */
+export effect function attachAll(files: ReadonlyArray<File>): void!!(Drafts | Composer.Machine) {
+  const store = try Drafts
+  const machine = try Composer.Machine
+  for (const file of files) {
+    const held = try store.pictures()
+    const fits = (MMS_ATTACHMENT_TYPES as ReadonlyArray<string>).includes(file.type) && file.size > 0 && held.reduce((sum, one) => sum + one.bytes.length, 0) + file.size <= MMS_MAX_TOTAL_BYTES
+    if (!Composer.canAttach(try machine.get(), fits)) return
+    const bytes = try promise(() => file.arrayBuffer()) catch () => undefined
+    if (bytes === undefined) continue
+    try store.setPictures([...held, { name: file.name, contentType: file.type as MmsAttachmentType, bytes: new Uint8Array(bytes) }])
+    try ignore(machine.send({ type: "attach", fits }))
+  }
 }
 
 // spec/app/messages/composer.md, "An edited draft is saved for its conversation, one save at a time"
