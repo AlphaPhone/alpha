@@ -1,7 +1,7 @@
 // spec/notes/editor.md, "Story: Edit a note without losing a word"; spec/notes/editor.md, "A draft opens from a note at the current revision, or starts as a new note"; spec/notes/editor.md, "A save captures the draft, runs only on its own base, and queues a later edit"; spec/notes/editor.md, "Only a clean draft at the current revision is selected for the agent"; spec/notes/editor.md, "Leaving saves an edited draft first, drops an untouched new note and otherwise just closes"; spec/notes/editor.md, "A delete of an edited note waits for its save, and a changed draft cancels it"; spec/notes/editor.md, "A delete or restore is confirmed only when the reply moves exactly that note"; spec/notes/editor.md, "Try again confirms words already saved, rebases only onto an untouched record, and otherwise keeps the draft"; spec/notes/editor.md, "A failed save keeps its changes in the encrypted draft slot, merged with earlier kept changes"; spec/notes/collection.md, "Reviewed text becomes one note under its own creation identity"
 import { parseNoteFormat } from "@elizaos/plugin-notes/format"
 import type { NoteFormat, NoteJson, NotesSnapshot, StickyColor, StickyNote } from "@elizaos/plugin-notes/types"
-import { textCreationAllowed } from "../../gen/notes__collection.effect.vibe"
+import { Machine as CollectionMachine, textCreationAllowed } from "../../gen/notes__collection.effect.vibe"
 import {
   type Editor, type Event as EditorEvent, Machine as EditorMachine, dirty, leavePlan, machine as editorMachine, selectionCurrent,
 } from "../../gen/notes__editor.effect.vibe"
@@ -33,6 +33,7 @@ export type RetryOutcome = "confirmed" | "saved" | "changed-elsewhere" | "delete
 
 /** A confirmed delete, with the deletion time Undo needs. */
 export interface DeleteOutcome { readonly deleted: boolean; readonly deletedAt?: string }
+export interface NoteDeletion { readonly id: string; readonly deletedAt: string }
 
 /** Words kept on the phone for a note that changed since they were kept: shown for Copy draft or Discard only. */
 export interface KeptReview { readonly noteId: string; readonly title: string; readonly body: string; readonly format?: NoteFormat }
@@ -45,11 +46,15 @@ export service NotesEditor {
   readonly unsaved: Stream.Stream<string>
   draft(): (DraftContent | undefined)!!
   openNote(id: string): boolean!!
+  /** Open a saved note for its bound owner without closing an edited draft. */
+  openFromAssistant(owner: string, id: string): boolean!!
   newNote(kind: "text" | "list", folderId?: string): boolean!!
   edit(patch: DraftPatch): boolean!!
   save(): boolean!!
   leave(next?: string): boolean!!
   remove(id: string): DeleteOutcome!!
+  /** Delete saved selections in order, stopping if the owner changes or a delete is unconfirmed. */
+  removeSelected(ids: readonly string[], owner: number, signal: AbortSignal): (readonly NoteDeletion[])!!
   restore(id: string): boolean!!
   retry(): RetryOutcome!!
   discard(): void!!
@@ -91,6 +96,7 @@ const trashIds = (snapshot: NotesSnapshot) => new Set((snapshot.trash ?? []).map
 
 const make = effect {
   const collection = try NotesCollection
+  const collectionMachine = try CollectionMachine
   const drafts = try NotesDrafts
   const machine = try EditorMachine
   const content = try SubscriptionRef.make<DraftContent | undefined>(undefined)
@@ -287,12 +293,42 @@ const make = effect {
     return next === undefined ? true : try openNote(next)
   }
 
+  effect function remove(id: string): DeleteOutcome!! {
+    const state = try machine.get()
+    if (state.present && state.draftId === "" && id === "") {
+      try send({ type: "closeDraft" })
+      try show(undefined)
+      return { deleted: true }
+    }
+    const after = try send({ type: "removeNote", id })
+    if (after === undefined) return { deleted: false }
+    if (after.mutation === "DeleteAfterSave") {
+      try writing.withPermits(1)(write())
+      const settled = try machine.get()
+      if (settled.known.includes(id)) return { deleted: false }
+      const deletedAt = (try collection.current())?.snapshot.trash?.find((entry) => entry.note.id === id)?.deletedAt
+      return deletedAt === undefined ? { deleted: true } : { deleted: true, deletedAt }
+    }
+    if (after.mutation !== "Deleting") {
+      if (after.review) try collection.needReview()
+      return { deleted: false }
+    }
+    return try runMutation()
+  }
+
   return {
     drafts: SubscriptionRef.changes(content),
     keptReviews: SubscriptionRef.changes(keptReview),
     unsaved: Stream.fromPubSub(unsaved),
     draft: () => SubscriptionRef.get(content),
     openNote,
+    effect openFromAssistant(owner: string, id: string) {
+      if ((try collection.current())?.owner !== owner) return false
+      const state = try machine.get()
+      if (state.present && state.draftId === id) return true
+      if (dirty(state) || state.saving || state.review) return false
+      return try leave(id)
+    },
     effect newNote(kind: "text" | "list", folderId?: string) {
       if (!(try leave())) return false
       const current = try collection.current()
@@ -310,27 +346,17 @@ const make = effect {
     edit,
     save,
     leave,
-    effect remove(id: string) {
-      const state = try machine.get()
-      if (state.present && state.draftId === "" && id === "") {
-        try send({ type: "closeDraft" })
-        try show(undefined)
-        return { deleted: true }
+    remove,
+    effect removeSelected(ids: readonly string[], owner: number, signal: AbortSignal) {
+      const deleted: NoteDeletion[] = []
+      for (const id of new Set(ids)) {
+        const current = try collectionMachine.get()
+        if (signal.aborted || current.owner !== owner || current.phase !== "Ready" || (try machine.get()).present) break
+        const outcome = try remove(id)
+        if (!outcome.deleted || outcome.deletedAt === undefined) break
+        deleted.push({ id, deletedAt: outcome.deletedAt })
       }
-      const after = try send({ type: "removeNote", id })
-      if (after === undefined) return { deleted: false }
-      if (after.mutation === "DeleteAfterSave") {
-        try writing.withPermits(1)(write())
-        const settled = try machine.get()
-        if (settled.known.includes(id)) return { deleted: false }
-        const deletedAt = (try collection.current())?.snapshot.trash?.find((entry) => entry.note.id === id)?.deletedAt
-        return deletedAt === undefined ? { deleted: true } : { deleted: true, deletedAt }
-      }
-      if (after.mutation !== "Deleting") {
-        if (after.review) try collection.needReview()
-        return { deleted: false }
-      }
-      return try runMutation()
+      return deleted
     },
     effect restore(id: string) {
       const after = try send({ type: "restoreNote", id })

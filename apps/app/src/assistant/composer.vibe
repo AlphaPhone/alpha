@@ -286,6 +286,14 @@ export const composerLayer = Layer.effect(Composer, effect {
     const files = try attachments.pending()
     if (composed.trim() === "" && files.length === 0) return false
     const aimed = try SubscriptionRef.get(target)
+    if (files.length === 0 && aimed === undefined && host.openSavedNote !== undefined) {
+      const said = try host.openSavedNote(composed)
+      if (said !== undefined) {
+        if (handed === undefined) try quiet(drafts.send({ type: "edit", text: [] }))
+        try host.toast(said)
+        return true
+      }
+    }
     const taken = try camera.intercept({ text: composed, attachments: files.length, editing: aimed?.kind === "edit" })
     if (taken !== "none") {
       if (handed === undefined) try quiet(drafts.send({ type: "edit", text: [] }))

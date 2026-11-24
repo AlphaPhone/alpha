@@ -21,7 +21,7 @@ import { NotesAudio } from "../../src/notes/audio.vibe"
 import { NotesCollection } from "../../src/notes/collection.vibe"
 import { NotesEditor } from "../../src/notes/editor.vibe"
 import { NotesFolders } from "../../src/notes/folders.vibe"
-import { checklistItems, checklistText, filterRows, folderOf, namedNoteOpenRequest, nextDefaultTitle, rowOf, shownRows } from "../../src/notes/list.vibe"
+import { checklistItems, checklistText, filterRows, folderOf, namedNoteOpenRequest, nextDefaultTitle, rowOf, savedNoteMatch, shownRows } from "../../src/notes/list.vibe"
 import { NotesListFilter } from "../../src/notes/listFilter.vibe"
 import { NotesOrganize } from "../../src/notes/organize.vibe"
 import { NotesOrigins } from "../../src/notes/origins.vibe"
@@ -106,9 +106,47 @@ describe("Notes stories", () => {
     // spec/notes/list.md, "Only a named, quoted or plainly titled note opens locally; a relative reference goes to the agent"
     const asked = [
       "Open the note called Groceries.", "Hey Alpha, could you show my groceries note", "open “Most Recent Recipes” in Notes",
-      "Open my most recent note", "open the note I just created", "open a new note",
+      "Okay, take me to that release checklist note, please.", "Open my most recent note",
+      "open the note I just created", "open a new note", "open a note about travel",
     ].map(namedNoteOpenRequest)
-    try check(() => assert.deepStrictEqual(asked, ["Groceries", "groceries", "Most Recent Recipes", undefined, undefined, undefined]))
+    const saved = [{ title: "Release checklist" }, { title: "Release Android checklist" }, { title: "Release iOS checklist" }]
+    try check(() => assert.deepStrictEqual(
+      [asked, savedNoteMatch("RELEASE  CHECKLIST", saved).matches, savedNoteMatch("release android", saved).matches, savedNoteMatch("release", saved).matches, savedNoteMatch("droid", saved).matches],
+      [["Groceries", "groceries", "Most Recent Recipes", "release checklist", undefined, undefined, undefined, undefined], [saved[0]], [saved[1]], saved, []],
+    ))
+  })
+
+  it.effect("A saved note can open from chat without dropping another edited draft (spec/notes/list.md, \"Story: Open a note by saying its title\")", () => effect {
+    const agent = seeded(note("first", "First", "", 1), note("second", "Second", "", 2))
+    provide notesOver(agent, new DeviceFake()) {
+      const editor = try NotesEditor
+      const collection = try NotesCollection
+      try bound()
+      const owner = (try collection.current())?.owner ?? ""
+      const opened = try editor.openFromAssistant(owner, "first")
+      try editor.edit({ body: "Kept words" })
+      const moved = try editor.openFromAssistant(owner, "second")
+      const draft = try editor.draft()
+      try check(() => assert.deepStrictEqual([opened, moved, draft?.title, draft?.body], [true, false, "First", "Kept words"]))
+    }
+  })
+
+  it.effect("A group moves to Trash and its exact deletion rows can be undone together (spec/notes/trash.md, \"Story: Recover a deleted note\")", () => effect {
+    const agent = seeded(note("first", "First", "", 1), note("second", "Second", "", 2))
+    provide notesOver(agent, new DeviceFake()) {
+      const editor = try NotesEditor
+      const trash = try NotesTrash
+      const collection = try CollectionMachine
+      try bound()
+      const owner = (try collection.get()).owner
+      const deleted = try editor.removeSelected(["first", "second"], owner, new AbortController().signal)
+      try trash.deleted()
+      const restored = try trash.undoSelected(deleted, owner)
+      try check(() => assert.deepStrictEqual(
+        [deleted.map((entry) => entry.id), restored, agent.notes.map((item) => item.id).sort(), agent.trash.length],
+        [["first", "second"], "restored", ["first", "second"], 0],
+      ))
+    }
   })
 
   it.effect("A checklist written as text reads back with every item and tick (spec/notes/list.md, \"Story: Turn text into a checklist and back\")", () => effect {

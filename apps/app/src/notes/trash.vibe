@@ -1,9 +1,10 @@
 // spec/notes/trash.md, "Story: Recover a deleted note"; spec/notes/trash.md, "Recently deleted opens while it has rows, one action runs at a time, and it closes once empty"; spec/notes/trash.md, "A restore needs the exact deletion and the current revision, and a delete's Undo the exact deletion"; spec/notes/trash.md, "Erase needs the three-day choice, a review of that exact deletion at the current revision, and no shared recording"; spec/notes/trash.md, "A saved erase leaves its recordings' cleanup pending, a conflict changes nothing, and an unknown outcome reopens the store"
 import type { NotesSnapshot, NotesTrashRecordingCleanup, StickyNote } from "@elizaos/plugin-notes/types"
+import { Machine as CollectionMachine } from "../../gen/notes__collection.effect.vibe"
 import { type EraseCommit, type Event as TrashEvent, Machine as TrashMachine, type TrashView, daysLeft, machine as trashMachine } from "../../gen/notes__trash.effect.vibe"
 import { NotesClient, NotesRefused, TrashRetentionOff } from "./client.vibe"
 import { NotesCollection } from "./collection.vibe"
-import { NotesEditor } from "./editor.vibe"
+import { NotesEditor, type NoteDeletion } from "./editor.vibe"
 import { voiceAudio } from "./list.vibe"
 
 /** One Recently deleted row as the owner reviews it: the note, its deletion time and the revision it was seen at. */
@@ -35,6 +36,7 @@ export service NotesTrash {
   cancelErase(): boolean!!
   restore(row: TrashRow): TrashNotice!!
   undo(noteId: string, deletedAt: string): TrashNotice!!
+  undoSelected(deletions: readonly NoteDeletion[], owner: number): TrashNotice!!
   erase(row?: TrashRow): TrashNotice!!
   deleted(): void!!
   dismissUndo(): void!!
@@ -67,6 +69,7 @@ export function recordingReferences(snapshot: NotesSnapshot, audioId: string): n
 const make = effect {
   const client = try NotesClient
   const collection = try NotesCollection
+  const collectionMachine = try CollectionMachine
   const editor = try NotesEditor
   const machine = try TrashMachine
   const rows = try SubscriptionRef.make<readonly TrashRow[]>([])
@@ -108,6 +111,17 @@ const make = effect {
     return on
   }
 
+  effect function undoOne(noteId: string, deletedAt: string, more: boolean, owner: number): TrashNotice!! {
+    try collection.refresh()
+    if ((try collectionMachine.get()).owner !== owner) return "gone"
+    const current = try snapshot()
+    const row = current === undefined ? undefined : trashRows(current, Date.now()).find((entry) => entry.id === noteId && entry.deletedAt === deletedAt)
+    if (row !== undefined) try Ref.set(asked, row)
+    const state = try send(more ? { type: "undoNext", exact: row !== undefined } : { type: "undo", exact: row !== undefined })
+    if (state === undefined) return "gone"
+    return try restoring()
+  }
+
   return {
     rows: SubscriptionRef.changes(rows),
     cleanups: SubscriptionRef.changes(cleanups),
@@ -140,13 +154,15 @@ const make = effect {
       return try restoring()
     },
     effect undo(noteId: string, deletedAt: string) {
-      try collection.refresh()
-      const current = try snapshot()
-      const row = current === undefined ? undefined : trashRows(current, Date.now()).find((entry) => entry.id === noteId && entry.deletedAt === deletedAt)
-      if (row !== undefined) try Ref.set(asked, row)
-      const state = try send({ type: "undo", exact: row !== undefined })
-      if (state === undefined) return "gone"
-      return try restoring()
+      return try undoOne(noteId, deletedAt, false, (try collectionMachine.get()).owner)
+    },
+    effect undoSelected(deletions: readonly NoteDeletion[], owner: number) {
+      let outcome: TrashNotice = "restored"
+      for (const [index, deletion] of deletions.entries()) {
+        const restored = try undoOne(deletion.id, deletion.deletedAt, index < deletions.length - 1, owner)
+        if (restored !== "restored") outcome = restored
+      }
+      return outcome
     },
     effect erase(row?: TrashRow) {
       const state = try machine.get()

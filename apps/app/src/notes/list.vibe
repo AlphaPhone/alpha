@@ -271,19 +271,38 @@ function unquote(text: string): string {
 
 /** The title a request opens locally, or undefined when it stays with the agent. */
 export function namedNoteOpenRequest(text: string): string | undefined {
-  const request = ownerCommand(text).replace(/[.!?]+$/, "").trim()
-  const command = request.replace(/^(?:(?:in|from) (?:the )?notes(?: app)?[, ]+|(?:go|switch) to (?:the )?notes(?: app)? and )/i, "")
+  const lead = /^(?:(?:thanks|thank you|okay|ok|sure|hmm+|um+|uh)[,.!]\s+)*/i
+  const request = ownerCommand(text.trim().replace(lead, "")).replace(/[.!?]+$/, "")
+    .replace(/\s*,\s*please$/i, "").replace(/(\b(?:note|notes app|in notes)|["”])\s+please$/i, "$1").trim()
+  const command = request.replace(/^(?:(?:in|from) (?:the )?notes(?: app)?[, ]+|(?:open|(?:go|switch) to) (?:the )?notes(?: app| view)? and )/i, "")
+    .replace(/^(?:open up|take me to|(?:go|switch) to) /i, "open ")
   const named = /^(?:open|show)(?: me)? (?:the |my )?note (?:called|named|titled) (.+?)(?: in (?:the )?notes(?: app)?)?$/i.exec(command)
   const quoted = /^(?:open|show)(?: me)? ((?:the |my )?note )?(".+"|“.+”)( in (?:the )?notes(?: app)?)?$/i.exec(command)
   const quotedTitle = quoted && (request !== command || quoted[1] || quoted[3]) ? quoted[2] : undefined
-  const shorthand = /^(?:open|show)(?: me)? (?:the |my )?(.+?) note(?: in (?:the )?notes(?: app)?)?$/i.exec(command)
+  const shorthand = /^(?:open|show)(?: me)? (?:the |my |that )?(.+?) note(?: in (?:the )?notes(?: app)?)?$/i.exec(command)
     ?? /^(?:open|show)(?: me)? (?:the |my )?note (.+?)(?: in (?:the )?notes(?: app)?)?$/i.exec(command)
-    ?? /^open (.+?) in (?:the )?notes(?: app)?$/i.exec(command)
+    ?? /^open (?:the |my |that )?(.+?) in (?:the )?notes(?: app)?$/i.exec(command)
   const target = named?.[1] ?? quotedTitle ?? shorthand?.[1]
   const reference = (target ?? "").replace(/^(?:a|an|the|my) /i, "").replace(/ (?:note|one)$/i, "")
   const generic = /^(?:a|an|the|my|this|that|it|new|(?:new )?(?:empty|blank)|any|another|some|first|last|latest|newest|oldest|(?:most |least )?recent|previous|note|one)$/i.test(reference)
   const relative = /^(?:(?:i|you|we) )?(?:just|last|(?:most )?recently) (?:made|wrote|created|saved|edited|updated|opened)$/i.test(reference)
+    || /^(?:about|on|with|concerning)\s+/i.test(reference)
   const title = unquote(target ?? "").trim()
   const hasTitle = title !== "" && !/[\r\n]/.test(title)
   return opensLocally(named !== null, quotedTitle !== undefined, generic, relative, hasTitle) ? title : undefined
+}
+
+/** The exact saved title wins. Shorthand must name whole words in order on just one saved row. */
+export function savedNoteMatch<T extends { readonly title: string }>(title: string, notes: readonly T[]) {
+  const key = (value: string) => value.normalize("NFC").trim().replace(/\s+/g, " ").toLowerCase()
+  const words = (value: string) => key(value).match(/[\p{L}\p{N}]+/gu) ?? []
+  const exact = notes.filter((note) => key(note.title) === key(title))
+  const query = words(title)
+  if (exact.length > 0 || query.length === 0) return { matches: exact, exact: true }
+  const matches = notes.filter((note) => {
+    let next = 0
+    for (const word of words(note.title)) if (word === query[next]) next += 1
+    return next === query.length
+  })
+  return { matches, exact: false }
 }

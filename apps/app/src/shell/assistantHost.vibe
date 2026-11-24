@@ -13,6 +13,10 @@ import { clockCapabilities } from "../clock/operations.vibe"
 import { FilesAgent } from "../files/agent.vibe"
 import { inboxCapabilities } from "../inbox/handoffs.vibe"
 import { mapsDeviceCapabilities } from "../maps/agent.vibe"
+import { canOpenApp } from "../../gen/shell__navigation.effect.vibe"
+import { NotesCollection } from "../notes/collection.vibe"
+import { NotesEditor } from "../notes/editor.vibe"
+import { namedNoteOpenRequest, savedNoteMatch } from "../notes/list.vibe"
 import { NotesOrganize } from "../notes/organize.vibe"
 import { Build } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"
@@ -74,6 +78,8 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
   const calls = try CallWatch
   const voice = try VoiceConversation
   const resident = try Resident
+  const notes = try NotesCollection
+  const editor = try NotesEditor
   const learned = try Ref.make<{ readonly connection: string; readonly support: PeerSupport }>({ connection: "", support: { tag: "NotLearned" } })
 
   effect function status() {
@@ -148,6 +154,27 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
         return opened
       }, () => opened)
       return opened
+    },
+    effect openSavedNote(text: string) {
+      const title = namedNoteOpenRequest(text)
+      if (title === undefined) return undefined
+      const before = try navigation.get()
+      const front = try foreground.get()
+      if (before.hidden || front.locked || PRIVATE_APPS.has(before.app)) return undefined
+      if (!canOpenApp(before, "notes")) return "Couldn’t open Notes."
+      if (before.app !== "notes" || (try notes.current()) === undefined) try notes.refresh()
+      const current = try navigation.get()
+      if (current.revision !== before.revision || current.hidden || (try foreground.get()).locked || !canOpenApp(current, "notes")) return "Couldn’t open Notes."
+      const saved = try notes.current()
+      if (saved === undefined) return "I couldn’t read your saved notes. Try again from Notes."
+      const { matches, exact } = savedNoteMatch(title, saved.snapshot.notes)
+      if (matches.length > 1) return exact
+        ? `More than one note is titled “${title}”. Open Notes and choose the one you want.`
+        : `More than one note matches “${title}”. Give me the full title.`
+      const note = matches[0]
+      if (note === undefined) return `I couldn’t find a note titled “${title}”.`
+      if (!(try editor.openFromAssistant(saved.owner, note.id))) return "Finish the unsaved edits in your note before opening another one."
+      return (try open("notes", note.id)) ? `Opened “${note.title}”.` : "Couldn’t open Notes."
     },
     toast: (text: string) => notices.show(text),
   }

@@ -147,7 +147,9 @@ pure def lawDefaultTitleIsNew(highest: int): bool = nextDefaultNumber(highest) =
 ### Only a named, quoted or plainly titled note opens locally; a relative reference goes to the agent
 
 A request opens a note locally when it names the note with called, named or titled, quotes its title, or
-uses a title in the shorthand open X note. A generic or relative reference such as a new note, the last
+uses a title in the shorthand open X note. Compare the exact title first, then match full words
+in order. Only one matching saved note may open, and an unsaved editor for a different note stays
+in place. A generic or relative reference such as a new note, the last
 note, my most recent note or the note I just created stays in the conversation, unless it was named or
 quoted, so an old note literally titled Most Recent never answers for the newest one.
 

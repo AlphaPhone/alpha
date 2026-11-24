@@ -1,16 +1,16 @@
 // spec/notes/collection.md, "Story: Read my notes under the account I am signed in as"; spec/notes/editor.md, "Story: Edit a note without losing a word"; spec/notes/list.md, "Story: Narrow the list to what I am looking for"; spec/notes/trash.md, "Story: Recover a deleted note"; spec/notes/recorder.md, "Story: Record a voice note"; spec/notes/share.md, "Story: Share the note I have open"; spec/notes/share.md, "One document operation runs at a time, and its receipt shows only in its own visible visit"; spec/notes/trash.md, "A restore needs the exact deletion and the current revision, and a delete's Undo the exact deletion"
 import { Effect } from "effect";
 import { Ellipsis, Folder, Mic, Plus, Search, X } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ScreenProps } from "../app-screen.ts";
 import { Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, Input, Sheet, SheetContent, Toast, ToastProvider, ToastViewport } from "../components/ui/index.ts";
 import { statusLabel, type Collection } from "../../../gen/notes__collection.ts";
 import { copyDraftAllowed, dirty, type Editor } from "../../../gen/notes__editor.ts";
 import type { Recorder } from "../../../gen/notes__recorder.ts";
-import type { TrashView } from "../../../gen/notes__trash.ts";
+import { deleteUndoMs, type TrashView } from "../../../gen/notes__trash.ts";
 import type { SourceDialog } from "../../../gen/notes__webSource.ts";
 import { NotesAudio } from "../../notes/audio.vibe";
-import { NotesEditor, type DraftContent, type KeptReview } from "../../notes/editor.vibe";
+import { NotesEditor, type DraftContent, type KeptReview, type NoteDeletion } from "../../notes/editor.vibe";
 import { NotesFolders, type NotesFolder } from "../../notes/folders.vibe";
 import { filterRows, matchesText, shownRows, type NoteRow, type NotesFilter } from "../../notes/list.vibe";
 import { NotesListFilter } from "../../notes/listFilter.vibe";
@@ -102,6 +102,8 @@ export interface NotesScreenViewProps extends ScreenProps {
   recorderCan: NoteRecorderProps["can"];
   /** The folders sheet's navigation layer. */
   foldersLayer: NotesLayer;
+  /** The Notes list selection, closed by Back with the rest of Notes' layers. */
+  selectionLayer: NotesLayer;
   /** Runs one call of a Notes service. */
   call: typeof runCall;
 }
@@ -112,7 +114,7 @@ export interface NotesScreenViewProps extends ScreenProps {
  */
 export function NotesScreenView({
   onClose, collection, editor, trash, recorder, sourceDialog, rows, draft, kept, deleted, display, folders, agentFilter, requestedFilter, receipt,
-  earlierNotesAvailable, now, can, recorderCan, foldersLayer, call,
+  earlierNotesAvailable, now, can, recorderCan, foldersLayer, selectionLayer, call,
 }: NotesScreenViewProps) {
   const [seenReceipt, setSeenReceipt] = useState<DocumentReceipt>();
   const [previousOwner, setPreviousOwner] = useState<number>();
@@ -121,9 +123,15 @@ export function NotesScreenView({
   const [folder, setFolder] = useState<string>();
   const [asked, setAsked] = useState<TrashRow>();
   const [transcribing, setTranscribing] = useState(false);
-  const [notice, setNotice] = useState<{ text: string; action?: { label: string; onAction: () => void }; onDismiss?: () => void }>();
+  const [notice, setNotice] = useState<{ text: string; action?: { label: string; onAction: () => void }; onDismiss?: () => void; duration?: number }>();
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [selectingOwner, setSelectingOwner] = useState<number>();
+  const [deletingSelection, setDeletingSelection] = useState(false);
+  const batch = useRef<AbortController>(undefined);
 
   const state = collection;
+  const selecting = selectionLayer.open && selectingOwner === state.owner;
+  useEffect(() => () => batch.current?.abort(), [selecting, state.owner]);
   if (previousOwner !== undefined && (!earlierNotesAvailable || previousOwner !== state.owner)) setPreviousOwner(undefined);
   const folderIds = new Set(folders.map((item) => item.id));
   const filter = agentFilter ?? requestedFilter ?? (folder === undefined ? undefined : { folder });
@@ -135,6 +143,21 @@ export function NotesScreenView({
   };
   const tellTrash = (said: TrashNotice) =>
     tell(trashNoticeText[said], undefined, () => void call(NotesTrash, (service) => service.noticeShown()));
+  const showDeleteNotice = async (deletions: readonly NoteDeletion[], owner: number, askedCount: number) => {
+    if (deletions.length === 0) return;
+    await call(NotesTrash, (service) => service.deleted());
+    let undoPressed = false;
+    const text = deletions.length < askedCount ? `Deleted ${deletions.length} of ${askedCount} notes`
+      : deletions.length === 1 ? "Deleted" : `Deleted ${deletions.length} notes`;
+    setNotice({
+      text, duration: deleteUndoMs,
+      action: { label: "Undo", onAction: () => {
+        undoPressed = true;
+        void call(NotesTrash, (service) => service.undoSelected(deletions, owner)).then(tellTrash);
+      } },
+      onDismiss: () => { if (!undoPressed) void call(NotesTrash, (service) => service.dismissUndo()); },
+    });
+  };
 
   const leave = () => void call(NotesEditor, (service) => service.leave());
   const openNote = (id: string) => void call(NotesEditor, (service) => service.leave(id));
@@ -143,11 +166,36 @@ export function NotesScreenView({
     const id = editor.draftId;
     void call(NotesEditor, (service) => service.remove(id)).then((outcome) => {
       if (!outcome.deleted || outcome.deletedAt === undefined) return;
-      const deletedAt = outcome.deletedAt;
-      void call(NotesTrash, (service) => service.deleted());
-      tell("Deleted", { label: "Undo", onAction: () => void call(NotesTrash, (service) => service.undo(id, deletedAt)).then(tellTrash) },
-        () => void call(NotesTrash, (service) => service.dismissUndo()));
+      return showDeleteNotice([{ id, deletedAt: outcome.deletedAt }], state.owner, 1);
     });
+  };
+  const toggleSelection = (id: string) => setSelected((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  });
+  const removeSelection = async () => {
+    if (batch.current !== undefined || !selecting) return;
+    const visible = new Set(shown.map((note) => note.id));
+    const ids = [...selected].filter((id) => visible.has(id));
+    if (ids.length === 0) return;
+    const controller = new AbortController();
+    batch.current = controller;
+    setDeletingSelection(true);
+    try {
+      const deleted = await call(NotesEditor, (service) => service.removeSelected(ids, state.owner, controller.signal));
+      if (!controller.signal.aborted) {
+        const completed = new Set(deleted.map((entry) => entry.id));
+        setSelected((current) => new Set([...current].filter((id) => !completed.has(id))));
+        if (deleted.length === ids.length) selectionLayer.hide();
+        if (deleted.length === 0) tell("No notes deleted.");
+        await showDeleteNotice(deleted, state.owner, ids.length);
+      }
+    } finally {
+      batch.current = undefined;
+      setDeletingSelection(false);
+    }
   };
   const share = (channel: ShareChannel) => {
     const id = editor.draftId;
@@ -201,18 +249,28 @@ export function NotesScreenView({
     body = (
       <>
         <header className="flex items-center gap-2 px-4 pt-4">
-          <h1 className="flex-1 font-display text-3xl">Notes</h1>
+          <h1 className="flex-1 font-display text-3xl">{selecting ? (selected.size > 0 ? `${selected.size} selected` : "Select notes") : "Notes"}</h1>
+          {selecting ? <>
+            <Button variant="ghost" disabled={deletingSelection} onClick={selectionLayer.hide}>Done</Button>
+            <Button variant="destructive" disabled={deletingSelection || selected.size === 0 || state.phase !== "Ready"} onClick={() => void removeSelection()}>Delete</Button>
+          </> : <>
           <Button variant="ghost" size="icon" aria-label="Search notes" onClick={() => setSearching(!searching)}><Search aria-hidden /></Button>
           <Button variant="ghost" size="icon" aria-label="Folders" onClick={() => { foldersLayer.show(); void call(NotesFolders, (service) => service.list()); }}><Folder aria-hidden /></Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Notes options"><Ellipsis aria-hidden /></Button></DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem disabled={!can.openTrash} onSelect={() => void call(NotesTrash, (service) => service.open())}>Recently deleted</DropdownMenuItem>
+              {shown.length > 0 && state.phase === "Ready" && <DropdownMenuItem onSelect={() => {
+                setSelected(new Set());
+                setSelectingOwner(state.owner);
+                selectionLayer.show();
+              }}>Select notes</DropdownMenuItem>}
               {testMocksBuilt && <DropdownMenuItem onSelect={() => void call(NotesShare, (service) => service.importText()).then((said) => { if (said === "busy" || said === "unavailable") tell(shareNoticeText[said]); })}>Import text file</DropdownMenuItem>}
               {earlierNotesAvailable && <DropdownMenuItem onSelect={() => setPreviousOwner(state.owner)}>Previous notes</DropdownMenuItem>}
               <DropdownMenuItem onSelect={onClose}>Close Notes</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          </>}
         </header>
         {searching && <div className="px-4 py-2"><Input autoFocus aria-label="Search notes" value={search} onChange={(event) => setSearch(event.target.value)} /></div>}
         {filter !== undefined && (
@@ -223,14 +281,14 @@ export function NotesScreenView({
             </Button>
           </div>
         )}
-        {state.priorReview ? <p className="px-4 py-6 text-center text-sm" role="status">{status}</p> : <div className="flex-1 overflow-y-auto pb-24"><NotesList rows={shown} now={now} onOpen={openNote} /></div>}
+        {state.priorReview ? <p className="px-4 py-6 text-center text-sm" role="status">{status}</p> : <div className="flex-1 overflow-y-auto pb-24"><NotesList rows={shown} now={now} onOpen={selecting ? toggleSelection : openNote} selection={selecting ? { ids: selected, busy: deletingSelection } : undefined} /></div>}
         {status !== "" && state.phase !== "Review" && <p className="px-4 font-mono text-xs uppercase text-muted-foreground" role="status">{status}</p>}
-        <div className="fixed bottom-24 right-4 flex flex-col gap-3">
+        {!selecting && <div className="fixed bottom-24 right-4 flex flex-col gap-3">
           <Button size="icon" variant="secondary" aria-label="Record voice note" disabled={!can.beginRecording}
             onClick={() => void call(NotesRecorder, (service) => service.begin(folder ?? null, false))}><Mic aria-hidden /></Button>
           <Button size="icon" aria-label="New note" disabled={state.revision < 0 || state.phase === "Saving"}
             onClick={() => void call(NotesEditor, (service) => service.newNote("text", folder))}><Plus aria-hidden /></Button>
-        </div>
+        </div>}
       </>
     );
   }
@@ -278,7 +336,7 @@ export function NotesScreenView({
         {receipt !== undefined && receipt !== seenReceipt && shareNoticeText[receipt.notice] !== "" && (
           <Toast open onOpenChange={(open) => { if (!open) setSeenReceipt(receipt); }} title={shareNoticeText[receipt.notice]} />
         )}
-        {notice !== undefined && <Toast open onOpenChange={(open) => { if (!open) { notice.onDismiss?.(); setNotice(undefined); } }} title={notice.text} {...(notice.action === undefined ? {} : { action: notice.action })} />}
+        {notice !== undefined && <Toast open onOpenChange={(open) => { if (!open) { notice.onDismiss?.(); setNotice(undefined); } }} title={notice.text} duration={notice.duration} {...(notice.action === undefined ? {} : { action: notice.action })} />}
         <ToastViewport />
       </main>
     </ToastProvider>

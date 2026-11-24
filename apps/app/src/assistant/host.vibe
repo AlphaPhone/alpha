@@ -38,6 +38,8 @@ export service AssistantHost {
   emergency(): boolean!!
   /** Open an app view, keeping the chat detent. */
   openView(app: string, route?: string): boolean!!
+  /** A direct request for a saved note. An absent answer leaves the text for an ordinary turn. */
+  openSavedNote?(text: string): (string | undefined)!!
   /** A short message at the top of the screen. */
   toast(text: string): void!!
 }
