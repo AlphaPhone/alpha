@@ -133,6 +133,15 @@ export function inboxRoutes(scene: InboxScene): Route[] {
     },
     (request, url) => {
       const requestId = new RegExp(`^${operations}/([^/]+)/dispatch$`, "u").exec(url.pathname)?.[1];
+      if (request.method !== "POST" || requestId === undefined || asked.get(requestId)?.kind !== "send") return;
+      return request.json().then(({ proposal }: { proposal: { to: string[]; subject: string; bodyText: string } }) => {
+        scene.changes.push(`send ${proposal.to.join(",")} ${proposal.subject}`);
+        scene.mail.push({ ...letter(scene.mail.length + 100, proposal.subject, ["SENT"], proposal.bodyText), card: { ...letter(scene.mail.length + 100, proposal.subject, ["SENT"]).card, to: proposal.to } });
+        return Response.json(operation(requestId, "send", "succeeded"));
+      });
+    },
+    (request, url) => {
+      const requestId = new RegExp(`^${operations}/([^/]+)/dispatch$`, "u").exec(url.pathname)?.[1];
       if (request.method !== "POST" || requestId === undefined) return;
       const proposal = asked.get(requestId);
       const stored = scene.mail.find((one) => one.card.id === proposal?.messageId);

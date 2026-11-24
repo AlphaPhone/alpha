@@ -258,23 +258,32 @@ function endedAs(operation: MailOperation): Changed {
   return state === "succeeded" ? { done: true, known: true } : state === "rejected" ? { done: false, known: true } : { done: false, known: false }
 }
 
+/** What Gmail is asked to do in one operation, as eliza's cloud client names it. */
+export type Proposal = Parameters<Cloud.Shape["client"]["gmailPrepare"]>[0]["proposal"]
+
 /**
- * Change one message's labels in Gmail, once, as attempt `id` of the machine whose job this is: prepared under the
- * attempt's own key (the `at`th message of the attempt under a key of its own), then dispatched as Gmail reviewed it. A refusal before the dispatch is known; any failure of the
- * dispatch itself leaves it unknown.
+ * Ask Gmail for `proposal` once, as attempt `id` of the machine whose job this is: prepared under the attempt's own
+ * key (the `at`th request of the attempt under a key of its own), then dispatched as Gmail reviewed it. A refusal
+ * before the dispatch is known; any failure of the dispatch itself leaves it unknown.
  */
-export effect function relabel(id: number, account: number, message: number, kind: "mark-read" | "mark-unread" | "archive" | "unarchive" | "trash" | "untrash", at = 0): Changed!!(Cloud | Mail | Attempts) {
+export effect function operate(id: number, account: number, proposal: Proposal, at = 0): Changed!!(Cloud | Mail | Attempts) {
   const { client } = try Cloud
   const ledger = try Mail
   const key = try (try Attempts).key(id)
   const requestId = at === 0 ? key : `${key.slice(0, -4)}${at.toString(16).padStart(4, "0")}`
   const grantId = ledger.grant(account)
-  const messageId = ledger.gmailId(message)
-  if (grantId === undefined || messageId === undefined) return { done: false, known: true }
-  const proposal = { kind, messageId, expectedHistoryId: ledger.card(message)?.metadata.historyId ?? "" }
+  if (grantId === undefined) return { done: false, known: true }
   const prepared = asked(() => client.gmailPrepare({ grantId, requestId, proposal })) catch () => undefined
   if (prepared === undefined) return { done: false, known: true }
   if (prepared.receipt.state !== "prepared") return endedAs(prepared)
   const dispatched = asked(() => client.gmailDispatch({ grantId, requestId, reviewDigest: prepared.receipt.reviewDigest, proposal })) catch () => undefined
   return dispatched === undefined ? { done: false, known: false } : endedAs(dispatched)
+}
+
+/** Change one message's labels in Gmail, once, as `operate` does, at the history revision the list read it at. */
+export effect function relabel(id: number, account: number, message: number, kind: "mark-read" | "mark-unread" | "archive" | "unarchive" | "trash" | "untrash", at = 0): Changed!!(Cloud | Mail | Attempts) {
+  const ledger = try Mail
+  const messageId = ledger.gmailId(message)
+  if (messageId === undefined) return { done: false, known: true }
+  return try operate(id, account, { kind, messageId, expectedHistoryId: ledger.card(message)?.metadata.historyId ?? "" }, at)
 }

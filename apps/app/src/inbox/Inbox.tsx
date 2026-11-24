@@ -19,17 +19,21 @@ import { useMachine as useMessage } from "../../gen/app__inbox__message.react.ts
 import type { Machine as Changes } from "../../gen/app__inbox__sending.effect.vibe";
 import { type Kind, type Operations, aside } from "../../gen/app__inbox__sending.ts";
 import { useMachine as useChanges } from "../../gen/app__inbox__sending.react.ts";
+import type { Machine as Writing } from "../../gen/app__inbox__drafts.effect.vibe";
+import { useMachine as useDrafts } from "../../gen/app__inbox__drafts.react.ts";
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { Time } from "../runtime/time.vibe";
+import { Compose, Shelf } from "./Compose.tsx";
+import { type Beginning, Letters, begin } from "./composer.vibe";
 import { type Letter, Mail, revisionOf } from "./gmail.vibe";
 import { linksOf } from "./links.ts";
 
 export interface InboxProps {
   /** Provides the list, the message open and its marks, the changes, the shell, and Mail, which holds what Gmail said. */
-  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Shell | Mail | Time, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Writing | Letters | Shell | Mail | Time, unknown>;
 }
 
 type Runtime = InboxProps["runtime"];
@@ -151,7 +155,7 @@ function Body({ read, images, view, onReview }: { read: MailMessage; images: boo
 }
 
 /** The message open: its body, links and attachments each reviewed before use, its marks, Archive and Trash, Retry and Ask Alpha. */
-function Opened({ runtime, list, onRefresh }: { runtime: Runtime; list: Mailbox; onRefresh: (() => void) | undefined }) {
+function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list: Mailbox; onRefresh: (() => void) | undefined; onBegin: (beginning: Beginning) => (() => void) | undefined }) {
   const { state, can, send } = useMessage(runtime);
   const marking = useMarks(runtime);
   const changes = useTimed(runtime, useChanges);
@@ -184,6 +188,7 @@ function Opened({ runtime, list, onRefresh }: { runtime: Runtime; list: Mailbox;
   const file = files.at(state.attachment - 1);
   const outcome = state.file.outcome;
   const link = loaded ? linksOf(read.bodyText).at(state.link - 1) : undefined;
+  const answered = card === undefined ? undefined : { id: card.id, from: card.from, others: [...card.to, ...card.cc], subject: card.subject, files: files.length };
   return (
     <>
       <InboxMessageScreen
@@ -214,6 +219,9 @@ function Opened({ runtime, list, onRefresh }: { runtime: Runtime; list: Mailbox;
         onArchive={changing("Archive")}
         onTrash={changing("Trash")}
         onAskAlpha={can({ type: "askAlpha" }) ? () => void send({ type: "askAlpha" }) : undefined}
+        onReply={loaded ? onBegin({ kind: "Reply", account: state.account, message: answered }) : undefined}
+        onReplyAll={loaded ? onBegin({ kind: "ReplyAll", account: state.account, message: answered }) : undefined}
+        onForward={loaded ? onBegin({ kind: "Forward", account: state.account, message: answered }) : undefined}
       >
         {state.fromPhone && card ? <p className="whitespace-pre-wrap break-words">{card.snippet}</p> : null}
         {loaded ? (
@@ -249,15 +257,25 @@ export function Inbox({ runtime }: InboxProps) {
   const { state, cause, can, send } = useList(runtime);
   const message = useMessage(runtime);
   const changes = useTimed(runtime, useChanges);
+  const drafts = useDrafts(runtime);
   const shell = useShell(runtime);
   const [query, setQuery] = useState("");
   const [choosing, setChoosing] = useState(false);
+  const [shelf, setShelf] = useState(false);
   if (cause) return <Alert variant="destructive" className="m-4">Alpha could not open Inbox</Alert>;
-  if (!state || !message.state) return null;
+  if (!state || !message.state || !drafts.state) return null;
+  // spec/app/inbox/drafts.md, "A new message, a reply, a reply to all or a forward begins as [one draft](./letter.md) says; a reply to a message with no usable address is refused and the owner told"
+  const onBegin = (beginning: Beginning) => {
+    const event = { type: "compose", kind: beginning.kind, account: beginning.account, others: 0, files: 0, mib: 0 } as const;
+    return beginning.account !== 0 && drafts.can({ ...event, replyTo: false, addressable: true, forwardable: false, policy: { files: 0, mib: 0 } }, "Owner")
+      ? () => void runtime.runPromise(begin(beginning))
+      : undefined;
+  };
+  if (drafts.state.open) return <><Compose runtime={runtime} list={state} />{<ChangeReview runtime={runtime} list={state} cards={(number) => mailOf(runtime, (mail) => mail.card(number))} />}</>;
   const cards = (number: number) => mailOf(runtime, (mail) => mail.card(number));
   const refresh = can({ type: "refresh" }) ? () => void send({ type: "refresh" }) : undefined;
   const review = <ChangeReview runtime={runtime} list={state} cards={cards} />;
-  if (message.state.message !== 0) return <>{<Opened runtime={runtime} list={state} onRefresh={refresh} />}{review}</>;
+  if (message.state.message !== 0) return <>{<Opened runtime={runtime} list={state} onRefresh={refresh} onBegin={onBegin} />}{review}</>;
   const settings = shell.can({ type: "openView", view: "Settings" }) ? () => void shell.send({ type: "openView", view: "Settings" }) : undefined;
   const held = changes.state ? aside(changes.state) : [];
   const letters = mailOf(runtime, (mail) => mail.shown(state)).filter(({ message: number }) => !held.includes(number));
@@ -322,6 +340,9 @@ export function Inbox({ runtime }: InboxProps) {
         onTrash={state.selected.folder === "Trashed" ? undefined : chosenChange("Trash")}
         onRestore={state.selected.folder === "Archived" ? chosenChange("Unarchive") : state.selected.folder === "Trashed" ? chosenChange("Untrash") : undefined}
         onRefresh={refresh}
+        onCompose={onBegin({ kind: "Fresh", account })}
+        aside={drafts.state.shelf.shelved.length}
+        onShelf={() => setShelf(true)}
         onAccount={state.connected.length > 0 ? () => setChoosing(true) : undefined}
         rows={letters.map(row)}
         loading={state.list.status === "Loading" && !state.further}
@@ -330,6 +351,7 @@ export function Inbox({ runtime }: InboxProps) {
       />
       {mustChoose ? <InboxAccountList accounts={accounts} onChoose={chooseAccount} /> : null}
       <InboxAccountSheet open={choosing} onOpenChange={setChoosing} accounts={accounts} selected={String(account)} onChoose={chooseAccount} />
+      <Shelf runtime={runtime} open={shelf} onOpenChange={setShelf} />
       {review}
     </>
   );

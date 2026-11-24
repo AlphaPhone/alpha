@@ -1,4 +1,4 @@
-// spec/app/inbox/sending.md, "Story: Archive or trash mail, with Undo"; spec/app/inbox/sending.md, "Story: Restore mail I archived or trashed"
+// spec/app/inbox/sending.md, "Story: Send a draft I reviewed"; spec/app/inbox/sending.md, "Story: Archive or trash mail, with Undo"; spec/app/inbox/sending.md, "Story: Restore mail I archived or trashed"
 import * as Inbox from "../../gen/app__inbox.effect.vibe"
 import { accessOf } from "../../gen/app__inbox.effect.vibe"
 import * as Sending from "../../gen/app__inbox__sending.effect.vibe"
@@ -9,7 +9,10 @@ import { Cloud } from "../platform/cloud.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { Time } from "../runtime/time.vibe"
 import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
-import { Mail, relabel } from "./gmail.vibe"
+import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
+import type { Event as DraftEvent } from "../../gen/app__inbox__drafts.effect.vibe"
+import { Letters } from "./composer.vibe"
+import { Mail, operate, relabel } from "./gmail.vibe"
 
 const labels = { Archive: "archive", Trash: "trash", Unarchive: "unarchive", Untrash: "untrash" } as const
 
@@ -28,17 +31,37 @@ effect function changed(attempt: number, kind: Kind, account: number, messages: 
   return { type: "answered", attempt, done, matches: known, gmail: 0 }
 }
 
-function carry(fx: Out): Job<Event, Cloud | Mail | Inbox.Machine | Shell, [by: Actor]> {
+// spec/app/inbox/sending.md, "A recorded operation sends its one request, for its own account under that account's grant now, exactly as reviewed: a draft while it is at the revision shown and its hand-over is written to the phone, archive and Trash once the undo window has passed"
+/** The draft `draft` sent from `account` exactly as the owner wrote it, once, under the attempt's own key. */
+effect function sent(attempt: number, account: number, draft: number): Event!!(Attempts | Cloud | Mail | Letters) {
+  const words = (try Letters).words(draft)
+  const ended = try operate(attempt, account, {
+    kind: "send", mode: words.mode, to: words.to, cc: words.cc, bcc: words.bcc, subject: words.subject, bodyText: words.text,
+    ...(words.answers === undefined ? {} : { replyMessageId: words.answers }),
+    ...(words.files.length === 0 ? {} : { attachments: words.files.map(({ name, mimeType, data }) => ({ name, mimeType, dataBase64: data })) }),
+  })
+  return { type: "answered", attempt, done: ended.done, matches: ended.known, gmail: 0 }
+}
+
+/** Tell the composer `event` about the draft an operation was handed. */
+const toDraft = (event: DraftEvent) => effect { try ignore((try Drafts.Machine).send(event, "World")) }
+
+function carry(fx: Out): Job<Event, Cloud | Mail | Letters | Inbox.Machine | Drafts.Machine | Shell, [by: Actor]> {
   return match (fx) {
+    when { tag: "Request", kind: "Send", let attempt, let access, let draft }:
+      answer(`request ${attempt}`, sent(attempt, access.account, draft), { type: "replyLost", attempt }, "World");
     when { tag: "Request", let attempt, let kind, let access, let messages }:
       answer(`request ${attempt}`, changed(attempt, kind, access.account, messages), { type: "replyLost", attempt }, "World");
     // spec/app/inbox/index.md, "Messages handed to an operation are no longer chosen; once a change to the account's mail ends the first page is read again, and when its outcome is unknown the list says it may be out of date until Refresh"
     when { tag: "Changed", let account, let known }: run("changed", effect { try ignore((try Inbox.Machine).send({ type: "changed", account, known })) }, "World");
     // spec/app/inbox/sending.md, "While the account's grant lacks consent to send, nothing is sent, and Turn on hands over to Google access in Settings"
     when { tag: "OpenGoogleAccess" }: run("access", effect { try ignore((try Shell).send({ type: "openView", view: "Settings" })) }, "World");
-    when { tag: "HandOver" }: run("draft", Effect.void, "World");
-    when { tag: "Cleanup" }: run("draft", Effect.void, "World");
-    when { tag: "Ended" }: run("draft", Effect.void, "World");
+    // spec/app/inbox/drafts.md, "The draft an operation is confirmed for is handed to it, and the hand-over is written to the phone before the operation goes out"
+    when { tag: "HandOver", let draft, let attempt, let use }: run("draft", toDraft({ type: "handedOver", draft, attempt, use }), "World");
+    // spec/app/inbox/drafts.md, "Once its send is confirmed, a draft unchanged since the revision sent is forgotten; one edited after it, or whose write is in flight, is kept and marked as sent"
+    when { tag: "Cleanup", let draft, let attempt, let revision }: run("draft", toDraft({ type: "sentAway", draft, attempt, revision }), "World");
+    // spec/app/inbox/drafts.md, "Every other end of the operation a draft was handed to: an unknown send is remembered with its revision; a save lands or leaves the draft unsure of Gmail's copy; a deletion forgets the draft; anything refused or stopped leaves it as it was"
+    when { tag: "Ended", let draft, let attempt, let outcome, let revision, let gmail }: run("draft", toDraft({ type: "ended", draft, attempt, result: outcome, revision, gmail }), "World");
   }
 }
 

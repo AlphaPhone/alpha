@@ -43,11 +43,22 @@ pure def whole(l: L::Letter): bool =
     and 0 <= l.sent and l.sent <= l.revision and l.sending >= 0
 ```
 
+### The shelf holds at most fifty drafts
+
+A draft is set aside only while there is room for it; with fifty on the
+shelf the owner sends, discards or takes one back first.
+
+```quint
+pure val room = 50
+
+pure def hasRoom(s: Shelf): bool = s.shelved.size() < room
+```
+
 ### A draft is set aside whole, under a number not on the shelf, saving nothing and handed to nothing
 
 ```quint
 pure def canPlace(s: Shelf, letter: L::Letter): bool =
-  whole(letter) and not(s.shelved.contains(letter.id))
+  whole(letter) and not(s.shelved.contains(letter.id)) and hasRoom(s)
     and letter.sending == 0 and letter.draft.sync != D::Saving
 
 pure def place(s: Shelf, letter: L::Letter): Shelf =
