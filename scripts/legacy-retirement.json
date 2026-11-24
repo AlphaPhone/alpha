@@ -30,7 +30,7 @@
    "legacy": "test/accessibility-coverage.test.mjs",
    "area": "platform",
    "spec": "apps/app/spec/platform/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/accessibility-timeout.test.mjs",
@@ -42,7 +42,7 @@
    "legacy": "test/accessibility-visible-bounds.test.mjs",
    "area": "platform",
    "spec": "apps/app/spec/platform/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/action-completion-one-sentence.test.mjs",
@@ -101,7 +101,7 @@
   {
    "legacy": "test/agent-email-draft.test.mjs",
    "area": "inbox",
-   "spec": "apps/app/spec/inbox/agentDrafts.md",
+   "spec": "apps/app/spec/inbox/drafts.md",
    "status": "mapped"
   },
   {
@@ -179,13 +179,13 @@
   {
    "legacy": "test/android-build-fast.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: Not moved yet: port to @elizaos/os/build generateAndroidHost and the schema-2 profile (docs/vibestack-open-items.md, Tooling).",
    "status": "mapped"
   },
   {
    "legacy": "test/android-build-path.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: Not moved yet: port to @elizaos/os/build generateAndroidHost and the schema-2 profile (docs/vibestack-open-items.md, Tooling).",
    "status": "mapped"
   },
   {
@@ -203,25 +203,25 @@
   {
    "legacy": "test/android-gzip-assets.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json run: pnpm test:root runs it",
    "status": "mapped"
   },
   {
    "legacy": "test/android-host.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: Not moved yet: port to @elizaos/os/build generateAndroidHost and the schema-2 profile (docs/vibestack-open-items.md, Tooling).",
    "status": "mapped"
   },
   {
    "legacy": "test/android-identity.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: Not moved yet: port to @elizaos/os/build generateAndroidHost and the schema-2 profile (docs/vibestack-open-items.md, Tooling).",
    "status": "mapped"
   },
   {
    "legacy": "test/android-instrumentation-runner.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: Not moved yet: the scripts/os-ported and harness rewrite (docs/vibestack-open-items.md, Tooling).",
    "status": "mapped"
   },
   {
@@ -233,19 +233,19 @@
   {
    "legacy": "test/aosp-capabilities.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: Not moved yet: port to @elizaos/os/build generateAndroidHost and the schema-2 profile (docs/vibestack-open-items.md, Tooling).",
    "status": "mapped"
   },
   {
    "legacy": "test/aosp-cloud-power-defaults.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json run: pnpm test:root runs it",
    "status": "mapped"
   },
   {
    "legacy": "test/aosp-cuttlefish.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json run: pnpm test:root runs it",
    "status": "mapped"
   },
   {
@@ -257,19 +257,19 @@
   {
    "legacy": "test/aosp-image-capability.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The platform area (scripts/legacy-retirement.json maps the AOSP image capability to apps/app/spec/platform).",
    "status": "mapped"
   },
   {
    "legacy": "test/aosp-image-packet.test.py",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/python-suites.test.mjs runs it",
    "status": "mapped"
   },
   {
    "legacy": "test/aosp-image-source-packet.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json run: pnpm test:root runs it",
    "status": "mapped"
   },
   {
@@ -293,13 +293,13 @@
   {
    "legacy": "test/aosp-native-admission.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: Not moved yet: the scripts/os-ported and harness rewrite (docs/vibestack-open-items.md, Tooling).",
    "status": "mapped"
   },
   {
    "legacy": "test/aosp-native-fixtures.py",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/aosp-pixel10a.test.mjs runs it (held in test/root-tests.json)",
    "status": "mapped"
   },
   {
@@ -311,7 +311,7 @@
   {
    "legacy": "test/aosp-pixel10a.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: Not moved yet: the scripts/os-ported and harness rewrite (docs/vibestack-open-items.md, Tooling).",
    "status": "mapped"
   },
   {
@@ -335,13 +335,13 @@
   {
    "legacy": "test/aosp-retain-known-good.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json run: pnpm test:root runs it",
    "status": "mapped"
   },
   {
    "legacy": "test/aosp-role-upgrade.test.py",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/python-suites.test.mjs runs it",
    "status": "mapped"
   },
   {
@@ -359,7 +359,7 @@
   {
    "legacy": "test/aosp-sense-policy.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json run: pnpm test:root runs it",
    "status": "mapped"
   },
   {
@@ -371,7 +371,7 @@
   {
    "legacy": "test/aosp-staging-patches.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json run: pnpm test:root runs it",
    "status": "mapped"
   },
   {
@@ -395,7 +395,7 @@
   {
    "legacy": "test/apk-alpha-power-policy.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json run: pnpm test:root runs it",
    "status": "mapped"
   },
   {
@@ -413,7 +413,7 @@
   {
    "legacy": "test/apk-signer-range.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json run: pnpm test:root runs it",
    "status": "mapped"
   },
   {
@@ -450,7 +450,7 @@
    "legacy": "test/assistant-draft-dispatch.test.mjs",
    "area": "inbox",
    "spec": "apps/app/spec/inbox/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/assistant-empty-draft.test.mjs",
@@ -597,10 +597,16 @@
    "status": "mapped"
   },
   {
-   "legacy": "test/browser-page-context.test.mjs",
+   "legacy": "test/browser-page-context-native.test.mjs",
    "area": "browser",
    "spec": "apps/app/spec/browser/pageContext.md",
    "status": "mapped"
+  },
+  {
+   "legacy": "test/browser-page-context.test.mjs",
+   "area": "browser",
+   "spec": "apps/app/spec/browser/pageContext.md",
+   "status": "removed"
   },
   {
    "legacy": "test/browser-proof-export.test.mjs",
@@ -630,7 +636,7 @@
    "legacy": "test/browser-session-persistence.test.mjs",
    "area": "browser",
    "spec": "apps/app/spec/browser/session.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser-site-permissions.test.mjs",
@@ -732,12 +738,12 @@
    "legacy": "test/browser/agent-conversation-migration.spec.ts",
    "area": "assistant",
    "spec": "apps/app/spec/assistant/conversation.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/agent-email-card.production.spec.ts",
    "area": "inbox",
-   "spec": "apps/app/spec/inbox/agentDrafts.md",
+   "spec": "apps/app/spec/inbox/drafts.md",
    "status": "mapped"
   },
   {
@@ -756,7 +762,7 @@
    "legacy": "test/browser/album-storage-migration.spec.ts",
    "area": "camera",
    "spec": "apps/app/spec/camera/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/all-view-context.production.spec.ts",
@@ -773,7 +779,7 @@
   {
    "legacy": "test/browser/aosp-phone.spec.ts",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "the Playwright lanes (playwright.config.ts); the legacy journeys are still to be rewritten for apps/app/src/web (register A-210b)",
    "status": "mapped"
   },
   {
@@ -954,7 +960,7 @@
    "legacy": "test/browser/browser-page-context.production.spec.ts",
    "area": "browser",
    "spec": "apps/app/spec/browser/pageContext.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/browser-paste-fallback.production.spec.ts",
@@ -1056,7 +1062,7 @@
    "legacy": "test/browser/calendar-backup-restore.spec.ts",
    "area": "calendar",
    "spec": "apps/app/spec/calendar/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/calendar-chat-changes.spec.ts",
@@ -1121,8 +1127,9 @@
   {
    "legacy": "test/browser/calendar-linked-storage.spec.ts",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/linkedLocal.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/calendar/googleLink.md",
+   "status": "removed",
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync."
   },
   {
    "legacy": "test/browser/calendar-maps-handoff.spec.ts",
@@ -1176,19 +1183,21 @@
    "legacy": "test/browser/calendar-storage-migration.spec.ts",
    "area": "calendar",
    "spec": "apps/app/spec/calendar/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/calendar-sync-fixture.ts",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/sync.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/calendar/googleLink.md",
+   "status": "removed",
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync."
   },
   {
    "legacy": "test/browser/calendar-sync-settings.spec.ts",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/sync.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/calendar/googleLink.md",
+   "status": "removed",
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync."
   },
   {
    "legacy": "test/browser/calendar-transaction-cancel.spec.ts",
@@ -1404,7 +1413,7 @@
    "legacy": "test/browser/cloud-account-migration.spec.ts",
    "area": "account",
    "spec": "apps/app/spec/account/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/cloud-account-panel.spec.ts",
@@ -1428,19 +1437,19 @@
    "legacy": "test/browser/cloud-personal-intent-storage.spec.ts",
    "area": "platform",
    "spec": "apps/app/spec/platform/storage.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/cloud-personal-onboarding.spec.ts",
    "area": "platform",
    "spec": "apps/app/spec/platform/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/cloud-setup-migration.spec.ts",
    "area": "platform",
    "spec": "apps/app/spec/platform/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/cloud-tts-latency.local.spec.ts",
@@ -1493,7 +1502,7 @@
   {
    "legacy": "test/browser/comms-image-guards.spec.ts",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "the Playwright lanes (playwright.config.ts); the legacy journeys are still to be rewritten for apps/app/src/web (register A-210b)",
    "status": "mapped"
   },
   {
@@ -1566,7 +1575,7 @@
    "legacy": "test/browser/connection.production.spec.ts",
    "area": "platform",
    "spec": "apps/app/spec/platform/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/content-review-layout.spec.ts",
@@ -1697,8 +1706,9 @@
   {
    "legacy": "test/browser/dev-clock.spec.ts",
    "area": "clock",
-   "spec": "apps/app/spec/clock/worldClock.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/clock/alarms.md",
+   "status": "mapped",
+   "note": "Alarms, ringing, Do Not Disturb and tones in the browser build; ringing is clock/ringer.md."
   },
   {
    "legacy": "test/browser/dev-cloud-identity.spec.ts",
@@ -1710,13 +1720,13 @@
    "legacy": "test/browser/dev-cloud-scenarios.spec.ts",
    "area": "platform",
    "spec": "apps/app/spec/platform/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/dev-cloud-setup.spec.ts",
    "area": "platform",
    "spec": "apps/app/spec/platform/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/dev-connected-voice.spec.ts",
@@ -1728,7 +1738,7 @@
    "legacy": "test/browser/dev-connection-actions.spec.ts",
    "area": "assistant",
    "spec": "apps/app/spec/assistant/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/dev-connection-pagehide.spec.ts",
@@ -1762,26 +1772,26 @@
   },
   {
    "legacy": "test/browser/dev-digest-delegation.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestSources.md",
    "status": "mapped"
   },
   {
    "legacy": "test/browser/dev-digest-live.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestSources.md",
    "status": "mapped"
   },
   {
    "legacy": "test/browser/dev-digest-schedule.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
    "legacy": "test/browser/dev-digest-storage.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestInbox.md",
    "status": "mapped"
   },
   {
@@ -1817,7 +1827,7 @@
   {
    "legacy": "test/browser/dev-image-question.spec.ts",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "the Playwright lanes (playwright.config.ts); the legacy journeys are still to be rewritten for apps/app/src/web (register A-210b)",
    "status": "mapped"
   },
   {
@@ -1864,8 +1874,8 @@
   },
   {
    "legacy": "test/browser/dev-maps-voice.spec.ts",
-   "area": "maps",
-   "spec": "apps/app/spec/maps/voice.md",
+   "area": "voice",
+   "spec": "apps/app/spec/voice/conversation.md",
    "status": "mapped"
   },
   {
@@ -1956,13 +1966,13 @@
    "legacy": "test/browser/dev-wallet.spec.ts",
    "area": "platform",
    "spec": "apps/app/spec/platform/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/dev-workflow-agent.spec.ts",
    "area": "workflows",
    "spec": "apps/app/spec/workflows/agentSchedules.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/dev-workflow-authoring.spec.ts",
@@ -1980,7 +1990,7 @@
    "legacy": "test/browser/dev-workflow-background-agent.spec.ts",
    "area": "workflows",
    "spec": "apps/app/spec/workflows/agentSchedules.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/dev-workflow-calendar.spec.ts",
@@ -1992,7 +2002,7 @@
    "legacy": "test/browser/dev-workflow-concurrency.spec.ts",
    "area": "workflows",
    "spec": "apps/app/spec/workflows/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/dev-workflow-dates.spec.ts",
@@ -2010,7 +2020,7 @@
    "legacy": "test/browser/dev-workflow-executor.spec.ts",
    "area": "workflows",
    "spec": "apps/app/spec/workflows/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/dev-workflow-files.spec.ts",
@@ -2040,7 +2050,7 @@
    "legacy": "test/browser/dev-workflow-phone.spec.ts",
    "area": "workflows",
    "spec": "apps/app/spec/workflows/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/dev-workflow-receipts.spec.ts",
@@ -2052,7 +2062,7 @@
    "legacy": "test/browser/dev-workflow-result.spec.ts",
    "area": "workflows",
    "spec": "apps/app/spec/workflows/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/dev-workflow-speech.spec.ts",
@@ -2064,13 +2074,13 @@
    "legacy": "test/browser/dev-workflow-triggers.spec.ts",
    "area": "workflows",
    "spec": "apps/app/spec/workflows/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/dev-workflow-urgency.spec.ts",
    "area": "workflows",
    "spec": "apps/app/spec/workflows/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/device-apps-stub.ts",
@@ -2082,7 +2092,7 @@
    "legacy": "test/browser/device-storage-migration.spec.ts",
    "area": "platform",
    "spec": "apps/app/spec/platform/storage.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/device-view-profile.spec.ts",
@@ -2092,50 +2102,50 @@
   },
   {
    "legacy": "test/browser/digest-authorization-migration.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
-   "status": "mapped"
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestSources.md",
+   "status": "removed"
   },
   {
    "legacy": "test/browser/digest-execution-migration.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
-   "status": "mapped"
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
+   "status": "removed"
   },
   {
    "legacy": "test/browser/digest-inbox-migration.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
-   "status": "mapped"
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestInbox.md",
+   "status": "removed"
   },
   {
    "legacy": "test/browser/digest-native-sources.production.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestSources.md",
    "status": "mapped"
   },
   {
    "legacy": "test/browser/digest-resident-schedule.production.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
    "legacy": "test/browser/digest-schedule-removal.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
    "legacy": "test/browser/digest-source-renewal.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestSources.md",
    "status": "mapped"
   },
   {
    "legacy": "test/browser/digest-summary.spec.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
@@ -2172,7 +2182,7 @@
    "legacy": "test/browser/domain-initialization.spec.ts",
    "area": "platform",
    "spec": "apps/app/spec/platform/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/domain-recovery-lifecycle.spec.ts",
@@ -2196,7 +2206,7 @@
    "legacy": "test/browser/execution-storage-migration.spec.ts",
    "area": "platform",
    "spec": "apps/app/spec/platform/storage.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/explicit-send.spec.ts",
@@ -2267,7 +2277,7 @@
   {
    "legacy": "test/browser/fixture-images.spec.ts",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "the Playwright lanes (playwright.config.ts); the legacy journeys are still to be rewritten for apps/app/src/web (register A-210b)",
    "status": "mapped"
   },
   {
@@ -2573,8 +2583,9 @@
   {
    "legacy": "test/browser/home-landscape.spec.ts",
    "area": "shell",
-   "spec": "apps/app/spec/shell/index.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/shell/geometry.md",
+   "status": "mapped",
+   "note": "Landscape Home is not ported (docs/vibestack-open-items.md, G5)."
   },
   {
    "legacy": "test/browser/home-launcher.spec.ts",
@@ -2748,7 +2759,7 @@
    "legacy": "test/browser/journey-j03-document-analysis.spec.ts",
    "area": "files",
    "spec": "apps/app/spec/files/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/journey-j04-android.production.spec.ts",
@@ -2796,7 +2807,7 @@
    "legacy": "test/browser/legacy-list-identity.spec.ts",
    "area": "platform",
    "spec": "apps/app/spec/platform/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/legacy-notes-access.spec.ts",
@@ -3017,14 +3028,15 @@
   {
    "legacy": "test/browser/native-calendar-deletion-routing.spec.ts",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/nativeSync.md",
+   "spec": "apps/app/spec/calendar/device.md",
    "status": "mapped"
   },
   {
    "legacy": "test/browser/native-calendar-sync-settings.spec.ts",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/nativeSync.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/calendar/googleLink.md",
+   "status": "removed",
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync."
   },
   {
    "legacy": "test/browser/native-cloud-signin.spec.ts",
@@ -3173,8 +3185,9 @@
   {
    "legacy": "test/browser/notes-query-review.spec.ts",
    "area": "notes",
-   "spec": "apps/app/spec/notes/query.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/notes/organize.md",
+   "status": "mapped",
+   "note": "notes.query.v1 is not negotiated at the Vibestack head: the agent reads and changes notes with its own Notes (notes/organize.md)."
   },
   {
    "legacy": "test/browser/notes-responsive.production.spec.ts",
@@ -3240,12 +3253,12 @@
    "legacy": "test/browser/notification-storage-migration.spec.ts",
    "area": "shell",
    "spec": "apps/app/spec/shell/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/notifications-handle.spec.ts",
    "area": "shell",
-   "spec": "apps/app/spec/shell/index.md",
+   "spec": "apps/app/spec/shell/shade.md",
    "status": "mapped"
   },
   {
@@ -3274,8 +3287,8 @@
   },
   {
    "legacy": "test/browser/owned-voice-navigation-fixture.ts",
-   "area": "maps",
-   "spec": "apps/app/spec/maps/voice.md",
+   "area": "voice",
+   "spec": "apps/app/spec/voice/conversation.md",
    "status": "mapped"
   },
   {
@@ -3300,7 +3313,7 @@
    "legacy": "test/browser/page-context-script.spec.ts",
    "area": "browser",
    "spec": "apps/app/spec/browser/pageContext.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/password-entry-back.spec.ts",
@@ -3426,7 +3439,7 @@
    "legacy": "test/browser/preference-storage-migration.spec.ts",
    "area": "settings",
    "spec": "apps/app/spec/settings/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/privacy-per-connection.spec.ts",
@@ -3486,7 +3499,7 @@
    "legacy": "test/browser/recording-question.spec.ts",
    "area": "platform",
    "spec": "apps/app/spec/platform/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/reduced-motion-harness.spec.ts",
@@ -3570,7 +3583,7 @@
    "legacy": "test/browser/reminder-storage-migration.spec.ts",
    "area": "clock",
    "spec": "apps/app/spec/clock/reminderJournal.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/reminder-timing-review.spec.ts",
@@ -3588,13 +3601,13 @@
    "legacy": "test/browser/render-error-recovery.spec.ts",
    "area": "platform",
    "spec": "apps/app/spec/platform/rendererRecovery.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/reset-only.production.spec.ts",
    "area": "settings",
    "spec": "apps/app/spec/settings/reset.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/resident-background-results.spec.ts",
@@ -3809,7 +3822,7 @@
   {
    "legacy": "test/browser/shell-toast.spec.ts",
    "area": "shell",
-   "spec": "apps/app/spec/shell/index.md",
+   "spec": "apps/app/spec/shell/toasts.md",
    "status": "mapped"
   },
   {
@@ -3911,7 +3924,7 @@
   {
    "legacy": "test/browser/upstream-client-features.spec.ts",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "the Playwright lanes (playwright.config.ts); the legacy journeys are still to be rewritten for apps/app/src/web (register A-210b)",
    "status": "mapped"
   },
   {
@@ -3984,7 +3997,7 @@
    "legacy": "test/browser/voice-entry-context.spec.ts",
    "area": "voice",
    "spec": "apps/app/spec/voice/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/voice-fixture-failure-metadata.ts",
@@ -4006,14 +4019,14 @@
   },
   {
    "legacy": "test/browser/voice-owned-navigation.spec.ts",
-   "area": "maps",
-   "spec": "apps/app/spec/maps/voice.md",
-   "status": "mapped"
+   "area": "voice",
+   "spec": "apps/app/spec/voice/conversation.md",
+   "status": "removed"
   },
   {
    "legacy": "test/browser/voice-phone-navigation.spec.ts",
-   "area": "maps",
-   "spec": "apps/app/spec/maps/voice.md",
+   "area": "voice",
+   "spec": "apps/app/spec/voice/conversation.md",
    "status": "mapped"
   },
   {
@@ -4026,13 +4039,13 @@
    "legacy": "test/browser/voice-route-preference.spec.ts",
    "area": "voice",
    "spec": "apps/app/spec/voice/route.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/voice-save-ownership.spec.ts",
    "area": "voice",
    "spec": "apps/app/spec/voice/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/browser/voice-stop-speaking.spec.ts",
@@ -4212,7 +4225,7 @@
    "legacy": "test/calendar-confirmation.test.mjs",
    "area": "calendar",
    "spec": "apps/app/spec/calendar/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/calendar-date-picker-label.test.mjs",
@@ -4236,7 +4249,7 @@
    "legacy": "test/calendar-delete-latch.test.mjs",
    "area": "calendar",
    "spec": "apps/app/spec/calendar/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/calendar-deletion-identity.test.mjs",
@@ -4271,14 +4284,16 @@
   {
    "legacy": "test/calendar-linked-provider.test.mjs",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/linkedLocal.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/calendar/googleLink.md",
+   "status": "removed",
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync."
   },
   {
    "legacy": "test/calendar-linked-store.test.mjs",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/linkedLocal.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/calendar/googleLink.md",
+   "status": "removed",
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync."
   },
   {
    "legacy": "test/calendar-managed-rejection.test.mjs",
@@ -4307,8 +4322,8 @@
   {
    "legacy": "test/calendar-mounted-preservation.test.mjs",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/preservation.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/calendar/editor.md",
+   "status": "removed"
   },
   {
    "legacy": "test/calendar-option-save-ownership.test.mjs",
@@ -4337,38 +4352,41 @@
   {
    "legacy": "test/calendar-sync-consent.test.mjs",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/sync.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/calendar/googleLink.md",
+   "status": "mapped",
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync."
   },
   {
    "legacy": "test/calendar-sync-failure-copy.test.mjs",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/sync.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/calendar/googleLink.md",
+   "status": "removed",
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync."
   },
   {
    "legacy": "test/calendar-sync-mutation.test.mjs",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/sync.md",
+   "spec": "apps/app/spec/calendar/device.md",
    "status": "mapped"
   },
   {
    "legacy": "test/calendar-sync-receipt-recovery.test.mjs",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/sync.md",
+   "spec": "apps/app/spec/calendar/device.md",
    "status": "mapped"
   },
   {
    "legacy": "test/calendar-sync-snapshot.test.mjs",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/sync.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/calendar/googleLink.md",
+   "status": "mapped",
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync."
   },
   {
    "legacy": "test/calendar-view-rules.test.mjs",
    "area": "calendar",
    "spec": "apps/app/spec/calendar/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/call-number-guard.test.mjs",
@@ -4410,7 +4428,7 @@
    "legacy": "test/camera-resume.test.mjs",
    "area": "camera",
    "spec": "apps/app/spec/camera/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/camera-view-first.test.mjs",
@@ -4428,7 +4446,7 @@
    "legacy": "test/canonical-maps-return.test.mjs",
    "area": "maps",
    "spec": "apps/app/spec/maps/eventReturn.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/canonical-notes-draft-copy.test.mjs",
@@ -4457,7 +4475,7 @@
   {
    "legacy": "test/check-quint-cache.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -4469,7 +4487,7 @@
   {
    "legacy": "test/ci-emulator-evidence.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: Not moved yet: the scripts/os-ported and harness rewrite (docs/vibestack-open-items.md, Tooling).",
    "status": "mapped"
   },
   {
@@ -4503,6 +4521,12 @@
    "status": "mapped"
   },
   {
+   "legacy": "test/clock-handoff-current-envelope.test.mjs",
+   "area": "clock",
+   "spec": "apps/app/spec/clock/handoffHistory.md",
+   "status": "mapped"
+  },
+  {
    "legacy": "test/clock-native-contract.test.mjs",
    "area": "clock",
    "spec": "apps/app/spec/clock/worldClock.md",
@@ -4517,14 +4541,14 @@
   {
    "legacy": "test/cloud-candidate-deployment.test.mjs",
    "area": "cloud",
-   "replacement": "cloud/test/*.test.vibe (deployment, registration, edge, wrangler, runtime-config, profile)",
+   "replacement": "test/root-tests.json held: cloud/src/*.vibe with cloud/test/*.test.vibe and scripts/cloud-worker.ts (scripts/legacy-retirement.json); the readiness gates beyond smoke are an open item.",
    "status": "mapped"
   },
   {
    "legacy": "test/cloud-credential-concurrent-read.test.mjs",
    "area": "account",
    "spec": "apps/app/spec/account/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/cloud-delegation-callback.test.mjs",
@@ -4535,19 +4559,19 @@
   {
    "legacy": "test/cloud-deployment.test.mjs",
    "area": "cloud",
-   "replacement": "cloud/test/*.test.vibe (deployment, registration, edge, wrangler, runtime-config, profile)",
+   "replacement": "test/root-tests.json held: cloud/src/*.vibe with cloud/test/*.test.vibe and scripts/cloud-worker.ts (scripts/legacy-retirement.json); the readiness gates beyond smoke are an open item.",
    "status": "mapped"
   },
   {
    "legacy": "test/cloud-email-deployment.test.mjs",
    "area": "cloud",
-   "replacement": "cloud/test/*.test.vibe (deployment, registration, edge, wrangler, runtime-config, profile)",
+   "replacement": "test/root-tests.json held: cloud/src/*.vibe with cloud/test/*.test.vibe and scripts/cloud-worker.ts (scripts/legacy-retirement.json); the readiness gates beyond smoke are an open item.",
    "status": "mapped"
   },
   {
    "legacy": "test/cloud-email-resend.test.mjs",
    "area": "cloud",
-   "replacement": "cloud/test/*.test.vibe (deployment, registration, edge, wrangler, runtime-config, profile)",
+   "replacement": "test/root-tests.json held: cloud/src/*.vibe with cloud/test/*.test.vibe and scripts/cloud-worker.ts (scripts/legacy-retirement.json); the readiness gates beyond smoke are an open item.",
    "status": "mapped"
   },
   {
@@ -4578,7 +4602,7 @@
    "legacy": "test/cloud-personal-protocol.test.mjs",
    "area": "platform",
    "spec": "apps/app/spec/platform/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/cloud-phone-login.test.mjs",
@@ -4596,12 +4620,12 @@
    "legacy": "test/cloud-prewarm.test.mjs",
    "area": "platform",
    "spec": "apps/app/spec/platform/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/cloud-provision.test.mjs",
    "area": "cloud",
-   "replacement": "cloud/test/*.test.vibe (deployment, registration, edge, wrangler, runtime-config, profile)",
+   "replacement": "test/root-tests.json run: pnpm test:root runs it",
    "status": "mapped"
   },
   {
@@ -4613,7 +4637,7 @@
   {
    "legacy": "test/cloud-readiness.test.mjs",
    "area": "cloud",
-   "replacement": "cloud/test/*.test.vibe (deployment, registration, edge, wrangler, runtime-config, profile)",
+   "replacement": "test/root-tests.json held: cloud/src/*.vibe with cloud/test/*.test.vibe and scripts/cloud-worker.ts (scripts/legacy-retirement.json); the readiness gates beyond smoke are an open item.",
    "status": "mapped"
   },
   {
@@ -4637,7 +4661,7 @@
   {
    "legacy": "test/cloud-sdk-routing.test.mjs",
    "area": "cloud",
-   "replacement": "cloud/test/*.test.vibe (deployment, registration, edge, wrangler, runtime-config, profile)",
+   "replacement": "test/root-tests.json held: cloud/src/*.vibe with cloud/test/*.test.vibe and scripts/cloud-worker.ts (scripts/legacy-retirement.json); the readiness gates beyond smoke are an open item.",
    "status": "mapped"
   },
   {
@@ -4656,7 +4680,7 @@
    "legacy": "test/cloud-sign-in-flow.test.mjs",
    "area": "account",
    "spec": "apps/app/spec/account/signIn.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/cloud-sign-in-network.test.mjs",
@@ -4709,7 +4733,7 @@
   {
    "legacy": "test/cloud-worker.test.mjs",
    "area": "cloud",
-   "replacement": "cloud/test/*.test.vibe (deployment, registration, edge, wrangler, runtime-config, profile)",
+   "replacement": "test/root-tests.json run: pnpm test:root runs it",
    "status": "mapped"
   },
   {
@@ -4758,7 +4782,7 @@
    "legacy": "test/connection-step-contracts.test.mjs",
    "area": "platform",
    "spec": "apps/app/spec/platform/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/contacts-adapter.test.mjs",
@@ -4876,26 +4900,26 @@
   },
   {
    "legacy": "test/digest-capabilities.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
    "legacy": "test/digest-missed-run-now.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
    "legacy": "test/digest-occurrence-delivery.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
    "legacy": "test/digest-restart-input.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
@@ -4967,7 +4991,7 @@
   {
    "legacy": "test/enroll-release-keys.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json run: pnpm test:root runs it",
    "status": "mapped"
   },
   {
@@ -4992,7 +5016,7 @@
    "legacy": "test/feature-manifest.test.mjs",
    "area": "platform",
    "spec": "apps/app/spec/platform/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/files-agent-patch.test.mjs",
@@ -5022,7 +5046,7 @@
    "legacy": "test/files-index.test.mjs",
    "area": "files",
    "spec": "apps/app/spec/files/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/files-legacy-storage.test.mjs",
@@ -5070,7 +5094,7 @@
    "legacy": "test/fixtures/AccessibilityBoundsTest.java",
    "area": "platform",
    "spec": "apps/app/spec/platform/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/fixtures/AlphaFileDetailsTest.java.txt",
@@ -5111,26 +5135,28 @@
   {
    "legacy": "test/fixtures/CalendarSyncConsentTest.java",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/sync.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/calendar/googleLink.md",
+   "status": "mapped",
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync."
   },
   {
    "legacy": "test/fixtures/CalendarSyncMutationTest.java",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/sync.md",
+   "spec": "apps/app/spec/calendar/device.md",
    "status": "mapped"
   },
   {
    "legacy": "test/fixtures/CalendarSyncReceiptRecoveryTest.java",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/sync.md",
+   "spec": "apps/app/spec/calendar/device.md",
    "status": "mapped"
   },
   {
    "legacy": "test/fixtures/CalendarSyncSnapshotTest.java",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/sync.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/calendar/googleLink.md",
+   "status": "mapped",
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync."
   },
   {
    "legacy": "test/fixtures/CallStateTest.java",
@@ -5206,8 +5232,8 @@
   },
   {
    "legacy": "test/fixtures/NativeDigestSourcesTest.java",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestSources.md",
    "status": "mapped"
   },
   {
@@ -5393,7 +5419,7 @@
   {
    "legacy": "test/fixtures/android-gzip-assets.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/android-gzip-assets.test.mjs imports it (run by pnpm test:root)",
    "status": "mapped"
   },
   {
@@ -5807,8 +5833,9 @@
   {
    "legacy": "test/fixtures/calendar-sync-snapshot-jvm.mjs",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/sync.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/calendar/googleLink.md",
+   "status": "mapped",
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync."
   },
   {
    "legacy": "test/fixtures/call-state-jvm/android/annotation/SuppressLint.java",
@@ -5998,8 +6025,8 @@
   },
   {
    "legacy": "test/fixtures/hosted-digest-refresh.jsx",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
@@ -6431,7 +6458,7 @@
   {
    "legacy": "test/fixtures/upstream-view-registry.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "a fixture of the legacy view-registry tests, which the area specs own",
    "status": "mapped"
   },
   {
@@ -6473,14 +6500,15 @@
   {
    "legacy": "test/font-license.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json run: pnpm test:root runs it",
    "status": "mapped"
   },
   {
    "legacy": "test/gmail-agent-read-host.test.mjs",
    "area": "inbox",
-   "spec": "apps/app/spec/inbox/agentDrafts.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/inbox/mailbox.md",
+   "status": "mapped",
+   "note": "Developer Gmail read host and broker for the legacy resident; whether local development starts a resident beside the renderer is open (register A-398)."
   },
   {
    "legacy": "test/gmail-background-binding.test.mjs",
@@ -6534,7 +6562,7 @@
    "legacy": "test/google-calendar-selection.test.mjs",
    "area": "calendar",
    "spec": "apps/app/spec/calendar/selection.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/google-connections-resource-budget.test.mjs",
@@ -6575,7 +6603,7 @@
   {
    "legacy": "test/gradle-verification.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json run: pnpm test:root runs it",
    "status": "mapped"
   },
   {
@@ -6624,7 +6652,7 @@
    "legacy": "test/home-views-model.test.mjs",
    "area": "shell",
    "spec": "apps/app/spec/shell/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/host-speech-admission.test.mjs",
@@ -6646,20 +6674,20 @@
   },
   {
    "legacy": "test/hosted-digest-mutation-ownership.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
    "legacy": "test/hosted-digest-panel.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
    "legacy": "test/hosted-digest-refresh-ownership.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
@@ -6761,7 +6789,7 @@
   {
    "legacy": "test/instrumentation-outcome-status.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json run: pnpm test:root runs it",
    "status": "mapped"
   },
   {
@@ -6773,19 +6801,19 @@
   {
    "legacy": "test/lemma-check.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/lemma-checker.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/licenses.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: Not moved yet: port the notice and SBOM tests to pnpm-lock.yaml (docs/vibestack-open-items.md, Tooling).",
    "status": "mapped"
   },
   {
@@ -6876,7 +6904,7 @@
    "legacy": "test/login-surfaces.test.mjs",
    "area": "platform",
    "spec": "apps/app/spec/platform/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/mail-attachment-refusals.test.mjs",
@@ -7037,14 +7065,15 @@
   {
    "legacy": "test/native-build-inputs.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: Not moved yet: requalify the embedding and voice hosts at the pin (docs/vibestack-open-items.md, Tooling).",
    "status": "mapped"
   },
   {
    "legacy": "test/native-calendar-sync-port.test.mjs",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/nativeSync.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/calendar/googleLink.md",
+   "status": "removed",
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync."
   },
   {
    "legacy": "test/native-campaign-evidence.test.mjs",
@@ -7078,8 +7107,8 @@
   },
   {
    "legacy": "test/native-digest-sources.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestSources.md",
    "status": "mapped"
   },
   {
@@ -7206,7 +7235,7 @@
    "legacy": "test/native-secure-slots.test.mjs",
    "area": "platform",
    "spec": "apps/app/spec/platform/nativeStream.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/native-start-cancel.test.mjs",
@@ -7240,9 +7269,10 @@
   },
   {
    "legacy": "test/native-voice-event-worker.test.mjs",
-   "area": "calendar",
-   "spec": "apps/app/spec/calendar/nativeSync.md",
-   "status": "mapped"
+   "area": "voice",
+   "spec": "apps/app/spec/voice/index.md",
+   "status": "mapped",
+   "note": "VoiceEventAdmission.java admits the voice event feed; the voice area owns it."
   },
   {
    "legacy": "test/native-voice-latency.test.mjs",
@@ -7259,13 +7289,19 @@
   {
    "legacy": "test/navigation-voice-pause.test.mjs",
    "area": "maps",
-   "spec": "apps/app/spec/maps/voice.md",
+   "spec": "apps/app/spec/maps/guidance.md",
    "status": "mapped"
   },
   {
    "legacy": "test/navigation-voice.test.mjs",
    "area": "maps",
-   "spec": "apps/app/spec/maps/voice.md",
+   "spec": "apps/app/spec/maps/guidance.md",
+   "status": "mapped"
+  },
+  {
+   "legacy": "test/network-location.test.mjs",
+   "area": "maps",
+   "spec": "apps/app/spec/maps/location.md",
    "status": "mapped"
   },
   {
@@ -7319,8 +7355,9 @@
   {
    "legacy": "test/notes-query-explanation.test.mjs",
    "area": "notes",
-   "spec": "apps/app/spec/notes/query.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/notes/organize.md",
+   "status": "mapped",
+   "note": "notes.query.v1 is not negotiated at the Vibestack head: the agent reads and changes notes with its own Notes (notes/organize.md)."
   },
   {
    "legacy": "test/notes-recorder-media-admission.test.mjs",
@@ -7445,7 +7482,7 @@
   {
    "legacy": "test/owner-sign-aosp-release-edges.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: Not moved yet: the scripts/os-ported and harness rewrite (docs/vibestack-open-items.md, Tooling).",
    "status": "mapped"
   },
   {
@@ -7601,13 +7638,13 @@
   {
    "legacy": "test/pixel10a-image.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json run: pnpm test:root runs it",
    "status": "mapped"
   },
   {
    "legacy": "test/pixel10a-source.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json run: pnpm test:root runs it",
    "status": "mapped"
   },
   {
@@ -7667,7 +7704,7 @@
   {
    "legacy": "test/production-bundle-audit.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json run: pnpm test:root runs it",
    "status": "mapped"
   },
   {
@@ -7721,7 +7758,7 @@
   {
    "legacy": "test/quint-address-input.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -7763,25 +7800,25 @@
   {
    "legacy": "test/quint-android-build-input-readiness.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-android-gzip-asset-stage.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-android-installation-identity.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-app-info-handoff-composition.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -7799,7 +7836,7 @@
   {
    "legacy": "test/quint-application-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -7835,7 +7872,7 @@
   {
    "legacy": "test/quint-back-dispatch.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -8027,8 +8064,9 @@
   {
    "legacy": "test/quint-calendar-linked-local-port.test.mjs",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/linkedLocal.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/calendar/googleLink.md",
+   "status": "removed",
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync."
   },
   {
    "legacy": "test/quint-calendar-named-read.test.mjs",
@@ -8045,8 +8083,8 @@
   {
    "legacy": "test/quint-calendar-preservation-confirmation.test.mjs",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/preservation.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/calendar/editor.md",
+   "status": "removed"
   },
   {
    "legacy": "test/quint-camera-agent-capture.test.mjs",
@@ -8177,19 +8215,19 @@
   {
    "legacy": "test/quint-checker.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-client-feature-publication.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-client-observation-support.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -8213,7 +8251,7 @@
   {
    "legacy": "test/quint-committed-view-observation.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -8225,19 +8263,19 @@
   {
    "legacy": "test/quint-composition-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-conformance.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-connection-controller.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -8273,43 +8311,43 @@
   {
    "legacy": "test/quint-core-interactive-task-traces.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-core-plugin-lifecycle-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-core-retirement.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-core-runtime-lifecycle-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-core-service-lifecycle-design-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-core-service-lifecycle.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-core-shutdown.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -8321,7 +8359,7 @@
   {
    "legacy": "test/quint-core-task-service-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -8345,7 +8383,7 @@
   {
    "legacy": "test/quint-day-anchor.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -8362,8 +8400,8 @@
   },
   {
    "legacy": "test/quint-development-digest-pending.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
@@ -8382,7 +8420,7 @@
    "legacy": "test/quint-domain-document-creation.test.mjs",
    "area": "files",
    "spec": "apps/app/spec/files/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/quint-drawer-interaction.test.mjs",
@@ -8399,25 +8437,25 @@
   {
    "legacy": "test/quint-embedding-sql-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-embedding-store-identity.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-fact-write-dedupe-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-fact-write-scope.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -8447,7 +8485,7 @@
   {
    "legacy": "test/quint-find-in-page.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -8459,7 +8497,7 @@
   {
    "legacy": "test/quint-fixture-busy-latch.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -8477,7 +8515,7 @@
   {
    "legacy": "test/quint-google-access-publication.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -8494,8 +8532,8 @@
   },
   {
    "legacy": "test/quint-google-calendar-disconnect.test.mjs",
-   "area": "calendar",
-   "spec": "apps/app/spec/calendar/disconnect.md",
+   "area": "account",
+   "spec": "apps/app/spec/account/google.md",
    "status": "mapped"
   },
   {
@@ -8513,7 +8551,7 @@
   {
    "legacy": "test/quint-google-consent-admission.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -8555,19 +8593,19 @@
   {
    "legacy": "test/quint-hosted-background-admission.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-hosted-digest-mutation.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-hosted-digest-refresh.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
@@ -8609,13 +8647,13 @@
   {
    "legacy": "test/quint-indicator-provider.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-inert-hold.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -8687,7 +8725,7 @@
   {
    "legacy": "test/quint-legacy-google-connect-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -8837,19 +8875,19 @@
   {
    "legacy": "test/quint-media-copy-intent.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-mms-compose.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-mobile-bundle-admission.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -8867,7 +8905,7 @@
   {
    "legacy": "test/quint-named-embedding-provenance.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -8879,7 +8917,7 @@
   {
    "legacy": "test/quint-native-app-info-handoff.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -8891,14 +8929,15 @@
   {
    "legacy": "test/quint-native-calendar-scoped-review.test.mjs",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/nativeSync.md",
+   "spec": "apps/app/spec/calendar/device.md",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-native-calendar-sync-enable.test.mjs",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/nativeSync.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/calendar/googleLink.md",
+   "status": "mapped",
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync."
   },
   {
    "legacy": "test/quint-native-clock-review.test.mjs",
@@ -8909,13 +8948,13 @@
   {
    "legacy": "test/quint-native-conformance.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-native-crash-journal.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -8926,8 +8965,8 @@
   },
   {
    "legacy": "test/quint-native-digest-consent.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestSources.md",
    "status": "mapped"
   },
   {
@@ -8945,7 +8984,7 @@
   {
    "legacy": "test/quint-native-google-host-artifact.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -8969,7 +9008,7 @@
   {
    "legacy": "test/quint-native-mms-dispatch.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -8981,13 +9020,13 @@
   {
    "legacy": "test/quint-native-recording.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-native-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -8999,7 +9038,7 @@
   {
    "legacy": "test/quint-native-request-withdrawal.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -9017,19 +9056,19 @@
   {
    "legacy": "test/quint-native-source-renewal.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-native-stream-bridge.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-native-text-scale-lifecycle.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -9119,13 +9158,13 @@
   {
    "legacy": "test/quint-on-device-recognizer.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-os-application-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -9179,7 +9218,7 @@
   {
    "legacy": "test/quint-phone-recents.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -9239,13 +9278,13 @@
   {
    "legacy": "test/quint-plugin-connector-custody.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-prepared-source-stamp.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -9275,13 +9314,13 @@
   {
    "legacy": "test/quint-prototype-surfaces-source-contracts.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-provider-execution-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -9293,7 +9332,7 @@
   {
    "legacy": "test/quint-read-aloud.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -9317,7 +9356,7 @@
   {
    "legacy": "test/quint-recovery-ui-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -9329,7 +9368,7 @@
   {
    "legacy": "test/quint-refinement-harness.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -9377,13 +9416,13 @@
   {
    "legacy": "test/quint-renderer-background-rebuild.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-renderer-digest-queue.test.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestInbox.md",
    "status": "mapped"
   },
   {
@@ -9395,7 +9434,7 @@
   {
    "legacy": "test/quint-renderer-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -9407,13 +9446,13 @@
   {
    "legacy": "test/quint-resident-java-source-stage.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-resident-liveness.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -9425,7 +9464,7 @@
   {
    "legacy": "test/quint-resident-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -9437,7 +9476,7 @@
   {
    "legacy": "test/quint-resident-start-cancel.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -9461,13 +9500,13 @@
   {
    "legacy": "test/quint-room-handler-queue.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-saved-service-read.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -9503,13 +9542,13 @@
   {
    "legacy": "test/quint-service-read-cache.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-services-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -9599,7 +9638,7 @@
   {
    "legacy": "test/quint-single-flight-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -9617,7 +9656,7 @@
   {
    "legacy": "test/quint-source-renewal-question.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -9659,7 +9698,7 @@
   {
    "legacy": "test/quint-state-inventory.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -9671,7 +9710,7 @@
   {
    "legacy": "test/quint-system-picker-visibility.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -9689,13 +9728,13 @@
   {
    "legacy": "test/quint-task-service-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-tla-inventory.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -9707,7 +9746,7 @@
   {
    "legacy": "test/quint-vault-coordinator-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
@@ -9725,13 +9764,13 @@
   {
    "legacy": "test/quint-view-admission.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-voice-owned-navigation.test.mjs",
-   "area": "maps",
-   "spec": "apps/app/spec/maps/voice.md",
+   "area": "voice",
+   "spec": "apps/app/spec/voice/conversation.md",
    "status": "mapped"
   },
   {
@@ -9851,7 +9890,7 @@
   {
    "legacy": "test/record-release.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json run: pnpm test:root runs it",
    "status": "mapped"
   },
   {
@@ -9941,7 +9980,7 @@
   {
    "legacy": "test/resident-build-output.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: Not moved yet: port to @elizaos/os/build generateAndroidHost and the schema-2 profile (docs/vibestack-open-items.md, Tooling).",
    "status": "mapped"
   },
   {
@@ -9977,7 +10016,7 @@
   {
    "legacy": "test/runtime-licenses.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: Not moved yet: port the notice and SBOM tests to pnpm-lock.yaml (docs/vibestack-open-items.md, Tooling).",
    "status": "mapped"
   },
   {
@@ -10001,7 +10040,7 @@
   {
    "legacy": "test/sbom.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: Not moved yet: port the notice and SBOM tests to pnpm-lock.yaml (docs/vibestack-open-items.md, Tooling).",
    "status": "mapped"
   },
   {
@@ -10133,7 +10172,7 @@
   {
    "legacy": "test/sign-release-apks.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json run: pnpm test:root runs it",
    "status": "mapped"
   },
   {
@@ -10169,7 +10208,7 @@
   {
    "legacy": "test/source-snapshot.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: Not moved yet: port to @elizaos/os/build generateAndroidHost and the schema-2 profile (docs/vibestack-open-items.md, Tooling).",
    "status": "mapped"
   },
   {
@@ -10205,7 +10244,7 @@
   {
    "legacy": "test/strict-build-inputs.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: Not moved yet: port to @elizaos/os/build generateAndroidHost and the schema-2 profile (docs/vibestack-open-items.md, Tooling).",
    "status": "mapped"
   },
   {
@@ -10229,7 +10268,7 @@
   {
    "legacy": "test/support/bun-test-setup.ts",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "none: Bun is retired; Vitest (pnpm test) and pnpm test:root replace its setup",
    "status": "mapped"
   },
   {
@@ -10242,7 +10281,7 @@
    "legacy": "test/support/login-surfaces.mjs",
    "area": "platform",
    "spec": "apps/app/spec/platform/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/support/managed-google-agent.mjs",
@@ -10260,7 +10299,7 @@
    "legacy": "test/support/module-inventory.mjs",
    "area": "platform",
    "spec": "apps/app/spec/platform/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/support/node-only.mjs",
@@ -10271,7 +10310,7 @@
   {
    "legacy": "test/support/quint-conformance-ui-staging.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "a helper of the legacy test/quint-* conformance tests, which test/root-tests.json holds",
    "status": "mapped"
   },
   {
@@ -10421,19 +10460,19 @@
   {
    "legacy": "test/upstream-native-source.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json run: pnpm test:root runs it",
    "status": "mapped"
   },
   {
    "legacy": "test/upstream-pin-guard.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json run: pnpm test:root runs it",
    "status": "mapped"
   },
   {
    "legacy": "test/upstream-reachability.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json run: pnpm test:root runs it",
    "status": "mapped"
   },
   {
@@ -10451,7 +10490,7 @@
   {
    "legacy": "test/verify-apks.test.mjs",
    "area": "tooling",
-   "replacement": "scripts/** (node) and upstream spec/os/build, spec/os/image",
+   "replacement": "test/root-tests.json held: Not moved yet: the scripts/os-ported and harness rewrite (docs/vibestack-open-items.md, Tooling).",
    "status": "mapped"
   },
   {
@@ -10584,7 +10623,7 @@
    "legacy": "test/white-label-copy.test.mjs",
    "area": "platform",
    "spec": "apps/app/spec/platform/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "test/wireless-install-history.test.mjs",
@@ -11005,8 +11044,9 @@
   {
    "legacy": "specs/quint/application/CalendarLinkedLocalPort.qnt",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/linkedLocal.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/calendar/googleLink.md",
+   "status": "removed",
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync."
   },
   {
    "legacy": "specs/quint/application/CalendarNamedRead.qnt",
@@ -11023,8 +11063,8 @@
   {
    "legacy": "specs/quint/application/CalendarPreservationConfirmation.qnt",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/preservation.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/calendar/editor.md",
+   "status": "removed"
   },
   {
    "legacy": "specs/quint/application/CallbackLanding.qnt",
@@ -11240,7 +11280,7 @@
    "legacy": "specs/quint/application/DomainDocumentCreation.qnt",
    "area": "files",
    "spec": "apps/app/spec/files/index.md",
-   "status": "mapped"
+   "status": "removed"
   },
   {
    "legacy": "specs/quint/application/DraftDispatch.qnt",
@@ -11340,8 +11380,8 @@
   },
   {
    "legacy": "specs/quint/application/GoogleCalendarDisconnect.qnt",
-   "area": "calendar",
-   "spec": "apps/app/spec/calendar/disconnect.md",
+   "area": "account",
+   "spec": "apps/app/spec/account/google.md",
    "status": "mapped"
   },
   {
@@ -11388,14 +11428,14 @@
   },
   {
    "legacy": "specs/quint/application/HostedDigestMutation.qnt",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
    "legacy": "specs/quint/application/HostedDigestRefresh.qnt",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
@@ -11802,8 +11842,8 @@
   },
   {
    "legacy": "specs/quint/application/RendererDigestQueue.qnt",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestInbox.md",
    "status": "mapped"
   },
   {
@@ -11988,8 +12028,8 @@
   },
   {
    "legacy": "specs/quint/application/VoiceOwnedNavigation.qnt",
-   "area": "maps",
-   "spec": "apps/app/spec/maps/voice.md",
+   "area": "voice",
+   "spec": "apps/app/spec/voice/conversation.md",
    "status": "mapped"
   },
   {
@@ -12364,14 +12404,15 @@
   {
    "legacy": "specs/quint/native/NativeCalendarScopedReview.qnt",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/nativeSync.md",
+   "spec": "apps/app/spec/calendar/device.md",
    "status": "mapped"
   },
   {
    "legacy": "specs/quint/native/NativeCalendarSyncEnable.qnt",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/nativeSync.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/calendar/googleLink.md",
+   "status": "mapped",
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync."
   },
   {
    "legacy": "specs/quint/native/NativeCaptureFrames.qnt",
@@ -12399,8 +12440,8 @@
   },
   {
    "legacy": "specs/quint/native/NativeDigestConsent.qnt",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestSources.md",
    "status": "mapped"
   },
   {
@@ -12789,8 +12830,8 @@
   },
   {
    "legacy": "specs/quint/services/BrowserDownloads.qnt",
-   "area": "files",
-   "spec": "apps/app/spec/files/browserDownloads.md",
+   "area": "browser",
+   "spec": "apps/app/spec/browser/downloads.md",
    "status": "mapped"
   },
   {
@@ -12814,14 +12855,16 @@
   {
    "legacy": "specs/quint/services/CalendarLinkedSync.qnt",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/sync.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/calendar/googleLink.md",
+   "status": "mapped",
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync."
   },
   {
    "legacy": "specs/quint/services/CalendarSync.qnt",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/sync.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/calendar/googleLink.md",
+   "status": "mapped",
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync."
   },
   {
    "legacy": "specs/quint/services/CanonicalNotesStore.qnt",
@@ -12885,8 +12928,8 @@
   },
   {
    "legacy": "specs/quint/services/DevelopmentDigestPending.qnt",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped"
   },
   {
@@ -14218,15 +14261,15 @@
   {
    "legacy": "specs/quint/refinement/application/calendar-linked-local-port.mjs",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/linkedLocal.md",
-   "status": "mapped",
-   "note": "LemmaScript/Dafny proof of a legacy renderer module; vibestack proofs are spec-level (*.proof.dfy beside the area spec)"
+   "spec": "apps/app/spec/calendar/googleLink.md",
+   "status": "removed",
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync."
   },
   {
    "legacy": "specs/quint/refinement/application/calendar-preservation-confirmation.md",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/preservation.md",
-   "status": "mapped",
+   "spec": "apps/app/spec/calendar/editor.md",
+   "status": "removed",
    "note": "LemmaScript/Dafny proof of a legacy renderer module; vibestack proofs are spec-level (*.proof.dfy beside the area spec)"
   },
   {
@@ -14462,8 +14505,8 @@
   },
   {
    "legacy": "specs/quint/refinement/application/google-calendar-disconnect.md",
-   "area": "calendar",
-   "spec": "apps/app/spec/calendar/disconnect.md",
+   "area": "account",
+   "spec": "apps/app/spec/account/google.md",
    "status": "mapped",
    "note": "LemmaScript/Dafny proof of a legacy renderer module; vibestack proofs are spec-level (*.proof.dfy beside the area spec)"
   },
@@ -14511,8 +14554,8 @@
   },
   {
    "legacy": "specs/quint/refinement/application/hosted-digest-refresh.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped",
    "note": "LemmaScript/Dafny proof of a legacy renderer module; vibestack proofs are spec-level (*.proof.dfy beside the area spec)"
   },
@@ -14931,8 +14974,8 @@
   },
   {
    "legacy": "specs/quint/refinement/application/voice-owned-navigation.mjs",
-   "area": "maps",
-   "spec": "apps/app/spec/maps/voice.md",
+   "area": "voice",
+   "spec": "apps/app/spec/voice/conversation.md",
    "status": "mapped",
    "note": "LemmaScript/Dafny proof of a legacy renderer module; vibestack proofs are spec-level (*.proof.dfy beside the area spec)"
   },
@@ -15072,9 +15115,9 @@
   {
    "legacy": "specs/quint/refinement/native/CalendarSyncEnableTraces.java",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/sync.md",
+   "spec": "apps/app/spec/calendar/googleLink.md",
    "status": "mapped",
-   "note": "LemmaScript/Dafny proof of a legacy renderer module; vibestack proofs are spec-level (*.proof.dfy beside the area spec)"
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync."
   },
   {
    "legacy": "specs/quint/refinement/native/CanonicalTapTraces.java",
@@ -15330,8 +15373,8 @@
   },
   {
    "legacy": "specs/quint/refinement/native/NativeDigestTraces.java",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestSources.md",
    "status": "mapped",
    "note": "LemmaScript/Dafny proof of a legacy renderer module; vibestack proofs are spec-level (*.proof.dfy beside the area spec)"
   },
@@ -15723,16 +15766,16 @@
   {
    "legacy": "specs/quint/refinement/native/calendar-sync-enable-platform.mjs",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/sync.md",
+   "spec": "apps/app/spec/calendar/googleLink.md",
    "status": "mapped",
-   "note": "LemmaScript/Dafny proof of a legacy renderer module; vibestack proofs are spec-level (*.proof.dfy beside the area spec)"
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync."
   },
   {
    "legacy": "specs/quint/refinement/native/calendar-sync-enable.mjs",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/sync.md",
+   "spec": "apps/app/spec/calendar/googleLink.md",
    "status": "mapped",
-   "note": "LemmaScript/Dafny proof of a legacy renderer module; vibestack proofs are spec-level (*.proof.dfy beside the area spec)"
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync."
   },
   {
    "legacy": "specs/quint/refinement/native/canonical-notification-tap.mjs",
@@ -15988,15 +16031,15 @@
   },
   {
    "legacy": "specs/quint/refinement/native/native-digest-platform.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestSources.md",
    "status": "mapped",
    "note": "LemmaScript/Dafny proof of a legacy renderer module; vibestack proofs are spec-level (*.proof.dfy beside the area spec)"
   },
   {
    "legacy": "specs/quint/refinement/native/native-digest.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestSources.md",
    "status": "mapped",
    "note": "LemmaScript/Dafny proof of a legacy renderer module; vibestack proofs are spec-level (*.proof.dfy beside the area spec)"
   },
@@ -16360,15 +16403,15 @@
   {
    "legacy": "specs/quint/refinement/services/calendar-linked.mjs",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/linkedLocal.md",
+   "spec": "apps/app/spec/calendar/googleLink.md",
    "status": "mapped",
-   "note": "LemmaScript/Dafny proof of a legacy renderer module; vibestack proofs are spec-level (*.proof.dfy beside the area spec)"
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync."
   },
   {
    "legacy": "specs/quint/refinement/services/calendar.mjs",
    "area": "calendar",
    "spec": "apps/app/spec/calendar/index.md",
-   "status": "mapped",
+   "status": "removed",
    "note": "LemmaScript/Dafny proof of a legacy renderer module; vibestack proofs are spec-level (*.proof.dfy beside the area spec)"
   },
   {
@@ -16429,15 +16472,15 @@
   },
   {
    "legacy": "specs/quint/refinement/services/development-digest-pending-probe.mjs",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped",
    "note": "LemmaScript/Dafny proof of a legacy renderer module; vibestack proofs are spec-level (*.proof.dfy beside the area spec)"
   },
   {
    "legacy": "specs/quint/refinement/services/development-digest-pending.md",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "mapped",
    "note": "LemmaScript/Dafny proof of a legacy renderer module; vibestack proofs are spec-level (*.proof.dfy beside the area spec)"
   },
@@ -16949,14 +16992,16 @@
   {
    "legacy": "scripts/browser-cloud-dev-bridge.ts",
    "area": "browser",
-   "spec": "apps/app/spec/browser/cloudCustody.md",
-   "status": "removed"
+   "status": "removed",
+   "note": "Developer surface of the legacy renderer and resident; no replacement at the Vibestack head. Whether local development starts a resident beside the renderer is open (register A-398).",
+   "replacement": "none yet (register A-398)"
   },
   {
    "legacy": "scripts/browser-full-reload.ts",
    "area": "browser",
-   "spec": "apps/app/spec/browser/index.md",
-   "status": "removed"
+   "status": "removed",
+   "note": "Developer surface of the legacy renderer and resident; no replacement at the Vibestack head. Whether local development starts a resident beside the renderer is open (register A-398).",
+   "replacement": "none yet (register A-398)"
   },
   {
    "legacy": "scripts/build-mobile-agent.ts",
@@ -16966,9 +17011,10 @@
   },
   {
    "legacy": "scripts/build-native-google-host.ts",
-   "area": "platform",
-   "spec": "apps/app/spec/platform/nativeStream.md",
-   "status": "removed"
+   "area": "tooling",
+   "status": "removed",
+   "note": "Retired: a Bun bundle of the native Google host the legacy phone ran. The upstream agent bundle (@elizaos/agent/bundle, scripts/resident/entry.vibe) replaces the host and Google sign-in is the account area (apps/app/spec/account/google.md); the Gradle verifyNativeGoogleHost step is gone.",
+   "replacement": "scripts/build-agent-bundle.ts (@elizaos/agent/bundle) and scripts/resident/entry.vibe"
   },
   {
    "legacy": "scripts/build-policy-source.ts",
@@ -16977,15 +17023,9 @@
    "status": "removed"
   },
   {
-   "legacy": "scripts/build-workflow-worker.ts",
-   "area": "tooling",
-   "replacement": "scripts/build-agent-bundle.ts (@elizaos/agent/bundle) and scripts/stage-agent-runtime.ts (@elizaos/os/build stageRuntimePayload)",
-   "status": "removed"
-  },
-  {
    "legacy": "scripts/bun-lock.ts",
    "area": "tooling",
-   "replacement": "vitest (pnpm test) and vibelang typecheck (pnpm typecheck)",
+   "replacement": "scripts/pnpm-lock.ts",
    "status": "removed"
   },
   {
@@ -17075,20 +17115,14 @@
   {
    "legacy": "scripts/dev-local.ts",
    "area": "platform",
-   "spec": "apps/app/spec/platform/index.md",
-   "status": "removed"
+   "status": "removed",
+   "note": "Developer surface of the legacy renderer and resident; no replacement at the Vibestack head. Whether local development starts a resident beside the renderer is open (register A-398).",
+   "replacement": "none yet (register A-398)"
   },
   {
    "legacy": "scripts/dev-native-preview.ts",
    "area": "platform",
    "spec": "apps/app/spec/platform/nativeStream.md",
-   "note": "legacy script-level behaviour test or dev surface bound to the replaced renderer or resident host; the area spec and its tests own the behaviour",
-   "status": "removed"
-  },
-  {
-   "legacy": "scripts/eval-phone-actions.ts",
-   "area": "assistant",
-   "spec": "apps/app/spec/assistant/index.md",
    "note": "legacy script-level behaviour test or dev surface bound to the replaced renderer or resident host; the area spec and its tests own the behaviour",
    "status": "removed"
   },
@@ -17137,10 +17171,10 @@
   },
   {
    "legacy": "scripts/fixtures/hosted-digest-protocol.ts",
-   "area": "inbox",
+   "area": "workflows",
    "note": "fixture of a removed legacy script flow",
    "status": "removed",
-   "spec": "apps/app/spec/inbox/digest.md"
+   "spec": "apps/app/spec/workflows/digests.md"
   },
   {
    "legacy": "scripts/fixtures/hosted-live-source/entry.tsx",
@@ -17203,14 +17237,16 @@
   {
    "legacy": "scripts/gmail-agent-dev-broker.ts",
    "area": "inbox",
-   "spec": "apps/app/spec/inbox/agentDrafts.md",
-   "status": "removed"
+   "status": "removed",
+   "note": "Developer surface of the legacy renderer and resident; no replacement at the Vibestack head. Whether local development starts a resident beside the renderer is open (register A-398).",
+   "replacement": "none yet (register A-398)"
   },
   {
    "legacy": "scripts/gmail-agent-read-host.ts",
    "area": "inbox",
-   "spec": "apps/app/spec/inbox/agentDrafts.md",
-   "status": "removed"
+   "status": "removed",
+   "note": "Developer surface of the legacy renderer and resident; no replacement at the Vibestack head. Whether local development starts a resident beside the renderer is open (register A-398).",
+   "replacement": "none yet (register A-398)"
   },
   {
    "legacy": "scripts/host-test-runtime.json",
@@ -17234,14 +17270,16 @@
   {
    "legacy": "scripts/local-agent-dev-bridge.ts",
    "area": "platform",
-   "spec": "apps/app/spec/platform/index.md",
-   "status": "removed"
+   "status": "removed",
+   "note": "Developer surface of the legacy renderer and resident; no replacement at the Vibestack head. Whether local development starts a resident beside the renderer is open (register A-398).",
+   "replacement": "none yet (register A-398)"
   },
   {
    "legacy": "scripts/local-agent-dev-storage.ts",
    "area": "platform",
-   "spec": "apps/app/spec/platform/storage.md",
-   "status": "removed"
+   "status": "removed",
+   "note": "Developer surface of the legacy renderer and resident; no replacement at the Vibestack head. Whether local development starts a resident beside the renderer is open (register A-398).",
+   "replacement": "none yet (register A-398)"
   },
   {
    "legacy": "scripts/local-agent-source.ts",
@@ -17269,15 +17307,17 @@
   },
   {
    "legacy": "scripts/native-google-host-artifact.ts",
-   "area": "platform",
-   "spec": "apps/app/spec/platform/nativeStream.md",
-   "status": "removed"
+   "area": "tooling",
+   "status": "removed",
+   "note": "Retired: a Bun bundle of the native Google host the legacy phone ran. The upstream agent bundle (@elizaos/agent/bundle, scripts/resident/entry.vibe) replaces the host and Google sign-in is the account area (apps/app/spec/account/google.md); the Gradle verifyNativeGoogleHost step is gone.",
+   "replacement": "scripts/build-agent-bundle.ts (@elizaos/agent/bundle) and scripts/resident/entry.vibe"
   },
   {
    "legacy": "scripts/native-google-product-host.ts",
-   "area": "platform",
-   "spec": "apps/app/spec/platform/nativeStream.md",
-   "status": "removed"
+   "area": "tooling",
+   "status": "removed",
+   "note": "Retired: a Bun bundle of the native Google host the legacy phone ran. The upstream agent bundle (@elizaos/agent/bundle, scripts/resident/entry.vibe) replaces the host and Google sign-in is the account area (apps/app/spec/account/google.md); the Gradle verifyNativeGoogleHost step is gone.",
+   "replacement": "scripts/build-agent-bundle.ts (@elizaos/agent/bundle) and scripts/resident/entry.vibe"
   },
   {
    "legacy": "scripts/native-voice-latency-emulator.ts",
@@ -17345,13 +17385,13 @@
   {
    "legacy": "scripts/run-node-only-tests.ts",
    "area": "tooling",
-   "replacement": "vitest (pnpm test) and vibelang typecheck (pnpm typecheck)",
+   "replacement": "scripts/run-root-tests.ts with test/root-tests.json (pnpm test:root)",
    "status": "removed"
   },
   {
    "legacy": "scripts/run-tests.ts",
    "area": "tooling",
-   "replacement": "vitest (pnpm test) and vibelang typecheck (pnpm typecheck)",
+   "replacement": "scripts/run-root-tests.ts with test/root-tests.json (pnpm test:root) and Vitest (pnpm test)",
    "status": "removed"
   },
   {
@@ -17387,14 +17427,16 @@
   {
    "legacy": "scripts/start-local-remote.ts",
    "area": "platform",
-   "spec": "apps/app/spec/platform/index.md",
-   "status": "removed"
+   "status": "removed",
+   "note": "Developer surface of the legacy renderer and resident; no replacement at the Vibestack head. Whether local development starts a resident beside the renderer is open (register A-398).",
+   "replacement": "none yet (register A-398)"
   },
   {
    "legacy": "scripts/start-local-voice-agent.ts",
    "area": "voice",
-   "spec": "apps/app/spec/voice/index.md",
-   "status": "removed"
+   "status": "removed",
+   "note": "Developer surface of the legacy renderer and resident; no replacement at the Vibestack head. Whether local development starts a resident beside the renderer is open (register A-398).",
+   "replacement": "none yet (register A-398)"
   },
   {
    "legacy": "scripts/test-agent-calendar-mutation-flow.ts",
@@ -17476,8 +17518,8 @@
   {
    "legacy": "scripts/test-calendar-sync-provider.ts",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/sync.md",
-   "note": "legacy script-level behaviour test or dev surface bound to the replaced renderer or resident host; the area spec and its tests own the behaviour",
+   "spec": "apps/app/spec/calendar/googleLink.md",
+   "note": "Client-side linked sync, where the phone copied Google events into its own storage, is retired (#1422); the agent-side link (calendar/googleLink.md, upstream spec/calendar/linkedSync.md) owns the sync.",
    "status": "removed"
   },
   {
@@ -17502,7 +17544,7 @@
   {
    "legacy": "scripts/test-cloud-maps.ts",
    "area": "cloud",
-   "replacement": "cloud/src/*.vibe and cloud/test/*.test.vibe",
+   "replacement": "apps/app/src/maps/cloud.vibe (the renderer's Maps Cloud client, spec/maps/connection.md) with its tests under apps/app/test/maps",
    "status": "removed"
   },
   {
@@ -17514,7 +17556,7 @@
   {
    "legacy": "scripts/test-cloud-protocol.ts",
    "area": "cloud",
-   "replacement": "cloud/src/*.vibe and cloud/test/*.test.vibe",
+   "replacement": "apps/app/src/platform/cloud.vibe (the renderer's Cloud client) and apps/app/src/account (sign-in), with their tests under apps/app/test",
    "status": "removed"
   },
   {
@@ -17538,8 +17580,8 @@
   },
   {
    "legacy": "scripts/test-digest-cancellation.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "note": "legacy script-level behaviour test or dev surface bound to the replaced renderer or resident host; the area spec and its tests own the behaviour",
    "status": "removed"
   },
@@ -17640,14 +17682,14 @@
   },
   {
    "legacy": "scripts/test-local-digest-restart.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digests.md",
    "status": "removed"
   },
   {
    "legacy": "scripts/test-local-digest-storage.ts",
-   "area": "inbox",
-   "spec": "apps/app/spec/inbox/digest.md",
+   "area": "workflows",
+   "spec": "apps/app/spec/workflows/digestInbox.md",
    "status": "removed"
   },
   {
@@ -17687,7 +17729,7 @@
   {
    "legacy": "scripts/test-native-calendar-deletion-restart.ts",
    "area": "calendar",
-   "spec": "apps/app/spec/calendar/nativeSync.md",
+   "spec": "apps/app/spec/calendar/device.md",
    "note": "legacy script-level behaviour test or dev surface bound to the replaced renderer or resident host; the area spec and its tests own the behaviour",
    "status": "removed"
   },
@@ -17728,8 +17770,8 @@
   {
    "legacy": "scripts/test-notes-query-flow.ts",
    "area": "notes",
-   "spec": "apps/app/spec/notes/query.md",
-   "note": "legacy script-level behaviour test or dev surface bound to the replaced renderer or resident host; the area spec and its tests own the behaviour",
+   "spec": "apps/app/spec/notes/organize.md",
+   "note": "notes.query.v1 is not negotiated at the Vibestack head: the agent reads and changes notes with its own Notes (notes/organize.md).",
    "status": "removed"
   },
   {
@@ -17845,7 +17887,7 @@
   {
    "legacy": "scripts/typecheck-scripts.ts",
    "area": "tooling",
-   "replacement": "vitest (pnpm test) and vibelang typecheck (pnpm typecheck)",
+   "replacement": "none yet: nothing typechecks scripts/** at the Vibestack head (docs/vibestack-open-items.md, Tooling); pnpm typecheck covers the app and Cloud",
    "status": "removed"
   },
   {
