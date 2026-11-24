@@ -47,6 +47,7 @@
   "test/gradle-verification.test.mjs",
   "test/host-test-json.test.mjs",
   "test/instrumentation-outcome-status.test.mjs",
+  "test/legacy-agent-state.test.mjs",
   "test/manifest-label-strings.test.mjs",
   "test/maps-dataset-manifest.test.mjs",
   "test/native-review-mode.test.mjs",

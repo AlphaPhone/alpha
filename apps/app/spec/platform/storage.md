@@ -5,7 +5,8 @@ storage (which Android keeps in the app's private data) under the namespace of t
 to, `alpha/<owner>/<key>`. A state is stepped from what is stored when an event is sent, so a second
 page or a page restored by Back never writes over a newer one. A stored value that is not a state is
 never written over: it is held for the owner's review. Resetting Alpha's data clears an owner's
-namespace; until it has, nothing starts.
+namespace; until it has, nothing starts. The earlier on-device agent's store is kept aside, unread,
+for a later import.
 
 ## Domain
 
@@ -133,4 +134,44 @@ pure def lawAnUncopiedValueStaysInItsLegacySlot(legacyHeld: bool): bool = not(le
 
 pure def lawANewerValueIsNeverOverwritten(legacyHeld: bool, copied: bool): bool =
   adoptionOf(legacyHeld, true, copied) != Adopted
+```
+
+## Story: Keep what the earlier on-device agent stored
+
+> As the owner, I want my phone's agent to start after the update without losing what the earlier
+> agent kept, so that my conversations, memories, schedules and workflows can still be brought in.
+
+### The earlier agent's store and runtime are moved aside by rename, and never opened, changed or deleted
+
+The earlier agent kept its PGlite store and workspace in `files/.eliza/workspace` (the store is its
+`.elizadb`) and its runtime in `files/agent`, which is now the parent of the new agent's account state
+directories. The new agent keeps its own store and never reads or migrates an older one (upstream
+`spec/agent/storage/database.md`): a store without its owner record is corrupt and is never reset.
+So before every launch Alpha moves the earlier workspace to `files/agent-legacy/eliza-workspace`
+and, while the earlier runtime's `agent-bundle.js` is still in `files/agent`, every entry there that
+is not an account state directory to `files/agent-legacy/payload`, the bundle last, so a launch
+that stops part way looks again next time. Each move is one rename within the app's files: nothing
+is copied, opened, rewritten or deleted, and a link is moved as the link, never followed. A source
+moves only to a name the archive does not hold; otherwise, or when the rename fails, it stays where
+it is and is tried again at the next launch. The launch never waits on the move and is never
+refused by it. The rest of `files/.eliza` (settings, workflow engine state, the vault, and the
+installation id and Google access switches Alpha still reads) stays in place. Only Reset Alpha's
+data removes the archive.
+
+```quint
+type LegacyMove = NothingToMove | MovedAside | KeptInPlace
+
+pure def legacyMoveOf(sourceHeld: bool, archiveHeld: bool, renamed: bool): LegacyMove =
+  if (not(sourceHeld)) NothingToMove
+  else if (archiveHeld or not(renamed)) KeptInPlace
+  else MovedAside
+
+pure def lawASourceMovesOnlyIntoAFreeArchiveName(sourceHeld: bool, archiveHeld: bool, renamed: bool): bool =
+  legacyMoveOf(sourceHeld, archiveHeld, renamed) == MovedAside implies (sourceHeld and not(archiveHeld) and renamed)
+
+pure def lawAnArchivedEntryIsNeverWrittenOver(sourceHeld: bool, renamed: bool): bool =
+  legacyMoveOf(sourceHeld, true, renamed) != MovedAside
+
+pure def lawAFailedRenameKeepsTheSourceInPlace(sourceHeld: bool, archiveHeld: bool): bool =
+  sourceHeld implies legacyMoveOf(sourceHeld, archiveHeld, false) == KeptInPlace
 ```

@@ -86,6 +86,7 @@ public final class ElizaAgentService extends AgentService {
   synchronized (STATE) { if (awaitedShutdown >= 0) throw new LaunchRefused("A credential change is in progress"); }
   try { RuntimeUpdatePause.beforeStart(); }
   catch (IllegalStateException pending) { throw new LaunchRefused("An app update is pending"); }
+  moveLegacyStateAside();
   try {
    java.io.File host = new java.io.File(getFilesDir(), "alpha-agent-host");
    if (!host.isDirectory() && !host.mkdirs()) throw new IOException("The agent host directory is unavailable");
@@ -93,6 +94,21 @@ public final class ElizaAgentService extends AgentService {
    AlphaLocalAgentPlugin.configureLaunch(this, variables);
   } catch (IOException | RuntimeException refused) {
    throw new LaunchRefused(refused.getMessage() == null ? "The launch environment is unavailable" : refused.getMessage());
+  }
+ }
+
+ /**
+  * Moves the earlier agent's store and runtime aside before the launch claims its state directory
+  * (spec/platform/storage.md, "Story: Keep what the earlier on-device agent stored"). The new agent
+  * reads neither, so the launch never waits on or is refused by the move; what stays is tried again
+  * at the next launch.
+  */
+ private void moveLegacyStateAside() {
+  try {
+   for (LegacyAgentState.Outcome outcome : LegacyAgentState.moveAside(getFilesDir().toPath()))
+    if (outcome.move != LegacyAgentState.Move.NOTHING_TO_MOVE) android.util.Log.i("AlphaLegacyAgent", outcome.toString());
+  } catch (RuntimeException unexpected) {
+   android.util.Log.w("AlphaLegacyAgent", "legacy state left in place: " + unexpected.getClass().getSimpleName());
   }
  }
 
