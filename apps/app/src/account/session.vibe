@@ -66,12 +66,8 @@ export service CloudSession {
   admit(route: RouteKind): void!RouteRefused
 }
 
-effect function readCredentialIdentity(native: Native.Shape, environment: string) {
-  return try Schema.decodeUnknownEffect(CredentialIdentity)(try native.invoke(plugin, "credentialIdentity", { environment }))
-}
-
 effect function readIdentity(native: Native.Shape, environment: string) {
-  const identity = try readCredentialIdentity(native, environment)
+  const identity = try Schema.decodeUnknownEffect(CredentialIdentity)(try native.invoke(plugin, "credentialIdentity", { environment }))
   if (identity.credentialId === null || identity.expiresAt === undefined) return undefined
   return { ...identity, credentialId: identity.credentialId, expiresAt: identity.expiresAt }
 }
