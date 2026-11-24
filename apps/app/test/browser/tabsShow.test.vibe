@@ -24,10 +24,10 @@ it.live("showing the open tabs brings Browser's own tab list forward only when p
       const docs = try loadPage(tabs, fake.events, session, "https://docs.example.org/", "1", 1)
       try SubscriptionRef.set(fake.foreground, { ...shownBrowser, view: "" })
       const card = ports.describe(show)
-      const ownCommand = [ports.ownCommand?.(show), ports.ownCommand?.({ type: "browser_navigate", url: "https://news.example/" }), ports.ownCommand?.({ type: "browser_tab_close", all: true })]
-      // The shell routes every operation through composeExecutors, so the direct pass sees ownCommand only as it passes it on.
+      const ownCommand = [ports.tabList?.(show), ports.tabList?.({ type: "browser_navigate", url: "https://news.example/" }), ports.tabList?.({ type: "browser_tab_close", all: true })]
+      // The shell routes every operation through composeExecutors, so the direct pass sees tabList only as it passes it on.
       const composed = composeExecutors([ports])
-      const composedOwnCommand = [composed.ownCommand?.(show), composed.ownCommand?.({ type: "browser_navigate", url: "https://news.example/" }), composed.ownCommand?.({ type: "telephony_dial", number: "+14155550100" })]
+      const composedOwnCommand = [composed.tabList?.(show), composed.tabList?.({ type: "browser_navigate", url: "https://news.example/" }), composed.tabList?.({ type: "telephony_dial", number: "+14155550100" })]
       const applied = try promise(() => ports.execute(show, call("show")))
       const openBeforeReceipt = (try tabs.get()).layers.tabsOpen
       const shownBeforeReceipt = (try Ref.get(fake.opened)).includes("browser")
