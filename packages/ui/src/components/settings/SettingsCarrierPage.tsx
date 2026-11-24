@@ -12,6 +12,10 @@ import type { AndroidTold, SettingsAndroidProps } from "./vocabulary.ts";
 export type SettingsCarrierField = {
   /** What it is, such as IMEI 1 or ICCID. */
   name: string;
+  /** The SIM or hardware group this fact belongs to. */
+  group?: string;
+  /** IMEI, ICCID or EID can be copied individually. */
+  identifier?: boolean;
   /** What Android returned; only then is it shown and can it be copied. */
   value?: string;
   /** Why Android returned nothing. */
@@ -54,29 +58,35 @@ const missing: Record<NonNullable<SettingsCarrierField["missing"]>, string> = {
  */
 export function SettingsCarrierPage({ fields, reading = false, failed = false, smsChoice = false, copied, onShow, onReadEid, onCopy, copyable, told, onBack, starting, onAndroid }: SettingsCarrierPageProps) {
   const android = { starting, onAndroid };
+  const groups = new Map<string | undefined, SettingsCarrierField[]>();
+  for (const field of fields) {
+    const group = groups.get(field.group);
+    if (group === undefined) groups.set(field.group, [field]);
+    else group.push(field);
+  }
   return (
     <SettingsPage title="Carrier & SIM setup" told={told} onBack={onBack}>
       {failed ? <Banner variant="warn">The identifiers could not be read</Banner> : null}
       <div role="status" aria-live="polite">{copied ? <Banner variant={copied === "copied" ? "info" : "warn"}>{copied === "copied" ? "Copied" : "Could not copy"}</Banner> : null}</div>
       {reading ? <ListRow title="Reading identifiers" trailing={<Spinner size="sm" label="Reading" />} /> : null}
-      {fields.length ? (
-        <ListGroup>
-          {fields.map(({ name, value, missing: why }) => (
+      {onShow || onReadEid ? (
+        <div className="flex flex-wrap gap-2">
+          {onShow ? <Button onClick={onShow}>{fields.length ? "Refresh identifiers" : "Show identifiers"}</Button> : null}
+          {onReadEid ? <Button variant="outline" onClick={onReadEid}>Read EID</Button> : null}
+        </div>
+      ) : null}
+      {[...groups].map(([heading, rows]) => (
+        <ListGroup key={heading ?? "identifiers"} heading={heading}>
+          {rows.map(({ name, value, identifier, missing: why }) => (
             <ListRow
               key={name}
               title={name}
               detail={value ?? (why ? missing[why] : undefined)}
-              trailing={value !== undefined && onCopy && (copyable?.(value) ?? true) ? <Button size="icon" variant="ghost" aria-label={`Copy ${name}`} onClick={() => onCopy(value)}><Copy /></Button> : undefined}
+              trailing={identifier && value !== undefined && onCopy && (copyable?.(value) ?? true) ? <Button size="icon" variant="ghost" aria-label={`Copy ${name}`} onClick={() => onCopy(value)}><Copy /></Button> : undefined}
             />
           ))}
         </ListGroup>
-      ) : null}
-      {onShow || onReadEid ? (
-        <div className="flex flex-wrap gap-2 px-4">
-          {onShow ? <Button onClick={onShow}>Show identifiers</Button> : null}
-          {onReadEid ? <Button variant="outline" onClick={onReadEid}>Read EID</Button> : null}
-        </div>
-      ) : null}
+      ))}
       <ListGroup>
         <SettingsAndroidRow target="sim-cards" title="SIMs" icon={<RadioTower />} {...android} />
         <SettingsAndroidRow target="mobile-networks" title="Mobile networks" icon={<Signal />} {...android} />

@@ -20,6 +20,7 @@ export interface SettingsScene {
   /** Android takes the Home role for Alpha when its dialog closes. */
   grantsHome: boolean;
   readonly opened: string[];
+  readonly copied: string[];
   crashes: NativeCrashEntry[];
   reset: { status: string; message: string };
   readonly reviews: number[];
@@ -39,7 +40,7 @@ export function settingsScene(): SettingsScene {
     ],
     launcher: true, version: "1.4.0",
     hostFacts: { androidRelease: "16", permissions: { Microphone: false, Calendar: true } },
-    gate: Promise.resolve(), grantsHome: true, opened: [], crashes: [], reset: { status: "cancelled", message: "Nothing was reset." }, reviews: [],
+    gate: Promise.resolve(), grantsHome: true, opened: [], copied: [], crashes: [], reset: { status: "cancelled", message: "Nothing was reset." }, reviews: [],
     networks: [{ ssid: "home", bssid: "00:11:22:33:44:55", rssi: -50, frequency: 2412, capabilities: "[WPA2-PSK-CCMP]", secured: true, security: "wpa2" }],
     joinAnswer: "connected", joins: [], connectivity: { online: true, validated: true, captivePortal: false, ssid: "home" },
     carrier: {
@@ -157,7 +158,7 @@ export function alphaCarrierSetup(scene: SettingsScene): Faked {
       canChooseSms: false, smsRole: { status: "available", value: "Messages" }, dialerRole: { status: "available", value: "Phone" }, eid: { status: "not-read" },
       hardware: { manufacturer: { status: "available", value: "Google" }, model: { status: "available", value: "Pixel" }, baseband: { status: "unsupported" } },
       slots: scene.carrier.slots,
-      subscriptions: { items: [{ subscriptionId: 1, embedded: true, carrier: { status: "available", value: "Carrier" }, iccid: scene.carrier.iccid, operator: { status: "available", value: "Carrier" }, operatorCode: { status: "available", value: "310260" }, dataEnabled: { status: "available", value: "on" }, roaming: { status: "available", value: "off" } }] },
+      subscriptions: { status: "available", items: [{ subscriptionId: 1, embedded: true, slotIndex: 0, defaultData: true, carrier: { status: "available", value: "Carrier" }, iccid: scene.carrier.iccid, operator: { status: "available", value: "Carrier" }, operatorCode: { status: "available", value: "310260" }, dataEnabled: { status: "available", value: "on" }, roaming: { status: "available", value: "off" } }] },
     }),
     readEid: () => Promise.resolve(scene.carrier.eid),
     openSettings: async ({ page: target }: { page: string }) => {
@@ -172,6 +173,10 @@ export function alphaCarrierSetup(scene: SettingsScene): Faked {
 export function settingsHost(scene: SettingsScene) {
   return {
     settingsFacts: () => Promise.resolve(scene.hostFacts),
+    copyText: ({ text }: { text: string }) => {
+      scene.copied.push(text);
+      return Promise.resolve();
+    },
     openSettings: async ({ page: target }: { page: string }) => {
       await page(scene, target);
       return { status: "opened", specific: target === "all-files" };

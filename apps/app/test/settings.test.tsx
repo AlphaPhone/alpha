@@ -279,7 +279,7 @@ describe("Settings", () => {
   });
 
   it("Read what my carrier needs to activate a SIM (spec/app/settings/carrier.md, \"Story: Read what my carrier needs to activate a SIM\")", async () => {
-    const { alpha, machines } = await settingsOpen();
+    const { alpha, machines, world } = await settingsOpen();
     await press("General");
     await press("Carrier & SIM setup");
     await until(alpha, machines, Carrier.Machine, (s) => s.showing);
@@ -292,8 +292,14 @@ describe("Settings", () => {
     await until(alpha, machines, Carrier.Machine, (s) => s.eid.status === "Returned");
     // spec/app/settings/carrier.md, "Copy puts one identifier Android returned on the clipboard, one copy at a time, and the page says whether it was copied"
     expect([Boolean(button("Copy IMEI 1")), Boolean(button("Copy IMEI 2")), Boolean(button("Copy ICCID"))]).toEqual([true, false, false]);
+    await press("Copy IMEI 1");
+    await until(alpha, machines, Carrier.Machine, (s) => s.copied === "CopiedIt");
+    expect(world.settings.copied).toEqual(["356938035643809"]);
     await seen(false);
     await until(alpha, machines, Carrier.Machine, (s) => s.fields.length === 0 && !s.showing);
     await seen(true);
+    await until(alpha, machines, Carrier.Machine, (s) => s.showing && s.read.read.status === "Idle" && s.fields.length === 0);
+    await press("Show identifiers");
+    await until(alpha, machines, Carrier.Machine, (s) => s.read.read.status === "Loaded" && s.fields.length > 0);
   });
 });
