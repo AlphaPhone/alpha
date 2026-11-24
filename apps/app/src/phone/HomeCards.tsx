@@ -1,5 +1,5 @@
 // spec/app/phone/index.md, "Home shows the missed-calls card while there are missed calls not yet seen"; spec/app/messages/index.md, "The phone reports how many conversations are unread, for the list and Home"; spec/app/phone/voicemail.md, "The phone reports how many voicemails are unheard, for Home and the tab"
-import { Card, CardTitle } from "@repo/ui";
+import { HomeCallsCard } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import type { Machine as MessagesMachine } from "../../gen/app__messages.effect.vibe";
 import { useMachine as useMessages } from "../../gen/app__messages.react.ts";
@@ -31,22 +31,8 @@ export function HomeCards({ runtime }: HomeCardsProps) {
   const waiting = missedCard(phone) ? counted(phone.missed, "missed call", "missed calls") : counted(voicemail.unheard, "unheard voicemail", "unheard voicemails");
   return (
     <>
-      {messages.unread > 0 && (
-        <Card asChild className="min-w-64 snap-start">
-          <button type="button" className="text-left" aria-label={`Messages: ${unread}`} onClick={() => void runtime.runPromise(openUnread())}>
-            <CardTitle>Messages</CardTitle>
-            <span className="text-sm text-muted-foreground">{unread}</span>
-          </button>
-        </Card>
-      )}
-      {calls && (
-        <Card asChild className="min-w-64 snap-start">
-          <button type="button" className="text-left" aria-label={`Phone: ${waiting}`} onClick={() => void runtime.runPromise(openCalls())}>
-            <CardTitle>Phone</CardTitle>
-            <span className="text-sm text-muted-foreground">{waiting}</span>
-          </button>
-        </Card>
-      )}
+      {messages.unread > 0 && <HomeCallsCard app="Messages" lines={[]} summary={unread} aria-label={`Messages: ${unread}`} onClick={() => void runtime.runPromise(openUnread())} />}
+      {calls && <HomeCallsCard app="Phone" lines={[]} summary={waiting} aria-label={`Phone: ${waiting}`} onClick={() => void runtime.runPromise(openCalls())} />}
     </>
   );
 }
