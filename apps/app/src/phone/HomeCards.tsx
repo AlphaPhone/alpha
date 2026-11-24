@@ -31,8 +31,12 @@ export function HomeCards({ runtime }: HomeCardsProps) {
   const waiting = missedCard(phone) ? counted(phone.missed, "missed call", "missed calls") : counted(voicemail.unheard, "unheard voicemail", "unheard voicemails");
   return (
     <>
-      {messages.unread > 0 && <HomeCallsCard app="Messages" lines={[]} summary={unread} aria-label={`Messages: ${unread}`} onClick={() => void runtime.runPromise(openUnread())} />}
-      {calls && <HomeCallsCard app="Phone" lines={[]} summary={waiting} aria-label={`Phone: ${waiting}`} onClick={() => void runtime.runPromise(openCalls())} />}
+      {messages.unread > 0 && (
+        <HomeCallsCard app="Messages" summary={unread} lines={[]} aria-label={`Messages: ${unread}`} onClick={() => void runtime.runPromise(openUnread())} />
+      )}
+      {calls && (
+        <HomeCallsCard app="Phone" summary={waiting} lines={[]} aria-label={`Phone: ${waiting}`} onClick={() => void runtime.runPromise(openCalls())} />
+      )}
     </>
   );
 }

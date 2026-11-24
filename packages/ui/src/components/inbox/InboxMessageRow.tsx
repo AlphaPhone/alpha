@@ -37,25 +37,25 @@ const swipeDistance = 72;
  * @model spec/app/inbox/index.md
  */
 export function InboxMessageRow({ sender, subject, snippet, time, unread = false, attachment = false, chosen = false, selecting = false, onOpen, onChosenChange, onSwipe }: InboxMessageRowProps) {
-  const swipeFrom = useRef<{ pointer: number; x: number; y: number } | undefined>(undefined);
-  const suppressClick = useRef(false);
+  const swipeFromRef = useRef<{ pointer: number; x: number; y: number } | undefined>(undefined);
+  const suppressClickRef = useRef(false);
   const start = (event: PointerEvent<HTMLButtonElement>) => {
-    suppressClick.current = false;
+    suppressClickRef.current = false;
     if (!onSwipe || selecting || !event.isPrimary || event.button !== 0) return;
-    swipeFrom.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY };
+    swipeFromRef.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY };
   };
   const end = (event: PointerEvent<HTMLButtonElement>) => {
-    const from = swipeFrom.current;
+    const from = swipeFromRef.current;
     if (from?.pointer !== event.pointerId) return;
-    swipeFrom.current = undefined;
+    swipeFromRef.current = undefined;
     const left = from.x - event.clientX;
     if (Math.abs(left) >= swipeDistance && Math.abs(left) > Math.abs(from.y - event.clientY)) {
-      suppressClick.current = true;
+      suppressClickRef.current = true;
       if (left > 0) onSwipe?.();
     }
   };
   const activate = (event: MouseEvent<HTMLButtonElement>) => {
-    if (suppressClick.current && event.detail !== 0) return;
+    if (suppressClickRef.current && event.detail !== 0) return;
     if (selecting) onChosenChange?.(!chosen);
     else onOpen?.();
   };
@@ -63,7 +63,7 @@ export function InboxMessageRow({ sender, subject, snippet, time, unread = false
     <button type="button" role={selecting ? "checkbox" : undefined} aria-checked={selecting ? chosen : undefined}
       aria-label={`${unread ? "Unread, " : ""}${sender}, ${subject}${attachment ? ", has attachments" : ""}`}
       disabled={selecting ? !onChosenChange : !onOpen} onClick={activate}
-      onPointerDown={start} onPointerUp={end} onPointerCancel={() => { swipeFrom.current = undefined; }}
+      onPointerDown={start} onPointerUp={end} onPointerCancel={() => { swipeFromRef.current = undefined; }}
       className={cn(focusRing, "flex w-full touch-pan-y items-start gap-3.5 px-5 py-3 text-left focus-visible:-outline-offset-focus", chosen && "bg-accent")}
     >
       {selecting ? (

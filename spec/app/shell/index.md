@@ -21,7 +21,7 @@ Home is the empty trail; the app showing is the last one on it. Ask Alpha
 rests as a bar, takes typing, opens as a sheet, or fills the screen.
 
 ```quint
-type View = Phone | Messages | Inbox | Calendar | Browser | Camera | Photos | Maps | Notes | Contacts | Files | Workflows | Settings
+type View = Phone | Messages | Inbox | Calendar | Clock | Reminders | Browser | Camera | Photos | Maps | Notes | Contacts | Files | Workflows | Settings
 type Detent = Bar | Typing | Sheet | Full
 type Shell = { trail: List[View], drawer: bool, assistant: Detent, image: bool, contacts: bool }
 
@@ -99,6 +99,25 @@ pure def goBack(s: Shell): Shell =
   else if (s.assistant == Full) { ...s, assistant: Sheet }
   else if (s.assistant != Bar) { ...s, assistant: Bar }
   else { ...s, trail: s.trail.removeAt(s.trail.length() - 1) }
+```
+
+### Returning to the prior communications app keeps Ask Alpha open at its current height
+
+The communications stage asks for this step only when its history names
+the preceding app. It can return from Phone, Messages or Contacts to one
+of those apps while Ask Alpha is open.
+
+```quint
+pure def commsView(view: View): bool = view == Phone or view == Messages or view == Contacts
+
+pure def canReturnCommsView(s: Shell, previous: View): bool =
+  (s.assistant == Sheet or s.assistant == Full) and s.trail.length() > 1 and commsView(previous)
+    and commsView(s.trail.nthOr(s.trail.length() - 1, Settings)) and s.trail.nthOr(s.trail.length() - 2, Settings) == previous
+
+pure def returnCommsView(s: Shell, previous: View): Shell = { ...s, trail: s.trail.removeAt(s.trail.length() - 1) }
+
+pure def stepACommsReturnPreservesTheSheet(before: Shell, via: str, after: Shell): bool =
+  via == "returnCommsView" implies (after.assistant == before.assistant and after.trail.length() == before.trail.length() - 1)
 ```
 
 ### Home leaves every app and closes every layer at once

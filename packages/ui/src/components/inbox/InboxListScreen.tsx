@@ -67,17 +67,17 @@ export function InboxListScreen({
   notice, onNoticeAction, state, onStateAction, chosen = 0, onStartSelection, onFinishSelection, onClearSelection,
   onArchive, onTrash, onRestore, onChooseAll, aside = 0, onShelf, onRefresh, onCompose, onAccount, rows, loading, onLoadMore, loadingMore,
 }: InboxListScreenProps) {
-  const focusSearchAfterClose = useRef(false);
+  const focusSearchAfterCloseRef = useRef(false);
   const closeSearch = () => {
-    focusSearchAfterClose.current = true;
+    focusSearchAfterCloseRef.current = true;
     onCloseSearch?.();
   };
   const actions = (
     <>
       {onRefresh || loading ? <Button variant="ghost" size="icon" aria-label="Refresh" loading={loading} disabled={!onRefresh} onClick={onRefresh}><RefreshCw /></Button> : null}
       <Button variant="ghost" size="icon" aria-label="Search email" disabled={!onOpenSearch} onClick={onOpenSearch} ref={(button) => {
-        if (button && focusSearchAfterClose.current) {
-          focusSearchAfterClose.current = false;
+        if (button && focusSearchAfterCloseRef.current) {
+          focusSearchAfterCloseRef.current = false;
           button.focus();
         }
       }}><Search /></Button>

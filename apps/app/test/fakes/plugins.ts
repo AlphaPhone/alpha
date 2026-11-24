@@ -1,8 +1,12 @@
+import { elizaCamera } from "./camera.ts";
 import { elizaCalendar } from "./calendar.ts";
 import { alphaMapsTransport, elizaLocation } from "./maps.ts";
 import { type Faked, elizaAgent, elizaCloud, elizaSecureStore } from "./phone.ts";
+import { type Faked, elizaAgent, elizaCloud, elizaSecureStore, present } from "./phone.ts";
+import { elizaReminders } from "./reminders.ts";
 import type { Answering } from "./routes.ts";
 import { elizaFiles, selectedDocuments } from "./files.ts";
+import { alphaPhotos } from "./photos.ts";
 import type { Scene } from "./scene.ts";
 import { alphaCarrierSetup, elizaReset, elizaSystem, elizaWiFi } from "./settings.ts";
 import { telephonyPlugins } from "./telephony.ts";
@@ -16,7 +20,10 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     ElizaCloud: elizaCloud(services.cloud, () => world.signedIn),
     ElizaSecureStore: elizaSecureStore(world.secrets, world.slots),
     ElizaCalendar: elizaCalendar(world.calendar),
+    ElizaReminders: elizaReminders(world.reminders, () => world.now),
+    ElizaCamera: elizaCamera(world.camera),
     ElizaFiles: elizaFiles(world.files),
+    AlphaPhotos: alphaPhotos(world.photos),
     SelectedDocuments: selectedDocuments(world.files),
     ElizaLocation: elizaLocation(world.maps, () => world.now),
     ElizaSystem: elizaSystem(world.launcher, world.settings),

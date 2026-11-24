@@ -4,7 +4,7 @@ import type { ListedVoicemail, VoicemailId, VoicemailListing } from "@elizaos/os
 import { Machine as PhoneMachine, liveCall } from "../../gen/app__phone.effect.vibe"
 import * as Voicemail from "../../gen/app__phone__voicemail.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__phone__voicemail.effect.vibe"
-import { Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
+import { type Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
 import { type Job, answer, applying, contained, following, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 
@@ -14,9 +14,10 @@ export interface Heard {
   readonly open: string
   readonly audio: string
   readonly transcript: string
+  readonly deletion: StagedDeletion | undefined
 }
 
-const nothing: Heard = { rows: [], open: "", audio: "", transcript: "" }
+const nothing: Heard = { rows: [], open: "", audio: "", transcript: "", deletion: undefined }
 
 /** The voicemails behind Voicemail's counts. */
 export service Voicemails {
@@ -78,29 +79,51 @@ effect function fetched(ticket: number): Event!!(Telephony | Voicemails | Voicem
 }
 
 /** The native receipt owns the outcome, even if the staged item is already hidden from the list. */
-effect function settlement(id: number, requested: StagedDeletion): Event!!(Telephony | Time) {
+effect function settlement(id: number, requested: StagedDeletion): Event!!(Telephony | Time | Voicemail.Machine) {
+  const machine = try Voicemail.Machine
   const time = try Time
   for (const delay of [0, 250, 1000, 3000]) {
-    if (delay !== 0) try time.until(requested.expiresAt + delay)
+    if (delay !== 0) {
+      if (delay === 250) {
+        try time.until(requested.expiresAt)
+        try ignore(machine.send({ type: "undoExpired", id }))
+      }
+      try time.until(requested.expiresAt + delay)
+    }
     const pending = telephony("pending voicemail deletions", (c) => c.deletions.pending()) catch () => undefined
     const phase = pending?.deletions.find((receipt) => receipt.id === requested.id && receipt.kind === requested.kind)?.phase
-    if (phase === "Deleted") return { type: "removed", id, done: true, known: true }
-    if (phase === "Undone" || phase === "DeletionConflict") return { type: "removed", id, done: false, known: true }
+    if (phase === "Deleted") return { type: "removed", id, done: true, known: true, kept: false }
+    if (phase === "Undone") return { type: "removed", id, done: false, known: true, kept: true }
+    if (phase === "DeletionConflict") return { type: "removed", id, done: false, known: true, kept: false }
     if (phase === "UnknownOutcome") break
   }
-  return { type: "removed", id, done: false, known: false }
+  return { type: "removed", id, done: false, known: false, kept: false }
 }
 
 // spec/app/phone/voicemail.md, "The phone's answer ends the removal it names"
-effect function removed(id: number): Event!!(Telephony | Voicemails | Time) {
+effect function removed(id: number): Event!!(Telephony | Voicemails | Time | Voicemail.Machine) {
   const open = try opened()
-  if (Option.isNone(open)) return { type: "removed", id, done: false, known: true }
+  if (Option.isNone(open)) return { type: "removed", id, done: false, known: true, kept: false }
   const voicemail: VoicemailId = open.value.id
   return effect {
     const answer = try telephony("deleteVoicemail", (c) => c.phone.deleteVoicemail(voicemail))
-    if (answer.status === "queued") return try settlement(id, answer.deletion)
-    return { type: "removed", id, done: false, known: true } satisfies Event
-  } catch (failure) => ({ type: "removed", id, done: false, known: !(failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === "") } satisfies Event)
+    if (answer.status === "queued") {
+      try (try Voicemails).set({ deletion: answer.deletion })
+      try ignore((try Voicemail.Machine).send({ type: "removalStaged", id }))
+      return try settlement(id, answer.deletion)
+    }
+    return { type: "removed", id, done: false, known: true, kept: false } satisfies Event
+  } catch (failure) => ({ type: "removed", id, done: false, kept: false, known: !(failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === "") } satisfies Event)
+}
+
+// spec/app/phone/voicemail.md, "Undo can keep a voicemail while Android's deletion window is open"
+effect function undo(id: number): Event!!(Telephony | Voicemails) {
+  const requested = (try (try Voicemails).get()).deletion
+  if (requested === undefined) return { type: "undoRefused", id }
+  const result = telephony("undo voicemail deletion", (c) => c.deletions.undo(requested)) catch () => undefined
+  return result?.kind === "Kept"
+    ? { type: "removed", id, done: false, known: true, kept: true }
+    : { type: "undoRefused", id }
 }
 
 // spec/app/phone/voicemail.md, "Call back hands the caller's number to Phone and Message opens Messages with it"
@@ -127,7 +150,8 @@ function carry(fx: Out): Job<Event, Telephony | Voicemails | PhoneMachine | Voic
       if (Option.isSome(open)) try ignore(telephony("markVoicemailHeard", (c) => c.phone.markVoicemailHeard(open.value.id)))
     });
     when { tag: "ReachCaller", let app }: run("reach", reached(app));
-    when { tag: "Remove", let id }: answer(`remove ${id}`, removed(id), { type: "removalLost" });
+    when { tag: "Remove", let id }: answer(`remove ${id}`, removed(id), { type: "removalLost", id });
+    when { tag: "UndoRemoval", let id }: answer(`undo ${id}`, undo(id), { type: "undoRefused", id });
   }
 }
 
@@ -143,8 +167,8 @@ const carrierChanged = started(effect {
   const phone = try PhoneMachine
   const voicemail = try Voicemail.Machine
   const front = Stream.changesWith(Stream.map(phone.changes, (state) => state.front), (a, b) => a === b)
-  const first = Stream.fromEffect(telephony("refreshVoicemail", (c) => c.phone.refreshVoicemail("AutomaticRead")) catch () => undefined)
-  const changed = Stream.mapEffect(observations, (listing) => tryPromise(() => listing) catch () => undefined)
+  const first = Stream.fromEffect(Effect.orElseSucceed(telephony("refreshVoicemail", (c) => c.phone.refreshVoicemail("AutomaticRead")), () => undefined))
+  const changed = Stream.mapEffect(observations, (listing) => Effect.orElseSucceed(tryPromise(() => listing), () => undefined))
   const watched = Stream.switchMap(front, (showing) => showing ? Stream.concat(first, changed) : Stream.empty)
   try Stream.runForEach(watched, effect (listing) => {
     if (listing === undefined || !(try phone.get()).front) return
@@ -163,28 +187,28 @@ const shown = following(PhoneMachine, (phone) => phone.front && phone.tab === "V
 // spec/app/phone/voicemail.md, "A call that starts pauses playback"
 const calls = following(PhoneMachine, liveCall, Voicemail.Machine, (live): Event | undefined => (live ? { type: "callStarted" } : undefined))
 
-/** The current clip's local playback position and changes. */
-export interface PlaybackPosition {
-  subscribe(wake: () => void): () => void
-  position(): number
-  seek(seconds: number): void
-}
-
 module audio {
+  /** The current clip's local playback position and changes. */
+  export interface PlaybackPosition {
+    subscribe(wake: () => void): () => void
+    position(): number
+    seek(seconds: number): void
+  }
+
   /** Create the one audio element for voicemail playback. @throws {never} */
   export function makeAudio(): HTMLAudioElement {
     return new Audio()
   }
   /** Listen only while a playback control is mounted. @throws {never} */
-  export function positionOf(element: HTMLAudioElement): PlaybackPosition {
+  export function positionOf(element: HTMLAudioElement): { subscribe(wake: () => void): () => void; position(): number; seek(seconds: number): void } {
     const events = ["timeupdate", "seeking", "seeked", "ended", "emptied"]
     return {
-      subscribe: (wake) => {
+      subscribe: (wake: () => void) => {
         for (const kind of events) element.addEventListener(kind, wake)
         return () => { for (const kind of events) element.removeEventListener(kind, wake) }
       },
       position: () => Math.floor(element.currentTime),
-      seek: (seconds) => {
+      seek: (seconds: number) => {
         if (!Number.isFinite(element.duration) || !Number.isFinite(seconds)) return
         element.currentTime = Math.max(0, Math.min(seconds, element.duration))
       },
@@ -209,7 +233,7 @@ module audio {
     if (reset) element.currentTime = 0
   }
 }
-import { makeAudio, pauseAudio, positionOf, sourceOf } from audio
+import { type PlaybackPosition, makeAudio, pauseAudio, positionOf, sourceOf } from audio
 
 /** The one audio element the open voicemail plays in, outside any screen. */
 export service Player {

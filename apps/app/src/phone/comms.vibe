@@ -7,8 +7,29 @@ import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
 import { Machine as Phone, clear, liveCall } from "../../gen/app__phone.effect.vibe"
 import { contained, following, reacting, started, together } from "../runtime/reactor.vibe"
 
+/** The actual shell app an entry in the communications stage can return to. */
+export function commsViewOf(app: Comms.CommsApp): "Phone" | "Messages" | "Contacts" {
+  return app === "PhoneApp" ? "Phone" : app === "MessagesApp" ? "Messages" : "Contacts"
+}
+
 // spec/app/phone/comms.md, "A proposal kept across a restart is shown, never approved, until Alpha proposes it again"
 const machine = reacting(Comms, { keep: 1, open: [{ type: "reopen" }, "Device"] })
+
+/** A request handed from owner-side search to the open Ask Alpha sheet. */
+export interface CommsPrompt {
+  readonly about: string
+  readonly text: string
+}
+
+export service CommsPrompts {
+  submit(prompt: CommsPrompt): void!!
+  readonly submissions: Stream.Stream<CommsPrompt>
+}
+
+const prompts = Layer.effect(CommsPrompts, effect {
+  const queue = try Queue.sliding<CommsPrompt>(1)
+  return { submit: (prompt: CommsPrompt) => asVoid(Queue.offer(queue, prompt)), submissions: Stream.fromQueue(queue) }
+})
 
 // spec/app/phone/comms.md, "End is beside the bar when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn"
 const calls = following(Phone, (phone) => ({ live: liveCall(phone), emergencyCall: liveCall(phone) && !clear(phone) }), Comms.Machine, (call): Event => ({ type: "callChanged", ...call }), "Device")
@@ -56,4 +77,4 @@ const subjects = started(effect {
 }, "comms subjects")
 
 /** The stage of Phone, Messages and Contacts: kept across restarts, told of calls, rings, the subject on screen and Ask Alpha lowering. */
-export const comms = together(machine, calls, rings, detents, subjects)
+export const comms = together(machine, prompts, calls, rings, detents, subjects)

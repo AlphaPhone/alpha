@@ -1,0 +1,112 @@
+// spec/app/assistant/composer.md, "Files chosen are added up to the upload limit of four"; spec/app/assistant/attachments.md, "Each file is checked against its limits: an image is made to fit, audio and video never go, and the message's files fit together"
+import * as Composer from "../../gen/app__assistant__composer.effect.vibe"
+import * as Limits from "../../gen/app__assistant__attachments.effect.vibe"
+import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
+import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { contained } from "../runtime/reactor.vibe"
+import { reencodeImage } from "./image-encode.ts"
+import { Talk } from "./talk.vibe"
+
+/** The owner's explicitly selected file. `data` contains raw base64. */
+export interface Attachment {
+  readonly id: string
+  readonly name: string
+  readonly mimeType: string
+  readonly data: string
+}
+
+/** The owner's handoff to the existing Ask Alpha composer from one of the apps. */
+export service MediaHandoff {
+  attach(file: Attachment): boolean!!
+}
+
+export effect function attachToAlpha(file: Attachment): boolean!!MediaHandoff {
+  return try (try MediaHandoff).attach(file)
+}
+
+module web {
+  /** Convert already selected bytes to a JPEG accepted by the agent. */
+  export async function jpeg(file: Attachment, cap: number): Promise<string | undefined> {
+    const bytes = Uint8Array.fromBase64(file.data)
+    return reencodeImage(new Blob([bytes], { type: file.mimeType }), [2048, 1600, 1280, 1024], [85, 72, 60], cap)
+  }
+
+  /** Store one message's files before the turn is sent. A later turn replaces the staging record. */
+  export async function keepFiles(files: ReadonlyArray<Attachment>): Promise<void> {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const open = indexedDB.open("alpha-chat-attachments", 1)
+      open.onupgradeneeded = () => { open.result.createObjectStore("pending") }
+      open.onsuccess = () => { resolve(open.result) }
+      open.onerror = () => { reject(open.error) }
+    })
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction("pending", "readwrite")
+        const store = tx.objectStore("pending")
+        if (files.length === 0) store.delete("turn")
+        else store.put(files, "turn")
+        tx.oncomplete = () => { resolve() }
+        tx.onabort = () => { reject(tx.error) }
+      })
+    } finally {
+      db.close()
+    }
+  }
+}
+import { jpeg, keepFiles } from web
+
+const images = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
+const documents = new Set(["application/pdf", "text/plain", "text/csv", "text/markdown", "application/json"])
+const base64 = /^[A-Za-z0-9+/]+={0,2}$/
+
+function rawLength(data: string): number {
+  return data.length / 4 * 3 - (data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0)
+}
+
+export effect function stageAttachment(file: Attachment): boolean!!(Talk | Composer.Machine | Conversation | Shell) {
+  const composer = try Composer.Machine
+  const conversation = try Conversation
+  const before = try composer.get()
+  const context = (try conversation.get()).context
+  if (context.sensitive || !Composer.canAttach(before, 1) || file.id === "" || file.data.length % 4 !== 0) return false
+  const type = file.mimeType.toLowerCase()
+  const image = type.startsWith("image/")
+  if (!image && !documents.has(type)) return false
+  if (!Limits.fits(image ? "Image" : "Document", rawLength(file.data), file.name.length) || !base64.test(file.data)) return false
+  const convert = image && Limits.reencoded("Image", rawLength(file.data), images.has(type))
+  const data = convert ? tryPromise(() => jpeg(file, Limits.imageBase64Cap)) catch () => undefined : file.data
+  if (data === undefined || data === "") return false
+  const { board, attachmentLock } = try Talk
+  return try attachmentLock.withPermits(1)(effect {
+    const current = try composer.get()
+    const seen = (try conversation.get()).context
+    if (seen.sensitive || seen.revision !== context.revision || current.binding.owner !== before.binding.owner || current.binding.conversation !== before.binding.conversation) return false
+    const files = board.snapshot().files
+    const present = files.some((item) => item.id === file.id)
+    if (!present) {
+      const next = [...files, { ...file, data, mimeType: convert ? "image/jpeg" : type }]
+      if (Composer.attachments(current.editor) >= Composer.maxFiles || !Limits.batchFits(next.length, next.reduce((sum, item) => sum + item.data.length, 0))) return false
+      if (!(try contained(composer.send({ type: "attach", count: 1 }), "attaching the selected file"))) return false
+      board.change({ files: next })
+    }
+    const shell = try Shell
+    if ((try shell.get()).assistant === "Bar") try contained(shell.send({ type: "raise", detent: "Sheet" }), "opening Ask Alpha")
+    return true
+  })
+}
+
+export effect function removeAttachment(id: string): void!!(Talk | Composer.Machine) {
+  const { board, attachmentLock } = try Talk
+  const composer = try Composer.Machine
+  try attachmentLock.withPermits(1)(effect {
+    const files = board.snapshot().files
+    if (!files.some((file) => file.id === id)) return
+    if (try contained(composer.send({ type: "removeFile" }), "removing the selected file")) {
+      board.change({ files: files.filter((file) => file.id !== id) })
+    }
+  })
+}
+
+export effect function storeAttachments(files: ReadonlyArray<Attachment>): boolean!! {
+  return tryPromise(() => keepFiles(files)) |> as(%, true) catch () => false
+}

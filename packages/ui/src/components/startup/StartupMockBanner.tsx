@@ -1,4 +1,3 @@
-import { Banner } from "../Banner.tsx";
 import { Button } from "../Button.tsx";
 
 export type StartupMockBannerProps = {
@@ -12,8 +11,9 @@ export type StartupMockBannerProps = {
  */
 export function StartupMockBanner({ onExit }: StartupMockBannerProps) {
   return (
-    <Banner variant="warn" action={onExit ? <Button variant="outline" size="sm" onClick={onExit}>Exit mock mode</Button> : undefined}>
-      Mock mode
-    </Banner>
+    <div role="status" className="flex min-h-8.5 shrink-0 items-center justify-between gap-2 bg-alpha px-2.5 text-xs font-semibold text-alpha-foreground">
+      <span>Mock mode · simulated data and actions</span>
+      {onExit ? <Button variant="ghost" size="sm" className="h-6 border border-alpha-foreground px-2.5 text-xs text-alpha-foreground hover:bg-alpha-foreground/10 active:bg-alpha-foreground/20" onClick={onExit}>Exit mock mode</Button> : null}
+    </div>
   );
 }
