@@ -118,7 +118,7 @@ jobs:
           retention-days: 3
   production:
     name: Browser production surface (flag off)
-    # Runs production-surface.spec.ts and every *.production.spec.ts (playwright.config.ts).
+    # Serves the flag-off Vibestack renderer and exercises its production browser contracts.
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
