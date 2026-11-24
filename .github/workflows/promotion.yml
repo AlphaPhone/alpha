@@ -107,7 +107,7 @@ jobs:
           ELIZA_DEV_ALLOW_TEST_MOCKS: '1'
         # The selected project uses the existing storageSpecPattern in playwright.config.ts.
         # test:browser selects Chromium, so invoke Playwright directly for this matrix.
-        run: pnpm exec --no-install playwright test --project=${{ matrix.browser }}
+        run: pnpm exec playwright test --project=${{ matrix.browser }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
