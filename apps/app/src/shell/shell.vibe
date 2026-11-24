@@ -48,6 +48,7 @@ export effect function back(): void!!(Shell.Machine | Layers.Machine | Backs) {
   if (taker === "ByHold") return
   const state = try shell.get()
   const view = state.trail.at(-1)
+  if (try screens.take("assistant")) return
   if (state.assistant === "Bar" && (try screens.take(view === undefined ? "home" : `view:${view}`))) return
   try contained(shell.send({ type: "goBack" }), "back")
 }

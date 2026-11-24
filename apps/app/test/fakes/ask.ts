@@ -38,7 +38,7 @@ export function askScene(): AskScene {
 const encoder = new TextEncoder();
 const frame = (data: unknown) => encoder.encode(`data: ${JSON.stringify(data)}\n\n`);
 /** What ends a turn, as eliza's agent names its messages (`.eliza/packages/agent/src/client/reply-frame.schema.vibe`, `DoneFrame`). */
-const named = (turn: number) => ({ messageId: `m${turn}`, userMessageId: `u${turn}`, agentName: "Alpha", actionResults: [] });
+const named = (turn: number) => ({ messageId: `m${turn}a`, userMessageId: `m${turn}u`, agentName: "Alpha", actionResults: [] });
 
 /** A streamed reply as eliza's agent writes one: what was said back in two pieces, or one piece that waits to be stopped. */
 function reply(scene: AskScene, room: string, text: string, keep: (said: string) => void): Response {

@@ -91,6 +91,7 @@ function about(waitMs: number): string {
 
 /** The action a failed reply's card offers, if any. */
 function actionOf(kind: Failure, fix: Fix): "signIn" | "funding" | "retry" | undefined {
+  if (kind === "OutOfFunds") return "funding";
   if (fix === "SignInFix") return "signIn";
   if (fix === "FundingFix" || (fix === "NoFix" && managesPlan(kind))) return "funding";
   if (fix === "RetryFix") return "retry";
@@ -158,7 +159,13 @@ export function Assistant({ runtime }: AssistantProps) {
         card={act === undefined || !fixShown(fix, kind)
           ? { kind: "plain", text: detail === undefined ? failures[kind] : `${failures[kind]}. ${detail}` }
           : { kind: "action", action: act, title: failures[kind], ...(detail === undefined ? {} : { detail }), ...(act === "funding" ? { label: "Manage plan" } : {}) }}
-        onAct={act === "retry" ? () => type(board.lastSent) : act !== undefined && shell.can({ type: "openView", view: "Settings" }) ? () => void shell.send({ type: "openView", view: "Settings" }) : undefined}
+        onAct={act === "retry"
+          ? () => type(board.lastSent)
+          : act !== undefined && shell.can({ type: "openView", view: "Settings" })
+            ? () => void shell.send({ type: "openView", view: "Settings" })
+            : act !== undefined && shell.state?.trail.at(-1) === "Settings" && shell.state.assistant !== "Bar" && shell.can({ type: "goBack" })
+              ? () => void shell.send({ type: "goBack" })
+              : undefined}
       />
     );
   };

@@ -2,6 +2,7 @@
 import { ConversationRecord } from "@elizaos/agent/client"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type { Failure, Fix } from "../../gen/app__assistant__reply.ts"
+import type { Sighting } from "../platform/location.vibe"
 
 /** One message of the conversation showing, as the agent keeps it. */
 export interface Line {
@@ -62,6 +63,12 @@ export interface Board {
   /** The id the last message was posted under, as the agent keeps it, or "" where its post never said. */
   lastSentId: string
   sendWhenMade: boolean
+  /** Keep `sighting` under the `ticket` the locator accepted. */
+  rememberPosition(ticket: number, sighting: Sighting): void
+  /** Forget any remembered position once the locator has none. */
+  forgetPosition(): void
+  /** The remembered position for `ticket`, if the locator still holds that ticket. */
+  positionFor(ticket: number): Sighting | undefined
   change(patch: Partial<Seen>): void
   /** The number of the conversation the agent names `record`, given the first time it is seen; its title where one is given. */
   numberOf(record: ConversationRecord, title?: string): number
@@ -75,6 +82,7 @@ export interface Board {
   page(ticket: number): ReadonlyArray<Line>
   latest(): ReadonlyArray<Line>
   append(line: Line): void
+  confirm(line: Line, id: string): void
   drop(line: Line): void
 }
 
@@ -107,6 +115,7 @@ export const talk = Layer.effect(Talk, effect {
   const records: Known[] = remembered.map((one) => ({ record: { id: one.id, roomId: one.roomId } as ConversationRecord, title: one.title }))
   const messages: string[] = []
   const listeners = new Set<() => void>()
+  let position: { readonly ticket: number; readonly sighting: Sighting } | undefined
   let seen: Seen = {
     pages: new Map(), reply: "", label: "", failure: undefined, typed: "", saved: "", hits: [],
     titles: new Map(records.map((one, at) => [at + 1, one.title])),
@@ -123,6 +132,9 @@ export const talk = Layer.effect(Talk, effect {
     lastSent: "",
     lastSentId: "",
     sendWhenMade: false,
+    rememberPosition: (ticket, sighting) => { position = { ticket, sighting } },
+    forgetPosition: () => { position = undefined },
+    positionFor: (ticket) => (position?.ticket === ticket ? position.sighting : undefined),
     change: (patch) => {
       seen = { ...seen, ...patch }
       for (const listener of listeners) listener()
@@ -156,6 +168,11 @@ export const talk = Layer.effect(Talk, effect {
     append: (line) => {
       const newest = Math.max(0, ...seen.pages.keys())
       board.change({ pages: new Map([...seen.pages, [newest, [...board.page(newest), line]]]) })
+    },
+    confirm: (line, id) => {
+      if (id === "") return
+      const newest = Math.max(0, ...seen.pages.keys())
+      board.change({ pages: new Map([...seen.pages, [newest, board.page(newest).map((one) => (one === line ? { ...one, id } : one))]]) })
     },
     drop: (line) => {
       const newest = Math.max(0, ...seen.pages.keys())
