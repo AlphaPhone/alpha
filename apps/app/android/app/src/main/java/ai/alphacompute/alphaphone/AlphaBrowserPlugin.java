@@ -320,6 +320,7 @@ public class AlphaBrowserPlugin extends Plugin {
  /** A load gets 30 seconds while its tab is on screen. A hidden or paused tab cannot draw its first frame, so its timer stops and starts again when it shows. */
  private void armTimeout(Tab t) {
   clearTimeout(t);
+  if(paused||!t.frame.isShown())return;
   t.timeout=()->{t.timeout=null;if(!t.loading||t.dead||!t.error.isEmpty())return;if(paused||!t.frame.isShown())return;fail(t,"This page is taking too long. Check your connection, then reload from the menu.",t.url);};
   navigationHandler.postDelayed(t.timeout,30000);
  }
@@ -923,7 +924,7 @@ public class AlphaBrowserPlugin extends Plugin {
  /** Invalid geometry withdraws the old input authority rather than routing through stale chrome. */
  private void rejectPresentation(PluginCall call,String reason) {
   selectPresentation(null);cancelFile();dismissSiteDialogs();exitFullscreen(true);if(reading!=null)reading.check();
-  for(Tab tab:tabs.values()){disableAutofill(tab);tab.frame.setHostRectsReceived(false);tab.frame.setVisibility(View.GONE);}
+  for(Tab tab:tabs.values()){clearTimeout(tab);disableAutofill(tab);tab.frame.setHostRectsReceived(false);tab.frame.setVisibility(View.GONE);}
   call.reject(reason);
  }
  @PluginMethod public void present(PluginCall call) { getActivity().runOnUiThread(() -> {if(closed(call))return;
@@ -953,7 +954,7 @@ public class AlphaBrowserPlugin extends Plugin {
    }
   }
   selectPresentation(nextId);if(reading!=null)reading.check();
-  for(Tab old:tabs.values())if(!Objects.equals(old.id,presentedId)){disableAutofill(old);clearFind(old);if(siteDialogTab==old)dismissSiteDialogs();if(fullscreenTab==old)exitFullscreen(true);old.frame.setVisibility(View.GONE);}
+  for(Tab old:tabs.values())if(!Objects.equals(old.id,presentedId)){clearTimeout(old);disableAutofill(old);clearFind(old);if(siteDialogTab==old)dismissSiteDialogs();if(fullscreenTab==old)exitFullscreen(true);old.frame.setVisibility(View.GONE);}
   Tab t=tabs.get(call.getString("id")); if(t!=null) { float d=getContext().getResources().getDisplayMetrics().density;
    presentLayer(t,layer,host,branch);
    FrameLayout.LayoutParams p=new FrameLayout.LayoutParams(Math.max(0,Math.round(width*d)),Math.max(0,Math.round(height*d)));p.leftMargin=Math.round(x*d);p.topMargin=Math.round(y*d);
@@ -967,16 +968,27 @@ public class AlphaBrowserPlugin extends Plugin {
   if(requested==null||requested.isEmpty()||requested.length()>100||(session!=null&&!session.equals(requested))){call.reject("Expired browser session");return false;}
   session=requested;return true;
  }
- private JSObject bookmarkResult(ArrayList<String> urls) { JSObject result=new JSObject();JSArray list=new JSArray();for(String url:urls)list.put(url);result.put("urls",list);return result; }
+ private JSObject bookmarkResult(List<BrowserBookmarkStore.Entry> rows) {
+  JSObject result=new JSObject();JSArray urls=new JSArray(),entries=new JSArray();
+  for(BrowserBookmarkStore.Entry row:rows){
+   urls.put(row.url);
+   JSObject entry=new JSObject();entry.put("url",row.url);
+   if(row.title!=null)entry.put("title",row.title);
+   entries.put(entry);
+  }
+  result.put("urls",urls);result.put("entries",entries);return result;
+ }
  @PluginMethod public void bookmarks(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;
   if(!bookmarkSession(call))return;
-  try{call.resolve(bookmarkResult(bookmarks.read()));}catch(Exception unavailable){call.reject("Saved bookmarks could not be read. Existing bookmarks were not changed.");}
+  try{call.resolve(bookmarkResult(bookmarks.entries()));}catch(Exception unavailable){call.reject("Saved bookmarks could not be read. Existing bookmarks were not changed.");}
  }); }
  @PluginMethod public void setBookmark(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;
   if(!bookmarkSession(call))return;
   String url=call.getString("url");Boolean saved=call.getBoolean("saved");
   if(!BrowserBookmarkStore.valid(url)||saved==null){call.reject("Only HTTPS addresses without embedded credentials can be bookmarked.");return;}
-  try{call.resolve(bookmarkResult(bookmarks.change(url,saved)));}catch(Exception unavailable){call.reject("Bookmark could not be saved. The device stores up to 100 bookmarks; existing data was not changed.");}
+  Object title=call.getData().opt("title");
+  if(saved&&title!=null&&title!=org.json.JSONObject.NULL&&!(title instanceof String)){call.reject("A bookmark title must be text.");return;}
+  try{call.resolve(bookmarkResult(bookmarks.change(url,saved,title instanceof String text?text:null)));}catch(Exception unavailable){call.reject("Bookmark could not be saved. The device stores up to 100 bookmarks; existing data was not changed.");}
  }); }
  @PluginMethod public void browsingState(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;
   if(!bookmarkSession(call))return;
@@ -1145,7 +1157,7 @@ public class AlphaBrowserPlugin extends Plugin {
  /** Whether website password fill can work in this browser (no secrets, no tab state). */
  @PluginMethod public void loginFillStatus(PluginCall call) { JSObject result=new JSObject(); boolean available=BrowserLoginFields.supported(); result.put("available",available); if(!available)result.put("reason",BrowserFieldOrigin.UNSUPPORTED); call.resolve(result); }
  @PluginMethod public void close(PluginCall call) { getActivity().runOnUiThread(() -> {if(closed(call))return; if (!Objects.equals(session,call.getString("session"))) { call.reject("Expired browser session"); return; } Tab t=tabs.remove(call.getString("id")); if(t!=null) dispose(t); call.resolve(); }); }
- @Override protected void handleOnPause() { paused=true;if(reading!=null)reading.cancel();flushCookies();exitFullscreen(true); for(Tab t:tabs.values()) { syncAutofill(t); t.frame.setHostRectsReceived(false);t.frame.setVisibility(View.GONE); if(!t.dead)t.web.onPause(); } }
+ @Override protected void handleOnPause() { paused=true;if(reading!=null)reading.cancel();flushCookies();exitFullscreen(true); for(Tab t:tabs.values()) { clearTimeout(t); syncAutofill(t); t.frame.setHostRectsReceived(false);t.frame.setVisibility(View.GONE); if(!t.dead)t.web.onPause(); } }
  /** Persist normal-tab sign-in cookies promptly; the process may be killed in background. */
  private void flushCookies() {
   try{if(WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)){androidx.webkit.Profile profile=ProfileStore.getInstance().getProfile(config().persistentProfile);if(profile!=null)profile.getCookieManager().flush();}}catch(Exception unavailable){}
