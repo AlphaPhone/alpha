@@ -51,11 +51,9 @@ on dispatch: one job builds the launcher APKs and runs the default instrumentati
 reading suites on hosted emulators. `resident-android.yml` builds the unsigned native candidate on
 each `main` push, and a dispatched build or embedding-qualification publication on request. The
 release workflows run only on dispatch.
-The native candidate keeps the bounded, hash-pinned Bun acquisition check with credentials
-limited to its download step. Runtime staging, mobile bundle checks, notices and distribution
+Runtime staging, mobile bundle checks, notices and distribution
 archiving retain separate deadlines. The emulator lane retains its exact debug and instrumentation
-APKs with their manifest for later byte-level audits. Required prepared-SDK tests fail when the
-Cloud recording classifier dependency is missing.
+APKs with their manifest for later byte-level audits.
 
 On a heavily loaded machine, `ALPHA_TIMEOUT_SCALE=3` (1–10) lengthens subprocess
 deadlines for refinement, host JVM fixtures and LemmaScript, and Playwright server
@@ -113,8 +111,9 @@ fixtures and developer controls require exactly `ELIZA_DEV_ALLOW_TEST_MOCKS=1`.
 Add `?tools=1` to an enabled development server to show developer controls;
 the query cannot enable them in production or on Android.
 
-`pnpm dev:cloud` uses a local resident with real Cloud sign-in and service
-requests. Its default URL is `http://127.0.0.1:5318`.
+`pnpm dev:cloud` starts the renderer only (Vite), against a real Cloud environment with real
+Cloud sign-in and service requests; no local resident is started. Its default URL is
+`http://127.0.0.1:5318`.
 `ALPHA_CLOUD_ENVIRONMENT=staging` explicitly selects staging. Private account and
 resident profiles live under `~/.local/share/alphaphone/`. Existing accounts,
 credentials and histories are not copied or reset.
