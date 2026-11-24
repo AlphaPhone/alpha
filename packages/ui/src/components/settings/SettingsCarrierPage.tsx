@@ -65,7 +65,7 @@ export function SettingsCarrierPage({ fields, reading = false, failed = false, s
     else group.push(field);
   }
   return (
-    <SettingsPage title="Carrier & SIM setup" told={told} onBack={onBack}>
+    <SettingsPage title="Carrier & SIM setup" told={told} onBack={onBack} backLabel="Back to General">
       {failed ? <Banner variant="warn">The identifiers could not be read</Banner> : null}
       <div role="status" aria-live="polite">{copied ? <Banner variant={copied === "copied" ? "info" : "warn"}>{copied === "copied" ? "Copied" : "Could not copy"}</Banner> : null}</div>
       {reading ? <ListRow title="Reading identifiers" trailing={<Spinner size="sm" label="Reading" />} /> : null}

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { AppWindow, Battery, Bell, Bluetooth, Lock, Phone, Plane, RadioTower, Signal, Sun, Volume2, Wifi, WifiCog } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { SettingsAndroidRow } from "./SettingsAndroidRow.tsx";
@@ -37,12 +38,16 @@ export type SettingsGeneralPageProps = SettingsAndroidProps &
     onRequestHome?: () => void;
     /** What Alpha said about the last reset attempt. */
     said?: SettingsResetNoticeProps["said"];
+    /** The update area's controls, above reset. */
+    children?: ReactNode;
+    /** Commands in the General header. */
+    actions?: ReactNode;
   };
 
 const links: SettingsPageLink[] = [
   { page: "display", title: "Display", icon: <Sun /> },
-  { page: "sound", title: "Sound", icon: <Volume2 /> },
   { page: "notifications", title: "Notifications", icon: <Bell /> },
+  { page: "sound", title: "Sound", icon: <Volume2 /> },
   { page: "battery", title: "Battery", icon: <Battery /> },
 ];
 
@@ -51,17 +56,16 @@ const links: SettingsPageLink[] = [
  * and default apps, and Erase all data at the foot. Rows are numbered by slot, as on the first page.
  * @model spec/app/settings/index.md
  */
-export function SettingsGeneralPage({ wifi, bluetooth, mobileData, image = false, told, onBack, onOpen, onPhone = false, reviewing, onErase, requestingHome, onRequestHome, said, starting, onAndroid, place, onPlace }: SettingsGeneralPageProps) {
+export function SettingsGeneralPage({ wifi, bluetooth, mobileData, image = false, told, onBack, onOpen, onPhone = false, reviewing, onErase, requestingHome, onRequestHome, said, starting, onAndroid, place, onPlace, children, actions }: SettingsGeneralPageProps) {
   const at = (row: number) => placed({ place, onPlace }, row);
   const android = { starting, onAndroid };
   return (
-    <SettingsPage title="General" told={told} onBack={onBack}>
+    <SettingsPage title="General" told={told} onBack={onBack} backLabel="Back to Settings" actions={actions}>
       {said ? <SettingsResetNotice said={said} /> : null}
+      {onPhone ? <ListGroup><SettingsNavRow title="Carrier & SIM setup" icon={<RadioTower />} onOpen={onOpen && (() => onOpen("carrier"))} {...at(13)} /></ListGroup> : null}
       <ListGroup>
         <SettingsPageLinks links={links} onOpen={onOpen} place={place} onPlace={onPlace} />
-        {image ? <SettingsNavRow title="Phone" icon={<Phone />} onOpen={onOpen && (() => onOpen("phone"))} {...at(4)} /> : null}
         {onPhone ? <SettingsNavRow title="Network" icon={<WifiCog />} onOpen={onOpen && (() => onOpen("network"))} {...at(12)} /> : null}
-        {onPhone ? <SettingsNavRow title="Carrier & SIM setup" icon={<RadioTower />} onOpen={onOpen && (() => onOpen("carrier"))} {...at(13)} /> : null}
       </ListGroup>
       <ListGroup>
         <SettingsAndroidRow target="wifi-networks" title="Wi-Fi" icon={<Wifi />} reading={wifi} {...android} {...at(5)} />
@@ -74,11 +78,13 @@ export function SettingsGeneralPage({ wifi, bluetooth, mobileData, image = false
         <SettingsAndroidRow target="default-apps" title="Default apps" icon={<AppWindow />} {...android} {...at(10)} />
         {!image && (requestingHome || onRequestHome) ? <SettingsSetAsHomeRow requesting={requestingHome} onRequest={onRequestHome} {...at(14)} /> : null}
       </ListGroup>
+      {children}
       {onPhone ? (
         <ListGroup>
           <SettingsResetRow reviewing={reviewing} onErase={onErase} {...at(11)} />
         </ListGroup>
       ) : null}
+      {image ? <ListGroup><SettingsNavRow title="Phone" icon={<Phone />} onOpen={onOpen && (() => onOpen("phone"))} {...at(4)} /></ListGroup> : null}
     </SettingsPage>
   );
 }

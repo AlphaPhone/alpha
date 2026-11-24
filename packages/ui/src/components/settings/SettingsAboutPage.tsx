@@ -37,7 +37,7 @@ export type SettingsAboutPageProps = SettingsAndroidProps &
 export function SettingsAboutPage({ alphaVersion, androidVersion, storage, onPhone = true, agent, told, onBack, onOpen, starting, onAndroid, place, onPlace, children }: SettingsAboutPageProps) {
   const at = (row: number) => placed({ place, onPlace }, row);
   return (
-    <SettingsPage title="About" told={told} onBack={onBack}>
+    <SettingsPage title="About" told={told} onBack={onBack} backLabel="Back to Settings">
       <div className="flex justify-center py-4">
         <span className="flex size-16 items-center justify-center rounded-full bg-alpha text-alpha-foreground">
           <Mark aria-hidden className="size-8" />
@@ -50,7 +50,7 @@ export function SettingsAboutPage({ alphaVersion, androidVersion, storage, onPho
       </ListGroup>
       <ListGroup>
         {onPhone ? <SettingsNavRow title="Agent activity" value={agent === "running" ? "Running" : agent === "starting" ? "Starting" : agent === "needs-you" ? "Needs attention" : agent === "stopped" ? "Stopped" : undefined} icon={<History />} onOpen={onOpen && (() => onOpen("activity"))} {...at(0)} /> : null}
-        <SettingsNavRow title="Licences" icon={<Scale />} onOpen={onOpen && (() => onOpen("licences"))} {...at(1)} />
+        <SettingsNavRow title="Licenses" icon={<Scale />} onOpen={onOpen && (() => onOpen("licences"))} {...at(1)} />
         {onPhone ? <SettingsAndroidRow target="about-phone" title="About phone" icon={<Smartphone />} starting={starting} onAndroid={onAndroid} {...at(2)} /> : null}
       </ListGroup>
       {children}

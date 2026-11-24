@@ -17,7 +17,7 @@ The rest of the area:
 - [Carrier & SIM setup](./carrier.md): the identifiers a carrier asks for, read only when the owner asks
 
 Rows of other areas sit on these pages and are theirs: the update rows
-(the update area); the listening rows and the "Microphone may be on" notice
+on General (the update area); the listening rows and the "Microphone may be on" notice
 (the voice area); sign-in, the plan, the AI provider and the agent's
 connection, its Cancel and its restart details (the account area); the
 access walkthrough and the crash journal (the startup area); collecting
@@ -25,8 +25,8 @@ other apps' notifications, their history and recovering notification data
 (the notices area); Google Calendar and its saved-event backups (the
 calendar area); the password manager and its provider (the passwords
 area); the conversations (Ask Alpha); and each phone action's custody (the
-approvals area). Browser and Files on the Apps page open the app itself,
-through the [shell](../shell/).
+approvals area). Browser, Files and Messages on the Apps page open the app itself
+through the [shell](../shell/). Messages is listed on an Alpha image.
 
 ## Story: Find a setting and come back
 
@@ -262,7 +262,7 @@ backups. Settings hands over and keeps nothing.
 ```quint
 type Neighbour = AccountAndPlan | GoogleAndEmail | CalendarAccount | PasswordManager | NotificationCollection | Listener | Conversations | RestartDetails | CalendarBackups
 
-type Effect = Handed({ neighbour: Neighbour }) | ReviewAccess({ access: F::Access })
+type Effect = Handed({ neighbour: Neighbour }) | ReviewAccess({ access: F::Access }) | ReviewAllAccess
 type Moved = { state: Settings, out: List[Effect] }
 
 pure def links(s: Settings, neighbour: Neighbour, micMayBeOn: bool): bool =
@@ -281,19 +281,24 @@ pure def canHandOver(s: Settings, neighbour: Neighbour, micMayBeOn: bool): bool 
 pure def handOver(s: Settings, neighbour: Neighbour, micMayBeOn: bool): Moved = { state: s, out: List(Handed({ neighbour: neighbour })) }
 ```
 
-### Set up Alpha access on Privacy, and each access on Permissions, open the walkthrough to review that one access
+### Set up Alpha access opens all permissions in review, and each row on Permissions opens that one access
 
 The startup area owns the walkthrough. Settings never asks it to start
 over, so a walkthrough already finished stays finished.
 
 ```quint
-pure def canReviewAccess(s: Settings, access: F::Access): bool = s.page == Privacy or s.page == Permissions
+pure def canReviewAllAccess(s: Settings): bool = s.page == Privacy
+
+pure def reviewAllAccess(s: Settings): Moved = { state: s, out: List(ReviewAllAccess) }
+
+pure def canReviewAccess(s: Settings, access: F::Access): bool = s.page == Permissions
 
 pure def reviewAccess(s: Settings, access: F::Access): Moved = { state: s, out: List(ReviewAccess({ access: access })) }
 
 pure def stepTheWalkthroughOnlyReviewsOneAccess(before: Settings, after: Settings, out: List[Effect]): bool =
   out.every(e => match e {
-    | ReviewAccess(r) => out.length() == 1 and (before.page == Privacy or before.page == Permissions)
+    | ReviewAccess(r) => out.length() == 1 and before.page == Permissions
+    | ReviewAllAccess => out.length() == 1 and before.page == Privacy
     | _ => true
   })
 ```

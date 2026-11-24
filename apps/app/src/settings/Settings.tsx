@@ -76,6 +76,7 @@ export interface PageProps {
 /** The props every page of Settings shares: the way back, the rows below, Android's pages and where the owner was. */
 export interface Common {
   readonly onBack?: () => void;
+  readonly actions?: ReactNode;
   readonly onOpen: (page: SettingsPageName) => void;
   readonly onHandOver: (neighbour: SettingsNeighbour) => void;
   readonly starting?: SettingsAndroidStart;
@@ -136,7 +137,9 @@ const saidNames: Record<ResetGen.Said, SettingsResetNoticeProps["said"] | undefi
 
 const loading = (timed: { readonly read: { readonly status: string } }) => timed.read.status === "Loading";
 
-const sounds: Record<string, string> = { all: "Ring", priority: "Priority only", alarms: "Alarms only", none: "Silent" };
+const collectionWords = { paused: "Paused", "no access": "No access", waiting: "Waiting" } as const;
+
+const sounds: Record<string, string> = { all: "Off", priority: "Priority only", alarms: "Alarms only", none: "On" };
 
 /** What the phone said about one fact, in the words and state the row shows. */
 function reading(facts: FactsGen.Facts | undefined, fact: FactsGen.Fact): SettingsFactReading {
@@ -146,6 +149,7 @@ function reading(facts: FactsGen.Facts | undefined, fact: FactsGen.Fact): Settin
   if (word === "Unavailable") return { word: "unavailable" };
   const value = facts.reported.find((one) => one.fact === fact)?.value ?? "";
   if (value === "on") return { word: "reported", value: "On", status: "ok" };
+  if (value === "paused" || value === "no access" || value === "waiting") return { word: "reported", value: collectionWords[value], status: "warn" };
   if (value === "some off") return { word: "reported", value: "Some off", status: "warn" };
   if (value === "off") return { word: "reported", value: "Off", status: "off" };
   if (fact === "Sound") return { word: "reported", value: sounds[value] ?? value };
@@ -206,14 +210,14 @@ function useDevice(runtime: SettingsRuntime) {
 function Top({ runtime, alpha, common }: PageProps) {
   const pages = usePages(runtime).state;
   return (
-    <SettingsTopPage {...common} leading={<AppBack alpha={alpha} />} developer={pages?.development ?? false}>
+    <SettingsTopPage {...common} leading={<AppBack alpha={alpha} />} onPhone={pages?.phone ?? false} developer={pages?.development ?? false}>
       {alpha.slot("settings/account")}
     </SettingsTopPage>
   );
 }
 
 // spec/app/settings/reset.md, "Erase all data, on the phone, asks the phone to show its disclosure and check the device credential, one review at a time"; spec/app/settings/facts.md, "Set as Home is offered when the newest answer reported a Home role that Alpha can take and does not hold, one request at a time"
-function General({ runtime, common }: PageProps) {
+function General({ runtime, alpha, common }: PageProps) {
   const pages = usePages(runtime).state;
   const { state: facts, can, send } = useTimed(runtime, useFacts);
   const reset = useTimed(runtime, useReset);
@@ -233,7 +237,9 @@ function General({ runtime, common }: PageProps) {
       said={reset.state && saidNames[reset.state.said]}
       requestingHome={facts !== undefined && loading(facts.request)}
       onRequestHome={can(request) ? () => void send(request) : undefined}
-    />
+    >
+      {alpha.slot("settings/update")}
+    </SettingsGeneralPage>
   );
 }
 
@@ -314,11 +320,14 @@ function Phone({ runtime, alpha, common }: PageProps) {
 
 function Apps({ runtime, common }: PageProps) {
   const shell = useShell(runtime);
+  const image = usePages(runtime).state?.image ?? false;
+  const appViews = { browser: "Browser", files: "Files", messages: "Messages" } as const;
   return (
     <SettingsAppsPage
       {...common}
+      image={image}
       onOpenApp={(app) => {
-        const open = { type: "openView", view: app === "browser" ? "Browser" : "Files" } as const;
+        const open = { type: "openView", view: appViews[app] } as const;
         if (shell.can(open)) void shell.send(open);
       }}
     />
@@ -354,7 +363,6 @@ function About({ runtime, alpha, common }: PageProps) {
   return (
     <SettingsAboutPage {...common} onPhone={pages?.phone} agent={agent} alphaVersion={reading(facts, "Versions")} androidVersion={reading(facts, "AndroidVersion")} storage={reading(facts, "Storage")}>
       {alpha.slot("settings/about")}
-      {alpha.slot("settings/update")}
     </SettingsAboutPage>
   );
 }
@@ -405,10 +413,14 @@ const drawn: Partial<Record<Page, Drawn>> = {
   Top,
   General,
   Display,
-  Sound: ({ runtime, common }) => <SettingsSoundPage {...common} sound={reading(useFacts(runtime).state, "Sound")} />,
+  Sound: ({ runtime, common }) => {
+    const facts = useFacts(runtime).state;
+    return <SettingsSoundPage {...common} sound={reading(facts, "Sound")} media={reading(facts, "MediaVolume")} ring={reading(facts, "RingVolume")} alarm={reading(facts, "AlarmVolume")} />;
+  },
   Notifications: ({ runtime, common }) => {
     const facts = useFacts(runtime).state;
-    return <SettingsNotificationsPage {...common} alerts={reading(facts, "Alerts")} channels={facts?.alerts ?? []} />;
+    const pages = usePages(runtime).state;
+    return <SettingsNotificationsPage {...common} onPhone={pages?.phone} alerts={reading(facts, "Alerts")} doNotDisturb={reading(facts, "Sound")} collection={reading(facts, "CollectionStatus")} channels={facts?.alerts ?? []} />;
   },
   Battery: ({ runtime, common }) => <SettingsBatteryPage {...common} battery={reading(useFacts(runtime).state, "Battery")} />,
   PhonePage: Phone,
@@ -442,7 +454,11 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
   const page = state.page;
   const goBack = { type: "goBack" } as const;
   const start = android.state && loading(android.state.start) ? { target: targetNames[android.state.target], channel: android.state.channel || undefined } : undefined;
+  const refresh = { type: "refresh", at: untimed } as const;
   const common: Common = {
+    actions: (page === "Top" || page === "General") && facts.can(refresh)
+      ? <Button variant="ghost" size="sm" onClick={() => void facts.send(refresh)}>Refresh</Button>
+      : undefined,
     onBack: can(goBack) ? () => void send(goBack) : undefined,
     onOpen: (name) => {
       const open = { type: "open", page: pagesNamed[name] } as const;
@@ -464,11 +480,9 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
     },
   };
   const Shown = further[page] ?? drawn[page];
-  const refresh = { type: "refresh", at: untimed } as const;
   return (
-    <section aria-label="Settings" className="flex h-full flex-col">
-      {facts.state && facts.state.read.read.status === "Failed" ? <Banner variant="warn">The phone did not answer</Banner> : null}
-      {facts.can(refresh) && page !== "Licences" ? <Button variant="ghost" size="sm" className="self-end" onClick={() => void facts.send(refresh)}>Refresh</Button> : null}
+    <section aria-label="Settings" className="flex h-full min-h-0 flex-col">
+      {state.phone && facts.state?.read.read.status === "Failed" && (page === "Top" || page === "General") ? <Banner variant="warn">The phone did not answer</Banner> : null}
       {Shown ? <Shown runtime={runtime} alpha={alpha} common={common} /> : null}
     </section>
   );

@@ -68,7 +68,7 @@ export function SettingsNetworkPage({ online, reading = false, scan, scanning = 
   const android = { starting, onAndroid };
   const ready = chosen !== undefined && onJoin !== undefined && !joining && (fits?.(chosen, passphrase) ?? false);
   return (
-    <SettingsPage title="Network" told={told} onBack={onBack} actions={onRescan ? <Button variant="ghost" size="sm" onClick={onRescan}>Scan again</Button> : undefined}>
+    <SettingsPage title="Network" told={told} onBack={onBack} backLabel="Back to General" actions={onRescan ? <Button variant="ghost" size="sm" onClick={onRescan}>Scan again</Button> : undefined}>
       {said ? <Banner variant="warn">{said}</Banner> : null}
       {joined ? <Banner variant={joined === "connected" ? "info" : "warn"}>{joins[joined]}</Banner> : null}
       <ListGroup>

@@ -31,7 +31,7 @@ export type SettingsPhonePageProps = SettingsAndroidProps & {
  */
 export function SettingsPhonePage({ home, assistant, requesting, onRequestHome, told, onBack, starting, onAndroid, children }: SettingsPhonePageProps) {
   return (
-    <SettingsPage title="Phone" told={told} onBack={onBack}>
+    <SettingsPage title="Phone" told={told} onBack={onBack} backLabel="Back to General">
       {children}
       <ListGroup>
         <SettingsRoleRow role="home" word={home} />

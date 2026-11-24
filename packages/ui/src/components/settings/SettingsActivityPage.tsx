@@ -59,7 +59,7 @@ export function SettingsActivityPage({ connection, actions, reading = false, fai
   return (
     <SettingsPage
       title="Agent activity"
-      onBack={onBack}
+      onBack={onBack} backLabel="Back to About"
       actions={ready && !journalUnavailable ? <Button variant="ghost" size="icon" aria-label="Refresh actions" loading={reading} disabled={!onRefresh} onClick={onRefresh}><RotateCw /></Button> : undefined}
     >
       {ready ? null : <SettingsAgentRecovery connection={connection} onRecover={onRecover} />}

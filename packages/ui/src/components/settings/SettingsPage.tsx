@@ -15,6 +15,8 @@ export type SettingsPageProps = {
   leading?: ReactNode;
   /** Goes back to the parent page, at the row left; the Back button is shown only with it, so the first page has none. */
   onBack?: () => void;
+  /** The parent page Back returns to. */
+  backLabel?: string;
   /** What Alpha tells about the last start of an Android page, above the rows. */
   told?: AndroidTold;
   /** The page's own actions, at the end of its header. */
@@ -27,11 +29,12 @@ export type SettingsPageProps = {
  * The frame of every Settings page: its title, the way back and the notice about Android, over a scrolling body.
  * @model spec/app/settings/index.md
  */
-export function SettingsPage({ title, top = false, leading, onBack, told, actions, children }: SettingsPageProps) {
+export function SettingsPage({ title, top = false, leading, onBack, backLabel = "Back", told, actions, children }: SettingsPageProps) {
   return (
     <Screen
+      data-settings-page={title}
       title={title}
-      leading={leading ?? (onBack ? <Button variant="ghost" size="icon" aria-label="Back" onClick={onBack}><ChevronLeft /></Button> : undefined)}
+      leading={leading ?? (onBack ? <Button variant="ghost" size="icon" aria-label={backLabel} onClick={onBack}><ChevronLeft /></Button> : undefined)}
       actions={actions}
       className={cn(
         "pt-[max(--spacing(11),env(safe-area-inset-top))] [&>main]:touch-pan-y [&>main]:pb-[calc(--spacing(32.5)+env(safe-area-inset-bottom))] [&>main>div]:gap-3 [&>main>div]:pt-1",

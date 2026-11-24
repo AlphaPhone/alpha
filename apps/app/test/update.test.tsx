@@ -38,7 +38,7 @@ const report = (alpha: Awaited<ReturnType<typeof open>>["alpha"], area: string, 
 async function about(alpha: Awaited<ReturnType<typeof open>>["alpha"]) {
   await press("Settings");
   await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Settings");
-  await press("About");
+  await press("General");
 }
 
 describe("Updates", () => {

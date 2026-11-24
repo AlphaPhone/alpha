@@ -34,14 +34,14 @@ export type SettingsLicencesPageProps = SettingsPlaceProps & {
  */
 export function SettingsLicencesPage({ load, found, query, licences, onQuery, onOpen, onBack, place, onPlace }: SettingsLicencesPageProps) {
   return (
-    <SettingsPage title="Licences" onBack={onBack}>
-      <SearchField aria-label="Search licences" value={query} onValueChange={(next) => onQuery?.(next)} disabled={load !== "loaded" || !onQuery} />
+    <SettingsPage title="Licenses" onBack={onBack} backLabel="Back to About">
+      <SearchField aria-label="Search licenses" value={query} onValueChange={(next) => onQuery?.(next)} disabled={load !== "loaded" || !onQuery} />
       {load === "loading" ? <Skeleton className="h-40 rounded-lg" /> : null}
-      {load === "failed" ? <EmptyState title="Licences are unavailable" /> : null}
-      {load === "loaded" && found === 0 ? <EmptyState title="No licences found" /> : null}
-      {load === "loaded" && found > 0 && licences.length === 0 ? <EmptyState title="No licence matches" /> : null}
+      {load === "failed" ? <EmptyState title="Licenses are unavailable" /> : null}
+      {load === "loaded" && found === 0 ? <EmptyState title="No licenses found" /> : null}
+      {load === "loaded" && found > 0 && licences.length === 0 ? <EmptyState title="No license matches" /> : null}
       {load === "loaded" && licences.length ? (
-        <ListGroup heading={query ? `${licences.length} of ${found}` : `${found} licences`}>
+        <ListGroup heading={query ? `${licences.length} of ${found}` : `${found} licenses`}>
           {licences.map((licence, index) => (
             <ListRow key={JSON.stringify([licence.name, licence.version, licence.source])} title={licence.name} detail={licence.version ? `${licence.version} · ${licence.licence}` : licence.licence} trailing={<ChevronRight aria-hidden className="size-5" />} onClick={onOpen && (() => onOpen(index))} {...placed({ place, onPlace }, index)} />
           ))}

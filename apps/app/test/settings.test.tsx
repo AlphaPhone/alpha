@@ -196,10 +196,10 @@ describe("Settings", () => {
   it("Read the licences (spec/app/settings/licences.md, \"Story: Read the licences\")", async () => {
     const { alpha, machines } = await settingsOpen();
     await press("About");
-    await press("Licences");
+    await press("Licenses");
     await until(alpha, machines, Licences.Machine, (s) => s.load.read.status === "Loaded" && s.found === 3);
     // spec/app/settings/licences.md, "Searching narrows the loaded list to the licences that match, from its top, and an empty search shows them all"
-    await fill("Search licences", "mpl");
+    await fill("Search licenses", "mpl");
     await until(alpha, machines, Licences.Machine, (s) => s.query === "mpl" && s.shown === 1);
     // spec/app/settings/licences.md, "Back from a licence returns to the same search"
     await tap("mediabunny");
@@ -208,7 +208,7 @@ describe("Settings", () => {
     await until(alpha, machines, Licences.Machine, (s) => s.licence < 0 && s.query === "mpl");
     // spec/app/settings/licences.md, "Opening the page clears the search, and loads the licences unless they are loading or loaded with some found"
     await hardware("back");
-    await press("Licences");
+    await press("Licenses");
     await until(alpha, machines, Licences.Machine, (s) => s.query === "" && s.shown === 3);
     expect(shipped).toHaveBeenCalledTimes(1);
   });

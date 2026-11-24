@@ -48,7 +48,7 @@ export type SettingsPrivacyPageProps = SettingsPlaceProps & {
 export function SettingsPrivacyPage({ read, askFirst, saving, recovering, onAskFirstChange, shares = {}, onShareChange, onRecover, onBack, onOpen, onSetUpAccess, onHandOver, place, onPlace, children }: SettingsPrivacyPageProps) {
   const at = (row: number) => placed({ place, onPlace }, row);
   return (
-    <SettingsPage title="Privacy" onBack={onBack}>
+    <SettingsPage title="Privacy" onBack={onBack} backLabel="Back to Settings">
       <ListGroup>
         <SettingsNavRow title="Permissions" icon={<ListChecks />} onOpen={onOpen && (() => onOpen("permissions"))} {...at(0)} />
         <SettingsNavRow title="Set up Alpha access" icon={<KeyRound />} onOpen={onSetUpAccess} {...at(1)} />

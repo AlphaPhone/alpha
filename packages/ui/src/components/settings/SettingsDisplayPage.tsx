@@ -39,7 +39,7 @@ export type SettingsDisplayPageProps = SettingsAndroidProps & {
  */
 export function SettingsDisplayPage({ theme, keeping, onChooseTheme, legible = false, onLegibleChange, size, sizing, onChooseSize, notice, told, onBack, starting, onAndroid }: SettingsDisplayPageProps) {
   return (
-    <SettingsPage title="Display" told={told} onBack={onBack}>
+    <SettingsPage title="Display" told={told} onBack={onBack} backLabel="Back to General">
       {notice ? <SettingsPreferencesNotice notice={notice} /> : null}
       <SettingsAppearancePicker theme={theme} keeping={keeping} onChoose={onChooseTheme} />
       <ListGroup>

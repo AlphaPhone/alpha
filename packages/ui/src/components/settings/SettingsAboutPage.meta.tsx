@@ -32,9 +32,9 @@ export const meta: ComponentMeta<SettingsAboutPageProps> = {
       onOpen.mockClear();
       const canvas = within(canvasElement);
       await userEvent.click(canvas.getByRole("button", { name: "Agent activity" }));
-      await userEvent.click(canvas.getByRole("button", { name: "Licences" }));
+      await userEvent.click(canvas.getByRole("button", { name: "Licenses" }));
       await expect(onOpen.mock.calls).toEqual([["activity"], ["licences"]]);
     },
-    "Returning to a row": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(document.activeElement).toBe(within(canvasElement).getByRole("button", { name: "Licences" })),
+    "Returning to a row": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(document.activeElement).toBe(within(canvasElement).getByRole("button", { name: "Licenses" })),
   },
 };

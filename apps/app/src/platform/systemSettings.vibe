@@ -1,7 +1,8 @@
 // spec/app/settings/facts.md, "Story: See what the phone says"; spec/app/settings/android.md, "Story: Change what only Android can change"
-import type { AndroidRoleStatus, NativeCrashEntry, SettingsHandoff, SystemFacts, SystemSettingsPage } from "@elizaos/os/bridges/definitions/system"
+import type { AndroidRoleStatus, DeviceSettingsStatus, NativeCrashEntry, SettingsHandoff, SystemFacts, SystemSettingsPage } from "@elizaos/os/bridges/definitions/system"
 import type { LocationPermissionStatus } from "@elizaos/os/bridges/definitions/location"
 import type { FilesAccess, StorageVolume } from "@elizaos/os/bridges/definitions/files"
+import type { MirrorStatus } from "@elizaos/os/bridges/definitions/notices"
 import type { LibraryScopeKind } from "@elizaos/os/bridges/definitions/media"
 import type { Opened, Target } from "../../gen/app__settings__android.ts"
 import type { Access, AccessGrant, Alert, Holder, Reading } from "../../gen/app__settings__facts.ts"
@@ -90,6 +91,8 @@ export interface PhoneReport {
 export service SystemSettings {
   /** What the phone reports now; what it could not read is left out, never guessed. */
   report(): PhoneReport!!
+  /** Whether Android could check one permission under review. */
+  access(access: Access): Option.Option<{ readonly grant: Grant; readonly on: boolean }>!!
   /** Android's dialog for the Home role; returns when it closes. Whether Alpha holds the role is read again, never taken from the dialog. */
   requestHome(): void!!
   /** Android's own page for `target`, for Alpha itself where the page is about Alpha. */
@@ -154,6 +157,8 @@ const HostFacts = Schema.Struct({
   })),
 })
 
+const hostFacts = () => Effect.option(Effect.flatMap(tryPromise(() => hostOf().settingsFacts()), Schema.decodeUnknownEffect(HostFacts)))
+
 function boolGrant(access: Access, allowed: boolean | undefined): AccessGrant[] {
   return allowed === undefined ? [] : [{ access, grant: allowed ? "Granted" : "Denied" }]
 }
@@ -162,17 +167,38 @@ function photoGrant(scope: LibraryScopeKind): Grant {
   return scope === "full" ? "Granted" : scope === "denied" || scope === "owned" ? "Denied" : "Limited"
 }
 
+const streams: ReadonlyArray<[DeviceSettingsStatus["volumes"][number]["stream"], Reading["fact"]]> = [
+  ["music", "MediaVolume"], ["ring", "RingVolume"], ["alarm", "AlarmVolume"],
+]
+
+function volumesOf(settings: DeviceSettingsStatus): ReadonlyArray<Reading> {
+  return streams.flatMap(([stream, fact]) => {
+    const volume = settings.volumes.find((one) => one.stream === stream)
+    return volume === undefined || volume.max <= 0 || volume.current < 0 || volume.current > volume.max
+      ? [] : [{ fact, value: `${Math.round(100 * volume.current / volume.max)}%` }]
+  })
+}
+
+function mirrorWord(mirror: MirrorStatus): string {
+  if (!mirror.enabled) return "off"
+  if (mirror.paused) return "paused"
+  if (!mirror.accessGranted) return "no access"
+  return mirror.connected ? "on" : "waiting"
+}
+
 /** What the phone reports through its SDK plugins and Alpha's own build facts. */
 effect function phoneReport(): PhoneReport!! {
-  const [facts, status, build, located, stored, host, photo, delivery] = try.all [
+  const [facts, status, build, located, stored, host, photo, delivery, deviceSettings, collection] = try.all [
     settled(async () => (await systemOf()).getSystemFacts()),
     settled(async () => (await systemOf()).getStatus()),
     settled(async () => (await systemOf()).getBuildInfo()),
     settled(() => locationOf().checkPermissions()),
     settled(() => filesOf().storageState()),
-    Effect.option(Effect.flatMap(tryPromise(() => hostOf().settingsFacts()), Schema.decodeUnknownEffect(HostFacts))),
+    hostFacts(),
     settled(() => photosOf().libraryAccess()),
     settled(() => noticesOf().delivery()),
+    settled(async () => (await systemOf()).getDeviceSettings()),
+    settled(() => noticesOf().mirrorStatus()),
   ]
   const settings = Option.getOrUndefined(host)
   const notices = Option.getOrUndefined(delivery)
@@ -191,7 +217,11 @@ effect function phoneReport(): PhoneReport!! {
   const location = Option.isSome(located) ? grantOf(located.value.location, located.value.accuracy === "approximate") : undefined
   const roles = Option.isSome(status) ? status.value.roles : []
   return {
-    readings,
+    readings: [
+      ...readings,
+      ...(Option.isSome(deviceSettings) ? volumesOf(deviceSettings.value) : []),
+      ...(Option.isSome(collection) ? [{ fact: "CollectionStatus" as const, value: mirrorWord(collection.value) }] : []),
+    ],
     alerts,
     grants: [
       ...boolGrant("CameraAccess", settings?.permissions?.Camera),
@@ -208,13 +238,38 @@ effect function phoneReport(): PhoneReport!! {
   }
 }
 
+const browserPermissions: Readonly<Partial<Record<Access, string>>> = { CameraAccess: "camera", MicrophoneAccess: "microphone", LocationAccess: "geolocation", NotificationsAccess: "notifications" }
+
+const permission = (grant: Grant | undefined, on = true) => Option.map(Option.fromUndefinedOr(grant), (value) => ({ grant: value, on }))
+
+effect function phoneAccess(access: Access) {
+  switch (access) {
+    case "LocationAccess": {
+      const [located, facts] = try.all [settled(() => locationOf().checkPermissions()), settled(async () => (await systemOf()).getSystemFacts())]
+      return Option.flatMap(located, (status) => permission(grantOf(status.location, status.accuracy === "approximate"), Option.getOrUndefined(facts)?.locationEnabled !== false))
+    }
+    case "PhotosAccess": return Option.map(try settled(() => photosOf().libraryAccess()), (status) => ({ grant: photoGrant(status.scope), on: true }))
+    case "FilesAccess": return Option.flatMap(try settled(() => filesOf().storageState()), (status) => permission(filesGrantOf(status.access)))
+    case "NotificationsAccess": return Option.map(try settled(() => noticesOf().delivery()), (status) => ({ grant: status.permissionGranted ? "Granted" as const : "Denied" as const, on: status.appEnabled }))
+    default: {
+      const permissions = Option.getOrUndefined(try hostFacts())?.permissions
+      const seen = access === "CameraAccess" ? permissions?.Camera : access === "MicrophoneAccess" ? permissions?.Microphone : permissions?.Calendar
+      return permission(seen === undefined ? undefined : seen ? "Granted" : "Denied")
+    }
+  }
+}
+
+effect function browserAccess(access: Access) {
+  const name = browserPermissions[access]
+  return name === undefined ? Option.none<{ readonly grant: Grant; readonly on: boolean }>() : permission(grantOf(try promise(() => asked(name))))
+}
+
 /** What a browser reports: no facts of a phone, and the browser's own answer for each access it knows. */
 effect function browserReport(): PhoneReport!! {
-  const names: ReadonlyArray<[Access, string]> = [["CameraAccess", "camera"], ["MicrophoneAccess", "microphone"], ["LocationAccess", "geolocation"], ["NotificationsAccess", "notifications"]]
   const grants: AccessGrant[] = []
-  for (const [access, name] of names) {
-    const grant = grantOf(try promise(() => asked(name)))
-    if (grant !== undefined) grants.push({ access, grant })
+  for (const access of ["CameraAccess", "MicrophoneAccess", "LocationAccess", "NotificationsAccess"] as const) {
+    const seen = try browserAccess(access)
+    if (Option.isSome(seen)) grants.push({ access, grant: seen.value.grant })
   }
   return { ...empty, grants }
 }
@@ -263,6 +318,7 @@ effect function opening(target: Target, channel: string): Opened!! {
 /** The phone, through eliza's clients of its plugins. */
 export const phoneSystemSettings = Layer.succeed(SystemSettings, {
   report: phoneReport,
+  access: phoneAccess,
   requestHome: () => ignore(tryPromise(async () => (await systemOf()).requestRole({ role: "home" }))),
   open: opening,
   problems: () => Effect.map(settled(async () => (await systemOf()).crashLog()), Option.map((log) => log.entries.map(problemOf))),
@@ -272,6 +328,7 @@ export const phoneSystemSettings = Layer.succeed(SystemSettings, {
 /** A browser: none of the phone's facts, roles, pages or log. */
 export const browserSystemSettings = Layer.succeed(SystemSettings, {
   report: browserReport,
+  access: browserAccess,
   requestHome: () => Effect.void,
   open: () => succeed<Opened>("NotAtAll"),
   problems: () => succeed(Option.none<ReadonlyArray<Problem>>()),
