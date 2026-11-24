@@ -44,7 +44,7 @@ finally{fs.closeSync(nativeStageLog);}
 // below still rejects drift in this file or any other captured input.
 const capacitorStageLog=fs.openSync(path.join(destination,'capacitor-prestage.log'),'wx');
 try{
- execFileSync(process.execPath,['run','android:sync'],{stdio:['ignore',capacitorStageLog,capacitorStageLog],timeout:600000,env:buildEnv});
+ execFileSync('pnpm',['run','android:sync'],{stdio:['ignore',capacitorStageLog,capacitorStageLog],timeout:600000,env:buildEnv});
  execFileSync(process.execPath,generateHost,{stdio:['ignore',capacitorStageLog,capacitorStageLog],timeout:180000,env:buildEnv});
 }
 finally{fs.closeSync(capacitorStageLog);}
@@ -56,7 +56,7 @@ for(const command of ['verify','android:build']){
  // Full verification includes the real staged JVM/runtime campaigns. Retain a
  // finite two-hour verification budget and the existing twenty-minute APK budget.
  // An archive retains the release APK, so the Android build is never debug-only here.
- try{execFileSync(process.execPath,['run',command,...(command==='android:build'?['--release']:[])],{stdio:['ignore',log,log],timeout:command==='verify'?7200000:1200000,env:command==='verify'?verifyEnv:buildEnv});}
+ try{execFileSync('pnpm',['run',command,...(command==='android:build'?['--release']:[])],{stdio:['ignore',log,log],timeout:command==='verify'?7200000:1200000,env:command==='verify'?verifyEnv:buildEnv});}
  finally{fs.closeSync(log);}
  console.log(command+': passed');
 }

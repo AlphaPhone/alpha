@@ -57,7 +57,6 @@ jobs:
     env:
       # One runtime profile: every build packages local speech and embeddings; speech is routed at run time.
       ALPHA_APP_UPDATE_CANDIDATE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '1' || '0' }}
-      ELIZA_BUN_CHANNEL: stable
       ELIZAOS_VERSION_CODE: ${{ github.event_name == 'workflow_dispatch' && inputs.build_version_code || '' }}
       ANDROID_NDK: /usr/local/lib/android/sdk/ndk/28.2.13676358
       ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/28.2.13676358
@@ -175,6 +174,8 @@ jobs:
         run: pnpm upstream:verify
       - name: Prepare archive host-test prerequisites in the selected cache
         run: |
+          bash scripts/ci/prepare-host-test-json.sh
+          bash scripts/ci/prepare-dafny.sh
           bash scripts/ci/install-playwright-browser.sh chromium
           bash scripts/ci/prepare-python-host-tests.sh test-results/resident-ci/python-host-tests
       - name: Check embedding artifact contract
