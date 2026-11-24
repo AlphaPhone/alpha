@@ -2,18 +2,29 @@
 import type { InstalledApp, LaunchTarget } from "@elizaos/os/bridges/definitions/system"
 
 module held {
+  import type { InstalledApp } from "@elizaos/os/bridges/definitions/system"
   type Bridge = typeof import("@elizaos/os/bridges/system")
   let loaded: Promise<Bridge> | undefined
+  let ready: Bridge | undefined
   /**
    * eliza's bridge of the `ElizaSystem` plugin, loaded the first time the phone's launcher is built: loading it
    * registers the plugin, which Capacitor binds once to what the host has declared by then.
    * @throws {never}
    */
   export function bridge(): Promise<Bridge> {
-    return (loaded ??= import("@elizaos/os/bridges/system"))
+    return (loaded ??= import("@elizaos/os/bridges/system").then((found) => (ready = found)))
+  }
+  /** The apps of `apps` that match `query`, in the order the drawer lists them, as eliza's launcher tells; all of them before the bridge is loaded. @throws {never} */
+  export function found(apps: readonly InstalledApp[], query: string): InstalledApp[] {
+    return ready === undefined ? [...apps] : ready.filterLauncherApps(apps, query)
+  }
+  /** What tells apart two apps whose labels read alike: their profile, package or activity. @throws {never} */
+  export function details(apps: readonly InstalledApp[]): Map<string, string[]> {
+    return ready === undefined ? new Map() : ready.describeLauncherApps(apps, { builtinPrefix: "alpha:", productName: "Alpha" })
   }
 }
-import { bridge } from held
+import { bridge, details, found } from held
+export { details, found }
 
 /** How Alpha is presented, as the phone says: as its launcher, as the assistant alone, or as an ordinary app. */
 export interface Presentation {
