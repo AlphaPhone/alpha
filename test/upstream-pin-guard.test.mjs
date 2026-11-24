@@ -20,6 +20,7 @@ const IDENTITY = ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.i
 const noVoiceCheck = () => ({status: 'not-packaged'});
 function fixture(t, {
   pin = 'B', mainPin = 'B', shallow = false, vibestack = false, vibestackPin = null, promoted = false,
+  upstreamMain = false,
 } = {}) {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-pin-guard-')));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
@@ -48,17 +49,20 @@ function fixture(t, {
 
   git(product, 'init', '-q', '-b', 'work');
   fs.writeFileSync(path.join(product, '.gitignore'), 'vendor/\n');
-  const lock = (name, onVibestack = false) => fs.writeFileSync(
+  const lock = (name, onVibestack = false, elizaMain = upstreamMain) => fs.writeFileSync(
     path.join(product, 'upstream.lock.json'),
-    JSON.stringify({commit: commits[name] ?? name, ...(onVibestack ? {branch: 'vibestack'} : {})}),
+    JSON.stringify({
+      commit: commits[name] ?? name,
+      ...(onVibestack ? elizaMain ? {branch: 'main', alphaReleaseLine: 'vibestack'} : {branch: 'vibestack'} : {}),
+    }),
   );
-  const release = (ref, name, onVibestack) => {
-    lock(name, onVibestack);
+  const release = (ref, name, onVibestack, elizaMain) => {
+    lock(name, onVibestack, elizaMain);
     git(product, 'add', '.'); git(product, 'commit', '-q', '--allow-empty', '-m', ref);
     git(product, 'update-ref', `refs/remotes/origin/${ref}`, 'HEAD');
   };
   if (mainPin) release('main', mainPin, promoted);
-  if (vibestackPin) release('vibestack', vibestackPin, true);
+  if (vibestackPin) release('vibestack', vibestackPin, true, false);
   lock(pin, vibestack);
   git(product, 'add', '.'); git(product, 'commit', '-q', '--allow-empty', '-m', 'branch');
   return {root: product, commits, pin: commits[pin] ?? pin};
@@ -100,6 +104,17 @@ test('Vibestack requires a fetched baseline and uses main immediately after prom
 
   const promoted = fixture(t, {pin: 'E', mainPin: 'F', vibestack: true, vibestackPin: 'E', promoted: true});
   assert.deepEqual(releasePinStatus(promoted.root, promoted.pin), {state: 'older', releasePin: promoted.commits.F, ref: 'refs/remotes/origin/main'});
+});
+
+test('Eliza moving to main preserves Alpha release lineage through promotion', t => {
+  const fresh = fixture(t, {pin: 'F', mainPin: 'C', vibestack: true, vibestackPin: 'E', upstreamMain: true});
+  assert.deepEqual(releasePinStatus(fresh.root, fresh.pin), {
+    state: 'descendant', releasePin: fresh.commits.E, ref: 'refs/remotes/origin/vibestack',
+  });
+  const stale = fixture(t, {pin: 'E', mainPin: 'F', vibestack: true, vibestackPin: 'E', promoted: true, upstreamMain: true});
+  assert.deepEqual(releasePinStatus(stale.root, stale.pin), {
+    state: 'older', releasePin: stale.commits.F, ref: 'refs/remotes/origin/main',
+  });
 });
 
 test('a main pin unknown to vendor/eliza asks for a fetch instead of passing', t => {

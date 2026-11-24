@@ -59,7 +59,9 @@ function readHead(directory: string) {
 
 const git = (directory: string, args: string[]) => execFileSync('git', ['-C', directory, ...args], {encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore']});
 
-function releaseLock(root: string, ref: string): {branch?: string; commit?: string} | null {
+type ReleaseLock = {branch?: string; commit?: string; alphaReleaseLine?: 'vibestack'};
+
+function releaseLock(root: string, ref: string): ReleaseLock | null {
   try {
     return JSON.parse(git(root, ['show', `${ref}:upstream.lock.json`]));
   } catch {
@@ -67,17 +69,21 @@ function releaseLock(root: string, ref: string): {branch?: string; commit?: stri
   }
 }
 
+function isVibestackRelease(lock: ReleaseLock | null) {
+  return lock?.alphaReleaseLine === 'vibestack' || lock?.branch === 'vibestack';
+}
+
 /** Verify the SDK pin against the protected Alpha release line that owns its SDK history. */
 export function releasePinStatus(root: string, pin: string) {
   const mainRef = 'refs/remotes/origin/main';
   const main = releaseLock(root, mainRef);
-  const vibestack = readUpstreamPin(root).branch === 'vibestack';
-  const ref = vibestack && main?.branch !== 'vibestack'
+  const vibestack = isVibestackRelease(readUpstreamPin(root));
+  const ref = vibestack && !isVibestackRelease(main)
     ? 'refs/remotes/origin/vibestack'
     : mainRef;
   const baseline = ref === mainRef ? main : releaseLock(root, ref);
   const releasePin = baseline?.commit;
-  if (!releasePin || !/^[a-f0-9]{40}$/.test(releasePin) || (vibestack && baseline?.branch !== 'vibestack')) {
+  if (!releasePin || !/^[a-f0-9]{40}$/.test(releasePin) || (vibestack && !isVibestackRelease(baseline))) {
     return {state: vibestack ? 'baselineMissing' : 'unavailable', releasePin: null, ref};
   }
   if (releasePin === pin) return {state: 'equal', releasePin, ref};

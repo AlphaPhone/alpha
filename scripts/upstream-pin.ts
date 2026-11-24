@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-/** upstream.lock.json: the shared elizaOS vibestack revision vendor/eliza is checked out at, and where each source lives in it. */
+/** The Eliza source revision, its upstream branch and the Alpha release line it serves. */
 export interface UpstreamPin {
   url: string;
   branch: string;
+  alphaReleaseLine?: 'vibestack';
   commit: string;
   appSource: string;
   osSource: string;
