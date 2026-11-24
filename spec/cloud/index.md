@@ -1,142 +1,124 @@
-# Alpha Cloud
+# Cloud
 
-Alpha Cloud is Alpha Phone's own deployment of eliza's cloud on Cloudflare, in
-`apps/cloud`: an API Worker that is eliza's own Worker serving Alpha's profile,
-and a web host Worker on the App Link host. Each hosted environment of
-`packages/deployment` names it as its cutover candidate; phones keep the Cloud
-they shipped with until the owner takes the cutover. What eliza's cloud
-decides for any deployment is eliza's spec; this one holds what Alpha adds.
+Alpha's cloud is eliza's: `@elizaos/cloud` at the pin, which specifies its
+own profile, routes, sign-in, device keys, entitlement, plans and billing
+(`.eliza/spec/cloud/`). What Alpha owns, and this spec states, is which
+deployment the app talks to in each environment, how Alpha's app is
+registered with it as a native client, what its asset links must say, how
+an operator brings a deployment up, and the gates a local cloud must pass.
+The profiles, the seed and the commands that check them are `apps/cloud`.
 
-- [Native client](./registration.md): Alpha Phone's registration with the Cloud
-- [Web host](./edge.md): the Worker on the App Link host
-- [Rollout](./rollout.md): putting one environment on Cloudflare
+- [Local cloud](./local.md): eliza's own server on this computer, and the gates Alpha's contract passes on it
+- [Provisioning](./provisioning.md): the operator's commands, in order, each read back before the next
 
-## Story: Move phones to Alpha Cloud only when the owner takes the cutover
+## Story: Know which cloud the app talks to
 
-> As the owner, I want every phone to keep the Cloud it signed in to until I
-> approve the cutover release, and then both environments to move at once, so
-> that no phone of mine is left between two Clouds.
+> As the owner, I want my phone to talk to one cloud, named once, so that
+> my sign-in, my plan and my mail never go to a host the product did not
+> choose.
 
-### An environment addresses its shipped Cloud or its candidate, and has taken the cutover exactly when it addresses the candidate
+### A hosted environment's profile answers at its deployment's cloud and keeps its returns on its deployment's App Link host
+
+`@repo/deployment` names the cloud and the App Link host of each
+environment; the profile that environment's deployment names says the same
+API origin and has its web origin on that host. The local environment runs
+the staging profile on this computer, where the cloud's origin is known only
+once it listens.
 
 ```quint
-type Hosts = { api: str, web: str }
-type Row = { addressed: Hosts, candidate: Hosts }
+type Hosts = { cloud: str, appLinkHost: str }
+type ProfileHosts = { api: str, webHost: str }
 
-pure def cutoverTaken(row: Row): bool = row.addressed == row.candidate
-
-pure val rowValues = Set({ addressed: { api: "https://api.shipped.test", web: "https://shipped.test" }, candidate: { api: "https://api.alpha.test", web: "https://cloud.alpha.test" } })
-  .union(Set({ addressed: { api: "https://api.alpha.test", web: "https://cloud.alpha.test" }, candidate: { api: "https://api.alpha.test", web: "https://cloud.alpha.test" } }))
-pure val productionValues = rowValues
-pure val stagingValues = Set({ addressed: { api: "https://api-staging.shipped.test", web: "https://staging.shipped.test" }, candidate: { api: "https://api-staging.alpha.test", web: "https://cloud-staging.alpha.test" } })
-  .union(Set({ addressed: { api: "https://api-staging.alpha.test", web: "https://cloud-staging.alpha.test" }, candidate: { api: "https://api-staging.alpha.test", web: "https://cloud-staging.alpha.test" } }))
-  .union(Set({ addressed: { api: "https://api.alpha.test", web: "https://cloud.alpha.test" }, candidate: { api: "https://api.alpha.test", web: "https://cloud.alpha.test" } }))
+pure def profileFits(deployment: Hosts, profile: ProfileHosts): bool =
+  profile.api == deployment.cloud and profile.webHost == deployment.appLinkHost
 ```
 
-### The cutover is taken in both environments or in neither, and a table split between them is refused
+### A cut-over candidate names neither the cloud nor the App Link host it would replace
+
+The candidate is the product's own cloud, recorded and not used until the
+decision on where Alpha's cloud runs is taken.
 
 ```quint
-type Cutover = NotTaken | Taken | Split
-
-pure def cutover(production: Row, staging: Row): Cutover =
-  if (cutoverTaken(production) and cutoverTaken(staging)) Taken
-  else if (not(cutoverTaken(production)) and not(cutoverTaken(staging))) NotTaken
-  else Split
-
-pure def lawSplitExactlyWhenTheEnvironmentsDisagree(production: Row, staging: Row): bool =
-  (cutover(production, staging) == Split) iff (cutoverTaken(production) != cutoverTaken(staging))
+pure def candidateApart(serving: Hosts, candidate: Hosts): bool =
+  candidate.cloud != serving.cloud and candidate.appLinkHost != serving.appLinkHost
+    and candidate.cloud != serving.appLinkHost and candidate.appLinkHost != serving.cloud
 ```
 
-### Alpha Cloud's two environments share no origin
+## Story: Register Alpha's app with the cloud
 
-A staging change can then never reach a production phone, nor a production
-credential a staging Worker.
+> As the owner, I want the cloud to send my sign-in back only to Alpha's
+> own app, signed by Alpha's own key, so that no other app can take my
+> account's key.
+
+What a registration holds and how the cloud admits a client is eliza's
+(`spec/cloud/nativeClients/registry.md`, "Story: Admit only a registered
+native client"); applying it is eliza's `client apply`
+(`spec/cloud/nativeClients/registry.md`, "Story: Apply my app's
+registration from its reviewed file").
+
+### Alpha registers one client in each environment, under its own package and name
 
 ```quint
-pure def candidatesApart(production: Row, staging: Row): bool =
-  Set(production.candidate.api).union(Set(production.candidate.web))
-    .intersect(Set(staging.candidate.api).union(Set(staging.candidate.web))).size() == 0
+type Environment = Production | Staging
+type ReturnUrl = { origin: str, path: str }
+type Registration = {
+  clientId: str, environment: Environment, displayName: str, androidPackage: str,
+  certFingerprints: List[str], signInReturn: ReturnUrl, billingReturn: ReturnUrl
+}
+
+pure val alphaPackage = "ai.alphacompute.alphaphone"
+pure val alphaName = "Alpha"
 ```
 
-## Story: Serve one reviewed profile
+### Production trusts only the release signer, and staging also the debug signer
 
-> As the owner, I want Alpha Cloud to run eliza's cloud with Alpha's own name,
-> hosts, model and capabilities, from values an operator reviewed, so that what
-> it serves is exactly what was approved.
-
-### Alpha Cloud offers inference, speech, maps, managed Google and billing, under its own name, with entitlements for Alpha Phone's application id
+The release signer is the public digest of the key Alpha's distributed
+builds are signed with (`legacy/android/release-signer.json`). The debug
+signer is the digest of the Android host's debug keystore; it is added here
+when the Android area brings that keystore in, and until then staging trusts
+the release signer alone.
 
 ```quint
-pure val alphaCloudName = "Alpha Cloud"
-pure val alphaAudience = "ai.alphacompute.alphaphone"
-pure val alphaCapabilities: List[str] = List("inference", "speech", "maps", "managedGoogle", "billing")
+pure val releaseSigner = "ED:BF:CA:CB:1D:A6:89:00:8B:F4:E7:D6:75:17:6C:30:2D:EC:F8:31:61:A8:77:EB:8B:1D:E4:FF:AE:04:45:ED"
+pure val debugSigners: List[str] = List()
+
+pure def signersOf(environment: Environment): List[str] =
+  if (environment == Staging) List(releaseSigner).concat(debugSigners) else List(releaseSigner)
 ```
 
-### Chat on Alpha Cloud is Alpha's model, and a request that names no cap is sent at the longest reply its provider generates
+### The release signer is never a debug signer
+
+A debug keystore is in the repository; a release signed by it could be
+installed over a phone by anyone who holds the repository.
 
 ```quint
-pure val alphaModel = "qwen-3.8-27b"
-pure val alphaModelMaxOutputTokens = 40960
+pure def lawTheReleaseSignerIsNoDebugSigner(environment: Environment): bool =
+  not(debugSigners.includes(releaseSigner)) and signersOf(environment).nthOr(0, "") == releaseSigner
 ```
 
-### The API Worker serves only while the profile in its assets is the text its pinned digest names, and otherwise asks the caller to retry
+### Each return is on the environment's web origin, at the paths Alpha's App Links have always opened, and Alpha keeps no connect return
 
-The profile is larger than a Worker variable may be, so the Worker's static
-assets carry it and a variable pins its digest.
+The sign-in and billing returns are the paths phones installed before this
+rebuild already open (`/alphaphone/auth/callback`,
+`/alphaphone/billing/return`). A Google connection finished for Alpha shows
+eliza's own page as connected (`spec/cloud/returnPages.md`, "A Google
+connection finished for an enabled registration without a connect return
+shows ReturnToApp as connected, with no action").
 
 ```quint
-type WorkerAnswer = Served | Unavailable
-
-pure def workerAnswer(pinned: bool, found: bool, matches: bool): WorkerAnswer =
-  if (pinned and found and matches) Served else Unavailable
-
-pure def lawServesOnlyThePinnedProfile(pinned: bool, found: bool, matches: bool): bool =
-  workerAnswer(pinned, found, matches) == Served implies (pinned and found and matches)
+pure def registrationOf(environment: Environment, web: str): Registration = {
+  clientId: alphaPackage, environment: environment, displayName: alphaName, androidPackage: alphaPackage,
+  certFingerprints: signersOf(environment),
+  signInReturn: { origin: web, path: "/alphaphone/auth/callback" },
+  billingReturn: { origin: web, path: "/alphaphone/billing/return" }
+}
 ```
 
-## Story: Render a deployment only when it is provisioned
-
-> As the operator, I want a Worker configuration written only for Cloudflare
-> resources that exist, on hosts in Alpha's zone, and never one that points at
-> another company's Cloud.
-
-### A configuration is rendered only for a provisioned account and database, hosts in the zone, and a complete worker block
+### An environment's asset links hold exactly one statement for Alpha's package, naming that environment's signers
 
 ```quint
-type ResourceId = Provisioned | Placeholder | Malformed
-type RenderProblem = AccountUnprovisioned | DatabaseUnprovisioned | ApiOutsideZone | WebOutsideZone | NoWorkerBlock
+type Statement = { packageName: str, fingerprints: List[str] }
 
-pure def renderProblems(account: ResourceId, database: ResourceId, apiInZone: bool, webInZone: bool, workerBlock: bool): List[RenderProblem] =
-  (if (account == Provisioned) List() else List(AccountUnprovisioned))
-    .concat(if (database == Provisioned) List() else List(DatabaseUnprovisioned))
-    .concat(if (apiInZone) List() else List(ApiOutsideZone))
-    .concat(if (webInZone) List() else List(WebOutsideZone))
-    .concat(if (workerBlock) List() else List(NoWorkerBlock))
-
-pure def lawRenderedOnlyWhenProvisioned(account: ResourceId, database: ResourceId, apiInZone: bool, webInZone: bool, workerBlock: bool): bool =
-  renderProblems(account, database, apiInZone, webInZone, workerBlock) == List()
-    implies (account == Provisioned and database == Provisioned and apiInZone and webInZone and workerBlock)
-```
-
-### A rendered configuration that names a deployed Eliza Cloud host is refused
-
-```quint
-pure def renderAccepted(problems: List[RenderProblem], namesElizaCloud: bool): bool =
-  problems == List() and not(namesElizaCloud)
-```
-
-## Story: Launch the resident agent on the deployment's own Cloud
-
-> As the owner, I want my phone's agent to ask for inference only from the
-> Cloud my phone addresses, with Alpha's model, keeping embeddings on the phone
-> and its credential out of every file.
-
-### The agent's launch uses the cloud backend at exactly the environment's API origin, Alpha's model, embeddings on the phone, and no credential in its document
-
-```quint
-type Launch = { cloudBackend: bool, onApiOrigin: bool, smallModel: str, largeModel: str, localEmbeddings: bool, carriesCredential: bool }
-
-pure def launchFits(l: Launch): bool =
-  l.cloudBackend and l.onApiOrigin and l.smallModel == alphaModel and l.largeModel == alphaModel
-    and l.localEmbeddings and not(l.carriesCredential)
+pure def assetLinksNameAlpha(statements: List[Statement], environment: Environment): bool =
+  statements.select(s => s.packageName == alphaPackage) == List({ packageName: alphaPackage, fingerprints: signersOf(environment) })
 ```

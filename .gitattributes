@@ -7,3 +7,5 @@ apps/app/test/bombadil.ts merge=union
 spec/app/index.md merge=union
 apps/app/src/platform/plugins.vibe merge=union
 apps/app/test/fakes/plugins.ts merge=union
+# One route per line, so that each area adds its own and two branches merge by keeping both.
+apps/agent/host/routes.jsonl merge=union

@@ -6,17 +6,13 @@
   "engines": {
     "node": ">=26"
   },
-  "bin": {
-    "alpha-cloud": "./dist/src/cli.js"
-  },
   "scripts": {
-    "build": "eliza-harness --ready && node -e \"fs.rmSync('dist', { recursive: true, force: true })\" && vibelang -p tsconfig.build.json && node -e \"fs.cpSync('node_modules/@elizaos/cloud/dist/pages', 'dist/pages', { recursive: true })\"",
+    "build": "eliza-harness --ready && node -e \"fs.rmSync('dist', { recursive: true, force: true })\" && vibelang -p tsconfig.build.json",
     "typecheck": "eliza-harness --ready && vibelang --noEmit -p .",
     "test": "eliza-harness --ready && vitest run"
   },
   "dependencies": {
     "@effect/platform-node": "4.1.1",
-    "@elizaos/agent": "link:../../.eliza/packages/agent",
     "@elizaos/cloud": "link:../../.eliza/packages/cloud",
     "@repo/deployment": "workspace:*",
     "effect": "4.1.1",
@@ -29,7 +25,7 @@
     "typescript": "catalog:",
     "vibelang": "0.0.13",
     "vibestack": "workspace:*",
-    "vitest": "catalog:",
-    "wrangler": "4.164.0"
+    "vite": "catalog:",
+    "vitest": "catalog:"
   }
 }

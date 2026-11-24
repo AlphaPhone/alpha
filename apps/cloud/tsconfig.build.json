@@ -11,7 +11,7 @@
     "src",
     "gen/*.ts",
     "gen/*.vibe",
-    "deployment.json",
-    "wrangler/*.json"
+    "profile",
+    "seed"
   ]
 }
