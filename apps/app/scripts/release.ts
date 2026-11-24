@@ -667,9 +667,12 @@ export interface Enrolled {
 }
 
 const enrolledKeys = (): Enrolled => {
-  const expected = JSON.parse(readFileSync(join(app, "aosp/signing/os-custody-expected.json"), "utf8")) as { readonly osCertificateSha256: Record<string, string>; readonly avbPublicKeySha256: string; readonly appSignerSha256: string };
+  const expected = JSON.parse(readFileSync(join(app, "aosp/signing/os-custody-expected.json"), "utf8")) as {
+    readonly schemaVersion?: number; readonly osCertificateSha256: Record<string, string>; readonly avbPublicKeySha256: string; readonly appSignerSha256: string;
+  };
   const manifest = JSON.parse(readFileSync(join(app, "aosp/signing/alpha-key-manifest.json"), "utf8")) as { readonly keys: readonly { readonly name: string; readonly bits: number }[] };
-  if (expected.appSignerSha256 !== reviewedSigner()) throw new ReleaseRefused({ message: "the custody record names another app signer than Alpha's one key" });
+  if (expected.schemaVersion !== 1 || Object.keys(expected.osCertificateSha256).length !== OS_CERTIFICATES.length || expected.appSignerSha256 !== reviewedSigner())
+    throw new ReleaseRefused({ message: "the custody record does not match Alpha's enrolled keys" });
   return { certificates: expected.osCertificateSha256, avbSha256: expected.avbPublicKeySha256, appSigner: expected.appSignerSha256,
     bits: Object.fromEntries(manifest.keys.map((key) => [key.name, key.bits])), publicDirectory: join(app, "aosp/signing/public") };
 };
@@ -741,8 +744,11 @@ export function custodyProof({ secrets, enrolled, scratch }: { readonly secrets:
   const [part1 = "", part2 = "", passphrase = "", keystore = "", password = ""] = CUSTODY_SECRETS.map((name) => secrets[name] ?? "");
   if (passphrase === "" || password === "") refuse("a key password is missing");
   const files = keyArchive(Buffer.concat([decoded(part1), decoded(part2)]));
-  const fingerprints = JSON.parse((files.get("fingerprints.json") ?? Buffer.alloc(0)).toString("utf8")) as { readonly schemaVersion?: number; readonly testKeys?: boolean; readonly keys?: readonly { readonly name: string; readonly certificateSha256?: string; readonly avbPublicKeySha256?: string }[] };
+  const fingerprints = JSON.parse((files.get("fingerprints.json") ?? Buffer.alloc(0)).toString("utf8")) as {
+    readonly schemaVersion?: number; readonly testKeys?: boolean; readonly keys?: readonly { readonly name: string; readonly kind?: string; readonly certificateSha256?: string; readonly avbPublicKeySha256?: string }[];
+  };
   const entries = new Map((fingerprints.keys ?? []).map((key) => [key.name, key]));
+  if (entries.size !== (fingerprints.keys ?? []).length) refuse("fingerprints.json repeats a key");
   const committed = (name: string) => readFileSync(join(enrolled.publicDirectory, name));
   const directory = realpathSync(scratch);
   const stage = join(directory, `alpha-release-proof-${randomBytes(8).toString("hex")}`);
@@ -757,15 +763,17 @@ export function custodyProof({ secrets, enrolled, scratch }: { readonly secrets:
     for (const name of OS_CERTIFICATES) {
       const certificate = files.get(`${name}.x509.pem`) ?? Buffer.alloc(0);
       const identity = identityOf(certificate);
+      const entry = entries.get(name);
       const paired = decrypted(`${name}.pk8.enc`, "DER").equals(identity.publicKey);
-      keys.push({ name, publicKey: identity.publicKey, enrolled: paired && identity.sha256 === enrolled.certificates[name]
-        && identity.sha256 === entries.get(name)?.certificateSha256 && identityOf(committed(`${name}.x509.pem`)).sha256 === identity.sha256 });
+      keys.push({ name, publicKey: identity.publicKey, enrolled: paired && entry?.kind === "x509-pk8" && identity.sha256 === enrolled.certificates[name]
+        && identity.sha256 === entry.certificateSha256 && identityOf(committed(`${name}.x509.pem`)).sha256 === identity.sha256 });
     }
     for (const name of AVB_KEYS) {
       const publicKey = openssl(["pkey", "-pubin", "-outform", "DER"], files.get(`${name}.pub.pem`));
       const metadata = avbMetadata(publicKey, enrolled.bits[name] ?? 0);
+      const entry = entries.get(name);
       const pairs = decrypted(`${name}.pem.enc`, "PEM").equals(publicKey) && metadata.equals(files.get(`${name}.avbpubkey`) ?? Buffer.alloc(0));
-      const known = sha256(metadata) === entries.get(name)?.avbPublicKeySha256
+      const known = entry?.kind === "avb-rsa" && sha256(metadata) === entry.avbPublicKeySha256
         && (name === "avb" ? metadata.equals(files.get("avb_pkmd.bin") ?? Buffer.alloc(0)) && sha256(metadata) === enrolled.avbSha256 && metadata.equals(committed("avb_pkmd.bin"))
           : metadata.equals(committed("apex_payload.avbpubkey")));
       keys.push({ name, publicKey, enrolled: pairs && known });
@@ -778,7 +786,9 @@ export function custodyProof({ secrets, enrolled, scratch }: { readonly secrets:
     const single = alias.test(certificate.toString()) && alias.test(privateKey.toString())
       && certificate.toString().split("-----BEGIN CERTIFICATE-----").length === 2 && privateKey.toString().split("-----BEGIN PRIVATE KEY-----").length === 2;
     const app = identityOf(certificate);
+    const appEntry = entries.get("alphaphone_app");
     keys.push({ name: "alphaphone_app", publicKey: app.publicKey, enrolled: single && app.sha256 === enrolled.appSigner
+      && (appEntry === undefined || appEntry.certificateSha256 === enrolled.appSigner)
       && publicOf(privateKey).equals(app.publicKey) && identityOf(committed("alphaphone_app.x509.pem")).sha256 === app.sha256 });
   } finally {
     rmSync(stage, { recursive: true, force: true });
@@ -791,21 +801,31 @@ export function custodyProof({ secrets, enrolled, scratch }: { readonly secrets:
   return { custody, keys: keys.map((key) => ({ name: key.name, publicKeySha256: sha256(key.publicKey), enrolled: key.enrolled })), signedImageProduced: false, deviceQualified: false };
 }
 
-/** One `pnpm release` command, as an effect over Node's services. */
-export const release = (argv: readonly string[]) => Effect.suspend(() => {
-  const [command = "", ...rest] = argv[0] === "--" ? argv.slice(1) : argv;
-  if (!Object.hasOwn(commands, command)) return Effect.fail(new UsageError({ message: command === "" ? "a command is required" : `unknown command ${command}` }));
-  return (commands[command as keyof typeof commands] as (argv: readonly string[]) => Effect.Effect<unknown, unknown, never>)(rest);
-}).pipe(Effect.provide(NodeServices.layer));
+/** Dispatches one named command from `table` over Node's services. */
+export function dispatch(table: Readonly<Record<string, (argv: readonly string[]) => Effect.Effect<unknown, unknown, NodeServices.NodeServices>>>, argv: readonly string[], usage: (message: string) => unknown) {
+  return Effect.suspend(() => {
+    const [command = "", ...rest] = argv[0] === "--" ? argv.slice(1) : argv;
+    const handler = Object.hasOwn(table, command) ? table[command] : undefined;
+    if (handler === undefined) return Effect.fail(usage(command === "" ? "a command is required" : `unknown command ${command}`));
+    return handler(rest);
+  }).pipe(Effect.provide(NodeServices.layer));
+}
 
-if (import.meta.main) {
-  const outcome = await Effect.runPromiseExit(release(process.argv.slice(2)));
-  if (outcome._tag === "Success") console.log(JSON.stringify(outcome.value, null, 2));
+/** Runs an Effect CLI program, printing JSON on success and diagnostics on failure. */
+export async function runCli(program: Effect.Effect<unknown, unknown, never>, usage: string, isUsage: (error: unknown) => boolean) {
+  const outcome = await Effect.runPromiseExit(program);
+  if (outcome._tag === "Success") process.stdout.write(`${JSON.stringify(outcome.value, null, 2)}\n`);
   else {
     const reason = outcome.cause.reasons[0];
     const failure: unknown = reason?._tag === "Fail" ? reason.error : outcome.cause;
-    const detail = failure instanceof Error ? failure.message : String(failure);
-    console.error(failure instanceof UsageError ? `${detail}\n\n${USAGE}` : detail);
-    process.exitCode = failure instanceof UsageError ? 2 : 1;
+    const detail = typeof failure === "object" && failure !== null && "reason" in failure && typeof failure.reason === "string" ? failure.reason
+      : failure instanceof Error ? failure.message : String(failure);
+    process.stderr.write(`${isUsage(failure) ? `${detail}\n\n${usage}` : detail}\n`);
+    process.exitCode = isUsage(failure) ? 2 : 1;
   }
 }
+
+/** One `pnpm release` command, as an effect over Node's services. */
+export const release = (argv: readonly string[]) => dispatch(commands, argv, (message) => new UsageError({ message }));
+
+if (import.meta.main) await runCli(release(process.argv.slice(2)), USAGE, (failure) => failure instanceof UsageError);

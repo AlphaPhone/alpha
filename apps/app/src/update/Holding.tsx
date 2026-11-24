@@ -1,4 +1,4 @@
-// spec/app/update/page.md, "Story: Open Alpha while an update is pending"; spec/app/update/page.md, "\"Updating Alpha…\" shows while a page holds or an update is pending, and \"Continue update\" only while it is paused and Android allows"
+// spec/app/update/page.md, "Story: Open Alpha while an update is pending"; spec/app/update/page.md, "Updating Alpha… shows while a page holds or an update is pending, and Continue update only while it is paused and Android allows"
 import { Button, Dialog, DialogContent, DialogTitle, Spinner } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import type { Machine as PageMachine } from "../../gen/app__update__page.effect.vibe";

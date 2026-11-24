@@ -48,8 +48,33 @@ export interface Notice {
 
 interface Draft { name: string; version: string; license: string; source: string; text: string; textSource?: string; flags: string[]; reason?: string }
 
+interface LicenseObject { readonly type?: string }
+interface PackageManifest {
+  readonly name: string
+  readonly version: string
+  readonly license?: string | LicenseObject
+  readonly licenses?: readonly (string | LicenseObject)[]
+  readonly repository?: string | { readonly url?: string }
+  readonly dependencies?: Readonly<Record<string, string>>
+  readonly optionalDependencies?: Readonly<Record<string, string>>
+}
+interface ElizaLock { readonly commit: string; readonly remote: string; readonly branch: string }
+interface ClasspathRecord { readonly coordinates: readonly string[] }
+interface FontRecord {
+  readonly name: string
+  readonly sha256: readonly string[]
+  readonly license: string
+  readonly evidence?: string
+  readonly source?: string
+  readonly holder?: string
+  readonly licensee?: string
+  readonly basis?: string
+  readonly scope?: string
+}
+interface FontLicensesFile { readonly entries: readonly FontRecord[] }
+
 const read = (file: string) => readFileSync(file, "utf8")
-const json = (file: string): any => JSON.parse(read(file))
+const json = <T>(file: string): T => JSON.parse(read(file)) as T
 const sha256 = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex")
 const canonical = (id: string) => {
   const file = join(app, "licenses", `${id.replace(/\+$/, "").replace(/-(only|or-later)$/, "").split(/ WITH /i)[0]?.trim()}.txt`)
@@ -58,7 +83,7 @@ const canonical = (id: string) => {
 
 /** The family of one SPDX identifier, by its name without `-only`, `-or-later`, `+` or an exception. */
 export function familyOf(id: string): Family {
-  const name = id.split(/ WITH /i)[0]!.trim().replace(/\+$/, "").replace(/-(only|or-later)$/, "")
+  const name = (id.split(/ WITH /i)[0] ?? "").trim().replace(/\+$/, "").replace(/-(only|or-later)$/, "")
   if (PERMISSIVE.has(name)) return "Permissive"
   if (NEWLY_PERMISSIVE.has(name)) return "NewlyPermissive"
   if (/^AGPL-/.test(name)) return "NetworkCopyleft"
@@ -89,10 +114,10 @@ function flagged(license: string): string[] {
   return flagsOf(alternatives(license).map((ids) => ids.map(familyOf))).map((flag) => FLAG_NAMES[flag])
 }
 
-function manifestLicence(manifest: any): string {
+function manifestLicence(manifest: PackageManifest): string {
   if (typeof manifest.license === "string") return manifest.license.trim()
   if (typeof manifest.license?.type === "string") return manifest.license.type
-  if (Array.isArray(manifest.licenses)) return manifest.licenses.map((item: any) => (typeof item === "string" ? item : item?.type)).filter(Boolean).join(" OR ")
+  if (manifest.licenses !== undefined) return manifest.licenses.map((item) => (typeof item === "string" ? item : item.type)).filter((item): item is string => Boolean(item)).join(" OR ")
   return ""
 }
 
@@ -100,7 +125,7 @@ function licenceText(dir: string): string {
   return readdirSync(dir).filter((file) => LICENCE_FILE.test(file) && statSync(join(dir, file)).isFile()).sort().map((file) => read(join(dir, file)).trim()).join("\n\n")
 }
 
-function packageDraft(dir: string, manifest: any): Draft {
+function packageDraft(dir: string, manifest: PackageManifest): Draft {
   const stated = manifestLicence(manifest)
   const license = stated === "" || /^(SEE LICEN[CS]E IN\b|UNLICENSED$)/i.test(stated) ? "UNKNOWN" : stated
   const flags = flagged(license)
@@ -131,10 +156,10 @@ function npmDrafts(): Draft[] {
   const walk = (dir: string) => {
     if (visited.has(dir)) return
     visited.add(dir)
-    const manifest = json(join(dir, "package.json"))
+    const manifest = json<PackageManifest>(join(dir, "package.json"))
     const inWorkspace = !dir.includes(`${"/"}node_modules${"/"}`) && dir !== root
-    if (!inWorkspace && !manifest.name?.startsWith("@elizaos/")) drafts.set(`${manifest.name}@${manifest.version}`, packageDraft(dir, manifest))
-    if (manifest.name?.startsWith("@elizaos/") && dir !== app) return
+    if (!inWorkspace && !manifest.name.startsWith("@elizaos/")) drafts.set(`${manifest.name}@${manifest.version}`, packageDraft(dir, manifest))
+    if (manifest.name.startsWith("@elizaos/") && dir !== app) return
     const names = [...Object.keys(manifest.dependencies ?? {}), ...Object.keys(manifest.optionalDependencies ?? {})]
     for (const name of names) {
       const found = installed(dir, name)
@@ -150,15 +175,15 @@ function npmDrafts(): Draft[] {
 }
 
 function elizaDraft(): Draft {
-  const pin = json(join(root, "eliza.lock.json"))
+  const pin = json<ElizaLock>(join(root, "eliza.lock.json"))
   const text = read(join(root, ".eliza/LICENSE")).trim()
   return { name: "elizaOS (@elizaos/agent, @elizaos/os, @elizaos/cloud)", version: pin.commit, license: "MIT", source: `${pin.remote} (${pin.branch})`, text, flags: flagged("MIT") }
 }
 
 function androidDrafts(): Draft[] {
-  const record = json(join(app, "licenses/android-runtime-classpath.json"))
+  const record = json<ClasspathRecord>(join(app, "licenses/android-runtime-classpath.json"))
   const groups = new Map<string, { family: (typeof MAVEN_FAMILIES)[number] | undefined; coordinates: string[] }>()
-  for (const coordinate of record.coordinates as string[]) {
+  for (const coordinate of record.coordinates) {
     const [group = "", artifact = ""] = coordinate.split(":")
     const family = MAVEN_FAMILIES.find((f) => (f.exact ? group === f.prefix : group.startsWith(f.prefix)))
     const key = family?.name ?? `${group}:${artifact}`
@@ -176,7 +201,7 @@ function androidDrafts(): Draft[] {
 export function fontDrafts(): { drafts: Draft[]; check: "FontResolved" | "FontUnresolved" | "FontCheckNotRun" } {
   const directory = join(root, "packages/design-system/fonts")
   if (!existsSync(directory)) return { drafts: [], check: "FontCheckNotRun" }
-  const records = json(join(app, "licenses/font-licenses.json")).entries as any[]
+  const records = json<FontLicensesFile>(join(app, "licenses/font-licenses.json")).entries
   const drafts = new Map<string, Draft>()
   let unresolved = false
   for (const file of readdirSync(directory).filter((name) => /\.(woff2?|ttf|otf)$/i.test(name)).sort()) {
@@ -193,7 +218,7 @@ export function fontDrafts(): { drafts: Draft[]; check: "FontResolved" | "FontUn
     drafts.set(record.name, {
       name: record.name, version: record.sha256.join("\n"), license: record.license, source: record.source ?? record.holder ?? "",
       flags: proprietary ? (held ? ["proprietary-licence-held-outside-repo"] : []) : flagged(record.license),
-      text: proprietary ? `${record.name} is licensed to ${record.licensee ?? record.holder}. ${record.basis ?? record.scope ?? ""}`.trim() : canonical(record.license),
+      text: proprietary ? `${record.name} is licensed to ${record.licensee ?? record.holder ?? ""}. ${record.basis ?? record.scope ?? ""}`.trim() : canonical(record.license),
       ...(proprietary ? {} : { textSource: "spdx-canonical" }),
     })
   }
@@ -254,13 +279,16 @@ export function renderText(notices: readonly Notice[]): string {
 
 /** A CycloneDX 1.5 software bill of materials of the same inventory. */
 export function renderSbom(notices: readonly Notice[], serial: string): string {
-  const version = json(join(app, "package.json")).version
-  const components = notices.map((entry) => ({
-    type: "library", name: entry.name, version: entry.version.split("\n")[0],
-    licenses: alternatives(entry.license).length === 1 && alternatives(entry.license)[0]!.length === 1 ? [{ license: { id: entry.license } }] : [{ expression: entry.license }],
-    ...(entry.source.startsWith("http") ? { externalReferences: [{ type: "distribution", url: entry.source }] } : {}),
-    properties: entry.flags.map((flag) => ({ name: "alpha:licence-flag", value: flag })),
-  }))
+  const version = json<PackageManifest>(join(app, "package.json")).version
+  const components = notices.map((entry) => {
+    const parsed = alternatives(entry.license)
+    return {
+      type: "library", name: entry.name, version: entry.version.split("\n")[0],
+      licenses: parsed.length === 1 && parsed[0]?.length === 1 ? [{ license: { id: entry.license } }] : [{ expression: entry.license }],
+      ...(entry.source.startsWith("http") ? { externalReferences: [{ type: "distribution", url: entry.source }] } : {}),
+      properties: entry.flags.map((flag) => ({ name: "alpha:licence-flag", value: flag })),
+    }
+  })
   return `${JSON.stringify({ bomFormat: "CycloneDX", specVersion: "1.5", serialNumber: `urn:uuid:${serial}`, version: 1,
     metadata: { component: { type: "application", name: "Alpha", version } }, components }, null, 2)}\n`
 }
@@ -304,10 +332,10 @@ export function licences(argv: readonly string[]) {
 if (import.meta.main) {
   try {
     const { flagLines, ...result } = licences(process.argv.slice(2))
-    for (const line of flagLines) console.warn(line)
-    console.log(JSON.stringify(result, null, 2))
+    for (const line of flagLines) process.stderr.write(`${line}\n`)
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
   } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error))
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
     process.exitCode = 1
   }
 }
