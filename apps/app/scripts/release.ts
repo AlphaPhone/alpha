@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// spec/release/index.md, "Story: Build a candidate"; spec/release/index.md, "Story: Sign a release"; spec/release/index.md, "Story: Qualify and publish a release"; spec/release/index.md, "A build is a candidate only when its verification recorded it distributable: no test mocks, the production bundle audit passed, Alpha's one signer, the runtime packaged with its notices, an on-device voice slot, and for an image its platform certificate"; spec/release/index.md, "An APK is admitted to the channel only as Alpha's launcher, first signed by Alpha's one key, at the candidate's version, not debuggable, of at most 2 GiB, and with only the entries a release may hold"; spec/release/index.md, "Phones read the launcher channel from the stable release of Alpha's repository, eliza-research/alpha, known by its permanent id; APKs kept under the repository's earlier names stay valid"; spec/release/index.md, "The anonymous download must return the exact size and digest before anything else moves"; spec/release/index.md, "The manifest is moved only after the download was verified, with the APK still in the channel's final inventory, the channel unchanged since publishing began, and the version above the floor and the published version as they are then"; spec/release/pilot.md, "Story: Update a pilot phone by cable"
+// spec/release/index.md, "Story: Build a candidate"; spec/release/index.md, "Story: Sign a release"; spec/release/index.md, "Story: Qualify and publish a release"; spec/release/index.md, "A build is a candidate only when its verification recorded it distributable: no test mocks, the production bundle audit passed, Alpha's one signer, the runtime packaged with its notices, an on-device voice slot, and for an image its platform certificate"; spec/release/index.md, "An APK is admitted to the channel only as Alpha's launcher, first signed by Alpha's one key, at the candidate's version, not debuggable, of at most 2 GiB, and with only the entries a release may hold"; spec/release/index.md, "Phones read the launcher channel from the stable release of Alpha's repository, eliza-research/alpha, known by its permanent id; APKs kept under the repository's earlier names stay valid"; spec/release/index.md, "The anonymous download must return the exact size and digest before anything else moves"; spec/release/index.md, "The manifest is moved only after the download was verified, with the APK still in the channel's final inventory, the channel unchanged since publishing began, and the version above the floor and the published version as they are then"; spec/release/pilot.md, "Story: Update a pilot phone by cable"; spec/release/index.md, "Story: Read back a phone that updated itself"; spec/release/index.md, "The protected keys are proven to be the enrolled ones: each of the nine OS certificates, the two verified-boot keys and Alpha's app key pairs with its committed public identity, none is a test key, and no two are the same"
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { constants, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { gunzipSync } from "node:zlib";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -14,7 +15,8 @@ import {
 import { Data, Effect } from "effect";
 import * as Channel from "../gen/release.ts";
 import {
-  type Apk, type Blockers, admitted, channelManifest, channelRepository, channelRepositoryId, channelTag, clear, distributable, earlierRepositories, maxApkBytes, retiredTag,
+  type Apk, type Blockers, type Custody, type Readback, admitted, channelManifest, channelRepository, channelRepositoryId, channelTag, clear, distributable, earlierRepositories, maxApkBytes,
+  custodyProven, retiredTag, updatedItself,
 } from "../gen/release.ts";
 import { pilotPassed } from "../gen/app__image.ts";
 import * as Pilot from "../gen/release__pilot.ts";
@@ -46,6 +48,8 @@ const USAGE = [
   "pnpm release record --run FILE --manifest FILE",
   "pnpm release status",
   "pnpm release pilot --serial SERIAL --apk FILE --version N --record NEW_FILE [--stock-home PACKAGE/ACTIVITY]",
+  "pnpm release readback --serial SERIAL --record NEW_FILE [--before FILE]",
+  "pnpm release custody --out NEW_FILE [--scratch TMPFS_DIR]",
 ].join("\n");
 
 /** The manifest phones read, at the release of the channel's tag. */
@@ -416,6 +420,27 @@ const commands = {
     if (!pilotPassed(update.state)) return yield* new ReleaseRefused({ message: `the pilot update did not pass; its record is ${out}` });
     return update;
   }),
+  readback: (argv: readonly string[]) => Effect.gen(function* () {
+    const found = yield* attempt(() => flags(argv, ["serial", "record", "before"]));
+    const [serial = "", out = ""] = yield* attempt(() => found.need("serial", "record"));
+    const adb: Adb = (args) => execFileSync("adb", ["-s", serial, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 120_000 });
+    const offer = yield* publicOffer;
+    const before = found.values.before === undefined ? undefined : yield* attempt(() => (JSON.parse(readFileSync(found.values.before ?? "", "utf8")) as { readonly observed: Observed }).observed);
+    const read = yield* attempt(() => readBack({ adb, offer, before }));
+    yield* attempt(() => writeFileSync(out, `${JSON.stringify(read, null, 2)}\n`, { flag: "wx" }));
+    if (read.readback !== undefined && !read.passed) return yield* new ReleaseRefused({ message: `the phone did not update itself to ${offer.versionCode}; its record is ${out}` });
+    return read;
+  }),
+  custody: (argv: readonly string[]) => Effect.gen(function* () {
+    const found = yield* attempt(() => flags(argv, ["out", "scratch"]));
+    const [out = ""] = yield* attempt(() => found.need("out"));
+    const secrets = Object.fromEntries(CUSTODY_SECRETS.map((name) => [name, process.env[name] ?? ""]));
+    for (const name of CUSTODY_SECRETS) delete process.env[name];
+    const proof = yield* attempt(() => custodyProof({ secrets, enrolled: enrolledKeys(), scratch: found.values.scratch ?? "/dev/shm" }));
+    yield* attempt(() => writeFileSync(out, `${JSON.stringify(proof, null, 2)}\n`, { flag: "wx" }));
+    if (!custodyProven(proof.custody)) return yield* new ReleaseRefused({ message: `the protected keys are not the enrolled ones; the proof is ${out}` });
+    return proof;
+  }),
 } as const;
 
 /** The phone's adb shell, for one serial: a command's output, or a thrown failure. */
@@ -574,6 +599,196 @@ export function pilotUpdate({ adb, serial, apk, stockHome, locks = PILOT_LOCKS, 
     release();
   }
   return { state, taken, receipt, failures };
+}
+
+/** The launcher release the channel offers anyone now, its APK's bytes read back as the offer describes them. */
+export interface Offer { readonly versionCode: number; readonly sha256: string; readonly sizeBytes: number; readonly apkUrl: string; readonly signerSha256: string }
+
+const publicOffer = Effect.gen(function* () {
+  const offer = JSON.parse(new TextDecoder().decode(yield* fetched(manifestUrl()))) as Offer;
+  const served = yield* fetched(offer.apkUrl);
+  if (!kept(offer.apkUrl, offer.versionCode) || offer.signerSha256 !== reviewedSigner() || served.length !== offer.sizeBytes || sha256(served) !== offer.sha256)
+    return yield* new ReleaseRefused({ message: `the channel's offer is not an APK of Alpha's one key served exactly as described: ${JSON.stringify(offer)}` });
+  return offer;
+});
+
+/** One read of the phone and the offer, made without changing either. */
+export interface Observed {
+  readonly offer: Offer;
+  readonly versionCode: number;
+  readonly identity: { readonly uid: string; readonly firstInstall: string };
+  readonly initiator: string;
+  readonly sha256: string;
+  readonly home: { readonly holders: readonly string[]; readonly activity: string };
+}
+
+/**
+ * Reads, by cable and without changing anything, what a phone runs and who holds its Home, beside the offer. Given
+ * the read made before the phone took the offer, it also judges whether the phone updated itself.
+ */
+export function readBack({ adb, offer, before }: { readonly adb: Adb; readonly offer: Offer; readonly before?: Observed | undefined }) {
+  const user = adb(["shell", "am", "get-current-user"]).trim();
+  const dump = adb(["shell", "dumpsys", "package", PACKAGE]);
+  const facts = packageFacts(dump);
+  const path = /^package:(\/\S+\.apk)$/m.exec(adb(["shell", "pm", "path", PACKAGE]))?.[1] ?? "";
+  const home = homeOf(adb, user);
+  const observed: Observed = {
+    offer, versionCode: facts.versionCode, identity: facts.identity,
+    initiator: /installInitiatingPackageName=([^\s,}]+)/.exec(dump)?.[1] ?? "",
+    sha256: path === "" ? "" : /^([0-9a-f]{64})\b/.exec(adb(["shell", "sha256sum", path]).trim())?.[1] ?? "",
+    home: { holders: home.holders, activity: home.activity },
+  };
+  if (before === undefined) return { observed, readback: undefined, passed: false };
+  const readback: Readback = {
+    sameInstall: observed.identity.uid === before.identity.uid && observed.identity.firstInstall === before.identity.firstInstall && observed.identity.uid !== "",
+    advanced: before.versionCode < offer.versionCode && observed.versionCode === offer.versionCode,
+    exact: observed.sha256 === offer.sha256,
+    selfInitiated: observed.initiator === PACKAGE,
+    homeKept: home.home === "AlphaHome" && JSON.stringify(observed.home) === JSON.stringify(before.home),
+    offerKept: JSON.stringify(offer) === JSON.stringify(before.offer),
+  };
+  return { observed, readback, passed: updatedItself(readback) };
+}
+
+const OS_CERTIFICATES = ["releasekey", "platform", "shared", "media", "networkstack", "sdk_sandbox", "bluetooth", "nfc", "apex"] as const;
+const AVB_KEYS = ["apex_payload", "avb"] as const;
+const KEY_ARCHIVE = new Set(["fingerprints.json", "avb_pkmd.bin", ...OS_CERTIFICATES.flatMap((name) => [`${name}.pk8.enc`, `${name}.x509.pem`]),
+  ...AVB_KEYS.flatMap((name) => [`${name}.avbpubkey`, `${name}.pem.enc`, `${name}.pub.pem`])]);
+const CUSTODY_SECRETS = ["ALPHA_OS_RELEASE_KEYS_PART1_B64", "ALPHA_OS_RELEASE_KEYS_PART2_B64", "ALPHA_OS_RELEASE_KEYS_PASSPHRASE", "ALPHA_APP_RELEASE_KEYSTORE_B64", KEYSTORE_PASSWORD] as const;
+const KEYSTORE_ALIAS = "alpha-release";
+
+/** The identities Alpha enrolled: the expected digests, the app signer, each key's size, and the directory of committed public identities. */
+export interface Enrolled {
+  readonly certificates: Readonly<Record<string, string>>;
+  readonly avbSha256: string;
+  readonly appSigner: string;
+  readonly bits: Readonly<Record<string, number>>;
+  readonly publicDirectory: string;
+}
+
+const enrolledKeys = (): Enrolled => {
+  const expected = JSON.parse(readFileSync(join(app, "aosp/signing/os-custody-expected.json"), "utf8")) as { readonly osCertificateSha256: Record<string, string>; readonly avbPublicKeySha256: string; readonly appSignerSha256: string };
+  const manifest = JSON.parse(readFileSync(join(app, "aosp/signing/alpha-key-manifest.json"), "utf8")) as { readonly keys: readonly { readonly name: string; readonly bits: number }[] };
+  if (expected.appSignerSha256 !== reviewedSigner()) throw new ReleaseRefused({ message: "the custody record names another app signer than Alpha's one key" });
+  return { certificates: expected.osCertificateSha256, avbSha256: expected.avbPublicKeySha256, appSigner: expected.appSignerSha256,
+    bits: Object.fromEntries(manifest.keys.map((key) => [key.name, key.bits])), publicDirectory: join(app, "aosp/signing/public") };
+};
+
+const refuse = (what: string): never => { throw new ReleaseRefused({ message: `release custody: ${what}` }); };
+
+/** openssl over `input`, the password only in its environment. */
+const openssl = (args: readonly string[], input?: Uint8Array, password?: string) => execFileSync("openssl", args, {
+  ...(input === undefined ? {} : { input }), timeout: 30_000, maxBuffer: 1 << 20, stdio: ["pipe", "pipe", "pipe"],
+  env: { PATH: process.env.PATH ?? "/usr/bin:/bin", LC_ALL: "C", ...(password === undefined ? {} : { ALPHA_PROOF_PASSWORD: password }) },
+});
+
+/** The key archive's files, each named once, regular and small; anything else refuses it. */
+function keyArchive(compressed: Buffer) {
+  const bytes = gunzipSync(compressed, { maxOutputLength: 512 * 1024 });
+  const files = new Map<string, Buffer>();
+  for (let at = 0; at + 512 <= bytes.length;) {
+    const header = bytes.subarray(at, at + 512);
+    if (header.every((byte) => byte === 0)) break;
+    const field = (from: number, to: number) => header.subarray(from, to).toString("utf8").replace(/\0.*$/s, "").trim();
+    const [name, size, type] = [field(0, 100), Number.parseInt(field(124, 136) || "0", 8), String.fromCharCode(header[156] ?? 0)];
+    const body = bytes.subarray(at + 512, at + 512 + size);
+    at += 512 + Math.ceil(size / 512) * 512;
+    if (type === "x" || type === "g") continue;
+    if (!KEY_ARCHIVE.has(name) || files.has(name) || (type !== "0" && type !== "\0") || size <= 0 || size > 32 * 1024 || body.length !== size) refuse(`the key archive holds an unexpected entry ${name}`);
+    files.set(name, body);
+  }
+  if (files.size !== KEY_ARCHIVE.size) refuse("the key archive lacks an entry");
+  return files;
+}
+
+const decoded = (text: string) => {
+  const bytes = Buffer.from(text, "base64");
+  if (text.length === 0 || text.length > 48 * 1024 || bytes.toString("base64").replace(/=+$/, "") !== text.replace(/\s+/g, "").replace(/=+$/, "")) refuse("a secret is not base64");
+  return bytes;
+};
+
+const publicOf = (privateKey: Buffer) => { openssl(["pkey", "-check", "-noout"], privateKey); return openssl(["pkey", "-pubout", "-outform", "DER"], privateKey); };
+const identityOf = (certificate: Buffer) => ({
+  publicKey: openssl(["pkey", "-pubin", "-outform", "DER"], openssl(["x509", "-pubkey", "-noout"], certificate)),
+  sha256: sha256(openssl(["x509", "-outform", "DER"], certificate)),
+});
+
+const inverse = (value: bigint, modulus: bigint) => {
+  let [a, b, x, y] = [value % modulus, modulus, 1n, 0n];
+  while (b !== 0n) { const q = a / b; [a, b, x, y] = [b, a - q * b, y, x - q * y]; }
+  return ((x % modulus) + modulus) % modulus;
+};
+const bigEndian = (value: bigint, bytes: number) => Buffer.from(value.toString(16).padStart(bytes * 2, "0"), "hex");
+
+/** AVB's public key metadata for an RSA key of `bits`: its header, then n and R squared modulo n. */
+export function avbMetadata(publicKey: Buffer, bits: number) {
+  if (!/^Exponent: 65537 \(0x10001\)$/m.test(openssl(["rsa", "-pubin", "-inform", "DER", "-text", "-noout"], publicKey).toString())) refuse("a verified-boot key's exponent is not 65537");
+  const n = BigInt(`0x${openssl(["rsa", "-pubin", "-inform", "DER", "-modulus", "-noout"], publicKey).toString().trim().replace(/^Modulus=/, "")}`);
+  if (n.toString(2).length !== bits || ![2048, 4096, 8192].includes(bits)) refuse("a verified-boot key has another size than its manifest");
+  const word = 1n << 32n;
+  const header = Buffer.alloc(8);
+  header.writeUInt32BE(bits, 0);
+  header.writeUInt32BE(Number((word - inverse(n, word)) % word), 4);
+  return Buffer.concat([header, bigEndian(n, bits / 8), bigEndian((1n << BigInt(2 * bits)) % n, bits / 8)]);
+}
+
+/**
+ * Proves the protected keys are the enrolled ones: each private key pairs with its public identity, which is the one
+ * Alpha enrolled and committed, none is a test key, and no two are the same. Secrets stay in memory and in `scratch`,
+ * a memory-backed directory removed at the end; the proof records only public digests.
+ */
+export function custodyProof({ secrets, enrolled, scratch }: { readonly secrets: Readonly<Record<string, string>>; readonly enrolled: Enrolled; readonly scratch: string }) {
+  const [part1 = "", part2 = "", passphrase = "", keystore = "", password = ""] = CUSTODY_SECRETS.map((name) => secrets[name] ?? "");
+  if (passphrase === "" || password === "") refuse("a key password is missing");
+  const files = keyArchive(Buffer.concat([decoded(part1), decoded(part2)]));
+  const fingerprints = JSON.parse((files.get("fingerprints.json") ?? Buffer.alloc(0)).toString("utf8")) as { readonly schemaVersion?: number; readonly testKeys?: boolean; readonly keys?: readonly { readonly name: string; readonly certificateSha256?: string; readonly avbPublicKeySha256?: string }[] };
+  const entries = new Map((fingerprints.keys ?? []).map((key) => [key.name, key]));
+  const committed = (name: string) => readFileSync(join(enrolled.publicDirectory, name));
+  const directory = realpathSync(scratch);
+  const stage = join(directory, `alpha-release-proof-${randomBytes(8).toString("hex")}`);
+  mkdirSync(stage, { mode: 0o700 });
+  const keys: { readonly name: string; readonly publicKey: Buffer; readonly enrolled: boolean }[] = [];
+  try {
+    const decrypted = (file: string, encoding: "DER" | "PEM") => {
+      const encrypted = join(stage, file);
+      writeFileSync(encrypted, files.get(file) ?? Buffer.alloc(0), { mode: 0o600 });
+      return publicOf(openssl(["pkcs8", "-inform", encoding, "-in", encrypted, "-passin", "env:ALPHA_PROOF_PASSWORD"], undefined, passphrase));
+    };
+    for (const name of OS_CERTIFICATES) {
+      const certificate = files.get(`${name}.x509.pem`) ?? Buffer.alloc(0);
+      const identity = identityOf(certificate);
+      const paired = decrypted(`${name}.pk8.enc`, "DER").equals(identity.publicKey);
+      keys.push({ name, publicKey: identity.publicKey, enrolled: paired && identity.sha256 === enrolled.certificates[name]
+        && identity.sha256 === entries.get(name)?.certificateSha256 && identityOf(committed(`${name}.x509.pem`)).sha256 === identity.sha256 });
+    }
+    for (const name of AVB_KEYS) {
+      const publicKey = openssl(["pkey", "-pubin", "-outform", "DER"], files.get(`${name}.pub.pem`));
+      const metadata = avbMetadata(publicKey, enrolled.bits[name] ?? 0);
+      const pairs = decrypted(`${name}.pem.enc`, "PEM").equals(publicKey) && metadata.equals(files.get(`${name}.avbpubkey`) ?? Buffer.alloc(0));
+      const known = sha256(metadata) === entries.get(name)?.avbPublicKeySha256
+        && (name === "avb" ? metadata.equals(files.get("avb_pkmd.bin") ?? Buffer.alloc(0)) && sha256(metadata) === enrolled.avbSha256 && metadata.equals(committed("avb_pkmd.bin"))
+          : metadata.equals(committed("apex_payload.avbpubkey")));
+      keys.push({ name, publicKey, enrolled: pairs && known });
+    }
+    const store = join(stage, "app.p12");
+    writeFileSync(store, decoded(keystore), { mode: 0o600 });
+    const read = (...more: string[]) => openssl(["pkcs12", "-in", store, "-passin", "env:ALPHA_PROOF_PASSWORD", ...more], undefined, password);
+    const [certificate, privateKey] = [read("-clcerts", "-nokeys"), read("-nocerts", "-noenc")];
+    const alias = new RegExp(`^\\s*friendlyName: ${KEYSTORE_ALIAS}\\s*$`, "m");
+    const single = alias.test(certificate.toString()) && alias.test(privateKey.toString())
+      && certificate.toString().split("-----BEGIN CERTIFICATE-----").length === 2 && privateKey.toString().split("-----BEGIN PRIVATE KEY-----").length === 2;
+    const app = identityOf(certificate);
+    keys.push({ name: "alphaphone_app", publicKey: app.publicKey, enrolled: single && app.sha256 === enrolled.appSigner
+      && publicOf(privateKey).equals(app.publicKey) && identityOf(committed("alphaphone_app.x509.pem")).sha256 === app.sha256 });
+  } finally {
+    rmSync(stage, { recursive: true, force: true });
+  }
+  const custody: Custody = {
+    pairs: keys.length, matching: keys.filter((key) => key.enrolled).length,
+    distinct: new Set(keys.map((key) => sha256(key.publicKey))).size === keys.length,
+    testKeys: fingerprints.schemaVersion !== 1 || fingerprints.testKeys !== false,
+  };
+  return { custody, keys: keys.map((key) => ({ name: key.name, publicKeySha256: sha256(key.publicKey), enrolled: key.enrolled })), signedImageProduced: false, deviceQualified: false };
 }
 
 /** One `pnpm release` command, as an effect over Node's services. */
