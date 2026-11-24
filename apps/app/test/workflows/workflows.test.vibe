@@ -12,7 +12,7 @@ function workflows(handlers: Handler[], sent: Sent[], variant: "launcher" | "bro
   return workflowsOf(handlers, sent, { variant })
 }
 
-const prompt = { id: "a1", type: "coordinator_text", title: "Plan my day", enabled: false, status: "paused", triggerId: "t1" }
+const prompt = { id: "t1", displayName: "Plan my day", instructions: "Plan", enabled: false }
 const status = { engine: "eliza-typed", status: "ready", manualSubmissionProtocol: 1, approvalReceiptProtocol: 1, hostedDigestProtocol: 1 }
 const definition = { id: "w1", name: "Morning", active: true, versionId: "v1", steps: [] }
 const run = (id: string, finished: boolean) => ({ id, workflowId: "w1", status: finished ? "succeeded" : "running", startedAt: "2026-11-22T07:00:00.000Z", finished, workflowVersionId: "v1" })
@@ -22,11 +22,11 @@ describe("Workflows (spec/workflows/automations.md, \"Story: See all my automati
     const sent: Sent[] = []
     let executes = 0
     const handlers: Handler[] = [
-      (m, p) => m === "GET" && p === "/api/automations" ? { status: 200, data: { automations: [prompt] } } : undefined,
+      (m, p) => m === "GET" && p === "/api/triggers" ? { status: 200, data: { triggers: [prompt] } } : undefined,
       (m, p) => m === "GET" && p.startsWith("/api/scheduled-tasks") ? { status: 500 } : undefined,
       (m, p) => m === "GET" && p === "/api/lifeops/reminders" ? { status: 200, data: { reminders: [] } } : undefined,
       (m, p) => m === "PUT" && p === "/api/triggers/t1" ? { status: 429 } : undefined,
-      (m, p) => m === "GET" && p === "/api/triggers/t1" ? { status: 200, data: { trigger: { id: "t1", displayName: "Plan my day", instructions: "Plan", enabled: false } } } : undefined,
+      (m, p) => m === "GET" && p === "/api/triggers/t1" ? { status: 200, data: { trigger: prompt } } : undefined,
       (m, p) => m === "POST" && p === "/api/triggers/t1/execute" ? (executes++, { status: 503 }) : undefined,
     ]
     provide workflows(handlers, sent) {
@@ -34,10 +34,10 @@ describe("Workflows (spec/workflows/automations.md, \"Story: See all my automati
       const held = try AutomationsMachine
       try list.refresh()
       const first = try held.get()
-      const enabled = try list.setEnabled("a1", true)
+      const enabled = try list.setEnabled("trigger:t1", true)
       const afterEnable = try held.get()
-      const ran = try list.run("a1")
-      const again = try list.run("a1")
+      const ran = try list.run("trigger:t1")
+      const again = try list.run("trigger:t1")
       const unknown = try held.get()
       try list.allowAnother(unknown.held[0]?.id ?? 0)
       const released = try held.get()
@@ -48,7 +48,7 @@ describe("Workflows (spec/workflows/automations.md, \"Story: See all my automati
         released: released.held.length,
         notSent: sent.some((s) => s.method === "DELETE" || (s.method === "GET" && s.body !== undefined)),
       }, {
-        rows: [["a1", "PromptRow", "t1"]], reads: ["Listed", "RefreshFailed", "Listed", "NotOnAgent"],
+        rows: [["trigger:t1", "PromptRow", "t1"]], reads: ["Listed", "RefreshFailed", "Listed", "NotOnAgent"],
         enabled: ["refused", "limit", 0],
         ran: ["unknown", "busy", 1, "AnswerUnknown", 1],
         released: 0,

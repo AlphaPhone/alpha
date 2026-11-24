@@ -147,7 +147,9 @@ pure def stepAFailedReadKeepsTheRows(before: Automations, via: str, after: Autom
 An applied answer and a refusal both release it, a refused create included, so a refusal never
 locks new prompts. A lost answer leaves the outcome unknown and the change held. A 4xx answer, a
 definite 404 included, is a refusal released before the list is read again; a 5xx or a reply that
-never came is unknown; a request that was never sent is refused (#1209).
+never came is unknown; a request that was never sent is refused (#1209). A change a complete re-read
+settles counts as applied, and one released by the owner's Allow another leaves no answer waiting:
+the unknown answer belonged to the change, and with nothing held it is no longer shown.
 
 ```quint
 pure def answerOfStatus(httpStatus: int, delivered: bool): Answer =
