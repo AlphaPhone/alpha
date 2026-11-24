@@ -11,6 +11,11 @@ import { useMachine as useView } from "../../gen/app__calendar.react.ts";
 import type * as Changes from "../../gen/app__calendar__agent.ts";
 import { useMachine as useChanges } from "../../gen/app__calendar__agent.react.ts";
 import * as Editor from "../../gen/app__calendar__editor.ts";
+import * as Sync from "../../gen/app__calendar__sync.ts";
+import { useMachine as useSync } from "../../gen/app__calendar__sync.react.ts";
+import { calendars } from "./sync.vibe";
+import { useTimed } from "../runtime/react.ts";
+import { untimed } from "../runtime/reactor.vibe";
 import { useMachine as useEditor } from "../../gen/app__calendar__editor.react.ts";
 import type { Calendared } from "./calendar.vibe";
 import { type Fields, kept, typed } from "./editor.vibe";
@@ -87,6 +92,7 @@ export function Calendar({ runtime }: CalendarProps) {
       {s.phone.status === "Failed" || s.google.status === "Failed" ? <Banner variant="warn" action={offer({ type: "refresh" }, "Retry")}>Calendar couldn't read this day.</Banner> : null}
       {!s.connected ? <Banner>Your agent has no Google Calendar connected.</Banner> : null}
       <Drafts runtime={runtime} day={s.anchor} />
+      <GoogleRow runtime={runtime} />
       <Proposal runtime={runtime} />
       <main className="flex-1 overflow-y-auto px-4 py-2">
         {View.empty(s) ? <EmptyState title="Nothing on this day" icon={<CalendarDays />} /> : (
@@ -282,3 +288,40 @@ function Proposal({ runtime }: CalendarProps) {
   );
 }
 
+const rows: Readonly<Record<Sync.Row, string>> = {
+  NotConnected: "Not connected", CouldNotCheck: "Couldn't check", FinishSetup: "Finish setup", Off: "Off", UpToDate: "Synced", Syncing: "Syncing", NeedsYou: "Needs you",
+};
+
+// spec/app/calendar/sync.md, "Calendar's Google row says Not connected, Couldn't check, Finish setup, Off, Synced or Needs you, from the link and the change under way alone"; spec/app/calendar/sync.md, "Story: Turn sync on knowingly"; spec/app/calendar/sync.md, "Story: Decide after a restart"
+function GoogleRow({ runtime }: CalendarProps) {
+  const sync = useTimed(runtime, useSync);
+  const y = sync.state;
+  if (!y) return null;
+  const act = (event: Sync.Event, label: string, variant: "primary" | "outline" | "ghost" = "outline") =>
+    sync.can(event) ? <Button key={label} variant={variant} onClick={() => void sync.send(event)}>{label}</Button> : null;
+  const target = calendars()[y.target - 1];
+  return (
+    <ListGroup heading="Copy to Google Calendar" className="mx-4 my-2">
+      <ListRow title={rows[Sync.rowOf(y)]} detail={target === undefined ? undefined : target.name} />
+      {y.link === "Linked" && !y.on ? calendars().map((one, at) => (
+        <ListRow key={one.id} title={one.name} selected={y.target === at + 1} disabled={!sync.can({ type: "chooseTarget", target: at + 1 })} onClick={() => void sync.send({ type: "chooseTarget", target: at + 1 })} />
+      )) : null}
+      {y.consent.showing ? <p className="px-4 text-sm">{`Events you add, change or delete on this phone will be copied to ${target?.name ?? "this calendar"}. A deletion waits ten seconds, so you can undo it.`}</p> : null}
+      <div className="flex flex-wrap gap-2 p-2">
+        {act({ type: "link" }, "Link Google Calendar", "primary")}
+        {act({ type: "review" }, "Review")}
+        {act({ type: "turnOn" }, "Turn on", "primary")}
+        {act({ type: "turnOff" }, "Turn off")}
+        {act({ type: "undo", now: untimed }, "Undo deletion")}
+        {act({ type: "retry" }, "Try again")}
+        {act({ type: "resolve", keepPhones: true }, "Keep the phone's")}
+        {act({ type: "resolve", keepPhones: false }, "Keep Google's")}
+        {act({ type: "lookForIt" }, "Look for it in Google")}
+        {act({ type: "letItGo" }, "Let it go")}
+        {act({ type: "decide", send: true }, "Delete it in Google")}
+        {act({ type: "decide", send: false }, "Keep it in Google")}
+        {act({ type: "disconnect" }, "Disconnect", "ghost")}
+      </div>
+    </ListGroup>
+  );
+}

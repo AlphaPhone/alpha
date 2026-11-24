@@ -3,6 +3,8 @@ import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Editor from "../../gen/app__calendar__editor.effect.vibe"
 import type { Effect as Out, Event, Scope } from "../../gen/app__calendar__editor.effect.vibe"
 import * as View from "../../gen/app__calendar.effect.vibe"
+import type * as Sync from "../../gen/app__calendar__sync.effect.vibe"
+import { changedOnPhone } from "./sync.vibe"
 import type { AndroidCalendarDeletionScope, AndroidCalendarEditorFields, CalendarPick } from "@elizaos/os/bridges/calendar"
 import { PhoneCalendar, type Written } from "../platform/calendar.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
@@ -110,15 +112,25 @@ effect function handOff() {
   try (try PhoneCalendar).handOff({ ...fieldsOf(fields), allDay: fields.allDay, timeZone: zone(), attendees: people })
 }
 
+/** The event a confirmed write left on the phone, as sync copies it. */
+effect function changedRow(kind: "Create" | "Update" | "Remove", id: number, attempt: number): Row!!(KeyValueStore.KeyValueStore | Attempts) {
+  const fields = try kept(0)
+  const before = shown.find(id)
+  const key = before?.key ?? (try (try Attempts).key(attempt))
+  const row: Row = before ?? { id, source: "Phone", key, calendarId: "local", title: "", place: "", notes: "", begin: 0, end: 0, allDay: false, recurring: false, link: "", video: "", revision: 0 }
+  return kind === "Remove" ? row : { ...row, title: fields.title.trim(), place: fields.place, notes: fields.notes, begin: fields.begin, end: fields.end, allDay: fields.allDay }
+}
+
 // spec/app/calendar/index.md, "The owner reads again whenever a source can be read"
 /** How write `attempt` ended; the calendar then reads its day again, which shows the write or releases its doubt. */
-effect function written(attempt: number, kind: "Create" | "Update" | "Remove" | "Reply", id: number, scope: Scope): Event!!(PhoneCalendar | KeyValueStore.KeyValueStore | Attempts | Time | Editor.Machine | View.Machine) {
+effect function written(attempt: number, kind: "Create" | "Update" | "Remove" | "Reply", id: number, scope: Scope): Event!!(PhoneCalendar | KeyValueStore.KeyValueStore | Attempts | Time | Editor.Machine | View.Machine | Sync.Machine) {
   const outcome = try send(attempt, kind, id, scope)
   try contained((try View.Machine).send({ type: "refresh" }), "reading the day again after a write")
+  if (outcome.confirmed && kind !== "Reply") try changedOnPhone(kind === "Remove" ? "Delete" : kind, try changedRow(kind, id, attempt))
   return { type: "written", attempt, ...outcome }
 }
 
-function carry(fx: Out): Job<Event, PhoneCalendar | KeyValueStore.KeyValueStore | Time | Editor.Machine | View.Machine, []> {
+function carry(fx: Out): Job<Event, PhoneCalendar | KeyValueStore.KeyValueStore | Time | Editor.Machine | View.Machine | Sync.Machine, []> {
   return match (fx) {
     when { tag: "Send", let attempt, let kind, let id, let scope }:
       answer(`write ${attempt}`, written(attempt, kind, id, scope), { type: "written", attempt, confirmed: false, known: false });

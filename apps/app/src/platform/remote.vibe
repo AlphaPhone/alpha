@@ -156,12 +156,13 @@ export effect function attempted<I>(remote: Context.Key<I, Remote>, request: Htt
 
 /**
  * Carry out the kit attempt `id` as `attempted` does, where the request itself names the attempt's idempotency key, as
- * eliza's calendar routes ask in their body or query: `build` makes it from the key, and no header carries it.
+ * eliza's calendar routes ask in their body or query: `build` makes it from the key, and no header carries it. Beside
+ * how it ended, the answer's body, untrusted, where it came.
  */
-export effect function attemptedWith<I>(remote: Context.Key<I, Remote>, build: (key: string) => HttpClientRequest.HttpClientRequest, id: number): Outcome!!(I | Attempts) {
+export effect function attemptedWith<I>(remote: Context.Key<I, Remote>, build: (key: string) => HttpClientRequest.HttpClientRequest, id: number): (Outcome & { readonly body: unknown })!!(I | Attempts) {
   const key = try (try Attempts).key(id)
   return effect {
-    try (try remote).call(build(key))
-    return { confirmed: true, known: true }
-  } catch (failure) => outcomeOf(failure)
+    const body = try (try remote).call(build(key))
+    return { confirmed: true, known: true, body }
+  } catch (failure) => ({ ...outcomeOf(failure), body: undefined })
 }

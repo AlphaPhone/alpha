@@ -5,6 +5,7 @@ import type { Effect as Out, Event, Source } from "../../gen/app__calendar.effec
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import type * as Editor from "../../gen/app__calendar__editor.effect.vibe"
 import type * as Changes from "../../gen/app__calendar__agent.effect.vibe"
+import type * as SyncState from "../../gen/app__calendar__sync.effect.vibe"
 import type { AndroidCalendarEvent } from "@elizaos/os/bridges/calendar"
 import { Agent } from "../platform/agent.vibe"
 import { PhoneCalendar } from "../platform/calendar.vibe"
@@ -158,4 +159,4 @@ const returned = hearing(forward, View.Machine, (): Event => ({ type: "comeBack"
 export const calendar = together(kept, told, opened, returned)
 
 /** Every machine of the Calendar area, which its screen reads, and Alpha's time. */
-export type Calendared = View.Machine | Editor.Machine | Changes.Machine | Time | KeyValueStore.KeyValueStore
+export type Calendared = View.Machine | Editor.Machine | Changes.Machine | SyncState.Machine | Time | KeyValueStore.KeyValueStore

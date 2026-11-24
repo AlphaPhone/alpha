@@ -49,10 +49,10 @@ pure val initial: Sync = {
   phase: Clear, change: Create, hold: U::free, check: R::unread, write: A::plan(0), found: false,
 }
 
-pure val undoWindow = 10
+pure val undoWindow = 10000
 
 pure val targetValues = Set(1, 2)
-pure val nowValues = Set(0, 10)
+pure val nowValues = Set(0, 10000)
 pure val ticketValues = Set(1, 2, 3)
 pure val attemptValues = Set(1, 2, 3)
 pure val weight_link = 20

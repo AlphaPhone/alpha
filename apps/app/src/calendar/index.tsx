@@ -8,6 +8,7 @@ import { changes } from "./agent.vibe";
 import { Calendar } from "./Calendar.tsx";
 import { calendar } from "./calendar.vibe";
 import { editor } from "./editor.vibe";
+import { syncing } from "./sync.vibe";
 
 /** Back inside Calendar: the form, then the overlay, then the open event, while one is open. */
 const back = Effect.gen(function* () {
@@ -22,5 +23,5 @@ const back = Effect.gen(function* () {
   return false;
 });
 
-/** Calendar, at its view (areas.ts): its view, its form and the agent's changes live from its first opening until Alpha closes. */
-export default area(Layer.mergeAll(together(calendar, editor), changes), Calendar, { back });
+/** Calendar, at its view (areas.ts): its view, its form, sync and the agent's changes live from its first opening until Alpha closes. */
+export default area(Layer.mergeAll(together(calendar, editor, syncing), changes), Calendar, { back });

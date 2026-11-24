@@ -1,0 +1,102 @@
+// spec/app/calendar/sync.md, "Story: Link my Google calendar"; spec/app/calendar/sync.md, "Story: Copy my phone's changes to Google, once"; spec/app/calendar/sync.md, "Story: Decide after a restart"
+import * as Sync from "../../gen/app__calendar__sync.effect.vibe"
+import type { Change, Effect as Out, Event } from "../../gen/app__calendar__sync.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { ask, attemptedWith } from "../platform/remote.vibe"
+import { Attempts } from "../runtime/attempts.vibe"
+import { type Job, answer, due, reacting, started, together, untimed, contained } from "../runtime/reactor.vibe"
+import type { Row } from "./shown.ts"
+import { zone } from "./time.ts"
+
+const base = "/api/lifeops/calendar"
+
+/** The agent's calendars as eliza's calendar routes list them; the owner chooses the one the phone is copied to by its place in this list. */
+schema Listed { readonly calendars: ReadonlyArray<{ readonly calendarId: string; readonly summary?: string }> }
+
+/** What the phone changed last, which sync copies: the event as it now is, and the Google event it was copied to, if any. */
+interface Pending {
+  readonly row: Row
+  readonly google: string
+}
+
+const listed: Array<{ readonly id: string; readonly name: string }> = []
+const copies = new Map<string, string>()
+let pending: Pending | undefined
+
+/** The calendars Linking listed, by their number in the spec (one after their place). */
+export const calendars = (): ReadonlyArray<{ readonly id: string; readonly name: string }> => listed
+
+// spec/app/calendar/sync.md, "A change on the phone is recorded there first; while sync is on it is queued, a deletion held for its Undo window"
+/** The phone's calendar changed `row` as `change`: the change sync copies next, told to the machine. */
+export effect function changedOnPhone(change: Change, row: Row) {
+  pending = { row, google: copies.get(row.key) ?? "" }
+  try contained((try Sync.Machine).send({ type: "phoneChanged", change, now: untimed }), "telling sync of a change on the phone")
+}
+
+effect function listCalendars(ticket: number): Event!!Agent {
+  const answered = ask(Agent, HttpClientRequest.get(`${base}/calendars`), Listed) catch () => undefined
+  if (answered !== undefined) listed.splice(0, listed.length, ...answered.calendars.map((one) => ({ id: one.calendarId, name: one.summary ?? one.calendarId })))
+  return { type: "calendarsListed", ticket, ok: answered !== undefined }
+}
+
+/** The target calendar's id, from its number. */
+const calendarOf = (target: number): string => listed[target - 1]?.id ?? ""
+
+/** The Google copy of the pending change as it is now: whether it is there and unchanged since it was copied. */
+schema Feed { readonly events: ReadonlyArray<{ readonly id: string }> }
+
+// spec/app/calendar/sync.md, "An unchanged event is written once, under a new number; one changed in Google is a conflict for the owner"; spec/app/calendar/sync.md, "A change in doubt is never written again: the owner looks for it in Google, or lets it go"
+effect function check(ticket: number, change: Change, target: number, inDoubt: boolean): Event!!Agent {
+  const google = pending?.google ?? ""
+  const feed = ask(Agent, HttpClientRequest.get(`${base}/feed`, { urlParams: { calendarId: calendarOf(target), timeZone: zone() } }), Feed) catch () => undefined
+  const there = feed !== undefined && google !== "" && feed.events.some((event) => event.id === google)
+  if (inDoubt) return { type: "lookedUp", ticket, found: change === "Delete" ? !there : there }
+  return { type: "checked", ticket, unchanged: change === "Create" || there }
+}
+
+/** The request that copies the pending change to `target` under its idempotency key. */
+function request(change: Change, target: number, key: string) {
+  const row = pending?.row
+  const fields = { title: row?.title ?? "", description: row?.notes ?? "", location: row?.place ?? "", startAt: new Date(row?.begin ?? 0).toISOString(), endAt: new Date(row?.end ?? 0).toISOString(), isAllDay: row?.allDay ?? false, timeZone: zone(), calendarId: calendarOf(target), idempotencyKey: key }
+  const google = encodeURIComponent(pending?.google ?? "")
+  if (change === "Create") return HttpClientRequest.post(`${base}/events`) |> HttpClientRequest.bodyJsonUnsafe(%, fields)
+  if (change === "Update") return HttpClientRequest.patch(`${base}/events/${google}`) |> HttpClientRequest.bodyJsonUnsafe(%, { ...fields, expectedProviderVersion: "*" })
+  return HttpClientRequest.delete(`${base}/events/${google}`, { urlParams: { calendarId: calendarOf(target), expectedProviderVersion: "*", idempotencyKey: key, cancellationMode: "organizer_cancel" } })
+}
+
+// spec/app/calendar/sync.md, "Google's answer ends the write: done, failed, or in doubt"
+/** What a copy answers: the Google event it made or changed. */
+schema Copied { readonly event: { readonly id: string } }
+
+effect function write(attempt: number, change: Change, target: number): Event!!(Agent | Attempts) {
+  const { confirmed, known, body } = try attemptedWith(Agent, (key) => request(change, target, key), attempt)
+  const made = Schema.decodeUnknownOption(Copied)(body)
+  if (pending !== undefined && Option.isSome(made)) copies.set(pending.row.key, made.value.event.id)
+  if (pending !== undefined && confirmed && change === "Delete") copies.delete(pending.row.key)
+  return { type: "written", attempt, confirmed, known }
+}
+
+function carry(fx: Out): Job<Event, Agent | Sync.Machine, []> {
+  return match (fx) {
+    when { tag: "ListCalendars", let ticket }: answer("list", listCalendars(ticket), { type: "calendarsListed", ticket, ok: false });
+    when { tag: "Check", let ticket, let change, let target }:
+      answer("check", effect { return try check(ticket, change, target, (try (try Sync.Machine).get()).phase === "InDoubt") }, { type: "checked", ticket, unchanged: false });
+    when { tag: "Write", let attempt, let change, let target }: answer(`write ${attempt}`, write(attempt, change, target), { type: "written", attempt, confirmed: false, known: false });
+  }
+}
+
+// spec/app/calendar/sync.md, "A queued change is claimed only while sync is on and linked with access, and a deletion only once its window ended"
+/** A queued change is claimed at once, and a held deletion once its Undo window is over. */
+function timers(s: Sync.Sync) {
+  return s.phase === "Queued" ? [due<Event, []>("claim", s.hold.holding === "Held" ? s.hold.until : 0, { type: "claim", now: untimed })] : []
+}
+
+// spec/app/calendar/sync.md, "Linking asks Google for the account's calendars, and only with access granted"
+/** Whether the agent can reach Google at all: what the accounts area will say, read here from the agent's calendar list. */
+const granted = started(effect {
+  const answered = ask(Agent, HttpClientRequest.get(`${base}/calendars`), Listed) catch () => undefined
+  try contained((try Sync.Machine).send({ type: "grantChanged", granted: answered !== undefined && answered.calendars.length > 0 }), "telling sync whether Google can be reached")
+}, "reading whether Google can be reached")
+
+/** Sync: kept on the phone across restarts, which pause a held deletion and count a write in flight as in doubt. */
+export const syncing = together(reacting(Sync, { keep: 1, open: [{ type: "restart" }], carry, timers }), granted)

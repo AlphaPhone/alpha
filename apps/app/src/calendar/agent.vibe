@@ -54,8 +54,8 @@ function request(change: Out & { tag: "Send" }, row: Row | undefined, key: strin
 // spec/app/calendar/agent.md, "A change Google confirms is read back; a refused or unknown one ends there and is reported"
 effect function send(change: Out & { tag: "Send" }): Event!!(Agent | Attempts) {
   const row = shown.find(change.id)
-  const outcome = try attemptedWith(Agent, (key) => request(change, row, key), change.attempt)
-  return { type: "sent", attempt: change.attempt, ...outcome }
+  const { confirmed, known } = try attemptedWith(Agent, (key) => request(change, row, key), change.attempt)
+  return { type: "sent", attempt: change.attempt, confirmed, known }
 }
 
 // spec/app/calendar/agent.md, "The read back says whether the change is there, and the agent is told"

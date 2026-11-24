@@ -4,8 +4,10 @@ import { Machine as View } from "../gen/app__calendar.effect.vibe";
 import { Machine as Changes } from "../gen/app__calendar__agent.effect.vibe";
 import { Machine as Editor } from "../gen/app__calendar__editor.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
+import { Machine as Sync } from "../gen/app__calendar__sync.effect.vibe";
 import calendar from "../src/calendar/index.tsx";
 import { shown } from "../src/calendar/shown.ts";
+import { rowOf as Sync_rowOf } from "../gen/app__calendar__sync.ts";
 import { civilDay, dateOf, dayStart } from "../src/calendar/time.ts";
 import type { Alpha } from "../src/runtime/area.tsx";
 import { button, closeAll, fill, hardware, later, only, open, press, underAct, until } from "./alpha.tsx";
@@ -161,6 +163,34 @@ describe("on a phone", () => {
     vi.useRealTimers();
     await until(alpha, runtime, Editor, (e) => e.kind === "Remove" && e.write.outcome === "Confirmed");
     expect(world.calendar.phoneEvents.map((event) => event.title)).not.toContain("Gym");
+  });
+
+  it("Copy my phone's changes to Google, once (spec/app/calendar/sync.md, \"Story: Link my Google calendar\"; spec/app/calendar/sync.md, \"Story: Turn sync on knowingly\"; spec/app/calendar/sync.md, \"Story: Copy my phone's changes to Google, once\")", async () => {
+    const world = morning(true);
+    world.calendar.granted = true;
+    const { alpha } = await open(world, only("view:Calendar"));
+    const runtime = calendar.runtime(alpha);
+    await openCalendar(alpha);
+    await until(alpha, runtime, Sync, (y) => y.granted);
+
+    // spec/app/calendar/sync.md, "Linking asks Google for the account's calendars, and only with access granted"; spec/app/calendar/sync.md, "The owner chooses the calendar to copy to while sync is off"
+    await press("Link Google Calendar");
+    await until(alpha, runtime, Sync, (y) => y.link === "Linked");
+    await tap("Alpha");
+    await until(alpha, runtime, Sync, (y) => y.target === 1);
+    expect(button("Turn on")).toBe(undefined);
+
+    // spec/app/calendar/sync.md, "The owner reviews what sync will copy and where, and turning it on confirms that review"
+    await press("Review");
+    await press("Turn on");
+    await until(alpha, runtime, Sync, (y) => y.on && Sync_rowOf(y) === "UpToDate");
+
+    // spec/app/calendar/sync.md, "An unchanged event is written once, under a new number; one changed in Google is a conflict for the owner"
+    await press("New event");
+    await fill("Title", "Coffee");
+    await press("Save");
+    await until(alpha, runtime, Sync, (y) => y.phase === "Done" && y.write.outcome === "Confirmed");
+    expect(world.calendar.writes).toEqual(["create ev-coffee"]);
   });
 
   it("Approve what the agent changes (spec/app/calendar/agent.md, \"Story: Approve what the agent changes\"; spec/app/calendar/agent.md, \"Story: Know what the agent's change did\")", async () => {
