@@ -1,6 +1,6 @@
 import type { View } from "../gen/app__shell.ts";
 import type { Area } from "./runtime/area.tsx";
-import home from "./shell/index.tsx";
+import home from "./home/index.tsx";
 
 /**
  * Where a screen is drawn. `view:<View>` is the page of a built-in app, under its title. The shell's layers, from
@@ -28,4 +28,5 @@ export const first = (place: Place, screen: Area): Mount => ({ at: place, load: 
 export const mounts: readonly Mount[] = [
   first("home", home),
   at("assistant", () => import("./ask/index.tsx")),
+  at("notice", () => import("./shell/Notices.tsx")),
 ];
