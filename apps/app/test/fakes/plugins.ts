@@ -8,6 +8,9 @@ import { alphaCarrierSetup, elizaReset, elizaSystem, elizaWiFi } from "./setting
 import { elizaLocation as mapsLocation } from "./maps.ts";
 import { type Faked, elizaAgent, elizaCloud, elizaSecureStore } from "./phone.ts";
 import type { Answering } from "./routes.ts";
+import { elizaLocation as mapsLocation } from "./maps.ts";
+import { type Faked, elizaAgent, elizaCloud, elizaSecureStore, present } from "./phone.ts";
+import type { Answering } from "./routes.ts";
 import { elizaSystem as launcherSystem } from "./launcher.ts";
 import { elizaFiles } from "./files.ts";
 import type { Scene } from "./scene.ts";
@@ -80,6 +83,8 @@ function combinedSystem(world: Scene): Faked {
   };
 }
 
+const both = (a: Faked, b: Faked): Faked => (emit) => ({ ...a(emit), ...b(emit) });
+
 /**
  * The plugins the fake phone's host registers, by the names their `@CapacitorPlugin` gives: one line per plugin, and
  * its import. Lines are only ever added, and git keeps every branch's (`.gitattributes`). An Alpha image's host
@@ -98,12 +103,15 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     ElizaSystem: elizaSystem(world.launcher, world.settings),
     ElizaLocation: combinedLocation(world),
     ElizaSystem: combinedSystem(world),
+    ElizaLocation: both(settingsLocation(world.settings), mapsLocation(world.maps, () => world.now)),
+    ElizaSystem: both(settingsSystem(world.settings), launcherSystem(world.launcher)),
     ElizaReset: elizaReset(world.settings),
     ElizaWiFi: elizaWiFi(world.settings),
     AlphaCarrierSetup: alphaCarrierSetup(world.settings),
     AlphaMapsTransport: alphaMapsTransport(world.maps),
     ...(world.image ? telephonyPlugins(world.telephony) : {}),
     AlphaDevice: alphaDevice(world.update, () => world.now),
+    ...(world.image ? { ElizaTelephony: present, ElizaContacts: present, ...telephonyPlugins(world.telephony) } : {}),
     AlphaConnection: alphaConnection(world.platform),
     ...(world.voice.onDevice ? { AlphaVoiceCloud: alphaVoiceCloud(world.voice) } : {}),
     ElizaCloudSpeech: elizaCloudSpeech(world.voice),

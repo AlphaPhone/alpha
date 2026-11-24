@@ -174,18 +174,17 @@ function kept<I, S, SE, SR>(key: string, stored: (key: string, start?: S) => Lay
   const aside = Layer.unwrap(effect {
     const store = try KeyValueStore.KeyValueStore
     const found = store.get(key) catch () => undefined
-    if (found !== undefined) {
-      let place: string | undefined
-      for (const one of asides(key)) {
-        const held = (store.get(one) catch () => "") !== undefined
-        if (place === undefined && setAside("KeptUnreadable", held)) place = one
-      }
-      if (place === undefined) return memory
-      const at = place
-      try logError(`what is kept under ${key} is not a state: set aside under ${at}`)
-      const copied = effect { try store.set(at, found); return true } catch () => false
-      if (!copied) return memory
+    if (found === undefined) return memory
+    let place: string | undefined
+    for (const one of asides(key)) {
+      const held = (store.get(one) catch () => "") !== undefined
+      if (place === undefined && setAside("KeptUnreadable", held)) place = one
     }
+    if (place === undefined) return memory
+    const at = place
+    try logError(`what is kept under ${key} is not a state: set aside under ${at}`)
+    const copied = effect { try store.set(at, found); return true } catch () => false
+    if (!copied) return memory
     try ignore(store.remove(key))
     try ignore(store.remove(`${key}.epoch`))
     return Layer.catch(Layer.fresh(stored(key)), () => memory)
@@ -346,13 +345,13 @@ type Needs<SR, R> = SR | KeyValueStore.KeyValueStore | Whole | Time | Install | 
  * the state that asked for it is kept, and each deadline of `timers` is told when its time has come. `open` is sent
  * once when the layer is built.
  */
-export function reacting<I, S, Ev, M, Refused, Undecoded, By extends ReadonlyArray<unknown>, SE, SR, R = never>(
+export function reacting<I, S, Ev, M, Refused, Undecoded, By extends ReadonlyArray<unknown>, SE, SR, R = never, RO = never>(
   spec: Spec<I, S, Ev, M, Refused, Undecoded, By, SE, SR>,
-  options: Options<S, Ev, R, By> & Carrying<M, Ev, R, By>,
-): Layer.Layer<I, never, Needs<SR, R>> {
-  const carry = options.carry as ((fx: unknown) => Job<Ev, R, By>) | undefined
+  options: Options<S, Ev, RO, By> & Carrying<M, Ev, R, By>,
+): Layer.Layer<I, never, Needs<SR, R | RO>> {
+  const carry = options.carry as ((fx: unknown) => Job<Ev, R | RO, By>) | undefined
   const key = options.keep === undefined ? undefined : storeKey(spec.Machine.key, options.keep)
-  const parts: Parts<S, Ev, M, unknown, R, By> = {
+  const parts: Parts<S, Ev, M, unknown, R | RO, By> = {
     scope: key ?? spec.Machine.key,
     durable: key !== undefined,
     stateOf: (moved) => (carry === undefined ? moved as unknown as S : (moved as unknown as Moved<S, unknown>).state),
@@ -362,7 +361,7 @@ export function reacting<I, S, Ev, M, Refused, Undecoded, By extends ReadonlyArr
     open: options.open,
   }
   const inner = key === undefined ? spec.machine() : kept(key, spec.stored, spec.machine())
-  return Layer.provide(reactor(spec.Machine, parts), inner) as unknown as Layer.Layer<I, never, Needs<SR, R>>
+  return Layer.provide(reactor(spec.Machine, parts), inner) as unknown as Layer.Layer<I, never, Needs<SR, R | RO>>
 }
 
 /**
