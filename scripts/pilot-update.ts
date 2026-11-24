@@ -289,15 +289,15 @@ async function main() {
   try {
     pulled = fs.mkdtempSync(path.join(os.tmpdir(), "alpha-installed-"));
     const candidate = snapshotUnitApk(apk, pulled);
-    requireConsistentApk(candidate, {descriptor, apiLevel});
+    await requireConsistentApk(candidate, {descriptor, apiLevel});
     const replacementFile = candidate.file;
     const before = packageFacts(adb(["shell", "dumpsys", "package", PACKAGE]));
     const installedFile = path.join(pulled, "installed.apk");
     const apkPath = /^package:(\/\S+\.apk)$/m.exec(adb(["shell", "pm", "path", PACKAGE]))?.[1];
     if (!apkPath) throw new Error("Alpha Phone is not installed on this unit");
     adb(["pull", apkPath, installedFile], { timeout: 600_000 });
-    const installedSigner = signerDigest(installedFile, {apiLevel});
-    const newSigner = signerDigest(replacementFile, {apiLevel});
+    const installedSigner = await signerDigest(installedFile, {apiLevel});
+    const newSigner = await signerDigest(replacementFile, {apiLevel});
     const problems = updateAdmission({ installedVersionCode: before.versionCode, installedSigner, newVersionCode: apk.versionCode, newSigner });
     if (problems.length) throw new Error(`Update refused: ${problems.join("; ")}`);
 

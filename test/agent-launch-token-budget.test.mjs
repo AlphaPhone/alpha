@@ -6,9 +6,7 @@ const read = file => fs.readFileSync(new URL(`../${file}`, import.meta.url), 'ut
 const launcher = () => read('android/app/src/main/java/ai/alphacompute/alphaphone/AlphaLocalAgentPlugin.java');
 const launchEnv = () => Object.fromEntries([...launcher().matchAll(/env\.put\("([A-Z0-9_]+)","([^"]*)"\)/g)].map(match => [match[1], match[2]]));
 
-// Settings the phone never sets. The caps and the stable-reference switch are no longer read, so
-// setting one would change nothing and suggest a cap that does not exist; the two rate-limit holds
-// are read only as a host override, and the phone leaves the hold to the runtime.
+// The pinned runtime owns caps, stable references and provider-specific rate-limit holds.
 const RETIRED = [
   'ELIZA_PLANNER_MAX_TOKENS', 'ELIZA_CODING_PLANNER_MAX_TOKENS', 'ELIZA_STAGE1_MAX_TOKENS', 'ELIZA_EVALUATOR_MAX_TOKENS',
   'TEXT_SMALL_MAX_TOKENS', 'TEXT_LARGE_MAX_TOKENS', 'RESPONSE_HANDLER_MAX_TOKENS', 'ACTION_PLANNER_MAX_TOKENS', 'DEFAULT_MAX_TOKENS',
@@ -35,11 +33,8 @@ test('the pinned runtime sends no output cap and keeps references stable without
   assert.doesNotMatch(swap, /ELIZA_SECRET_SWAP_STABLE_REFERENCES/);
 });
 
-// A launch variable may only shorten a rate-limit hold (spec/agent/models/binding.md, "A host may
-// shorten how long a rate limit holds the account"); the phone sets none (first test), so the pinned
-// runtime's own handling of a refused step decides how long a turn waits.
-test('the pinned runtime reads the Cerebras rate-limit hold only as a launch override', () => {
+test('the pinned runtime derives the rate-limit hold from the bound provider', () => {
   const binding = read('vendor/eliza/packages/agent/src/models/binding.vibe');
-  assert.match(binding, /holdSettings = \["OPENAI_RATE_LIMIT_MAX_HOLD_SECONDS", "CEREBRAS_RATE_LIMIT_MAX_HOLD_SECONDS"\]/);
-  assert.match(binding, /maxHold: rateLimitHold\(launch\.environment\)/);
+  assert.doesNotMatch(binding, /(?:OPENAI|CEREBRAS)_RATE_LIMIT_MAX_HOLD_SECONDS/);
+  assert.match(binding, /backend === "own-key" && onCerebras\(launch\.model\.ownKeyBaseUrl\)/);
 });

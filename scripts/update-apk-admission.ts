@@ -1,7 +1,7 @@
 /** Bind a release offer to the actual APK and its verified signer. Alpha signs with one key and
  * no signing-key rotation, so the APK's original signer must be its active release signer;
  * neither is accepted from apk-manifest.json alone. */
-import {execFileSync, type ExecFileSyncOptionsWithStringEncoding} from 'node:child_process';
+import {execFileSync} from 'node:child_process';
 import type {ReleaseSigner} from './build-android.ts';
 import {retiredReleaseSignerProblems} from './release-signer-record.ts';
 import {sha256} from './sha256.ts';
@@ -10,9 +10,8 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {requireConsistentApk, PACKAGE} from './provision-unit.ts';
 import {androidEnv, tool} from './toolchain.ts';
-import {apkArchiveFacts} from '../vendor/eliza/packages/os/android/apk-distribution.mjs';
 import {updateArtifactDigest} from './update-artifact.ts';
-import {parseXmlTree} from './apk.ts';
+import {apkArchiveFacts, parseXmlTree, readApkManifestEvidence} from './apk.ts';
 import {apkUpdateChannel, type UpdateChannel} from './update-channel.ts';
 
 const HEX = /^[0-9a-f]{64}$/;
@@ -84,20 +83,18 @@ export function verifiedUpdateSigning(apk: Pick<UpdateApk, 'file' | 'sha256'>): 
   return JSON.parse(result);
 }
 
-function updateArchive(file: string) {
-  const options: ExecFileSyncOptionsWithStringEncoding={env:androidEnv(),encoding:'utf8',timeout:120_000,maxBuffer:16 << 20,stdio:['ignore','pipe','pipe']};
-  const badging=execFileSync(tool('aapt'),['dump','badging',file],options);
-  const xml=execFileSync(tool('aapt'),['dump','xmltree',file,'AndroidManifest.xml'],options);
-  return {...apkArchiveFacts({badging,xml,names:[]}),xml};
+async function updateArchive(file: string) {
+  const {badging, xml} = await readApkManifestEvidence(file);
+  return {...apkArchiveFacts({badging, xml, names: []}), xml};
 }
 
 /** Production default: inspect exact admitted bytes, then return the original
  * signer Android SigningInfo.getSigningCertificateHistory()[0] reports (the release signer). */
-export function inspectUpdateApk(apk: UpdateApk, {descriptor}: {descriptor?: ReleaseSigner} = {}) {
+export async function inspectUpdateApk(apk: UpdateApk, {descriptor}: {descriptor?: ReleaseSigner} = {}) {
   const before = fs.lstatSync(apk.file);
   requireValue(before.isFile() && before.size > 0 && before.size <= 2**31, 'APK must be a bounded regular file');
-  requireConsistentApk(apk, {descriptor});
-  const archive = updateArchive(apk.file), signing = verifiedUpdateSigning(apk);
+  await requireConsistentApk(apk, {descriptor});
+  const archive = await updateArchive(apk.file), signing = verifiedUpdateSigning(apk);
   const {updateManifestUrl} = JSON.parse(fs.readFileSync(new URL('../app.config.json', import.meta.url),'utf8'));
   admitPublicUpdateChannel(archive.xml, updateManifestUrl);
   requireValue(updateArtifactDigest(apk.file).sha256 === apk.sha256, 'APK bytes changed during admission');

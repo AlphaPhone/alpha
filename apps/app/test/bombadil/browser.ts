@@ -1,4 +1,4 @@
-// spec/browser/session.md, "Opening the menu, the switcher or the library ends address editing, and the menu never covers editing"; spec/browser/session.md, "A new tab, normal or private, opens selected with its address field, unless eight are open"; spec/browser/egress.md, "What the shell reads at each tap is the selected tab's page and whether the Browser view shows it"; spec/browser/reading.md, "The question goes to the editor only with an excerpt or clean pasted text, and only while the same page is shown"; spec/browser/session.md, "A started Browser always has a tab, selects one of them, and never holds more than eight"; spec/browser/session.md, "Next and previous step through matches only when there are matches, and closing clears the native search"; spec/browser/reviews.md, "Reviews are open dialogs, one per identity, each of a kind"; spec/browser/pageContext.md, "A page is read only for a message observed on the page Browser shows now, a settled public HTTPS page of a normal tab, with Browser page for Alpha on and a peer that takes it"
+// spec/browser/session.md, "Opening the menu, the switcher or the library ends address editing, and the menu never covers editing"; spec/browser/session.md, "A new tab, normal or private, opens selected with its address field, unless eight are open"; spec/browser/egress.md, "What the shell reads at each tap is the selected tab's page and whether the Browser view shows it"; spec/browser/reading.md, "The question goes to the editor only with an excerpt or clean pasted text, and only while the same page is shown"; spec/browser/session.md, "A started Browser always has a tab, selects one of them, and never holds more than eight"; spec/browser/session.md, "Next and previous step through matches only when there are matches, and closing clears the native search"; spec/browser/reviews.md, "Reviews are open dialogs, one per identity, each of a kind"; spec/browser/pageContext.md, "A page is read only for a message observed on the page Browser shows now, a settled public HTTPS page of a normal tab, with Browser page for Alpha on and a peer that takes it"; spec/browser/reading.md, "The review opens on a settled page, fetches its public text once, and a sensitive address or text refuses it for good"
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
 
@@ -92,3 +92,13 @@ const unloadedPageShareable = extract(({ document }) => {
 
 /** A blank or loading tab is never offered to a message. */
 export const browserUnloadedPageIsNeverShared = always(() => !unloadedPageShareable.current);
+
+const secretExcerptUsable = extract(({ document }) =>
+  Array.from(document.querySelectorAll('[role="dialog"]')).filter((dialog) => dialog.querySelector('textarea[aria-label="Excerpt"]') !== null).some((dialog) => {
+    const status = dialog.querySelector('[role="status"]')?.textContent?.trim() ?? "";
+    const use = Array.from(dialog.querySelectorAll<HTMLButtonElement>("button")).find((button) => ["Continue", "Read locally"].includes(button.textContent?.trim() ?? ""));
+    return (status === "Contains secrets" || status === "This text may contain credentials or codes.") && use !== undefined && !use.disabled;
+  }));
+
+/** An excerpt that may hold a secret is never read aloud or handed to the assistant. */
+export const browserSecretExcerptIsNeverUsed = always(() => !secretExcerptUsable.current);

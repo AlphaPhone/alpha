@@ -2,7 +2,12 @@
 import type { MapsCard } from "@elizaos/plugin-maps/cards";
 import type { Guidance } from "../../../gen/maps__guidance.ts";
 import { initial as guidanceStart } from "../../../gen/maps__guidance.ts";
-import type { GuidanceContent, Shown } from "../../maps/content.vibe";
+import { initial as returnStart, type EventReturn } from "../../../gen/maps__eventReturn.ts";
+import { initial as locatorStart, type Locator } from "../../../gen/maps__location.ts";
+import { initial as planeStart, type MapPlane } from "../../../gen/maps__plane.ts";
+import type { SavedItem } from "../../../gen/maps__savedPlaces.ts";
+import { initial as screenStart, type Screen } from "../../../gen/maps__screen.ts";
+import { emptyContent, type CoverageInfo, type GuidanceContent, type MapsContentState, type Shown } from "../../maps/content.vibe";
 import type { Place, Route } from "../../maps/maps.schema.vibe";
 
 const ferry = { latitude: 37.7955, longitude: -122.3937 };
@@ -60,3 +65,82 @@ export const routeCard: MapsCard = {
 
 /** A request for the phone's location to search around it. */
 export const locateCard: MapsCard = { kind: "locate", intent: "place-near", prompt: "coffee near me", query: "coffee" };
+
+/** Alpha Cloud's open map provider, covering every travel mode but transit. */
+export const openCoverage: CoverageInfo = {
+  providerId: "alpha-osm", kind: "OpenProvider", connectionId: "conn_alphaStoryMaps0001", revision: "1", attribution: "© OpenStreetMap contributors", sourceName: "OpenStreetMap",
+  recipients: [{ role: "gateway", name: "Alpha Cloud", operator: "Alpha" }, { role: "search", name: "Nominatim", operator: "OpenStreetMap Foundation" }],
+  regions: [], offer: { drive: true, walk: true, bicycle: true, transit: false, alternatives: true, map: true, liveTraffic: false },
+};
+
+/** Nothing fetched yet, with the provider known. */
+export const covered: MapsContentState = { ...emptyContent, coverage: openCoverage, recent: ["coffee", "Pier 39"] };
+
+/** Maps could not reach Cloud. */
+export const unreachable: MapsContentState = { ...emptyContent, message: "Maps is unavailable. Check the connection and try again." };
+
+/** The map before any search. */
+export const idleScreen: Screen = screenStart;
+
+/** A search for coffee, waiting on its answer. */
+export const searchingScreen: Screen = { ...screenStart, searching: true, query: "coffee", queryRun: 1, search: "Loading", searched: "coffee" };
+
+/** The same search, answered. */
+export const resultsScreen: Screen = { ...searchingScreen, search: "Ready" };
+
+/** A pier near the Ferry Building, for a second result. */
+const pier39 = { ...ferryBuilding, id: "n77", name: "Pier 39", coordinate: pier, address: "Beach Street & The Embarcadero, San Francisco", phone: "", website: "" };
+
+/** Two places for the coffee search. */
+export const resultsContent: MapsContentState = { ...covered, results: { run: 1, places: [ferryBuilding, pier39] } };
+
+/** A search that found nothing. */
+export const emptyResultsScreen: Screen = { ...searchingScreen, query: "zzzz", searched: "zzzz", search: "Empty" };
+
+/** A search that failed. */
+export const failedResultsScreen: Screen = { ...searchingScreen, search: "Failed" };
+
+/** The Ferry Building chosen from the results. */
+export const placeScreen: Screen = { ...resultsScreen, choice: "ResultChoice", choiceId: shownPlace.id, details: "Ready" };
+
+/** The place sheet's content. */
+export const placeContent: MapsContentState = { ...resultsContent, shown: shownPlace };
+
+/** The same place served by Google's provider. */
+export const googlePlaceContent: MapsContentState = { ...placeContent, coverage: { ...openCoverage, providerId: "eliza-cloud-google", kind: "GoogleProvider" }, shown: shownGooglePlace };
+
+/** Walking directions from here to the place, two routes found. */
+export const directionsScreen: Screen = { ...placeScreen, directions: true, origin: true, originKind: "LocatedOrigin", travel: "Walk", route: "Ready", routeRun: 1, routes: 2 };
+
+/** The routes directions show. */
+export const directionsContent: MapsContentState = { ...placeContent, routes: { run: 1, routes: [walkRoute, altRoute] } };
+
+/** Guidance's content over the directions. */
+export const guidingContent: MapsContentState = { ...directionsContent, guidance: guidanceContent };
+
+/** A ready map plane on the open raster map. */
+export const planeReady: MapPlane = { ...planeStart, generation: 1, element: 1, basemap: "OpenRaster", built: true, state: "PlaneReady" };
+
+/** The map plane failed to draw. */
+export const planeFailed: MapPlane = { ...planeReady, state: "PlaneFailed" };
+
+/** The credits panel open. */
+export const planeCredits: MapPlane = { ...planeReady, infoOpen: true };
+
+/** Two saved places. */
+export const savedPlaces: SavedItem[] = [
+  { id: 1, label: "Home", lat: 37_776_000, lng: -122_417_000, provider: "", providerPlaceId: "" },
+  { id: 2, label: "Ferry Building", lat: 37_795_500, lng: -122_393_700, provider: "alpha-osm", providerPlaceId: "n42" },
+];
+
+/** No event to go back to. */
+export const noReturn: EventReturn = returnStart;
+
+/** A place opened from a Calendar event, offering the way back. */
+export const fromEvent: EventReturn = { ...returnStart, inMaps: true, fromCalendar: true, origin: 1, lastOrigin: 1 };
+
+/** The location request, idle. */
+export const locatorIdle: Locator = locatorStart;
+
+/** Android refused the location. */
+export const locationDenied: Locator = { ...locatorStart, purpose: "OwnerFix", phase: "Failed", failure: "Denied", prompted: true };

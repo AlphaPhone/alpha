@@ -9,7 +9,7 @@ const roots=['apps/app/src','apps/app/spec','apps/app/public','apps/app/package.
 roots.push('android/app/src/launcher','android/app/src/release',
  // The Gradle host the pinned upstream generator writes from android/consumer-host.json.
  'android/consumer-host.json','android/app/product.gradle','scripts/android-host.ts','scripts/android-identity.ts',
- 'android/app/cloud-deployment.generated.gradle','scripts/cloud-deployment-policy.ts','scripts/upstream-os.ts',
+ 'android/app/cloud-deployment.generated.gradle','scripts/cloud-deployment-policy.ts','scripts/upstream-os.ts','scripts/run-os-program.ts',
  'android/.eliza-consumer-profile.json','android/eliza-consumer-host',
  'vendor/eliza/packages/os/src/build','vendor/eliza/packages/os/android/host-templates',
  'android/build.gradle','android/gradle.properties',

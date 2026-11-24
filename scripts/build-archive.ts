@@ -92,6 +92,6 @@ if(fs.existsSync(mapping)){
 fs.writeFileSync(path.join(destination,'release-mappings.json'),JSON.stringify(mappings,null,2)+'\n',{flag:'wx'});
 fs.copyFileSync(path.join(sourceDir,'apk-manifest.json'),path.join(destination,'apk-verification.json'),fs.constants.COPYFILE_EXCL);
 // Preserve the exact web payload from the hash-checked, archived APK.
-archiveWebPayload(path.join(destination,'launcher-debug.apk'),path.join(destination,'web-dist'));
+await archiveWebPayload(path.join(destination,'launcher-debug.apk'),path.join(destination,'web-dist'));
 fs.writeFileSync(path.join(destination,'apk-manifest.json'),JSON.stringify(manifest,null,2));
 console.log(JSON.stringify({archive:destination,sourceFingerprint:after.digest,apks:Object.keys(manifest).length}));

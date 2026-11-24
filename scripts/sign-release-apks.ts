@@ -263,7 +263,7 @@ export async function main(argv: readonly string[], { root = process.cwd(), env 
   }
   const runner = run ?? ((command, args) => execFileSync(command, args, { cwd: root, stdio: "inherit" }));
   const { sbomArgs } = await import("./build-android.ts");
-  runner(process.execPath, ["scripts/verify-apks.ts"]);
+  runner(process.execPath, ["--conditions=eliza-source", "--import", "vibelang/register", "scripts/verify-apks.ts"]);
   runner(process.execPath, ["scripts/generate-sbom.ts", ...sbomArgs("artifacts", root)]);
   log("apk-manifest.json and the SBOM now describe the signed releases. A signed release is distributable only when verify-apks says so; it is not installation, image or device evidence.");
   return 0;

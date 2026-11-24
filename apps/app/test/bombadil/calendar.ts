@@ -1,4 +1,4 @@
-// spec/calendar/presentation.md, "A day is free only when the read covering it was complete"; spec/calendar/presentation.md, "The delete sheet belongs to an open event that may be changed, and never sits under a form"; spec/calendar/editor.md, "Save is off while loading, while saving, for another account, for an event that changed, and without a title, in that order"; spec/calendar/approvals.md, "Approve needs every field the change would apply to be shown; Decline is always possible for a pending request"; spec/calendar/availability.md, "Nothing is preselected, and Check is offered only for one to sixteen ticked calendars"; spec/calendar/presentation.md, "Without an agent session Calendar says Not connected and offers Settings, never a dead Connect"; spec/calendar/presentation.md, "The people list says Organizer or Alpha's word for each reply, never the provider's value"; spec/calendar/deletions.md, "Confirming a deletion holds it; a deletion still waiting is sent first, so the only Undo shown is the newest"; spec/calendar/availability.md, "The answer sheet shows free or busy with each busy interval, and shares times only"; spec/calendar/presentation.md, "The Calendars sheet is a modal over the view, opened only with no form or delete sheet open"
+// spec/calendar/presentation.md, "A day is free only when the read covering it was complete"; spec/calendar/presentation.md, "The delete sheet belongs to an open event that may be changed, and never sits under a form"; spec/calendar/editor.md, "Save is off while loading, while saving, for another account, for an event that changed, and without a title, in that order"; spec/calendar/approvals.md, "Approve needs every field the change would apply to be shown; Decline is always possible for a pending request"; spec/calendar/availability.md, "Nothing is preselected, and Check is offered only for one to sixteen ticked calendars"; spec/calendar/presentation.md, "Without an agent session Calendar says Not connected and offers Settings, never a dead Connect"; spec/calendar/presentation.md, "The people list says Organizer or Alpha's word for each reply, never the provider's value"; spec/calendar/deletions.md, "Confirming a deletion holds it; a deletion still waiting is sent first, so the only Undo shown is the newest"; spec/calendar/availability.md, "The answer sheet shows free or busy with each busy interval, and shares times only"; spec/calendar/presentation.md, "The Calendars sheet is a modal over the view, opened only with no form or delete sheet open"; spec/calendar/presentation.md, "The month grid has five weeks unless the month and its leading days need six"; spec/calendar/editor.md, "The duration is at least one minute, and an end at or before the start is refused"
 // What Bombadil checks of the Calendar app in every state it reaches.
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
@@ -96,3 +96,18 @@ const overlays = extract(({ document }) => {
 
 /** The Calendars sheet and the date picker never show at once (spec/calendar/presentation.md, "The Calendars sheet is a modal over the view, opened only with no form or delete sheet open"). */
 export const calendarSourcesNeverOverDatePicker = always(() => !(overlays.current.calendars && overlays.current.picker));
+
+const monthCells = extract(({ document }) =>
+  Array.from(document.querySelectorAll('[role="grid"]')).map((grid) => grid.querySelectorAll(':scope > [role="gridcell"]').length).filter((cells) => cells > 0));
+
+/** A month grid shows five weeks, or six when the month and its leading days need them. */
+export const calendarMonthHasFiveOrSixWeeks = always(() => monthCells.current.every((cells) => cells === 35 || cells === 42));
+
+const span = extract(({ document }) => {
+  const save = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')).find((button) => button.textContent?.trim() === "Save event");
+  const [start = "", end = ""] = Array.from(save?.closest('[role="dialog"]')?.querySelectorAll<HTMLInputElement>('input[type="datetime-local"]') ?? []).map((input) => input.value);
+  return { saveable: save !== undefined && !save.disabled, start, end };
+});
+
+/** An event is never saved with its end at or before its start. */
+export const calendarEndFollowsStart = always(() => !span.current.saveable || span.current.start === "" || span.current.end === "" || span.current.end > span.current.start);

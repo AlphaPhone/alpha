@@ -42,7 +42,8 @@ import {
 } from "./apk.ts";
 import type {ApkMode, ApkVariant} from "./apk.ts";
 import { androidEnv, tool } from "./toolchain.ts";
-import { readApkEntries } from "../vendor/eliza/packages/os/android/apk-distribution.mjs";
+import { listAndroidArtifactEntries } from "@elizaos/os/image";
+import { run } from "./run-os-program.ts";
 import { readReleaseSigner, releaseAdmission, RELEASE_SIGNER_FILE, SIGNING_ENV } from "./build-android.ts";
 import { RUNTIME_ENTRY } from "./generate-licenses.ts";
 import { fontCheckFailedItem, fontLicenceCheck, fontLicenceLine } from "./font-license-blockers.ts";
@@ -70,7 +71,7 @@ interface BuildRecord {
   mapsProvider?: string;
   release?: boolean;
 }
-type ApkInspection = ReturnType<typeof validateApk>;
+type ApkInspection = Awaited<ReturnType<typeof validateApk>>;
 type RuntimeVoiceHost = ReturnType<typeof voiceHostAdmission>;
 type VerificationRow = Omit<ApkInspection, "badging" | "xml" | "names" | "dexClasses" | "removedSpeechClasses"> & {
   variant: ApkVariant;
@@ -184,7 +185,7 @@ for (const mode of modes) {
       ? releaseFile(directory)
       : { file: path.join(directory, `${variant}-debug.apk`), signed: true };
     if (!fs.existsSync(file)) throw new Error(`Missing ${file}`);
-    const d = validateApk(file, identity);
+    const d = await validateApk(file, identity);
     if (d.debuggable !== (mode === "debug"))
       throw new Error(`Wrong debug flag: ${file}`);
     const { facts, problems } = distributionProblems(d, { mode, appId: identity.appId });
@@ -198,7 +199,7 @@ for (const mode of modes) {
     }));
     problems.push(...webViewFilterProblems(tree, webViewFiltersAllowed));
     // Shared web bundle audit on the exact packaged payload.
-    const payload = extractWebPayload(file);
+    const payload = await extractWebPayload(file);
     let flags: ReturnType<typeof readBuildFlags> | undefined;
     // A PACKAGED distribution must ship notices regenerated with --packaged-runtime (Node.js and
     // the bundled agent/worker packages); the committed notices carry only the umbrella entry.
@@ -244,7 +245,7 @@ for (const mode of modes) {
     problems.push(...embeddingApkProblems({names:d.names,read:entry=>execFileSync('unzip',['-p',file,entry],{maxBuffer:256*1024*1024})},embeddingManifest));
     let signerSha256: string | null = null;
     if (signed) {
-      try { signerSha256 = signerDigest(file, {apiLevel: signerApiLevel}); }
+      try { signerSha256 = await signerDigest(file, {apiLevel: signerApiLevel}); }
       catch (error) { problems.push(`apksigner verify failed for ${file}: ${message(error)}`); }
     }
     if (problems.length) failures.push(`${file}:\n  - ${problems.join("\n  - ")}`);
@@ -341,7 +342,7 @@ for (const row of results.filter(row => row.mode === "debug")) {
 }
 
 // Inspect the separate image-only listener APKs when they are present beside the app APKs.
-function listenerFacts(file: string, mode: ApkMode, signed: boolean) {
+async function listenerFacts(file: string, mode: ApkMode, signed: boolean) {
   const facts: {
     file: string; mode: ApkMode; signed: boolean; sha256: string;
     signerSha256?: string | null; permissionProblem?: string;
@@ -349,14 +350,14 @@ function listenerFacts(file: string, mode: ApkMode, signed: boolean) {
     voiceBundle?: {packaged: boolean; abis?: ReturnType<typeof checkListenerSpeechBundle>; problem?: string};
   } = { file, mode, signed, sha256: sha256File(file) };
   if (signed) {
-    try { facts.signerSha256 = signerDigest(file, {apiLevel: signerApiLevel}); }
+    try { facts.signerSha256 = await signerDigest(file, {apiLevel: signerApiLevel}); }
     catch (error) { facts.permissionProblem = `apksigner verify failed: ${message(error)}`; }
   }
   const dump = execFileSync(tool("aapt"), ["dump", "permissions", file], { encoding: "utf8", env: androidEnv(), maxBuffer: 16 << 20 });
   Object.assign(facts, apkPermissions(dump));
   try { checkListenerPermissions(dump, renderSensePermissions(identity.appId), listenerPackage(identity.appId)); }
   catch (error) { facts.permissionProblem ??= message(error); }
-  const entries = readApkEntries(file);
+  const entries = await run(listAndroidArtifactEntries(file));
   try {
     const abis = checkListenerSpeechBundle(entries, readVoiceHost("."), (entry: string) => execFileSync("unzip", ["-p", file, entry], { encoding: "utf8", maxBuffer: 1 << 20 }));
     facts.voiceBundle = { packaged: true, abis };
@@ -383,9 +384,9 @@ function listenerFacts(file: string, mode: ApkMode, signed: boolean) {
   };
 }
 const listenerApks = [["sense-debug.apk", "debug", true], ["sense-release.apk", "release", true], ["sense-release-unsigned.apk", "release", false]] as const;
-const listenerRows = listenerApks
+const listenerRows = await Promise.all(listenerApks
   .filter(([name]) => fs.existsSync(path.join(directory, name)))
-  .map(([name, mode, signed]) => listenerFacts(path.join(directory, name), mode, signed));
+  .map(([name, mode, signed]) => listenerFacts(path.join(directory, name), mode, signed)));
 const listenerFailures = listenerRows.filter(row => row.problems.length);
 if (listenerFailures.length)
   throw new Error(`Listener APK verification failed:\n${listenerFailures.map(row => `${row.file}:\n  - ${row.problems.join("\n  - ")}`).join("\n")}`);

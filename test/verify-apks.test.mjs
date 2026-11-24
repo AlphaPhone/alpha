@@ -16,7 +16,7 @@ test("Cloud voice evidence is one readable file for a genuine build, before any 
     [["--cloud-voice-evidence=a.json", "--cloud-voice-evidence=b.json"], /Specify --cloud-voice-evidence only once/],
     [["--cloud-voice-evidence=missing.json"], /Cloud voice evidence could not be read as JSON/],
   ]) {
-    const result=spawnSync(process.execPath,["scripts/verify-apks.ts",...args],{cwd:root,encoding:"utf8"});
+    const result=spawnSync(process.execPath,["--conditions=eliza-source","--import","vibelang/register","scripts/verify-apks.ts",...args],{cwd:root,encoding:"utf8"});
     assert.notEqual(result.status,0,args.join(" "));
     assert.match(result.stderr,message,args.join(" "));
   }
@@ -42,10 +42,10 @@ test("AOSP staging refuses test-mocks and non-distributable inputs before any st
     fs.copyFileSync(path.join(root, "app.config.json"), path.join(dir, "app.config.json"));
     completeAospLock(dir);
     fs.mkdirSync(path.join(dir, "artifacts/test-mocks"), { recursive: true });
-    const stage = args => spawnSync(process.execPath, [path.join(root, "scripts/stage-aosp.ts"), "--target", "cuttlefish", "--aosp-source", "absent-source", ...args], { cwd: dir, encoding: "utf8" });
+    const stage = args => spawnSync(process.execPath, ["--conditions=eliza-source", "--import", path.join(root, "node_modules/vibelang/register.mjs"), path.join(root, "scripts/stage-aosp.ts"), "--target", "cuttlefish", "--aosp-source", "absent-source", ...args], { cwd: dir, encoding: "utf8" });
     const flagOn = path.join(dir, "artifacts/test-mocks/launcher-debug.apk");
     zip(flagOn, { "assets/public/build-flags.json": JSON.stringify({ testMocks: true }) });
-    const raw = args => spawnSync(process.execPath, [path.join(root, "scripts/stage-aosp.ts"), ...args], { cwd: dir, encoding: "utf8" });
+    const raw = args => spawnSync(process.execPath, ["--conditions=eliza-source", "--import", path.join(root, "node_modules/vibelang/register.mjs"), path.join(root, "scripts/stage-aosp.ts"), ...args], { cwd: dir, encoding: "utf8" });
     let out = raw(["--aosp-source", "absent-source", "--apk", flagOn, "--development"]);
     assert.notEqual(out.status, 0);
     assert.match(out.stderr, /Staging requires --target pixel10a or --target cuttlefish/);
@@ -121,7 +121,7 @@ test("AOSP production staging refuses a missing or foreign descriptor", () => {
   try {
     fs.copyFileSync(path.join(root, "app.config.json"), path.join(dir, "app.config.json"));
     completeAospLock(dir);
-    const stage = args => spawnSync(process.execPath, [path.join(root, "scripts/stage-aosp.ts"), "--target", "cuttlefish", "--aosp-source", "absent-source", ...args], { cwd: dir, encoding: "utf8" });
+    const stage = args => spawnSync(process.execPath, ["--conditions=eliza-source", "--import", path.join(root, "node_modules/vibelang/register.mjs"), path.join(root, "scripts/stage-aosp.ts"), "--target", "cuttlefish", "--aosp-source", "absent-source", ...args], { cwd: dir, encoding: "utf8" });
     // The missing-APK message says which staging was asked for.
     assert.match(stage(["--development"]).stderr, /Development staging: supply --apk PATH to a flag-off debug launcher APK\./);
     assert.match(stage(["--descriptor", "reviewed.json"]).stderr, /Production staging: supply --apk PATH to the signed launcher release APK that verify-apks recorded as distributable\./);
@@ -171,7 +171,7 @@ test("APK verification requires the packaged owner route table to match the gene
   }
 });
 
-test('archive retains actual flag-off APK web bytes and refuses a mock payload', t => {
+test('archive retains actual flag-off APK web bytes and refuses a mock payload', async t => {
   const testMocks = false;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-archive-web-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -184,13 +184,13 @@ test('archive retains actual flag-off APK web bytes and refuses a mock payload',
   // Working assets may be restored to a different mode after the APK was built.
   fs.writeFileSync(path.join(publicDir, 'build-flags.json'), JSON.stringify({ testMocks: !testMocks }));
   const archived = path.join(dir, 'archived-web');
-  archiveWebPayload(apkFile, archived);
+  await archiveWebPayload(apkFile, archived);
   assert.equal(readBuildFlags(archived).testMocks, testMocks);
   assert.equal(fs.readFileSync(path.join(archived, 'index.html'), 'utf8'), '<html>Actual APK payload</html>');
   fs.writeFileSync(path.join(dir, 'assets/public/build-flags.json'), JSON.stringify({ testMocks: true }));
   const mockApk = path.join(dir, 'mock.apk');
   execFileSync('zip', ['-q', '-r', mockApk, 'assets'], { cwd: dir });
-  assert.throws(() => archiveWebPayload(mockApk, path.join(dir, 'wrong-mode')), /testMocks/);
+  await assert.rejects(() => archiveWebPayload(mockApk, path.join(dir, 'wrong-mode')), /testMocks/);
   assert.equal(fs.existsSync(path.join(dir, 'wrong-mode')), false);
 });
 
@@ -243,7 +243,7 @@ if(args[1]==='android:build'){
   if (inherited) Object.assign(env, {ELIZA_DEV_ALLOW_TEST_MOCKS:'1'});
   if (mode === 'wrong-profile') env.FIXTURE_WRONG_PROFILE='1';
   if(mode==='wrong-channel')env.FIXTURE_WRONG_CHANNEL='1';
-  const run = spawnSync(process.execPath, [path.join(root, 'scripts/build-archive.ts'), 'test-results/archive'], {cwd:dir, env, encoding:'utf8'});
+  const run = spawnSync(process.execPath, ["--conditions=eliza-source", "--import", path.join(root, "node_modules/vibelang/register.mjs"), path.join(root, 'scripts/build-archive.ts'), 'test-results/archive'], {cwd:dir, env, encoding:'utf8'});
   const archive = path.join(dir, 'test-results/archive');
   if (mode === 'wrong-profile'||mode==='wrong-channel') {
     assert.notEqual(run.status, 0);
@@ -272,7 +272,7 @@ if(args[1]==='android:build'){
 test('archive rejects unsupported options before creating output', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-build-archive-invalid-'));
   t.after(() => fs.rmSync(dir, {recursive:true, force:true}));
-  const run = spawnSync(process.execPath, [path.join(root, 'scripts/build-archive.ts'), '--unknown', 'test-results/archive'], {cwd:dir, encoding:'utf8'});
+  const run = spawnSync(process.execPath, ["--conditions=eliza-source", "--import", path.join(root, "node_modules/vibelang/register.mjs"), path.join(root, 'scripts/build-archive.ts'), '--unknown', 'test-results/archive'], {cwd:dir, encoding:'utf8'});
   assert.notEqual(run.status, 0);
   assert.ok(!fs.existsSync(path.join(dir, 'test-results')));
 });
@@ -323,7 +323,7 @@ test("APK voice admission requires the complete recorded bundle and every record
   assert.equal(voiceBundleAdmission(apk(), pair).asr, true);
 });
 
-test('merged-manifest check requires the launcher permissions and components', () => {
+test('merged-manifest check requires the launcher permissions and components', async () => {
   // Stand-in for aapt's merged xmltree.
   for (const appId of ['ai.alphacompute.alphaphone', 'ai.elizaresearch.alphaphone']) {
     const identity = {appId};
@@ -338,18 +338,18 @@ test('merged-manifest check requires the launcher permissions and components', (
           : `    A: android:name="${name}"`)].join('\n');
       return {packageName: identity.appId, home, launcher: true, webPayload: true, badging: '', xml};
     };
-    assert.doesNotThrow(() => validateApk('launcher.apk', identity, apk(true, required)));
+    await assert.doesNotReject(() => validateApk('launcher.apk', identity, apk(true, required)));
     for (const entry of ['android.permission.READ_PHONE_STATE', 'android.permission.EXPAND_STATUS_BAR', `${identity.appId}.AlphaSmsSendReceiver`, `${identity.appId}.AlphaTelephonySetupReceiver`, 'android.permission.WRITE_CONTACTS', 'android.permission.READ_PRIVILEGED_PHONE_STATE']) {
       const name = entry.split('.').at(-1);
-      assert.throws(() => validateApk('launcher.apk', identity, apk(true, required.filter(other => other !== entry))), new RegExp(`Invalid.*${name}.*launcher\\.apk`));
+      await assert.rejects(() => validateApk('launcher.apk', identity, apk(true, required.filter(other => other !== entry))), new RegExp(`Invalid.*${name}.*launcher\\.apk`));
     }
     for (const entry of ['com.android.voicemail.permission.ADD_VOICEMAIL', 'android.telephony.VisualVoicemailService', 'android.permission.BIND_VISUAL_VOICEMAIL_SERVICE']) {
-      assert.throws(() => validateApk('launcher.apk', identity, apk(true, [...required, entry])), /Unexpected carrier voicemail manifest entry/);
+      await assert.rejects(() => validateApk('launcher.apk', identity, apk(true, [...required, entry])), /Unexpected carrier voicemail manifest entry/);
     }
     const other = appId === 'ai.alphacompute.alphaphone' ? 'ai.elizaresearch.alphaphone' : 'ai.alphacompute.alphaphone';
     const foreign = required.map(entry => entry.startsWith(appId + '.') ? other + entry.slice(appId.length) : entry);
-    assert.throws(() => validateApk('launcher.apk', identity, apk(true, foreign)), /Invalid telephony-role component/);
-    assert.throws(() => validateApk('launcher.apk', identity, () => ({...apk(true, required)(), packageName: other})), /Wrong package/);
+    await assert.rejects(() => validateApk('launcher.apk', identity, apk(true, foreign)), /Invalid telephony-role component/);
+    await assert.rejects(() => validateApk('launcher.apk', identity, () => ({...apk(true, required)(), packageName: other})), /Wrong package/);
   }
 });
 

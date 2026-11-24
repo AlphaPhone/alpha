@@ -1,4 +1,4 @@
-// spec/assistant/emailCard.md, "Send is offered for a draft with an account, valid recipients and a body, and dispatches once per version"; spec/assistant/approvals.md, "A card whose review time passed reads \"Review expired\" and can only be asked for again"; spec/assistant/dock.md, "Home keeps its bar, and a dragged height lasts only while the chat it was dragged in is open"; spec/assistant/send.md, "The typing indicator belongs to the newest send, and an older send settling never clears it"; spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"; spec/assistant/approvals.md, "Decline runs nothing and works during an emergency call; Approve waits until the call ends"; spec/assistant/attachments.md, "At most four attachments, each within its cap, and a batch within 19 MiB of base64"; spec/assistant/draft.md, "A held send found by a restart is offered for review and never sent again on its own"; spec/assistant/conversation.md, "Only a recorded message of this session that is settled can be quoted, and only my own can be edited, from an empty composer"; spec/assistant/dock.md, "Home keeps its bar, and a dragged height lasts only while the chat it was dragged in is open"; spec/assistant/review.md, "A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it"; spec/assistant/recovery.md, "Restart is offered only while the resident is refused and holds a reviewable recovery, once per tap"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"; spec/assistant/attachments.md, "A file's question is reviewed before it joins the draft: \"Use excerpt\" for its text, its name alone for a file too large, and its source line only while linked"
+// spec/assistant/emailCard.md, "Send is offered for a draft with an account, valid recipients and a body, and dispatches once per version"; spec/assistant/approvals.md, "A card whose review time passed reads \"Review expired\" and can only be asked for again"; spec/assistant/dock.md, "Home keeps its bar, and a dragged height lasts only while the chat it was dragged in is open"; spec/assistant/send.md, "The typing indicator belongs to the newest send, and an older send settling never clears it"; spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"; spec/assistant/approvals.md, "Decline runs nothing and works during an emergency call; Approve waits until the call ends"; spec/assistant/attachments.md, "At most four attachments, each within its cap, and a batch within 19 MiB of base64"; spec/assistant/draft.md, "A held send found by a restart is offered for review and never sent again on its own"; spec/assistant/conversation.md, "Only a recorded message of this session that is settled can be quoted, and only my own can be edited, from an empty composer"; spec/assistant/dock.md, "Home keeps its bar, and a dragged height lasts only while the chat it was dragged in is open"; spec/assistant/review.md, "A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it"; spec/assistant/recovery.md, "Restart is offered only while the resident is refused and holds a reviewable recovery, once per tap"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"; spec/assistant/attachments.md, "A file's question is reviewed before it joins the draft: \"Use excerpt\" for its text, its name alone for a file too large, and its source line only while linked"; spec/assistant/reply.md, "One brief acknowledgment at most, only before work runs, and the final answer is delivered whole"
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
 
@@ -120,3 +120,24 @@ const questionReview = extract(({ document }) => {
 /** A question review that only names a file shows no excerpt to send, and Add to chat is offered only for a question that is not blank. */
 export const assistantQuestionReviewNeedsAQuestion = always(() =>
   !questionReview.current.open || ((!questionReview.current.sourceOnly || !questionReview.current.excerpt) && (!questionReview.current.add || questionReview.current.question.trim() !== "")));
+
+const pendingReplies = extract(({ document }) =>
+  Array.from(document.querySelectorAll("[data-alpha-transcript]")).map((transcript) =>
+    Array.from(transcript.querySelectorAll(":scope > li[data-alpha-message-id] > p:first-child")).filter((line) => line.querySelector('svg[role="status"]') !== null).length));
+
+/** The chat never shows two pending acknowledgements: at most one reply waits under its label. */
+export const assistantOnePendingAcknowledgement = always(() => pendingReplies.current.every((pending) => pending <= 1));
+
+const targets = extract(({ document }) =>
+  Array.from(document.querySelectorAll('section[aria-label="Assistant"]')).map((panel) => ({
+    draft: panel.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]")?.value.trim() ?? "",
+    replying: panel.querySelector('button[aria-label="Stop reply"]') !== null,
+    edit: panel.querySelector('[aria-label="Edit this message"]') !== null,
+    quote: panel.querySelector('[aria-label="Reply to this message"]') !== null,
+  })));
+
+/** My message is offered for editing only from an empty composer. */
+export const assistantEditOnlyFromAnEmptyComposer = always(() => targets.current.every((panel) => !panel.edit || panel.draft === ""));
+
+/** While a reply is written, no message is offered to quote or edit. */
+export const assistantNoTargetWhileReplying = always(() => targets.current.every((panel) => !panel.replying || (!panel.edit && !panel.quote)));
