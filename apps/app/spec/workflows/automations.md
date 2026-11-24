@@ -160,7 +160,7 @@ pure def lawADefiniteNotFoundIsARefusal(delivered: bool): bool = answerOfStatus(
 pure def releaseHeld(why: Release, a: Automations): Automations = {
   val h = heldFor(a, a.owner)
   { ...a, held: a.held.select(o => o.owner != a.owner), busy: false, released: why, releasedKind: h.kind,
-    answer: if (why == ByReply) AnswerApplied else if (why == ByRefusal) AnswerRefused else a.answer }
+    answer: if (why == ByReply or why == ByList) AnswerApplied else if (why == ByRefusal) AnswerRefused else NoAnswer }
 }
 pure def canAnswered(a: Automations, id: int, answer: Answer): bool = a.busy and heldFor(a, a.owner).id == id and answer != NoAnswer
 pure def answered(a: Automations, id: int, answer: Answer): Automations =
@@ -173,7 +173,8 @@ pure def sometimesUnknownHeld(a: Automations): bool = a.answer == AnswerUnknown 
 ### Only a complete re-read settles a held delete or switch, and never a run, snooze, verb, edit or create
 
 A delete is settled when its row is gone, a switch when its row shows the chosen state; a source
-that failed or a partial workflow list settles nothing (#680f151).
+that failed or a partial workflow list settles nothing (#680f151). A change the list settles
+counts as applied.
 
 ```quint
 pure def settledByList(a: Automations): bool = {
@@ -200,7 +201,8 @@ pure def sometimesSettledByList(a: Automations): bool = a.released == ByList
 
 The review says the earlier change may still apply. It is offered only while nothing is in flight,
 and it names the exact held change it reviewed: a confirmation of a review whose change was
-replaced, or whose owner changed, releases nothing (#1014).
+replaced, or whose owner changed, releases nothing (#1014). The released change has no answer, so an
+unknown outcome is only ever shown while its change is held.
 
 ```quint
 pure def canAllowAnother(a: Automations, id: int): bool = not(a.busy) and holds(a) and heldFor(a, a.owner).id == id
