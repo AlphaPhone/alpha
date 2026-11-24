@@ -29,16 +29,15 @@ export function AssistantConversation({ header, transcript, composer, detent = "
       data-host-chrome=""
       data-alpha-detent={detent}
       className={cn(
-        "flex min-h-0 flex-col bg-background text-foreground",
-        resting ? "z-dock h-auto touch-none rounded-t-tile border-t border-border shadow-lg" : "z-sheet shadow-sheet",
-        full ? "h-full rounded-none" : resting ? null : "h-1/2 rounded-t-sheet",
+        "flex flex-col text-foreground",
+        resting ? "z-dock" : "z-sheet overflow-hidden bg-card",
+        full ? "h-full rounded-none pt-4" : resting ? null : cn("rounded-t-sheet pt-1", props.style?.height ? "max-h-dvh" : "min-h-[38dvh] max-h-[60dvh]"),
         className,
       )}
       {...props}
     >
-      {header.grabber}
-      <div hidden={resting} className={cn("flex min-h-0 flex-col", resting ? "max-h-0 overflow-hidden" : "flex-1")}>
-        <AssistantChatHeader {...header} grabber={undefined} />
+      <div hidden={resting} className={cn("min-h-0 flex-1 basis-auto flex-col", resting ? "hidden" : "flex")}>
+        <AssistantChatHeader {...header} grabber={full ? undefined : header.grabber} />
         <AssistantTranscript {...transcript} className={cn("flex-1", transcript.className)} />
       </div>
       <AssistantComposer {...composer} variant={resting ? "bar" : "sheet"} />

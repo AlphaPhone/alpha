@@ -64,6 +64,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
   it("See my mail (spec/app/inbox/index.md, \"Story: See my mail\")", async () => {
     const world = { ...scene(), phone };
     for (let at = 5; at <= 30; at += 1) world.inbox.mail.push(letter(at, `Newsletter ${at}`, ["INBOX"]));
+    const earlierLunch = letter(0, "Earlier lunch plan", ["SENT"], "Could you make it Friday?");
+    world.inbox.mail.push({ ...earlierLunch, card: { ...earlierLunch.card, threadId: "t1" } });
     const first = await open(world);
     const { alpha } = first;
     const runtime = inbox.runtime(alpha);
@@ -107,6 +109,14 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Marks, (s) => s.attempt.outcome === "Confirmed");
     step("7");
     expect([title(), world.inbox.changes]).toEqual(["Lunch on Friday", ["mark-read g1"]]);
+
+    // spec/app/inbox/message.md, "Previous and next move one place through the thread"
+    await action("Previous message");
+    await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.position === 0);
+    expect([title(), told()]).toEqual(["Earlier lunch plan", expect.stringContaining("Could you make it Friday?")]);
+    await action("Next message");
+    await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.position === 1);
+    expect(title()).toBe("Lunch on Friday");
 
     // spec/app/inbox/message.md, "Only an https link without credentials in it can be reviewed and opened; any other link stays text"
     const visited = vi.spyOn(window, "open").mockReturnValue(null);
@@ -258,6 +268,14 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await later(alpha, 10);
   await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
 
+  // spec/app/inbox/drafts.md, "Before a draft with a Gmail copy is saved over it, and whenever the draft is unsure of that copy, Gmail's copy is read, one read at a time, while its account may be read"
+  await menu("Check Gmail copy");
+  await until(alpha, runtime, Writing, (s) => s.lookup.status === "Loaded" && s.letter.verified === s.letter.revision && !s.pending && s.write.status === "Loaded");
+  await menu("Save to Gmail");
+  await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "ReplaceDraft");
+  await confirm("Cancel");
+  await until(alpha, runtime, Changes, (s) => !s.review.showing);
+
   // spec/app/inbox/sending.md, "Only the owner confirms, only the review of the thing as it is now, while the account's grant allows it and, for a send, it has a valid recipient"
   await press("Send");
   await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "Send");
@@ -273,6 +291,23 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   // spec/app/inbox/drafts.md, "A draft is set aside only once it is wholly kept on the phone, and comes back exactly as it was set aside"
   await press("Back to the list");
   await until(alpha, runtime, Shown, (s) => s.message === 0);
+  // spec/app/inbox/drafts.md, "A draft from Gmail's Drafts opens only with no draft open and none set aside that holds it, and only when Alpha can open it whole; otherwise the owner is offered Open in Gmail"
+  world.inbox.drafts.set("plain-remote", {
+    id: "plain-remote", messageId: "remote-message", providerDigest: "a".repeat(64),
+    content: { to: ["guest@example.test"], cc: [], bcc: [], subject: "A remote draft", bodyText: "Already in Gmail.", plainText: true, threaded: false, attachmentCount: 0 },
+  });
+  await menu("Drafts", "More folders");
+  await until(alpha, runtime, List, (s) => s.selected.folder === "DraftsFolder" && s.list.status === "Loaded");
+  await row("A remote draft");
+  await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "Saved" && s.letter.recipients === 1 && s.stored);
+  expect(document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value).toBe("Already in Gmail.");
+  await menu("Discard");
+  await confirm("Discard");
+  await until(alpha, runtime, Writing, (s) => !s.open);
+  expect(world.inbox.drafts.has("plain-remote")).toBe(true);
+  await press("Inbox");
+  await until(alpha, runtime, List, (s) => s.selected.folder === "Incoming" && s.list.status === "Loaded");
+
   await press("Compose");
   await until(alpha, runtime, Writing, (s) => s.open);
   await fill("Add to To", "unfinished@");

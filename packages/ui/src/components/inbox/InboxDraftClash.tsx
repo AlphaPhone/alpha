@@ -5,7 +5,7 @@ export type InboxDraftClashProps = {
   /** Keeps the owner's text to be saved over the latest copy in Gmail. */
   onRestoreMine: () => void;
   /** Takes the latest saved draft, and the owner's edits give way to it. */
-  onUseSaved: () => void;
+  onUseSaved?: () => void;
 };
 
 /**
@@ -21,7 +21,7 @@ export function InboxDraftClash({ onRestoreMine, onUseSaved }: InboxDraftClashPr
         <p>This draft changed in Gmail</p>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={onRestoreMine}>Restore my edits</Button>
-          <Button variant="outline" size="sm" onClick={onUseSaved}>Use latest saved draft</Button>
+          {onUseSaved ? <Button variant="outline" size="sm" onClick={onUseSaved}>Use latest saved draft</Button> : null}
         </div>
       </div>
     </Alert>

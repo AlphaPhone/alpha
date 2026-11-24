@@ -8,6 +8,7 @@ import { haptics } from "./shell/haptics.vibe"
 import { canvas } from "./shell/canvas.vibe"
 import { focus } from "./shell/focus.vibe"
 import { mailbox } from "./inbox/mailbox.vibe"
+import { mailQuestions } from "./inbox/mail-context.vibe"
 import { operations } from "./inbox/operations.vibe"
 import { composer as inboxComposer } from "./inbox/composer.vibe"
 import { adding } from "./inbox/adding.vibe"
@@ -39,6 +40,7 @@ const machines = together(
   preferences,
   updating,
   mailbox,
+  mailQuestions,
   operations,
   inboxComposer,
   adding,
