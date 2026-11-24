@@ -23,7 +23,8 @@ do next.
   Home date. `tracking-caps` with `text-xs` is a small uppercase label. A list row reads `text-base`,
   `text-subject` and `text-snippet` line by line; `text-meta` is a status line under a header, and `text-body`
   the text of a message or of a field being typed; `text-2xs` is the time under a text message or a
-  keypad key's letters.
+  keypad key's letters; `text-keypad-number` the number being dialled, `text-keypad-digit` a key's
+  digit and `text-keypad-letters` the letters under it.
 - **Shape.** `radius` is a card or a row group; `rounded-home-card` is a Home overview card;
   `rounded-drawer-icon` rounds an installed app icon; `rounded-option` is a row of a floating menu and
   `rounded-box` the box of a list row's selection check. `rounded-tile` is an app tile, a menu and a dialog;
@@ -132,6 +133,14 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.4xl.tracking` | -0.01em |
 | `text.home-display.size` | 1.625rem |
 | `text.home-display.leading` | 1.1 |
+| `text.keypad-letters.size` | 0.59375rem |
+| `text.keypad-letters.leading` | 1.15 |
+| `text.keypad-letters.tracking` | 0.14em |
+| `text.keypad-digit.size` | 1.875rem |
+| `text.keypad-digit.leading` | 1 |
+| `text.keypad-number.size` | 2.375rem |
+| `text.keypad-number.leading` | 1.2 |
+| `text.keypad-number.tracking` | 0.02em |
 | `weight.light` | 300 |
 | `weight.normal` | 400 |
 | `weight.medium` | 500 |

@@ -3,7 +3,7 @@ import type { ListedVoicemail, VoicemailId } from "@elizaos/os/bridges/phone"
 import { Machine as PhoneMachine, liveCall } from "../../gen/app__phone.effect.vibe"
 import * as Voicemail from "../../gen/app__phone__voicemail.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__phone__voicemail.effect.vibe"
-import { Telephony, TelephonyRefused, telephony } from "../platform/telephony.vibe"
+import { Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
 import { type Job, answer, applying, following, hearing, reacting, run, together } from "../runtime/reactor.vibe"
 import { Dialer, prefilled } from "./phone.vibe"
 
@@ -41,7 +41,9 @@ effect function listed(ticket: number): Event!!(Telephony | Voicemails | PhoneMa
   const listing = telephony("refreshVoicemail", (c) => c.phone.refreshVoicemail("ExplicitRead")) catch () => undefined
   const carrier = listing?.carrier === "CarrierReady"
   if (listing !== undefined) try ignore((try PhoneMachine).send({ type: "voicemailReported", ready: carrier }))
-  const rows = carrier ? listing?.voicemails ?? [] : []
+  const voicemails = carrier ? listing?.voicemails ?? [] : []
+  const names = try namesOf("phone", voicemails.map((row) => row.number))
+  const rows = voicemails.map((row) => ({ ...row, cachedName: names.get(row.number) ?? row.cachedName }))
   try store.set({ rows })
   return { type: "listed", ticket, ok: listing !== undefined, carrier, count: rows.length, unheard: rows.filter((row) => !row.heard).length }
 }
@@ -115,38 +117,78 @@ const shown = following(PhoneMachine, (phone) => phone.front && phone.tab === "V
 // spec/app/phone/voicemail.md, "A call that starts pauses playback"
 const calls = following(PhoneMachine, liveCall, Voicemail.Machine, (live): Event | undefined => (live ? { type: "callStarted" } : undefined))
 
+/** The current clip's local playback position and changes. */
+export interface PlaybackPosition {
+  subscribe(wake: () => void): () => void
+  position(): number
+  seek(seconds: number): void
+}
+
 module audio {
   /** Create the one audio element for voicemail playback. @throws {never} */
   export function makeAudio(): HTMLAudioElement {
     return new Audio()
   }
+  /** Listen only while a playback control is mounted. @throws {never} */
+  export function positionOf(element: HTMLAudioElement): PlaybackPosition {
+    const events = ["timeupdate", "seeking", "seeked", "ended", "emptied"]
+    return {
+      subscribe: (wake) => {
+        for (const kind of events) element.addEventListener(kind, wake)
+        return () => { for (const kind of events) element.removeEventListener(kind, wake) }
+      },
+      position: () => Math.floor(element.currentTime),
+      seek: (seconds) => {
+        if (!Number.isFinite(element.duration) || !Number.isFinite(seconds)) return
+        element.currentTime = Math.max(0, Math.min(seconds, element.duration))
+      },
+    }
+  }
+
+  /** Prepare this clip for playback and seeking without starting it. @throws {never} */
+  export function sourceOf(element: HTMLAudioElement, source: string): void {
+    if (source === "") {
+      if (!element.hasAttribute("src")) return
+      element.removeAttribute("src")
+      element.load()
+    } else if (element.getAttribute("src") !== source) {
+      element.src = source
+      element.preload = "metadata"
+    }
+  }
+
   /** Pause voicemail playback, resetting to the start when stopped. @throws {never} */
   export function pauseAudio(element: HTMLAudioElement, reset: boolean): void {
     element.pause()
     if (reset) element.currentTime = 0
   }
 }
-import { makeAudio, pauseAudio } from audio
+import { makeAudio, pauseAudio, positionOf, sourceOf } from audio
 
 /** The one audio element the open voicemail plays in, outside any screen. */
 export service Player {
   element(): HTMLAudioElement!!
+  controls(): PlaybackPosition!!
 }
 
 const player = Layer.sync(Player, () => {
   const element = makeAudio()
-  return { element: () => sync(() => element) }
+  const controls = positionOf(element)
+  return { element: () => sync(() => element), controls: () => sync(() => controls) }
 })
 
 // spec/app/phone/voicemail.md, "Play needs the audio, and never plays during a call"
-const played = applying(Voicemail.Machine, (state) => (state.open ? state.playback : "Stopped"), effect (playback) => {
+const played = applying(Voicemail.Machine, (state) => ({ open: state.open, ready: state.open && state.audio.status === "Loaded", playback: state.playback }), effect ({ open, ready, playback }) => {
   const element = try (try Player).element()
+  const store = try Voicemails
+  const audio = ready ? (try store.get()).audio : ""
   if (playback !== "Playing") {
     pauseAudio(element, playback === "Stopped")
+    sourceOf(element, audio)
+    if (!open) try store.set({ open: "", audio: "", transcript: "" })
     return
   }
-  const audio = (try (try Voicemails).get()).audio
-  if (element.src !== audio) element.src = audio
+  sourceOf(element, audio)
   promise(() => element.play()) catch effect () => {
     try ignore((try Voicemail.Machine).send({ type: "pause" }))
   }

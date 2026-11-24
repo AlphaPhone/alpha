@@ -61,7 +61,7 @@ call's number, which the handoff names.
 ```quint
 type Source = TypedNumber | RecentCall
 type Effect =
-  | ReadLog({ ticket: int })
+  | ReadLog({ ticket: int, device: bool })
   | MatchNumber({ ticket: int })
   | AskLog
   | OpenSettings
@@ -93,20 +93,20 @@ pure val weight_press = 3
 
 ### Phone reads the call log whenever Recents comes to the front
 
-Showing Phone on Recents, or picking the Recents tab, starts a new read.
+Showing Phone on Recents, or picking the Recents tab while Phone is in front, starts a new read. The Contacts tab can choose a Phone tab before the shell returns to Phone.
 
 ```quint
 pure def onRecents(s: Phone): bool = s.front and s.tab == Recents
 
-pure def readLog(chip: Filter, s: Phone): Moved =
+pure def readLog(device: bool, chip: Filter, s: Phone): Moved =
   val recents = R::ask(s.recents)
-  { state: { ...s, chip: chip, recents: recents }, out: List(ReadLog({ ticket: recents.ticket })) }
+  { state: { ...s, chip: chip, recents: recents }, out: List(ReadLog({ ticket: recents.ticket, device: device })) }
 
 pure def canShow(s: Phone): bool = not(s.front)
 
 pure def show(s: Phone): Moved =
   val shown = { ...s, front: true, dialled: false, failedDial: false, unsureDial: false }
-  if (shown.tab == Recents) readLog(s.chip, shown) else { state: shown, out: List() }
+  if (shown.tab == Recents) readLog(true, s.chip, shown) else { state: shown, out: List() }
 ```
 
 ### Leaving Phone, or leaving Recents, forgets the rows
@@ -114,13 +114,13 @@ pure def show(s: Phone): Moved =
 ```quint
 pure def canLeave(s: Phone): bool = s.front
 
-pure def leave(s: Phone): Phone = { ...s, front: false, rows: 0, failedDial: false, unsureDial: false }
+pure def leave(s: Phone): Phone = { ...s, front: false, rows: 0, sought: false, failedDial: false, unsureDial: false }
 
-pure def canPickTab(s: Phone, tab: Tab): bool = s.front and tab != s.tab and (tab != Voicemail or s.voicemail)
+pure def canPickTab(s: Phone, tab: Tab): bool = tab != s.tab and (tab != Voicemail or s.voicemail)
 
 pure def pickTab(s: Phone, tab: Tab): Moved =
   val turned = { ...s, tab: tab, rows: 0 }
-  if (tab == Recents) readLog(s.chip, turned) else { state: turned, out: List() }
+  if (tab == Recents and s.front) readLog(true, s.chip, turned) else { state: turned, out: List() }
 ```
 
 ### The Voicemail tab is offered only while the carrier's visual voicemail is ready
@@ -133,7 +133,7 @@ turns to Recents.
 pure def voicemailReported(s: Phone, ready: bool): Moved =
   val told = { ...s, voicemail: ready }
   if (ready or s.tab != Voicemail) { state: told, out: List() }
-  else if (s.front) readLog(s.chip, { ...told, tab: Recents, rows: 0 })
+  else if (s.front) readLog(true, s.chip, { ...told, tab: Recents, rows: 0 })
   else { state: { ...told, tab: Recents, rows: 0 }, out: List() }
 
 pure def alwaysVoicemailOnlyWhileReady(s: Phone): bool = s.tab == Voicemail implies s.voicemail
@@ -146,11 +146,11 @@ pure def sometimesVoicemailTab(s: Phone): bool = s.front and s.tab == Voicemail
 ```quint
 pure def canPickChip(s: Phone, chip: Filter): bool = onRecents(s) and chip != s.chip
 
-pure def pickChip(s: Phone, chip: Filter): Moved = readLog(chip, { ...s, rows: 0 })
+pure def pickChip(s: Phone, chip: Filter): Moved = readLog(false, chip, { ...s, rows: 0 })
 
 pure def canRetry(s: Phone): bool = onRecents(s) and s.recents.status == R::Failed
 
-pure def retry(s: Phone): Moved = readLog(s.chip, s)
+pure def retry(s: Phone): Moved = readLog(true, s.chip, s)
 ```
 
 ### Only the newest read of the log is shown, with what Android says about access
@@ -182,13 +182,15 @@ pure def logNeeded(s: Phone): bool = onRecents(s) and not(P::allows(s.log))
 
 ### Typing in the bar, or the agent's filter, searches the log afresh
 
-Digits match numbers and letters match names, on the phone. Clearing the
-search, or the agent's filter chip, lists the log again.
+Digits match numbers and letters match names, on the phone. Each search
+uses the bounded call-log page from this visit, reading from Android when
+the page is missing. Clearing the search or the agent's chip shows the
+unfiltered page again.
 
 ```quint
 pure def canSearch(s: Phone, typed: bool): bool = onRecents(s) and P::allows(s.log) and (typed or s.sought)
 
-pure def search(s: Phone, typed: bool): Moved = readLog(s.chip, { ...s, sought: typed, rows: 0 })
+pure def search(s: Phone, typed: bool): Moved = readLog(false, s.chip, { ...s, sought: typed, rows: 0 })
 
 pure def noMatchingCalls(s: Phone): bool = noCalls(s) and s.sought
 
@@ -238,7 +240,7 @@ pure def goToSettings(s: Phone): Moved = { state: s, out: List(OpenSettings) }
 pure def logReported(s: Phone, grant: P::Grant): Moved =
   val log = P::observe(s.log, grant)
   if (not(P::allows(log))) { state: { ...s, log: log, rows: 0 }, out: List() }
-  else if (onRecents(s) and not(P::allows(s.log))) readLog(s.chip, { ...s, log: log })
+  else if (onRecents(s) and not(P::allows(s.log))) readLog(true, s.chip, { ...s, log: log })
   else { state: { ...s, log: log }, out: List() }
 ```
 
@@ -258,6 +260,7 @@ pure def stepThePromptNeedsTheControl(before: Phone, via: str, after: Phone, out
 
 The phone says whether what is now typed is blank, a partial number, a
 number it can dial or an emergency number. The lookup happens on the phone.
+The owner can also edit or paste the number directly.
 
 ```quint
 pure def judged(digits: int, typed: Typed, s: Phone): Moved =
@@ -274,6 +277,12 @@ pure def canTakeBack(s: Phone, typed: Typed): bool =
   s.front and s.tab == Keypad and s.digits > 0 and ((s.digits == 1) == (typed == Blank))
 
 pure def takeBack(s: Phone, typed: Typed): Moved = judged(s.digits - 1, typed, s)
+
+pure def canEditNumber(s: Phone, digits: int, typed: Typed): bool =
+  s.front and s.tab == Keypad and s.dial.status != R::Loading
+    and 0 <= digits and digits <= maxDigits and ((digits == 0) == (typed == Blank))
+
+pure def editNumber(s: Phone, digits: int, typed: Typed): Moved = judged(digits, typed, s)
 ```
 
 ### A number handed to Phone opens the keypad with it filled in, and never dials
@@ -302,10 +311,10 @@ pure def numberMatched(s: Phone, ticket: int, found: bool): Phone =
   { ...s, lookup: R::answer(s.lookup, true), matched: found and s.digits > 0 }
 ```
 
-### The keypad holds at most fifteen digits, and is blank exactly when it holds none
+### The keypad holds at most forty dial characters, and is blank exactly when it holds none
 
 ```quint
-pure val maxDigits = 15
+pure val maxDigits = 40
 
 pure def alwaysTheKeypadIsWellFormed(s: Phone): bool =
   0 <= s.digits and s.digits <= maxDigits and ((s.digits == 0) == (s.typed == Blank))
@@ -357,6 +366,18 @@ pure def canDialRecent(s: Phone, number: str): bool = s.rows > 0 and s.carrier a
 pure def dialRecent(s: Phone, number: str): Moved = handOff(RecentCall, number, s)
 ```
 
+### Tapping a keypad contact hands over the contact's full number
+
+The lookup is for the currently typed digits. The owner can choose the
+matched contact without having to type the rest of the number.
+
+```quint
+pure def canDialMatched(s: Phone, number: str): bool =
+  s.front and s.tab == Keypad and s.matched and s.carrier and not(s.dialled) and number != ""
+
+pure def dialMatched(s: Phone, number: str): Moved = handOff(RecentCall, number, s)
+```
+
 ### One handoff is made each time Phone is showing
 
 The dialer covers Phone; coming back is a new showing.
@@ -370,7 +391,7 @@ pure def stepOneHandoffPerShowing(before: Phone, via: str, after: Phone, out: Li
 
 ```quint
 pure def stepOnlyANumberIsHandedOver(before: Phone, via: str, after: Phone, out: List[Effect]): bool =
-  handoffIn(out) implies ((via == "dialTyped" and dialable(before)) or (via == "dialRecent" and before.rows > 0 and before.carrier))
+  handoffIn(out) implies ((via == "dialTyped" and dialable(before)) or (via == "dialRecent" and before.rows > 0 and before.carrier) or (via == "dialMatched" and before.matched and before.carrier))
 ```
 
 ### The dialer's answer counts only while the same showing lasts
@@ -488,7 +509,7 @@ pure def canOpenMissed(s: Phone): bool = s.missed > 0
 
 pure def openMissed(s: Phone): Moved =
   val turned = { ...s, tab: Recents, chip: MissedCalls, rows: 0, sought: false }
-  if (s.front) readLog(MissedCalls, turned) else { state: turned, out: List() }
+  if (s.front) readLog(true, MissedCalls, turned) else { state: turned, out: List() }
 
 pure def canOpenVoicemail(s: Phone, unheard: int): bool = s.missed == 0 and unheard > 0 and s.voicemail
 
