@@ -2,12 +2,13 @@ name: Alpha site
 
 on:
   push:
-    branches: [vibestack]
+    branches: [main]
     paths:
       - 'apps/site/**'
       - 'apps/app/public/logo-mark.svg'
       - 'apps/app/public/denton-300.woff2'
       - '.github/workflows/site-deploy.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -18,7 +19,7 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.repository_id == '1396333361'
+    if: github.repository_id == '1396333361' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment:
@@ -45,4 +46,5 @@ jobs:
             echo 'Configure CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_PAGES_API_TOKEN in alpha-site-production.' >&2
             exit 1
           fi
+          # This is the Pages project's production label, independent of the GitHub branch name.
           npx --yes wrangler@4.166.0 pages deploy dist --project-name=alphaphone --branch=vibestack --commit-hash="$GITHUB_SHA" --commit-dirty=false

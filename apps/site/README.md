@@ -6,7 +6,10 @@ Chat backdrop comes from `docs/assets/alpha-screens-more.png`. The conversation
 is staged in the browser and makes no service requests.
 
 The Alpha site workflow builds and deploys to the Cloudflare Pages project
-`alphaphone` when site files or the shared Alpha mark and font change on `vibestack`.
-It reads `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_PAGES_API_TOKEN` from the
-`alpha-site-production` GitHub environment. Use a Cloudflare account API token
-with Cloudflare Pages Edit for that account.
+`alphaphone` when site files or the shared Alpha mark and font change on GitHub
+`main`. It can also run on demand on `main`. The Pages project uses the
+`vibestack` production label for these uploads.
+
+Allow `main` in the `alpha-site-production` GitHub environment. Set the
+`CLOUDFLARE_ACCOUNT_ID` variable and the `CLOUDFLARE_PAGES_API_TOKEN` secret
+there. The token needs Cloudflare Pages Edit for the account.
