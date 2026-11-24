@@ -1,0 +1,125 @@
+// spec/app/settings/licences.md, "Story: Read the licences"; spec/app/settings/developer.md, "Story: Read the problem log"
+import * as Developer from "../../gen/app__settings__developer.effect.vibe"
+import * as Licences from "../../gen/app__settings__licences.effect.vibe"
+import * as Prefs from "../../gen/app__settings__preferences.effect.vibe"
+import * as Pages from "../../gen/app__settings.effect.vibe"
+import { SystemSettings } from "../platform/systemSettings.vibe"
+import { type Job, answer, due, following, reacting, run, stop, together, untimed } from "../runtime/reactor.vibe"
+
+module web {
+  /** The licence notices shipped with Alpha, beside its page: never a remote source. */
+  export async function shipped(): Promise<unknown> {
+    const response = await fetch("licenses/third-party-notices.json")
+    if (!response.ok) throw new Error(`the notices answered ${response.status}`)
+    return await response.json()
+  }
+  /** Share `text` as a file through Android's share sheet where there is one, or save it as a file. Whether it was shared or saved. */
+  export async function shared(name: string, text: string): Promise<boolean> {
+    const file = new File([text], name, { type: "application/json" })
+    if (typeof navigator.canShare === "function" && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: "Alpha diagnostics" })
+        return true
+      } catch {
+        return false
+      }
+    }
+    const link = document.createElement("a")
+    link.href = URL.createObjectURL(file)
+    link.download = name
+    link.click()
+    URL.revokeObjectURL(link.href)
+    return true
+  }
+  /** @throws {never} */
+  export function versions(): { readonly app: string; readonly mode: string } {
+    return { app: import.meta.env.VITE_ALPHA_VERSION ?? "development", mode: import.meta.env.MODE }
+  }
+}
+import { shared, shipped, versions } from web
+
+/** One licence as the notices file holds it. */
+export schema Notice { name: string; version: string; license: string; text: string; flags?: ReadonlyArray<string> }
+
+/** The licences loaded, kept beside the machine that counts them: the list the Licences page searches and shows. */
+export service Notices {
+  get(): ReadonlyArray<Notice>!!
+  set(notices: ReadonlyArray<Notice>): void!!
+}
+
+const notices = Layer.sync(Notices, () => {
+  let held: ReadonlyArray<Notice> = []
+  return { get: () => sync(() => held), set: (next: ReadonlyArray<Notice>) => sync(() => { held = next }) }
+})
+
+// spec/app/settings/licences.md, "A load ends with the licences it found, or as one that could not load"
+effect function loaded(load: number): Licences.Event!!Notices {
+  return effect {
+    const found = try Schema.decodeUnknownEffect(Schema.Array(Notice))(try tryPromise(shipped))
+    try (try Notices).set(found)
+    return { type: "loaded", load, ok: true, found: found.length }
+  } catch () => ({ type: "loaded", load, ok: false, found: 0 })
+}
+
+const licencesMachine = reacting(Licences, {
+  carry: (fx): Job<Licences.Event, Notices, []> => answer("load", loaded(fx.load), { type: "giveUpOnLoad", now: untimed }),
+  timers: (state) => (state.load.read.status === "Loading" ? [due<Licences.Event, []>("load", state.load.due, { type: "giveUpOnLoad", now: untimed })] : []),
+})
+
+// spec/app/settings/licences.md, "Opening the page clears the search, and loads the licences unless they are loading or loaded with some found"
+const licencesOpened = following(Pages.Machine, (state) => state.page === "Licences", Licences.Machine, (shown): Licences.Event | undefined => (shown ? { type: "opened", at: untimed } : undefined))
+
+// spec/app/settings/developer.md, "Only the newest read's answer is taken; a log that could not be read, or was not read in time, says unavailable with Retry"
+effect function logRead(reading: number): Developer.Event!!(SystemSettings | Prefs.Machine) {
+  const problems = try (try SystemSettings).problems()
+  const prefs = try (try Prefs.Machine).get()
+  const needs: Developer.Store[] = prefs.document.read.status === "Failed" ? ["DevicePreferences"] : []
+  return Option.isSome(problems)
+    ? { type: "logRead", reading, ok: true, problems: Math.min(problems.value, Developer.journalCap), needs }
+    : { type: "logRead", reading, ok: false, problems: 0, needs: [] }
+}
+
+effect function logCleared(clearing: number): Developer.Event!!SystemSettings {
+  return { type: "logCleared", clearing, ok: try (try SystemSettings).clearProblems(), at: untimed }
+}
+
+// spec/app/settings/developer.md, "The report copies only the fields Alpha allows, so no text, address, key or identifier can reach it"
+effect function exported(exporting: number): Developer.Event!!(SystemSettings | Developer.Machine) {
+  const { problems } = try (try Developer.Machine).get()
+  const { app, mode } = versions()
+  const report = { appVersion: app, buildType: mode, problemEntries: problems }
+  const ok = tryPromise(() => shared("alpha-diagnostics.json", JSON.stringify(report, null, 2))) catch () => false
+  return { type: "exported", exporting, ok }
+}
+
+// spec/app/settings/developer.md, "Saved data that cannot be read is listed, and each such store is handed to its owner to recover"
+const recoverPreferences = effect {
+  try ignore((try Prefs.Machine).send({ type: "recover", at: untimed }, "Owner"))
+}
+
+function carryDeveloper(fx: Developer.Effect): Job<Developer.Event, SystemSettings | Prefs.Machine | Developer.Machine, []> {
+  return match (fx) {
+    when { tag: "ReadLog", let reading }: answer("log", logRead(reading), { type: "giveUpOnLog", now: untimed });
+    when { tag: "ClearLog", let clearing }: answer("clear", logCleared(clearing), { type: "giveUpOnClearing", now: untimed });
+    when { tag: "ExportDiagnostics", let exporting }: answer("export", exported(exporting), { type: "giveUpOnExport", now: untimed });
+    when { tag: "TryMockMode" }: stop("mocks");
+    when { tag: "RecoverStore", let store }: store === "DevicePreferences" ? run("recover", recoverPreferences) : stop("recover");
+  }
+}
+
+function developerTimers(state: Developer.Developer) {
+  const waits: ReadonlyArray<[boolean, string, number, Developer.Event]> = [
+    [state.log.read.status === "Loading", "log", state.log.due, { type: "giveUpOnLog", now: untimed }],
+    [state.clearing.read.status === "Loading", "clear", state.clearing.due, { type: "giveUpOnClearing", now: untimed }],
+    [state.exporting.read.status === "Loading", "export", state.exporting.due, { type: "giveUpOnExport", now: untimed }],
+  ]
+  return waits.flatMap(([busy, key, at, event]) => (busy ? [due<Developer.Event, []>(key, at, event)] : []))
+}
+
+const developerMachine = reacting(Developer, { carry: carryDeveloper, timers: developerTimers })
+
+// spec/app/settings/developer.md, "The log is read when the Problem log opens, on Retry, and after it was cleared, one read at a time, with ten seconds to answer"; spec/app/settings/developer.md, "Leaving the Problem log retires its read, and an answer that comes later is never shown"
+const logShown = following(Pages.Machine, (state) => state.page === "Problems", Developer.Machine, (shown): Developer.Event => (shown ? { type: "openLog", at: untimed } : { type: "leaveLog" }))
+
+/** About's licences and the Developer page's problem log, which Settings loads when their page opens. */
+export const about = together(Layer.provideMerge(licencesMachine, notices), licencesOpened, developerMachine, logShown)

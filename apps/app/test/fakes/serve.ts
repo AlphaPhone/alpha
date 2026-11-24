@@ -4,6 +4,7 @@ import type { ReadableStream as NodeStream } from "node:stream/web";
 import type { Plugin } from "vite";
 import type { Answering } from "./routes.ts";
 import { scene, services } from "./scene.ts";
+import { notices } from "./settings.ts";
 
 async function relay(answer: Answering, incoming: IncomingMessage, outgoing: ServerResponse) {
   const body = incoming.method === "GET" || incoming.method === "HEAD" ? undefined : (Readable.toWeb(incoming) as ReadableStream<Uint8Array>);
@@ -30,6 +31,7 @@ export function fakes(real?: string, phone = false): Plugin {
     configureServer(server) {
       if (real === undefined) server.middlewares.use("/agent", (incoming, outgoing) => void relay(agent, incoming, outgoing));
       server.middlewares.use("/cloud", (incoming, outgoing) => void relay(cloud, incoming, outgoing));
+      server.middlewares.use("/licenses/third-party-notices.json", (_incoming, outgoing) => void outgoing.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(notices)));
     },
     config: () => (real === undefined ? {} : { server: { proxy: { "/agent": { target: real, rewrite: (path: string) => path.slice("/agent".length) } } } }),
   };

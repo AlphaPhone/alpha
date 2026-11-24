@@ -2,7 +2,7 @@
 
 What Settings says about the phone: Wi-Fi, Bluetooth, mobile data, the
 battery, sound, Alpha's alerts and their channels, whether location is on,
-each access Alpha holds, the Home and Assistant roles, and the versions of
+the storage used, each access Alpha holds, the Home and Assistant roles, and the versions of
 Alpha and Android. Alpha cannot change any of them here. It reads them,
 says what the phone reported, and hands over to Android's own settings for
 the rest ([Android](./android.md)). The one request it makes is Set as
@@ -17,8 +17,8 @@ own is the [Home role](./roles.md).
 
 ### Facts hold the newest asking, which facts and accesses its answer reported, the roles, and Set as Home in flight
 
-One asking reads every fact. The phone reports the facts it could read and
-the grant of each access it could read; who holds the Home and Assistant
+One asking reads every fact. The phone reports the facts it could read,
+each with the value it read, and the grant of each access it could read; who holds the Home and Assistant
 roles, and whether this build can be the Home app, come with the roles.
 Nothing here is kept: after a restart every row waits for a fresh answer.
 
@@ -27,13 +27,14 @@ import read as R from "../../kit/read"
 import permission as P from "../../kit/permission"
 import timed as T from "./timed"
 
-type Fact = Wifi | Bluetooth | MobileData | Battery | Sound | Alerts | DeviceLocation | Roles | Versions
+type Fact = Wifi | Bluetooth | MobileData | Battery | Sound | Alerts | DeviceLocation | Storage | Roles | Versions
+type Reading = { fact: Fact, value: str }
 type Access = CameraAccess | MicrophoneAccess | LocationAccess | CalendarAccess | PhotosAccess | FilesAccess | NotificationsAccess
 type AccessGrant = { access: Access, grant: P::Grant }
 type Holder = NotAlpha | AnotherApp | Alpha | NoSuchRole
 
 type Facts = {
-  read: T::Timed, taken: int, reported: List[Fact], grants: List[AccessGrant],
+  read: T::Timed, taken: int, reported: List[Reading], grants: List[AccessGrant],
   home: Holder, assistant: Holder, launcher: bool,
   request: T::Timed, readAtRequest: int,
 }
@@ -47,7 +48,7 @@ pure val initial: Facts = {
   request: T::unasked, readAtRequest: 0,
 }
 
-pure def has(reported: List[Fact], fact: Fact): bool = reported.some(f => f == fact)
+pure def has(reported: List[Reading], fact: Fact): bool = reported.some(r => r.fact == fact)
 
 pure def shownAny(s: Facts): bool = s.reported.length() > 0 or s.grants.length() > 0
 ```
@@ -60,8 +61,8 @@ shell says whether Settings is showing when Alpha comes back; the owner may
 have changed something in Android's settings meanwhile.
 
 ```quint
-pure val readLimit = 10
-pure val atValues = Set(0, 4, 20)
+pure val readLimit = 10000
+pure val atValues = Set(0, 4000, 20000)
 
 pure def look(at: int, s: Facts): Asked =
   val asking = T::ask(s.read, at, readLimit)
@@ -98,7 +99,16 @@ Roles the phone did not report are never shown as held.
 
 ```quint
 pure val ticketValues = Set(1, 2, 3)
-pure val reportedValues = Set(List(), List(Wifi, Battery), List(Roles), List(Wifi, Bluetooth, MobileData, Battery, Sound, Alerts, DeviceLocation, Roles, Versions))
+pure val reportedValues = Set(
+  List(),
+  List({ fact: Wifi, value: "on" }, { fact: Battery, value: "80" }),
+  List({ fact: Roles, value: "" }),
+  List(
+    { fact: Wifi, value: "on" }, { fact: Bluetooth, value: "off" }, { fact: MobileData, value: "on" }, { fact: Battery, value: "80" },
+    { fact: Sound, value: "ring" }, { fact: Alerts, value: "on" }, { fact: DeviceLocation, value: "on" }, { fact: Storage, value: "3/8" },
+    { fact: Roles, value: "" }, { fact: Versions, value: "1.0" },
+  ),
+)
 pure val grantsValues = Set(
   List(),
   List({ access: CameraAccess, grant: P::Granted }, { access: MicrophoneAccess, grant: P::Denied }),
@@ -107,7 +117,7 @@ pure val grantsValues = Set(
 
 pure def canAnswered(s: Facts, ticket: int): bool = T::canAnswer(s.read, ticket)
 
-pure def answered(s: Facts, ticket: int, reported: List[Fact], grants: List[AccessGrant], home: Holder, assistant: Holder, launcher: bool): Facts =
+pure def answered(s: Facts, ticket: int, reported: List[Reading], grants: List[AccessGrant], home: Holder, assistant: Holder, launcher: bool): Facts =
   val roles = has(reported, Roles)
   {
     ...s, read: T::answer(s.read, reported.length() > 0 or grants.length() > 0), taken: ticket, reported: reported, grants: grants,
@@ -120,7 +130,7 @@ pure def answered(s: Facts, ticket: int, reported: List[Fact], grants: List[Acce
 Its answer, if it comes later, is refused.
 
 ```quint
-pure val nowValues = Set(0, 4, 20, 40, 80)
+pure val nowValues = Set(0, 4000, 20000, 40000, 80000)
 
 pure def canAbandon(s: Facts, now: int): bool = T::canGiveUp(s.read, now)
 
@@ -282,7 +292,7 @@ not offered while the phone is being read, so it never rests on a role an
 answer in flight may change.
 
 ```quint
-pure val homeLimit = 60
+pure val homeLimit = 60000
 
 pure def canRequestHome(s: Facts, at: int): bool =
   s.launcher and (s.home == NotAlpha or s.home == AnotherApp) and not(T::busy(s.request)) and s.read.read.status == R::Loaded

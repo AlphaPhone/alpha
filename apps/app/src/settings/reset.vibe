@@ -1,0 +1,59 @@
+// spec/app/settings/reset.md, "Story: Erase all data"
+import * as Reset from "../../gen/app__settings__reset.effect.vibe"
+import type { Answer, Effect as Out, Event } from "../../gen/app__settings__reset.effect.vibe"
+import { type Job, answer, due, reacting, stop, untimed } from "../runtime/reactor.vibe"
+
+module held {
+  import { resetPlugin, reviewDataReset } from "@elizaos/os/bridges/reset"
+  import type { ReviewNotice } from "@elizaos/os/bridges/reset"
+
+  /** Android's own review of erasing all data, through eliza's client of the `ElizaReset` plugin: what it says when nothing was reset. A confirmed reset never answers: the phone erases and stops Alpha. */
+  export async function reviewed(): Promise<ReviewNotice> {
+    return (await reviewDataReset(resetPlugin())).notice
+  }
+}
+import { reviewed } from held
+
+// spec/app/settings/reset.md, "Only the phone's answer to the latest review counts; an approval is recorded on the phone before anything else"
+const answers: Readonly<Record<Awaited<ReturnType<typeof reviewed>>, Answer>> = { NativeCancelled: "Declined", NativeUnavailable: "NoReset", ShellUnavailable: "NoReset" }
+
+effect function reviewOf(ticket: number): Event!! {
+  const notice = tryPromise(reviewed) catch () => "ShellUnavailable" as const
+  return { type: "reviewed", review: ticket, reply: answers[notice] }
+}
+
+/**
+ * eliza's reset plugin records, stops, revokes and erases in native code, and tells the page only that nothing was
+ * reset. The steps a try asks of the page are therefore never carried out from here: each is given up on its time.
+ */
+function carry(fx: Out): Job<Event, never, []> {
+  return match (fx) {
+    when { tag: "ReviewReset", let review }: answer("review", reviewOf(review), { type: "giveUpOnReview", now: untimed });
+    when { tag: "RecordReset", let record }: answer("record", succeed<Event>({ type: "recorded", record, saved: false, at: untimed }), { type: "recorded", record, saved: false, at: untimed });
+    when { tag: "StopAccountUsers" }: stop("try");
+    when { tag: "RevokeCloudKeys" }: stop("try");
+    when { tag: "ClearData" }: stop("try");
+    when { tag: "CheckErased", let checking }: answer("check", succeed<Event>({ type: "erasedChecked", checking, erased: false, known: false }), { type: "erasedChecked", checking, erased: false, known: false });
+  }
+}
+
+// spec/app/settings/reset.md, "Every review, stop, revocation and erase ends"
+function timers(state: Reset.Reset) {
+  const waits: ReadonlyArray<[boolean, string, number, Event]> = [
+    [state.review.read.status === "Loading", "review", state.review.due, { type: "giveUpOnReview", now: untimed }],
+    [state.stopping.read.status === "Loading", "stop", state.stopping.due, { type: "giveUpOnStopping", now: untimed }],
+    [state.revoking.read.status === "Loading", "revoke", state.revoking.due, { type: "giveUpOnRevoking", now: untimed, at: untimed }],
+    [state.clear.outcome === "Sent", "clear", state.clearDue, { type: "giveUpOnClearing", now: untimed }],
+  ]
+  return waits.flatMap(([busy, key, at, event]) => (busy ? [due<Event, []>(key, at, event)] : []))
+}
+
+// spec/app/settings/reset.md, "Alpha starting again keeps the record and the tries; a try it cut short before the erase was sent erased nothing, and one cut short after is one it cannot tell about"
+const launching = effect {
+  const { pending } = try (try Reset.Machine).get()
+  const launch: Event = { type: "launch", found: pending }
+  return [launch] as const
+}
+
+/** Erasing all data: kept across restarts, as the phone keeps the record of an approved reset. */
+export const resetting = reacting(Reset, { keep: 1, open: launching, carry, timers })

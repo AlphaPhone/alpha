@@ -115,13 +115,38 @@ from its name and signature:
 | `pure def declassifyLast4(c: SecretCard): str` | the one way out for a secret | a function whose result is public; review names it |
 | `pure val idValues = Set(1, 2, 3)` | what the simulator tries for a parameter named `id`. It must be a set whose elements match the parameter type; any supported Quint is allowed in it | nothing: it never reaches TypeScript |
 | `pure val weight_pay = 5` | how often the simulator tries `pay`: a whole number from 1 to 100, times as often as an event of weight 1 (the default). For deep interleavings, such as a message lost, repeated and reordered | nothing |
+| `pure val eval_witness_sometimesPaid = (("authorize", 8), ("pay", 8), "finish")` | an example path from `initial` to the named `sometimes` rule | nothing |
+| `pure val eval_refuse_canElapse = { elapsed: -1 }` | concrete arguments for a transition guard to refuse in `initial` | nothing |
 | `pure val fair_pay = "weak"` or `"strong"` | an assumption for `leadsTo` rules: a fair run does not put `pay` off for ever while its guard keeps allowing it (`"weak"`), or while it allows it again and again (`"strong"`) | nothing |
 | `pure val within_leadsToPaid = 3` | a bound for a `leadsTo` rule: every run meets it within 3 events, from 1 to 100 | a search of simulated traces for a run that does not ("Liveness", below) |
 | any other `pure val` or `pure def` | a constant or helper | the same constant or function |
 
+Each goal search can also uncover a broken rule. If the search finishes without
+a witness, a retained probe that evaluated the goal to true can supply its
+journey through the usual TypeScript replay when the spec gives no example.
 When a reachability search uses multiple trace lengths, it tries short,
-single-threaded batches before spending the full search budgets. A trace
-that reaches the goal or breaks a rule goes through the usual replay.
+single-threaded batches before spending the full search budgets. Give a
+`eval_witness_<rule>` for a goal that needs a rare sequence or specific values.
+Write each step as a transition name followed by its arguments in
+declaration order. A step with no arguments is just its name. For one step,
+write that step alone. In a model with senders, add the sender last for a
+transition that does not take `by`.
+
+Quint typechecks the arguments and runs the original transitions and their
+guards, checking state and step rules until the path reaches the goal or
+breaks a rule. A broken rule fails the check. The usual search runs if the
+example stops short of the goal. The safety and probe samples stay the same, and a
+trace that reaches the goal or breaks a rule goes through the usual replay.
+An ordinary simulation can reuse its results when only an unused guide changes.
+The check preserves the input files for replay when one of these ordinary runs fails.
+
+An `eval_refuse_<guard>` record has one field for each of the guard's
+sampled arguments. In a model without opaque functions, if other traces
+have not shown a refusal, Quint tries the given arguments in the initial
+state. A valid refusal replaces the remaining randomized refusal search
+and goes through TypeScript replay. If the example does not show a refusal,
+the usual search runs. The ordinary safety and probe samples and the
+application conformance inputs are unchanged by the focused trace.
 
 A transition parameter named `by` identifies its sender. All such parameters
 use the same type. It is supplied separately as `enabled(current, event, by)`
@@ -219,6 +244,28 @@ it does for the root's own `src/` and `test/`:
   `// spec/app/index.md, "A rule"`.
 
 An owner has no `check`, `gen` or `accept` script: the root's are its own.
+
+For an independent owner build, `pnpm gen --owner <name>` reads every spec
+in `spec/<name>/` and follows its imports and links to check references.
+It compiles the owner's Quint and the Quint it imports, and writes the same
+`gen/` artifact that whole-tree generation writes for that owner. Root
+`pnpm check` still checks the whole tree and owns acceptance.
+
+Projects with non-formal directories under `spec/` or custom package paths
+configure them in `vibestack.json` (or under `package.json#vibestack`, see
+[vibestack/README.md, "Configuration"](vibestack/README.md#configuration)):
+
+- **`spec.exclude`**: subdirectories relative to `spec/` (for example
+  `["models", "product"]`) ignored by formal parsing, generation, simulation,
+  proofs, and review. Markdown links pointing into an excluded directory are
+  treated as informational prose links rather than broken formal references.
+- **`spec.owners`**: maps spec area names to package directories when a
+  package's directory differs from `apps/<name>` or `packages/<name>` (for
+  example `{ "assistant": "packages/plugin-assistant" }`). Merged with
+  `package.json#specOwners`.
+- **`spec.dir`**, **`mode`**, **`cacheDir`**, **`stages`**: override the spec
+  root, toolchain mode (`"vibelang"`, `"typescript"`, or `"specs-only"`),
+  cache directory, or stage runners (`types`, `tests`, `explore`).
 
 ### Opaque functions
 
@@ -490,6 +537,7 @@ package's own: an owner of `spec/app/cart.md` writes
 `test/traces/app__cart.jsonl` or names its script `driver:app__cart`, all in
 `apps/app`. `vibestack/examples/order/test/drivers/index.ts` is a worked
 driver; `effectDriver` from `vibestack/testing` builds one from a `Layer`.
+Run conformance standalone with `pnpm exec spec conformance [<module>] [--nightly]`.
 
 A `Driver` has `reset`, `dispatch` (sends an event through the
 application's own entry point and returns `"accepted"` or `"refused"`),
@@ -540,8 +588,9 @@ under `src/`.
   uncaught exception or unhandled rejection, no console error, no HTTP
   error), and export a property for each rule the page must keep, citing
   it as a test does. The types come from `@antithesishq/bombadil`, which
-  `spec init` adds. Without the file, the defaults are checked.
-  `apps/app/test/bombadil.ts` is a worked one.
+  `vibestack init` adds. Without the file, the defaults are checked.
+  `apps/app/test/bombadil.ts` is a worked one. Run exploration
+  standalone with `pnpm exec spec explore [--nightly]`.
 - **A broken property is saved.** The run is kept in
   `test/__traces__/bombadil`, which is not committed;
   `pnpm exec bombadil browser inspect test/__traces__/bombadil` shows each

@@ -1,0 +1,14 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <!-- Long-press Power opens Alpha. These are defaults; saved user settings remain authoritative. -->
+    <string name="config_defaultAssistant" translatable="false">ai.alphacompute.alphaphone</string>
+    <integer name="config_longPressOnPowerBehavior">5</integer>
+    <bool name="config_longPressOnPowerForAssistantSettingAvailable">true</bool>
+    <!-- Retain a hardware route to shutdown/restart while long-press opens Alpha. -->
+    <integer name="config_keyChordPowerVolumeUp">2</integer>
+    <color name="config_defaultNotificationColor">#FF0000FF</color>
+    <integer name="config_defaultNightMode">2</integer>
+    <!-- Safe pre-setup fallback. Alpha Welcome selects Android's standard gesture
+         overlay on fresh setup when a navigation mode has not been selected. -->
+    <integer name="config_navBarInteractionMode">0</integer>
+</resources>

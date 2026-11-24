@@ -35,8 +35,8 @@ pure def answer(r: Read, ok: bool): Read = { ...r, status: if (ok) Loaded else F
 ### An answer to an older asking is refused
 
 ```quint
-pure def lawAnOlderAnswerIsRefused(ticket: int, older: int, ok: bool): bool =
-  older <= ticket implies not(canAnswer(ask({ status: Loading, ticket: ticket }), older))
+pure def lawAnOlderAnswerIsRefused(ticket: int, earlier: int, ok: bool): bool =
+  earlier <= ticket implies not(canAnswer(ask({ status: Loading, ticket: ticket }), earlier))
 ```
 
 ### An answer is not taken twice

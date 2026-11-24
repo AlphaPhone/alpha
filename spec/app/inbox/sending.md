@@ -54,7 +54,7 @@ type Effect =
   | OpenGoogleAccess({ account: int })
 type Done = { state: Operations, out: List[Effect] }
 
-pure val window = 10
+pure val window = 10000
 
 pure val initial: Operations = {
   session: 0, of: 0, kind: Send, account: 0, draft: 0, messages: Set(), gmail: 0, history: 0,
@@ -67,7 +67,7 @@ pure val accountValues = Set(1, 2)
 pure val messagesValues = Set(Set(1), Set(1, 2))
 pure val revisionValues = Set(1, 2)
 pure val historyValues = Set(0, 1)
-pure val nowValues = Set(0, 5, 10, 20)
+pure val nowValues = Set(0, 5000, 10000, 20000)
 pure val attemptValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20)
 pure val weight_answered = 3
 pure val weight_replyLost = 2
@@ -196,7 +196,8 @@ pure def cancel(s: Operations): Operations = { ...s, review: V::dismiss(s.review
 ### Only the owner confirms, only the review of the thing as it is now, while the account's grant allows it and, for a send, it has a valid recipient
 
 Confirming records the operation on the phone and hands a draft to it;
-archive and Trash are then held for the undo window.
+archive and Trash are then held for the undo window, ten seconds of
+Alpha's time, which counts in milliseconds.
 
 ```quint
 pure def canConfirm(s: Operations, revision: int, access: Access, now: int, by: Actor): bool =
