@@ -1,4 +1,4 @@
-// spec/account/session.md, "Story: Keep my sign-in working until I sign out"; spec/account/signIn.md, "Story: Choose how to sign in"; spec/account/billing.md, "Story: Choose or change my plan in Alpha"; spec/account/sheet.md, "Story: Look after my account in one place"; spec/account/provider.md, "Story: Use my own keys instead of Cloud"
+// spec/account/session.md, "Story: Keep my sign-in working until I sign out"; spec/account/signIn.md, "Story: Choose how to sign in"; spec/account/billing.md, "Story: Choose or change my plan in Alpha"; spec/account/sheet.md, "Story: Look after my account in one place"; spec/account/provider.md, "Story: Use my own keys instead of Cloud"; spec/account/provider.md, "A voice key alone is changed in place, keeping the saved text key and the route"
 import { assert, it } from "@effect/vitest"
 import { entryOf } from "../../gen/account__signIn.ts"
 import { GoogleAgentAccess } from "../../src/account/agentAccess.vibe"
@@ -600,6 +600,53 @@ it.live(`Own keys go to the host only, and switching back keeps them (spec/accou
         saved: ["OwnRoute", true, false, "NoProviderFault"], back: ["CloudRoute", true, 1],
         carrying: ["Agent.configureProvider"], chose: { mode: "cloud", expectedRevision: "r2", requestId: "lease-1" },
         removedWithoutReview: false
+      }))
+    })
+  }
+})
+
+// spec/account/provider.md, "A voice key alone is changed in place, keeping the saved text key and the route"
+it.live(`A voice key alone changes in place, never resending the text key or switching route (spec/account/provider.md, "A voice key alone is changed in place, keeping the saved text key and the route")`, () => effect {
+  const calls: Calls = []
+  const voice = "sk_car_test-voice-0123456789"
+  const host = { mode: "own" as "cloud" | "own", text: true, voice: false, revision: 1, lose: false }
+  const status = () => providerStatus(host.mode, host.text, host.voice, `r${host.revision}`)
+  const native = {
+    ...signedInNative,
+    "Agent.providerStatus": status,
+    "Agent.editProviderKeys": (args: unknown) => {
+      const edit = args as { textKey?: string; voiceKey?: string; expectedRevision?: string }
+      if (edit.expectedRevision !== `r${host.revision}` || edit.textKey !== undefined) return { refuse: "stale" }
+      host.voice = true
+      host.revision += 1
+      return host.lose ? { refuse: "lost" } : status()
+    }
+  }
+  provide account(calls, native) {
+    try scoped(effect {
+      const session = try CloudSession
+      const provider = try AiProvider
+      fork.scoped session.run()
+      fork.scoped provider.run()
+      try until(provider.changes, (p) => p.known && p.signedIn && p.textKey)
+      try provider.save("", ` ${voice} `)
+      const edited = try provider.current()
+      host.lose = true
+      try provider.save("", voice)
+      const readBack = try provider.current()
+      try Effect.try(() => assert.deepStrictEqual({
+        edited: [edited.route, edited.textKey, edited.voiceKey, edited.edits, edited.saves, edited.fault],
+        readBack: [readBack.work, readBack.route, readBack.textKey, readBack.voiceKey, readBack.lost, readBack.fault],
+        sent: calls.filter((c) => c.name === "Agent.editProviderKeys").map((c) => c.args),
+        configured: names(calls).includes("Agent.configureProvider"), switched: names(calls).includes("Agent.selectProvider")
+      }, {
+        edited: ["OwnRoute", true, true, 1, 0, "NoProviderFault"],
+        readBack: ["ProviderIdle", "OwnRoute", true, true, 1, "NoProviderFault"],
+        sent: [
+          { voiceKey: voice, expectedRevision: "r1", requestId: "lease-1" },
+          { voiceKey: voice, expectedRevision: "r2", requestId: "lease-1" }
+        ],
+        configured: false, switched: false
       }))
     })
   }

@@ -1,8 +1,8 @@
-// spec/account/provider.md, "Story: Use my own keys instead of Cloud"
+// spec/account/provider.md, "Story: Use my own keys instead of Cloud"; spec/account/provider.md, "A voice key alone is changed in place, keeping the saved text key and the route"
 import { Bot, CreditCard, Eye, KeyRound, RotateCw, Trash2 } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import {
-  type KeyName, type Provider, type ProviderFault, type Route, canAskRemove, canCancelRemove, canChooseRoute, canConfirmRemove, canRead,
+  type KeyName, type Provider, type ProviderFault, type Route, canAskRemove, canCancelRemove, canChooseRoute, canConfirmRemove, canEditVoice, canRead,
   canReveal, canSave, reviewedKey,
 } from "../../../gen/account__provider.ts";
 import { keyShaped } from "../../account/provider.vibe";
@@ -14,7 +14,8 @@ export interface ProviderPanelProps {
   provider: Provider;
   /** The deployment's display name, such as "Eliza Cloud". */
   serviceName: string;
-  /** Save own keys; an empty voice key leaves it unchanged. The keys go straight to the native host. */
+  /** Save own keys; an empty voice key leaves it unchanged, and an empty text key with one saved changes the voice key alone.
+   * The keys go straight to the native host. */
   onSave: (textKey: string, voiceKey: string) => void;
   /** Switch the route the agent answers with. */
   onChoose: (route: Route) => void;
@@ -49,7 +50,8 @@ export function ProviderPanel({ provider, serviceName, onSave, onChoose, onAskRe
   const [textKey, setTextKey] = useState("");
   const [voiceKey, setVoiceKey] = useState("");
   const fault = provider.fault === "NoProviderFault" ? undefined : faults[provider.fault];
-  const shaped = keyShaped(textKey.trim()) && (voiceKey.trim() === "" || keyShaped(voiceKey.trim()));
+  const voiceOnly = textKey.trim() === "" && keyShaped(voiceKey.trim());
+  const shaped = voiceOnly ? canEditVoice(provider) : keyShaped(textKey.trim()) && (voiceKey.trim() === "" || keyShaped(voiceKey.trim()));
   const reviewing = provider.review.tag === "Reviewing" ? reviewedKey(provider.review) : undefined;
   const save = (event: FormEvent) => {
     event.preventDefault();
@@ -118,7 +120,9 @@ export function ProviderPanel({ provider, serviceName, onSave, onChoose, onAskRe
           id="provider-voice-key" type="password" autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={1024}
           value={voiceKey} disabled={!canSave(provider)} onChange={(event) => setVoiceKey(event.currentTarget.value)}
         />
-        <Button type="submit" loading={provider.work === "Saving"} disabled={!canSave(provider) || !shaped}>Save and use own keys</Button>
+        <Button type="submit" loading={provider.work === "Saving" || provider.work === "Editing"} disabled={!canSave(provider) || !shaped}>
+          {voiceOnly ? "Save voice key" : "Save and use own keys"}
+        </Button>
       </form>
       {fault && <p role="alert" className="text-destructive">{fault}</p>}
       <div className="flex gap-2">

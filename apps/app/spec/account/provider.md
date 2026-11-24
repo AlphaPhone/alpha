@@ -14,7 +14,8 @@ outdated form is refused. The form lives in Account's AI provider section, and t
 ## Story: Use my own keys instead of Cloud
 
 > As the owner, I save my own Cerebras key, and a voice key if I want one, switch between Cloud and
-> my own keys whenever I like without losing either, and remove a key only after I confirm it.
+> my own keys whenever I like without losing either, change my voice key without typing my Cerebras
+> key again, and remove a key only after I confirm it.
 
 ### The form shows what the host reports, and a failed read keeps the last known choice
 
@@ -23,21 +24,21 @@ A read that fails never switches the owner to Cloud.
 ```quint
 type Route = CloudRoute | OwnRoute
 type KeyName = TextKey | VoiceKey
-type ProviderWork = ProviderIdle | Reading | Saving | Choosing | Removing | Revealing
+type ProviderWork = ProviderIdle | Reading | Saving | Editing | Choosing | Removing | Revealing
 type ProviderFault = NoProviderFault | ReadFailed | KeyNotAccepted | ChangeNotConfirmed | NeedsTextKey
 type Review = NoReview | Reviewing({ reviewed: KeyName })
 type ChangeOutcome = ChangeConfirmed | ChangeLost | ChangeDenied
 type Provider = {
   known: bool, route: Route, textKey: bool, voiceKey: bool, revision: int, work: ProviderWork, fault: ProviderFault,
   target: Route, removing: KeyName, review: Review, signedIn: bool,
-  reads: int, saves: int, switches: int, removals: int, lost: int
+  reads: int, saves: int, edits: int, switches: int, removals: int, lost: int
 }
-type ProviderEffect = ReadProvider | SaveKeys | SelectRoute | RemoveKey | RevealKey | OpenSignIn
+type ProviderEffect = ReadProvider | SaveKeys | EditKeys | SelectRoute | RemoveKey | RevealKey | OpenSignIn
 type ProviderStep = { state: Provider, out: List[ProviderEffect] }
 pure val initial: Provider = {
   known: false, route: CloudRoute, textKey: false, voiceKey: false, revision: 0, work: ProviderIdle, fault: NoProviderFault,
   target: CloudRoute, removing: TextKey, review: NoReview, signedIn: false,
-  reads: 0, saves: 0, switches: 0, removals: 0, lost: 0
+  reads: 0, saves: 0, edits: 0, switches: 0, removals: 0, lost: 0
 }
 pure def idle(p: Provider): bool = p.work == ProviderIdle
 pure def canRead(p: Provider): bool = idle(p)
@@ -69,9 +70,32 @@ pure def saveSettled(p: Provider, accepted: bool, voice: bool): Provider =
     revision: p.revision + 1, saves: p.saves + 1 }
   else { ...p, work: ProviderIdle, fault: KeyNotAccepted }
 pure def stepAKeyIsAddedOnlyByTheHost(before: Provider, via: str, after: Provider): bool =
-  ((after.textKey and not(before.textKey)) or (after.voiceKey and not(before.voiceKey))) implies (via == "saveSettled" or via == "readSettled")
+  ((after.textKey and not(before.textKey)) or (after.voiceKey and not(before.voiceKey)))
+    implies (via == "saveSettled" or via == "editSettled" or via == "readSettled")
 pure def sometimesOwnKeysSaved(p: Provider): bool = p.saves >= 1 and p.route == OwnRoute and p.voiceKey
 pure def sometimesKeyNotAccepted(p: Provider): bool = p.fault == KeyNotAccepted and not(p.textKey)
+```
+
+### A voice key alone is changed in place, keeping the saved text key and the route
+
+With a text key saved, typing only a voice key changes that key alone (`Agent.editProviderKeys`):
+the text key is neither sent again nor replaced, and the agent keeps the route it answers with. The
+change counts only when the host's answer shows the voice key saved with the text key and the route
+as they were; a change whose answer was lost is read back once.
+
+```quint
+pure def canEditVoice(p: Provider): bool = idle(p) and p.known and p.textKey
+pure def editVoice(p: Provider): ProviderStep =
+  { state: { ...p, work: Editing, fault: NoProviderFault, review: NoReview }, out: List(EditKeys) }
+pure def canEditSettled(p: Provider, result: ChangeOutcome): bool = p.work == Editing
+pure def editSettled(p: Provider, result: ChangeOutcome): ProviderStep =
+  if (result == ChangeConfirmed)
+    { state: { ...p, work: ProviderIdle, voiceKey: true, revision: p.revision + 1, edits: p.edits + 1 }, out: List() }
+  else if (result == ChangeLost) { state: { ...p, work: Reading, reads: p.reads + 1, lost: p.lost + 1 }, out: List(ReadProvider) }
+  else { state: { ...p, work: ProviderIdle, fault: ChangeNotConfirmed }, out: List() }
+pure def stepAVoiceEditKeepsTheTextKeyAndTheRoute(before: Provider, via: str, after: Provider): bool =
+  (via == "editVoice" or via == "editSettled") implies (after.textKey == before.textKey and after.route == before.route)
+pure def sometimesVoiceKeyChangedInPlace(p: Provider): bool = p.edits >= 1 and p.route == OwnRoute and p.voiceKey and p.saves == 1
 ```
 
 ### Switching keeps both keys, needs a saved text key for own keys and a sign-in for Cloud
@@ -106,7 +130,7 @@ pure def sometimesBackOnCloudWithKeysKept(p: Provider): bool = p.switches >= 2 a
 ```quint
 pure def stepAChangeIsSentOnlyByItsRequest(before: Provider, via: str, after: Provider, out: List[ProviderEffect]): bool =
   (out.includes(SelectRoute) implies via == "chooseRoute") and (out.includes(RemoveKey) implies via == "confirmRemove")
-    and (out.includes(SaveKeys) implies via == "save")
+    and (out.includes(SaveKeys) implies via == "save") and (out.includes(EditKeys) implies via == "editVoice")
 pure def sometimesLostChangeReadBack(p: Provider): bool = p.lost >= 1 and idle(p) and p.known
 ```
 

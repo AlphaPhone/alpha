@@ -17,7 +17,7 @@ export const nativePlugins = {
     methods: [
       "residentAttachment", "setGoogleAgentAccess", "configureProvider", "prepareProviderConfiguration",
       "cancelProviderConfiguration", "clearProvider", "configureCloudProvider", "providerStatus", "selectProvider",
-      "removeProviderKey", "revealProviderKey", "launchSurface", "takeInvocation", "keyguard",
+      "editProviderKeys", "removeProviderKey", "revealProviderKey", "launchSurface", "takeInvocation", "keyguard",
     ],
     events: ["keyguardChanged"],
   },

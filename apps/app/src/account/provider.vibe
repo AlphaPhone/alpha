@@ -1,4 +1,4 @@
-// spec/account/provider.md, "Story: Use my own keys instead of Cloud"; spec/account/signIn.md, "Saving own keys ends a readiness check without starting anything, and ends the entry"
+// spec/account/provider.md, "Story: Use my own keys instead of Cloud"; spec/account/provider.md, "A voice key alone is changed in place, keeping the saved text key and the route"; spec/account/signIn.md, "Saving own keys ends a readiness check without starting anything, and ends the entry"
 import {
   type ChangeOutcome, type KeyName, type Provider, type ProviderEffect, type Route,
   Machine as ProviderMachine, machine as providerMachine
@@ -46,7 +46,8 @@ export service AiProvider {
   /** Read the host's provider and follow the session; runs for the app's life. */
   run(): void!!
   refresh(): void!!
-  /** Save own keys; both go straight to the native host and are never kept here. An empty voice key leaves it unchanged. */
+  /** Save own keys; both go straight to the native host and are never kept here. An empty voice key leaves it unchanged;
+   * an empty text key with a text key saved changes the voice key alone, keeping the text key and the route. */
   save(textKey: string, voiceKey: string): void!!
   choose(route: Route): void!!
   askRemove(key: KeyName): void!!
@@ -125,6 +126,19 @@ export const providerService = Layer.effect(AiProvider, effect {
     try follow()
   }
 
+  effect function editKeys() {
+    const before = try machine.get()
+    const keys = try Ref.get(typed)
+    try Ref.set(typed, { textKey: "", voiceKey: "" })
+    const answer = try change("editProviderKeys", { voiceKey: keys.voiceKey })
+    const outcome = changeOutcomeOf(answer.status, answer.failed, (status) => {
+      const read = readOf(status)
+      return read.voiceKey && read.textKey === before.textKey && read.route === before.route
+    })
+    try send({ type: "editSettled", result: outcome })
+    try follow()
+  }
+
   effect function selectRoute() {
     const before = try machine.get()
     const mode = before.target === "OwnRoute" ? "own" : "cloud"
@@ -160,6 +174,7 @@ export const providerService = Layer.effect(AiProvider, effect {
       match (effectOf) {
         when "ReadProvider": try readBack();
         when "SaveKeys": try saveKeys();
+        when "EditKeys": try editKeys();
         when "SelectRoute": try selectRoute();
         when "RemoveKey": try removeKey();
         when "RevealKey": try revealKey();
@@ -186,9 +201,10 @@ export const providerService = Layer.effect(AiProvider, effect {
     effect save(textKey: string, voiceKey: string) {
       const text = textKey.trim()
       const voice = voiceKey.trim()
-      if (!keyShaped(text) || (voice !== "" && !keyShaped(voice))) return
+      const voiceOnly = text === "" && keyShaped(voice)
+      if (!voiceOnly && (!keyShaped(text) || (voice !== "" && !keyShaped(voice)))) return
       try Ref.set(typed, { textKey: text, voiceKey: voice })
-      if (!(try send({ type: "save" }))) try Ref.set(typed, { textKey: "", voiceKey: "" })
+      if (!(try send(voiceOnly ? { type: "editVoice" } : { type: "save" }))) try Ref.set(typed, { textKey: "", voiceKey: "" })
     },
     effect choose(route: Route) {
       const p = try machine.get()

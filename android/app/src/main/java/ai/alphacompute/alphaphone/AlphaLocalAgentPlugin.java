@@ -580,6 +580,19 @@ private static final class ResidentAttachDiagnostic {
    }
   });
  }
+ /** Changes a saved key in place (spec/account/provider.md, "A voice key alone is changed in place, keeping the saved
+  * text key and the route"): an omitted key stays, and null or an empty value never means removal. */
+ @PluginMethod public void editProviderKeys(PluginCall call){
+  for(String field:new String[]{"textKey","voiceKey"})if(call.getData().has(field)&&!(call.getData().opt(field) instanceof String)){
+   call.reject("Enter a key or leave the field unchanged.");return;
+  }
+  if(!runtimePackaged()){call.reject("On-device agent is unavailable in this version.");return;}
+  changeProvider(call,store->{
+   String failure=NativeProviderSlot.editKeys(providerSlot(store),call.getString("expectedRevision"),
+    call.getString("textKey"),call.getString("voiceKey"),NativeProviderSlot::checkCerebrasKey);
+   if(failure!=null)throw new IllegalArgumentException("Provider validation refused");
+  });
+ }
  @PluginMethod public void removeProviderKey(PluginCall call){
   changeProvider(call,store->NativeProviderSlot.removeKey(providerSlot(store),call.getString("expectedRevision"),call.getString("key")));
  }
