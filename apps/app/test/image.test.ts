@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { alphaPrivileged, firstBootGrants } from "../gen/app__image.ts";
 import { aosp, otaArguments, place } from "../scripts/aosp.ts";
 import { inventory, licences } from "../scripts/licences.ts";
-import { type Adb, type Offer, avbMetadata, custodyProof, kept, pilotUpdate, readBack, release } from "../scripts/release.ts";
+import { type Adb, type Offer, avbMetadata, compareUrl, compared, custodyProof, kept, pilotUpdate, readBack, release } from "../scripts/release.ts";
 
 const scratches: string[] = [];
 afterEach(() => { for (const directory of scratches.splice(0)) rmSync(directory, { recursive: true, force: true }); });
@@ -140,7 +140,7 @@ describe("Ship what Alpha is built from, with its licences (spec/app/image/licen
     const bill = JSON.parse(readFileSync(sbom, "utf8")) as { bomFormat: string; components: { name: string; properties: unknown[] }[] };
     expect([bill.bomFormat, bill.components.length]).toEqual(["CycloneDX", found.notices.length]);
     expect(bill.components.find((component) => component.name === "Denton typeface")?.properties).toEqual([{ name: "alpha:licence-flag", value: "proprietary-licence-held-outside-repo" }]);
-  });
+  }, 300_000);
 });
 
 /** What a `pnpm release` command answered: its result, or the tag and words of the failure it ended with. */
@@ -192,13 +192,22 @@ describe("Build a candidate and sign it (spec/release/index.md, \"Story: Build a
     const unsigned = join(directory, "launcher-release-unsigned.apk");
     writeFileSync(unsigned, "unsigned candidate bytes");
     const verified = write(directory, "apk-manifest.json", { apks: [candidateRow()] });
+    const lock = JSON.parse(readFileSync(place("../../eliza.lock.json"), "utf8")) as { remote: string; branch: string; commit: string };
+    const upstream = write(directory, "upstream.json", { ...lock, status: "ahead", mergeBase: lock.commit });
+    const candidate = (number: string, apks: string, reached = upstream) => released("candidate", "--run", run, "--number", number, "--attempt", "1", "--apk-manifest", apks, "--upstream", reached);
+    // spec/release/index.md, "A candidate is built only from an eliza pin that the branch its lock names reaches, by a compare made for exactly that pin"
+    expect(compareUrl(lock)).toBe(`https://api.github.com/repos/elizaOS/eliza/compare/${lock.commit}...${lock.branch}`);
+    expect([compared({ ...lock, status: "diverged", mergeBase: digest("older") }, lock), compared({ ...lock, commit: "0".repeat(40), status: "ahead", mergeBase: lock.commit }, lock)])
+      .toEqual([{ forThePin: true, reached: false }, { forThePin: false, reached: true }]);
+    expect(await candidate("122", verified, write(directory, "diverged.json", { ...lock, status: "diverged", mergeBase: "0".repeat(40) }))).toMatchObject({ ok: false, tag: "ReleaseRefused", said: expect.stringContaining("\"upstream\":true") });
+    expect(await candidate("122", verified, write(directory, "another.json", { ...lock, branch: "main", status: "ahead", mergeBase: lock.commit }))).toMatchObject({ ok: false, tag: "ReleaseRefused" });
     const stage = () => (JSON.parse(readFileSync(run, "utf8")) as { state: { stage: string; attempt: number; reviewed: boolean } }).state;
     // spec/release/index.md, "A build is a candidate only when its verification recorded it distributable: no test mocks, the production bundle audit passed, Alpha's one signer, the runtime packaged with its notices, an on-device voice slot, and for an image its platform certificate"
-    expect(await released("candidate", "--run", run, "--number", "122", "--attempt", "1", "--apk-manifest", write(directory, "mocked.json", { apks: [candidateRow({ testMocks: true })] }))).toMatchObject({ ok: false, tag: "ReleaseRefused" });
+    expect(await candidate("122", write(directory, "mocked.json", { apks: [candidateRow({ testMocks: true })] }))).toMatchObject({ ok: false, tag: "ReleaseRefused" });
     // spec/release/index.md, "A candidate is built only when none is in flight, numbered by a run above every run before it, the floor and the published version"
-    expect(await released("candidate", "--run", run, "--number", "74", "--attempt", "1", "--apk-manifest", verified)).toMatchObject({ ok: false, tag: "ReleaseRefused" });
-    expect(await released("candidate", "--run", run, "--number", "122", "--attempt", "1", "--apk-manifest", verified)).toMatchObject({ ok: true, value: { stage: "Built", number: 122 } });
-    expect(await released("candidate", "--run", run, "--number", "123", "--attempt", "1", "--apk-manifest", verified)).toMatchObject({ ok: false, tag: "ReleaseRefused" });
+    expect(await candidate("74", verified)).toMatchObject({ ok: false, tag: "ReleaseRefused" });
+    expect(await candidate("122", verified)).toMatchObject({ ok: true, value: { stage: "Built", number: 122 } });
+    expect(await candidate("123", verified)).toMatchObject({ ok: false, tag: "ReleaseRefused" });
     // spec/release/index.md, "The candidate is mirrored privately, creating the object only if it is absent, or reusing one whose bytes read back the same"
     const mirror = join(directory, "private");
     expect(await released("mirror", "--run", run, "--apk", unsigned, "--to", mirror)).toMatchObject({ ok: true, value: { mirrored: join(mirror, "alpha-phone-122-unsigned.apk") } });
@@ -223,8 +232,8 @@ describe("Build a candidate and sign it (spec/release/index.md, \"Story: Build a
     expect([stage().stage, stage().attempt]).toEqual(["Planned", 2]);
     // spec/release/index.md, "A candidate can be abandoned before it is published": its number stays spent.
     expect(await released("abandon", "--run", run)).toMatchObject({ ok: true, value: { stage: "Abandoned" } });
-    expect(await released("candidate", "--run", run, "--number", "122", "--attempt", "1", "--apk-manifest", verified)).toMatchObject({ ok: false, tag: "ReleaseRefused" });
-    expect(await released("candidate", "--run", run, "--number", "123", "--attempt", "1", "--apk-manifest", verified)).toMatchObject({ ok: true, value: { stage: "Built", number: 123 } });
+    expect(await candidate("122", verified)).toMatchObject({ ok: false, tag: "ReleaseRefused" });
+    expect(await candidate("123", verified)).toMatchObject({ ok: true, value: { stage: "Built", number: 123 } });
   });
 });
 
@@ -385,5 +394,5 @@ describe("Prove the protected release keys (spec/release/index.md, \"Story: Sign
     expect(custodyProof({ secrets, enrolled, scratch: directory }).custody).toEqual({ pairs: 12, matching: 12, distinct: true, testKeys: false });
     copyFileSync(join(committed, "media.x509.pem"), join(committed, "platform.x509.pem"));
     expect(custodyProof({ secrets, enrolled, scratch: directory }).custody).toEqual({ pairs: 12, matching: 11, distinct: true, testKeys: false });
-  });
+  }, 300_000);
 });

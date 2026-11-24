@@ -73,11 +73,11 @@ before it is delivered.
 
 ```quint
 type Blockers = {
-  mocks: bool, audit: bool, signer: bool, runtime: bool, notices: bool, voice: bool, platform: bool,
+  mocks: bool, audit: bool, signer: bool, runtime: bool, notices: bool, voice: bool, platform: bool, upstream: bool,
 }
 
 pure val clear: Blockers = {
-  mocks: false, audit: false, signer: false, runtime: false, notices: false, voice: false, platform: false,
+  mocks: false, audit: false, signer: false, runtime: false, notices: false, voice: false, platform: false, upstream: false,
 }
 
 pure def distributable(b: Blockers): bool = b == clear
@@ -87,8 +87,25 @@ pure def distributable(b: Blockers): bool = b == clear
 
 ```quint
 pure def lawAnyBlockerKeepsTheBuildBack(blockers: Blockers): bool =
-  (blockers.mocks or blockers.audit or blockers.signer or blockers.runtime or blockers.notices or blockers.voice or blockers.platform)
-    implies not(distributable(blockers))
+  (blockers.mocks or blockers.audit or blockers.signer or blockers.runtime or blockers.notices or blockers.voice or blockers.platform
+    or blockers.upstream) implies not(distributable(blockers))
+```
+
+### A candidate is built only from an eliza pin that the branch its lock names reaches, by a compare made for exactly that pin
+
+The build reads eliza from the commit `eliza.lock.json` pins. Before the
+build becomes a candidate, the release owner's compare of that commit with
+the lock's branch is recorded: the pin must be the compare's base, on the
+same remote and branch, and the branch must contain it. A compare made for
+another commit or branch blocks the build as an unreached pin does.
+
+```quint
+type Compare = { forThePin: bool, reached: bool }
+
+pure def upstreamBlocks(compare: Compare): bool = not(compare.forThePin and compare.reached)
+
+pure def lawAnUnreachedPinIsNoCandidate(compare: Compare): bool =
+  upstreamBlocks(compare) implies not(distributable({ ...clear, upstream: upstreamBlocks(compare) }))
 ```
 
 ### A rerun keeps its number and takes a new attempt, before signing only
@@ -418,6 +435,7 @@ pure val nowValues = Set(0, 10, 23, 24, 30)
 pure val versionValues = Set(76, 77, 79)
 pure val namedValues = Set(0, 76, 77, 78, 80)
 pure val tookIt: Readback = { sameInstall: true, advanced: true, exact: true, selfInitiated: true, homeKept: true, offerKept: true }
+pure val compareValues = Set({ forThePin: true, reached: true }, { forThePin: true, reached: false }, { forThePin: false, reached: true })
 pure val custodyValues = Set({ pairs: 12, matching: 12, distinct: true, testKeys: false }, { pairs: 12, matching: 11, distinct: true, testKeys: false })
 pure val readbackValues = Set(tookIt).union(Set({ ...tookIt, selfInitiated: false })).union(Set({ ...tookIt, sameInstall: false }))
 pure val weight_build = 3

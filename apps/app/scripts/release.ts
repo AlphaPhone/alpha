@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// spec/release/index.md, "Story: Build a candidate"; spec/release/index.md, "Story: Sign a release"; spec/release/index.md, "Story: Qualify and publish a release"; spec/release/index.md, "A build is a candidate only when its verification recorded it distributable: no test mocks, the production bundle audit passed, Alpha's one signer, the runtime packaged with its notices, an on-device voice slot, and for an image its platform certificate"; spec/release/index.md, "An APK is admitted to the channel only as Alpha's launcher, first signed by Alpha's one key, at the candidate's version, not debuggable, of at most 2 GiB, and with only the entries a release may hold"; spec/release/index.md, "Phones read the launcher channel from the stable release of Alpha's repository, eliza-research/alpha, known by its permanent id; APKs kept under the repository's earlier names stay valid"; spec/release/index.md, "The anonymous download must return the exact size and digest before anything else moves"; spec/release/index.md, "The manifest is moved only after the download was verified, with the APK still in the channel's final inventory, the channel unchanged since publishing began, and the version above the floor and the published version as they are then"; spec/release/pilot.md, "Story: Update a pilot phone by cable"; spec/release/index.md, "Story: Read back a phone that updated itself"; spec/release/index.md, "The protected keys are proven to be the enrolled ones: each of the nine OS certificates, the two verified-boot keys and Alpha's app key pairs with its committed public identity, none is a test key, and no two are the same"
+// spec/release/index.md, "Story: Build a candidate"; spec/release/index.md, "Story: Sign a release"; spec/release/index.md, "Story: Qualify and publish a release"; spec/release/index.md, "A build is a candidate only when its verification recorded it distributable: no test mocks, the production bundle audit passed, Alpha's one signer, the runtime packaged with its notices, an on-device voice slot, and for an image its platform certificate"; spec/release/index.md, "An APK is admitted to the channel only as Alpha's launcher, first signed by Alpha's one key, at the candidate's version, not debuggable, of at most 2 GiB, and with only the entries a release may hold"; spec/release/index.md, "Phones read the launcher channel from the stable release of Alpha's repository, eliza-research/alpha, known by its permanent id; APKs kept under the repository's earlier names stay valid"; spec/release/index.md, "The anonymous download must return the exact size and digest before anything else moves"; spec/release/index.md, "The manifest is moved only after the download was verified, with the APK still in the channel's final inventory, the channel unchanged since publishing began, and the version above the floor and the published version as they are then"; spec/release/pilot.md, "Story: Update a pilot phone by cable"; spec/release/index.md, "Story: Read back a phone that updated itself"; spec/release/index.md, "A candidate is built only from an eliza pin that the branch its lock names reaches, by a compare made for exactly that pin"; spec/release/index.md, "The protected keys are proven to be the enrolled ones: each of the nine OS certificates, the two verified-boot keys and Alpha's app key pairs with its committed public identity, none is a test key, and no two are the same"
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { constants, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -15,8 +15,8 @@ import {
 import { Data, Effect } from "effect";
 import * as Channel from "../gen/release.ts";
 import {
-  type Apk, type Blockers, type Custody, type Readback, admitted, channelManifest, channelRepository, channelRepositoryId, channelTag, clear, distributable, earlierRepositories, maxApkBytes,
-  custodyProven, retiredTag, updatedItself,
+  type Apk, type Blockers, type Compare, type Custody, type Readback, admitted, channelManifest, channelRepository, channelRepositoryId, channelTag, clear, distributable, earlierRepositories, maxApkBytes,
+  custodyProven, retiredTag, updatedItself, upstreamBlocks,
 } from "../gen/release.ts";
 import { pilotPassed } from "../gen/app__image.ts";
 import * as Pilot from "../gen/release__pilot.ts";
@@ -27,6 +27,7 @@ const PACKAGE = "ai.alphacompute.alphaphone";
 const LAUNCHER_MARK = "android.permission.READ_CONTACTS";
 const KEYSTORE_PASSWORD = "ALPHA_APP_RELEASE_KEYSTORE_PASSWORD";
 const PILOT_LOCKS = join(homedir(), ".local", "state", "alpha-pilot");
+const ELIZA_LOCK = join(app, "../../eliza.lock.json");
 
 export class UsageError extends Data.TaggedError("UsageError")<{ readonly message: string }> {}
 export class ReleaseRefused extends Data.TaggedError("ReleaseRefused")<{ readonly message: string }> {}
@@ -36,7 +37,8 @@ const USAGE = [
   "pnpm release blockers --apk-manifest FILE [--platform-certificate HEX]",
   "pnpm release admit --apk FILE --version N",
   "pnpm release manifest --apk FILE --version N [--notes TEXT] --out NEW_FILE",
-  "pnpm release candidate --run FILE --number N --attempt N --apk-manifest FILE [--platform-certificate HEX]",
+  "pnpm release upstream --out NEW_FILE",
+  "pnpm release candidate --run FILE --number N --attempt N --apk-manifest FILE --upstream FILE [--platform-certificate HEX]",
   "pnpm release rerun|abandon --run FILE",
   "pnpm release mirror --run FILE --apk UNSIGNED --to DIR",
   "pnpm release plan --run FILE --apk UNSIGNED --out NEW_FILE",
@@ -116,6 +118,34 @@ export function blockersOf(reasons: readonly string[], signed: boolean): Blocker
     notices: any("RuntimeNoticesMissing", "LicenceUnrecorded", "LicenceBlocks"),
     voice: any("VoiceNotRecorded", "OnDeviceVoiceMissing", "VoiceAssetsUnverified", "VoiceUnqualified", "CloudPackagesVoice", "QaReceiptNotPassed"),
     platform: any("ImageCertificateUnreviewed"),
+    upstream: false,
+  };
+}
+
+/** The eliza source the build reads: a remote, the branch the pin follows, and the commit it pins. */
+export interface Lock { readonly remote: string; readonly branch: string; readonly commit: string }
+
+/** A recorded compare of a pin with its branch: the lock it was made for, and what GitHub answered. */
+export interface UpstreamRecord extends Lock { readonly status: string; readonly mergeBase: string }
+
+const elizaLock = (file: string = ELIZA_LOCK): Lock => {
+  const { remote, branch, commit } = JSON.parse(readFileSync(file, "utf8")) as Partial<Lock>;
+  if (typeof remote !== "string" || typeof branch !== "string" || typeof commit !== "string" || !/^[0-9a-f]{40}$/.test(commit)) throw new ReleaseRefused({ message: `${file} names no remote, branch and commit` });
+  return { remote, branch, commit };
+};
+
+/** Where GitHub compares `lock`'s commit, as base, with its branch. */
+export function compareUrl(lock: Lock) {
+  const repository = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+?)(?:\.git)?$/.exec(lock.remote)?.[1];
+  if (repository === undefined) throw new ReleaseRefused({ message: `${lock.remote} is not a GitHub repository` });
+  return `https://api.github.com/repos/${repository}/compare/${lock.commit}...${encodeURIComponent(lock.branch)}`;
+}
+
+/** Whether `record` is a compare made for exactly `lock`, and whether the branch contains the pinned commit. */
+export function compared(record: Partial<UpstreamRecord>, lock: Lock): Compare {
+  return {
+    forThePin: record.remote === lock.remote && record.branch === lock.branch && record.commit === lock.commit,
+    reached: record.mergeBase === lock.commit && (record.status === "identical" || record.status === "ahead"),
   };
 }
 
@@ -154,7 +184,7 @@ function recordedBlockers(file: string, platform: string | undefined, signed: bo
   const rows = (recorded.apks ?? []).map((row) => blockersOf(apkReleaseBlockers(row, review), signed));
   const all = rows.reduce<Blockers>((sum, row) => ({
     mocks: sum.mocks || row.mocks, audit: sum.audit || row.audit, signer: sum.signer || row.signer, runtime: sum.runtime || row.runtime,
-    notices: sum.notices || row.notices, voice: sum.voice || row.voice, platform: sum.platform || row.platform,
+    notices: sum.notices || row.notices, voice: sum.voice || row.voice, platform: sum.platform || row.platform, upstream: sum.upstream || row.upstream,
   }), clear);
   return { rows: rows.length, blockers: rows.length === 0 ? { ...clear, audit: true } : all };
 }
@@ -243,11 +273,21 @@ const commands = {
     yield* attempt(() => writeFileSync(out, `${JSON.stringify(manifest, null, 2)}\n`, { flag: "wx" }));
     return manifest;
   }),
+  upstream: (argv: readonly string[]) => Effect.gen(function* () {
+    const [out = ""] = yield* attempt(() => flags(argv, ["out"]).need("out"));
+    const lock = yield* attempt(() => elizaLock());
+    const answer = JSON.parse(new TextDecoder().decode(yield* fetched(compareUrl(lock)))) as { readonly status?: string; readonly merge_base_commit?: { readonly sha?: string } };
+    const record: UpstreamRecord = { ...lock, status: answer.status ?? "", mergeBase: answer.merge_base_commit?.sha ?? "" };
+    yield* attempt(() => writeFileSync(out, `${JSON.stringify(record, null, 2)}\n`, { flag: "wx" }));
+    if (upstreamBlocks(compared(record, lock))) return yield* new ReleaseRefused({ message: `${lock.branch} does not reach the eliza pin ${lock.commit}; the compare is ${out}` });
+    return record;
+  }),
   candidate: (argv: readonly string[]) => Effect.gen(function* () {
-    const found = yield* attempt(() => flags(argv, ["run", "number", "attempt", "apk-manifest", "platform-certificate"]));
-    const [file = "", number = "", tried = "", recorded = ""] = yield* attempt(() => found.need("run", "number", "attempt", "apk-manifest"));
+    const found = yield* attempt(() => flags(argv, ["run", "number", "attempt", "apk-manifest", "upstream", "platform-certificate"]));
+    const [file = "", number = "", tried = "", recorded = "", upstream = ""] = yield* attempt(() => found.need("run", "number", "attempt", "apk-manifest", "upstream"));
+    const reached = compared(yield* attempt(() => JSON.parse(readFileSync(upstream, "utf8")) as Partial<UpstreamRecord>), yield* attempt(() => elizaLock()));
     const event = { type: "build" as const, number: yield* attempt(() => whole(number, "number")), attempt: yield* attempt(() => whole(tried, "attempt")),
-      blockers: (yield* attempt(() => recordedBlockers(recorded, found.values["platform-certificate"], false))).blockers };
+      blockers: { ...(yield* attempt(() => recordedBlockers(recorded, found.values["platform-certificate"], false))).blockers, upstream: upstreamBlocks(reached) } };
     const run = yield* attempt(() => runOf(file));
     const floor = (yield* attempt(() => signerRecord())).lastRelease?.versionCode ?? 0;
     if (run.can({ type: "retainElsewhere", version: floor })) yield* attempt(() => run.take({ type: "retainElsewhere", version: floor }));

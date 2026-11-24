@@ -48,7 +48,8 @@ jobs:
         working-directory: apps/app
         run: |
           private="$RUNNER_TEMP/candidate"
-          pnpm -s release candidate --run "$private/run.json" --number "${{ github.run_number }}" --attempt "${{ github.run_attempt }}" --apk-manifest artifacts/apk-manifest.json
+          pnpm -s release upstream --out "$private/upstream.json"
+          pnpm -s release candidate --run "$private/run.json" --number "${{ github.run_number }}" --attempt "${{ github.run_attempt }}" --apk-manifest artifacts/apk-manifest.json --upstream "$private/upstream.json"
           pnpm -s release mirror --run "$private/run.json" --apk artifacts/launcher-release-unsigned.apk --to "$private"
           pnpm -s release plan --run "$private/run.json" --apk artifacts/launcher-release-unsigned.apk --out "$private/plan.json" | tee "$private/plan-answer.json"
           echo "Signing plan: \`$(node -p 'require(process.argv[1]).planSha256' "$private/plan-answer.json")\`" >> "$GITHUB_STEP_SUMMARY"
