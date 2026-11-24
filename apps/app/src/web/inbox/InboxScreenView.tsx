@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import { ChevronLeft, PenSquare, Search } from "lucide-react";
 import { useState } from "react";
 import { readable, showsConnect, mayChangeMail, type MailAccounts } from "../../../gen/inbox__accounts.ts";
-import { visibleFolders, draftsView, type Folder, type Mailbox as MailboxState } from "../../../gen/inbox__mailbox.ts";
+import { visibleFolders, draftsView, searchShown, type Folder, type Mailbox as MailboxState } from "../../../gen/inbox__mailbox.ts";
 import type { MailLink, Reader as ReaderState } from "../../../gen/inbox__reader.ts";
 import { accountOf, hasDraft, saysNotKept, type Drafts } from "../../../gen/inbox__drafts.ts";
 import { recordOf, kindAllowed, isComposerKind, type Journal } from "../../../gen/inbox__operations.ts";
@@ -65,8 +65,8 @@ export interface InboxScreenViewProps extends ScreenProps {
  */
 export function InboxScreenView({ onClose, accounts, mailbox, reader, drafts, journal, selection, reviewLayer, linkLayer, draftsKept, composerReloads, act, answer }: InboxScreenViewProps) {
   const [notice, setNotice] = useState("");
-  const [search, setSearch] = useState({ shown: mailbox.query, open: mailbox.query !== "", text: mailbox.query });
-  if (search.shown !== mailbox.query) setSearch({ shown: mailbox.query, open: mailbox.query !== "", text: mailbox.query });
+  const [search, setSearch] = useState({ shown: mailbox.query, text: mailbox.query });
+  if (search.shown !== mailbox.query) setSearch({ shown: mailbox.query, text: mailbox.query });
   const reviewOpen = reviewLayer.open;
   const setReviewOpen = (open: boolean) => (open ? reviewLayer.show() : reviewLayer.hide());
   const [busy, setBusy] = useState(false);
@@ -99,7 +99,6 @@ export function InboxScreenView({ onClose, accounts, mailbox, reader, drafts, jo
   const back = () => answer(inboxBack(), (step) => {
     if (step.refusal !== undefined) say(composerRefusal[step.refusal]);
     if (step.taken) return;
-    if (search.open) { setSearch({ ...search, open: false, text: "" }); return; }
     onClose();
   });
 
@@ -161,11 +160,11 @@ export function InboxScreenView({ onClose, accounts, mailbox, reader, drafts, jo
               </DropdownMenuContent>
             </DropdownMenu>
             <div className="ml-auto flex items-center gap-1">
-              {search.open ? (
+              {searchShown(mailbox) ? (
                 <form role="search" onSubmit={(event) => { event.preventDefault(); act(Effect.flatMap(Effect.service(Mailbox), (m) => m.search(search.text))); }}>
                   <Input aria-label="Search mail" autoFocus value={search.text} onChange={(event) => setSearch({ ...search, text: event.currentTarget.value })} className="w-40" />
                 </form>
-              ) : <Button size="icon" variant="ghost" aria-label="Search" onClick={() => setSearch({ ...search, open: true })}><Search aria-hidden /></Button>}
+              ) : <Button size="icon" variant="ghost" aria-label="Search" onClick={() => act(Effect.flatMap(Effect.service(Mailbox), (m) => m.openSearch()))}><Search aria-hidden /></Button>}
               <Button size="icon" variant="ghost" aria-label="New email" disabled={drafts.owner === ""} onClick={() => answer(Effect.flatMap(Effect.service(MailComposer), (c) => c.compose()), (r) => say(r && composerRefusal[r]))}><PenSquare aria-hidden /></Button>
             </div>
           </header>

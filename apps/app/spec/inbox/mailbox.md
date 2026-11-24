@@ -25,12 +25,12 @@ type ListPhase = ListIdle | ListLoading | ListReady | ListFailed
 type Mailbox = {
   account: str, epoch: int, folder: Folder, query: str, generation: int, phase: ListPhase, loadingMore: bool,
   rows: List[MailRow], drafts: List[DraftRow], seen: List[str], cursor: str, asked: str, firstRevision: str,
-  newerMail: bool, cached: bool, failure: FailureKind, spamTrash: bool, localDraftsOnly: bool
+  newerMail: bool, cached: bool, failure: FailureKind, spamTrash: bool, localDraftsOnly: bool, searchOpen: bool
 }
 pure val initial: Mailbox = {
   account: "", epoch: 0, folder: InboxFolder, query: "", generation: 0, phase: ListIdle, loadingMore: false,
   rows: List(), drafts: List(), seen: List(), cursor: "", asked: "", firstRevision: "",
-  newerMail: false, cached: false, failure: NoFailure, spamTrash: false, localDraftsOnly: false
+  newerMail: false, cached: false, failure: NoFailure, spamTrash: false, localDraftsOnly: false, searchOpen: false
 }
 pure def canShow(s: Mailbox, account: str, epoch: int, folder: Folder, query: str): bool =
   account != "" and (account != s.account or epoch != s.epoch or folder != s.folder or query != s.query)
@@ -42,6 +42,24 @@ pure def alwaysADetachedListIsEmpty(s: Mailbox): bool = s.account != "" or (s.ro
 pure val accountValues = Set("a", "b")
 pure val epochValues = Set(1, 2)
 pure val queryValues = Set("", "invoice")
+```
+
+### Back closes an open search, with or without a query
+
+The search field is open while the owner has opened it or a search is listed. Back with a search
+listed returns to its folder and closes the field; Back with the field open and nothing searched yet
+closes the field. Either way Back is the Inbox's, not the shell's.
+
+```quint
+pure def searchShown(s: Mailbox): bool = s.searchOpen or s.query != ""
+pure def canOpenSearch(s: Mailbox): bool = s.account != "" and not(searchShown(s))
+pure def openSearch(s: Mailbox): Mailbox = { ...s, searchOpen: true }
+pure def canCloseSearch(s: Mailbox): bool = s.searchOpen and s.query == ""
+pure def closeSearch(s: Mailbox): Mailbox = { ...s, searchOpen: false }
+pure def stepClosingASearchChangesOnlyTheField(before: Mailbox, via: str, after: Mailbox): bool =
+  via == "closeSearch" implies (after == { ...before, searchOpen: false } and not(searchShown(after)))
+pure def alwaysAnOpenSearchHasAnAccount(s: Mailbox): bool = not(s.searchOpen) or s.account != ""
+pure def sometimesSearchOpenEmpty(s: Mailbox): bool = s.searchOpen and s.query == ""
 ```
 
 ### Folders map to fixed Gmail searches, and Spam and Trash appear only where supported

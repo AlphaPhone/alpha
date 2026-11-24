@@ -19,6 +19,7 @@ export const meta: ComponentMeta<InboxScreenViewProps> = {
     SignedOut: { accounts: signedOutAccounts },
     ConnectGmail: { accounts: noGmail },
     Empty: { mailbox: emptyList },
+    SearchOpen: { mailbox: { ...inboxList, searchOpen: true } },
     LongList: { mailbox: longList },
     ReadFailed: { mailbox: failedList },
     ReadOnlyAccount: { accounts: personalSelected },

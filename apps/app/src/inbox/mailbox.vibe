@@ -19,7 +19,9 @@ export service Mailbox {
   setFolder(folder: Folder): void!!
   /** Searches the selected account; an empty query returns to the folder. */
   search(query: string): void!!
-  /** Leaves a search for its folder; false when no search was shown. */
+  /** Opens the search field. */
+  openSearch(): void!!
+  /** Leaves a search for its folder, or closes an open search field with nothing searched; false when neither was shown. */
   endSearch(): boolean!!
   /** Reads the first page again. */
   load(): void!!
@@ -201,9 +203,12 @@ export const layer = Layer.effect(Mailbox, effect {
       const s = try machine.get()
       try showSelection(s.folder, query.trim())
     },
+    effect openSearch() {
+      try send({ type: "openSearch" })
+    },
     effect endSearch() {
       const s = try machine.get()
-      if (s.query === "") return false
+      if (s.query === "") return (try send({ type: "closeSearch" })) !== undefined
       try showSelection(s.folder, "")
       return true
     },

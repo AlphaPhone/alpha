@@ -317,6 +317,23 @@ it.live("Send from another of my accounts: a new email moves and the selection f
   }
 })
 
+// spec/inbox/mailbox.md, "Back closes an open search, with or without a query"
+it.live("Back closes an open search field with nothing searched, and is the shell's once it is closed", () => effect {
+  const log = calls()
+  provide inboxApp(log, mailCloud(log)) {
+    const mailbox = try Mailbox
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try mailbox.openSearch()
+    const opened = (try mailbox.get()).searchOpen
+    const fromField = try inboxBack()
+    const closed = (try mailbox.get()).searchOpen
+    const atList = try inboxBack()
+    try Effect.try(() => assert.deepStrictEqual(
+      { opened, fromField: fromField.taken, closed, atList: atList.taken },
+      { opened: true, fromField: true, closed: false, atList: false }))
+  }
+})
+
 // spec/inbox/drafts.md, "Opening a Gmail draft opens its local copy when there is one, and otherwise sets the open draft aside first"
 it.live("Continue a Gmail draft here as a local draft bound to it", () => effect {
   const log = calls()
