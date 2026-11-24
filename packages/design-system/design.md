@@ -19,7 +19,7 @@ do next.
 - **Type.** `font-sans` is Public Sans, for everything read or pressed. `font-display` is Denton, with
   Fraunces behind it, at weight `light`: a screen's one title, the date on Home, a large figure. The sizes
   are in rem, so Android's text size scales them: `base` is body text, `3xl` a screen title, `4xl` the
-  Home date, `5xl` and `6xl` the public site's headline on a narrow and a wide screen. `tracking-caps` with `text-xs` is a small uppercase label.
+  Home date. `tracking-caps` with `text-xs` is a small uppercase label.
 - **Shape.** `radius` is a card or a row group; `rounded-tile` an app tile, a menu and a dialog;
   `rounded-sheet` the top of a bottom sheet; `rounded-full` a button, a chip and the Ask Alpha bar.
   Everything pressed is at least 44px in both directions.
@@ -29,8 +29,7 @@ do next.
   dialog, `z-toast` a notice, `z-voice` the voice overlay. `z-10`, `z-20` and `z-50` order things inside one view.
 - **Motion.** `fast` for press, `base` for most changes, `slow` for entering and leaving, on
   `ease-standard`; `animate-rise` brings in a sheet, `animate-drop` a menu, `animate-fade` a screen,
-  `animate-shimmer` work in progress; on the public site `animate-float` sways the phone, `animate-enter`
-  brings in a chat message and `animate-typing` bobs a typing dot. Reduced motion stops them all.
+  `animate-shimmer` work in progress. Reduced motion stops them all.
 - **Width.** Layout follows the measured width, not the orientation: from `md` a centered reading
   column, from `lg` a list beside its detail.
 - **Dark.** Follows the system; a `.dark` or `.light` class on an ancestor overrides it.
@@ -109,12 +108,6 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.4xl.size` | 2.5rem |
 | `text.4xl.leading` | 1.08 |
 | `text.4xl.tracking` | -0.01em |
-| `text.5xl.size` | 3.25rem |
-| `text.5xl.leading` | 1.04 |
-| `text.5xl.tracking` | -0.05em |
-| `text.6xl.size` | 5.5rem |
-| `text.6xl.leading` | 1.04 |
-| `text.6xl.tracking` | -0.06em |
 | `weight.light` | 300 |
 | `weight.normal` | 400 |
 | `weight.medium` | 500 |
@@ -145,16 +138,10 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `keyframes.drop` | from{opacity:0;transform:translateY(-2.25rem)}to{opacity:1;transform:none} |
 | `keyframes.fade` | from{opacity:0}to{opacity:1} |
 | `keyframes.shimmer` | from{background-position:200% 0}to{background-position:-200% 0} |
-| `keyframes.float` | 0%,100%{transform:translateY(0) rotateZ(-9deg) rotateX(9deg) rotateY(-17deg)}50%{transform:translateY(-0.55rem) rotateZ(-6deg) rotateX(5deg) rotateY(-10deg)} |
-| `keyframes.typing` | 0%,100%{opacity:0.45;transform:none}50%{opacity:1;transform:translateY(-0.2em)} |
-| `keyframes.enter` | from{opacity:0;transform:translateY(0.5em)}to{opacity:1;transform:none} |
 | `animate.rise` | rise 460ms cubic-bezier(0.19, 1, 0.22, 1) both |
 | `animate.drop` | drop 500ms cubic-bezier(0.19, 1, 0.22, 1) both |
 | `animate.fade` | fade 700ms ease both |
 | `animate.shimmer` | shimmer 2s linear infinite |
-| `animate.float` | float 12s ease-in-out infinite |
-| `animate.typing` | typing 650ms ease-in-out 2 both |
-| `animate.enter` | enter 400ms ease both |
 | `breakpoint.sm` | 40rem |
 | `breakpoint.md` | 47.5rem |
 | `breakpoint.lg` | 62.5rem |

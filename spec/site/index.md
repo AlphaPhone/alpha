@@ -77,7 +77,8 @@ pure def pick(d: Demo, scene: Scene, now: int): Demo =
 
 ### Pausing keeps the time the beat has left, and playing again goes on from it
 
-A page out of sight pauses the same way, and shown again goes on.
+A page out of sight pauses the same way, and shown again goes on. The
+phone's sway pauses with the demo, and goes on with it.
 
 ```quint
 pure def timed(now: int, before: Demo, after: Demo): Demo =

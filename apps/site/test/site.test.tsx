@@ -58,10 +58,14 @@ function shown(visible: boolean) {
 
 const at = (demo: Demo) => [demo.scene, demo.beat, demo.whole, demo.playing];
 
+const phone = () => document.querySelector('[role="img"][aria-label^="Alpha Home"]')!;
+
+const swaying = () => !phone().classList.contains("[animation-play-state:paused]");
+
 const chat = () => {
-  const phone = document.querySelector('[role="img"][aria-label^="Alpha Home"]')!;
-  const text = phone.textContent ?? "";
-  return [text.includes("What’s on my calendar today?"), phone.querySelectorAll("i").length === 3, text.includes("Two things this afternoon."), phone.querySelectorAll("time").length];
+  const screen = phone();
+  const text = screen.textContent ?? "";
+  return [text.includes("What’s on my calendar today?"), screen.querySelectorAll("i").length === 3, text.includes("Two things this afternoon."), screen.querySelectorAll("time").length];
 };
 
 describe('Watch Alpha at work (spec/site/index.md, "Story: Watch Alpha at work")', () => {
@@ -80,19 +84,24 @@ describe('Watch Alpha at work (spec/site/index.md, "Story: Watch Alpha at work")
 
   it('pauses and goes on, out of sight too, and shows a picked scene (spec/site/index.md, "Pausing keeps the time the beat has left, and playing again goes on from it")', async () => {
     const { later, until, state, press } = await open();
+    const swayed = [swaying()];
     await later(1_000);
     await press("Pause automatic playback");
     await later(10_000);
     expect([at(await state()), (await state()).left]).toEqual([["Home", 0, false, false], 1_700]);
+    swayed.push(swaying());
     await press("Pause automatic playback");
+    swayed.push(swaying());
     await later(1_700, (demo) => demo.scene === "Chat");
 
     shown(false);
     await until((demo) => demo.hidden);
     await later(10_000);
     expect(at(await state())).toEqual(["Chat", 0, false, true]);
+    swayed.push(swaying());
     shown(true);
     await later(410, (demo) => demo.beat === 1);
+    expect([...swayed, swaying()]).toEqual([true, false, true, false, true]);
 
     // spec/site/index.md, "A scene the visitor picks is shown from its start, and whole where the demo is not playing or the visitor asks for less motion"
     await press("Show Calendar");

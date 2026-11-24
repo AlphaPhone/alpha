@@ -26,7 +26,7 @@ const events = [
 ] as const;
 
 function Conversation({ demo }: { demo: Demo }) {
-  const enter = !demo.whole && "motion-safe:animate-enter";
+  const enter = !demo.whole && "motion-safe:animate-[enter_400ms_ease_both]";
   const at = (part: Part) => shown(demo, part);
   return (
     <>
@@ -39,7 +39,7 @@ function Conversation({ demo }: { demo: Demo }) {
         )}
         {at("Typing") && (
           <div className={cn("absolute mt-[1em] flex items-center gap-[0.28em] rounded-xl bg-muted p-[0.72em]", enter)}>
-            {[0, 1, 2].map((dot) => <i key={dot} className="size-[0.31em] rounded-full bg-muted-foreground motion-safe:animate-typing" style={{ animationDelay: `${dot * 110}ms` }} />)}
+            {[0, 1, 2].map((dot) => <i key={dot} className="size-[0.31em] rounded-full bg-muted-foreground motion-safe:animate-[typing_650ms_ease-in-out_2_both]" style={{ animationDelay: `${dot * 110}ms` }} />)}
           </div>
         )}
         {at("Answered") && <p className={cn("mt-[1em] mb-[0.6em] font-medium", enter)}>Two things this afternoon.</p>}
@@ -59,7 +59,7 @@ export function Site({ runtime }: SiteProps) {
   const { state, can, send } = useMachine(runtime);
   const demo = state ?? initial;
   const toggle = { type: "toggle", now: untimed } as const;
-  const still = !running(demo) && "[&_*]:[animation-play-state:paused]";
+  const still = !running(demo) && "[animation-play-state:paused] [&_*]:[animation-play-state:paused]";
   return (
     <div className="mx-auto max-w-[94rem] px-[clamp(1.5rem,5vw,4.5rem)]">
       <header className="flex min-h-19 items-center justify-between md:min-h-22">
@@ -73,10 +73,10 @@ export function Site({ runtime }: SiteProps) {
       </header>
       <main className="grid min-h-[calc(100svh-5.5rem)] items-center gap-7 py-6 md:grid-cols-[0.83fr_1.17fr] md:gap-[clamp(1.75rem,4.3vw,4.5rem)] md:pt-2 md:pb-11">
         <div className="text-center md:ps-[clamp(0rem,1.25vw,1rem)] md:text-left">
-          <h1 className="text-5xl font-semibold xl:text-6xl">
+          <h1 className="font-semibold [font-size:clamp(3.25rem,11vw,5.25rem)] leading-none [letter-spacing:-0.062em] [word-spacing:0.045em] md:[font-size:clamp(3.25rem,6.05vw,6.5rem)] md:[line-height:1.04]">
             Your phone.
             <br />
-            <em className="font-display font-light text-primary not-italic">Your agent.</em>
+            <em className="font-display font-light text-primary not-italic [font-size:1.11em] [letter-spacing:-0.057em]">Your agent.</em>
           </h1>
           <a className="mt-4 inline-flex gap-1 text-base text-muted-foreground hover:text-primary md:mt-[clamp(1.25rem,4vw,2.625rem)]" href="https://alphacompute.ai/">
             Built by <strong className="font-semibold text-foreground underline decoration-border underline-offset-4">Alpha Compute</strong>
@@ -90,7 +90,7 @@ export function Site({ runtime }: SiteProps) {
           <div
             role="img"
             aria-label="Alpha Home, a chat asking about today’s calendar, and the Calendar app on a phone."
-            className={cn("relative mb-16 aspect-[370/813] w-[clamp(10rem,55vw,16rem)] -rotate-z-9 rotate-x-9 -rotate-y-17 transform-3d motion-safe:animate-float md:mb-13 md:w-[clamp(13rem,min(23vw,calc((100svh-15rem)*0.45)),20rem)]", still)}
+            className={cn("relative mb-16 aspect-[370/813] w-[clamp(10rem,55vw,16rem)] -rotate-z-9 rotate-x-9 -rotate-y-17 transform-3d motion-safe:animate-[float_12s_ease-in-out_infinite] md:mb-13 md:w-[clamp(13rem,min(23vw,calc((100svh-15rem)*0.45)),20rem)]", still)}
           >
             <div className="absolute inset-0 -translate-z-[15px] rounded-sheet bg-foreground shadow-lg" />
             <div className="absolute inset-0 -translate-z-[7px] rounded-sheet bg-linear-[154deg] from-muted-foreground via-foreground to-muted-foreground ring-1 ring-background/45 ring-inset" />
