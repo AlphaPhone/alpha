@@ -249,13 +249,7 @@ pure def sometimesDraftedInsteadOfSent(a: Actions): bool = kindOf(a.ongoing) == 
 Opening the keypad, a conversation with Alpha's draft, or a filtered Contacts list shows what an
 approved or direct action did. It runs at once when no chat request is in flight, and otherwise
 only once the request carrying the action's reply has ended, so it never reads as the owner
-leaving and never stops that reply (#1433). Nothing is dialed or sent by it. It opens the view the
-way the assistant opens one, keeping the chat at the height it had: while a voice conversation runs,
-the change is that conversation's own claimed screen ([voice](../voice/conversation.md), "Voice
-stays on through a screen change only when the agent claimed it, the screen pinned its context and
-the change was delivered with exactly that context"), as a spoken VIEWS move is, so a spoken request
-for the keypad, a filtered Contacts list or a draft in another conversation keeps talking there
-instead of reading as the owner leaving (#1453).
+leaving and never stops that reply (#1433). Nothing is dialed or sent by it.
 
 ```quint
 type ReplyState = ReplyInFlight | ReplySettled

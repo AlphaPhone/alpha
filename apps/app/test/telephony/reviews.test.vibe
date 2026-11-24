@@ -1,12 +1,8 @@
-// spec/telephony/actions.md, "A name is looked up on the phone and the owner picks the exact number, even for one match"; spec/telephony/actions.md, "A view change that shows the outcome waits for the reply that carries it"
-import type { ExecutorCall } from "@elizaos/agent/client"
+// spec/telephony/actions.md, "A name is looked up on the phone and the owner picks the exact number, even for one match"
 import { assert, it } from "@effect/vitest"
 import type { ContactDetail, ContactId, ContactVersion } from "@elizaos/os/bridges/contacts"
 import { Machine as ActionsMachine } from "../../gen/telephony__actions.effect.vibe"
-import { AssistantHost } from "../../src/assistant/host.vibe"
 import { changeLines, TelephonyActions } from "../../src/telephony/actions.vibe"
-import { operationPorts } from "../../src/telephony/operations.vibe"
-import { TelephonyCalls } from "../../src/telephony/ports.vibe"
 import { fakePhone, until } from "./fakes.vibe"
 
 const maya: ContactDetail = {
@@ -66,29 +62,6 @@ it.live("a new contact's number saved under another name is shown before it is a
         added: "Applied",
         looked: ["holders:4155550199", "holders:4155550177"],
       },
-    ))
-  }
-})
-
-// spec/telephony/actions.md, "A view change that shows the outcome waits for the reply that carries it"
-it.live("a keypad step opens the way the assistant opens a view, so a voice conversation claims it instead of being left", () => effect {
-  const fake = fakePhone()
-  const opened: string[] = []
-  const host = Layer.succeed(AssistantHost, {
-    openView: (app: string, route?: string) => sync(() => { opened.push(`${app}:${route ?? ""}`); return true }),
-  } as unknown as AssistantHost.Shape)
-  const calls = Layer.succeed(TelephonyCalls, { of: () => succeed({ reviewed: true, ownerText: "open the keypad with 415-555-0100" }), settled: () => Effect.void })
-  provide Layer.mergeAll(fake.layer, host, calls) {
-    const ports = try operationPorts
-    const call = { proposalId: "p-keypad", operationId: "op-keypad", attemptId: 1 } as unknown as ExecutorCall
-    const keypad = { type: "phone_keypad", number: "4155550100" }
-    const ran = try promise(() => ports.execute(keypad, call))
-    const before = [...opened]
-    ports.present?.(keypad, call)
-    try sleep("30 millis")
-    try Effect.try(() => assert.deepStrictEqual(
-      { ran: (ran as { readonly kind?: string } | undefined)?.kind, before, opened, plain: fake.calls.filter((c) => c.startsWith("navigation.open:")) },
-      { ran: "applied", before: [], opened: ["phone:keypad:4155550100"], plain: [] },
     ))
   }
 })
