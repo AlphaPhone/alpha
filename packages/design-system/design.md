@@ -27,6 +27,7 @@ do next.
   digit and `text-keypad-letters` the letters under it; `text-contact-name` and `text-contact-initials`, in
   `font-display`, are a contact's name and initials at the top of their card. `text-lead` is the street of the next turn,
   `text-title` a document's name over its preview, and `text-figure` and `text-figure-sm` a route's time.
+  `leading-row` sets `text-body` as a note's or a routine's title in a list.
 - **Shape.** `radius` is a card or a row group; `rounded-home-card` is a Home overview card;
   `rounded-drawer-icon` rounds an installed app icon; `rounded-option` is a row of a floating menu and
   `rounded-box` the box of a list row's selection check. `rounded-tile` is an app tile, a menu and a dialog;
@@ -165,6 +166,7 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `leading.none` | 1 |
 | `leading.tight` | 1.1 |
 | `leading.snug` | 1.25 |
+| `leading.row` | 1.3 |
 | `leading.normal` | 1.4 |
 | `leading.relaxed` | 1.6 |
 | `tracking.tight` | -0.01em |
