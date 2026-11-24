@@ -86,8 +86,9 @@ final class AlphaFreshPresets {
             if (result == AlphaFreshSetupPolicy.NavigationResult.FAILED) {
                 Log.w("AlphaFreshPresets", "Gesture navigation default was not applied.");
             }
-        } catch (IllegalStateException | SecurityException failure) {
-            // The system's button navigation remains available if this image cannot select gestures.
+        } catch (RuntimeException failure) {
+            // Overlay calls can also fail with system-server or unknown-package runtime errors;
+            // none may stop setup, and the system's button navigation remains available.
             Log.w("AlphaFreshPresets", "Gesture navigation default was unavailable.", failure);
         }
     }
