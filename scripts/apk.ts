@@ -156,10 +156,14 @@ function policyProblems(apk: DistributionInput, facts: ManifestFacts, exportedCo
   if (facts.application.usesCleartextTraffic !== AAPT_FALSE)
     problems.push(`usesCleartextTraffic must be false (found ${facts.application.usesCleartextTraffic ?? "unset"})`);
   if (mode === "release") {
-    // Upstream's build type: a release APK is a declared, non-debuggable application.
+    // Upstream's build type: a release APK is a declared, non-debuggable application. Upstream reads only
+    // aapt2's 0xffffffff as debuggable; Android treats any nonzero boolean (or a resource reference) as
+    // true, so Alpha admits only an absent or explicitly false android:debuggable.
     const buildType = buildTypeOf(apk.xml);
-    if (buildType !== "ReleaseBuild")
-      problems.push(buildType === "DebuggableBuild" ? "Release APK is debuggable" : "Release APK declares no application, so its build type is unread");
+    const debuggable = facts.application.debuggable;
+    if (buildType === "BuildTypeUnread") problems.push("Release APK declares no application, so its build type is unread");
+    else if (buildType === "DebuggableBuild") problems.push("Release APK is debuggable");
+    else if (debuggable !== null && debuggable !== AAPT_FALSE) problems.push(`Release APK is debuggable (android:debuggable=${debuggable})`);
     if (!facts.application.networkSecurityConfig) problems.push("Release manifest has no networkSecurityConfig");
   }
   if (facts.application.allowBackup !== AAPT_FALSE)
@@ -274,7 +278,7 @@ export function archiveFacts({ badging, xml, names }: {badging: string; xml: str
     packageName: /package: name='([^']+)'/.exec(badging)?.[1],
     home: xml.includes("android.intent.category.HOME"),
     launcher: xml.includes("android.intent.category.LAUNCHER"),
-    debuggable: buildTypeOf(xml) === "DebuggableBuild",
+    debuggable: buildTypeOf(xml) === "DebuggableBuild" || ![null, AAPT_FALSE].includes(manifestFacts(xml).application.debuggable),
     webPayload: names.includes(WEB_PAYLOAD_INDEX),
   };
 }

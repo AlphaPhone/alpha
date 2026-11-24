@@ -9,7 +9,7 @@ function assess({appId="ai.alphacompute.alphaphone",policyAppId=appId,name='.Alp
     A: android:allowBackup=(type 0x12)0x0
     A: android:usesCleartextTraffic=(type 0x12)0x0
     A: android:networkSecurityConfig=@0x7f010001
-${debuggable ? '    A: android:debuggable(0x0101000f)=(type 0x12)0xffffffff\n' : ''}    E: ${tag}
+${debuggable === true ? '    A: android:debuggable(0x0101000f)=(type 0x12)0xffffffff\n' : debuggable ? `    A: android:debuggable(0x0101000f)=${debuggable}\n` : ''}    E: ${tag}
       A: android:name="${name}"
       A: android:exported=(type 0x12)0xffffffff
       ${permission ? `A: android:permission="${permission}"` : ''}
@@ -21,6 +21,10 @@ test('release admits the exact platform-protected Power activity', () => {
 });
 test('release refuses a debuggable build', () => {
   assert.deepEqual(assess({debuggable:true}), ['Release APK is debuggable']);
+  // Android reads any nonzero boolean, and a resource reference, as true; only an explicit false is admitted.
+  for (const value of ['(type 0x12)0x1', '@0x7f050001'])
+    assert.deepEqual(assess({debuggable:value}), [`Release APK is debuggable (android:debuggable=${value.replace('(type 0x12)', '')})`], value);
+  assert.deepEqual(assess({debuggable:'(type 0x12)0x0'}), []);
 });
 test('release refuses unprotected or incorrectly protected Power entry', () => {
   for (const permission of ['', 'android.permission.INTERNET', 'android.permission.BIND_QUICK_SETTINGS_TILE'])
