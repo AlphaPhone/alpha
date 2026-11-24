@@ -9,7 +9,8 @@ read can outlast a hide, a departure, a busy start or another review. Only
 the same visible visit, free and with no review open, may then act, and the
 count of items it could not find is exact. The `{selected: true}` form names
 the one item open in the viewer, and only an assistant that offered
-`photos.view-selected.v1` may use it.
+`photos.view-selected.v1` may use it; if that item closed or another opened
+while the read ran, the request is refused and opens nothing.
 
 ## Domain
 
@@ -18,22 +19,22 @@ the one item open in the viewer, and only an assistant that offered
 ```quint
 type RequestKind = SelectItems | AlbumItems | ShareItems | OpenItem
 type AskPhase = AskIdle | AskReading
-type Ask = { phase: AskPhase, kind: RequestKind, ids: Set[str], found: Set[str], target: str, visit: int }
-type Answer = { kind: RequestKind, asked: int, selected: int, missing: int }
+type Ask = { phase: AskPhase, kind: RequestKind, ids: Set[str], found: Set[str], target: str, open: str, visit: int }
+type Answer = { kind: RequestKind, asked: int, selected: int, missing: int, open: str, seen: str }
 type Host = {
   inPhotos: bool, hidden: bool, disposed: bool, visit: int, busy: bool,
   library: Set[str], inWindow: Set[str], ask: Ask, viewer: str,
   selection: Set[str], selectionAsked: Set[str], albumReview: Set[str], shareReview: Set[str], libraryReview: bool,
   answers: List[Answer], albumsConfirmed: int, sharesConfirmed: int,
-  refusedLeft: int, refusedBusy: int, refusedNone: int, refusedReview: int, refusedForm: int
+  refusedLeft: int, refusedBusy: int, refusedNone: int, refusedReview: int, refusedForm: int, refusedMoved: int
 }
-pure val idleAsk: Ask = { phase: AskIdle, kind: SelectItems, ids: Set(), found: Set(), target: "", visit: 0 }
+pure val idleAsk: Ask = { phase: AskIdle, kind: SelectItems, ids: Set(), found: Set(), target: "", open: "", visit: 0 }
 pure val initial: Host = {
   inPhotos: true, hidden: false, disposed: false, visit: 0, busy: false,
   library: Set("1", "2"), inWindow: Set("1"), ask: idleAsk, viewer: "",
   selection: Set(), selectionAsked: Set(), albumReview: Set(), shareReview: Set(), libraryReview: false,
   answers: List(), albumsConfirmed: 0, sharesConfirmed: 0,
-  refusedLeft: 0, refusedBusy: 0, refusedNone: 0, refusedReview: 0, refusedForm: 0
+  refusedLeft: 0, refusedBusy: 0, refusedNone: 0, refusedReview: 0, refusedForm: 0, refusedMoved: 0
 }
 pure def visible(h: Host): bool = h.inPhotos and not(h.hidden) and not(h.disposed)
 pure def reviewOpen(h: Host): bool = h.albumReview.size() > 0 or h.shareReview.size() > 0 or h.libraryReview
@@ -75,14 +76,19 @@ pure def selectedAdmitted(selectedForm: bool, offersSelected: bool, viewer: str)
 ### After the reads, only the same visible visit, free and with no review open, may select, open or open a review
 
 A window row is found from the window even if it left the library during the
-read; a selection replaces the earlier one.
+read; a selection replaces the earlier one. A request in the selected form
+acts only while the item it named is still the one open in the viewer: if the
+viewer closed or moved to another item during the read, it is refused ("Ask
+again because a different item is open now.") and nothing is selected or
+reviewed.
 
 ```quint
 pure def complete(asked: Ask, h: Host): Host = {
   val rows = asked.found.union(asked.ids.exclude(asked.found).intersect(h.library))
-  val answer = { kind: asked.kind, asked: asked.ids.size(), selected: rows.size(), missing: asked.ids.size() - rows.size() }
+  val answer = { kind: asked.kind, asked: asked.ids.size(), selected: rows.size(), missing: asked.ids.size() - rows.size(), open: asked.open, seen: if (asked.open == "") "" else h.viewer }
   if (asked.visit != h.visit or not(visible(h))) { ...h, refusedLeft: bump(h.refusedLeft) }
   else if (h.busy) { ...h, refusedBusy: bump(h.refusedBusy) }
+  else if (asked.open != "" and h.viewer != asked.open) { ...h, refusedMoved: bump(h.refusedMoved) }
   else if (rows.size() == 0) { ...h, refusedNone: bump(h.refusedNone) }
   else if (asked.kind == SelectItems) { ...h, selection: rows, selectionAsked: asked.ids, answers: h.answers.append(answer) }
   else if (reviewOpen(h)) { ...h, refusedReview: bump(h.refusedReview) }
@@ -92,7 +98,7 @@ pure def complete(asked: Ask, h: Host): Host = {
 }
 pure def request(h: Host, kind: RequestKind, ids: Set[str], target: str, selectedForm: bool, offersSelected: bool): Host = {
   val named = namedIds(h, kind, ids, target, selectedForm)
-  val asked = { phase: AskReading, kind: kind, ids: named, found: named.intersect(h.inWindow), target: target, visit: h.visit }
+  val asked = { phase: AskReading, kind: kind, ids: named, found: named.intersect(h.inWindow), target: target, open: if (selectedForm and kind != OpenItem) h.viewer else "", visit: h.visit }
   if (not(selectedAdmitted(selectedForm, offersSelected, h.viewer)) or named.size() == 0) { ...h, refusedForm: bump(h.refusedForm) }
   else if (h.busy) { ...h, refusedBusy: bump(h.refusedBusy) }
   else if (named.subseteq(h.inWindow)) complete(asked, h)
@@ -106,10 +112,15 @@ pure def alwaysReviewOnlyWhileShown(h: Host): bool = (h.albumReview.size() > 0 o
 pure def alwaysSelectionOnlyWhileShown(h: Host): bool = h.selection.size() > 0 implies visible(h)
 pure def alwaysSelectionWasAsked(h: Host): bool = h.selection.subseteq(h.selectionAsked)
 pure def alwaysExactMissingCount(h: Host): bool = h.answers.every(a => a.selected > 0 and a.selected + a.missing == a.asked)
+pure def alwaysSelectedFormActsOnTheItemStillOpen(h: Host): bool = h.answers.every(a => a.open == a.seen)
 pure def sometimesOlderItemSelected(h: Host): bool = h.selection.contains("2") and not(h.inWindow.contains("2"))
 pure def sometimesMissingCounted(h: Host): bool = h.answers.some(a => a.missing > 0)
 pure def sometimesLeftDuringRead(h: Host): bool = h.refusedLeft > 0 and visible(h)
 pure def sometimesOpenedFromRead(h: Host): bool = h.viewer == "2"
+pure def sometimesOpenItemMovedDuringRead(h: Host): bool = h.refusedMoved > 0 and h.viewer != "" and h.answers.length() == 0
+pure val eval_witness_sometimesOpenItemMovedDuringRead = (
+  ("viewerOpens", "1"), ("windowLoaded", Set("2")), ("request", AlbumItems, Set("1"), "", true, true), ("viewerOpens", "2"), "settleAsk"
+)
 ```
 
 ### The owner confirms or cancels the album or share review the request opened

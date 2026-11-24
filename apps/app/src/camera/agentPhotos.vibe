@@ -91,13 +91,20 @@ export const agentPhotos = Layer.effect(AgentPhotos, effect {
     }
   }
 
+  /** Tells the request Machine which item the viewer shows now. */
+  effect function viewerNow() {
+    const shown = try library.shown()
+    if (shown?.id === (try host.get()).viewer) return
+    try hostSend({ type: "viewerCloses" })
+    if (shown !== undefined) try hostSend({ type: "viewerOpens", media: shown.id })
+  }
+
   effect function itemsRequest(kind: RequestKind, ids: readonly string[], target: string, selectedForm: boolean, offersSelected: boolean) {
     const rows = try library.rows()
     const known = (try host.get()).library
     for (const row of rows) if (!known.includes(row.id)) try hostSend({ type: "restore", media: row.id })
     try hostSend({ type: "windowLoaded", loadedIds: rows.map((row) => row.id) })
-    const shown = try library.shown()
-    if (shown !== undefined) try hostSend({ type: "viewerOpens", media: shown.id })
+    try viewerNow()
     const before = try host.get()
     const asked = try hostSend({ type: "request", kind, ids: [...ids], target, selectedForm, offersSelected })
     if (asked === undefined) throw new PhotosRefused({ message: (try host.get()).albumReview.length > 0 || before.libraryReview ? "Finish the open review first." : "Open Photos, then ask again." })
@@ -107,11 +114,13 @@ export const agentPhotos = Layer.effect(AgentPhotos, effect {
         if (found === undefined) try hostSend({ type: "remove", media: id })
         else if (!asked.library.includes(id)) try hostSend({ type: "restore", media: id })
       }
+      try viewerNow()
       try hostSend({ type: "settleAsk" })
     }
     const after = try host.get()
     if (after.refusedLeft > before.refusedLeft) throw new PhotosRefused({ message: "Open Photos, then ask again." })
     if (after.refusedBusy > before.refusedBusy) throw new PhotosRefused({ message: "Photos is busy right now." })
+    if (after.refusedMoved > before.refusedMoved) throw new PhotosRefused({ message: "Ask again because a different item is open now." })
     if (after.refusedNone > before.refusedNone) throw new PhotosRefused({ message: kind === "SelectItems" ? "None of those items are in Photos." : "Those items are not in Photos." })
     if (after.refusedReview > before.refusedReview) throw new PhotosRefused({ message: "Finish the open review first." })
     if (after.refusedForm > before.refusedForm) throw new PhotosRefused({ message: "Open the photo in Photos, then ask again." })
