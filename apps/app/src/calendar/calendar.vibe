@@ -10,7 +10,7 @@ import { Agent } from "../platform/agent.vibe"
 import { PhoneCalendar } from "../platform/calendar.vibe"
 import { type Failure, ask } from "../platform/remote.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { type Job, answer, contained, due, following, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, due, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { type Read, shown } from "./shown.ts"
 import { civilDay, dayStart, localDate, openLink, zone } from "./time.ts"
@@ -145,11 +145,14 @@ const told = started(effect {
   try contained(view.send({ type: "googleChanged", connected }), "telling Calendar of the agent's account")
 }, "reading what Calendar may read")
 
-// spec/app/calendar/index.md, "The owner reads again whenever a source can be read"
-const opened = following(Shell.Machine, (shell) => Shell.showing(shell, "Calendar"), View.Machine, (front): Event | undefined => (front ? { type: "refresh" } : undefined))
+/** Each time the shell brings Calendar forward. */
+const forward = Stream.unwrap(effect {
+  return Stream.filter(Stream.changes(Stream.map((try Shell.Machine).changes, (shell) => Shell.showing(shell, "Calendar"))), (front) => front)
+})
 
-// spec/app/calendar/index.md, "The event's place opens in Maps, and coming back reads the event again"
-const returned = following(Shell.Machine, (shell) => Shell.showing(shell, "Calendar"), View.Machine, (front): Event | undefined => (front ? { type: "comeBack" } : undefined))
+// spec/app/calendar/index.md, "The owner reads again whenever a source can be read"; spec/app/calendar/index.md, "The event's place opens in Maps, and coming back reads the event again"
+const opened = hearing(forward, View.Machine, (): Event => ({ type: "refresh" }))
+const returned = hearing(forward, View.Machine, (): Event => ({ type: "comeBack" }))
 
 /** Calendar's view: in memory, told today by Alpha's time and the shell, and what it may read by Android and the agent. */
 export const calendar = together(kept, told, opened, returned)
