@@ -13,7 +13,7 @@ export const meta: ComponentMeta<ComposerBarProps> = {
     Hosted: { text: "Hi", canSend: true, disclosure: "Prompts and the context you share go to Eliza Cloud.", locationShared: true },
     RestartNeeded: { text: "Still here", canSend: true, restartOffer: { kind: "restart" } },
     Restarting: { restartOffer: { kind: "restart" }, restartBusy: true },
-    CouldNotStart: { restartOffer: { kind: "retry", refusal: "CouldNotStart" } },
+    CouldNotStart: { restartOffer: { kind: "retry", refusal: "CouldNotStart" }, onRestart: fn() },
     StartupCheckFailed: { restartOffer: { kind: "retry", refusal: "StartupCheckFailed" }, restartBusy: true },
   },
   play: {
