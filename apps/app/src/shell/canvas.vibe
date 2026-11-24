@@ -20,10 +20,17 @@ module page {
     if (active.closest("[data-alpha-composer]")) return "Composer"
     return active.matches("input, textarea, [contenteditable=true]") ? "OtherField" : "NoField"
   }
-  /** Each change of the window, of the space above the keyboard and of focus. @throws {never} */
-  export function watched(heard: (what: "resize" | "focus") => void): () => void {
+  /** The text size the page has, as a percent of the browser's own: the owner's text size times the phone's font scale. @throws {never} */
+  export function textScale(): number {
+    const size = Number.parseFloat(getComputedStyle(document.documentElement).fontSize)
+    return Number.isFinite(size) && size > 0 ? Math.round(size / 16 * 100) : 100
+  }
+  /** Each change of the window, of the space above the keyboard, of focus and of the page's text size. @throws {never} */
+  export function watched(heard: (what: "resize" | "focus" | "text") => void): () => void {
     const resize = () => heard("resize")
     const focus = () => heard("focus")
+    const text = new MutationObserver(() => heard("text"))
+    text.observe(document.documentElement, { attributes: true, attributeFilter: ["style"] })
     window.addEventListener("resize", resize)
     window.visualViewport?.addEventListener("resize", resize)
     document.addEventListener("focusin", focus)
@@ -33,13 +40,15 @@ module page {
       window.visualViewport?.removeEventListener("resize", resize)
       document.removeEventListener("focusin", focus)
       document.removeEventListener("focusout", focus)
+      text.disconnect()
     }
   }
   /** @throws {never} */
   export const paged = (): boolean => typeof window !== "undefined" && typeof document !== "undefined"
 }
-import { focused, measured, paged, watched } from page
+import { focused, measured, paged, textScale, watched } from page
 
+// spec/app/shell/keyboard.md, "From 150% text a list and its item take one pane each and Calendar shows its day as an agenda; below it, a list splits from a 1000-point canvas, and Calendar shows as many 240-point day columns as fit beside its 76-point times, widened with the text, at most seven"
 // spec/app/shell/keyboard.md, "At the same width, a shorter window while a field has focus is the keyboard; a new width while a field has focus, within a fifth of the height kept, is a rotation, and the width kept stands in for the new height; any other change takes the height measured"
 const followed = started(effect {
   if (!paged()) return
@@ -48,15 +57,22 @@ const followed = started(effect {
   const tell = (event: Event) => contained(canvas.send(event), "the canvas")
   const window0 = measured()
   try tell({ type: "mount", width: window0.width, height: window0.height, launcher: presented.launcher })
-  const changes = Stream.callback<"resize" | "focus">((queue) => acquireRelease(sync(() => watched((what) => { Queue.offerUnsafe(queue, what) })), (off) => sync(off)))
+  const scaled = effect () => {
+    const scale = textScale()
+    if ((try canvas.get()).textScale !== scale) try tell({ type: "measureText", scale })
+  }
+  try scaled()
+  const changes = Stream.callback<"resize" | "focus" | "text">((queue) => acquireRelease(sync(() => watched((what) => { Queue.offerUnsafe(queue, what) })), (off) => sync(off)))
   try Stream.runForEach(changes, effect (what) => {
     if (what === "focus") {
       const field: Field = focused()
       if ((try canvas.get()).field !== field) try tell({ type: "focusField", focus: field })
       return
     }
+    if (what === "text") return try scaled()
     const now = measured()
     try tell({ type: "resize", width: now.width, height: now.height, visible: now.visible })
+    try scaled()
   })
 }, "the canvas")
 
