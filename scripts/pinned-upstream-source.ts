@@ -11,6 +11,8 @@ export const GENERATED_UPSTREAM_DIRECTORIES = [
 	[".cache", ".vibe", "dist", "gen", ".spec-cache", "vibestack/studio/.spec-cache", "vibestack/studio/.vibe"],
 	// The design system's build writes its token stylesheets here.
 	["packages/design-system/generated"],
+	// The Android workflow exercises the pinned OS tests before staging. Vitest writes compiled modules here.
+	["packages/os/.cache/vitest/modules"],
 );
 /**
  * The upstream root's turbo logs from pnpm build:upstream, and the single-file outputs upstream's own
