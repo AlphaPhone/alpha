@@ -1,9 +1,10 @@
 // spec/browser/session.md, "The agent shows Browser's own list of open tabs only after its receipt, only while the tab the request came from is still selected, and changes no tab"; spec/browser/agent.md, "A deferred switch, close of the showing tab, page-history move or tab list that does not run after its receipt says a correction"
 import { assert, it } from "@effect/vitest"
+import { BROWSER_TABS_SHOW_CAPABILITY, parseBrowserControl } from "@elizaos/plugin-browser/contract"
 import { canAgentShowTabs, initial } from "../../gen/browser__session.ts"
 import { BrowserAgent } from "../../src/browser/agent.vibe"
 import { BrowserTabs } from "../../src/browser/session.vibe"
-import { BROWSER_TABS_SHOW_CAPABILITY, TABS_SHOWN_SUMMARY, browserDeviceCapabilities, browserNotDone, groundedIn, operationPorts, parseBrowserTabsShow } from "../../src/browser/operations.vibe"
+import { TABS_SHOWN_SUMMARY, browserDeviceCapabilities, browserNotDone, groundedIn, operationPorts } from "../../src/browser/operations.vibe"
 import { callsTo, fakeHost, loadPage, settledTabs, shownBrowser } from "./fakes.vibe"
 
 const show = { type: "browser_tabs_show" }
@@ -94,14 +95,17 @@ it.live("a tab list that cannot open when presented, on a locked phone or after 
 // spec/browser/session.md, "The agent shows Browser's own list of open tabs only after its receipt, only while the tab the request came from is still selected, and changes no tab"
 it("showing the tab list is its own exact form with no field, advertised whenever the agent offers it, and runs without review only from the owner's message", () => {
   assert.deepStrictEqual({
-    parsed: [parseBrowserTabsShow(show), parseBrowserTabsShow({ ...show, all: true }), parseBrowserTabsShow({ ...show, target: "news" }), parseBrowserTabsShow({ type: "browser_tab_close" })],
+    parsed: [show, { ...show, all: true }, { ...show, target: "news" }, { type: "browser_tab_close" }].map((raw) => {
+      const parsed = parseBrowserControl(raw)
+      return parsed.ok ? parsed.operation.type : undefined
+    }),
     beside: browserDeviceCapabilities(["browser.search.v1", "browser.tabs.v1", BROWSER_TABS_SHOW_CAPABILITY], false),
     alone: browserDeviceCapabilities([BROWSER_TABS_SHOW_CAPABILITY], false),
     unoffered: browserDeviceCapabilities(["browser.tabs.v1"], true).includes(BROWSER_TABS_SHOW_CAPABILITY),
     grounded: groundedIn(show, "show my open tabs"),
     notDone: browserNotDone(show),
   }, {
-    parsed: [show, undefined, undefined, undefined],
+    parsed: ["browser_tabs_show", undefined, undefined, "browser_tab_close"],
     beside: ["browser.search.v1", "browser.tabs.v1", BROWSER_TABS_SHOW_CAPABILITY],
     alone: [BROWSER_TABS_SHOW_CAPABILITY],
     unoffered: false,
@@ -118,7 +122,7 @@ it.live("a Browser with no session refuses the tab list before its receipt, and 
       const tabs = try BrowserTabs
       const agent = try BrowserAgent
       const started = try settledTabs(tabs)
-      const presented = try agent.showTabs()
+      const presented = try agent.control(show, undefined, () => Effect.succeed(null))
       try Effect.try(() => assert.deepStrictEqual({
         unstarted: canAgentShowTabs(initial, initial.cur),
         started: canAgentShowTabs(started, started.cur),
