@@ -26,7 +26,8 @@ the startup area asks for; Files is told the answer.
 
 The top shows the volumes; a place is a category, or a folder named by its
 path from its volume. The owner, the agent and the phone each send their
-own events.
+own events. Files keeps the item whose details are shown, and whether
+another area handed the owner to the place where this walk began.
 
 ```quint
 import read as R from "../../kit/read"
@@ -48,7 +49,7 @@ type Action = Making | Naming | Moving | Copying | Deleting | Sharing
 type Files = {
   access: P::Grant, supported: bool, open: bool, storage: R::Read, volumes: List[Volume], tally: Tally,
   trail: List[int], inCategory: bool, category: F::Kind, listing: R::Read, items: List[F::Item], partial: bool, picked: List[int], missing: bool,
-  layout: Layout, order: Order, reversed: bool, trash: bool,
+  layout: Layout, order: Order, reversed: bool, trash: bool, details: int, handed: bool, begun: S::Where,
   search: S::Search, deleting: V::Review, change: C::Change, sheet: M::Sheet,
 }
 
@@ -56,7 +57,7 @@ pure val untallied: Tally = { counts: List(), trashed: 0 }
 pure val initial: Files = {
   access: P::Unasked, supported: true, open: false, storage: R::unread, volumes: List(), tally: untallied,
   trail: List(), inCategory: false, category: F::Other, listing: R::unread, items: List(), partial: false, picked: List(), missing: false,
-  layout: Rows, order: ByDate, reversed: false, trash: false,
+  layout: Rows, order: ByDate, reversed: false, trash: false, details: 0, handed: false, begun: S::top,
   search: S::initial, deleting: V::unreviewed, change: C::initial, sheet: M::initial,
 }
 ```
@@ -106,7 +107,14 @@ pure val doneValues = Set(List(), List(1), List(1, 2))
 pure val failedValues = Set(List(), List(2))
 pure val volumesValues = Set(List({ id: 1, used: 3, total: 8 }, { id: 9, used: 0, total: 0 }))
 pure val tallyValues = Set({ counts: List({ kind: F::Image, items: 2, bytes: 9 }), trashed: 1 })
-pure val fileValues = Set({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1 })
+pure val fileValues = Set({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0 })
+pure val firstValues = Set({ id: 4, name: "a", revision: 1, kind: F::Folder, volume: 1, bytes: 0 }, { id: 2, name: "b", revision: 2, kind: F::Image, volume: 1, bytes: 5 })
+pure val secondValues = Set({ id: 3, name: "c", revision: 1, kind: F::Document, volume: 1, bytes: 9 }, { id: 4, name: "a", revision: 1, kind: F::Folder, volume: 1, bytes: 0 })
+pure val trailValues = Set(List(), List(1, 4))
+pure val hitsValues = Set(List(), List({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0 }, { id: 3, name: "c", revision: 1, kind: F::Document, volume: 1, bytes: 0 }))
+pure val positionsValues = Set(List(), List(1), List(2, 1), List(3))
+pure val weight_showDownloads = 3
+pure val weight_showDetails = 5
 pure val wantedValues = Set({ text: "", kind: F::Image, anyKind: false }).union(Set({ text: "b", kind: F::Other, anyKind: true }))
 pure val destValues = Set({ folder: 1, path: List(), names: List("b") }).union(Set({ folder: 4, path: List(1), names: List() }))
 pure val weight_enter = 30
@@ -148,8 +156,8 @@ pure val weight_closeMoveTo = 8
 pure val weight_closeShare = 8
 pure val entriesValues =
   Set(List())
-    .union(Set(List({ id: 4, name: "a", revision: 1, kind: F::Folder, volume: 1 }, { id: 2, name: "b", revision: 1, kind: F::Image, volume: 1 })))
-    .union(Set(List({ id: 2, name: "b", revision: 2, kind: F::Image, volume: 1 }, { id: 3, name: "c", revision: 1, kind: F::Document, volume: 1 })))
+    .union(Set(List({ id: 4, name: "a", revision: 1, kind: F::Folder, volume: 1, bytes: 0 }, { id: 2, name: "b", revision: 1, kind: F::Image, volume: 1, bytes: 0 })))
+    .union(Set(List({ id: 2, name: "b", revision: 2, kind: F::Image, volume: 1, bytes: 0 }, { id: 3, name: "c", revision: 1, kind: F::Document, volume: 1, bytes: 0 })))
 ```
 
 ### Files is closed, unsupported, not yet allowed, denied, at the top, reading, unavailable or showing a place
@@ -225,7 +233,7 @@ pure def entered(trail: List[int], inCategory: bool, category: F::Kind, s: Files
   val reading = s.open and allowed(s)
   val search = if (reading) S::follow(s.search, there) else s.search
   val placed = { ...s, trail: trail, inCategory: inCategory, category: category, items: List(), partial: false, picked: List(), missing: false, trash: false,
-    deleting: V::dismiss(s.deleting), change: C::invalidate(s.change), sheet: M::close(s.sheet), search: search }
+    details: 0, deleting: V::dismiss(s.deleting), change: C::invalidate(s.change), sheet: M::close(s.sheet), search: search }
   val asked = if (reading and search.searching) List(Search({ ticket: search.query.ticket, where: there, filter: search.filter })) else List()
   if (reading and not(trail.length() == 0 and not(inCategory)))
     { state: { ...placed, listing: listing }, out: List(Look({ ticket: listing.ticket, trail: trail, category: category, inCategory: inCategory })).concat(asked) }
@@ -248,6 +256,7 @@ pure def enter(s: Files, by: Actor): Moved = arrived(entered(s.trail, s.inCatego
 
 pure def shut(open: bool, s: Files): Moved =
   { state: { ...s, open: open, storage: F::drop(s.storage), volumes: List(), tally: untallied, listing: F::drop(s.listing), items: List(), partial: false, picked: List(),
+      details: 0, handed: false,
       search: S::stop(s.search), deleting: V::dismiss(s.deleting), change: C::retire(s.change), sheet: M::close(s.sheet) },
     out: unanswered(s.search) }
 
@@ -257,7 +266,8 @@ pure def leave(s: Files, by: Actor): Moved = shut(false, s)
 
 pure def alwaysNothingIsReadOrHeldWhileClosed(s: Files): bool =
   not(s.open) implies (s.listing.status != R::Loading and s.storage.status != R::Loading and s.search.query.status != R::Loading
-    and s.picked.length() == 0 and s.search.hits.length() == 0 and not(s.deleting.showing) and s.change.panel == 0 and not(s.sheet.open))
+    and s.picked.length() == 0 and s.search.hits.length() == 0 and not(s.deleting.showing) and s.change.panel == 0 and not(s.sheet.open)
+    and s.details == 0)
 ```
 
 ### When the phone says Alpha may read the storage the place is read, and when it takes access away, or says the storage cannot be reached at all, everything read is dropped
@@ -323,11 +333,11 @@ pure def sometimesTheCategoriesAreCounted(s: Files): bool = browse(s) == AtTop a
 pure def canOpenVolume(s: Files, target: int, by: Actor): bool =
   by == Owner and browse(s) == AtTop and s.volumes.some(v => v.id == target)
 
-pure def openVolume(s: Files, target: int, by: Actor): Moved = entered(List(target), false, F::Other, s)
+pure def openVolume(s: Files, target: int, by: Actor): Moved = entered(List(target), false, F::Other, { ...s, handed: false })
 
 pure def canOpenCategory(s: Files, kind: F::Kind, by: Actor): bool = by == Owner and browse(s) == AtTop and kind != F::Folder
 
-pure def openCategory(s: Files, kind: F::Kind, by: Actor): Moved = entered(List(), true, kind, s)
+pure def openCategory(s: Files, kind: F::Kind, by: Actor): Moved = entered(List(), true, kind, { ...s, handed: false })
 
 pure def canOpenFolder(s: Files, target: int, by: Actor): bool =
   by == Owner and browse(s) == Showing and s.items.some(i => i.id == target and i.kind == F::Folder)
@@ -342,7 +352,7 @@ pure def openCrumb(s: Files, depth: int, by: Actor): Moved =
 
 pure def canOpenTop(s: Files, by: Actor): bool = by == Owner and allowed(s) and s.open and not(atTop(s))
 
-pure def openTop(s: Files, by: Actor): Moved = entered(List(), false, F::Other, s)
+pure def openTop(s: Files, by: Actor): Moved = entered(List(), false, F::Other, { ...s, handed: false })
 
 pure def stepMovingStartsAfresh(before: Files, via: str, after: Files): bool =
   (via == "openFolder" or via == "openCrumb" or via == "openVolume" or via == "openCategory" or via == "openTop") implies
@@ -371,6 +381,80 @@ pure def alwaysTheTrashShowsAtTheTop(s: Files): bool = s.trash implies atTop(s)
 pure def sometimesTheTrashShows(s: Files): bool = trashShows(s)
 ```
 
+### Another area opens Files at Downloads: the Download folder of the main volume where the phone has one, else the Downloads category; the owner's own move to the top, a volume or a category ends that walk
+
+The Browser's Show in Files is one. The phone says which folder holds the
+downloads, by the path from its volume, or that there is none.
+
+```quint
+pure def canShowDownloads(s: Files, trail: List[int], by: Actor): bool = by == Phone and trail.every(f => f > 0)
+
+pure def showDownloads(s: Files, trail: List[int], by: Actor): Moved =
+  val there = if (trail.length() > 0) entered(trail, false, F::Other, s) else entered(List(), true, F::Download, s)
+  { state: { ...there.state, handed: true, begun: where(there.state) }, out: there.out }
+
+pure def sometimesFilesWasHandedDownloads(s: Files): bool = s.handed and browse(s) == Showing and s.inCategory
+```
+
+### The owner sees a listed item's details: what it is, how big it is, when it last changed and where it is; they close when the owner closes them or moves, or when the item is no longer listed
+
+```quint
+pure def canShowDetails(s: Files, target: int, by: Actor): bool =
+  by == Owner and browse(s) == Showing and has(s.items, target) and s.details != target
+
+pure def showDetails(s: Files, target: int, by: Actor): Files = { ...s, details: target }
+
+pure def canCloseDetails(s: Files, by: Actor): bool = by == Owner and s.details != 0
+
+pure def closeDetails(s: Files, by: Actor): Files = { ...s, details: 0 }
+
+pure def detailed(s: Files): List[F::Item] = s.items.select(i => i.id == s.details)
+
+pure def alwaysDetailsAreOfAListedItem(s: Files): bool = s.details != 0 implies has(s.items, s.details)
+
+pure def sometimesDetailsAreShown(s: Files): bool = s.details != 0 and browse(s) == Showing
+```
+
+### Back closes one layer inside Files: the Move to sheet, the share sheet, the name clash, the delete confirmation, the details, the Trash, the selection and the filter, then goes up the path a step; at the top, or back where another area's walk began, it leaves Files
+
+The [shell](../shell/) closes Files when Back has no layer left here, which
+returns the owner to the area that handed them over.
+
+```quint
+type Layer = NoLayer | SheetLayer | ShareLayer | ClashLayer | ConfirmLayer | DetailsLayer | TrashLayer | SelectionLayer | FilterLayer | TopLayer | UpLayer
+
+pure def backLayer(s: Files): Layer =
+  if (s.sheet.open) SheetLayer
+  else if (s.change.panel != 0) ShareLayer
+  else if (s.change.clash.showing) ClashLayer
+  else if (s.deleting.showing) ConfirmLayer
+  else if (s.details != 0) DetailsLayer
+  else if (s.trash) TrashLayer
+  else if (s.picked.length() > 0) SelectionLayer
+  else if (s.search.searching) FilterLayer
+  else if (not(s.open) or not(allowed(s)) or atTop(s) or (s.handed and where(s) == s.begun)) NoLayer
+  else if (s.inCategory or s.trail.length() <= 1) TopLayer
+  else UpLayer
+
+pure def alwaysBackClosesTheLayerOnTop(s: Files): bool =
+  val layer = backLayer(s)
+  match layer {
+    | SheetLayer => canCloseMoveTo(s, Owner)
+    | ShareLayer => canCloseShare(s, Owner)
+    | ClashLayer => canGoBack(s, Owner)
+    | ConfirmLayer => canKeepFiles(s, Owner)
+    | DetailsLayer => canCloseDetails(s, Owner)
+    | TrashLayer => canCloseTrash(s, Owner)
+    | SelectionLayer => canCancelSelection(s, Owner)
+    | FilterLayer => canClearFilter(s, Owner)
+    | TopLayer => canOpenTop(s, Owner)
+    | UpLayer => canOpenCrumb(s, s.trail.length() - 1, Owner)
+    | NoLayer => true
+  }
+
+pure def sometimesBackReturnsWhereTheWalkBegan(s: Files): bool = s.handed and backLayer(s) == NoLayer and not(atTop(s))
+```
+
 ### The place showing is read again when asked, and only its newest answer is taken; a folder that no longer exists brings the owner back to the top and says so, never that the storage is unavailable
 
 The owner pulls to refresh, or the phone says the storage changed. The
@@ -382,7 +466,10 @@ pure def canRefresh(s: Files, by: Actor): bool = by != Agent and allowed(s) and 
 
 pure def refresh(s: Files, by: Actor): Moved =
   val listing = R::ask(s.listing)
-  { state: { ...s, listing: listing }, out: List(Look({ ticket: listing.ticket, trail: s.trail, category: s.category, inCategory: s.inCategory })) }
+  val search = S::follow(s.search, where(s))
+  { state: { ...s, listing: listing, search: search },
+    out: List(Look({ ticket: listing.ticket, trail: s.trail, category: s.category, inCategory: s.inCategory }))
+      .concat(if (search.searching) List(Search({ ticket: search.query.ticket, where: where(s), filter: search.filter })) else List()) }
 
 pure def canListed(s: Files, ticket: int, by: Actor): bool = by == Phone and R::canAnswer(s.listing, ticket)
 
@@ -393,11 +480,21 @@ pure def listed(s: Files, ticket: int, ok: bool, gone: bool, complete: bool, ent
   val back = entered(List(), false, F::Other, s)
   if (not(ok) and gone and not(s.inCategory)) { state: { ...back.state, missing: true }, out: back.out }
   else { state: { ...s, listing: R::answer(s.listing, ok), items: items, partial: ok and not(complete), picked: picked,
+      details: if (has(items, s.details)) s.details else 0,
       deleting: if (s.deleting.showing and not(same)) V::revise(s.deleting) else s.deleting,
       change: if (picked != s.picked) C::invalidate(s.change) else s.change,
       sheet: if (picked != s.picked) M::close(s.sheet) else s.sheet }, out: List() }
 
 pure def alwaysAMissingFolderIsToldAtTheTop(s: Files): bool = s.missing implies atTop(s)
+```
+
+### A refresh asks the filter on again for the place showing, so what it found is never older than what the place lists
+
+```quint
+pure def stepARefreshAsksTheFilterAgain(before: Files, via: str, after: Files, out: List[Effect]): bool =
+  (via == "refresh" and before.search.searching) implies
+    (after.search.query.status == R::Loading
+      and out.some(e => match e { | Search(x) => x.ticket == after.search.query.ticket and x.filter == before.search.filter | _ => false }))
 ```
 
 ### A place is called empty only after the phone read all of it; a reading cut short keeps what it read
@@ -465,6 +562,35 @@ pure def canSortBy(s: Files, order: Order, by: Actor): bool = by == Owner
 
 pure def sortBy(s: Files, order: Order, by: Actor): Files =
   { ...s, order: order, reversed: order == s.order and not(s.reversed) }
+```
+
+### Folders come before files in every sort: by name in the phone's order of names, by date the newest first, by size the largest first; choosing the sort again turns the order within the folders and within the files
+
+How names are ordered is not modelled; no name comes before itself.
+
+```quint
+const nameBefore: (str, str) => bool
+pure def lawNoNameComesBeforeItself(label: str): bool = not(nameBefore(label, label))
+
+pure def precedes(order: Order, first: F::Item, second: F::Item): bool =
+  if (order == ByName) nameBefore(first.name, second.name)
+  else if (order == ByDate) first.revision > second.revision
+  else first.bytes > second.bytes
+
+pure def ahead(order: Order, reversed: bool, first: F::Item, second: F::Item): bool =
+  if (first.kind == F::Folder and second.kind != F::Folder) true
+  else if (second.kind == F::Folder and first.kind != F::Folder) false
+  else if (reversed) precedes(order, second, first)
+  else precedes(order, first, second)
+```
+
+### A folder is ahead of a file whatever the sort, and an item is never ahead of itself
+
+```quint
+pure def lawAFolderIsAheadOfAFile(order: Order, reversed: bool, first: F::Item, second: F::Item): bool =
+  (first.kind == F::Folder and second.kind != F::Folder) implies (ahead(order, reversed, first, second) and not(ahead(order, reversed, second, first)))
+
+pure def lawNothingIsAheadOfItself(order: Order, reversed: bool, first: F::Item): bool = not(ahead(order, reversed, first, first))
 ```
 
 ### A name matches a text when the phone's comparison says it contains it; every name contains the empty text and itself
@@ -579,6 +705,40 @@ pure def agentOpen(s: Files, request: int, file: F::Item, previewing: bool, guar
   else { state: s, out: List(Tell({ request: request, ok: false, items: List() })) }
 ```
 
+### The phone offers Files to an agent that takes Files' operations, and naming files by their place among the results shown only beside them; a request the phone cannot take is never shown for approval
+
+The agent names the files of a share, a move or a deletion by path, or by
+position among the filter's results on screen; Files advertises the second
+only with the first. The approvals area shows a card only for a request the
+phone takes.
+
+```quint
+type Offer = { operations: bool, positions: bool }
+
+pure def offered(operations: bool, shownTargets: bool): Offer = { operations: operations, positions: operations and shownTargets }
+
+pure def takes(o: Offer, byPosition: bool): bool = o.operations and (o.positions or not(byPosition))
+
+pure def lawPositionsAreOfferedOnlyWithTheOperations(operations: bool, shownTargets: bool, byPosition: bool): bool =
+  takes(offered(operations, shownTargets), byPosition) implies (operations and (shownTargets or not(byPosition)))
+```
+
+### A position names a result on screen, counting from one; a request naming a position that is not shown names nothing and leaves no card, and a card keeps the files it showed
+
+The approvals area binds each file the positions named, with its revision,
+when the card is built; a refresh of Files after that changes nothing on it.
+
+```quint
+pure def atPositions(hits: List[F::Item], positions: List[int]): List[F::Item] =
+  if (positions.length() > 0 and positions.every(p => p >= 1 and p <= hits.length()))
+    positions.listMap(p => hits.nthOr(p - 1, { id: 0, name: "", revision: 0, kind: F::Other, volume: 0, bytes: 0 }))
+  else List()
+
+pure def lawAPositionNamesOnlyAResultShown(hits: List[F::Item], positions: List[int]): bool =
+  atPositions(hits, positions).every(i => hits.includes(i))
+    and (atPositions(hits, positions).length() == 0 or atPositions(hits, positions).length() == positions.length())
+```
+
 ### The agent's reading and opening change nothing the owner is working on
 
 ```quint
@@ -667,6 +827,9 @@ pure def stepOnlyWhatWasConfirmedIsTrashed(before: Files, via: str, after: Files
 
 ### The owner opens the Move to sheet for the selection, at the folder showing, and goes through the volumes and folders in it
 
+The phone moves and copies within one volume, so the sheet offers only the
+volume the selection is on.
+
 ```quint
 pure def going(trail: List[int], s: Files): Moved =
   val sheet = M::go(s.sheet, trail)
@@ -679,7 +842,7 @@ pure def openMoveTo(s: Files, by: Actor): Moved = going(s.trail, s)
 
 pure def canMoveInto(s: Files, target: int, by: Actor): bool =
   by == Owner and s.sheet.open and allowed(s)
-    and (if (s.sheet.trail.length() == 0) s.volumes.some(v => v.id == target)
+    and (if (s.sheet.trail.length() == 0) s.volumes.some(v => v.id == target) and chosen(s).every(i => i.volume == target)
       else s.sheet.reading.status == R::Loaded and s.sheet.folders.includes(target))
 
 pure def moveInto(s: Files, target: int, by: Actor): Moved = going(s.sheet.trail.append(target), s)
