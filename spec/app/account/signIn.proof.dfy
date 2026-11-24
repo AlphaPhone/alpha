@@ -18,7 +18,6 @@ lemma sendCode_ensures(s: SignIn, method_: app__account__session_Method, address
   ensures (inv(s) ==> canSendCode(s, method_, address, now, online) ==> stepOnlyBackAbandonsAnAttempt(s, "sendCode", sendCode(s, method_, address, now, online).state, sendCode(s, method_, address, now, online).out))
   ensures (inv(s) ==> canSendCode(s, method_, address, now, online) ==> stepErasingLeavesNoAddress(s, "sendCode", sendCode(s, method_, address, now, online).state))
 {
-  lawSomethingTypedIsNeverWrittenAsNothing_ensures(address);
   var after := sendCode(s, method_, address, now, online);
   assert after.out[0] in after.out;
 }
