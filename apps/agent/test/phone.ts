@@ -5,6 +5,7 @@ import net from "node:net";
 import path from "node:path";
 import type { RuntimeJsonBridge, RuntimeStatus, RuntimeStreamFrame } from "@elizaos/agent/client";
 import { type Cloud, type DeviceKey, packPrepared, said, scratch, startCloud } from "@repo/eliza-harness";
+import { Effect } from "effect";
 
 /** The owner every journey of the pack signs in. */
 const owner = "owner@alpha.test";
@@ -33,15 +34,17 @@ export interface Listed {
   readonly stream?: boolean;
 }
 
-/** The policy the build wrote beside the bundle. */
-export const policy = () => read("policy.json") as { actions: { allowed: string[]; refused: Record<string, string> } };
-
 /** The routes the host file admits for the page. */
 export const listed = () => read("host.json").routes as Listed[];
 
 /** The bundle's manifest as the build wrote it. */
 export const manifest = () => JSON.parse(fs.readFileSync(path.join(pack, "bundle/manifest.json"), "utf8")) as {
   plugins: string[]; packages: { name: string }[]; localInference: boolean; workflowWorkerSha256?: string; actions: { name: string }[];
+};
+
+/** The policy the build wrote beside the bundle. */
+export const policy = () => read("policy.json") as {
+  actions: { allowed: string[]; refused: Record<string, string> }; plugins: { load: string[] };
 };
 
 /**
@@ -165,4 +168,17 @@ export function socketBridge(running: Running): RuntimeJsonBridge {
     },
     requestStream: (input) => streamed(running, input.path, input.body),
   };
+}
+
+/** Until the agent's health says ready, within `within` milliseconds, or why it never will. */
+export async function ready(running: Running, within = 120_000) {
+  const deadline = Date.now() + within;
+  let ended: number | null | undefined;
+  void running.exited.then((code) => { ended = code; });
+  for (;;) {
+    if (ended !== undefined) throw new Error(`the agent exited with ${ended} before it was ready`);
+    if ((await call(running, "GET", "/api/health").catch(() => ({ status: 0 }))).status === 200) return;
+    if (Date.now() > deadline) throw new Error("the agent was not ready in time");
+    await Effect.runPromise(Effect.sleep("100 millis"));
+  }
 }

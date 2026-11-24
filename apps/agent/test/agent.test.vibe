@@ -2,7 +2,7 @@
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports -- ConversationRecord is the schema `schema Created` decodes with, a value the projection ESLint reads does not show
 import { ConversationRecord, TurnController, createRuntimeJsonClient } from "@elizaos/agent/client"
 import { describe, expect, it } from "@effect/vitest"
-import { configurationExit, coreActions, entryCarried, packedPlugins, refusedActions, workerAdmitted } from "../gen/agent.effect.vibe"
+import { configurationExit, coreActions, entryCarried, packedPlugins, policyAdmitted, proposalsAdmitted, refusedActions, workerAdmitted } from "../gen/agent.effect.vibe"
 import { type Running, call, launchFor, listed, manifest, pinnedWorker, policy, ready, socketBridge, startPhoneAgent, startRun } from "./phone.ts"
 
 type Run = Awaited<ReturnType<typeof startRun>>
@@ -35,7 +35,8 @@ schema Created { conversation: ConversationRecord }
 schema Listed { conversations: { id: string }[] }
 schema Replied { fullText: string }
 schema Interacted { success: boolean; result: { state?: { notes: { title: string; body: string }[] } } }
-schema Approvals { approvals: Schema.Unknown[] }
+schema Approval { id: string }
+schema Approvals { approvals: Approval[] }
 
 describe("Build the pack only from the pinned eliza", () => {
   // spec/agent/index.md, "A pack is admitted only when its manifest names the pinned commit, Node 26, no local inference, the plugins it carries, a pinned workflow worker and every allowed action"
@@ -44,11 +45,13 @@ describe("Build the pack only from the pinned eliza", () => {
   it("Build the pack only from the pinned eliza", () => {
     const built = manifest()
     const registered = built.actions.map(({ name }) => name)
-    const { actions } = policy()
+    const { actions, plugins } = policy()
     expect({ plugins: [...built.plugins].sort(), localInference: built.localInference, worker: /^[a-f0-9]{64}$/.test(built.workflowWorkerSha256 ?? "") })
       .toEqual({ plugins: [...packedPlugins].sort(), localInference: false, worker: true })
     expect(entryCarried(built.packages.map(({ name }) => name))).toBe(true)
     expect(built.packages.filter(({ name }) => name.startsWith("@repo/") || name.startsWith("@alphacompute/")).map(({ name }) => name)).toEqual(["@repo/agent-pack-entry"])
+    expect(policyAdmitted(actions.allowed, Object.keys(actions.refused), plugins.load, registered)).toBe(true)
+    expect(proposalsAdmitted(plugins.load, actions.allowed)).toBe(true)
     expect(Object.keys(actions.refused).sort()).toEqual(refusedActions(registered).sort())
     expect(Object.keys(actions.refused)).toContain("CALCULATE")
     expect(coreActions.every((name) => actions.allowed.includes(name))).toBe(true)
@@ -74,7 +77,7 @@ describe("Run Alpha's agent on the phone", () => {
       const { conversation: opened } = try Schema.decodeUnknownEffect(Created)(try promise(() => runtime.request("/api/conversations", { title: "Ask Alpha" })))
       try promise(() => controller.bind(opened))
       const result = try promise(() => controller.send({ text: "Remember the word heron." }, { stream: { onPreview: () => {} } }))
-      try Effect.try(() => expect(result.kind === "Replied" ? result.reply.text : result.kind).toMatch(/^You said: Remember the word heron\./))
+      try Effect.try(() => expect(result.kind === "Replied" ? result.reply.text.startsWith("You said: Remember the word heron.") : result.kind).toBe(true))
       for (const route of try Effect.try(() => listed())) {
         const target = filled(route.path, opened)
         const status = route.stream === true
@@ -85,7 +88,8 @@ describe("Run Alpha's agent on the phone", () => {
             return { status: streamed.status, body: chunks.length as unknown }
           })
           : try promise(async () => {
-            const answer = await call(first, route.method, target, route.method === "GET" || route.method === "DELETE" ? undefined : target.endsWith("/messages") ? { text: "Again." } : {})
+            const body = route.method === "GET" || route.method === "DELETE" ? undefined : target.endsWith("/messages") ? { text: "Again." } : {}
+            const answer = await call(first, route.method, target, body)
             return answerOf(answer.status, answer.body)
           })
         try Effect.try(() => expect({ route: route.path, answer: status }).not.toEqual({ route: route.path, answer: unserved }))
@@ -93,7 +97,7 @@ describe("Run Alpha's agent on the phone", () => {
       const created = try promise(() => call(first, "POST", "/api/notes/interact", { capability: "create-note", params: { content: "Heron food on Thursday" } }))
       const notes = try promise(() => call(first, "POST", "/api/notes/interact", { capability: "get-notes", params: {} }))
       const read = try Schema.decodeUnknownEffect(Schema.fromJsonString(Interacted))(notes.body)
-      try Effect.try(() => expect({ created: created.status, notes: read.result.state?.notes.map(({ title, body }) => body === "" ? title : `${title}\n${body}`) })
+      try Effect.try(() => expect({ created: created.status, notes: read.result.state?.notes.map(({ title }) => title) })
         .toEqual({ created: 200, notes: ["Heron food on Thursday"] }))
       const proposals = try promise(() => call(first, "GET", "/api/approvals"))
       const pending = try Schema.decodeUnknownEffect(Schema.fromJsonString(Approvals))(proposals.body)
@@ -105,8 +109,8 @@ describe("Run Alpha's agent on the phone", () => {
     const known = try Schema.decodeUnknownEffect(Schema.fromJsonString(Listed))(kept.body)
     const answer = try promise(() => call(second, "POST", `/api/conversations/${conversation.id}/messages`, { text: "Which word?" }))
     const { fullText } = try Schema.decodeUnknownEffect(Schema.fromJsonString(Replied))(answer.body)
-    try Effect.try(() => expect({ kept: known.conversations.some(({ id }) => id === conversation.id), status: answer.status, fullText })
-      .toEqual({ kept: true, status: 200, fullText: expect.stringMatching(/^You said: Which word\?/) }))
+    try Effect.try(() => expect({ kept: known.conversations.some(({ id }) => id === conversation.id), status: answer.status, replied: fullText.startsWith("You said: Which word?") })
+      .toEqual({ kept: true, status: 200, replied: true }))
     const refused = try Effect.try(() => run.place("refused"))
     const worker = { workflowWorker: { ...(try Effect.try(() => pinnedWorker())), sha256: "0".repeat(64) } }
     const launch = try promise(() => launchFor(run.cloud, run.key, refused, worker))

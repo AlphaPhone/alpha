@@ -72,7 +72,7 @@ export function run(cwd: string, command: string, ...args: string[]) {
 }
 
 /** Only one worktree builds the checkout all of them share: the others wait for it, and then find it ready. */
-export async function alone<A>(at: Pick<Checkout, "commit" | "root">, work: () => Promise<A>): Promise<A> {
+export async function alone<A>(at: Pick<Checkout, "commit" | "root">, work: () => A | Promise<A>): Promise<A> {
   const lock = `${at.root}.building`;
   fs.mkdirSync(path.dirname(at.root), { recursive: true });
   for (let waited = 0; ; waited += 1) {

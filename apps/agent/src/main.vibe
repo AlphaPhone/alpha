@@ -14,6 +14,7 @@ import {
 
 module node {
   import { pathToFileURL } from "node:url"
+  import type * as AgentBundle from "@elizaos/agent/bundle"
 
   /** The words after the script on the command line. @throws {never} */
   export function words(): string[] {
@@ -26,8 +27,8 @@ module node {
   }
 
   /** eliza's bundle builder of the clone at `dir`: the entry it ships imports that clone's agent, so the builder must be the same tree's. */
-  export function builderOf(dir: string): Promise<typeof import("@elizaos/agent/bundle")> {
-    return import(pathToFileURL(`${dir}/packages/agent/dist/src/bundle/build.js`).href) as Promise<typeof import("@elizaos/agent/bundle")>
+  export function builderOf(dir: string): Promise<typeof AgentBundle> {
+    return import(pathToFileURL(`${dir}/packages/agent/dist/src/bundle/build.js`).href) as Promise<typeof AgentBundle>
   }
 }
 import { builderOf, root, words } from node
@@ -58,12 +59,12 @@ const alphaOwned = (name: string) => name.startsWith("@repo/") || name.startsWit
 export function entrySource(bundled: readonly string[], hosted: readonly { name: string; module: string }[]): string {
   return [
     `import { runAgentCli } from "@elizaos/agent/cli"`,
-    ...bundled.map((name, index) => `import * as plugin${index} from ${JSON.stringify(name)}`),
+    ...bundled.map((name, index) => `import plugin${index} from ${JSON.stringify(name)}`),
     ...hosted.map(({ name, module }, index) => `import { ${module} as host${index} } from ${JSON.stringify(name)}`),
     "",
     "runAgentCli({",
     "  bundled: [",
-    ...bundled.map((name, index) => `    { packageName: ${JSON.stringify(name)}, plugin: plugin${index}.default ?? plugin${index}.plugin },`),
+    ...bundled.map((name, index) => `    { packageName: ${JSON.stringify(name)}, plugin: plugin${index} },`),
     ...hosted.map(({ name }) => `    { packageName: ${JSON.stringify(name)}, plugin: undefined },`),
     "  ],",
     `  hostModules: new Map([${hosted.map(({ name }, index) => `[${JSON.stringify(name)}, host${index}]`).join(", ")}]),`,

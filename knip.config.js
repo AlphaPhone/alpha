@@ -71,8 +71,8 @@ export default {
     },
     "packages/eliza-harness": {
       "entry": [
+        "src/index.ts",
         "src/no-bun.vibe",
-        "src/pinned.vibe",
         "test/**/*.test.{ts,vibe}"
       ],
       "project": [

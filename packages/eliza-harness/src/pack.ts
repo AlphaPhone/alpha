@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -19,10 +20,11 @@ export interface Pack {
 export const packEntryName = "@repo/agent-pack-entry";
 
 const always = ["@elizaos/core", "@elizaos/cloud", "@elizaos/agent", "@elizaos/os"];
+const worktreeKey = createHash("sha256").update(repository).digest("hex").slice(0, 12);
 
-/** Where this machine keeps its pack clone for `commit`, outside any worktree's `node_modules` or glob tree. @throws {never} */
+/** Where the pack's clone for `commit` lives, shared across worktrees like `.eliza`, outside `node_modules` and outside the repo. @throws {never} */
 export function packRoot(commit = checkout().commit): string {
-  return path.join(os.homedir(), ".cache/alpha/eliza-pack", commit.slice(0, 12));
+  return process.env.ALPHA_ELIZA_PACK_DIR ?? path.join(os.homedir(), ".cache/alpha/eliza-pack", commit.slice(0, 12));
 }
 
 const stampOf = (root: string) => path.join(root, ".alpha/pack.json");
@@ -66,7 +68,19 @@ function install(root: string) {
   }
 }
 
-async function prepare(root: string, commit: string, plugins: readonly string[]) {
+function seedSpecCache(shared: string, root: string) {
+  const from = path.join(shared, ".spec-cache");
+  if (!fs.existsSync(from)) return;
+  const to = path.join(root, ".spec-cache");
+  fs.mkdirSync(to, { recursive: true });
+  for (const name of fs.readdirSync(from)) {
+    if (!name.startsWith("action-")) continue;
+    const dest = path.join(to, name);
+    if (!fs.existsSync(dest)) fs.copyFileSync(path.join(from, name), dest);
+  }
+}
+
+function prepare(root: string, commit: string, plugins: readonly string[]) {
   if (packReady(plugins, commit)) return;
   const shared = checkout().root;
   const source = process.env.ALPHA_ELIZA_SOURCE ?? (fs.existsSync(path.join(shared, ".git")) ? shared : undefined);
@@ -74,11 +88,14 @@ async function prepare(root: string, commit: string, plugins: readonly string[])
     fs.rmSync(root, { recursive: true, force: true });
     fs.mkdirSync(path.dirname(root), { recursive: true });
     const lock = JSON.parse(fs.readFileSync(path.join(repository, "eliza.lock.json"), "utf8")) as { remote: string; branch: string };
-    run(path.dirname(root), "git", "clone", "-q", "--no-checkout", ...(source === undefined ? ["--branch", lock.branch, lock.remote] : ["--local", source]), root);
+    run(path.dirname(root), "git", "clone", "-q", "--no-checkout", ...(source === undefined ? ["--branch", lock.branch, lock.remote] : ["--shared", source]), root);
   }
   run(root, "git", "checkout", "-q", "--detach", commit);
   const before = stamped(root);
-  if (before.commit !== commit) install(root);
+  if (before.commit !== commit) {
+    seedSpecCache(shared, root);
+    install(root);
+  }
   const names = workspace(root);
   const unknown = plugins.filter((name) => !names.has(name));
   if (unknown.length > 0) throw new Error(`eliza ${commit.slice(0, 12)} has no package ${unknown.join(", ")}`);
@@ -112,7 +129,7 @@ export function packPrepared(plugins: readonly string[]): Pack {
 export function stagePackEntry(pack: Pack, source: string): string {
   const parent = path.join(pack.root, ".alpha");
   fs.mkdirSync(parent, { recursive: true });
-  const target = path.join(parent, "pack-entry");
+  const target = path.join(parent, `pack-entry-${worktreeKey}`);
   const staging = fs.mkdtempSync(path.join(parent, ".pack-entry-"));
   try {
     fs.writeFileSync(path.join(staging, "package.json"), `${JSON.stringify({ name: packEntryName, version: "0.0.0", private: true, type: "module" }, null, 2)}\n`);
@@ -120,7 +137,7 @@ export function stagePackEntry(pack: Pack, source: string): string {
     const scope = path.join(staging, "node_modules/@elizaos");
     fs.mkdirSync(scope, { recursive: true });
     for (const [name, directory] of pack.packages) {
-      if (name.startsWith("@elizaos/")) fs.symlinkSync(directory, path.join(scope, name.slice("@elizaos/".length)), "dir");
+      if (name.startsWith("@elizaos/")) fs.symlinkSync(path.relative(scope, directory), path.join(scope, name.slice("@elizaos/".length)), "dir");
     }
     fs.rmSync(target, { recursive: true, force: true });
     fs.renameSync(staging, target);
