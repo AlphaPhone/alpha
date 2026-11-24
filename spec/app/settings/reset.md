@@ -54,12 +54,12 @@ pure val initial: Reset = {
 }
 
 pure val automaticTries = 3
-pure val reviewLimit = 60
-pure val stopLimit = 10
-pure val revokeLimit = 8
-pure val clearLimit = 30
-pure val atValues = Set(0, 4, 20)
-pure val nowValues = Set(0, 4, 20, 40, 80)
+pure val reviewLimit = 60000
+pure val stopLimit = 10000
+pure val revokeLimit = 8000
+pure val clearLimit = 30000
+pure val atValues = Set(0, 4000, 20000)
+pure val nowValues = Set(0, 4000, 20000, 40000, 80000)
 
 pure def ended(s: Reset): bool = s.clear.outcome == A::Confirmed
 

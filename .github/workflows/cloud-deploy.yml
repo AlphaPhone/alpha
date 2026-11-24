@@ -1,0 +1,91 @@
+name: Cloud deploy
+run-name: Alpha Cloud ${{ inputs.action }} (${{ inputs.environment }}) on ${{ github.sha }}
+# Deploys Alpha Cloud (spec/cloud/): eliza's cloud with Alpha's profile, the API Worker (apps/cloud/src/worker.vibe)
+# and the web host Worker (apps/cloud/src/edge.vibe), through `pnpm cloud`. Manual and main-only. Deploying the Cloud
+# never moves a phone: each environment's phones address the Cloud packages/deployment names until the cutover.
+#
+# Each GitHub environment (alpha-cloud-staging, alpha-cloud-production) holds:
+#   secret CLOUDFLARE_API_TOKEN   Workers Scripts and Routes, Hyperdrive edit, and Zone DNS edit
+#   secret ALPHA_CLOUD_ENV        the completed secrets file of `pnpm cloud secrets` (run once locally)
+#   secret ALPHA_CLOUD_INPUTS     the reviewed operator inputs (OperatorInputs in apps/cloud/src/profile.vibe)
+# Account and resource ids come from the committed apps/cloud/resources.json.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: staging or production
+        required: true
+        type: choice
+        options: [staging, production]
+      action:
+        description: "check: render and bundle only. deploy: secrets, resources, migrations, registration, prices, Workers, public gates."
+        required: true
+        type: choice
+        options: [check, deploy]
+      component:
+        description: Worker to deploy (deploy only)
+        required: true
+        default: all
+        type: choice
+        options: [all, api, edge]
+permissions:
+  contents: read
+concurrency:
+  group: alpha-cloud-${{ inputs.environment }}
+  cancel-in-progress: false
+jobs:
+  cloud:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    environment: alpha-cloud-${{ inputs.environment }}
+    env:
+      E: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          job: ""
+          verification: "false"
+      - run: pnpm eliza
+      - name: Write the private inputs
+        env:
+          ALPHA_CLOUD_ENV: ${{ secrets.ALPHA_CLOUD_ENV }}
+          ALPHA_CLOUD_INPUTS: ${{ secrets.ALPHA_CLOUD_INPUTS }}
+        run: |
+          umask 077
+          test -n "$ALPHA_CLOUD_ENV" || { echo "ALPHA_CLOUD_ENV is empty: store the completed file of pnpm cloud secrets" >&2; exit 1; }
+          printf '%s\n' "$ALPHA_CLOUD_ENV" > "$RUNNER_TEMP/alpha-cloud.env"
+          printf '%s\n' "$ALPHA_CLOUD_INPUTS" > "$RUNNER_TEMP/alpha-cloud-inputs.json"
+      - name: Render and bundle (dry run)
+        run: pnpm cloud check --environment "$E" --inputs "$RUNNER_TEMP/alpha-cloud-inputs.json" --out "$RUNNER_TEMP/rendered"
+      - name: Verify the secrets, never generating one
+        if: inputs.action == 'deploy'
+        run: pnpm cloud secrets --environment "$E" --env-file "$RUNNER_TEMP/alpha-cloud.env" --frozen
+      - name: Check the Cloudflare resources
+        if: inputs.action == 'deploy'
+        run: pnpm cloud preflight --environment "$E" --env-file "$RUNNER_TEMP/alpha-cloud.env"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Migrate the database
+        if: inputs.action == 'deploy'
+        run: pnpm cloud migrate --environment "$E" --inputs "$RUNNER_TEMP/alpha-cloud-inputs.json" --env-file "$RUNNER_TEMP/alpha-cloud.env"
+      - name: Register Alpha Phone's native client
+        if: inputs.action == 'deploy'
+        run: pnpm cloud register --environment "$E" --inputs "$RUNNER_TEMP/alpha-cloud-inputs.json" --env-file "$RUNNER_TEMP/alpha-cloud.env"
+      - name: Check the payment catalogue
+        if: inputs.action == 'deploy'
+        run: pnpm cloud prices --environment "$E" --inputs "$RUNNER_TEMP/alpha-cloud-inputs.json" --env-file "$RUNNER_TEMP/alpha-cloud.env"
+      - name: Deploy the Workers
+        if: inputs.action == 'deploy'
+        run: pnpm cloud deploy --environment "$E" --inputs "$RUNNER_TEMP/alpha-cloud-inputs.json" --env-file "$RUNNER_TEMP/alpha-cloud.env" --component "${{ inputs.component }}"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Public readiness
+        if: inputs.action == 'deploy'
+        run: pnpm cloud smoke --environment "$E"
+      - name: Remove the private inputs
+        if: always()
+        run: rm -f "$RUNNER_TEMP/alpha-cloud.env" "$RUNNER_TEMP/alpha-cloud-inputs.json"

@@ -1,5 +1,6 @@
-// spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
+// spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"; spec/app/platform/index.md, "Story: Reach the phone's native capabilities"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { reachable, variantOf } from "../../gen/app__platform.effect.vibe"
 
 module web {
   import { Capacitor, registerPlugin } from "@capacitor/core"
@@ -128,7 +129,7 @@ effect function scaleOf(): Option.Option<number>!! {
 const telephony = "ElizaTelephony"
 const contacts = "ElizaContacts"
 
-/** The phone: what it admits is which plugins its host registered. */
+/** The phone: what it admits is which plugins its host registered, and an image's plugins only on an image. */
 export const phoneDevice = Layer.effect(Device, effect {
   return {
     ...(try paged()),
@@ -136,8 +137,8 @@ export const phoneDevice = Layer.effect(Device, effect {
     haptic: (kind: string) => registered(alphaDevice) ? ignore(tryPromise(() => alpha().haptic({ kind }))) : Effect.void,
     feels: () => sync(() => registered(alphaDevice)),
     effect capabilities() {
-      const image = registered(telephony)
-      return { image, contacts: image && registered(contacts) }
+      const variant = variantOf(native(), registered(telephony))
+      return { image: variant === "Image", contacts: reachable("ImageOnly", variant) && registered(contacts) }
     },
   }
 })

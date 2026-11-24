@@ -39,7 +39,7 @@ type Message = { text: bool, files: int, mail: bool, transcript: bool, shown: bo
 type Composer = {
   binding: Binding, slot: Slot, read: R::Read, draft: D::Draft, writing: int, failing: bool,
   hold: int, away: Away, marked: bool, unsettled: bool, editor: Message, held: Message,
-  offeredAt: int, source: int, clear: A::Attempt,
+  offeredAt: int, source: int, clear: A::Attempt, long: bool,
 }
 
 pure val blankMessage: Message = { text: false, files: 0, mail: false, transcript: false, shown: false, quote: 0, editing: 0 }
@@ -47,7 +47,7 @@ pure val blankMessage: Message = { text: false, files: 0, mail: false, transcrip
 pure val initial: Composer = {
   binding: { owner: 0, conversation: 0 }, slot: Closed, read: R::unread, draft: D::blank, writing: 0, failing: false,
   hold: 0, away: Free, marked: false, unsettled: false, editor: blankMessage, held: blankMessage,
-  offeredAt: 0, source: 0, clear: A::plan(0),
+  offeredAt: 0, source: 0, clear: A::plan(0), long: false,
 }
 
 pure def opening(c: Composer): bool = c.read.status == R::Loading
@@ -147,10 +147,16 @@ pure def alwaysTheSlotIsReadWhileClosed(c: Composer): bool = opening(c) implies 
 
 ### The owner writes only in an open slot, and every edit is counted at once
 
-```quint
-pure def canEdit(c: Composer, blank: bool): bool = c.slot == Open
+The shell says whether the text is blank, and whether it is longer than
+the 64,000 UTF-16 units a message may hold.
 
-pure def edit(c: Composer, blank: bool): Composer = { ...c, draft: D::edit(c.draft), editor: { ...c.editor, text: not(blank) } }
+```quint
+pure val textLimit = 64000
+
+pure def canEdit(c: Composer, blank: bool, long: bool): bool = c.slot == Open
+
+pure def edit(c: Composer, blank: bool, long: bool): Composer =
+  { ...c, draft: D::edit(c.draft), editor: { ...c.editor, text: not(blank) }, long: long and not(blank) }
 ```
 
 ### Edits are saved while no send is in hand and storage has not failed
@@ -426,11 +432,22 @@ not sensitive and no turn in flight; otherwise Send is not offered.
 pure def content(m: Message): bool = m.text or attachments(m) > 0
 
 pure def canHold(c: Composer, askable: bool): bool =
-  askable and c.slot == Open and c.away == Free and not(c.marked) and not(c.failing) and content(c.editor)
+  askable and c.slot == Open and c.away == Free and not(c.marked) and not(c.failing) and content(c.editor) and not(c.long)
     and c.source == 0 and c.draft.sync != D::Saving and c.draft.sync != D::Conflicted
 
 pure def hold(c: Composer, askable: bool): Moved =
-  written(true, { ...c, hold: c.hold + 1, away: Marking, editor: blankMessage, held: c.editor, draft: D::edit(c.draft) })
+  written(true, { ...c, hold: c.hold + 1, away: Marking, editor: blankMessage, held: c.editor, draft: D::edit(c.draft), long: false })
+```
+
+### A message longer than a message may hold is kept as a draft and never sent
+
+The owner is told it is too long, and Send is offered again once it is
+short enough.
+
+```quint
+pure def lawALongMessageIsNotSent(c: Composer, askable: bool): bool = c.long implies not(canHold(c, askable))
+
+pure def sometimesAMessageIsTooLong(c: Composer): bool = c.long and c.editor.text and c.slot == Open
 ```
 
 ### A held message is asked of the conversation only once its mark is written, and only once, with its attachments
@@ -630,6 +647,20 @@ pure def quote(c: Composer, message: int): Composer = { ...c, editor: { ...c.edi
 pure def canUnquote(c: Composer): bool = c.away == Free and c.editor.quote > 0
 
 pure def unquote(c: Composer): Composer = { ...c, editor: { ...c.editor, quote: 0 } }
+```
+
+### Text another area hands to Ask Alpha goes only into an empty composer, as a draft the owner sends
+
+Nothing handed over is sent by the area that handed it, and it never
+replaces what the owner already typed.
+
+```quint
+pure def canHandOver(c: Composer): bool = c.slot == Open and c.away == Free and not(c.editor.text)
+
+pure def handOver(c: Composer): Composer = { ...c, draft: D::edit(c.draft), editor: { ...c.editor, text: true }, long: false }
+
+pure def stepAHandoverNeverOverwritesTyping(before: Composer, via: str, after: Composer, out: List[Effect]): bool =
+  via == "handOver" implies (not(before.editor.text) and out == List())
 ```
 
 ### Edit and resend puts a message the owner sent in an empty composer, to be sent as a new message

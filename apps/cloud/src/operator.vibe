@@ -1,0 +1,262 @@
+// spec/cloud/rollout.md, "Story: Deploy an environment without reading a secret into the repository"; spec/cloud/rollout.md, "Story: Keep every secret private and fitting its environment"
+import type { CloudEnvironment, CloudProfile } from "@elizaos/cloud/profile"
+import { ChildProcess } from "effect/process"
+import { ChildProcessSpawner } from "effect/process/ChildProcessSpawner"
+import { Machine, machine, secretsFileAccepted, stripeKeyFits } from "../gen/cloud__rollout.effect.vibe"
+import apiTemplate from "../wrangler/api.template.json" with { type: "json" }
+import edgeTemplate from "../wrangler/edge.template.json" with { type: "json" }
+import { reconcileResources } from "./cloudflare.vibe"
+import { base64urlBytes, entitlementKey, entitlementPublicKey, randomKey } from "./keys.ts"
+import { PROFILE_ASSET } from "./profile-asset.ts"
+import { alphaHosts, alphaProfile, deploymentTable, operatorInputs, type OperatorInputs, type Table } from "./profile.vibe"
+import { environmentRegistration, registrationFile } from "./registration.vibe"
+import { assetsDirectory, leakedElizaHost, renderEnvironment, type CloudResources } from "./wrangler.vibe"
+
+/** A step of the operator's command could not be carried out; the message says which and why, and holds no secret. */
+export error OperatorFailed { problem: string }
+
+/** The secrets each environment's operator supplies. */
+export const providedSecrets = ["DATABASE_URL", "RESEND_API_KEY", "GOOGLE_CLIENT_SECRET", "GOOGLE_CONNECT_CLIENT_SECRET", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "CEREBRAS_API_KEY", "CARTESIA_API_KEY", "GOOGLE_MAPS_API_KEY"]
+/** The secrets the operator command generates once and keeps in the secrets file; it never rotates one. */
+export const internalSecrets = ["CLOUD_DIGEST_KEY", "CLOUD_SEALING_KEY", "CLOUD_ENTITLEMENT_KEY", "EMAIL_CODE_SECRET", "GOOGLE_CONNECT_TOKEN_KEY"]
+/** The API Worker's secrets, each by the secrets file entry it is read from. */
+const workerSecretSource: Readonly<Record<string, string>> = {
+  CLOUD_DIGEST_KEY: "CLOUD_DIGEST_KEY", CLOUD_SEALING_KEY: "CLOUD_SEALING_KEY", CLOUD_ENTITLEMENT_KEY: "CLOUD_ENTITLEMENT_KEY",
+  EMAIL_CODE_SECRET: "EMAIL_CODE_SECRET", RESEND_API_KEY: "RESEND_API_KEY", GOOGLE_CLIENT_SECRET: "GOOGLE_CLIENT_SECRET",
+  GOOGLE_CONNECT_CLIENT_SECRET: "GOOGLE_CONNECT_CLIENT_SECRET", GOOGLE_CONNECT_TOKEN_KEY: "GOOGLE_CONNECT_TOKEN_KEY",
+  STRIPE_SECRET_KEY: "STRIPE_SECRET_KEY", STRIPE_WEBHOOK_SECRET: "STRIPE_WEBHOOK_SECRET",
+  CEREBRAS_API_KEY: "CEREBRAS_API_KEY", INFERENCE_API_KEY: "CEREBRAS_API_KEY", CARTESIA_API_KEY: "CARTESIA_API_KEY",
+  GOOGLE_MAPS_API_KEY: "GOOGLE_MAPS_API_KEY",
+}
+
+/** This package's directory, run from `src/` or from `dist/src/`. */
+export effect function packageDirectory() {
+  const path = try Path.Path
+  const here = try path.fromFileUrl(new URL("..", import.meta.url))
+  return path.basename(here) === "dist" ? path.dirname(here) : here
+}
+
+/** The NAME=value lines of a secrets file, quotes removed. */
+export function parseSecrets(text: string): Record<string, string> {
+  const values: Record<string, string> = {}
+  for (const line of text.split("\n")) {
+    const match = /^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line)
+    if (match) values[match[1]] = /^(['"]).*\1$/.test(match[2]) ? match[2].slice(1, -1) : match[2]
+  }
+  return values
+}
+
+/** The secrets file at `file`, refused inside the checkout or readable by anyone but its owner; nothing yet when it does not exist. */
+export effect function readSecrets(file: string): Record<string, string>!OperatorFailed!(FileSystem.FileSystem | Path.Path) {
+  const fs = try FileSystem.FileSystem
+  const path = try Path.Path
+  const resolved = path.resolve(file)
+  const checkout = path.resolve(try packageDirectory(), "../..")
+  const exists = try (fs.exists(resolved) catch () => false)
+  const mode = exists ? (try (fs.stat(resolved) catch effect () => { throw new OperatorFailed({ problem: `cannot read ${resolved}` }) })).mode : 0o600
+  if (!secretsFileAccepted(resolved.startsWith(checkout + path.sep), (mode & 0o077) !== 0))
+    throw new OperatorFailed({ problem: `${resolved} must lie outside the checkout and be readable by its owner alone (chmod 600)` })
+  if (!exists) return {}
+  return parseSecrets(try (fs.readFileString(resolved) catch effect () => { throw new OperatorFailed({ problem: `cannot read ${resolved}` }) }))
+}
+
+effect function writeSecrets(file: string, values: Readonly<Record<string, string>>): void!OperatorFailed!FileSystem.FileSystem {
+  if (Object.values(values).some((value) => /[\r\n]/.test(value))) throw new OperatorFailed({ problem: "a secret cannot span lines" })
+  const fs = try FileSystem.FileSystem
+  const text = Object.entries(values).map(([name, value]) => `${name}=${value}`).join("\n") + "\n"
+  try (fs.writeFileString(file, text, { mode: 0o600 }) catch effect () => { throw new OperatorFailed({ problem: `cannot write ${file}` }) })
+  try (fs.chmod(file, 0o600) catch effect () => { throw new OperatorFailed({ problem: `cannot make ${file} private` }) })
+}
+
+/** Every internal secret that is absent, generated; those present are kept as they are. */
+export function generated(values: Readonly<Record<string, string>>): Record<string, string> {
+  const next = { ...values }
+  for (const name of internalSecrets) if (!next[name]) next[name] = name === "CLOUD_ENTITLEMENT_KEY" ? entitlementKey() : randomKey()
+  return next
+}
+
+/** Why the secrets cannot serve `environment`: a missing value, a key of the wrong Stripe mode, a malformed one, or a deployed Eliza Cloud host. */
+export function secretProblems(values: Readonly<Record<string, string>>, environment: CloudEnvironment): ReadonlyArray<string> {
+  const problems = [...providedSecrets, ...internalSecrets].filter((name) => !values[name]).map((name) => `${name} is missing`)
+  const stripe = values.STRIPE_SECRET_KEY
+  if (stripe && (!/^(sk|rk)_(live|test)_/.test(stripe) || !stripeKeyFits(environment === "production", /^(sk|rk)_live_/.test(stripe))))
+    problems.push(environment === "production" ? "STRIPE_SECRET_KEY must be a live key in production" : "STRIPE_SECRET_KEY must be a test key in staging")
+  if (values.DATABASE_URL && !/^postgres(ql)?:\/\//.test(values.DATABASE_URL)) problems.push("DATABASE_URL must be a postgres:// URL")
+  for (const name of internalSecrets) if (values[name] && name !== "CLOUD_ENTITLEMENT_KEY" && base64urlBytes(values[name]) < 32) problems.push(`${name} must hold at least 32 bytes`)
+  for (const [name, value] of Object.entries(values)) if (leakedElizaHost(value) !== undefined) problems.push(`${name} names a deployed Eliza Cloud host`)
+  return problems
+}
+
+/** The API Worker's secrets, by the name the Worker reads. */
+export function workerSecrets(values: Readonly<Record<string, string>>): Record<string, string> {
+  return Object.fromEntries(Object.entries(workerSecretSource).map(([name, source]) => [name, values[source] ?? ""]).filter(([, value]) => value !== ""))
+}
+
+/** The secrets of `file` read under the rollout's rules: generated once unless frozen, written back, and refused unless complete. */
+export effect function settledSecrets(file: string, environment: CloudEnvironment) {
+  const rollout = try Machine
+  const values = try readSecrets(file)
+  const internalMissing = internalSecrets.some((name) => !values[name])
+  const provided = secretProblems(generated(values), environment)
+  const read = try rollout.send({ type: "readSecrets", internalMissing, providedFit: provided.length === 0 })
+  const settled = read.generated ? generated(values) : values
+  if (read.generated) try writeSecrets(file, settled)
+  const signingKey = settled.CLOUD_ENTITLEMENT_KEY
+  const publicKey = signingKey ? try (Effect.try(() => entitlementPublicKey(signingKey)) catch effect () => { throw new OperatorFailed({ problem: "CLOUD_ENTITLEMENT_KEY is not a PKCS #8 P-256 key" }) }) : undefined
+  if (read.vault !== "Complete") throw new OperatorFailed({ problem: secretProblems(settled, environment).join("\n") })
+  return { values: settled, entitlementPublicKey: publicKey }
+}
+
+/** The command's exit, with its output passed through to the operator; a nonzero exit fails as `label`. */
+effect function run(label: string, command: string, args: ReadonlyArray<string>, cwd: string, env: Readonly<Record<string, string>> = {}): void!OperatorFailed!ChildProcessSpawner {
+  const spawner = try ChildProcessSpawner
+  const code: number = try (spawner.exitCode(ChildProcess.make(command, [...args], { cwd, env: { ...env }, extendEnv: true, stdin: "ignore", stdout: "inherit", stderr: "inherit" })) catch effect () => {
+    throw new OperatorFailed({ problem: `${label} could not start` })
+  })
+  if (code !== 0) throw new OperatorFailed({ problem: `${label} failed (exit ${code})` })
+}
+
+/** eliza's operator command, `elizaos-cloud`, with the secrets in its environment and never in its arguments. */
+export effect function elizaosCloud(args: ReadonlyArray<string>, values: Readonly<Record<string, string>>) {
+  const path = try Path.Path
+  const directory = try packageDirectory()
+  try run(`elizaos-cloud ${args.slice(0, 2).join(" ")}`, "node", [path.join(directory, "node_modules/@elizaos/cloud/dist/src/main.js"), ...args], directory, values)
+}
+
+/** Wrangler in this package, in the account the resources record. */
+export effect function wrangler(args: ReadonlyArray<string>, accountId?: string) {
+  const path = try Path.Path
+  const directory = try packageDirectory()
+  try run(`wrangler ${args.slice(0, 2).join(" ")}`, path.join(directory, "node_modules/.bin/wrangler"), args, directory, { WRANGLER_SEND_METRICS: "false", ...(accountId === undefined ? {} : { CLOUDFLARE_ACCOUNT_ID: accountId }) })
+}
+
+/** A directory of this run only its owner reads, gone with the scope. */
+export effect function privateDirectory() {
+  const fs = try FileSystem.FileSystem
+  const directory = try fs.makeTempDirectoryScoped({ prefix: "alpha-cloud-" })
+  try fs.chmod(directory, 0o700)
+  return directory
+}
+
+/** The JSON a file holds, refused when it is missing or not JSON. */
+export effect function readJson(file: string): unknown!OperatorFailed!FileSystem.FileSystem {
+  const fs = try FileSystem.FileSystem
+  const text = fs.readFileString(file) catch effect () => { throw new OperatorFailed({ problem: `cannot read ${file}` }) }
+  return try Effect.try({ try: () => JSON.parse(text) as unknown, catch: () => new OperatorFailed({ problem: `${file} is not JSON` }) })
+}
+
+/** The deployment table, the accepted profile for the inputs in `file`, and the hosts it serves. */
+export effect function profiled(file: string) {
+  const table = try deploymentTable()
+  const hosts = alphaHosts(table)
+  const inputs = try operatorInputs(try readJson(file))
+  return { table, hosts, inputs, profile: try alphaProfile(inputs, hosts) }
+}
+
+/** `apps/cloud/resources.json`, or the file `override` names. */
+export effect function resourcesOf(override?: string): Readonly<Record<CloudEnvironment, CloudResources>>!OperatorFailed!(FileSystem.FileSystem | Path.Path) {
+  const path = try Path.Path
+  return (try readJson(override ?? path.join(try packageDirectory(), "resources.json"))) as Record<CloudEnvironment, CloudResources>
+}
+
+const siblingOf = (environment: CloudEnvironment): CloudEnvironment => environment === "production" ? "staging" : "production"
+
+/** Checks, and with `creating` completes, an environment's Cloudflare resources against what `resources.json` records. */
+export effect function reconciled(environment: CloudEnvironment, table: Table, resources: Readonly<Record<CloudEnvironment, CloudResources>>, databaseUrl: string | undefined, creating: boolean) {
+  const hosts = table[environment].candidate
+  const accountId = try (Config.withDefault(Config.String("CLOUDFLARE_ACCOUNT_ID"), "") catch () => "")
+  const token = try (Config.withDefault(Config.String("CLOUDFLARE_API_TOKEN"), "") catch () => "")
+  return try reconcileResources({
+    ids: resources[environment], sibling: resources[siblingOf(environment)],
+    apiHost: new URL(hosts.api).host, webHost: new URL(hosts.web).host, databaseUrl, creating,
+    accountId: accountId === "" ? undefined : accountId, token,
+  })
+}
+
+/** Records one environment's verified resources, unless the file changed since it was read. */
+export effect function recordResources(file: string, environment: CloudEnvironment, expected: CloudResources, verified: CloudResources) {
+  const fs = try FileSystem.FileSystem
+  const current = (try readJson(file)) as Record<CloudEnvironment, CloudResources>
+  if (JSON.stringify(current[environment]) === JSON.stringify(verified)) return
+  if (JSON.stringify(current[environment]) !== JSON.stringify(expected)) throw new OperatorFailed({ problem: `resources.json changed for ${environment}; run provision again` })
+  const staged = `${file}.${environment}.next`
+  try (fs.writeFileString(staged, JSON.stringify({ ...current, [environment]: verified }, null, 2) + "\n") catch effect () => { throw new OperatorFailed({ problem: `cannot write ${staged}` }) })
+  try (fs.rename(staged, file) catch effect () => { throw new OperatorFailed({ problem: `cannot replace ${file}` }) })
+}
+
+/** Both Workers of one environment, rendered into `out`: their Wrangler files, and the API Worker's assets, eliza's pages and the profile. */
+export effect function renderInto(out: string, profile: CloudProfile, environment: CloudEnvironment, resources: CloudResources, inputs: OperatorInputs) {
+  const fs = try FileSystem.FileSystem
+  const path = try Path.Path
+  const directory = try packageDirectory()
+  const client = try environmentRegistration(profile, environment)
+  const assets = path.join(out, assetsDirectory(environment))
+  const paths = { apiMain: path.join(directory, "dist/src/worker.js"), edgeMain: path.join(directory, "dist/src/edge.js"), assets }
+  const rendered = try renderEnvironment({ api: apiTemplate, edge: edgeTemplate }, profile, environment, resources, inputs[environment], client, paths)
+  const pages = path.join(directory, "dist/pages")
+  if (!(try (fs.exists(pages) catch () => false))) throw new OperatorFailed({ problem: `${pages} is missing: build @repo/cloud first` })
+  try fs.makeDirectory(out, { recursive: true })
+  try fs.remove(assets, { recursive: true, force: true })
+  try fs.copy(pages, assets)
+  const profileFile = path.join(assets, PROFILE_ASSET)
+  try fs.makeDirectory(path.dirname(profileFile), { recursive: true })
+  try fs.writeFileString(profileFile, rendered.profile)
+  const api = path.join(out, `wrangler.${environment}.json`)
+  const edge = path.join(out, `wrangler.edge.${environment}.json`)
+  try fs.writeFileString(api, JSON.stringify(rendered.api, null, 2) + "\n")
+  try fs.writeFileString(edge, JSON.stringify(rendered.edge, null, 2) + "\n")
+  return { api, edge, assets, profile: profileFile }
+}
+
+/** Which Workers a deploy puts on Cloudflare. */
+export type Component = "api" | "edge" | "all"
+
+/**
+ * One rollout of an environment: its secrets read under the frozen rule, its resources checked, both Workers rendered
+ * into a private directory, then the API Worker deployed with its secrets and the web host after it. The rollout's
+ * machine refuses each step whose checks have not all passed.
+ */
+export effect function deploy(at: { readonly environment: CloudEnvironment; readonly inputs: string; readonly secrets: string; readonly component: Component; readonly resources?: string }) {
+  return try scoped(effect {
+    provide machine() {
+      const rollout = try Machine
+      try rollout.send({ type: "freeze" })
+      const { values } = try settledSecrets(at.secrets, at.environment)
+      const { table, inputs, profile } = try profiled(at.inputs)
+      const resources = try resourcesOf(at.resources)
+      const verified = reconciled(at.environment, table, resources, values.DATABASE_URL, false) catch effect (refused) => {
+        try rollout.send({ type: "checkResources", recorded: false })
+        throw refused
+      }
+      try rollout.send({ type: "checkResources", recorded: true })
+      const fs = try FileSystem.FileSystem
+      const path = try Path.Path
+      const directory = try privateDirectory()
+      const rendered = try renderInto(directory, profile, at.environment, verified, inputs)
+      try rollout.send({ type: "render" })
+      if (at.component !== "edge") {
+        const secretsFile = path.join(directory, "secrets.json")
+        try fs.writeFileString(secretsFile, JSON.stringify(workerSecrets(values)), { mode: 0o600 })
+        try wrangler(["deploy", "--config", rendered.api, "--secrets-file", secretsFile], verified.accountId)
+        try rollout.send({ type: "deployApi" })
+      }
+      if (at.component !== "api") {
+        try wrangler(["deploy", "--config", rendered.edge], verified.accountId)
+        try rollout.send({ type: "deployEdge" })
+      }
+      return { environment: at.environment, deployed: at.component }
+    }
+  })
+}
+
+/** Writes the registration eliza's `client apply --file` takes, and the profile, into `directory`. */
+export effect function registrationInto(directory: string, profile: CloudProfile, environment: CloudEnvironment) {
+  const fs = try FileSystem.FileSystem
+  const path = try Path.Path
+  const client = try environmentRegistration(profile, environment)
+  const profileFile = path.join(directory, "profile.json")
+  const file = path.join(directory, `registration.${environment}.json`)
+  try fs.writeFileString(profileFile, JSON.stringify(profile, null, 2) + "\n", { mode: 0o600 })
+  try fs.writeFileString(file, JSON.stringify(registrationFile(client, environment), null, 2) + "\n", { mode: 0o600 })
+  return { profileFile, file, clientId: client.clientId }
+}

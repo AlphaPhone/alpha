@@ -1,15 +1,19 @@
 // @vitest-environment happy-dom
 import { CloudError } from "@elizaos/cloud/client";
-import { Effect, Exit, Layer, Option, Redacted } from "effect";
+import { Effect, Exit, Layer, Option, Redacted, Stream } from "effect";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { at, mounts } from "../src/areas.ts";
+import { adopt, keptAt, vaulted } from "../src/platform/adoption.vibe";
+import { Agent } from "../src/platform/agent.vibe";
 import { Cloud } from "../src/platform/cloud.vibe";
 import { type Slot, Vault } from "../src/platform/vault.vibe";
+import type { Platform } from "../src/platform/platform.vibe";
 import { area } from "../src/runtime/area.tsx";
 import { button, closeAll, hardware, only, open, press, underAct, until } from "./alpha.tsx";
 import { account } from "./fakes/cloud.ts";
+import { publish } from "./fakes/platform.ts";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -75,5 +79,62 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await run((vault) => vault.remove(open_));
     expect(world.secrets.size).toBe(0);
     expect([failed(await run((vault) => vault.write(shut, Redacted.make("another"))))?.code, failed(await run((vault) => vault.read(shut)))?.code]).toEqual(["denied", "denied"]);
+  });
+
+  // spec/app/platform/index.md, "Story: Talk to the resident agent"
+  it("Talk to the resident agent: it hears the device headers a request names, and a reply that grows too large breaks (spec/app/platform/index.md, \"Story: Talk to the resident agent\")", async () => {
+    const { alpha } = await open({ ...scene(), phone }, only("home"));
+    const call = (request: HttpClientRequest.HttpClientRequest) => alpha.runtime.runPromiseExit(Effect.flatMap(Agent, (agent) => agent.call(request)));
+    const heard = HttpClientRequest.get("/api/platform/heard");
+    // spec/app/platform/index.md, "The agent hears the device headers a request names, on the phone as in a browser"
+    expect(await call(HttpClientRequest.setHeader(heard, "x-eliza-device-id", "phone-1"))).toEqual(Exit.succeed({ "x-eliza-device-id": "phone-1" }));
+    expect(failed(await call(HttpClientRequest.setHeader(heard, "authorization", "Bearer not-the-page's")))?._tag).toBe("Unsent");
+    if (!phone) return;
+    // spec/app/platform/index.md, "A streamed answer the phone relays never grows past two mebibytes"
+    const flooded = (size: number) => alpha.runtime.runPromiseExit(Effect.flatMap(Agent, (agent) => Stream.runDrain(agent.events(HttpClientRequest.post(`/api/platform/flood?size=${size}`)))));
+    expect([Exit.isSuccess(await flooded(1000)), failed(await flooded(3_000_000))?._tag]).toEqual([true, "Unreachable"]);
+  });
+
+  // spec/app/platform/feed.md, "Story: Follow what my agent does on my screen"
+  it("Follow what my agent does on my screen: only its own steps reach it, until it stops reading (spec/app/platform/feed.md, \"Story: Follow what my agent does on my screen\")", async () => {
+    const world = { ...scene(), phone };
+    const { alpha } = await open(world, only("home"));
+    const steps = alpha.runtime.runPromiseExit(Effect.flatMap(Agent, (agent) => Stream.runCollect(Stream.take(agent.feed("view", "screen-1"), 2))));
+    if (!phone) return void expect(failed(await steps)?._tag).toBe("Unsent");
+    // spec/app/platform/feed.md, "The subscription is asked for only once its listener is registered"
+    await vi.waitFor(() => expect([...world.platform.listening].map((one) => [one.topic, one.clientId])).toEqual([["view", "screen-1"]]));
+    // spec/app/platform/feed.md, "Only this feed's steps for this screen reach it, until it ends"
+    publish(world.platform, "view", { stream: "view-interact", payload: { clientId: "screen-2", frame: { tapped: "elsewhere" } } });
+    publish(world.platform, "view", { stream: "notification", payload: { clientId: "screen-1", frame: { tapped: "not a step" } } });
+    publish(world.platform, "view", { stream: "view-interact", payload: { clientId: "screen-1", frame: { tapped: 1 } } });
+    publish(world.platform, "view", { stream: "view-interact", payload: { clientId: "screen-1", frame: { tapped: 2 } } });
+    expect(await steps).toEqual(Exit.succeed([{ tapped: 1 }, { tapped: 2 }]));
+    // spec/app/platform/feed.md, "Closing removes the listener and withdraws whatever was asked for"
+    await vi.waitFor(() => expect(world.platform.listening.size).toBe(0));
+  });
+
+  // spec/app/platform/adoption.md, "Story: Keep what the earlier Alpha kept"
+  it("Keep what the earlier Alpha kept: a value moves once, and leaves its earlier place only once the new one holds a value (spec/app/platform/adoption.md, \"Story: Keep what the earlier Alpha kept\")", async () => {
+    const world = { ...scene(), phone };
+    world.slots.add("alpha.test.open");
+    const { alpha } = await open(world, only("home"));
+    const [earlier, current] = ["alpha.maps.saved-places.v1", "alpha/app/maps@1"];
+    const run = <A, E, R extends Platform>(work: Effect.Effect<A, E, R>) => alpha.runtime.runPromise(work as Effect.Effect<A, E, Platform>);
+    const places = (copy: (value: string) => Option.Option<string>) => run(Effect.flatMap(Effect.all([keptAt(earlier), keptAt(current)]), ([from, to]) => adopt(from, to, copy)));
+    const read = (value: string) => Option.some(`[${value}]`);
+    localStorage.setItem(earlier, "Home");
+    // spec/app/platform/adoption.md, "A value is moved by copying it only where the new place is still empty, and its earlier place is cleared only once the new place holds a value"
+    expect([await places(read), localStorage.getItem(earlier), await places(read)]).toEqual(["Adopted", null, "NothingToAdopt"]);
+    expect(await run(Effect.flatMap(keptAt(current), (place) => place.read()))).toEqual(Option.some("[Home]"));
+    localStorage.setItem(earlier, "Work");
+    expect([await places(read), localStorage.getItem(earlier), await run(Effect.flatMap(keptAt(current), (place) => place.read()))]).toEqual(["AlreadyKept", null, Option.some("[Home]")]);
+    await run(Effect.flatMap(keptAt(current), (place) => place.clear()));
+    localStorage.setItem(earlier, "Work");
+    expect([await places(() => Option.none()), localStorage.getItem(earlier)]).toEqual(["NotAdopted", "Work"]);
+    const [open_, shut] = ["alpha.test.open", "alpha.test.shut"] as unknown as [Slot, Slot];
+    const secret = (slot: Slot) => run(Effect.flatMap(Effect.all([keptAt(earlier), vaulted(slot)]), ([from, to]) => adopt(from, to, (value) => Option.some(Redacted.make(value)))));
+    expect([await secret(shut), localStorage.getItem(earlier)]).toEqual(["NotAdopted", "Work"]);
+    if (!phone) return void expect(await secret(open_)).toBe("NotAdopted");
+    expect([await secret(open_), localStorage.getItem(earlier), world.secrets.get("alpha.test.open")]).toEqual(["Adopted", null, "\"Work\""]);
   });
 });

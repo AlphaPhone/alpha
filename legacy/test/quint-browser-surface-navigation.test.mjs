@@ -18,7 +18,7 @@ const tab = {session: 'session', id: 'tab'};
 
 async function browserSurfaceNavigationDriver() {
   const load = await loadBundled('apps/app/src/browser/browser-surface.ts', {
-    './preference-documents': 'const unused={read(){throw Error("unused")},edit(){throw Error("unused")}};export const bookmarkDocument=unused,browsingSessionDocument=unused;'});
+    './preference-documents': 'const unused={read(){throw Error("unused")},edit(){throw Error("unused")}};export const bookmarkDocument=unused,bookmarkTitleDocument=unused,browsingSessionDocument=unused;'});
   return async () => {
     const dom = await installDocument();
     const {window, document} = dom;
