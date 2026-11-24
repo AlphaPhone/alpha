@@ -145,10 +145,21 @@ export const layer = Layer.effect(MailComposer, effect {
     return try write()
   }
 
-  effect function start(draft: Draft): (ComposerRefusal | undefined)!! {
+  effect function bindSelected() {
+    if ((try accounts.selectedKey()) === (try machine.get()).owner) return
     try flush()
+    const key = try accounts.selectedKey()
+    if (key === "") try send({ type: "unbind" })
+    else try send({ type: "bind", owner: key })
+  }
+
+  effect function start(draft: Draft, expectedOwner?: string): (ComposerRefusal | undefined)!! {
+    const refusal = try flush()
+    if (refusal !== undefined) return refusal
+    try bindSelected()
     const s = try machine.get()
     if (s.owner === "") return "no-account"
+    if (expectedOwner !== undefined && s.owner !== expectedOwner) return "changed"
     const a = accountOf(s.owner, s)
     if (!shelfRoom(a.shelf, a.open)) return "drafts-full"
     const opened = try send({ type: "openDraft", draft, bytes: jsonBytes(draft) })
@@ -201,14 +212,7 @@ export const layer = Layer.effect(MailComposer, effect {
   }
 
   fork.scoped (effect {
-    for try (const _ of accounts.changes) {
-      const key = try accounts.selectedKey()
-      const s = try machine.get()
-      if (key === s.owner) continue
-      try flush()
-      if (key === "") try send({ type: "unbind" })
-      else try send({ type: "bind", owner: key })
-    }
+    for try (const _ of accounts.changes) try bindSelected()
   })
 
   return {
@@ -330,9 +334,13 @@ export const layer = Layer.effect(MailComposer, effect {
     },
     effect openGmailDraft(row: DraftRow, confirmed: boolean) {
       try flush()
+      try bindSelected()
+      const owner = (try machine.get()).owner
       const grant = (try accounts.get()).selected
+      if (owner === "" || owner !== (try accounts.selectedKey())) return "no-account"
       const d = gmail.draft(grant, row.draftId) catch () => undefined
       if (d === undefined) return "not-ready"
+      if ((try accounts.selectedKey()) !== owner || (try machine.get()).owner !== owner) return "changed"
       if (!editableHere(d.threaded, d.attachmentCount, d.plainText)) return "edit-in-gmail"
       const fields: DraftFields = { ...emptyFields, toList: d.toList, ccList: d.ccList, bccList: d.bccList, subject: oneLineSubject(d.subject), body: d.body.slice(0, 64000) }
       const draft: Draft = { ...noDraft, id: newId(), revision: 1, fields, provider: { draftId: d.draftId, digest: d.digest } }
@@ -359,19 +367,18 @@ export const layer = Layer.effect(MailComposer, effect {
       return try operations.saveGmailDraft(open)
     },
     effect shareFile(first: PickedFile, again: PickedFile, token: string) {
-      const s = try machine.get()
-      const a = accountOf(s.owner, s)
       const checked = tryPromise({ try: () => checkMailFile(first.name, first.mimeType, first.dataBase64), catch: (cause) => cause }) catch () => "name-or-encoding" as const
       const sameBytes = !isRefusal(checked) && again.name === first.name && again.mimeType === first.mimeType && again.dataBase64 === first.dataBase64
         && (first.sha256 === undefined || first.sha256 === checked.sha256)
+      try bindSelected()
+      const s = try machine.get()
+      const a = accountOf(s.owner, s)
       const duplicate = !isRefusal(checked) && a.open.fields.files.some((f) => f.sha256 === checked.sha256)
       const outcome = handoffOutcome({ tokenAtStart: token, tokenNow: s.owner, destinationReady: s.owner !== "", sameBytesTwice: sameBytes, shelfRoom: shelfRoom(a.shelf, a.open), duplicate })
       if (outcome !== "FileAdded" || isRefusal(checked)) return outcome
-      const refusal = try start(try fresh({ ...emptyFields, files: [outgoing(checked.name, checked.mimeType, checked.bytes, checked.sha256, first.dataBase64)] }))
+      const refusal = try start(try fresh({ ...emptyFields, files: [outgoing(checked.name, checked.mimeType, checked.bytes, checked.sha256, first.dataBase64)] }), token)
       return refusal === undefined ? "FileAdded" : refusal === "drafts-full" ? "DraftsFull" : "NotReady"
     },
-    effect token() {
-      return (try machine.get()).owner
-    }
+    token: () => accounts.selectedKey()
   }
 })
