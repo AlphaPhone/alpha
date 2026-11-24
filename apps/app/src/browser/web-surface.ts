@@ -4,8 +4,10 @@ import { isSecureWebAddress, isWebAddress } from "@elizaos/os/browser/address";
 const MARKS_KEY = "alpha/browser/bookmarks";
 const SESSION_KEY = "alpha/browser/session";
 const MAX_MARKS = 100;
+const MAX_MARK_TITLE = 300;
 
 type Listener = (event: unknown) => void;
+type BookmarkEntry = { url: string; title?: string };
 interface FrameTab {
   readonly session: string;
   readonly id: string;
@@ -28,10 +30,37 @@ function readJson(key: string): unknown {
   return JSON.parse(raw);
 }
 
-function stringList(value: unknown): string[] {
+function bookmarkTitle(value: string): string {
+  const title = value.replace(/[\x00-\x1f\x7f]/g, " ").replace(/^ +| +$/g, "");
+  if (title.length <= MAX_MARK_TITLE) return title;
+  const last = title.charCodeAt(MAX_MARK_TITLE - 1);
+  const end = last >= 0xd800 && last <= 0xdbff ? MAX_MARK_TITLE - 1 : MAX_MARK_TITLE;
+  return title.slice(0, end).replace(/ +$/g, "");
+}
+
+function bookmarkEntries(value: unknown): BookmarkEntry[] {
   if (value === undefined) return [];
-  if (!Array.isArray(value) || value.some((x) => typeof x !== "string")) throw new Error("Saved bookmarks could not be read. Existing bookmarks were not changed.");
-  return value;
+  const invalid = "Saved bookmarks could not be read. Existing bookmarks were not changed.";
+  if (!Array.isArray(value) || value.length > MAX_MARKS) throw new Error(invalid);
+  const entries: BookmarkEntry[] = [];
+  const seen = new Set<string>();
+  for (const row of value as unknown[]) {
+    let url: unknown;
+    let title = "";
+    if (typeof row === "string") url = row;
+    else if (row !== null && typeof row === "object" && "url" in row && "title" in row && typeof row.title === "string") {
+      url = row.url;
+      title = bookmarkTitle(row.title);
+    }
+    if (typeof url !== "string" || !isSecureWebAddress(url) || seen.has(url)) throw new Error(invalid);
+    entries.push(title ? { url, title } : { url });
+    seen.add(url);
+  }
+  return entries;
+}
+
+function bookmarkResult(entries: BookmarkEntry[]) {
+  return { urls: entries.map((entry) => entry.url), entries };
 }
 
 function webOnly(raw: unknown): string {
@@ -73,8 +102,8 @@ export class WebTabHost {
       case "command": return this.command(this.tab(args.id), String(args.command));
       case "present": return this.present(args);
       case "close": return this.close(String(args.id));
-      case "bookmarks": return { urls: stringList(readJson(MARKS_KEY)) };
-      case "setBookmark": return this.setBookmark(webOnly(args.url), args.saved === true);
+      case "bookmarks": return bookmarkResult(bookmarkEntries(readJson(MARKS_KEY)));
+      case "setBookmark": return this.setBookmark(webOnly(args.url), args.saved === true, args.title);
       case "browsingState": return readJson(SESSION_KEY) ?? { history: [], tabs: [], cur: "" };
       case "saveBrowsingState": {
         globalThis.localStorage.setItem(SESSION_KEY, JSON.stringify({ history: args.history, tabs: args.tabs, cur: args.cur }));
@@ -207,13 +236,16 @@ export class WebTabHost {
     return {};
   }
 
-  private setBookmark(url: string, saved: boolean) {
+  private setBookmark(url: string, saved: boolean, requestedTitle: unknown) {
     if (!isSecureWebAddress(url)) throw new Error("Only HTTPS addresses without embedded credentials can be bookmarked.");
-    const urls = stringList(readJson(MARKS_KEY)).filter((value) => value !== url);
-    if (saved) urls.unshift(url);
-    if (urls.length > MAX_MARKS) throw new Error("Bookmark could not be saved. The device stores up to 100 bookmarks; existing data was not changed.");
-    globalThis.localStorage.setItem(MARKS_KEY, JSON.stringify(urls));
-    return { urls };
+    if (requestedTitle != null && typeof requestedTitle !== "string") throw new Error("A bookmark title must be text.");
+    const before = bookmarkEntries(readJson(MARKS_KEY));
+    const title = requestedTitle == null ? before.find((entry) => entry.url === url)?.title : bookmarkTitle(requestedTitle);
+    const entries = before.filter((entry) => entry.url !== url);
+    if (saved) entries.unshift(title ? { url, title } : { url });
+    if (entries.length > MAX_MARKS) throw new Error("Bookmark could not be saved. The device stores up to 100 bookmarks; existing data was not changed.");
+    globalThis.localStorage.setItem(MARKS_KEY, JSON.stringify(entries.map((entry) => entry.title === undefined ? entry.url : entry)));
+    return bookmarkResult(entries);
   }
 
   private clearBrowsingData() {

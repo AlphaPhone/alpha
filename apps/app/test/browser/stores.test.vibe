@@ -26,13 +26,16 @@ it.live("a bookmark is written only after the list was read, keeps the page's na
       try marks.set("https://full.test/", "Full", true)
       const now = try marks.get()
       const order = (try Ref.get(fake.calls)).map((c) => c.method).filter((m) => m === "bookmarks" || m === "setBookmark")
+      const writes = try callsTo(fake.calls, "setBookmark")
       const got1 = try Ref.get(fake.toasts)
       try Effect.try(() => assert.deepStrictEqual({
         firstIsARead: order[0],
+        wroteTitle: writes[0]?.args.title,
         marks: now.marks,
         refused: got1.includes("Bookmark not saved. Alpha keeps up to 100 bookmarks; nothing else changed."),
       }, {
         firstIsARead: "bookmarks",
+        wroteTitle: "example.test",
         marks: [{ url: "https://example.test/news", title: "example.test" }, { url: "https://recipes.test/bread", title: "" }],
         refused: true,
       }))
@@ -42,24 +45,31 @@ it.live("a bookmark is written only after the list was read, keeps the page's na
 
 // spec/browser/bookmarks.md, "Opening Browser, resuming the app, a visible return and a changed bookmark document each ask for one refresh"
 it.live("another tab's change to the bookmark document is read again, and another session's is not", () => effect {
-  const saved = try Ref.make<readonly string[]>([])
-  const fake = try fakeHost({ answers: { bookmarks: () => Effect.map(Ref.get(saved), (urls) => ({ urls })) } })
+  const saved = try Ref.make([{ url: "https://elsewhere.test/", title: "Saved before restart" }])
+  const fake = try fakeHost({ answers: { bookmarks: () => Effect.map(Ref.get(saved), (entries) => ({ urls: entries.map((entry) => entry.url), entries })) } })
   try scoped(effect {
     provide fake.live {
       const tabs = try BrowserTabs
       const marks = try BrowserBookmarks
       try settledTabs(tabs)
+      try marks.refresh(false)
+      const first = try marks.get()
       const session = try sessionOf(fake.calls)
       const before = (try callsTo(fake.calls, "bookmarks")).length
-      try Ref.set(saved, ["https://elsewhere.test/"])
+      try Ref.set(saved, [{ url: "https://elsewhere.test/", title: "Renamed elsewhere" }])
       try emit(fake.events, "bookmarksChanged", { session: "another-session" })
       const ignored = (try callsTo(fake.calls, "bookmarks")).length
       try emit(fake.events, "bookmarksChanged", { session })
       const after = (try callsTo(fake.calls, "bookmarks")).length
       const now = try marks.get()
       try Effect.try(() => assert.deepStrictEqual(
-        { ignored: ignored - before, read: after - before, marks: now.marks.map((m) => m.url) },
-        { ignored: 0, read: 1, marks: ["https://elsewhere.test/"] },
+        { first: first.marks, ignored: ignored - before, read: after - before, marks: now.marks },
+        {
+          first: [{ url: "https://elsewhere.test/", title: "Saved before restart" }],
+          ignored: 0,
+          read: 1,
+          marks: [{ url: "https://elsewhere.test/", title: "Renamed elsewhere" }],
+        },
       ))
     }
   })

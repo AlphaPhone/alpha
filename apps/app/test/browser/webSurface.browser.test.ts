@@ -52,3 +52,31 @@ it("Stop swaps in a blank frame, closing forgets the tab, and another session's 
   await expect(call("command", { id: "w2", command: "back" })).rejects.toThrow("Browser tab is unavailable");
   await expect(host.call("create", { id: "w3", session: "another-session" })).rejects.toThrow("Expired browser session");
 });
+
+// spec/browser/bookmarks.md, "A read replaces the marks with the store's list, keeping each saved name, and a failed read is reported, or offered for recovery once when the list is damaged"
+it("keeps a page's saved name across hosts while older address-only data remains readable", async () => {
+  const key = "alpha/browser/bookmarks";
+  const previous = localStorage.getItem(key);
+  const first = "https://old.example/";
+  const second = "https://named.example/article";
+  try {
+    localStorage.setItem(key, JSON.stringify([first]));
+    const { call } = frameHost();
+    await expect(call("bookmarks")).resolves.toEqual({ urls: [first], entries: [{ url: first }] });
+    await call("setBookmark", { url: second, saved: true, title: "  Saved\npage  " });
+    const reopened = new WebTabHost("reopened");
+    const list = { urls: [second, first], entries: [{ url: second, title: "Saved page" }, { url: first }] };
+    await expect(reopened.call("bookmarks", { session: "reopened" })).resolves.toEqual(list);
+    await expect(reopened.call("setBookmark", { session: "reopened", url: second, saved: true })).resolves.toEqual(list);
+    await expect(call("setBookmark", { url: second, saved: true, title: 42 })).rejects.toThrow("A bookmark title must be text.");
+    await expect(call("bookmarks")).resolves.toEqual(list);
+    await expect(call("setBookmark", { url: second, saved: true, title: " " })).resolves.toEqual({
+      urls: [second, first],
+      entries: [{ url: second }, { url: first }],
+    });
+    expect(localStorage.getItem(key)).toBe(JSON.stringify([second, first]));
+  } finally {
+    if (previous === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, previous);
+  }
+});

@@ -62,9 +62,16 @@ export schema ShowDownloads {
   readonly session: string
 }
 
-/** The bookmark list the store returned. */
+/** An address with its optional stored name. */
+export schema MarkEntry {
+  readonly url: string
+  readonly title?: string
+}
+
+/** The bookmark list the store returned. Older hosts return only addresses. */
 export schema MarkList {
   readonly urls: ReadonlyArray<string>
+  readonly entries?: ReadonlyArray<MarkEntry>
 }
 
 /** One saved tab. */
