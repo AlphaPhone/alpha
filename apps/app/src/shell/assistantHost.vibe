@@ -164,7 +164,7 @@ export function composeExecutors(families: readonly OperationPorts[]): Operation
     itemize: (operation, proposalId) => owner(operation)?.itemize?.(operation, proposalId),
     handoff: (operation) => owner(operation)?.handoff?.(operation) ?? true,
     present: (operation, call) => owner(operation)?.present?.(operation, call),
-    ownCommand: (operation) => owner(operation)?.ownCommand?.(operation) ?? false,
+    tabList: (operation) => owner(operation)?.tabList?.(operation) ?? false,
   }
 }
 

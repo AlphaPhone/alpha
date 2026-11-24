@@ -15,6 +15,7 @@ import { AdvertisedCapabilities, type WorkflowStepRef } from "./ports.vibe"
 import { actionResultText, copy, receiptTitle, unsyncedSummary } from "./presentation.vibe"
 import type { CardDestination, ItemizedSet, ProposalCard } from "./transcript.vibe"
 import { ask } from "./transport.vibe"
+import { directBrowserTabList } from "@elizaos/plugin-browser/grounding"
 import { browserCommand, writtenNumbers } from "./grounding.vibe"
 import { WithdrawableRequests } from "./withdrawable.vibe"
 
@@ -40,8 +41,8 @@ export interface OperationPorts {
   handoff?(operation: unknown): boolean
   /** Show an applied operation's result, such as bringing Browser forward, only after its journal entry and receipt settled (#1226, #1438). */
   present?(operation: unknown, call: ExecutorCall): void
-  /** Whether the operation is its own command, as showing Browser's tab list is: the message it is bound to commands it in any words; undefined counts as not. */
-  ownCommand?(operation: unknown): boolean
+  /** Whether the operation shows Browser's local tab list. */
+  tabList?(operation: unknown): boolean
 }
 
 /** What the assistant knows of one executor call: whether the owner approved its card, the owner message it answers and that message's words. */
@@ -470,7 +471,8 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
   effect function directOne(proposal: PendingProposal, text: string, messageId: string, pageLink: boolean) {
     const op = ports.classOf(proposal.operation)
     const bound = proposal.requestMessageId === messageId
-    const commanded = browserCommanded(browserCommand(text), ports.ownCommand?.(proposal.operation) === true)
+    const tabList = ports.tabList?.(proposal.operation) === true
+    const commanded = browserCommanded(browserCommand(text), tabList, tabList && directBrowserTabList(text, "Alpha"))
     const grounded = op !== "BrowserNavigate" || (ownerTyped(ports.target(proposal.operation, text).tag !== "NoTarget", pageLink) && commanded)
     try custodyStep({ type: "prefer", value: try preference() })
     try custodyStep({ type: "propose", op, workflow: proposal.workflow !== undefined, bound, grounded, listed: false })

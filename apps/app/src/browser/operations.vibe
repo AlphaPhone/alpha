@@ -284,8 +284,7 @@ export const operationPorts = effect {
       if (op.kind === "tabsShow") return TABS_SHOWN_SUMMARY
       return op.kind === "navigate" ? browserNavigationSummary(op.url) : controlSummary(op.operation)
     },
-    // spec/assistant/review.md: the tab list names nothing typed and changes no tab, so its bound message commands it in any words.
-    ownCommand: (operation) => decoded(operation)?.kind === "tabsShow",
+    tabList: (operation) => decoded(operation)?.kind === "tabsShow",
     itemized: (operation) => decoded(operation)?.kind === "closeAll",
     itemize: (operation, proposalId) => decoded(operation)?.kind === "closeAll" ? listed(proposalId) : undefined,
     stillListed: (operation, proposalId) => {
