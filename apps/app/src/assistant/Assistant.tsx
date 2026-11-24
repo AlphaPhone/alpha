@@ -183,8 +183,7 @@ export function Assistant({ runtime }: AssistantProps) {
   const writingReply = seen.reply !== "" ? [{ id: "reply", author: "alpha", text: seen.reply } as const] : [];
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
   const failed = seen.failure === undefined ? [] : [{ id: "failure", author: "alpha", text: "", children: failureCard(seen.failure, true) } as const];
-  const quoteId = writing.editor.quote > 0 ? board.messageId(writing.editor.quote) : undefined;
-  const quoted = quoteId === undefined ? undefined : lines.find((line) => line.id === quoteId)?.text;
+  const quoted = board.line(shown.chosen, writing.editor.quote)?.text;
   const view = talking.context.showing.tag === "App" ? talking.context.showing.view : "Home";
   const assistantDetent = shell.state?.assistant ?? "Bar";
   const open = dockOpen(assistantDetent);
