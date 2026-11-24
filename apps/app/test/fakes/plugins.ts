@@ -8,7 +8,7 @@ import { alphaCarrierSetup, elizaReset, elizaSystem, elizaWiFi } from "./setting
 import { telephonyPlugins } from "./telephony.ts";
 import { alphaDevice } from "./update.ts";
 import { alphaConnection } from "./platform.ts";
-import { alphaVoiceCloud, elizaCloudSpeech } from "./voice.ts";
+import { alphaVoiceCloud, elizaCloudSpeech, elizaSignIn } from "./voice.ts";
 
 export function plugins(world: Scene, services: { readonly agent: Answering; readonly cloud: Answering }): Record<string, Faked> {
   return {
@@ -28,7 +28,8 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     ...(world.image ? telephonyPlugins(world.telephony) : {}),
     AlphaDevice: alphaDevice(world.update, () => world.now),
     AlphaConnection: alphaConnection(world.platform),
-    AlphaVoiceCloud: alphaVoiceCloud(world.voice),
+    ...(world.voice.onDevice ? { AlphaVoiceCloud: alphaVoiceCloud(world.voice) } : {}),
     ElizaCloudSpeech: elizaCloudSpeech(world.voice),
+    ElizaSignIn: elizaSignIn(world.voice, () => world.signedIn),
   };
 }

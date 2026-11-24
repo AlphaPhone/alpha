@@ -5,6 +5,7 @@ import * as Prefs from "../../gen/app__settings__preferences.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
 import { Device, native } from "../platform/device.vibe"
 import { type PhoneReport, type Problem, SystemSettings } from "../platform/systemSettings.vibe"
+import { VoiceBridge } from "../platform/voice.vibe"
 import { type Job, answer, due, following, reacting, run, stop, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 
@@ -92,13 +93,39 @@ const shapes = {
   patch: /^\d{4}-\d{2}-\d{2}$/,
   pin: /^[0-9a-f]{40}$/,
   digest: /^[0-9a-f]{64}$/,
+  timingFormat: /^[a-z0-9-]{1,64}$/,
+}
+
+/** The Talk stages a report keeps, by the name the relay records them under. */
+const talkStages = { "stt-connected": "sttConnectedMs", "first-frame-sent": "firstFrameSentMs" } as const
+
+/**
+ * Each recent Talk the relay recorded, in order and without its session: the milliseconds from its start to the
+ * relay's connection and to the first audio sent, and whether consent was asked again.
+ */
+function talkOf(answer: unknown) {
+  const kept = typeof answer === "object" && answer !== null ? (answer as Record<string, unknown>) : {}
+  const rows = Array.isArray(kept.records) ? kept.records : []
+  const sessions = new Map<number, { sttConnectedMs: number | null; firstFrameSentMs: number | null; consentRetry: boolean }>()
+  for (const row of rows) {
+    const one = typeof row === "object" && row !== null ? (row as Record<string, unknown>) : {}
+    const { session, stage, elapsedMs } = one
+    if (typeof session !== "number" || !Number.isSafeInteger(session) || typeof stage !== "string") continue
+    const talk = sessions.get(session) ?? { sttConnectedMs: null, firstFrameSentMs: null, consentRetry: false }
+    sessions.set(session, talk)
+    if (stage === "consent-retry") talk.consentRetry = true
+    const field = Object.hasOwn(talkStages, stage) ? talkStages[stage as keyof typeof talkStages] : undefined
+    if (field !== undefined && typeof elapsedMs === "number" && Number.isSafeInteger(elapsedMs) && elapsedMs >= 0 && talk[field] === null) talk[field] = elapsedMs
+  }
+  const format = typeof kept.format === "string" && shapes.timingFormat.test(kept.format) ? kept.format : null
+  return { format, sessions: [...sessions.values()] }
 }
 
 /**
  * The support report: only the fields Alpha allows, each of a strict shape, and anything else left out, never
  * scrubbed. What the host says about its build is untrusted; Alpha's own roles say only whether Alpha holds them.
  */
-export function reportOf(input: { readonly at: number; readonly native: boolean; readonly facts: unknown; readonly phone: PhoneReport; readonly problems: ReadonlyArray<Problem> }) {
+export function reportOf(input: { readonly at: number; readonly native: boolean; readonly facts: unknown; readonly phone: PhoneReport; readonly problems: ReadonlyArray<Problem>; readonly talk: unknown }) {
   const facts: Record<string, unknown> = typeof input.facts === "object" && input.facts !== null ? { ...input.facts } : {}
   const text = (value: unknown, shape: RegExp) => (typeof value === "string" && shape.test(value) ? value : undefined)
   const whole = (value: unknown, below: number) => (typeof value === "number" && Number.isSafeInteger(value) && value > 0 && value < below ? value : undefined)
@@ -122,11 +149,12 @@ export function reportOf(input: { readonly at: number; readonly native: boolean;
     permissions: Object.fromEntries(input.phone.grants.flatMap(({ access, grant }) => (grant === "Granted" || grant === "Limited" ? [[access, true]] : grant === "Denied" ? [[access, false]] : []))),
     roles: ([["home", input.phone.home], ["assistant", input.phone.assistant]] as const).map(([role, holder]) => ({ role, held: holder === "Alpha", available: holder !== "NoSuchRole" })),
     problems: { count: input.problems.length, recent: input.problems.slice(-Developer.journalCap) },
+    talk: talkOf(input.talk),
   }
 }
 
 // spec/app/settings/developer.md, "The report copies only the fields Alpha allows, so no text, address, key or identifier can reach it"
-effect function exported(exporting: number): Developer.Event!!(SystemSettings | Device | Time) {
+effect function exported(exporting: number): Developer.Event!!(SystemSettings | Device | Time | VoiceBridge) {
   const system = try SystemSettings
   const device = try Device
   const logged = try system.problems()
@@ -136,6 +164,7 @@ effect function exported(exporting: number): Developer.Event!!(SystemSettings | 
     facts: Option.getOrUndefined(try device.buildFacts()),
     phone: try system.report(),
     problems: Option.getOrElse(logged, () => []),
+    talk: try (try VoiceBridge).streamTimings(),
   })
   const ok = tryPromise(() => shared("alpha-diagnostics.json", JSON.stringify(report, null, 2))) catch () => false
   return { type: "exported", exporting, ok }
@@ -146,7 +175,7 @@ const recoverPreferences = effect {
   try ignore((try Prefs.Machine).send({ type: "recover", at: untimed }, "Owner"))
 }
 
-function carryDeveloper(fx: Developer.Effect): Job<Developer.Event, SystemSettings | Device | Time | Prefs.Machine | Developer.Machine, []> {
+function carryDeveloper(fx: Developer.Effect): Job<Developer.Event, SystemSettings | Device | Time | VoiceBridge | Prefs.Machine | Developer.Machine, []> {
   return match (fx) {
     when { tag: "ReadLog", let reading }: answer("log", logRead(reading), { type: "giveUpOnLog", now: untimed });
     when { tag: "ClearLog", let clearing }: answer("clear", logCleared(clearing), { type: "giveUpOnClearing", now: untimed });

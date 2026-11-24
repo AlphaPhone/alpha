@@ -69,7 +69,7 @@ export function services(world: Scene) {
     cloud: answering([
       ...cloudRoutes(),
       ...inboxRoutes(world.inbox),
-      ...mapsRoutes(world.maps),
+      ...mapsRoutes(world.maps, () => world.now),
     ]),
   };
 }
