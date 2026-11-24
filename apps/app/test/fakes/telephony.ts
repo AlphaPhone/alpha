@@ -62,8 +62,10 @@ export interface TelephonyScene {
   readonly asked: unknown[];
 }
 
-/** A wire-shaped contact version token from the fixture's numeric ID and revision. */
-const versionOf = (id: string, revision: number) => id.padStart(32, "0") + String(revision).padStart(32, "0");
+async function versionOf(id: string, revision: number): Promise<string> {
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${id}:${revision}`));
+  return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 
 /** A fresh image: a call log, two voicemails, one conversation and two contacts. */
 export function telephonyScene(): TelephonyScene {
@@ -280,15 +282,15 @@ function contacts(world: TelephonyScene): Faked {
         world.editors.push(id);
         return Promise.resolve({ status: "returned" });
       },
-      get: ({ id }) => {
+      get: async ({ id }) => {
         const one = find(id);
-        if (one === undefined) return Promise.reject(new Error("Contact not found"));
-        return Promise.resolve({
+        if (one === undefined) throw new Error("Contact not found");
+        return {
           id: one.id, lookup: `lookup-${one.id}`, displayName: one.displayName, givenName: one.givenName, familyName: one.familyName,
-          ...(one.notes === undefined ? {} : { notes: one.notes }), starred: false, phoneNumbers: one.phoneNumbers, emailAddresses: one.emailAddresses, version: versionOf(one.id, one.revision),
-        });
+          ...(one.notes === undefined ? {} : { notes: one.notes }), starred: false, phoneNumbers: one.phoneNumbers, emailAddresses: one.emailAddresses, version: await versionOf(one.id, one.revision),
+        };
       },
-      save: ({ id, version, ...draft }) => {
+      save: async ({ id, version, ...draft }) => {
         const fill = (one: Person) => {
           Object.assign(one, { displayName: draft.displayName, givenName: draft.givenName ?? one.givenName, familyName: draft.familyName ?? one.familyName, phoneNumbers: draft.phoneNumbers, emailAddresses: draft.emailAddresses });
           if (draft.notes !== undefined) one.notes = draft.notes;
@@ -297,23 +299,25 @@ function contacts(world: TelephonyScene): Faked {
           const made: Person = { id: String(Math.max(...world.people.map((one) => Number(one.id))) + 1), displayName: "", givenName: "", familyName: "", phoneNumbers: [], emailAddresses: [], revision: 1 };
           fill(made);
           world.people.push(made);
-          return Promise.resolve({ status: "saved", id: made.id, version: versionOf(made.id, made.revision) });
+          return { status: "saved", id: made.id, version: await versionOf(made.id, made.revision) };
         }
         const one = find(id);
-        if (one === undefined) return Promise.resolve({ status: "not-found" });
-        if (versionOf(one.id, one.revision) !== version) return Promise.resolve({ status: "stale" });
+        if (one === undefined) return { status: "not-found" };
+        const revision = one.revision;
+        if (await versionOf(id, revision) !== version || find(id) !== one || one.revision !== revision) return { status: "stale" };
         fill(one);
         one.revision += 1;
-        return Promise.resolve({ status: "saved", id: one.id, version: versionOf(one.id, one.revision) });
+        return { status: "saved", id: one.id, version: await versionOf(one.id, one.revision) };
       },
-      remove: ({ id, version }) => {
+      remove: async ({ id, version }) => {
         const one = find(id);
-        if (one === undefined) return Promise.resolve({ status: "not-found" });
-        if (versionOf(one.id, one.revision) !== version) return Promise.resolve({ status: "stale" });
+        if (one === undefined) return { status: "not-found" };
+        const revision = one.revision;
+        if (await versionOf(id, revision) !== version || find(id) !== one || one.revision !== revision) return { status: "stale" };
         world.people = world.people.filter((person) => person !== one);
         const staged = { id: `staged-${world.staged.length + 1}`, kind: "contact", target: { id, version }, phase: "queued", deadline: { expiresAt: 1_800_000_000_000 } };
         world.staged.push(staged);
-        return Promise.resolve({ status: "queued", deletion: staged });
+        return { status: "queued", deletion: staged };
       },
       resolveNames: ({ numbers }) => Promise.resolve({ names: numbers.map((number) => ({ number, name: world.people.find((one) => one.phoneNumbers.some((phone) => phone.number === number))?.displayName ?? null, photo: null })) }),
     };
