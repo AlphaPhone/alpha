@@ -10,8 +10,8 @@ export type StartupMarkProps = Omit<ComponentProps<"div">, "children">;
  */
 export function StartupMark({ className, ...props }: StartupMarkProps) {
   return (
-    <div className={cn("flex size-full flex-1 items-center justify-center bg-background text-alpha motion-safe:animate-fade", className)} {...props}>
-      <Mark className="size-20" />
+    <div role="status" aria-label="Loading Alpha" className={cn("flex size-full flex-1 items-center justify-center bg-background text-alpha motion-safe:animate-fade", className)} {...props}>
+      <Mark className="size-14" />
     </div>
   );
 }

@@ -702,9 +702,9 @@ pure def canEditSaved(s: Composer, access: Access, account: int, gmail: int, hel
 
 pure def editSaved(s: Composer, access: Access, account: int, gmail: int, held: int, intact: bool, recipients: int, invalid: int): Written = {
   val l = L::fromGmail(s.made + 1, s.session, account, gmail, held)
-  val openedLetter = { ...l, recipients: recipients, invalid: invalid }
+  val edited = { ...l, recipients: recipients, invalid: invalid }
   if (not(intact)) { state: { ...s, notice: NotEditable }, out: List() }
-  else keeping(openedLetter, opened(openedLetter, false, { ...s, made: s.made + 1 }))
+  else keeping(edited, opened(edited, false, { ...s, made: s.made + 1 }))
 }
 
 pure def stepEditingASavedDraftReplacesNone(before: Composer, via: str, after: Composer): bool =
