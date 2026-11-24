@@ -65,6 +65,11 @@ export schema CredentialIdentity {
   activationPending?: boolean
 }
 
+/** The sign-in host's answer to sign-out's self-revocation (`AlphaCloudSignIn.revokeKey`): whether Cloud no longer accepts the key. */
+export schema KeyRevocation {
+  revoked: boolean
+}
+
 /** Where the saved key's silent renewal stands. */
 export schema Renewal {
   status: "current" | "renewed" | "deferred" | "sign-in-required" | "unavailable" | "signed-out"
@@ -125,7 +130,7 @@ export schema ServiceRow {
   privacy: ServiceDocument
 }
 
-/** `GET /api/public/service`. */
+/** `GET /api/public/service`, as the sign-in host (`AlphaCloudSignIn.serviceInfo`) reads it. */
 export schema ServiceAnswer {
   success: boolean
   version: number

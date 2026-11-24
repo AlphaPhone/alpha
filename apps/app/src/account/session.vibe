@@ -12,7 +12,7 @@ import { Resident } from "../platform/resident.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 import { deployment } from "./deployment.ts"
 import { ensureResident, unbindInference } from "./inference.vibe"
-import { Completed, CredentialIdentity, Incomplete, Renewal, Renewed, UserAnswer } from "./signIn.schema.vibe"
+import { Completed, CredentialIdentity, Incomplete, KeyRevocation, Renewal, Renewed, UserAnswer } from "./signIn.schema.vibe"
 
 const plugin = "AlphaCloudSignIn"
 
@@ -107,9 +107,9 @@ export const sessionService = Layer.effect(CloudSession, effect {
   effect function revoke(credentialId: string) {
     const held = readIdentity(native, environment) catch () => undefined
     if (held === undefined || held.credentialId !== credentialId) return false
+    // Self-revocation is a sign-in-owned route: the sign-in host sends it with the key it holds, never the page's Cloud table.
     const answer = effect {
-      try cloud.json("DELETE", "/api/v1/api-keys/current")
-      return true
+      return (try Schema.decodeUnknownEffect(KeyRevocation)(try native.invoke(plugin, "revokeKey", { environment, credentialId }))).revoked
     } catch () => false
     return answer
   }

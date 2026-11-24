@@ -33,6 +33,7 @@
   "test/ci-ruleset-readback.test.mjs",
   "test/cloud-auth-wire.test.mjs",
   "test/cloud-provision.test.mjs",
+  "test/cloud-route-table.test.mjs",
   "test/cloud-worker.test.mjs",
   "test/cuttlefish-launcher-postboot.test.mjs",
   "test/deliver-app-update.test.mjs",

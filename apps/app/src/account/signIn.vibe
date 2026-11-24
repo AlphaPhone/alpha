@@ -6,7 +6,6 @@ import {
 import type { Net as LifeNet } from "../../gen/platform__lifecycle.ts"
 import { Build } from "../platform/build.vibe"
 import { buildCloudEnvironment, environmentName } from "../platform/build-live.vibe"
-import { Cloud } from "../platform/cloud.vibe"
 import { AppLifecycle } from "../platform/lifecycle.vibe"
 import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
@@ -81,7 +80,6 @@ export function factorOf(method: string | undefined): FactorKind {
 export const signInService = Layer.effect(SignInScreen, effect {
   const machine = try SignInMachine
   const native = try Native
-  const cloud = try Cloud
   const resident = try Resident
   const build = try Build
   const lifecycle = try AppLifecycle
@@ -357,7 +355,8 @@ export const signInService = Layer.effect(SignInScreen, effect {
     },
     effect serviceInfo() {
       const answer = effect {
-        return try Schema.decodeUnknownEffect(ServiceAnswer)(try cloud.json("GET", "/api/public/service"))
+        // The service document is a sign-in-owned route: the sign-in host reads it, never the page's Cloud table.
+        return try Schema.decodeUnknownEffect(ServiceAnswer)(try native.invoke(plugin, "serviceInfo", { environment }))
       } catch () => undefined
       return answer !== undefined && answer.success && answer.version === 1 ? answer.service : undefined
     },

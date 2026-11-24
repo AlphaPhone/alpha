@@ -10,6 +10,8 @@ export const root=resolve(import.meta.dirname,'../..');
 export const nativeSource=name=>join(root,'android/app/src/main/java/ai/alphacompute/alphaphone',name);
 export const fixture=name=>join(root,'test/fixtures',name);
 export const upstreamConnection=name=>join(root,'vendor/eliza/plugins/plugin-native-agent/android/src/main/java/ai/eliza/plugins/agent/connection',name);
+/** A source root of one upstream os Android module at the reviewed pin (sign-in, agent-service, ...). */
+export const upstreamOsModule=name=>join(root,'vendor/eliza/packages/os/android',name,'src/main/java');
 export const upstreamSecureStore=name=>join(root,'vendor/eliza/packages/os/android/secure-store/src/main/java/ai/eliza/plugins/securestore/nativeonly',name);
 export const upstreamAgentRuntime=name=>join(root,'vendor/eliza/plugins/plugin-native-agent/android/src/main/java/ai/eliza/plugins/agent/runtime',name);
 // Shared speech pipeline (ai.eliza.voice) and its upstream host-JVM fixtures at the reviewed pin.
@@ -47,12 +49,14 @@ export function jvmSkip(...names){
 export const jsonJarSkip=jvmSkip('json');
 
 /** Compiles the sources (plus org.json when needed) and returns the main class's stdout for the given stdin.
- * `release` is the Java language level (21 for sources with text blocks, as the app compiles). */
-export function runJvm(sources,mainClass,{json=false,args=[],input,timeout=jvmTimeout,release='11'}={}){
+ * `release` is the Java language level (21 for sources with text blocks, as the app compiles). `sourcepath`
+ * names source roots javac draws the classes the sources use from, compiling only those. */
+export function runJvm(sources,mainClass,{json=false,args=[],input,timeout=jvmTimeout,release='11',sourcepath=[]}={}){
  const temporary=mkdtempSync(join(tmpdir(),'alpha-jvm-'));
  try{
   const classpath=json?['-cp',jsonJar]:[];
-  execFileSync(javaBinary('javac'),['--release',release,...classpath,'-d',temporary,...sources],{timeout:jvmTimeout});
+  const roots=sourcepath.length?['-sourcepath',sourcepath.join(':'),'-implicit:class']:[];
+  execFileSync(javaBinary('javac'),['--release',release,...classpath,...roots,'-d',temporary,...sources],{timeout:jvmTimeout});
   return execFileSync(javaBinary('java'),['-cp',json?temporary+':'+jsonJar:temporary,mainClass,...args],{encoding:'utf8',timeout,input});
  }finally{rmSync(temporary,{recursive:true,force:true});}
 }

@@ -200,8 +200,8 @@ pure def sometimesKeyExpired(s: Session): bool = s.phase == KeyExpired
 ### Sign-out revokes exactly the key it was asked for, and the agent keeps running
 
 Sign-out is fenced to the captured key: Cloud inference is unbound first, then, only while the
-host still holds that key, Cloud's self-revocation route (`DELETE /api/v1/api-keys/current`) is
-asked once and the host clears its credential state. Only a confirmed revocation reads as signed
+host still holds that key, the host asks Cloud's self-revocation route (`DELETE /api/v1/api-keys/current`,
+sign-in-owned, so never in the page's Cloud route table) once with that key, and the host clears its credential state. Only a confirmed revocation reads as signed
 out everywhere; any other answer is signed out here only. The agent is started again without Cloud inference.
 
 ```quint

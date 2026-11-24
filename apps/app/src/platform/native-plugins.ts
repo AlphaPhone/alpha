@@ -69,8 +69,8 @@ export const nativePlugins = {
   AlphaCloudSignIn: {
     reach: "AnyNative",
     methods: [
-      "credentialIdentity", "status", "startGoogle", "startEmail", "startPhone", "verifyPhone", "verifyEmail", "verifyMfa",
-      "resumeMfa", "clearCredentialState", "cancel", "renewSignIn",
+      "credentialIdentity", "revokeKey", "serviceInfo", "status", "startGoogle", "startEmail", "startPhone", "verifyPhone",
+      "verifyEmail", "verifyMfa", "resumeMfa", "clearCredentialState", "cancel", "renewSignIn",
     ],
     events: ["signInCompleted", "signInIncomplete", "signInMfaRequired", "signInReadinessChanged", "signInRenewed"],
   },

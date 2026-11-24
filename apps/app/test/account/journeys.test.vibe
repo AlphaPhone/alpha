@@ -237,10 +237,11 @@ it.live(`Back from the chooser the owner opened while signed out closes sign-in 
 // spec/account/signIn.md, "Story: Read the service's terms before signing in"
 it.live(`Terms are shown only as the service's plain published text (spec/account/signIn.md, "Story: Read the service's terms before signing in")`, () => effect {
   const document = { title: "Terms", revision: "r1", sections: [{ title: "Use", paragraphs: ["Plain text."] }] }
-  const published = { ...cloudAnswers, "GET /api/public/service": { success: true, version: 1, service: { name: "Eliza Cloud", terms: document, privacy: { ...document, title: "Privacy" } } } }
-  const later = { ...cloudAnswers, "GET /api/public/service": { success: true, version: 2, service: { name: "Eliza Cloud", terms: document, privacy: document } } }
-  const shown = try scoped(effect { provide account([], signedInNative, published) { return try (try SignInScreen).serviceInfo() } })
-  const unknown = try scoped(effect { provide account([], signedInNative, later) { return try (try SignInScreen).serviceInfo() } })
+  // The service document is sign-in-owned, so the sign-in host reads it; the page's Cloud table never lists it.
+  const published = { ...signedInNative, "AlphaCloudSignIn.serviceInfo": { success: true, version: 1, service: { name: "Eliza Cloud", terms: document, privacy: { ...document, title: "Privacy" } } } }
+  const later = { ...signedInNative, "AlphaCloudSignIn.serviceInfo": { success: true, version: 2, service: { name: "Eliza Cloud", terms: document, privacy: document } } }
+  const shown = try scoped(effect { provide account([], published) { return try (try SignInScreen).serviceInfo() } })
+  const unknown = try scoped(effect { provide account([], later) { return try (try SignInScreen).serviceInfo() } })
   const missing = try scoped(effect { provide account([]) { return try (try SignInScreen).serviceInfo() } })
   try Effect.try(() => assert.deepStrictEqual({ name: shown?.name, privacy: shown?.privacy.title, unknown, missing }, { name: "Eliza Cloud", privacy: "Privacy", unknown: undefined, missing: undefined }))
 })
@@ -392,7 +393,7 @@ it.live(`Sign-out is confirmed only for the reviewed account, and Home closes th
       try sheet.show()
       try sheet.askSignOut()
       try sheet.close()
-      const dismissed = names(calls).includes("DELETE /api/v1/api-keys/current")
+      const dismissed = names(calls).includes("AlphaCloudSignIn.revokeKey")
       try sheet.show()
       try sheet.askSignOut()
       const reviewing = try sheet.current()
@@ -401,7 +402,7 @@ it.live(`Sign-out is confirmed only for the reviewed account, and Home closes th
       try sheet.returnHome()
       const home = try sheet.current()
       try Effect.try(() => assert.deepStrictEqual(
-        { dismissed, reviewOwner: reviewing.reviewOwner, revoked: names(calls).includes("DELETE /api/v1/api-keys/current"), confirmed: after.confirmed, home: [home.open, home.covered] },
+        { dismissed, reviewOwner: reviewing.reviewOwner, revoked: names(calls).includes("AlphaCloudSignIn.revokeKey"), confirmed: after.confirmed, home: [home.open, home.covered] },
         { dismissed: false, reviewOwner: 1, revoked: true, confirmed: 1, home: [false, false] }
       ))
     })

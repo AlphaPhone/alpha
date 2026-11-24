@@ -46,12 +46,12 @@ it.live(`Sign out of exactly the signed-in key with the agent still running (spe
       // spec/account/session.md, "Sign-out revokes exactly the key it was asked for, and the agent keeps running"
       const revoked = try session.signOut()
       const after = try session.current()
-      const revokedAt = names(calls).indexOf("DELETE /api/v1/api-keys/current")
+      const revokedAt = names(calls).indexOf("AlphaCloudSignIn.revokeKey")
       const identityBefore = calls.slice(0, revokedAt).filter((c) => c.name === "AlphaCloudSignIn.credentialIdentity").length
       try Effect.try(() => assert.deepStrictEqual({
         restored: restored.account, owner, hostedRefused: hosted !== undefined, revoked,
         after: [after.phase, after.revocation, after.account.credentialId, after.generation > owner],
-        revokedOnce: names(calls).filter((n) => n === "DELETE /api/v1/api-keys/current").length,
+        revokedOnce: names(calls).filter((n) => n === "AlphaCloudSignIn.revokeKey").length,
         keyCheckedBeforeRevoke: identityBefore >= 2,
         clearedAfterRevoke: names(calls).lastIndexOf("AlphaCloudSignIn.clearCredentialState") > revokedAt,
         unboundBeforeRevoke: names(calls).indexOf("Agent.clearProvider") < revokedAt,

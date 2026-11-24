@@ -289,6 +289,34 @@ public abstract class AlphaCloudSignInClient extends Plugin {
   return credentials(() -> { if (destroyed) throw new IllegalStateException("Sign-in closed"); });
  }
 
+ /**
+  * Sign-out's one self-revocation of the saved key, sent only while the slot still holds the key the
+  * renderer named by its local credential id. The route is sign-in-owned, so the page's ElizaCloud
+  * table never lists it; the key never crosses the bridge. Resolves {revoked}: true when Cloud no
+  * longer accepts the key (CloudKeyRevocation.signOut). The saved slot is left as it is.
+  */
+ @PluginMethod public void revokeKey(PluginCall call) {
+  final CloudSignInEnvironment environment;
+  try { environment = config().environment(call.getString("environment")); }
+  catch (Exception invalid) { call.reject("Unsupported Cloud environment", "invalid-request"); return; }
+  final String credentialId = call.getString("credentialId");
+  if (!CloudSignInFlow.validUuid(credentialId)) { call.reject("Unknown saved sign-in", "invalid-request"); return; }
+  final String slot = config().credentialSlot(environment);
+  run(() -> {
+   final String token;
+   try {
+    token = withCredentialRead(() -> {
+     if (destroyed) throw new IllegalStateException("Sign-in closed");
+     String saved = credentials(() -> {}).read(slot);
+     if (saved == null) return null;
+     JSONObject value = new JSONObject(saved);
+     return credentialId.equals(value.optString("credentialId", null)) ? value.optString("token", null) : null;
+    });
+   } catch (Exception unavailable) { call.reject("Saved sign-in could not be read", "storage"); return; }
+   call.resolve(new JSObject().put("revoked", token != null && CloudKeyRevocation.signOut(config(), environment, token)));
+  });
+ }
+
  // ── Readiness: each method only once Cloud is ready for this app ───────────────────────────
 
  /** Public provider documents come only from this build's configured API origin. */

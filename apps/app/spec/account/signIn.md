@@ -373,7 +373,8 @@ pure def sometimesOwnKeysRefused(s: SignIn): bool = s.fault == KeysBusy and s.wo
 
 ### Terms are the service's published plain text, or nothing
 
-`GET /api/public/service` answers the service name and two documents of titled sections of plain
+`GET /api/public/service`, which the sign-in host reads (it is sign-in-owned, so the page's Cloud
+route table never lists it), answers the service name and two documents of titled sections of plain
 paragraphs. Anything else is shown as unavailable; no markup, link or authority is taken from it.
 
 ```quint

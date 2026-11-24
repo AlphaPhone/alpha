@@ -19,14 +19,23 @@ function environment(name: "production" | "staging") {
 }
 
 const any = { kind: "any" } as const;
+/** Query rules that accept any value for each named key. */
+const keys = (...names: string[]) => names.map((key) => ({ key, accepts: any }));
+const google = "/api/v1/eliza/google";
+const inbox = `${google}/gmail/inbox-v1`;
 
-/** The Cloud device routes the renderer sends through ElizaCloud; every one is a device route the os sign-in module lists. */
-const cloudRoutes = [
-  { method: "GET", path: "/api/public/service" },
+/**
+ * The Cloud device routes the renderer sends through ElizaCloud. Each one is, by method and path, exactly one route of
+ * the os sign-in module's device table (CloudRequestPolicy.deviceRoutes), and none is sign-in-owned (/api/public,
+ * /api/v1/auth, /api/v1/app-auth, /api/v1/api-keys, /api/v1/voice/speech): one such route refuses the whole table
+ * (spec/os/signIn/cloudRequests.md, lawOneForeignRouteRefusesTheTable). The service document and self-revocation go
+ * through the sign-in owner, AlphaCloudSignIn. test/cloud-route-table.test.mjs loads this table through upstream's
+ * policy. The Gmail routes and their query keys are the ones @elizaos/plugin-inbox's managed client sends.
+ */
+export const cloudRoutes = [
   { method: "GET", path: "/api/v1/user" },
   { method: "GET", path: "/api/v1/referrals" },
   { method: "POST", path: "/api/v1/referrals/apply" },
-  { method: "DELETE", path: "/api/v1/api-keys/current" },
   { method: "GET", path: "/api/v1/subscriptions/plans" },
   { method: "POST", path: "/api/v1/subscriptions/checkout" },
   { method: "POST", path: "/api/v1/subscriptions/checkout/confirm" },
@@ -42,13 +51,23 @@ const cloudRoutes = [
   { method: "POST", path: "/api/v1/maps/routes" },
   { method: "POST", path: "/api/v1/maps/tiles/viewport" },
   { method: "GET", path: "/api/v1/maps/tiles/{z}/{x}/{y}" },
-  { method: "GET", path: "/api/v1/eliza/google/status" },
-  { method: "GET", path: "/api/v1/eliza/google/accounts", query: [{ key: "side", accepts: any }] },
-  { method: "POST", path: "/api/v1/eliza/google/connect/initiate" },
-  { method: "POST", path: "/api/v1/eliza/google/disconnect" },
-  { method: "GET", path: "/api/v1/eliza/google/calendar/calendars", query: [{ key: "grantId", accepts: any }, { key: "side", accepts: any }] },
-  { method: "GET", path: "/api/v1/eliza/google/calendar/feed", query: ["grantId", "side", "calendarId", "timeMin", "timeMax", "timeZone"].map((key) => ({ key, accepts: any })) },
-  { method: "GET", path: "/api/v1/eliza/google/calendar/events/{eventId}", query: [{ key: "grantId", accepts: any }, { key: "calendarId", accepts: any }] },
+  { method: "GET", path: `${google}/status`, query: keys("side", "grantId") },
+  { method: "GET", path: `${google}/accounts`, query: keys("side") },
+  { method: "POST", path: `${google}/connect/initiate` },
+  { method: "POST", path: `${google}/disconnect` },
+  { method: "GET", path: `${google}/gmail/search`, query: keys("side", "grantId", "query", "maxResults", "pageToken") },
+  { method: "GET", path: `${google}/gmail/read`, query: keys("side", "grantId", "messageId") },
+  { method: "GET", path: `${inbox}/capabilities`, query: keys("grantId") },
+  { method: "GET", path: `${inbox}/thread`, query: keys("grantId", "threadId", "offset", "historyId") },
+  { method: "GET", path: `${inbox}/attachment`, query: keys("grantId", "messageId", "partId", "historyId") },
+  { method: "GET", path: `${inbox}/drafts`, query: keys("grantId", "pageToken") },
+  { method: "GET", path: `${inbox}/draft`, query: keys("grantId", "draftId") },
+  { method: "POST", path: `${inbox}/operations` },
+  { method: "POST", path: `${inbox}/operations/{requestId}/dispatch` },
+  { method: "GET", path: `${inbox}/operations/{requestId}`, query: keys("grantId") },
+  { method: "GET", path: `${google}/calendar/calendars`, query: keys("grantId", "side") },
+  { method: "GET", path: `${google}/calendar/feed`, query: keys("grantId", "side", "calendarId", "timeMin", "timeMax", "timeZone") },
+  { method: "GET", path: `${google}/calendar/events/{eventId}`, query: keys("grantId", "calendarId") },
 ];
 
 const config: CapacitorConfig = {

@@ -41,6 +41,7 @@ export const signedInNative: Record<string, Answer> = {
   "AlphaCloudSignIn.status": { inApp: true, methodsKnown: true, google: true, email: true, phone: false },
   "AlphaCloudSignIn.renewSignIn": { status: "current", expiryWarning: false, expiresAt, credentialId: "key-1" },
   "AlphaCloudSignIn.clearCredentialState": {},
+  "AlphaCloudSignIn.revokeKey": { revoked: true },
   "AlphaCloudSignIn.cancel": {},
   "Agent.providerStatus": providerStatus("cloud", false, false, "r1"),
   "Agent.residentAttachment": { attachable: false },
@@ -68,7 +69,6 @@ export function snapshot(usdMicros: number) {
 
 /** Cloud's answers for the signed-in account. */
 export const cloudAnswers: Record<string, Answer> = {
-  "DELETE /api/v1/api-keys/current": { success: true },
   "GET /api/v1/user": { success: true, data: { id: "user-1", organization_id: "org-1", email: "owner@example.com" } },
   "GET /api/v1/billing/limits": snapshot(5000000)
 }
