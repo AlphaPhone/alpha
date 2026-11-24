@@ -8,6 +8,12 @@ call. The bar sits at the top of every view while a call is live, says what the 
 and goes when the call ends. The development phone never has a call here: the bar is not offered
 off the image.
 
+A call Telecom presents as ringing after screening (`STATE_SIMULATED_RINGING`) is a ringing call
+everywhere: the call screen offers Answer and Decline and says "Incoming call". An incoming call is
+presented by Android's ringing alert (full screen or heads-up), so the call screen opens on its own
+only for an outgoing call, or for a ringing call when that alert cannot show (notices off, or the
+ringing channel missing or below high importance), and at most once for each call.
+
 ## Domain
 
 ### The bar holds the calls Telecom last reported, the reading's generation and the call-state reading
