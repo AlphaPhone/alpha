@@ -10,9 +10,8 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {requireConsistentApk, PACKAGE} from './provision-unit.ts';
 import {androidEnv, tool} from './toolchain.ts';
-import {apkArchiveFacts} from '../vendor/eliza/packages/os/android/apk-distribution.mjs';
 import {updateArtifactDigest} from './update-artifact.ts';
-import {parseXmlTree} from './apk.ts';
+import {archiveFacts, parseXmlTree} from './apk.ts';
 import {apkUpdateChannel, type UpdateChannel} from './update-channel.ts';
 
 const HEX = /^[0-9a-f]{64}$/;
@@ -88,7 +87,7 @@ function updateArchive(file: string) {
   const options: ExecFileSyncOptionsWithStringEncoding={env:androidEnv(),encoding:'utf8',timeout:120_000,maxBuffer:16 << 20,stdio:['ignore','pipe','pipe']};
   const badging=execFileSync(tool('aapt'),['dump','badging',file],options);
   const xml=execFileSync(tool('aapt'),['dump','xmltree',file,'AndroidManifest.xml'],options);
-  return {...apkArchiveFacts({badging,xml,names:[]}),xml};
+  return {...archiveFacts({badging,xml,names:[]}),xml};
 }
 
 /** Production default: inspect exact admitted bytes, then return the original
