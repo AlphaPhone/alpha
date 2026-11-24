@@ -151,6 +151,8 @@ pure def alwaysHiddenHoldsNoInput(s: Screen): bool = s.hidden implies s.pending 
 
 A result or the agent's place is shown under its own name at once, and its
 provider details are fetched; they are shown only for the place still open.
+Under its name the sheet shows the most specific category those details carry
+(for example "Pharmacy"), and no category line when they carry none.
 Opening a place retires the route of the place before it. A pin drops where
 the owner holds a finger still for 500 milliseconds (moving more than 10
 pixels is a pan) or opens the map's menu, never during guidance; spec/maps/plane.md says which

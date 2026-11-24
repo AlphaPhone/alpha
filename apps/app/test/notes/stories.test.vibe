@@ -17,11 +17,12 @@ import { Machine as TransferMachine, voiceExport } from "../../gen/notes__share.
 import { askDialogName, eraseDialogName, Machine as TrashMachine } from "../../gen/notes__trash.effect.vibe"
 import { copyDraftAllowed } from "../../gen/notes__editor.effect.vibe"
 import { Machine as SourceDialogMachine } from "../../gen/notes__webSource.effect.vibe"
+import { NotesViews } from "../../src/assistant/ports.vibe"
 import { NotesAudio } from "../../src/notes/audio.vibe"
 import { NotesCollection } from "../../src/notes/collection.vibe"
 import { NotesEditor } from "../../src/notes/editor.vibe"
 import { NotesFolders } from "../../src/notes/folders.vibe"
-import { checklistItems, checklistText, filterRows, folderOf, namedNoteOpenRequest, nextDefaultTitle, rowOf, shownRows } from "../../src/notes/list.vibe"
+import { checklistItems, checklistText, filterRows, folderOf, nextDefaultTitle, rowOf, shownRows } from "../../src/notes/list.vibe"
 import { NotesListFilter } from "../../src/notes/listFilter.vibe"
 import { NotesOrganize } from "../../src/notes/organize.vibe"
 import { NotesOrigins } from "../../src/notes/origins.vibe"
@@ -102,13 +103,37 @@ describe("Notes stories", () => {
     }
   })
 
-  it.effect("A named note opens on the phone and a relative one stays with the agent (spec/notes/list.md, \"Story: Open a note by saying its title\")", () => effect {
-    // spec/notes/list.md, "Only a named, quoted or plainly titled note opens locally; a relative reference goes to the agent"
-    const asked = [
-      "Open the note called Groceries.", "Hey Alpha, could you show my groceries note", "open “Most Recent Recipes” in Notes",
-      "Open my most recent note", "open the note I just created", "open a new note",
-    ].map(namedNoteOpenRequest)
-    try check(() => assert.deepStrictEqual(asked, ["Groceries", "groceries", "Most Recent Recipes", undefined, undefined, undefined]))
+  it.live("The agent opens the saved note I named, never over another note's unsaved edit (spec/notes/list.md, \"Story: Open a note by saying its title\")", () => effect {
+    // spec/notes/list.md, "The agent opens the one saved note I named, and never over another note's unsaved edit"
+    const agent = seeded(note("groceries", "Groceries", "\nMilk", 1), note("recipes", "Recipes", "\nTacos", 2))
+    const device = new DeviceFake()
+    provide notesOver(agent, device) {
+      const views = try NotesViews
+      const editor = try NotesEditor
+      const collection = try NotesCollection
+      try bound()
+      const opened = try views.openSaved("groceries")
+      const shown = try views.shown()
+      const again = try views.openSaved("groceries")
+      const gone = try views.openSaved("deleted-note")
+      const stillShown = try views.shown()
+      // A note the agent saved after the phone's last read is read again before it opens.
+      agent.notes.push(note("fresh", "Fresh", "\nJust saved", 3))
+      agent.revision += 1
+      const heldBefore = ((try collection.current())?.snapshot.notes ?? []).some((item) => item.id === "fresh")
+      const fresh = try views.openSaved("fresh")
+      const freshShown = try views.shown()
+      try editor.edit({ body: "Milk and eggs" })
+      const overEdit = try views.openSaved("recipes")
+      const kept = (try editor.draft())?.body
+      const afterEdit = try views.shown()
+      const saved = agent.notes.find((item) => item.id === "fresh")?.body ?? ""
+      try check(() => assert.deepStrictEqual(
+        { opened, shown, again, gone, stillShown, heldBefore, fresh, freshShown, overEdit, kept, afterEdit, savedForOwner: saved.includes("eggs") },
+        { opened: true, shown: "groceries", again: true, gone: false, stillShown: "groceries", heldBefore: false, fresh: true, freshShown: "fresh",
+          overEdit: false, kept: "Milk and eggs", afterEdit: "fresh", savedForOwner: false },
+      ))
+    }
   })
 
   it.effect("A checklist written as text reads back with every item and tick (spec/notes/list.md, \"Story: Turn text into a checklist and back\")", () => effect {

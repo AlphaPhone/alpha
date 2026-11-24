@@ -34,6 +34,11 @@ export interface TelephonyClients {
   readonly contacts: AddressBookClient
   /** Display-only names for the numbers a surface shows. */
   readonly names: ContactNamesClient
+  /**
+   * Android's own number matching over the whole address book, for the review of a new contact whose number is already saved
+   * under another name (#1453): display-only like `names`, with its own screen count, so it never drops a screen's names.
+   */
+  readonly holders: ContactNamesClient
   /** The deletion window's pending deletions, Undo and dismissal. */
   readonly deletions: DeferredDeletionsClient
 }
@@ -104,6 +109,7 @@ export const bridgesLayer = Layer.effect(TelephonyBridges, effect {
         composer: messagesClient(composerPlugin(messagesPlugin(TELEPHONY_PLUGIN)), journal),
         contacts: createAddressBookClient({ install: "WritingInstall", plugin: addressBookPlugin(CONTACTS_PLUGIN), journal }),
         names: createContactNames(addressBookPlugin(CONTACTS_PLUGIN)),
+        holders: createContactNames(addressBookPlugin(CONTACTS_PLUGIN)),
         deletions: createDeferredDeletions(journal),
       }
     : undefined

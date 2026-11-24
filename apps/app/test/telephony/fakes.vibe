@@ -48,6 +48,8 @@ export interface World {
   threads: { id: string; addresses: string[]; snippet: string; date: number; unread: boolean }[]
   messages: { id: string; kind: "sms" | "mms"; threadId: string; direction: "incoming" | "outgoing"; status: string; deliveryReport: string; date: number; body: string; attachments: number }[]
   contacts: { id: string; lookup: string; name: string; revision: string; starred: boolean; phones: string[]; emails: string[] }[]
+  /** Who holds a number by Android's own number matching, which the name search does not reach. */
+  holders: Record<string, string>
   smsAnswer: () => Promise<unknown>
   smsHistory: { operationId: string; status: string }[]
   phoneState: boolean
@@ -76,6 +78,7 @@ export function fakePhone(variant: "aosp" | "launcher" | "browser" = "aosp") {
       { id: "sms:9", kind: "sms", threadId: "thread:2", direction: "incoming", status: "complete", deliveryReport: "none", date: 11, body: "Elsewhere", attachments: 0 },
     ],
     contacts: [{ id: "7", lookup: "k7", name: "Maya Chen", revision: "r1", starred: false, phones: ["4155550100"], emails: [] }],
+    holders: {},
     smsAnswer: () => Promise.reject(new Error("answer lost")),
     smsHistory: [],
     phoneState: true,
@@ -163,6 +166,11 @@ export function fakePhone(variant: "aosp" | "launcher" | "browser" = "aosp") {
       requestPermissions: async () => ({ available: true, readable: true, writable: true }),
     },
     names: { resolve: async () => [], close: async () => {} },
+    holders: {
+      resolve: async (screen: { numbers: readonly string[] }) => (log(`holders:${screen.numbers.join(",")}`),
+        screen.numbers.flatMap((number) => world.holders[number] === undefined ? [] : [{ number, name: world.holders[number], photo: null }])),
+      close: async () => {},
+    },
     deletions: {
       pending: async () => ({ deletions: [], deletedOrigins: [] }),
       undo: async () => ({ kind: "Kept" }),
