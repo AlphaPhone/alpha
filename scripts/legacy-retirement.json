@@ -179,13 +179,13 @@
   {
    "legacy": "test/android-build-fast.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: Not moved yet: port to @elizaos/os/build generateAndroidHost and the schema-2 profile (docs/vibestack-open-items.md, Tooling).",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/android-build-path.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: Not moved yet: port to @elizaos/os/build generateAndroidHost and the schema-2 profile (docs/vibestack-open-items.md, Tooling).",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -203,25 +203,25 @@
   {
    "legacy": "test/android-gzip-assets.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json run: pnpm test:root runs it",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/android-host.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: Not moved yet: port to @elizaos/os/build generateAndroidHost and the schema-2 profile (docs/vibestack-open-items.md, Tooling).",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/android-identity.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: Not moved yet: port to @elizaos/os/build generateAndroidHost and the schema-2 profile (docs/vibestack-open-items.md, Tooling).",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/android-instrumentation-runner.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: Not moved yet: the scripts/os-ported and harness rewrite (docs/vibestack-open-items.md, Tooling).",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -233,19 +233,19 @@
   {
    "legacy": "test/aosp-capabilities.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: Not moved yet: port to @elizaos/os/build generateAndroidHost and the schema-2 profile (docs/vibestack-open-items.md, Tooling).",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/aosp-cloud-power-defaults.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json run: pnpm test:root runs it",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/aosp-cuttlefish.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json run: pnpm test:root runs it",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -257,7 +257,7 @@
   {
    "legacy": "test/aosp-image-capability.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The platform area (scripts/legacy-retirement.json maps the AOSP image capability to apps/app/spec/platform).",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -269,7 +269,7 @@
   {
    "legacy": "test/aosp-image-source-packet.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json run: pnpm test:root runs it",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -293,7 +293,7 @@
   {
    "legacy": "test/aosp-native-admission.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: Not moved yet: the scripts/os-ported and harness rewrite (docs/vibestack-open-items.md, Tooling).",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -311,7 +311,7 @@
   {
    "legacy": "test/aosp-pixel10a.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: Not moved yet: the scripts/os-ported and harness rewrite (docs/vibestack-open-items.md, Tooling).",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -335,7 +335,7 @@
   {
    "legacy": "test/aosp-retain-known-good.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json run: pnpm test:root runs it",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -359,7 +359,7 @@
   {
    "legacy": "test/aosp-sense-policy.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json run: pnpm test:root runs it",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -371,7 +371,7 @@
   {
    "legacy": "test/aosp-staging-patches.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json run: pnpm test:root runs it",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -395,7 +395,7 @@
   {
    "legacy": "test/apk-alpha-power-policy.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json run: pnpm test:root runs it",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -413,7 +413,7 @@
   {
    "legacy": "test/apk-signer-range.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json run: pnpm test:root runs it",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -4475,7 +4475,7 @@
   {
    "legacy": "test/check-quint-cache.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -4487,7 +4487,7 @@
   {
    "legacy": "test/ci-emulator-evidence.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: Not moved yet: the scripts/os-ported and harness rewrite (docs/vibestack-open-items.md, Tooling).",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -4541,7 +4541,7 @@
   {
    "legacy": "test/cloud-candidate-deployment.test.mjs",
    "area": "cloud",
-   "replacement": "test/root-tests.json held: cloud/src/*.vibe with cloud/test/*.test.vibe and scripts/cloud-worker.ts (scripts/legacy-retirement.json); the readiness gates beyond smoke are an open item.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -4559,19 +4559,19 @@
   {
    "legacy": "test/cloud-deployment.test.mjs",
    "area": "cloud",
-   "replacement": "test/root-tests.json held: cloud/src/*.vibe with cloud/test/*.test.vibe and scripts/cloud-worker.ts (scripts/legacy-retirement.json); the readiness gates beyond smoke are an open item.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/cloud-email-deployment.test.mjs",
    "area": "cloud",
-   "replacement": "test/root-tests.json held: cloud/src/*.vibe with cloud/test/*.test.vibe and scripts/cloud-worker.ts (scripts/legacy-retirement.json); the readiness gates beyond smoke are an open item.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/cloud-email-resend.test.mjs",
    "area": "cloud",
-   "replacement": "test/root-tests.json held: cloud/src/*.vibe with cloud/test/*.test.vibe and scripts/cloud-worker.ts (scripts/legacy-retirement.json); the readiness gates beyond smoke are an open item.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -4625,7 +4625,7 @@
   {
    "legacy": "test/cloud-provision.test.mjs",
    "area": "cloud",
-   "replacement": "test/root-tests.json run: pnpm test:root runs it",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -4637,7 +4637,7 @@
   {
    "legacy": "test/cloud-readiness.test.mjs",
    "area": "cloud",
-   "replacement": "test/root-tests.json held: cloud/src/*.vibe with cloud/test/*.test.vibe and scripts/cloud-worker.ts (scripts/legacy-retirement.json); the readiness gates beyond smoke are an open item.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -4661,7 +4661,7 @@
   {
    "legacy": "test/cloud-sdk-routing.test.mjs",
    "area": "cloud",
-   "replacement": "test/root-tests.json held: cloud/src/*.vibe with cloud/test/*.test.vibe and scripts/cloud-worker.ts (scripts/legacy-retirement.json); the readiness gates beyond smoke are an open item.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -4733,7 +4733,7 @@
   {
    "legacy": "test/cloud-worker.test.mjs",
    "area": "cloud",
-   "replacement": "test/root-tests.json run: pnpm test:root runs it",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -4991,7 +4991,7 @@
   {
    "legacy": "test/enroll-release-keys.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json run: pnpm test:root runs it",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -6500,7 +6500,7 @@
   {
    "legacy": "test/font-license.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json run: pnpm test:root runs it",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -6603,7 +6603,7 @@
   {
    "legacy": "test/gradle-verification.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json run: pnpm test:root runs it",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -6789,7 +6789,7 @@
   {
    "legacy": "test/instrumentation-outcome-status.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json run: pnpm test:root runs it",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -6801,19 +6801,19 @@
   {
    "legacy": "test/lemma-check.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/lemma-checker.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/licenses.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: Not moved yet: port the notice and SBOM tests to pnpm-lock.yaml (docs/vibestack-open-items.md, Tooling).",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -7065,7 +7065,7 @@
   {
    "legacy": "test/native-build-inputs.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: Not moved yet: requalify the embedding and voice hosts at the pin (docs/vibestack-open-items.md, Tooling).",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -7482,7 +7482,7 @@
   {
    "legacy": "test/owner-sign-aosp-release-edges.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: Not moved yet: the scripts/os-ported and harness rewrite (docs/vibestack-open-items.md, Tooling).",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -7638,13 +7638,13 @@
   {
    "legacy": "test/pixel10a-image.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json run: pnpm test:root runs it",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/pixel10a-source.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json run: pnpm test:root runs it",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -7704,7 +7704,7 @@
   {
    "legacy": "test/production-bundle-audit.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json run: pnpm test:root runs it",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -7758,7 +7758,7 @@
   {
    "legacy": "test/quint-address-input.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -7800,25 +7800,25 @@
   {
    "legacy": "test/quint-android-build-input-readiness.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-android-gzip-asset-stage.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-android-installation-identity.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-app-info-handoff-composition.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -7836,7 +7836,7 @@
   {
    "legacy": "test/quint-application-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -7872,7 +7872,7 @@
   {
    "legacy": "test/quint-back-dispatch.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -8215,19 +8215,19 @@
   {
    "legacy": "test/quint-checker.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-client-feature-publication.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-client-observation-support.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -8251,7 +8251,7 @@
   {
    "legacy": "test/quint-committed-view-observation.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -8263,19 +8263,19 @@
   {
    "legacy": "test/quint-composition-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-conformance.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-connection-controller.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -8311,43 +8311,43 @@
   {
    "legacy": "test/quint-core-interactive-task-traces.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-core-plugin-lifecycle-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-core-retirement.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-core-runtime-lifecycle-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-core-service-lifecycle-design-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-core-service-lifecycle.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-core-shutdown.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -8359,7 +8359,7 @@
   {
    "legacy": "test/quint-core-task-service-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -8383,7 +8383,7 @@
   {
    "legacy": "test/quint-day-anchor.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -8437,25 +8437,25 @@
   {
    "legacy": "test/quint-embedding-sql-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-embedding-store-identity.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-fact-write-dedupe-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-fact-write-scope.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -8485,7 +8485,7 @@
   {
    "legacy": "test/quint-find-in-page.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -8497,7 +8497,7 @@
   {
    "legacy": "test/quint-fixture-busy-latch.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -8515,7 +8515,7 @@
   {
    "legacy": "test/quint-google-access-publication.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -8551,7 +8551,7 @@
   {
    "legacy": "test/quint-google-consent-admission.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -8593,7 +8593,7 @@
   {
    "legacy": "test/quint-hosted-background-admission.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -8647,13 +8647,13 @@
   {
    "legacy": "test/quint-indicator-provider.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-inert-hold.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -8725,7 +8725,7 @@
   {
    "legacy": "test/quint-legacy-google-connect-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -8875,19 +8875,19 @@
   {
    "legacy": "test/quint-media-copy-intent.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-mms-compose.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-mobile-bundle-admission.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -8905,7 +8905,7 @@
   {
    "legacy": "test/quint-named-embedding-provenance.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -8917,7 +8917,7 @@
   {
    "legacy": "test/quint-native-app-info-handoff.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -8948,13 +8948,13 @@
   {
    "legacy": "test/quint-native-conformance.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-native-crash-journal.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -8984,7 +8984,7 @@
   {
    "legacy": "test/quint-native-google-host-artifact.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9008,7 +9008,7 @@
   {
    "legacy": "test/quint-native-mms-dispatch.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9020,13 +9020,13 @@
   {
    "legacy": "test/quint-native-recording.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-native-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9038,7 +9038,7 @@
   {
    "legacy": "test/quint-native-request-withdrawal.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9056,19 +9056,19 @@
   {
    "legacy": "test/quint-native-source-renewal.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-native-stream-bridge.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-native-text-scale-lifecycle.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9158,13 +9158,13 @@
   {
    "legacy": "test/quint-on-device-recognizer.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-os-application-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9218,7 +9218,7 @@
   {
    "legacy": "test/quint-phone-recents.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9278,13 +9278,13 @@
   {
    "legacy": "test/quint-plugin-connector-custody.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-prepared-source-stamp.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9314,13 +9314,13 @@
   {
    "legacy": "test/quint-prototype-surfaces-source-contracts.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-provider-execution-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9332,7 +9332,7 @@
   {
    "legacy": "test/quint-read-aloud.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9356,7 +9356,7 @@
   {
    "legacy": "test/quint-recovery-ui-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9368,7 +9368,7 @@
   {
    "legacy": "test/quint-refinement-harness.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9416,7 +9416,7 @@
   {
    "legacy": "test/quint-renderer-background-rebuild.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9434,7 +9434,7 @@
   {
    "legacy": "test/quint-renderer-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9446,13 +9446,13 @@
   {
    "legacy": "test/quint-resident-java-source-stage.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-resident-liveness.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9464,7 +9464,7 @@
   {
    "legacy": "test/quint-resident-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9476,7 +9476,7 @@
   {
    "legacy": "test/quint-resident-start-cancel.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9500,13 +9500,13 @@
   {
    "legacy": "test/quint-room-handler-queue.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-saved-service-read.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9542,13 +9542,13 @@
   {
    "legacy": "test/quint-service-read-cache.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-services-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9638,7 +9638,7 @@
   {
    "legacy": "test/quint-single-flight-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9656,7 +9656,7 @@
   {
    "legacy": "test/quint-source-renewal-question.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9698,7 +9698,7 @@
   {
    "legacy": "test/quint-state-inventory.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9710,7 +9710,7 @@
   {
    "legacy": "test/quint-system-picker-visibility.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9728,13 +9728,13 @@
   {
    "legacy": "test/quint-task-service-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/quint-tla-inventory.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9746,7 +9746,7 @@
   {
    "legacy": "test/quint-vault-coordinator-refinement.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9764,7 +9764,7 @@
   {
    "legacy": "test/quint-view-admission.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec.",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9890,7 +9890,7 @@
   {
    "legacy": "test/record-release.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json run: pnpm test:root runs it",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -9980,7 +9980,7 @@
   {
    "legacy": "test/resident-build-output.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: Not moved yet: port to @elizaos/os/build generateAndroidHost and the schema-2 profile (docs/vibestack-open-items.md, Tooling).",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -10016,7 +10016,7 @@
   {
    "legacy": "test/runtime-licenses.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: Not moved yet: port the notice and SBOM tests to pnpm-lock.yaml (docs/vibestack-open-items.md, Tooling).",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -10040,7 +10040,7 @@
   {
    "legacy": "test/sbom.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: Not moved yet: port the notice and SBOM tests to pnpm-lock.yaml (docs/vibestack-open-items.md, Tooling).",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -10172,7 +10172,7 @@
   {
    "legacy": "test/sign-release-apks.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json run: pnpm test:root runs it",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -10208,7 +10208,7 @@
   {
    "legacy": "test/source-snapshot.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: Not moved yet: port to @elizaos/os/build generateAndroidHost and the schema-2 profile (docs/vibestack-open-items.md, Tooling).",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -10244,7 +10244,7 @@
   {
    "legacy": "test/strict-build-inputs.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: Not moved yet: port to @elizaos/os/build generateAndroidHost and the schema-2 profile (docs/vibestack-open-items.md, Tooling).",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -10460,19 +10460,19 @@
   {
    "legacy": "test/upstream-native-source.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json run: pnpm test:root runs it",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/upstream-pin-guard.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json run: pnpm test:root runs it",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
    "legacy": "test/upstream-reachability.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json run: pnpm test:root runs it",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
@@ -10490,7 +10490,7 @@
   {
    "legacy": "test/verify-apks.test.mjs",
    "area": "tooling",
-   "replacement": "test/root-tests.json held: Not moved yet: the scripts/os-ported and harness rewrite (docs/vibestack-open-items.md, Tooling).",
+   "replacement": "test/root-tests.json, which runs it under pnpm test:root or holds it with the reason and where it moved",
    "status": "mapped"
   },
   {
