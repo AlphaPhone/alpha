@@ -260,4 +260,45 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
       "Idle", "Off", false, false, 1,
     ]);
   });
+  // spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "Starting asks for the microphone the first time, opens it once it is allowed, and holds the speech engine while talking"; spec/app/voice/route.md, "Story: Choose where speech is processed"
+  it("talks over Cloud speech on a phone with only the relay, under the signed-in key read again after a refused start, and warms the relay without waiting on it", async () => {
+    const world = { ...scene(), phone: true };
+    world.voice.onDevice = false;
+    world.voice.relayWarmupHangs = true;
+    world.voice.credentialId = "cred-owner-7";
+    const runtime = bootVoice(world);
+    expect(await runtime.runPromise(Effect.flatMap(VoiceBridge, (bridge) => bridge.available()))).toBe(true);
+
+    await until(runtime, Voice.Machine, (s) => s.warmed);
+    await sendVoice(runtime, { type: "accountChanged", account: "CloudAccount", key: 1 });
+    await sendVoice(runtime, { type: "chooseNetworkSpeech", agree: true });
+    await sendVoice(runtime, { type: "returned" });
+    await untilCondition(runtime, () => world.voice.relayWarmups.length === 1 && world.ask.cloudWarmCalls >= 1, () => world.voice.relayWarmups);
+    await until(runtime, Voice.Machine, (s) => s.warmed);
+    await sendVoice(runtime, { type: "returned" });
+    await untilCondition(runtime, () => world.voice.relayWarmups.length === 2, () => world.voice.relayWarmups);
+    expect(world.voice.relayWarmups).toEqual(["production", "production"]);
+
+    await sendVoice(runtime, { type: "startTalking", now: untimed });
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
+    expect(world.voice.cloudStarts).toEqual([{ environment: "production", credentialId: "cred-owner-7" }]);
+    await sendVoice(runtime, { type: "stop", keyboard: false });
+    await until(runtime, Voice.Machine, (s) => s.phase === "Idle");
+
+    world.voice.credentialId = "cred-owner-8";
+    await sendVoice(runtime, { type: "startTalking", now: untimed });
+    await until(runtime, Voice.Machine, (s) => s.phase === "Failed");
+    await sendVoice(runtime, { type: "startTalking", now: untimed });
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
+    expect(world.voice.cloudStarts.map((one) => one.credentialId)).toEqual(["cred-owner-7", "cred-owner-7", "cred-owner-8"]);
+    await sendVoice(runtime, { type: "stop", keyboard: false });
+    await until(runtime, Voice.Machine, (s) => s.phase === "Idle");
+
+    world.signedIn = false;
+    await sendVoice(runtime, { type: "returned" });
+    await untilCondition(runtime, () => world.voice.relayWarmups.length === 3, () => world.voice.relayWarmups);
+    await sendVoice(runtime, { type: "startTalking", now: untimed });
+    await until(runtime, Voice.Machine, (s) => s.phase === "Failed");
+    expect([(await getVoice(runtime)).mic, world.voice.cloudStarts.length]).toEqual(["Off", 3]);
+  });
 });
