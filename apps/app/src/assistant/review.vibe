@@ -43,6 +43,8 @@ export interface OperationPorts {
   present?(operation: unknown, call: ExecutorCall): void
   /** Whether the operation shows Browser's local tab list. */
   tabList?(operation: unknown): boolean
+  /** Whether the operation is a text that sends to the number or numbers its card shows, which reads its button Send and may be sent by voice. */
+  addressedText?(operation: unknown): boolean
 }
 
 /** What the assistant knows of one executor call: whether the owner approved its card, the owner message it answers and that message's words. */
@@ -325,6 +327,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
       expiresAt: expiryOf(proposal.expiresAt), state: recovered ? "RecoveredCard" : "LiveCard", recovered, session,
       ...(destination === undefined ? {} : { destination }),
       ...(items === undefined ? {} : { items }),
+      ...(ports.addressedText?.(proposal.operation) === true ? { addressedText: true as const } : {}),
     }
     drawn.set(proposal.id, card)
     while (drawn.size > 64) drawn.delete(drawn.keys().next().value ?? "")

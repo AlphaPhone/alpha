@@ -44,6 +44,8 @@ export interface ProposalCard {
   readonly destination?: CardDestination
   readonly summary?: string
   readonly items?: ItemizedSet
+  /** A text that sends to the number or numbers the card shows: its button reads Send, and Talk may send it when the owner says so. */
+  readonly addressedText?: true
 }
 
 /** One row of the transcript. */
