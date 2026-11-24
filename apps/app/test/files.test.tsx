@@ -277,6 +277,7 @@ describe("Files on a phone", () => {
     await press("notes.txt");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.kind === "Text");
     expect(document.querySelector("pre")?.textContent).toBe("The words of notes.txt");
+    expect(Boolean(button("Ask Alpha"))).toBe(true);
     // spec/app/files/preview.md, "The owner closes the viewer, and so does leaving the screen or the phone locking"
     await press("Close");
     await until(alpha, runtime, Shown, (s) => s.viewer === 0);
@@ -299,6 +300,16 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Recent, (s) => s.rows.length === 1 && s.shown.grant === 0);
     expect(world.files.forgotten).toEqual(["selection:Download/lease.pdf"]);
 
+    // spec/app/files/preview.md, "A file that holds a verification code or another secret is never handed to Ask Alpha"
+    world.files.stored.push({ volume: "primary", path: "Download/code.txt", directory: false, mimeType: "text/plain", size: 30, modified: 4 });
+    world.files.texts["Download/code.txt"] = "Your verification code is 482913";
+    await press("Refresh");
+    await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 3);
+    await press("code.txt");
+    await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.secret);
+    expect(button("Ask Alpha")).toBeUndefined();
+    await press("Close");
+
     // spec/app/files/recent.md, "Opening a row again asks the phone first: it opens, moves to the front and is the document open, or its access has ended and it must be selected again, or its provider cannot be reached and it stays"
     await press("Files");
     await press("notes.txt");
@@ -307,13 +318,23 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Shown, (s) => s.viewer === 0);
     world.files.forgotten.push("selection:Documents/notes.txt");
     await press("notes.txt");
-    await until(alpha, runtime, Recent, (s) => s.reaching.status === "Failed" && s.rows.every((row) => row.grant === 0));
+    await until(alpha, runtime, Recent, (s) => s.reaching.status === "Failed" && s.rows.filter((row) => row.grant === 0).length === 1);
     expect(button("notes.txt")).toBeUndefined();
   });
 
   it("Come back after a restart (spec/app/files/index.md, \"Story: Come back after a restart\"; spec/app/files/trash.md, \"Story: Come back to the Trash after a restart\"; spec/app/files/preview.md, \"Story: Come back to a preview after a restart\")", async () => {
     const world = { ...scene(), phone: true };
+    // spec/app/files/recent.md, "The earlier Alpha's Recent is carried over once, while this one is still empty: each document it held access to becomes a row of its own, the newest first; one it held without access, and the document it had open, are not carried"
+    localStorage.setItem("alpha.files.recent.v1", JSON.stringify([
+      { key: "selected:a", kind: "selected", name: "lease.pdf", mimeType: "application/pdf", openedAt: 2, status: "ready", selectionId: "selection:Download/lease.pdf" },
+      { key: "selected:b", kind: "selected", name: "gone.txt", mimeType: "text/plain", openedAt: 3, status: "revoked", selectionId: "b" },
+    ]));
     const first = await onFiles(world);
+    await until(first.alpha, first.runtime, Recent, (s) => s.rows.length === 1 && s.rows[0]?.origin === "Picked");
+    expect(localStorage.getItem("alpha.files.recent.v1")).toBeNull();
+    await press("lease.pdf");
+    await until(first.alpha, first.runtime, Shown, (s) => s.drawing.status === "Loaded" && s.kind === "Pdf");
+    await press("Close");
     await until(first.alpha, first.runtime, Browser, (s) => s.storage.status === "Loaded");
     await press("Internal storage");
     await press("Documents");
@@ -330,7 +351,7 @@ describe("Files on a phone", () => {
     await until(second.alpha, second.runtime, Browser, (s) => s.open && s.listing.status === "Loaded" && s.trail.length === 2);
     await until(second.alpha, second.runtime, Browser, (s) => s.layout === "Grid" && s.order === "ByName");
     await until(second.alpha, second.runtime, Shown, (s) => s.viewer === 0);
-    await until(second.alpha, second.runtime, Recent, (s) => s.rows.length === 1 && s.rows.every((row) => row.grant === 0));
+    await until(second.alpha, second.runtime, Recent, (s) => s.rows.length === 2 && s.rows.filter((row) => row.grant === 0).length === 1);
   });
 
   it("Delete into the Trash and bring it back (spec/app/files/trash.md, \"Story: Delete into the Trash\"; spec/app/files/trash.md, \"Story: Bring something back\"; spec/app/files/trash.md, \"Story: Erase for good\")", async () => {

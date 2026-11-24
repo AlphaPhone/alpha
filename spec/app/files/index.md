@@ -5,7 +5,9 @@ volumes, storage bar and categories, a folder with its breadcrumbs, a
 selection, a filter, and one change at a time. The agent may read for
 itself, and changes files only through a request the owner approved in
 the approvals area. Whether Alpha may read the storage is the permission
-the startup area asks for; Files is told the answer.
+the startup area asks for; Files is told the answer. On the phone the shared storage is
+the library: a selection is shared, copied or moved rather than downloaded
+as an archive, and the browser build keeps no file library of its own.
 
 - [Changes](./change.md): one change to the files, and the share sheet
 - [Move to](./destination.md): choosing the folder a move or a copy goes to

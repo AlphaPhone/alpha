@@ -46,6 +46,8 @@ export interface FilesScene {
   readonly refusing: string[];
   /** The selections Alpha gave back. */
   readonly forgotten: string[];
+  /** What a text file says, by path, where it is not its default words. */
+  readonly texts: Record<string, string>;
 }
 
 const file = (volume: string, path: string, mimeType: string, size = 100, modified = 1): Stored => ({ volume, path, directory: false, mimeType, size, modified });
@@ -64,7 +66,7 @@ export function filesScene(): FilesScene {
       folder("primary", "Documents/Old"),
       file("card", "song.mp3", "audio/mpeg", 4_000, 2),
     ],
-    trash: [], shared: [], opened: [], calls: [], gate: Promise.resolve(), now: 10, listMost: 5_000, queryMost: 500, changed: () => {}, watching: undefined, refusing: [], forgotten: [],
+    trash: [], shared: [], opened: [], calls: [], gate: Promise.resolve(), now: 10, listMost: 5_000, queryMost: 500, changed: () => {}, watching: undefined, refusing: [], forgotten: [], texts: {},
   };
 }
 
@@ -246,7 +248,7 @@ export function selectedDocuments(scene: FilesScene): Faked {
       },
       readSelected({ selectionId }) {
         const found = held(selectionId);
-        return Promise.resolve(found ? { status: "read", message: "", text: `The words of ${leaf(found.path)}`, mimeType: found.mimeType, bytes: found.size } : { status: "unavailable", message: "" });
+        return Promise.resolve(found ? { status: "read", message: "", text: scene.texts[found.path] ?? `The words of ${leaf(found.path)}`, mimeType: found.mimeType, bytes: found.size } : { status: "unavailable", message: "" });
       },
       openSelected({ selectionId }) {
         scene.opened.push(selectionId);
