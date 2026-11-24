@@ -38,11 +38,10 @@ import {apkUpdateChannel,validateUpdateChannel} from './update-channel.ts';
 import type {UpdateChannel} from './update-channel.ts';
 import {releaseBlockers} from './release-blockers.ts';
 import {
-  auditBundle, distributionProblems, extractWebPayload, parseXmlTree, readBuildFlags, signerDigest, validateApk, verifyOwnerRouteTable,
+  auditBundle, distributionProblems, extractWebPayload, parseXmlTree, readApkEntries, readBuildFlags, signerDigest, validateApk, verifyOwnerRouteTable,
 } from "./apk.ts";
 import type {ApkMode, ApkVariant} from "./apk.ts";
 import { androidEnv, tool } from "./toolchain.ts";
-import { readApkEntries } from "../vendor/eliza/packages/os/android/apk-distribution.mjs";
 import { readReleaseSigner, releaseAdmission, RELEASE_SIGNER_FILE, SIGNING_ENV } from "./build-android.ts";
 import { RUNTIME_ENTRY } from "./generate-licenses.ts";
 import { fontCheckFailedItem, fontLicenceCheck, fontLicenceLine } from "./font-license-blockers.ts";

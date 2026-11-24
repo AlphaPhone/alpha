@@ -1,11 +1,11 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { androidEnv, tool } from "./toolchain.ts";
-import {
-  apkDistributionProblems, extractApkWebPayload, parseApkSignerDigest, readApk, readApkSignerDigest,
-} from "../vendor/eliza/packages/os/android/apk-distribution.mjs";
-import { manifestFacts as readManifestFacts, parseXmlTree as parseAaptTree } from "../vendor/eliza/packages/os/android/android-manifest-facts.mjs";
+import { manifestFacts as readManifestFacts, parseXmlTree as parseAaptTree } from "./os-ported/os/android-manifest-facts.mjs";
+import { parseApkSignerDigest, readApkSignerDigest } from "./os-ported/os/apk-signer.mjs";
+import { sha256File } from "./sha256.ts";
 
 export type ApkMode = "debug" | "release";
 export type ApkVariant = "launcher";
@@ -61,20 +61,11 @@ interface ApkInspection extends DistributionInput {
   removedSpeechClasses: string[];
 }
 
-// Upstream's JS parser builds children and attributes after initialization.
+// The plain-Node parser builds children and attributes after initialization.
 export const parseXmlTree = parseAaptTree as (text: string, options?: {decodeAttribute?: (encoded: string) => string}) => ManifestNode;
 export const manifestFacts = readManifestFacts as (xml: string, badging?: string) => ManifestFacts;
-const assessDistribution = apkDistributionProblems as (
-  apk: DistributionInput,
-  policy: Omit<typeof DISTRIBUTION_POLICY, "exportedComponents"> & {exportedComponents: Readonly<Record<string, string | null>>},
-  options?: DistributionOptions,
-) => {facts: ManifestFacts; problems: string[]};
 
-
-// Alpha's distribution policy as data for the upstream APK inspection
-// (vendor/eliza/packages/os/android/apk-distribution.mjs).
-// Development hooks no APK may package. The upstream inspection admits them only in a test-mocks
-// debug build, and Alpha never builds one, so every APK is refused if it carries them.
+// Every Alpha APK must be free of development hooks.
 export const DEVELOPMENT_CLASSES = Object.freeze([
   "SyntheticAutofillService",
   "DevelopmentAgentPlugin",
@@ -173,19 +164,15 @@ export const DISTRIBUTION_POLICY = Object.freeze({
 /**
  * Pure release-policy assessment. `apk` holds aapt dumps, zip entry names and
  * the development class names found in dex. Returns `{ facts, problems }`.
- * The upstream inspection applies DISTRIBUTION_POLICY; the Power entry's
- * component kind and the Quick Settings tile shape and target are Alpha's own checks.
+ * Alpha applies its distribution policy and validates the exported system entries.
  */
 export function distributionProblems(apk: DistributionInput, { mode, appId = CANONICAL_APP_ID }: DistributionOptions = {}) {
   // The caller selects the admitted installation identity. Only product-owned names move;
   // shared/platform components keep their exact names and all permission checks remain intact.
   const exportedComponents = Object.fromEntries(Object.entries(EXPORTED_COMPONENTS).map(([name, permission]) =>
     [name.startsWith(CANONICAL_APP_ID + ".") ? appId + name.slice(CANONICAL_APP_ID.length) : name, permission]));
-  const { facts, problems } = assessDistribution(
-    { ...apk, forbiddenDex: apk.forbiddenDex ?? apk.removedSpeechClasses },
-    {...DISTRIBUTION_POLICY, exportedComponents},
-    { mode },
-  );
+  const facts = manifestFacts(apk.xml, apk.badging);
+  const problems = packagedDistributionProblems(apk, facts, exportedComponents, mode);
   if (facts.packageName && facts.packageName !== appId)
     problems.push("APK package differs from selected application identity");
   problems.push(...legacyStorageProblems(apk.xml));
@@ -235,6 +222,49 @@ export function distributionProblems(apk: DistributionInput, { mode, appId = CAN
   return { facts, problems };
 }
 
+const falseManifestValue = (value: string | null | undefined) => value === "0x0" || value === "false";
+const debugManifestValue = (value: string | null | undefined) => value != null && !falseManifestValue(value);
+
+function packagedDistributionProblems(apk: DistributionInput, facts: ManifestFacts, exported: Readonly<Record<string, string | null>>, mode?: ApkMode) {
+  const rules = DISTRIBUTION_POLICY;
+  const problems: string[] = [];
+  for (const name of rules.developmentClasses)
+    if (apk.xml.includes(name) || apk.dexClasses?.includes(name)) problems.push(`Development class ${name} is packaged`);
+  for (const text of rules.developmentManifestText)
+    if (apk.xml.includes(text)) problems.push(`${text} permission or package query is packaged`);
+  for (const name of apk.names)
+    if (rules.developmentEntries.some((rule) => rule.test(name))) problems.push(`Development entry ${name} is packaged`);
+  if (!falseManifestValue(facts.application.usesCleartextTraffic))
+    problems.push(`usesCleartextTraffic must be false (found ${facts.application.usesCleartextTraffic ?? "unset"})`);
+  if (!falseManifestValue(facts.application.allowBackup))
+    problems.push(`allowBackup must be false (found ${facts.application.allowBackup ?? "unset"})`);
+  if (mode === "release") {
+    if (!facts.application.networkSecurityConfig) problems.push("Release manifest has no networkSecurityConfig");
+    if (debugManifestValue(facts.application.debuggable)) problems.push("Release manifest is debuggable");
+  }
+  for (const { name, tag, permission } of facts.exported) {
+    if (!Object.hasOwn(exported, name)) problems.push(`Unexpected exported ${tag} ${name}`);
+    else if (exported[name] && permission !== exported[name]) problems.push(`Exported ${name} must require ${exported[name]}`);
+  }
+  for (const name of [...facts.components.map((component) => component.name), ...facts.permissions, ...facts.queriedPackages])
+    if (/mock|fixture/i.test(name)) problems.push(`Test-only manifest entry ${name}`);
+  for (const permission of rules.forbiddenPermissions)
+    if (facts.permissions.includes(permission)) problems.push(`${permission.split(".").pop()} is requested`);
+  const maps = apk.names.filter((name) => name.startsWith("assets/") && name.endsWith(".map"));
+  if (maps.length) problems.push(`Source maps are packaged: ${maps.slice(0, 3).join(", ")}`);
+  const forbidden = apk.names.filter((name) => rules.forbiddenEntries.test(name));
+  if (forbidden.length) problems.push(`${rules.forbiddenEntriesLabel}: ${forbidden.slice(0, 3).join(", ")}`);
+  const classes = apk.forbiddenDex ?? apk.removedSpeechClasses;
+  if (classes?.length) problems.push(`${rules.forbiddenDexLabel}: ${classes.join(", ")}`);
+  for (const entry of rules.requiredEntries)
+    if (!apk.names.includes(entry)) problems.push(`${entry} is missing`);
+  if (facts.versionCode === null)
+    problems.push(`versionCode must be a positive integer (found ${facts.versionCodeText ?? "none"})`);
+  if (!facts.versionName || facts.versionName === "0")
+    problems.push(`versionName must be set (found ${facts.versionName ?? "none"})`);
+  return problems;
+}
+
 /**
  * Files' Android 10 legacy storage: WRITE_EXTERNAL_STORAGE may be requested only with
  * maxSdkVersion 29 or lower (never on API 30+, where all-files access is used), and READ_ only up
@@ -254,14 +284,50 @@ export function legacyStorageProblems(xml: string) {
   return problems;
 }
 
+/** Facts from the actual aapt evidence and the archive's entry names. */
+export function apkArchiveFacts({ badging, xml, names }: Pick<ApkInspection, "badging" | "xml" | "names">) {
+  return {
+    packageName: /package: name='([^']+)'/.exec(badging)?.[1],
+    home: xml.includes("android.intent.category.HOME"),
+    launcher: xml.includes("android.intent.category.LAUNCHER"),
+    debuggable: debugManifestValue(manifestFacts(xml, badging).application.debuggable),
+    webPayload: names.includes("assets/public/index.html"),
+  };
+}
+
+export function readApkEntries(file: string): string[] {
+  return execFileSync("unzip", ["-Z1", path.resolve(file)], { encoding: "utf8", maxBuffer: 64 << 20, timeout: 120_000 })
+    .split("\n").filter(Boolean);
+}
+
 export function inspectApk(file: string): ApkInspection {
-  const { forbiddenDex, ...apk } = readApk(file, { aapt: tool("aapt"), policy: DISTRIBUTION_POLICY });
-  return { ...apk, removedSpeechClasses: forbiddenDex };
+  const aapt = tool("aapt");
+  const options = { encoding: "utf8" as const, maxBuffer: 16 << 20, timeout: 120_000 };
+  const badging = execFileSync(aapt, ["dump", "badging", file], options);
+  const xml = execFileSync(aapt, ["dump", "xmltree", file, "AndroidManifest.xml"], options);
+  const names = readApkEntries(file);
+  const development = new Set<string>();
+  const removed = new Set<string>();
+  for (const entry of names.filter((name) => /^classes\d*\.dex$/.test(name))) {
+    const bytes = execFileSync("unzip", ["-p", path.resolve(file), entry], { maxBuffer: 512 << 20, timeout: 120_000 });
+    for (const name of DEVELOPMENT_CLASSES)
+      if (bytes.includes(`/${name};`)) development.add(name);
+    for (const prefix of REMOVED_SPEECH_CLASSES)
+      if (bytes.includes(prefix)) removed.add(prefix);
+  }
+  return { file, badging, xml, names, ...apkArchiveFacts({ badging, xml, names }), sha256: sha256File(file), dexClasses: [...development], removedSpeechClasses: [...removed] };
 }
 
 /** Extract assets/public into a fresh temporary directory; caller removes it. */
 export function extractWebPayload(file: string): {root: string; public: string} {
-  return extractApkWebPayload(file, { prefix: "alpha-apk-public-" });
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "alpha-apk-public-"));
+  try {
+    execFileSync("unzip", ["-q", path.resolve(file), "assets/public/*", "-d", root], { timeout: 120_000 });
+  } catch (error) {
+    fs.rmSync(root, { recursive: true, force: true });
+    throw error;
+  }
+  return { root, public: path.join(root, "assets/public") };
 }
 
 /** Read the build-time flag record that vite writes beside the web bundle. */

@@ -10,9 +10,8 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {requireConsistentApk, PACKAGE} from './provision-unit.ts';
 import {androidEnv, tool} from './toolchain.ts';
-import {apkArchiveFacts} from '../vendor/eliza/packages/os/android/apk-distribution.mjs';
 import {updateArtifactDigest} from './update-artifact.ts';
-import {parseXmlTree} from './apk.ts';
+import {apkArchiveFacts, parseXmlTree} from './apk.ts';
 import {apkUpdateChannel, type UpdateChannel} from './update-channel.ts';
 
 const HEX = /^[0-9a-f]{64}$/;
@@ -43,6 +42,7 @@ interface ArchiveFacts {
   packageName?: string | null;
   home: boolean;
   launcher: boolean;
+  debuggable: boolean;
   xml: string;
 }
 
@@ -64,6 +64,7 @@ export function admitUpdateApkIdentity(apk: Pick<UpdateApk, 'build' | 'variant' 
   requireValue(!retired.length, retired.join(' '));
   requireValue(signing?.verified === true && HEX.test(signing.activeSignerSha256 ?? '') && HEX.test(signing.signerRootSha256 ?? ''), 'verified signer and family are required');
   requireValue(signing.activeSignerSha256 === descriptor.signerSha256, 'active signer differs from the enrolled release signer');
+  requireValue(archive?.debuggable === false, 'a non-debuggable APK is required');
   requireValue(signing.packageName === PACKAGE && archive?.packageName === PACKAGE, 'archive package differs from Alpha');
   requireValue(Number.isSafeInteger(apk.versionCode) && apk.versionCode > 0 && signing.versionCode === apk.versionCode, 'archive versionCode differs from its release row');
   const launcher = apk.variant === 'launcher';

@@ -16,7 +16,7 @@ const old = 'a'.repeat(64), active = 'b'.repeat(64), lineageHash = 'c'.repeat(64
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const publicUrl = 'https://github.com/example/alpha/releases/download/app-stable/alpha-update-stable.json';
 const row = {build:'release',variant:'launcher',versionCode:45};
-const archive = {packageName:PACKAGE,home:true,launcher:true,xml:'android.permission.READ_CONTACTS'};
+const archive = {packageName:PACKAGE,home:true,launcher:true,debuggable:false,xml:'android.permission.READ_CONTACTS'};
 const signature = {verified:true,packageName:PACKAGE,versionCode:45,activeSignerSha256:active,signerRootSha256:active,lineageSize:0,lineageSha256:null};
 const rotated = {...signature,signerRootSha256:old,lineageSize:2,lineageSha256:lineageHash};
 const descriptor = {signerSha256:active};
@@ -40,6 +40,7 @@ test('a manifest cannot substitute package, version, flavor or signing-family as
     ['flavor',{...row,variant:'standalone'},archive,signature],
     ['HOME',row,{...archive,home:false},signature],
     ['missing launcher',row,{...archive,launcher:false},signature],
+    ['debuggable release',row,{...archive,debuggable:true},signature],
     ['Contacts marker',row,{...archive,xml:''},signature],
     ['package',row,{...archive,packageName:'org.other'},signature],
     ['verified package',row,archive,{...signature,packageName:'org.other'}],

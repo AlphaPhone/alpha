@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parseXmlTree} from '../vendor/eliza/packages/app/scripts/lib/android-manifest-facts.mjs';
+import {parseXmlTree} from '../scripts/os-ported/os/android-manifest-facts.mjs';
 import {appLinkFilters, requiredAppLinkProblems} from '../scripts/render-assetlinks.ts';
 
 const expected={host:'login.example.org',path:'/alphaphone/auth/callback',activity:'ai.alphacompute.alphaphone.MainActivity'};

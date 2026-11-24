@@ -7,7 +7,7 @@ import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
 
-import { parseXmlTree } from "../../../../../vendor/eliza/packages/os/android/android-manifest-facts.mjs";
+import { parseXmlTree } from "../../../os/android-manifest-facts.mjs";
 
 const executeFile = promisify(execFile);
 

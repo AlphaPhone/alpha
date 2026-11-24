@@ -19,7 +19,8 @@ roots.push('android/app/src/launcher','android/app/src/release',
  'android/gradlew','android/gradlew.bat','android/app/proguard-rules.pro',
  'android/notification-fixture/build.gradle','android/notification-fixture/src',
  'scripts/build-android.ts','scripts/android-abis.ts','scripts/update-channel.ts','scripts/android-build-preflight.ts','scripts/toolchain.ts','scripts/verify-upstream.ts',
- 'scripts/pinned-upstream-source.ts','scripts/upstream-pin.ts','scripts/sha256.ts','scripts/verify-apks.ts','scripts/verify-packaged-runtime.py','scripts/apk.ts','scripts/source-snapshot.ts');
+ 'scripts/pinned-upstream-source.ts','scripts/upstream-pin.ts','scripts/sha256.ts','scripts/verify-apks.ts','scripts/verify-packaged-runtime.py','scripts/apk.ts',
+ 'scripts/os-ported/os/android-manifest-facts.mjs','scripts/os-ported/os/apk-signer.mjs','scripts/source-snapshot.ts');
 // The on-device voice record and its staging/verification code are APK inputs. The staged voice
 // outputs and their record are streamed into the freeze so large model files do not require large buffers.
 roots.push('android/voice-host','android/embedding-host','android/paradee-voice','android/local-speech/build.gradle',
