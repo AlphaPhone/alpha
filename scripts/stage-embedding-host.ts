@@ -11,7 +11,8 @@ const root=path.resolve(import.meta.dirname,'..');
 const sha=(value: string | Buffer)=>createHash('sha256').update(value).digest('hex');
 const hash=(file: string)=>sha(fs.readFileSync(file));
 const names=['libelizainference.so','libparadeevoicejni.so','libc++_shared.so'];
-const model={path:'android/app/src/main/assets/agent/models/bge-small-en-v1.5-f16.gguf',sha256:'f0b2fef971e8366438bfd2d9aefea1b0115919389448806d290237f638bae999',dimensions:384};
+/** The pinned BGE384 embedding model the launcher packages; pnpm agent:stage-android stages it beside the runtime payload. */
+export const EMBEDDING_MODEL={path:'android/app/src/main/assets/agent/models/bge-small-en-v1.5-f16.gguf',sha256:'f0b2fef971e8366438bfd2d9aefea1b0115919389448806d290237f638bae999',dimensions:384};
 export type EmbeddingInput = { path: string; sourceSha256: string; generatedSha256: string };
 export type EmbeddingProducerInput = { path: string; sha256: string };
 export type PreparedEmbeddingLibrary = { path: string; sha256: string; bytes: number; alignment16KiB: boolean; artifactPath?: string; requiredSymbols?: string[] };
@@ -107,7 +108,7 @@ export function verifyEmbeddingHost(productRoot: string,{requireProducerInputs=f
  if(manifest.jniIdentityRelocated!==true)throw Error('Embedding host JNI identity missing or changed');
  verifyEmbeddingEngine(productRoot,manifest);
  verifyEmbeddingInputs(productRoot,manifest,{requireProducerInputs});
- if(manifest.model?.sha256!==model.sha256||manifest.model?.path!==model.path||manifest.model?.dimensions!==384)throw Error('Embedding host model admission changed');
+ if(manifest.model?.sha256!==EMBEDDING_MODEL.sha256||manifest.model?.path!==EMBEDDING_MODEL.path||manifest.model?.dimensions!==384)throw Error('Embedding host model admission changed');
  const abis=embeddingAbiLibraries(manifest);
  if(abis.some((row,index)=>row.abi!==ANDROID_ABIS[index])||abis.length>2)throw Error('Invalid embedding ABI inventory');
  for(const abi of abis){
@@ -118,14 +119,14 @@ export function verifyEmbeddingHost(productRoot: string,{requireProducerInputs=f
   if(!fs.existsSync(file)||fs.lstatSync(file).isSymbolicLink()||fs.statSync(file).size!==row.bytes||hash(file)!==row.sha256)throw Error('Qualified embedding host library missing or changed: '+row.name);
  }
  }
- const file=path.join(productRoot,model.path);
- if(!fs.existsSync(file)||fs.lstatSync(file).isSymbolicLink()||hash(file)!==model.sha256)throw Error('Pinned BGE384 model missing or changed');
+ const file=path.join(productRoot,EMBEDDING_MODEL.path);
+ if(!fs.existsSync(file)||fs.lstatSync(file).isSymbolicLink()||hash(file)!==EMBEDDING_MODEL.sha256)throw Error('Pinned BGE384 model missing or changed');
  return manifest;
 }
 /** Every packaged resident ABI needs its own exact engine, STL and product JNI bridge. */
 export function embeddingApkProblems(bundle:{names:readonly string[];read:(name:string)=>Buffer},manifest:Pick<EmbeddingManifest,'abi'|'libraries'|'additionalAbis'>) {
  const problems:string[]=[],abis=embeddingAbiLibraries(manifest);
- const residentAbis=[...new Set(bundle.names.flatMap(name=>/^lib\/([^/]+)\/libeliza_bun\.so$/.exec(name)?.[1]??[]))];
+ const residentAbis=[...new Set(bundle.names.flatMap(name=>/^lib\/([^/]+)\/libeliza_node\.so$/.exec(name)?.[1]??[]))];
  for(const abi of residentAbis){
   const record=abis.find(row=>row.abi===abi);
   if(!record){problems.push('Resident embedding ABI is not admitted: '+abi);continue;}
@@ -159,9 +160,9 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
    return {name,sha256:row.sha256,bytes:row.bytes,alignment16KiB:true,source:sourcePath,target};
   });
   // agent:stage-android stages the model with the runtime payload; this command only checks it.
-  if(!fs.existsSync(path.join(root,model.path)))throw Error('Pinned BGE model is not staged: run pnpm agent:build-workflow-worker, pnpm agent:bundle and pnpm agent:stage-android first');
-  if(hash(path.join(root,model.path))!==model.sha256)throw Error('Pinned BGE model bytes changed');
-  const manifest={pin:receipt.pin,forkPin:receipt.forkPin,identity,abi:receipt.abi,model,libraries:libraries.map(({source,target,...row})=>row),jniIdentityRelocated:true,inputs:receipt.inputs,producerInputs:receipt.producerInputs,...(receipt.jniBinding?{jniBinding:receipt.jniBinding}:{})};
+  if(!fs.existsSync(path.join(root,EMBEDDING_MODEL.path)))throw Error('Pinned BGE model is not staged: run pnpm agent:build-workflow-worker, pnpm agent:bundle and pnpm agent:stage-android first');
+  if(hash(path.join(root,EMBEDDING_MODEL.path))!==EMBEDDING_MODEL.sha256)throw Error('Pinned BGE model bytes changed');
+  const manifest={pin:receipt.pin,forkPin:receipt.forkPin,identity,abi:receipt.abi,model:EMBEDDING_MODEL,libraries:libraries.map(({source,target,...row})=>row),jniIdentityRelocated:true,inputs:receipt.inputs,producerInputs:receipt.producerInputs,...(receipt.jniBinding?{jniBinding:receipt.jniBinding}:{})};
   // Refuse before copying anything: the voice host stages the same arm64 engine file.
   verifyEmbeddingEngine(root,manifest);
   const manifestFile=path.join(root,embeddingRecord);

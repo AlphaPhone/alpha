@@ -51,6 +51,7 @@
   "test/maps-dataset-manifest.test.mjs",
   "test/native-review-mode.test.mjs",
   "test/os-update-enrollment.test.mjs",
+  "test/packaged-runtime.test.mjs",
   "test/paradee-runtime.test.mjs",
   "test/pilot-install-lock.test.mjs",
   "test/pilot-update-export.test.mjs",
@@ -62,6 +63,7 @@
   "test/publish-update-manifest.test.mjs",
   "test/record-release.test.mjs",
   "test/release-signing.test.mjs",
+  "test/runtime-licenses.test.mjs",
   "test/shared-ui-overrides.test.mjs",
   "test/sign-release-apks.test.mjs",
   "test/update-apk-admission.test.mjs",
@@ -224,7 +226,6 @@
   {
    "files": [
     "test/licenses.test.mjs",
-    "test/runtime-licenses.test.mjs",
     "test/sbom.test.mjs"
    ],
    "reason": "They read bun.lock and the legacy bundle manifests; the generator now reads pnpm-lock.yaml and upstream's manifest.json.",
