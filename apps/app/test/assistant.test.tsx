@@ -148,6 +148,14 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await press("Earlier");
     await until(alpha, runtime, Chats, (s) => s.around > 0 && s.page.status === "Loaded");
     expect(lines().slice(0, 2)).toEqual(["Hello", "You said: Hello"]);
+
+    // spec/app/assistant/composer.md, "A quoted message goes with the next send, until the owner removes the quote"
+    await onMessage("You said: Hello", "Reply");
+    await until(alpha, runtime, Composer, (s) => s.editor.quote === 2);
+    await write("Why?");
+    await press("Send");
+    await until(alpha, runtime, Conversation, (s) => s.turn.send.id === 4 && s.turn.reply === "Complete");
+    expect([world.ask.metadata?.at(-1), world.ask.said.at(-1)]).toEqual([expect.objectContaining({ replyToMessageId: "m1a" }), "Why?"]);
   });
 
   // spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/chats.md, "Story: Open a message that search found"

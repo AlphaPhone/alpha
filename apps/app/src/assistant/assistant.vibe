@@ -132,8 +132,9 @@ function observed(told: boolean, context: Conversation.Context) {
 }
 
 // spec/app/assistant/index.md, "Every message asked is posted exactly once, under a new ticket, whoever gave the text, with the screen showing and never a sensitive one"; spec/app/assistant/index.md, "The first word of a reply shows that the agent has the message, and a withdrawal that came too late stops it there"
-function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine> {
-  return Stream.callback<Conversation.Event, never, Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine>((queue) => effect {
+// spec/app/assistant/composer.md, "A quoted message goes with the next send, until the owner removes the quote"
+function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine> {
+  return Stream.callback<Conversation.Event, never, Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine>((queue) => effect {
     const { controller } = try Turns
     const { board } = try Talk
     const reply = try Reply.Machine
@@ -142,13 +143,15 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const chats = try (try Chats.Machine).get()
     const known = board.known(chats.chosen)
     const text = board.outgoing
+    const held = (try (try Composer.Machine).get()).held
+    const quoted = held.quote > 0 ? board.latest()[held.quote - 1] : undefined
     if (known === undefined || text === "") {
       Queue.offerUnsafe(queue, { type: "refuse", ticket })
       Queue.endUnsafe(queue)
       return
     }
     if (controller.conversation?.id !== known.record.id) try ignore(tryPromise(() => controller.bind(known.record)))
-    const mine: Line = { id: `sent ${ticket}`, mine: true, text }
+    const mine: Line = { id: `sent ${ticket}`, mine: true, text, ...(quoted === undefined ? {} : { quote: quoted.text }) }
     board.append(mine)
     board.lastSent = text
     let heard = false
@@ -172,8 +175,8 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
         if (board.snapshot().reply === "") board.change({ label: label ?? `Using ${name}` })
       },
     }
-    const metadata = observed(told, context)
-    const result = tryPromise(() => controller.send({ text, ...(metadata === undefined ? {} : { metadata }) }, { stream: hooks })) catch () => undefined
+    const metadata = { ...observed(told, context), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
+    const result = tryPromise(() => controller.send({ text, ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks })) catch () => undefined
     board.change({ reply: "", label: "" })
     board.lastSentId = result !== undefined && "clientMessageId" in result ? result.clientMessageId : ""
     const ending = replied(ticket, result)

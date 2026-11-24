@@ -173,6 +173,7 @@ export function Assistant({ runtime }: AssistantProps) {
       id: line.id,
       author: line.mine ? "owner" : "alpha",
       text: line.text,
+      ...(line.quote === undefined ? {} : { quote: line.quote }),
       ...(line.failure === undefined ? {} : { children: failureCard({ kind: line.failure, fix: "NoFix", waitMs: -1 }, false) }),
       onFork: chats.can(fork) ? () => void chats.send(fork) : undefined,
       onQuote: composer.can(quote) ? () => void composer.send(quote) : undefined,
