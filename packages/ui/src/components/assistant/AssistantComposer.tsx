@@ -91,12 +91,26 @@ export function AssistantComposer({
           disabled={closed}
           onChange={(event) => onValueChange(event.target.value)}
           onFocus={onFocusField}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+            event.preventDefault();
+            if (!event.repeat && !closed && !onStop && !stopping) onSend?.();
+          }}
           className="max-h-40 min-w-0 flex-1 touch-auto rounded-full border-0 bg-transparent px-2"
         />
         {onStop || stopping ? (
           <Button size="icon" aria-label="Stop reply" loading={stopping} className="bg-foreground text-background hover:bg-foreground/90" onClick={onStop}><Square fill="currentColor" /></Button>
         ) : written ? (
-          <Button size="icon" aria-label="Send" disabled={!onSend} onClick={onSend}><ArrowUp /></Button>
+          <Button
+            size="icon"
+            aria-label="Send"
+            disabled={closed || !onSend}
+            onPointerDown={(event) => {
+              event.stopPropagation();
+              if (event.button === 0 && event.currentTarget.ownerDocument.activeElement?.matches("textarea[data-alpha-composer]")) event.preventDefault();
+            }}
+            onClick={onSend}
+          ><ArrowUp /></Button>
         ) : onTalk ? (
           <Button variant="secondary" size="icon" aria-label="Talk" onClick={onTalk}><Mic /></Button>
         ) : null}
