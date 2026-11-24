@@ -12,7 +12,7 @@ import { ask } from "../platform/remote.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { Telephony, TelephonyRefused, telephony } from "../platform/telephony.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
-import { type Job, answer, contained, following, hearing, reacting, run, started, stream, together } from "../runtime/reactor.vibe"
+import { type Job, answer, applying, contained, following, hearing, reacting, run, started, stream, together } from "../runtime/reactor.vibe"
 import { grantOf } from "../phone/phone.vibe"
 import { Conversations, Inbox, elsewhere } from "./messages.vibe"
 
@@ -288,5 +288,11 @@ export effect function attachAll(files: ReadonlyArray<File>): void!!(Drafts | Co
 // spec/app/messages/composer.md, "An edited draft is saved for its conversation, one save at a time"
 const saving = following(Composer.Machine, (state) => Composer.canSaveDraft(state), Composer.Machine, (due): Event | undefined => (due ? { type: "saveDraft" } : undefined))
 
+// spec/app/messages/composer.md, "The composer holds at most five pictures and a SIM the phone has"
+/** The pictures kept beside the composer go when it holds none: a message sent with them, or another conversation opened. */
+const unpictured = applying(Composer.Machine, (state) => state.pictures === 0, effect (none: boolean) => {
+  if (none) try (try Drafts).setPictures([])
+})
+
 /** The composer: kept across restarts, so a draft and a send under way survive them; nothing is sent when Alpha opens again. */
-export const composer = together(machine, drafts, opened, saving, retiring, hearing(reports, Composer.Machine, (event: Event) => event))
+export const composer = together(machine, drafts, opened, saving, retiring, unpictured, hearing(reports, Composer.Machine, (event: Event) => event))

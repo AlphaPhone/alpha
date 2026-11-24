@@ -22,6 +22,8 @@ export type SettingsTopPageProps = SettingsAndroidProps &
     onHandOver?: (neighbour: Neighbour) => void;
     /** The rows other areas own on this page, such as the update rows. */
     children?: ReactNode;
+    /** The shell's Back control when it offers one. */
+    leading?: ReactNode;
   };
 
 const links: SettingsPageLink[] = [
@@ -37,11 +39,11 @@ const links: SettingsPageLink[] = [
  * above it are shown.
  * @model spec/app/settings/index.md
  */
-export function SettingsTopPage({ developer = false, micMayBeOn = false, told, onOpen, onHandOver, starting, onAndroid, place, onPlace, children }: SettingsTopPageProps) {
+export function SettingsTopPage({ developer = false, micMayBeOn = false, told, onOpen, onHandOver, starting, onAndroid, place, onPlace, children, leading }: SettingsTopPageProps) {
   const at = (row: number) => placed({ place, onPlace }, row);
   const android = { starting, onAndroid };
   return (
-    <SettingsPage title="Settings" told={told}>
+    <SettingsPage title="Settings" leading={leading} top told={told}>
       {micMayBeOn ? (
         <ListGroup>
           <SettingsNavRow title="Microphone may be on" icon={<Mic />} value={<StatusDot status="error" label="Needs attention" />} onOpen={onHandOver && (() => onHandOver("listener"))} {...at(0)} />

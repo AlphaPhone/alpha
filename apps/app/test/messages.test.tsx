@@ -60,7 +60,8 @@ describe("Messages on an Alpha image", () => {
     expect([world.telephony.asked, (document.querySelector("textarea[aria-label=Message]") as HTMLTextAreaElement).value, world.telephony.sent]).toEqual([
       [{ participant: "+14155550100", messages: [{ direction: "in", date: 1_700_000_050_000, body: "See you at five" }], truncated: false }], "Five works, see you there", [],
     ]);
-    await press("Undo Alpha's draft");
+    expect(document.querySelector("[role=group][aria-label='Message draft to Maya Chen · +14155550100']")).not.toBeNull();
+    await press("Don't send");
     await until(alpha, alpha.runtime, Composer, (s) => s.slot.author === "Nobody");
     await write("Message", "On my way");
     await until(alpha, alpha.runtime, Composer, (s) => s.slot.author === "OwnerWrote");
@@ -70,6 +71,7 @@ describe("Messages on an Alpha image", () => {
     await press("Send");
     await until(alpha, alpha.runtime, Composer, (s) => s.outgoing.op.outcome === "Confirmed" && s.slot.author === "Nobody");
     expect(world.telephony.sent.map(({ recipients, body }) => ({ recipients, body }))).toEqual([{ recipients: ["+14155550100"], body: "On my way" }]);
+    expect([...document.querySelectorAll("[role=status]")].map((one) => one.textContent)).toContain("Sent to Maya Chen");
 
     // spec/app/messages/sending.md, "A delivery report counts only for a part reported sent"; spec/app/messages/sending.md, "A finished record is retired by a tombstone"
     world.telephony.deliver(world.telephony.sent[0]!.operationId);

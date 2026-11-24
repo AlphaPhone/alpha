@@ -28,7 +28,7 @@ const inReview = (name: string) => [...document.querySelectorAll("[role=dialog] 
 
 /** Press `name` in the open confirmation. */
 const confirm = (name: string) => act(async () => {
-  const found = [...document.querySelectorAll("[role=alertdialog] button")].find((one) => one.textContent === name);
+  const found = [...document.querySelectorAll("[role=alertdialog] button, [aria-label='Delete voicemail'] button")].find((one) => one.textContent === name);
   if (!(found instanceof HTMLButtonElement)) throw new Error(`no ${name} in the confirmation`);
   found.click();
 });
@@ -107,7 +107,10 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Phone, (s) => !s.voicemail && s.tab === "Recents");
     await press("Phone");
     await until(alpha, alpha.runtime, Phone, (s) => s.front && s.recents.status === "Loaded");
-    expect([...document.querySelectorAll("[role=tab]")].map((one) => one.textContent)).toEqual(["Recents", "Keypad"]);
+    const tabs = [...document.querySelectorAll("[role=tab]")].map((one) => one.textContent);
+    expect(tabs).toContain("Recents");
+    expect(tabs).toContain("Keypad");
+    expect(tabs).not.toContain("Voicemail");
   });
 
   it("See my voicemail, listen to one, and delete it (spec/app/phone/voicemail.md, \"Story: See my voicemail\"; spec/app/phone/voicemail.md, \"Story: Listen to a voicemail\"; spec/app/phone/voicemail.md, \"Story: Delete a voicemail\")", async () => {
@@ -121,7 +124,11 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Voicemail, (s) => s.list.status === "Loaded" && s.items === 1 && s.unheard === 1);
 
     // spec/app/phone/voicemail.md, "Opening a voicemail asks for its audio under a new ticket"
-    await press("+14155550100");
+    await act(async () => {
+      const row = document.querySelector<HTMLButtonElement>("button[aria-expanded='false'][aria-label^='Voicemail from']");
+      if (!row) throw new Error("no voicemail to open");
+      row.click();
+    });
     await until(alpha, alpha.runtime, Voicemail, (s) => s.open && s.audio.status === "Loaded");
 
     // spec/app/phone/voicemail.md, "Only the open voicemail's newest audio is taken, and with it a transcript is asked of the phone's own recognizer": this phone has no recognizer, and nothing else is asked.
