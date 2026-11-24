@@ -1,4 +1,4 @@
-// spec/camera/viewfinder.md, "Story: Take photos"; spec/camera/viewfinder.md, "Story: Record videos"; spec/camera/viewfinder.md, "Story: Keep the viewfinder only while Camera is in front"; spec/camera/viewfinder.md, "Story: Recover when the camera is denied or stops"; spec/camera/viewfinder.md, "Story: Leave the lock screen to the system camera"; spec/camera/agentCapture.md, "Story: Let the assistant take the photo I asked for"; spec/camera/media.md, "Story: Ask Alpha about what Camera sees"; spec/camera/libraryReview.md, "Story: Share only reviewed identities with the assistant"
+// spec/camera/viewfinder.md, "Story: Take photos"; spec/camera/viewfinder.md, "Story: Record videos"; spec/camera/viewfinder.md, "Story: Keep the viewfinder only while Camera is in front"; spec/camera/viewfinder.md, "Story: Recover when the camera is denied or stops"; spec/camera/viewfinder.md, "Story: Leave the lock screen to the system camera"; spec/camera/agentCapture.md, "Story: Let the assistant take the photo I asked for"; spec/camera/media.md, "Story: Ask Alpha about what Camera sees"; spec/camera/libraryReview.md, "Story: Share only reviewed identities with the assistant"; spec/camera/viewfinder.md, "Photo mode offers 4:3 or 16:9 when the bound camera lists both, and a new ratio restarts the preview with it"
 import { assert, it } from "@effect/vitest"
 import { readRefusal } from "../../gen/camera__libraryReview.ts"
 import { Machine as NoticeMachine } from "../../gen/camera__notices.effect.vibe"
@@ -56,6 +56,46 @@ it.live("take a photo on the ready preview, with the self-timer, and see it as t
       last: counting.lastId, timer: counting.countdown, cancelled: cancelled.countdown, zoom: flipped.zoom, lens: flipped.lens, flash: flipped.flash,
       released: [left.phase, left.released], stopped: device.calls.some((call) => call.method === "ElizaCamera.stopPreview"),
     }, { last: "41", timer: 3, cancelled: 0, zoom: 10, lens: "FrontLens", flash: "FlashOff", released: ["PreviewOff", true], stopped: true }))
+  }
+})
+
+// spec/camera/viewfinder.md, "Photo mode offers 4:3 or 16:9 when the bound camera lists both, and a new ratio restarts the preview with it"
+it.live("the aspect chip restarts the preview at 16:9 and back, only where the camera lists both (spec/camera/viewfinder.md, \"Story: Take photos\")", () => effect {
+  const device = camera({ "ElizaCamera.getDevices": () => ({ devices: [{ deviceId: "0", label: "Camera 0 (back)", supportedCaptureAspectRatios: ["4:3", "16:9"] }] }) })
+  provide cameraOver(device) {
+    const view = try Viewfinder
+    try view.enter()
+    try until(() => effect { const c = try view.get(); return c.aspectChoice && !c.binding })
+    try view.cycleAspect()
+    try until(() => effect { const c = try view.get(); return c.phase === "PreviewReady" && c.aspectChoice })
+    const wide = try view.get()
+    try view.shutter()
+    try until(() => effect { return (try view.get()).photos === 1 })
+    try view.pickMode("VideoMode")
+    try until(() => effect { return !(try view.get()).binding })
+    try view.cycleAspect()
+    const inVideo = try view.get()
+    try view.pickMode("PhotoMode")
+    try until(() => effect { return !(try view.get()).binding })
+    try view.cycleAspect()
+    try until(() => effect { const c = try view.get(); return c.phase === "PreviewReady" && c.aspect === "Aspect4x3" && c.aspectChoice })
+    const starts = device.calls.filter((call) => call.method === "ElizaCamera.startPreview").map((call) => (call.args as { captureAspectRatio?: string }).captureAspectRatio ?? "default")
+    try Effect.try(() => assert.deepStrictEqual(
+      { wide: [wide.aspect, wide.phase], video: [inVideo.aspect, inVideo.epoch === wide.epoch], starts },
+      { wide: ["Aspect16x9", "PreviewReady"], video: ["Aspect16x9", true], starts: ["default", "16:9", "default"] },
+    ))
+  }
+  const plain = camera()
+  provide cameraOver(plain) {
+    const view = try Viewfinder
+    try view.enter()
+    try until(() => effect { return (try view.get()).phase === "PreviewReady" })
+    try view.cycleAspect()
+    const kept = try view.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { aspect: kept.aspect, offered: kept.aspectChoice, starts: plain.calls.filter((call) => call.method === "ElizaCamera.startPreview").length },
+      { aspect: "Aspect4x3", offered: false, starts: 1 },
+    ))
   }
 })
 
