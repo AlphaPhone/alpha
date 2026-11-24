@@ -40,7 +40,9 @@
     { "module": "passwords" },
     { "module": "filesystem" },
     { "module": "location" },
-    { "module": "wifi" }
+    { "module": "wifi" },
+    { "module": "voice-io" },
+    { "module": "cloud-speech" }
   ],
   "modules": [
     { "name": "capacitor-android", "source": { "root": "dependencies", "path": "@capacitor/android/capacitor" } }
@@ -48,7 +50,8 @@
   "dependencies": [
     { "configuration": "implementation", "module": "androidx.appcompat:appcompat", "toolchainVersion": "androidxAppCompatVersion" },
     { "configuration": "implementation", "module": "androidx.core:core-splashscreen", "toolchainVersion": "coreSplashScreenVersion" },
-    { "configuration": "implementation", "module": "androidx.webkit:webkit", "toolchainVersion": "androidxWebkitVersion" }
+    { "configuration": "implementation", "module": "androidx.webkit:webkit", "toolchainVersion": "androidxWebkitVersion" },
+    { "configuration": "testImplementation", "module": "junit:junit", "toolchainVersion": "junitVersion" }
   ],
   "agent": {
     "host": { "root": "consumer", "path": "android/agent/host.json" },
