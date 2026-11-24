@@ -85,6 +85,7 @@ function about(waitMs: number): string {
 }
 
 function actionOf(kind: Failure, fix: Fix): "signIn" | "funding" | "retry" | undefined {
+  if (kind === "OutOfFunds") return "funding";
   if (fix === "SignInFix") return "signIn";
   if (fix === "FundingFix" || (fix === "NoFix" && managesPlan(kind))) return "funding";
   if (fix === "RetryFix") return "retry";
@@ -104,7 +105,7 @@ export function Assistant({ runtime }: AssistantProps) {
   const reply = useReply(runtime);
   const shell = useShell(runtime);
   const dock = useDock(runtime);
-  const board = runtime.runSync(Effect.map(Talk, (talk) => talk.board));
+  const [board] = useState(() => runtime.runSync(Effect.flatMap(Talk, (talk) => Effect.succeed(talk.board))));
   const seen = useSyncExternalStore((listener) => board.subscribe(listener), () => board.snapshot());
   const [listing, setListing] = useState(false);
   const [words, setWords] = useState("");
@@ -129,18 +130,16 @@ export function Assistant({ runtime }: AssistantProps) {
     void composer.send({ type: "edit", blank: text.trim() === "", long: text.length > textLimit });
   };
   const send = () => {
-    const talk = runtime.runSync(Effect.map(Talk, (t) => t.board));
     if (newChat) {
-      talk.sendWhenMade = true;
+      board.queueSend();
       void chats.send(start);
       return;
     }
-    talk.outgoing = seen.typed;
-    talk.type("");
+    board.hold(seen.typed);
+    board.type("");
     void composer.send(hold);
   };
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"
-  /** The card of a reply that did not finish: live, with the fix the agent named and its wait, or read again from history, with neither. */
   const failureCard = ({ kind, fix, waitMs }: { kind: Failure; fix: Fix; waitMs: number }, live: boolean) => {
     const act = actionOf(kind, fix);
     const detail = showsWait(kind, waitMs) ? `Try again in about ${about(waitMs)}` : !live && kind === "LimitReached" ? "Wait a moment, then try again" : undefined;
