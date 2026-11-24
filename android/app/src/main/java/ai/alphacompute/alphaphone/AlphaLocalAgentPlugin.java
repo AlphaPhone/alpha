@@ -432,7 +432,7 @@ private static final class ResidentAttachDiagnostic {
   final Boolean gmailChanges=call.getBoolean("gmailChanges"),calendarEdits=call.getBoolean("calendarEdits");
   if(gmailChanges==null||calendarEdits==null){call.reject("Invalid Google access.");return;}
   PluginWorkers.submit(workers,()->{
-   try{GoogleAgentAccessFile.write(GoogleAgentAccessFile.in(getContext().getFilesDir()),gmailChanges,calendarEdits);call.resolve();}
+   try{GoogleAgentAccessFile.write(GoogleAgentAccessFile.in(getContext().getFilesDir()),gmailChanges,calendarEdits);ElizaAgentService.googleConsentChanged();call.resolve();}
    catch(Exception unavailable){call.reject("Google access could not be saved.");}
   },()->{call.reject("Local agent bridge is closed.");});
  }

@@ -104,6 +104,16 @@ public final class ElizaAgentService extends AgentService {
   AgentService.start(context);
  }
 
+ @Override protected ai.eliza.os.agent.AgentConfig.GoogleConsent googleConsent() {
+  return GoogleAgentAccessFile.read(GoogleAgentAccessFile.in(getFilesDir()));
+ }
+
+ /** Tells a running resident that Google agent-access switches changed, so it restarts with the new consent. */
+ static void googleConsentChanged() {
+  Context context = application;
+  if (context != null && alive != null) AgentService.restart(context);
+ }
+
  /** Tells a running resident that Alpha's device credential changed, so it takes the new key or restarts for another account. */
  static void credentialChanged() {
   Context context = application;
@@ -215,7 +225,7 @@ public final class ElizaAgentService extends AgentService {
   String path = path(request), method = method(request);
   int timeout = timeout(request, path);
   String body = body(request, method);
-  JSONObject answered = exchange(method, path, body, timeout);
+  JSONObject answered = exchange(method, path, body, headersMap(request), timeout);
   if (answered.getInt("status") == 200 && "GET".equals(method) && "/api/auth/status".equals(path)) return authStatus(answered);
   if (answered.getInt("status") == 200 && "GET".equals(method) && "/api/auth/me".equals(path)) return ownerSession(answered, bearer(request));
   return answered.toString();
@@ -237,9 +247,11 @@ public final class ElizaAgentService extends AgentService {
   return new JSONObject().put("status", status).put("body", body.toString()).toString();
  }
 
- private static JSONObject exchange(String method, String path, String body, int timeoutMs) throws IOException, JSONException {
+ private static JSONObject exchange(String method, String path, String body, Map<String, String> headers, int timeoutMs) throws IOException, JSONException {
   try {
-   AgentChannel.Response response = AgentService.request(method, path, bytes(body)).get(timeoutMs, TimeUnit.MILLISECONDS);
+   AgentChannel.Response response = (headers == null || headers.isEmpty()
+     ? AgentService.request(method, path, bytes(body))
+     : AgentService.request(method, path, bytes(body), headers)).get(timeoutMs, TimeUnit.MILLISECONDS);
    return new JSONObject().put("status", response.status()).put("body", response.body() == null ? "" : new String(response.body(), StandardCharsets.UTF_8));
   } catch (TimeoutException late) {
    throw new IOException("Local agent request timed out");
@@ -257,8 +269,9 @@ public final class ElizaAgentService extends AgentService {
    JSONObject request = requestJson == null || requestJson.trim().isEmpty() ? new JSONObject() : new JSONObject(requestJson);
    String path = path(request), method = method(request);
    String body = body(request, method);
+   Map<String, String> headers = headersMap(request);
    if (handle.closed()) throw new IOException("Stream transport closed");
-   handle.attach(AgentService.requestStream(method, path, bytes(body), new AgentChannel.Listener() {
+   AgentChannel.Listener listener = new AgentChannel.Listener() {
     @Override public void head(String id, long index, int status, Map<String, String> headers) {
      try {
       JSONObject named = new JSONObject();
@@ -276,7 +289,10 @@ public final class ElizaAgentService extends AgentService {
      complete(onEvent, kind == ChannelPolicy.OutcomeKind.END || kind == ChannelPolicy.OutcomeKind.RESPONSE ? null
        : kind == ChannelPolicy.OutcomeKind.FAILED ? "Local agent refused the stream: " + outcome.code().name().toLowerCase(Locale.ROOT) : "Local agent stream ended early");
     }
-   }));
+   };
+   handle.attach(headers == null || headers.isEmpty()
+     ? AgentService.requestStream(method, path, bytes(body), listener)
+     : AgentService.requestStream(method, path, bytes(body), headers, listener));
   } catch (Exception error) {
    complete(onEvent, error.getMessage() == null ? "Local agent stream failed" : error.getMessage());
   }
@@ -411,6 +427,19 @@ public final class ElizaAgentService extends AgentService {
    }
   }
   return null;
+ }
+
+ private static Map<String, String> headersMap(JSONObject request) {
+  JSONObject headers = request.optJSONObject("headers");
+  if (headers == null || headers.length() == 0) return null;
+  Map<String, String> out = new java.util.LinkedHashMap<>();
+  for (java.util.Iterator<String> keys = headers.keys(); keys.hasNext(); ) {
+   String key = keys.next();
+   if ("authorization".equalsIgnoreCase(key)) continue;
+   Object value = headers.opt(key);
+   if (value instanceof String text) out.put(key, text);
+  }
+  return out.isEmpty() ? null : out;
  }
 
  private static byte[] bytes(String body) { return body == null ? null : body.getBytes(StandardCharsets.UTF_8); }

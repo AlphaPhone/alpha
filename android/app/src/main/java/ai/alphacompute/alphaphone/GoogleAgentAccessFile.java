@@ -21,6 +21,19 @@ final class GoogleAgentAccessFile {
  private GoogleAgentAccessFile(){}
  /** In the resident's private state directory, so Reset Alpha data removes it. */
  static File in(File filesDir){return new File(new File(filesDir,".eliza"),NAME);}
+  /** Reads the saved switches; a missing or malformed file means both are off. */
+ static synchronized ai.eliza.os.agent.AgentConfig.GoogleConsent read(File file) {
+  try {
+   if (!file.isFile() || Files.isSymbolicLink(file.toPath())) return new ai.eliza.os.agent.AgentConfig.GoogleConsent(false, false);
+   byte[] raw = Files.readAllBytes(file.toPath());
+   if (raw.length > 4096) return new ai.eliza.os.agent.AgentConfig.GoogleConsent(false, false);
+   org.json.JSONObject json = new org.json.JSONObject(new String(raw, StandardCharsets.UTF_8));
+   if (json.optInt("version", 0) != 1) return new ai.eliza.os.agent.AgentConfig.GoogleConsent(false, false);
+   return new ai.eliza.os.agent.AgentConfig.GoogleConsent(json.optBoolean("gmailChanges", false), json.optBoolean("calendarEdits", false));
+  } catch (Exception unreadable) {
+   return new ai.eliza.os.agent.AgentConfig.GoogleConsent(false, false);
+  }
+ }
  /** Whole-file replace: the host reads either the previous switches or these, never a partial file. */
  static synchronized void write(File file,boolean gmailChanges,boolean calendarEdits) throws IOException {
   Path target=file.toPath(),directory=target.getParent();

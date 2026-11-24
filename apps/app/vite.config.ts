@@ -1,5 +1,6 @@
 // The page as the WebView gets it: src/web/index.html and what it loads, `.vibe` included, written to the
 // repository's web-dist, which Capacitor packages. Storybook builds the components with the same plugins.
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
@@ -46,6 +47,27 @@ function contentSecurity(): Plugin {
   };
 }
 
+/** Strips staging hosts and the browser-sign-in diagnostic return path from cloud/deployment.json in a production build. */
+function productionDeployment(): Plugin {
+  const deploymentPath = path.resolve(import.meta.dirname, "../../cloud/deployment.json");
+  return {
+    name: "alpha-production-deployment",
+    enforce: "pre",
+    apply: "build",
+    load(id) {
+      if (mocks) return null;
+      const [file, query] = id.split("?", 2);
+      if (query !== "raw" || path.resolve(file) !== deploymentPath) return null;
+      const full = JSON.parse(readFileSync(deploymentPath, "utf8")) as Record<string, unknown>;
+      const signIn = { ...(full.signIn as Record<string, unknown>) };
+      delete signIn.browserSignIn;
+      const shipped = { production: (full.shipped as Record<string, unknown>).production };
+      const alphaCloudHosts = { production: (full.alphaCloudHosts as Record<string, unknown>).production };
+      return `export default ${JSON.stringify(JSON.stringify({ ...full, signIn, shipped, alphaCloudHosts }))};`;
+    },
+  };
+}
+
 export default defineConfig({
   root: "src/web",
   publicDir: "../../public",
@@ -53,6 +75,6 @@ export default defineConfig({
   define: { __ALPHA_TEST_MOCKS__: JSON.stringify(mocks) },
   resolve: { conditions: ["eliza-source"] },
   // Scan OCR (src/camera/scanWork.ts) loads its worker, cores and English data from /ocr/, never a CDN.
-  plugins: [contentSecurity(), vibelang(), react(), tailwindcss(), localOcrAssets(new URL("./package.json", import.meta.url))],
+  plugins: [contentSecurity(), productionDeployment(), vibelang(), react(), tailwindcss(), localOcrAssets(new URL("./package.json", import.meta.url))],
   build: { outDir: "../../../../web-dist", emptyOutDir: true, target: "es2023" },
 });

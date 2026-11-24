@@ -90,11 +90,25 @@ function alphaHosts(environment: "production" | "staging"): CloudAuthority {
   return { name: "Alpha Cloud", api: origin(row.api, `alphaCloudHosts.${environment}.api`), web, services: web, entitlementAudience: appId };
 }
 
+function hasStaging(name: "shipped" | "alphaCloudHosts"): boolean {
+  const row = section(deployment, name).staging;
+  return typeof row === "object" && row !== null && !Array.isArray(row);
+}
+
+const elizaProduction = shipped("production");
+const alphaProduction = alphaHosts("production");
+
 /** The Cloud every distributed build uses until the cutover: Eliza Cloud, as cloud/deployment.json ships it. */
-export const elizaCloud: Environments = { production: shipped("production"), staging: shipped("staging") };
+export const elizaCloud: Environments = {
+  production: elizaProduction,
+  staging: hasStaging("shipped") ? shipped("staging") : elizaProduction,
+};
 
 /** Alpha's own Cloud on the hosts cloud/deployment.json names, dormant until the cutover flag is set; its entitlements name Alpha's app id. */
-export const alphaCloud: Environments = { production: alphaHosts("production"), staging: alphaHosts("staging") };
+export const alphaCloud: Environments = {
+  production: alphaProduction,
+  staging: hasStaging("alphaCloudHosts") ? alphaHosts("staging") : alphaProduction,
+};
 
 /** The development host's agent origin (`VITE_LOCAL_AGENT_URL`), only in a test-mocks build served off the phone. @throws {never} */
 export function developmentAgentBase(onDevice: boolean): URL | undefined {

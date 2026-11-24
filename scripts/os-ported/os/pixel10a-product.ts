@@ -276,6 +276,7 @@ function verifyNativeStaging(output, launcher, evidence) {
     const name =
       typeof library.path === "string" ? path.posix.basename(library.path) : "";
     const mode = [
+      "libeliza_node.so",
       "libeliza_bun.so",
       "libeliza_ld_musl_aarch64.so",
       "libeliza_ld_musl_aarch64_real.so",

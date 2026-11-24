@@ -20,6 +20,7 @@ import type { ResetReview } from "../../../gen/settings__reset.ts";
 import type { Updates } from "../../../gen/settings__updates.ts";
 import { Alert, Button, Dialog, DialogContent, DialogTitle, Input, RadioGroup, RadioGroupItem, ScrollArea } from "../components/ui/index.ts";
 import type { AccountRows } from "../../account/bindings.vibe";
+import { testMocksBuilt } from "../../platform/build-flags.ts";
 import { cn } from "../lib/cn.ts";
 import { AboutPages, type AboutPagesProps } from "./AboutPages.tsx";
 import type { PageDialog } from "./dialogs.ts";
@@ -153,7 +154,7 @@ export function SettingsScreen({ model, act, onClose, dialog, onDialog, notifica
               onOpen={act.open} onOpenLicence={act.openLicence} onAppInfo={() => act.openPage("PageAppInfo")}
               onActivity={elsewhereShown("AgentActivity", model.variant === "aosp", native) ? () => act.openElsewhere("AgentActivity") : undefined} />
           )}
-          {nav.page === "Developer" && nav.developer && (
+          {testMocksBuilt && nav.page === "Developer" && nav.developer && (
             <DeveloperPage developerActs={developerActs} version={facts.read.version} native={native} onHandoff={act.openPage} />
           )}
         </div>
@@ -185,7 +186,7 @@ function Root({ nav, native, account, act, micMayBeOn: micOpen }: {
         <SettingRow label="AI provider" icon={<Bot aria-hidden className="size-5" />} state={{ word: account.provider }} onOpen={() => act.openAccount("provider")} />
       </Section>
       {native && <Section><SettingRow label="Android settings" icon={<AppWindow aria-hidden className="size-5" />} ariaLabel="Open Android settings" onHandoff={() => act.openPage("PageHome")} /></Section>}
-      {nav.developer && <Section><SettingRow label="Developer" onOpen={() => act.open("Developer")} /></Section>}
+      {testMocksBuilt && nav.developer && <Section><SettingRow label="Developer" onOpen={() => act.open("Developer")} /></Section>}
     </>
   );
 }
