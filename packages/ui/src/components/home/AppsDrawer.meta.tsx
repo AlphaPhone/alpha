@@ -4,13 +4,13 @@ import type { AppsDrawerProps, HomeInstalledApp } from "./AppsDrawer.tsx";
 import { appImage } from "./InstalledAppIcon.meta.tsx";
 
 const apps: HomeInstalledApp[] = [
-  { id: "com.example.mail/.Inbox/0", label: "Mail", package: "com.example.mail", onHome: false },
-  { id: "com.example.clock/.Main/0", label: "Clock", package: "com.example.clock", image: appImage, onHome: true },
-  { id: "com.example.calculator/.Main/0", label: "Calculator", package: "com.example.calculator", onHome: false },
-  { id: "com.example.mail/.Inbox/10", label: "Mail", package: "com.example.mail", profile: "Work", onHome: false },
-  { id: "com.example.camera/.Main/0", label: "Câmera", package: "com.example.camera", onHome: false },
-  { id: "com.example.music/.Main/0", label: "Music", package: "com.example.music", onHome: false },
-  { id: "com.example.maps/.Main/0", label: "Atlas Maps", package: "com.example.maps", onHome: false },
+  { id: "com.example.mail/.Inbox/0", label: "Mail", onHome: false },
+  { id: "com.example.clock/.Main/0", label: "Clock", image: appImage, onHome: true },
+  { id: "com.example.calculator/.Main/0", label: "Calculator", onHome: false },
+  { id: "com.example.mail/.Inbox/10", label: "Mail", detail: "Work", onHome: false },
+  { id: "com.example.camera/.Main/0", label: "Câmera", onHome: false },
+  { id: "com.example.music/.Main/0", label: "Music", onHome: false },
+  { id: "com.example.maps/.Main/0", label: "Atlas Maps", onHome: false },
 ];
 const onSearch = fn();
 const onOpenApp = fn();

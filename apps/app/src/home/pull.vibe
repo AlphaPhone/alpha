@@ -1,0 +1,108 @@
+// spec/app/shell/gestures.md, "A pull opens the shade only when it is clearly downward, one and a half times its sideways travel, starts below the 44-point status band, on Home itself and not in a field, with no keyboard up and nothing under the finger scrolled from its top"
+module page {
+  import { overflowPull, pullOpensShade, travel } from "../../gen/app__shell__gestures.ts"
+
+  const editable = 'input, textarea, select, [contenteditable]:not([contenteditable=false]), [role=textbox], [role=slider]'
+
+  type Start = {
+    id: number
+    x: number
+    y: number
+    across: number
+    down: number
+    startY: number
+  }
+
+  function startAt(home: HTMLDivElement, target: EventTarget | null, id: number, x: number, y: number): Start | undefined {
+    const element = target instanceof Element ? target : undefined
+    if (!element || !home.contains(element) || home.closest("[inert]")) return undefined
+    const canvas = home.closest("main") ?? home
+    const box = canvas.getBoundingClientRect()
+    const across = box.width > 0 ? canvas.offsetWidth / box.width : 1
+    const down = box.height > 0 ? canvas.offsetHeight / box.height : 1
+    const startY = (y - box.top) * down
+    const document = home.ownerDocument
+    const keyboard = document.documentElement.hasAttribute("data-alpha-covered") || document.activeElement?.matches(editable) === true
+    const typing = element.closest(editable) !== null
+    let scrolled = false
+    for (let node: Element | null = element; node; node = node.parentElement) {
+      if (node.scrollTop > 0) { scrolled = true; break }
+      if (node === home) break
+    }
+    return pullOpensShade(true, startY, 0, travel + 1, true, typing, keyboard, scrolled) ? { id, x, y, across, down, startY } : undefined
+  }
+
+  /** Give Android a deliberate pull from Home's top while leaving upward and sideways drags to their scroll surfaces. @throws {never} */
+  export function watchHomePull(home: HTMLDivElement, open: () => void): () => void {
+    let pointer: Start | undefined
+    let touch: { start: Start; claimed: boolean } | undefined
+    const finish = (start: Start, x: number, y: number) => {
+      if (home.isConnected && !home.closest("[inert]") && pullOpensShade(true, start.startY, (x - start.x) * start.across, (y - start.y) * start.down, true, false, false, false)) {
+        open()
+      }
+    }
+    const pointerDown = (event: PointerEvent) => {
+      if (event.pointerType !== "touch" && event.isPrimary && event.button === 0) pointer = startAt(home, event.target, event.pointerId, event.clientX, event.clientY)
+    }
+    const pointerUp = (event: PointerEvent) => {
+      if (pointer?.id !== event.pointerId || event.pointerType === "touch") return
+      const start = pointer
+      pointer = undefined
+      finish(start, event.clientX, event.clientY)
+    }
+    const pointerCancel = (event: PointerEvent) => {
+      if (pointer?.id === event.pointerId) pointer = undefined
+    }
+    const touchStart = (event: TouchEvent) => {
+      const first = event.touches.length === 1 ? event.touches[0] : undefined
+      const start = first && startAt(home, event.target, first.identifier, first.clientX, first.clientY)
+      touch = start ? { start, claimed: false } : undefined
+    }
+    const touchMove = (event: TouchEvent) => {
+      if (!touch) return
+      const current = event.touches.length === 1 ? event.touches[0] : undefined
+      if (!current || current.identifier !== touch.start.id) { touch = undefined; return }
+      if (!touch.claimed) {
+        const { start } = touch
+        const decision = overflowPull(event.cancelable, (current.clientX - start.x) * start.across, (current.clientY - start.y) * start.down)
+        if (decision === "WaitPull") return
+        if (decision === "ReleasePull") { touch = undefined; return }
+        touch.claimed = true
+      }
+      if (event.cancelable) event.preventDefault()
+    }
+    const touchEnd = (event: TouchEvent) => {
+      const ending = touch
+      touch = undefined
+      if (!ending?.claimed) return
+      const last = Array.from(event.changedTouches).find((contact) => contact.identifier === ending.start.id)
+      if (last) finish(ending.start, last.clientX, last.clientY)
+    }
+    const touchCancel = () => { touch = undefined }
+    home.addEventListener("pointerdown", pointerDown)
+    home.addEventListener("pointerup", pointerUp)
+    home.addEventListener("pointercancel", pointerCancel)
+    home.addEventListener("touchstart", touchStart, { passive: true })
+    home.addEventListener("touchmove", touchMove, { capture: true, passive: false })
+    home.addEventListener("touchend", touchEnd, { passive: true })
+    home.addEventListener("touchcancel", touchCancel)
+    return () => {
+      home.removeEventListener("pointerdown", pointerDown)
+      home.removeEventListener("pointerup", pointerUp)
+      home.removeEventListener("pointercancel", pointerCancel)
+      home.removeEventListener("touchstart", touchStart)
+      home.removeEventListener("touchmove", touchMove, true)
+      home.removeEventListener("touchend", touchEnd)
+      home.removeEventListener("touchcancel", touchCancel)
+    }
+  }
+}
+import { watchHomePull } from page
+export { watchHomePull }
+
+// spec/app/home/index.md, "A long press on bare Home starts editing, only on the phone and once the tiles are read"; spec/app/home/index.md, "An app's menu opens in the open drawer, for an app in the last reading, and says Add to Home or On Home"
+/** Wait for one physical long press. Its caller interrupts it when the pointer moves, releases or is canceled. */
+export effect function launcherHeld(held: () => void): void!! {
+  try sleep("450 millis")
+  try sync(held)
+}

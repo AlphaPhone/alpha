@@ -1,4 +1,5 @@
 import { X } from "lucide-react";
+import { useMemo } from "react";
 import { cn } from "../../lib/cn.ts";
 import { AppHeader } from "../AppHeader.tsx";
 import { Button } from "../Button.tsx";
@@ -8,6 +9,7 @@ import { HomeAppMenu } from "./HomeAppMenu.tsx";
 import { HomeDrawerApp } from "./HomeDrawerApp.tsx";
 import { HomeNotice, type HomeNoticeMessage } from "./HomeNotice.tsx";
 import { tileColumns } from "./HomeTileGrid.tsx";
+import type { LauncherHold } from "./launcherPress.ts";
 
 /** What the open drawer shows, as the launcher decides it. */
 export type HomeDrawerView = "Spinner" | "CannotRead" | "NoAppsInstalled" | "NoMatch" | "Grid";
@@ -18,10 +20,8 @@ export type HomeInstalledApp = {
   id: string;
   /** Its name, as Android gives it. */
   label: string;
-  /** Its package, which tells apart two apps of the same name in one profile. */
-  package: string;
-  /** The profile it is installed in, such as "Work"; left out for the owner's own. */
-  profile?: string;
+  /** Its profile, package or activity where Android's entries need to be told apart. */
+  detail?: string;
   /** Its icon, as an image URL. */
   image?: string;
   /** It is on Home already. */
@@ -49,6 +49,8 @@ export type AppsDrawerProps = {
   menu?: string;
   /** Opens an app's menu. */
   onOpenMenu?: (id: string) => void;
+  /** Schedules and cancels a stationary press on a drawer app. */
+  hold?: LauncherHold;
   /** Closes the open menu. */
   onCloseMenu: () => void;
   /** Adds the menu's app to Home; left out while a change is being saved. */
@@ -63,19 +65,15 @@ export type AppsDrawerProps = {
 };
 
 const plain = (text: string) => text.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase();
+const byLabel = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
 
-/** Prefix matches first, then by name; an app whose name another shares says its profile, or else its package. */
+/** Put label matches before package-only matches, as Android's inventory does. */
 const arrange = (apps: readonly HomeInstalledApp[], query: string) => {
   const search = plain(query.trim());
-  const twinsOf = (name: string) => apps.filter((other) => plain(other.label) === name);
+  const rank = (name: string) => name.startsWith(search) ? 0 : name.includes(search) ? 1 : 2;
   return apps
-    .map((app) => {
-      const name = plain(app.label);
-      const twins = twinsOf(name);
-      const byProfile = new Set(twins.map((twin) => twin.profile)).size === twins.length;
-      return { app, name, detail: twins.length < 2 ? undefined : byProfile ? app.profile : app.package };
-    })
-    .sort((a, b) => Number(!a.name.startsWith(search)) - Number(!b.name.startsWith(search)) || a.name.localeCompare(b.name) || (a.detail ?? "").localeCompare(b.detail ?? ""));
+    .map((app) => ({ app, rank: rank(plain(app.label)) }))
+    .sort((a, b) => a.rank - b.rank || byLabel.compare(a.app.label, b.app.label) || a.app.id.localeCompare(b.app.id));
 };
 
 const empty = {
@@ -90,9 +88,9 @@ const empty = {
  * @model spec/app/home/index.md
  */
 export function AppsDrawer({
-  view, apps, refreshing = false, query, onSearch, onClose, onOpenApp, opening, menu, onOpenMenu, onCloseMenu, onAddToHome, onShowAppInfo, onTryAgain, notice, className,
+  view, apps, refreshing = false, query, onSearch, onClose, onOpenApp, opening, menu, onOpenMenu, hold, onCloseMenu, onAddToHome, onShowAppInfo, onTryAgain, notice, className,
 }: AppsDrawerProps) {
-  const entries = arrange(apps, query);
+  const entries = useMemo(() => arrange(apps, query), [apps, query]);
   return (
     <div
       role="dialog"
@@ -115,11 +113,11 @@ export function AppsDrawer({
       <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto px-2 pt-1 pb-[calc(--spacing(27)+env(safe-area-inset-bottom))]">
         {view === "Grid" ? (
           <div aria-busy={refreshing || undefined} className={cn(tileColumns, "gap-y-5 px-0.5 py-1.5")}>
-            {entries.map(({ app, detail }) => (
+            {entries.map(({ app }) => (
               <HomeAppMenu
                 key={app.id}
                 open={app.id === menu}
-                label={detail ? `${app.label} (${detail})` : app.label}
+                label={app.detail ? `${app.label} (${app.detail})` : app.label}
                 onHome={app.onHome}
                 onAddToHome={onAddToHome && (() => onAddToHome(app.id))}
                 onShowAppInfo={onShowAppInfo && (() => onShowAppInfo(app.id))}
@@ -127,12 +125,13 @@ export function AppsDrawer({
               >
                 <HomeDrawerApp
                   label={app.label}
-                  detail={detail}
+                  detail={app.detail}
                   image={app.image}
                   opening={opening === app.id}
                   disabled={!onOpenApp}
                   onClick={onOpenApp && (() => onOpenApp(app.id))}
                   onOpenMenu={onOpenMenu && (() => onOpenMenu(app.id))}
+                  hold={hold}
                 />
               </HomeAppMenu>
             ))}

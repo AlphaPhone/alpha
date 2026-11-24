@@ -2,6 +2,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { Minus } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { AppTile } from "../AppTile.tsx";
+import { type LauncherHold, useLauncherPress } from "./launcherPress.ts";
 
 export type HomeTileProps = Omit<ComponentProps<"button">, "children"> & {
   /** The app's name, under its icon. */
@@ -14,19 +15,19 @@ export type HomeTileProps = Omit<ComponentProps<"button">, "children"> & {
   editing?: boolean;
   /** While editing, takes the tile off Home; left out while a change is being saved, so the control refuses. */
   onRemove?: () => void;
-  /** Where the tile being dragged would land: just before or just after this one. */
-  drop?: "before" | "after";
-  /** This tile is the one being dragged. */
-  dragging?: boolean;
+  /** Schedules and cancels a stationary press on this tile. */
+  hold?: LauncherHold;
+  /** Opens Home editing after a stationary press or the context menu key. */
+  onHold?: () => void;
 };
 
-/** One tile on Home: the app it opens, and while Home is being edited, its remove control and where a moved tile lands. */
-export function HomeTile({ label, icon, badge, editing = false, onRemove, drop, dragging = false, className, ...props }: HomeTileProps) {
+/** One tile on Home: the app it opens, and while Home is being edited, its remove control. */
+export function HomeTile({ label, icon, badge, editing = false, onRemove, hold, onHold, onClick, className, ...props }: HomeTileProps) {
+  const activation = useLauncherPress(hold, onHold, onClick);
   return (
-    <div className={cn("relative flex justify-center", dragging && "rounded-tile outline-2 outline-offset-2 outline-primary outline-dashed", className)}>
-      {drop ? <span aria-hidden className={cn("absolute inset-y-2 w-1 rounded-full bg-primary", drop === "before" ? "-left-1.5" : "-right-1.5")} /> : null}
+    <div data-home-cell="" className={cn("relative flex justify-center data-[home-dragging]:z-10", className)}>
       <div className="relative">
-        <AppTile label={label} icon={icon} badge={editing ? undefined : badge} className={cn(editing && "touch-none")} {...props} />
+        <AppTile label={label} icon={icon} badge={editing ? undefined : badge} className={cn(editing && "touch-none")} {...activation} {...props} />
         {editing ? (
           <button
             type="button"
