@@ -30,6 +30,11 @@ export interface Shown {
   readonly providerPlaceId?: string
 }
 
+/** The place the screen shows now: `shown` only while the screen's choice still names it, so a closed place is no longer shown. */
+export function shownOf(screen: { readonly choiceId: number }, c: MapsContentState): Shown | undefined {
+  return c.shown && c.shown.id === screen.choiceId ? c.shown : undefined
+}
+
 /** The guidance session's route and the fix it last measured. */
 export interface GuidanceContent {
   readonly session: number

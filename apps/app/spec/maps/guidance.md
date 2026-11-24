@@ -84,8 +84,9 @@ pure def stepOnlyStartBeginsGuidance(before: Guidance, via: str, after: Guidance
 
 An unusable fix pauses voice and keeps the step ("Turn guidance needs a
 precise, up-to-date location."). Arrival needs 25 meters at 30 meters
-accuracy and stops the watch; with Maps off screen the shell posts one
-"Arrived at" notice for this session. A turn is passed near it or after two
+accuracy and stops the watch once the arriving fix is handled, so the owner
+is still told "Destination reached."; with Maps off screen the shell posts
+one "Arrived at" notice for this session. A turn is passed near it or after two
 clearing fixes on the route, never backwards and never past the arrival step.
 Off the route the owner is told "Off route. End navigation to plan a new
 route.", and the notification "Open Maps to end navigation."

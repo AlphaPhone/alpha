@@ -1,9 +1,9 @@
-// spec/maps/location.md, "When GPS gives no fix for 4 seconds, a network position stands in as approximate until GPS answers"; spec/assistant/context.md, "The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again"
+// spec/maps/location.md, "When GPS gives no fix for 4 seconds, a network position stands in as approximate until GPS answers"; spec/assistant/context.md, "The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again"; spec/maps/location.md, "A start is admitted one at a time and retires the session before it"
 import { assert, it } from "@effect/vitest"
 import { NetworkLocation } from "../../src/assistant/network-location.vibe"
 import { MapsLocation } from "../../src/maps/location.vibe"
 import { MapsNetworkLocation } from "../../src/maps/networkLocation.vibe"
-import { ferry, fixTakenAt, harness, pier } from "./fakes.vibe"
+import { ferry, fixTakenAt, harness, pier, until } from "./fakes.vibe"
 
 const open = { id: "alpha-osm", data: "OpenStreetMap" }
 const beacon = { latitude: pier.latitude, longitude: pier.longitude, accuracy: 25000, fingerprint: "ab12cd34" }
@@ -67,13 +67,16 @@ it.effect("Maps shares the chat's network client: a refused lookup waits two min
   const confirmed = try Effect.provide(effect {
     const network = try MapsNetworkLocation
     const shared = try NetworkLocation
+    // Both scenarios share the test clock, which the first moved on: times are counted from this one's start.
+    const start = try Clock.currentTimeMillis
+    const at = (timestamp: number | undefined) => timestamp === undefined ? undefined : timestamp - start
     const first = try network.locate()
     const reused = try network.locate()
     try TestClock.adjust("16 minutes")
     const second = try network.locate()
     const chat = try shared.cached()
     return {
-      first: first?.timestamp, reused: reused?.timestamp, second: second?.timestamp, precision: second?.precision, chat: chat?.timestamp,
+      first: at(first?.timestamp), reused: at(reused?.timestamp), second: at(second?.timestamp), precision: second?.precision, chat: at(chat?.timestamp),
       lookups: kept.nativeCalls.filter((c) => c === "AlphaNetworkLocation.locate").length,
     }
   }, kept.layer)
@@ -84,4 +87,37 @@ it.effect("Maps shares the chat's network client: a refused lookup waits two min
       confirmed: { first: 0, reused: 0, second: 960000, precision: "approximate", chat: 960000, lookups: 2 },
     },
   ))
+})
+
+it.effect("A watch still handling its last fix when the owner asks for a locate ends without stopping that locate (spec/maps/location.md, \"A start is admitted one at a time and retires the session before it\")", () => effect {
+  const h = try harness(open)
+  provide h.layer {
+    const location = try MapsLocation
+    const handling = try Deferred.make<void>()
+    const handled = try Deferred.make<void>()
+    // As guidance does while it tells an arrival: the watch has taken a fix and ends once it has handled it.
+    const watch = fork Stream.runForEachWhile(location.watch(), () => effect {
+      try Deferred.succeed(handling, undefined)
+      try Deferred.await(handled)
+      return false
+    })
+    try until(location.states, (s) => s.purpose === "GuidanceWatch" && s.phase === "Watching")
+    try Queue.offer(h.fixes, fixTakenAt(ferry, try Clock.currentTimeMillis))
+    try Deferred.await(handling)
+    const locate = fork location.once("OwnerFix")
+    try until(location.states, (s) => s.purpose === "OwnerFix" && s.phase === "Stopping")
+    try Deferred.succeed(handled, undefined)
+    try Fiber.join(watch)
+    const ended = try until(location.states, () => true)
+    try until(location.states, (s) => s.phase === "Watching" || s.purpose === "NoPurpose")
+    try Queue.offer(h.fixes, fixTakenAt(pier, try Clock.currentTimeMillis))
+    const located = try exit(Fiber.join(locate))
+    try Effect.try(() => assert.deepStrictEqual(
+      {
+        afterTheWatch: ended.purpose, located: Exit.isSuccess(located) ? located.value.coordinate.latitude : "failed",
+        cleared: h.nativeCalls.filter((c) => c === "ElizaLocation.clearWatch").length,
+      },
+      { afterTheWatch: "OwnerFix", located: pier.latitude, cleared: 2 },
+    ))
+  }
 })

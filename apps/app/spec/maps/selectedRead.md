@@ -40,6 +40,9 @@ pure val weight_approveRead = 3
 
 ### The context revision changes exactly when what is shown changes, and clears when Maps is not in front
 
+A place is shown only while the screen's choice still names it: closing the
+place shows the search again, and the context follows it.
+
 ```quint
 pure def canPublish(s: SelectedRead, kind: ContextKind, changed: bool): bool = s.inMaps and (changed or kind != s.kind)
 pure def publish(s: SelectedRead, kind: ContextKind, changed: bool): SelectedRead =

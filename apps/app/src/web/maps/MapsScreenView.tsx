@@ -9,7 +9,7 @@ import { basemapFor, creditsFor, type MapPlane as Plane } from "../../../gen/map
 import type { SavedItem } from "../../../gen/maps__savedPlaces.ts";
 import { canBack, mode, type Screen } from "../../../gen/maps__screen.ts";
 import { maySpeak, restricted } from "../../../gen/maps__vocabulary.ts";
-import type { MapsContentState } from "../../maps/content.vibe";
+import { type MapsContentState, shownOf } from "../../maps/content.vibe";
 import { offered, outsideShown, savedFor } from "../../maps/screen.vibe";
 import type { ScreenProps } from "../app-screen.ts";
 import { Button } from "../components/ui/index.ts";
@@ -65,7 +65,7 @@ export function MapsScreenView({ route, onClose, screen, guidance, plane, saved,
   const guiding = guidance !== undefined && guidance.phase !== "NotGuiding" && c.guidance !== undefined;
   const view = mode(screen);
   const coverage = c.coverage;
-  const shown = c.shown && c.shown.id === screen.choiceId ? c.shown : undefined;
+  const shown = shownOf(screen, c);
   const googleContent = coverage?.kind === "GoogleProvider" && (shown?.kind === "GoogleProvider" || c.results.places.length > 0 || c.routes.routes.length > 0);
   const basemap = basemapFor(coverage?.kind ?? "NoProvider", coverage?.offer.map ?? false, googleContent);
   const routes = c.routes.run === screen.routeRun ? c.routes.routes : [];

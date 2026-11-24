@@ -13,7 +13,7 @@ import { MapsRelay } from "../assistant/ports.vibe"
 import { newId } from "../platform/ids.ts"
 import { Resident } from "../platform/resident.vibe"
 import { modelTravel, wireMode } from "./cloud.vibe"
-import { emptyContent, MapsContent, type MapsContentState } from "./content.vibe"
+import { emptyContent, MapsContent, type MapsContentState, shownOf } from "./content.vibe"
 import { failure } from "./failure.vibe"
 import { MapsLocation } from "./location.vibe"
 import { InteractClaim } from "./maps.schema.vibe"
@@ -60,7 +60,8 @@ export service MapsAgent {
 /** The identity of what is shown, kept while the same place or search stays selected: a route keeps its destination's. */
 export function selectionOf(s: Screen, c: MapsContentState, kind: ContextKind): string {
   if (kind === "MapSearch") return JSON.stringify(["search", s.searched])
-  if ((kind === "MapPlace" || kind === "MapRoute") && c.shown) return JSON.stringify(["place", c.shown.providerId, c.shown.providerPlaceId, c.shown.label, c.shown.coordinate])
+  const shown = shownOf(s, c)
+  if ((kind === "MapPlace" || kind === "MapRoute") && shown) return JSON.stringify(["place", shown.providerId, shown.providerPlaceId, shown.label, shown.coordinate])
   return ""
 }
 
@@ -82,8 +83,8 @@ function phaseOf(p: Screen["details"]): ResultState<unknown>["phase"] {
   return p === "Loading" ? "loading" : p === "Ready" ? "ready" : p === "Empty" ? "empty" : p === "Failed" ? "error" : "idle"
 }
 
-function shownPlace(c: MapsContentState): Place | null {
-  const s = c.shown
+function shownPlace(screen: Screen, c: MapsContentState): Place | null {
+  const s = shownOf(screen, c)
   if (!s) return null
   return s.place ?? { providerId: s.providerId ?? c.coverage?.providerId ?? "coordinates", id: s.providerPlaceId ?? "manual", name: s.label, coordinate: s.coordinate,
     attribution: "User-selected coordinates", fetchedAt: 1 }
@@ -94,7 +95,8 @@ export function contextOf(s: Screen, c: MapsContentState, guiding: boolean): { k
   const route = c.routes.run === s.routeRun ? c.routes.routes[s.chosen] : undefined
   if ((s.directions || guiding) && s.route === "Ready" && route && route.mode !== "transit")
     return { kind: "MapRoute", key: JSON.stringify(["route", route.providerId, route.id, route.from, route.to, route.mode]) }
-  if (c.shown) return { kind: "MapPlace", key: JSON.stringify(["place", c.shown.label, c.shown.coordinate, c.shown.providerId, c.shown.providerPlaceId]) }
+  const shown = shownOf(s, c)
+  if (shown) return { kind: "MapPlace", key: JSON.stringify(["place", shown.label, shown.coordinate, shown.providerId, shown.providerPlaceId]) }
   if (s.searching && s.searched) return { kind: "MapSearch", key: JSON.stringify(["search", s.searched, s.search, c.results.run]) }
   return { kind: "NoContext", key: "" }
 }
@@ -190,7 +192,7 @@ export const agentLayer = Layer.effect(MapsAgent, effect {
       const route: Route | null = s.route === "Ready" && c.routes.run === s.routeRun ? c.routes.routes[s.chosen] ?? null : null
       return {
         provider: providerConfig(c),
-        selection: { phase: phaseOf(s.details), value: shownPlace(c), error: null },
+        selection: { phase: phaseOf(s.details), value: shownPlace(s, c), error: null },
         route: { phase: phaseOf(s.route), value: route, error: null },
         revision: s.intent * 100000 + s.choiceId,
         mode: wireMode(s.travel),
@@ -294,11 +296,12 @@ export const agentLayer = Layer.effect(MapsAgent, effect {
       const { screen: s, content: c } = latest
       const route = c.routes.run === s.routeRun ? c.routes.routes[s.chosen] : undefined
       const coverage = c.coverage
+      const shown = shownOf(s, c)
       const body = executed.kind === "MapRoute" && route
         ? { kind: "map-route", providerId: route.providerId, providerRevision: coverage?.revision ?? "", attribution: route.attribution, from: route.from, to: route.to,
             mode: route.mode, distanceMeters: route.distanceMeters, durationSeconds: route.durationSeconds, traffic: route.traffic }
-        : { kind: "map-place", providerId: coverage?.providerId ?? "", providerRevision: coverage?.revision ?? "", attribution: c.shown?.place?.attribution ?? coverage?.attribution ?? "",
-            label: c.shown?.label ?? "", coordinate: c.shown?.coordinate }
+        : { kind: "map-place", providerId: coverage?.providerId ?? "", providerRevision: coverage?.revision ?? "", attribution: shown?.place?.attribution ?? coverage?.attribution ?? "",
+            label: shown?.label ?? "", coordinate: shown?.coordinate }
       const text = JSON.stringify(body)
       const uploaded = reads.send({ type: "uploadRead" }) catch () => undefined
       return uploaded?.uploaded && encodeURIComponent(text).replace(/%[0-9A-F]{2}/g, "x").length <= maxReadBytes ? text : undefined
