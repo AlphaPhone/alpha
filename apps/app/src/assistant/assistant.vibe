@@ -31,7 +31,7 @@ const titled = Schema.Struct({ ...ConversationRecord.fields, title: Schema.Strin
 const listing = () => Schema.Struct({ conversations: Schema.Array(titled) })
 const made = () => Schema.Struct({ conversation: titled })
 /** A page of a conversation's messages, and a page of search hits, as eliza's history routes give them. */
-const page = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.String, role: Schema.Literals(["user", "assistant"]), text: Schema.String, clientMessageId: Schema.optionalKey(Schema.String) })) })
+const page = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.String, role: Schema.Literals(["user", "assistant"]), text: Schema.String, clientMessageId: Schema.optionalKey(Schema.String), failureKind: Schema.optionalKey(Schema.String) })) })
 const hits = () => Schema.Struct({ results: Schema.Array(Schema.Struct({ conversationId: Schema.NonEmptyString, roomId: Schema.NonEmptyString, messageId: Schema.String, text: Schema.String })) })
 const health = () => Schema.Struct({ ready: Schema.Boolean })
 
@@ -266,7 +266,9 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
     if (known === undefined) return { type: "paged", ticket, ok: false, messages: 0 }
     const pivot = around > 0 ? board.messageId(around) : undefined
     const { messages } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(known.record.id)}/messages`, { urlParams: pivot === undefined ? {} : { around: pivot } }), page())
-    board.change({ pages: new Map([...board.snapshot().pages, [ticket, messages.map((one) => ({ id: one.id, mine: one.role === "user", text: one.text }))]]) })
+    board.change({ pages: new Map([...board.snapshot().pages, [ticket, messages.map((one) => ({
+      id: one.id, mine: one.role === "user", text: one.text, ...(one.failureKind === undefined ? {} : { failure: failures[one.failureKind] ?? "OtherFailure" }),
+    }))]]) })
     const numbers = messages.map((one) => board.messageNumber(one.id))
     return { type: "paged", ticket, ok: true, messages: Math.max(0, ...numbers) }
   } catch () => ({ type: "paged", ticket, ok: false, messages: 0 })

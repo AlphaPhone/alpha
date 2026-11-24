@@ -8,6 +8,8 @@ export interface Line {
   readonly id: string
   readonly mine: boolean
   readonly text: string
+  /** Why a reply the agent keeps did not finish, as its history says, in Alpha's words. */
+  readonly failure?: Failure
 }
 
 /** A search hit: the conversation it is in, by its number, the message, by its number, and what it says. */
