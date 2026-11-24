@@ -1,6 +1,7 @@
 // spec/notes/collection.md, "Story: Read my notes under the account I am signed in as"
 import { CloudSession } from "../../src/account/layer.vibe"
 import { initial as signedOut } from "../../gen/account__session.effect.vibe"
+import { Machine as EditorMachine } from "../../gen/notes__editor.effect.vibe"
 import { sendsOf } from "../../gen/voice__route.effect.vibe"
 import { Build } from "../../src/platform/build.vibe"
 import { Native, NativeFailed } from "../../src/platform/native.vibe"
@@ -97,7 +98,11 @@ export const notesOver = (agent: NotesAgentFake, device: DeviceFake, shown?: Sub
 /** The first snapshot of the bound collection. */
 export effect function bound() {
   const collection = try NotesCollection
-  return Option.getOrUndefined(try timeout(Stream.runHead(Stream.filter(collection.snapshots, (owned) => owned !== undefined)), "5 seconds"))
+  const editor = try EditorMachine
+  const owned = try until(collection.snapshots, (snapshot) => snapshot !== undefined)
+  if (owned === undefined) throw new Error("Notes collection never bound")
+  try until(editor.changes, (state) => state.current && state.revision === owned.snapshot.revision)
+  return owned
 }
 
 /** Wait until a stream of states reaches one the test is waiting for; a state never reached within five seconds fails the test. */

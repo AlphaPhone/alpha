@@ -51,6 +51,21 @@ pure def lawNoClaimNoView(switched: bool, accepted: bool): bool = delivered(fals
 pure def lawAnAcknowledgedClaimSendsNoNegative(claimed: bool): bool = not(negativeSent(claimed, true))
 ```
 
+### The assistant confirms a saved Notes editor only while that exact editor is in front for the same owner and conversation
+
+A renderer that compared its resident can offer saved-editor support for a
+text turn that observes the screen. It claims a saved-editor handoff only
+for the same owner, session, conversation and origin screen. The claim
+identifies the saved note. Opening it uses the existing Notes editor and
+never saves an unrelated draft. A successful result includes the exact
+mounted note id. A refusal or an identity change cannot confirm it.
+
+```quint
+pure def confirmsSavedEditor(opened: bool, sameOrigin: bool, exactEditorInFront: bool): bool =
+  opened and sameOrigin and exactEditorInFront
+```
+
+
 ### Maps' view is delivered by Maps, at most once per effect
 
 A prepared Maps view is handed to Maps with its binding, one request number

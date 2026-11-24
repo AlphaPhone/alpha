@@ -13,6 +13,8 @@ import { clockCapabilities } from "../clock/operations.vibe"
 import { FilesAgent } from "../files/agent.vibe"
 import { inboxCapabilities } from "../inbox/handoffs.vibe"
 import { mapsDeviceCapabilities } from "../maps/agent.vibe"
+import { NotesEditor } from "../notes/editor.vibe"
+import { notesRouteOf } from "../notes/list.vibe"
 import { NotesOrganize } from "../notes/organize.vibe"
 import { Build } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"
@@ -64,6 +66,7 @@ const ORDINARY: PeerFacts = { optionalFields: false, takesLocation: false }
 export const assistantHostLive = Layer.effect(AssistantHost, effect {
   const navigation = try Navigation
   const foreground = try Foreground
+  const notes = try NotesEditor
   const notices = try Notices
   const session = try CloudSession
   const bindings = try AccountBindings
@@ -112,6 +115,16 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
     return opened
   }
 
+  effect function openView(app: AppId, route: string | undefined) {
+    if (!(try navigation.get()).voice) return try open(app, route)
+    let opened = false
+    try voice.followScreen(() => effect {
+      opened = try open(app, route)
+      return opened
+    }, () => opened)
+    return opened
+  }
+
   return {
     identity: () => bindings.identity(),
     effect screen() {
@@ -136,15 +149,19 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
     },
     effect emergency() { return try calls.emergencyLive() },
     effect openView(app: string, route?: string) {
-      const known = appOfKey(`alpha:${app}`)
-      if (known === undefined) return false
-      if (!(try navigation.get()).voice) return try open(known as AppId, route)
-      let opened = false
-      try voice.followScreen(() => effect {
-        opened = try open(known as AppId, route)
-        return opened
-      }, () => opened)
-      return opened
+      const known = appOfKey("alpha:" + app)
+      return known !== undefined && (try openView(known as AppId, route))
+    },
+    effect openSavedNote(id: string) {
+      const route = notesRouteOf({ noteId: id })
+      return route !== undefined && (try notes.openSavedEditor(id)) && (try openView("notes", route))
+    },
+    effect showsSavedNote(id: string) {
+      const nav = try navigation.get()
+      const front = try foreground.get()
+      return front.visible && !front.locked && front.view === "notes" && nav.app === "notes"
+        && nav.places.some((place) => place.app === "notes" && place.route === notesRouteOf({ noteId: id }))
+        && (try notes.selection())?.id === id
     },
     toast: (text: string) => notices.show(text),
   }

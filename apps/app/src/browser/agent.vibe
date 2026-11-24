@@ -68,8 +68,6 @@ export service BrowserAgent {
   openApproved(url: string, newTab: boolean): Effect.Effect<{ readonly tab: string; readonly present: Effect.Effect<void> }, BrowserOpenRefused>
   /** A reviewed Browser control from chat; the returned presentation runs after the action's journal and receipt, and answers false when a change its receipt reported (a switch, closing the showing tab, a page-history move) did not run. */
   control(operation: unknown, observed: BrowserTabSelection | undefined, choose: (choice: BrowserTabChoice) => Effect.Effect<number | null>): Effect.Effect<Effect.Effect<boolean>, BrowserOpenRefused>
-  /** Shows Browser's own list of open tabs once the action's receipt settled, or refuses before any effect when Browser has no session: the presentation answers whether the list opened; no tab, title, address or count leaves Browser. */
-  showTabs(): Effect.Effect<Effect.Effect<boolean>, BrowserOpenRefused>
   /** A view command from the assistant's Browser view, claimed once and never repeated. */
   command(raw: unknown, selection: unknown): ViewCommandAnswer!!
   /** An agent view interaction in Browser: `browser-command` is a view command, and `get-text` is refused with where the page comes from. */
@@ -217,11 +215,14 @@ export const agentLayer = Layer.provide(Layer.effect(BrowserAgent, effect {
       const operation: BrowserControlOperation = parsed.operation
       const state = try tabs.get()
       const selected = state.cur
+      if (operation.type === "browser_tabs_show") {
+        if (!canAgentShowTabs(state, selected)) throw new BrowserOpenRefused({ message: "Browser is unavailable." })
+        return deferred("PresentTabList", { type: "agentShowTabs", selected })
+      }
       const shown = inBrowser(try foreground.get())
       const request = newId()
       const observedTab = observed === undefined ? "" : observed.id.slice(observed.id.indexOf(":") + 1)
       const observedRevision = observed === undefined ? 0 : Number(observed.revision)
-      // browser_tabs_show is not in the pinned contract's BrowserControlOperation yet (elizaOS/eliza#40331); once the pin includes it, add its case here delegating to showTabs().
       switch (operation.type) {
         case "browser_search": {
           const opened = try open(searchAddress(operation.query), false)
@@ -256,11 +257,6 @@ export const agentLayer = Layer.provide(Layer.effect(BrowserAgent, effect {
           return deferred("PresentCommandShown", { type: "agentCommandShown", tab: selected, command, navigation })
         }
       }
-    },
-    effect showTabs() {
-      const state = try tabs.get()
-      if (!canAgentShowTabs(state, state.cur)) throw new BrowserOpenRefused({ message: "Browser is unavailable." })
-      return deferred("PresentTabList", { type: "agentShowTabs", selected: state.cur })
     },
     command: viewCommand,
     effect interact(capability: string, raw: unknown, selection: unknown) {

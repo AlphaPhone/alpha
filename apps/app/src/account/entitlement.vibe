@@ -120,13 +120,17 @@ export const entitlementService = Layer.effect(Entitlement, effect {
     }
   }
 
-  effect function signedPlan(now: number) {
+  effect function signedPlan(now: number, credential: number) {
+    const current = try session.current()
+    const { userId, organizationId } = current.account
+    if (credential === 0 || ownerOf(current) !== credential || !userId || !organizationId)
+      return { signed: "SignedInvalid" as SignedPlan, planEndsAt: null, expires: 0 }
     const keysBody = try read(cloud, "/api/v1/subscription/entitlement-keys")
     const keys = parseEntitlementKeys(keysBody)
     if (keys === undefined) return { signed: "SignedInvalid" as SignedPlan, planEndsAt: null, expires: 0 }
     const body = try read(cloud, "/api/v1/subscription/entitlement")
     const token = typeof body === "object" && body !== null && typeof (body as { entitlement?: unknown }).entitlement === "string" ? (body as { entitlement: string }).entitlement : ""
-    const checked = tryPromise(() => checkEntitlement(token, { keys, issuer: authority.api, audience: authority.entitlementAudience, now })) catch () => undefined
+    const checked = tryPromise(() => checkEntitlement(token, { keys, issuer: authority.api, audience: authority.entitlementAudience, userId, organizationId, now })) catch () => undefined
     if (checked === undefined) return { signed: "SignedInvalid" as SignedPlan, planEndsAt: null, expires: 0 }
     return { signed: signedOf(checked.plan.status), planEndsAt: checked.planEndsAt, expires: checked.expiresAt }
   }
@@ -143,7 +147,7 @@ export const entitlementService = Layer.effect(Entitlement, effect {
       return
     }
     const now = try Clock.currentTimeMillis
-    const signed = signedPlan(now) catch (error) => error
+    const signed = signedPlan(now, credential) catch (error) => error
     if (signed instanceof PlanUnread && signed.signedOut) {
       if ((try send({ type: "signInRejected", credential })) && credential === (try session.owner())) try session.rejected()
       return
@@ -191,7 +195,8 @@ export const entitlementService = Layer.effect(Entitlement, effect {
       if (a.binding !== "CloudBound") continue
       const credential = a.credential
       const at = try Clock.currentTimeMillis
-      const signed = signedPlan(at) catch () => undefined
+      const signed = signedPlan(at, credential) catch () => undefined
+      if (credential !== (try session.owner())) continue
       if (signed === undefined || !admits(admittedKind(signed.signed, "SnapshotUnread"))) {
         try Ref.update(failures, (n) => n + 1)
         continue

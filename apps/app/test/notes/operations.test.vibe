@@ -7,7 +7,7 @@ import { AssistantHost } from "../../src/assistant/host.vibe"
 import { NotesCollection } from "../../src/notes/collection.vibe"
 import { NotesEditor } from "../../src/notes/editor.vibe"
 import { notesRouteOf, notesRouteRequest } from "../../src/notes/list.vibe"
-import { operationPorts } from "../../src/notes/operations.vibe"
+import { NotesCalls, operationPorts } from "../../src/notes/operations.vibe"
 import { NotesHandoff } from "../../src/notes/origins.vibe"
 import { sha256Hex } from "../../src/notes/platform.ts"
 import { NotesRecorder } from "../../src/notes/recorder.vibe"
@@ -30,6 +30,14 @@ function seeded(): NotesAgentFake {
 function host(hidden: boolean, view = "workflows") {
   const screen = { exposure: { privateView: false, locked: false, hidden, connectionDialog: false }, observation: { view, revision: 1, sensitive: false }, onCalendar: false, contextKey: `${view}:` }
   return Layer.succeed(AssistantHost, { screen: () => succeed(screen), identity: () => succeed(undefined) } as unknown as AssistantHost.Shape)
+}
+
+function workflowCall(proposalId: string, operationId: string) {
+  return Layer.succeed(NotesCalls, {
+    workflow: (call) => succeed(call.proposalId === proposalId && call.operationId === operationId
+      ? { workflowId: "workflow-1", versionId: "version-1", runId: "run-1", stepId: "step-1" }
+      : undefined),
+  })
 }
 
 interface Place { readonly app: string; readonly route: string; readonly inner: boolean }
@@ -91,7 +99,7 @@ describe("Notes device operations, Back and routes", () => {
   it.live("A workflow saves the note its step wrote once, from the open run (spec/notes/organize.md, \"Story: Let a workflow save the note its step wrote\")", () => effect {
     const agent = seeded()
     const device = new DeviceFake()
-    provide notesOver(agent, device), host(false) {
+    provide notesOver(agent, device), host(false), workflowCall("p5", "op_5") {
       try bound()
       const ports = try operationPorts
       const collection = try NotesCollection
@@ -112,7 +120,7 @@ describe("Notes device operations, Back and routes", () => {
   it.live("A workflow note away from the open run saves nothing (spec/notes/organize.md, \"Story: Let a workflow save the note its step wrote\")", () => effect {
     const agent = seeded()
     const device = new DeviceFake()
-    provide notesOver(agent, device), host(false, "notes") {
+    provide notesOver(agent, device), host(false, "notes"), workflowCall("p6", "op_6") {
       try bound()
       const ports = try operationPorts
       const collection = try NotesCollection

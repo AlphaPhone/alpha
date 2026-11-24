@@ -60,6 +60,30 @@ describe("Notes journeys", () => {
     }
   })
 
+  it.live("A saved editor can open without saving or replacing an unrelated dirty draft (spec/assistant/views.md, \"The assistant confirms a saved Notes editor only while that exact editor is in front for the same owner and conversation\")", () => effect {
+    const agent = new NotesAgentFake()
+    const device = new DeviceFake()
+    const at = "2026-11-19T10:00:00.000Z"
+    agent.notes.push(
+      { id: "keys", title: "House keys", body: "Pick up the keys", color: "yellow", createdAt: at, updatedAt: at },
+      { id: "ferry", title: "Ferry checklist", body: "Bring ID", color: "yellow", createdAt: at, updatedAt: at },
+    )
+    agent.revision = 1
+    provide notesOver(agent, device) {
+      const editor = try NotesEditor
+      try bound()
+      const opened = try editor.openSavedEditor("ferry")
+      const exact = (try editor.selection())?.id
+      const unknown = try editor.openSavedEditor("absent")
+      try editor.edit({ body: "Bring ID and breakfast" })
+      const other = try editor.openSavedEditor("keys")
+      const kept = (try editor.draft())?.body
+      const savedBefore = agent.notes.find((note) => note.id === "ferry")?.body
+      try check(() => assert.deepStrictEqual({ opened, exact, unknown, other, kept, savedBefore },
+        { opened: true, exact: "ferry", unknown: false, other: false, kept: "Bring ID and breakfast", savedBefore: "Bring ID" }))
+    }
+  })
+
   it.live("An owner change keeps an unsaved edit and says it was not saved (spec/notes/editor.md, \"Story: Keep my unsaved words on this phone when a save fails\")", () => effect {
     const agent = new NotesAgentFake()
     const device = new DeviceFake()
@@ -143,6 +167,20 @@ describe("Notes journeys", () => {
         direct: true, started: { status: "succeeded", summary: "Recording" }, stopped: { status: "succeeded", summary: "Saved the voice note." },
         voices: 1, audio: { audioId: "rec_9", durationMs: 3000 }, claims: 1, again: false, retained: true,
       }))
+    }
+  })
+
+  it.live("Stopping before there is any audio creates no voice note (spec/notes/recorder.md, \"Done claims the save once, and the recording closes only after its note is confirmed\")", () => effect {
+    const agent = new NotesAgentFake()
+    const device = new DeviceFake()
+    device.emptyCapture = true
+    provide notesOver(agent, device) {
+      try bound()
+      const recorder = try NotesRecorder
+      const started = try recorder.recordStart()
+      const stopped = try recorder.recordStop()
+      try check(() => assert.deepStrictEqual({ started, stopped, claims: device.claims, saved: agent.notes.length },
+        { started: "started", stopped: "retained", claims: 0, saved: 0 }))
     }
   })
 

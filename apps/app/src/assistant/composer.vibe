@@ -263,9 +263,9 @@ export const composerLayer = Layer.effect(Composer, effect {
     ownKey = (try host.screen()).contextKey
     return pass
   }
-  effect function viewed(results: readonly { readonly action: string; readonly data: unknown }[], contextKey: string) {
+  effect function viewed(results: readonly { readonly action: string; readonly data: unknown }[], contextKey: string, identity: AgentIdentity, room: string) {
     acting += 1
-    const done = try ensuring(views.deliver(results, contextKey), sync(() => { acting -= 1 }))
+    const done = try ensuring(views.deliver(results, contextKey, { identity, stillCurrent: () => map(SubscriptionRef.get(transcript), (state) => state.conversation === room) }), sync(() => { acting -= 1 }))
     if (done.status === "delivered") ownKey = (try host.screen()).contextKey
     return done
   }
@@ -357,12 +357,17 @@ export const composerLayer = Layer.effect(Composer, effect {
     } : undefined
     const page = observation === undefined ? undefined : try pageForTurn(pages, observed, observation, browserTab, peer.optionalFields)
     const browserPage = page === undefined ? undefined : wirePage(page)
-    const voiceUi = statesDirectRequests(asksFirst ? "PreferenceOn" : "PreferenceOff") ? { agentActionMode: "direct-request-v1" as const } : undefined
+    const viewFields = try views.turnFields(observed, screen.observation.view)
+    const direct = statesDirectRequests(asksFirst ? "PreferenceOn" : "PreferenceOff")
+    const savedNote = viewFields !== undefined && peer.optionalFields
+    const voiceUi = direct || savedNote ? {
+      ...(direct ? { agentActionMode: "direct-request-v1" as const } : {}),
+      ...(savedNote ? { uiNotesEditor: "saved-note-v1" as const, uiClientId: viewFields.viewClientId, viewDelivery: viewFields.viewDelivery } : {}),
+    } : undefined
     const context = encodeTurnContext({
       ...(observation === undefined ? {} : { observation, ...(browserPage === undefined ? {} : { browserPage }) }),
       ...(voiceUi === undefined ? {} : { voiceUi }),
     }, { optionalFields: peer.optionalFields })
-    const viewFields = try views.turnFields(observed, screen.observation.view)
     const pageLinks = browserPage === undefined ? [] : (page?.links ?? []).map((link) => link.url)
     const userId = `local-user-${attempt}`
     const replyId = `local-reply-${attempt}`
@@ -502,7 +507,7 @@ export const composerLayer = Layer.effect(Composer, effect {
     const drafted: EmailRow | undefined = staged === undefined || !inConversation || live === null ? undefined
       : { kind: "email", id: `email:${reply.messageId}`, card: { ...emailStart, recipients: staged.to.trim() !== "", body: staged.body.trim() !== "" }, ...staged, messageId: reply.messageId, ownerTurn }
     const emailRows: Row[] = drafted === undefined || live === null ? [] : [try shelf.stage([identity.origin, identity.owner, identity.agent, live.id], drafted)]
-    const opened: ViewDelivery = delivered && inConversation ? try viewed(reply.actionResults, screen.contextKey) : { status: "none" }
+    const opened: ViewDelivery = delivered && inConversation ? try viewed(reply.actionResults, screen.contextKey, identity, live.id) : { status: "none" }
     const viewRows: Row[] = opened.status !== "unavailable" ? []
       : [{ kind: "notice", id: `view-notice:${reply.messageId}`, text: opened.parentView === undefined ? copy.viewUnavailable : copy.viewInside(opened.parentView), system: false }]
     const changed = delivered && inConversation ? try changes.settle(reply.actionResults) : undefined
