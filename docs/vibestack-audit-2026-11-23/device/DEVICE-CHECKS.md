@@ -1,8 +1,8 @@
 # On-device equivalence checklist: Vibestack image against legacy v630
 
-For after `steps/07-postflash-checks.sh` passes. Written 2026-11-23 from reading; none of it has been run against
-a Vibestack build. This is device evidence for the listed turns and screens. It is not an APK build, an emulator
-result or owner acceptance.
+Use this checklist with the [Pixel qualification runbook](RUNBOOK.md). It was
+written on November 23, 2026 before a Vibestack device run. Read each historical
+prediction against the candidate before testing.
 
 ## Ground rules
 
@@ -15,9 +15,9 @@ result or owner acceptance.
 3. **No credentials.** If the sign-in page appears, stop. Do not type an email, code or password. The owner signs in.
 4. **Writes need this run's yes.** Checks marked **ASK** create or change something of the owner's (a calendar
    event, a note, a reminder). Run them only after the owner agrees for this run, and clean up what they created.
-5. One CDP client per page. Agree with any other session before attaching.
+5. Use an explicit adb serial. Coordinate with anyone else using the Pixel.
 6. Use the test number `415-555-0100` only.
-7. Check the network first: `adb shell dumpsys connectivity | grep "VPN CONNECTED"` must print nothing (a dead
+7. Check the network first: `adb -s "$ALPHA_SERIAL" shell dumpsys connectivity | grep "VPN CONNECTED"` must print nothing (a dead
    gnirehtet reverse tether black-holes all traffic and makes sign-in look broken).
 
 Who runs a check: **AGENT** (read-only or navigation only), **ASK** (agent, after the owner's yes for this run),
@@ -25,46 +25,16 @@ Who runs a check: **AGENT** (read-only or navigation only), **ASK** (agent, afte
 
 ## How to drive
 
-- **adb, read-only:** `adb -s "$ALPHA_SERIAL" exec-out screencap -p > NN.png`, `shell dumpsys …`,
-  `shell input keyevent KEYCODE_HOME` / `KEYCODE_BACK` (navigation only). Avoid `input tap` by coordinates.
-- **WebView over Chrome DevTools:** the image is userdebug, so the release launcher's WebView exposes its devtools
-  socket (this is how v612-v630 were driven). The legacy driver is `~/.cache/alpha-v612/driver/`:
-  - `./fwd.sh` forwards `tcp:9333` to `localabstract:webview_devtools_remote_<pid>` and checks the Alpha page
-    (`https://localhost/`) is there. It never restarts the adb server.
-  - `node cdp.mjs alpha`, `node cdp.mjs eval '<expr>'`, `node cdp.mjs screenshot out.png`.
-  - `node say.mjs "message"` sends one chat message and prints the reply and any review card;
-    `node say.mjs --inspect` and `node selftest.mjs` are read-only. **Never pass `--approve`.**
-- **The driver was written for the legacy DOM.** `say.mjs` relies on `data-alpha-agent-row`,
-  `[data-alpha-turn-status]`, `.alpha-action-review`, `[data-alpha-chat-proposal]`, `button[data-alpha-proposal-act]`
-  and `html[data-active-view]`. None of these attribute names appears under `apps/app/src/web/{assistant,shell,telephony}`
-  at 7c2338706 (present there: `data-alpha-composer`, `data-alpha-layer`, `data-alpha-message-id`,
-  `data-alpha-transcript`, `data-alpha-toast`). So on Vibestack run `./fwd.sh`, `node selftest.mjs` and
-  `node say.mjs --inspect` first; expect them to need porting. Until then drive by exact visible text:
+Use the visible UI and explicitly target the selected Pixel for adb reads.
+If a legacy driver depends on selectors that changed in Vibestack, verify
+the target by the text on the device. Save compact outcomes and redact any
+personal content in screenshots or logs.
 
-  ```js
-  // what is on screen
-  JSON.stringify({url: location.href, text: document.body.innerText.slice(0, 2000)})
-  // every button label
-  [...document.querySelectorAll('button,[role=button]')].map(b => (b.getAttribute('aria-label') || b.innerText).trim()).filter(Boolean)
-  // click the one button with exactly this label inside the element that contains the checked target text
-  (() => { const card = [...document.querySelectorAll('[data-alpha-message-id], article, section, li')]
-             .filter(e => e.innerText.includes('4155550100')).pop();
-           if (!card) return 'no card with that number';
-           const b = [...card.querySelectorAll('button')].filter(x => x.innerText.trim() === 'Decline');
-           if (b.length !== 1) return 'Decline buttons in card: ' + b.length;
-           b[0].click(); return 'declined'; })()
-  ```
-
-  These snippets are untested against the Vibestack page; check what they return before trusting a click.
-- **Evidence:** for each check save a device screenshot and the page text under
-  `work/v$N/device-checks/<phase>/<id>.{png,txt}`.
-
-## Order
-
-1. **Before the flash, on legacy v630:** `PHASE=pre ./07-postflash-checks.sh`, then every AGENT check below, to
-   fill the "legacy showed" cells marked *capture before flashing*. The legacy driver works as is on v630.
-2. Flash (steps 1-6), `./07-postflash-checks.sh`, owner unlocks the phone.
-3. The same checks on the Vibestack build, then the OWNER list.
+1. Capture the unchecked observations on legacy v630 before the flash.
+2. After the operator's authorized update, confirm the image and package
+   checks in the runbook and ask the owner to unlock the phone.
+3. Repeat the baseline checks on the Vibestack image, then review the
+   owner checks.
 
 ## Known before testing (alpha 7c2338706; re-check against the handed-over commit)
 
@@ -92,17 +62,17 @@ failure of equivalence; record it against the row.
 
 | ID | Who | Drive | Legacy showed | Pass |
 |---|---|---|---|---|
-| A1 | AGENT | After unlock, screenshot; CDP page text | *Capture before flashing* (the 12:12 baseline screenshot shows Maps with the dock, so the app was past sign-in; the account itself is not recorded) | No sign-in page. Same first screen as before the flash |
+| A1 | AGENT | After unlock, observe the first app screen | *Capture before flashing* (the 12:12 baseline screenshot shows Maps with the dock, so the app was past sign-in; the account itself is not recorded) | No sign-in page. Same first screen as before the flash |
 | A2 | AGENT | Open Settings from Home, read the Account row by text. Do not record the address in any report, only "same / different" | *Capture before flashing* | Same account, same plan line |
-| A3 | AGENT | `node cdp.mjs eval 'Capacitor.Plugins.AlphaCloudSignIn.status()'` (read-only; plugin name from the 2026-11-11 note, still registered per the register) | 2026-11-11 after the VPN fix: `inApp/email/phone/google: true` | Methods known, signed-in state reported, no 40 s probe |
-| A4 | AGENT | `adb shell pm get-app-links ai.alphacompute.alphaphone` | `verified` after re-verification on 2026-11-11 | Still `verified` (an image update can re-run verification; `legacy_failure` usually means it ran offline) |
+| A3 | AGENT | Read the offered methods and readiness on the sign-in surface, if it appears | 2026-11-11 after the VPN fix: `inApp/email/phone/google: true` | Methods known, signed-in state reported, no 40 s probe |
+| A4 | AGENT | `adb -s "$ALPHA_SERIAL" shell pm get-app-links ai.alphacompute.alphaphone` | `verified` after re-verification on 2026-11-11 | Still `verified` (an image update can re-run verification; `legacy_failure` usually means it ran offline) |
 | A5 | OWNER | Only if A1 fails: see OWNER 5 | — | — |
 
 ### B. Home and library
 
 | ID | Who | Drive | Legacy showed | Pass |
 |---|---|---|---|---|
-| B1 | AGENT | `adb shell input keyevent KEYCODE_HOME`, screenshot, page text | *Capture before flashing*. Dock in the baseline screenshot: Alpha orb, keyboard, microphone | Alpha's Home (Alpha holds HOME); date, tiles and dock present; no blank frame, no sign-in flash |
+| B1 | AGENT | `adb -s "$ALPHA_SERIAL" shell input keyevent KEYCODE_HOME`, screenshot, page text | *Capture before flashing*. Dock in the baseline screenshot: Alpha orb, keyboard, microphone | Alpha's Home (Alpha holds HOME); date, tiles and dock present; no blank frame, no sign-in flash |
 | B2 | AGENT | List tile labels by text | *Capture before flashing* | Same tiles, plus Clock (new on Vibestack, register A-355). A missing legacy tile is a fail |
 | B3 | AGENT | Open the app library by its control's exact label; list app names | *Capture before flashing* | Same installed apps listed; opening and closing returns to Home |
 | B4 | AGENT | Press Home from inside Maps, then Back from Home | *Capture before flashing* | Home returns to Alpha's Home; Back on Home leaves Home in place |
@@ -114,13 +84,13 @@ failure of equivalence; record it against the row.
 | C1 | AGENT | Type "what is 17 times 23?" in the composer (`data-alpha-composer`), tap the composer's own Send | Typical Cloud text turn 1.8-2.1 s with a 4-8 s tail (2026-11-06); v620 once showed "Reply failed" | One user row, one reply containing 391 within 60 s; no "Reply failed", no rate-limit toast |
 | C2 | AGENT | "what's on my calendar today" (read only) | *Capture before flashing* | A reply that reads the calendar or says it is empty; not an error |
 | C3 | AGENT | Scroll the conversation up | *Capture before flashing*: earlier turns are listed | Record whether pre-flash turns are still shown (A-001 predicts they are not). Not shown = fail of "state kept", recorded against A-001 |
-| C4 | AGENT | Force nothing; after C1 read `adb logcat -d` for the app pid, crash buffer | *Capture before flashing* | No FATAL EXCEPTION for the app; no new `avc: denied` |
+| C4 | AGENT | Force nothing; after C1 read `adb -s "$ALPHA_SERIAL" logcat -d` for the app pid, crash buffer | *Capture before flashing* | No FATAL EXCEPTION for the app; no new `avc: denied` |
 
 ### D. Call and SMS proposal cards: read, then DECLINED
 
 | ID | Who | Drive | Legacy showed | Pass |
 |---|---|---|---|---|
-| D1 | AGENT | Send "call 415-555-0100". Read the card. Check the number. Tap **Decline** on that card only | v625 run #43: "Review this request on your phone before it can run." / "Number: 4155550100" / proposal card, "Needs approval", button `Call`. Declining was never exercised by the legacy runs: *capture before flashing* | Card names 4155550100; has a Decline; after Decline the card reads Declined; `adb shell dumpsys telecom` shows no call; the Phone app shows no new outgoing entry. No card at all = fail (see E-011) |
+| D1 | AGENT | Send "call 415-555-0100". Read the card. Check the number. Tap **Decline** on that card only | v625 run #43: "Review this request on your phone before it can run." / "Number: 4155550100" / proposal card, "Needs approval", button `Call`. Declining was never exercised by the legacy runs: *capture before flashing* | Card names 4155550100; has a Decline; after Decline the card reads Declined; `adb -s "$ALPHA_SERIAL" shell dumpsys telecom` shows no call; the Phone app shows no new outgoing entry. No card at all = fail (see E-011) |
 | D2 | AGENT | Send "text 415-555-0100 saying v$N test". Read the card. Check the recipient and body. Tap **Decline** | v625 run #44: same review line, "To: 4155550100", proposal card | Card names 4155550100 and the body; Decline works; card reads Declined; the Messages thread for that number shows no new outgoing message |
 | D3 | AGENT | Send "open the phone dialer" | v625: "The keypad is open. Nothing was dialed." | Keypad opens, nothing dialed |
 | D4 | AGENT | Send "open messages" and "open contacts" | Both prompts were in the v625 list; their replies were not read here: *capture before flashing* | Views open and list threads / contacts (image telephony on: needs release build + overlay + feature) |
@@ -138,7 +108,7 @@ failure of equivalence; record it against the row.
 
 | ID | Who | Drive | Legacy showed | Pass |
 |---|---|---|---|---|
-| F1 | AGENT | "open notes"; count and list titles | *Capture before flashing* | Notes written before the flash are still reachable (Vibestack shows legacy notes through a read-only "Previous Notes" route, per the register). A missing note is a fail |
+| F1 | AGENT | "open notes"; compare the visible count and titles without recording them | *Capture before flashing* | Notes written before the flash are still reachable (Vibestack shows legacy notes through a read-only "Previous Notes" route, per the register). A missing note is a fail |
 | F2 | ASK | "create a note called v$N check saying first line"; "add the line second line to v$N check"; "rename the note v$N check to v$N notes"; "delete the note v$N notes" | v625: "Done, v625 check is saved with first line as the body." … "Done, v625 notes is deleted." | Same outcomes; nothing left behind |
 
 ### G. Files
@@ -152,7 +122,7 @@ failure of equivalence; record it against the row.
 
 | ID | Who | Drive | Legacy showed | Pass |
 |---|---|---|---|---|
-| H1 | AGENT | "open my email inbox"; read the thread list (subjects only in evidence; do not copy bodies into reports) | *Capture before flashing* | Same Google account state; threads load |
+| H1 | AGENT | "open my email inbox"; check whether the thread list loads without recording message content | *Capture before flashing* | Same Google account state; threads load |
 | H2 | AGENT | Open one thread, read, go back. No reply, no archive | *Capture before flashing* | Body renders; nothing changed in the mailbox |
 
 ### I. Maps
@@ -177,7 +147,7 @@ failure of equivalence; record it against the row.
 
 | ID | Who | Drive | Legacy showed | Pass |
 |---|---|---|---|---|
-| K1 | AGENT | "open camera"; screenshot; leave with Home. Do not press the shutter or record | The prompt was in the v625 list; *capture the screenshot before flashing* | Live viewfinder (not black), no permission dialog; leaving releases the camera (`adb shell dumpsys media.camera` shows no client) |
+| K1 | AGENT | "open camera"; screenshot; leave with Home. Do not press the shutter or record | The prompt was in the v625 list; *capture the screenshot before flashing* | Live viewfinder (not black), no permission dialog; leaving releases the camera (`adb -s "$ALPHA_SERIAL" shell dumpsys media.camera` shows no client) |
 
 ### L. Clock and reminder
 
@@ -203,15 +173,15 @@ failure of equivalence; record it against the row.
 |---|---|---|---|---|
 | N1 | AGENT | Settings → General: read the update controls by text | *Capture before flashing*. On 2026-11-16 the public channel had no release | Same controls present |
 | N2 | AGENT | Tap "Check for updates" (a network read) | No update offered | Completes without error and offers nothing. If it offers an update: **do not install** (a /data update over the system app outranks the image and can drop the roles); report |
-| N3 | AGENT | After N2: `adb shell dumpsys package ai.alphacompute.alphaphone \| grep -E "codePath\|versionCode"` | `/product/priv-app/AlphaPhone`, 630 | Still `/product/priv-app/AlphaPhone`, `$N` |
+| N3 | AGENT | After N2: `adb -s "$ALPHA_SERIAL" shell dumpsys package ai.alphacompute.alphaphone \| grep -E "codePath\|versionCode"` | `/product/priv-app/AlphaPhone`, 630 | Still `/product/priv-app/AlphaPhone`, `$N` |
 | N4 | OWNER | "Allow automatic updates" opens Android's install-source page: OWNER 6 | — | — |
 
 ### P. After a reboot (agent, read-only apart from the reboot the owner agrees to)
 
 | ID | Who | Drive | Legacy showed | Pass |
 |---|---|---|---|---|
-| P1 | ASK | `adb reboot`; owner unlocks; rerun `./07-postflash-checks.sh` | Roles kept across two no-wipe reflashes (v99, v100, 2026-11-16) | Same result as the first run; roles still Alpha's |
-| P2 | AGENT | `adb shell dumpsys activity services ai.alphacompute.alphaphone` before opening Alpha | *Capture before flashing* (legacy starts the agent only when the owner chose on-device or hybrid) | Record whether the agent service and its notification are up (gap 7 predicts always) |
+| P1 | ASK | After the authorized reboot, the owner unlocks the phone and the operator repeats the runbook device checks | Roles kept across two no-wipe reflashes (v99, v100, 2026-11-16) | Same result as the first run; roles still Alpha's |
+| P2 | AGENT | `adb -s "$ALPHA_SERIAL" shell dumpsys activity services ai.alphacompute.alphaphone` before opening Alpha | *Capture before flashing* (legacy starts the agent only when the owner chose on-device or hybrid) | Record whether the agent service and its notification are up (gap 7 predicts always) |
 
 ## OWNER checks (numbered steps for Shaw)
 
