@@ -65,12 +65,13 @@ export default {
     },
     "packages/eliza-harness": {
       "entry": [
-        "src/no-bun.vibe",
+        "scripts/no-bun.ts",
         "src/pinned.vibe",
         "test/**/*.test.{ts,vibe}"
       ],
       "project": [
         "src/**/*.{ts,vibe,vibex}",
+        "scripts/**/*.ts",
         "test/**/*.{ts,vibe,vibex}"
       ],
       "ignoreBinaries": [
@@ -84,6 +85,7 @@ export default {
       ],
       "project": [
         "src/**/*.{ts,vibe,vibex}",
+        "scripts/**/*.ts",
         "test/**/*.{ts,vibe,vibex}"
       ]
     },
@@ -94,6 +96,7 @@ export default {
       ],
       "project": [
         "src/**/*.{ts,vibe,vibex}",
+        "scripts/**/*.ts",
         "test/**/*.{ts,vibe,vibex}"
       ]
     },
@@ -107,6 +110,7 @@ export default {
       ],
       "project": [
         "src/**/*.{ts,vibe,vibex}",
+        "scripts/**/*.ts",
         "test/**/*.{ts,vibe,vibex}"
       ]
     },
