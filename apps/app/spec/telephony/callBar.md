@@ -7,8 +7,9 @@ plugin reports each call's ID, state and connect time and offers Return (`showCa
 call. The bar sits at the top of every view while a call is live, says what the call screen says,
 and goes when the call ends. A ringing call is Android's to present: `AlphaInCallService` posts it
 as a ringing notice that Android shows as a heads-up or full-screen alert with Answer and Decline,
-so the bar draws nothing while a call rings. The development phone never has a call here: the bar
-is not offered off the image.
+or, when Alpha's notices or its calls channel are off or quiet, opens the call screen as the
+incoming screen, so the bar draws nothing while a call rings. The development phone never has a call
+here: the bar is not offered off the image.
 
 ## Domain
 
@@ -87,11 +88,12 @@ pure def sometimesTheBarShowsALiveCall(b: CallBar): bool = barPhase(b) == LiveBa
 
 ### While a call rings, Android's incoming alert is the only call bar
 
-Android presents the ringing call over every view with its own Answer and Decline, so the top bar
-draws nothing while any listed call rings, a call waiting behind a held or connected call
-included; a second call bar would cover or repeat that alert. The ringing call stays listed, so
-the comms stage, End beside the comms bar and the voice gate still see it. Once the ring is
-answered or gone the bar draws the call that is left. A ring the bar never drew holds no "Call
+A ringing call is presented outside the bar with its own Answer and Decline: Android's heads-up or
+full-screen alert, or the call screen as the incoming screen when Alpha's notices or calls channel
+cannot alert. The top bar draws nothing while any listed call rings, a call waiting behind a held or
+connected call included; a second call bar would cover or repeat that alert. The ringing call stays
+listed, so the comms stage, End beside the comms bar and the voice gate still see it. Once the ring
+is answered or gone the bar draws the call that is left. A ring the bar never drew holds no "Call
 ended" moment when it goes, and a ring that arrives during that moment clears it.
 
 ```quint
