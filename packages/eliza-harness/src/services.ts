@@ -9,6 +9,7 @@ import path from "node:path";
 import { pipeline } from "node:stream";
 import { Effect } from "effect";
 import { prepared } from "./checkout.ts";
+import { builtPack } from "./pack.ts";
 
 /** What the model answers next: the pieces of a reply, or one piece and then nothing until the caller gives up. */
 export type Reply = { readonly kind: "text"; readonly parts: readonly string[] } | { readonly kind: "stall"; readonly first: string };
@@ -356,16 +357,19 @@ export async function startCloud(state: string, emails: readonly string[], credi
 /** The character of the agent of `email`: its system prompt names its owner, which is also how the local cloud's model tells one journey's agent from another's. */
 export const characterOf = (email: string) => ({ name: "Alpha", system: `You are Alpha, the phone agent of ${email}.` });
 
-/** The modules of eliza's agent Alpha's launch loads beside conversations: each serves the routes an area reads (`.eliza/packages/agent/src/plugins/profile.vibe`). */
-export const modules = ["approvals", "notifications", "reply-draft", "scheduled-tasks", "triggers", "tasks", "surface"].map((name) => `@elizaos/agent/${name}`);
-
-/** Start the agent bundle of the pinned checkout as the owner's, over `state`, with `key` as its cloud credential; `persist` keeps its conversations in `state`. */
+/**
+ * Start the agent pack the phone ships (`pnpm --filter @repo/agent build`) as the owner's, over `state`, with `key` as
+ * its cloud credential: its bundle, the plugins and modules its policy loads, the actions it allows and the workflow
+ * worker it pins; `persist` keeps its conversations in `state`.
+ */
 export async function startAgent(state: string, cloud: Cloud, key: DeviceKey, character: { name: string; system: string }, persist: boolean): Promise<Agent> {
+  const pack = await builtPack();
   const launch = path.join(owned(state), "launch.json");
   fs.writeFileSync(launch, JSON.stringify({
     schema: 1,
     character,
-    policy: { actions: { allowed: ["REPLY", "IGNORE", "NONE"] }, plugins: { load: modules } },
+    policy: pack.policy,
+    workflowWorker: pack.workflowWorker,
     model: { backend: "cloud", cloudBaseUrl: cloud.api, smallModel: cloud.model, largeModel: cloud.model, imageModel: cloud.model },
     account: { userId: key.accountId, organizationId: key.organizationId },
     embeddings: "none", persistMemory: persist, callerRole: "owner",
@@ -373,7 +377,7 @@ export async function startAgent(state: string, cloud: Cloud, key: DeviceKey, ch
   const token = base64url(randomBytes(32));
   const port = await freePort();
   const home = owned(path.join(state, "agent"));
-  const child = spawn(node, [path.join(prepared().bundle, "agent.mjs"), "serve", "--launch", launch, "--state", home, "--http", `127.0.0.1:${port}`], {
+  const child = spawn(node, [pack.bundle, "serve", "--launch", launch, "--state", home, "--http", `127.0.0.1:${port}`], {
     env: { PATH: process.env.PATH, HOME: home, TMPDIR: home, TZ: "UTC", NODE_EXTRA_CA_CERTS: cloud.caFile },
     stdio: ["pipe", "ignore", "pipe"],
   });

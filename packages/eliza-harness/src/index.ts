@@ -34,7 +34,6 @@ export {
   type DeviceKey,
   type Reply,
   characterOf,
-  modules,
   said,
   scratch,
   startAgent,

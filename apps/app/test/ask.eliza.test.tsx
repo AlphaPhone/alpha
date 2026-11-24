@@ -67,7 +67,7 @@ it("Read what my agent keeps, from eliza's agent with its modules loaded (spec/k
   // spec/kit/read.md, "Only the newest ticket's answer is taken, once": each route an area reads answers at the pinned commit, through Alpha's own Agent service.
   expect(await read("/api/approvals")).toMatchObject({ approvals: [] });
   expect(await read("/api/notifications")).toMatchObject({ notifications: [], unreadCount: 0 });
-  expect(await read("/api/scheduled-tasks?ownerVisibleOnly=1")).toEqual({ tasks: [] });
+  expect(await read("/api/scheduled-tasks?ownerVisibleOnly=1")).toEqual({ tasks: [expect.objectContaining({ kind: "personal-assistant.checkin", state: { status: "scheduled" } })] });
   expect(await read("/api/triggers")).toEqual({ triggers: [] });
   expect(await read("/api/tasks/current")).toEqual({ task: null });
   expect(await read("/api/client-devices/capabilities")).toMatchObject({ protocol: 1 });

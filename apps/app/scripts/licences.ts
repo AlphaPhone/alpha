@@ -180,6 +180,51 @@ function elizaDraft(): Draft {
   return { name: "elizaOS (@elizaos/agent, @elizaos/os, @elizaos/cloud)", version: pin.commit, license: "MIT", source: `${pin.remote} (${pin.branch})`, text, flags: flagged("MIT") }
 }
 
+interface OcrSources {
+  package: string;
+  version: string;
+  cores: Record<string, string>;
+  source: string;
+  components: Array<{ name: string; version: string; license: string; source: string; preface?: string; files: Array<{ path: string; sha256: string }> }>;
+}
+
+/** The libraries linked into OCR's shipped WebAssembly and the bundled OCR language data. */
+function ocrDrafts(): Draft[] {
+  const directory = join(app, "licenses/tesseract-core")
+  const sources = json(join(directory, "sources.json")) as OcrSources
+  const engine = installed(app, sources.package)
+  if (engine === undefined || json(join(engine, "package.json")).version !== sources.version) throw new Error("The OCR engine does not match the recorded licences")
+  for (const [file, digest] of Object.entries(sources.cores)) {
+    if (sha256(join(engine, file)) !== digest) throw new Error(`The OCR core ${file} differs from its recorded binary`)
+  }
+  const drafts: Draft[] = sources.components.map((component) => {
+    const texts = component.files.map(({ path, sha256: digest }) => {
+      const file = join(directory, path)
+      if (sha256(file) !== digest) throw new Error(`The OCR licence ${path} differs from its recorded source`)
+      return read(file).trim()
+    })
+    return {
+      name: `${component.name} (linked into tesseract.js-core WebAssembly)`,
+      version: component.version, license: component.license, source: component.source,
+      text: [component.preface, ...texts].filter(Boolean).join("\n\n"), flags: flagged(component.license),
+    }
+  })
+  const language = "@tesseract.js-data/eng"
+  const english = installed(app, language)
+  if (english === undefined) throw new Error("The OCR language data is unavailable")
+  drafts.push({
+    name: "Tesseract English trained data (tessdata 4.0.0_best_int)",
+    version: json(join(english, "package.json")).version,
+    license: "Apache-2.0", source: "https://github.com/tesseract-ocr/tessdata_best", flags: flagged("Apache-2.0"),
+    text: read(join(app, "public/ocr/tessdata-LICENSE.txt")).trim(),
+  })
+  const sdk = installed(app, "@elizaos/plugin-files")
+  const pdf = sdk === undefined ? undefined : installed(sdk, "pdf-lib")
+  if (pdf === undefined) throw new Error("The SDK's searchable PDF engine is unavailable")
+  drafts.push(packageDraft(pdf, json(join(pdf, "package.json"))))
+  return drafts
+}
+
 function androidDrafts(): Draft[] {
   const record = json<ClasspathRecord>(join(app, "licenses/android-runtime-classpath.json"))
   const groups = new Map<string, { family: (typeof MAVEN_FAMILIES)[number] | undefined; coordinates: string[] }>()
@@ -256,7 +301,7 @@ export interface Inventory { readonly notices: readonly Notice[]; readonly fontC
 /** What Alpha ships, each with its licence: npm packages, eliza, the Android runtime classpath and the fonts. @throws {Error} */
 export function inventory(): Inventory {
   const fonts = fontDrafts()
-  const drafts = [...npmDrafts(), elizaDraft(), ...androidDrafts(), ...fonts.drafts]
+  const drafts = [...npmDrafts(), elizaDraft(), ...androidDrafts(), ...ocrDrafts(), ...fonts.drafts]
   const notices = drafts.map(finish).sort((a, b) => a.name.localeCompare(b.name, "en") || a.version.localeCompare(b.version, "en"))
   const openSourceFlags = [...new Set(drafts.flatMap((draft) => flagsOf(alternatives(draft.license).map((ids) => ids.map(familyOf)))))]
   return { notices, fontCheck: fonts.check, openSourceFlags }
