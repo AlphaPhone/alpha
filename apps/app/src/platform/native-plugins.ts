@@ -66,6 +66,7 @@ export const nativePlugins = {
     events: [],
   },
   AlphaCallState: { reach: "AnyNative", methods: ["callState"], events: ["callState"] },
+  AlphaCarrierSetup: { reach: "AnyNative", methods: ["read", "readEid", "openSettings"], events: ["foregroundEnded"] },
   AlphaCloudSignIn: {
     reach: "AnyNative",
     methods: [
@@ -216,7 +217,7 @@ export const nativePlugins = {
   ElizaCamera: {
     reach: "AnyNative",
     methods: [
-      "checkPermissions", "startPreview", "stopPreview", "setCaptureMode", "switchCamera", "capturePhoto", "startRecording",
+      "checkPermissions", "getDevices", "startPreview", "stopPreview", "setCaptureMode", "switchCamera", "capturePhoto", "startRecording",
       "stopRecording", "getRecordingState", "setSettings", "setZoom", "setFocusPoint",
     ],
     events: [],

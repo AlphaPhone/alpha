@@ -1,6 +1,6 @@
-// spec/telephony/callBar.md, "The bar says Calling until the call is active, and only an active call counts a clock from its connect time"; spec/telephony/callBar.md, "An ended call's bar holds its place for a moment and takes no taps"; spec/telephony/callBar.md, "Return and End act only on the call the bar shows, and End is asked once"
+// spec/telephony/callBar.md, "While a call rings, Android's incoming alert is the only call bar"; spec/telephony/callBar.md, "The bar says Calling until the call is active, and only an active call counts a clock from its connect time"; spec/telephony/callBar.md, "An ended call's bar holds its place for a moment and takes no taps"; spec/telephony/callBar.md, "Return and End act only on the call the bar shows, and End is asked once"
 import { PhoneOff } from "lucide-react";
-import { barPhase, barWords, shownCall, type CallBar as CallBarState } from "../../../gen/telephony__callBar.ts";
+import { barDrawn, barWords, shownCall, type CallBar as CallBarState } from "../../../gen/telephony__callBar.ts";
 import { Button } from "../components/ui/index.ts";
 import { cn, focusRing } from "../lib/cn.ts";
 import { barWordsText } from "./present.ts";
@@ -10,22 +10,21 @@ export interface CallBarViewProps {
   bar: CallBarState;
   /** Bring the call screen to the front. */
   onReturn?: (callId: string) => void;
-  /** End or decline the call. */
+  /** End the call. */
   onEnd?: (callId: string) => void;
 }
 
 /**
- * The ongoing-call bar: what the call screen says, Return to call, and End (Decline while it rings). An ended call's bar holds its place without controls.
+ * The ongoing-call bar: what the call screen says, Return to call, and End. It draws nothing while a call rings: Android's incoming alert answers or declines it. An ended call's bar holds its place without controls.
  * @model spec/telephony/callBar.md
  * @design design.md
  */
 export function CallBarView({ bar, onReturn, onEnd }: CallBarViewProps) {
-  const phase = barPhase(bar);
+  const phase = barDrawn(bar);
   if (phase === "NoBar") return null;
   const call = shownCall(bar.calls);
   const status = barWordsText(barWords(bar));
   const ended = phase === "EndedBar";
-  const ringing = call.phase === "Ringing";
   return (
     <div role="status" aria-live="polite" className="flex h-12 items-center gap-2 border-b border-border bg-card px-4 text-card-foreground">
       <span aria-hidden className={cn("size-2 shrink-0 rounded-full", ended ? "bg-muted-foreground" : "bg-ok")} />
@@ -42,7 +41,7 @@ export function CallBarView({ bar, onReturn, onEnd }: CallBarViewProps) {
         <Button
           variant="destructive"
           size="sm"
-          aria-label={ringing ? "Decline" : "End call"}
+          aria-label="End call"
           disabled={bar.ending === call.id}
           onClick={() => onEnd?.(call.id)}
         >

@@ -13,6 +13,8 @@ import {sha256 as workerHash} from '../scripts/sha256.ts';
 import {verifyNativeGoogleHost} from '../scripts/runtime-profile.ts';
 import {coreStateBuildRecord} from '../scripts/core-state-patch.ts';
 import {writeCoreStateFixture} from './fixtures/core-state-root.mjs';
+// Scripts that load scripts/apk.ts read upstream VibeLang (@elizaos/os/image), so they run as package.json runs them.
+const VIBE = ["--conditions=eliza-source", "--import", import.meta.resolve("vibelang/register")];
 
 const read = file => fs.readFileSync(file, 'utf8');
 
@@ -119,7 +121,7 @@ test('preflight rejects an unpinned checkout and android:build stops before sync
     f.write('scripts/' + file, read('scripts/' + file));
   // build-android.ts reads the release-signing environment names from the host descriptor.
   f.write('android/consumer-host.json', read('android/consumer-host.json'));
-  const result = spawnSync(process.execPath, ['scripts/build-android.ts'], {cwd: f.root, encoding: 'utf8'});
+  const result = spawnSync(process.execPath, [...VIBE, 'scripts/build-android.ts'], {cwd: f.root, encoding: 'utf8'});
   assert.equal(result.status, 2, result.stderr);
   assert.match(result.stderr, /Android build prerequisites are missing/);
   assert.match(result.stderr, /git submodule update --init vendor\/eliza/);

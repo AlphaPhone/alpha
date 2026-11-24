@@ -243,14 +243,17 @@ pure val targetValues = Set(NoTarget).union(Set(NumberTarget({ matches: true }))
   .union(Set(ContactTarget({ nameWritten: true }))).union(Set(ContactTarget({ nameWritten: false })))
 ```
 
-### The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote
+### The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote or my own ask for its tab list
 
 A photo runs directly at most once per message and only on a visible,
 uncovered viewfinder; the request is at most 512 characters with no
 question mark in its first 80. An ungrounded Browser proposal of the
 current message gets the notice "I only open a site or search you ask for
 yourself" with an example, and no card; a grounded one that is not a
-direct command keeps its review card. A Browser open of a link of the
+direct command keeps its review card. Showing Browser's own list of open
+tabs uses Browser's whole-message tab list request ([Browser session](../browser/session.md)).
+"Show my open tabs" and "What tabs do I have open?" open the list without a
+card. Binding a tab-list proposal to unrelated words does not authorize it to open. A Browser open of a link of the
 page my message carried ([Turn context](./context.md)), exactly as the page
 gave it, also keeps its review card and never opens on its own (#1444): the
 page's words are not the owner's, so such an open counts as not typed even
@@ -263,10 +266,16 @@ pure val photoPrefixLimit = 80
 pure def keypadDirect(number: bool, typed: bool): bool = not(number) or typed
 pure def photoDirect(ownRequest: bool, len: int, alreadyTaken: bool): bool = ownRequest and len >= 1 and len <= photoRequestLimit and not(alreadyTaken)
 pure def browserDirect(grounded: bool, command: bool, ambiguousTab: bool): bool = grounded and command and not(ambiguousTab)
+pure def browserCommanded(typedCommand: bool, tabList: bool, askedForTabs: bool): bool =
+  if (tabList) askedForTabs else typedCommand
 pure def browserNoticeInstead(grounded: bool): bool = not(grounded)
 pure def lawAnUntypedNumberNeverDials(typed: bool): bool = typed or not(keypadDirect(true, typed))
 pure def lawOnePhotoPerMessage(own: bool, len: int): bool = not(photoDirect(own, len, true))
 pure def lawAnAmbiguousTabNeedsTheOwner(grounded: bool, command: bool): bool = not(browserDirect(grounded, command, true))
+pure def lawATabListNeedsItsOwnRequest(typedCommand: bool, askedForTabs: bool): bool =
+  browserCommanded(typedCommand, true, askedForTabs) == askedForTabs
+pure def lawOtherwiseTheWordsCommand(typedCommand: bool, askedForTabs: bool): bool =
+  browserCommanded(typedCommand, false, askedForTabs) == typedCommand
 pure def browserCarded(grounded: bool, pageLink: bool): bool = grounded or pageLink
 pure def ownerTyped(grounded: bool, pageLink: bool): bool = grounded and not(pageLink)
 pure def lawAPageLinkIsNeverOwnerTyped(grounded: bool): bool = not(ownerTyped(grounded, true))

@@ -135,6 +135,11 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
       return cloud ? { where: "CloudHosted" as const, provider: "Eliza Cloud" } : { where: "OwnKeyHosted" as const, provider: "Your provider" }
     },
     effect emergency() { return try calls.emergencyLive() },
+    effect allowanceResetsAt() {
+      const at = (try entitlement.summary()).view?.allowance?.resetsAt
+      const now = try Clock.currentTimeMillis
+      return typeof at === "number" && at > now ? at : undefined
+    },
     effect openView(app: string, route?: string) {
       const known = appOfKey(`alpha:${app}`)
       if (known === undefined) return false
@@ -164,6 +169,7 @@ export function composeExecutors(families: readonly OperationPorts[]): Operation
     itemize: (operation, proposalId) => owner(operation)?.itemize?.(operation, proposalId),
     handoff: (operation) => owner(operation)?.handoff?.(operation) ?? true,
     present: (operation, call) => owner(operation)?.present?.(operation, call),
+    tabList: (operation) => owner(operation)?.tabList?.(operation) ?? false,
   }
 }
 

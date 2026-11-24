@@ -243,7 +243,7 @@ export const browserScreen: ScreenFacts = {
 }
 
 /** The shell's side of the assistant, signed in on Home, and Inbox delivering email cards; toasts and emails are collected; `compared` when the peer was compared for this turn and takes the optional fields, such as the Browser page. */
-export function fakeHost(toasts: string[], screen: ScreenFacts = homeScreen, emails: unknown[] = [], compared = false) {
+export function fakeHost(toasts: string[], screen: ScreenFacts = homeScreen, emails: unknown[] = [], compared = false, resetsAt?: number) {
   const inbox = Layer.succeed(AssistantEmail, {
     send: (email: ReviewedEmail) => sync(() => { emails.push(email); return "Delivered" as const }),
     address: () => succeed("owner@example.com"),
@@ -256,6 +256,7 @@ export function fakeHost(toasts: string[], screen: ScreenFacts = homeScreen, ema
     emergency: () => succeed(false),
     openView: () => succeed(true),
     toast: (text: string) => sync(() => { toasts.push(text) }),
+    allowanceResetsAt: () => succeed(resetsAt),
   }))
 }
 

@@ -106,4 +106,11 @@ export function androidPorts(identity){
  'android/content/pm/ServiceInfo.java':`package android.content.pm;public class ServiceInfo {public boolean enabled=true;public ApplicationInfo applicationInfo=new ApplicationInfo();}`,
  'android/view/inputmethod/InputMethodInfo.java':`package android.view.inputmethod;import android.content.pm.*;public class InputMethodInfo {public String getPackageName(){return "com.android.inputmethod.latin";}public String getServiceName(){return "com.android.inputmethod.latin.LatinIME";}public String getId(){return "com.android.inputmethod.latin/.LatinIME";}public ServiceInfo getServiceInfo(){return new ServiceInfo();}}`,
  'android/view/inputmethod/InputMethodManager.java':`package android.view.inputmethod;import java.util.*;public class InputMethodManager {public boolean available=true;public List<InputMethodInfo> getInputMethodList(){return available?List.of(new InputMethodInfo()):List.of();}}`,
+ 'android/content/om/OverlayInfo.java':`package android.content.om;public class OverlayInfo {public String category,targetPackageName;public boolean enabled;public boolean isEnabled(){return enabled;}}`,
+ 'android/content/om/OverlayManager.java':`package android.content.om;import android.os.*;import java.util.*;public class OverlayManager {public final Map<String,OverlayInfo> overlays=new HashMap<>();
+ public List<OverlayInfo> getOverlayInfosForTarget(String target,UserHandle user){List<OverlayInfo> found=new ArrayList<>();for(OverlayInfo info:overlays.values())if(target.equals(info.targetPackageName))found.add(info);return found;}
+ public OverlayInfo getOverlayInfo(String name,UserHandle user){return overlays.get(name);}
+ public void setEnabledExclusiveInCategory(String name,UserHandle user){OverlayInfo selected=overlays.get(name);if(selected==null)throw new IllegalArgumentException(name);for(OverlayInfo info:overlays.values())if(selected.category.equals(info.category))info.enabled=info==selected;}
+ }`,
+ 'android/util/Log.java':`package android.util;public final class Log {public static int w(String tag,String message){return 0;}public static int w(String tag,String message,Throwable failure){return 0;}}`,
 };}

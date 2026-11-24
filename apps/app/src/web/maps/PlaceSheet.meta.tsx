@@ -1,6 +1,6 @@
 import { expect, fn, userEvent, within } from "storybook/test";
 import type { ComponentMeta } from "vibestack/stories";
-import { shownGooglePlace, shownPlace } from "./fixtures.ts";
+import { ferryBuilding, shownGooglePlace, shownPlace } from "./fixtures.ts";
 import type { PlaceSheetProps } from "./PlaceSheet.tsx";
 
 const handlers = {
@@ -11,6 +11,7 @@ export const meta: ComponentMeta<PlaceSheetProps> = {
   args: { shown: shownPlace, details: "Ready", restricted: false, saved: false, canDirections: true, canCall: true, ...handlers },
   examples: {
     Google: { shown: shownGooglePlace, restricted: true },
+    Category: { shown: { ...shownPlace, label: "Walgreens", place: { ...ferryBuilding, name: "Walgreens", categories: ["Pharmacy", "Shop"] } } },
     LoadingDetails: { details: "Loading", shown: { ...shownPlace, place: undefined } },
     Saved: { saved: true, shown: { ...shownPlace, savedId: 1 } },
     LauncherBuild: { canCall: false },
@@ -28,7 +29,13 @@ export const meta: ComponentMeta<PlaceSheetProps> = {
       await expect(canvas.queryByRole("button", { name: "Copy number" })).toBeNull();
       await expect(canvas.queryByRole("button", { name: "Save" })).toBeNull();
     },
+    Category: async ({ canvasElement }) => {
+      const canvas = within(canvasElement);
+      await expect(canvas.getByText("Pharmacy")).toBeInTheDocument();
+      await expect(canvas.queryByText("Shop")).toBeNull();
+    },
     Default: async ({ canvasElement, args }) => {
+      await expect(canvasElement.querySelector("header p")).toBeNull();
       await userEvent.click(within(canvasElement).getByRole("button", { name: /Directions/ }));
       await expect(args.onDirections).toHaveBeenCalled();
     },

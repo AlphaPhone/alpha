@@ -137,7 +137,8 @@ pure def sometimesAskingForHome(f: Facts): bool = f.roleAsking
 
 A repeated tap while Android is opening a page is ignored. A page Android could not open says it is
 unavailable. Alpha's App info, Android's all-files access page and its photo library dialog are
-handoffs too, and Settings reads the device again after the last two answer.
+handoffs too, and Settings reads the device again after the last two answer. Carrier & SIM setup
+also hands off to Android's SIMs and access point names (APN) pages.
 
 ```quint
 pure def canBeginHandoff(f: Facts, page: SettingsPage): bool = f.handoff != HandoffOpening
@@ -153,7 +154,7 @@ pure def sometimesABroaderPage(f: Facts): bool = f.handoff == HandoffOpened({ sp
 ```quint
 type SettingsPage = PageWifi | PageBluetooth | PageMobile | PageAirplane | PageLocation | PageDisplay | PageSound
   | PageBattery | PageAbout | PageDeveloper | PageNotifications | PagePrivacy | PageDefaultApps | PageDnd | PageHome
-  | PageAppInfo | PageFilesAccess | PagePhotoAccess
+  | PageAppInfo | PageFilesAccess | PagePhotoAccess | PageSim | PageApn
 type BroaderNotice = NoBroader | NetworkPage | PriorityPage | RelatedPage
 pure def broaderNotice(page: SettingsPage, specific: bool): BroaderNotice =
   if (specific) NoBroader else if (page == PageAirplane or page == PageMobile) NetworkPage

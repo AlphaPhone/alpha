@@ -37,7 +37,7 @@ export schema StorageAccess { access?: "granted" | "denied" }
 /** AlphaDevice.setTextScale. */
 export schema TextScale { textScalePercent: number }
 
-/** ElizaSystem.openSettingsPage, and AlphaDevice.openSettings for Android's Settings home. */
+/** ElizaSystem.openSettingsPage, AlphaDevice.openSettings for Android's Settings home, and AlphaCarrierSetup.openSettings for its SIMs and APN pages. */
 export schema PageOpened { status: "opened"; specific?: boolean }
 
 /** ElizaSystem.openNotificationShade. */
