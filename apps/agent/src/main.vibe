@@ -1,0 +1,175 @@
+// spec/agent/index.md, "Story: Build the pack only from the pinned eliza"; spec/agent/index.md, "Story: Run Alpha's agent on the phone"
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import { buildAgentBundle, readBundleManifest } from "@elizaos/agent/bundle"
+import { decodeLaunchDocument } from "@elizaos/agent/launch"
+import { defineRoutes } from "@elizaos/agent/routes"
+import { deployment } from "@repo/deployment"
+import { pinnedCheckout } from "@repo/eliza-harness/pinned"
+import {
+  type Environment, type Manifest, characterAdmitted, cloudModel, localEmbeddings, packAdmitted, packedFor, persistMemory, policyAdmitted,
+  refusedActions, routeListAdmitted,
+} from "../gen/agent.effect.vibe"
+
+module node {
+  /** The words after the script on the command line. @throws {never} */
+  export function words(): string[] {
+    return process.argv.slice(2)
+  }
+
+  /** `apps/agent`: the command runs as `node dist/src/main.js`. @throws {never} */
+  export function root(): string {
+    return (process.argv[1] ?? "").replace(/\/dist\/src\/main\.js$/, "")
+  }
+}
+import { root, words } from node
+
+/** What makes the pack unfit to ship, in words a maker can act on. */
+export error Refused { reason: string }
+
+const environments: Readonly<Record<string, Environment>> = { local: "Local", staging: "Staging", production: "Production" }
+
+schema RouteLine { method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; path: string; stream?: boolean }
+schema Character { name: string; system: string; bio: string[] }
+schema Policy { schema: 1; actions: { allowed: string[]; refused: Record<string, string> }; plugins: { load: string[] } }
+schema Service { service: string; notification: { channel: string; title: string; text: string } }
+schema Model { backend: "cloud"; cloudBaseUrl: string; smallModel: string; largeModel: string; imageModel: string }
+schema Host {
+  schema: 1; service: string; notification: { channel: string; title: string; text: string }; routes: RouteLine[]; model: Model
+  embeddings: "none" | "local"; persistMemory: boolean; callerRole: "owner" | "user"
+}
+
+/** Where the pack is written: the bundle as `buildAgentBundle` publishes it, and the three files eliza's agent service reads beside it. */
+function places() {
+  const app = root()
+  return { app, data: `${app}/host`, bundle: `${app}/dist/bundle`, host: `${app}/dist/host` }
+}
+
+effect function text(file: string) {
+  const fs = try FileSystem.FileSystem
+  return fs.readFileString(file) catch effect () => { throw new Refused({ reason: `${file} cannot be read` }) }
+}
+
+effect function decoded<A>(file: string, schema: Schema.Decoder<A>) {
+  const read = try text(file)
+  return Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(read) catch effect (cause) => {
+    throw new Refused({ reason: `${file} is not what it should be: ${String(cause)}` })
+  }
+}
+
+/** The route list, one JSON route per line, as eliza's route gate and the host file take it. */
+effect function routeLines(file: string) {
+  const read = try text(file)
+  const routes: RouteLine[] = []
+  for (const line of read.split("\n").filter((each) => each.trim() !== "")) {
+    routes.push(Schema.decodeUnknownEffect(Schema.fromJsonString(RouteLine))(line) catch effect () => { throw new Refused({ reason: `${file}: ${line} is not a route` }) })
+  }
+  return routes
+}
+
+const spelled = { GET: "Get", POST: "Post", PUT: "Put", PATCH: "Patch", DELETE: "Delete" } as const
+
+/** Refuse a route list unless it is the page's, and eliza's own gate admits each of its routes. */
+effect function admitRoutes(routes: readonly RouteLine[]) {
+  if (!routeListAdmitted(routes.map((route) => ({ method: spelled[route.method], path: route.path, stream: route.stream === true })))) {
+    throw new Refused({ reason: "the route list is not exactly the routes the page's platform services call (spec/agent/index.md)" })
+  }
+  const gate = defineRoutes(routes)
+  for (const route of routes) {
+    const target = route.path.replace(/\{[a-zA-Z]+\}/g, "x")
+    const admission = gate.admit({ method: route.method, target, streamed: route.stream === true, body: undefined })
+    if (admission.tag !== "Admitted") throw new Refused({ reason: `eliza's route gate does not admit ${route.method} ${route.path}` })
+  }
+}
+
+/** The manifest of the bundle written at `bundle`, read back by eliza for the bundle's own bytes, if the pinned eliza and Alpha's rules admit it. */
+effect function admittedManifest(bundle: string, pin: string) {
+  const manifest = try tryPromise({ try: () => readBundleManifest(bundle), catch: () => new Refused({ reason: `${bundle} holds no manifest readable for its own bytes` }) })
+  const facts: Manifest = {
+    sourceCommit: manifest.sourceCommit, node: manifest.node, localInference: manifest.localInference,
+    plugins: [...manifest.plugins], actions: manifest.actions.map(({ name }) => name),
+  }
+  if (!packAdmitted(facts, pin)) {
+    throw new Refused({ reason: `the bundle is not the pinned eliza's (${pin}) for Node 26 with no local inference, no plugin and every allowed action: ${JSON.stringify(facts)}` })
+  }
+  return manifest
+}
+
+/** The host files at `host`, if they say what the spec decides and eliza's agent reads the launch the phone writes from them. */
+effect function admittedHost(host: string, registered: readonly string[]) {
+  const character = try decoded(`${host}/character.json`, Character)
+  if (!characterAdmitted(character.name, character.system.trim())) throw new Refused({ reason: "the character is not Alpha with a system prompt" })
+  const policy = try decoded(`${host}/policy.json`, Policy)
+  if (!policyAdmitted(policy.actions.allowed, Object.keys(policy.actions.refused), policy.plugins.load, [...registered])) {
+    throw new Refused({ reason: `the policy must allow exactly what Alpha needs and refuse ${refusedActions([...registered]).join(", ")}, loading no module` })
+  }
+  const written = try decoded(`${host}/host.json`, Host)
+  try admitRoutes(written.routes)
+  const document = JSON.stringify({
+    schema: 1, character, policy: { actions: { allowed: policy.actions.allowed }, plugins: policy.plugins },
+    model: written.model, embeddings: written.embeddings, persistMemory: written.persistMemory, callerRole: written.callerRole,
+    account: { userId: "the owner signed in on the phone", organizationId: "their organization" },
+  })
+  decodeLaunchDocument(document) catch effect () => { throw new Refused({ reason: "eliza's agent would refuse the launch the phone writes from these files" }) }
+  return written
+}
+
+/** The pinned eliza checkout, built. */
+effect function pinned() {
+  return pinnedCheckout() catch effect () => { throw new Refused({ reason: "the pinned eliza is not built: run pnpm eliza" }) }
+}
+
+/** Build eliza's agent bundle at the pin for `name`'s cloud, and write the host files beside it. */
+effect function build(name: string) {
+  const environment = environments[name]
+  if (environment === undefined) throw new Refused({ reason: `no environment ${name}: local, staging or production` })
+  if (!packedFor(environment)) throw new Refused({ reason: "the local cloud has no fixed origin: a journey launches the pack against its own" })
+  const where = deployment(name) catch effect () => { throw new Refused({ reason: `${name} is not a row of packages/deployment/deployments.json` }) }
+  if (where.kind !== "hosted") throw new Refused({ reason: `${name} has no deployed cloud` })
+  const pin = try pinned()
+  const at = places()
+  try tryPromise({
+    try: () => buildAgentBundle({ plugins: [], outDir: at.bundle, sourceCommit: pin.commit, sourceRoot: pin.dir }),
+    catch: (cause) => new Refused({ reason: `eliza refused to build the bundle: ${String(cause)}` }),
+  })
+  const fs = try FileSystem.FileSystem
+  try fs.makeDirectory(at.host, { recursive: true })
+  for (const file of ["character.json", "policy.json"]) try fs.copyFile(`${at.data}/${file}`, `${at.host}/${file}`)
+  const service = try decoded(`${at.data}/service.json`, Service)
+  const host: Host = {
+    schema: 1, service: service.service, notification: service.notification, routes: try routeLines(`${at.data}/routes.jsonl`),
+    model: { backend: "cloud", cloudBaseUrl: where.cloud, smallModel: cloudModel, largeModel: cloudModel, imageModel: "" },
+    embeddings: localEmbeddings ? "local" : "none", persistMemory, callerRole: "owner",
+  }
+  try fs.writeFileString(`${at.host}/host.json`, `${JSON.stringify(host, null, 2)}\n`)
+  try check()
+}
+
+/** Read the pack back, refuse it where a rule is broken, and print what it is. */
+effect function check() {
+  const pin = try pinned()
+  const at = places()
+  const manifest = try admittedManifest(at.bundle, pin.commit)
+  const host = try admittedHost(at.host, manifest.actions.map(({ name }) => name))
+  const fs = try FileSystem.FileSystem
+  const files = try fs.readDirectory(at.bundle)
+  let bytes = 0
+  for (const file of files) bytes += Number((try fs.stat(`${at.bundle}/${file}`)).size)
+  try Console.log([
+    `bundle ${at.bundle}: ${files.length} files, ${bytes} bytes, agent.mjs sha256 ${manifest.bundleSha256}`,
+    `sourceCommit ${manifest.sourceCommit}, node ${manifest.node}, schemaVersion ${manifest.schemaVersion}, localInference ${manifest.localInference}`,
+    `plugins [${manifest.plugins.join(", ")}], packages ${manifest.packages.length}, actions ${manifest.actions.map(({ name }) => name).join(", ")}`,
+    `model ${JSON.stringify(host.model)}`,
+    "routes admitted:",
+    ...host.routes.map((route) => `  ${route.method} ${route.path}${route.stream === true ? " (stream)" : ""}`),
+  ].join("\n"))
+}
+
+effect function main() {
+  const [command, flag, value, ...rest] = words()
+  if (command === "build" && flag === "--env" && value !== undefined && rest.length === 0) return try build(value)
+  if (command === "check" && flag === undefined) return try check()
+  throw new Refused({ reason: "usage: main.js build --env <staging|production> | main.js check" })
+}
+
+NodeRuntime.runMain(Effect.provide(main(), NodeServices.layer))
