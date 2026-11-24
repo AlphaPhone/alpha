@@ -28,6 +28,12 @@ export interface ReadingBinding {
   readonly expiresAt: number
 }
 
+/** What a Cloud warm-up may go under: Alpha in front and a network Android has not confirmed down. */
+export interface WarmFacts {
+  readonly inFront: boolean
+  readonly online: boolean
+}
+
 /** How a passage is spoken: queued behind the one playing, and told when its first audio starts. */
 export interface SpeakOptions {
   readonly queue?: boolean
@@ -62,8 +68,8 @@ export service Speech {
   entry(recorderOpen: boolean): VoiceEntry!!
   /** Prime the phone's output after a sent turn; advisory. */
   warmDevice(): void!!
-  /** Warm Cloud speech for `connection`, at most once a minute. */
-  warmCloud(connection: number): void!!
+  /** Warm Cloud speech for `connection`, at most once a minute and only as `facts` allow; the request runs on its own fiber, so the caller never waits on it, and its failure is ignored. */
+  warmCloud(connection: number, facts: WarmFacts): void!!
   /** Mute or unmute only the speech output; false when the phone cannot. */
   setMuted(muted: boolean): boolean!!
   /** Speak the reply channel through `stream` while a Cloud stream conversation holds it, and on the route's own synthesis once it is unbound. */
@@ -74,6 +80,9 @@ const PASSAGE_LIMIT = "20 minutes"
 const BUSY_WAIT = "100 millis"
 const PLAYBACK_EVENTS = ["playbackEnded", "playbackFailed", "playbackStopped"] as const
 const STREAM_CLEANUP = "2500 millis"
+const WARM_LIMIT = "10 seconds"
+/** The Cloud speech relay; its prewarm opens the phone's connection to Cloud speech ahead of Talk. */
+const RELAY = "AlphaCloudSpeechStream"
 const CLEANUP_UNCONFIRMED = "speech-cleanup-unconfirmed"
 const decodePrepared = Schema.decodeUnknownOption(PreparedSpeech)
 const decodePlayback = Schema.decodeUnknownOption(PlaybackEvent)
@@ -327,10 +336,16 @@ export const speechService = Layer.effect(Speech, effect {
     },
     effect entry(recorderOpen: boolean) { return voiceEntry(try held.get(), recorderOpen) },
     effect warmDevice() { native.invoke("AlphaVoiceCloud", "warmSpeechOutput", {}) catch () => undefined },
-    effect warmCloud(connection: number) {
+    effect warmCloud(connection: number, facts: WarmFacts) {
       const now = try Clock.currentTimeMillis
-      const sent = held.send({ type: "warmCloud", connection, now }) catch () => undefined
-      if (sent !== undefined) resident.json("POST", "/api/cloud/warm", {}) catch () => undefined
+      const sent = held.send({ type: "warmCloud", connection, now, inFront: facts.inFront, online: facts.online }) catch () => undefined
+      if (sent === undefined) return
+      const account = try routes.account()
+      if (account.kind === "cloud") fork.detached effect {
+        const relay = native.available(RELAY) catch () => false
+        if (relay) timeout(native.invoke(RELAY, "prewarmCloudSpeech", { environment: account.environment }), WARM_LIMIT) catch () => undefined
+      }
+      fork.detached effect { timeout(resident.json("POST", "/api/cloud/warm", {}), WARM_LIMIT) catch () => undefined }
     },
     effect setMuted(muted: boolean) {
       const through = stream

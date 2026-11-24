@@ -1,5 +1,5 @@
 // spec/maps/connection.md, "Every Maps request goes through the Cloud client, with its own request key, and a tile comes back as its image"; spec/maps/connection.md, "A coverage read starts only for a signed-in account, and a signed-out read sends nothing"; spec/maps/connection.md, "Only the newest read for the bound account installs the provider"; spec/maps/connection.md, "Changing account retires the provider; rebuilding the client for the same account keeps it"; spec/maps/connection.md, "A request may start only on the installed provider, for its account and generation, outside a pause"; spec/maps/connection.md, "A rate-limit refusal of the current generation pauses every data request until its wait ends"
-import { type Coverage, type CoverageReply, type MapsConnection, Machine as Connection, mayRequest, mayReturn, tileAccepted } from "../../gen/maps__connection.effect.vibe"
+import { type Coverage, type CoverageReply, type MapsConnection, Machine as Connection, canCoverageSettles, coverageSettles, mayRequest, mayReturn, tileAccepted } from "../../gen/maps__connection.effect.vibe"
 import type { Offer, ProviderKind, Travel } from "../../gen/maps__vocabulary.ts"
 import { noOffer } from "../../gen/maps__vocabulary.effect.vibe"
 import { CloudError, type CloudClient } from "@elizaos/cloud/client"
@@ -204,6 +204,8 @@ export const providerLayer = Layer.effect(MapsProvider, effect {
         connection.send({ type: "coverageSettles", attempt, reply, coverage: { kind: "NoProvider", offer: noOffer } }) catch () => undefined
         try content.update((c) => ({ ...c, coverage: undefined, message }))
       }
+      // A read retired before it went out, by an account change or a newer read, is never sent.
+      if (!canCoverageSettles(try connection.get(), attempt)) return
       const raw = cloud.json("GET", "/api/v1/maps/capabilities") catch effect (error) => {
         const reason = cloudFailure(error, try Clock.currentTimeMillis)
         try refused(replyOf(reason), reason.message)
@@ -218,8 +220,12 @@ export const providerLayer = Layer.effect(MapsProvider, effect {
       if (!read.available) return try refused("CoverageNotOffered", "Cloud Maps is not available yet.")
       const info = coverageInfo(read)
       const coverage: Coverage = { kind: info.kind, offer: info.offer }
+      // The provider's coverage is in place before the connection says Installed, so a request admitted on Installed finds it.
+      const current = try connection.get()
+      const installs = canCoverageSettles(current, attempt) && coverageSettles(current, attempt, "ValidCoverage", coverage).phase === "Installed"
+      if (installs) try content.update((c) => ({ ...c, coverage: info, message: "" }))
       const accepted = connection.send({ type: "coverageSettles", attempt, reply: "ValidCoverage", coverage }) catch () => undefined
-      if (accepted?.state.phase === "Installed") try content.update((c) => ({ ...c, coverage: info, message: "" }))
+      if (installs && accepted?.state.phase !== "Installed") try content.update((c) => c.coverage === info ? { ...c, coverage: undefined } : c)
     },
   }
 })

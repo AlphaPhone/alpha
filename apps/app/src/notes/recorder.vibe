@@ -134,6 +134,17 @@ const make = effect {
     for (const segment of segments) if (segment.text !== undefined && !(try Ref.get(texts)).has(segment.segmentId)) {
       try Ref.update(texts, (known) => new Map([...known, [segment.segmentId, segment.text ?? ""]]))
     }
+    // spec/notes/recordingJournal.md: the text the native journal holds for its finished segments, in segment order, is journaled
+    // with them; text the journal could not take yet is journaled the next time the recorder learns the recording.
+    let held = 0
+    while (held < segments.length && segments[held]?.text !== undefined) held += 1
+    let journaled = (try journal.get()).texts
+    while (journaled < held) {
+      try record({ type: "textJournaled" })
+      const now = (try journal.get()).texts
+      if (now === journaled) break
+      journaled = now
+    }
   }
 
   effect function absorb(status: RecordingStatus): void!! {
@@ -259,6 +270,16 @@ const make = effect {
     if (stopped === undefined || stopped.recordingId !== id || stopped.state !== "stopped") { try send({ type: "voiceSaveFailed" }); return false }
     if (stopped.canonicalSavePending === true && !(try machine.get()).savePending) try send({ type: "claim" })
     try learn(stopped)
+    try send({ type: "progress", segments: (stopped.segments ?? []).length, longEnough: (stopped.durationMs ?? 0) >= 1000 })
+    if ((stopped.segments ?? []).length === 0) {
+      // spec/notes/recorder.md: a recording with no finished segment once stopped has no audio: nothing is saved and it is let go quietly.
+      if ((try send({ type: "noAudio" })) === undefined) { try send({ type: "voiceSaveFailed" }); return false }
+      try record({ type: "discardPending", isOwner: true })
+      try record({ type: "retirePending" })
+      voice("discardNoteRecording", { recordingId: id }) catch () => undefined
+      try close()
+      return false
+    }
     try record({ type: "stopPending" })
     const words = try transcript(stopped.segments ?? [])
     const durationMs = Math.round(stopped.durationMs ?? (try SubscriptionRef.get(display)).durationMs)

@@ -5962,9 +5962,9 @@ SOFTWARE.
 
 ==============================================================================
 elizaOS
-Version: 0.1.0 (e11409812b4989a34763d31ae962ac4b7c314faa)
+Version: 0.1.0 (7df94a1f00f71bb144f63c1e8dd706431b6f105c)
 License: MIT
-Source: https://github.com/elizaOS/eliza/tree/e11409812b4989a34763d31ae962ac4b7c314faa
+Source: https://github.com/elizaOS/eliza/tree/7df94a1f00f71bb144f63c1e8dd706431b6f105c
 
 MIT License
 

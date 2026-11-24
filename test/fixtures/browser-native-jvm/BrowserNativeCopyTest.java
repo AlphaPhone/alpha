@@ -3,6 +3,7 @@ import ai.alphacompute.alphaphone.browser.HostRect;
 import ai.alphacompute.alphaphone.browser.LinkHandoff;
 import ai.alphacompute.alphaphone.browser.LinkHandoff.Action;
 import ai.alphacompute.alphaphone.browser.TabLayer;
+import ai.alphacompute.alphaphone.browser.TabNavigation;
 import java.util.List;
 import java.util.Map;
 
@@ -93,7 +94,31 @@ public final class BrowserNativeCopyTest {
     check(!AlphaBrowserCopy.signInMessage("a.example", "", AlphaBrowserCopy.Manager.OFF, "https://a.example", false).contains("password manager"),
         "no manager is named when Autofill is off");
 
+    // Which plain-HTTP addresses go to HTTPS (AlphaBrowserPlugin.load and its link and redirect check).
+    equal(TabNavigation.httpsUpgrade("http://example.test/a?b=1#c", false, false), "https://example.test/a?b=1#c", "a refused HTTP address goes to HTTPS unchanged otherwise");
+    equal(TabNavigation.httpsUpgrade("HTTP://Example.test/", false, false), "https://Example.test/", "the scheme is matched in any case");
+    equal(TabNavigation.httpsUpgrade("http://example.test/", true, false), null, "a host Android allows in the clear stays HTTP");
+    equal(TabNavigation.httpsUpgrade("https://example.test/", false, false), null, "HTTPS is left alone");
+    equal(TabNavigation.httpsUpgrade("http://example.test:8080/", false, false), null, "an explicit port stays as written");
+    equal(TabNavigation.httpsUpgrade("http://user@example.test/", false, false), null, "an address with credentials is never rewritten");
+    equal(TabNavigation.httpsUpgrade("http://localhost/", false, true), null, "the device's own address stays HTTP when loopback is allowed");
+    equal(TabNavigation.httpsUpgrade("http://127.0.0.1/", false, true), null, "the loopback IP stays HTTP when loopback is allowed");
+    equal(TabNavigation.httpsUpgrade("http://localhost/", false, false), "https://localhost/", "without loopback the device's address is upgraded too");
+    equal(TabNavigation.httpsUpgrade("mailto:a@example.test", false, false), null, "another scheme is not an HTTP address");
+    equal(TabNavigation.httpsUpgrade("not a url", false, false), null, "an unparsable address is left alone");
+    equal(TabNavigation.httpHost("http://Example.TEST/x"), "example.test", "the HTTP host, lower case");
+    equal(TabNavigation.httpHost("https://example.test/"), null, "an HTTPS address has no HTTP host");
+
+    // When a history update settles a load the host started inside the shown document.
+    check(TabNavigation.settlesInDocument(true, false, "https://a.test/x", true), "Back across pushState settles in the shown document");
+    check(!TabNavigation.settlesInDocument(true, true, "https://a.test/x", true), "a new document started: its first paint settles it");
+    check(!TabNavigation.settlesInDocument(false, false, "https://a.test/x", true), "nothing is waiting");
+    check(!TabNavigation.settlesInDocument(true, false, "", true), "nothing was committed yet");
+    check(!TabNavigation.settlesInDocument(true, false, "https://a.test/x", false), "another origin is never adopted without a page start");
+
     // What the tab frame says.
+    check(AlphaBrowserCopy.LEFT_WEB.endsWith("Enter an address to keep browsing."), "a load that went to an app asks for an address");
+    check(AlphaBrowserCopy.RESUBMIT_MESSAGE.contains("again") && AlphaBrowserCopy.RESUBMIT.equals("Send again"), "reloading a form result asks before sending it again");
     equal(AlphaBrowserCopy.pageError("Browser renderer stopped. Close this tab and open a new one."),
         "This tab stopped working. Close it and open a new one.", "renderer loss");
     equal(AlphaBrowserCopy.pageError("A new upstream failure"), AlphaBrowserCopy.PAGE_ERROR_FALLBACK, "unknown reasons read as not loaded");

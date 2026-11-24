@@ -26,9 +26,24 @@ jobs:
         with:
           node-version: "26.13.0"
       - name: Install pnpm
-        run: npm install --global pnpm@10.24.0
+        id: pnpm
+        run: |
+          npm install --global pnpm@10.24.0
+          echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Cache pnpm store
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
       - run: pnpm install --frozen-lockfile
       # The proof stage runs Dafny; the explore stage drives Bombadil in Chromium.
+      - name: Cache Dafny archive
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ${{ runner.temp }}/alpha-dafny-4.11.0.zip
+          key: dafny-4.11.0-a46a9ff7cdd720f7955854c78e95df13f4cfe6b80691b05f8654fe19e8267179
       - name: Install Dafny
         run: bash scripts/ci/prepare-dafny.sh
       - run: bash scripts/ci/install-playwright-browser.sh chromium

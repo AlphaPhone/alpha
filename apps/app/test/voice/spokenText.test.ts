@@ -1,6 +1,6 @@
-// spec/voice/speech.md, "Story: Hear dates and times the way a person says them"; spec/voice/speech.md, "A spoken reply refuses only a likely password, key or card; everything else it cannot say becomes a pause"
+// spec/voice/speech.md, "Story: Hear dates and times the way a person says them"; spec/voice/speech.md, "A spoken reply refuses only a likely password, key or card; everything else it cannot say becomes a pause"; spec/voice/conversation.md, "Saying the send phrase sends the bound card once, as its Send tap does, only as the next thing said and only while it is still the one live text shown in that conversation"
 import { expect, it } from "vitest";
-import { planReading, planReply } from "../../src/voice/spoken-text.ts";
+import { planReading, planReply, sendPhraseOf } from "../../src/voice/spoken-text.ts";
 
 const said = (text: string) => {
   const plan = planReply(text);
@@ -73,4 +73,14 @@ it("phone numbers, ISO dates, offsets, money and a lower-case month word keep ho
 // spec/voice/speech.md, "A spoken reply refuses only a likely password, key or card; everything else it cannot say becomes a pause"
 it("a likely secret is still refused before any date or time is said", () => {
   expect({ reply: said("Your wifi password is: 12:30 pm"), reading: read("The secret: Mon, Nov 23") }).toEqual({ reply: "secret", reading: "secret" });
+});
+
+// spec/voice/conversation.md, "Saying the send phrase sends the bound card once, as its Send tap does, only as the next thing said and only while it is still the one live text shown in that conversation"
+it("only the whole send phrase asks to send a text, and only one naming the text or message names it", () => {
+  const phrases = ["Send this text", "send this text.", "Okay, send this message!", "um yes send this", "Send it", "Please send it", "I'd like to send this text", "let’s send it", "I think I want to send this message"];
+  const others = ["Send this text to Mom", "Don't send this text", "send", "Send a text to Sam", "Can you send it later?", "What did the text say", ""];
+  expect({ phrases: phrases.map(sendPhraseOf), others: others.map(sendPhraseOf) }).toEqual({
+    phrases: ["SendText", "SendText", "SendText", "Send", "Send", "Send", "SendText", "Send", "SendText"],
+    others: others.map(() => "NotSend"),
+  });
 });

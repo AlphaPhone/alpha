@@ -117,12 +117,40 @@ it.effect("Talk ended out of plan allowance and credits posts one line to the ch
   const typedWithReset = try typed(resetsAt)
   const stopped = try talk("c1")
   const elsewhere = try talk("c2")
-  try Effect.try(() => assert.deepStrictEqual({ typedWithReset, stopped, elsewhere, undated: outOfFundsLine(undefined, 10), past: outOfFundsLine(5, 10) }, {
+  try Effect.try(() => assert.deepStrictEqual({ typedWithReset, stopped, elsewhere, undated: outOfFundsLine("TalkStopped", undefined, 10), past: outOfFundsLine("TalkStopped", 5, 10) }, {
     typedWithReset: { text: "Your plan is out of credits. Manage your plan to keep chatting.", plan: "Funding", toasts: [] },
     undated: "You’re out of plan allowance and credits, so Talk stopped.",
     stopped: { added: 1, text: `You’re out of plan allowance and credits, so Talk stopped. Your allowance resets on ${day}.`, plan: "Funding", toasts: [] },
     elsewhere: { added: 0, text: "", plan: undefined, toasts: [] },
     past: "You’re out of plan allowance and credits, so Talk stopped.",
+  }))
+})
+
+it.effect("A typed turn refused for spent credits with Cloud's own code is the one out-of-funds line with Manage plan, and without the code keeps the billing wording (spec/assistant/reply.md, \"Spent credits that Cloud named with its own code is the one out-of-funds line, with Manage plan\")", () => effect {
+  const resetsAt = Date.UTC(2030, 0, 15, 12)
+  const day = new Intl.DateTimeFormat(undefined, { month: "long", day: "numeric" }).format(resetsAt)
+  const typed = effect function (cloudCode: string | undefined, reset: number | undefined) {
+    const toasts: string[] = []
+    const turn = { kind: "fail" as const, failureKind: "insufficient_credits", ...(cloudCode === undefined ? {} : { cloudCode }) }
+    provide assistantOver(fakeResident({ calls: [] }, { turn, proposals: [] }), fakeHost(toasts, undefined, [], false, reset), countingExecutors({ count: 0 })) {
+      const composer = try Composer
+      try composer.edit("Plan my week")
+      try composer.send()
+      const rows = (try transcriptNow()).rows.filter((each) => each.kind === "agent")
+      return { replies: rows.length, text: rows[0]?.kind === "agent" ? rows[0].text : "", plan: rows[0]?.kind === "agent" ? rows[0].plan : undefined, toasts }
+    }
+  }
+  const credits = try typed("insufficient_credits", resetsAt)
+  const allowance = try typed("allowance_exhausted", undefined)
+  const resetNotAhead = try typed("insufficient_credits", 0)
+  const uncoded = try typed(undefined, resetsAt)
+  const line = "You’re out of plan allowance and credits, so I couldn’t reply."
+  const billing = { replies: 1, text: "Your plan is out of credits. Manage your plan to keep chatting.", plan: "Funding", toasts: [] }
+  try Effect.try(() => assert.deepStrictEqual({ credits, allowance, resetNotAhead, uncoded }, {
+    credits: { replies: 1, text: `${line} Your allowance resets on ${day}.`, plan: "Funding", toasts: [] },
+    allowance: { replies: 1, text: line, plan: "Funding", toasts: [] },
+    resetNotAhead: { replies: 1, text: line, plan: "Funding", toasts: [] },
+    uncoded: billing,
   }))
 })
 

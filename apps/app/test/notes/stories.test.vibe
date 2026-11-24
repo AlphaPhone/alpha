@@ -31,7 +31,7 @@ import { NotesRecordingOpen } from "../../src/notes/recordingOpen.vibe"
 import { NotesShare } from "../../src/notes/share.vibe"
 import { NotesSources } from "../../src/notes/sources.vibe"
 import { NotesTrash } from "../../src/notes/trash.vibe"
-import { bound, check, home, inNotes, notesOver, until } from "./harness.vibe"
+import { bound, check, home, inNotes, notesOver, told, until } from "./harness.vibe"
 import { DeviceFake, NotesAgentFake } from "./resident-fake.ts"
 
 const start = Date.parse("2026-11-20T10:00:00.000Z")
@@ -266,11 +266,15 @@ describe("Notes stories", () => {
       // spec/notes/editor.md, "Only a clean draft at the current revision is selected for the agent"
       const clean = try editor.selection()
       try editor.edit({ body: "Steps and more" })
-      const dirty = try editor.selection()
+      const edited = try editor.selection()
+      // A change saved elsewhere moves the revision past the edit's base.
+      agent.revision += 1
+      try (try NotesCollection).refresh()
+      const stale = try editor.selection()
       // spec/notes/editor.md, "Copy draft copies the draft on screen only while it is the same reviewed draft"
       try check(() => assert.deepStrictEqual(
-        { opened, title: draft?.title, clean: clean?.id, revision: clean?.revision, dirty, copy: copyDraftAllowed(true, true, true, true, true), other: copyDraftAllowed(true, true, false, true, true) },
-        { opened: true, title: "Plan", clean: "plan", revision: "1", dirty: undefined, copy: true, other: false },
+        { opened, title: draft?.title, clean: clean?.id, revision: clean?.revision, edited: edited?.id, stale, copy: copyDraftAllowed(true, true, true, true, true), other: copyDraftAllowed(true, true, false, true, true) },
+        { opened: true, title: "Plan", clean: "plan", revision: "1", edited: "plan", stale: undefined, copy: true, other: false },
       ))
     }
   })
@@ -360,8 +364,8 @@ describe("Notes stories", () => {
 
   it.live("Every finished segment and its words survive a restart (spec/notes/recordingJournal.md, \"Story: Keep every finished segment of a recording through a crash\")", () => effect {
     const agent = new NotesAgentFake()
+    // The native journal holds the segment's words, as an earlier version kept them: a recording itself sends nothing for transcription.
     const device = new DeviceFake()
-    device.segmentText = undefined
     provide notesOver(agent, device) {
       const recorder = try NotesRecorder
       const journal = try JournalMachine
@@ -393,6 +397,29 @@ describe("Notes stories", () => {
       try check(() => assert.deepStrictEqual(
         { finished, again, claims: device.claims, completed: after.completed, phase: after.phase, voices: agent.notes.filter((item) => item.format?.kind === "voice").length },
         { finished: true, again: false, claims: 1, completed: 1, phase: "PendingEmpty", voices: 1 },
+      ))
+    }
+  })
+
+  it.live("Done on a recording with no audio yet saves nothing and closes without a word (spec/notes/recorder.md, \"Story: Save the recording as one voice note\")", () => effect {
+    const agent = new NotesAgentFake()
+    const device = new DeviceFake()
+    device.silent = true
+    told.length = 0
+    provide notesOver(agent, device) {
+      const recorder = try NotesRecorder
+      const machine = try RecorderMachine
+      const journal = try JournalMachine
+      try bound()
+      try recorder.begin(null, false)
+      // spec/notes/recorder.md, "Done claims the save once, and the recording closes only after its note is confirmed"
+      const finished = try recorder.finish()
+      const state = try machine.get()
+      const pending = try journal.get()
+      try check(() => assert.deepStrictEqual(
+        { finished, phase: state.phase, error: state.error, saved: state.saved, claims: device.claims, native: (device.status as { state?: string }).state,
+          pending: pending.phase, voices: agent.notes.filter((item) => item.format?.kind === "voice").length, said: [...told] },
+        { finished: false, phase: "RecClosed", error: "NoRecError", saved: 0, claims: 0, native: "idle", pending: "PendingEmpty", voices: 0, said: [] },
       ))
     }
   })
@@ -525,6 +552,11 @@ describe("Notes stories", () => {
       // spec/notes/organize.md, "A move applies only to the note revision the owner reviewed, into a folder that exists"
       const revision = try tryPromise(() => recordNoteOriginFor(plan))
       const target = { sourceId: "notes", sourceRevision: sha, noteId: "plan", revision: revision?.revision ?? sha }
+      // spec/notes/organize.md: a change to saved notes is offered only on a screen that may show it, and always as a review card.
+      const hidden = try organize.admit({ type: "notes_move", target, folder: "Work" }, { view: "notes", sensitive: true }, true, false, false)
+      const folderCard = try organize.admit({ type: "notes_folder_create", name: "Home" }, { view: "notes" }, true, false, false)
+      const restoreCard = try organize.admit({ type: "notes_restore", noteId: "old" }, { view: "notes" }, true, false, false)
+      const unmoved = agent.notes.find((item) => item.id === "plan")?.format?.data.folderId
       const admitted = try organize.admit({ type: "notes_move", target, folder: "Work" }, { view: "notes" }, true, false, false)
       const moved = admitted === undefined ? undefined : try organize.execute(admitted.operation)
       const stale = try organize.execute({ type: "notes_move", target, folder: null })
@@ -535,9 +567,9 @@ describe("Notes stories", () => {
       const restored = try organize.execute({ type: "notes_restore", noteId: "old" })
       const live = try organize.execute({ type: "notes_restore", noteId: "old" })
       try check(() => assert.deepStrictEqual(
-        { made: made.status, exists: exists.summary, direct: admitted?.direct, moved: moved?.status, folder: typeof agent.notes.find((item) => item.id === "plan")?.format?.data.folderId,
+        { made: made.status, exists: exists.summary, hidden, reviewed: [folderCard?.direct, restoreCard?.direct], unmoved, direct: admitted?.direct, moved: moved?.status, folder: typeof agent.notes.find((item) => item.id === "plan")?.format?.data.folderId,
           stale: [stale.status, stale.summary], missing: missing.status, restored: restored.status, live: live.summary },
-        { made: "succeeded", exists: "“work” exists", direct: false, moved: "succeeded", folder: "string",
+        { made: "succeeded", exists: "“work” exists", hidden: undefined, reviewed: [false, false], unmoved: undefined, direct: false, moved: "succeeded", folder: "string",
           stale: ["failed", "Note changed"], missing: "failed", restored: "succeeded", live: "The note is already in Notes." },
       ))
     }
@@ -579,14 +611,14 @@ describe("Notes stories", () => {
   })
 
   it.live("A note's open items become a Calendar draft I review (spec/notes/origins.md, \"Story: Turn a note into an event or a reminder I review in Calendar\")", () => effect {
-    const agent = seeded(note("call", "Clinic", "\nCall the clinic at nine", 1), note("blank", "", "", 2))
+    const agent = seeded(note("call", "Clinic", "\nCall the clinic at nine", 1), note("errands", "Errands", "", 2))
     const device = new DeviceFake()
     provide notesOver(agent, device) {
       const origins = try NotesOrigins
       try bound()
       // spec/notes/origins.md, "The draft text is the note's open action items, then its open checklist items, then its body"
       const ready = try origins.scheduleDraft("call", "event")
-      const empty = try origins.scheduleDraft("blank", "reminder")
+      const empty = try origins.scheduleDraft("errands", "reminder")
       const unknown = try origins.scheduleDraft("nobody", "event")
       try check(() => assert.deepStrictEqual(
         { ready, empty, unknown, first: scheduleSource(1, 2, false), long: scheduleStart("NoteBody", 4001, true) },

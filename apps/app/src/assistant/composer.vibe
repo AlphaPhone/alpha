@@ -1,8 +1,8 @@
-// spec/assistant/send.md, "Story: Send a message and know what happened to it"; spec/assistant/draft.md, "Story: Get my message back when it was not sent"; spec/assistant/stoppedReply.md, "Story: Know what became of a reply I stopped"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/conversation.md, "Story: Talk to my agent and approve what it proposes"; spec/assistant/conversation.md, "A changed screen context bumps the revision and drops every proposal; a private screen stops everything"; spec/assistant/recovery.md, "Story: See what still waits for me without the phone polling my agent"; spec/assistant/receipts.md, "A receipt that could not reach the agent keeps its result and says it is not synced yet"; spec/assistant/receipts.md, "A reply's changes are shown once, only for what its action results prove, and each opens its own view"; spec/assistant/context.md, "The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again"; spec/assistant/context.md, "A turn carries the page Browser hands it for the observed tab, beside the observation, only to a peer that declares it"; spec/assistant/context.md, "A turn names the place, route or search Maps shows as its selected object only while Maps is in front"; spec/assistant/views.md, "A prepared view opens once under a returned claim, only while the screen and the session are the ones the turn was sent from, and every claim is settled once"; spec/assistant/emailCard.md, "Cards are kept per message on their conversation's shelf, staged once, edited only at the version shown, and an unedited card goes under its owner turn's identity"; spec/voice/latency.md, "A dictated draft sent unchanged is timed from the recording's end through the send and the first token to the final reply, and its reply is never spoken"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"; spec/assistant/send.md, "A dictated draft sent exactly as inserted is timed as a voice turn, and its reply is never spoken"; spec/assistant/review.md, "A direct effect needs an allow-listed operation of the current message that is not a workflow step, with review-first off"; spec/assistant/context.md, "A spoken turn carries the screen context a typed turn sent at that moment would"; spec/voice/conversation.md, "Out of plan allowance and credits ends voice quietly as Stop does, and the chat gets the one line"
+// spec/assistant/send.md, "Story: Send a message and know what happened to it"; spec/assistant/draft.md, "Story: Get my message back when it was not sent"; spec/assistant/stoppedReply.md, "Story: Know what became of a reply I stopped"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/conversation.md, "Story: Talk to my agent and approve what it proposes"; spec/assistant/conversation.md, "A changed screen context bumps the revision and drops every proposal; a private screen stops everything"; spec/assistant/recovery.md, "Story: See what still waits for me without the phone polling my agent"; spec/assistant/receipts.md, "A receipt that could not reach the agent keeps its result and says it is not synced yet"; spec/assistant/receipts.md, "A reply's changes are shown once, only for what its action results prove, and each opens its own view"; spec/assistant/context.md, "The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again"; spec/assistant/context.md, "A turn carries the page Browser hands it for the observed tab, beside the observation, only to a peer that declares it"; spec/assistant/context.md, "A turn names the place, route or search Maps shows as its selected object only while Maps is in front"; spec/assistant/views.md, "A prepared view opens once under a returned claim, only while the screen and the session are the ones the turn was sent from, and every claim is settled once"; spec/assistant/emailCard.md, "Cards are kept per message on their conversation's shelf, staged once, edited only at the version shown, and an unedited card goes under its owner turn's identity"; spec/voice/latency.md, "A dictated draft sent unchanged is timed from the recording's end through the send and the first token to the final reply, and its reply is never spoken"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"; spec/assistant/send.md, "A dictated draft sent exactly as inserted is timed as a voice turn, and its reply is never spoken"; spec/assistant/review.md, "A direct effect needs an allow-listed operation of the current message that is not a workflow step, with review-first off"; spec/assistant/context.md, "A spoken turn carries the screen context a typed turn sent at that moment would"; spec/voice/conversation.md, "Out of plan allowance and credits ends voice quietly as Stop does, and the chat gets the one line"; spec/voice/conversation.md, "A reply that needs review stops voice with the microphone off and says it waits in the chat"; spec/voice/conversation.md, "A reply whose only card is one addressed text keeps voice listening and says the text is ready"; spec/voice/conversation.md, "Saying the send phrase sends the bound card once, as its Send tap does, only as the next thing said and only while it is still the one live text shown in that conversation"; spec/assistant/reply.md, "Spent credits that Cloud named with its own code is the one out-of-funds line, with Manage plan"
 import { TurnController, encodeTurnContext, findStoppedUserTurn, type ClientMessageId, type ConversationRecord, type ReplyStreamHooks, type TurnResult } from "@elizaos/agent/client"
 import { Machine as DraftsMachine, shown, slotOf } from "../../gen/assistant__draft.effect.vibe"
 import { Machine as SendsMachine, timedAsVoice, type Event as SendsEvent } from "../../gen/assistant__send.effect.vibe"
-import { Machine as ReplyMachine, failReply, initial as replyStart, machine as replyMachine, refusedBeforeOutput, offersManagePlan, type ReplyView } from "../../gen/assistant__reply.effect.vibe"
+import { Machine as ReplyMachine, failReply, initial as replyStart, machine as replyMachine, refusedBeforeOutput, offersManagePlan, outOfFundsReply, type ReplyView } from "../../gen/assistant__reply.effect.vibe"
 import { Machine as StoppedMachine, recentTurnMs, type ReadKind } from "../../gen/assistant__stoppedReply.effect.vibe"
 import { Machine as ClientMachine, canReplyWith } from "../../gen/assistant__conversation.effect.vibe"
 import { Machine as RecoveryMachine } from "../../gen/assistant__recovery.effect.vibe"
@@ -20,9 +20,9 @@ import { Conversations } from "./conversations.vibe"
 import { AssistantHost, type AgentIdentity, type PeerFacts } from "./host.vibe"
 import { PhoneLocation } from "./location.vibe"
 import { BrowserPages, CameraComposer, MapsChatCards, MapsRelay, MapsViews, ReplyChanges, TurnSources, type MapsShown } from "./ports.vibe"
-import { changeWords, copy, failureKindOf, failureText, liveWaitOf, outOfFundsLine, planActionOf } from "./presentation.vibe"
+import { changeWords, copy, failureKindOf, failureText, liveWaitOf, outOfFundsLine, planActionOf, replyFundsCode } from "./presentation.vibe"
 import { DeviceReview, type Approval } from "./review.vibe"
-import { collapseSystemNotices, emailDraftOf, emptyTranscript, historyRows, pendingReply, replyNotices, withReply, type ProposalCard, type Quote, type Row, type Transcript } from "./transcript.vibe"
+import { collapseSystemNotices, emailDraftOf, emptyTranscript, historyRows, pendingReply, replyNotices, spokenTextCard, withReply, type ProposalCard, type Quote, type Row, type Transcript } from "./transcript.vibe"
 import { moveFirstDraft } from "./first-send.vibe"
 import { initial as emailStart } from "../../gen/assistant__emailCard.effect.vibe"
 import { timerCeilingMs } from "../../gen/assistant__approvals.effect.vibe"
@@ -62,6 +62,23 @@ export service Composer {
   turnContext(): { readonly [key: string]: unknown }!!
   /** A voice conversation in `conversation` ended out of plan allowance and credits: the chat showing it gets the one out-of-funds line with Manage plan. */
   talkOutOfFunds(conversation: string): void!!
+  /**
+   * A spoken turn of the voice conversation in `conversation` was answered as `messageId`: while that chat is shown, the message is
+   * reviewed as a typed one is and its cards, receipts and notices join it. `text` is the card Talk may bind: the reply left only
+   * that one addressed text card, it answers this message, and it is now the one live addressed text card of the transcript.
+   */
+  talkReplied(conversation: string, messageId: string, words: string): { readonly cards: number; readonly text?: string }!!
+  /** Talk bound `proposalId`, the text card it may send when the owner says so. */
+  talkBind(proposalId: string): void!!
+  /**
+   * Whether `proposalId` is the card Talk bound and still the one live addressed text card shown in `conversation`, on a screen
+   * Alpha may act on, with no approval of it under way.
+   */
+  talkTextShown(conversation: string, proposalId: string): boolean!!
+  /** Send the text card Talk bound, as its Send tap does; the receipt sentence, or undefined when its approval did not finish. */
+  talkSend(proposalId: string): (string | undefined)!!
+  /** Talk let go of the text card it bound. */
+  talkReleased(): void!!
   static readonly key = "alpha/assistant/Composer"
 }
 
@@ -104,6 +121,8 @@ export const composerLayer = Layer.effect(Composer, effect {
   let acting = 0
   let ownKey: string | undefined
   let dictated: { readonly text: string; readonly binding: string } | undefined
+  // The links of the Browser page the last spoken turn carried: an open of one keeps its card, as for a typed turn.
+  let spokenLinks: readonly string[] = []
   const quiet = <E>(work: Effect.Effect<unknown, E>) => Effect.match(work, { onSuccess: () => true, onFailure: () => false })
 
   effect function rows(change: (rows: readonly Row[]) => readonly Row[]) {
@@ -233,6 +252,11 @@ export const composerLayer = Layer.effect(Composer, effect {
     }
     try quiet(stopped.send({ type: "readSettles", kind }))
     try stoppedNotice()
+  }
+  /** Whether the chat shows `conversation` on a screen Alpha may act on. */
+  effect function talkShown(conversation: string) {
+    const exposure = (try host.screen()).exposure
+    return (try SubscriptionRef.get(transcript)).conversation === conversation && !(exposure.hidden || exposure.privateView || exposure.locked || exposure.connectionDialog)
   }
   effect function settleView(id: string, view: ReplyView, text: string) {
     try rows((list) => list.map((row) => row.id === id ? withReply(row, text, view, false) : row))
@@ -475,7 +499,8 @@ export const composerLayer = Layer.effect(Composer, effect {
       const kind = failureKindOf(result.code)
       const wait = liveWaitOf(reply?.retryAfterMs)
       try quiet(view.send({ type: "failReply", kind }))
-      const said = refusedBeforeOutput(kind) ? failureText(kind, wait) : `${reply?.text ?? shownText}\n\n${failureText(kind, wait)}`
+      const said = outOfFundsReply(kind, replyFundsCode(reply)) ? outOfFundsLine("TypedTurnRefused", try host.allowanceResetsAt(), try Clock.currentTimeMillis)
+        : refusedBeforeOutput(kind) ? failureText(kind, wait) : `${reply?.text ?? shownText}\n\n${failureText(kind, wait)}`
       try settleView(replyId, try view.get(), said)
       const fix = planActionOf(reply?.planAction) ?? (offersManagePlan(kind) ? "Funding" as const : undefined)
       if (fix !== undefined) try rows((list) => list.map((row) => row.id === replyId && row.kind === "agent" ? { ...row, plan: fix } : row))
@@ -600,12 +625,56 @@ export const composerLayer = Layer.effect(Composer, effect {
       const conversation = (try SubscriptionRef.get(transcript)).conversation
       if (row.kind === "email" && identity !== undefined && conversation !== null) try shelf.keep([identity.origin, identity.owner, identity.agent, conversation], row)
     },
-    turnContext: () => map(screenContext(host.peer()), (read) => read.context as { readonly [key: string]: unknown }),
+    turnContext: () => effect {
+      const read = try screenContext(host.peer())
+      spokenLinks = read.browserPage === undefined ? [] : read.links
+      return read.context as { readonly [key: string]: unknown }
+    },
+    // spec/voice/conversation.md, "A reply that needs review stops voice with the microphone off and says it waits in the chat";
+    // "A reply whose only card is one addressed text keeps voice listening and says the text is ready".
+    talkReplied: (conversation: string, messageId: string, words: string) => effect {
+      const none: { readonly cards: number; readonly text?: string } = { cards: 0 }
+      if ((try host.identity()) === undefined || !(try talkShown(conversation))) return none
+      const pass = try directly(messageId, words, spokenLinks)
+      if (!(try talkShown(conversation))) return none
+      const one = pass.cards.length === 1 && pass.cards[0].addressedText === true && (pass.answering ?? []).includes(pass.cards[0].proposalId) ? pass.cards[0].proposalId : undefined
+      // A card a listing already drew is redrawn where it is, never shown twice.
+      const drawn = new Map<string, ProposalCard>(pass.cards.map((card) => [`card:${card.proposalId}`, card]))
+      try rows((list) => [
+        ...list.map((row) => row.kind === "card" && drawn.has(row.id) ? { ...row, card: drawn.get(row.id) ?? row.card } : row),
+        ...pass.notices.map((text, at): Row => ({ kind: "notice", id: `device-notice:${messageId}:${at}`, text, system: false })),
+        ...pass.receipts.flatMap((done): Row[] => done.receipt === undefined ? [] : [{ kind: "receipt", id: `device-receipt:${done.card.proposalId}`, proposalId: done.card.proposalId, title: done.receipt.title, summary: done.receipt.summary }]),
+        ...pass.cards.filter((card) => !list.some((row) => row.id === `card:${card.proposalId}`)).map((card): Row => ({ kind: "card", id: `card:${card.proposalId}`, card })),
+      ])
+      try watch(pass.cards)
+      // An older live text card in the chat would make "Send this text" ambiguous: then this one waits for a tap like any other.
+      const now = try Clock.currentTimeMillis
+      const only = one !== undefined && spokenTextCard((try SubscriptionRef.get(transcript)).rows, now)?.proposalId === one ? one : undefined
+      return only === undefined ? { cards: pass.cards.length } : { cards: pass.cards.length, text: only }
+    },
+    talkBind: (proposalId: string) => SubscriptionRef.update(transcript, (t) => ({ ...t, voiceText: proposalId })),
+    talkTextShown: (conversation: string, proposalId: string) => effect {
+      if (!(try talkShown(conversation))) return false
+      const t = try SubscriptionRef.get(transcript)
+      const now = try Clock.currentTimeMillis
+      return t.voiceText === proposalId && spokenTextCard(t.rows, now)?.proposalId === proposalId && (try review.tappable(proposalId))
+    },
+    // Talk checked the card was bound and shown as the owner said the phrase; the binding may already be let go by now.
+    talkSend: (proposalId: string) => effect {
+      const t = try SubscriptionRef.get(transcript)
+      try SubscriptionRef.update(transcript, (now) => now.voiceText === undefined ? now : { ...now, voiceText: undefined })
+      const row = t.rows.find((each) => each.kind === "card" && each.card.proposalId === proposalId)
+      if (row === undefined || row.kind !== "card") return undefined
+      const done = try review.approve(row.card)
+      try rows((list) => list.map((each) => each.id === row.id ? { ...row, card: done.card } : each))
+      return done.receipt?.summary
+    },
+    talkReleased: () => SubscriptionRef.update(transcript, (t) => t.voiceText === undefined ? t : { ...t, voiceText: undefined }),
     talkOutOfFunds: (conversation: string) => effect {
       if ((try SubscriptionRef.get(transcript)).conversation !== conversation) return
       const resetsAt = try host.allowanceResetsAt()
       const now = try Clock.currentTimeMillis
-      const line = withReply(pendingReply(`out-of-funds:${now}`), outOfFundsLine(resetsAt, now), failReply(replyStart, "InsufficientCredits"), false)
+      const line = withReply(pendingReply(`out-of-funds:${now}`), outOfFundsLine("TalkStopped", resetsAt, now), failReply(replyStart, "InsufficientCredits"), false)
       try rows((list) => [...list, line.kind === "agent" ? { ...line, plan: "Funding" as const } : line])
     },
     dictationTarget: () => effect {

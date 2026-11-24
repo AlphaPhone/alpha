@@ -125,7 +125,8 @@ export const locationLayer = Layer.effect(MapsLocation, effect {
         return id
       },
       (id) => effect {
-        locator.send({ type: "stopLocate" }) catch () => undefined
+        // A retired session's late end clears only its own watch: the session admitted since is not its to stop.
+        if ((try locator.get()).generation === owner) locator.send({ type: "stopLocate" }) catch () => undefined
         try confirmCleanup(id)
       },
     )

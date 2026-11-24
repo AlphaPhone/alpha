@@ -89,8 +89,9 @@ export class CalendarAgentFake {
       this.writes.push({ method, path, body });
       const target = this.events.find((event) => event.id === decodeURIComponent(match[1]!));
       if (!target) throw Object.assign(new Error("missing"), { status: 404 });
-      const request = body as { expectedProviderVersion: string };
-      if (request.expectedProviderVersion !== target.etag) throw Object.assign(new Error("version"), { status: 409 });
+      // A delete carries its version in the query, as upstream's DELETE route reads it; a change carries it in the body.
+      const expected = method === "DELETE" ? url.searchParams.get("expectedProviderVersion") : (body as { expectedProviderVersion: string }).expectedProviderVersion;
+      if (expected !== target.etag) throw Object.assign(new Error("version"), { status: 409 });
       if (method === "DELETE") {
         this.events = this.events.filter((event) => event !== target);
         return { status: 200, data: { deleted: true, event: null, receipt: { operation: "delete", source: this.sourceKey(), eventId: target.id, providerVersion: `deleted:${target.etag}`, event: null, target: this.event(target), acceptedAt: target.startAt } } };

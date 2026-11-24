@@ -17,6 +17,8 @@ export const meta: ComponentMeta<RecentsListProps> = {
       await expect(args.onCall).toHaveBeenCalledWith("4155550100");
     },
     NeedsAccess: async ({ canvasElement, args }) => {
+      // The spies in `args` are shared by every story of the file, and Default's play taps a call: count only this story's taps.
+      for (const spy of [args.onAllow, args.onCall]) spy.mockClear();
       await userEvent.click(within(canvasElement).getByRole("button", { name: "Allow" }));
       await expect(args.onAllow).toHaveBeenCalled();
       await expect(args.onCall).not.toHaveBeenCalled();
