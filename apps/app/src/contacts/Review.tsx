@@ -86,7 +86,7 @@ export function Review({ runtime }: ReviewProps) {
         </>
       )}
       <div className="flex gap-2">
-        {can(approve, "Owner") && <Button onClick={() => void send(approve, "Owner")}>{state.ask === "Text" ? "Send this text" : state.ask === "Dial" ? "Call" : "Approve"}</Button>}
+        {can(approve, "Owner") && <Button aria-label={state.ask === "Text" ? "Send this text" : undefined} onClick={() => void send(approve, "Owner")}>{state.ask === "Text" ? "Send" : state.ask === "Dial" ? "Call" : "Approve"}</Button>}
         {can({ type: "decline" }, "Owner") && <Button variant="ghost" onClick={() => void send({ type: "decline" }, "Owner")}>Not now</Button>}
       </div>
     </Card>
