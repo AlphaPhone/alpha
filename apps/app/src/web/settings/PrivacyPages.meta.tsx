@@ -13,7 +13,7 @@ export const meta: ComponentMeta<PrivacyPagesProps> = {
     onPermissions: none, onPreference: none, onResetPreferences: none, onHandoff: none, onAccessSetup: none,
     resetAsked: false, onAskReset: none,
   },
-  states: {
+  examples: {
     ViaCloud: { privacy: { route: "ViaCloud", listener: listenerOn, aosp: true } },
     StopUnconfirmed: { privacy: { route: "OnPhone", listener: stopUnconfirmed, aosp: true } },
     Unreadable: { preferences: { value: preferences, readable: false } },
