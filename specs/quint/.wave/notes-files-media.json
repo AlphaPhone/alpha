@@ -1,0 +1,1803 @@
+{
+ "add": [
+  {
+   "path": "specs/quint/application/NotesDraftSlot.qnt",
+   "module": "NotesDraftSlot",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "failedSaveResumedAfterRestartTest",
+    "newerSavedContentKeptTest",
+    "laterFailureKeepsEarlierDraftTest",
+    "threeLostRacesGiveUpTest",
+    "changedSlotIsNotClearedTest"
+   ],
+   "invariants": [
+    "NewerSavedNeverOverwritten",
+    "KeptDraftNeverDropped",
+    "RevertedEditNotResurrected",
+    "ConflictKeepsDraft",
+    "BoundedRetries"
+   ],
+   "witnesses": [
+    "ConflictWitness",
+    "OwnDraftOverKeptWitness",
+    "RevertedOwnDraftWitness",
+    "GaveUpWitness",
+    "RecoveredEditWitness"
+   ],
+   "sources": [
+    "apps/app/src/runtime/notes-secure-store.ts",
+    "apps/app/src/prototype/agent-adapter.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/runtime/notes-secure-store.ts",
+     "name": "saveDraft"
+    },
+    {
+     "path": "apps/app/src/runtime/notes-secure-store.ts",
+     "name": "clearDraft"
+    },
+    {
+     "path": "apps/app/src/runtime/notes-secure-store.ts",
+     "name": "readDraft"
+    },
+    {
+     "path": "apps/app/src/runtime/notes-secure-store.ts",
+     "name": "mergeNotesDrafts"
+    },
+    {
+     "path": "apps/app/src/runtime/notes-secure-store.ts",
+     "name": "applyNotesDraft"
+    },
+    {
+     "path": "apps/app/src/runtime/notes-secure-store.ts",
+     "name": "notesDraftConflicts"
+    },
+    {
+     "path": "apps/app/src/runtime/notes-secure-store.ts",
+     "name": "notesDraftChanges"
+    },
+    {
+     "path": "apps/app/src/prototype/agent-adapter.ts",
+     "name": "keepNotesDraft"
+    },
+    {
+     "path": "apps/app/src/prototype/agent-adapter.ts",
+     "name": "resumeNotesDraft"
+    },
+    {
+     "path": "apps/app/src/prototype/agent-adapter.ts",
+     "name": "notesDraftKept"
+    },
+    {
+     "path": "apps/app/src/prototype/agent-adapter.ts",
+     "name": "notesDraftSaved"
+    }
+   ],
+   "abstractions": [
+    "One note edited in this editor (A) and one note only an earlier session edited (B); saved and drafted contents are opaque identities, and the SHA-256 base and the storage-full deferral are not modeled.",
+    "Another view rewriting the slot is a change of the stored value with the same edits; a foreign draft with different edits is merged by the source and is outside this model.",
+    "Three compare-and-swap attempts and two restarts. Editing is admitted only after the open has read the slot, as the Android open sequence does.",
+    "Model safety checks do not establish implementation refinement or device acceptance."
+   ]
+  },
+  {
+   "path": "specs/quint/application/NotesTrashSession.qnt",
+   "module": "NotesTrashSession",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "timerAndOpenShareOnePassTest",
+    "backgroundPassWithoutChangeSkipsReloadTest",
+    "openTrashForgetsRefusalTest",
+    "refusedNoteDeletedForeverTest",
+    "unconfirmedPermanentDeleteKeepsChoiceTest",
+    "busyBlocksSecondActionTest"
+   ],
+   "invariants": [
+    "SingleMaintenancePass",
+    "JoinedPassReloads",
+    "OneDestructiveAction",
+    "FullChoiceHoldsRefusal",
+    "ConfirmationNeedsOpenTrash",
+    "PermanentOnlyAfterRefusal"
+   ],
+   "witnesses": [
+    "ForegroundJoinedBackgroundWitness",
+    "RefusalPendingWitness",
+    "ChoiceDismissedDuringDeleteWitness",
+    "RestoreWaitsForMaintenanceWitness",
+    "DeletedForeverWitness"
+   ],
+   "sources": [
+    "apps/app/src/prototype/notes-trash-adapter.ts",
+    "apps/app/src/runtime/notes-trash.ts",
+    "apps/app/src/runtime/notes-trash-policy.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/prototype/notes-trash-adapter.ts",
+     "name": "installNotesTrashAdapter"
+    },
+    {
+     "path": "apps/app/src/prototype/notes-trash-adapter.ts",
+     "name": "runMaintenance"
+    },
+    {
+     "path": "apps/app/src/prototype/notes-trash-adapter.ts",
+     "name": "scheduleMaintenance"
+    },
+    {
+     "path": "apps/app/src/prototype/notes-trash-adapter.ts",
+     "name": "moveToTrash"
+    },
+    {
+     "path": "apps/app/src/prototype/notes-trash-adapter.ts",
+     "name": "deleteForever"
+    },
+    {
+     "path": "apps/app/src/prototype/notes-trash-adapter.ts",
+     "name": "erase"
+    },
+    {
+     "path": "apps/app/src/prototype/notes-trash-adapter.ts",
+     "name": "restore"
+    },
+    {
+     "path": "apps/app/src/prototype/notes-trash-adapter.ts",
+     "name": "refused"
+    },
+    {
+     "path": "apps/app/src/prototype/notes-trash-adapter.ts",
+     "name": "maintaining"
+    },
+    {
+     "path": "apps/app/src/prototype/notes-trash-adapter.ts",
+     "name": "trashFull"
+    },
+    {
+     "path": "apps/app/src/prototype/notes-trash-adapter.ts",
+     "name": "trashConfirm"
+    },
+    {
+     "path": "apps/app/src/prototype/notes-trash-adapter.ts",
+     "name": "trashOpen"
+    }
+   ],
+   "abstractions": [
+    "One renderer, at most one Trash row counted, three destructive actions and one refused note. Storage, locks and the voice-recording paths are in NotesLifecycle and PermanentVoiceDeletion.",
+    "The 15-minute timer, startup and resume are one nondeterministic background pass. A render that finds the refused note gone is a separate sweep step.",
+    "Model safety checks do not establish implementation refinement or device acceptance."
+   ]
+  },
+  {
+   "path": "specs/quint/application/SharePanel.qnt",
+   "module": "SharePanel",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "explicitChoiceHandsOffTest",
+    "changedSelectionClosesPanelTest",
+    "changedSelectionRefusesChoiceTest",
+    "equalRewriteKeepsPanelTest",
+    "secondPanelRetiresFirstTest"
+   ],
+   "invariants": [
+    "OnePanel",
+    "HiddenPageHasNoPanel",
+    "HandoffSharesReviewedSelection",
+    "ClosingSelectsNothing",
+    "AcceptedIdentityIsRemembered"
+   ],
+   "witnesses": [
+    "StaleSelectionRefusedWitness",
+    "EqualRewriteAcceptedWitness",
+    "PanelOverChangedSelectionWitness"
+   ],
+   "sources": [
+    "apps/app/src/runtime/share-panel.ts",
+    "apps/app/src/prototype/share-panel-adapter.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/runtime/share-panel.ts",
+     "name": "openSharePanel"
+    },
+    {
+     "path": "apps/app/src/runtime/share-panel.ts",
+     "name": "unchangedSince"
+    },
+    {
+     "path": "apps/app/src/runtime/share-panel.ts",
+     "name": "selectionWatch"
+    },
+    {
+     "path": "apps/app/src/runtime/share-panel.ts",
+     "name": "retirementEvents"
+    },
+    {
+     "path": "apps/app/src/runtime/share-panel.ts",
+     "name": "openPanel"
+    },
+    {
+     "path": "apps/app/src/prototype/share-panel-adapter.ts",
+     "name": "installSharePanelAdapter"
+    },
+    {
+     "path": "apps/app/src/prototype/share-panel-adapter.ts",
+     "name": "unchangedSince"
+    }
+   ],
+   "abstractions": [
+    "One watched view state with an identity token and a content identity; browser selection and Calendar rows are further instances of the same check.",
+    "The 250 ms watch is a nondeterministic tick. Destinations are one handoff counter; what each destination does is in its own model.",
+    "Model safety checks do not establish implementation refinement or device acceptance."
+   ]
+  },
+  {
+   "path": "specs/quint/application/MediaCopyIntent.qnt",
+   "module": "MediaCopyIntent",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "unresolvedRequestBlocksNextTest",
+    "restartRecoversPendingRequestTest",
+    "staleHolderCannotClearNewRequestTest"
+   ],
+   "invariants": [
+    "SinglePendingRequest",
+    "AcknowledgeRemovesExactRequest",
+    "HeldRequestIsCurrentOrStale",
+    "BrowserRevisionsNeverReused",
+    "AndroidStoresTokenOnly"
+   ],
+   "witnesses": [
+    "SecondRequestRefusedWitness",
+    "RecoveredAfterRestartWitness",
+    "StaleAcknowledgeRefusedWitness"
+   ],
+   "sources": [
+    "apps/app/src/runtime/media-copy-intent.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/runtime/media-copy-intent.ts",
+     "name": "admitMediaCopyIntent"
+    },
+    {
+     "path": "apps/app/src/runtime/media-copy-intent.ts",
+     "name": "acknowledgeMediaCopyIntent"
+    },
+    {
+     "path": "apps/app/src/runtime/media-copy-intent.ts",
+     "name": "readMediaCopyIntent"
+    },
+    {
+     "path": "apps/app/src/runtime/media-copy-intent.ts",
+     "name": "mediaCopyIntentKey"
+    },
+    {
+     "path": "apps/app/src/runtime/media-copy-intent.ts",
+     "name": "replace"
+    }
+   ],
+   "abstractions": [
+    "Two flows that may hold the stored request and two tokens. The browser document's compare-and-swap and Android's synchronous localStorage update are each one atomic step inside one renderer.",
+    "Android stores no revision, so a held request matches any stored request with the same token; tokens name one copy operation.",
+    "Model safety checks do not establish implementation refinement or device acceptance."
+   ]
+  },
+  {
+   "path": "specs/quint/application/FilesRecentIndex.qnt",
+   "module": "FilesRecentIndex",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "thirdDocumentEvictsOldestTest",
+    "sameDocumentChosenAgainTest",
+    "treeRowsRevokedByNewSessionTest",
+    "endedAccessMarksRowRevokedTest",
+    "treeEntryReopenedTest",
+    "savedPdfAsksPickerTest"
+   ],
+   "invariants": [
+    "BoundedRecent",
+    "KeysUnique",
+    "KeptGrantNeverReleased",
+    "ReadyRowHoldsGrant",
+    "EvictedGrantsReleased",
+    "SavedPdfHoldsNoGrant"
+   ],
+   "witnesses": [
+    "EvictedGrantWitness",
+    "RevokedTreeRowWitness",
+    "SameKeyRefreshWitness",
+    "SameNameReplacedWitness"
+   ],
+   "sources": [
+    "apps/app/src/prototype/files-index.ts",
+    "apps/app/src/prototype/files-tree-adapter.ts",
+    "apps/app/src/prototype/selection-adapter.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/prototype/files-index.ts",
+     "name": "createFilesIndex"
+    },
+    {
+     "path": "apps/app/src/prototype/files-index.ts",
+     "name": "record"
+    },
+    {
+     "path": "apps/app/src/prototype/files-index.ts",
+     "name": "revoke"
+    },
+    {
+     "path": "apps/app/src/prototype/files-index.ts",
+     "name": "remove"
+    },
+    {
+     "path": "apps/app/src/prototype/files-index.ts",
+     "name": "revokeTree"
+    },
+    {
+     "path": "apps/app/src/prototype/files-index.ts",
+     "name": "recentKey"
+    },
+    {
+     "path": "apps/app/src/prototype/files-index.ts",
+     "name": "RECENT_LIMIT"
+    },
+    {
+     "path": "apps/app/src/prototype/files-tree-adapter.ts",
+     "name": "openRecent"
+    },
+    {
+     "path": "apps/app/src/prototype/selection-adapter.ts",
+     "name": "forgetSelected"
+    },
+    {
+     "path": "apps/app/src/prototype/selection-adapter.ts",
+     "name": "filesIndex"
+    }
+   ],
+   "abstractions": [
+    "Two rows stand for the limit of 24; three names with one MIME type each, so name equality stands for name and type equality.",
+    "A row refreshed under its own key drops its previous selection id without reporting it; the model records those ids separately instead of asserting they are released.",
+    "Model safety checks do not establish implementation refinement or device acceptance."
+   ]
+  },
+  {
+   "path": "specs/quint/services/SystemPickerVisibility.qnt",
+   "module": "SystemPickerVisibility",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "exportPickerKeepsDialogsTest",
+    "correctionAlwaysClosesTest",
+    "realBackgroundUnderPickerTest",
+    "lateFilePickerResultTest",
+    "cancelledFilePickerTest"
+   ],
+   "invariants": [
+    "CounterBalanced",
+    "UnexemptDialogsCloseWhenHidden",
+    "HiddenDialogStartedUnderPicker",
+    "NestedDialogsNeedDocument",
+    "RetiredPickerNeverDelivers",
+    "OneFilePickerConsumer"
+   ],
+   "witnesses": [
+    "DialogKeptUnderPickerWitness",
+    "DialogHiddenAfterPickerEndedWitness",
+    "LateResultDroppedWitness",
+    "TwoPickersWitness"
+   ],
+   "sources": [
+    "apps/app/src/prototype/scan-pdf.ts",
+    "apps/app/src/browser/file-picker.ts",
+    "apps/app/src/prototype/scan-review.ts",
+    "apps/app/src/prototype/scan-document.ts",
+    "apps/app/src/prototype/scan-searchable-review.ts",
+    "apps/app/src/prototype/scan-correction-review.ts",
+    "apps/app/src/prototype/scan-page-camera.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/prototype/scan-pdf.ts",
+     "name": "systemPickerActive"
+    },
+    {
+     "path": "apps/app/src/prototype/scan-pdf.ts",
+     "name": "duringSystemPicker"
+    },
+    {
+     "path": "apps/app/src/prototype/scan-pdf.ts",
+     "name": "systemPickers"
+    },
+    {
+     "path": "apps/app/src/browser/file-picker.ts",
+     "name": "runFilePicker"
+    },
+    {
+     "path": "apps/app/src/browser/file-picker.ts",
+     "name": "inputFiles"
+    },
+    {
+     "path": "apps/app/src/prototype/scan-review.ts",
+     "name": "systemPickerActive"
+    },
+    {
+     "path": "apps/app/src/prototype/scan-document.ts",
+     "name": "systemPickerActive"
+    },
+    {
+     "path": "apps/app/src/prototype/scan-searchable-review.ts",
+     "name": "systemPickerActive"
+    }
+   ],
+   "abstractions": [
+    "Up to three system pickers and three browser file pickers. Dialog contents are in ScanDocument and ScanReviewDialogs.",
+    "A picker that settles while the page stays hidden produces no further visibility event; the model shows that state as reachable and asserts only that the page was hidden under a picker.",
+    "Model safety checks do not establish implementation refinement or device acceptance."
+   ]
+  },
+  {
+   "path": "specs/quint/services/ScanReviewDialogs.qnt",
+   "module": "ScanReviewDialogs",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "unconfirmedNotesSaveStaysLatchedTest",
+    "retryablePdfUnlocksTest",
+    "searchableCloseOutcomesTest",
+    "searchableCloseAfterRequestTest",
+    "cornerChangeDiscardsPreviewTest",
+    "stoppedCameraKeepsCaptureTest",
+    "backClosesDocumentFirstTest"
+   ],
+   "invariants": [
+    "NotesSavedOnce",
+    "PhotoKeptOnce",
+    "PdfRetryNeedsNonWrite",
+    "DocumentNeedsOpenReview",
+    "UnconfirmedNeedsProviderRequest",
+    "SearchableResultNeedsReadyText",
+    "PreviewMatchesCorners",
+    "AppliedCorrectionWasPreviewed",
+    "UsedPageWasReviewed",
+    "StoppedCameraKeepsCapture"
+   ],
+   "witnesses": [
+    "UnconfirmedNotesSaveWitness",
+    "PdfRetriedWitness",
+    "ClosedWhilePreparingWitness",
+    "StalePreviewDiscardedWitness",
+    "CaptureAfterCameraStoppedWitness"
+   ],
+   "sources": [
+    "apps/app/src/prototype/scan-review.ts",
+    "apps/app/src/prototype/scan-searchable-review.ts",
+    "apps/app/src/prototype/scan-correction-review.ts",
+    "apps/app/src/prototype/scan-page-camera.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/prototype/scan-review.ts",
+     "name": "pdfAttempted"
+    },
+    {
+     "path": "apps/app/src/prototype/scan-review.ts",
+     "name": "attempted"
+    },
+    {
+     "path": "apps/app/src/prototype/scan-review.ts",
+     "name": "keeping"
+    },
+    {
+     "path": "apps/app/src/prototype/scan-review.ts",
+     "name": "closeDocument"
+    },
+    {
+     "path": "apps/app/src/prototype/scan-searchable-review.ts",
+     "name": "reviewSearchableScan"
+    },
+    {
+     "path": "apps/app/src/prototype/scan-searchable-review.ts",
+     "name": "searchableCloseUnconfirmed"
+    },
+    {
+     "path": "apps/app/src/prototype/scan-searchable-review.ts",
+     "name": "requested"
+    },
+    {
+     "path": "apps/app/src/prototype/scan-correction-review.ts",
+     "name": "clearPreview"
+    },
+    {
+     "path": "apps/app/src/prototype/scan-correction-review.ts",
+     "name": "corrected"
+    },
+    {
+     "path": "apps/app/src/prototype/scan-correction-review.ts",
+     "name": "busy"
+    },
+    {
+     "path": "apps/app/src/prototype/scan-page-camera.ts",
+     "name": "captureScanPage"
+    },
+    {
+     "path": "apps/app/src/prototype/scan-page-camera.ts",
+     "name": "retake"
+    },
+    {
+     "path": "apps/app/src/prototype/scan-page-camera.ts",
+     "name": "stream"
+    }
+   ],
+   "abstractions": [
+    "Four independent dialogs in one state; recognised text, corner coordinates and image bytes are opaque. Three corner changes and three PDF attempts.",
+    "Retake is modeled as available only over a live camera, so a capture reviewed before the camera stopped is kept.",
+    "Model safety checks do not establish implementation refinement or device acceptance."
+   ]
+  },
+  {
+   "path": "specs/quint/native/DeviceLibrary.qnt",
+   "module": "DeviceLibrary",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "burstOfChangesReadsTwiceTest",
+    "denialDiscoveredByLoadEndsReviewTest",
+    "changedRowRefusedTest",
+    "androidRechecksRevisionTest",
+    "expiredReviewTest",
+    "tooManySelectedTest",
+    "hiddenAppEndsReviewTest",
+    "supersededLoadDroppedTest",
+    "confirmedChangeAppliedTest"
+   ],
+   "invariants": [
+    "SingleRevalidation",
+    "SelectionSubsetCatalog",
+    "ReviewWithinLimit",
+    "ReviewNeedsReadableCatalog",
+    "UnreadableCatalogEmpty",
+    "ChangedRowsWereReviewed",
+    "ActingExcludesReview",
+    "OneCurrentLoad"
+   ],
+   "witnesses": [
+    "CoalescedChangeWitness",
+    "StaleReviewRefusedWitness",
+    "ReviewOverChangedRowWitness",
+    "SupersededLoadWitness",
+    "AppliedChangeWitness"
+   ],
+   "sources": [
+    "apps/app/src/prototype/photo-library-adapter.ts",
+    "apps/app/src/runtime/photo-library.ts",
+    "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaPhotoLibraryPlugin.java",
+    "android/app/src/main/java/ai/elizaresearch/alphaphone/PermittedMediaReview.java"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/prototype/photo-library-adapter.ts",
+     "name": "createDeviceLibrary"
+    },
+    {
+     "path": "apps/app/src/prototype/photo-library-adapter.ts",
+     "name": "revalidate"
+    },
+    {
+     "path": "apps/app/src/prototype/photo-library-adapter.ts",
+     "name": "revalidateOnce"
+    },
+    {
+     "path": "apps/app/src/prototype/photo-library-adapter.ts",
+     "name": "revalidateAgain"
+    },
+    {
+     "path": "apps/app/src/prototype/photo-library-adapter.ts",
+     "name": "confirmReview"
+    },
+    {
+     "path": "apps/app/src/prototype/photo-library-adapter.ts",
+     "name": "startReview"
+    },
+    {
+     "path": "apps/app/src/prototype/photo-library-adapter.ts",
+     "name": "readScope"
+    },
+    {
+     "path": "apps/app/src/prototype/photo-library-adapter.ts",
+     "name": "reloadOnOpen"
+    },
+    {
+     "path": "apps/app/src/runtime/photo-library.ts",
+     "name": "reviewCurrent"
+    },
+    {
+     "path": "apps/app/src/runtime/photo-library.ts",
+     "name": "prepareReview"
+    },
+    {
+     "path": "apps/app/src/runtime/photo-library.ts",
+     "name": "LIBRARY_LIMITS"
+    },
+    {
+     "path": "apps/app/src/runtime/photo-library.ts",
+     "name": "observeScope"
+    },
+    {
+     "path": "apps/app/src/runtime/photo-library.ts",
+     "name": "REVIEW_TTL"
+    },
+    {
+     "path": "apps/app/src/runtime/photo-library.ts",
+     "name": "LibraryCatalog"
+    },
+    {
+     "path": "apps/app/src/runtime/photo-library.ts",
+     "name": "LibrarySelection"
+    }
+   ],
+   "abstractions": [
+    "Three library items, an action limit of two for the source limit of 20, one first page (no Load more), and denied and locked as the unreadable access states.",
+    "One revalidation pass is atomic: scope read, change set and identity validation are one step, and a single validation batch covers the catalog.",
+    "The 120-second review lifetime is two ticks. Android's own confirmation dialog is one result that re-checks the reviewed revisions.",
+    "Model safety checks do not establish implementation refinement or device acceptance."
+   ]
+  },
+  {
+   "path": "specs/quint/native/CameraPreview.qnt",
+   "module": "CameraPreview",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "agentJoinsStartingPreviewTest",
+    "agentStartsStoppedPreviewTest",
+    "staleStartNeverReadyTest",
+    "endedTrackLeavesReadyTest",
+    "failedFlipLeavesReadyTest",
+    "denialRestartsOnlyAfterGrantTest"
+   ],
+   "invariants": [
+    "ReadyImpliesLiveTrack",
+    "StaleEpochNeverSetsReady",
+    "StartIsJoinable",
+    "DenialRestartsOnlyOnGrant",
+    "FailedImpliesNoRow",
+    "SucceededImpliesOneRow",
+    "UnknownOnlyAfterDispatch"
+   ],
+   "witnesses": [
+    "AgentWaitsForStartWitness",
+    "SupersededStartWitness",
+    "DeniedStoppedWitness",
+    "EndedTrackWitness",
+    "RestartedAfterGrantWitness",
+    "AgentPhotoWitness"
+   ],
+   "sources": [
+    "apps/app/src/prototype/camera-adapter.ts",
+    "apps/app/src/prototype/browser-camera.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/prototype/camera-adapter.ts",
+     "name": "restartAfterResume"
+    },
+    {
+     "path": "apps/app/src/prototype/camera-adapter.ts",
+     "name": "takeRequestedPhoto"
+    },
+    {
+     "path": "apps/app/src/prototype/camera-adapter.ts",
+     "name": "requestedCaptureActive"
+    },
+    {
+     "path": "apps/app/src/prototype/camera-adapter.ts",
+     "name": "phase"
+    },
+    {
+     "path": "apps/app/src/prototype/camera-adapter.ts",
+     "name": "epoch"
+    },
+    {
+     "path": "apps/app/src/prototype/camera-adapter.ts",
+     "name": "controlBusy"
+    },
+    {
+     "path": "apps/app/src/prototype/browser-camera.ts",
+     "name": "startPreview"
+    },
+    {
+     "path": "apps/app/src/prototype/browser-camera.ts",
+     "name": "stopPreview"
+    },
+    {
+     "path": "apps/app/src/prototype/browser-camera.ts",
+     "name": "switchCamera"
+    },
+    {
+     "path": "apps/app/src/prototype/browser-camera.ts",
+     "name": "capturePhoto"
+    },
+    {
+     "path": "apps/app/src/prototype/browser-camera.ts",
+     "name": "generation"
+    }
+   ],
+   "abstractions": [
+    "One preview, five epochs and three saved photos. Zoom, flash, focus and the access panel are omitted.",
+    "A photo requested while the preview is starting waits for that start, and an ended track or failed camera flip leaves the ready phase; these are the behaviours the invariants require of the adapter.",
+    "Model safety checks do not establish implementation refinement or device acceptance."
+   ]
+  },
+  {
+   "path": "specs/quint/native/VideoRecorder.qnt",
+   "module": "VideoRecorder",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "limitReachedStillSavesTest",
+    "exactLimitKeepsChunkTest",
+    "emptyRecordingFailsTest",
+    "leaveFinalisesFirstTest",
+    "recorderErrorDiscardsTest"
+   ],
+   "invariants": [
+    "LimitTruncatesNotDiscards",
+    "WithinSizeLimit",
+    "SettledExactlyOnce",
+    "CancelledSessionNeverWritesRow",
+    "LeaveFinalisesBeforePreviewStop",
+    "OneFinalisation"
+   ],
+   "witnesses": [
+    "LimitReachedWithVideoWitness",
+    "OverflowChunkDroppedWitness",
+    "SavedRowWitness",
+    "LeavingWhileRecordingWitness",
+    "FailedFinalisationWitness"
+   ],
+   "sources": [
+    "apps/app/src/browser/video-capture.ts",
+    "apps/app/src/prototype/camera-adapter.ts",
+    "apps/app/src/prototype/browser-camera.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/browser/video-capture.ts",
+     "name": "BrowserVideoCapture"
+    },
+    {
+     "path": "apps/app/src/browser/video-capture.ts",
+     "name": "admitVideoChunk"
+    },
+    {
+     "path": "apps/app/src/browser/video-capture.ts",
+     "name": "cancel"
+    },
+    {
+     "path": "apps/app/src/browser/video-capture.ts",
+     "name": "settled"
+    },
+    {
+     "path": "apps/app/src/browser/video-capture.ts",
+     "name": "stopping"
+    },
+    {
+     "path": "apps/app/src/prototype/camera-adapter.ts",
+     "name": "finishVideo"
+    },
+    {
+     "path": "apps/app/src/prototype/camera-adapter.ts",
+     "name": "finalizing"
+    },
+    {
+     "path": "apps/app/src/prototype/camera-adapter.ts",
+     "name": "recordingStarting"
+    },
+    {
+     "path": "apps/app/src/prototype/browser-camera.ts",
+     "name": "videoSession"
+    },
+    {
+     "path": "apps/app/src/prototype/browser-camera.ts",
+     "name": "videoSave"
+    },
+    {
+     "path": "apps/app/src/prototype/browser-camera.ts",
+     "name": "stopRecording"
+    }
+   ],
+   "abstractions": [
+    "A size limit of two units with chunks of one to three units; the duration limit and an ended track are one stop event; the five-second stop deadline is one nondeterministic step.",
+    "Microphone acquisition, canvas transforms and MIME confirmation are folded into the start and settle outcomes. Android's native recorder is outside this model.",
+    "Model safety checks do not establish implementation refinement or device acceptance."
+   ]
+  },
+  {
+   "path": "specs/quint/native/VideoEditReview.qnt",
+   "module": "VideoEditReview",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "trimClampedTest",
+    "clockRoundsIntoMinutesTest",
+    "saveOnceThenCloseTest",
+    "failedSaveNeedsReopenTest",
+    "hiddenPageDropsResultTest"
+   ],
+   "invariants": [
+    "TrimValid",
+    "SubmittedEditFrozen",
+    "OneSavePerEditor",
+    "HiddenEditorClosed",
+    "ClosedAbortsSave",
+    "SavedOutcomeCloses"
+   ],
+   "witnesses": [
+    "TightestTrimWitness",
+    "UnsavedCopyWitness",
+    "LateResultDroppedWitness",
+    "SavedCopyWitness"
+   ],
+   "sources": [
+    "apps/app/src/prototype/video-edit-review.ts",
+    "apps/app/src/browser/video-edit.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/prototype/video-edit-review.ts",
+     "name": "clock"
+    },
+    {
+     "path": "apps/app/src/prototype/video-edit-review.ts",
+     "name": "trim"
+    },
+    {
+     "path": "apps/app/src/prototype/video-edit-review.ts",
+     "name": "commit"
+    },
+    {
+     "path": "apps/app/src/prototype/video-edit-review.ts",
+     "name": "dispose"
+    },
+    {
+     "path": "apps/app/src/prototype/video-edit-review.ts",
+     "name": "busy"
+    },
+    {
+     "path": "apps/app/src/prototype/video-edit-review.ts",
+     "name": "loaded"
+    },
+    {
+     "path": "apps/app/src/browser/video-edit.ts",
+     "name": "validateVideoEdit"
+    }
+   ],
+   "abstractions": [
+    "A four-tenths source with trim positions in tenths of a second. Preview frames and playback position are omitted.",
+    "The clock is checked as a pure function over representative values in hundredths of a second, rounded to tenths before minutes and seconds are split.",
+    "Model safety checks do not establish implementation refinement or device acceptance."
+   ]
+  },
+  {
+   "path": "specs/quint/native/CopyReceipt.qnt",
+   "module": "CopyReceipt",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "copyAndReceiptCommitTogetherTest",
+    "readRetiresSuspendedSaveTest",
+    "changedSourceFailsTest",
+    "identityEditMakesNoCopyTest",
+    "otherParametersRefusedTest"
+   ],
+   "invariants": [
+    "AtMostOneCopyPerOperation",
+    "CopyIffSavedReceipt",
+    "ReadRetiresUncommitted",
+    "SourceNeverWritten",
+    "SavingHasOneOwner"
+   ],
+   "witnesses": [
+    "SuspendedSaveRetiredWitness",
+    "SavedCopyWitness",
+    "ChangedSourceFailedWitness",
+    "SecondSaveRefusedWitness"
+   ],
+   "sources": [
+    "apps/app/src/prototype/browser-camera.ts",
+    "apps/app/src/prototype/camera-adapter.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/prototype/browser-camera.ts",
+     "name": "savePhotoEdit"
+    },
+    {
+     "path": "apps/app/src/prototype/browser-camera.ts",
+     "name": "resultPhotoEdit"
+    },
+    {
+     "path": "apps/app/src/prototype/browser-camera.ts",
+     "name": "cancelPhotoEdit"
+    },
+    {
+     "path": "apps/app/src/prototype/browser-camera.ts",
+     "name": "beginPhotoEdit"
+    },
+    {
+     "path": "apps/app/src/prototype/browser-camera.ts",
+     "name": "EditRecord"
+    },
+    {
+     "path": "apps/app/src/prototype/browser-camera.ts",
+     "name": "saveVideoCopy"
+    },
+    {
+     "path": "apps/app/src/prototype/browser-camera.ts",
+     "name": "outcome"
+    },
+    {
+     "path": "apps/app/src/prototype/camera-adapter.ts",
+     "name": "pendingNativeVideoCopy"
+    }
+   ],
+   "abstractions": [
+    "One photo edit operation, three save attempts, two non-identity parameter sets and two external source edits. Each IndexedDB transaction is one atomic step.",
+    "The video copy receipt is created by its first save instead of by opening the editor; it follows the same saving, saved and failed states and is not modeled separately. Receipts are never deleted.",
+    "Model safety checks do not establish implementation refinement or device acceptance."
+   ]
+  },
+  {
+   "path": "specs/quint/native/DeletionUndoPoller.qnt",
+   "module": "DeletionUndoPoller",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "idleThenPendingCadenceTest",
+    "changeDuringReadReadsOnceMoreTest",
+    "identityChangeDropsLateReadTest",
+    "hiddenPageStopsPollingTest",
+    "repeatedFailuresFallBackTest"
+   ],
+   "invariants": [
+    "SingleFlight",
+    "ClosePollOnlyWhenNeeded",
+    "HiddenSchedulesNothing",
+    "StaleIdentityNeverShown",
+    "HiddenOrLockedShowsNothing",
+    "IdleViewKeepsReading"
+   ],
+   "witnesses": [
+    "IdlePollWitness",
+    "ChangeDuringReadWitness",
+    "StaleReadDroppedWitness",
+    "ThreeFailuresWitness"
+   ],
+   "sources": [
+    "apps/app/src/runtime/deletion-undo.tsx"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/runtime/deletion-undo.tsx",
+     "name": "DeletionUndo"
+    },
+    {
+     "path": "apps/app/src/runtime/deletion-undo.tsx",
+     "name": "deletionPollDelay"
+    },
+    {
+     "path": "apps/app/src/runtime/deletion-undo.tsx",
+     "name": "DELETION_POLL_ACTIVE"
+    },
+    {
+     "path": "apps/app/src/runtime/deletion-undo.tsx",
+     "name": "DELETION_POLL_IDLE"
+    },
+    {
+     "path": "apps/app/src/runtime/deletion-undo.tsx",
+     "name": "identityEpoch"
+    },
+    {
+     "path": "apps/app/src/runtime/deletion-undo.tsx",
+     "name": "inflight"
+    },
+    {
+     "path": "apps/app/src/runtime/deletion-undo.tsx",
+     "name": "knownPending"
+    },
+    {
+     "path": "apps/app/src/runtime/deletion-undo.tsx",
+     "name": "failures"
+    }
+   ],
+   "abstractions": [
+    "One reader, three identities and one pending flag for all rows. The 500 ms and 5 s delays are the two timer kinds; a timer fires at any time.",
+    "Undo and dismiss buttons are in DeletionJournal; forgetting deleted note origins is omitted.",
+    "Model safety checks do not establish implementation refinement or device acceptance."
+   ]
+  }
+ ],
+ "update": [
+  {
+   "module": "ScanDocument",
+   "set": {
+    "tests": [
+     "orderedLayersTest",
+     "serializedAutosaveTest",
+     "staleCasTest",
+     "nativePickerVisibilityTest",
+     "unknownExportTest",
+     "cancelledExportRetryTest",
+     "exportWaitsForQueuedDraftsTest",
+     "automaticDraftCleanupTest",
+     "explicitSaveAfterAutosaveKeepsDraftTest",
+     "loadEditExportKeepsDraftTest",
+     "removedLastPageEndsOwnDraftTest",
+     "failedOwnDraftDeleteKeepsDraftTest",
+     "removedLastPageKeepsSavedDraftTest",
+     "searchableFailureStaysRetryableTest",
+     "searchableCloseWhilePreparingTest",
+     "searchableCloseAfterRequestTest",
+     "searchableExportClearsOwnDraftTest",
+     "loadedDraftRetainedTest"
+    ],
+    "invariants": [
+     "TypeOK",
+     "TextStaysWithPage",
+     "BoundedDraft",
+     "WriterSerialized",
+     "ImmutableExport",
+     "UnknownExportLocked",
+     "ClosedNoWriter",
+     "DefiniteNonWriteRetryable",
+     "LockNeedsProviderRequest",
+     "ExplicitlySavedDraftPreserved",
+     "RemovedPagesNotResurrected"
+    ],
+    "witnesses": [
+     "ExplicitSaveExportedWitness",
+     "SearchUnconfirmedWitness",
+     "RetryableSearchWitness",
+     "OwnedDraftAwaitingDeleteWitness",
+     "EmptiedOwnedDraftWitness"
+    ],
+    "symbols": [
+     {
+      "path": "apps/app/src/prototype/scan-document.ts",
+      "name": "openScanDocument"
+     },
+     {
+      "path": "apps/app/src/prototype/scan-document.ts",
+      "name": "ownsAutoDraftAfterSave"
+     },
+     {
+      "path": "apps/app/src/prototype/scan-document.ts",
+      "name": "searchableReviewLocksExport"
+     },
+     {
+      "path": "apps/app/src/prototype/scan-document.ts",
+      "name": "clearAutoDraft"
+     },
+     {
+      "path": "apps/app/src/prototype/scan-document.ts",
+      "name": "autosave"
+     },
+     {
+      "path": "apps/app/src/prototype/scan-document.ts",
+      "name": "autoSaved"
+     },
+     {
+      "path": "apps/app/src/prototype/scan-document.ts",
+      "name": "draftRevision"
+     },
+     {
+      "path": "apps/app/src/prototype/scan-pdf.ts",
+      "name": "scanPdfRetryable"
+     },
+     {
+      "path": "apps/app/src/prototype/scan-pdf.ts",
+      "name": "exportScanPdf"
+     },
+     {
+      "path": "apps/app/src/prototype/scan-pdf.ts",
+      "name": "ScanPdfExportError"
+     },
+     {
+      "path": "apps/app/src/prototype/scan-searchable-review.ts",
+      "name": "reviewSearchableScan"
+     },
+     {
+      "path": "apps/app/src/prototype/scan-searchable-review.ts",
+      "name": "searchableCloseUnconfirmed"
+     },
+     {
+      "path": "apps/app/src/browser/scan-draft.ts",
+      "name": "saveScanDraft"
+     },
+     {
+      "path": "apps/app/src/browser/scan-draft.ts",
+      "name": "deleteScanDraft"
+     },
+     {
+      "path": "apps/app/src/browser/scan-draft.ts",
+      "name": "readScanDraft"
+     }
+    ],
+    "sharedSources": [
+     ".eliza/client-features/plugins/plugin-files/src/documents/scan-draft.ts",
+     ".eliza/client-features/plugins/plugin-files/src/documents/scan-text-layer.ts",
+     ".eliza/client-features/plugins/plugin-files/src/documents/scan-pdf.ts"
+    ],
+    "stateMapping": {
+     "pages/exportPages": "ordered image/text-layer pairs and immutable export snapshot",
+     "queued/saving/pendingPages/pendingExpected": "serialized captured autosave work and CAS checked against current stored revision; an empty queued snapshot is the task that ends this review's own draft",
+     "storedRevision/expectedRevision/autoSaved/userSaved/deleteFailed": "saved draft ownership: created by this review's autosave versus explicitly saved or loaded, and automatic-draft cleanup",
+     "phase/picker/closed": "editor operation admission, the searchable review phases and the system-picker visibility exception",
+     "exported/output/asked": "retryable known non-writes versus requested/exported/unverified/unconfirmed outcomes on the plain and searchable routes, locked only once the provider was asked"
+    },
+    "abstractions": [
+     "Two pages, two queued writes and four non-reused draft revisions represent source limits of 20 pages and arbitrary UUID revisions.",
+     "Opaque image identities encode already-validated MIME, dimensions and size. Each text layer stays with its image through reorder and is cleared on image replacement.",
+     "The exported flag follows the source UI retry lock and does not assert that a provider has saved a PDF. Requested, unverified and unconfirmed outcomes lock retry; failed, unavailable, too-large and cancelled do not, on either route.",
+     "Text recognition and page correction run under the document's busy flag and are atomic; the searchable review is modeled from its Download step. A searchable review closed after its provider request settles the picker flag at once.",
+     "Autosave marks only a draft it created. An explicit save or a load clears the mark, so a confirmed export leaves that draft, and removing the last page deletes only a draft this review created."
+    ]
+   },
+   "unset": [
+    "expectedViolations"
+   ]
+  },
+  {
+   "module": "PdfWorker",
+   "set": {
+    "tests": [
+     "renderAndReplyTest",
+     "busyRejectTest",
+     "invalidBoundsTest",
+     "protectionFailureTest",
+     "timeoutCleanupTest",
+     "memoryAbortTest",
+     "nonIsolatedRefusedTest"
+    ],
+    "invariants": [
+     "IsolatedAdmission",
+     "ActiveRequestOwned",
+     "MappingHasStorage",
+     "ReadyResourcesClosed",
+     "PublishedReadOnly",
+     "ReadOnlyNotMapped"
+    ],
+    "witnesses": [
+     "MappedOutputWitness",
+     "WatchdogKilledWitness",
+     "BusyRefusalWitness"
+    ]
+   }
+  },
+  {
+   "module": "NotesLifecycle",
+   "set": {
+    "tests": [
+     "failedSaveKeepsDraftTest",
+     "deletionRestartRestoreTest",
+     "expiryTest",
+     "concurrentEditTest",
+     "eraseFreshTrashRowTest",
+     "fullTrashPermanentDeleteTest",
+     "changedNoteAfterRefusalTest",
+     "pendingSaveBlocksDeletionTest"
+    ],
+    "invariants": [
+     "RestorableBytes",
+     "TombstoneMeaning",
+     "TrashHasContent",
+     "ForeverDeletesRefusedRevision",
+     "RefusalNeedsSavedNote",
+     "KeptDraftSurvives"
+    ],
+    "witnesses": [
+     "ConfirmedPermanentWitness",
+     "StaleRefusalWitness",
+     "KeptDraftOverNewerSaveWitness"
+    ],
+    "symbols": [
+     {
+      "path": "apps/app/src/prototype/notes-trash-adapter.ts",
+      "name": "moveToTrash"
+     },
+     {
+      "path": "apps/app/src/prototype/notes-trash-adapter.ts",
+      "name": "deleteForever"
+     },
+     {
+      "path": "apps/app/src/prototype/notes-trash-adapter.ts",
+      "name": "erase"
+     },
+     {
+      "path": "apps/app/src/prototype/notes-trash-adapter.ts",
+      "name": "restore"
+     },
+     {
+      "path": "apps/app/src/prototype/notes-trash-adapter.ts",
+      "name": "refused"
+     },
+     {
+      "path": "apps/app/src/runtime/notes-secure-store.ts",
+      "name": "saveDraft"
+     },
+     {
+      "path": "apps/app/src/runtime/notes-secure-store.ts",
+      "name": "readDraft"
+     }
+    ],
+    "sources": [
+     "apps/app/src/runtime/notes-store.ts",
+     "apps/app/src/runtime/notes-trash.ts",
+     "apps/app/src/runtime/notes-trash-policy.ts",
+     "apps/app/src/runtime/notes-secure-store.ts",
+     "apps/app/src/prototype/notes-document-adapter.ts",
+     "apps/app/src/prototype/notes-trash-adapter.ts",
+     "apps/app/src/browser/domain-document.ts"
+    ],
+    "abstractions": [
+     "One representative note with opaque contents, three revisions and a three-step Trash age. A full Trash is an environment flag; the refusal remembers the refused revision.",
+     "Confirmed Empty Trash, Delete forever and the full-Trash permanent deletion are the only ways a deleted note younger than the retention period has no Trash row.",
+     "The kept draft is one flag here; its merge, apply and clear rules are in NotesDraftSlot, and the Trash surface is in NotesTrashSession.",
+     "Model safety checks do not establish implementation refinement or device acceptance."
+    ]
+   }
+  },
+  {
+   "module": "DurableStore",
+   "set": {
+    "tests": [
+     "competingWriterTest",
+     "corruptRecoveryTest",
+     "staleRecoveryTest",
+     "failedWriteRetainsDraftTest",
+     "firstReadImportsLegacyTest",
+     "emptyDomainReadWritesNothingTest",
+     "firstEditCreatesTest",
+     "legacyChangedBeforeFirstCommitTest"
+    ],
+    "invariants": [
+     "CommitCurrent",
+     "LegacyRetained",
+     "BoundedVersion",
+     "ReadImportsOnlyLegacy",
+     "AbsentUntouched"
+    ],
+    "witnesses": [
+     "AbsentNoLegacyReadWitness",
+     "ImportedLegacyWitness",
+     "CreatedByEditWitness",
+     "StaleCaptureWitness"
+    ],
+    "symbols": [
+     {
+      "path": "apps/app/src/browser/domain-document.ts",
+      "name": "BrowserDomainDocument"
+     },
+     {
+      "path": "apps/app/src/browser/domain-document.ts",
+      "name": "load"
+     },
+     {
+      "path": "apps/app/src/browser/domain-document.ts",
+      "name": "edit"
+     },
+     {
+      "path": "apps/app/src/browser/domain-document.ts",
+      "name": "readOrCreate"
+     },
+     {
+      "path": "apps/app/src/browser/domain-document.ts",
+      "name": "unchanged"
+     }
+    ],
+    "abstractions": [
+     "One document with finite content identities, non-reused revision classes, explicit corrupt metadata and legacy-write fencing.",
+     "The domain starts present or absent, with or without legacy bytes. Creation by the first read keeps version 0; a concurrent creator is a concurrent write.",
+     "Encryption and storage-engine transactional correctness are environment contracts."
+    ]
+   }
+  },
+  {
+   "module": "FilesAndSharing",
+   "set": {
+    "tests": [
+     "exactCopyTest",
+     "changedSourceTest",
+     "changedOwnerTest",
+     "failedInsertNeedsNewReviewTest",
+     "revokedReadTest"
+    ],
+    "invariants": [
+     "ExactDraft",
+     "ReviewSelection",
+     "FailedReviewInert",
+     "CancelledHoldsNoBytes"
+    ],
+    "witnesses": [
+     "FailedInsertWitness",
+     "StaleCheckedReviewWitness",
+     "InsertedThenSourceChangedWitness"
+    ],
+    "symbols": [
+     {
+      "path": "apps/app/src/prototype/file-email-review.ts",
+      "name": "reviewFileEmail"
+     },
+     {
+      "path": "apps/app/src/prototype/file-email-review.ts",
+      "name": "busy"
+     }
+    ],
+    "sources": [
+     "apps/app/src/prototype/file-email-review.ts",
+     "apps/app/src/runtime/inbox-attachment.ts",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaMailAttachmentsPlugin.java"
+    ],
+    "abstractions": [
+     "Finite representative identities and contents for one file-to-email review. A failed insert leaves only Cancel until the review is opened again.",
+     "The share panel and the pending saved-copy request are modeled in SharePanel and MediaCopyIntent.",
+     "Model safety checks do not establish implementation refinement or device acceptance."
+    ]
+   }
+  },
+  {
+   "module": "PermanentVoiceDeletion",
+   "set": {
+    "tests": [
+     "finishInterruptedDeletionTest",
+     "rollbackRecordingTest",
+     "purgedRecordingCommitsNoteTest",
+     "sharedAudioReviewTest",
+     "liveRendererLeaseTest",
+     "changedNoteReviewTest",
+     "recoveryPlanCasesTest",
+     "liveOwnRowNotRecoveredTest",
+     "lostOwnershipReviewTest"
+    ],
+    "invariants": [
+     "ExactRecoveryOwnership",
+     "NoUnownedErasure",
+     "ChangedRecordNeedsReview",
+     "UnownedNeedsReview"
+    ],
+    "witnesses": [
+     "LiveOwnRowWitness",
+     "UnownedUnderReviewWitness",
+     "ErasedWitness"
+    ],
+    "symbols": [
+     {
+      "path": "apps/app/src/runtime/permanent-voice-deletion.ts",
+      "name": "planInterruptedPermanentDeletion"
+     },
+     {
+      "path": "apps/app/src/runtime/permanent-voice-deletion.ts",
+      "name": "claimDeletion"
+     },
+     {
+      "path": "apps/app/src/runtime/permanent-voice-deletion.ts",
+      "name": "deletionClaimedElsewhere"
+     },
+     {
+      "path": "apps/app/src/runtime/permanent-voice-deletion.ts",
+      "name": "leasedDeletionRow"
+     }
+    ],
+    "abstractions": [
+     "Finite representative operation and payload identities. A row is either left by an earlier process or started by this live view; only the former is recovered. See application README for source contract and evidence."
+    ]
+   }
+  },
+  {
+   "module": "FilesTree",
+   "set": {
+    "tests": [
+     "partialBatchTest",
+     "staleRevisionTest",
+     "permissionLossMidBatchTest",
+     "hiddenPickerReturnTest",
+     "stalePickerReturnTest",
+     "revokedListingClearsSelectionTest",
+     "lateListingAfterLeaveTest",
+     "shareSelectionLeavesTreeTest",
+     "changedFolderQuestionAddsNothingTest",
+     "folderCreationTest"
+    ],
+    "invariants": [
+     "ExactReviewedRevision",
+     "DeleteReviewStatesPermanence",
+     "HandoffLeavesTreeUnchanged",
+     "FolderQuestionFromCurrentListing",
+     "PartialOutcomesDisjoint",
+     "EachItemAttemptedOnce",
+     "RevokedCapabilitiesEmpty",
+     "SelectionFromListing",
+     "TypeOK"
+    ],
+    "witnesses": [
+     "RevokedHandoffWitness",
+     "SelectedRowsRevokedWitness",
+     "StaleFolderReviewWitness",
+     "FolderQuestionComposedWitness"
+    ],
+    "symbols": [
+     {
+      "path": "apps/app/src/prototype/files-tree-adapter.ts",
+      "name": "installFilesTreeAdapter"
+     },
+     {
+      "path": "apps/app/src/prototype/files-tree-adapter.ts",
+      "name": "askFolder"
+     },
+     {
+      "path": "apps/app/src/prototype/files-tree-adapter.ts",
+      "name": "selectionEpoch"
+     },
+     {
+      "path": "apps/app/src/prototype/files-tree-adapter.ts",
+      "name": "resetSelection"
+     },
+     {
+      "path": "apps/app/src/prototype/files-tree-adapter.ts",
+      "name": "changeMany"
+     },
+     {
+      "path": "apps/app/src/prototype/files-tree-adapter.ts",
+      "name": "shareMany"
+     },
+     {
+      "path": "apps/app/src/prototype/files-tree-adapter.ts",
+      "name": "saveMany"
+     },
+     {
+      "path": "apps/app/src/prototype/files-tree-adapter.ts",
+      "name": "confirmPermanent"
+     },
+     {
+      "path": "apps/app/src/prototype/files-tree-adapter.ts",
+      "name": "loadMore"
+     }
+    ],
+    "stateMapping": {
+     "granted/session/capabilities": "native persisted tree grant and bounded per-process entry map",
+     "selection/review/expected/pending/attempted/succeeded/failed": "current selection, revision-bound changeMany and per-item partial outcomes",
+     "picker/pickerEpoch/active/hidden": "view-generation-fenced system picker return, permitted while the document is hidden",
+     "folder/requestFolder/requestEpoch/shown/cursor/listingPending/listingGeneration": "single-flight tree listing fenced by view epoch and active owner, page cursor and deduplicated loadMore",
+     "handoff/handoffExpected/handoffEffects": "shareMany and saveMany over the selected rows with the listed revisions",
+     "folderReview/folderExpected/composed": "folder question reviewed against one listing and re-read before it reaches the conversation draft"
+    },
+    "abstractions": [
+     "Three representative entries (two files and one created folder), two folder identities, two sessions, revisions 0..2 and up to four applied effects.",
+     "Opaque entry and selection capabilities retain their role without provider paths or credentials. Tree access and separately selected document access remain distinct.",
+     "Provider failures and stale revisions are per-item; a committed item is not rolled back when a later item fails. Review is required before mutation; the delete review states permanence and native requires confirmPermanent.",
+     "Share and save hand rows to Android without changing the tree. The recent list and its grants are in FilesRecentIndex.",
+     "The model covers Alpha tree orchestration and native request admission. Document provider filesystem implementation and exact payload bytes remain implementation test boundaries."
+    ]
+   }
+  },
+  {
+   "module": "DeletionJournal",
+   "set": {
+    "tests": [
+     "undoBeforeExpiryTest",
+     "lostOutcomeNeverReplaysTest",
+     "staleOwnerPausesTest",
+     "changedClockKeepsUndoTest",
+     "repeatedUndoReturnsUndoneRowTest",
+     "changedSourcePausesBeforeDispatchTest",
+     "providerConflictAfterDispatchTest",
+     "permissionFailureKeepsUndoTest"
+    ],
+    "invariants": [
+     "PausedKeepsUndo",
+     "SingleDispatch",
+     "UndoKeepsSource",
+     "DurableIntentBeforeEffect",
+     "ReceiptNeedsDispatch",
+     "UnknownNeverRequeued"
+    ],
+    "witnesses": [
+     "PausedBeforeDispatchWitness",
+     "ProviderConflictWitness",
+     "UndoneWitness",
+     "AcknowledgedUnknownWitness"
+    ],
+    "symbols": [
+     {
+      "path": "apps/app/src/runtime/deletion-window.ts",
+      "name": "claimDeletion"
+     },
+     {
+      "path": "apps/app/src/runtime/deletion-window.ts",
+      "name": "deletionWindow"
+     },
+     {
+      "path": "apps/app/src/runtime/deletion-window.ts",
+      "name": "undoConfirmed"
+     },
+     {
+      "path": "apps/app/src/browser/reminder-deletions.ts",
+      "name": "claimDeletion"
+     }
+    ],
+    "sources": [
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/DeferredDeletionJournal.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/NativeDeletionCoordinator.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/NativeDeletionClaim.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/NativeDeletionRecovery.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/DeletionDeadline.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/DeletionWorker.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/NotesDeletionLease.java",
+     "apps/app/src/runtime/deletion-owner.ts",
+     "apps/app/src/runtime/deletion-window.ts",
+     "apps/app/src/runtime/deletions.ts",
+     "apps/app/src/runtime/note-audio-deletions.ts",
+     "apps/app/src/browser/reminder-deletions.ts",
+     "apps/app/src/runtime/deletion-undo.tsx"
+    ],
+    "abstractions": [
+     "One operation, two owner identities, two source revisions and open/expired/clock-changed windows.",
+     "Atomic durable writes are represented by storage success; capacity and multi-row scheduling are omitted.",
+     "A stored dispatching row projects unknown on restart and is never automatically dispatched again.",
+     "A changed owner or source pauses the row before any dispatch, and Undo of an undone row returns it again. The browser reminder twin is held to the same rules; the Calendar twin is allocated to CalendarSync."
+    ]
+   }
+  },
+  {
+   "module": "MediaLifecycle",
+   "set": {
+    "tests": [
+     "reviewedChangeTest",
+     "revokeWhileReadingTest",
+     "changedSourceRefusedByAndroidTest",
+     "lateReadForOtherSelectionTest",
+     "ownedCaptureSurvivesPauseTest",
+     "recordingSavedOnPauseTest",
+     "pickerKeepsScanFrameTest",
+     "keepCommittedAfterReviewClosedTest",
+     "ownVideoCopyKeepsViewerTest",
+     "reviewExpiresTest",
+     "hiddenPageEndsReviewTest"
+    ],
+    "invariants": [
+     "LoadedMatchesSelection",
+     "PermittedLoadNeedsAccess",
+     "ReviewBindsRevision",
+     "PlaybackAdmitted",
+     "AppliedChangeMatchesReview",
+     "PermittedCatalogNeedsAccess",
+     "OwnedCapturesRetained",
+     "HiddenFrameNeedsPicker",
+     "UnknownKeepIsCommitted",
+     "RecordingNeedsForeground"
+    ],
+    "witnesses": [
+     "OwnedSurvivesDenialWitness",
+     "StaleReadPendingWitness",
+     "HiddenPickerFrameWitness",
+     "UnknownKeepWitness",
+     "AppliedChangeWitness",
+     "OwnCopyKeepsPlaybackWitness"
+    ],
+    "symbols": [
+     {
+      "path": "apps/app/src/prototype/camera-adapter.ts",
+      "name": "invalidateLibrary"
+     },
+     {
+      "path": "apps/app/src/prototype/camera-adapter.ts",
+      "name": "keepScan"
+     },
+     {
+      "path": "apps/app/src/prototype/camera-adapter.ts",
+      "name": "finishVideo"
+     },
+     {
+      "path": "apps/app/src/prototype/camera-adapter.ts",
+      "name": "permittedLibrary"
+     },
+     {
+      "path": "apps/app/src/prototype/camera-adapter.ts",
+      "name": "retirePhotoRead"
+     },
+     {
+      "path": "apps/app/src/prototype/camera-adapter.ts",
+      "name": "libraryEpoch"
+     },
+     {
+      "path": "apps/app/src/runtime/photo-library.ts",
+      "name": "reviewCurrent"
+     },
+     {
+      "path": "apps/app/src/runtime/photo-library.ts",
+      "name": "REVIEW_TTL"
+     }
+    ],
+    "sources": [
+     "apps/app/src/runtime/photo-library.ts",
+     "apps/app/src/prototype/browser-camera.ts",
+     "apps/app/src/prototype/photo-library-adapter.ts",
+     "apps/app/src/prototype/video-edit-review.ts",
+     "apps/app/src/prototype/camera-adapter.ts",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/NativeReadEpoch.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/PhotoLibraryAccess.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/PermittedMediaCatalog.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/PermittedMediaReview.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/PhotoAttachmentSource.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/SelectedDocumentAccess.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/OwnedVideoPlayback.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/VideoCopyEdits.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaPhotoLibraryPlugin.java"
+    ],
+    "abstractions": [
+     "One permitted item and one app-owned capture identity, two source revisions, five library epochs, four selection tickets and up to three owned rows.",
+     "Full/selected summarize permitted access; mixed/partial policies are represented by current per-item permission. Lock is the locked scope Android reports, which ends the permitted catalog only.",
+     "Photo, video and assistant captures are saved by the shutter with no review; scan mode holds one unsaved frame whose keep commit is not fenced, so a review closed meanwhile leaves a committed photo with an unshown outcome.",
+     "A hidden page clears the permitted catalog only when the library is readable, finishes a recording, and keeps the scan frame only when a system picker was open. The 120-second review lifetime is two ticks.",
+     "Exact content/hash equality is represented by matching revision identities; codecs and pixel transforms are omitted. Preview, recording, copy receipts and the device library are detailed in CameraPreview, VideoRecorder, CopyReceipt and DeviceLibrary."
+    ]
+   }
+  }
+ ],
+ "readme": [
+  {
+   "family": "application",
+   "module": "NotesLifecycle",
+   "sourceSymbols": "`editNotesTrash`, `planNotesTrash`, `moveToTrash`, `erase`, `deleteForever`, Notes document adapter and secure store",
+   "modeledState": "One representative note, opaque record content, dirty draft kept through restart, revision conflict, write-ahead Trash, three-day boundary, restore, confirmed erase, full-Trash refusal bound to the refused revision and storage failure"
+  },
+  {
+   "family": "application",
+   "module": "NotesDraftSlot",
+   "sourceSymbols": "`SecureNotesStore.saveDraft`, `readDraft`, `clearDraft`, `mergeNotesDrafts`, `applyNotesDraft`, `notesDraftConflicts`, `keepNotesDraft`, `resumeNotesDraft`",
+   "modeledState": "Encrypted draft slot with three compare-and-swap attempts, merge with a draft kept from an earlier session, replacement of the editor's own draft, apply only over unchanged saved content and exact clear"
+  },
+  {
+   "family": "application",
+   "module": "NotesTrashSession",
+   "sourceSymbols": "`installNotesTrashAdapter`, `runMaintenance`, `scheduleMaintenance`, `erase`, `restore`, `deleteForever`, `notes.back`",
+   "modeledState": "Single-flight maintenance joined by foreground callers, one destructive action at a time, Trash confirmation, full-Trash choice and its in-memory refusal"
+  },
+  {
+   "family": "application",
+   "module": "DurableStore",
+   "sourceSymbols": "`BrowserDomainDocument.load`, `edit`, `capture`, `restore`, `reset`",
+   "modeledState": "One document transaction starting present or absent, legacy import on first read or edit, no write for an empty domain, two distinct revisions, preserved legacy bytes, corrupt metadata, explicit recovery and persistence failure"
+  },
+  {
+   "family": "application",
+   "module": "PermanentVoiceDeletion",
+   "sourceSymbols": "`planInterruptedPermanentDeletion`, `leasedDeletionRow`, `claimDeletion`, `changeAudioDeletion`",
+   "modeledState": "Separate note and recording effects, exact ownership and its loss, rows started by a live view versus left by an earlier process, external references, shared-lock/renderer-lease admission, restore versus erase"
+  },
+  {
+   "family": "application",
+   "module": "FilesTree",
+   "sourceSymbols": "`files-tree-adapter` mutation, selection, paging, picker, `askFolder`, `shareMany` and `saveMany` entry points",
+   "modeledState": "Separate tree/picker access, epoch-fenced listing, revision-bound partial batch results, selection invalidation, one-step permanent deletion review, share/save handoff, folder question re-read and native restart"
+  },
+  {
+   "family": "application",
+   "module": "FilesRecentIndex",
+   "sourceSymbols": "`createFilesIndex.record`, `revoke`, `remove`, `revokeTree`, `openRecent`",
+   "modeledState": "Bounded de-duplicated recent rows (two for 24), grants released on eviction or replacement, session-scoped tree rows and reopening a revoked or saved row through the picker"
+  },
+  {
+   "family": "application",
+   "module": "FilesAndSharing",
+   "sourceSymbols": "`reviewFileEmail`, `reviewMailAttachment`",
+   "modeledState": "One exact source, owner and draft identity, initially unchecked selection, reread before local insertion, failed insert that leaves only Cancel, cancellation and revoked grant. Send has its own Inbox model"
+  },
+  {
+   "family": "application",
+   "module": "SharePanel",
+   "sourceSymbols": "`openSharePanel`, `unchangedSince`, `installSharePanelAdapter`",
+   "modeledState": "Single panel, identity-first selection watch, refusal of a changed selection, retirement events and one explicit destination handoff"
+  },
+  {
+   "family": "application",
+   "module": "MediaCopyIntent",
+   "sourceSymbols": "`admitMediaCopyIntent`, `acknowledgeMediaCopyIntent`, `readMediaCopyIntent`",
+   "modeledState": "Single pending saved-copy request admitted from empty, exact acknowledgement, recovery after restart, browser revision versus Android token-only storage"
+  },
+  {
+   "family": "services",
+   "module": "ScanDocument",
+   "sourceSymbols": "`openScanDocument`, `ownsAutoDraftAfterSave`, `searchableReviewLocksExport`, `exportScanPdf`, `scanPdfRetryable`, `saveScanDraft`",
+   "modeledState": "Ordered pages with text layers, serialized compare-and-swap autosave, draft ownership (created versus saved or loaded), removal of the last page, plain and searchable export with the retry lock and the unconfirmed outcome"
+  },
+  {
+   "family": "services",
+   "module": "SystemPickerVisibility",
+   "sourceSymbols": "`systemPickerActive`, `duringSystemPicker`, `runFilePicker`, dialog `visibility` handlers",
+   "modeledState": "Picker counter against hidden-page closure for exempt and non-exempt scan dialogs, and the single owned browser file picker with retired late results"
+  },
+  {
+   "family": "services",
+   "module": "ScanReviewDialogs",
+   "sourceSymbols": "`reviewScan` controls (`attempted`, `pdfAttempted`, `keeping`), `reviewSearchableScan`, scan correction preview, `captureScanPage`",
+   "modeledState": "One-shot Notes save and Keep photo, retryable photo PDF, searchable close outcomes, corner changes discarding the correction preview, capture kept when the camera stops"
+  },
+  {
+   "family": "native",
+   "module": "MediaLifecycle",
+   "sourceSymbols": "`camera-adapter` library invalidation, `keepScan`, `finishVideo`, `reviewCurrent`, `NativeReadEpoch`, `PermittedMediaReview`",
+   "modeledState": "Permitted versus app-owned catalogs, per-selection read tickets, reviewed library changes re-checked by Android, shutter publication, unfenced scan keep commit, hidden-page clearing and the picker exemption"
+  },
+  {
+   "family": "native",
+   "module": "DeviceLibrary",
+   "sourceSymbols": "`createDeviceLibrary` (`load`, `revalidate`, `startReview`, `confirmReview`), `reviewCurrent`, `prepareReview`, `LibraryCatalog.observeScope`",
+   "modeledState": "Epoch-fenced catalog loads, single-flight revalidation with one coalesced rerun, selection within the catalog, review limit and lifetime, review cleared with the catalog, Android revision re-check"
+  },
+  {
+   "family": "native",
+   "module": "DeletionJournal",
+   "sourceSymbols": "`DeferredDeletionJournal`, `NativeDeletionCoordinator`, `claimDeletion`, `deletionWindow`, browser reminder twin",
+   "modeledState": "One durable row with operation-id deduplication, Undo window, pause before dispatch on a changed owner or source, idempotent Undo, single dispatch and unknown outcome review"
+  },
+  {
+   "family": "native",
+   "module": "DeletionUndoPoller",
+   "sourceSymbols": "`DeletionUndo` effect (`refresh`, `arm`), `deletionPollDelay`",
+   "modeledState": "Single-flight status read with one coalesced rerun, identity epoch fence, hidden and locked suppression, close poll only while pending or after a recent failure"
+  },
+  {
+   "family": "native",
+   "module": "CameraPreview",
+   "sourceSymbols": "`camera-adapter` `start`, `stop`, `control`, `restartAfterResume`, `takeRequestedPhoto`; `browserCamera.startPreview`",
+   "modeledState": "Preview phase with epoch fence and live track, joinable start for an assistant photo, ended track and failed flip, denial restart only after a grant, capture outcome versus saved rows"
+  },
+  {
+   "family": "native",
+   "module": "VideoRecorder",
+   "sourceSymbols": "`BrowserVideoCapture`, `admitVideoChunk`, `finishVideo`, `record`, `stop`",
+   "modeledState": "Chunk admission against the size limit, stop and settle exactly once, cancellation, one finalisation and row per recording, finalisation before the preview stops"
+  },
+  {
+   "family": "native",
+   "module": "VideoEditReview",
+   "sourceSymbols": "`reviewVideoEdit` controls (`trim`, `commit`, `dispose`, `clock`), `validateVideoEdit`",
+   "modeledState": "Clamped trim range, one save per editor, frozen submitted edit, hidden-page disposal and the rounded trim clock"
+  },
+  {
+   "family": "native",
+   "module": "CopyReceipt",
+   "sourceSymbols": "`beginPhotoEdit`, `savePhotoEdit`, `resultPhotoEdit`, `cancelPhotoEdit`, `saveVideoCopy`",
+   "modeledState": "Receipt status with one owning attempt, copy and saved receipt committed together, uncommitted outcome retired by a read, changed or trashed source failing, original never written"
+  },
+  {
+   "family": "services",
+   "module": "PdfWorker",
+   "sourceSymbols": "`IsolatedPdfService` request admission, render and reply",
+   "modeledState": "Single CAS-owned request, bitmap and shared-memory ownership, read-only output transfer, watchdog and memory teardown"
+  }
+ ]
+}

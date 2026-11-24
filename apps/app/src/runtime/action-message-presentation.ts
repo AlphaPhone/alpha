@@ -169,22 +169,39 @@ export function collapseSystemNotices<T extends ChatRow>(messages: T[]): T[] {
 
 
 /** Display-only projection of an agent Maps card. Links are shown as text, never opened. */
-export type MapsChatCard={kind:MapsCardSpec['kind'];title:string;lines:string[];attribution:string;mapQuery?:string};
+export type MapsChatCard={kind:MapsCardSpec['kind'];title:string;lines:string[];attribution:string;mapQuery?:string;
+ /** Maps reads the phone's position itself, after the user's tap, and searches around it. Chat never receives it. */
+ nearMe?:boolean;
+ /** Maps finds this destination and plans directions to it from the phone's own position, after the user's tap. */
+ directionsFromHere?:boolean;
+ /** A planned route for Maps to draw: both ends as `latitude, longitude`, and how to travel. */
+ route?:{origin:string;destination:string;name:string;travelMode:MapsCardRoute['travelMode']}};
+type MapsCardRoute=Extract<MapsCardSpec,{kind:'route'}>;
 /** The plugin-maps share gate: exactly two bounded answers that are sent back verbatim. */
 export type MapsShareChoice={id:string;options:{label:string;value:string}[]};
 
 const MODES:Record<string,string>={drive:'Driving',walk:'Walking',bicycle:'Cycling',transit:'Transit'};
 const placeLine=(place:MapsCardPlace)=>place.formattedAddress?`${place.name}, ${place.formattedAddress}`:place.name;
-// Alpha's agent context carries no device position, so the locate card cannot be answered here.
+// Alpha's agent context carries no device position, so the locate card is never answered in chat.
+// Maps can serve it on the phone: plugin-maps names the search or the destination in the prompt.
 const LOCATE_LINE='Name a start · Location not shared';
+const NEAR_PROMPT=/^I need your precise location to search near you for “([^”]{1,300})”\.$/;
+const ROUTE_PROMPT=/^I need your precise location to start the route to (.{1,300})\.$/;
+const point=(place:MapsCardPlace)=>`${place.latitude}, ${place.longitude}`;
 
 function present(card:MapsCardSpec):MapsChatCard{
  switch(card.kind){
   case 'place':return {kind:card.kind,title:card.place.name,lines:card.place.formattedAddress?[card.place.formattedAddress]:[],attribution:card.attribution||'',mapQuery:`${card.place.latitude}, ${card.place.longitude}`};
   case 'places':return {kind:card.kind,title:`Places for “${card.query}”`,lines:card.places.map(placeLine),attribution:card.attribution||'',mapQuery:card.query};
-  case 'route':return {kind:card.kind,title:`Route to ${card.destination.name}`,lines:[`From ${card.origin.name}`,`${MODES[card.travelMode]} · ${guidanceDistance(card.distanceMeters)} · ${guidanceDuration(card.durationSeconds)}`,...card.warnings],attribution:card.attribution||'',mapQuery:`${card.destination.latitude}, ${card.destination.longitude}`};
+  case 'route':return {kind:card.kind,title:`Route to ${card.destination.name}`,lines:[`From ${card.origin.name}`,`${MODES[card.travelMode]} · ${guidanceDistance(card.distanceMeters)} · ${guidanceDuration(card.durationSeconds)}`,...card.warnings],attribution:card.attribution||'',mapQuery:point(card.destination),
+   route:{origin:point(card.origin),destination:point(card.destination),name:card.destination.name,travelMode:card.travelMode}};
   case 'handoff':return {kind:card.kind,title:card.handoffKind==='share'?`Location link for ${card.place.name}`:`Directions to ${card.place.name}`,lines:[...(card.place.formattedAddress?[card.place.formattedAddress]:[]),card.webUri],attribution:'',mapQuery:`${card.place.latitude}, ${card.place.longitude}`};
-  case 'locate':return {kind:card.kind,title:'Location needed',lines:[card.intent==='place-near'?'Pick an area in Maps · Location not shared':LOCATE_LINE],attribution:''};
+  case 'locate':{
+   const near=card.intent==='place-near'?NEAR_PROMPT.exec(card.prompt)?.[1]:undefined,to=card.intent==='route-origin'?ROUTE_PROMPT.exec(card.prompt)?.[1]:undefined;
+   if(near)return {kind:card.kind,title:`“${near}” near you`,lines:['Map searches around this phone · Location not shared with chat'],attribution:'',mapQuery:near,nearMe:true};
+   if(to)return {kind:card.kind,title:`Directions to ${to}`,lines:['Map plans the route from this phone · Location not shared with chat'],attribution:'',mapQuery:to,directionsFromHere:true};
+   return {kind:card.kind,title:'Location needed',lines:[card.intent==='place-near'?'Pick an area in Maps · Location not shared':LOCATE_LINE],attribution:''};
+  }
  }
 }
 

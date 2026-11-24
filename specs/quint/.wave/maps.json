@@ -1,0 +1,1062 @@
+{
+  "add": [
+    {
+      "path": "specs/quint/services/MapsConnection.qnt",
+      "module": "MapsConnection",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "onlineKeepsGuidanceTest",
+        "onlineReplacesAttemptInFlightTest",
+        "hiddenFailureRetriedOnReturnTest",
+        "hiddenTimerWaitsForFrontTest",
+        "accountChangeRetiresProviderTest",
+        "signedOutAttemptCannotInstallTest",
+        "requestFailureKeepsConnectionTest",
+        "retryTimerAfterSearchReplacesProviderTest",
+        "searchFailureArmsNoRetryTest"
+      ],
+      "invariants": [
+        "TypeOK",
+        "InstalledForSignedInAccount",
+        "ErrorMeansNoProvider",
+        "AttemptInFlightHasNoProvider",
+        "TrackedAttemptsInFlight",
+        "GuidanceNeedsProvider",
+        "NetworkAndForegroundKeepGuidance",
+        "RequestFailureIsNotSessionError",
+        "TransientFailureHasRetry",
+        "RetryTimerNeedsSignIn"
+      ],
+      "witnesses": [
+        "TransientRetryArmedWitness",
+        "GuidanceOnInstalledProviderWitness",
+        "SupersededAttemptWitness",
+        "RequestFailedWitness",
+        "AccountEndedGuidanceWitness"
+      ],
+      "sources": [
+        "apps/app/src/maps/cloud-maps.ts",
+        "apps/app/src/maps/cloud-provider.ts",
+        "apps/app/src/maps/cloud-session.ts",
+        "apps/app/src/prototype/maps-adapter.ts"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/maps/cloud-maps.ts",
+          "name": "connectNow"
+        },
+        {
+          "path": "apps/app/src/maps/cloud-maps.ts",
+          "name": "scheduleRetry"
+        },
+        {
+          "path": "apps/app/src/maps/cloud-maps.ts",
+          "name": "cloudMapsConnecting"
+        },
+        {
+          "path": "apps/app/src/maps/cloud-maps.ts",
+          "name": "lastAttempt"
+        },
+        {
+          "path": "apps/app/src/maps/cloud-maps.ts",
+          "name": "pending"
+        },
+        {
+          "path": "apps/app/src/maps/cloud-maps.ts",
+          "name": "retries"
+        },
+        {
+          "path": "apps/app/src/maps/cloud-maps.ts",
+          "name": "RETRY_MS"
+        },
+        {
+          "path": "apps/app/src/maps/cloud-maps.ts",
+          "name": "TRANSIENT"
+        },
+        {
+          "path": "apps/app/src/maps/cloud-provider.ts",
+          "name": "initializeCloudMaps"
+        },
+        {
+          "path": "apps/app/src/maps/cloud-provider.ts",
+          "name": "retireCloudMaps"
+        },
+        {
+          "path": "apps/app/src/maps/cloud-provider.ts",
+          "name": "cloudMapsHealthy"
+        },
+        {
+          "path": "apps/app/src/maps/cloud-provider.ts",
+          "name": "uninstall"
+        },
+        {
+          "path": "apps/app/src/maps/cloud-provider.ts",
+          "name": "generation"
+        },
+        {
+          "path": "apps/app/src/maps/cloud-provider.ts",
+          "name": "installed"
+        },
+        {
+          "path": "apps/app/src/maps/cloud-provider.ts",
+          "name": "cloudMapsDiagnostics"
+        },
+        {
+          "path": "apps/app/src/maps/cloud-session.ts",
+          "name": "captureMapsSession"
+        },
+        {
+          "path": "apps/app/src/maps/cloud-session.ts",
+          "name": "assertOwner"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "initializeMaps"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "onMapsConnectionChange"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "activateProvider"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "release"
+        }
+      ],
+      "abstractions": [
+        "Two accounts and seven connection generations; account changes, reconnects and searches are disabled at the generation bound rather than dropped.",
+        "Failure codes are three classes: transient (unavailable, invalid-response, timeout), offline, and unauthorized (which also stands for every other code that is not retried). The retry delay table is a counter that saturates at four; the delays are nondeterministic timer ticks.",
+        "The one-minute limit on unforced attempts is a flag set by an attempt and cleared by a nondeterministic tick. A stored sign-in at launch is the first account change.",
+        "Guidance is one flag owned by the Maps screen: uninstalling the installed provider releases the screen and ends it; activating a provider on an unconfigured screen does not.",
+        "The retry timer callback forces a connection. A timer left armed across a connection the Maps screen started for a search therefore replaces that working connection: TimerKeepsGuidanceDesired is outside safety and retryTimerAfterSearchReplacesProviderTest replays it.",
+        "A connection the Maps screen starts itself does not arm a retry when it fails transiently: EveryTransientFailureHasRetryDesired is outside safety and searchFailureArmsNoRetryTest replays it.",
+        "retryProgress is a temporal property under weak fairness of the timer; the default gate typechecks it and simulation checks the state invariant TransientFailureHasRetry. The regional provider and map-plane retry are not modeled."
+      ]
+    },
+    {
+      "path": "specs/quint/services/GuidanceSession.qnt",
+      "module": "GuidanceSession",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "startEndStartRefusedWatchEndsSessionTest",
+        "staleRefusalIsInertTest",
+        "startWithoutLocationThenFirstFixTest",
+        "deniedLocationEndsGuidanceTest",
+        "arrivalLatchesAndStopsResourcesTest",
+        "failedRerouteKeepsRouteAndRetriesTest",
+        "differentRouteOutsideRerouteEndsSessionTest",
+        "foregroundOnlyGuidanceReleasesWhenHiddenTest",
+        "notificationStopEndsItsSessionTest",
+        "backgroundStartFailingWhileHiddenTest"
+      ],
+      "invariants": [
+        "TypeOK",
+        "RouteFollowedIffNavigating",
+        "NavigationNeedsRouteSheet",
+        "ReroutingNeedsSession",
+        "RetryTimerImpliesNavigating",
+        "StartHasLocationOrError",
+        "WatchBelongsToSession",
+        "ArrivedLatches",
+        "ArrivalStopsResources",
+        "BackgroundOwnedBySession",
+        "StaleSessionCallbacksInert",
+        "PermissionHoldNeedsStartingWatch",
+        "HiddenGuidanceWasAdmitted"
+      ],
+      "witnesses": [
+        "RefusedStartPendingWitness",
+        "WaitingForFirstFixWitness",
+        "ArrivedWitness",
+        "OffRouteWitness",
+        "ReroutingWitness",
+        "HiddenContinuationWitness",
+        "CallbackEndedSessionWitness"
+      ],
+      "sources": [
+        "apps/app/src/prototype/maps-adapter.ts",
+        "apps/app/src/maps/navigation-fix.ts",
+        "apps/app/src/maps/background-navigation.ts",
+        "apps/app/src/maps/native-location.ts",
+        "apps/app/src/maps/device-navigation.ts"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "startGuidance"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "stopGuidance"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "endGuidance"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "onNavFix"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "rerouteFrom"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "scheduleRerouteRetry"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "clearRerouteRetry"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "navSession"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "navRoute"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "rerouteTimer"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "rerouteAttempts"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "backgroundRunning"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "arrived"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "offRoute"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "release"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "continuing"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "awaitingPermission"
+        },
+        {
+          "path": "apps/app/src/maps/navigation-fix.ts",
+          "name": "watchNavigationFixes"
+        },
+        {
+          "path": "apps/app/src/maps/navigation-fix.ts",
+          "name": "usableNavigationFix"
+        },
+        {
+          "path": "apps/app/src/maps/background-navigation.ts",
+          "name": "BackgroundNavigation"
+        },
+        {
+          "path": "apps/app/src/maps/background-navigation.ts",
+          "name": "active"
+        },
+        {
+          "path": "apps/app/src/maps/native-location.ts",
+          "name": "NativeMapsLocation"
+        },
+        {
+          "path": "apps/app/src/maps/device-navigation.ts",
+          "name": "ActiveGuidance"
+        }
+      ],
+      "abstractions": [
+        "Eight guidance sessions and four route identities. stopGuidance moves the session counter even when no session is active; the model leaves it then, since there is no session to tell apart.",
+        "The location owner is its admission flag and the session it admitted; NativeMapsLocation models its internals. The screen-off session is the set of starts in flight and the session BackgroundNavigation holds; BackgroundNavigation models its bridge calls.",
+        "A fix is one of unusable, at the destination, on the route or off it. Maneuver progress, the reroute-cleared handshake and exact retry delays are in NavigationProgress.",
+        "The controller is its route phase and a route identity. A ready route outside a reroute always differs from the route being followed.",
+        "A screen-off start that fails after the page was hidden leaves guidance running without a native session: HiddenGuidanceHasNativeSessionDesired is outside safety and backgroundStartFailingWhileHiddenTest replays it.",
+        "Events that end a session are drawn less often in step so sampled traces reach long sessions; every one stays enabled."
+      ]
+    },
+    {
+      "path": "specs/quint/services/MapsScreenModes.qnt",
+      "module": "MapsScreenModes",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "modesInOrderTest",
+        "lateFixKeepsChosenOriginTest",
+        "lateFixAfterTypedOriginClearsOriginTest",
+        "lateFixDoesNotReplaceSearchTest",
+        "backFromRouteSheetBeforeFixTest",
+        "backUnwindsOneLayerTest",
+        "handoffFencedByNewerActionTest",
+        "agentRouteStartsGuidanceTest"
+      ],
+      "invariants": [
+        "TypeOK",
+        "NavigationNeedsRouteSheet",
+        "DirectionsNeedDestination",
+        "OriginPickNeedsRouteSheet",
+        "LocatingHasRequest",
+        "LateFixNeverReplacesSearch",
+        "ChosenOriginSurvivesLateFix",
+        "HandoffRunsForItsIntent",
+        "HandoffNeedsQuery",
+        "HiddenScreenIsReleased"
+      ],
+      "witnesses": [
+        "GuidanceModeWitness",
+        "OriginPickWitness",
+        "LateFixAfterChosenOriginWitness",
+        "LateFixAfterSearchWitness",
+        "HandoffAppliedWitness",
+        "CurrentLocationPlaceWitness"
+      ],
+      "sources": [
+        "apps/app/src/prototype/maps-adapter.ts",
+        "apps/app/src/maps/device-navigation.ts",
+        "apps/app/src/runtime/maps-event-return.ts"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "searching"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "selected"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "directions"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "originMode"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "locating"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "searchIntent"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "pendingHandoff"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "chosenOrigin"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "originText"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "choosingOrigin"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "isPlace"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "isResults"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "discardHandoff"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "submit"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "locate"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "chooseOrigin"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "editOrigin"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "showAgentPlace"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "showDirections"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "planFrom"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "release"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "YOUR_LOCATION"
+        },
+        {
+          "path": "apps/app/src/maps/device-navigation.ts",
+          "name": "MapsNavigationSurface"
+        },
+        {
+          "path": "apps/app/src/runtime/maps-event-return.ts",
+          "name": "mapsEventReturnOffered"
+        }
+      ],
+      "abstractions": [
+        "The search text is present or absent; the selection is a place or the current location; the starting point is empty, the device's location, typed text or a chosen place. Saved places, dropped pins, renames and sharing do not change the mode.",
+        "User actions are enabled in the modes that draw their control, which is the template's behaviour; agent requests are refused while guidance is active, as device-navigation checks.",
+        "The shared controller is its origin kind, whether its position is ready, and whether a located fix is pending. Route planning settles nondeterministically.",
+        "The hand-off microtask may interleave with other actions here; in the browser it runs before the next event.",
+        "Back from the route sheet leaves its location request pending, and the fix then replaces the place on screen with the current location: OriginFixNeverReplacesPlaceDesired is outside safety and backFromRouteSheetBeforeFixTest replays it.",
+        "The Calendar event return, the external maps app hand-off and map-plane loading are not modeled."
+      ]
+    },
+    {
+      "path": "specs/quint/application/ChatMapsAutoOpen.qnt",
+      "module": "ChatMapsAutoOpen",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "arrivedReplyOpensOnceTest",
+        "restoredHistoryNeverOpensTest",
+        "onlyNewestArrivedResultOpensTest",
+        "showInMapsNeverStartsGuidanceTest",
+        "replyHeldWhileSuspendedOpensOnReturnTest",
+        "replyAfterReplacementBeforeRenderDoesNotOpenTest",
+        "assistantSurfaceNeverOpensTest"
+      ],
+      "invariants": [
+        "TypeOK",
+        "OpensAtMostOnce",
+        "RestoredHistoryNeverOpens",
+        "OnlyArrivedRepliesOpen",
+        "AssistantSurfaceNeverOpens",
+        "DirectStartOnlyForArrivedReply",
+        "FreshIsNewestSeen",
+        "UntrackedShellHoldsNothing"
+      ],
+      "witnesses": [
+        "ReplyOpenedWitness",
+        "ReplacedHistoryFollowedWitness",
+        "FreshHeldWhileSuspendedWitness",
+        "ShowInMapsOnRestoredWitness"
+      ],
+      "sources": [
+        "apps/app/src/prototype/maps-chat-adapter.ts",
+        "apps/app/src/runtime/maps-chat-markup.ts",
+        "apps/app/src/maps/agent-navigation.ts"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/prototype/maps-chat-adapter.ts",
+          "name": "installMapsChatAdapter"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-chat-adapter.ts",
+          "name": "Seen"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-chat-adapter.ts",
+          "name": "fresh"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-chat-adapter.ts",
+          "name": "openInMaps"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-chat-adapter.ts",
+          "name": "allowDirectStart"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-chat-adapter.ts",
+          "name": "appended"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-chat-adapter.ts",
+          "name": "assistantSurface"
+        },
+        {
+          "path": "apps/app/src/runtime/maps-chat-markup.ts",
+          "name": "createMapsChatParses"
+        },
+        {
+          "path": "apps/app/src/maps/agent-navigation.ts",
+          "name": "mapsAgentResultsPort"
+        }
+      ],
+      "abstractions": [
+        "Six message identifiers. A message is the user's or an agent reply whose newest card Maps can open; card parsing, the parse cache and share-choice answers are not modeled.",
+        "A replaced or restored history is one or two messages with new identifiers, each carrying a result. A new shell object is a remount with no Seen record.",
+        "The open itself is a recorded request; whether Maps accepts it, and whether the owner preference then starts guidance, is in MapsNavigation.",
+        "A reply that arrives in a conversation whose previous render was empty, or between a history replacement and the next render, does not open; the model keeps that."
+      ]
+    },
+    {
+      "path": "specs/quint/native/BackgroundNavigation.qnt",
+      "module": "BackgroundNavigation",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "firstFixBeforeStartSettlesTest",
+        "unchangedInstructionNotResentTest",
+        "failedReadbackRetiresOnlyItsSessionTest",
+        "refusedReadbackEndsSessionOnceTest",
+        "notificationStopNotStoppedTwiceTest",
+        "stopDuringStartLeavesNoNativeSessionTest",
+        "unavailableBackgroundTest"
+      ],
+      "invariants": [
+        "TypeOK",
+        "ActiveSessionIsLive",
+        "UpdatesOnlyAfterNativeStart",
+        "LostOnlyAfterStart",
+        "StartedOncePerSession",
+        "StoppedOncePerSession",
+        "NoOrphanNativeSession",
+        "InstructionMirrored"
+      ],
+      "witnesses": [
+        "EarlyInstructionHeldWitness",
+        "InstructionMirroredWitness",
+        "SupersededStartWitness",
+        "NotificationStopWitness"
+      ],
+      "sources": [
+        "apps/app/src/maps/background-navigation.ts",
+        "apps/app/src/prototype/maps-adapter.ts",
+        "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaNavigationService.java",
+        "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaMapsTransportPlugin.java"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/maps/background-navigation.ts",
+          "name": "BackgroundNavigation"
+        },
+        {
+          "path": "apps/app/src/maps/background-navigation.ts",
+          "name": "NavigationBridge"
+        },
+        {
+          "path": "apps/app/src/maps/background-navigation.ts",
+          "name": "start"
+        },
+        {
+          "path": "apps/app/src/maps/background-navigation.ts",
+          "name": "update"
+        },
+        {
+          "path": "apps/app/src/maps/background-navigation.ts",
+          "name": "send"
+        },
+        {
+          "path": "apps/app/src/maps/background-navigation.ts",
+          "name": "lost"
+        },
+        {
+          "path": "apps/app/src/maps/background-navigation.ts",
+          "name": "stop"
+        },
+        {
+          "path": "apps/app/src/maps/background-navigation.ts",
+          "name": "active"
+        },
+        {
+          "path": "apps/app/src/maps/background-navigation.ts",
+          "name": "started"
+        },
+        {
+          "path": "apps/app/src/maps/background-navigation.ts",
+          "name": "stopped"
+        },
+        {
+          "path": "apps/app/src/maps/background-navigation.ts",
+          "name": "navigationStopped"
+        },
+        {
+          "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaNavigationService.java",
+          "name": "activeSession"
+        },
+        {
+          "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaNavigationService.java",
+          "name": "update"
+        },
+        {
+          "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaNavigationService.java",
+          "name": "finish"
+        },
+        {
+          "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaMapsTransportPlugin.java",
+          "name": "startNavigation"
+        },
+        {
+          "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaMapsTransportPlugin.java",
+          "name": "updateNavigation"
+        },
+        {
+          "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaMapsTransportPlugin.java",
+          "name": "stopNavigation"
+        },
+        {
+          "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaMapsTransportPlugin.java",
+          "name": "navigationAvailability"
+        }
+      ],
+      "abstractions": [
+        "Three sessions and three instruction texts. Bridge calls are one first-in first-out queue handled by the native service; the availability read and listener registration are separate resolutions.",
+        "start() stops a leftover session and takes the new one in a single step: its callers always stop the previous session first, so that wait is one microtask.",
+        "A native start may be refused; an update may be refused or find another session. The notification's Stop, a refused service and a removed task are one native end event; AlphaNavigationService's per-reason handling is in NavigationProgress.",
+        "Unsupported platforms, where start() resolves false without a session, are the availability refusal."
+      ]
+    },
+    {
+      "path": "specs/quint/native/NativeMapsLocation.qnt",
+      "module": "NativeMapsLocation",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "secondStartWhileAdmittingIsRefusedTest",
+        "unavailableBuildRefusesTest",
+        "hiddenGrantWaitsForFrontTest",
+        "leavingDuringWatchSetupClearsItTest",
+        "deniedPermissionReportsOnceTest",
+        "staleListenerHearsNothingTest",
+        "unconfirmedCleanupRejectsNextStartTest"
+      ],
+      "invariants": [
+        "TypeOK",
+        "AdmissionOwnsRun",
+        "PermissionPromptWithinAdmission",
+        "SessionMatchesGeneration",
+        "DeliveriesCurrent",
+        "ErrorReportedOncePerSession",
+        "ListenersPrecedeWatch",
+        "WatchNeedsGrant",
+        "OrphanWatchReported",
+        "QuietStartWasSuperseded",
+        "WatchingStartHasWatch"
+      ],
+      "witnesses": [
+        "RefusedWhileAdmittingWitness",
+        "WaitingForFrontWitness",
+        "SupersededStartWitness",
+        "WatchingWitness",
+        "UnconfirmedCleanupWitness",
+        "FixDeliveredWitness"
+      ],
+      "sources": [
+        "apps/app/src/maps/native-location.ts",
+        "apps/app/src/maps/navigation-fix.ts",
+        "apps/app/src/prototype/maps-adapter.ts"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/maps/native-location.ts",
+          "name": "NativeMapsLocation"
+        },
+        {
+          "path": "apps/app/src/maps/native-location.ts",
+          "name": "SharedLocation"
+        },
+        {
+          "path": "apps/app/src/maps/native-location.ts",
+          "name": "LocationBridge"
+        },
+        {
+          "path": "apps/app/src/maps/native-location.ts",
+          "name": "locationPermissionGranted"
+        },
+        {
+          "path": "apps/app/src/maps/navigation-fix.ts",
+          "name": "watchNavigationFixes"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "navigationLocation"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "agentLocation"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-adapter.ts",
+          "name": "awaitingPermission"
+        }
+      ],
+      "abstractions": [
+        "The class is the shared plugin-maps NativeMapsLocation that apps/app/src/maps/native-location.ts binds to the ElizaLocation bridge; the model follows the shared source's awaits one by one.",
+        "Three sessions and nine generations. Listener registration is one step for both listeners; a cleanup confirms or fails as a whole.",
+        "Permission answers, fix validity and watch creation are nondeterministic. The web permission-request cancellation is part of cleanup.",
+        "A start refused before a session exists is recorded as its outcome; watchNavigationFixes routes that rejection to the caller's error handler, which GuidanceSession models."
+      ]
+    }
+  ],
+  "update": [
+    {
+      "module": "MapsNavigation",
+      "set": {
+        "tests": [
+          "waitingForLocationTest",
+          "userStartNeedsNoLocationTest",
+          "staleReplyTest",
+          "failedRerouteKeepsRouteAndRetriesTest",
+          "accountRetirementTest",
+          "firstFixBeforeBackgroundStartTest",
+          "leavingMapsEndsGuidanceTest",
+          "hiddenGuidanceNeedsScreenOffSessionTest",
+          "arrivalStopsWatchAndSessionTest"
+        ],
+        "invariants": [
+          "TypeOK",
+          "GuidanceHasRoute",
+          "RerouteKeepsRoute",
+          "RetiredRouteHidden",
+          "FailedRerouteKept",
+          "GuidancePhase",
+          "GuidanceFixNeedsPermission",
+          "ArrivedLatches",
+          "RetryTimerNeedsGuidance",
+          "OffRouteNeedsGuidance",
+          "BackgroundNeedsGuidance",
+          "BackgroundUpdateAfterStart",
+          "RoutePlanningNeedsForeground"
+        ],
+        "witnesses": [
+          "GuidanceWithoutFixWitness",
+          "HeldInstructionWitness",
+          "HiddenGuidanceWitness",
+          "ReroutingWitness",
+          "ArrivedWitness"
+        ],
+        "sources": [
+          "apps/app/src/maps/device-navigation.ts",
+          "apps/app/src/maps/agent-navigation.ts",
+          "apps/app/src/maps/cloud-provider.ts",
+          "apps/app/src/maps/cloud-maps.ts",
+          "apps/app/src/maps/cloud-session.ts",
+          "apps/app/src/maps/navigation-fix.ts",
+          "apps/app/src/maps/guidance.ts",
+          "apps/app/src/maps/background-navigation.ts",
+          "apps/app/src/maps/resident-relay.ts",
+          "apps/app/src/maps/native-location.ts",
+          "apps/app/src/maps/state.ts",
+          "apps/app/src/prototype/maps-adapter.ts",
+          "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaMapsTransportPlugin.java",
+          "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaNavigationService.java"
+        ],
+        "symbols": [
+          {
+            "path": "apps/app/src/maps/device-navigation.ts",
+            "name": "AlphaMapsDeviceNavigation"
+          },
+          {
+            "path": "apps/app/src/maps/device-navigation.ts",
+            "name": "showRoute"
+          },
+          {
+            "path": "apps/app/src/maps/device-navigation.ts",
+            "name": "allowsDirectStart"
+          },
+          {
+            "path": "apps/app/src/maps/device-navigation.ts",
+            "name": "awaiting-location"
+          },
+          {
+            "path": "apps/app/src/maps/device-navigation.ts",
+            "name": "awaiting-confirmation"
+          },
+          {
+            "path": "apps/app/src/maps/cloud-session.ts",
+            "name": "captureMapsSession"
+          },
+          {
+            "path": "apps/app/src/maps/cloud-session.ts",
+            "name": "assertOwner"
+          },
+          {
+            "path": "apps/app/src/prototype/maps-adapter.ts",
+            "name": "startGuidance"
+          },
+          {
+            "path": "apps/app/src/prototype/maps-adapter.ts",
+            "name": "stopGuidance"
+          },
+          {
+            "path": "apps/app/src/prototype/maps-adapter.ts",
+            "name": "release"
+          },
+          {
+            "path": "apps/app/src/prototype/maps-adapter.ts",
+            "name": "rerouteFrom"
+          },
+          {
+            "path": "apps/app/src/prototype/maps-adapter.ts",
+            "name": "scheduleRerouteRetry"
+          },
+          {
+            "path": "apps/app/src/prototype/maps-adapter.ts",
+            "name": "onNavFix"
+          },
+          {
+            "path": "apps/app/src/prototype/maps-adapter.ts",
+            "name": "locate"
+          },
+          {
+            "path": "apps/app/src/prototype/maps-adapter.ts",
+            "name": "planRoute"
+          },
+          {
+            "path": "apps/app/src/prototype/maps-adapter.ts",
+            "name": "continuing"
+          },
+          {
+            "path": "apps/app/src/maps/background-navigation.ts",
+            "name": "BackgroundNavigation"
+          },
+          {
+            "path": "apps/app/src/maps/navigation-fix.ts",
+            "name": "usableNavigationFix"
+          },
+          {
+            "path": "apps/app/src/maps/resident-relay.ts",
+            "name": "residentMapsNavigationPort"
+          },
+          {
+            "path": "apps/app/src/maps/state.ts",
+            "name": "MapsController"
+          },
+          {
+            "path": "apps/app/src/maps/native-location.ts",
+            "name": "locationPermissionGranted"
+          }
+        ],
+        "stateMapping": {
+          "generation/requestGeneration": "AlphaMapsDeviceNavigation.begin run identity and the shared controller's routeRequest identity",
+          "epoch/requestEpoch/owner/routeOwner": "captureMapsSession and its assertOwner account fence in cloud-session.ts",
+          "locationGranted/fixFresh": "permission and bounded navigation fix freshness; required by the agent's direct start, not by the screen's Start",
+          "phase awaiting-location/resumeWithFix/chooseOrigin": "the user's Use current location (locate, then planRoute when the fix arrives) or a typed or chosen starting point; an agent request that reports awaiting-location has ended and never resumes",
+          "route/previousRoute/guidance/rerouting/retryTimer": "active guidance, replacement route, failed-reroute preservation and its retry timer",
+          "located/arrived/offRoute": "onNavFix: guidance waits for its first usable fix, latches arrival and raises the off-route notice",
+          "backgroundSession/heldInstruction/notified": "BackgroundNavigation start, an instruction kept until the native start settles, and the notification text",
+          "foreground/background/leaveMaps": "document visibility and module.onLeave: a hidden page keeps guidance only with its screen-off session; leaving Maps in the launcher releases it"
+        },
+        "abstractions": [
+          "Three route generations, two owners and boolean fix freshness summarize coordinate geometry and timestamps.",
+          "Travel modes, polylines, route-distance calculations and detailed maneuver rendering remain stateless/runtime-tested transformations.",
+          "A route callback must retain its request generation and account epoch. Direct agent start requires separate opt-in, location permission and a fresh fix; the screen's Start requires only a ready route.",
+          "The agent states selected and awaiting-confirmation are the model's idle and ready phases.",
+          "A screen-off start that fails while the page is hidden leaves guidance running; GuidanceSession records that as a desired property outside safety.",
+          "Events that end guidance are drawn less often in step so sampled traces reach reroutes; every one stays enabled."
+        ]
+      },
+      "unset": []
+    },
+    {
+      "module": "NavigationProgress",
+      "set": {
+        "tests": [
+          "unapproachedManeuverGivenUpAfterTwoClearFixesTest",
+          "inaccurateArrivalRejectedTest",
+          "sparseProjectionDoesNotSkipManeuverTest",
+          "exactFortyMeterBoundaryTest",
+          "oldReadyCannotCompleteRerouteTest",
+          "failureBackoffAndRecoveryTest",
+          "arrivalCancelsRetryAndBackgroundTest",
+          "oldSessionCannotStopSuccessorTest",
+          "staleLocationCannotMoveCursorTest",
+          "pendingNativeStartKeepsBridgeSessionTest",
+          "foregroundOnlyHiddenStopsTest",
+          "unusableFixDoesNotAdvanceTest"
+        ],
+        "invariants": [
+          "CursorRange",
+          "ManeuverPassedByProximityOrTwoClearFixes",
+          "SingleFixNeverSkipsManeuver",
+          "ClearedCountBounded",
+          "ArrivalRequiresAccurateFix",
+          "ArrivalStopsResources",
+          "RerouteKeepsRoute",
+          "FailedRerouteKeepsRoute",
+          "BoundedBackoff",
+          "NativeSessionOwned",
+          "NativeStopOnce"
+        ],
+        "witnesses": [
+          "ClearedOnceWitness",
+          "GivenUpManeuverWitness",
+          "ArrivedWitness",
+          "ReroutingWitness",
+          "ConfirmedBackgroundWitness"
+        ],
+        "sources": [
+          "apps/app/src/prototype/maps-adapter.ts",
+          "apps/app/src/maps/guidance.ts",
+          "apps/app/src/maps/navigation-fix.ts",
+          "apps/app/src/maps/native-location.ts",
+          "apps/app/src/maps/background-navigation.ts",
+          "apps/app/src/maps/route-distance.ts",
+          "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaNavigationService.java",
+          "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaMapsTransportPlugin.java",
+          "apps/app/src/maps/device-navigation.ts",
+          "apps/app/src/maps/agent-navigation.ts"
+        ],
+        "symbols": [
+          {
+            "path": "apps/app/src/maps/guidance.ts",
+            "name": "advanceStep"
+          },
+          {
+            "path": "apps/app/src/maps/guidance.ts",
+            "name": "StepHold"
+          },
+          {
+            "path": "apps/app/src/maps/guidance.ts",
+            "name": "STEP_REACHED_METERS"
+          },
+          {
+            "path": "apps/app/src/maps/guidance.ts",
+            "name": "atStep"
+          },
+          {
+            "path": "apps/app/src/prototype/maps-adapter.ts",
+            "name": "onNavFix"
+          },
+          {
+            "path": "apps/app/src/prototype/maps-adapter.ts",
+            "name": "navStep"
+          },
+          {
+            "path": "apps/app/src/prototype/maps-adapter.ts",
+            "name": "navCleared"
+          },
+          {
+            "path": "apps/app/src/prototype/maps-adapter.ts",
+            "name": "startGuidance"
+          },
+          {
+            "path": "apps/app/src/prototype/maps-adapter.ts",
+            "name": "rerouteFrom"
+          },
+          {
+            "path": "apps/app/src/prototype/maps-adapter.ts",
+            "name": "scheduleRerouteRetry"
+          },
+          {
+            "path": "apps/app/src/prototype/maps-adapter.ts",
+            "name": "rerouteCleared"
+          },
+          {
+            "path": "apps/app/src/prototype/maps-adapter.ts",
+            "name": "REROUTE_RETRY_MS"
+          },
+          {
+            "path": "apps/app/src/maps/navigation-fix.ts",
+            "name": "usableNavigationFix"
+          },
+          {
+            "path": "apps/app/src/maps/background-navigation.ts",
+            "name": "BackgroundNavigation"
+          },
+          {
+            "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaNavigationService.java",
+            "name": "finish"
+          }
+        ],
+        "stateMapping": {
+          "navStep/lastStep/nearSteps/displayedStep": "maps-adapter onNavFix and guidance.advanceStep proximity loop, guidance.atStep",
+          "cleared/lastCleared/lastBeyond": "advanceStep's StepHold.cleared: two consecutive on-route fixes clear beyond a maneuver give it up",
+          "navSession/backgroundPending/nativeSession/nativeStops": "startGuidance, BackgroundNavigation, AlphaNavigationService.finish",
+          "rerouting/rerouteCleared/requestGeneration/retryTimer/retryAttempts/retryDelay": "rerouteFrom, controller subscription, scheduleRerouteRetry",
+          "bridgeRegistered/backgroundPending/backgroundRunning": "BackgroundNavigation.active during start and native completion, distinct from confirmed background continuation"
+        },
+        "abstractions": [
+          "Three maneuvers and two route identities, exact 39/40 meter maneuver, 24/25 meter arrival and 30/31 meter accuracy boundary classes.",
+          "Precise position freshness uses exact 30000ms age and 5000ms future limits; GPS geometry is represented by distance classes.",
+          "A fix clear beyond the current maneuver (more than 60 m and twice its accuracy past it, on the route) is one boolean input; an off-route fix never counts.",
+          "Four session values and three reroute request generations. Retry attempts saturate at four, preserving the 10/20/40/60-second delay policy.",
+          "The source currently only sets follow=true at Start/recenter. The model preserves this behavior."
+        ]
+      },
+      "unset": []
+    }
+  ],
+  "readme": [
+    {
+      "family": "services",
+      "module": "MapsConnection",
+      "sourceSymbols": "`connectNow`, `scheduleRetry`, `initializeCloudMaps`, `retireCloudMaps`, `cloudMapsHealthy`, `captureMapsSession`",
+      "modeledState": "Connection generations with superseded attempts, the tracked and search-started attempt, installed provider and its account, failure class, retry timer and backoff, the one-minute throttle, visibility, and guidance on the installed provider"
+    },
+    {
+      "family": "services",
+      "module": "GuidanceSession",
+      "sourceSymbols": "`startGuidance`, `stopGuidance`, `onNavFix`, `rerouteFrom`, `scheduleRerouteRetry`, `watchNavigationFixes`, `release`",
+      "modeledState": "navSession-fenced callbacks, the location watch and its refused start, arrival latch, reroute and retry timer, screen-off session ownership, and every cause that ends a session (End, Back, leave, hidden page, location failure, notification Stop, replaced route)"
+    },
+    {
+      "family": "services",
+      "module": "MapsScreenModes",
+      "sourceSymbols": "`searching`, `selected`, `directions`, `originMode`, `locating`, `chosenOrigin`, `searchIntent`, `pendingHandoff`",
+      "modeledState": "The six screen modes computed from independent flags, Back unwinding one layer, the late-fix restore of a chosen or typed starting point, agent place/route requests, and the intent-fenced cross-app search hand-off"
+    },
+    {
+      "family": "services",
+      "module": "MapsNavigation",
+      "sourceSymbols": "`AlphaMapsDeviceNavigation.showRoute`, `captureMapsSession`, `startGuidance`, `rerouteFrom`, `release`, `BackgroundNavigation`",
+      "modeledState": "generation/requestGeneration/requestEpoch, locationGranted/fixFresh, route/previousRoute/guidance/rerouting/retryTimer, located/arrived/offRoute, backgroundSession/heldInstruction/notified, foreground and leaving Maps"
+    },
+    {
+      "family": "application",
+      "module": "ChatMapsAutoOpen",
+      "sourceSymbols": "`installMapsChatAdapter`, `fresh`, `Seen`, `openInMaps`",
+      "modeledState": "Per-shell seen/last/fresh message tracking across appended replies, replaced or restored history, remount and suspension; automatic opens counted per reply; Show in Maps requests that never allow a direct start"
+    },
+    {
+      "family": "native",
+      "module": "BackgroundNavigation",
+      "sourceSymbols": "`BackgroundNavigation.start`, `update`, `send`, `lost`, `stop`, `AlphaNavigationService.update`",
+      "modeledState": "Renderer session phases through availability, listener, native start and its resolution; an ordered bridge queue; instructions held until the native start settles; failed readback, notification Stop and stop-once accounting"
+    },
+    {
+      "family": "native",
+      "module": "NativeMapsLocation",
+      "sourceSymbols": "`NativeMapsLocation.start`, `stop`, `awaitingPermission`, `watchNavigationFixes`",
+      "modeledState": "Serial admission, the generation ticket across every await of start(), permission prompt and wait for the front, listener-before-watch order, watch cleared when left during setup, cleanup confirmation, and fix or error delivery only to the session in place"
+    },
+    {
+      "family": "native",
+      "module": "NavigationProgress",
+      "sourceSymbols": "`onNavFix`, `advanceStep`, `atStep`, `rerouteFrom`, `scheduleRerouteRetry`, `AlphaNavigationService.finish`",
+      "modeledState": "Maneuver cursor advanced by proximity or two consecutive clear fixes, arrival and accuracy boundaries, reroute-cleared handshake, retry backoff, native background session ownership and stop-once accounting"
+    }
+  ]
+}

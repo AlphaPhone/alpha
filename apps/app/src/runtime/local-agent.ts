@@ -1,4 +1,4 @@
-import { isPreparedViewNavigationRequest } from './prepared-view-navigation.ts';
+import { isPreparedViewNavigationRequest, normalizeTurnReply } from './prepared-view-navigation.ts';
 import {subscribeNativeViewEvents,type NativeViewEventPort} from "./native-view-events";
 import {browserCloudResidentEnabled,browserResidentCall,browserProviderCall} from './browser-cloud-resident';
 import type {AppRecordMethod} from './app-record-route-policy';
@@ -471,12 +471,12 @@ export class LocalAgentProtocol {
           throw error;
         });valid();
         if(typeof recovered.text!=='string'||typeof recovered.agentName!=='string')throw new Error('Invalid local agent reply.');
-        return recovered as RemoteChatReply;
+        return normalizeTurnReply(recovered) as RemoteChatReply;
       }finally{this.streams.delete(controller);}
     }
     const value=await this.json(path,body,options.signal,headers);
     if(typeof value.text!=='string'||typeof value.agentName!=='string')throw new Error('Invalid local agent reply.');
-    return value as RemoteChatReply;
+    return normalizeTurnReply(value) as RemoteChatReply;
   }
   /** Conversation → room, as the agent's conversation list reported it. A conversation keeps its
    * room, so Stop reads the list once per conversation on this connection, not on every call. */

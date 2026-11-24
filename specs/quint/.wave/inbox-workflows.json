@@ -1,0 +1,1643 @@
+{
+ "add": [
+  {
+   "path": "specs/quint/services/InboxDrafts.qnt",
+   "module": "InboxDrafts",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "earlierVersionEditRetainedTest",
+    "providerDraftKeepsSavedDraftTest",
+    "retainedEditsBlockProviderDraftTest",
+    "sentCopiesRemovedTest",
+    "editedAfterSendKeepsCopiesTest",
+    "unretainedEditReportedTest"
+   ],
+   "invariants": [
+    "TypeOK",
+    "NoSilentLoss",
+    "LatestTextKept",
+    "EditableCopyUnmarked",
+    "EarlierMeansSent",
+    "WaitingHasOpen"
+   ],
+   "witnesses": [
+    "EarlierSavedWitness",
+    "EarlierShelvedOpenWitness",
+    "UnretainedEditWitness",
+    "SavedAndShelvedWitness",
+    "EditedAfterSendWitness"
+   ],
+   "sources": [
+    "apps/app/src/prototype/inbox-drafts.ts",
+    "apps/app/src/prototype/inbox-unsaved.ts",
+    "apps/app/src/runtime/inbox-unsaved-record.ts",
+    "apps/app/src/runtime/inbox-edit-coalescer.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/prototype/inbox-drafts.ts",
+     "name": "setAside"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-drafts.ts",
+     "name": "openShelved"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-drafts.ts",
+     "name": "editProvider"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-drafts.ts",
+     "name": "savedDraftOnProviderEdit"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-drafts.ts",
+     "name": "settleSent"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-drafts.ts",
+     "name": "earlierThanSent"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-drafts.ts",
+     "name": "transfer"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-drafts.ts",
+     "name": "restoreRetained"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-drafts.ts",
+     "name": "fromSaved"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-drafts.ts",
+     "name": "pendingEdits"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-unsaved.ts",
+     "name": "inboxUnsaved"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-unsaved.ts",
+     "name": "editCoalescer"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-unsaved.ts",
+     "name": "invalid"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-unsaved.ts",
+     "name": "peek"
+    },
+    {
+     "path": "apps/app/src/runtime/inbox-unsaved-record.ts",
+     "name": "readInboxUnsaved"
+    },
+    {
+     "path": "apps/app/src/runtime/inbox-unsaved-record.ts",
+     "name": "encodeInboxUnsaved"
+    },
+    {
+     "path": "apps/app/src/runtime/inbox-edit-coalescer.ts",
+     "name": "editCoalescer"
+    }
+   ],
+   "stateMapping": {
+    "openId/openRev/openEarlier": "the composer draft and its content; the editable copy never carries earlierThanSent",
+    "waiting/invalid/retainedId/retainedRev": "the coalesced recovery write, the not-retained status and the stored recovery copy",
+    "savedId/savedRev/savedEarlier": "the saved local draft slot and its earlier-version mark",
+    "shelf": "set-aside drafts by draft id",
+    "gone": "drafts removed by discard, a move to another From account, a provider copy of the same email, or a restart after a reported unretained edit",
+    "sentId/sentRev/sentSavedRev/sentPending/sentGone": "the provider-confirmed send waiting to settle local copies"
+   },
+   "abstractions": [
+    "Three draft identities and six content values stand for arbitrary emails; equal content is an equal number.",
+    "One account. A move to another From account removes the draft from this model; the other account and the restore path of a refused move are not modeled.",
+    "savedDraftOnProviderEdit also replaces a saved draft that already holds exactly the provider draft. The model treats that draft as the same email and keeps its identity.",
+    "Recovery-store conflict, error and stale-base states of the retained copy are covered by DraftDispatch; here a write either stores the latest text or is reported as not retained.",
+    "Drafts with no content are dropped when set aside; every modeled draft has content. Storage size limits are a nondeterministic encoding failure."
+   ]
+  },
+  {
+   "path": "specs/quint/services/InboxListPaging.qnt",
+   "module": "InboxListPaging",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "staleReplyDroppedTest",
+    "replyForOtherAccountDroppedTest",
+    "repeatedCursorEndsPagingTest",
+    "failedPageKeepsListTest",
+    "singleFlightTest",
+    "savedListRestoredTest"
+   ],
+   "invariants": [
+    "TypeOK",
+    "ShownBelongsToSelection",
+    "SingleFlight",
+    "CursorUsedOnce",
+    "CursorNeedsList",
+    "SavedListMarked"
+   ],
+   "witnesses": [
+    "StaleFlightWitness",
+    "SavedListShownWitness",
+    "ChangedMailboxWitness",
+    "RepeatedCursorWitness"
+   ],
+   "sources": [
+    "apps/app/src/prototype/inbox-cloud-adapter.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/prototype/inbox-cloud-adapter.ts",
+     "name": "nextPageToken"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-cloud-adapter.ts",
+     "name": "seenCursors"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-cloud-adapter.ts",
+     "name": "generation"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-cloud-adapter.ts",
+     "name": "loadingMore"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-cloud-adapter.ts",
+     "name": "rememberList"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-cloud-adapter.ts",
+     "name": "restoreList"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-cloud-adapter.ts",
+     "name": "cachedListShown"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-cloud-adapter.ts",
+     "name": "invalidateList"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-cloud-adapter.ts",
+     "name": "firstPageRevision"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-cloud-adapter.ts",
+     "name": "loadedQuery"
+    }
+   ],
+   "stateMapping": {
+    "generation/busy/flights": "the work generation, the single operation and every request still on the network",
+    "pages/shownAccount/shownQuery/loadedQuery": "the messages on screen and the account and query they were read for",
+    "cursor/seenCursors/usedCursors": "nextPageToken, the cursors already offered, and those already requested",
+    "newerMail/failure/cachedShown": "the changed-mailbox notice, a failed page, and a list shown from the saved copy",
+    "saved": "the folder list kept by rememberList"
+   },
+   "abstractions": [
+    "Two accounts, two folders, three pages, two provider cursors and five requests.",
+    "Message identities, duplicate removal and the unread count are not modeled; a page is a count.",
+    "Read-ahead, body caching and the provider drafts list use the same generation fence and are not modeled separately.",
+    "A search typed over a loaded folder is modeled as a folder change."
+   ]
+  },
+  {
+   "path": "specs/quint/services/ServiceReadCache.qnt",
+   "module": "ServiceReadCache",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "calendarClearKeepsMailTest",
+    "clearFencesPutTest",
+    "ownerSwitchIsolatesTest",
+    "lateWriteLandsInOwnDocumentTest",
+    "restartEndsWritesTest"
+   ],
+   "invariants": [
+    "TypeOK",
+    "ShownOwnerIsolation",
+    "ShownHasEntry",
+    "ClearIsolated",
+    "ClearFencesPut"
+   ],
+   "witnesses": [
+    "ClearedBesideOtherWitness",
+    "StalePutWitness",
+    "OtherOwnerPutWitness",
+    "BothOwnersCachedWitness"
+   ],
+   "sources": [
+    "apps/app/src/runtime/service-read-cache.ts",
+    "apps/app/src/runtime/service-read-cache-store.ts",
+    "apps/app/src/prototype/inbox-cloud-adapter.ts",
+    "apps/app/src/prototype/google-calendar-view-adapter.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/runtime/service-read-cache.ts",
+     "name": "ServiceReadCache"
+    },
+    {
+     "path": "apps/app/src/runtime/service-read-cache.ts",
+     "name": "MAX_ENTRIES"
+    },
+    {
+     "path": "apps/app/src/runtime/service-read-cache.ts",
+     "name": "epoch"
+    },
+    {
+     "path": "apps/app/src/runtime/service-read-cache.ts",
+     "name": "clear"
+    },
+    {
+     "path": "apps/app/src/runtime/service-read-cache.ts",
+     "name": "put"
+    },
+    {
+     "path": "apps/app/src/runtime/service-read-cache-store.ts",
+     "name": "readCacheIdentity"
+    },
+    {
+     "path": "apps/app/src/runtime/service-read-cache-store.ts",
+     "name": "serviceReadCache"
+    },
+    {
+     "path": "apps/app/src/runtime/service-read-cache-store.ts",
+     "name": "retireSharedReadCache"
+    },
+    {
+     "path": "apps/app/src/runtime/service-read-cache-store.ts",
+     "name": "ReadCacheService"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-cloud-adapter.ts",
+     "name": "purgeOffline"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-cloud-adapter.ts",
+     "name": "offlineStore"
+    },
+    {
+     "path": "apps/app/src/prototype/google-calendar-view-adapter.ts",
+     "name": "serviceReadCache"
+    }
+   ],
+   "stateMapping": {
+    "owner/docs": "one document per verified account identity and service (readCacheIdentity)",
+    "epochs/pending": "the per-instance clear counter captured by each queued put",
+    "clears": "the number of clears of a document since it was created, kept across restarts for the check only",
+    "shown": "snapshots an adapter is showing",
+    "lastClearKey/othersBefore/othersAfter": "entries of every other document around the latest clear"
+   },
+   "abstractions": [
+    "Two account identities and two services; a document holds at most two entries and ages in two steps (24 entries, 4 MiB and 30 days in the code).",
+    "Eviction by entry count and by size is the same step: the oldest entry of the same document makes room.",
+    "The retired shared document is removed without migration and is never read; it has no state here.",
+    "Hiding snapshots when the account changes is the adapters' duty; the model applies it at switchOwner.",
+    "Store read failures and compare-exchange retries are not modeled."
+   ]
+  },
+  {
+   "path": "specs/quint/services/AutomationIntent.qnt",
+   "module": "AutomationIntent",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "backgroundedChangeStaysRetainedTest",
+    "listingReleasesAppliedChangeTest",
+    "unknownCreateDoesNotBlockOtherDraftTest",
+    "ownerClearsUnconfirmedRequestTest",
+    "reminderResendCreatesOneTest",
+    "promptCannotBeResentTest",
+    "refusedRequestUnlocksTest"
+   ],
+   "invariants": [
+    "TypeOK",
+    "NoAutomaticRepeat",
+    "IdempotentCreateOnce",
+    "EffectsNeedDispatch",
+    "LockedIsReleasable",
+    "BusyKeyRetained",
+    "ClearAskRetained"
+   ],
+   "witnesses": [
+    "RetainedAfterRestartWitness",
+    "ClearConfirmWitness",
+    "SecondDraftWhileFirstUnknownWitness",
+    "ReminderResentWitness"
+   ],
+   "sources": [
+    "apps/app/src/prototype/automations-adapter.ts",
+    "apps/app/src/runtime/workflow-intents.ts",
+    "apps/app/src/runtime/automations-protocol.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/prototype/automations-adapter.ts",
+     "name": "uncertain"
+    },
+    {
+     "path": "apps/app/src/prototype/automations-adapter.ts",
+     "name": "forget"
+    },
+    {
+     "path": "apps/app/src/prototype/automations-adapter.ts",
+     "name": "requestKey"
+    },
+    {
+     "path": "apps/app/src/prototype/automations-adapter.ts",
+     "name": "resend"
+    },
+    {
+     "path": "apps/app/src/prototype/automations-adapter.ts",
+     "name": "locked"
+    },
+    {
+     "path": "apps/app/src/prototype/automations-adapter.ts",
+     "name": "intentStore"
+    },
+    {
+     "path": "apps/app/src/runtime/workflow-intents.ts",
+     "name": "WorkflowIntentStore"
+    },
+    {
+     "path": "apps/app/src/runtime/workflow-intents.ts",
+     "name": "admit"
+    },
+    {
+     "path": "apps/app/src/runtime/workflow-intents.ts",
+     "name": "acknowledge"
+    },
+    {
+     "path": "apps/app/src/runtime/workflow-intents.ts",
+     "name": "retained"
+    },
+    {
+     "path": "apps/app/src/runtime/workflow-intents.ts",
+     "name": "locked"
+    },
+    {
+     "path": "apps/app/src/runtime/automations-protocol.ts",
+     "name": "automationIntentApplied"
+    },
+    {
+     "path": "apps/app/src/runtime/automations-protocol.ts",
+     "name": "AutomationOutcomeError"
+    }
+   ],
+   "stateMapping": {
+    "entries[k].retained/uncertain": "the journal entry for an automation identity and the in-memory unknown-outcome mark",
+    "entries[k].wire/sent/dispatched/applied": "requests on the network, sends under the current entry, all sends, and effects on the agent",
+    "busy/busyKey": "the single controller and the identity it is working on",
+    "clearAsk": "the first tap of Clear unconfirmed request"
+   },
+   "abstractions": [
+    "Three identities: one existing row, one new prompt draft, one new reminder draft with an idempotency key. Two sends per identity.",
+    "A listing shows the asked-for state as a nondeterministic boolean; automationIntentApplied decides it per request kind in the code.",
+    "A request cleared by its owner may still arrive at the agent. The model allows it; the owner clears only after checking the record.",
+    "Session and visibility changes abort the controller; they are the unknown reply here."
+   ]
+  },
+  {
+   "path": "specs/quint/services/WorkflowAuthoring.qnt",
+   "module": "WorkflowAuthoring",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "lostReplyDoesNotDuplicateTest",
+    "unreceiptedExactResendTest",
+    "slowRequestAndResendApplyOnceTest",
+    "refusedSaveUnlocksDraftTest",
+    "pendingBlocksEditTest",
+    "pendingBlocksDiscardTest",
+    "changedCompilerBlocksResendTest"
+   ],
+   "invariants": [
+    "TypeOK",
+    "OneSavePerDraft",
+    "PendingNeverEdited",
+    "AppliedNeverAbandoned",
+    "ResendNeedsNoRecord",
+    "UnreceiptedMeansPending",
+    "CommittedClearsDraft",
+    "WireNeedsIdentity"
+   ],
+   "witnesses": [
+    "UnreceiptedWitness",
+    "ResendConfirmWitness",
+    "RepeatOnWireWitness",
+    "AppliedUnknownWitness",
+    "RefusedThenEditedWitness"
+   ],
+   "sources": [
+    "apps/app/src/prototype/workflow-authoring.ts",
+    "apps/app/src/runtime/workflow-protocol.ts",
+    "apps/app/src/runtime/phone-workflow-authoring.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/prototype/workflow-authoring.ts",
+     "name": "unreceipted"
+    },
+    {
+     "path": "apps/app/src/prototype/workflow-authoring.ts",
+     "name": "resendReview"
+    },
+    {
+     "path": "apps/app/src/prototype/workflow-authoring.ts",
+     "name": "refused"
+    },
+    {
+     "path": "apps/app/src/prototype/workflow-authoring.ts",
+     "name": "committed"
+    },
+    {
+     "path": "apps/app/src/prototype/workflow-authoring.ts",
+     "name": "recover"
+    },
+    {
+     "path": "apps/app/src/prototype/workflow-authoring.ts",
+     "name": "resend"
+    },
+    {
+     "path": "apps/app/src/prototype/workflow-authoring.ts",
+     "name": "discardDraft"
+    },
+    {
+     "path": "apps/app/src/prototype/workflow-authoring.ts",
+     "name": "locked"
+    },
+    {
+     "path": "apps/app/src/prototype/workflow-authoring.ts",
+     "name": "mutationId"
+    },
+    {
+     "path": "apps/app/src/runtime/workflow-protocol.ts",
+     "name": "savePhone"
+    },
+    {
+     "path": "apps/app/src/runtime/workflow-protocol.ts",
+     "name": "phoneSaveReceipt"
+    },
+    {
+     "path": "apps/app/src/runtime/workflow-protocol.ts",
+     "name": "WorkflowTypedRejected"
+    },
+    {
+     "path": "apps/app/src/runtime/phone-workflow-authoring.ts",
+     "name": "normalizePhoneSpec"
+    }
+   ],
+   "stateMapping": {
+    "draft/spec/review": "the local typed draft, its content and the specification shown for review",
+    "pending/pendingSpec/minted": "the stored mutation identity, the content it was minted for, and identities minted",
+    "busy/unreceipted/resendReview/discardAsk/storageFailed": "the request in progress, the no-record receipt answer, the two confirmations and the draft storage latch",
+    "wire/applied/saves": "requests on the network and saves the agent applied",
+    "agentChanged/compilerChanged": "a workflow changed on the agent and a changed compiler revision"
+   },
+   "abstractions": [
+    "One draft, three content values, three mutation identities and two requests on the network.",
+    "Step editing, calendar and note pickers and generated drafts change only the draft content; they are the edit action.",
+    "A workflow changed on the agent stays changed, so a refused edit can never be applied later.",
+    "Local cleanup after a confirmed save is atomic here; its failure is reported by the code and leaves the save applied."
+   ]
+  },
+  {
+   "path": "specs/quint/services/TriggerCursor.qnt",
+   "module": "TriggerCursor",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "leaveAcrossBackgroundTest",
+    "brokenFlowDoesNotStopOthersTest",
+    "fullQueueStillDispatchesTest",
+    "heldDispatchWaitsForWakeTest",
+    "movedPlaceRestartsCursorTest"
+   ],
+   "invariants": [
+    "TypeOK",
+    "LatchNeedsRuntimeFault",
+    "LeaveFiredOncePerObservation",
+    "CursorKeepsLastKnownSide",
+    "SeenBounded",
+    "QueueBounded",
+    "ReportMeansBroken"
+   ],
+   "witnesses": [
+    "GapKeepsSideWitness",
+    "BlockedWithQueueWitness",
+    "BrokenFlowBesideFiringWitness",
+    "HeldDispatchWitness",
+    "EdgeFixWitness"
+   ],
+   "sources": [
+    "apps/app/src/browser/workflow-trigger-runtime.ts",
+    "apps/app/src/browser/workflow-triggers.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/browser/workflow-trigger-runtime.ts",
+     "name": "WorkflowTriggerRuntime"
+    },
+    {
+     "path": "apps/app/src/browser/workflow-trigger-runtime.ts",
+     "name": "blocked"
+    },
+    {
+     "path": "apps/app/src/browser/workflow-trigger-runtime.ts",
+     "name": "held"
+    },
+    {
+     "path": "apps/app/src/browser/workflow-trigger-runtime.ts",
+     "name": "wake"
+    },
+    {
+     "path": "apps/app/src/browser/workflow-trigger-runtime.ts",
+     "name": "position"
+    },
+    {
+     "path": "apps/app/src/browser/workflow-trigger-runtime.ts",
+     "name": "watching"
+    },
+    {
+     "path": "apps/app/src/browser/workflow-triggers.ts",
+     "name": "placeChanged"
+    },
+    {
+     "path": "apps/app/src/browser/workflow-triggers.ts",
+     "name": "triggerTickPlan"
+    },
+    {
+     "path": "apps/app/src/browser/workflow-triggers.ts",
+     "name": "detectWorkflowTriggers"
+    },
+    {
+     "path": "apps/app/src/browser/workflow-triggers.ts",
+     "name": "TriggerCursor"
+    },
+    {
+     "path": "apps/app/src/browser/workflow-triggers.ts",
+     "name": "placeKey"
+    },
+    {
+     "path": "apps/app/src/browser/workflow-triggers.ts",
+     "name": "TriggerError"
+    }
+   ],
+   "stateMapping": {
+    "foreground/blocked/held/faulted": "the foreground gate, the scan latch, the dispatch latch and the whole-check failure that set the scan latch",
+    "actual/pos/placeVersion": "where the phone is, the fix the runtime holds, and the saved place identity",
+    "cursor/cursorInside/cursorPlace": "the location cursor with its last known side and place key",
+    "lastKnown/observedLeaves/fired": "the side last observed by a check and the leave occurrences owed and produced",
+    "brokenB/reportB/cursorB/liveB/seenB/firedB": "a second workflow that can fail to be checked, its report, and its message cursor",
+    "queue": "queued trigger jobs"
+   },
+   "abstractions": [
+    "Development surface only: the runtime is installed with the browser development profile behind ELIZA_DEV_ALLOW_TEST_MOCKS.",
+    "Two workflows, three message identities, a queue of three (100 in the code) and three moves.",
+    "Time, calendar and email triggers, source hashing and the per-second timer are not modeled; a check and a dispatch are separate steps.",
+    "A full queue stands for every failure of the whole check (invalid history, an incomplete calendar read, a full document)."
+   ]
+  },
+  {
+   "path": "specs/quint/services/WorkflowNoticeTaps.qnt",
+   "module": "WorkflowNoticeTaps",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "refreshDuringTapReadTest",
+    "tapDuringOperationDeferredTest",
+    "failedConsumeDoesNotReopenTest",
+    "canceledQuestionStaysUsableTest",
+    "interruptedQuestionKeepsTapTest",
+    "secondEventWhileReadingTest"
+   ],
+   "invariants": [
+    "TypeOK",
+    "OpenedOncePerTap",
+    "ConsumedWasHandled",
+    "RememberedTapIsPending",
+    "QuestionReviewHasTap",
+    "ComposeNeedsConsume",
+    "StaleCheckRepeats"
+   ],
+   "witnesses": [
+    "StaleReadWitness",
+    "OpenedUnconsumedWitness",
+    "DeferredWithoutOperationWitness",
+    "ReleasedQuestionWitness"
+   ],
+   "sources": [
+    "apps/app/src/runtime/workflow-notice-taps.ts",
+    "apps/app/src/prototype/workflow-adapter.ts",
+    "apps/app/src/prototype/workflow-notice-question.ts",
+    "android/app/src/main/java/ai/elizaresearch/alphaphone/WorkflowNoticeTaps.java"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/runtime/workflow-notice-taps.ts",
+     "name": "resolveWorkflowTap"
+    },
+    {
+     "path": "apps/app/src/runtime/workflow-notice-taps.ts",
+     "name": "readyTapStep"
+    },
+    {
+     "path": "apps/app/src/runtime/workflow-notice-taps.ts",
+     "name": "tapRecheck"
+    },
+    {
+     "path": "apps/app/src/runtime/workflow-notice-taps.ts",
+     "name": "consumeWorkflowTap"
+    },
+    {
+     "path": "apps/app/src/prototype/workflow-adapter.ts",
+     "name": "checkNotice"
+    },
+    {
+     "path": "apps/app/src/prototype/workflow-adapter.ts",
+     "name": "tapBusy"
+    },
+    {
+     "path": "apps/app/src/prototype/workflow-adapter.ts",
+     "name": "tapRequested"
+    },
+    {
+     "path": "apps/app/src/prototype/workflow-adapter.ts",
+     "name": "tapDeferred"
+    },
+    {
+     "path": "apps/app/src/prototype/workflow-adapter.ts",
+     "name": "openedTap"
+    },
+    {
+     "path": "apps/app/src/prototype/workflow-adapter.ts",
+     "name": "noticeQuestion"
+    },
+    {
+     "path": "apps/app/src/prototype/workflow-notice-question.ts",
+     "name": "reviewWorkflowNoticeQuestion"
+    },
+    {
+     "path": "apps/app/src/prototype/workflow-notice-question.ts",
+     "name": "discard"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/WorkflowNoticeTaps.java",
+     "name": "settleQuestion"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/WorkflowNoticeTaps.java",
+     "name": "consume"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/WorkflowNoticeTaps.java",
+     "name": "capture"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/WorkflowNoticeTaps.java",
+     "name": "pending"
+    }
+   ],
+   "stateMapping": {
+    "ledger/question": "the native tap row (new, pending, consumed) and its Ask flag",
+    "tapBusy/tapRequested/tapDeferred/recheck": "the read in progress and the three ways another check is owed",
+    "operation/generation/epoch/staleDrop": "the workflow operation, the view generation, the generation a read began under, and a read that ended under another one",
+    "noticeQuestion/asked/composed": "the open question review and its outcome",
+    "openedTap/runOpen/opens": "the token of a run opened before its consume, the open run, and how often it was opened"
+   },
+   "abstractions": [
+    "One notification and one tap token; four view generations.",
+    "Taps for another account, unavailable executions and a failed native lookup leave the tap pending without a new check; they are not modeled.",
+    "The authenticated receipt and workflow reads are one step. Their failure reports the tap as retained.",
+    "A view reset drops the running operation without its completion step, so a deferred check then waits for the next operation or event. The model keeps that behavior."
+   ]
+  },
+  {
+   "path": "specs/quint/services/InboxWithdrawal.qnt",
+   "module": "InboxWithdrawal",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "withdrawalDuringPrepareTest",
+    "pendingWithdrawalBlocksConfirmTest",
+    "resetStillDiscardsTest",
+    "dispatchedReceiptKeptTest",
+    "failedDiscardReportedTest"
+   ],
+   "invariants": [
+    "TypeOK",
+    "DispatchUnderReadCapabilities",
+    "ReceiptSurvivesWithdrawal",
+    "WithdrawalNeverSkipped",
+    "PendingNeedsLiveOperation",
+    "RunningMeansBusy"
+   ],
+   "witnesses": [
+    "PendingWhilePreparingWitness",
+    "DetachedDiscardWitness",
+    "ReportedReviewRegrantedWitness",
+    "DispatchedThenWithdrawnWitness"
+   ],
+   "sources": [
+    "apps/app/src/prototype/inbox-provider-controls.ts",
+    "apps/app/src/runtime/inbox-operation.ts",
+    "apps/app/src/runtime/gmail-grants.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/prototype/inbox-provider-controls.ts",
+     "name": "withdrawn"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-provider-controls.ts",
+     "name": "applyWithdrawal"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-provider-controls.ts",
+     "name": "withdrawal"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-provider-controls.ts",
+     "name": "running"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-provider-controls.ts",
+     "name": "reset"
+    },
+    {
+     "path": "apps/app/src/runtime/inbox-operation.ts",
+     "name": "discardUnsent"
+    },
+    {
+     "path": "apps/app/src/runtime/inbox-operation.ts",
+     "name": "allows"
+    },
+    {
+     "path": "apps/app/src/runtime/inbox-operation.ts",
+     "name": "grantRefusal"
+    },
+    {
+     "path": "apps/app/src/runtime/gmail-grants.ts",
+     "name": "gmailGrantChange"
+    },
+    {
+     "path": "apps/app/src/runtime/gmail-grants.ts",
+     "name": "gmailInboxAllows"
+    }
+   ],
+   "stateMapping": {
+    "bound/busy/running": "the live operation, the busy flag and the kind of run in progress",
+    "phase/dispatches/dispatchCaps": "the saved operation record and whether its dispatch had allowing capabilities",
+    "grant/caps/seen": "the provider grant, the capabilities last read and the account row last read",
+    "withdrawal/detached/owed/reported": "a withdrawal waiting for the run, a discard handed over at reset, a withdrawal seen with an unsent review, and a discard failure shown to the user"
+   },
+   "abstractions": [
+    "One account and one saved operation; two resets.",
+    "The provider enforces the grant on dispatch. The model checks only what the phone knows.",
+    "The capability read after an accounts read is the same step as that read."
+   ]
+  },
+  {
+   "path": "specs/quint/services/InboxReadState.qnt",
+   "module": "InboxReadState",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "uncertainAutoMarkNotRepeatedTest",
+    "explicitMarkAfterUncertainTest",
+    "markInFlightRefusesAnotherTest",
+    "resetAllowsOneMoreAutoMarkTest",
+    "staleUnknownBlocksAutoMarkTest"
+   ],
+   "invariants": [
+    "TypeOK",
+    "AutoMarkSentOnce",
+    "SingleFlight"
+   ],
+   "witnesses": [
+    "UncertainAutoMarkWitness",
+    "StaleBesideNewWitness",
+    "ExplicitAfterUncertainWitness"
+   ],
+   "sources": [
+    "apps/app/src/prototype/inbox-cloud-adapter.ts",
+    "apps/app/src/runtime/gmail-mailbox.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/prototype/inbox-cloud-adapter.ts",
+     "name": "readStateInFlight"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-cloud-adapter.ts",
+     "name": "readStateUnconfirmed"
+    },
+    {
+     "path": "apps/app/src/prototype/inbox-cloud-adapter.ts",
+     "name": "setRead"
+    },
+    {
+     "path": "apps/app/src/runtime/gmail-mailbox.ts",
+     "name": "setGmailReadState"
+    }
+   ],
+   "stateMapping": {
+    "unread/target": "the loaded message and the state a mark asks for",
+    "inFlight/sessionFlights/stale": "readStateInFlight and requests from before a mailbox reset",
+    "unconfirmed/autoSinceConfirm": "readStateUnconfirmed and automatic marks sent since the last confirmed result",
+    "sends": "all read-state requests"
+   },
+   "abstractions": [
+    "One message and four requests.",
+    "Read-state changes use no durable operation record: the label change is idempotent, so a restart or mailbox reset may send one more automatic mark.",
+    "The reviewed prepare and dispatch of a mark are one request."
+   ]
+  },
+  {
+   "path": "specs/quint/services/ApprovalDecision.qnt",
+   "module": "ApprovalDecision",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "lostDecisionReplyReconciledTest",
+    "retainedDecisionBlocksAnotherTest",
+    "unrecordedDecisionReleasedAtFinishTest",
+    "changedRequestNeedsItsOwnDecisionTest",
+    "lateDecisionForReplacedRequestDroppedTest"
+   ],
+   "invariants": [
+    "TypeOK",
+    "AtMostOneDecisionPerRequest",
+    "RecordedNeedsDecision",
+    "RetainedBlocksReview",
+    "BusyMeansRetained",
+    "WireNeedsDecision"
+   ],
+   "witnesses": [
+    "RetainedUnrecordedWitness",
+    "RetainedForReplacedRequestWitness",
+    "ReviewedNotSentWitness"
+   ],
+   "sources": [
+    "apps/app/src/prototype/workflow-adapter.ts",
+    "apps/app/src/runtime/workflow-protocol.ts",
+    "apps/app/src/runtime/workflow-intents.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/prototype/workflow-adapter.ts",
+     "name": "approvalKey"
+    },
+    {
+     "path": "apps/app/src/prototype/workflow-adapter.ts",
+     "name": "approvalLocked"
+    },
+    {
+     "path": "apps/app/src/prototype/workflow-adapter.ts",
+     "name": "approvalReview"
+    },
+    {
+     "path": "apps/app/src/prototype/workflow-adapter.ts",
+     "name": "decide"
+    },
+    {
+     "path": "apps/app/src/prototype/workflow-adapter.ts",
+     "name": "beforeDispatch"
+    },
+    {
+     "path": "apps/app/src/runtime/workflow-protocol.ts",
+     "name": "decideApproval"
+    },
+    {
+     "path": "apps/app/src/runtime/workflow-protocol.ts",
+     "name": "approvals"
+    },
+    {
+     "path": "apps/app/src/runtime/workflow-protocol.ts",
+     "name": "requestDigest"
+    },
+    {
+     "path": "apps/app/src/runtime/workflow-intents.ts",
+     "name": "admit"
+    },
+    {
+     "path": "apps/app/src/runtime/workflow-intents.ts",
+     "name": "acknowledge"
+    }
+   ],
+   "stateMapping": {
+    "digest/status/finished/cancelRequested": "the engine's approval request and run state",
+    "intent/intentDigest/busy": "the retained decision and the operation sending it",
+    "reviewDigest/reviewApproved": "the first tap of a decision",
+    "wire/wireDigest/wireApproved": "the decision on the network",
+    "sent/recorded": "decisions sent and recorded per request digest"
+   },
+   "abstractions": [
+    "One approval node with two request digests.",
+    "A retained decision for a request the engine no longer lists stays retained until the run finishes or is cancelled.",
+    "Unsupported approvals, which can only be denied, are not distinguished."
+   ]
+  },
+  {
+   "path": "specs/quint/application/ShadeNotices.qnt",
+   "module": "ShadeNotices",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "staleRefreshDroppedTest",
+    "updatedNoticeNotComposedTest",
+    "currentNoticeComposedTest",
+    "lockDuringComposeCheckTest",
+    "replacedSelectionDroppedTest",
+    "staleDismissRefusedTest"
+   ],
+   "invariants": [
+    "TypeOK",
+    "ShownIsCurrentEpoch",
+    "SelectionShown",
+    "HiddenShowsNothing",
+    "QuestionNeedsShade",
+    "ComposeMatchesNotice",
+    "DismissExactRevision"
+   ],
+   "witnesses": [
+    "StaleRefreshWitness",
+    "ReplacedWhileShownWitness",
+    "QuestionOnReplacedNoticeWitness",
+    "StaleComposeCheckWitness"
+   ],
+   "sources": [
+    "apps/app/src/prototype/notifications-adapter.ts",
+    "apps/app/src/prototype/context-selection.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/prototype/notifications-adapter.ts",
+     "name": "alphaNoticeEpoch"
+    },
+    {
+     "path": "apps/app/src/prototype/notifications-adapter.ts",
+     "name": "refreshAlphaNotices"
+    },
+    {
+     "path": "apps/app/src/prototype/notifications-adapter.ts",
+     "name": "alphaNoticeSelection"
+    },
+    {
+     "path": "apps/app/src/prototype/notifications-adapter.ts",
+     "name": "alphaNoticeQuestion"
+    },
+    {
+     "path": "apps/app/src/prototype/notifications-adapter.ts",
+     "name": "ownNotificationSelection"
+    },
+    {
+     "path": "apps/app/src/prototype/notifications-adapter.ts",
+     "name": "alphaNoticesBusy"
+    },
+    {
+     "path": "apps/app/src/prototype/notifications-adapter.ts",
+     "name": "clearAll"
+    },
+    {
+     "path": "apps/app/src/prototype/context-selection.ts",
+     "name": "noticeCurrent"
+    },
+    {
+     "path": "apps/app/src/prototype/context-selection.ts",
+     "name": "noticeExcerpt"
+    },
+    {
+     "path": "apps/app/src/prototype/context-selection.ts",
+     "name": "noticeReviewable"
+    }
+   ],
+   "stateMapping": {
+    "live/hidden/shade/epoch": "the mounted shell, page visibility, the open shade and alphaNoticeEpoch",
+    "busy/capturedEpoch": "the list read in progress and the epoch it began under",
+    "nativePresent/nativeRev": "the platform's notice and its revision",
+    "shownPresent/shownRev/shownEpoch": "the row in alphaNotices",
+    "selection/question/checking/checkEpoch": "the pressed notice, the reviewed notice, and the list read before composing",
+    "composed*/dismissed*": "what reached the conversation draft and what was dismissed, with the platform revision at that moment"
+   },
+   "abstractions": [
+    "One of Alpha Phone's own notices with three revisions; five epochs.",
+    "Other apps' and hosted rows are never reviewable or selectable and are not modeled.",
+    "Opening a notice and Clear all act on the shown revision in the same way as dismiss.",
+    "The platform refuses an action on a revision it no longer holds; that check is the plugin's."
+   ]
+  }
+ ],
+ "update": [
+  {
+   "module": "InboxDelivery",
+   "set": {
+    "tests": [
+     "exactReviewTest",
+     "changedDraftTest",
+     "editedReviewDiscardedTest",
+     "absentComposerCannotConfirmTest",
+     "uncertainRecoveryTest",
+     "regressedReceiptCannotRearmTest",
+     "sequentialOperationsTest",
+     "unresolvedOutcomeCannotBeClearedTest",
+     "restoredGrantNeedsFreshReviewTest",
+     "restoredGrantKeepsUnknownTest",
+     "restartedWithdrawalCannotConfirmTest",
+     "withdrawalSeenInSessionDiscardsReviewTest",
+     "accountSwitchKeepsReviewTest",
+     "accountSwitchKeepsUnknownTest",
+     "grantRevocationTest",
+     "savedMailShownBeforeGrantReadTest"
+    ],
+    "invariants": [
+     "TypeOK",
+     "AtMostOneDispatch",
+     "PersistBeforeDispatch",
+     "NoRearmAfterDispatch",
+     "DispatchUnderKnownGrant",
+     "DispatchBoundToComposer",
+     "CacheBound",
+     "SavedMailMarked",
+     "SuccessfulCleanup",
+     "UnknownCannotRearm",
+     "ParkedInert"
+    ],
+    "witnesses": [
+     "ObservedUnknownWitness",
+     "ParkedReviewWitness",
+     "SavedMailUnverifiedWitness",
+     "ReviewUnderWithdrawnGrantWitness",
+     "SecondOperationWitness"
+    ],
+    "symbols": [
+     {
+      "path": "apps/app/src/runtime/inbox-operation.ts",
+      "name": "nextOperationPhase"
+     },
+     {
+      "path": "apps/app/src/runtime/inbox-operation.ts",
+      "name": "reviewBinding"
+     },
+     {
+      "path": "apps/app/src/runtime/inbox-operation.ts",
+      "name": "reviewConfirmable"
+     },
+     {
+      "path": "apps/app/src/runtime/inbox-operation.ts",
+      "name": "discardUnsent"
+     },
+     {
+      "path": "apps/app/src/runtime/inbox-operation.ts",
+      "name": "unconfirmedSource"
+     },
+     {
+      "path": "apps/app/src/runtime/inbox-operation.ts",
+      "name": "allows"
+     },
+     {
+      "path": "apps/app/src/runtime/inbox-operation.ts",
+      "name": "refresh"
+     },
+     {
+      "path": "apps/app/src/runtime/inbox-operation.ts",
+      "name": "clear"
+     },
+     {
+      "path": "apps/app/src/runtime/gmail-grants.ts",
+      "name": "gmailGrantChange"
+     },
+     {
+      "path": "apps/app/src/runtime/gmail-grants.ts",
+      "name": "gmailInboxAllows"
+     },
+     {
+      "path": "apps/app/src/runtime/gmail-grants.ts",
+      "name": "gmailReadCacheKey"
+     },
+     {
+      "path": "apps/app/src/prototype/inbox-cloud-adapter.ts",
+      "name": "restoreMailbox"
+     },
+     {
+      "path": "apps/app/src/prototype/inbox-cloud-adapter.ts",
+      "name": "refreshAccounts"
+     },
+     {
+      "path": "apps/app/src/prototype/inbox-cloud-adapter.ts",
+      "name": "openMailbox"
+     },
+     {
+      "path": "apps/app/src/prototype/inbox-cloud-adapter.ts",
+      "name": "cachedListShown"
+     },
+     {
+      "path": "apps/app/src/prototype/inbox-provider-controls.ts",
+      "name": "withdrawn"
+     },
+     {
+      "path": "apps/app/src/prototype/inbox-provider-controls.ts",
+      "name": "discardEdited"
+     },
+     {
+      "path": "apps/app/src/prototype/inbox-provider-controls.ts",
+      "name": "followup"
+     }
+    ],
+    "stateMapping": {
+     "phase/kind/durable/opOwner/opGrant/requestEpoch": "InboxOperationRecord for the selected account, compareExchange before dispatch, and the binding it was loaded under",
+     "parked": "the saved operation of the account that is not selected; records are keyed by owner and grant",
+     "draftRevision/reviewedRevision/composerOpen/exactReview": "the composer email, the content fixed at prepare, reviewBinding and the server review",
+     "dispatches/operations/dispatchCaps/dispatchBound": "one network attempt per request ID, sequential operations, and the capability and composer checks made at confirm",
+     "outcome/providerConfirmed/draftExists/sendSucceeded": "saved receipt, the providerAgrees gate before local cleanup, and a confirmed send",
+     "read/modify/seenRead/seenModify/capsModify": "provider grants, the account row held from the last accounts read, and the capabilities last read",
+     "cacheVisible/cacheSaved/cacheVerified/savedShown/knownRead": "mail on screen, the offline copy, an accounts read since startup, the saved-list mark, and the read grant recorded with the saved accounts"
+    },
+    "abstractions": [
+     "One draft and two accounts, three content revisions and three sequential operations; send and one non-composer change stand for every operation kind.",
+     "Recipient and byte equality are opaque identity comparisons. Parsing, SHA-256 and exact-byte copy remain runtime test responsibilities.",
+     "The grant guard on confirm is the capabilities last read for the account (InboxOperationDependencies.allows). The provider enforces the grant itself; between a withdrawal elsewhere and the next read the phone can only be refused by the provider.",
+     "withdrawRead and withdrawModify are a withdrawal seen by an accounts read of the same session; withdrawElsewhere followed by accountsRead models one seen later, including after a restart, when no earlier account row exists and the unsent review stays saved but cannot be confirmed.",
+     "Saved mail is shown under the read grant recorded with it and marked as saved until the accounts read that always follows; a grant withdrawn elsewhere is visible for that window.",
+     "A review for a different composer email is treated as an edited one. A reload closes the composer; here closing is a separate step from restart.",
+     "Read and unread marks do not use this durable record and are modeled in InboxReadState. Local draft copies are modeled in InboxDrafts; draftExists is the sent draft with exactly the sent content.",
+     "The provider reports an undispatched request only as prepared or refused. A dispatching record whose request never reached the provider stays unresolved; no abandon action exists."
+    ],
+    "sources": [
+     "apps/app/src/runtime/inbox-operation.ts",
+     "apps/app/src/runtime/inbox-local-store.ts",
+     "apps/app/src/runtime/inbox-unsaved-record.ts",
+     "apps/app/src/runtime/inbox-attachment.ts",
+     "apps/app/src/runtime/gmail-grants.ts",
+     "apps/app/src/runtime/reviewed-mail-context.ts",
+     "apps/app/src/prototype/inbox-cloud-adapter.ts",
+     "apps/app/src/prototype/inbox-provider-controls.ts"
+    ]
+   },
+   "unset": []
+  },
+  {
+   "module": "WorkflowExecution",
+   "set": {
+    "tests": [
+     "reviewedExecutionTest",
+     "unknownSubmissionTest",
+     "lostReplyReconcilesTest",
+     "changedVersionAbandonsTest",
+     "versionRaceRefusedTest",
+     "legacyVersionRaceReportedTest",
+     "legacyCannotReconcileTest",
+     "changedRequestNeedsNewDecisionTest",
+     "ownerSwitchDoesNotCancelTest",
+     "denialAndCancelTest",
+     "cancelNeedsReceiptTest",
+     "triggerDisableTest"
+    ],
+    "invariants": [
+     "TypeOK",
+     "AtMostOneExecution",
+     "DurableSubmission",
+     "AcceptedRunIsReviewedVersion",
+     "ProtocolAdmitsReviewedVersion",
+     "AbandonedNeverRan",
+     "OwnerConfirmsRepeat",
+     "ReviewedEffect",
+     "CancelNeedsReceipt",
+     "TriggerDispatchEnabled",
+     "ProductionTriggerGate"
+    ],
+    "witnesses": [
+     "UnadmittedWitness",
+     "AbandonedWitness",
+     "LegacyUncertainRanWitness",
+     "LegacyOtherVersionWitness",
+     "StaleApprovalWitness",
+     "DisabledQueuedWitness",
+     "OtherOwnerRunningWitness"
+    ],
+    "symbols": [
+     {
+      "path": "apps/app/src/runtime/workflow-protocol.ts",
+      "name": "submit"
+     },
+     {
+      "path": "apps/app/src/runtime/workflow-protocol.ts",
+      "name": "resubmit"
+     },
+     {
+      "path": "apps/app/src/runtime/workflow-protocol.ts",
+      "name": "reconcile"
+     },
+     {
+      "path": "apps/app/src/runtime/workflow-protocol.ts",
+      "name": "WorkflowAdmissionRejected"
+     },
+     {
+      "path": "apps/app/src/runtime/workflow-protocol.ts",
+      "name": "supportsSubmissionReconciliation"
+     },
+     {
+      "path": "apps/app/src/runtime/workflow-protocol.ts",
+      "name": "requestDigest"
+     },
+     {
+      "path": "apps/app/src/runtime/workflow-intents.ts",
+      "name": "runIntentReconcilable"
+     },
+     {
+      "path": "apps/app/src/runtime/workflow-intents.ts",
+      "name": "admit"
+     },
+     {
+      "path": "apps/app/src/runtime/workflow-intents.ts",
+      "name": "acknowledge"
+     },
+     {
+      "path": "apps/app/src/prototype/workflow-adapter.ts",
+      "name": "unadmitted"
+     },
+     {
+      "path": "apps/app/src/prototype/workflow-adapter.ts",
+      "name": "unverifiable"
+     },
+     {
+      "path": "apps/app/src/prototype/workflow-adapter.ts",
+      "name": "reviewResend"
+     },
+     {
+      "path": "apps/app/src/prototype/workflow-adapter.ts",
+      "name": "reviewClear"
+     },
+     {
+      "path": "apps/app/src/prototype/workflow-adapter.ts",
+      "name": "clearRunRequest"
+     },
+     {
+      "path": "apps/app/src/prototype/workflow-adapter.ts",
+      "name": "reviewCancel"
+     },
+     {
+      "path": "apps/app/src/browser/workflow-trigger-runtime.ts",
+      "name": "triggerState"
+     },
+     {
+      "path": "apps/app/src/browser/workflow-trigger-runtime.ts",
+      "name": "workflowNeedsReview"
+     },
+     {
+      "path": "apps/app/src/browser/simulated-workflows.ts",
+      "name": "badge"
+     }
+    ],
+    "stateMapping": {
+     "version/reviewedVersion/phase": "normalized authoring, validation and exact-version save/run",
+     "queued/queuedVersion/sourceCurrent/enabled/mocks/triggerDispatchEnabled": "development trigger queue, its filter on a foreground check, source hash revalidation and the gate at dispatch",
+     "legacy/intentSaved/submission/submittedVersion/admitted/subExecutions/ranVersion": "durable submission identity, the agent's single admission, and agents without submission identities",
+     "abandoned/ownerReview": "a request cleared as a known non-run, and the confirmation before a resend or a clear",
+     "approval/requestDigest/reviewedDigest/effectDigest/effects": "reviewed supported approval bound to the request digest, and effect execution",
+     "cancelRequested/outcome": "cancellation of an accepted run versus terminal receipt"
+    },
+    "abstractions": [
+     "One workflow, two submissions, three versions and three request digests.",
+     "Production supports manual triggers here. Browser event/time/location trigger activity is explicitly marked development-only.",
+     "The upstream workflow engine and multiple action graph steps are composed through receipt/approval contracts rather than reimplemented.",
+     "An account change stops this phone acting on the run through the owner and epoch fences. The agent's run is not cancelled and reports its own outcome.",
+     "A legacy agent has no version fence: the phone reads the workflow first and compares the version of the run it gets back. activate has the same read-then-act gap and is not modeled.",
+     "A request cleared by its owner on a legacy agent may still have run; the model counts executions per submission.",
+     "Disabling a workflow leaves its queued occurrence in the saved queue, where the badge reads it, until a foreground check filters it. It is never dispatched."
+    ],
+    "sources": [
+     "apps/app/src/runtime/phone-workflow-authoring.ts",
+     "apps/app/src/runtime/workflow-protocol.ts",
+     "apps/app/src/runtime/workflow-intents.ts",
+     "apps/app/src/runtime/workflow-device-contract.ts",
+     "apps/app/src/browser/workflow-trigger-runtime.ts",
+     "apps/app/src/browser/workflow-triggers.ts",
+     "apps/app/src/browser/simulated-workflows.ts",
+     "apps/app/src/prototype/workflow-authoring.ts",
+     "apps/app/src/prototype/workflow-adapter.ts",
+     "backend/proposal-action.ts"
+    ]
+   },
+   "unset": []
+  },
+  {
+   "module": "NoticesAndCaches",
+   "set": {
+    "tests": [
+     "deliveredOnceTest",
+     "releasedQuestionTapTest",
+     "retirementRetryTest",
+     "retirementResumedTest",
+     "restartResumesRetirementTest",
+     "clearFencesWriteTest",
+     "expiredCacheTest",
+     "ownerSwitchHidesCacheTest"
+    ],
+    "invariants": [
+     "TypeOK",
+     "CacheOwnerIsolation",
+     "ClearFencesWrite",
+     "PostedOwnerIsolation",
+     "OneAcknowledgement",
+     "ClaimExclusive",
+     "NoPostAfterConsume",
+     "TapOwnerBound",
+     "QuestionNeedsTap",
+     "RetryHasDriver"
+    ],
+    "witnesses": [
+     "RetryWaitingWitness",
+     "TappedQuestionWitness",
+     "StaleWriteWitness",
+     "OtherOwnerCacheWitness"
+    ],
+    "symbols": [
+     {
+      "path": "apps/app/src/runtime/notice-owner-coordinator.ts",
+      "name": "NoticeOwnerCoordinator"
+     },
+     {
+      "path": "apps/app/src/runtime/notice-owner-coordinator.ts",
+      "name": "retryNeeded"
+     },
+     {
+      "path": "apps/app/src/runtime/notice-owner-coordinator.ts",
+      "name": "update"
+     },
+     {
+      "path": "apps/app/src/runtime/notice-owner-coordinator.ts",
+      "name": "generation"
+     },
+     {
+      "path": "apps/app/src/runtime/workflow-notice-taps.ts",
+      "name": "consumeWorkflowTap"
+     },
+     {
+      "path": "apps/app/src/runtime/workflow-notice-taps.ts",
+      "name": "discard"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/WorkflowNoticeTaps.java",
+      "name": "settleQuestion"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/WorkflowNoticeTaps.java",
+      "name": "releaseApprovalQuestion"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/WorkflowNoticeTaps.java",
+      "name": "consume"
+     },
+     {
+      "path": "apps/app/src/runtime/service-read-cache.ts",
+      "name": "epoch"
+     },
+     {
+      "path": "apps/app/src/runtime/service-read-cache.ts",
+      "name": "clear"
+     },
+     {
+      "path": "apps/app/src/runtime/service-read-cache.ts",
+      "name": "MAX_AGE"
+     },
+     {
+      "path": "apps/app/src/runtime/service-read-cache-store.ts",
+      "name": "readCacheIdentity"
+     }
+    ],
+    "stateMapping": {
+     "epoch/phase/inFlight/retry": "NoticeOwnerCoordinator generation, the immediate privacy transition, the transition in progress and retryNeeded",
+     "notice/question/claim/posted/consumed/acknowledgements": "durable delivery, single claim, the pending tap with its Ask flag, consume and acknowledgement",
+     "cacheOwner": "the identity whose document holds the snapshot (readCacheIdentity)",
+     "cacheClears/cacheWrittenClears/callbackClears/callbackOwner/cacheWritePending": "the per-instance clear counter captured by a queued write, and the identity the write was requested for",
+     "cacheAge/cachePresent/cacheVisible": "MAX_AGE, the stored snapshot and what a view shows"
+    },
+    "abstractions": [
+     "One notice and one cached entry, two claimants and two expiry ticks.",
+     "Native platform post success, uncertain delivery and detailed provider cursor pagination remain external observations. The model checks the admitted claim/consume path.",
+     "Per-entry byte limits, multiple bounded entries and the separate documents of each service are modeled in ServiceReadCache. Cache data never authorizes a provider mutation.",
+     "Cache isolation between accounts is the document identity, not a counter: the clear counter lives in one process and is neither stored nor shared between windows. Hiding snapshots on an account change is the adapters' duty.",
+     "A failed owner transition has no timer. It is repeated by the next update, which a connection event, a resume or startup delivers.",
+     "An approval Ask keeps its tap usable: a canceled question returns the tap to the untapped notice. The tap check itself is modeled in WorkflowNoticeTaps.",
+     "Whether the native post of an approval notice refuses a route of a retired owner was not read; the model requires the current owner for every post."
+    ],
+    "sources": [
+     "apps/app/src/runtime/notice-owner-coordinator.ts",
+     "apps/app/src/runtime/service-read-cache.ts",
+     "apps/app/src/runtime/service-read-cache-store.ts",
+     "apps/app/src/runtime/gmail-background.ts",
+     "apps/app/src/runtime/workflow-notice-taps.ts",
+     "apps/app/src/runtime/hosted-result-notices.ts",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/WorkflowNoticeRecovery.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/WorkflowNoticeIntentDedup.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/WorkflowNoticeDelivery.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/WorkflowNoticeTaps.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/GmailDelivery.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/GmailReconciliation.java"
+    ]
+   },
+   "unset": []
+  },
+  {
+   "module": "NotificationCollection",
+   "set": {
+    "tests": [
+     "collectionOptInTest",
+     "policyChangeFencesReadTest",
+     "policyChangeFencesHistoryTest",
+     "lockRedactsTest",
+     "secretNeverOpensTest",
+     "packageReplacementTest",
+     "historyExpiresTest",
+     "ownNotificationGateIndependentTest",
+     "nativeLockDropsRowsTest",
+     "browserLockRedactsRowsTest",
+     "changedPackageRequiresRemovalTest",
+     "foreignIntentCannotOpenTest",
+     "ongoingCannotDismissTest",
+     "ownDismissLockRaceTest",
+     "ownDismissAfterUnlockTest",
+     "browserCannotPauseTest",
+     "nativePauseDropsRowsTest",
+     "clearBatchMatchesSingleDismissalsTest"
+    ],
+    "invariants": [
+     "PreviewNeedsConsent",
+     "CollectionNeedsAuthority",
+     "NativeRowsUnlocked",
+     "CurrentActionIdentity",
+     "OnlyPostingAppIntent",
+     "RetainedHistoryBounded",
+     "ClearOnDisable",
+     "BrowserNeverPauses",
+     "OwnDismissUnlocked",
+     "OwnDismissNeedsRow",
+     "TypeOK"
+    ],
+    "witnesses": [
+     "OwnCheckThenLockWitness",
+     "LockedOwnRowWitness",
+     "NativePausedWitness"
+    ],
+    "symbols": [
+     {
+      "path": "apps/app/src/browser/notifications.ts",
+      "name": "dismiss"
+     },
+     {
+      "path": "apps/app/src/browser/notifications.ts",
+      "name": "clear"
+     },
+     {
+      "path": "apps/app/src/browser/notifications.ts",
+      "name": "postedMarks"
+     },
+     {
+      "path": "apps/app/src/browser/notifications.ts",
+      "name": "locked"
+     },
+     {
+      "path": "apps/app/src/browser/notifications.ts",
+      "name": "focusAction"
+     },
+     {
+      "path": "apps/app/src/prototype/notifications-adapter.ts",
+      "name": "clearAll"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/NotificationAccess.java",
+      "name": "pause"
+     }
+    ],
+    "stateMapping": {
+     "enabled/paused/access/connected/selected/preview/historyEnabled": "independent collection, system permission, app selection, preview and history authority",
+     "policyRevision/epoch/readEpoch/rowEpoch/queuedEpoch": "reviewed policy updates, callback invalidation and exact displayed/action revision",
+     "signature/selectedSignature/sameUser/ownPackage/uidMatches": "pinned native package certificate, user and notification UID admission",
+     "native/locked/rowPresent/rowText": "native locked-row removal and browser locked metadata redaction",
+     "historyCount/historyAge/historySignature": "bounded 24-hour metadata history with signature pruning, storage errors and explicit clear",
+     "appEnabled/channelEnabled": "Alpha own-notification gates, independent of external collection",
+     "ownPosted/ownChecked/ownDismissed/ownDismissedLocked": "one of Alpha's own reminder rows in the browser double: the listing that validates a dismissal and the edit that records it after checking the lock again"
+    },
+    "abstractions": [
+     "One representative external package and notification, signatures/revisions 0..2, policy epochs 0..4, two retained metadata rows and two time buckets representing the 24-hour boundary.",
+     "Persisted history is modeled only as metadata count, age and package signature. Its schema contains no title, message body, PendingIntent or provider key. Encryption and exact byte limits remain pinned implementation contracts.",
+     "The native branch drops all locked rows; the browser branch can show a redacted app label while locked. Native package replacement requires removal before selection can pin its new signature.",
+     "External notification posts are environmental events. The browser synthetic injection UI is admitted only by DevelopmentSurfaces; this specification performs no external actions.",
+     "Pausing collection exists only on the native collector, where mock admission calls it. The browser double can resume but never pause.",
+     "Clear all in the browser double validates rows against one listing and records the dismissals in one edit; each row has the outcome of its own dismissal."
+    ]
+   },
+   "unset": []
+  }
+ ],
+ "readme": [
+  {
+   "family": "services",
+   "module": "InboxDelivery",
+   "sourceSymbols": "`InboxOperation.prepare`, `confirm`, `refresh`, `clear`, `discardUnsent`, `nextOperationPhase`, `reviewBinding`, `gmailGrantChange`, `restoreMailbox`",
+   "modeledState": "One saved operation per account with sequential operations, a composer binding, receipts that never return to a confirmable phase, capabilities and account rows as last read, and saved mail shown before the accounts read"
+  },
+  {
+   "family": "services",
+   "module": "InboxDrafts",
+   "sourceSymbols": "`inboxDrafts.setAside`, `openShelved`, `editProvider`, `savedDraftOnProviderEdit`, `settleSent`, `inboxUnsaved.edit`",
+   "modeledState": "The open, retained, saved and set-aside copies of each local draft, the coalesced recovery write, the earlier-version mark and cleanup after a confirmed send"
+  },
+  {
+   "family": "services",
+   "module": "InboxListPaging",
+   "sourceSymbols": "`load`, `loadDrafts`, `nextPageToken`, `seenCursors`, `rememberList`, `restoreList`",
+   "modeledState": "Single-flight list reads fenced by generation, account and query, cursors used once, a repeated cursor ending the list, and the saved folder list"
+  },
+  {
+   "family": "services",
+   "module": "InboxWithdrawal",
+   "sourceSymbols": "`withdrawn`, `applyWithdrawal`, `reset`, `InboxOperation.discardUnsent`",
+   "modeledState": "A change grant withdrawn while a run is active: deferral to the run's end, the detached discard after a reset, and receipts that survive"
+  },
+  {
+   "family": "services",
+   "module": "InboxReadState",
+   "sourceSymbols": "`setRead`, `readStateInFlight`, `readStateUnconfirmed`, `setGmailReadState`",
+   "modeledState": "One read-state request at a time per message and no automatic repeat after an uncertain outcome"
+  },
+  {
+   "family": "services",
+   "module": "ServiceReadCache",
+   "sourceSymbols": "`ServiceReadCache.put`, `clear`, `get`, `readCacheIdentity`, `serviceReadCache`",
+   "modeledState": "One document per account identity and service, the clear fence on queued writes, bounded entries and snapshots shown per account"
+  },
+  {
+   "family": "services",
+   "module": "WorkflowExecution",
+   "sourceSymbols": "`WorkflowProtocol.run`, `submit`, `resubmit`, `reconcile`, `unadmitted`, `unverifiable`, `clearRunRequest`, `decideApproval`",
+   "modeledState": "Reviewed submission with one admission per identity, owner-confirmed resend, a known non-run, legacy agents, approval bound to the request digest, and the development trigger queue"
+  },
+  {
+   "family": "services",
+   "module": "WorkflowAuthoring",
+   "sourceSymbols": "`createWorkflowAuthoring`: `save`, `recover`, `resend`, `refused`, `committed`, `discardDraft`",
+   "modeledState": "Typed draft review, one stored mutation identity, receipt recovery, confirmed exact resend and a refused edit"
+  },
+  {
+   "family": "services",
+   "module": "AutomationIntent",
+   "sourceSymbols": "`work`, `refresh`, `forget`, `save`, `WorkflowIntentStore.admit`, `acknowledge`, `automationIntentApplied`",
+   "modeledState": "Automation requests recorded before dispatch and released by a reply, a confirming listing or the owner, with per-draft identities and idempotent reminder creation"
+  },
+  {
+   "family": "services",
+   "module": "ApprovalDecision",
+   "sourceSymbols": "`decide`, `read`, `approvalKey`, `approvalLocked`, `decideApproval`",
+   "modeledState": "One retained decision per approval request digest, released by the receipt or when the run no longer accepts decisions"
+  },
+  {
+   "family": "services",
+   "module": "TriggerCursor",
+   "sourceSymbols": "`WorkflowTriggerRuntime.tick`, `wake`, `triggerTickPlan`, `detectWorkflowTriggers`, `placeChanged`",
+   "modeledState": "Development trigger runtime: scan and dispatch latches, per-workflow error isolation, the location cursor across position gaps and the pruned seen set"
+  },
+  {
+   "family": "services",
+   "module": "WorkflowNoticeTaps",
+   "sourceSymbols": "`checkNotice`, `resolveWorkflowTap`, `readyTapStep`, `tapRecheck`, `reviewWorkflowNoticeQuestion`, `WorkflowNoticeTaps.consume`",
+   "modeledState": "A pending tap read against the view generation, deferred behind operations, opened once, and released or consumed by an Ask review"
+  },
+  {
+   "family": "services",
+   "module": "NoticesAndCaches",
+   "sourceSymbols": "`NoticeOwnerCoordinator.update`, `consumeWorkflowTap`, `WorkflowNoticeTaps.settleQuestion`, `ServiceReadCache.clear`",
+   "modeledState": "Owner retirement with an event-driven retry, single delivery claim, pending and released taps, one acknowledgement and one cached snapshot"
+  },
+  {
+   "family": "application",
+   "module": "NotificationCollection",
+   "sourceSymbols": "`Notifications.dismiss`, `clear`, `external`, `NotificationAccess.pause`",
+   "modeledState": "External collection policy and history as before, plus own-row dismissal checked against the lock inside its edit, batch clear, and pause on the native collector only"
+  },
+  {
+   "family": "application",
+   "module": "ShadeNotices",
+   "sourceSymbols": "`refreshAlphaNotices`, `alphaNoticeEpoch`, `alphaNoticeSelection`, `alphaNoticeQuestion`, `noticeCurrent`",
+   "modeledState": "The shade's copy of Alpha Phone's notices: epoch-fenced list reads, the pressed notice as agent context, and a question composed only for the revision still posted"
+  }
+ ]
+}

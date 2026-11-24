@@ -56,6 +56,12 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   let mapGeneration=0,mapFailed=false,mapObserver:MutationObserver|undefined;
   let mapCopyright='';
   let pendingHandoff: {query:string}|undefined, mapsController:MapsController|undefined;
+  // A chat card's request, taken once: a search around the phone, or a planned route to draw.
+  type AgentRoute={origin:string;destination:string;name:string;travelMode:TravelMode};
+  type NearSearch={query:string;located:boolean};
+  let nearSearch: NearSearch|undefined, pendingRoute: AgentRoute|undefined;
+  // "Directions to X from here": search the destination, open the first provider match, then plan from the phone.
+  let fromHere: {query:string;stage:'search'|'place'}|undefined;
   const active=()=>!disposed&&!document.hidden&&!!api?.isActive();
   const dropPlane=()=>{++mapGeneration;mapObserver?.disconnect();mapObserver=undefined;mapFailed=false;mapCopyright='';plane?.destroy();plane=undefined;planeElement=undefined;planeBasemap=undefined;};
   const googleProviders = new Set<string>();
@@ -184,16 +190,56 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
     if(!voicePreferenceRead){navigationVoice.enabled=st.voice!==false;voicePreferenceRead=true;}
     // Cross-app navigation carries a one-use search, not a selected destination.
     // Consume it outside render and fence it against leaving or a newer action.
-    if(typeof st.query==='string'&&st.query.trim()&&!pendingHandoff){
+    if(st.fromHere&&typeof st.query==='string'&&st.query.trim()&&!pendingHandoff)fromHere={query:st.query.trim(),stage:'search'};
+    if(typeof st.query==='string'&&st.query.trim()&&!st.nearMe&&!pendingHandoff){
       const handoff=pendingHandoff={query:st.query};
       queueMicrotask(()=>{
         if(pendingHandoff!==handoff)return;pendingHandoff=undefined;
         if(disposed||!currentApi.isActive()||currentApi.get('maps').query!==handoff.query)return;
         const fromEvent=!!currentApi.get('maps').fromEvent;
-        currentApi.set({query:null});screen.handoff(handoff.query,fromEvent);
+        currentApi.set({query:null,fromHere:null});screen.handoff(handoff.query,fromEvent);
       });
     }
+    // A chat card's "near you" search: the user's tap asks this phone for its position (the platform may
+    // prompt), then Maps searches around it. The position goes to the Maps service only, as for any search.
+    if(st.nearMe&&typeof st.query==='string'&&st.query.trim()&&!nearSearch&&!pendingHandoff){
+     const near:NearSearch=nearSearch={query:st.query.trim(),located:false};
+     queueMicrotask(()=>{
+      if(nearSearch!==near)return;
+      if(disposed||!currentApi.isActive()||currentApi.get('maps').query!==st.query){nearSearch=undefined;return;}
+      // Leave any route, place or results of an earlier visit first, as system Back would.
+      currentApi.set({query:null,nearMe:null});screen.unwind();near.located=true;screen.recenter();
+     });
+    }
+    // A chat route card: the same pin, starting point and travel mode the user could enter by hand.
+    if(st.agentRoute&&!pendingRoute){
+     const route=pendingRoute=st.agentRoute as AgentRoute;
+     queueMicrotask(()=>{
+      if(pendingRoute!==route)return;pendingRoute=undefined;
+      if(disposed||!currentApi.isActive()||currentApi.get('maps').agentRoute!==route)return;
+      currentApi.set({agentRoute:null});
+      screen.handoff(route.destination,false);screen.rename(route.name);screen.ensure();
+      screen.openDirections();screen.setMode(route.travelMode);screen.setOriginText(route.origin);screen.planOrigin();
+     });
+    }
     const view = screen.view();
+    if(nearSearch?.located){
+     const near=nearSearch,position=mapsController?.snapshot().position;
+     if(position?.phase==='ready'){nearSearch=undefined;queueMicrotask(()=>{if(!disposed&&currentApi.isActive())screen.searchFor(near.query);});}
+     // A refused or failed fix keeps the screen's own location message; nothing is searched elsewhere.
+     else if(position?.phase==='error'||!view.status.locationBusy&&position?.phase!=='loading')nearSearch=undefined;
+    }
+    if(fromHere&&!pendingHandoff){
+     const pending=fromHere,first=view.results.find(row=>!row.saved);
+     // The agent offers this only after its own search resolved the name to one place, so the first match is taken.
+     if(view.query!==pending.query||view.noResults)fromHere=undefined;
+     else if(pending.stage==='search'&&view.mode==='results'&&first){pending.stage='place';queueMicrotask(()=>{if(fromHere===pending&&!disposed&&currentApi.isActive())screen.choose(first.key);});}
+     else if(pending.stage==='place'&&view.mode==='place'&&view.place?.canDirections){
+      fromHere=undefined;
+      // The card's tap is the explicit location request: the platform may prompt, and the route starts from the fix.
+      queueMicrotask(()=>{if(!disposed&&currentApi.isActive()){screen.openDirections();screen.locate();}});
+     }
+    }
     // Calling the original with neutral state retains visual tokens without
     // generating sample place cards, address guesses, routes or timers.
     const data = original.render({ ...st, query: null, place: null, directions: null, nav: false, saved: [], pan: null }, currentApi);
@@ -247,6 +293,8 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
       cloudCredit:cloudCredit(directionsOpen),
       notNative:false, hasNativeMap:true, globalBasemap:globalMap, regionalBasemap:!!region && basemap === region,
       cloudBasemap:!!raster && basemap === raster && !googleMaps, googleMaps, googleMapsLogo,
+      // Google Maps keeps its badge alone; the badge opens the same information.
+      mapInfoControl:!googleMaps,
       googleMapMissing:googleMaps && !basemap,
       mapLabel:googleMaps ? 'Google Maps' : globalMap ? 'World map' : basemap === region && region ? 'Regional map' : basemap ? 'Cloud map' : 'Map',
       mapAttribution:region && basemap === region ? region.attribution : raster && basemap === raster ? (planeBasemap === raster && mapCopyright || raster.attribution) : '',
@@ -264,7 +312,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
           mapObserver?.disconnect();plane?.destroy();mapFailed=false;mapCopyright='';planeElement=element;planeBasemap=basemap;const generation=++mapGeneration;delete element.dataset.mapReady;delete element.dataset.mapError;
           const current=()=>generation===mapGeneration&&planeElement===element&&!disposed&&!!api?.isActive();
           try{
-            plane=new MapPlane(element,basemap,()=>{if(!current())return;mapFailed=true;screen.setMapState('error');},data.C,id=>screen.pin(id),text=>{if(current()&&text!==mapCopyright){mapCopyright=text;screen.refresh();}},()=>screen.stopFollowing());
+            plane=new MapPlane(element,basemap,()=>{if(!current())return;mapFailed=true;screen.setMapState('error');},data.C,id=>screen.pin(id),text=>{if(current()&&text!==mapCopyright){mapCopyright=text;screen.refresh();}},()=>screen.stopFollowing(),(center,zoom)=>{if(current())screen.setViewport(center,zoom);});
             mapObserver=new MutationObserver(()=>{if(current())screen.setMapState(element.dataset.mapError ? 'error' : element.dataset.mapReady === 'true' ? 'ready' : 'loading');});
             mapObserver.observe(element,{attributes:true,attributeFilter:['data-map-ready','data-map-error']});
           }catch{mapFailed=true;element.replaceChildren();queueMicrotask(()=>{if(current())screen.setMapState('error');});}
@@ -448,7 +496,7 @@ export function installMapsChatAdapter(Component:Bag){
    return {...message,displayText:parsed.displayText,hasCalendarText:message.hasCalendarText!==false&&!!parsed.displayText,
     messageActionsLabel:message.messageActionsLabel?'Message actions: '+(parsed.displayText||parsed.cards[0]?.title||'Maps'):message.messageActionsLabel,
     mapsCards:parsed.cards.map(card=>({...card,lines:card.lines.map(text=>({text})),hasAttribution:!!card.attribution,canOpenMap:current(),
-      openMap:()=>{if(!current()||!this.live||document.hidden||connectionController.getSnapshot().open)return;this.openView('maps',card.mapQuery?{query:card.mapQuery}:{keepState:true});}})),
+      openMap:()=>{if(!current()||!this.live||document.hidden||connectionController.getSnapshot().open)return;this.openView('maps',card.route?{agentRoute:card.route}:card.mapQuery?{query:card.mapQuery,nearMe:!!card.nearMe,fromHere:!!card.directionsFromHere}:{keepState:true});}})),
     hasMapsChoice:open,mapsChoices:open?choice!.options.map(option=>({label:option.label,choose:()=>void answer(this,id,option.value,current)})):[]};
   });return out;
  };

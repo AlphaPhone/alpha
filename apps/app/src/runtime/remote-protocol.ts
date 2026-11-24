@@ -1,4 +1,4 @@
-import { isPreparedViewNavigationRequest } from './prepared-view-navigation.ts';
+import { isPreparedViewNavigationRequest, normalizeTurnReply } from './prepared-view-navigation.ts';
 import { parseViewInteractionClientId } from "../../../../.eliza/client-features/packages/core/src/views/view-interact-protocol.ts";
 import type {ChatChannel} from './alpha-client';
 /** Eliza app-host REST protocol. Native composition owns network and secure storage.
@@ -291,7 +291,7 @@ export class RemoteProtocol {
     const value = object(raw);
     if (typeof value.text !== "string" || typeof value.agentName !== "string") throw new RemoteProtocolError("invalid_response");
     // Preserve terminal failures and ignored/interrupted turns for the UI; never synthesize success.
-    return value as RemoteChatReply;
+    return normalizeTurnReply(value) as RemoteChatReply;
   }
 }
 /** Outcome of an explicit Stop. `aborted`: the agent cancelled an active turn. `idle`: the agent

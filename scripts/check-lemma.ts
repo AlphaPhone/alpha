@@ -28,8 +28,9 @@ const receipt: LemmaReceipt = {schemaVersion: 1, startedAt: new Date().toISOStri
 writeFileSync(receiptPath, JSON.stringify(receipt, null, 2) + '\n');
 let exitCode = 1;
 let lastOutput = "";
-function run(command: string, args: string[]) {
-  const result = spawnSync(command, args, {cwd: root, encoding: 'utf8', timeout: 120000});
+const aggregateTimeoutMs = 15 * 60 * 1000;
+function run(command: string, args: string[], timeout = 120_000) {
+  const result = spawnSync(command, args, {cwd: root, encoding: 'utf8', timeout});
   const output = `${result.stdout || ''}${result.stderr || ''}`;
   lastOutput = output;
   process.stdout.write(output);
@@ -78,7 +79,7 @@ try {
     if ((!functions.length && !model.classes?.length) || unread.length) throw Error(`Unread or empty verified contract in ${file}`);
     receipt.files.push({file, functions, trust});
   }
-  const generatedOK = run(process.execPath, [cli, 'gen-check', '--backend=dafny']);
+  const generatedOK = run(process.execPath, [cli, 'gen-check', '--backend=dafny'], aggregateTimeoutMs);
   const generated = hashes();
   const changed = inputs.filter(file => generated[file] !== receipt.inputs[file]);
   if (changed.length) {
@@ -96,7 +97,7 @@ try {
     console.warn(receipt.reason);
     exitCode = process.env.LEMMA_REQUIRE_BACKEND === '1' ? 2 : 0;
   } else {
-    if (!run(process.execPath, [cli, 'check', '--backend=dafny'])) throw Error('Dafny verification failed');
+    if (!run(process.execPath, [cli, 'check', '--backend=dafny'], aggregateTimeoutMs)) throw Error('Dafny verification failed');
     const proofs = [...receipt.results.at(-1)!.output.matchAll(/Dafny program verifier finished with ([1-9][0-9]*) verified, 0 errors/g)];
     if (proofs.length !== files.length) throw Error('Dafny did not report a nonempty successful proof for every source');
     receipt.verifiedConditions = proofs.reduce((count, match) => count + Number(match[1]), 0);

@@ -1,3 +1,4 @@
+import {normalizeTurnViewResults} from './prepared-view-navigation.ts';
 import {SseEventFramer} from '../ui/api/transport.ts';
 import {findViewActionHandoff} from '../../../../.eliza/client-features/packages/core/src/views/view-action-handoff.ts';
 import type {RemoteChatReply} from './remote-protocol';
@@ -128,6 +129,16 @@ export interface StreamTextFrame {
   provisional: boolean;
   direct?: true;
 }
+function activityLabel(activity: unknown): string {
+  switch (activity) {
+    case 'thinking': return 'Thinking…';
+    case 'running_action':
+    case 'running_tool': return 'Working…';
+    case 'evaluating': return 'Checking…';
+    case 'waking': return 'Starting…';
+    default: return '';
+  }
+}
 export type StreamTextListener = (text:string, frame?:StreamTextFrame)=>void;
 export async function readLocalAgentStream(response:Response, signal:AbortSignal, onText:StreamTextListener,onReplyReady?:(results:readonly unknown[]|undefined)=>void,request?:{path:string;ownerId:string;body:string}):Promise<RemoteChatReply> {
  if(!response.ok)throw Object.assign(Error(`Local agent request failed (HTTP ${response.status}).`),{status:response.status});
@@ -136,6 +147,7 @@ export async function readLocalAgentStream(response:Response, signal:AbortSignal
  const framer=new SseEventFramer();
  const reader=response.body.getReader(),decoder=new TextDecoder('utf-8',{fatal:true});
  let text='',received=0,readySeen=false,readyKey:string|undefined;
+ let acknowledgmentSeen=false,replyBegan=false;
  const invalid=(message:string):never=>{onReplyReady?.(undefined);throw Error(message);};
  const abort=()=>{void reader.cancel().catch(()=>{});};
  signal.addEventListener('abort',abort,{once:true});
@@ -152,19 +164,34 @@ export async function readLocalAgentStream(response:Response, signal:AbortSignal
    const kind=typeof value.failureKind==='string'?value.failureKind:value.terminalFailure&&typeof value.terminalFailure==='object'&&typeof value.terminalFailure.kind==='string'?value.terminalFailure.kind:undefined;
    throw Object.assign(Error('Local agent response interrupted. Check conversation and action history before retrying.'),kind&&kind.length<=64?{failureKind:kind}:{});
   }
-  if(value.type==='status'){
-   if(!signal.aborted)emitBatchProgress(progressBinding,value);
-   const label=typeof value.label==='string'?value.label.trim():'';
-   if(label&&label.length<=160&&!signal.aborted)localTurnStatus.dispatchEvent(new CustomEvent('label',{detail:label}));
+  if(value.type==='acknowledgment'){
+   if(signal.aborted||acknowledgmentSeen||replyBegan||typeof value.text!=='string')return;
+   const cue=value.text.trim();
+   if(!cue||cue.length>120||/[\u0000-\u001f\u007f]/u.test(cue))return;
+   acknowledgmentSeen=true;
+   emitBatchProgress(progressBinding,{kind:'thinking',label:cue});
+   localTurnStatus.dispatchEvent(new CustomEvent('label',{detail:cue}));
+   return;
+  }
+  if(value.type==='status'||value.type==='tool'){
+   if(signal.aborted)return;
+   const namedTool=value.type==='tool'&&typeof value.name==='string'&&/^[A-Za-z0-9_-]{1,64}$/.test(value.name);
+   if(value.type==='status')emitBatchProgress(progressBinding,value);
+   else if(namedTool)emitBatchProgress(progressBinding,{kind:'running_tool',toolName:value.name});
+   const label=value.type==='status'
+    ? typeof value.label==='string'?value.label.trim():activityLabel(value.activity)
+    : namedTool?activityLabel('running_tool'):'';
+   if(label&&label.length<=160)localTurnStatus.dispatchEvent(new CustomEvent('label',{detail:label}));
    return;
   }
   if(value.type==='reply_ready'){
    if(value.terminalFailure!==undefined||value.failureKind!==undefined)return invalid('Reply-ready snapshot is not successful');
    if(typeof value.fullText!=='string'||value.fullText.length>200000||(value.actionResults!==undefined&&!Array.isArray(value.actionResults)))return invalid('Invalid reply-ready snapshot');
-   const navigation=preparedNavigation(value.actionResults),key=navigation?JSON.stringify(navigation):undefined;
+   const results=Array.isArray(value.actionResults)?normalizeTurnViewResults(value.actionResults):undefined;
+   const navigation=preparedNavigation(results),key=navigation?JSON.stringify(navigation):undefined;
    if(readySeen&&key!==readyKey)return invalid('Reply-ready navigation changed');
    if(!readySeen){
-    readySeen=true;readyKey=key;signal.throwIfAborted();emitBatchReply(progressBinding);if(navigation)onReplyReady?.(navigation);
+    readySeen=true;readyKey=key;replyBegan=true;signal.throwIfAborted();emitBatchReply(progressBinding);if(navigation)onReplyReady?.(navigation);
     // A voice turn's settled generation with no action results proves a plain direct reply: its
     // text may be spoken before the terminal frame. Anything with action results waits for the
     // confirmed reply. Typed turns keep rendering from tokens and the terminal frame only.
@@ -178,15 +205,18 @@ export async function readLocalAgentStream(response:Response, signal:AbortSignal
    if(text.length>200000)return invalid('Local reply exceeds display limit');
    // Draft and action-callback text is provisional: shown, never spoken, and it never preempts the cue.
    const provisional=value.provisional!==undefined&&value.provisional!==false;
-   signal.throwIfAborted();if(!provisional)emitBatchReply(progressBinding);onText(text,{provisional});
+   signal.throwIfAborted();
+   if(!provisional){replyBegan=true;emitBatchReply(progressBinding);}
+   onText(text,{provisional});
   }
   if(value.type==='done'){
    if(typeof value.fullText!=='string'||value.fullText.length>200000||typeof value.agentName!=='string')return invalid('Invalid terminal reply');
-   const navigation=preparedNavigation(value.actionResults),key=navigation?JSON.stringify(navigation):undefined;
+   const results=Array.isArray(value.actionResults)?normalizeTurnViewResults(value.actionResults):undefined;
+   const navigation=preparedNavigation(results),key=navigation?JSON.stringify(navigation):undefined;
    if(readySeen&&key!==readyKey)return invalid('Terminal navigation disagrees with reply-ready snapshot');
    if(value.terminalFailure||value.failureKind)onReplyReady?.(undefined);
    signal.throwIfAborted();emitBatchReply(progressBinding);
-   return {...value,text:value.fullText} as RemoteChatReply;
+   return {...value,...(results===undefined?{}:{actionResults:results}),text:value.fullText} as RemoteChatReply;
   }
  }
  try {

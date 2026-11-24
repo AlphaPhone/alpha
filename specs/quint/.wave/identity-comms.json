@@ -1,0 +1,1767 @@
+{
+ "add": [
+  {
+   "path": "specs/quint/services/SmsSend.qnt",
+   "module": "SmsSend",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "retryAfterCancelledAndDeniedTest",
+    "repeatedIdNeverDispatchesTwiceTest",
+    "staleAnswerDroppedTest",
+    "editResetsOperationTest",
+    "deliveryEvidenceTest",
+    "reconcileReleasesClosedRecordTest"
+   ],
+   "invariants": [
+    "TypeOK",
+    "AtMostOneDispatchPerOperation",
+    "DispatchJournaled",
+    "ClosedRecordReleasesId",
+    "StaleResultNeverShown",
+    "InactiveHoldsNothing",
+    "BusyHasCall"
+   ],
+   "witnesses": [
+    "RetryAfterClosedRecordWitness",
+    "RepeatedIdAnsweredFromJournalWitness",
+    "StaleAnswerDroppedWitness",
+    "DeliveredWitness"
+   ],
+   "sources": [
+    "apps/app/src/prototype/sms-adapter.ts",
+    "apps/app/src/runtime/image-sms.ts",
+    "apps/app/src/runtime/aosp-telephony.ts",
+    "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaTelephonyPlugin.java",
+    "android/app/src/main/java/ai/elizaresearch/alphaphone/SmsSendJournal.java",
+    "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaSms.java"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/prototype/sms-adapter.ts",
+     "name": "operationId"
+    },
+    {
+     "path": "apps/app/src/prototype/sms-adapter.ts",
+     "name": "draftRevision"
+    },
+    {
+     "path": "apps/app/src/prototype/sms-adapter.ts",
+     "name": "lifecycle"
+    },
+    {
+     "path": "apps/app/src/prototype/sms-adapter.ts",
+     "name": "reconcile"
+    },
+    {
+     "path": "apps/app/src/prototype/sms-adapter.ts",
+     "name": "installSmsAdapter"
+    },
+    {
+     "path": "apps/app/src/runtime/image-sms.ts",
+     "name": "smsNothingDispatched"
+    },
+    {
+     "path": "apps/app/src/runtime/image-sms.ts",
+     "name": "receiptLabel"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/SmsSendJournal.java",
+     "name": "existing"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/SmsSendJournal.java",
+     "name": "decide"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/SmsSendJournal.java",
+     "name": "beginDispatch"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaTelephonyPlugin.java",
+     "name": "reviewSmsOnMain"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaTelephonyPlugin.java",
+     "name": "sendSms"
+    }
+   ],
+   "abstractions": [
+    "Three operation IDs, four visits and four draft revisions. Recipients, text and SIM are one draft whose every change is an edit.",
+    "One native call is in flight at a time: a second send while the native review is open is refused as busy without a journal record and is not modeled.",
+    "The journal is reduced to one status per ID. Sent and delivery evidence, and startup reconciliation of an interrupted dispatch, are nondeterministic status advances; part counts and provider rows are covered by the journal tests.",
+    "The messaging-app handoff, which sends nothing itself, and the retired-ID watermark are outside the model."
+   ]
+  },
+  {
+   "path": "specs/quint/services/SmsSession.qnt",
+   "module": "SmsSession",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "readAndObserveTest",
+    "supersededReadDroppedTest",
+    "lateObserverDisposedTest",
+    "noAccessTest",
+    "answerAfterLeaveTest"
+   ],
+   "invariants": [
+    "TypeOK",
+    "InactiveHoldsNoContent",
+    "SingleObserver",
+    "ContentNeedsGrantedStatus",
+    "CursorNeedsRows",
+    "BusyHasCurrentRead",
+    "InstallOwned"
+   ],
+   "witnesses": [
+    "SupersededReadWitness",
+    "LateObserverWitness",
+    "ObservingWitness",
+    "AccessLostAfterReadWitness"
+   ],
+   "sources": [
+    "apps/app/src/runtime/image-sms.ts",
+    "apps/app/src/runtime/aosp-telephony.ts",
+    "apps/app/src/prototype/sms-adapter.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/runtime/image-sms.ts",
+     "name": "createSmsSession"
+    },
+    {
+     "path": "apps/app/src/runtime/image-sms.ts",
+     "name": "observerTail"
+    },
+    {
+     "path": "apps/app/src/runtime/image-sms.ts",
+     "name": "observeMessages"
+    },
+    {
+     "path": "apps/app/src/runtime/image-sms.ts",
+     "name": "setActive"
+    },
+    {
+     "path": "apps/app/src/runtime/image-sms.ts",
+     "name": "openThread"
+    },
+    {
+     "path": "apps/app/src/runtime/image-sms.ts",
+     "name": "refresh"
+    }
+   ],
+   "abstractions": [
+    "Six read epochs and four visits. A read is one answer: status, send history and one page are not interleaved separately, since each stage applies the same epoch and active check.",
+    "Rows, threads and receipts are one content flag; the page cursor is one flag.",
+    "SMS read access is a native fact that changes outside any read. The session learns it only from a status answer."
+   ]
+  },
+  {
+   "path": "specs/quint/services/ContactsSession.qnt",
+   "module": "ContactsSession",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "readRowsTest",
+    "answerAfterLeaveTest",
+    "supersededReadTest",
+    "revokedWhileOpenTest",
+    "editorReturnRereadsTest",
+    "noAccessTest"
+   ],
+   "invariants": [
+    "TypeOK",
+    "ActiveMatchesAvailability",
+    "InactiveHoldsNoRows",
+    "RowsNeedAccess",
+    "MoreNeedsRows",
+    "LoadingHasCurrentWork",
+    "DeferredViewNotOpen"
+   ],
+   "witnesses": [
+    "RowsKeptWhileLoadingWitness",
+    "SupersededReadWitness",
+    "RevokedWhileOpenWitness",
+    "EditorOverLoadedListWitness"
+   ],
+   "sources": [
+    "apps/app/src/prototype/contacts-adapter.ts",
+    "apps/app/src/runtime/image-contacts.ts",
+    "apps/app/src/prototype/mvp-features.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/prototype/contacts-adapter.ts",
+     "name": "installContactsAdapter"
+    },
+    {
+     "path": "apps/app/src/prototype/contacts-adapter.ts",
+     "name": "available"
+    },
+    {
+     "path": "apps/app/src/prototype/contacts-adapter.ts",
+     "name": "refresh"
+    },
+    {
+     "path": "apps/app/src/prototype/contacts-adapter.ts",
+     "name": "editor"
+    },
+    {
+     "path": "apps/app/src/prototype/contacts-adapter.ts",
+     "name": "clear"
+    },
+    {
+     "path": "apps/app/src/runtime/image-contacts.ts",
+     "name": "applyImageContacts"
+    },
+    {
+     "path": "apps/app/src/prototype/mvp-features.ts",
+     "name": "isMvpView"
+    },
+    {
+     "path": "apps/app/src/prototype/mvp-features.ts",
+     "name": "admitImageContacts"
+    }
+   ],
+   "abstractions": [
+    "Six read epochs and four page sizes (50 to 200 rows). The status read and the list read are one answer under one epoch check.",
+    "Availability changes and the adapter synchronisation that follows them are one step: the adapter synchronises on every component update and visibility change.",
+    "Search text and the selected contact are not modeled; a search is a read that resets the page size."
+   ]
+  },
+  {
+   "path": "specs/quint/application/SignInChooser.qnt",
+   "module": "SignInChooser",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "offlineEmailResumesTest",
+    "failedResendKeepsCodeTest",
+    "unreachableVerifyKeepsAttemptTest",
+    "refusalNotPolledTest",
+    "resumedCooldownHeldTest",
+    "queuedReturnRunsAfterWorkTest",
+    "lostAttemptAsksForNewCodeTest"
+   ],
+   "invariants": [
+    "TypeOK",
+    "CodeStepAgreesWithHost",
+    "AttemptOnlyOnCodeSteps",
+    "PendingSentOnce",
+    "QueuedReturnOnlyBehindWork",
+    "CooldownFromAcceptedSend",
+    "ResumedOnlyDuringOwnSend",
+    "ResumeNeedsHeldStep"
+   ],
+   "witnesses": [
+    "HeldStepWitness",
+    "ResendFailedKeepsAttemptWitness",
+    "VerifyUnreachableKeepsAttemptWitness",
+    "RefusalNotPolledWitness",
+    "QueuedReturnWitness",
+    "CodeLostWitness"
+   ],
+   "sources": [
+    "apps/app/src/runtime/connection-ui.tsx",
+    "apps/app/src/runtime/cloud-sign-in-ui.tsx",
+    "apps/app/src/runtime/cloud-sign-in.ts",
+    "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "holdSignInStep"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "sendPendingSignInStep"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "sendPendingSignInStepWhenIdle"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "refreshSignInMethods"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "queuedSignInReturn"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "runQueuedSignInReturn"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "signInStepResumed"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "resendSignInCode"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "backToChooser"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "verifySignInCode"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "signInReturned"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "inAppMethodsUnconfirmed"
+    },
+    {
+     "path": "apps/app/src/runtime/cloud-sign-in.ts",
+     "name": "signInStepHeld"
+    },
+    {
+     "path": "apps/app/src/runtime/cloud-sign-in.ts",
+     "name": "verifyFailureStep"
+    },
+    {
+     "path": "apps/app/src/runtime/cloud-sign-in.ts",
+     "name": "signInMethodsRecheck"
+    },
+    {
+     "path": "apps/app/src/runtime/cloud-sign-in.ts",
+     "name": "SIGN_IN_WAITING"
+    },
+    {
+     "path": "apps/app/src/runtime/cloud-sign-in.ts",
+     "name": "SIGN_IN_RESEND_FAILED"
+    },
+    {
+     "path": "apps/app/src/runtime/cloud-sign-in.ts",
+     "name": "SIGN_IN_CODE_LOST"
+    },
+    {
+     "path": "apps/app/src/runtime/cloud-sign-in-ui.tsx",
+     "name": "signInMethodsRecheck"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+     "name": "admitSend"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+     "name": "sendAccepted"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+     "name": "sendFailed"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+     "name": "resumeMfa"
+    }
+   ],
+   "abstractions": [
+    "Four host attempts, three holds and three automatic sends. The host is reduced to its installed attempt and its send cooldown; IdentitySession models the host in full.",
+    "Each step is a start and one outcome. Cancelling a step in flight, the passkey refusal after an email code, and the required-sign-in page that cannot be closed are not modeled.",
+    "The readiness answer is ready or unavailable; which optional methods it offers is not modeled.",
+    "The host losing its in-memory attempt is an explicit event, so the agreement between the code step and the host is checked for every other step."
+   ]
+  },
+  {
+   "path": "specs/quint/services/EntitlementRefresher.qnt",
+   "module": "EntitlementRefresher",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "lapseDuringOutageTest",
+    "lateTimerTest",
+    "terminalAnswerTest",
+    "explicitCheckLeavesTerminalTest",
+    "authFailureStopsTest",
+    "stopDuringCheckTest"
+   ],
+   "invariants": [
+    "TypeOK",
+    "RetryScheduledAfterFailure",
+    "LapseReportedAfterFailedCheck",
+    "LapsedPlanShownExpired",
+    "TerminalAnswerStopsTimer",
+    "ActiveSourcesRefreshed",
+    "StoppedIsQuiet",
+    "FallbackHasNoEntitlement",
+    "AuthFailureStops"
+   ],
+   "witnesses": [
+    "LateTimerShowsActiveWitness",
+    "LapsedReportedWitness",
+    "TerminalWitness",
+    "BackoffWitness",
+    "RefreshFailedKeepsActiveWitness"
+   ],
+   "sources": [
+    "apps/app/src/runtime/subscription-entitlement.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/runtime/subscription-entitlement.ts",
+     "name": "EntitlementRefresher"
+    },
+    {
+     "path": "apps/app/src/runtime/subscription-entitlement.ts",
+     "name": "nextRefreshDelay"
+    },
+    {
+     "path": "apps/app/src/runtime/subscription-entitlement.ts",
+     "name": "fallbackActive"
+    },
+    {
+     "path": "apps/app/src/runtime/subscription-entitlement.ts",
+     "name": "lapsedPlanName"
+    },
+    {
+     "path": "apps/app/src/runtime/subscription-entitlement.ts",
+     "name": "refreshNow"
+    },
+    {
+     "path": "apps/app/src/runtime/subscription-entitlement.ts",
+     "name": "schedule"
+    },
+    {
+     "path": "apps/app/src/runtime/subscription-entitlement.ts",
+     "name": "FALLBACK_REFRESH_MS"
+    },
+    {
+     "path": "apps/app/src/runtime/subscription-entitlement.ts",
+     "name": "REFRESH_RETRY_MAX_MS"
+    },
+    {
+     "path": "apps/app/src/runtime/subscription-entitlement.ts",
+     "name": "onAuthFailure"
+    }
+   ],
+   "abstractions": [
+    "Six checks and three counted failures; the backoff delay itself is a nondeterministic timer.",
+    "The entitlement lifetime is two classes, live and lapsed, moved by a clock event. The refresh hint and the retry bound to the expiry are one armed timer.",
+    "A check is one answer: a signed active or ended plan, a billing snapshot, credits, a verified absence, an unpublished source, a transient failure, or an account refusal."
+   ]
+  },
+  {
+   "path": "specs/quint/services/PlanAdmissionGrace.qnt",
+   "module": "PlanAdmissionGrace",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "renewalAfterPastEndTest",
+    "offlineGraceTest",
+    "otherAccountRecordIgnoredTest",
+    "billingOutageAdmitsFromRecordTest",
+    "planEndedRemovesGraceTest",
+    "pastEndGivesNoGraceTest"
+   ],
+   "invariants": [
+    "TypeOK",
+    "EndsAtNotPast",
+    "GraceBoundToCredential",
+    "KeptOnlyOffline",
+    "CloudBindingHasBasis",
+    "PlanEndedRemovesRecord",
+    "SignedOutUnbound"
+   ],
+   "witnesses": [
+    "KeptOfflineWitness",
+    "PastEndInMemoryWitness",
+    "OtherAccountRecordWitness",
+    "OldRecordUnbindsWitness",
+    "BillingOutageAdmitsWitness"
+   ],
+   "sources": [
+    "apps/app/src/runtime/connection-ui.tsx",
+    "apps/app/src/runtime/subscription-entitlement.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "recentPlanAdmission"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "writePlanAdmission"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "readPlanAdmission"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "PlanAdmissionRecord"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "OFFLINE_PLAN_GRACE_MS"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "admitCloudResident"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "residentPlanEnded"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "cloudUnreachable"
+    },
+    {
+     "path": "apps/app/src/runtime/subscription-entitlement.ts",
+     "name": "planWindowEnd"
+    },
+    {
+     "path": "apps/app/src/runtime/subscription-entitlement.ts",
+     "name": "planAdmission"
+    }
+   ],
+   "abstractions": [
+    "Two sign-ins and four record writes. The record age is fresh or old against the seven-day window; a plan end is none, ahead or past.",
+    "Cloud's answers are classes: no usable account, unreachable, billing unavailable, an admitting plan with or without a reported period end, credits, and a verified absence of a plan.",
+    "Applying the binding to the agent (bind, unbind, unconfirmed removal) is ConnectionController and ResidentRuntime scope; here the admission's requested binding is the binding."
+   ]
+  },
+  {
+   "path": "specs/quint/services/GoogleConnectRuntime.qnt",
+   "module": "GoogleConnectRuntime",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "connectedReturnTest",
+    "deniedNoteTest",
+    "boundedWaitTest",
+    "sessionChangeRetiresAttemptTest",
+    "noteClearedForNextSessionTest",
+    "signedOutOpensAccountSheetTest"
+   ],
+   "invariants": [
+    "TypeOK",
+    "WaitingHasRunningWait",
+    "RunStageConsistent",
+    "NoteBelongsToTrackedSession",
+    "RunOwnedByTrackedSession",
+    "NoRunWithoutSession"
+   ],
+   "witnesses": [
+    "NeverLeftForegroundWitness",
+    "ReturnForEndedSessionWitness",
+    "DeniedNoteWitness",
+    "SignedOutConnectWitness"
+   ],
+   "sources": [
+    "apps/app/src/runtime/google-connect-flow.ts",
+    "apps/app/src/runtime/native-connection.ts",
+    "android/app/src/main/java/ai/elizaresearch/alphaphone/GoogleConnectReturn.java",
+    "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaConnectionPlugin.java"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/runtime/google-connect-flow.ts",
+     "name": "googleConnect"
+    },
+    {
+     "path": "apps/app/src/runtime/google-connect-flow.ts",
+     "name": "googleConnectOwnerChanged"
+    },
+    {
+     "path": "apps/app/src/runtime/google-connect-flow.ts",
+     "name": "GOOGLE_CONNECT_WAIT_MS"
+    },
+    {
+     "path": "apps/app/src/runtime/google-connect-flow.ts",
+     "name": "backInFront"
+    },
+    {
+     "path": "apps/app/src/runtime/google-connect-flow.ts",
+     "name": "watchOwner"
+    },
+    {
+     "path": "apps/app/src/runtime/google-connect-flow.ts",
+     "name": "retire"
+    },
+    {
+     "path": "apps/app/src/runtime/google-connect-flow.ts",
+     "name": "GoogleConnectStatus"
+    },
+    {
+     "path": "apps/app/src/runtime/native-connection.ts",
+     "name": "onGoogleConnectReturn"
+    },
+    {
+     "path": "apps/app/src/runtime/native-connection.ts",
+     "name": "googleConnectReturnUrl"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaConnectionPlugin.java",
+     "name": "captureGoogleReturn"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/GoogleConnectReturn.java",
+     "name": "GoogleConnectReturn"
+    }
+   ],
+   "abstractions": [
+    "Three attempts and two Cloud sessions (plus signed out). State tokens are match or no match.",
+    "An aborted wait has no further effect in the code, so cancel and retirement end the run in one step.",
+    "The session change and the flow's subscription seeing it are separate steps, so the check made when the wait ends is exercised.",
+    "Granted capabilities and the account read are GoogleAccounts scope; here a refresh is a counter."
+   ]
+  },
+  {
+   "path": "specs/quint/application/DelegationReceiver.qnt",
+   "module": "DelegationReceiver",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "returnDuringStartTest",
+    "finishingEscapableTest",
+    "cancelAdoptsCompletedGrantTest",
+    "expiredReturnClearedTest",
+    "otherAccountReturnKeptTest",
+    "deniedReturnCancelsTest",
+    "statusCheckRetriesCompletionOnceTest"
+   ],
+   "invariants": [
+    "TypeOK",
+    "UnreadReturnBehindGate",
+    "QueuedNeedsGate",
+    "GateHasStep",
+    "CompleteAtMostOncePerTap",
+    "GrantOnlyFromCloud",
+    "RecordHasCloudState"
+   ],
+   "witnesses": [
+    "DeferredReturnWitness",
+    "CompletionUnconfirmedWitness",
+    "OtherAccountReturnKeptWitness",
+    "ExpiredReturnUsedUpWitness"
+   ],
+   "sources": [
+    "apps/app/src/runtime/cloud-delegation-ui.tsx",
+    "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaConnectionPlugin.java"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/runtime/cloud-delegation-ui.tsx",
+     "name": "createDelegationGate"
+    },
+    {
+     "path": "apps/app/src/runtime/cloud-delegation-ui.tsx",
+     "name": "delegationCallbackDisposition"
+    },
+    {
+     "path": "apps/app/src/runtime/cloud-delegation-ui.tsx",
+     "name": "delegationCancelStep"
+    },
+    {
+     "path": "apps/app/src/runtime/cloud-delegation-ui.tsx",
+     "name": "CloudDelegationPanel"
+    },
+    {
+     "path": "apps/app/src/runtime/cloud-delegation-ui.tsx",
+     "name": "readDelegationCallback"
+    },
+    {
+     "path": "apps/app/src/runtime/cloud-delegation-ui.tsx",
+     "name": "clearDelegationCallback"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaConnectionPlugin.java",
+     "name": "captureDelegationCallback"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaConnectionPlugin.java",
+     "name": "readDelegationCallback"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaConnectionPlugin.java",
+     "name": "clearDelegationCallback"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaConnectionPlugin.java",
+     "name": "delegationCallback"
+    }
+   ],
+   "abstractions": [
+    "One account, two authorizations and two status checks. The retained return is one of the shapes CallbackLanding hands over (a code, an error, neither) or a return for another account.",
+    "Cloud's state for the authorization is an input that completion and time can change. A failed step leaves everything as it was except that the return has been read.",
+    "Revocation of granted access, the account switch that reloads the panel, and the secure-store compare-exchange conflicts are not modeled."
+   ]
+  },
+  {
+   "path": "specs/quint/native/ReadinessProbeCache.qnt",
+   "module": "ReadinessProbeCache",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "coalescedProbeTest",
+    "freshAnswerReusedTest",
+    "storedAnswerSurvivesRestartTest",
+    "refusalForgetsAnswerTest",
+    "closedProberAnswersTest"
+   ],
+   "invariants": [
+    "TypeOK",
+    "OneProbePerEnvironment",
+    "WaitingNeedsProbe",
+    "CallsAccounted",
+    "MemoryNeverFresherThanStorage"
+   ],
+   "witnesses": [
+    "CoalescedCallsWitness",
+    "AnsweredFromStorageWitness",
+    "ForgottenDuringProbeWitness",
+    "IndependentEnvironmentsWitness"
+   ],
+   "sources": [
+    "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+    "android/app/src/main/java/ai/elizaresearch/alphaphone/CloudSignInReadiness.java"
+   ],
+   "symbols": [
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+     "name": "probe"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+     "name": "probing"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+     "name": "forgetReadiness"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+     "name": "storedReadiness"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+     "name": "storeReadiness"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+     "name": "prober"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+     "name": "readiness"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+     "name": "statusOutcome"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/CloudSignInReadiness.java",
+     "name": "fresh"
+    },
+    {
+     "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/CloudSignInReadiness.java",
+     "name": "notReady"
+    }
+   ],
+   "abstractions": [
+    "Two environments, six calls. An answer is fresh or stale against its time limit; what it offers is not modeled.",
+    "A measurement that throws is the not-ready answer, cached like any other. A failed write of the stored copy is not modeled.",
+    "A process restart drops memory and the calls waiting on a probe; storage stays."
+   ]
+  },
+  {
+   "path": "specs/quint/application/ConnectionController.qnt",
+   "module": "ConnectionController",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "autoRetryUntilSpentTest",
+    "editReleaseDrainsQueuesTest",
+    "rebindWaitsForTurnTest",
+    "recheckDoesNotBlockOrChurnTest",
+    "savedSignInRetryKeepsAgentTest",
+    "recoveryReviewWaitsForOwnerTest"
+   ],
+   "invariants": [
+    "TypeOK",
+    "NoAgentlessQuiescence",
+    "ReleaseDrainsQueues",
+    "NoRebindWhileSending",
+    "TurnNeedsAgent",
+    "RetryTimerOnlyWhenAgentless",
+    "PhaseMatchesAgent"
+   ],
+   "witnesses": [
+    "RetriesSpentWitness",
+    "RebindHeldForTurnWitness",
+    "SendDuringRecheckWitness",
+    "BackoffWaitsWitness",
+    "RetryPendingDuringReviewWitness"
+   ],
+   "sources": [
+    "apps/app/src/runtime/connection-ui.tsx",
+    "apps/app/src/runtime/resident-recovery.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "releaseOperation"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "holdOperation"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "scheduleResidentAutoRetry"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "RESIDENT_AUTO_RETRY_MS"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "ensureResident"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "queueResidentRebind"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "runQueuedResidentRebind"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "runQueuedSignInReturn"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "recheckResidentPlan"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "planRecheckStep"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "bindingRetryDelayMs"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "savedSignInRetryStep"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "retrySavedSignIn"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "residentRebindQueued"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "planRecheck"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "truncateMessage"
+    },
+    {
+     "path": "apps/app/src/runtime/connection-ui.tsx",
+     "name": "prepareVoiceConversation"
+    },
+    {
+     "path": "apps/app/src/runtime/resident-recovery.ts",
+     "name": "residentRecoveryReason"
+    }
+   ],
+   "abstractions": [
+    "Four automatic retries (the backoff table), four rebinds and one turn. A start or rebind is one step with one outcome; its internals are ResidentRuntime scope.",
+    "The steps that hold the slot are classes: start, rebind, a history edit or voice preparation, a native sign-in return, and any other.",
+    "The rebind backoff is a flag cleared by time. Dialog contents, messages and errors are not modeled.",
+    "The retry timer armed before a start that ends in a recovery review is not cancelled by the code and is modeled as it is."
+   ]
+  },
+  {
+   "path": "specs/quint/application/DevelopmentTransportProposals.qnt",
+   "module": "DevelopmentTransportProposals",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "consumedBeforeDispatchTest",
+    "newRequestClearsProposalsTest",
+    "staleContextRefusedTest",
+    "wrongBindingRefusedTest",
+    "expiredProposalRefusedTest",
+    "overlappingRequestsTest",
+    "productionInertTest",
+    "productionSendRefusedTest"
+   ],
+   "invariants": [
+    "TypeOK",
+    "AtMostOneDispatch",
+    "ConsumedBeforeDispatch",
+    "PendingWasIssued",
+    "ProductionInert",
+    "ClosedHoldsNothing"
+   ],
+   "witnesses": [
+    "OverlappingRequestsWitness",
+    "StaleContextWitness",
+    "DispatchedWitness"
+   ],
+   "sources": [
+    "apps/app/src/runtime/development-transport.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/runtime/development-transport.ts",
+     "name": "pending"
+    },
+    {
+     "path": "apps/app/src/runtime/development-transport.ts",
+     "name": "validateOperation"
+    },
+    {
+     "path": "apps/app/src/runtime/development-transport.ts",
+     "name": "contextRevision"
+    },
+    {
+     "path": "apps/app/src/runtime/development-transport.ts",
+     "name": "DevelopmentAgent"
+    },
+    {
+     "path": "apps/app/src/runtime/development-transport.ts",
+     "name": "close"
+    }
+   ],
+   "abstractions": [
+    "Test-mocks emulator transport only. Two requests, four proposals and three context revisions.",
+    "An answer carries zero to two proposals that are all bound correctly or refused together; the operation validation is part of that binding.",
+    "The dispatched action reports any result; the proposal is consumed either way."
+   ]
+  },
+  {
+   "path": "specs/quint/application/ViewAdmission.qnt",
+   "module": "ViewAdmission",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "revokedWhileOpenTest",
+    "deferredViewCannotOpenTest",
+    "unrefreshedCapabilityTest",
+    "admittedViewOpensTest",
+    "revokedElsewhereTest"
+   ],
+   "invariants": [
+    "TypeOK",
+    "RawViewNeverDeferred",
+    "ReportedMatchesRaw",
+    "OrderMatchesAdmission"
+   ],
+   "witnesses": [
+    "ContactsOpenWitness",
+    "RevokedWhileOpenWitness",
+    "RevokedAndLeftWitness"
+   ],
+   "sources": [
+    "apps/app/src/runtime/image-contacts.ts",
+    "apps/app/src/prototype/mvp-features.ts",
+    "apps/app/src/main.tsx",
+    "apps/app/src/runtime/aosp-image.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/runtime/image-contacts.ts",
+     "name": "applyImageContacts"
+    },
+    {
+     "path": "apps/app/src/prototype/mvp-features.ts",
+     "name": "admitImageContacts"
+    },
+    {
+     "path": "apps/app/src/prototype/mvp-features.ts",
+     "name": "DEFERRED_MVP_VIEWS"
+    },
+    {
+     "path": "apps/app/src/prototype/mvp-features.ts",
+     "name": "ENABLED_MVP_VIEWS"
+    },
+    {
+     "path": "apps/app/src/prototype/mvp-features.ts",
+     "name": "isMvpView"
+    },
+    {
+     "path": "apps/app/src/main.tsx",
+     "name": "refreshImage"
+    },
+    {
+     "path": "apps/app/src/main.tsx",
+     "name": "admitImageContacts"
+    }
+   ],
+   "abstractions": [
+    "Contacts is the only view admitted at runtime; Home and Notes stand for every other view.",
+    "The image capability is a native fact the shell learns only on a refresh (start and each return to the app).",
+    "The development-server profile, which ignores image admission, is not modeled."
+   ]
+  },
+  {
+   "path": "specs/quint/application/SettingsListenerReads.qnt",
+   "module": "SettingsListenerReads",
+   "init": "init",
+   "step": "step",
+   "invariant": "safety",
+   "tests": [
+    "olderReadDroppedTest",
+    "readSkippedDuringActionTest",
+    "freshReadAfterActionTest",
+    "supersededReadTest"
+   ],
+   "invariants": [
+    "TypeOK",
+    "ActionResultNotReplacedByOlderRead",
+    "NoReadIssuedDuringAction",
+    "ShownSequenceIssued"
+   ],
+   "witnesses": [
+    "OlderReadPendingAfterActionWitness",
+    "ReadSkippedWitness",
+    "FreshReadShownWitness"
+   ],
+   "sources": [
+    "apps/app/src/prototype/settings-adapter.ts",
+    "apps/app/src/runtime/always-on-listener.ts"
+   ],
+   "symbols": [
+    {
+     "path": "apps/app/src/prototype/settings-adapter.ts",
+     "name": "listenerReadGate"
+    },
+    {
+     "path": "apps/app/src/prototype/settings-adapter.ts",
+     "name": "beginAction"
+    },
+    {
+     "path": "apps/app/src/prototype/settings-adapter.ts",
+     "name": "endAction"
+    },
+    {
+     "path": "apps/app/src/prototype/settings-adapter.ts",
+     "name": "beginRead"
+    },
+    {
+     "path": "apps/app/src/prototype/settings-adapter.ts",
+     "name": "readApplies"
+    },
+    {
+     "path": "apps/app/src/prototype/settings-adapter.ts",
+     "name": "listenerAction"
+    },
+    {
+     "path": "apps/app/src/prototype/settings-adapter.ts",
+     "name": "refreshCapabilities"
+    }
+   ],
+   "abstractions": [
+    "Six issued sequence numbers. Pause and Turn off are one action whose answer is the listener's state afterwards.",
+    "A status read reports the listener as it was when the read was issued.",
+    "The other capability reads, the abort of a superseded refresh and the Settings instance check are not modeled."
+   ]
+  }
+ ],
+ "update": [
+  {
+   "module": "IdentitySession",
+   "set": {
+    "tests": [
+     "googleReturnTest",
+     "ackRecoveryTest",
+     "exhaustedCodesTest",
+     "lateReturnTest",
+     "newAttemptBurnsLateReturnTest",
+     "postCommitCancelStillActivatesTest",
+     "storageFailureBeforeCommitTest",
+     "unsentVerifyKeepsAttemptTest",
+     "failedResendKeepsCodeTest",
+     "acceptedResendReplacesAttemptTest",
+     "failedSendLeavesNoCooldownTest",
+     "googleDuringCooldownTest",
+     "googleMfaTest",
+     "consentDeclinedTest",
+     "consentTimeoutTest",
+     "codeExpiryTest",
+     "replacedKeyRevokedAfterRestartTest",
+     "lapsedActivationStillRevokesTest"
+    ],
+    "invariants": [
+     "TypeOK",
+     "KeyBeforeAck",
+     "DurableReceiptBeforeKey",
+     "SingleUseGoogleReturn",
+     "MatchedReturnBurned",
+     "BoundedAttempts",
+     "AuthenticatedKey",
+     "KeyNeedsConsent",
+     "CodeStepHasLiveAttempt",
+     "CooldownFromAcceptedSend",
+     "ReplacedKeysAccounted",
+     "AuthenticatedAfterRevocation",
+     "PendingOnlyForGoogle"
+    ],
+    "witnesses": [
+     "GoogleDuringCooldownWitness",
+     "GoogleMfaWitness",
+     "ConsentWitness",
+     "ResendHeldWitness",
+     "LateReturnWitness",
+     "ActivationPendingWitness",
+     "AuthenticatedWitness"
+    ],
+    "symbols": [
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+      "name": "admitSend"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+      "name": "sendAccepted"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+      "name": "sendFailed"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+      "name": "requireAuthorization"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+      "name": "burnUnclaimedPending"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+      "name": "revokeReplaced"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+      "name": "resumeAcknowledgements"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+      "name": "lastEmailSendAt"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+      "name": "replacement"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+      "name": "failedVerifies"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+      "name": "captureCallback"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+      "name": "acknowledge"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/CloudSignInFlow.java",
+      "name": "afterVerifyFailure"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/CloudSignInFlow.java",
+      "name": "withReplacedKey"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/CloudSignInFlow.java",
+      "name": "RESEND_COOLDOWN_MS"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/CloudSignInFlow.java",
+      "name": "MAX_VERIFY_ATTEMPTS"
+     },
+     {
+      "path": "apps/app/src/runtime/cloud-sign-in.ts",
+      "name": "verifyFailureStep"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/CloudKeyRevocation.java",
+      "name": "revoke"
+     }
+    ],
+    "abstractions": [
+     "Two sign-ins and owners, four attempt IDs, five wrong-code attempts and three ack attempts.",
+     "Opaque PKCE states, proofs and credentials are represented by identities. Cryptography, endpoint shapes and encrypted persistence are checked by existing implementation tests.",
+     "begin with a code method is the send and Cloud's acceptance in one step, and exchanged is the session and an immediate Authorize in one step; beginSend/sendAccepted/sendFailed and sessionReady/authorize/decline/consentTimeout are the same paths step by step.",
+     "Storage failure before the key commit ends the attempt. After key persistence, cancellation cannot stop acknowledgement. Authentication delivery precedes best-effort Steward logout and local-session cleanup.",
+     "The renderer is reduced to the attempt its code or MFA step names; SignInChooser models the renderer.",
+     "The browser development bridge (scripts/browser-cloud-dev-bridge.ts) is a separate sign-in implementation outside this model: it acknowledges the key before storing it and keeps no receipt."
+    ],
+    "sources": [
+     "apps/app/src/runtime/cloud-sign-in.ts",
+     "apps/app/src/runtime/cloud-sign-in-ui.tsx",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/CloudSignInFlow.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCloudSignInPlugin.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/CloudEmailCode.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/CloudSmsCode.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCredentialStore.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/CloudKeyRevocation.java"
+    ],
+    "stateMapping": {
+     "phase/method/attempt/attempts/sending": "native Attempt, the replacement held during a resend, and the attempt IDs issued",
+     "uiAttempt": "the attemptId the renderer's code or MFA step holds",
+     "pending/consumed/callbackAccepted": "encrypted pending Google record and callback burn",
+     "wrongCodes/mfa/cooldown/sendsAccepted": "failedVerifies, the MFA challenge and the send cooldown started only by an accepted send",
+     "authorized": "Android's consent prompt before the key request",
+     "receipt/key/acknowledged/ackTries": "persisted ack receipt, credential slot and acknowledge rounds",
+     "replacedPending/keysReplaced/keysSettled/previousReport": "the stored list of replaced keys and their revocation at sign-in or at the next start",
+     "epoch/attemptOwner/owner": "credential intent and captured account ownership",
+     "cancelRequested/steward": "pre-key cancellation versus post-key activation and separate transient Steward cleanup after authentication delivery"
+    }
+   },
+   "unset": []
+  },
+  {
+   "module": "ServiceAuthorization",
+   "set": {
+    "tests": [
+     "signedExpiryTest",
+     "localOutageTest",
+     "refusalTest",
+     "unverifiableTokenIsOutageTest",
+     "ownerChangeTest",
+     "serverRefusalTest",
+     "snapshotWithoutExpiryTest",
+     "creditRefreshFailureTest",
+     "signedNoPlanCreditOnlyTest",
+     "signedOutageKeepsUnexpiredTest",
+     "offlineGraceTest",
+     "graceNotCarriedToNewOwnerTest"
+    ],
+    "invariants": [
+     "TypeOK",
+     "RefusalNotUpgraded",
+     "ExpiryHonestAfterFailedCheck",
+     "SnapshotHasNoSignedLifetime",
+     "CanonicalCreditView",
+     "ExactManagedRoute",
+     "CurrentDispatch",
+     "GraceBoundToCredential",
+     "BoundHasBasis",
+     "NeedsPlanUnbinds"
+    ],
+    "witnesses": [
+     "LateTimerShowsActiveWitness",
+     "BoundThroughExpiredViewWitness",
+     "GraceAdmissionWitness",
+     "RefusedRouteWitness",
+     "StaleRecordUnbindsWitness"
+    ],
+    "symbols": [
+     {
+      "path": "apps/app/src/runtime/subscription-entitlement.ts",
+      "name": "EntitlementRefresher"
+     },
+     {
+      "path": "apps/app/src/runtime/subscription-entitlement.ts",
+      "name": "checkEntitlement"
+     },
+     {
+      "path": "apps/app/src/runtime/subscription-entitlement.ts",
+      "name": "planAdmission"
+     },
+     {
+      "path": "apps/app/src/runtime/subscription-entitlement.ts",
+      "name": "subscriptionView"
+     },
+     {
+      "path": "apps/app/src/runtime/managed-service-routes.ts",
+      "name": "managedServiceRequest"
+     },
+     {
+      "path": "apps/app/src/runtime/connection-ui.tsx",
+      "name": "recentPlanAdmission"
+     },
+     {
+      "path": "apps/app/src/runtime/connection-ui.tsx",
+      "name": "OFFLINE_PLAN_GRACE_MS"
+     },
+     {
+      "path": "apps/app/src/runtime/connection-ui.tsx",
+      "name": "writePlanAdmission"
+     },
+     {
+      "path": "apps/app/src/runtime/connection-ui.tsx",
+      "name": "admitCloudResident"
+     },
+     {
+      "path": "apps/app/src/runtime/connection-ui.tsx",
+      "name": "residentPlanEnded"
+     }
+    ],
+    "abstractions": [
+     "Opaque exact-route categories summarize URL/method/body validation: identity, maps, gmail, calendar, self-revoke, billing, entitlement, redeem, cli-session and google-account. The parser remains covered by runtime tests.",
+     "Server authorization is explicit input to dispatch, separate from cached UI entitlement.",
+     "Two expiry ticks apply only to signed entitlements. The view is not derived from the clock: a lifetime that ran out still reads active until a check completes, and a failed check then reports it expired.",
+     "A token that cannot be verified is a failed check, never a refusal. Failed snapshot or credit refresh produces an unavailable view; none of these unbinds inference.",
+     "The stored admission record is fresh or stale against its seven-day window and plan end. PlanAdmissionGrace models its plan end and writes in detail.",
+     "Whether the on-device agent itself is running is ResidentRuntime and ConnectionController scope and is not a variable here."
+    ],
+    "sources": [
+     "apps/app/src/runtime/subscription-entitlement.ts",
+     "apps/app/src/runtime/managed-service-routes.ts",
+     "apps/app/src/runtime/cloud-environment-selection.ts",
+     "backend/managed-google-route-policy.ts",
+     "backend/managed-google-agent-broker.ts",
+     "apps/app/src/runtime/connection-ui.tsx"
+    ],
+    "stateMapping": {
+     "plan/validFor/refresh/failedSinceLapse": "EntitlementRefresher cached signed entitlement, its lifetime and the lapse reported once a failed check completes",
+     "signedRefusal/credits": "signed refusal versus authenticated organization-credit fallback",
+     "bound/admittedBy": "the running agent's inference binding and whether Cloud's answer or the stored record admitted it",
+     "grace/graceOwner/graceEpoch": "the stored plan admission record and the sign-in it was verified for",
+     "owner/epoch/requestOwner/requestEpoch": "captured Cloud binding",
+     "request/dispatched/refusedRequests": "managedServiceRequest and private Google broker admission, including refused routes",
+     "source/fallback": "signed entitlement, absent-token billing snapshot and signed-no-plan credit supplementation"
+    }
+   },
+   "unset": []
+  },
+  {
+   "module": "GoogleAccounts",
+   "set": {
+    "tests": [
+     "connectAndReadTest",
+     "grantWithdrawalTest",
+     "disconnectUncertainTest",
+     "explicitDisconnectRetryTest",
+     "deniedNotePersistsTest",
+     "retiredAttemptTest",
+     "noteNotShownToNextSessionTest",
+     "boundedWaitTest"
+    ],
+    "invariants": [
+     "TypeOK",
+     "ReviewNeedsCurrentModify",
+     "CacheNeedsRead",
+     "ModifyIncludesRead",
+     "RevokedAccountEmpty",
+     "NoteBelongsToSession",
+     "WaitingShowsNoNote",
+     "ReadbackOwned"
+    ],
+    "witnesses": [
+     "DeniedNoteAfterReadbackWitness",
+     "FailedStartWitness",
+     "UnconfirmedDisconnectWitness",
+     "ReviewWitness"
+    ],
+    "symbols": [
+     {
+      "path": "apps/app/src/runtime/google-connect-flow.ts",
+      "name": "googleConnect"
+     },
+     {
+      "path": "apps/app/src/runtime/google-connect-flow.ts",
+      "name": "googleConnectNote"
+     },
+     {
+      "path": "apps/app/src/runtime/google-connect-flow.ts",
+      "name": "GoogleConnectStatus"
+     },
+     {
+      "path": "apps/app/src/runtime/google-connect-flow.ts",
+      "name": "googleConnectOwnerChanged"
+     },
+     {
+      "path": "apps/app/src/runtime/google-connect-flow.ts",
+      "name": "GOOGLE_CONNECT_WAIT_MS"
+     },
+     {
+      "path": "apps/app/src/runtime/gmail-grants.ts",
+      "name": "gmailGrantChange"
+     },
+     {
+      "path": "apps/app/src/runtime/gmail-mailbox.ts",
+      "name": "still-connected"
+     },
+     {
+      "path": "apps/app/src/runtime/gmail-mailbox.ts",
+      "name": "unconfirmed"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/GoogleConnectReturn.java",
+      "name": "GoogleConnectReturn"
+     }
+    ],
+    "abstractions": [
+     "Two Google connections and two connect attempts represent arbitrary opaque IDs.",
+     "Partial Gmail write capabilities are grouped as modify for the reviewed-operation gate. Calendar read/write differences are further modeled by CalendarSync.",
+     "A return requests fresh account readback and does not itself grant capabilities. GoogleConnectRuntime models the wait itself.",
+     "An unconfirmed disconnect leaves the account as it was shown; the unknown account list is not a separate value."
+    ],
+    "sources": [
+     "apps/app/src/runtime/google-accounts.ts",
+     "apps/app/src/runtime/google-connect-flow.ts",
+     "apps/app/src/runtime/google-authorization.ts",
+     "apps/app/src/runtime/gmail-account-selection.ts",
+     "apps/app/src/runtime/gmail-grants.ts",
+     "apps/app/src/runtime/gmail-mailbox.ts",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/GoogleConnectReturn.java"
+    ],
+    "stateMapping": {
+     "attempt/pendingEpoch/phase/returnMatched": "googleConnect waiting, matching state, foreground return and the bounded wait; refreshing is the account re-read the readers own",
+     "note/noteEpoch": "the denied or failed status kept as a note until the next start or a Cloud session change",
+     "account/readGrant/modifyGrant/calendarGrant": "selected connection and granted capabilities",
+     "cacheVisible/review": "gmailGrantChange withdrawal and read-cache invalidation",
+     "disconnectSent/disconnectResult/revoked": "one disconnect request and its disconnected, still-connected or unconfirmed result"
+    }
+   },
+   "unset": []
+  },
+  {
+   "module": "NativeCredentialMutation",
+   "set": {
+    "tests": [
+     "shutdownAckTest",
+     "staleProviderTest",
+     "retainedShrinkTest",
+     "capacityRollbackTest",
+     "oversizedPreflightTest",
+     "unchangedCredentialAdmissionTest",
+     "unrelatedEnvironmentTest",
+     "unboundSignInTest",
+     "cloudChangeObservedTest",
+     "stagingSlotUnobservedTest"
+    ],
+    "invariants": [
+     "ShutdownBeforeCriticalWrite",
+     "AdmissionInvalidated",
+     "CurrentMutation",
+     "RejectedWriteRetainsBytes",
+     "CloudChangeObserved",
+     "ObserverOnlyAfterCommit",
+     "Bounded"
+    ],
+    "witnesses": [
+     "ObserverNotifiedWitness",
+     "StagingWriteUnobservedWitness",
+     "ShutdownCommittedWitness"
+    ],
+    "symbols": [
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCredentialStore.java",
+      "name": "cloudChange"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCredentialStore.java",
+      "name": "observeCloudChanges"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCredentialStore.java",
+      "name": "CloudChangeObserver"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/LocalAgentProviderAdmission.java",
+      "name": "sameCloudCredential"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/LocalAgentProviderAdmission.java",
+      "name": "PROVIDER_SLOT"
+     },
+     {
+      "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/GmailDelivery.java",
+      "name": "withdraw"
+     }
+    ],
+    "abstractions": [
+     "Opaque credential contents and provider configurations are equality classes; providerRevision captures the full stored provider comparison.",
+     "Current versus retained byte caps are scaled to two and three units, with four representing preflight overflow.",
+     "The running resident is stopped only for matching bound critical changes. No-provider Cloud sign-in and ordinary slots may commit without stopping it.",
+     "Rollback restores only its captured provider revision. A newer provider revision makes it fail without overwriting it.",
+     "The Cloud-change observer is notified for the production Cloud slot by name. The staging slot exists only with test mocks and its writes do not reach the observer."
+    ],
+    "sources": [
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCredentialStore.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaLocalAgentPlugin.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/LocalAgentProviderAdmission.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/ResidentCredentialShutdownRetry.java",
+     "android/app/src/main/java/ai/elizaresearch/alphaphone/GmailDelivery.java"
+    ],
+    "stateMapping": {
+     "operation/phase/before/capturedProvider": "mutateSlotOnce classification and slot/provider snapshot reread",
+     "requestedStop/acknowledgedStop/stopped": "exact strict resident shutdown before critical write",
+     "ownerEpoch/capturedEpoch": "credential intent and lifecycle ownership recheck",
+     "oldSize/newSize/admissionInvalidated": "retained slot-cap shrink versus rejected growth after admission invalidation",
+     "productionSlot/observerNotified": "the Cloud-change observer, called for the provider slot and for a changed production Cloud credential only"
+    }
+   },
+   "unset": []
+  },
+  {
+   "module": "DevelopmentDevice",
+   "set": {
+    "tests": [
+     "screenedCallTest",
+     "staleCallTimerTest",
+     "missedCallTest",
+     "declineWithReplyTest",
+     "controlsWhileDialingTest",
+     "notificationTest",
+     "simulatedPaymentTest",
+     "productionInertTest"
+    ],
+    "invariants": [
+     "CallControlsRequireCall",
+     "ProductionInert",
+     "LiveCallOwnsTimer"
+    ],
+    "witnesses": [
+     "MutedWhileDialingWitness",
+     "DeclinedWithoutVoicemailWitness",
+     "VoicemailWitness"
+    ],
+    "symbols": [
+     {
+      "path": "apps/app/src/prototype/model.js",
+      "name": "pnDecline"
+     },
+     {
+      "path": "apps/app/src/prototype/model.js",
+      "name": "pnEnd"
+     },
+     {
+      "path": "apps/app/src/prototype/model.js",
+      "name": "inCall"
+     }
+    ],
+    "abstractions": [
+     "Finite representative operation and payload identities. See application README for source contract and evidence.",
+     "The prototype call screen shows mute, speaker and hold from the moment it opens, before the call is live. The keypad and assistant toggles are not modeled.",
+     "A decline with a quick reply leaves no voicemail. Every transition changes prototype state only; there is no variable for real effects because no transition has one."
+    ]
+   },
+   "unset": []
+  },
+  {
+   "module": "DevelopmentSurfaces",
+   "set": {
+    "tests": [
+     "craftedProductionQueryTest",
+     "toolsNeedQueryTest",
+     "devSimulationTest"
+    ],
+    "invariants": [
+     "TypeOK",
+     "ProductionAdmission",
+     "ToolsAdmission",
+     "FixtureIsolation"
+    ],
+    "witnesses": [
+     "CraftedProductionQueryWitness",
+     "ToolsShownWitness",
+     "SyntheticEventWitness"
+    ],
+    "symbols": [
+     {
+      "path": "apps/app/src/build-flags.ts",
+      "name": "devSurfacesEnabled"
+     },
+     {
+      "path": "apps/app/src/build-flags.ts",
+      "name": "testMocksEnabled"
+     }
+    ],
+    "abstractions": [
+     "Finite representative identities and contents. Exact source symbols and modeling limits are documented in the family README.",
+     "The device controls need test mocks, the development server, a non-Android page and ?tools=1. The runtime profile is a query choice that admits nothing.",
+     "Model safety checks do not establish implementation refinement or device acceptance."
+    ]
+   },
+   "unset": []
+  },
+  {
+   "module": "DevelopmentHost",
+   "set": {
+    "tests": [
+     "claimedSignInTest",
+     "replacementAbortsRequestsTest",
+     "failedRetirementStopsReplacementTest",
+     "expiryStopsInferenceTest",
+     "childrenStopTogetherTest"
+    ],
+    "invariants": [
+     "TypeOK",
+     "BoundedRequests",
+     "CurrentResponse",
+     "ReadyBinding",
+     "ClaimSucceedsCredential",
+     "ActiveRequestsOwned",
+     "ClosedIsQuiet"
+    ],
+    "witnesses": [
+     "ReadyWitness",
+     "ClaimHeldWhileRetiringWitness",
+     "RequestInFlightWitness"
+    ],
+    "symbols": [
+     {
+      "path": "scripts/browser-cloud-dev-bridge.ts",
+      "name": "serial"
+     },
+     {
+      "path": "scripts/browser-cloud-dev-bridge.ts",
+      "name": "activation-pending"
+     }
+    ],
+    "abstractions": [
+     "One private profile, two credentials and requests, serial resident replacement. The deployment environment is fixed for the run and is not constrained by an invariant.",
+     "The runtime launchers are developer infrastructure with local/private process and storage boundaries.",
+     "The bridge's own email sign-in acknowledges the minted key before storing it and keeps no receipt; that order is outside this model, which starts from a received claim."
+    ]
+   },
+   "unset": []
+  }
+ ],
+ "readme": [
+  {
+   "family": "services",
+   "module": "SmsSend",
+   "sourceSymbols": "`installSmsAdapter` send/reconcile/edit/sync, `smsNothingDispatched`, `AlphaTelephonyPlugin.sendSms`, `SmsSendJournal.existing`/`decide`/`beginDispatch`",
+   "modeledState": "operationId/minted, lifecycle/draftRevision/busy, native call and its answer, journal status and dispatch count per ID, shown receipt"
+  },
+  {
+   "family": "services",
+   "module": "SmsSession",
+   "sourceSymbols": "`createSmsSession` refresh/observe/openThread/setActive/request",
+   "modeledState": "active/epoch/visit, reads and observer installs in flight, observing/stop/live observers, status, rows, cursor, thread, busy"
+  },
+  {
+   "family": "services",
+   "module": "ContactsSession",
+   "sourceSymbols": "`installContactsAdapter` sync/refresh/clear/editor, `applyImageContacts`, `isMvpView`",
+   "modeledState": "viewOpen/admitted/hidden/active, epoch and reads in flight, loading/editorOpen, readable/rows/more/limit"
+  },
+  {
+   "family": "application",
+   "module": "SignInChooser",
+   "sourceSymbols": "`holdSignInStep`, `sendPendingSignInStep`, `refreshSignInMethods`, `resendSignInCode`, `verifySignInCode`, `backToChooser`, `signInReturned`, `runQueuedSignInReturn`, `signInStepHeld`, `verifyFailureStep`, `signInMethodsRecheck`",
+   "modeledState": "step/error/pending/resumeDue, operation/kind/resumed, methodsRefresh/methodsUnconfirmed, queuedReturn, hostAttempt/uiAttempt/hostCooldown/hostLost"
+  },
+  {
+   "family": "services",
+   "module": "EntitlementRefresher",
+   "sourceSymbols": "`EntitlementRefresher` constructor/schedule/run/refreshNow/stop, `nextRefreshDelay`",
+   "modeledState": "entitlement/planTerminal/fallbackActive/lapsedPlan, failures/failedSinceLapse, timer/checking/stopped/authFailed, view"
+  },
+  {
+   "family": "services",
+   "module": "PlanAdmissionGrace",
+   "sourceSymbols": "`recentPlanAdmission`, `writePlanAdmission`, `admitCloudResident`, `residentPlanEnded`, `planWindowEnd`",
+   "modeledState": "credential, record (credential/age/endsAt), memoryEndsAt, binding/admittedBy/notice, lastWrittenEnd"
+  },
+  {
+   "family": "services",
+   "module": "GoogleConnectRuntime",
+   "sourceSymbols": "`googleConnect.start`/`cancel`, `googleConnectOwnerChanged`, `watchOwner`, `backInFront`, `GOOGLE_CONNECT_WAIT_MS`, `onGoogleConnectReturn`",
+   "modeledState": "session/owner/watching, status/noteSession, attempt/runSession/stage/left/result, notifies"
+  },
+  {
+   "family": "application",
+   "module": "DelegationReceiver",
+   "sourceSymbols": "`createDelegationGate`, `delegationCallbackDisposition`, `delegationCancelStep`, `CloudDelegationPanel` callback/recover/cancelPending, `AlphaConnectionPlugin.captureDelegationCallback`",
+   "modeledState": "locked/queued/running, record/recordExpired, retained/unread, cloud/grant, completes/codeReturns/statusTaps"
+  },
+  {
+   "family": "native",
+   "module": "ReadinessProbeCache",
+   "sourceSymbols": "`AlphaCloudSignInPlugin.probe`, `forgetReadiness`, `storedReadiness`, `storeReadiness`, `CloudSignInReadiness.Result.fresh`",
+   "modeledState": "memory/stored answer per environment, probes/waiting per environment, calls/answered/abandoned"
+  },
+  {
+   "family": "application",
+   "module": "ConnectionController",
+   "sourceSymbols": "`work`, `releaseOperation`, `scheduleResidentAutoRetry`, `ensureResident`, `queueResidentRebind`, `recheckResidentPlan`, `planRecheckStep`, `savedSignInRetryStep`, `runQueuedSignInReturn`",
+   "modeledState": "operation, agent/phase/recoveryReview, autoRetries/retryTimer, sending, rebindQueued/queuedReturn, planRecheck/binding/rebindBackoff"
+  },
+  {
+   "family": "application",
+   "module": "DevelopmentTransportProposals",
+   "sourceSymbols": "`development-transport.ts` send/execute/close, `pending`, `validateOperation`",
+   "modeledState": "mocks/closed, contextRevision, active requests, pending proposals with request and revision, expired, dispatches"
+  },
+  {
+   "family": "application",
+   "module": "ViewAdmission",
+   "sourceSymbols": "`applyImageContacts`, `admitImageContacts`, `DEFERRED_MVP_VIEWS`, `refreshImage`",
+   "modeledState": "rawView, admitted/ordered, capability, leaves"
+  },
+  {
+   "family": "application",
+   "module": "SettingsListenerReads",
+   "sourceSymbols": "`listenerReadGate`, `listenerAction`, `refreshCapabilities`",
+   "modeledState": "busy/sequence/actionSequence, reads in flight with snapshots, listening, shown/shownFrom/shownSequence"
+  },
+  {
+   "family": "services",
+   "module": "IdentitySession",
+   "sourceSymbols": "`AlphaCloudSignInPlugin` startGoogle/admitSend/sendAccepted/sendFailed/verify/requireAuthorization/complete/revokeReplaced/resumeAcknowledgements, `CloudSignInFlow.afterVerifyFailure`",
+   "modeledState": "phase/method/attempt/sending, uiAttempt, pending/consumed, wrongCodes/mfa/cooldown, authorized, receipt/key/acknowledged/ackTries, replacedPending/keysReplaced/keysSettled, epoch/attemptOwner/owner"
+  },
+  {
+   "family": "services",
+   "module": "ServiceAuthorization",
+   "sourceSymbols": "`checkEntitlement`, `EntitlementRefresher`, `planAdmission`, `managedServiceRequest`, `recentPlanAdmission`, `admitCloudResident`",
+   "modeledState": "plan/source/fallback/validFor/refresh/failedSinceLapse, signedRefusal/credits, bound/admittedBy, grace record, owner/epoch/requestOwner/requestEpoch, request/dispatched/refusedRequests"
+  },
+  {
+   "family": "services",
+   "module": "GoogleAccounts",
+   "sourceSymbols": "`googleConnect`, `googleConnectNote`, `googleConnectOwnerChanged`, `gmailGrantChange`, `GoogleConnectReturn`",
+   "modeledState": "attempt/pendingEpoch/phase/returnMatched, note/noteEpoch, account/readGrant/modifyGrant/calendarGrant, cacheVisible/review, disconnectSent/disconnectResult/revoked"
+  },
+  {
+   "family": "services",
+   "module": "NativeCredentialMutation",
+   "sourceSymbols": "`AlphaCredentialStore` mutateSlotOnce and `cloudChange`, `LocalAgentProviderAdmission.sameCloudCredential`, `GmailDelivery.withdraw`",
+   "modeledState": "operation/phase/before/capturedProvider, requestedStop/acknowledgedStop/stopped, ownerEpoch/capturedEpoch, oldSize/newSize/admissionInvalidated, productionSlot/observerNotified"
+  },
+  {
+   "family": "application",
+   "module": "DevelopmentDevice",
+   "sourceSymbols": "`model.js` prototype phone (`pnDecline`, `pnEnd`), browser device simulations",
+   "modeledState": "call/callGeneration/timerGeneration, microphoneMuted/speaker/hold, voicemails, unread/notifications, fakePayment"
+  },
+  {
+   "family": "application",
+   "module": "DevelopmentSurfaces",
+   "sourceSymbols": "`devSurfacesEnabled`, `testMocksEnabled`, device controls render guard",
+   "modeledState": "mocks/devServer/native/profile, fixture/tools/toolsQuery/remote, syntheticEvents/liveEvents"
+  },
+  {
+   "family": "application",
+   "module": "DevelopmentHost",
+   "sourceSymbols": "`browser-cloud-dev-bridge.ts` login claim, credential commit, request fencing; development launchers",
+   "modeledState": "credential/previous/claim/loginPending, host/bound/generation/retiring, active requests and owners, childCount/stopping"
+  }
+ ]
+}

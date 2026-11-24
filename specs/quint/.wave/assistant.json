@@ -1,0 +1,1200 @@
+{
+  "add": [
+    {
+      "path": "specs/quint/application/ComposerSend.qnt",
+      "module": "ComposerSend",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "argumentSendReachesTransportTest",
+        "staleFinallyKeepsTypingTest",
+        "refusedSendRestoresTextTest",
+        "cancelWaitsForTransportTest",
+        "unsettledCancelOffersCheckTest",
+        "staleComposerSendKeepsDraftTest"
+      ],
+      "invariants": [
+        "TypingHasLiveOwner",
+        "OwnerKeepsTyping",
+        "RestoredNeverPosted",
+        "OfferedWasHandedOver",
+        "OneOutcome",
+        "ExplicitArgumentAdmitted"
+      ],
+      "witnesses": [
+        "OverlappingSendWitness",
+        "RestoredWitness",
+        "OfferedAfterTimeoutWitness",
+        "ArgumentSendWitness"
+      ],
+      "sources": [
+        "apps/app/src/prototype/agent-adapter.ts",
+        "apps/app/src/prototype/maps-chat-adapter.ts",
+        "apps/app/src/prototype/calendar-approval-adapter.ts"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/prototype/agent-adapter.ts",
+          "name": "SendAttempt"
+        },
+        {
+          "path": "apps/app/src/prototype/agent-adapter.ts",
+          "name": "trackDispatch"
+        },
+        {
+          "path": "apps/app/src/prototype/agent-adapter.ts",
+          "name": "transportSettled"
+        },
+        {
+          "path": "apps/app/src/prototype/agent-adapter.ts",
+          "name": "dispatched"
+        },
+        {
+          "path": "apps/app/src/prototype/agent-adapter.ts",
+          "name": "isPreDispatchError"
+        },
+        {
+          "path": "apps/app/src/prototype/agent-adapter.ts",
+          "name": "NotDispatched"
+        },
+        {
+          "path": "apps/app/src/prototype/agent-adapter.ts",
+          "name": "sendAttempt"
+        },
+        {
+          "path": "apps/app/src/prototype/agent-adapter.ts",
+          "name": "UNSENT_NOTICE"
+        },
+        {
+          "path": "apps/app/src/prototype/maps-chat-adapter.ts",
+          "name": "installMapsChatAdapter"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-approval-adapter.ts",
+          "name": "installCalendarApprovalAdapter"
+        },
+        {
+          "path": "apps/app/src/prototype/agent-adapter.ts",
+          "name": "composerSendStale"
+        },
+        {
+          "path": "apps/app/src/prototype/agent-adapter.ts",
+          "name": "sendOwnsTyping"
+        }
+      ],
+      "abstractions": [
+        "Two send attempts and three text classes (\"A\", \"B\" and \"both\" for restored text followed by newer typing).",
+        "The transport is called, refuses before dispatch, or accepts; what the agent received is a hidden fact revealed only when the transport settles. The 5-second settle bound is a nondeterministic timeout.",
+        "Callers that pass an explicit argument require an empty composer; that precondition is a guard of the send action.",
+        "A session change is not interleaved with the connect wait of a new send. Message edit and resend, navigation delivery and the stopped-reply notice are outside this model.",
+        "The typing indicator is cleared only by the attempt that still owns the send, and an explicit-argument send is not compared with the composer text."
+      ]
+    },
+    {
+      "path": "specs/quint/application/RecorderStage.qnt",
+      "module": "RecorderStage",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "recordTranscribeApplyTest",
+        "failedStopAllowsRetryTest",
+        "failedTimerStopAllowsRetryTest",
+        "staleStartAfterCloseTest",
+        "lostCaptureReturnsReadyTest",
+        "cancelTranscriptionReopensTest"
+      ],
+      "invariants": [
+        "BusyHasCurrentTask",
+        "ClosedIsQuiet",
+        "ReadyCanRecord",
+        "NeverRefusedAsRecording",
+        "RecordingHasCapture",
+        "LaterStagesHoldClip",
+        "WaitingStagesAreBusy",
+        "DraftOnlyInReview"
+      ],
+      "witnesses": [
+        "RetryAfterFailedStopWitness",
+        "ReviewWitness",
+        "StaleTaskWitness",
+        "ReadyAfterErrorWitness"
+      ],
+      "sources": [
+        "apps/app/src/prototype/voice-adapter.ts",
+        "apps/app/src/runtime/native-live-voice.ts"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/prototype/voice-adapter.ts",
+          "name": "generation"
+        },
+        {
+          "path": "apps/app/src/prototype/voice-adapter.ts",
+          "name": "startingCapture"
+        },
+        {
+          "path": "apps/app/src/prototype/voice-adapter.ts",
+          "name": "transcribeClip"
+        },
+        {
+          "path": "apps/app/src/prototype/voice-adapter.ts",
+          "name": "cleanup"
+        },
+        {
+          "path": "apps/app/src/prototype/voice-adapter.ts",
+          "name": "reopen"
+        },
+        {
+          "path": "apps/app/src/prototype/voice-adapter.ts",
+          "name": "recordingStopped"
+        },
+        {
+          "path": "apps/app/src/runtime/native-live-voice.ts",
+          "name": "createNativeLiveDictation"
+        },
+        {
+          "path": "apps/app/src/runtime/native-live-voice.ts",
+          "name": "startRecording"
+        },
+        {
+          "path": "apps/app/src/runtime/native-live-voice.ts",
+          "name": "stopRecording"
+        },
+        {
+          "path": "apps/app/src/runtime/native-live-voice.ts",
+          "name": "cancelRecording"
+        },
+        {
+          "path": "apps/app/src/runtime/native-live-voice.ts",
+          "name": "maxDurationMs"
+        }
+      ],
+      "abstractions": [
+        "One recorder with four generations; one task in flight per generation and one flag for an abandoned older task.",
+        "The driver state follows the native live dictation recording (opening, recording, stopping, clip). Clip recorders on other routes share the stage machine only.",
+        "cleanup() cancels the driver recording within the step; the serialized stopping chain and readiness probes are omitted.",
+        "A rejected stop, from the Stop control or the maximum-duration timer, releases the driver recording.",
+        "Saving a voice note, playback of the draft and the voice conversation host are outside this model."
+      ]
+    },
+    {
+      "path": "specs/quint/application/StoppedReplyReconciliation.qnt",
+      "module": "StoppedReplyReconciliation",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "finishedAfterStopTest",
+        "confirmedStopTest",
+        "newSendRetiresCheckTest",
+        "busyAtTimerSkipsReadTest",
+        "operationDuringReadKeepsChatTest",
+        "laterStopClearsEarlierConfirmationTest"
+      ],
+      "invariants": [
+        "PendingNoticeHasCheck",
+        "SingleRead",
+        "CheckYieldsToNewRequest",
+        "CancelledNoticeNeedsAbort",
+        "ConfirmedStopNeedsAbort",
+        "ChatNotReplacedWhileBusy",
+        "CancelAttemptBelongsToCheck"
+      ],
+      "witnesses": [
+        "CancelledReadWitness",
+        "LoadLaterWitness",
+        "FinishedWitness"
+      ],
+      "sources": [
+        "apps/app/src/runtime/connection-ui.tsx",
+        "apps/app/src/runtime/stopped-reply-match.ts"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/runtime/connection-ui.tsx",
+          "name": "scheduleStoppedReply"
+        },
+        {
+          "path": "apps/app/src/runtime/connection-ui.tsx",
+          "name": "cancelStoppedReply"
+        },
+        {
+          "path": "apps/app/src/runtime/connection-ui.tsx",
+          "name": "STOPPED_REPLY_NOTICE"
+        },
+        {
+          "path": "apps/app/src/runtime/connection-ui.tsx",
+          "name": "STOPPED_CONFIRMED_NOTICE"
+        },
+        {
+          "path": "apps/app/src/runtime/connection-ui.tsx",
+          "name": "STOPPED_CANCELLED_NOTICE"
+        },
+        {
+          "path": "apps/app/src/runtime/connection-ui.tsx",
+          "name": "STOPPED_REPLY_CHECK_MS"
+        },
+        {
+          "path": "apps/app/src/runtime/connection-ui.tsx",
+          "name": "replyNotice"
+        },
+        {
+          "path": "apps/app/src/runtime/stopped-reply-match.ts",
+          "name": "findStoppedUserTurn"
+        }
+      ],
+      "abstractions": [
+        "One check at a time; at most three stops. The 15-second delay is a nondeterministic timer that waits for the cancel attempt.",
+        "The conversation read yields one of four classes: error, stopped message not recorded, reply not finished, reply finished. Matching by clientMessageId or by text and time is abstracted into the unrecorded class.",
+        "Selecting another agent, an explicit history load, a new conversation and a new send retire the check and clear its notice in one step, as the controller does.",
+        "The chat bubble that mirrors the notice (syncStoppedReplyNotice) and automatic restores that change the selected conversation are not modeled."
+      ]
+    },
+    {
+      "path": "specs/quint/application/ApprovalRoutes.qnt",
+      "module": "ApprovalRoutes",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "clientRouteRunsOnceTest",
+        "recoveredRouteRefetchesTest",
+        "crossRouteRunsOnceTest",
+        "executedActionIsNotOfferedAgainTest",
+        "abortedFetchSendsNothingTest",
+        "staleLiveCardSendsNothingTest"
+      ],
+      "invariants": [
+        "OneExecution",
+        "OneClientDispatchPerSession",
+        "ConsumedBlocksClientProposal",
+        "RecoveredRouteRefetches",
+        "RequestsNeedTaps",
+        "CompletedMeansExecuted",
+        "DoneCardIsInert"
+      ],
+      "witnesses": [
+        "RepeatedRequestWitness",
+        "RecoveredFetchWitness",
+        "UnavailableAfterExecutionWitness",
+        "ConsumedAfterReloadWitness",
+        "LostResponseWitness"
+      ],
+      "sources": [
+        "apps/app/src/prototype/agent-adapter.ts",
+        "apps/app/src/runtime/alpha-client.ts",
+        "apps/app/src/runtime/connection-ui.tsx"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/prototype/agent-adapter.ts",
+          "name": "cardAct"
+        },
+        {
+          "path": "apps/app/src/prototype/agent-adapter.ts",
+          "name": "recoverPendingActions"
+        },
+        {
+          "path": "apps/app/src/prototype/agent-adapter.ts",
+          "name": "pendingActionApproval"
+        },
+        {
+          "path": "apps/app/src/prototype/agent-adapter.ts",
+          "name": "reviewUnavailable"
+        },
+        {
+          "path": "apps/app/src/runtime/alpha-client.ts",
+          "name": "approve"
+        },
+        {
+          "path": "apps/app/src/runtime/alpha-client.ts",
+          "name": "consumed"
+        },
+        {
+          "path": "apps/app/src/runtime/alpha-client.ts",
+          "name": "disconnect"
+        },
+        {
+          "path": "apps/app/src/runtime/connection-ui.tsx",
+          "name": "approvePendingAction"
+        },
+        {
+          "path": "apps/app/src/runtime/connection-ui.tsx",
+          "name": "actionReceipt"
+        },
+        {
+          "path": "apps/app/src/runtime/connection-ui.tsx",
+          "name": "pendingActions"
+        },
+        {
+          "path": "apps/app/src/runtime/alpha-client.ts",
+          "name": "keepConsumed"
+        },
+        {
+          "path": "apps/app/src/runtime/alpha-client.ts",
+          "name": "consumedSession"
+        }
+      ],
+      "abstractions": [
+        "One proposal identity, at most three taps and two reattachments. A history restore or session change removes the cards of the old transcript; recovery brings a pending proposal back as a recovered card.",
+        "Assumption: the agent journals each proposal identity and executes it once; a repeated execute request returns the journaled receipt. The client consumed set survives a reload of the same session, but the recovered route does not consult it, so one execution across routes rests on this assumption.",
+        "A live card whose client no longer holds the proposal sends nothing; awaiting an earlier tracked receipt on that path is omitted.",
+        "Expiry, decline, the Home review destination and read-reply completion are outside this model (see ReadReplyLease)."
+      ]
+    },
+    {
+      "path": "specs/quint/application/ReadReplyLease.qnt",
+      "module": "ReadReplyLease",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "approvedReadAnswersOnceTest",
+        "cancelledWhileCompletingTest",
+        "bindingChangeLeavesUnconfirmedTest",
+        "failedActionCancelsLeaseTest",
+        "staleReceiptLeavesLeasePendingTest"
+      ],
+      "invariants": [
+        "PhaseKnown",
+        "AtMostOneAnswer",
+        "AnswerMeansDone",
+        "CancelledIsFinal",
+        "VoiceResumesWithAnswer",
+        "CompletingHasOneRequest",
+        "UnconfirmedNeverRetried",
+        "CancelRequestedOnce"
+      ],
+      "witnesses": [
+        "AnsweredWitness",
+        "UnconfirmedWitness",
+        "CancelledWhileCompletingWitness",
+        "LateAnswerDroppedWitness"
+      ],
+      "sources": [
+        "apps/app/src/prototype/agent-adapter.ts",
+        "apps/app/src/runtime/connection-ui.tsx"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/prototype/agent-adapter.ts",
+          "name": "retainReadReply"
+        },
+        {
+          "path": "apps/app/src/prototype/agent-adapter.ts",
+          "name": "completeReadReply"
+        },
+        {
+          "path": "apps/app/src/prototype/agent-adapter.ts",
+          "name": "cancelReadReplyCompletions"
+        },
+        {
+          "path": "apps/app/src/prototype/agent-adapter.ts",
+          "name": "readReplyLeases"
+        },
+        {
+          "path": "apps/app/src/prototype/agent-adapter.ts",
+          "name": "resumeReadReplyVoice"
+        },
+        {
+          "path": "apps/app/src/runtime/connection-ui.tsx",
+          "name": "readReplyCurrent"
+        },
+        {
+          "path": "apps/app/src/runtime/connection-ui.tsx",
+          "name": "completeReadReply"
+        },
+        {
+          "path": "apps/app/src/runtime/connection-ui.tsx",
+          "name": "cancelReadReply"
+        },
+        {
+          "path": "apps/app/src/runtime/connection-ui.tsx",
+          "name": "readReplyBinding"
+        }
+      ],
+      "abstractions": [
+        "One lease. Session, conversation, origin, digest, visibility and sensitive-screen checks are one bindingCurrent predicate that never becomes true again.",
+        "A succeeded receipt stands for a receipt carrying the read-reply hint; any other receipt cancels the lease.",
+        "The answer text and message identity are omitted; the count of answers added to the conversation is tracked."
+      ]
+    },
+    {
+      "path": "specs/quint/native/SegmentAccounting.qnt",
+      "module": "SegmentAccounting",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "finalAfterSpeechEndTest",
+        "finalBeforeSpeechEndTest",
+        "failedCloseStillFlushesTest",
+        "longConversationSurvivesTest",
+        "discardDuringCloseTest",
+        "bufferLimitLosesCaptureTest",
+        "lossDuringCloseIsIgnoredTest"
+      ],
+      "invariants": [
+        "AtMostOneResult",
+        "EveryClosedSegmentAccounted",
+        "SettledCloseFlushed",
+        "SessionNotStranded",
+        "BuffersBounded",
+        "DiscardDeliversNothing",
+        "LossRetiresSession"
+      ],
+      "witnesses": [
+        "FailedCloseWitness",
+        "EvictionWitness",
+        "BufferedFinalWitness",
+        "LostWitness"
+      ],
+      "sources": [
+        "apps/app/src/runtime/native-resident-capture.ts",
+        "apps/app/src/runtime/live-segment-stream.ts",
+        "apps/app/src/runtime/voice-assistant.ts",
+        "apps/app/src/runtime/native-live-voice.ts"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/runtime/native-resident-capture.ts",
+          "name": "openNativeResidentCapture"
+        },
+        {
+          "path": "apps/app/src/runtime/native-resident-capture.ts",
+          "name": "drain"
+        },
+        {
+          "path": "apps/app/src/runtime/native-resident-capture.ts",
+          "name": "lose"
+        },
+        {
+          "path": "apps/app/src/runtime/native-resident-capture.ts",
+          "name": "expected"
+        },
+        {
+          "path": "apps/app/src/runtime/native-resident-capture.ts",
+          "name": "finished"
+        },
+        {
+          "path": "apps/app/src/runtime/native-resident-capture.ts",
+          "name": "stopLiveCapture"
+        },
+        {
+          "path": "apps/app/src/runtime/live-segment-stream.ts",
+          "name": "createLiveSegmentStream"
+        },
+        {
+          "path": "apps/app/src/runtime/live-segment-stream.ts",
+          "name": "closeSegment"
+        },
+        {
+          "path": "apps/app/src/runtime/live-segment-stream.ts",
+          "name": "expected"
+        },
+        {
+          "path": "apps/app/src/runtime/voice-assistant.ts",
+          "name": "segmentResult"
+        },
+        {
+          "path": "apps/app/src/runtime/voice-assistant.ts",
+          "name": "closeCapture"
+        },
+        {
+          "path": "apps/app/src/runtime/voice-assistant.ts",
+          "name": "captureEnded"
+        },
+        {
+          "path": "apps/app/src/runtime/native-live-voice.ts",
+          "name": "onLost"
+        }
+      ],
+      "abstractions": [
+        "One capture. Two buffered finals stand for the limit of 8 and two remembered turn ids for 512; at most four segments and five finals.",
+        "The session side is the count of closed segments and delivered results; transcript text, tentative barge-in and ignored segments are in VoiceSession.",
+        "A lost capture fails its session, which drops the segment list (retired). Loss while muted is not distinguished.",
+        "A rejected or unconfirmed graceful close still delivers a null result to every closed segment, and the remembered turn ids are bounded by eviction instead of ending the capture.",
+        "The renderer segment stream keeps the same expected counter; its fatal-error flush is not modeled separately."
+      ]
+    },
+    {
+      "path": "specs/quint/native/SpeechCleanupLatch.qnt",
+      "module": "SpeechCleanupLatch",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "replacementWaitsForCleanupTest",
+        "unconfirmedCleanupLatchesTest",
+        "latchedEntryNamesCleanupTest",
+        "busyRecorderMessageTest",
+        "waitingSuccessorRejectedTest",
+        "restartOpensChainsTest"
+      ],
+      "invariants": [
+        "StagesKnown",
+        "SuccessorWaitsForCleanup",
+        "LatchHoldsUntilRestart",
+        "RefusedOnlyOnClosedChain",
+        "LatchedEntryNamesCleanup",
+        "BusyRecorderMessageOnlyWhenOpen"
+      ],
+      "witnesses": [
+        "LatchedVoiceWitness",
+        "RefusedSuccessorWitness",
+        "WaitingSuccessorWitness",
+        "LatchedEntryWitness",
+        "RestartedWitness"
+      ],
+      "sources": [
+        "apps/app/src/prototype/voice-adapter.ts",
+        "apps/app/src/prototype/local-speech-playback.ts",
+        "apps/app/src/runtime/app-speech.ts",
+        "apps/app/src/runtime/cloud-voice.ts",
+        "apps/app/src/runtime/speech-cleanup.ts"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/prototype/voice-adapter.ts",
+          "name": "mediaUnconfirmed"
+        },
+        {
+          "path": "apps/app/src/prototype/voice-adapter.ts",
+          "name": "stopVoiceConversation"
+        },
+        {
+          "path": "apps/app/src/prototype/local-speech-playback.ts",
+          "name": "speechRetirement"
+        },
+        {
+          "path": "apps/app/src/prototype/local-speech-playback.ts",
+          "name": "retainSpeechRetirement"
+        },
+        {
+          "path": "apps/app/src/prototype/local-speech-playback.ts",
+          "name": "stopLocalSpeechPlayback"
+        },
+        {
+          "path": "apps/app/src/runtime/app-speech.ts",
+          "name": "retirement"
+        },
+        {
+          "path": "apps/app/src/runtime/app-speech.ts",
+          "name": "speakAppText"
+        },
+        {
+          "path": "apps/app/src/runtime/cloud-voice.ts",
+          "name": "appSpeechRetirement"
+        },
+        {
+          "path": "apps/app/src/runtime/cloud-voice.ts",
+          "name": "speakCloudText"
+        },
+        {
+          "path": "apps/app/src/runtime/speech-cleanup.ts",
+          "name": "SPEECH_CLEANUP_NOTICE"
+        },
+        {
+          "path": "apps/app/src/runtime/speech-cleanup.ts",
+          "name": "speechCleanupNotice"
+        }
+      ],
+      "abstractions": [
+        "Four independent chains, each idle, playing, retiring or closed; at most six requests and one restart.",
+        "A request made while speech plays on its chain retires that speech and waits; who cancels the predecessor is not distinguished.",
+        "The latch is deliberate fail-closed behaviour that lasts until the app process restarts. Every refusal on a closed chain, and opening the voice surface while its media is still stopping or was never confirmed stopped, carries the one media-not-stopped message.",
+        "Native cancel and stop are one confirmed-or-unconfirmed settle step (see RendererSpeechChunk)."
+      ]
+    },
+    {
+      "path": "specs/quint/native/RendererSpeechChunk.qnt",
+      "module": "RendererSpeechChunk",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "playsToEndTest",
+        "busySpeakerRetryTest",
+        "abortDuringPrepareStopsLatePlaybackTest",
+        "strictCleanupFailureTest",
+        "boundedCleanupKeepsOutcomeTest",
+        "finishedWhileWaitingForSpeakerTest",
+        "unqueuedBusyFailsTest"
+      ],
+      "invariants": [
+        "OneTerminalOutcome",
+        "NoListenerOutlivesChunk",
+        "DisposeAlwaysRuns",
+        "LatePlaybackIsStopped",
+        "StartedOnceWithPlayback",
+        "EndedMeansStarted",
+        "StrictReportsUnconfirmedCleanup",
+        "StrictAwaitsPreparation"
+      ],
+      "witnesses": [
+        "StrictFailureWitness",
+        "LatePlaybackWitness",
+        "BusyRetryWitness",
+        "InterruptedWitness",
+        "BoundedCleanupWitness"
+      ],
+      "sources": [
+        "apps/app/src/local-speech-playback.ts"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/local-speech-playback.ts",
+          "name": "speakChunk"
+        },
+        {
+          "path": "apps/app/src/local-speech-playback.ts",
+          "name": "dispose"
+        },
+        {
+          "path": "apps/app/src/local-speech-playback.ts",
+          "name": "playOwnedSpeech"
+        },
+        {
+          "path": "apps/app/src/local-speech-playback.ts",
+          "name": "speakLocalText"
+        },
+        {
+          "path": "apps/app/src/local-speech-playback.ts",
+          "name": "strictDrain"
+        }
+      ],
+      "abstractions": [
+        "One chunk on the native platform; three listeners; at most two busy-speaker retries where the source retries without a count limit until aborted.",
+        "Listener registration is one step per listener. The 100 ms retry wait and the 500 ms bounded cleanup are nondeterministic ticks.",
+        "Synthesis text, playback identity checks and the execution requirement are folded into the prepare result classes ok, busy and error.",
+        "The 20-minute passage limit and multi-chunk passages of speakLocalText are outside this model."
+      ]
+    },
+    {
+      "path": "specs/quint/native/NativeStreamBridge.qnt",
+      "module": "NativeStreamBridge",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "completedReplyTest",
+        "busyRefusalIsNotDispatchedTest",
+        "busyAfterResponseIsUnknownTest",
+        "interruptedAfterResponseTest",
+        "abortCancelsStartedStreamTest",
+        "abortBeforeListenerRemovesLateListenerTest"
+      ],
+      "invariants": [
+        "OneTerminalOutcome",
+        "CompletedNeedsResponse",
+        "NotDispatchedIsProvable",
+        "ChunksNeedResponse",
+        "ReadyRevokedOnlyOnFailure",
+        "SettledCleansUp"
+      ],
+      "witnesses": [
+        "RefusedBeforeDispatchWitness",
+        "InterruptedReplyWitness",
+        "CompletedWitness",
+        "LateListenerWitness"
+      ],
+      "sources": [
+        "apps/app/src/runtime/local-agent-native-stream.ts"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/runtime/local-agent-native-stream.ts",
+          "name": "streamNativeAgent"
+        },
+        {
+          "path": "apps/app/src/runtime/local-agent-native-stream.ts",
+          "name": "requestStream"
+        },
+        {
+          "path": "apps/app/src/runtime/local-agent-native-stream.ts",
+          "name": "cancelStream"
+        },
+        {
+          "path": "apps/app/src/runtime/local-agent-native-stream.ts",
+          "name": "beforeDispatch"
+        },
+        {
+          "path": "apps/app/src/runtime/local-agent-native-stream.ts",
+          "name": "alphaAgentStream"
+        }
+      ],
+      "abstractions": [
+        "One stream; response status classes 200, 401, 429 and other; at most three chunks.",
+        "Frame validation, the 2 MB limit and content-type checks are one valid/invalid class. The 120-second bound and the caller signal are one abort action.",
+        "Assumption: native rejects requestStream only before it sent anything to the runtime.",
+        "Parsing of the event stream body (readLocalAgentStream) is outside this model."
+      ]
+    },
+    {
+      "path": "specs/quint/native/HeardReporter.qnt",
+      "module": "HeardReporter",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "recordedOnceTest",
+        "replyNotYetPersistedRetriesOnceTest",
+        "staleRetrySendsNothingTest",
+        "uninterruptedReplyNotReportedTest"
+      ],
+      "invariants": [
+        "AtMostOneRetry",
+        "OneReportPerReply",
+        "TerminalOutcome",
+        "StaleSendsNothingMore",
+        "ExhaustedOnlyAfterRetry",
+        "RecordedNeedsRequest"
+      ],
+      "witnesses": [
+        "RetriedWitness",
+        "StaleRetryWitness",
+        "DuplicateReportWitness",
+        "ExhaustedWitness"
+      ],
+      "sources": [
+        "apps/app/src/runtime/voice-turn-routes.ts"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/runtime/voice-turn-routes.ts",
+          "name": "createHeardReporter"
+        },
+        {
+          "path": "apps/app/src/runtime/voice-turn-routes.ts",
+          "name": "settled"
+        },
+        {
+          "path": "apps/app/src/runtime/voice-turn-routes.ts",
+          "name": "retryDelayMs"
+        },
+        {
+          "path": "apps/app/src/runtime/voice-turn-routes.ts",
+          "name": "HeardOutcome"
+        }
+      ],
+      "abstractions": [
+        "One reply identity and at most three report calls.",
+        "Response classes: changed, same, conflict, refused, not-found and unavailable. The 1.5-second retry delay is a nondeterministic timer.",
+        "The resident request port being gone is folded into the binding predicate."
+      ]
+    }
+  ],
+  "update": [
+    {
+      "module": "DraftDispatch",
+      "set": {
+        "tests": [
+          "openingRetryTest",
+          "openFailureKeepsTextTest",
+          "typedDuringOpenKeepsBothTest",
+          "restoreSavedTest",
+          "consumeHandoffTest",
+          "staleReceiptUndoTest",
+          "consumeAfterSwitchKeepsOriginalTest",
+          "failedSaveReviewsConflictTest",
+          "retiredWriteKeepsBindingTest"
+        ],
+        "invariants": [
+          "OpenRetriesBounded",
+          "OpeningIsReadOnly",
+          "ConflictPausesWrites",
+          "ConsumeOwnsBinding",
+          "HandoffClearsDraft",
+          "StaleReceiptUndone",
+          "OneHandoffPerConsume"
+        ],
+        "witnesses": [
+          "ConflictWitness",
+          "OpenFailedWitness",
+          "HandoffWitness",
+          "StaleReceiptWitness",
+          "RetiredWriteWitness"
+        ],
+        "symbols": [
+          {
+            "path": "apps/app/src/prototype/assistant-draft-controller.ts",
+            "name": "AssistantDraftController"
+          },
+          {
+            "path": "apps/app/src/prototype/assistant-draft-controller.ts",
+            "name": "open"
+          },
+          {
+            "path": "apps/app/src/prototype/assistant-draft-controller.ts",
+            "name": "load"
+          },
+          {
+            "path": "apps/app/src/prototype/assistant-draft-controller.ts",
+            "name": "edit"
+          },
+          {
+            "path": "apps/app/src/prototype/assistant-draft-controller.ts",
+            "name": "reviewConflict"
+          },
+          {
+            "path": "apps/app/src/prototype/assistant-draft-controller.ts",
+            "name": "restoreSaved"
+          },
+          {
+            "path": "apps/app/src/prototype/assistant-draft-controller.ts",
+            "name": "keepCurrent"
+          },
+          {
+            "path": "apps/app/src/prototype/assistant-draft-controller.ts",
+            "name": "retry"
+          },
+          {
+            "path": "apps/app/src/prototype/assistant-draft-controller.ts",
+            "name": "consume"
+          },
+          {
+            "path": "apps/app/src/runtime/assistant-draft-record.ts",
+            "name": "replaceAssistantDraft"
+          },
+          {
+            "path": "apps/app/src/runtime/assistant-draft-record.ts",
+            "name": "readAssistantDraft"
+          }
+        ],
+        "abstractions": [
+          "Two conversation stores with revisions (0 is no saved record), four bindings and three text classes plus \"X\" for a copy saved elsewhere.",
+          "One pending write at a time; a newer binding waits for an older binding's queued write, which still runs against its own conversation.",
+          "The three-attempt read-only open, the delayed restore into the composer, conflict review, consume and the undo of a stale consume receipt are modeled. The caller's `current` predicate is folded into the binding and text checks.",
+          "hold, release and commit have no production caller and are not modeled."
+        ]
+      },
+      "unset": []
+    },
+    {
+      "module": "AssistantConversation",
+      "set": {
+        "tests": [
+          "reviewedSendTest",
+          "unknownNoReplayTest",
+          "failedSendKeepsProposalTest",
+          "reloadKeepsConsumedTest",
+          "otherSessionRunsOnceTest",
+          "expiredProposalTest",
+          "lateReplyTest",
+          "workflowNavigationTest",
+          "sensitiveStopsWorkflowTest",
+          "draftConflictTest"
+        ],
+        "invariants": [
+          "OneDispatchPerSession",
+          "OneExecution",
+          "SensitiveIsolation",
+          "ProposalAdmission",
+          "InFlightSession"
+        ],
+        "witnesses": [
+          "ProposalSurvivesSendWitness",
+          "ConsumedAcrossReloadWitness",
+          "ExpiredProposalWitness"
+        ],
+        "symbols": [
+          {
+            "path": "apps/app/src/runtime/alpha-client.ts",
+            "name": "AlphaClient"
+          },
+          {
+            "path": "apps/app/src/runtime/alpha-client.ts",
+            "name": "run"
+          },
+          {
+            "path": "apps/app/src/runtime/alpha-client.ts",
+            "name": "send"
+          },
+          {
+            "path": "apps/app/src/runtime/alpha-client.ts",
+            "name": "approve"
+          },
+          {
+            "path": "apps/app/src/runtime/alpha-client.ts",
+            "name": "cancel"
+          },
+          {
+            "path": "apps/app/src/runtime/alpha-client.ts",
+            "name": "disconnect"
+          },
+          {
+            "path": "apps/app/src/runtime/alpha-client.ts",
+            "name": "setViewContext"
+          },
+          {
+            "path": "apps/app/src/runtime/alpha-client.ts",
+            "name": "generateWorkflowText"
+          },
+          {
+            "path": "apps/app/src/runtime/alpha-client.ts",
+            "name": "consumed"
+          },
+          {
+            "path": "apps/app/src/runtime/alpha-client.ts",
+            "name": "proposals"
+          },
+          {
+            "path": "apps/app/src/runtime/alpha-client.ts",
+            "name": "expiresAt"
+          },
+          {
+            "path": "apps/app/src/runtime/assistant-draft-record.ts",
+            "name": "replaceAssistantDraft"
+          },
+          {
+            "path": "apps/app/src/runtime/alpha-client.ts",
+            "name": "keepConsumed"
+          },
+          {
+            "path": "apps/app/src/runtime/alpha-client.ts",
+            "name": "consumedSession"
+          }
+        ],
+        "abstractions": [
+          "One foreground request, one proposal identity, two agent sessions, four attachment epochs and three context revisions.",
+          "Starting a request keeps the reviewed proposal; a valid reply replaces it; transport failure, an invalid reply and the caller's abort leave it approvable. Expiry disables approval without removing the proposal.",
+          "The consumed set survives a reattach to the same session (a history reload) and is forgotten by any other disconnect or another session. Assumption: the agent journals a proposal identity, so a request repeated on another session has no second effect (see ApprovalRoutes).",
+          "An unchanged context envelope is a no-op; multiple simultaneous proposals and streamed-text callback gating are omitted.",
+          "Model safety checks do not establish implementation refinement or device acceptance."
+        ]
+      },
+      "unset": []
+    },
+    {
+      "module": "VoiceSession",
+      "set": {
+        "tests": [
+          "longGapAndPlaybackTest",
+          "staleReplyAfterBargeInTest",
+          "partialSentenceNotHeardTest",
+          "dictationIsDraftTest",
+          "ownerInputPauseStopsMicrophoneTest",
+          "proposalReplyEndsSessionTest",
+          "staleEndpointAfterNewSpeechTest",
+          "reviewedReadResumesSameTurnTest",
+          "muteKeepsReplyAndStopsMicrophoneTest",
+          "stopRejectsLateCaptureTest",
+          "startingOpensCaptureTest",
+          "failedOpenEndsSessionTest",
+          "streamedPlaybackBeforeReplyTest",
+          "unmuteBeforePauseStaysOffTest",
+          "resumedReplyKeepsEverySentenceTest",
+          "stopSpeakingEndsPauseTest",
+          "mutedFinalStillSubmitsTest",
+          "halfDuplexInterruptTest"
+        ],
+        "invariants": [
+          "MutedMicrophoneOff",
+          "TypeOK",
+          "CloudConsent",
+          "StopReleasesCapture",
+          "IdleIsQuiet",
+          "StartingHasNoCapture",
+          "ReviewPauseMicrophoneOff",
+          "PlaybackCurrent",
+          "EchoReferenceWhileSpeaking",
+          "HeardIsCompleted",
+          "ResumedReplyComplete",
+          "InterruptedHeardReported",
+          "DictationNeverSubmits"
+        ],
+        "witnesses": [
+          "StreamedBeforeReplyWitness",
+          "ReviewPauseWitness",
+          "MutedFinalWitness",
+          "ReopeningWitness",
+          "InterruptedPlaybackWitness"
+        ],
+        "symbols": [
+          {
+            "path": "apps/app/src/runtime/voice-assistant.ts",
+            "name": "VoiceAssistantSession"
+          },
+          {
+            "path": "apps/app/src/runtime/voice-assistant.ts",
+            "name": "setMuted"
+          },
+          {
+            "path": "apps/app/src/runtime/voice-assistant.ts",
+            "name": "interruptSpeech"
+          },
+          {
+            "path": "apps/app/src/runtime/voice-assistant.ts",
+            "name": "resume"
+          },
+          {
+            "path": "apps/app/src/runtime/voice-assistant.ts",
+            "name": "closeCapture"
+          },
+          {
+            "path": "apps/app/src/runtime/voice-assistant.ts",
+            "name": "speechStarted"
+          },
+          {
+            "path": "apps/app/src/runtime/voice-assistant.ts",
+            "name": "segmentResult"
+          },
+          {
+            "path": "apps/app/src/runtime/voice-assistant.ts",
+            "name": "playSentence"
+          },
+          {
+            "path": "apps/app/src/runtime/voice-assistant.ts",
+            "name": "respond"
+          },
+          {
+            "path": "apps/app/src/runtime/voice-assistant.ts",
+            "name": "reportInterrupted"
+          },
+          {
+            "path": "apps/app/src/runtime/voice-assistant.ts",
+            "name": "audible"
+          },
+          {
+            "path": "apps/app/src/runtime/native-live-voice.ts",
+            "name": "createNativeLiveDictation"
+          },
+          {
+            "path": "apps/app/src/runtime/voice-assistant.ts",
+            "name": "heardSplit"
+          },
+          {
+            "path": "apps/app/src/runtime/voice-assistant.ts",
+            "name": "remainingSentences"
+          }
+        ],
+        "abstractions": [
+          "At most three session identities, five turn identities and five utterance identities; a ticket is current or one generation stale.",
+          "Up to two sentences streamed before the reply is confirmed and two sentences of the confirmed reply represent playback, the echo reference and heard-content accounting.",
+          "Errors retire the session; disclosure and exact owner binding are represented as admission predicates.",
+          "`start` is a start whose microphone opened within the step; `beginStart`, `captureOpened` and `captureOpenFailed` expose the opening window. Unmuting reopens through the same window.",
+          "A streamed sentence joins the echo reference when it is queued, an interrupted reply reports what was played whether or not the reply was confirmed, the owner-input pause retires a capture that is still opening, and a resumed reply queues all of its sentences after those streamed before the pause.",
+          "A contradicted stream (queued sentences that are not a prefix of the final reply) and tentative barge-in segments are not modeled."
+        ],
+        "stateMapping": {
+          "phase idle": "AssistantState idle, and error (fail() stops the session first and retires its generation)",
+          "phase starting": "AssistantState starting: start() awaiting open()",
+          "phase awaiting-review / pendingReview": "AssistantState awaiting-user-input and the unresolved `awaiting` latch",
+          "phase dictating / draft": "createNativeLiveDictation recording and its transcript as an editable draft",
+          "capture / opening / closing": "VoiceAssistantSession.capture, opening and the closing promise of a muted capture",
+          "queued / availableSentences / heard / replied": "respond() queued sentences, Response.sentences, Response.played and Response.replyId",
+          "interruptedHeard / reportedHeard": "interrupt() and reportInterrupted() heard text"
+        }
+      },
+      "unset": []
+    },
+    {
+      "module": "NavigationProgress",
+      "set": {
+        "sources": [
+          "apps/app/src/prototype/maps-adapter.ts",
+          "apps/app/src/maps/guidance.ts",
+          "apps/app/src/maps/navigation-fix.ts",
+          "apps/app/src/maps/native-location.ts",
+          "apps/app/src/maps/background-navigation.ts",
+          "apps/app/src/maps/route-distance.ts",
+          "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaNavigationService.java",
+          "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaMapsTransportPlugin.java",
+          "apps/app/src/maps/device-navigation.ts",
+          "apps/app/src/maps/agent-navigation.ts",
+          "apps/app/src/prototype/maps-chat-adapter.ts"
+        ],
+        "abstractions": [
+          "Three maneuvers and two route identities, exact 39/40 meter maneuver, 24/25 meter arrival and 30/31 meter accuracy boundary classes.",
+          "Precise position freshness uses exact 30000ms age and 5000ms future limits; GPS geometry is represented by distance classes.",
+          "Four session values and three reroute request generations. Retry attempts saturate at four, preserving the 10/20/40/60-second delay policy.",
+          "The source currently only sets follow=true at Start/recenter. The model preserves this behavior.",
+          "The chat entry in maps-chat-adapter calls the agent results port with allowDirectStart; the model's start abstracts the caller and that option."
+        ]
+      },
+      "unset": []
+    }
+  ],
+  "readme": [
+    {
+      "family": "application",
+      "module": "DraftDispatch",
+      "sourceSymbols": "`AssistantDraftController.open`, `edit`, `consume`, `restoreSaved`, `keepCurrent`, `retry`",
+      "modeledState": "Read-only open with two retries, delayed restore, queued writes bound to their conversation, conflict review, consume and the undo of a stale consume receipt. `hold`/`release`/`commit` have no production caller and are not modeled"
+    },
+    {
+      "family": "application",
+      "module": "AssistantConversation",
+      "sourceSymbols": "`AlphaClient.run`, `send`, `approve`, `cancel`, `disconnect`, `replaceAssistantDraft`",
+      "modeledState": "One foreground request and one proposal identity that survives a failed or aborted send, expiry, consumption kept across a same-session reload with an explicit agent-journal assumption for other sessions, automatic-workflow survival across ordinary navigation, sensitive-view cancellation, compare-and-exchange composer draft"
+    },
+    {
+      "family": "application",
+      "module": "ComposerSend",
+      "sourceSymbols": "`p.send`, `SendAttempt`, `trackDispatch`, `transportSettled`, `dispatched`",
+      "modeledState": "Two overlapping send attempts, explicit-argument sends, the bounded wait for the transport result, restore versus \"Check for reply\", and typing-indicator ownership across a session change"
+    },
+    {
+      "family": "application",
+      "module": "RecorderStage",
+      "sourceSymbols": "voice-adapter `stage`, `generation`, `busy`, `transcribeClip`; `createNativeLiveDictation`",
+      "modeledState": "Recorder stages closed to review, generation-fenced tasks, the dictation driver recording, failed stop and lost capture, maximum-duration stop"
+    },
+    {
+      "family": "application",
+      "module": "StoppedReplyReconciliation",
+      "sourceSymbols": "`scheduleStoppedReply`, `cancelStoppedReply`, `findStoppedUserTurn`",
+      "modeledState": "One later read per stopped reply, the cancel attempt, busy deferral, the reply notice and the confirmed-stop message"
+    },
+    {
+      "family": "application",
+      "module": "ApprovalRoutes",
+      "sourceSymbols": "`cardAct`, `AlphaClient.approve`, `approvePendingAction`, `recoverPendingActions`",
+      "modeledState": "Client and recovered approval routes for one proposal, consumption kept across a same-session reload, one tap in flight, lost responses, and one execution under the agent-journal assumption"
+    },
+    {
+      "family": "application",
+      "module": "ReadReplyLease",
+      "sourceSymbols": "`retainReadReply`, `completeReadReply`, `cancelReadReplyCompletions`",
+      "modeledState": "One read-reply lease through pending, completing, done, cancelled and unconfirmed; at most one answer and one voice resume"
+    },
+    {
+      "family": "native",
+      "module": "VoiceSession",
+      "sourceSymbols": "`VoiceAssistantSession.start`, `setMuted`, `interruptSpeech`, `resume`, `respond`, `createNativeLiveDictation`",
+      "modeledState": "Session, turn and utterance generations; starting and capture opening; muted capture finalization; playback streamed before the confirmed reply; owner-input pause and resume; barge-in and Stop speaking; heard accounting. `error` is `idle` with a retired generation"
+    },
+    {
+      "family": "native",
+      "module": "SegmentAccounting",
+      "sourceSymbols": "`openNativeResidentCapture` (`drain`, `lose`, `close`), `createLiveSegmentStream`, `segmentResult`",
+      "modeledState": "One result per closed VAD segment, buffered finals, duplicate finals, bounded remembered ids, loss, discard and a rejected graceful close"
+    },
+    {
+      "family": "native",
+      "module": "SpeechCleanupLatch",
+      "sourceSymbols": "`mediaUnconfirmed`, `speechRetirement`, app-speech `retirement`, `appSpeechRetirement`",
+      "modeledState": "Four owned-speech retirement chains: successor waits for cleanup, unconfirmed cleanup closes the chain until restart, one shared refusal message"
+    },
+    {
+      "family": "native",
+      "module": "RendererSpeechChunk",
+      "sourceSymbols": "`speakChunk`, `dispose`, `playOwnedSpeech`",
+      "modeledState": "Listeners, prepare and play with busy retry, terminal events, abort, late preparation, strict versus bounded cleanup and one terminal outcome"
+    },
+    {
+      "family": "native",
+      "module": "NativeStreamBridge",
+      "sourceSymbols": "`streamNativeAgent`",
+      "modeledState": "Listener, request, response, chunks, completion, abort and cleanup of one native reply stream; provable not-dispatched refusals"
+    },
+    {
+      "family": "native",
+      "module": "HeardReporter",
+      "sourceSymbols": "`createHeardReporter`",
+      "modeledState": "One heard report per interrupted reply, one retry of a transient failure, stale binding"
+    }
+  ]
+}

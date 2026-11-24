@@ -20,7 +20,7 @@ type StreamModules = [
  typeof import('../apps/app/src/runtime/local-agent-native-stream.ts'),
 ];
 type ReadyListener = NonNullable<Parameters<VerifiedSessionTransport['send']>[0]['onReplyReady']>;
-const [{createLocalAgentDevHandler},{readLocalAgentStream,localTurnStatus},{AlphaClient},{LocalAgentProtocol},{RemoteProtocol},{streamNativeAgent}]: StreamModules = await loadBrowserModule(['scripts/local-agent-dev-bridge.ts', 'apps/app/src/runtime/local-agent-stream.ts', 'apps/app/src/runtime/alpha-client.ts', 'apps/app/src/runtime/local-agent.ts', 'apps/app/src/runtime/remote-protocol.ts', 'apps/app/src/runtime/local-agent-native-stream.ts'],{testMocks:true});
+const [{createLocalAgentDevHandler},{readLocalAgentStream,localTurnStatus,batchVoiceProgressEvents},{AlphaClient},{LocalAgentProtocol},{RemoteProtocol},{streamNativeAgent}]: StreamModules = await loadBrowserModule(['scripts/local-agent-dev-bridge.ts', 'apps/app/src/runtime/local-agent-stream.ts', 'apps/app/src/runtime/alpha-client.ts', 'apps/app/src/runtime/local-agent.ts', 'apps/app/src/runtime/remote-protocol.ts', 'apps/app/src/runtime/local-agent-native-stream.ts'],{testMocks:true});
 const encoder=new TextEncoder(),signal=new AbortController().signal;
 const event=(value:unknown)=>`data: ${JSON.stringify(value)}\n\n`;
 function response(text:string,size=1){const bytes=encoder.encode(text);return new Response(new ReadableStream({start(c){for(let i=0;i<bytes.length;i+=size)c.enqueue(bytes.slice(i,i+size));c.close();}}),{headers:{'content-type':'text/event-stream'}});}
@@ -32,6 +32,47 @@ const labels:unknown[]=[],onLabel=(event:Event)=>{if('detail' in event)labels.pu
 const labelled=await readLocalAgentStream(response(event({type:'status',kind:'thinking'})+event({type:'status',kind:'thinking',label:"  checking today's calendar  "})+event({type:'status',kind:'thinking',label:'x'.repeat(161)})+event({type:'token',text:'Done.'})+event({type:'done',fullText:'Done.',agentName:'Fixture'})),signal,()=>{});
 localTurnStatus.removeEventListener('label',onLabel);
 assert.deepEqual(labels,["checking today's calendar"]);assert.equal(labelled.text,'Done.');assert.equal(terminal.text,'Final');assert.equal(terminal.proposals,undefined);
+const candidateLabels:unknown[]=[],candidateProgress:unknown[]=[];
+const recordLabel=(entry:Event)=>{if('detail' in entry)candidateLabels.push(entry.detail);};
+const recordProgress=(entry:Event)=>{if('detail' in entry)candidateProgress.push(entry.detail);};
+localTurnStatus.addEventListener('label',recordLabel);
+batchVoiceProgressEvents.addEventListener('progress',recordProgress);
+try {
+ const conversationId='00000000-0000-4000-8000-000000000001',turnId='00000000-0000-4000-8000-000000000002';
+ const candidate=await readLocalAgentStream(response([
+  {type:'acknowledgment',text:'x'.repeat(121)},
+  {type:'acknowledgment',text:' Let me check. ',actionResults:[{action:'UNTRUSTED'}]},
+  {type:'acknowledgment',text:'Duplicate cue.'},
+  {type:'status',activity:'thinking'},
+  {type:'status',activity:'arbitrary model text'},
+  {type:'tool',name:'CALENDAR',actionResults:[{action:'UNTRUSTED'}]},
+  {type:'tool',name:'untrusted tool text'},
+  {type:'done',fullText:'Calendar is open.',agentName:'Fixture',actionResults:[]},
+ ].map(event).join('')),signal,()=>{throw Error('Progress must not render as reply text');},undefined,{
+  path:`/api/conversations/${conversationId}/messages/stream`,ownerId:'owner',body:JSON.stringify({channelType:'VOICE_DM',clientMessageId:turnId}),
+ });
+ assert.deepEqual(candidateLabels,['Let me check.','Thinking…','Working…']);
+ assert.deepEqual(candidateProgress,[
+  {conversationId,turnId,ownerId:'owner',kind:'thinking',label:'Let me check.'},
+  {conversationId,turnId,ownerId:'owner',kind:'running_tool',toolName:'CALENDAR'},
+ ]);
+ assert.equal(candidate.text,'Calendar is open.');
+ assert.deepEqual(candidate.actionResults,[]);
+ const received:string[]=[];
+ const late=await readLocalAgentStream(response([
+  {type:'token',text:'Reply began.'},
+  {type:'acknowledgment',text:'Late cue.'},
+  {type:'done',fullText:'Reply began.',agentName:'Fixture'},
+ ].map(event).join('')),signal,text=>received.push(text),undefined,{
+  path:`/api/conversations/${conversationId}/messages/stream`,ownerId:'owner',body:JSON.stringify({channelType:'VOICE_DM',clientMessageId:turnId}),
+ });
+ assert.deepEqual(received,['Reply began.']);
+ assert.equal(late.text,'Reply began.');
+ assert.deepEqual(candidateLabels,['Let me check.','Thinking…','Working…']);
+} finally {
+ localTurnStatus.removeEventListener('label',recordLabel);
+ batchVoiceProgressEvents.removeEventListener('progress',recordProgress);
+}
 // A settled semantic refusal carries its diagnostic without a second display,
 // early navigation, a thrown transport error, or an invented retry.
 const calendarFailure={kind:'reply_generation_error',code:'CALENDAR_READ_RECEIPT_MISMATCH',transient:false,message:"I couldn't confirm that Calendar request."};
@@ -198,6 +239,26 @@ const navigationClient=new AlphaClient();let automaticEffects=0;
 navigationClient.attachVerifiedTransport({session:{ownerId:'owner',agentId:'agent',sessionId:'navigation-session',origin:'https://agent.example'},send:async()=>({text:navWire.text,actionResults:navWire.actionResults}),execute:async()=>{automaticEffects++;throw Error('Navigation must not auto-approve device actions');}});
 const navigationReply=await navigationClient.send('Open Notes');assert.deepEqual(navigationReply.actionResults,[handoff]);assert.equal(automaticEffects,0);
 console.log('PASS terminal navigation metadata survives the existing stream/client boundary without executing device approvals.');
+
+const candidateBinding={requestId:'00000000-0000-4000-8000-000000000011',clientId:'owned-client',viewId:'notes',viewType:'gui',installationId:'owned-installation'};
+const candidateNavigation={action:'VIEWS',data:{actionName:'VIEWS'},preparedNavigation:{binding:candidateBinding,viewPath:'/notes',label:'Notes'}};
+const candidateCaptured:(readonly unknown[] | undefined)[]=[];
+const candidateViewReply=await readLocalAgentStream(response(
+ event({type:'tool',name:'VIEWS',actionResults:[candidateNavigation]})+event({type:'done',fullText:'Notes is ready.',agentName:'Fixture',actionResults:[candidateNavigation]})
+),signal,()=>{throw Error('Tool payload must stay outside reply text');},items=>candidateCaptured.push(items));
+assert.deepEqual(candidateCaptured,[]);
+assert.partialDeepStrictEqual(candidateViewReply.actionResults,[{actionName:'VIEWS',success:true,values:{
+ mode:'show',viewId:'notes',viewPath:'/notes',completedActionDelivered:false,completedActionHandoffId:candidateBinding.requestId,
+ navigationPrepared:true,navigationBinding:candidateBinding,
+}}]);
+for(const invalid of [
+ {...candidateNavigation,action:'CALENDAR'},
+ {...candidateNavigation,preparedNavigation:{...candidateNavigation.preparedNavigation,viewPath:'//foreign.example'}},
+ {...candidateNavigation,preparedNavigation:{...candidateNavigation.preparedNavigation,completedActionDelivered:true}},
+]){
+ const refused=await readLocalAgentStream(response(event({type:'done',fullText:'Refused binding.',agentName:'Fixture',actionResults:[{...handoff,...invalid}]})),signal,()=>{});
+ assert.deepEqual(refused.actionResults,[{action:invalid.action,data:invalid.data}]);
+}
 
 // reply_ready finalizes generation metadata, not persistence or navigation.
 const prepared={actionName:'VIEWS_SHOW',success:true,values:{mode:'show',viewId:'notes',viewPath:'/notes',viewType:'gui',label:'Notes',completedActionDelivered:false,completedActionHandoffId:'ready-handoff',navigationPrepared:true,navigationBinding:{requestId:'ready-handoff',clientId:'owned-client',viewId:'notes',viewType:'gui',installationId:'owned-installation'}}};

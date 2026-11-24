@@ -1,0 +1,538 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vibestack recovery report</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@600&family=Inter:wght@400;600&display=swap">
+<style>
+/* VOICE: calm incident report, conclusion first.
+   IDEA: a newspaper leader page about a repository mix-up.
+   PICTURE: a two-line branch diagram: develop, the in-place branch, the template rebuild.
+   COLOUR and TYPE: white and ink, red accent, slate panels; Source Serif 4 heads, Inter body.
+   LAYOUT: one readable column, tables full width in scrollers, section links sticky on wide screens. */
+:root{color-scheme:light dark;--bg:light-dark(#ffffff,#10191e);--ink:light-dark(#121212,#e9eef1);--mute:light-dark(#4a5560,#9fb0ba);--red:#e3120b;--panel:light-dark(#e3ecf0,#18262e);--rule:light-dark(#d5dde2,#2b3b44);--slate:light-dark(#2e6f8e,#7fb6d1)}
+:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;background:var(--bg);color:var(--ink);font:16.5px/1.6 Inter,system-ui,sans-serif;overflow-x:clip}
+header,figure,main{max-width:1240px;margin-inline:auto;padding-inline:max(5vw,16px)}
+header{padding-top:clamp(28px,4vw,56px)}
+.tab{display:inline-block;background:var(--red);color:#fff;font-weight:600;font-size:13px;padding:3px 10px;margin-bottom:14px}
+h1{font:600 clamp(30px,4.4vw,48px)/1.06 'Source Serif 4',Georgia,serif;margin:0 0 10px;text-wrap:balance}
+.dek{color:var(--mute);max-width:70ch;margin:0}
+nav.scroll{display:flex;gap:18px;padding:12px max(5vw,16px);border-block:1px solid var(--rule);max-width:1240px;margin:18px auto 0;white-space:nowrap;background:var(--bg)}
+nav a{color:var(--slate);text-decoration:none;font-size:14px;padding:10px 0}nav a:hover,nav a:focus-visible{text-decoration:underline}
+@media(min-width:900px){nav.scroll{position:sticky;top:0;z-index:2}}
+figure{margin-top:22px;margin-bottom:0}
+.fig{position:relative;min-height:240px;background:var(--panel)}.fig>svg{position:absolute;inset:0;width:100%;height:100%}
+figcaption{color:var(--mute);font-size:14px;margin-top:6px}
+main{padding-bottom:64px}
+main>*{max-width:78ch}main>.scroll{max-width:none}
+h2{font:600 clamp(22px,2.6vw,30px)/1.15 'Source Serif 4',Georgia,serif;margin:44px 0 10px;padding-top:12px;border-top:2px solid var(--ink);text-wrap:balance}
+h3{font-size:18px;margin:28px 0 8px}
+li{margin:4px 0}code{font-size:.88em;background:var(--panel);padding:1px 4px;overflow-wrap:anywhere}
+strong{font-weight:600}a{color:var(--slate)}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:14.5px;margin:12px 0}
+th,td{border-bottom:1px solid var(--rule);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:var(--panel);font-weight:600}
+html{scroll-padding-top:72px}
+@media(max-width:600px){table{font-size:13px}}
+</style></head><body>
+<header><div class="tab">Forensics and recovery</div>
+<h1>Alpha's vibestack branch was never the template. The real rebuild sat beside it, unseen.</h1>
+<p class="dek">How the Alpha and eliza Vibestack lines got mixed up, what is preserved and what is at risk, what still has to be migrated, and the plan and decisions to make the template line canonical. Written 2026-11-24 from read-only investigation.</p></header>
+<nav class="scroll" aria-label="Sections"><a href="#s1">Bottom line</a><a href="#s2">What "Vibestack" means, precisely</a><a href="#s3">State of every line now</a><a href="#s4">How it happened</a><a href="#s5">Is anything lost, and what is at risk</a><a href="#s6">What still has to reach the canonical line</a><a href="#s7">Recovery plan</a><a href="#s8">Decisions for the owner</a><a href="#s9">Keeping this from happening again</a><a href="#s10">key evidence</a></nav>
+<figure><div class="fig"><svg id="g" role="img" aria-label="Branch diagram: alpha develop, the in-place vibestack branch cut from it on 11-22, and the template rebuild branched on 11-17"></svg></div>
+<figcaption>Two lines called Vibestack in eliza-research/alpha. Dates are 2026-11, UTC.</figcaption></figure>
+<main><p>2026-11-24. This report was written from read-only investigation: GitHub ref activity logs, <code>git ls-remote</code> on both repositories, every local object store on this laptop, the transcripts of the Claude and Codex sessions involved, lalalune/vibestack and gracefultechnology/grace. Seven investigator agents gathered the facts and a final agent spot-checked 13 of their claims; all 13 held. It builds on the earlier report from the &quot;Vibestack migration codebase&quot; session (<code>vibestack-forensics-2026-11-24.md</code>) and corrects or extends it where noted.</p>
+<p>Nothing on a remote was changed while investigating. The only remote writes from this session were pushes of its own local-only branches (listed in section 5).</p>
+<h2 id="s1">1. Bottom line</h2>
+<ul>
+<li><strong>Eliza is not broken.</strong> <code>elizaOS/eliza</code> promoted its Vibestack line on purpose on 2026-11-24, 05:07 to 05:17 UTC. <code>develop</code>, <code>main</code> and <code>staging</code> are now the Vibestack repository, and the old lines live on as <code>develop-v3</code>, <code>main-v3</code> and <code>staging-v3</code>. The branch named <code>vibestack</code> was deleted as part of that.</li>
+<li><strong>Alpha's <code>vibestack</code> branch was never a Vibestack repository.</strong> It was created on 2026-11-22 from alpha <code>develop</code> by the in-place migration session, which found no <code>vibestack</code> branch and made one. Everything since (#1451, the area merges, about 25 more PRs, my repin and the register fixes) built a Vibestack-<em>style</em> app inside the legacy repository layout.</li>
+<li><strong>The real Alpha Vibestack line is <code>vibestack-template-rebuild</code>.</strong> It is lalalune's 50-commit rebuild on the lalalune/vibestack template (2026-11-17 to 11-23). It lived only in a local worktree for a week, so no session saw it. When it was finally pushed as draft PR #1470, the PR was closed and its branch deleted within hours. NubsCarson restored the branch this morning.</li>
+<li><strong>The template itself moved on 2026-11-23.</strong> lalalune/vibestack 8f8521e restructured the repository into packages (<code>packages/vibestack</code>, <code>studio</code>, <code>create-vibestack</code>) with an <code>init</code>/<code>upgrade</code> manifest flow. Every downstream line is still on the old &quot;the repository is the template&quot; shape: grace, eliza <code>develop</code>, the template rebuild and the template port. The new flow cannot be installed yet: the <code>vibestack</code> npm name belongs to an unrelated package.</li>
+<li><strong>Nothing that was on a remote is lost, but a lot is now at risk.</strong> Both GitHub repositories were pruned hard on 11-24, and that deleted the <code>wip/*</code> backup branches. Hundreds of local-only branches and dozens of dirty worktrees hold work that is on no remote, the biggest being Codex's 114-commit eliza port.</li>
+<li><strong>The way forward</strong> is the plan the template-migration session is already running: port everything onto <code>vibestack-template-rebuild</code>, with alpha <code>vibestack</code> as the frozen behaviour reference. It needs a few decisions from you first (section 8). It also needs a firmer source list than it has today (section 6), and a guard so this does not happen again (section 9).</li>
+</ul>
+<h2 id="s2">2. What &quot;Vibestack&quot; means, precisely</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th></th>
+<th>Old shape (what everyone uses today)</th>
+<th>New shape (lalalune/vibestack main 3d0c81a, since 8f8521e)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tool</td>
+<td>vendored at <code>vibestack/</code> in the product repo, kept current by &quot;Sync vibestack to &lt;sha&gt;&quot; copy commits</td>
+<td>the <code>vibestack</code> package (catalog <code>^0.2.0</code>), with <code>vibestack init</code> / <code>vibestack upgrade</code></td>
+</tr>
+<tr>
+<td>Procedure files</td>
+<td><code>SPEC.md</code>, <code>AGENTS.md</code>, <code>.agents/skills</code> copied in</td>
+<td>managed by a hash manifest <code>.agents/.vibestack-manifest.json</code>; template text in <code>AGENTS.md</code> between <code>&lt;!-- vibestack:start/end --&gt;</code> markers</td>
+</tr>
+<tr>
+<td>Specs</td>
+<td>one root <code>spec/</code> with one ledger <code>spec/lock.json</code>; <code>spec/&lt;name&gt;</code> owned by <code>apps/&lt;name&gt;</code> or <code>packages/&lt;name&gt;</code></td>
+<td>the same</td>
+</tr>
+<tr>
+<td>Product code</td>
+<td><code>apps/app</code> (React + VibeLang), <code>packages/ui</code> and <code>packages/design-system</code></td>
+<td>the same, from <code>template/</code></td>
+</tr>
+<tr>
+<td>Eliza</td>
+<td>not prescribed. Grace uses a <code>vendor/eliza</code> submodule with <code>link:</code> dependencies</td>
+<td>not prescribed</td>
+</tr>
+<tr>
+<td>Rules</td>
+<td>pnpm only, Node 26, no Bun, no new Markdown documents, never hand-edit <code>gen/</code> or <code>spec/lock.json</code></td>
+<td>the same</td>
+</tr>
+</tbody>
+</table></div>
+<p>Where each line stands against those conventions:</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Line</th>
+<th>One root <code>spec/</code> + ledger</th>
+<th>Template procedure files</th>
+<th><code>packages/ui</code> + design system</th>
+<th>Tool pin</th>
+<th>Eliza pin</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>grace <code>develop</code></td>
+<td>yes</td>
+<td>yes (identical)</td>
+<td>yes</td>
+<td>copy commits (33cf987d)</td>
+<td>submodule on the deleted eliza <code>vibestack</code> branch</td>
+</tr>
+<tr>
+<td>eliza <code>develop</code></td>
+<td>yes (~90 areas)</td>
+<td>yes (edited)</td>
+<td>n/a (library)</td>
+<td>prose only: b7f1827, 34 behind main</td>
+<td>itself</td>
+</tr>
+<tr>
+<td>alpha <code>vibestack-template-rebuild</code></td>
+<td>yes (<code>spec/kit</code> + <code>spec/app</code>)</td>
+<td>yes (e4e2ab3)</td>
+<td>yes</td>
+<td>frozen import e4e2ab3, 413 behind main</td>
+<td><code>eliza.lock.json</code> + <code>@repo/eliza-harness</code> (branch <code>vibestack</code> 2ac22b44, a deleted branch)</td>
+</tr>
+<tr>
+<td>alpha <code>claude/template-port</code></td>
+<td>yes</td>
+<td>yes</td>
+<td>yes</td>
+<td>e4e2ab3; lane T is refreshing it (uncommitted)</td>
+<td><code>eliza.lock.json</code> → eliza <code>develop</code> e11409812b</td>
+</tr>
+<tr>
+<td>alpha <code>vibestack</code> (in-place)</td>
+<td>no (<code>apps/app/spec</code>, no ledger, nothing ever accepted)</td>
+<td>no</td>
+<td>no (<code>apps/app/src/web/components/ui</code>)</td>
+<td>borrows eliza's tool through the submodule (747bf8d)</td>
+<td><code>vendor/eliza</code> submodule + <code>upstream.lock.json</code> → eliza <code>develop</code> e11409812b</td>
+</tr>
+</tbody>
+</table></div>
+<p>Alpha <code>vibestack</code> is not template-shaped. It keeps develop's <code>specs/</code> (931 legacy Quint files), <code>test/</code> (1,717 files on <code>node:test</code>), <code>scripts/</code>, <code>docs/</code> and <code>android/</code> at the root.</p>
+<h2 id="s3">3. State of every line now</h2>
+<h3>elizaOS/eliza</h3>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Ref</th>
+<th>Head</th>
+<th>What it is</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>develop</code> (default)</td>
+<td>e11409812b, then a few merges (68468c1f0f by the last check)</td>
+<td>The Vibestack line. Contains the Alpha cutover #40258, the develop deltas #40357 (#40060 to #40299) and #40395 (#40300 onward), #40440 (#40420 port), and #40441 (tool synced to b7f1827).</td>
+</tr>
+<tr>
+<td><code>main</code></td>
+<td>586e0508d2</td>
+<td>Same Vibestack root; tool synced to lalalune/vibestack b7f1827.</td>
+</tr>
+<tr>
+<td><code>staging</code></td>
+<td>93b07caec6</td>
+<td>The last <code>vibestack</code> head before the promotion.</td>
+</tr>
+<tr>
+<td><code>develop-v3</code></td>
+<td>184150ae5d</td>
+<td>The old develop, exactly. No merges since the rename.</td>
+</tr>
+<tr>
+<td><code>main-v3</code>, <code>staging-v3</code></td>
+<td>0bc3753de4e / c2abfe8f94d</td>
+<td>The old main and staging. <strong>Still taking merges</strong> (NubsCarson's Talk/Cloud release PRs #40430 to #40443).</td>
+</tr>
+<tr>
+<td><code>vibestack</code></td>
+<td>(deleted)</td>
+<td>Deleted 2026-11-24 05:17:26 UTC.</td>
+</tr>
+<tr>
+<td><code>barrel-unentangle</code></td>
+<td>ee7f5abba97</td>
+<td><strong>Not tracked by anyone.</strong> 4 commits not on <code>develop</code>, including a7e51cae1e1 &quot;Enforce single-barrel workspace exports and split browser/host packages&quot; (862 files). No PR.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Promotion sequence (all lalalune, UTC): 05:00 #40420 merged into old develop; 05:05 #40427 merged into <code>vibestack</code> (93b07caec68); 05:07 <code>develop-v3</code>, <code>main-v3</code> and <code>staging-v3</code> created; 05:10 <code>develop</code>, <code>main</code> and <code>staging</code> force-pushed to 93b07caec68; 05:17 <code>vibestack</code> deleted. Earlier, 02:28 to 02:43, 15 open <code>vibestack</code> PRs were closed with written reasons (&quot;v4 branch cleanup&quot;). The earlier report triaged them and found them landed, superseded or deliberately deferred: #40370 Inbox Reply-To, #40358 context budget and #40242 device mail lease are deferred.</p>
+<h3>eliza-research/alpha</h3>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Ref</th>
+<th>Head</th>
+<th>What it is</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vibestack-template-rebuild</code></td>
+<td>8eb7ea73a7</td>
+<td><strong>The template line.</strong> 50 commits (46 non-merge) by lalalune, 2026-11-17 to 23, on develop 26e827f064 (#1315). Old tree under <code>legacy/</code>. Specs for shell, home, startup, assistant/ask, inbox, notes, settings, account (+ <code>spec/kit</code>, 27 Dafny proofs). Code only for shell, Ask Alpha, platform and runtime (~1.9k lines); Ask Alpha runs end to end against a real eliza agent and cloud. Still pins eliza's deleted <code>vibestack</code> branch (2ac22b44).</td>
+</tr>
+<tr>
+<td><code>claude/template-port</code></td>
+<td>3248c922d6</td>
+<td>The template-migration session's integration branch: the rebuild plus <code>legacy/</code> refreshed to develop 264ca621e, eliza repinned to <code>develop</code> e11409812b, and a harness test fix. Pushed.</td>
+</tr>
+<tr>
+<td><code>vibestack</code></td>
+<td>164dbbe073</td>
+<td>The in-place port. 317 commits beyond develop; 16 areas with 251 spec files, 443 VibeLang files, ~27k lines of React, 87 test files (~680 cases); Android, Cloud, scripts, site, 11 CI workflows. Its own audit registers list 113 open rows and 47 blockers. It does not yet typecheck, test or build an APK.</td>
+</tr>
+<tr>
+<td><code>barrel-unentangle</code></td>
+<td>7cda031dd4</td>
+<td><strong>Not tracked by anyone.</strong> 3 lalalune commits on vibestack 14f5a614fab (231 files, +6,599/−647): &quot;Port develop parity fixes, carrier setup, CI/preflight, and runtime blockers to vibestack&quot; and &quot;Enforce single-barrel workspace exports&quot;. Pins eliza <code>barrel-unentangle</code>. No PR.</td>
+</tr>
+<tr>
+<td><code>develop</code></td>
+<td>264ca621e7</td>
+<td>The legacy app (Bun). Its pin 17116b70e6 exists only on eliza <code>develop-v3</code>.</td>
+</tr>
+<tr>
+<td><code>main</code></td>
+<td>a0d453068d</td>
+<td>develop + the v121 signing pin (#1484).</td>
+</tr>
+<tr>
+<td><code>codex/alpha-legacy-final-20261124</code> (#1499)</td>
+<td>27357f35d2</td>
+<td>13 legacy fixes not yet on develop.</td>
+</tr>
+<tr>
+<td>Open drafts on <code>vibestack</code></td>
+<td>#1497 (4047b29a8, 94 commits, still moving), #1498 (31), #1477 (38), #1479, #1483, #1501</td>
+<td>Codex and NubsCarson parity work that is on neither line.</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="s4">4. How it happened</h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>When (UTC)</th>
+<th>What</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>11-13</td>
+<td>eliza's orphan <code>vibestack</code> branch is seeded from the lalalune/vibestack template (root 8643eb34d62).</td>
+</tr>
+<tr>
+<td>11-17 to 11-23</td>
+<td>lalalune builds the Alpha template rebuild in a <strong>local worktree</strong> (50 commits, UTC−5 clock). It is pushed nowhere.</td>
+</tr>
+<tr>
+<td>11-22 18:16</td>
+<td>The owner asks the code-only migration session for &quot;PRs to the vibestack branches&quot;. It finds no alpha <code>vibestack</code> branch (&quot;so the PR base has to be created from develop&quot;) and never compares against the template layout or looks for local template work.</td>
+</tr>
+<tr>
+<td>11-22 22:29</td>
+<td>That session creates alpha <code>vibestack</code> from develop 06c2098d651 (#1418) and starts the in-place port (#1451). <strong>This is the decision that put the wrong shape on the branch named vibestack.</strong></td>
+</tr>
+<tr>
+<td>11-23</td>
+<td>My cutover session repins #1451, launches the per-area workflows and merges the area branches. The validation, Browser, Chat-view, migration, Codex and NubsCarson actors land about 25 PRs onto alpha <code>vibestack</code>.</td>
+</tr>
+<tr>
+<td>11-23 17:33</td>
+<td>eliza #40258 (the Alpha cutover branch <code>vibestack-dp</code>) merges into eliza <code>vibestack</code>.</td>
+</tr>
+<tr>
+<td>11-23 18:51</td>
+<td>The template rebuild is first pushed, as <code>vibestack-template-rebuild</code>, with draft #1470 → <code>vibestack</code> (&quot;conflicts with vibestack throughout&quot;). The local sessions do not merge it.</td>
+</tr>
+<tr>
+<td>11-23 22:27 / 23:54</td>
+<td>#1470 is closed, then its branch deleted, both by the lalalune account. No comment, no app attribution, and <strong>no Claude or Codex transcript or shell history on this laptop contains either command.</strong> Inference: the same off-laptop lalalune environment that wrote the template commits, merged #40258 and later promoted eliza.</td>
+</tr>
+<tr>
+<td>11-24 02:28 to 05:17</td>
+<td>eliza &quot;v4 branch cleanup&quot;: 15 <code>vibestack</code> PRs closed with reasons, then the promotion (section 3). Remote branches pruned on both repos; the <code>wip/*</code> backups go with them.</td>
+</tr>
+<tr>
+<td>11-24 07:15</td>
+<td>NubsCarson restores <code>vibestack-template-rebuild</code>. The owner gives the &quot;Vibestack template migration&quot; session the goal to port everything onto it.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Root causes:</p>
+<ol>
+<li><strong>Two efforts shared one name, and only one was visible.</strong> The template rebuild was local for a week, so &quot;alpha has no vibestack branch&quot; was true for every other session.</li>
+<li><strong>No one checked the target shape.</strong> The migration briefs built inside <code>apps/app</code> of the develop tree and borrowed the tool from eliza. They never compared that against lalalune/vibestack or grace.</li>
+<li><strong>Momentum made the wrong shape canonical.</strong> Dozens of actors merged onto that branch within 36 hours.</li>
+<li><strong>The name changed meaning overnight.</strong> Eliza's <code>vibestack</code> <em>was</em> template-shaped. After its promotion, the only branch left called <code>vibestack</code> was alpha's develop-shaped one.</li>
+<li><strong>Several writers on the same branches with no freeze.</strong> Codex, NubsCarson, lalalune's direct pushes and several Claude sessions changed alpha <code>vibestack</code> and <code>develop</code> concurrently. Any snapshot drifted within hours.</li>
+<li><strong>Cleanups that do not check reachability.</strong> The remote prunes and the #1470 close removed work-in-progress branches without a backup ref.</li>
+</ol>
+<h2 id="s5">5. Is anything lost, and what is at risk</h2>
+<p><strong>Preserved on remotes:</strong></p>
+<ul>
+<li>Eliza: old develop is <code>develop-v3</code> (exactly 184150ae); old main and staging are <code>main-v3</code> and <code>staging-v3</code>.</li>
+<li>Alpha: <code>vibestack</code>, <code>vibestack-template-rebuild</code>, <code>claude/template-port</code> (plus <code>backup/template-port-774620abec1</code>), <code>develop</code> and <code>main</code> all exist.</li>
+<li>The template rebuild exists only as that remote branch. lalalune's original worktree is not on this laptop, and no other variant of that line exists anywhere locally.</li>
+</ul>
+<p><strong>Pushed by this session today, to stop them existing only here:</strong> the alpha blocker branches <code>vibecut-r2-cloud-routes</code> (Cloud route table, A2-001/002), <code>vibecut-r2-db-adoption</code> (A2-003), <code>vibecut-r2-agent-launch</code> and <code>vibecut-r2-runtime-packaging</code>; the eliza branches <code>vibestack-res-lint</code>, <code>-res-proof-headers</code>, <code>-res-proof-agent</code>, <code>vibestack-reg-blockers-os-cloud</code>, <code>-agent-core</code>, <code>-calendar-inbox</code> and <code>vibestack-gmail-broker</code>. Uncommitted edits went to <code>wip/&lt;branch&gt;</code> snapshots. <strong>Caution:</strong> the same pruning could delete these again.</p>
+<p><strong>At risk, local only</strong> (563 checkouts on this laptop; 256 tips from the Vibestack period hold commits on no remote branch, and 188 of those exist nowhere on GitHub):</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>What</th>
+<th>Where</th>
+<th>Size</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Codex's eliza Alpha-Vibestack port lines</td>
+<td><code>~/Work/eliza/.git</code>: <code>codex/alphaphone-vibestack-reconcile-93b</code> (28997af66d9) and about 14 sibling branches and detached worktrees</td>
+<td>50 to 115 commits each; the main tip changes 174 files (+7,716/−1,103), 172 untouched on develop</td>
+<td>Planning, <strong>legacy conversation/history adoption</strong>, <strong>Android resident binding and launch</strong>, scheduler drain, Calendar routing, Maps cards, Cloud speech rollover, Files adoption, camera receipts. <strong>The largest single risk.</strong></td>
+</tr>
+<tr>
+<td>Other Codex parity branches</td>
+<td><code>~/Work/eliza-parity-*</code>, <code>~/Work/alpha-parity-*</code></td>
+<td>about 60 branches, 1 to 41 commits</td>
+<td>Including <code>codex/alpha-parity-cutover</code> (41) and <code>codex/alpha-agent-parity-integration</code> (21).</td>
+</tr>
+<tr>
+<td>Old wave branches</td>
+<td>eliza <code>vibestack-w2-*</code>, <code>-w3-*</code>, <code>-dp-wp*</code>, <code>-parity-*</code>, <code>-int-*</code></td>
+<td>37 to 128 commits each</td>
+<td>On GitHub only as unreferenced objects. They probably landed by squash through #40258, but that is unverified.</td>
+</tr>
+<tr>
+<td>Deleted <code>wip/*</code> snapshots</td>
+<td><code>~/.cache/vibeaudit/alpha.git</code> and <code>~/Work/eliza/.git</code> tracking refs</td>
+<td>14 commits</td>
+<td>Only stale tracking refs remain. A <code>git fetch --prune</code> would drop them.</td>
+</tr>
+<tr>
+<td>ctx-budget work</td>
+<td><code>~/.cache/alphaphone-ctx-budget/vs</code> (<code>claude/vs-cb-*</code>, <code>vs-context-budget-recon</code>)</td>
+<td>2 to 15 commits</td>
+<td>#40358 was closed with 23 conflicts.</td>
+</tr>
+<tr>
+<td>Uncommitted worktrees</td>
+<td><code>~/.cache/vibecut/alpha-area-*</code> (69 to 84 files each), <code>alpha-drift-*</code>, <code>alpha-reg-blockers-calendar-inbox</code> (with a new <code>sign-in-phone.ts</code>), the template lanes L1 to L11 and T (10 to 95 dirty files each)</td>
+<td></td>
+<td>The template lanes have <strong>no commits</strong>, only uncommitted agent edits. One crash loses them.</td>
+</tr>
+<tr>
+<td>Stashes</td>
+<td>23 alpha, 14 eliza, 16 vendor/eliza</td>
+<td></td>
+<td>None on a remote.</td>
+</tr>
+</tbody>
+</table></div>
+<p>All of this is also in git bundles in <code>~/.cache/vibestack-forensics-backup-2026-11-24/</code> (21 MB), which the migration session made. Those bundles are local too.</p>
+<h2 id="s6">6. What still has to reach the canonical line</h2>
+<h3>From alpha</h3>
+<ol>
+<li>
+<p><strong>Alpha <code>vibestack</code> (the in-place port), as behaviour reference and parts.</strong> It covers all 16 areas, where the rebuild covers 7. Roughly 25 to 35% carries over mechanically:</p>
+<ul>
+<li>spec Markdown for the 10 areas the rebuild lacks (files, calendar, clock, workflows, camera, maps, browser, telephony, voice, plus platform);</li>
+<li>the Android, Cloud, scripts and site trees;</li>
+<li>about 142 pure helper modules;</li>
+<li>42 presentational <code>*View.tsx</code> components with stories.</li>
+</ul>
+<p>The remaining 65 to 75% must be rewritten onto the rebuild's architecture:</p>
+<ul>
+<li>the service layer (~40k lines of Effect Layers, streams and PortCells) onto the rebuild's reactor, places and Platform services;</li>
+<li>every test, as journeys over <code>test/fakes</code>;</li>
+<li>kit conformance in the specs.</li>
+</ul>
+</li>
+<li>
+<p><strong>Alpha <code>develop</code> since 26e827f</strong> that is on neither line: 232 non-merge commits, from #1460, #1463, #1464, #1465, #1471, #1474, #1485, the v118 demo checkpoint 380bf0b0f (133 commits), the v91 to v119 signing pins and single pushes. About 93 of them are behaviour. Examples:</p>
+<ul>
+<li>the SMS review card with spoken &quot;Send this text&quot;;</li>
+<li>Gmail draft review in chat;</li>
+<li>Ask Alpha questions as attachments;</li>
+<li>Talk leases;</li>
+<li>agent voice notes;</li>
+<li>Notes multi-select delete;</li>
+<li>Camera zoom and light while recording;</li>
+<li>Workflows WF-21 pause;</li>
+<li>the HTTPS-timeout browser fallback;</li>
+<li>ViewRequestDiagnostic.</li>
+</ul>
+<p>Alpha <code>vibestack</code>'s own drift tracking stops at f29c9cdc3 and never mentions #1471, 380bf0b0f or #1485.</p>
+</li>
+<li>
+<p><strong>Alpha <code>main</code>'s v121 signing record</strong> (152047eb685: versionCode 121, alphaCommit 6ed84c28961, sdkCommit 57588dc08a8). Every other line, including the template port's <code>legacy/</code>, is at v119.</p>
+</li>
+<li>
+<p><strong>#1499</strong> (13 legacy fixes), <strong>#1497/#1498/#1501</strong> (open parity drafts, still moving), and <strong><code>barrel-unentangle</code></strong> (3 commits, owner to say what it is for).</p>
+</li>
+<li>
+<p><strong>The blocker fixes pushed above:</strong> Cloud route table, DB adoption, agent launch, runtime packaging. Their content applies to whichever line ships, but they are written against the in-place layout.</p>
+</li>
+</ol>
+<h3>From eliza</h3>
+<ol>
+<li><strong>The direct push 3ef2897d983</strong> (&quot;Merge codex/alpha-current-checkpoint-20261123 into develop&quot;) on the old develop: 30 NubsCarson commits. 3 are ported, Talk recovery is open as #40428, and about 23 have no port: Calendar slot fast paths, SMS recipient grounding, Android runtime status alerts, voice/progress cues, Notes checklists.</li>
+<li><strong>The pins the shipped phones use live only on <code>develop-v3</code></strong>: alpha develop's 17116b70e6 and v121's 57588dc08a8. A build on eliza <code>develop</code> cannot reproduce v121's agent behaviour until those changes are ported.</li>
+<li><strong><code>main-v3</code> and <code>staging-v3</code> are still taking merges.</strong> Each needs a port, or the lines need to be frozen.</li>
+<li><strong>The Codex local port lines</strong> (section 5) and <strong>eliza <code>barrel-unentangle</code></strong> (862 files).</li>
+<li><strong>Tool currency.</strong> eliza <code>develop</code> has b7f1827, the old shape, 34 behind. The next sync is a layout migration, not a copy.</li>
+</ol>
+<h3>Cross-cutting choices still open</h3>
+<ul>
+<li><strong>Cloud host:</strong> develop targets alphacompute.cc; alpha <code>vibestack</code> ships against eliza.app with alphaphone.dev as Alpha's hosts; the rebuild points at eliza.app with alphacompute.cc as &quot;cutoverCandidate&quot;. You chose alphacompute.cc yesterday. The rebuild's <code>packages/deployment</code> should record it before lane L10 ports <code>cloud/</code>.</li>
+<li><strong>Eliza dependency:</strong> grace uses a submodule, the rebuild uses <code>eliza.lock.json</code> plus a harness, and the rebuild also still declares a dead <code>legacy/vendor/eliza</code> submodule. There should be exactly one pin.</li>
+<li><strong>Tool version skew:</strong> the rebuild's tool (e4e2ab3) differs from eliza's (747bf8d/b7f1827) in 43 files, with 28 files on one side only. Specs moved from alpha <code>vibestack</code> were checked with eliza's tool, so they may fail under the rebuild's for tool reasons, not spec reasons.</li>
+</ul>
+<h2 id="s7">7. Recovery plan</h2>
+<h3>Phase 0: preserve and freeze (now)</h3>
+<ol>
+<li><strong>Push every at-risk branch to a namespace the cleanups do not prune.</strong> Use <code>refs/backup/2026-11-24/&lt;branch&gt;</code>, a ref outside <code>refs/heads</code> like the <code>refs/backup/15826-pre-rebase</code> that survived on eliza. The Codex and ctx-budget branches belong to other actors, so this needs your OK.</li>
+<li><strong>Have the template lanes commit.</strong> Make WIP commits on their <code>port/*</code> branches, pushed to the backup namespace, so a crash cannot lose the agent edits.</li>
+<li><strong>Freeze alpha <code>vibestack</code>.</strong> Land or close #1497, #1498 and #1501, then record the final SHA as <strong>SOURCE A</strong> and allow no further merges. Ask Codex and NubsCarson to stop merging there.</li>
+<li><strong>Tag the heads:</strong> <code>archive/alpha-vibestack-inplace-&lt;sha&gt;</code>, <code>archive/alpha-develop-&lt;sha&gt;</code> and <code>archive/alpha-main-&lt;sha&gt;</code>.</li>
+</ol>
+<h3>Phase 1: settle the decisions that every lane depends on (hours)</h3>
+<p>These are decisions 2 to 6 in section 8: the template shape and tool version, the eliza pin mechanism, the Cloud host, the v121 signing record and the <code>-v3</code> policy. Then refresh <code>legacy/</code> once #1499 lands.</p>
+<h3>Phase 2: eliza consolidation (in parallel with phase 3)</h3>
+<ol>
+<li>Make <code>develop</code> the only place eliza work lands. Port the 23 unported commits from 3ef2897d983 and the v121 SDK commit 57588dc08a8 (and alpha develop's 17116b70e6 changes) from <code>develop-v3</code>.</li>
+<li>Rebase Codex's <code>reconcile-93b</code> chain onto <code>develop</code> and split it into about 12 themed PRs. This includes the legacy conversation adoption and the Android resident binding, which the alpha line needs.</li>
+<li>Open PRs to <code>develop</code> from this session's eliza branches: native host device headers, proofs, lint.</li>
+<li>Decide what <code>barrel-unentangle</code> is, then land or retire it.</li>
+</ol>
+<h3>Phase 3: port Alpha onto the template (the template-migration session's 11 lanes)</h3>
+<p>The base is <code>claude/template-port</code>. The sources are SOURCE A, alpha develop/main since 26e827f, #1499, <code>barrel-unentangle</code> (alpha), the blocker branches, and both audit registers as the list of behaviour to get right, not of defects to copy.</p>
+<p>Order matters:</p>
+<ol>
+<li><strong>L9 platform first.</strong> It settles the Platform services and the mapping of the in-place port's 16 PortCells onto places and resident machines. Every area lane depends on it.</li>
+<li><strong>The area lanes</strong> after that.</li>
+<li><strong>Missing lanes:</strong> add lanes for <code>apps/site</code>, the 11 CI workflows, <code>licenses/</code> and the runbooks, none of which the current briefs cover.</li>
+<li><strong>Files:</strong> for L6, start from the rebuild's own withdrawn Files spec (bd69cbe6bd9).</li>
+</ol>
+<p>Delete <code>legacy/&lt;area&gt;</code> as each area lands. The estimate (an inference from lalalune's pace and code volume) is 1 to 2 weeks for specs and 3 to 5 weeks for code in parallel lanes, plus device and owner acceptance.</p>
+<h3>Phase 4: catch-up, cutover, verification</h3>
+<ol>
+<li>
+<p>Re-diff SOURCE A, alpha develop/main, eliza <code>develop-v3</code>, <code>main-v3</code> and <code>staging-v3</code> against what the lanes ported, and port anything merged after the snapshot.</p>
+</li>
+<li>
+<p>Cut over the way eliza did: the template line becomes alpha <code>develop</code> (<code>main</code> at release); the old develop and main become <code>develop-v3</code> and <code>main-v3</code>; <code>vibestack</code> is deleted or kept only as the archived snapshot.</p>
+</li>
+<li>
+<p>Repoint CI, the Pixel build docs, session briefs and memory.</p>
+</li>
+<li>
+<p>Then verify:</p>
+<ul>
+<li><code>pnpm verify</code>;</li>
+<li>both APK variants;</li>
+<li>the emulator HOME role;</li>
+<li>the AOSP image;</li>
+<li>Pixel acceptance.</li>
+</ul>
+<p>Each is a separate claim: none proves another.</p>
+</li>
+</ol>
+<h2 id="s8">8. Decisions for the owner</h2>
+<ol>
+<li><strong>Base:</strong> confirm that <code>vibestack-template-rebuild</code> (through <code>claude/template-port</code>) is the canonical Alpha line. Alpha <code>vibestack</code> is then frozen as the read-only behaviour reference.</li>
+<li><strong>Template shape:</strong> port onto the old shape now and match eliza's tool (b7f1827), then move eliza, grace and alpha to the new package flow together once <code>vibestack</code> 0.2.0 is installable? Or adopt the new flow in Alpha first?</li>
+<li><strong>Eliza pin in Alpha:</strong> keep the rebuild's <code>eliza.lock.json</code> + harness, or use grace's submodule? Either way, remove the second, dead pin.</li>
+<li><strong>Cloud host for the template line:</strong> confirm alphacompute.cc (your choice yesterday) over eliza.app and alphaphone.dev.</li>
+<li><strong>Signing:</strong> carry v121 (main 152047eb685) into the template line.</li>
+<li><strong>Eliza <code>-v3</code> lines:</strong> freeze <code>main-v3</code> and <code>staging-v3</code>, or keep merging there and port each change to <code>develop</code>?</li>
+<li><strong>Other actors' local work:</strong> may this session push Codex's and the ctx-budget session's local-only branches to <code>refs/backup/2026-11-24/*</code> on the public eliza repository and on alpha?</li>
+<li><strong><code>barrel-unentangle</code></strong> (alpha and eliza): what is it for, and does it go to eliza <code>develop</code> and the template line?</li>
+<li><strong>Freeze:</strong> approve the merge freeze on alpha <code>vibestack</code> after #1497, #1498 and #1501.</li>
+</ol>
+<h2 id="s9">9. Keeping this from happening again</h2>
+<ul>
+<li><strong>One canonical branch per repository, announced.</strong> A branch name means one shape, and a promotion or rename is posted where every session reads it (a pinned note in each repo's <code>AGENTS.md</code> or memory).</li>
+<li><strong>Nothing lives only on a laptop.</strong> Every brief requires pushing each non-scratch branch to <code>refs/backup/&lt;date&gt;/&lt;branch&gt;</code> before stopping, and a nightly job enforces it.</li>
+<li><strong>Cleanups check reachability.</strong> Before a branch or PR is deleted or closed, its unique commits are saved to a backup ref, with the reason written on the PR.</li>
+<li><strong>Pins in data, not prose.</strong> Record the vibestack tool SHA and the eliza commit in a lock file that CI checks.</li>
+<li><strong>Merge freezes during migrations,</strong> with a recorded snapshot SHA that every parity diff is computed against.</li>
+<li><strong>Shape check before building.</strong> Any &quot;migrate to X&quot; brief starts by comparing against the reference (lalalune/vibestack, grace) and by searching for existing local or remote work toward X.</li>
+</ul>
+<h2 id="s10">Appendix: key evidence</h2>
+<ul>
+<li><code>gh api repos/eliza-research/alpha/activity?ref=refs/heads/vibestack</code>: <code>branch_creation lalalune 00000000000-&gt;06c2098d651</code> at 2026-11-22T22:29:43Z; later pushes 2c2544c0df2, 009960a3cc7 and 057fdc5a2b2 are all develop commits.</li>
+<li><code>gh api repos/eliza-research/alpha/activity?ref=refs/heads/vibestack-template-rebuild</code>: created 2026-11-23T18:51:15Z, deleted 23:54:00Z (lalalune), recreated 2026-11-24T07:15:29Z (NubsCarson).</li>
+<li>PR #1470 timeline: <code>closed lalalune 2026-11-23T22:27:35Z</code>, <code>head_ref_deleted 23:54:00Z</code>, <code>head_ref_restored NubsCarson 2026-11-24T07:15:29Z</code>.</li>
+<li><code>git merge-base origin/vibestack-template-rebuild origin/develop</code> = 26e827f064f. <code>git log 26e827f064f..origin/vibestack-template-rebuild</code> starts at 3be68da9b76 &quot;Move the alphaphone tree under legacy/&quot;.</li>
+<li>Migration session memory, 2026-11-22: &quot;The alpha repo had no <code>vibestack</code> branch, so the PR base has to be created from develop.&quot;</li>
+<li><code>git ls-remote elizaOS/eliza</code>: develop, develop-v3, main, main-v3, staging, staging-v3, barrel-unentangle; no <code>vibestack</code>.</li>
+<li>lalalune/vibestack 8f8521e &quot;Restructure into 3-package workspace and polish Spec Studio UI&quot; (2026-11-23 20:32 −0500); <code>npm view vibestack</code> → an unrelated 0.1.2 package.</li>
+<li>Full investigator output: this session's workflow <code>wf_53975af5-5ed</code> journal. The earlier report: <code>vibestack-forensics-2026-11-24.md</code>.</li>
+</ul>
+</main>
+<script>{
+const s=document.getElementById('g');
+const draw=()=>{
+  const W=s.clientWidth,H=s.clientHeight,sm=W<560;
+  const ink=getComputedStyle(document.body).color;
+  const x=f=>Math.round(24+f*(W-48)),y=[H*0.24,H*0.52,H*0.8];
+  const t=(txt,xx,yy,c,a)=>'<text x="'+xx+'" y="'+yy+'" fill="'+c+'" font-size="'+(sm?11:13)+'" font-family="Inter,sans-serif" text-anchor="'+(a||'start')+'">'+txt+'</text>';
+  let o='<line x1="'+x(0)+'" y1="'+y[1]+'" x2="'+x(1)+'" y2="'+y[1]+'" stroke="'+ink+'" stroke-width="3"/>'+t('alpha develop (legacy app)',x(0),y[1]-10,ink);
+  o+='<path d="M'+x(.12)+' '+y[1]+' C'+x(.2)+' '+y[1]+' '+x(.22)+' '+y[0]+' '+x(.3)+' '+y[0]+' L'+x(.88)+' '+y[0]+'" fill="none" stroke="#2e6f8e" stroke-width="4"/>';
+  o+=t(sm?'template rebuild (local)':'vibestack-template-rebuild: the real template, local for a week',x(.31),y[0]-10,'#2e6f8e');
+  o+='<circle cx="'+x(.88)+'" cy="'+y[0]+'" r="6" fill="#2e6f8e"/>'+t(sm?'pushed 11-23':'pushed 11-23 18:51, #1470 closed 22:27',x(.88),y[0]+22,'#2e6f8e','end');
+  o+='<path d="M'+x(.6)+' '+y[1]+' C'+x(.66)+' '+y[1]+' '+x(.68)+' '+y[2]+' '+x(.74)+' '+y[2]+' L'+x(1)+' '+y[2]+'" fill="none" stroke="#e3120b" stroke-width="4"/>';
+  o+=t(sm?'vibestack (in-place)':'alpha vibestack: cut from develop 11-22, in-place port, ~25 PRs',x(.75),y[2]+22,'#e3120b');
+  o+='<circle cx="'+x(.12)+'" cy="'+y[1]+'" r="5" fill="'+ink+'"/>'+t('11-17',x(.12),y[1]+22,ink,'middle');
+  o+='<circle cx="'+x(.6)+'" cy="'+y[1]+'" r="5" fill="'+ink+'"/>'+t('11-22',x(.6),y[1]+22,ink,'middle');
+  s.innerHTML=o;
+};
+const ro=new ResizeObserver(draw);ro.observe(s);
+}</script>
+</body></html>

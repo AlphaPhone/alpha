@@ -6,9 +6,9 @@ globalThis.document=Object.assign(new EventTarget(),{hidden:false});globalThis.w
 test.after(()=>{globalThis.document=before.document;globalThis.window=before.window;});
 // Every exit after a successful claim must settle it exactly once, or the host keeps
 // refusing the next navigation for this client until its preparation timeout.
-function fixture({claim=()=>{},result=()=>{}}={}){
+function fixture({claim=()=>{},result=()=>({accepted:true})}={}){
  let state={view:'home',revision:1,sensitive:false},session=true;const calls=[];
- const client=new ViewNavigationClient(async(path,body)=>{calls.push({path,body});if(path.endsWith('claim')){claim();return {claimId:'owned-claim'};}result(body);return {accepted:true};},()=>session,()=>state);
+ const client=new ViewNavigationClient(async(path,body)=>{calls.push({path,body});if(path.endsWith('claim')){claim();return {claimId:'owned-claim'};}return result(body);},()=>session,()=>state);
  const binding={requestId:'owned-handoff',clientId:client.clientId,viewId:'notes',viewType:'gui',installationId:'owned-installation'};
  const results=[{actionName:'VIEWS',success:true,values:{mode:'show',viewId:'notes',viewPath:'/notes',viewType:'gui',navigationPrepared:true,completedActionHandoffId:binding.requestId,navigationBinding:binding}}];
  return {client,calls,results,set state(next){state=next;},get state(){return state;},retire(){session=false;},
@@ -37,7 +37,7 @@ test('an attempt cancelled during navigation settles one negative result',async(
 });
 test('a positive result is never followed by another result, even when lost',async()=>{
  for(const lost of [false,true]){
-  const f=fixture({result:()=>{if(lost)throw Error('reply lost');}});
+  const f=fixture({result:()=>{if(lost)throw Error('reply lost');return {accepted:true};}});
   const delivery=f.client.deliver(f.results,f.client.capture(f.state),switchTo(f));
   if(lost)await assert.rejects(delivery,/reply lost/);else assert.equal((await delivery).status,'delivered');
   const replies=f.replies();assert.equal(replies.length,1);assert.equal(replies[0].success,true);f.client.dispose();
@@ -46,4 +46,17 @@ test('a positive result is never followed by another result, even when lost',asy
 test('a retired session posts nothing after the claim',async()=>{
  const f=fixture({claim:()=>f.retire()});
  await assert.rejects(f.client.deliver(f.results,f.client.capture(f.state),switchTo(f)));assert.equal(f.replies().length,0);f.client.dispose();
+});
+
+test('the renderer never verifies navigation when either host envelope refuses its positive result',async()=>{
+ const legacy=fixture({result:()=>{throw Object.assign(Error('claim refused'),{status:409});}});
+ await assert.rejects(legacy.client.deliver(legacy.results,legacy.client.capture(legacy.state),switchTo(legacy)),/claim refused/);
+ assert.deepEqual(legacy.replies().map(({success})=>success),[true]);
+ legacy.client.dispose();
+
+ const vibestack=fixture({result:()=>({ok:true,accepted:false})});
+ const delivery=await vibestack.client.deliver(vibestack.results,vibestack.client.capture(vibestack.state),switchTo(vibestack));
+ assert.equal(delivery.status,'unknown');
+ assert.deepEqual(vibestack.replies().map(({success})=>success),[true]);
+ vibestack.client.dispose();
 });

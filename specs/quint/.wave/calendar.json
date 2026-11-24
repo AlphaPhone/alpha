@@ -1,0 +1,1608 @@
+{
+  "add": [
+    {
+      "path": "specs/quint/application/CalendarDeviceWrites.qnt",
+      "module": "CalendarDeviceWrites",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "confirmedCreateTest",
+        "lostCreateBlocksSecondTest",
+        "separateCreationTest",
+        "plainCreateRefusedByNativeTest",
+        "latchClearableTest",
+        "latchClearedByRetryTest",
+        "latchBlocksEditSaveTest",
+        "supersededSaveTest",
+        "changedEventNotDeletedTest"
+      ],
+      "invariants": [
+        "TypeOK",
+        "NoBlindDuplicate",
+        "CreateWaitsForReceipts",
+        "SingleWrite",
+        "LatchBlocksWrites",
+        "LatchHoldsDelete",
+        "JournalConsistent"
+      ],
+      "witnesses": [
+        "UncertainLatchWitness",
+        "UnknownReceiptWitness",
+        "SeparateFormWitness",
+        "SupersededSaveWitness",
+        "RecoveryFailedWitness"
+      ],
+      "sources": [
+        "apps/app/src/prototype/calendar-adapter.ts",
+        "android/app/src/main/java/ai/elizaresearch/alphaphone/CalendarCreationStore.java",
+        "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaCalendarPlugin.java"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "creationPending"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "creationRecoveryFailed"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "creationDraftEpoch"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "creationReadEpoch"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "readCreations"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "separateCreation"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "calendarSaving"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "calendarWriteUncertain"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "checkCreations"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "acknowledgeCreation"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "pending-creation"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "inspectDeletion"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "removeScoped"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "deleteSelection"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "nativeStatusRetry"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "ownsForm"
+        },
+        {
+          "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/CalendarCreationStore.java",
+          "name": "pendingCreations"
+        },
+        {
+          "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/CalendarCreationStore.java",
+          "name": "acknowledge"
+        },
+        {
+          "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/CalendarCreationStore.java",
+          "name": "separate"
+        }
+      ],
+      "abstractions": [
+        "One form, one selected event and at most two unknown creation receipts stand for the journal and the event list.",
+        "formEpoch merges creationDraftEpoch with the form object identity that ownsForm compares; any replacement or close of the form changes it.",
+        "The permission request, the option-event readback and note-origin linking are folded into the write step; a failed readback is a lost answer.",
+        "The native creation journal (written unknown before the insert, settled to saved by a later read, acknowledged only when saved) lives in the shared calendar plugin and is modeled at its contract.",
+        "checkCreations is modeled only while no save runs; the code has no such guard, and the check only reads and acknowledges saved receipts.",
+        "A remount stands for a new component instance: the latch and the receipt view are instance state, the journal is durable."
+      ]
+    },
+    {
+      "path": "specs/quint/application/CalendarAgentSelection.qnt",
+      "module": "CalendarAgentSelection",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "inspectedEventSelectedTest",
+        "lateInspectionDroppedTest",
+        "refreshRetiresSelectionTest",
+        "failedInspectionSelectsNothingTest",
+        "sourceFollowsFormCalendarTest",
+        "sourceForOtherCalendarDroppedTest"
+      ],
+      "invariants": [
+        "TypeOK",
+        "ExposedEventIsOpen",
+        "ExposedSourceMatchesForm",
+        "SelectionFromCurrentEpoch",
+        "SelectionMatchesKey",
+        "RevisionWasProviders"
+      ],
+      "witnesses": [
+        "EventSelectedWitness",
+        "SourceSelectedWitness",
+        "RetiredInspectionWitness",
+        "SourceHiddenByCalendarChoiceWitness"
+      ],
+      "sources": [
+        "apps/app/src/prototype/calendar-adapter.ts"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "agentSelection"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "agentSelectionKey"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "agentSelectionEpoch"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "calendarSelection"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "prepareAgentSource"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "calendar-source"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "calendar-event"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "formCal"
+        }
+      ],
+      "abstractions": [
+        "Two events and revisions up to 2. The inspected content (title, body, location, instants) is one revision number.",
+        "One awaited inspection or source preparation at a time; an older one is already retired by the epoch, so dropping it loses nothing.",
+        "The Android fallback from inspect to inspectDeletion is one inspection step."
+      ]
+    },
+    {
+      "path": "specs/quint/application/ReminderIntents.qnt",
+      "module": "ReminderIntents",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "confirmedCreateTest",
+        "refusedCreateLeavesNothingTest",
+        "lostCreateNeverRepeatsTest",
+        "lateSaveFoundTest",
+        "separateCreateNeedsChoiceTest",
+        "foundRowsMakeRoomTest",
+        "fullHistoryNeedsOwnerDiscardTest",
+        "ownerDiscardFreesHistoryTest",
+        "abandonedCreateRemovedTest",
+        "lostOperationAcknowledgedTest",
+        "neverAppliedOperationStaysTest",
+        "operationsFullTest",
+        "ownerDiscardFreesOperationsTest"
+      ],
+      "invariants": [
+        "TypeOK",
+        "RecordBeforeDispatch",
+        "OneDispatchPerAttempt",
+        "HistoryBounded",
+        "FormIdHasRecord",
+        "SavingHasStage",
+        "RetainedWhileDispatching",
+        "FullOnlyByPending"
+      ],
+      "witnesses": [
+        "UnresolvableCreationWitness",
+        "HistoryFullOfPendingWitness",
+        "UnknownOperationWitness",
+        "OperationsFullWitness",
+        "FoundRowWitness"
+      ],
+      "sources": [
+        "apps/app/src/runtime/reminder-creations.ts",
+        "apps/app/src/runtime/reminder-deletions.ts",
+        "apps/app/src/prototype/reminder-adapter.ts"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/runtime/reminder-creations.ts",
+          "name": "retainReminderCreation"
+        },
+        {
+          "path": "apps/app/src/runtime/reminder-creations.ts",
+          "name": "discardUndispatchedCreation"
+        },
+        {
+          "path": "apps/app/src/runtime/reminder-creations.ts",
+          "name": "retireRefusedCreation"
+        },
+        {
+          "path": "apps/app/src/runtime/reminder-creations.ts",
+          "name": "checkReminderCreation"
+        },
+        {
+          "path": "apps/app/src/runtime/reminder-creations.ts",
+          "name": "reconcileReminderCreations"
+        },
+        {
+          "path": "apps/app/src/runtime/reminder-creations.ts",
+          "name": "isReminderRefusal"
+        },
+        {
+          "path": "apps/app/src/runtime/reminder-deletions.ts",
+          "name": "retainReminderDeletion"
+        },
+        {
+          "path": "apps/app/src/runtime/reminder-deletions.ts",
+          "name": "discardUndispatchedReminderDeletion"
+        },
+        {
+          "path": "apps/app/src/runtime/reminder-deletions.ts",
+          "name": "acknowledgeReminderDeletion"
+        },
+        {
+          "path": "apps/app/src/runtime/reminder-deletions.ts",
+          "name": "reconcileReminderDeletions"
+        },
+        {
+          "path": "apps/app/src/runtime/reminder-deletions.ts",
+          "name": "pendingReminderDeletions"
+        },
+        {
+          "path": "apps/app/src/prototype/reminder-adapter.ts",
+          "name": "reminderSaving"
+        },
+        {
+          "path": "apps/app/src/prototype/reminder-adapter.ts",
+          "name": "reminderCreationId"
+        },
+        {
+          "path": "apps/app/src/prototype/reminder-adapter.ts",
+          "name": "scheduleReminder"
+        },
+        {
+          "path": "apps/app/src/prototype/reminder-adapter.ts",
+          "name": "operateReminder"
+        },
+        {
+          "path": "apps/app/src/prototype/reminder-adapter.ts",
+          "name": "reminderOperationReceipt"
+        },
+        {
+          "path": "apps/app/src/prototype/reminder-adapter.ts",
+          "name": "reminderCreateUnknown"
+        },
+        {
+          "path": "apps/app/src/prototype/reminder-adapter.ts",
+          "name": "reminderDeleteUnknown"
+        }
+      ],
+      "abstractions": [
+        "Cap and OpCap of 2 stand for the 32-row creation history and the 100-row operation store; byte limits are not modeled.",
+        "Rows are counted, not identified: pending rows split into those a readback will find and those with no saved reminder.",
+        "Field-by-field matching of a saved reminder against its request is one found/not-found answer.",
+        "ownerDiscard is defined and exercised by scenarios but is not part of step: the Android reminder screens have no action that removes an unconfirmed record. The unresolvable states are reachability witnesses.",
+        "Edit, cancel, complete and snooze share one operation record shape and one flow."
+      ]
+    },
+    {
+      "path": "specs/quint/application/ReminderTapTokens.qnt",
+      "module": "ReminderTapTokens",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "openAndConsumeTest",
+        "newerTapNotConsumedTest",
+        "newerTapAfterOpenTest",
+        "interactionKeepsTokenTest",
+        "changedTargetKeepsLinkTest",
+        "blockedCheckDoesNothingTest",
+        "questionReleasedTest",
+        "questionConsumedTest"
+      ],
+      "invariants": [
+        "TypeOK",
+        "ConsumeAfterVisible",
+        "NewestTapSurvives",
+        "TokenIsNewest",
+        "SingleCheck",
+        "NothingOpensWhileBlocked",
+        "CapturedOnlyInCheck"
+      ],
+      "witnesses": [
+        "QueuedRecheckWitness",
+        "NewerTapDuringCheckWitness",
+        "ChangedTargetKeptWitness",
+        "QuestionOpenWitness",
+        "ConsumedWitness"
+      ],
+      "sources": [
+        "apps/app/src/prototype/reminder-adapter.ts"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/prototype/reminder-adapter.ts",
+          "name": "checkReminderTap"
+        },
+        {
+          "path": "apps/app/src/prototype/reminder-adapter.ts",
+          "name": "tapBusy"
+        },
+        {
+          "path": "apps/app/src/prototype/reminder-adapter.ts",
+          "name": "tapRequested"
+        },
+        {
+          "path": "apps/app/src/prototype/reminder-adapter.ts",
+          "name": "tapInteraction"
+        },
+        {
+          "path": "apps/app/src/prototype/reminder-adapter.ts",
+          "name": "pendingReminderTap"
+        },
+        {
+          "path": "apps/app/src/prototype/reminder-adapter.ts",
+          "name": "consumeReminderTap"
+        },
+        {
+          "path": "apps/app/src/prototype/reminder-adapter.ts",
+          "name": "releaseReminderQuestion"
+        },
+        {
+          "path": "apps/app/src/prototype/reminder-adapter.ts",
+          "name": "reminderTapPending"
+        },
+        {
+          "path": "apps/app/src/prototype/reminder-adapter.ts",
+          "name": "closeNoticeQuestion"
+        },
+        {
+          "path": "apps/app/src/prototype/reminder-adapter.ts",
+          "name": "sameTarget"
+        }
+      ],
+      "abstractions": [
+        "Up to three taps; native keeps the newest pending token, so an earlier unconsumed one is replaced.",
+        "blocked merges a hidden page, an open connection chooser, a sensitive context and an open Calendar form.",
+        "The reminder list read and the target comparison are one listed/not-listed answer; the reviewed question is consume or release.",
+        "Native token storage and its own recheck of source, occurrence and revision are modeled as \"consume only the current token\"."
+      ]
+    },
+    {
+      "path": "specs/quint/application/ReminderRefresh.qnt",
+      "module": "ReminderRefresh",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "deviceRowsSurviveReminderFailureTest",
+        "newestRefreshWinsTest",
+        "openIntentWaitsForSuccessTest",
+        "unmountedRefreshPublishesNothingTest"
+      ],
+      "invariants": [
+        "TypeOK",
+        "DeviceRowsAlwaysPublished",
+        "RemindersCurrentOrMarked",
+        "OnlyNewestPublishes",
+        "OpenIntentKept",
+        "FailureReportedOnce"
+      ],
+      "witnesses": [
+        "StaleRemindersWitness",
+        "SupersededRefreshWitness",
+        "PendingOpenAfterFailureWitness",
+        "OpenedWitness"
+      ],
+      "sources": [
+        "apps/app/src/prototype/reminder-adapter.ts",
+        "apps/app/src/prototype/calendar-adapter.ts",
+        "apps/app/src/runtime/reminder-creations.ts"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/prototype/reminder-adapter.ts",
+          "name": "refreshReminders"
+        },
+        {
+          "path": "apps/app/src/prototype/reminder-adapter.ts",
+          "name": "reminderRefreshGeneration"
+        },
+        {
+          "path": "apps/app/src/prototype/reminder-adapter.ts",
+          "name": "reminderRefreshFailed"
+        },
+        {
+          "path": "apps/app/src/prototype/reminder-adapter.ts",
+          "name": "pendingReminderOpenId"
+        },
+        {
+          "path": "apps/app/src/prototype/reminder-adapter.ts",
+          "name": "reminderStale"
+        },
+        {
+          "path": "apps/app/src/prototype/reminder-adapter.ts",
+          "name": "nativeCalendarRows"
+        },
+        {
+          "path": "apps/app/src/prototype/reminder-adapter.ts",
+          "name": "reminderRows"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "refreshReminders"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "nativeCalendarRows"
+        },
+        {
+          "path": "apps/app/src/runtime/reminder-creations.ts",
+          "name": "reminderEvents"
+        }
+      ],
+      "abstractions": [
+        "Device rows and the reminder store are version numbers; up to five refreshes.",
+        "Reconciling creation and operation intents inside a refresh is covered by ReminderIntents and is part of the refresh succeeding or failing here.",
+        "A change to reminders starts a refresh in the same step (the committed and document-changed events)."
+      ]
+    },
+    {
+      "path": "specs/quint/application/ClockHandoff.qnt",
+      "module": "ClockHandoff",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "reviewedHandoffTest",
+        "retiredReviewNotSentTest",
+        "leftCalendarNotSentTest",
+        "unsavedRecordNotSentTest",
+        "editedReviewNotSentTest",
+        "noHistoryNoHandoffTest",
+        "interruptedHandoffTest",
+        "lostResultSaveTest"
+      ],
+      "invariants": [
+        "TypeOK",
+        "RecordBeforeHandoff",
+        "RetiredReviewNeverSent",
+        "NoReplay",
+        "ReviewNeedsVisibleClock",
+        "BusyHasStage",
+        "SnapshotIsCurrent"
+      ],
+      "witnesses": [
+        "ReviewReadyWitness",
+        "RetiredDuringSaveWitness",
+        "InterruptedHandoffWitness",
+        "HistoryUnavailableWitness",
+        "HandoffOutWitness"
+      ],
+      "sources": [
+        "apps/app/src/prototype/clock-adapter.ts",
+        "apps/app/src/runtime/clock-handoff-history.ts",
+        "android/app/src/main/java/ai/elizaresearch/alphaphone/ClockHandoff.java"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/prototype/clock-adapter.ts",
+          "name": "installClockAdapter"
+        },
+        {
+          "path": "apps/app/src/prototype/clock-adapter.ts",
+          "name": "retireReview"
+        },
+        {
+          "path": "apps/app/src/prototype/clock-adapter.ts",
+          "name": "historyGeneration"
+        },
+        {
+          "path": "apps/app/src/prototype/clock-adapter.ts",
+          "name": "generation"
+        },
+        {
+          "path": "apps/app/src/prototype/clock-adapter.ts",
+          "name": "review"
+        },
+        {
+          "path": "apps/app/src/prototype/clock-adapter.ts",
+          "name": "busy"
+        },
+        {
+          "path": "apps/app/src/prototype/clock-adapter.ts",
+          "name": "loading"
+        },
+        {
+          "path": "apps/app/src/prototype/clock-adapter.ts",
+          "name": "snapshot"
+        },
+        {
+          "path": "apps/app/src/prototype/clock-adapter.ts",
+          "name": "restore"
+        },
+        {
+          "path": "apps/app/src/prototype/clock-adapter.ts",
+          "name": "dispatch"
+        },
+        {
+          "path": "apps/app/src/prototype/clock-adapter.ts",
+          "name": "clockHandoff"
+        },
+        {
+          "path": "apps/app/src/prototype/clock-adapter.ts",
+          "name": "repeatSupported"
+        },
+        {
+          "path": "apps/app/src/runtime/clock-handoff-history.ts",
+          "name": "createClockHandoffHistory"
+        },
+        {
+          "path": "apps/app/src/runtime/clock-handoff-history.ts",
+          "name": "compareExchange"
+        },
+        {
+          "path": "apps/app/src/runtime/clock-handoff-history.ts",
+          "name": "opening"
+        },
+        {
+          "path": "apps/app/src/runtime/clock-handoff-history.ts",
+          "name": "unknown"
+        }
+      ],
+      "abstractions": [
+        "Request fields (action, time, label, repeat days, time zone) are one review identity; a time-zone change counts as retiring the review.",
+        "Mock simulation and the blocked no-connection path exist only in test-mock builds and are not modeled.",
+        "The history store is one record with a compare-and-exchange save; the legacy localStorage copy is not modeled.",
+        "A handoff is never replayed from history: the model has no action that reads a record and dispatches."
+      ]
+    },
+    {
+      "path": "specs/quint/application/BrowserAlarmRinging.qnt",
+      "module": "BrowserAlarmRinging",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "onePageRingsTest",
+        "twoPagesOneRingerTest",
+        "ownerHidesOtherTakesOverTest",
+        "hiddenBeforeGrantTest",
+        "clearedBeforeGrantTest",
+        "soundStopsThenRingsAgainTest"
+      ],
+      "invariants": [
+        "TypeOK",
+        "OneRinger",
+        "OwnerHoldsLock",
+        "LockHasHolder",
+        "SoundNeedsOwner",
+        "OwnerIsVisible",
+        "RingingIsKnownSet"
+      ],
+      "witnesses": [
+        "RingingWitness",
+        "OtherPageSilentWitness",
+        "SilentAfterMinuteWitness",
+        "HiddenDuringGrantWitness",
+        "HandoverWitness"
+      ],
+      "sources": [
+        "apps/app/src/browser/clock.ts",
+        "apps/app/src/browser/alert-audio.ts"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/browser/clock.ts",
+          "name": "BrowserClock"
+        },
+        {
+          "path": "apps/app/src/browser/clock.ts",
+          "name": "owns"
+        },
+        {
+          "path": "apps/app/src/browser/clock.ts",
+          "name": "ringing"
+        },
+        {
+          "path": "apps/app/src/browser/clock.ts",
+          "name": "soundTimer"
+        },
+        {
+          "path": "apps/app/src/browser/clock.ts",
+          "name": "alpha.browser.alarm-owner"
+        },
+        {
+          "path": "apps/app/src/browser/clock.ts",
+          "name": "ifAvailable"
+        },
+        {
+          "path": "apps/app/src/browser/clock.ts",
+          "name": "stopSound"
+        },
+        {
+          "path": "apps/app/src/browser/clock.ts",
+          "name": "retire"
+        },
+        {
+          "path": "apps/app/src/browser/clock.ts",
+          "name": "allowed"
+        },
+        {
+          "path": "apps/app/src/browser/clock.ts",
+          "name": "poll"
+        }
+      ],
+      "abstractions": [
+        "Two pages. The set of posted alarms is a version number; a changed set rings again.",
+        "allowed merges visibility, the development background flag, mock mode and the screen lock.",
+        "The one-second poll and the 60-second sound limit are nondeterministic steps; elapsed time is not counted.",
+        "This is the browser double of the Clock app; the Android handoff is ClockHandoff."
+      ]
+    },
+    {
+      "path": "specs/quint/application/DayAnchor.qnt",
+      "module": "DayAnchor",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "midnightRefreshTest",
+        "retainedFormReanchoredTest",
+        "retainedEditReanchoredTest",
+        "failedReadHidesRowsTest",
+        "remountReadsTodayTest",
+        "plainFormShiftsTest"
+      ],
+      "invariants": [
+        "TypeOK",
+        "RowsFollowDate",
+        "RowOffIsCivilDay",
+        "RetainedFormFollowsDate",
+        "RetainedFormKeepsCivilDate",
+        "RetainedSaveOnIntendedDay",
+        "DueOnlyWhileMounted"
+      ],
+      "witnesses": [
+        "StaleRowsAwaitingTimerWitness",
+        "ReanchoredFormWitness",
+        "PlainFormShiftedWitness",
+        "PlainSavedOnShiftedDayWitness",
+        "RowsHiddenAfterFailedReadWitness"
+      ],
+      "sources": [
+        "apps/app/src/prototype/calendar-adapter.ts",
+        "apps/app/src/prototype/calendar-form-draft-adapter.ts",
+        "apps/app/src/prototype/calendar-edit-draft-adapter.ts",
+        "apps/app/src/runtime/reminder-creations.ts",
+        "apps/app/src/prototype/calendar-days.ts",
+        "apps/app/src/prototype/reminder-adapter.ts"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "msToLocalMidnight"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "calendarMidnight"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "mapEvent"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-adapter.ts",
+          "name": "civilDay"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-form-draft-adapter.ts",
+          "name": "calendarDraftAnchor"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-form-draft-adapter.ts",
+          "name": "calendarDraftIdentity"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-form-draft-adapter.ts",
+          "name": "creationId"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-edit-draft-adapter.ts",
+          "name": "calendarEditDraftAnchor"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-edit-draft-adapter.ts",
+          "name": "calendarEditDraftIdentity"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-edit-draft-adapter.ts",
+          "name": "googleEventId"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-edit-draft-adapter.ts",
+          "name": "reminderEditSchedule"
+        },
+        {
+          "path": "apps/app/src/runtime/reminder-creations.ts",
+          "name": "reminderEvents"
+        },
+        {
+          "path": "apps/app/src/prototype/calendar-days.ts",
+          "name": "msToLocalMidnight"
+        }
+      ],
+      "abstractions": [
+        "Three consecutive days, one event and one form. Offsets are whole days; hours, zones and DST are not modeled.",
+        "Google rows compute their offset at each render and are always current, so only device and reminder rows are modeled.",
+        "refreshDue stands for the interval between local midnight and the timer or resume that follows it.",
+        "A plain form has no retained identity (a new reminder, or an edit of an unsent Google create): neither draft adapter re-anchors it. That shift is a reachability witness, not an invariant."
+      ]
+    },
+    {
+      "path": "specs/quint/services/GoogleCalendarReader.qnt",
+      "module": "GoogleCalendarReader",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "readThenSameRequestTest",
+        "accountSwitchDuringReadTest",
+        "accountSwitchThenReadTest",
+        "lostGrantOffersConnectTest",
+        "leftCalendarRetriesTest",
+        "leftCalendarThenReturnTest",
+        "recentSavedReadTest",
+        "unavailableKeepsRowsTest"
+      ],
+      "invariants": [
+        "TypeOK",
+        "RowsOwnerBound",
+        "LoadedOwnerBound",
+        "SavedReadOwnerBound",
+        "ConnectWithoutRows",
+        "RefreshingHasRead",
+        "FlightHoldsEpoch",
+        "SignedOutShowsNothing"
+      ],
+      "witnesses": [
+        "SavedRowsShownWitness",
+        "ConnectOfferedWitness",
+        "SupersededReadWitness",
+        "RevokedGrantShownWitness",
+        "LeftoverReadingWitness"
+      ],
+      "sources": [
+        "apps/app/src/prototype/google-calendar-view-adapter.ts",
+        "apps/app/src/runtime/google-calendar.ts",
+        "apps/app/src/runtime/service-read-cache.ts",
+        "apps/app/src/runtime/google-accounts.ts"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/prototype/google-calendar-view-adapter.ts",
+          "name": "epoch"
+        },
+        {
+          "path": "apps/app/src/prototype/google-calendar-view-adapter.ts",
+          "name": "attempted"
+        },
+        {
+          "path": "apps/app/src/prototype/google-calendar-view-adapter.ts",
+          "name": "loaded"
+        },
+        {
+          "path": "apps/app/src/prototype/google-calendar-view-adapter.ts",
+          "name": "reading"
+        },
+        {
+          "path": "apps/app/src/prototype/google-calendar-view-adapter.ts",
+          "name": "cachedRead"
+        },
+        {
+          "path": "apps/app/src/prototype/google-calendar-view-adapter.ts",
+          "name": "lastReadAt"
+        },
+        {
+          "path": "apps/app/src/prototype/google-calendar-view-adapter.ts",
+          "name": "connectOffered"
+        },
+        {
+          "path": "apps/app/src/prototype/google-calendar-view-adapter.ts",
+          "name": "identityKey"
+        },
+        {
+          "path": "apps/app/src/prototype/google-calendar-view-adapter.ts",
+          "name": "reset"
+        },
+        {
+          "path": "apps/app/src/prototype/google-calendar-view-adapter.ts",
+          "name": "refresh"
+        },
+        {
+          "path": "apps/app/src/prototype/google-calendar-view-adapter.ts",
+          "name": "permissionRetry"
+        },
+        {
+          "path": "apps/app/src/prototype/google-calendar-view-adapter.ts",
+          "name": "cachedCalendars"
+        },
+        {
+          "path": "apps/app/src/prototype/google-calendar-view-adapter.ts",
+          "name": "GOOGLE_ACCOUNTS_CHANGED"
+        },
+        {
+          "path": "apps/app/src/runtime/google-calendar.ts",
+          "name": "GoogleCalendarReader"
+        },
+        {
+          "path": "apps/app/src/runtime/service-read-cache.ts",
+          "name": "clear"
+        }
+      ],
+      "abstractions": [
+        "Two identities plus signed out, two ranges, one saved read. Calendar preferences are part of the request key and are not varied.",
+        "Only the newest read is tracked: an older one is aborted and its continuation returns at its first current() check.",
+        "Per-account and per-calendar partial failures collapse into ready, unavailable, lost and error.",
+        "The five-minute age of a saved read is a boolean that a nondeterministic step clears.",
+        "The outbox and its paused-delete offers are modeled in CalendarSync and CalendarOutboxScheduling."
+      ]
+    },
+    {
+      "path": "specs/quint/services/CalendarLinkedSync.qnt",
+      "module": "CalendarLinkedSync",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "reviewedEnableThenSyncTest",
+        "staleReviewRefusedTest",
+        "changedContextRefusedTest",
+        "savedOptInSyncsTest",
+        "noOptInNoSyncTest",
+        "serializedOperationTest",
+        "pauseBeforeRequestTest",
+        "pauseStopsPassTest",
+        "pauseDuringRequestTest",
+        "quarantineRecoveredTest",
+        "undoneDeleteKeepsEventTest",
+        "changedBeforeLinkStopsTest"
+      ],
+      "invariants": [
+        "TypeOK",
+        "RequestsNeedOptIn",
+        "EnableNeedsExactReview",
+        "RequestBelongsToSync",
+        "RequestKindSet",
+        "ProtectedRowsKept",
+        "UnlinkedHasNoWork"
+      ],
+      "witnesses": [
+        "RequestInFlightWitness",
+        "PausedMidSyncWitness",
+        "StaleReviewWitness",
+        "QuarantinedRowWitness",
+        "PendingCreateWitness"
+      ],
+      "sources": [
+        "apps/app/src/runtime/calendar-sync-controller.ts",
+        "apps/app/src/runtime/calendar-linked-store.ts",
+        "apps/app/src/runtime/calendar-sync-settings.ts",
+        "apps/app/src/runtime/calendar-linked-provider.ts",
+        "apps/app/src/runtime/calendar-sync-host.ts"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/runtime/calendar-sync-controller.ts",
+          "name": "CalendarSyncController"
+        },
+        {
+          "path": "apps/app/src/runtime/calendar-sync-controller.ts",
+          "name": "review"
+        },
+        {
+          "path": "apps/app/src/runtime/calendar-sync-controller.ts",
+          "name": "enable"
+        },
+        {
+          "path": "apps/app/src/runtime/calendar-sync-controller.ts",
+          "name": "pause"
+        },
+        {
+          "path": "apps/app/src/runtime/calendar-sync-controller.ts",
+          "name": "sync"
+        },
+        {
+          "path": "apps/app/src/runtime/calendar-sync-controller.ts",
+          "name": "cancel"
+        },
+        {
+          "path": "apps/app/src/runtime/calendar-sync-controller.ts",
+          "name": "opted"
+        },
+        {
+          "path": "apps/app/src/runtime/calendar-sync-controller.ts",
+          "name": "reviewIdentity"
+        },
+        {
+          "path": "apps/app/src/runtime/calendar-sync-controller.ts",
+          "name": "recoverDispatch"
+        },
+        {
+          "path": "apps/app/src/runtime/calendar-sync-controller.ts",
+          "name": "reconcile"
+        },
+        {
+          "path": "apps/app/src/runtime/calendar-sync-controller.ts",
+          "name": "localDeletionUndone"
+        },
+        {
+          "path": "apps/app/src/runtime/calendar-sync-controller.ts",
+          "name": "quarantined"
+        },
+        {
+          "path": "apps/app/src/runtime/calendar-sync-controller.ts",
+          "name": "LINKED_CALENDAR_LOCAL_DELETE_UNDONE"
+        },
+        {
+          "path": "apps/app/src/runtime/calendar-linked-store.ts",
+          "name": "link"
+        },
+        {
+          "path": "apps/app/src/runtime/calendar-linked-store.ts",
+          "name": "pendingOperation"
+        },
+        {
+          "path": "apps/app/src/runtime/calendar-linked-store.ts",
+          "name": "dirty"
+        }
+      ],
+      "abstractions": [
+        "One linked row, two contexts and local revisions up to 3; the 2,000-event limit is not modeled.",
+        "The reconciler is shared upstream code: its outcome is a nondeterministic value from the report keys.",
+        "A write whose answer is dropped because sync was paused meanwhile is left quarantined; that is the contract assumed of the upstream dispatch journal.",
+        "init starts with the saved opt-in either on or off, since the preference outlives a session."
+      ]
+    },
+    {
+      "path": "specs/quint/services/CalendarOutboxScheduling.qnt",
+      "module": "CalendarOutboxScheduling",
+      "init": "init",
+      "step": "step",
+      "invariant": "safety",
+      "tests": [
+        "attachLoadSendTest",
+        "detachedBeforeLoadTest",
+        "detachStopsSendTest",
+        "stoppedSendThenReattachTest",
+        "reattachHasNoStaleTimerTest",
+        "chainedTimerStopsWithDetachTest",
+        "secondViewKeepsLifetimeTest",
+        "timerClearedOnDetachTest"
+      ],
+      "invariants": [
+        "TypeOK",
+        "NoSendAfterLastDetach",
+        "LifetimeWhileAttached",
+        "TimerWhileAttached",
+        "AttachedCount",
+        "ViewsShareLifetime",
+        "LiveSendHasLifetime",
+        "ChainNeedsSend"
+      ],
+      "witnesses": [
+        "DetachedBeforeLoadWitness",
+        "StoppedSendWitness",
+        "ChainedRequestWitness",
+        "SentWitness",
+        "QueuedAfterDetachWitness"
+      ],
+      "sources": [
+        "apps/app/src/runtime/google-calendar-outbox.ts",
+        "apps/app/src/prototype/google-calendar-view-adapter.ts"
+      ],
+      "symbols": [
+        {
+          "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+          "name": "attach"
+        },
+        {
+          "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+          "name": "flush"
+        },
+        {
+          "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+          "name": "schedule"
+        },
+        {
+          "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+          "name": "nextWake"
+        },
+        {
+          "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+          "name": "lifetime"
+        },
+        {
+          "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+          "name": "sendingSignal"
+        },
+        {
+          "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+          "name": "attached"
+        },
+        {
+          "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+          "name": "sending"
+        },
+        {
+          "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+          "name": "anyAbortSignal"
+        },
+        {
+          "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+          "name": "detached"
+        },
+        {
+          "path": "apps/app/src/prototype/google-calendar-view-adapter.ts",
+          "name": "ensureOutbox"
+        },
+        {
+          "path": "apps/app/src/prototype/google-calendar-view-adapter.ts",
+          "name": "outboxRelease"
+        },
+        {
+          "path": "apps/app/src/prototype/google-calendar-view-adapter.ts",
+          "name": "outboxOpen"
+        }
+      ],
+      "abstractions": [
+        "Two views and at most four lifetimes; queued changes are a counter and each send is one step.",
+        "Retry back-off, the Undo-window wake and the stale-holder wake are one timer that is set whenever something is queued.",
+        "A request that waits behind a stopped send runs under the lifetime that was live when it arrived. google-calendar-outbox.ts resolves the lifetime when the waiting request starts instead; see the verification notes.",
+        "Which change is claimed and how its outcome settles are modeled in CalendarSync."
+      ]
+    }
+  ],
+  "update": [
+    {
+      "module": "CalendarSync",
+      "set": {
+        "tests": [
+          "reviewedSyncConsentTest",
+          "undoDeleteTest",
+          "conflictTest",
+          "uncertainCreateTest",
+          "uncertainCreateDropTest",
+          "restartDeleteTest",
+          "pausedSendNeedsOfferTest",
+          "pausedOfferWithdrawnTest",
+          "permissionRestorationTest",
+          "permissionRefusedCreateTest",
+          "retryFailedTest",
+          "lostReplyAppliedIsNotConflictTest",
+          "lostReplyThenRemoteEditConflictsTest",
+          "absentDeleteIsSentTest",
+          "absentUpdateWaitsForOwnerTest",
+          "ownHolderRecoveryTest",
+          "ownHolderRecheckTest",
+          "knownTwinNotAdoptedTest",
+          "restoredPermissionKeepsUnknownTest",
+          "restoredPermissionKeepsOwnerFenceTest",
+          "retiredOwnerTest"
+        ],
+        "invariants": [
+          "TypeOK",
+          "NoAutomaticUnknownCreate",
+          "UndoBeforeDispatch",
+          "PausedWaitsForClock",
+          "PausedNeedsDecision",
+          "DurableClaim",
+          "SendingHeld",
+          "VisibleOwnerBound",
+          "NoSelfConflict",
+          "DeleteDoneAfterSend",
+          "FailureRecorded",
+          "GoneOnlyDrops",
+          "KnownTwinNeverAdopted",
+          "FinishedCreateExists"
+        ],
+        "witnesses": [
+          "PermissionFailedWitness",
+          "UnknownOutcomeWitness",
+          "OrphanedSendWitness",
+          "PausedOfferedWitness",
+          "PausedDeleteResumedWitness",
+          "UnseenConflictWitness",
+          "DeleteFinishedWitness",
+          "UnseenTwinAdoptedWitness",
+          "KnownTwinStaysUncertainWitness"
+        ],
+        "sources": [
+          "apps/app/src/runtime/google-calendar-outbox.ts",
+          "apps/app/src/runtime/google-calendar-writer.ts",
+          "apps/app/src/runtime/google-calendar.ts",
+          "apps/app/src/prototype/google-calendar-view-adapter.ts",
+          "apps/app/src/runtime/deletion-window.ts",
+          "apps/app/src/runtime/calendar-sync-controller.ts",
+          "apps/app/src/runtime/calendar-sync-settings.ts",
+          "apps/app/src/runtime/calendar-linked-provider.ts",
+          "apps/app/src/runtime/calendar-linked-store.ts",
+          "apps/app/src/runtime/calendar-sync-host.ts",
+          "android/app/src/main/java/ai/elizaresearch/alphaphone/CalendarSyncConsent.java",
+          "android/app/src/main/java/ai/elizaresearch/alphaphone/CalendarSyncFreshness.java",
+          "android/app/src/main/java/ai/elizaresearch/alphaphone/CalendarSyncMutation.java",
+          "android/app/src/main/java/ai/elizaresearch/alphaphone/CalendarSyncReceiptRecovery.java"
+        ],
+        "symbols": [
+          {
+            "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+            "name": "GoogleCalendarOutbox"
+          },
+          {
+            "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+            "name": "recoverStale"
+          },
+          {
+            "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+            "name": "sendingId"
+          },
+          {
+            "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+            "name": "retryPermission"
+          },
+          {
+            "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+            "name": "resolvePaused"
+          },
+          {
+            "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+            "name": "resolveConflict"
+          },
+          {
+            "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+            "name": "resolveUncertain"
+          },
+          {
+            "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+            "name": "dismiss"
+          },
+          {
+            "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+            "name": "googleCalendarChangeApplied"
+          },
+          {
+            "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+            "name": "googleCalendarCreateMatch"
+          },
+          {
+            "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+            "name": "unseen"
+          },
+          {
+            "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+            "name": "needs-permission"
+          },
+          {
+            "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+            "name": "settle"
+          },
+          {
+            "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+            "name": "claim"
+          },
+          {
+            "path": "apps/app/src/runtime/google-calendar-outbox.ts",
+            "name": "finish"
+          },
+          {
+            "path": "apps/app/src/runtime/google-calendar-writer.ts",
+            "name": "needs-permission"
+          },
+          {
+            "path": "apps/app/src/runtime/google-calendar-writer.ts",
+            "name": "retryable"
+          },
+          {
+            "path": "apps/app/src/runtime/deletion-window.ts",
+            "name": "claimDeletion"
+          },
+          {
+            "path": "apps/app/src/runtime/deletion-window.ts",
+            "name": "deletionWindow"
+          },
+          {
+            "path": "apps/app/src/runtime/deletion-window.ts",
+            "name": "clock-changed"
+          },
+          {
+            "path": "apps/app/src/prototype/google-calendar-view-adapter.ts",
+            "name": "offerPaused"
+          },
+          {
+            "path": "apps/app/src/prototype/google-calendar-view-adapter.ts",
+            "name": "pausedOffered"
+          },
+          {
+            "path": "apps/app/src/prototype/google-calendar-view-adapter.ts",
+            "name": "retryPermission"
+          }
+        ],
+        "stateMapping": {
+          "phase/kind/holder/instance/sending": "GoogleCalendarOutboxOp phase, the durable holder, and sendingId (the change this instance is sending now)",
+          "undoOpen/hasDeadline/clockKnown/wasPaused/pausedOffered/pauseDecision": "the delete deadline and its monotonic window, the pause when the clock cannot time it, the Undo offered again by Calendar and how the pause ended",
+          "baseRevision/remoteRevision/checked/remoteGone/unseen/goneAnswer": "read-before-write on the content revision, an event missing from the days read, the owner keeping a change to an unseen event, and Google answering gone",
+          "unknown/ownRemote": "a lost answer to an update, reply or delete, and Google already showing what that send set (googleCalendarChangeApplied)",
+          "failure/writable/restorePermission": "Google refusing the check read or the write for want of permission, the failed change, and retryPermission after a reconnect shows the grant",
+          "retryAuthorized/applied/sends/created/twin/twinSeen/existing/adoptedTwin": "uncertain create matching by title, start and end against ids recorded before the send, explicit retry and write outcome",
+          "consent/localRevision/consentReview": "reviewed linked-sync preference and exact current context"
+        },
+        "abstractions": [
+          "One outbox entry, two revisions, two holders and at most two sends expose interference without the full event collection.",
+          "checking splits the durable dispatching phase into preflight and actual network dispatch. Restarts map both back to source recovery states.",
+          "Time is not modeled: retry back-off (retryAt), the wait before another holder's unfinished send is taken back (DISPATCH_STALE_MS) and the abort of a running send when the last view detaches are abstractions. Detach and single-flight sending are in CalendarOutboxScheduling.",
+          "Recurring-event scope, timestamp parsing, merging multiple queued edits and upstream linked reconciler internals remain abstractions checked by runtime contracts.",
+          "Unknown creates allow an explicit retry after owner review. The model does not claim globally exactly-once Calendar creates, and a lookalike event the loaded feed did not show before the send can still be adopted (UnseenTwinAdoptedWitness).",
+          "checkUnreadable keeps the lost-answer marker across a failed check read. In google-calendar-outbox.ts settle() replaces the error, so the marker is lost there; see the verification notes.",
+          "Permission restoration is an authorized current-account readback. It queues again only a change that failed for want of permission and preserves operation owner, request epoch, unknown-create state and linked-sync consent.",
+          "Calendar offers Undo again for a paused delete only while Calendar is shown; resolvePaused is reachable only through that offer."
+        ]
+      },
+      "unset": []
+    },
+    {
+      "module": "CalendarPresentation",
+      "set": {
+        "tests": [
+          "overlayBackOrderTest",
+          "formClosesBeforeEventTest",
+          "staleRangeReplyTest",
+          "supersededReadTest",
+          "latestReadWinsTest",
+          "accountPreferenceIsolationTest",
+          "scheduleReturnTest",
+          "formBlocksViewChangeTest",
+          "scheduleSaveTest",
+          "daySaveShowsSavedDayTest",
+          "accountLeftClosesGoogleSurfacesTest",
+          "accountLeftKeepsDeviceEventTest",
+          "revokedElsewhereTest",
+          "draftClockAndIdentityTest",
+          "failedSaveRetainsFormTest",
+          "editsAfterSubmitPreserveSnapshotTest"
+        ],
+        "invariants": [
+          "ScheduleStartsToday",
+          "MonthOffsetScoped",
+          "ExclusiveTransientOverlay",
+          "CurrentReadCommitted",
+          "LatestReadWins",
+          "GoogleCacheOwnerBound",
+          "RevokedSourcesHidden",
+          "RevokedElsewhereBounded",
+          "GoogleSurfacesOwnerBound",
+          "RestoredCreationKeepsId",
+          "SaveNeedsValidTime",
+          "NoRestoredAuthority",
+          "TransientsEndWithVisit",
+          "TypeOK"
+        ],
+        "witnesses": [
+          "SavedInScheduleWitness",
+          "OverlappingReadWitness",
+          "RevokedElsewhereShownWitness",
+          "GoogleEventOpenWitness",
+          "RestoredDraftWitness"
+        ],
+        "symbols": [
+          {
+            "path": "apps/app/src/prototype/calendar-days.ts",
+            "name": "calendarSavedDay"
+          },
+          {
+            "path": "apps/app/src/prototype/calendar-days.ts",
+            "name": "calendarReturnDay"
+          },
+          {
+            "path": "apps/app/src/prototype/calendar-days.ts",
+            "name": "calendarLoadRange"
+          },
+          {
+            "path": "apps/app/src/prototype/calendar-adapter.ts",
+            "name": "runningToken"
+          },
+          {
+            "path": "apps/app/src/prototype/calendar-adapter.ts",
+            "name": "generation"
+          },
+          {
+            "path": "apps/app/src/prototype/calendar-adapter.ts",
+            "name": "attemptedKey"
+          },
+          {
+            "path": "apps/app/src/prototype/calendar-adapter.ts",
+            "name": "loadedKey"
+          },
+          {
+            "path": "apps/app/src/prototype/calendar-adapter.ts",
+            "name": "calendarSavedDay"
+          },
+          {
+            "path": "apps/app/src/prototype/google-calendar-view-adapter.ts",
+            "name": "googleCalendarAccountLeftPatch"
+          },
+          {
+            "path": "apps/app/src/prototype/google-calendar-view-adapter.ts",
+            "name": "accountLeft"
+          },
+          {
+            "path": "apps/app/src/prototype/google-calendar-view-adapter.ts",
+            "name": "lastReadAt"
+          },
+          {
+            "path": "apps/app/src/prototype/google-calendar-view-adapter.ts",
+            "name": "cachedRead"
+          },
+          {
+            "path": "apps/app/src/prototype/model.js",
+            "name": "calSelectedDay"
+          },
+          {
+            "path": "apps/app/src/prototype/model.js",
+            "name": "calMenuToggle"
+          },
+          {
+            "path": "apps/app/src/prototype/model.js",
+            "name": "calDeleteAsk"
+          }
+        ],
+        "stateMapping": {
+          "view/day/month/search/menu/deleteSheet/chat/openEvent/openDay": "Calendar persistent view choice and Back order: the shell lowers the conversation, then form, delete sheet, event, menu, search",
+          "generation/desiredRange/requestRange/requestGeneration/loading/readToken/lastReadToken": "latest-wins desired-range loading: a forced read supersedes the one in flight, and only the newest read publishes or ends loading",
+          "owner/hidden/googleRowsOwner/localAccess/googleAccess/providerGrant/cacheFresh/recheckDue": "owner-scoped Google preferences, access as last read here against the provider grant, and the saved read that may be shown before the accounts are read again",
+          "form/formDay/formTarget/formOwner/openOwner/creationId/nextCreation/durableDraft/submittedTimeValid/saved": "civil-date draft recovery, retained creation identity, immutable save snapshot, a confirmed save, and Google surfaces closed when their account leaves"
+        },
+        "abstractions": [
+          "Two source identities (device event and Google event), two account identities, day/month offsets -1..1 and up to five read-generation changes.",
+          "Date arithmetic, DST resolution, recurrence expansion and visual grid geometry remain pure implementation contracts; this model tracks transitions and retained identities across those calculations.",
+          "Calendar writes are modeled in CalendarSync and CalendarDeviceWrites. This module tracks presentation/read/draft state and never gives a restored form provider authority.",
+          "Cached rows may remain while a broader/narrower range is loading. Committed-result freshness and owner isolation are checked independently of cache presentation.",
+          "The device read and the Google read share one request/reply pair; the Google reader's own epochs are in GoogleCalendarReader.",
+          "The guest picker inside a form (form.pq), which Back closes before the form, is not modeled.",
+          "A grant withdrawn outside the app is learned at the next read of the accounts; the five-minute age of the saved read is a boolean."
+        ]
+      },
+      "unset": []
+    },
+    {
+      "module": "ResidentScheduling",
+      "set": {
+        "tests": [
+          "refusedStartDeferredTest",
+          "refusedStartThenLaunchTest",
+          "refusalNeedsAdmissionTest",
+          "allRearmBroadcastsTest",
+          "lockedBootWaitsForUnlockTest",
+          "providerMutationWinsBeforeBroadcastTest",
+          "broadcastBeforeStopIsRetiredTest",
+          "processDeathCanRearmTest",
+          "unavailableBuildAndOwnerTest",
+          "unrelatedBroadcastDoesNotStartTest",
+          "splitAdmissionCanaryTest"
+        ],
+        "invariants": [
+          "NoStartDuringLifecycle",
+          "ActiveResidentAdmitted",
+          "RefusedStartNotRunning",
+          "RunningWasStarted",
+          "BoundedStarts"
+        ],
+        "witnesses": [
+          "DeferredStartWitness",
+          "RunningResidentWitness",
+          "BusyLifecycleWitness"
+        ],
+        "symbols": [
+          {
+            "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/ResidentScheduleRearm.java",
+            "name": "admitAndStart"
+          },
+          {
+            "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/ResidentScheduleRearm.java",
+            "name": "decide"
+          },
+          {
+            "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/ResidentScheduleRearm.java",
+            "name": "handles"
+          },
+          {
+            "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/ResidentScheduleRearm.java",
+            "name": "LIFECYCLE_BUSY"
+          },
+          {
+            "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/ResidentScheduleRearm.java",
+            "name": "NOT_PACKAGED"
+          },
+          {
+            "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/ResidentScheduleRearm.java",
+            "name": "NOT_ENABLED"
+          },
+          {
+            "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/ResidentScheduleRearm.java",
+            "name": "LOCKED"
+          },
+          {
+            "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/ResidentScheduleReceiver.java",
+            "name": "startResidentIfAdmissible"
+          },
+          {
+            "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/ResidentScheduleReceiver.java",
+            "name": "RuntimeException"
+          },
+          {
+            "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/ResidentScheduleReceiver.java",
+            "name": "deferred"
+          },
+          {
+            "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaLocalAgentPlugin.java",
+            "name": "startResidentIfAdmissible"
+          },
+          {
+            "path": "android/app/src/main/java/ai/elizaresearch/alphaphone/AlphaLocalAgentPlugin.java",
+            "name": "runtimePackaged"
+          }
+        ],
+        "stateMapping": {
+          "unlocked/packaged/enabled/lifecycle/lastDecision": "ResidentScheduleRearm.decide full ordered decision table",
+          "running/epoch/starts": "admitAndStart synchronized decision/start and surrounding lifecycle ownership",
+          "deferred/failedStarts": "an admitted start the service refuses (RuntimeException caught in ResidentScheduleReceiver), deferred to a later broadcast or foreground launch"
+        },
+        "abstractions": [
+          "Five broadcast classes, three lifecycle generations, three actual process starts and two refused starts.",
+          "Decision and start are atomic under the same lock, matching admitAndStart. A canary shows the forbidden split-admission interleaving.",
+          "First-unlock state differs from screen lock. Occurrence execution and occurrence recovery belong to the shared runtime and are not modeled here.",
+          "foregroundLaunch stands for the app starting an admissible resident when it is next opened."
+        ]
+      },
+      "unset": []
+    },
+    {
+      "module": "Calendar",
+      "set": {
+        "abstractions": [
+          "Historical current/proposed design comparison at source ef9fbf7cd7, not a runtime conformance claim.",
+          "All original state variables are fields of s; immutable Design selects behavior; record spreads preserve the original frame conditions.",
+          "Finite domains and numeric constants are unchanged from the original model configuration.",
+          "Persistent history booleans monitor the original action properties without restricting transitions; TLC checks the equivalent invariants and temporal monitor formulas.",
+          "Keep mine after Google reports the event gone: the design model keeps the change, the runtime drops it whatever the choice. CalendarSync (goneAnswer, GoneOnlyDrops) models the runtime.",
+          "RSVP is enabled in the design model and capability-gated off in the runtime until Cloud supports it.",
+          "One Undo slot: several deletes with their own Undo windows, which the runtime allows, are outside this model and covered per operation by CalendarSync.",
+          "OutboxDrains holds for the design model under its fairness assumptions only. The runtime phases paused, uncertain and failed leave only by an owner action and are not in this model."
+        ]
+      },
+      "unset": []
+    }
+  ],
+  "readme": [
+    {
+      "family": "services",
+      "module": "CalendarSync",
+      "sourceSymbols": "`GoogleCalendarOutbox.claim`, `settle`, `recoverStale`, `retryPermission`, `resolvePaused`, `googleCalendarChangeApplied`, `googleCalendarCreateMatch`, `offerPaused`",
+      "modeledState": "phase/kind/holder/sending, deadline/pause/offer/decision, base and remote revision with missing and gone events, lost answers and own writes, permission failure and retry, uncertain create matching, linked-sync consent"
+    },
+    {
+      "family": "services",
+      "module": "GoogleCalendarReader",
+      "sourceSymbols": "`installGoogleCalendarViewAdapter` `refresh`, `reset`, `epoch`, `attempted`, `loaded`, `cachedRead`, `connectOffered`",
+      "modeledState": "identity, request key, read epoch, saved read shown first, rows bound to the identity they were read for, Connect offered when no account grants Calendar"
+    },
+    {
+      "family": "services",
+      "module": "CalendarLinkedSync",
+      "sourceSymbols": "`CalendarSyncController.review`, `enable`, `pause`, `sync`, `cancel`",
+      "modeledState": "one serialized operation, exact-review enable, opt-in checked around each provider request, row states clean/dirty/conflicted/quarantined/paused"
+    },
+    {
+      "family": "services",
+      "module": "CalendarOutboxScheduling",
+      "sourceSymbols": "`GoogleCalendarOutbox.attach`, `flush`, `schedule`, `nextWake`",
+      "modeledState": "attached views and their lifetime, the single running send, a request waiting behind a stopped send, the wake timer"
+    },
+    {
+      "family": "application",
+      "module": "CalendarPresentation",
+      "sourceSymbols": "`calendar-views`, `calendar-days` (`calendarSavedDay`), `calendar-month-focus`, `googleCalendarAccountLeftPatch`, Google Calendar selection",
+      "modeledState": "Selected month/day, shell-then-view Back order, latest-wins read tokens, confirmed save and the day it shows, visible calendars, known access against the provider grant, Google surfaces closed when their account leaves"
+    },
+    {
+      "family": "application",
+      "module": "CalendarDeviceWrites",
+      "sourceSymbols": "`installCalendarAdapter` save, `saveOptions`, `checkCreations`, `deleteSelection`, `calendarSaving`, `calendarWriteUncertain`",
+      "modeledState": "Creation receipts (unknown, saved, acknowledged), explicit separate creation, the single write in progress, superseded forms, the unconfirmed-write latch and its clearing read, inspect-then-delete"
+    },
+    {
+      "family": "application",
+      "module": "CalendarAgentSelection",
+      "sourceSymbols": "`calendarSelection`, `agentSelection`, `agentSelectionKey`, `agentSelectionEpoch`",
+      "modeledState": "The inspected open event or prepared calendar source exposed to the assistant, retired by an epoch on every read, close and new form"
+    },
+    {
+      "family": "application",
+      "module": "ReminderIntents",
+      "sourceSymbols": "`retainReminderCreation`, `retireRefusedCreation`, `checkReminderCreation`, `retainReminderDeletion`, `acknowledgeReminderDeletion`, `reconcileReminderDeletions`",
+      "modeledState": "Creation records pending/found within a bounded history, operation records until a succeeded receipt, read-only recovery, and the records nothing can resolve"
+    },
+    {
+      "family": "application",
+      "module": "ReminderTapTokens",
+      "sourceSymbols": "`checkReminderTap`, `pendingReminderTap`, `consumeReminderTap`, `releaseReminderQuestion`",
+      "modeledState": "Native pending tap token, one check at a time with a queued explicit request, interaction fence, consume only after the exact detail is shown"
+    },
+    {
+      "family": "application",
+      "module": "ReminderRefresh",
+      "sourceSymbols": "`refreshReminders`, `reminderRefreshGeneration`, `pendingReminderOpenId`",
+      "modeledState": "Newest refresh publishes, device rows published even when the reminder store fails, stale marking, navigation intent kept until a successful refresh"
+    },
+    {
+      "family": "application",
+      "module": "ClockHandoff",
+      "sourceSymbols": "`installClockAdapter` `dispatch`, `restore`, `retireReview`, `createClockHandoffHistory`",
+      "modeledState": "Review identity, view and history generations, durable opening/result record, retired review never handed off, no replay"
+    },
+    {
+      "family": "application",
+      "module": "BrowserAlarmRinging",
+      "sourceSymbols": "`BrowserClock.poll`, `ring`, `retire`, `alpha.browser.alarm-owner` lock",
+      "modeledState": "Two pages, one lock holder that owns and rings, release when hidden or nothing rings, sound limited per ring"
+    },
+    {
+      "family": "application",
+      "module": "DayAnchor",
+      "sourceSymbols": "`msToLocalMidnight` timer, `mapEvent`, `reminderEvents`, `calendarDraftAnchor`, `calendarEditDraftAnchor`",
+      "modeledState": "Today, row offsets and the day they were read, the midnight refresh, re-anchoring of retained forms, forms with no retained identity"
+    },
+    {
+      "family": "native",
+      "module": "ResidentScheduling",
+      "sourceSymbols": "`ResidentScheduleRearm.decide`, `admitAndStart`, `ResidentScheduleReceiver.onReceive`",
+      "modeledState": "Ordered admission decision, lifecycle lock, starts, and an admitted start the service refuses and defers"
+    }
+  ]
+}
