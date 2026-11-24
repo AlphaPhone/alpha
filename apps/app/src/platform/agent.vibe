@@ -40,6 +40,18 @@ export interface Reached extends Remote {
   feed(topic: AgentTopic, clientId?: string): Stream.Stream<unknown, Unsent>
   /** The agent as the phone's host runs it, which the account area starts, stops and brings back after a failure. */
   readonly life: Life
+  /** This phone as a device the agent enrolled: what each request of eliza's client carries, and when a turn ended. */
+  readonly device: Enrolled
+}
+
+/**
+ * The phone's enrollment as eliza's client carries it: once the phone has enrolled, every request names it, so the
+ * agent's turns may propose what the phone can do. `turned` says each time a message posted to a conversation has had
+ * its whole answer, however it ended, so that the proposals of that turn are read.
+ */
+export interface Enrolled {
+  carry(headers: RuntimeRequestHeaders): void
+  readonly turned: Stream.Stream<void>
 }
 
 /**
@@ -128,6 +140,44 @@ function framed(opened: Opened!(Unsent | Unreachable)!Scope.Scope, signal?: Abor
   return Stream.toAsyncIterable(Stream.interruptWhen(Stream.catch(frames, () => Stream.succeed<RuntimeStreamFrame>({ kind: "error" })), withdrawn))
 }
 
+module turning {
+  /** Whether `path` posts a message to a conversation: a turn of the agent's. @throws {never} */
+  export function isTurn(path: string): boolean {
+    const [, api, conversations, id, messages, stream, ...rest] = path.split("?")[0].split("/")
+    return api === "api" && conversations === "conversations" && id !== "" && id !== "messages" && messages === "messages" && (stream === undefined || stream === "stream") && rest.length === 0
+  }
+
+  /** `body` as it is read, saying `ended` once, when the reader finishes it, stops reading or it fails. @throws {never} */
+  export function endingWith(body: AsyncIterable<Uint8Array>, ended: () => void): AsyncIterable<Uint8Array> {
+    let said = false
+    const once = () => {
+      if (said) return
+      said = true
+      ended()
+    }
+    return {
+      [Symbol.asyncIterator]() {
+        const chunks = body[Symbol.asyncIterator]()
+        return {
+          async next() {
+            const step = await chunks.next().catch((cause: unknown) => {
+              once()
+              throw cause
+            })
+            if (step.done === true) once()
+            return step
+          },
+          async return() {
+            once()
+            return (await chunks.return?.()) ?? { done: true, value: undefined }
+          },
+        }
+      },
+    }
+  }
+}
+import { endingWith, isTurn } from turning
+
 const posted = (input: { readonly path: string; readonly body?: unknown }) =>
   input.body === undefined ? HttpClientRequest.post(input.path) : HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(input.path), input.body)
 
@@ -165,11 +215,28 @@ function httpBridge(direct: Wired): RuntimeJsonBridge {
  * stream that is not a POST) goes to `direct`.
  */
 function over(bridge: RuntimeJsonBridge, direct: Remote, feed: Reached["feed"], life: Life): Reached {
-  const runtime = createRuntimeJsonClient({ bridge: () => bridge, ...waits })
+  const client = createRuntimeJsonClient({ bridge: () => bridge, ...waits })
+  const turns = Effect.runSync(PubSub.unbounded<void>())
+  const ended = () => { Effect.runFork(PubSub.publish(turns, undefined)) }
+  let device: RuntimeRequestHeaders = {}
+  const runtime: Runtime = {
+    request: (path, body, headers) => {
+      const answer = client.request(path, body, { ...device, ...headers })
+      if (body !== undefined && isTurn(path)) void answer.then(ended, ended)
+      return answer
+    },
+    stream: async (path, body, signal, headers) => {
+      const opened = await client.stream(path, body, signal, { ...device, ...headers })
+      return isTurn(path) ? { ...opened, body: endingWith(opened.body, ended) } : opened
+    },
+    refreshNativeAccount: () => client.refreshNativeAccount(),
+    get requestBodyLimit() { return client.requestBodyLimit },
+  }
   return {
     runtime,
     feed,
     life,
+    device: { carry: (headers) => { device = headers }, turned: Stream.fromPubSub(turns) },
     effect call(request: HttpClientRequest.HttpClientRequest): unknown!Failure {
       const sent = try plain(request)
       if (Option.isNone(sent)) return try direct.call(request)

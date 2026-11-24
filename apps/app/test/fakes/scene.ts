@@ -60,11 +60,11 @@ export function services(world: Scene) {
   return {
     agent: answering([
       health,
+      ...telephonyRoutes(world.telephony),
       ...sampleRoutes(world.sample),
       ...askRoutes(world.ask),
       ...calendarRoutes(world.calendar),
       ...platformRoutes(world.platform),
-      ...telephonyRoutes(world.telephony),
     ]),
     cloud: answering([
       ...cloudRoutes(),

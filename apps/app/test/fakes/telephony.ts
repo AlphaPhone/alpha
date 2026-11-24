@@ -61,7 +61,17 @@ export interface TelephonyScene {
   /** What the agent's reply drafter answers: one draft, or none; and every thread it was asked about. */
   replyDraft: string | null;
   readonly asked: unknown[];
+  readonly desk: Desk;
 }
+
+/** A proposal of the agent's for this phone, as its device API keeps it, with the receipt the phone sent for it. */
+export interface Proposed { id: string; digest: string; state: "pending" | "approved" | "executing" | "done" | "rejected"; operation: unknown; receipt?: unknown }
+
+/**
+ * eliza's device API, as the agent answers the phone that enrolled with it (`.eliza/packages/agent/src/device-actions`):
+ * the key it enrolled under, the operations the next turn that names that enrollment proposes, and every proposal.
+ */
+export interface Desk { key: string | undefined; capabilities: string; offers: unknown[]; proposals: Proposed[] }
 
 const versionOf = (id: string, revision: number) => createHash("sha256").update(`${id}:${revision}`).digest("hex");
 
@@ -100,12 +110,71 @@ export function telephonyScene(): TelephonyScene {
     hold: undefined,
     replyDraft: "Five works, see you there",
     asked: [],
+    desk: { key: undefined, capabilities: "", offers: [], proposals: [] },
   };
+}
+
+const agentId = "00000000-0000-4000-8000-00000000a1fa";
+
+/** Whether `request` names the enrollment the desk holds. */
+const enrolled = (desk: Desk, request: Request) =>
+  desk.key !== undefined && request.headers.get("x-eliza-device-id") === agentId && request.headers.get("x-eliza-device-key") === desk.key;
+
+/** The desk's answer to a step on a proposal: the proposal it names, when the digest is the one the phone was shown and it is at `stage`. */
+function step(desk: Desk, request: Request, url: URL, name: string, stage: Proposed["state"], moved: (one: Proposed, body: Record<string, unknown>) => Response) {
+  const id = new RegExp(`^/api/client-devices/proposals/([^/]+)/${name}$`).exec(url.pathname)?.[1];
+  if (request.method !== "POST" || id === undefined) return undefined;
+  if (!enrolled(desk, request)) return Response.json({ error: "device_unauthorized" }, { status: 401 });
+  return request.json().then((body: Record<string, unknown>) => {
+    const one = desk.proposals.find((proposal) => proposal.id === decodeURIComponent(id));
+    return one === undefined || one.digest !== body.digest || one.state !== stage ? Response.json({ error: `${name}_refused` }, { status: 409 }) : moved(one, body);
+  });
+}
+
+/** eliza's device API over `desk`: the agent's id, enrollment, the proposals a turn made, and the decision, claim and receipt of each. */
+function deskRoutes(desk: Desk): Route[] {
+  return [
+    (request, url) => (request.method === "GET" && url.pathname === "/api/agents" ? Response.json({ agents: [{ id: agentId, name: "Alpha", status: "running" }] }) : undefined),
+    (request, url) => {
+      if (request.method !== "POST" || url.pathname !== "/api/client-devices/register") return undefined;
+      const key = request.headers.get("x-eliza-device-key") ?? "";
+      if (request.headers.get("x-eliza-device-id") !== agentId || !/^[a-f0-9]{64}$/.test(key)) return Response.json({ error: "device_unauthorized" }, { status: 401 });
+      if (desk.key !== undefined && desk.key !== key) return Response.json({ error: "registration_refused" }, { status: 409 });
+      desk.key = key;
+      desk.capabilities = request.headers.get("x-eliza-device-capabilities") ?? "";
+      return Response.json({ installationId: agentId, enrollmentId: "enrolled-1", capabilities: [], viewProfileVersion: 1 });
+    },
+    (request, url) => {
+      if (request.method !== "POST" || !/^\/api\/conversations\/[^/]+\/messages(\/stream)?$/.test(url.pathname) || !enrolled(desk, request)) return undefined;
+      for (const operation of desk.offers.splice(0)) desk.proposals.push({ id: `proposal-${desk.proposals.length + 1}`, digest: `${desk.proposals.length + 1}`.padStart(64, "d"), state: "pending", operation });
+      return undefined;
+    },
+    (request, url) => {
+      if (request.method !== "GET" || url.pathname !== "/api/client-devices/proposals") return undefined;
+      if (!enrolled(desk, request)) return Response.json({ error: "device_unauthorized" }, { status: 401 });
+      return Response.json({ proposals: desk.proposals.map(({ id, digest, state, operation }) => ({ id, digest, state, payload: { operation } })) });
+    },
+    (request, url) => step(desk, request, url, "decision", "pending", (one, body) => {
+      one.state = body.decision === "approve" ? "approved" : "rejected";
+      return Response.json({ proposal: { id: one.id, state: one.state } });
+    }),
+    (request, url) => step(desk, request, url, "claim", "approved", (one) => {
+      one.state = "executing";
+      return Response.json({ proposal: { id: one.id, state: one.state, execution: { attemptId: `attempt-${one.id}` } } });
+    }),
+    (request, url) => step(desk, request, url, "receipt", "executing", (one, body) => {
+      if (body.attemptId !== `attempt-${one.id}`) return Response.json({ error: "receipt_refused" }, { status: 409 });
+      one.state = "done";
+      one.receipt = body.receipt;
+      return Response.json({ proposal: { id: one.id, state: one.state } });
+    }),
+  ];
 }
 
 /** The resident agent's reply drafter, over `world`: it answers one draft for the open conversation, and sends nothing. */
 export function telephonyRoutes(world: TelephonyScene): Route[] {
   return [
+    ...deskRoutes(world.desk),
     (request, url) => {
       if (request.method !== "POST" || url.pathname !== "/api/messages/reply-draft") return undefined;
       return request.json().then((thread: unknown) => {

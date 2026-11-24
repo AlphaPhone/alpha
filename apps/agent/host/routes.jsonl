@@ -8,6 +8,12 @@
 { "method": "POST", "path": "/api/conversations/{id}/fork" }
 { "method": "POST", "path": "/api/turns/{roomId}/abort" }
 { "method": "GET", "path": "/api/client-devices/capabilities" }
+{ "method": "GET", "path": "/api/agents" }
+{ "method": "POST", "path": "/api/client-devices/register" }
+{ "method": "GET", "path": "/api/client-devices/proposals" }
+{ "method": "POST", "path": "/api/client-devices/proposals/{id}/decision" }
+{ "method": "POST", "path": "/api/client-devices/proposals/{id}/claim" }
+{ "method": "POST", "path": "/api/client-devices/proposals/{id}/receipt" }
 { "method": "GET", "path": "/api/approvals" }
 { "method": "POST", "path": "/api/approvals/{id}/resolve" }
 { "method": "GET", "path": "/api/lifeops/calendar/feed" }

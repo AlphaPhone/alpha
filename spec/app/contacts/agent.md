@@ -9,9 +9,25 @@ contact always lets the owner pick the exact number, even when only one was
 found. A call the owner
 approves is handed to the phone's dialer, as in [Phone](../phone/); a text is
 sent once, as in [Sending](../messages/sending.md); a contact change is
-written as in [Contacts](./). A text the agent only drafts is
-[Alpha's suggestion](../messages/composer.md), which never sends. The agent is told only how its
-request ended.
+written as in [Contacts](./). Every text the agent asks for is shown here
+first, a draft and one the agent marks as needing no review alike: nothing
+is sent until the owner approves it on this card. [Alpha's
+suggestion](../messages/composer.md) in the composer is the owner's own
+draft, which only the owner's Send sends. The agent is told only how its
+request ended, and a text the phone settled is never offered for approval
+again.
+
+The phone enrolls with the agent under its own key, kept in the secure
+store, and every request it makes carries that enrollment and the texts it
+can send. The agent's proposals for this phone are read after each turn
+ends, and when a request ends; each pending text is asked here, one at a
+time, under the proposal it came as. The agent's telephony grounding offers
+only a number the owner wrote, so a proposed number counts as written. The
+owner's approval is first recorded with the agent and claimed for this
+phone; only then is the text sent, under the proposal's own operation ID,
+and the phone's send record goes back to the agent as its receipt. A request
+that ends before an approval is declined to the agent, so nothing it never
+ran stays waiting.
 
 ## Domain
 

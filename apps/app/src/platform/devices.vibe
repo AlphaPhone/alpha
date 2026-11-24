@@ -1,0 +1,96 @@
+// spec/app/contacts/agent.md, "Story: Let the agent ask for a call or a contact change"; spec/app/contacts/agent.md, "Story: Learn how the request ended"
+import { capabilitiesHeader, type DeviceReceipt } from "@elizaos/agent/operations"
+import { Agent, type Reached } from "./agent.vibe"
+import { type Failure, ask } from "./remote.vibe"
+import { Vault } from "./vault.vibe"
+
+/** What this phone carries out for the agent: a text to one number, which the owner approves on its card. */
+const capabilities = ["sms.compose.v1", "sms.compose.v2", "sms.send.v1"]
+
+module web {
+  /** 32 random bytes as 64 lowercase hexadecimal digits: the enrollment key the agent hashes. @throws {never} */
+  export function freshKey(): string {
+    return [...crypto.getRandomValues(new Uint8Array(32))].map((byte) => byte.toString(16).padStart(2, "0")).join("")
+  }
+}
+import { freshKey } from web
+
+schema Known { readonly id: string }
+schema Agents { readonly agents: Known[] }
+schema Registered { readonly enrollmentId: string }
+schema Listed { readonly proposals: Schema.Unknown[] }
+schema Execution { readonly attemptId: string }
+schema Executing { readonly execution: Execution }
+schema Claimed { readonly proposal: Executing }
+
+schema Payload { readonly operation: Schema.Unknown }
+/** One proposal of the agent's for this phone, as its device API lists it: the operation is untrusted until read. */
+schema Row { readonly id: Schema.NonEmptyString; readonly digest: Schema.NonEmptyString; readonly state: string; readonly payload: Payload }
+
+/** A proposal of the agent's, as its decision, claim and receipt name it. */
+export interface Proposal {
+  readonly id: string
+  readonly digest: string
+}
+
+/** The key this phone enrolled under: the one the secure store keeps, or a new one kept there first; none where there is no secure store. */
+effect function enrollmentKey(): (Redacted.Redacted<string> | undefined)!!Vault {
+  const vault = try Vault
+  return effect {
+    const kept = try vault.read("agent-device")
+    if (Option.isSome(kept)) return kept.value
+    try vault.write("agent-device", Redacted.make(freshKey()))
+    return Option.getOrUndefined(try vault.read("agent-device"))
+  } catch () => undefined
+}
+
+/** No request names an enrollment any more. */
+function unenrolled(agent: Reached): boolean {
+  agent.device.carry({})
+  return false
+}
+
+/**
+ * Enroll this phone with the agent under its key, so every request after names it and the agent may propose the texts
+ * it can send. Answers whether the agent took the enrollment; where it did not, no request names one.
+ */
+export effect function enroll(): boolean!!(Agent | Vault) {
+  const agent = try Agent
+  const key = try enrollmentKey()
+  if (key === undefined) return false
+  return effect {
+    const { agents } = try ask(Agent, HttpClientRequest.get("/api/agents"), Agents)
+    const [one] = agents
+    if (one === undefined) return unenrolled(agent)
+    agent.device.carry({ "x-eliza-device-id": one.id, "x-eliza-device-key": Redacted.value(key), [capabilitiesHeader]: capabilities.join(",") })
+    try ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/client-devices/register"), { label: "Alpha", capabilities }), Registered)
+    return true
+  } catch () => unenrolled(agent)
+}
+
+/** The agent's proposals for this phone still waiting for the owner, each with its operation as the agent wrote it. */
+export effect function waiting(): ReadonlyArray<Proposal & { readonly operation: unknown }>!!Agent {
+  const listed = ask(Agent, HttpClientRequest.get("/api/client-devices/proposals"), Listed) catch () => undefined
+  return (listed?.proposals ?? []).flatMap((raw) => {
+    const row = Schema.decodeUnknownOption(Row)(raw)
+    return Option.isSome(row) && row.value.state === "pending" ? [{ id: row.value.id, digest: row.value.digest, operation: row.value.payload.operation }] : []
+  })
+}
+
+const at = (proposal: Proposal, step: string) => `/api/client-devices/proposals/${encodeURIComponent(proposal.id)}/${step}`
+
+/** Record the owner's decision with the agent: an approval as it was shown, or that nothing will run. */
+export effect function decide(proposal: Proposal, approved: boolean): void!Failure!Agent {
+  try ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(at(proposal, "decision")), { digest: proposal.digest, decision: approved ? "approve" : "reject" }), Schema.Unknown)
+}
+
+/** Claim an approved proposal for this phone, before it is carried out: the attempt its receipt names. */
+export effect function claim(proposal: Proposal): string!Failure!Agent {
+  const { proposal: claimed } = try ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(at(proposal, "claim")), { digest: proposal.digest }), Claimed)
+  return claimed.execution.attemptId
+}
+
+/** Tell the agent how the claimed attempt ended, as the phone's own record says. */
+export effect function receipt(proposal: Proposal, attemptId: string, told: DeviceReceipt): void!Failure!Agent {
+  try ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(at(proposal, "receipt")), { digest: proposal.digest, attemptId, receipt: told }), Schema.Unknown)
+}

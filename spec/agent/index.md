@@ -131,7 +131,10 @@ the host file's route list. Ask Alpha opens its conversation with
 streamed and asks the agent to stop a turn by its room. The assistant
 (`apps/app/src/assistant/assistant.vibe`) lists conversations, reads a
 conversation's messages, forks one, searches messages, asks the agent's
-health and which device steps it takes; Home and Calendar
+health and which device steps it takes; Contacts
+(`apps/app/src/platform/devices.vibe`, `apps/app/src/contacts/requests.vibe`)
+reads the agent's id, enrolls the phone, lists the agent's proposals for it
+and records the owner's decision, its claim and its receipt; Home and Calendar
 (`apps/app/src/home/cards.vibe`, `apps/app/src/calendar/agent.vibe`) read the
 calendar feed and the calendars and create, change, answer and delete
 events through the calendar plugin; the approvals area lists the agent's
@@ -154,6 +157,12 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/conversations/{id}/fork", stream: false },
   { method: Post, path: "/api/turns/{roomId}/abort", stream: false },
   { method: Get, path: "/api/client-devices/capabilities", stream: false },
+  { method: Get, path: "/api/agents", stream: false },
+  { method: Post, path: "/api/client-devices/register", stream: false },
+  { method: Get, path: "/api/client-devices/proposals", stream: false },
+  { method: Post, path: "/api/client-devices/proposals/{id}/decision", stream: false },
+  { method: Post, path: "/api/client-devices/proposals/{id}/claim", stream: false },
+  { method: Post, path: "/api/client-devices/proposals/{id}/receipt", stream: false },
   { method: Get, path: "/api/approvals", stream: false },
   { method: Post, path: "/api/approvals/{id}/resolve", stream: false },
   { method: Get, path: "/api/lifeops/calendar/feed", stream: false },
