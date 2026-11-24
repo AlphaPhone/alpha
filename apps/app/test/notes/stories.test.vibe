@@ -102,6 +102,24 @@ describe("Notes stories", () => {
     }
   })
 
+  it.effect("A group moves to Trash and its exact deletion rows can be undone together (spec/notes/trash.md, \"Story: Recover a deleted note\")", () => effect {
+    const agent = seeded(note("first", "First", "", 1), note("second", "Second", "", 2))
+    provide notesOver(agent, new DeviceFake()) {
+      const editor = try NotesEditor
+      const trash = try NotesTrash
+      const collection = try CollectionMachine
+      try bound()
+      const owner = (try collection.get()).owner
+      const deleted = try editor.removeSelected(["first", "second"], owner, new AbortController().signal)
+      try trash.deleted()
+      const restored = try trash.undoSelected(deleted, owner)
+      try check(() => assert.deepStrictEqual(
+        [deleted.map((entry) => entry.id), restored, agent.notes.map((item) => item.id).sort(), agent.trash.length],
+        [["first", "second"], "restored", ["first", "second"], 0],
+      ))
+    }
+  })
+
   it.effect("A checklist written as text reads back with every item and tick (spec/notes/list.md, \"Story: Turn text into a checklist and back\")", () => effect {
     // spec/notes/list.md, "A checked item is written with an [x] mark, and an unchecked item that looks marked gets an empty mark"
     const items = [{ t: "Milk", done: true }, { t: "[x] on the label", done: false }, { t: "Eggs", done: false }]

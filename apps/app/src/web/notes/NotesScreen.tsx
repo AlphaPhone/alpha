@@ -59,6 +59,7 @@ export function NotesScreen({ onClose }: NotesScreenProps) {
   const requestedFilter = useServiceStream("notes.requestedFilters", Effect.map(Effect.service(NotesHandoff), requestedFilters), undefined);
   const receipt = useServiceStream("notes.documentReceipts", Effect.map(Effect.service(NotesShare), documentReceipts), undefined);
   const foldersLayer = useLayer("notes-folders");
+  const selectionLayer = useLayer("notes-selection", "SheetLayer", false);
   const state = collection.state ?? collectionInitial;
   const earlierNotesAvailable = state.owner > 0 && now(Effect.flatMap(Effect.service(Native), (native) => native.available("AlphaConnection")), false);
   const snapshot = owned?.snapshot;
@@ -77,6 +78,6 @@ export function NotesScreen({ onClose }: NotesScreenProps) {
         finish: recorderMachine.can({ type: "finishRecording" }), discard: recorderMachine.can({ type: "discardRecording" }), askDiscard: recorderMachine.can({ type: "askDiscard" }),
         retry: recorderMachine.can({ type: "beginRecording", viaControl: false }),
       }}
-      foldersLayer={foldersLayer} call={call} />
+      foldersLayer={foldersLayer} selectionLayer={selectionLayer} call={call} />
   );
 }
