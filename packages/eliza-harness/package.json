@@ -11,6 +11,7 @@
   },
   "exports": {
     "./checkout": "./src/checkout.ts",
+    "./pack": "./src/pack.ts",
     "./services": "./src/services.ts",
     "./serve": "./src/serve.ts",
     "./setup": "./src/setup.ts",
