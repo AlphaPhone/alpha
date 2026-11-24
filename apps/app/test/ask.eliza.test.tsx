@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { afterEach, beforeAll, expect, it } from "vitest";
 import { Machine as Ask } from "../gen/app__ask.effect.vibe";
+import type { Mount } from "../src/areas.ts";
 import ask from "../src/ask/index.tsx";
 import { Agent } from "../src/platform/agent.vibe";
 import { Cloud } from "../src/platform/cloud.vibe";
@@ -19,12 +20,15 @@ beforeAll(async () => {
 }, 600_000);
 afterEach(closeAll);
 
+/** The worked example at Ask Alpha's place, which only its own journeys mount. */
+const asked: Mount[] = [{ at: "assistant", load: () => import("../src/ask/index.tsx") }];
+
 const lines = () => [...document.querySelectorAll("section[aria-label='Ask Alpha'] ol li")].map((line) => line.textContent);
 
 // spec/app/ask/index.md, "Story: Talk to my agent"
 it("Talk to my agent, through eliza's agent and cloud (spec/app/ask/index.md, \"Story: Talk to my agent\")", async () => {
   expect([mine.key.mailed, mine.key.accountId === "", mine.agent.token === ""]).toEqual([expect.stringMatching(/^\d{6}$/), false, false]);
-  const { alpha } = await openOver(elizaWorld(mine));
+  const { alpha } = await openOver(elizaWorld(mine), asked);
   const asking = ask.runtime(alpha);
   const balance = async () => (await alpha.runtime.runPromise(Effect.flatMap(Cloud, (cloud) => Effect.promise(() => cloud.client.snapshot())))).balance.usdMicros;
   expect(await balance()).toBe(mine.granted);

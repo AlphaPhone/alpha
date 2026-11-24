@@ -27,7 +27,6 @@ export const first = (place: Place, screen: Area): Mount => ({ at: place, load: 
 /** Every screen of Alpha and where it is drawn: one line each, in the order a place draws them. Lines are only ever added. */
 export const mounts: readonly Mount[] = [
   first("home", home),
-  at("assistant", () => import("./ask/index.tsx")),
   at("notice", () => import("./shell/Notices.tsx")),
   at("assistant", () => import("./assistant/index.tsx")),
   at("view:Settings", () => import("./settings/index.tsx")),
