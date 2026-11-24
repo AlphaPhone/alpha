@@ -95,8 +95,8 @@ export interface WorkflowsScreenViewProps {
   removedRows?: ReadonlyArray<Row> | "unavailable";
   /** The on or off the owner is reviewing for the open workflow. */
   activation?: boolean;
-  /** What the agent said about the last on or off. */
-  activeOutcome?: ChangeOutcome;
+  /** What the agent said about the last on or off, and which it was. */
+  activeOutcome?: { on: boolean; outcome: ChangeOutcome };
   runOutcome?: RunOutcome;
   /** What the last workflow change ended as. */
   change?: ChangeOutcome;
@@ -215,10 +215,14 @@ export function WorkflowsScreenView({
               ? "It runs on its schedule from now on, at the version you see. A workflow you run by hand stays off."
               : "It stops running on its schedule until you turn it on again."}</p>
           </ReviewDialog>
-          {activeOutcome !== undefined && activeOutcome !== "saved" && (
-            <Alert variant="warn" role="status" className="mx-4 text-sm">{activeOutcome === "refused"
-              ? "Your agent didn’t make this change. A workflow you run by hand can’t be turned on."
-              : "Your agent didn’t confirm this change. Check the workflow before trying again."}</Alert>
+          {activeOutcome !== undefined && activeOutcome.outcome !== "saved" && (
+            <Alert variant="warn" role="status" className="mx-4 text-sm">{activeOutcome.outcome === "changed"
+              ? activeOutcome.on
+                ? "This workflow changed before its schedule was turned on. Nothing was enabled. Review the current version first."
+                : "This workflow changed before it was paused. Nothing was changed. Review the current version, then pause it again."
+              : activeOutcome.outcome === "refused"
+                ? "Your agent didn’t make this change. A workflow you run by hand can’t be turned on."
+                : "Your agent didn’t confirm this change. Check the workflow before trying again."}</Alert>
           )}
           {steps !== undefined && (
             <PhoneStepReview steps={steps} {...(sheet.step === undefined ? {} : { review: sheet.step })} canTap={can.tapStep} onTap={onTapStep} />

@@ -32,7 +32,7 @@ export const meta: ComponentMeta<WorkflowsScreenViewProps> = {
     Prompt: { place: atPrompt, history: [{ at: Date.parse("2026-11-22T07:00:00.000Z"), status: "success" }], report: { answer: "unknown", word: "not-confirmed" } },
     Workflow: { place: atWorkflow, runs: withHistory, lifecycle: lifecycleOpen, steps: stepWaiting, runOutput: "Three meetings today; dentist at 4." },
     TurnOnReview: { place: atWorkflow, runs: withHistory, lifecycle: lifecycleOpen, list: { ...listedWithWorkflow, rows: listedWithWorkflow.rows.map((r) => (r.kind === "WorkflowRow" ? { ...r, enabled: false } : r)) }, activation: true },
-    AnswerLost: { place: atWorkflow, runs: unknownRun, lifecycle: lifecycleKept, can: refusedGates, runOutcome: "unknown", change: "unknown", activeOutcome: "unknown" },
+    AnswerLost: { place: atWorkflow, runs: unknownRun, lifecycle: lifecycleKept, can: refusedGates, runOutcome: "unknown", change: "unknown", activeOutcome: { on: false, outcome: "unknown" } },
     RunNow: { place: atRunNow, digests: digestPanel, runNowReview: runNowOffer },
     AddSheet: { place: atAdding, clockOutcome: "unknown" },
     DraftSheet: { place: atDraft, authoring: draftReviewed, draftText: "Every weekday at 7, read my calendar aloud", described: { kind: "clarify", message: "Workflow needs clarification: which calendar should it read?" } },

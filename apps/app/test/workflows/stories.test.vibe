@@ -278,6 +278,30 @@ describe("Lifecycle (spec/workflows/lifecycle.md, \"Story: Remove a workflow onl
   })
 })
 
+describe("Switching (spec/workflows/lifecycle.md, \"A change is reviewed before it is kept, never while a run is going, and an interrupted run is stopped first\")", () => {
+  it.effect("a workflow changed since it opened is not paused, and is read again at its current version", () => effect {
+    const sent: Sent[] = []
+    let current = definition
+    const routes: Handler[] = [
+      statusRoute,
+      (m, p) => m === "GET" && p === "/api/workflow/workflows/w1" ? { status: 200, data: current } : undefined,
+      (m, p) => m === "GET" && p === "/api/workflow/workflows/w1/executions" ? { status: 200, data: { executions: [] } } : undefined,
+    ]
+    provide workflowsOf(routes, sent) {
+      const definitions = try WorkflowDefinitions
+      try definitions.open("w1")
+      const before = (try (try LifecycleMachine).get()).version
+      current = { ...definition, versionId: "v2" }
+      const outcome = try definitions.setActive("w1", false)
+      const after = (try (try LifecycleMachine).get()).version
+      try Effect.try(() => assert.deepStrictEqual(
+        { outcome, before, after, paused: sent.some((s) => s.method === "POST" && s.path.endsWith("/deactivate")) },
+        { outcome: "changed", before: 1, after: 2, paused: false },
+      ))
+    }
+  })
+})
+
 describe("Typed drafts (spec/workflows/authoring.md, \"Story: Describe a workflow and keep only what this phone can do\")", () => {
   it.effect("without the agent's phone catalog nothing is generated, and a save with no reviewed draft sends nothing (spec/workflows/authoring.md, \"Story: Save exactly the draft I reviewed, once\")", () => effect {
     const sent: Sent[] = []

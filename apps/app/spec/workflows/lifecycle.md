@@ -63,8 +63,9 @@ pure def open(l: Lifecycle, owner: str, workflowId: str, version: int, removed: 
 
 Removal is refused while a run is going; a run whose outcome is unknown is asked to stop before the
 removal is reviewed again (legacy `cancelReply`). Turning a workflow on or off is reviewed too, and
-goes at the version it was read at; a workflow that runs only when the owner taps Run is never turned
-on (legacy #1316, #1403).
+goes at the version on screen, the one read when the workflow opened: if the workflow changed since,
+the agent refuses, nothing changes, and the workflow is read again so the owner reviews the current
+version; a workflow that runs only when the owner taps Run is never turned on (legacy #1316, #1403).
 
 ```quint
 pure def canBeginReview(l: Lifecycle, op: LifeOp): bool =

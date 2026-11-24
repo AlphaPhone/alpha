@@ -18,7 +18,7 @@ export const DRAFT_BYTES_KEY = ownerKey("device", "workflows/draft-bytes")
 export const DRAFT_TEXT_KEY = ownerKey("device", "workflows/draft-text")
 
 /** What a definition change ended as, for the screen to word. */
-export type ChangeOutcome = "saved" | "replayed" | "refused" | "unknown" | "busy" | "cancelling"
+export type ChangeOutcome = "saved" | "replayed" | "refused" | "changed" | "unknown" | "busy" | "cancelling"
 
 /** What describing a workflow gave: a draft, or the refusal shown before anything was sent. */
 export type Described =
@@ -75,7 +75,7 @@ export service WorkflowDefinitions {
   resend(): ChangeOutcome!!
   /** Leave a review or a resend review; false when none was open, so Back is someone else's. */
   back(): boolean!!
-  /** Turn a workflow on or off at its current version; a manual typed workflow is never activated. */
+  /** Turn the open workflow on or off at the version on screen; a manual typed workflow is never activated, and a workflow changed since it opened is refused and read again. */
   setActive(workflowId: string, on: boolean): ChangeOutcome!!
   /** Describe a phone workflow; a refused description sends nothing. */
   describe(prompt: string): Described!!
@@ -215,6 +215,22 @@ export const definitions = Layer.provideMerge(Layer.provideMerge(Layer.effect(Wo
     return "unknown" satisfies ChangeOutcome
   }
 
+  effect function refreshNow() {
+    const state = try life.get()
+    if (state.workflowId === "") return
+    const read = (readDefinition(state.workflowId) catch () => undefined)
+    if (read === undefined) return
+    const kept = state.intent.mutation !== ""
+    const versionId = kept ? try seen.versionId(state.intent.workflowId, state.intent.fromVersion) : ""
+    const receipt = kept ? (effect {
+      return state.intent.op === "RenameOp"
+        ? try client.reconcileMetadata(state.intent.workflowId, versionId, state.intent.mutation)
+        : try client.reconcileLifecycle(state.intent.workflowId, versionId, state.intent.mutation, state.intent.op === "RemoveOp" ? "remove" : "restore")
+    } catch () => null) : null
+    life.send({ type: "refreshed", version: read.version, removed: read.workflow.removed, cleaned: read.workflow.triggerCleanup === "complete",
+      ongoing: read.ongoing, interrupted: read.interrupted, appliedThis: receipt !== null && read.version > state.intent.fromVersion }) catch () => undefined
+  }
+
   return {
     open,
     effect review(op: LifeOp) {
@@ -234,21 +250,7 @@ export const definitions = Layer.provideMerge(Layer.provideMerge(Layer.effect(Wo
       }
       return try send(true)
     },
-    effect refresh() {
-      const state = try life.get()
-      if (state.workflowId === "") return
-      const read = (readDefinition(state.workflowId) catch () => undefined)
-      if (read === undefined) return
-      const kept = state.intent.mutation !== ""
-      const versionId = kept ? try seen.versionId(state.intent.workflowId, state.intent.fromVersion) : ""
-      const receipt = kept ? (effect {
-        return state.intent.op === "RenameOp"
-          ? try client.reconcileMetadata(state.intent.workflowId, versionId, state.intent.mutation)
-          : try client.reconcileLifecycle(state.intent.workflowId, versionId, state.intent.mutation, state.intent.op === "RemoveOp" ? "remove" : "restore")
-      } catch () => null) : null
-      life.send({ type: "refreshed", version: read.version, removed: read.workflow.removed, cleaned: read.workflow.triggerCleanup === "complete",
-        ongoing: read.ongoing, interrupted: read.interrupted, appliedThis: receipt !== null && read.version > state.intent.fromVersion }) catch () => undefined
-    },
+    refresh: refreshNow,
     effect reviewResend() {
       return ((life.send({ type: "reviewResend" }) catch () => undefined)) !== undefined
     },
@@ -261,11 +263,18 @@ export const definitions = Layer.provideMerge(Layer.provideMerge(Layer.effect(Wo
       return ((life.send({ type: "back" }) catch () => undefined)) !== undefined
     },
     effect setActive(workflowId: string, on: boolean) {
+      const opened = try life.get()
+      if (!opened.opened || opened.workflowId !== workflowId) return "unknown" satisfies ChangeOutcome
+      const shown = try seen.versionId(workflowId, opened.version)
       const workflow = (client.detail(workflowId) catch () => undefined)
-      if (workflow === undefined) return "unknown" satisfies ChangeOutcome
+      if (workflow === undefined || shown === "") return "unknown" satisfies ChangeOutcome
       if (on && manualTyped(workflow)) return "refused" satisfies ChangeOutcome
-      const answer = (effect { return try (on ? client.activate(workflowId, workflow.versionId) : client.pause(workflowId, workflow.versionId)) } catch (error) =>
-        error instanceof WorkflowActivationRejected || error instanceof WorkflowPauseRejected ? "refused" : "unknown")
+      const answer = workflow.versionId !== shown ? "changed" : (effect { return try (on ? client.activate(workflowId, shown) : client.pause(workflowId, shown)) } catch (error) =>
+        error instanceof WorkflowActivationRejected || error instanceof WorkflowPauseRejected ? "changed" : "unknown")
+      if (answer === "changed") {
+        try refreshNow()
+        return answer satisfies ChangeOutcome
+      }
       if (typeof answer === "string") return answer
       return answer.id === workflowId && answer.active === on ? "saved" : "unknown"
     },

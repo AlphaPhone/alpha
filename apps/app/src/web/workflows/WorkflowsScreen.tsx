@@ -73,7 +73,7 @@ export function WorkflowsScreen({ onClose }: WorkflowsScreenProps) {
   const [clockOutcome, setClockOutcome] = useState<ClockOutcome | undefined>(undefined);
   const [activation, setActivation] = useState<boolean | undefined>(undefined);
   const [removedRows, setRemovedRows] = useState<ReadonlyArray<Row> | "unavailable" | undefined>(undefined);
-  const [activeOutcome, setActiveOutcome] = useState<ChangeOutcome | undefined>(undefined);
+  const [activeOutcome, setActiveOutcome] = useState<{ on: boolean; outcome: ChangeOutcome } | undefined>(undefined);
   const list = automations.state;
   const held = list?.held.find((h) => h.owner === list.owner);
   const where = place.state ?? placeStart;
@@ -190,7 +190,7 @@ export function WorkflowsScreen({ onClose }: WorkflowsScreenProps) {
         const workflowId = where.target;
         setActivation(undefined);
         void perform(WorkflowDefinitions.use((d) => d.setActive(workflowId, on))).then((outcome) => {
-          setActiveOutcome(outcome);
+          setActiveOutcome({ on, outcome });
           void perform(Automations.use((a) => a.refresh()));
         });
       }}
