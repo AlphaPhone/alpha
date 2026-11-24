@@ -1,4 +1,4 @@
-// spec/account/signIn.md, "Email works while readiness is unknown; Google and text messages need their own readiness"; spec/account/signIn.md, "A second verification the host kept after its wait ended is offered once the host resumes it"; spec/account/session.md, "A signed-in account is the one Cloud named for the saved key"; spec/account/signIn.md, "Terms are the service's published plain text, or nothing"
+// spec/account/signIn.md, "Email works while readiness is unknown; Google and text messages need their own readiness"; spec/account/signIn.md, "A second verification the host kept after its wait ended is offered once the host resumes it"; spec/account/session.md, "A signed-in account is the one Cloud named for the saved key"; spec/account/signIn.md, "Terms are the service's published plain text, or nothing"; spec/account/signIn.md, "Back during a verification adopts a key the host already stored"
 
 /** The host's `status()` answer: which methods are ready, and whether a saved key awaits Cloud's confirmation. */
 export schema HostStatus {
@@ -26,6 +26,11 @@ export schema SignInAnswer {
   method?: "totp" | "sms" | "passkey"
   accountCreated?: Schema.Unknown
   previousSignIn?: "revoked" | "unconfirmed"
+}
+
+/** `credentialIdentity` read only for which key the host holds: its ID, or null when it holds none. */
+export schema HeldKey {
+  credentialId?: string | null
 }
 
 /** The retained `signInCompleted` event: what the host said of a sign-in that finished while no call waited. */
