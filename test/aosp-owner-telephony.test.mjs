@@ -75,7 +75,7 @@ test('stage-aosp refuses --owner-telephony without --development before reading 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-owner-stage-'));
   try {
     fs.copyFileSync(path.join(root, 'app.config.json'), path.join(dir, 'app.config.json'));
-    const out = spawnSync(process.execPath, [path.join(root, 'scripts/stage-aosp.ts'), '--target', 'cuttlefish',
+    const out = spawnSync(process.execPath, ["--conditions=eliza-source", "--import", path.join(root, "node_modules/vibelang/register.mjs"), path.join(root, 'scripts/stage-aosp.ts'), '--target', 'cuttlefish',
       '--aosp-source', 'absent-source', '--apk', 'absent.apk', '--owner-telephony'], {cwd: dir, encoding: 'utf8'});
     assert.notEqual(out.status, 0);
     assert.match(out.stderr, /--owner-telephony requires --development/);
@@ -87,7 +87,7 @@ test('stage-aosp refuses --owner-telephony on any target but pixel10a or cuttlef
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-owner-stage-'));
   try {
     fs.copyFileSync(path.join(root, 'app.config.json'), path.join(dir, 'app.config.json'));
-    const out = spawnSync(process.execPath, [path.join(root, 'scripts/stage-aosp.ts'), '--development', '--target', 'cuttlefish_x86_64',
+    const out = spawnSync(process.execPath, ["--conditions=eliza-source", "--import", path.join(root, "node_modules/vibelang/register.mjs"), path.join(root, 'scripts/stage-aosp.ts'), '--development', '--target', 'cuttlefish_x86_64',
       '--aosp-source', 'absent-source', '--apk', 'absent.apk', '--owner-telephony'], {cwd: dir, encoding: 'utf8'});
     assert.notEqual(out.status, 0);
     assert.match(out.stderr, /requires --target pixel10a or --target cuttlefish/);
