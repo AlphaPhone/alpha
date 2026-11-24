@@ -70,7 +70,7 @@ function List({ state, runtime }: { state: State; runtime: ContactsProps["runtim
       {rows.length > 0 && (
         <ListGroup aria-label="Contacts list">
           {rows.map((row) => (
-            <ListRow key={row.id} leading={<Avatar name={row.title || "?"} size="sm" />} title={row.complete ? row.title : "A contact Alpha cannot show"} detail={row.phones[0] ?? row.emails[0]}
+            <ListRow key={row.id} aria-label={row.complete ? row.title : "A contact Alpha cannot show"} leading={<Avatar name={row.title || "?"} size="sm" />} title={row.complete ? row.title : "A contact Alpha cannot show"} detail={row.phones[0] ?? row.emails[0]}
               disabled={!can({ type: "contactOpened", contactId: row.id })} onClick={() => void send({ type: "contactOpened", contactId: row.id })} />
           ))}
         </ListGroup>

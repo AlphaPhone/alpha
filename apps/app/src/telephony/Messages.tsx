@@ -65,7 +65,7 @@ function Conversations({ state, runtime }: { state: State; runtime: MessagesProp
       {shown.length > 0 && (
         <ListGroup aria-label="Conversations">
           {shown.map((thread) => (
-            <ListRow key={thread.id} title={thread.complete ? thread.title : "A conversation Alpha cannot show"} detail={thread.snippet}
+            <ListRow key={thread.id} aria-label={thread.complete ? thread.title : "A conversation Alpha cannot show"} title={thread.complete ? thread.title : "A conversation Alpha cannot show"} detail={thread.snippet}
               trailing={thread.unread ? <span className="size-2 rounded-full bg-primary" aria-label="Unread" /> : undefined}
               disabled={!can({ type: "threadOpened", threadId: thread.id })} onClick={() => void send({ type: "threadOpened", threadId: thread.id })} />
           ))}

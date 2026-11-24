@@ -6,7 +6,7 @@ import * as Voicemail from "../../gen/app__telephony__voicemail.effect.vibe"
 import type { Effect as Out, Event, VoicemailAnswer, VoicemailRow, VoicemailWritten } from "../../gen/app__telephony__voicemail.effect.vibe"
 import { Telephony, TelephonyRefused, telephony } from "../platform/telephony.vibe"
 import { type Job, answer, following, reacting, run, together } from "../runtime/reactor.vibe"
-import { visiting } from "./visit.vibe"
+import { on, visiting } from "./visit.vibe"
 
 /** One voicemail as the tab lists it. */
 function rowOf(entry: ListedVoicemail): VoicemailRow {
@@ -61,7 +61,7 @@ function carry(fx: Out): Job<Event, Telephony, []> {
 
 const machine = reacting(Voicemail, { carry })
 
-const shown = visiting("Phone", Voicemail.Machine, (showing): Event => ({ type: "show", showing }))
+const shown = visiting(on("Phone"), Voicemail.Machine, (showing): Event => ({ type: "show", showing }))
 
 // spec/app/telephony/phone.md, "The Voicemail tab exists only while the carrier's visual voicemail is ready"
 const carrier = following(Voicemail.Machine, (state) => state.shown && state.carrier === "CarrierReady", PhoneMachine, (ready): PhoneEvent => ({ type: "carrierRead", ready }))

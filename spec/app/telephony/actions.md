@@ -147,6 +147,40 @@ pure def stepADispatchedRunIsNeverCancelled(before: Actions, via: str, after: Ac
 pure def sometimesDismissed(a: Actions): bool = resultOf(a.ongoing) == OwnerCancelled
 ```
 
+## Story: Send a text Alpha drafted, from its card
+
+> As the owner, I want to send a text Alpha drafted for someone straight
+> from its review card, by a tap or by saying so in Talk, and only the exact
+> text I was shown, to the one person I picked.
+
+### An approved draft is sent only as its card showed it, to one number the owner picked, and nothing is sent when no contact matches
+
+The owner's Send on an addressed draft's card, or a spoken confirmation of
+that card in Talk, sends the draft once without opening Messages, through
+the same journal as the composer. A card whose text changed after it was
+shown is reviewed again, and nothing is sent. A draft to a name shows the
+matching contacts as one single choice, and only the owner's pick of one row
+lets the journal reserve a send; no match says that nothing was sent. The
+spoken confirmation phrase is never read back aloud. The card's own words
+and the approval are the [assistant](../assistant/index.md)'s; this rule is
+what the phone does with them.
+
+```quint
+pure def canDraftApproved(a: Actions, runId: str, unchanged: bool, by: Actor): bool =
+  ownerOnly(by) and runIdOf(a.ongoing) == runId and kindOf(a.ongoing) == ComposeText and (isResolving(a.ongoing) or isChoosing(a.ongoing))
+
+pure def draftApproved(a: Actions, runId: str, unchanged: bool, by: Actor): Actions =
+  if (unchanged) a else { ...a, ongoing: Finished({ runId: runId, kind: ComposeText, result: Stale }), refusals: a.refusals + 1 }
+
+pure def stepAChangedDraftIsNeverSent(before: Actions, via: str, after: Actions): bool =
+  (via == "draftApproved" and isFinished(after.ongoing) and not(isFinished(before.ongoing))) implies (resultOf(after.ongoing) == Stale and after.dispatches == before.dispatches)
+
+pure def stepADraftToANameNeedsOnePick(before: Actions, via: str, after: Actions): bool =
+  (kindOf(before.ongoing) == ComposeText and isChoosing(before.ongoing) and isGuarding(after.ongoing)) implies via == "candidateChosen"
+
+pure def sometimesAChangedDraftWasNotSent(a: Actions): bool = kindOf(a.ongoing) == ComposeText and resultOf(a.ongoing) == Stale
+```
+
 ## Story: Nothing acts over an emergency call
 
 > As the owner, I want every approved call, text, dial handoff and contact write to read the

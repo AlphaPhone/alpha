@@ -5,7 +5,7 @@ import * as Phone from "../../gen/app__telephony__phone.effect.vibe"
 import type { Effect as Out, Event, Recent, RecentsAnswer } from "../../gen/app__telephony__phone.effect.vibe"
 import { Telephony, TelephonyRefused, telephony } from "../platform/telephony.vibe"
 import { type Job, answer, reacting, together, untimed } from "../runtime/reactor.vibe"
-import { visiting } from "./visit.vibe"
+import { on, visiting } from "./visit.vibe"
 
 /** The largest call-log page Phone reads: eliza's own bound. */
 export const recentsLimit = 50
@@ -67,7 +67,7 @@ function carry(fx: Out): Job<Event, Telephony, []> {
 
 const machine = reacting(Phone, { carry })
 
-const shown = visiting("Phone", Phone.Machine, (showing): Event => ({ type: "show", showing }))
+const shown = visiting(on("Phone"), Phone.Machine, (showing): Event => ({ type: "show", showing }))
 
 /** Phone: resident, since Contacts, voicemail and Alpha hand it a number to fill in; it reads only while its view is in front. */
 export const phone = together(machine, shown)

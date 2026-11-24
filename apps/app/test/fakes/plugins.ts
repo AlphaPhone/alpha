@@ -1,6 +1,7 @@
 import { type Faked, elizaAgent, elizaCloud, elizaSecureStore, present } from "./phone.ts";
 import type { Answering } from "./routes.ts";
 import type { Scene } from "./scene.ts";
+import { telephonyPlugins } from "./telephony.ts";
 
 /**
  * The plugins the fake phone's host registers, by the names their `@CapacitorPlugin` gives: one line per plugin, and
@@ -13,5 +14,6 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     ElizaCloud: elizaCloud(services.cloud, () => world.signedIn),
     ElizaSecureStore: elizaSecureStore(world.secrets, world.slots),
     ...(world.image ? { ElizaTelephony: present, ElizaContacts: present } : {}),
+    ...(world.image ? telephonyPlugins(world.telephony) : {}),
   };
 }

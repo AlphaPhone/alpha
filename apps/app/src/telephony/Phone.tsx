@@ -115,7 +115,7 @@ function Voicemails({ runtime, onCallBack }: { runtime: PhoneProps["runtime"]; o
       {state.rows.length === 0 && state.list.status === "Loaded" && <EmptyState title="No voicemail" />}
       <ListGroup aria-label="Voicemail">
         {state.rows.map((row: VoicemailRow) => (
-          <ListRow key={row.id} title={row.title || row.number || "Unknown caller"} detail={`${when(row.date)} · ${row.seconds}s`} selected={row.id === opened.openId}
+          <ListRow key={row.id} aria-label={row.title || row.number || "Unknown caller"} title={row.title || row.number || "Unknown caller"} detail={`${when(row.date)} · ${row.seconds}s`} selected={row.id === opened.openId}
             trailing={row.fresh ? <span className="size-2 rounded-full bg-primary" aria-label="New" /> : undefined}
             disabled={!can({ type: "voicemailOpened", voicemail: row.id })} onClick={() => void send({ type: "voicemailOpened", voicemail: row.id })} />
         ))}

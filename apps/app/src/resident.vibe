@@ -1,6 +1,7 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"
 import { together, whole } from "./runtime/reactor.vibe"
 import { shell } from "./shell/shell.vibe"
+import { attention } from "./telephony/attention.vibe"
 import { callBar } from "./telephony/callBar.vibe"
 import { messages } from "./telephony/messages.vibe"
 import { phone } from "./telephony/phone.vibe"
@@ -15,6 +16,7 @@ const machines = together(
   callBar,
   phone,
   messages,
+  attention,
 )
 
 /** The resident machines, closed: each machine one of them follows or tells is among them. */

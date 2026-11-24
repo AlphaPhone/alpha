@@ -10,7 +10,7 @@ import { Telephony, TelephonyRefused, telephony } from "../platform/telephony.vi
 import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, reacting, run, stop, stream, together, untimed } from "../runtime/reactor.vibe"
 import { placed } from "./phone.vibe"
-import { visiting } from "./visit.vibe"
+import { on, visiting } from "./visit.vibe"
 
 /** A conversation as the list shows it; one the phone could not report whole keeps its place without content. */
 function threadOf(row: Listed): ThreadRow {
@@ -108,7 +108,7 @@ function carry(fx: Out): Job<Event, Telephony | Messages.Machine, []> {
 
 const conversations = reacting(Messages, { carry })
 
-const shown = visiting("Messages", Messages.Machine, (showing): Event => ({ type: "show", showing }))
+const shown = visiting(on("Messages"), Messages.Machine, (showing): Event => ({ type: "show", showing }))
 
 const receipts: Record<SmsSendStatus, Receipt> = {
   cancelled: "ReceiptCancelled", denied: "ReceiptDenied", failed: "ReceiptFailed", unknown: "ReceiptUnknown",

@@ -4,7 +4,7 @@ import * as Contacts from "../../gen/app__telephony__contacts.effect.vibe"
 import type { ContactDraft, ContactRow, ContactsAnswer, Detail, Effect as Out, Event, WriteAnswer } from "../../gen/app__telephony__contacts.effect.vibe"
 import { Telephony, TelephonyRefused, telephony } from "../platform/telephony.vibe"
 import { type Job, answer, reacting, run, together } from "../runtime/reactor.vibe"
-import { visiting } from "./visit.vibe"
+import { on, visiting } from "./visit.vibe"
 
 function rowOf(row: AddressBookRow): ContactRow {
   return "incomplete" in row
@@ -97,7 +97,7 @@ function carry(fx: Out): Job<Event, Telephony, []> {
 
 const machine = reacting(Contacts, { carry })
 
-const shown = visiting("Contacts", Contacts.Machine, (showing): Event => ({ type: "show", showing }))
+const shown = visiting(on("Contacts"), Contacts.Machine, (showing): Event => ({ type: "show", showing }))
 
 /** Contacts: in memory, read while its view is in front, its writes gated on the version shown. */
 export const contacts = together(machine, shown)

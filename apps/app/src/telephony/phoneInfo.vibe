@@ -4,7 +4,7 @@ import * as Info from "../../gen/app__telephony__phoneInfo.effect.vibe"
 import type { Effect as Out, Event, Holders, Line, Network, VoicemailSetup } from "../../gen/app__telephony__phoneInfo.effect.vibe"
 import { Telephony, telephony } from "../platform/telephony.vibe"
 import { type Job, answer, reacting, together } from "../runtime/reactor.vibe"
-import { visiting } from "./visit.vibe"
+import { on, visiting } from "./visit.vibe"
 
 const networks = {
   none: "NoService", "2g": "Network2g", "3g": "Network3g", "4g": "Network4g", "5g": "Network5g", "wifi-calling": "WifiCalling", unknown: "NetworkUnknown",
@@ -49,7 +49,7 @@ function carry(fx: Out): Job<Event, Telephony, []> {
 const machine = reacting(Info, { carry })
 
 /** Leaving Settings, or the page hiding, closes the page; only the owner's tap on its row opens it. */
-const left = visiting("Settings", Info.Machine, (shown): Event | undefined => (shown ? undefined : { type: "show", showing: false }))
+const left = visiting(on("Settings"), Info.Machine, (shown): Event | undefined => (shown ? undefined : { type: "show", showing: false }))
 
 /** Settings → Phone: in memory, read while the page is open. */
 export const phoneInfo = together(machine, left)
