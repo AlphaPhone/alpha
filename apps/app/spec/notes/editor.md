@@ -14,10 +14,16 @@ version and the mutation that continues after a save.
 ### A draft opens from a note at the current revision, or starts as a new note
 
 Each draft gets a fresh token. A new note starts with its default title, which alone is not an edit: an
-untouched new note is dropped when the owner leaves it. Published snapshots keep the known notes and
-the Trash apart; a clean draft follows the snapshot, a clean draft of a note that disappeared closes, and
-an edited draft whose base is no longer current goes to review. A new draft has no record to overwrite,
-so it simply follows the current revision.
+untouched new note is dropped when the owner leaves it. Published snapshots keep the known notes and the
+Trash apart; a clean draft follows the snapshot, a clean draft of a note that disappeared closes, and an
+edited draft whose base is no longer current goes to review. A new draft has no record to overwrite, so
+it simply follows the current revision. The editor takes in every snapshot in the order the collection
+published it, and acts only on the collection it has taken in: before it opens, starts, saves, leaves,
+deletes or restores a note, shows its draft or names its selection, it first takes in every snapshot the
+collection already published, so a note the agent or the recorder just saved opens at once. It waits at
+most 2 seconds for that: a snapshot it cannot take in by then never holds the owner or the agent back,
+and the action runs on what the editor has taken in. A snapshot whose taking in fails still counts as
+taken in, so the editor goes on to the next one.
 
 ```quint
 type Mutation = NoMutation | DeleteAfterSave | Deleting | Restoring
@@ -64,6 +70,7 @@ pure val noteIdValues = Set("", "a", "b")
 pure val notesValues = Set(Set(), Set("a"), Set("a", "b"))
 pure val trashedValues = Set(Set(), Set("b"))
 pure val revisionValues = Set(0, 1, 2, 3)
+pure val catchUpWaitMs = 2000
 pure def alwaysVersionsNonnegative(s: Editor): bool = s.version >= 0 and s.capturedVersion >= 0 and s.token >= 0 and s.nextToken >= s.token
 pure def alwaysCollectionDisjoint(s: Editor): bool = s.known.intersect(s.trash).size() == 0
 ```

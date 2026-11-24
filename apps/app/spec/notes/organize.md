@@ -15,6 +15,8 @@ only on the screen it is bound to, and returns a receipt that never claims more 
 Which operations are offered under `notes.record.v1`, `notes.organize.v1` with `notes.local-record.v1`
 and `notes.list-filter.v1`, on which screen each may be reviewed or run, and which may run without a card
 are `@elizaos/plugin-notes`'s organisation rules; the phone advertises the capabilities and calls them.
+Every device request already carries `notes.local-record.v1`, so the phone counts it among the Notes
+capabilities it offers, beside `notes.record.v1`, `notes.organize.v1` and `notes.list-filter.v1`.
 
 ### A recording receipt says what the recorder did
 
