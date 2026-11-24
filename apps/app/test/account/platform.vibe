@@ -81,6 +81,11 @@ function answer(table: Record<string, Answer>, key: string, args: unknown): Answ
   return typeof found === "function" ? (found as (args: unknown) => unknown)(args) : found
 }
 
+/** An answer the host is still working on: a test's native answer may be an Effect that answers, or refuses with the plugin's failure, when it ends. */
+function working(value: Answer): value is unknown!NativeFailed {
+  return Effect.isEffect(value)
+}
+
 function refused(value: Answer): value is Refusal {
   return typeof value === "object" && value !== null && typeof (value as { refuse?: unknown }).refuse === "string"
 }
@@ -105,7 +110,7 @@ export function platform(calls: Calls, native: Record<string, Answer>, cloud: Re
         const found = answer(native, `${plugin}.${method}`, args)
         if (found === undefined) return Effect.fail(new NativeFailed({ plugin, method, message: "absent" }))
         // An answer that is an Effect is the host still working: it answers, or refuses, when that Effect does.
-        if (Effect.isEffect(found)) return found as Effect.Effect<unknown, NativeFailed>
+        if (working(found)) return found
         if (refused(found)) return Effect.fail(new NativeFailed({ plugin, method, message: "refused", code: found.refuse }))
         return Effect.succeed(found)
       },
