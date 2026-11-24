@@ -77,7 +77,8 @@ function waiting(writing: Writing): AssistantAttachment[] {
 const failures: Record<Failure, string> = {
   CredentialInvalid: "Your provider refused its key", InsufficientCredits: "Out of credits", LimitReached: "Too many requests",
   ProviderIssue: "The provider had a problem", TimedOut: "The reply timed out", MissingCapability: "Your agent cannot do that yet",
-  NoProvider: "No AI provider", PlanLimit: "Your plan's limit is reached", OtherFailure: "The reply did not finish",
+  NoProvider: "No AI provider", PlanLimit: "Your plan's limit is reached",
+  OutOfFunds: "You’re out of plan allowance and credits, so I couldn’t reply.", OtherFailure: "The reply did not finish",
 };
 
 /** "about …" for a wait: seconds under 90, then minutes under 90, then hours. */
@@ -147,6 +148,20 @@ export function Assistant({ runtime }: AssistantProps) {
     board.type("");
     void composer.send(hold);
   };
+  // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"
+  /** The card of a reply that did not finish: live, with the fix the agent named and its wait, or read again from history, with neither. */
+  const failureCard = ({ kind, fix, waitMs }: { kind: Failure; fix: Fix; waitMs: number }, live: boolean) => {
+    const act = actionOf(kind, fix);
+    const detail = showsWait(kind, waitMs) ? `Try again in about ${about(waitMs)}` : !live && kind === "LimitReached" ? "Wait a moment, then try again" : undefined;
+    return (
+      <AssistantCard
+        card={act === undefined || !fixShown(fix, kind)
+          ? { kind: "plain", text: detail === undefined ? failures[kind] : `${failures[kind]}. ${detail}` }
+          : { kind: "action", action: act, title: failures[kind], ...(detail === undefined ? {} : { detail }), ...(act === "funding" ? { label: "Manage plan" } : {}) }}
+        onAct={act === "retry" ? () => type(board.lastSent) : act !== undefined && shell.can({ type: "openView", view: "Settings" }) ? () => void shell.send({ type: "openView", view: "Settings" }) : undefined}
+      />
+    );
+  };
   const messages = lines.map((line, at): AssistantMessageProps & { id: string } => {
     const message = at + 1;
     const settled = settledLine(line.id);
@@ -158,27 +173,20 @@ export function Assistant({ runtime }: AssistantProps) {
       id: line.id,
       author: line.mine ? "owner" : "alpha",
       text: line.text,
+      ...(line.quote === undefined ? {} : { quote: line.quote }),
+      ...(line.failure === undefined ? {} : { children: failureCard({ kind: line.failure, fix: "NoFix", waitMs: -1 }, false) }),
       onFork: chats.can(fork) ? () => void chats.send(fork) : undefined,
       onQuote: composer.can(quote) ? () => void composer.send(quote) : undefined,
       onEditAgain: composer.can(editAgain) ? () => { board.type(line.text); void composer.send(editAgain); } : undefined,
       onReadAloud: chats.can(readAloud) ? () => void chats.send(readAloud) : undefined,
     };
   });
+  // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
+  const earlier = { type: "scroll", around: board.numbered(lines[0]?.id ?? "") } as const;
+  const later = { type: "scroll", around: board.numbered(lines.at(-1)?.id ?? "") } as const;
   const writingReply = seen.reply !== "" ? [{ id: "reply", author: "alpha", text: seen.reply } as const] : [];
-  // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"
-  const failure = seen.failure;
-  const act = failure === undefined ? undefined : actionOf(failure.kind, failure.fix);
-  const failed = failure === undefined ? [] : [{
-    id: "failure", author: "alpha", text: "",
-    children: (
-      <AssistantCard
-        card={act === undefined || !fixShown(failure.fix, failure.kind)
-          ? { kind: "plain", text: failures[failure.kind] }
-          : { kind: "action", action: act, title: failures[failure.kind], ...(showsWait(failure.kind, failure.waitMs) ? { detail: `Try again in about ${about(failure.waitMs)}` } : {}), ...(act === "funding" ? { label: "Manage plan" } : {}) }}
-        onAct={act === "retry" ? () => type(board.lastSent) : act !== undefined && shell.can({ type: "openView", view: "Settings" }) ? () => void shell.send({ type: "openView", view: "Settings" }) : undefined}
-      />
-    ),
-  } as const];
+  // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
+  const failed = seen.failure === undefined ? [] : [{ id: "failure", author: "alpha", text: "", children: failureCard(seen.failure, true) } as const];
   const quoted = writing.editor.quote > 0 ? lines[writing.editor.quote - 1]?.text : undefined;
   const view = talking.context.showing.tag === "App" ? talking.context.showing.view : "Home";
 
@@ -217,6 +225,8 @@ export function Assistant({ runtime }: AssistantProps) {
           status: shown.page.status === "Loading" ? "loading" : shown.page.status === "Failed" ? "failed" : "loaded",
           turn: status === undefined ? undefined : { status, label: seen.label === "" ? undefined : seen.label, onCheck: checkable ? () => void conversation.send(check) : undefined },
           onRetry: chats.can({ type: "reread" }) ? () => void chats.send({ type: "reread" }) : undefined,
+          onEarlier: chats.can(earlier) ? () => void chats.send(earlier) : undefined,
+          onLater: chats.can(later) ? () => void chats.send(later) : undefined,
           onReturnToOriginal: chats.can({ type: "returnToOriginal", ...free }) ? () => void chats.send({ type: "returnToOriginal", ...free }) : undefined,
         }}
         composer={{

@@ -689,8 +689,8 @@ pure def told(showing: Showing, zone: str, day: int, selected: bool, sensitive: 
 ### A sensitive screen says only that it is sensitive: no selection and no day
 
 A sensitive screen is the passwords view, a password surface in Settings,
-a locked or secure screen, a screen that is off, a hidden page, and the
-agent connection dialog.
+Settings' page of the carrier's identifiers, a locked or secure screen, a
+screen that is off, a hidden page, and the agent connection dialog.
 
 ```quint
 pure def lawASensitiveScreenTellsNothingOfItself(showing: Showing, zone: str, day: int, selected: bool, sensitive: bool, revision: int): bool =

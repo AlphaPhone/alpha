@@ -6,6 +6,8 @@ import { Machine as Chats } from "../gen/app__assistant__chats.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Reply } from "../gen/app__assistant__reply.effect.vibe";
 import { Machine as Search } from "../gen/app__assistant__search.effect.vibe";
+import * as Pages from "../gen/app__settings.effect.vibe";
+import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import type { Mount } from "../src/areas.ts";
 import assistant from "../src/assistant/index.tsx";
 import { button, closeAll, fill, hardware, open, press, underAct, until } from "./alpha.tsx";
@@ -122,12 +124,44 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await chatsList();
     await until(alpha, runtime, Chats, (s) => s.list.status === "Loaded");
     expect(rows("Chats")).toBe(2);
+
+    // spec/app/assistant/index.md, "A sensitive screen is never sent, and no reply is awaited over one": Settings showing the saved passwords is a sensitive screen.
+    await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Settings" })));
+    await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "openSection", page: "PasswordsPage" })));
+    await until(alpha, runtime, Conversation, (s) => s.context.sensitive && s.context.showing.tag === "App");
+    await write("my password is hunter2");
+    expect([button("Send"), world.ask.said.length]).toEqual([undefined, 2]);
+    // spec/app/assistant/index.md, "A sensitive screen says only that it is sensitive: no selection and no day"
+    await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "goBack" })));
+    await until(alpha, runtime, Conversation, (s) => !s.context.sensitive);
+    expect(Boolean(button("Send"))).toBe(true);
+
+    // spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
+    world.ask.refusal = "allowance_exhausted";
+    await write("Hi");
+    await press("Send");
+    await until(alpha, runtime, Reply, (s) => s.turn === 3 && s.status === "Interrupted");
+    expect([(document.querySelector("section[aria-label='Ask Alpha'] [role=log]")?.textContent ?? "").includes("You’re out of plan allowance and credits, so I couldn’t reply."), Boolean(button("Manage plan"))]).toEqual([true, true]);
+    world.ask.refusal = undefined;
+
+    // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
+    await press("Earlier");
+    await until(alpha, runtime, Chats, (s) => s.around > 0 && s.page.status === "Loaded");
+    expect(lines().slice(0, 2)).toEqual(["Hello", "You said: Hello"]);
+
+    // spec/app/assistant/composer.md, "A quoted message goes with the next send, until the owner removes the quote"
+    await onMessage("You said: Hello", "Reply");
+    await until(alpha, runtime, Composer, (s) => s.editor.quote === 2);
+    await write("Why?");
+    await press("Send");
+    await until(alpha, runtime, Conversation, (s) => s.turn.send.id === 4 && s.turn.reply === "Complete");
+    expect([world.ask.metadata?.at(-1), world.ask.said.at(-1)]).toEqual([expect.objectContaining({ replyToMessageId: "m1a" }), "Why?"]);
   });
 
   // spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/chats.md, "Story: Open a message that search found"
   it("Search my conversations, and open a hit where it was said (spec/app/assistant/search.md, \"Story: Search my conversations\")", async () => {
     const world = { ...scene(), phone };
-    world.ask.kept.set("c7", { roomId: "r7", title: "Lunch", messages: [{ id: "m1", role: "user", text: "Lunch on Friday?" }, { id: "m2", role: "assistant", text: "Friday at noon works." }] });
+    world.ask.kept.set("c7", { roomId: "r7", title: "Lunch", messages: [{ id: "m1", role: "user", text: "Lunch on Friday?" }, { id: "m2", role: "assistant", text: "Friday at noon works." }, Object.assign({ id: "m3", role: "assistant" as const, text: "" }, { failureKind: "limit_reached" })] });
     const { alpha } = await open(world, mounts);
     const runtime = assistant.runtime(alpha);
     await until(alpha, runtime, Composer, (s) => s.slot === "Open");
@@ -140,7 +174,9 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     // spec/app/assistant/search.md, "Opening a hit closes search and opens its conversation around its message, and another conversation only while the turn and the composer are free"
     await row("Results", "Friday at noon");
     await until(alpha, runtime, Chats, (s) => s.chosen > 0 && s.around > 0 && s.page.status === "Loaded");
-    expect([lines(), document.querySelector("section[aria-label='Results']")]).toEqual([["Lunch on Friday?", "Friday at noon works."], null]);
+    expect([lines().slice(0, 2), document.querySelector("section[aria-label='Results']")]).toEqual([["Lunch on Friday?", "Friday at noon works."], null]);
+    // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again": a reply read again from history says why it did not finish, and to wait a moment.
+    expect(document.querySelector("[role=log]")?.textContent).toContain("Too many requests. Wait a moment, then try again");
 
     // spec/app/assistant/search.md, "Only the newest asking's hits are shown, a page at a time, after those already shown": a search that fails says so.
     world.ask.searchDown = true;

@@ -7,6 +7,7 @@ import * as Composer from "../../gen/app__assistant__composer.effect.vibe"
 import * as Dock from "../../gen/app__assistant__dock.effect.vibe"
 import { zoneOf } from "../../gen/app__assistant__context.effect.vibe"
 import * as Reply from "../../gen/app__assistant__reply.effect.vibe"
+import * as Pages from "../../gen/app__settings.effect.vibe"
 import * as Search from "../../gen/app__assistant__search.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
@@ -30,7 +31,7 @@ const titled = Schema.Struct({ ...ConversationRecord.fields, title: Schema.Strin
 const listing = () => Schema.Struct({ conversations: Schema.Array(titled) })
 const made = () => Schema.Struct({ conversation: titled })
 /** A page of a conversation's messages, and a page of search hits, as eliza's history routes give them. */
-const page = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.String, role: Schema.Literals(["user", "assistant"]), text: Schema.String })) })
+const page = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.String, role: Schema.Literals(["user", "assistant"]), text: Schema.String, clientMessageId: Schema.optionalKey(Schema.String), failureKind: Schema.optionalKey(Schema.String) })) })
 const hits = () => Schema.Struct({ results: Schema.Array(Schema.Struct({ conversationId: Schema.NonEmptyString, roomId: Schema.NonEmptyString, messageId: Schema.String, text: Schema.String })) })
 const health = () => Schema.Struct({ ready: Schema.Boolean })
 
@@ -78,6 +79,9 @@ const failures: Readonly<Record<string, Reply.Failure>> = {
   no_provider: "NoProvider", billing_refused: "PlanLimit", subscription_required: "PlanLimit", allowance_exhausted: "PlanLimit",
 }
 
+/** Cloud's own codes for an account with no plan allowance and no credits left, as a failed turn names them. */
+const outOfFunds: ReadonlySet<string> = new Set(["insufficient_credits", "allowance_exhausted"])
+
 // spec/app/assistant/reply.md, "The settled reply is the whole final answer, shown and spoken, never the acknowledgment"; spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"
 /** How a reply ended, for the reply as it is shown: whole, failed by its kind, stopped, or not given. */
 function replied(turn: number, result: TurnResult | undefined): Reply.Event {
@@ -85,7 +89,7 @@ function replied(turn: number, result: TurnResult | undefined): Reply.Event {
   if (result === undefined) return { type: "failed", turn, kind: "OtherFailure" }
   return match (result) {
     when { kind: "Replied", let reply }: reply.failureKind === undefined ? (reply.text === "" ? { type: "decline", turn } : { type: "done", turn, units: reply.text.length }) : failed(reply, reply.failureKind);
-    when { kind: "AgentFailed", let reply, let code }: failed(reply, code);
+    when { kind: "AgentFailed", let reply, let code }: outOfFunds.has(code) ? { type: "failed", turn, kind: "OutOfFunds" } : failed(reply, code);
     when { kind: "StoppedByOwner" }: { type: "stop", turn };
     default: { type: "failed", turn, kind: "OtherFailure" };
   }
@@ -128,8 +132,9 @@ function observed(told: boolean, context: Conversation.Context) {
 }
 
 // spec/app/assistant/index.md, "Every message asked is posted exactly once, under a new ticket, whoever gave the text, with the screen showing and never a sensitive one"; spec/app/assistant/index.md, "The first word of a reply shows that the agent has the message, and a withdrawal that came too late stops it there"
-function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine> {
-  return Stream.callback<Conversation.Event, never, Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine>((queue) => effect {
+// spec/app/assistant/composer.md, "A quoted message goes with the next send, until the owner removes the quote"
+function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine> {
+  return Stream.callback<Conversation.Event, never, Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine>((queue) => effect {
     const { controller } = try Turns
     const { board } = try Talk
     const reply = try Reply.Machine
@@ -138,13 +143,15 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const chats = try (try Chats.Machine).get()
     const known = board.known(chats.chosen)
     const text = board.outgoing
+    const held = (try (try Composer.Machine).get()).held
+    const quoted = held.quote > 0 ? board.latest()[held.quote - 1] : undefined
     if (known === undefined || text === "") {
       Queue.offerUnsafe(queue, { type: "refuse", ticket })
       Queue.endUnsafe(queue)
       return
     }
     if (controller.conversation?.id !== known.record.id) try ignore(tryPromise(() => controller.bind(known.record)))
-    const mine: Line = { id: `sent ${ticket}`, mine: true, text }
+    const mine: Line = { id: `sent ${ticket}`, mine: true, text, ...(quoted === undefined ? {} : { quote: quoted.text }) }
     board.append(mine)
     board.lastSent = text
     let heard = false
@@ -168,9 +175,10 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
         if (board.snapshot().reply === "") board.change({ label: label ?? `Using ${name}` })
       },
     }
-    const metadata = observed(told, context)
-    const result = tryPromise(() => controller.send({ text, ...(metadata === undefined ? {} : { metadata }) }, { stream: hooks })) catch () => undefined
+    const metadata = { ...observed(told, context), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
+    const result = tryPromise(() => controller.send({ text, ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks })) catch () => undefined
     board.change({ reply: "", label: "" })
+    board.lastSentId = result !== undefined && "clientMessageId" in result ? result.clientMessageId : ""
     const ending = replied(ticket, result)
     if (ending.type === "failed") board.change({ failure: { kind: ending.kind, fix: fixOf(result), waitMs: waitOf(result) } })
     show(ending)
@@ -192,6 +200,7 @@ effect function aborted(turn: number): Conversation.Event!!Turns {
 }
 
 // spec/app/assistant/index.md, "The read says the reply finished anyway, was stopped for sure, was never recorded, or to look later"
+/** The message is found by the id its turn was posted under, or by its text where the post never said which. */
 effect function checked(recheck: number): Conversation.Event!!(Agent | Talk | Chats.Machine) {
   return effect {
     const { board } = try Talk
@@ -199,7 +208,7 @@ effect function checked(recheck: number): Conversation.Event!!(Agent | Talk | Ch
     const known = board.known(chats.chosen)
     if (known === undefined) return { type: "reconcile", ticket: recheck, found: "Unread" }
     const { messages } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(known.record.id)}/messages`), page())
-    const asked = messages.findLastIndex((one) => one.role === "user" && one.text === board.lastSent)
+    const asked = messages.findLastIndex((one) => one.role === "user" && (board.lastSentId === "" ? one.text === board.lastSent : one.clientMessageId === board.lastSentId))
     const found: Conversation.Found = asked < 0 ? "Unrecorded" : messages.slice(asked + 1).some((one) => one.role === "assistant") ? "Ended" : "Unended"
     return { type: "reconcile", ticket: recheck, found }
   } catch () => ({ type: "reconcile", ticket: recheck, found: "Unread" })
@@ -251,7 +260,8 @@ effect function listed(ticket: number): Chats.Event!!(Agent | Talk) {
   } catch () => ({ type: "listed", ticket, ok: false, ids: [] })
 }
 
-// spec/app/assistant/chats.md, "A page of the conversation showing is taken only from the newest asking"
+// spec/app/assistant/chats.md, "A page of the conversation showing is taken only from the newest asking"; spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
+/** A page of the conversation showing, each message numbered as Alpha first saw it: the page counts up to its highest number, which a scroll names. */
 effect function paged(conversation: number, around: number, ticket: number): Chats.Event!!(Agent | Talk) {
   return effect {
     const { board } = try Talk
@@ -259,8 +269,11 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
     if (known === undefined) return { type: "paged", ticket, ok: false, messages: 0 }
     const pivot = around > 0 ? board.messageId(around) : undefined
     const { messages } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(known.record.id)}/messages`, { urlParams: pivot === undefined ? {} : { around: pivot } }), page())
-    board.change({ pages: new Map([...board.snapshot().pages, [ticket, messages.map((one) => ({ id: one.id, mine: one.role === "user", text: one.text }))]]) })
-    return { type: "paged", ticket, ok: true, messages: messages.length }
+    board.change({ pages: new Map([...board.snapshot().pages, [ticket, messages.map((one) => ({
+      id: one.id, mine: one.role === "user", text: one.text, ...(one.failureKind === undefined ? {} : { failure: failures[one.failureKind] ?? "OtherFailure" }),
+    }))]]) })
+    const numbers = messages.map((one) => board.messageNumber(one.id))
+    return { type: "paged", ticket, ok: true, messages: Math.max(0, ...numbers) }
   } catch () => ({ type: "paged", ticket, ok: false, messages: 0 })
 }
 
@@ -406,10 +419,24 @@ const reached = hearing(
   (ready): Conversation.Event => ({ type: "reach", ready }),
 )
 
-// spec/app/assistant/index.md, "A screen that changed takes a new revision and stops the turn in flight; an unchanged one is ignored"
-const looked = following(Shell, (shell) => shell.trail.at(-1), Conversation.Machine, (view): Conversation.Event => ({
-  type: "look", showing: view === undefined ? { tag: "Home" } : { tag: "App", view }, zone: zone(), day: 0, selected: false, sensitive: false,
-}))
+/** The Settings pages whose screen the agent is never told: the saved passwords and the carrier's identifiers. */
+const sensitivePages: ReadonlySet<Pages.Page> = new Set(["PasswordsPage", "CarrierPage"])
+
+// spec/app/assistant/index.md, "A screen that changed takes a new revision and stops the turn in flight; an unchanged one is ignored"; spec/app/assistant/index.md, "A sensitive screen says only that it is sensitive: no selection and no day"
+const looked = started(effect {
+  const shell = try Shell
+  const settings = try Pages.Machine
+  const conversation = try Conversation.Machine
+  let taken: string | undefined
+  try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(shell.changes, settings.changes), conversation.changes), effect ([[shown, pages]]) => {
+    const view = shown.trail.at(-1)
+    const sensitive = view === "Settings" && sensitivePages.has(pages.page)
+    const seen = `${view ?? ""} ${sensitive}`
+    if (seen === taken) return
+    const event: Conversation.Event = { type: "look", showing: view === undefined ? { tag: "Home" } : { tag: "App", view }, zone: zone(), day: 0, selected: false, sensitive }
+    if (!Conversation.enabled(try conversation.get(), event) || (try contained(conversation.send(event), "telling the screen"))) taken = seen
+  })
+}, "telling the screen")
 
 // spec/app/assistant/index.md, "When another conversation is shown, the last turn stays behind with its own"
 const left = following(Chats.Machine, (chats) => chats.chosen, Conversation.Machine, (): Conversation.Event => ({ type: "leave" }))

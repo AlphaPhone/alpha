@@ -20,6 +20,8 @@ export interface AskScene {
   acknowledgment?: string;
   /** What each turn told the agent beside its text, as it arrived. */
   metadata?: unknown[];
+  /** The code of the error frame the agent writes instead of a reply, as eliza's agent does when Cloud refuses the turn. */
+  refusal?: string;
 }
 
 /** One conversation as the agent keeps it: its room, title and messages. */
@@ -43,6 +45,8 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(frame({ type: "status", activity: "thinking" }));
+      if (scene.refusal !== undefined) controller.enqueue(frame({ type: "error", code: scene.refusal, message: "Cloud refused the turn" }));
+      if (scene.refusal !== undefined) return controller.close();
       if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "acknowledgment", text: scene.acknowledgment }));
       if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "tool", name: "CALENDAR", label: "Using Calendar" }));
       if (scene.stalled) {
@@ -113,6 +117,7 @@ export function askRoutes(scene: AskScene): Route[] {
         if (found[2] === undefined) return Response.json({ text: `You said: ${body.text}`, ...named(scene.said.length) });
         scene.said.push(body.text);
         keep("user", body.text);
+        Object.assign(messages.at(-1) ?? {}, { clientMessageId: (body as { clientMessageId?: string }).clientMessageId });
         return reply(scene, `r${found[1]}`, body.text, (said) => keep("assistant", said));
       });
     },
