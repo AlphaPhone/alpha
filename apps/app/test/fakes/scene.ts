@@ -1,6 +1,7 @@
 // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
 import { type AskScene, askRoutes, askScene } from "./ask.ts";
 import { cloudRoutes } from "./cloud.ts";
+import { type InboxScene, inboxRoutes, inboxScene } from "./inbox.ts";
 import { type Route, answering } from "./routes.ts";
 import { type SampleScene, sampleRoutes, sampleScene } from "./sample.ts";
 import { type LauncherScene, launcherScene } from "./launcher.ts";
@@ -23,6 +24,7 @@ export interface Scene {
   readonly ask: AskScene;
   readonly launcher: LauncherScene;
   readonly settings: SettingsScene;
+  readonly inbox: InboxScene;
 }
 
 /** A fresh world: each area adds its field here, one line each. */
@@ -33,6 +35,7 @@ export function scene(): Scene {
     ask: askScene(),
     launcher: launcherScene(),
     settings: settingsScene(),
+    inbox: inboxScene(),
   };
 }
 
@@ -49,6 +52,7 @@ export function services(world: Scene) {
     ]),
     cloud: answering([
       ...cloudRoutes(),
+      ...inboxRoutes(world.inbox),
     ]),
   };
 }

@@ -7,6 +7,8 @@ import { shell } from "./shell/shell.vibe"
 import { notices } from "./shell/notices.vibe"
 import { haptics } from "./shell/haptics.vibe"
 import { canvas } from "./shell/canvas.vibe"
+import { mailbox } from "./inbox/mailbox.vibe"
+import { operations } from "./inbox/operations.vibe"
 
 /**
  * The machines that live from launch to exit: those another area follows or tells, and those that must act while
@@ -21,6 +23,8 @@ const machines = together(
   pages,
   preferences,
   updating,
+  mailbox,
+  operations,
 )
 
 /** The resident machines, closed: each machine one of them follows or tells is among them. */
