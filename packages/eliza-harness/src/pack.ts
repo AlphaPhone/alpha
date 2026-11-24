@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { alone, checkout, repository, run } from "./checkout.ts";
 
@@ -19,9 +20,9 @@ export const packEntryName = "@repo/agent-pack-entry";
 
 const always = ["@elizaos/core", "@elizaos/cloud", "@elizaos/agent", "@elizaos/os"];
 
-/** Where this worktree keeps its clone for `commit`. @throws {never} */
+/** Where this machine keeps its pack clone for `commit`, outside any worktree's `node_modules` or glob tree. @throws {never} */
 export function packRoot(commit = checkout().commit): string {
-  return path.join(repository, "apps/agent/.cache/eliza-pack", commit.slice(0, 12));
+  return path.join(os.homedir(), ".cache/alpha/eliza-pack", commit.slice(0, 12));
 }
 
 const stampOf = (root: string) => path.join(root, ".alpha/pack.json");
