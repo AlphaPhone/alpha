@@ -1,0 +1,35 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "allowArbitraryExtensions": true,
+    "lib": [
+      "es2024",
+      "dom",
+      "dom.iterable"
+    ],
+    "types": [
+      "node"
+    ],
+    "rootDir": ".",
+    "rootDirs": [
+      ".",
+      ".vibe/declarations"
+    ],
+    "resolveJsonModule": true
+  },
+  "include": [
+    "src",
+    "test",
+    "gen/*.ts",
+    "gen/*.vibe",
+    "*.config.ts",
+    "deployment.json",
+    "wrangler/*.json"
+  ],
+  "exclude": [
+    "test/fixtures"
+  ],
+  "vibe": {
+    "sidecarDir": ".vibe/declarations"
+  }
+}
