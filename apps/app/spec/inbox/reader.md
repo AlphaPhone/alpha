@@ -15,7 +15,8 @@ allows read changes and the message's revision is known.
 
 Each opening is numbered; a body, thread page, revision or attachment that arrives for an earlier
 opening or another account is dropped. Closing the message, opening another or changing account
-starts a new opening.
+starts a new opening. The reader binds to the account selected now, both when the selection
+changes and before it opens a message, so a message opens for the account it was listed for.
 
 ```quint
 import failures.* from "./failures"
