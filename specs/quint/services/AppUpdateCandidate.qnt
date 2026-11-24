@@ -1,6 +1,3 @@
-// Two trusted GitHub run numbers, two attempts and three ordered release-floor classes.
-// Calls settle serially; remote inventory and archive admission are explicit inputs.
-// A receipt is unsigned build evidence, never a reservation or release authority.
 module AppUpdateCandidate {
   type Candidate = {attempt: int, firstAttempt: int, finalAttempt: int,
     firstFloor: int, finalFloor: int, versionWrites: int, receiptWrites: int,
@@ -17,13 +14,10 @@ module AppUpdateCandidate {
   var s: State
   action init = s' = {floor: 1, candidates: Map(1 -> empty, 2 -> empty)}
 
-  // Retained stable assets and the release record must not lose their version floor.
-  // A later release can make an already-written unsigned receipt stale.
   action advanceFloor(floor: int): bool = all {
     floor.in(Floors), floor > s.floor,
     s' = {...s, floor: floor}
   }
-  // A rerun keeps its GitHub run number. Its attempt identity changes.
   action rerun(actor: int): bool = all {
     actor.in(Actors), s.candidates.get(actor).attempt == 1,
     s' = {...s, candidates: s.candidates.set(actor,
@@ -43,8 +37,6 @@ module AppUpdateCandidate {
         outcome: if (admitted) "version" else "refused"})}
     }
   }
-  // finalAdmissionValid covers the independently read inventory, current identity,
-  // complete source freeze and exact archive bytes; it is not a model-produced fact.
   action receipt(actor: int, finalAdmissionValid: bool): bool = {
     val old = s.candidates.get(actor)
     val admitted = finalAdmissionValid and Codes.get(actor) > s.floor

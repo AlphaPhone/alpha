@@ -1,32 +1,9 @@
-// Journey E: Browser + credentials, driven start to finish through rendered controls in the
-// browser build (development profile, /?mode=dev).
-//
-// Evidence boundary: a pass is source/test evidence for the browser renderer only. It is NOT
-// APK, emulator, AOSP image, physical-device or real-integration evidence.
-//
-// Synthetic fixtures (all test-owned, nothing leaves this machine):
-// - Web pages come from an in-process HTTP server on 127.0.0.1 started by this spec.
-// - The search engine is an external boundary: https://www.google.com/search is fulfilled by
-//   Playwright with a test-owned results page; no real request is sent.
-// - The device speech engine is replaced by a recording fixture (same prototype hook that
-//   reading-sensitive.spec.ts uses), so no audio is played; the reviewed text handed to speech
-//  is what is asserted.
-// - Password values are only the development vault's built-in synthetic records and the
-//   development provider's disposable sample sign-in. Nothing is typed into a credential field.
-//
-// Native-only steps (not provable here; the spec asserts the honest browser-build state instead):
-// - Isolated per-tab WebView and a persistent browsing profile across a cold start. The browser
-//   build renders sandboxed iframes; only the regular tab list is asserted across a reload.
-// - Android Autofill (service selection, fill, save prompt): the UI states it is unavailable.
-// - BiometricPrompt / Keystore unlock: the development vault unlocks without a prompt.
-// - TLS lock indicator: never shown in the browser build.
 import {createServer, type Server} from 'node:http';
 import {test, expect, type Page} from '@playwright/test';
 
 const article = '<article><h1>Harbour notes</h1><p>The ferry leaves at nine.</p><script>window.injected=true</script><p hidden>Hidden text</p></article>';
 let server: Server, origin = '';
 const hits: string[] = [];
-// Held responses for /arrivals?held: the document a page is leaving for commits only when the test releases it.
 const held: Array<() => void> = [];
 const releaseArrivals = () => { for (const finish of held.splice(0)) finish(); };
 
@@ -37,8 +14,6 @@ test.beforeAll(async () => {
     response.setHeader('Access-Control-Allow-Origin', '*');
     response.setHeader('Content-Type', 'text/html');
     if (path === '/article') response.end(article);
-    // A page that leaves for another document by itself. The destination is held by the server,
-    // so the old document stays on screen until the test lets the navigation commit.
     else if (path === '/departures') response.end('<head><meta http-equiv="refresh" content="1;url=/arrivals?held"></head><article><h1>Departures</h1><p>Old page text.</p></article>');
     else if (path === '/arrivals?held') held.push(() => response.end('<article><h1>Arrivals</h1><p>New page text.</p></article>'));
     else if (path === '/arrivals') response.end('<article><h1>Arrivals</h1><p>New page text.</p></article>');
@@ -54,10 +29,8 @@ test.afterAll(async () => { releaseArrivals(); await new Promise<void>(resolve =
 
 const button = (page: Page, name: string) => page.getByRole('button', {name, exact: true});
 const addressBox = (page: Page) => page.getByRole('textbox', {name: 'Address', exact: true});
-// Each tab owns one sandboxed frame; only the current tab's frame is visible.
 const heading = (page: Page, name: string) => page.locator('iframe[title="Website"]:visible').contentFrame().getByRole('heading', {name, exact: true});
 async function enter(page: Page, value: string) {
-  // A new tab opens with the address field already focused for editing.
   if (!await addressBox(page).isVisible()) await page.getByRole('button', {name: /^(Edit address|Search or type address)$/}).first().click();
   await addressBox(page).fill(value);
   await addressBox(page).press('Enter');
@@ -85,7 +58,6 @@ test('browser navigation, tabs, private tab, reviewed reading and password manag
     await enter(page, `${origin}/one`);
     await expect(heading(page, 'Page one')).toBeVisible();
     await expect(button(page, 'Edit address')).toContainText('/one');
-    // The browser build cannot verify TLS, so it must not claim a secure connection.
     await expect(page.getByRole('img', {name: 'Secure connection', exact: true})).toHaveCount(0);
     await enter(page, 'ferry timetable');
     await expect(heading(page, 'Results fixture')).toBeVisible();
@@ -131,7 +103,6 @@ test('browser navigation, tabs, private tab, reviewed reading and password manag
     await expect(review).toHaveCount(0);
   });
 
-  // Journey hardening: navigation during approval.
   await test.step('a page that navigates while its excerpt is under review retires that review; nothing of the old page is read', async () => {
     await enter(page, `${origin}/departures`);
     await expect(heading(page, 'Departures')).toBeVisible();
@@ -140,19 +111,14 @@ test('browser navigation, tabs, private tab, reviewed reading and password manag
     await expect(review.getByRole('status', {name: 'Reading status'})).toHaveText('');
     await expect(review.getByRole('textbox', {name: 'Excerpt to read'})).toHaveValue('Departures\n\nOld page text.');
     await expect(review.getByRole('button', {name: 'Read locally', exact: true})).toBeEnabled();
-    // The page starts leaving on its own; the old document is still shown while the request is held.
     await expect.poll(() => held.length).toBe(1);
     await expect(heading(page, 'Departures')).toBeVisible();
     await expect(review).toBeVisible();
-    // The navigation commits while the review is open: the review of the old target is withdrawn.
     releaseArrivals();
     await expect(heading(page, 'Arrivals')).toBeVisible();
     await expect(review).toHaveCount(0);
     await expect(page.getByRole('button', {name: 'Read locally', exact: true})).toHaveCount(0);
     expect(await page.evaluate(() => (window as any).speechCalls)).toEqual(['The ferry leaves at nine.']);
-    // The host cannot see where a sandboxed page took itself, so it says so and offers no reading
-    // of that unknown document: the menu offers neither Read aloud nor a page question, so no review
-    // opens and nothing is spoken.
     await expect(page.getByRole('status').filter({hasText: 'Page blocked'})).toBeVisible();
     await button(page, 'Menu').click();
     await expect(button(page, 'Reload page')).toBeVisible();
@@ -162,7 +128,6 @@ test('browser navigation, tabs, private tab, reviewed reading and password manag
     await expect(page.getByRole('dialog',{name:'Browser menu',exact:true})).toHaveCount(0);
     await expect(review).toHaveCount(0);
     expect(await page.evaluate(() => (window as any).speechCalls)).toEqual(['The ferry leaves at nine.']);
-    // Going to the new address explicitly restores a reviewable page: the review is of that page.
     await enter(page, `${origin}/arrivals`);
     await expect(heading(page, 'Arrivals')).toBeVisible();
     await menu(page, 'Read aloud');
@@ -186,8 +151,6 @@ test('browser navigation, tabs, private tab, reviewed reading and password manag
     await expect(review.getByRole('button', {name: 'Read locally', exact: true})).toBeDisabled();
     await review.getByRole('button', {name: 'Close', exact: true}).click();
     expect(await page.evaluate(() => (window as any).speechCalls)).toHaveLength(2);
-    // A plain-HTTP local page is not an acceptable question source: honest refusal, no editor,
-    // and the menu must not stay open over the refusal.
     await menu(page, 'Ask about page');
     await expect(page.getByText('Load a public HTTPS page before asking about it.', {exact: true})).toBeVisible();
     await expect(page.getByRole('dialog', {name: 'Ask about selected content'})).toHaveCount(0);
@@ -219,7 +182,7 @@ test('browser navigation, tabs, private tab, reviewed reading and password manag
     await expect(page.getByRole('heading', {name: '2 tabs', exact: true})).toBeVisible();
     await expect(button(page, `Switch to ${origin}/one`)).toBeVisible();
     await expect(button(page, `Switch to ${origin}/members`)).toBeVisible();
-    await expect(page.getByRole('button', {name: /private/i})).toHaveCount(1); // only the "New private tab" control
+    await expect(page.getByRole('button', {name: /private/i})).toHaveCount(1);
     await button(page, 'Back to page').click();
   });
 

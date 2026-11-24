@@ -1,8 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
 
-// Production builds resolve ./fixtures.js to ./fixtures.empty.js. The dev server
-// always serves the real fixtures, so swap the module over the network here and
-// check that the live product renders from empty, honest state without errors.
 const sentinels = /Jordan Park|Maya Chen|Priya Nair|Alex Kim|you@gmail\.example|Ritual Coffee|news\.example|Design review at|Unlock for details|Running a few minutes late|218 GB free|tartine|Enclave lock/;
 const views = ['Inbox', 'Calendar', 'Browser', 'Camera', 'Photos', 'Maps', 'Notes', 'Files', 'Workflows', 'Settings'];
 
@@ -53,7 +50,6 @@ test('notification shade has no seeded notices, no Enclave lock tile and neutral
   await expect(shade).toHaveAttribute('aria-hidden', 'false');
   await expect(shade.getByRole('status').filter({ hasText: 'No notifications' })).toBeVisible();
   await expect(shade.getByRole('button', { name: 'Enclave lock' })).toHaveCount(0);
-  // Flashlight has no device fact behind it, so it must not claim on or off.
   await expect(shade.getByRole('button', { name: 'Flashlight', exact: true })).not.toHaveAttribute('aria-pressed', /.*/);
   expect(await shade.innerText()).not.toMatch(sentinels);
   expect(errors).toEqual([]);

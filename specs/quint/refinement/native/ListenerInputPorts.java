@@ -3,7 +3,6 @@ package ai.eliza.sense;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** Synthetic recognition responses and observation of the real utterance array. */
 public final class ListenerInputPorts {
  public static final AtomicInteger calls=new AtomicInteger();
  public static final BlockingQueue<String> responses=new LinkedBlockingQueue<>();

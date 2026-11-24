@@ -1,8 +1,4 @@
 import { test, expect, type Page } from '@playwright/test';
-// Development lane with a native-plugin stub: the page sees an Android Capacitor bridge whose
-// ElizaSystem launcher, AlphaNotifications and AlphaVoiceCloud answers come from this file. No Android
-// device, package manager or permission prompt is involved; LauncherHomeInstrumentedTest covers
-// the real launcher APK holding HOME.
 
 type Stub = { apps?: unknown; failLaunch?: string[]; dial?: unknown; notifications?: { permissionGranted: boolean; appEnabled: boolean }; microphone?: string; assistant?: boolean; launchAssistant?: boolean; update?: {activationId:string;bridgeId:string;mounted?:boolean} };
 
@@ -219,26 +215,21 @@ test('Apps lists Android entries with icons and launches by package', async ({ p
   await page.getByRole('button', { name: 'Apps', exact: true }).click();
   const drawer = page.getByRole('dialog', { name: 'Apps', exact: true });
   await expect(drawer.getByRole('button', { name: 'Open Settings', exact: true })).toBeVisible();
-  // Icons are requested on Android; an entry with an unsafe icon or a duplicate package is dropped.
   expect(await calls(page, 'ElizaSystem', 'listLauncherApps')).toEqual([{ icons: true }]);
   await expect(drawer.getByRole('button', { name: 'Open Bad icon', exact: true })).toHaveCount(0);
   await expect(drawer.getByRole('button', { name: 'Open Settings duplicate', exact: true })).toHaveCount(0);
-  // Installed apps only, without a count; Alpha's views are on Home.
   await expect.poll(() => drawer.locator('[data-launcher-app] > button').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label')))).toEqual(['Open Broken app', 'Open Settings']);
   await expect(drawer.getByText(/\d+ apps?$/)).toHaveCount(0);
   await expect(drawer.getByRole('button', { name: 'Open Settings', exact: true }).locator('img')).toHaveAttribute('src', PNG);
 
-  // Only Android's installed inventory appears, even when a default dialer was resolved.
   await expect(drawer.getByRole('button', { name: /^Open Phone/ })).toHaveCount(0);
   await expect(drawer.getByRole('button', { name: 'Open Calendar', exact: true })).toHaveCount(0);
   expect(await calls(page, 'ElizaSystem', 'openDefaultApp')).toEqual([]);
 
-  // Search, then launch by package name only.
   await drawer.getByRole('searchbox', { name: 'Search apps', exact: true }).fill('sett');
   await drawer.getByRole('button', { name: 'Open Settings', exact: true }).click();
   await expect.poll(() => calls(page, 'ElizaSystem', 'launchApp')).toEqual([{ packageName: 'com.android.settings' }]);
 
-  // A failed launch is reported in place and nothing is retried.
   await drawer.getByRole('searchbox', { name: 'Search apps', exact: true }).fill('broken');
   await drawer.getByRole('button', { name: 'Open Broken app', exact: true }).click();
   await expect(drawer.getByRole('alert')).toHaveText(/^Broken app could not be opened\./);
@@ -261,7 +252,6 @@ test('an empty installed-app list says so and offers no Phone shortcut without a
 
 test('typing a search while the installed-app list is still loading still shows the results', async ({ page }) => {
   await nativeStub(page, { apps: [{ packageName: 'com.android.settings', label: 'Settings' }, { packageName: 'com.android.chrome', label: 'Chrome' }] });
-  // Hold the list read until the user has typed.
   await page.addInitScript(() => {
     const w = window as any; const original = w.Capacitor.nativePromise;
     w.Capacitor.nativePromise = (plugin: string, method: string, options: any) => plugin === 'ElizaSystem' && method === 'listLauncherApps'
@@ -291,8 +281,6 @@ test('denied notification access stays pending after account restoration without
  await expect(panel.locator('[aria-current=step] .alpha-permission-name')).toHaveText('Notifications');await panel.getByRole('button',{name:'Allow',exact:true}).click();
  await expect.poll(()=>calls(page,'DailyApps','requestPermissions')).toEqual([{permissions:['notifications']}]);
  await expect(panel.getByRole('button',{name:'Settings',exact:true})).toBeVisible();
- // Walkthrough choices do not grant OS permission. A denied prompt is not requested again.
- // A known choice can be deferred with the explicit Skip; there is no other way past it.
  await expect(panel.getByRole('button',{name:'Skip',exact:true})).toBeVisible();
  await expect(panel.getByRole('button',{name:/Not now|Back/})).toHaveCount(0);
  await page.keyboard.press('Escape');await expect(panel).toBeVisible();
@@ -303,7 +291,6 @@ test('denied notification access stays pending after account restoration without
 });
 
 test('the assistant Activity renders chat and Close only', async ({ page }) => {
-  // Notifications are denied, so a normal start would show the startup permission panel.
   await nativeStub(page, { assistant: true, notifications: { permissionGranted: false, appEnabled: false } });
   await page.goto('/');
   await expect(page.locator('html')).toHaveClass(/alpha-assistant-surface/);
@@ -317,7 +304,6 @@ test('the assistant Activity renders chat and Close only', async ({ page }) => {
 });
 
 test('the alpha.assistant launch extra alone keeps Home', async ({ page }) => {
-  // Only AlphaAssistActivity (DailyApps.surfaceInfo) opens the assistant surface.
   await nativeStub(page, { launchAssistant: true });
   await page.goto('/');
   await expect(page.getByRole('button', { name: 'Apps', exact: true })).toBeVisible();

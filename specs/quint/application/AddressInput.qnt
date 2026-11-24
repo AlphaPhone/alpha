@@ -1,24 +1,13 @@
-/// What the address bar does with a submission: the shared parser's verdict, the product's
-/// corrections to it, and the one outcome of every submission (open, search or refuse).
 module AddressInput {
-  // The properties of the trimmed text that the decision looks at.
   type Input = {
     tooLong: bool,
-    // The shared parser's reading: "url", "search" or "rejected", and why it rejected.
     verdict: str, reason: str,
-    // digits:digits (10:30), which the parser reads as host:port.
     timeLike: bool,
-    // Begins with http: or https:.
     webScheme: bool,
-    // The NFKC-normalized text contains an @.
     hasAt: bool,
-    // Exactly one @ in normalized text, with no URL delimiters, percent escapes, or controls.
     simpleAtSearch: bool,
-    // One to three groups of digits separated by dots (3.14).
     shortDecimal: bool,
-    // The parsed address has no host.
     hostEmpty: bool,
-    // A bare localhost, with an optional path.
     localhostAlias: bool
   }
   type State = { input: Input, approved: bool, outcome: str, corrected: bool }
@@ -26,7 +15,6 @@ module AddressInput {
   pure val word: Input = { tooLong: false, verdict: "search", reason: "none", timeLike: false,
     webScheme: false, hasAt: false, simpleAtSearch: false, shortDecimal: false, hostEmpty: false,
     localhostAlias: false }
-  // Combinations of properties that one text can have.
   pure def possible(i: Input): bool = and {
     i.verdict.in(Set("url", "search", "rejected")),
     i.reason.in(Set("none", "unsupported-protocol", "credentials", "other")),
@@ -37,9 +25,6 @@ module AddressInput {
     i.hostEmpty implies i.verdict == "url",
     i.localhostAlias implies (i.verdict == "search" and not(i.simpleAtSearch or i.webScheme))
   }
-  // Typed text that only looks like an address is searched instead of opened or refused: a
-  // word:body that is not a web address, simple @ text and a short decimal. An approved
-  // destination is never reread this way.
   pure def typedCorrection(i: Input, approved: bool): bool =
     not(approved) and not(i.webScheme) and
       (if (i.verdict == "rejected")
@@ -50,7 +35,6 @@ module AddressInput {
     else if (i.verdict == "url" and i.timeLike) "search"
     else if (typedCorrection(i, approved)) "search"
     else i.verdict
-  // A typed refusal shows a message; a refused approved destination fails its request.
   pure def result(i: Input, approved: bool): str = {
     val k = kind(i, approved)
     val refuseSearch = k == "search" and (approved or (i.hasAt and not(i.simpleAtSearch)))
@@ -90,7 +74,6 @@ module AddressInput {
   val TooLongRefused = (submitted and s.input.tooLong) implies s.outcome.in(Set("toast", "throw"))
   val OpenedHasHost = s.outcome == "open" implies
     ((s.input.verdict == "url" and not(s.input.hostEmpty) and not(s.input.timeLike)) or s.input.localhostAlias)
-  // Text that may carry credentials is never sent to the search provider.
   val CredentialsNeverSearched = (s.input.reason == "credentials" and not(s.input.simpleAtSearch)) implies
     s.outcome != "search"
   val ExplicitAddressNeverSearched = (s.input.webScheme and s.input.verdict != "search") implies s.outcome != "search"
@@ -105,7 +88,6 @@ module AddressInput {
   val SimpleAtSearchedWitness = s.outcome == "search" and s.input.simpleAtSearch and s.input.reason == "credentials"
   val DecimalSearchedWitness = s.outcome == "search" and s.input.shortDecimal and s.input.verdict == "url"
   val ApprovedRefusedWitness = s.outcome == "throw" and s.input.verdict == "search" and not(s.input.tooLong)
-  // "site:example.com cats", "define:x", "user@example.com", "3.14" and "10:30" are searches.
   run colonQueriesSearchTest = init
     .then(submit({ ...word, verdict: "rejected", reason: "unsupported-protocol" }, false))
     .expect(s.outcome == "search" and s.corrected)

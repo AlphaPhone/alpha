@@ -38,9 +38,6 @@ module UpdatePauseComponent {
   export RuntimeUpdatePause.reopen
 }
 
-// The real updater joins an in-memory participant barrier to a durable
-// journal and the retained resident shutdown lease. One attempt per process
-// is sufficient to expose the handoff and a visible unconfirmed tombstone.
 module NativeUpdateComposition {
   import UpdateActivationComponent(instance = 1) as Activation
   import UpdatePauseComponent(instance = 2) as Pause
@@ -67,8 +64,6 @@ module NativeUpdateComposition {
     Pause::observe({...Pause::defaults, boot: admission.platform.boot, sdk: if (admission.platform.sdk == 30) 30 else 37, session: "bound"}),
     admission' = {...admission, automatic: false}
   }
-  // A refused automatic call cannot cross the staging/activation boundary or
-  // acquire journal/lease authority. Manual begin intentionally has no boot gate.
   action beginAutomatic(owner: int): bool =
     if (automaticCapability != "supported") all {keepActivation, keepPause, keepAdmission}
     else all {
@@ -86,8 +81,6 @@ module NativeUpdateComposition {
     admission' = {...admission, platform: {...admission.platform, consent: value}},
     keepActivation, keepPause
   }
-  // Before an attempt, observe either a same-boot process replacement or reboot.
-  // In-flight durable recovery remains the imported journal model's contract.
   action processRestart = all {
     Activation::s.serial == 0, Activation::s.registered == Set(),
     Pause::s.generation == 1, Pause::s.file == "missing", admission.platform.process < 2,
@@ -120,15 +113,11 @@ module NativeUpdateComposition {
     Activation::seal,
     Pause::acquire(Activation::s.active), keepAdmission
   }
-  // The controlled port has a confirmed stop when this checkpoint is observed.
   action requestConfirmedStop = all {
     Pause::s.liveOwner == Activation::s.active,
     Pause::s.evidence.confirmed,
     Activation::requestStop, Pause::requestStop, keepAdmission
   }
-  // One fresh native read either matches the bound discovery bytes and exact APK
-  // tuple or fails to confirm them. A changed, withdrawn or failed read has the
-  // same precommit effect here. A read observes the feed at that point in time.
   action readFinalOffer(result: str): bool = all {
     admission.automatic, admission.finalOffer == "unread",
     Activation::s.stopRequested, Activation::s.active != 0,
@@ -136,15 +125,12 @@ module NativeUpdateComposition {
     result.in(Set("matching", "unavailable")),
     admission' = {...admission, finalOffer: result}, keepActivation, keepPause
   }
-  // Automatic consent is sampled again after the fresh offer read.
   action markCommitting = all {
     Activation::s.stopRequested,
     not(Pause::s.record.committing),
     not(admission.automatic) or (admission.finalOffer == "matching" and admission.platform.consent),
     Pause::committing(Activation::s.active), keepActivation, keepAdmission
   }
-  // This checkpoint represents an observed abandonment and confirmed journal/lease release.
-  // The pause model separately covers uncertain or interrupted recovery.
   action abandonAutomatic = {
     val active = Activation::s.active
     val owner = Activation::s.preparedOwner

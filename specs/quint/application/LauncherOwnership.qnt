@@ -1,4 +1,3 @@
-// Shared launcher inventory/default readback and native handoff ownership.
 module LauncherOwnership {
   type Read = {listDone: bool, listOk: bool, entries: List[int], dialDone: bool, dial: int}
   type Launch = {lifetime: int, target: int, resolvedDial: int}

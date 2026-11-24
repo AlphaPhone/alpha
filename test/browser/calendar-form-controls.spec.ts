@@ -1,11 +1,7 @@
 import {openBrowserCalendar} from './helpers/browser-calendar';
 import { test, expect, type Page } from '@playwright/test';
-// Calendar form controls (model.js calendar form): the day chips follow the chosen day so any later
-// day is reachable, Start later never moves the start earlier, a five-row month draws five rows,
-// and selected chips say so (aria-pressed). Browser renderer only; no provider write.
 test.use({ timezoneId: 'America/New_York' });
 
-/** Reads or patches the Calendar view state through the phone shell's own vget/vset. */
 const calendar = (page: Page, patch?: Record<string, unknown>) => page.evaluate(patch => {
   const screen = document.querySelector('[data-screen]') as any;
   const key = Object.keys(screen).find(name => name.startsWith('__reactFiber$'))!;
@@ -73,9 +69,7 @@ test('a month that fits five rows draws 35 cells and a six-row month 42', async 
   await page.getByRole('button', { name: 'Month view', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Choose calendar date' });
   const cells = dialog.getByRole('button', { name: /^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b/ });
-  // June 2027 starts on a Tuesday and has 30 days: five Monday-first rows.
   await expect(cells).toHaveCount(35);
-  // May 2027 starts on a Saturday and has 31 days: six rows.
   await dialog.getByRole('button', { name: 'Previous month', exact: true }).click();
   await expect(cells).toHaveCount(42);
 });

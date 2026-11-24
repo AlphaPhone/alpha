@@ -1,4 +1,3 @@
-// Selected media identity, lifecycle fences, reviewed bytes and unpublished capture cleanup.
 module MediaLifecycle {
   type State = {
     scope: str, foreground: bool, unlocked: bool, epoch: int, revision: int,

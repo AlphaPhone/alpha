@@ -11,7 +11,6 @@ import java.util.Map;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Exact public recorder state and journal bytes at native operation boundaries. */
 public final class NoteRecordingTraces {
  static AlphaNoteRecorder recorder;
  static Context context;

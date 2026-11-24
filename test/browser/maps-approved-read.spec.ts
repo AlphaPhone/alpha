@@ -2,8 +2,6 @@ import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import { returnToApps } from './app-navigation';
 import { test, expect } from '@playwright/test';
 
-// Real renderer, pairing, connection controller, proposal parser and journal
-// orchestration; synthetic HTTP/native boundaries, no provider or device effects.
 for (const mode of ['place', 'route', 'stale-before-approval', 'stale-after-read', 'receipt-replay', 'stale-replay', 'basemap-ready'] as const) {
   test(`approved Maps snapshot: ${mode}`, async ({ page }) => {
     await page.addInitScript((mode) => {
@@ -113,14 +111,10 @@ for (const mode of ['place', 'route', 'stale-before-approval', 'stale-after-read
     expect(sent.metadata.clientDevice.context).toEqual(sent.metadata.alphaPhone.context);
     expect(await page.evaluate(()=>(window as any).recoveryFixture.receipts)).toBe(0);
     expect(await page.evaluate(()=>(window as any).mapsRetained)).toBeUndefined();
-    // The pinned coordinator names the exact location-bearing view and the agent
-    // receiving it; this disclosure must appear before any approval or claim.
     await expect(page.getByText('Share this place or route, with its mode and distance, with the agent.',{exact:true})).toBeVisible();
     expect(await page.evaluate(()=>(window as any).recoveryFixture.decisions)).toBe(0);
     expect(await page.evaluate(()=>(window as any).recoveryFixture.claims)).toBe(0);
     if(mode==='stale-before-approval') {
-      // Close the place through Maps itself (keyboard; the open chat covers the sheet): the visible
-      // screen republishes its selection on each render, so an external context clear is undone.
       await page.getByRole('region',{name:'Maps',exact:true}).getByRole('button',{name:'Close place',exact:true}).press('Enter');
       await expect.poll(()=>page.evaluate(async()=>{const {getMapsSelectedObject}=await import('/src/maps/agent-context.ts');return getMapsSelectedObject()?.kind??null;})).not.toBe('map-place');
     } else {

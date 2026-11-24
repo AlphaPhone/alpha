@@ -5,7 +5,6 @@ import java.net.*;
 import java.nio.charset.StandardCharsets;
 import org.json.*;
 
-/** Closed transport boundaries execute the unchanged native transcription class. */
 public final class KeyboardDictationCloudTraces {
  static final JSONArray traces = new JSONArray();
  static KeyboardDictationCloud operation;

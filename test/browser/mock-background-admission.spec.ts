@@ -1,6 +1,5 @@
 import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import {test,expect} from '@playwright/test';
-// Real rendered entry and cold-start controllers; controlled native collectors.
 for(const entry of ['cold','chooser'] as const)for(const failure of ['none','hosted','notifications'] as const){
  test(`mock admission ${entry}: ${failure}`,async({page})=>{
   const pageErrors:string[]=[];page.on('pageerror',error=>pageErrors.push(error.message));
@@ -35,8 +34,6 @@ for(const entry of ['cold','chooser'] as const)for(const failure of ['none','hos
   },{entry,failure});
   await page.goto('/');
   if(entry==='chooser'){
-   // Finish the live startup permission handoff before requesting mock mode,
-   // which can retire that startup before an asynchronous publication runs.
    await expect.poll(()=>page.evaluate(()=>(window as any).mockFixture.googleAccess)).toContainEqual({gmailChanges:true,calendarEdits:true});
    await page.getByRole('button',{name:'Settings',exact:true}).click();
    await openConnectionDiagnostics(page);
@@ -47,7 +44,6 @@ for(const entry of ['cold','chooser'] as const)for(const failure of ['none','hos
   await expect(page.getByText('Mock mode · simulated data and actions')).toHaveCount(0);
   if(entry==='cold')await expect(page.getByRole('button',{name:'Settings',exact:true})).toHaveCount(0);
   else expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha.connection.selection.v1')!).kind)).toBe('offline');
-  // Release only one barrier: mounting/navigation must remain blocked.
   await page.evaluate(()=>(window as any).mockFixture.held.shift()());
   await expect(page.getByText('Mock mode · simulated data and actions')).toHaveCount(0);
   await page.evaluate(()=>{sessionStorage.setItem('mock-barriers-released','1');(window as any).mockFixture.held.shift()();});

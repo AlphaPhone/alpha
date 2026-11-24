@@ -3,7 +3,6 @@ test.use({locale:'en-GB'});
 import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 const place={name:'Ferry Building',latitude:37.7955,longitude:-122.3937,provider:'eliza-cloud',providerPlaceId:'osm:n1',formattedAddress:'1 Ferry Building, San Francisco',categories:[]};
 const attribution='© OpenStreetMap contributors';
-// The exact wire shapes plugin-maps emits (`card.ts` and core `interaction-serialize.ts`).
 const card=(text:string,body:unknown)=>`${text}\n\n[MAPSCARD]\n${JSON.stringify(body)}\n[/MAPSCARD]`;
 const route=card('Here is the walking route.',{kind:'route',origin:{...place,name:'Home',providerPlaceId:'osm:n0'},destination:place,travelMode:'walk',distanceMeters:1530,durationSeconds:1260,warnings:[],attribution});
 const share='Share the location of Ferry Building?\n\n[CHOICE:maps-share id=maps-share-m1]\nYes, share the location of Ferry Building (confirmed).=Share location\nNo, do not share my location.=Don\'t share\n[/CHOICE]';

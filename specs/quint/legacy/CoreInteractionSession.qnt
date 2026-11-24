@@ -1,4 +1,3 @@
-// Literal upstream InteractionSession at 4787d51a142c. Claim IDs are client/run pairs.
 module CoreInteractionSessionTemplate {
   const Clients: Set[int]
   const Mismatched: Set[int]
@@ -6,7 +5,6 @@ module CoreInteractionSessionTemplate {
   const MaxTime: int
   const Expiry: int
   const Ttl: int
-  // The same abstract None value has typed sentinels in the disjoint claim and digest domains.
   const None: (int, int)
   pure val NoDigest = "none"
   type ClaimId = (int, int)
@@ -112,7 +110,6 @@ module CoreInteractionSession {
   val safety = Model::TypeOK and Model::AtMostOnce and Model::ExactlyOnceAuthority and Model::CompletedHasEffect
     and Model::NoCommitWhileRevoked and Model::NoLateCommit and Model::AmbiguousRetained and Model::ExecutorHasRecord
   temporal CheckedTemporal = Model::Fairness implies Model::EffectOnlyByCommitter and Model::EffectRecorded
-  // Source driver exposes the exact configured actions and normalizes tuple observations to lists.
   val state = Model::s
   val stateOwner = List(Model::s.owner._1, Model::s.owner._2)
   val stateMine = Model::s.mine.keys().mapBy(client => {
@@ -146,7 +143,6 @@ module CoreInteractionSessionRetries {
   val safety = Model::TypeOK and Model::AtMostOnce and Model::ExactlyOnceAuthority and Model::CompletedHasEffect
     and Model::NoCommitWhileRevoked and Model::NoLateCommit and Model::AmbiguousRetained and Model::ExecutorHasRecord
   temporal CheckedTemporal = Model::Fairness implies Model::EffectOnlyByCommitter and Model::EffectRecorded
-  // Source driver exposes the exact configured actions and normalizes tuple observations to lists.
   val state = Model::s
   val stateOwner = List(Model::s.owner._1, Model::s.owner._2)
   val stateMine = Model::s.mine.keys().mapBy(client => {

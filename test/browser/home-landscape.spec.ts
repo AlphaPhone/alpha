@@ -1,6 +1,4 @@
 import { test, expect, type Page, type Locator } from '@playwright/test';
-// A touch phone in landscape (the Android WebView path in main.tsx). Android rotation itself is
-// covered by RotationInstrumentedTest; this checks the renderer layout only.
 test.use({ hasTouch: true, isMobile: true, viewport: { width: 915, height: 412 } });
 
 async function reachable(page: Page, control: Locator) {
@@ -16,7 +14,6 @@ async function reachable(page: Page, control: Locator) {
 test('landscape lays Home and the composer side by side and keeps every Home control reachable', async ({ page }, info) => {
   await page.goto('/');
   await expect(page.locator('html')).toHaveClass(/alpha-landscape/);
-  // Scaled by the shorter side: type stays phone-sized rather than shrinking to fit the width.
   expect(Number(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--phone-scale')))).toBeCloseTo(1, 1);
   const home = page.locator('[data-alpha-layer="home"]'), composer = page.locator('[data-alpha-layer="composer"]');
   const homeBox = (await home.boundingBox())!, composerBox = (await composer.boundingBox())!;
@@ -31,14 +28,12 @@ test('landscape lays Home and the composer side by side and keeps every Home con
   await page.locator('[data-alpha-dock-scrim="true"]').click({position:{x:12,y:12}});
   await page.getByRole('button', { name: 'Notes', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('data-active-view', 'notes');
-  // Rotate to portrait: the active view and the composer draft survive.
   await page.setViewportSize({ width: 412, height: 915 });
   await expect(page.locator('html')).not.toHaveClass(/alpha-landscape/);
   await expect(page.locator('html')).toHaveAttribute('data-active-view', 'notes');
   await page.getByRole('button', { name: 'Back to apps', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Ask Alpha', exact: true })).toHaveValue('Rotation keeps this draft');
   await reachable(page, page.getByRole('button', { name: 'Settings', exact: true }));
-  // And back to landscape with the drawer open: its search and rows stay reachable too.
   await page.setViewportSize({ width: 915, height: 412 });
   await page.getByRole('button', { name: 'Apps', exact: true }).click();
   const drawer = page.getByRole('dialog', { name: 'Apps', exact: true });
@@ -62,7 +57,6 @@ test('the conversation docks beside Home in landscape and its controls stay on s
 test.describe('a narrow window on a landscape monitor', () => {
   test.use({ hasTouch: false, isMobile: false, viewport: { width: 500, height: 900 } });
   test('keeps the portrait phone layout: only a landscape window on a landscape screen docks side by side', async ({ page }) => {
-    // A 1920x1080 monitor (Chromium ignores the screen option outside mobile emulation).
     await page.addInitScript(() => {
       Object.defineProperty(Screen.prototype, 'width', { configurable: true, get: () => 1920 });
       Object.defineProperty(Screen.prototype, 'height', { configurable: true, get: () => 1080 });

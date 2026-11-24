@@ -1,4 +1,3 @@
-/// Account presentation and owner-bound sign-out. Does not model billing-provider internals.
 module AccountSheet {
   type State = { owner: int, open: bool, section: str, review: int, mode: str,
     keys: Set[int], dataRevision: int, removed: Set[int], authorized: Set[int] }

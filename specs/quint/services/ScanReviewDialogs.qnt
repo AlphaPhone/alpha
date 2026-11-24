@@ -1,6 +1,3 @@
-/// The four scan review dialogs as independent small machines: the text review with its
-/// one-shot Notes save, retryable PDF export and Keep photo; the searchable review; the
-/// page correction preview; and the page capture dialog over a camera that may stop.
 module ScanReviewDialogs {
   type Text = { ocr: str, closed: bool, attempted: bool, saveCalls: int, saved: str,
     pdfAttempted: bool, pdfCalls: int, pdfLocked: bool, keep: str, keepCalls: int, keepRetries: int, document: bool }
@@ -16,22 +13,17 @@ module ScanReviewDialogs {
     correction: { busy: "none", corners: 0, preview: -1, corrected: false, closed: false, applied: -1 },
     capture: { stream: "starting", busy: false, blob: false, blobWhenEnded: false, closed: false, result: "none" }
   }
-  // Text review.
   action ocrSettled(ok: bool): bool = all { s.text.ocr == "starting", not(s.text.closed),
     s' = { ...s, text: { ...s.text, ocr: if (ok) "ready" else "failed" } } }
-  // Save to Notes runs once per review. An unconfirmed save stays latched: the text may already be saved.
   action saveToNotes = all { s.text.ocr == "ready", not(s.text.closed), not(s.text.attempted),
     s' = { ...s, text: { ...s.text, attempted: true, saveCalls: s.text.saveCalls + 1, saved: "pending" } } }
   action notesSettled(saved: bool): bool = all { s.text.saved == "pending",
     s' = { ...s, text: { ...s.text, saved: if (saved) "saved" else "unconfirmed" } } }
-  // The photo PDF can be asked for again only after a result that confirms nothing was written.
   action exportPhotoPdf = all { not(s.text.closed), not(s.text.pdfAttempted), s.text.pdfCalls < 3,
     s' = { ...s, text: { ...s.text, pdfAttempted: true, pdfCalls: s.text.pdfCalls + 1 } } }
   action photoPdfSettled(retryable: bool): bool = all { s.text.pdfAttempted, not(s.text.pdfLocked),
     s' = { ...s, text: if (s.text.closed) { ...s.text, pdfLocked: true }
       else { ...s.text, pdfAttempted: not(retryable), pdfLocked: not(retryable) } } }
-  // Keep photo can be pressed again only after a failure the host marks retryable: it kept
-  // nothing, or it resolves the retry against the same operation. A result after close is dropped.
   action keepPhoto = all { not(s.text.closed), s.text.keep == "idle", s.text.keepCalls < 3,
     s' = { ...s, text: { ...s.text, keep: "pending", keepCalls: s.text.keepCalls + 1 } } }
   action keepSettled(outcome: str): bool = all { s.text.keep == "pending", not(s.text.closed),
@@ -39,12 +31,10 @@ module ScanReviewDialogs {
     s' = { ...s, text: if (outcome == "retryable") { ...s.text, keep: "idle", keepRetries: s.text.keepRetries + 1 }
       else { ...s.text, keep: outcome } } }
   action buildDocument = all { not(s.text.closed), s' = { ...s, text: { ...s.text, document: true } } }
-  // Back is left to an open document dialog; every other close ends the review and its document.
   action textBack = all { not(s.text.closed),
     s' = if (s.text.document) { ...s, text: { ...s.text, document: false } }
       else { ...s, text: { ...s.text, closed: true } } }
   action textClose = all { not(s.text.closed), s' = { ...s, text: { ...s.text, closed: true, document: false } } }
-  // Searchable review.
   action recognised = all { not(s.searchable.closed), s' = { ...s, searchable: { ...s.searchable, ready: true } } }
   action keepText = all { s.searchable.ready, not(s.searchable.busy), not(s.searchable.closed),
     s' = { ...s, searchable: { ...s.searchable, closed: true, result: "reviewed" } } }
@@ -61,7 +51,6 @@ module ScanReviewDialogs {
   action searchableClose = all { not(s.searchable.closed),
     s' = { ...s, searchable: { ...s.searchable, closed: true, requestedAtClose: s.searchable.requested,
       result: if (s.searchable.busy and s.searchable.requested) "unconfirmed" else "none" } } }
-  // Correction: any corner change discards the preview, and only a current preview can be applied.
   action moveCorner = all { s.correction.busy == "none", not(s.correction.closed), s.correction.corners < 3,
     s' = { ...s, correction: { ...s.correction, corners: s.correction.corners + 1, corrected: false, preview: -1 } } }
   action beginWork(kind: str): bool = all { Set("detect", "preview").contains(kind), s.correction.busy == "none",
@@ -79,7 +68,6 @@ module ScanReviewDialogs {
     s' = { ...s, correction: { ...s.correction, closed: true, applied: s.correction.preview } } }
   action correctionClose = all { not(s.correction.closed),
     s' = { ...s, correction: { ...s.correction, closed: true, busy: "none" } } }
-  // Capture: the reviewed frame is kept when the camera stops; only a live camera can retake.
   action cameraStarted(ok: bool): bool = all { s.capture.stream == "starting", not(s.capture.closed),
     s' = { ...s, capture: { ...s.capture, stream: if (ok) "live" else "none" } } }
   action cameraEnded = all { s.capture.stream == "live", not(s.capture.closed),
@@ -131,7 +119,6 @@ module ScanReviewDialogs {
     .expect(s.text.keepCalls == 2 and s.text.keep == "unconfirmed" and safety)
   run retryablePdfUnlocksTest = init.then(exportPhotoPdf).then(photoPdfSettled(true)).then(exportPhotoPdf)
     .then(photoPdfSettled(false)).expect(s.text.pdfCalls == 2 and s.text.pdfLocked and safety)
-  /// Closing while the PDF is still being prepared reports nothing; after the request it is unconfirmed.
   run searchableCloseOutcomesTest = init.then(recognised).then(download).then(searchableClose)
     .expect(s.searchable.result == "none" and safety)
   run searchableCloseAfterRequestTest = init.then(recognised).then(download).then(providerAsked).then(searchableClose)
@@ -140,7 +127,6 @@ module ScanReviewDialogs {
     .expect(s.correction.corrected and safety).then(moveCorner).expect(not(s.correction.corrected) and safety)
     .then(beginWork("preview")).then(workSettled(true)).then(applyCorrection)
     .expect(s.correction.applied == 1 and safety)
-  /// The camera stops after a page was captured: the capture stays and can still be used.
   run stoppedCameraKeepsCaptureTest = init.then(cameraStarted(true)).then(capturePage).then(frameEncoded(true))
     .then(cameraEnded).expect(s.capture.blob and s.capture.stream == "ended" and safety).then(usePage)
     .expect(s.capture.result == "page" and safety)

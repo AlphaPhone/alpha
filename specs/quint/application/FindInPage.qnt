@@ -1,17 +1,12 @@
-/// Find in page: the renderer's find bar, its debounced native search, and the native side
-/// clearing a search when its tab navigates or stops being shown.
 module FindInPage {
   pure val Tabs = Set(1, 2)
   type Event = { id: int, cleared: bool }
   type State = {
     alive: Set[int], cur: int,
-    // The tab whose native surface is shown; 0 while every surface is hidden.
     presented: int,
     finding: bool, findTab: int, hasQuery: bool, queryVersion: int, count: int,
     timerArmed: bool, timerTab: int, timerVersion: int, timerHasQuery: bool,
-    // Tabs with an active native search.
     nativeQuery: Set[int],
-    // Native find events not yet handled by the renderer.
     events: List[Event],
     strayFind: bool, staleSearch: bool
   }
@@ -20,7 +15,6 @@ module FindInPage {
     queryVersion: 0, count: 0, timerArmed: false, timerTab: 0, timerVersion: 0, timerHasQuery: false,
     nativeQuery: Set(), events: List(), strayFind: false, staleSearch: false }
   pure def idleBar(t: State): State = { ...t, finding: false, findTab: 0, hasQuery: false, count: 0 }
-  // The native side reports a cleared search only for a tab that had one.
   pure def nativeClear(t: State, ids: Set[int]): State = { ...t,
     nativeQuery: t.nativeQuery.exclude(ids),
     events: ids.intersect(t.nativeQuery).fold(t.events, (pending, id) => pending.append({ id: id, cleared: true })) }
@@ -28,19 +22,16 @@ module FindInPage {
     s.alive.contains(s.cur), s.queryVersion < 4,
     s' = { ...s, finding: true, findTab: s.cur, hasQuery: false, count: 0, queryVersion: s.queryVersion + 1 }
   }
-  // Close, Escape or Back. The debounce is dropped and the native search of the bar's tab is cleared.
   action closeFind = all {
     s.finding, s.events.length() < 2,
     s' = nativeClear({ ...idleBar(s), timerArmed: false }, Set(s.findTab).intersect(s.alive))
   }
-  // Typing is possible only while the bar is shown, which is on its own tab.
   action typeQuery(nonEmpty: bool): bool = all {
     s.finding, s.findTab == s.cur, s.queryVersion < 4,
     s' = { ...s, hasQuery: nonEmpty, count: if (nonEmpty) s.count else 0,
       queryVersion: s.queryVersion + 1, timerArmed: true, timerTab: s.cur,
       timerVersion: s.queryVersion + 1, timerHasQuery: nonEmpty }
   }
-  // The debounce searches only a tab that is still selected and still owns the bar.
   action timerFires = all {
     s.timerArmed,
     s' = if (s.alive.contains(s.timerTab) and s.timerTab == s.cur and s.timerTab == s.findTab)
@@ -54,7 +45,6 @@ module FindInPage {
     s.nativeQuery.contains(id), s.events.length() < 2,
     s' = { ...s, events: s.events.append({ id: id, cleared: false }) }
   }
-  // Events for any tab other than the bar's are ignored.
   action deliver = all {
     s.events.length() > 0,
     s' = if (s.events.head().id != s.findTab) { ...s, events: s.events.tail() }
@@ -62,7 +52,6 @@ module FindInPage {
       else { ...s, events: s.events.tail(), count: 1 }
   }
   action pick(id: int): bool = all { s.alive.contains(id), id != s.cur, s' = { ...s, cur: id } }
-  // The poll shows the selected tab's surface, or none under a menu, sheet or other overlay.
   action present(hidden: bool): bool = all {
     s.events.length() == 0,
     s' = nativeClear({ ...s, presented: if (hidden) 0 else s.cur },
@@ -72,9 +61,7 @@ module FindInPage {
     s.alive.contains(id), s.events.length() < 2,
     s' = nativeClear(s, Set(id))
   }
-  // A closed tab is disposed without a cleared event.
   action closeTab(id: int): bool = {
-    // The unchanged guards and alive subseteq Tabs make the remaining set a singleton.
     nondet remaining = s.alive.exclude(Set(id)).oneOf()
     all {
       s.alive.contains(id), s.alive.size() > 1,
@@ -98,16 +85,12 @@ module FindInPage {
     s.events.length() <= 3 and s.count.in(0.to(1))
   val safety = TypeOK and FindTabIffFinding and ResultsNeedFindBar and SearchIssuedForShownBar and
     NativeSearchOnLiveTab
-  // An empty find bar is not cleared by a tab switch, because the native side has nothing to
-  // report. The bar is hidden on the other tab, and the next Back press closes it.
   val HiddenFindBarWitness = s.finding and s.findTab != s.cur and s.alive.contains(s.findTab) and
     s.events.length() == 0 and s.nativeQuery.size() == 0 and s.presented == s.cur and not(s.timerArmed)
   val FindBarOnClosedTabWitness = s.finding and not(s.alive.contains(s.findTab)) and s.events.length() == 0
-  // The debounce carries no version: reopening the bar before it fires searches for the earlier text.
   val EarlierTextSearchedWitness = s.staleSearch
   val ClearedEventPendingWitness = s.finding and s.events.length() > 0 and s.events.head().cleared and
     s.events.head().id == s.findTab
-  // A tab switch during the debounce must not search a tab that is no longer shown.
   run tabSwitchDuringDebounceTest = init.then(openFind).then(typeQuery(true)).then(pick(2)).then(timerFires)
     .expect(s.nativeQuery.size() == 0 and not(s.strayFind) and not(s.timerArmed) and safety)
   run switchClearsActiveSearchTest = init.then(openFind).then(typeQuery(true)).then(timerFires)

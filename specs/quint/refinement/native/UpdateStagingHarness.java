@@ -32,7 +32,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import javax.net.ssl.HttpsURLConnection;
 import org.json.JSONObject;
 
-/** Exact updater code with synthetic HTTPS, archive readback and installer ports. */
 public final class UpdateStagingHarness {
  private static final byte[] APK = {1, 2, 3, 4};
  private static final List<Response> connections = new CopyOnWriteArrayList<>();
@@ -108,7 +107,6 @@ public final class UpdateStagingHarness {
   context.packages.installer.stagedOutput=id->{
    var sink=new ByteArrayOutputStream();copies.put(id,sink);return sink;
   };
-  // Stop at the first actual renderer preparation event. No fixture takes an install past this boundary.
   Plugin.ready=(plugin,request)->((AlphaDevicePlugin)plugin).activateUpdate(new PluginCall(request.put("ready",false)));
   trace=new Trace(mode,observe());
  }
@@ -175,7 +173,6 @@ public final class UpdateStagingHarness {
   else trace.step("processRestart",observe());
  }
  private void deferred(String status)throws Exception{
-  // A shut-down worker proves this refusal occurs before executor admission.
   ((java.util.concurrent.ExecutorService)Trace.read(bridges.get(1),"updateWorker")).shutdownNow();
   calls[1]=payload();bindAutomatic(calls[1]);bridges.get(1).installUpdate(calls[1]);answer(1,true);
   require(status.equals(calls[1].result.optString("status")),"exact automatic refusal status");
@@ -315,7 +312,6 @@ public final class UpdateStagingHarness {
     break;
    case "same-size-corrupt-body":
     body=new byte[]{1,2,3,5};start();heldRead.open();
-    // Both chunks were written, but a matching byte count is insufficient.
     answer(1,false);owner=0;phase="idle";outcome="download";
     trace.macro("same-size wrong SHA-256 refuses before archive",observe(),Trace.action("chunk",2),Trace.action("settle","download",true,true));
     break;

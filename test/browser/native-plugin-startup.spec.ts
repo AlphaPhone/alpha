@@ -1,6 +1,4 @@
 import {test,expect} from '@playwright/test';
-// Android injects legacy synchronous listener handles before modern core loads.
-// This fixture exercises the production entrypoint with that native shape; no device effects.
 test('Android legacy plugin injection is wrapped before renderer startup and listener cleanup',async({page})=>{
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
  await page.addInitScript(()=>{

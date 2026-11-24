@@ -1,22 +1,11 @@
-// Production (flag-off) renderer: Clock repeat days reach DailyApps.clockHandoff only when the
-// native surface reports clockRepeatDaysVersion >= 1. Otherwise no day chips are rendered and a
-// reviewed request never carries days.
-//
-// Evidence boundary: the flag-off renderer over the stubbed Capacitor bridge in flag-off-android.ts,
-// with DailyApps.clockHandoff and the surfaceInfo flag added at the same test boundary. It is not
-// the native DailyApps plugin, Android's AlarmClock intent or an installed Clock app: no alarm is
-// created and nothing proves Clock honours EXTRA_DAYS.
 import { test, expect, type Page } from '@playwright/test';
 import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface, residentHome } from './flag-off-android';
 
-/** Adds DailyApps.clockHandoff (recorded, reports 'opened') and the repeat-days surface flag. */
 async function clockBridge(page: Page, repeatDaysVersion: number | null) {
   await page.addInitScript((version) => {
     const w = window as any, capacitor = w.Capacitor, original = capacitor.nativePromise;
     const daily = capacitor.PluginHeaders.find((plugin: any) => plugin.name === 'DailyApps');
     daily.methods.push({ name: 'clockHandoff', rtype: 'promise' });
-    // Opening Workflows discovers these four collections before the Clock chooser.
-    // This Clock fixture supplies no automations; every write and other path stays guarded.
     const emptyDiscoveries: Record<string, string> = {
       '/api/automations': 'automations',
       '/api/lifeops/scheduled-tasks?ownerVisibleOnly=1': 'tasks',
@@ -53,19 +42,15 @@ for (const version of [1, 2]) test(`clockRepeatDaysVersion ${version}: Mon to Fr
   for (const day of [...weekdays, 'Sat', 'Sun']) await expect(repeat.getByRole('button', { name: `Repeat on ${day}`, exact: true })).toHaveAttribute('aria-pressed', 'false');
   await clock.getByLabel('Alarm time', { exact: true }).fill('06:30');
   await clock.getByRole('textbox', { name: 'Alarm label' }).fill('Weekday wake');
-  // Chosen out of order; the request is still the ascending Calendar values.
   for (const day of ['Fri', 'Mon', 'Wed', 'Tue', 'Thu']) await repeat.getByRole('button', { name: `Repeat on ${day}`, exact: true }).click();
   for (const day of weekdays) await expect(repeat.getByRole('button', { name: `Repeat on ${day}`, exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(repeat).toContainText('Repeats weekdays');
-  // Repeat belongs only to Set; changing the action keeps the unfinished Set draft.
   for(const action of ['Show alarms','Snooze','Dismiss']){await clock.getByRole('button',{name:action,exact:true}).click();await expect(clock.getByRole('group',{name:'Repeat',exact:true})).toHaveCount(0);}
   await clock.getByRole('button',{name:'Set alarm',exact:true}).click();
   await expect(repeat).toContainText('Repeats weekdays');
   await clock.getByRole('button', { name: 'Review Clock request', exact: true }).click();
   await expect(clock).toContainText('06:30 · weekdays · Weekday wake');
   expect(await handoffs(page)).toEqual([]);
-  // Deliver duplicate activation to the same reviewed control before its asynchronous
-  // handoff settles. A physical dblclick can retarget the newly exposed Review button.
   await clock.getByRole('button', { name: 'Confirm Clock request', exact: true }).evaluate(button => {
     (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click();
   });
@@ -96,7 +81,6 @@ test('without clockRepeatDaysVersion there are no day chips and a set request ca
   const [request] = await handoffs(page);
   expect(request).toMatchObject({ action: 'set', hour: 6, minute: 30, reviewed: true });
   expect('days' in request).toBe(false);
-  // Show alarms is its own reviewed handoff.
   await clock.getByRole('button', { name: 'Show alarms', exact: true }).click();
   await clock.getByRole('button', { name: 'Review Clock request', exact: true }).click();
   await expect(clock.getByRole('button', { name: 'Confirm Clock request', exact: true })).toBeVisible();

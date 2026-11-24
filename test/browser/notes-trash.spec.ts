@@ -13,14 +13,11 @@ async function createNote(page:Page,title:string,body:string){
  await page.getByRole('button',{name:'Back to notes',exact:true}).click();
  await expect(page.getByRole('button',{name:`Open ${title}`,exact:true})).toBeVisible();
 }
-/** Editor ⋯ menu → Delete. */
 async function deleteOpenNote(page:Page){
  await page.getByRole('button',{name:'More',exact:true}).click();
  await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
 }
-/** The "Recently deleted" folder chip, shown while it has notes. */
 async function openDeleted(page:Page){await page.getByRole('button',{name:'Recently deleted',exact:true}).click();}
-/** Row → Recover in the action sheet. */
 async function recover(page:Page,title:string,left:string){
  await page.getByRole('button',{name:`${title}, ${left}`,exact:true}).click();
  await page.getByRole('dialog',{name:title}).getByRole('button',{name:'Recover',exact:true}).click();
@@ -39,7 +36,6 @@ test('deleted notes survive a restart in Recently deleted, restore with the same
  const before=(await savedRecords(page)).find((n:any)=>n.title==='Trash audit');
  const revision=await page.evaluate(async id=>{const m=await import('/src/runtime/browser-notes-document.ts');return (await (await m.openBrowserNotes()).target(id)).revision;},before.id);
 
- // Immediate Undo from the toast puts the note back and leaves Recently deleted empty.
  await deleteNote(page,'Second note');
  await page.getByRole('button',{name:'Undo',exact:true}).click();
  await expect(page.getByRole('button',{name:'Open Second note',exact:true})).toBeVisible();
@@ -47,7 +43,6 @@ test('deleted notes survive a restart in Recently deleted, restore with the same
 
  await deleteNote(page,'Trash audit');
  expect((await savedRecords(page)).some((n:any)=>n.id===before.id)).toBe(false);
- // Content is durable outside the in-memory toast: reload is a restart of the web app.
  await page.reload();await openNotes(page);
  await expect(page.getByRole('button',{name:'Open Trash audit',exact:true})).toHaveCount(0);
  await openDeleted(page);
@@ -59,12 +54,10 @@ test('deleted notes survive a restart in Recently deleted, restore with the same
  await page.screenshot({path:test.info().outputPath('notes-trash.png')});
  await recover(page,'Trash audit','30 days left');
  await expect(page.getByText('Trash audit restored',{exact:true})).toBeVisible();
- // The last note left: Recently deleted closes and its chip disappears.
  await expect(trash).toHaveCount(0);
  await expect(page.getByRole('button',{name:'Recently deleted',exact:true})).toHaveCount(0);
  await page.getByRole('button',{name:'Open Trash audit',exact:true}).click();
  await expect(page.getByRole('textbox',{name:'Note',exact:true})).toHaveValue('Keep this exact text.\nSecond line.');
- // Same id, byte-identical record and therefore the same reviewed revision.
  expect((await savedRecords(page)).find((n:any)=>n.id===before.id)).toEqual(before);
  expect(await page.evaluate(async id=>{const m=await import('/src/runtime/browser-notes-document.ts');return (await (await m.openBrowserNotes()).target(id)).revision;},before.id)).toBe(revision);
  expect(await trashEntries(page)).toEqual([]);
@@ -91,8 +84,6 @@ test('Delete now and Empty ask first, and checklists use the same Recently delet
  await expect(trash.getByText('First',{exact:true})).toBeVisible();
  await askDelete();
  await page.getByRole('dialog',{name:'Delete “First”?'}).getByRole('button',{name:'Delete',exact:true}).click();
- // The permanent erase settled without touching the other two Trash records. Its passive
- // confirmation cannot replace the three previously offered restore actions.
  await expect.poll(async()=>{const state=await toastObservation(page);return state.queued.some(notice=>!notice.undo&&notice.text==='Deleted');}).toBe(true);
  expect((await trashEntries(page)).map((entry:any)=>entry.note.title).sort()).toEqual(['Second','Third']);
  expect(await savedRecords(page)).toEqual([]);
@@ -119,13 +110,11 @@ test('canonical startup preserves unselected legacy Trash; Older notes purges ex
  const deletedAt=(await trashEntries(page))[0].deletedAt;
  await page.clock.setSystemTime(deletedAt+DAY);
  await deleteNote(page,'Later');
- // The first deletion's toast may still be visible. Verify both durable writes before reload.
  await expect.poll(async()=>({
   trash:(await trashEntries(page)).map(entry=>entry.note.title).sort(),
   saved:(await savedRecords(page)).map((note:{title:string})=>note.title),
  })).toEqual({trash:['Expiring','Later'],saved:[]});
 
- // One minute before the boundary: still restorable after a restart.
  await page.clock.setSystemTime(deletedAt+30*DAY-60_000);
  await page.reload();await openNotes(page);
  await openDeleted(page);
@@ -133,7 +122,6 @@ test('canonical startup preserves unselected legacy Trash; Older notes purges ex
  await expect(trash.getByRole('button',{name:'Expiring, 1 day left',exact:true})).toBeVisible();
  await expect(trash.getByRole('button',{name:'Later, 2 days left',exact:true})).toBeVisible();
 
- // Past the boundary, explicitly opening Older notes purges without a restart.
  await page.clock.setSystemTime(deletedAt+30*DAY+60_000);
  await returnToApps(page);
  await openNotes(page);
@@ -143,9 +131,6 @@ test('canonical startup preserves unselected legacy Trash; Older notes purges ex
  await expect(trash.getByText('Later',{exact:true})).toBeVisible();
  expect(await page.evaluate(async()=>JSON.stringify((await (await import('/src/browser/documents.ts')).browserDocuments.read('alpha.browser.notes-trash.v1'))??null).includes('Gone after thirty days'))).toBe(false);
 
- // Canonical startup must not open or rewrite unselected legacy records, even
- // when their Trash entry expires while the app is closed. Preserve the exact
- // collection and Trash document receipt/bytes before explicitly selecting Older notes.
  const retained=await page.evaluate(async()=>({
   notes:await(await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw(),
   trash:await(await import('/src/browser/documents.ts')).browserDocuments.read('alpha.browser.notes-trash.v1'),
@@ -159,10 +144,8 @@ test('canonical startup preserves unselected legacy Trash; Older notes purges ex
   trash:await(await import('/src/browser/documents.ts')).browserDocuments.read('alpha.browser.notes-trash.v1'),
  }))).toEqual(retained);
  expect((await trashEntries(page)).map((entry:any)=>entry.note.title)).toEqual(['Later']);
- // Selecting the retained source now admits its existing three-day maintenance.
  await openNotes(page);
  await expect.poll(()=>trashEntries(page)).toEqual([]);
- // Reopening the already purged source is still a no-op.
  await page.reload();await openNotes(page);
  expect(await trashEntries(page)).toEqual([]);
  expect((await savedRecords(page)).map((n:any)=>n.title)).toEqual([]);
@@ -198,7 +181,6 @@ test('voice notes share Recently deleted: the recording restores with its note a
  await expect(page.getByText('Voice note restored.',{exact:true})).toBeVisible();
  await expect(trash).toHaveCount(0);
  expect((await describe()).deletedAt).toBeUndefined();
- // The voice restore reinstates the exact record: same id, same dates, same reviewed revision.
  expect((await savedRecords(page)).find((n:any)=>n.id==='trash-voice')).toEqual(original);
  expect(await revision()).toBe(originalRevision);
 
@@ -210,7 +192,6 @@ test('voice notes share Recently deleted: the recording restores with its note a
  const erased=await describe();
  expect(erased.transcript).toBe('');expect(erased.expired).toBe(true);
  expect(Object.values(erased.deletionOperations)).toContain('purged');
- // An erased recording can never be restored again.
  const op=Object.entries(erased.deletionOperations).find(([,v])=>v==='purged')![0];
  expect(await page.evaluate(async op=>{const {registerPlugin}=await import('/src/platform-plugins.ts');try{await registerPlugin<any>('AlphaNoteAudio').restore({audioId:'trash-audio',noteId:'trash-voice',operationId:op});return 'restored';}catch{return 'refused';}},op)).toBe('refused');
 });
@@ -232,14 +213,11 @@ test('an expired voice entry never erases a recording that a saved note still re
  await expect(page.getByText('Deleted',{exact:true}).last()).toBeVisible();
  await expect.poll(async()=>(await describe()).deletedAt).toBeGreaterThan(0);
  const entry=(await trashEntries(page))[0];
- // Another saved note now references the same recording (for example, re-associated by a later edit).
  await page.evaluate(async audio=>{const {openBrowserNotes}=await import('/src/runtime/browser-notes-document.ts');const store=await openBrowserNotes();await store.replace([...store.list,{id:'other-voice',kind:'voice',title:'Other',body:'',audio,dur:1,lines:[],summary:[],actions:[]}]);},entry.note.audio);
- // Past the Trash deadline. The recording store's own backstop (60 days) is later, so the Trash rule decides.
  await page.clock.setSystemTime(entry.deletedAt+30*DAY+60_000);
  await page.reload();await openNotes(page);
  await openDeleted(page);
  await expect(page.locator('[data-alpha-subview="notes-trash"]').getByRole('button',{name:'Shared memo, Deleting permanently',exact:true})).toBeVisible();
- // Maintenance ran and kept both the row and the recording bytes and transcript.
  expect((await trashEntries(page)).map((e:any)=>e.id)).toEqual([entry.id]);
  const kept=await describe();
  expect(kept.transcript).toBe('Shared words');expect(kept.expired).toBeUndefined();
@@ -247,7 +225,6 @@ test('an expired voice entry never erases a recording that a saved note still re
 });
 
 test('an approved agent deletion of a voice note moves its recording to Recently deleted with it',async({page})=>{
- // Test-only seam: expose the module-scoped executor that the Notes shell installs.
  await page.route(/\/src\/runtime\/connection-ui\.tsx(\?.*)?$/,async route=>{
   const response=await route.fetch();
   await route.fulfill({response,body:(await response.text())+'\nwindow.__notesTrashTestExecutor=(...args)=>deviceExecutor(...args);\n'});
@@ -270,8 +247,6 @@ test('an approved agent deletion of a voice note moves its recording to Recently
   return (window as any).__notesTrashTestExecutor({type:'notes_delete',target},operationId,structuredClone(alphaClient.getState().context),new AbortController().signal);
  },operationId);
  expect(result.status).toBe('succeeded');
- // This calls the executor directly, so stand in for the approval-receipt path in agent-adapter,
- // which announces the commit through publishCommittedDeviceChanges (test/committed-device-changes.test.mjs).
  await page.evaluate(()=>window.dispatchEvent(new CustomEvent('alpha:notes-committed')));
  await expect(page.getByRole('button',{name:'Open Agent memo',exact:true})).toHaveCount(0);
  expect((await savedRecords(page)).some((n:any)=>n.id==='agent-voice')).toBe(false);
@@ -283,7 +258,6 @@ test('an approved agent deletion of a voice note moves its recording to Recently
  expect(entries.map((e:any)=>[e.id,e.audio?.audioId])).toEqual([[operationId,'agent-audio']]);
  expect(await page.evaluate(async()=>Object.keys(await (await import('/src/runtime/note-audio-deletions.ts')).pendingAudioDeletions()))).toEqual([]);
 
- // Recently deleted restores the note and its recording together, through the reviewed voice restore path.
  await openDeleted(page);
  await recover(page,'Agent memo','30 days left');
  await expect(page.getByText('Voice note restored.',{exact:true})).toBeVisible();

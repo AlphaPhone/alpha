@@ -1,4 +1,3 @@
-/// Current shared Maps screen guidance, explicit rerouting and owned screen-off sessions.
 module NavigationProgress {
   type Navigation = {
     foreground: bool, permission: bool, releases: int, selected: bool,
@@ -46,7 +45,6 @@ module NavigationProgress {
     if (reason == "notification") endGuidance(noted)
     else if (state.foreground) noted else release(noted)
   }
-  // Init is after one verified provider route is selected and before the user's Start.
   action init = s' = {foreground: true, permission: false, releases: 0, selected: true,
     routePhase: "ready", route: 1, previousRoute: 1, routeRequests: 1, pendingRoutes: Set(), abortedRequests: Set(),
     navigating: false, navSession: 0, navRoute: 0, navStep: 0, navCleared: 0, follow: true, arrived: false,
@@ -96,9 +94,6 @@ module NavigationProgress {
   pure def advanceStep(index: int, point: str): int =
     if (index == 0 and point == "near-first") 1
     else if (index == 1 and point == "near-second") 2 else index
-  // Initial straight route: every class below is over 100m clear of the active
-  // maneuver, including index0/near-second (112m) and index1/past (115m).
-  // Thus all admitted accuracies meet >max(60,2*accuracy); onRoute is separate.
   pure def clearBeyond(index: int, point: str): bool = index < 2 and
     (point.in(Set("past", "near-arrival", "away-arrival", "off-76", "off-99", "off-101"))
       or (index == 0 and point == "near-second"))

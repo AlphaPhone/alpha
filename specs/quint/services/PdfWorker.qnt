@@ -1,4 +1,3 @@
-/// Permissionless PDF worker request CAS, resource ownership and read-only output transfer.
 module PdfWorker {
   type Worker = {
     isolated: bool, phase: str, busy: bool, request: int, descriptor: bool,
@@ -40,7 +39,6 @@ module PdfWorker {
     s.phase.in(Set("rendering", "mapping", "protecting")),
     s' = { ...s, phase: "cleanup", renderValid: false }
   }
-  /// The worker finally closes the input and all bitmap/mapping resources before main-thread reply.
   action cleanup = all {
     s.phase == "cleanup",
     s' = { ...s, phase: "reply-ready", descriptor: false, bitmap: false, mapped: false }
@@ -52,7 +50,6 @@ module PdfWorker {
       publishedReadOnly: s.publishedReadOnly or delivered and s.renderValid and s.readOnly,
       replies: s.replies + 1 }
   }
-  /// Kernel-owned descriptor teardown follows timeout, memory, unbind and process death.
   action kill = all {
     s.isolated,
     s' = { ...s, phase: "dead", busy: false, descriptor: false, bitmap: false,

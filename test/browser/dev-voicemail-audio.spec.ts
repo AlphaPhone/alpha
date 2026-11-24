@@ -1,7 +1,5 @@
 import {test,expect} from '@playwright/test';
 import {agentBrowserVoice} from './voice-fixture';
-// P-43: voicemail is read through the local agent's on-device speech (libelizainference Paradee),
-// stubbed at the agent boundary (agentBrowserVoice); there is no Web Speech fallback.
 test.beforeEach(async({page})=>{
  await page.addInitScript(()=>{localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));});
  await page.goto('/?mode=dev');await agentBrowserVoice(page);await page.getByRole('button',{name:'Phone',exact:true}).click();await page.getByRole('button',{name:'Voicemail',exact:true}).click();await page.getByText("Hey, it's Maya. Quick one: can we push the review to 3:30? I want to get the prototype on the device first. Call me back.",{exact:true}).click();

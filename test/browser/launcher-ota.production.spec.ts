@@ -11,7 +11,6 @@ const apk = {
   sizeBytes: 42_000_000,
 };
 const launcher = { ...apk, schema: 'alpha-update/v1', variant: 'launcher', signerSha256: signer };
-// Another signing family's newer launcher is never this install's offer.
 const otherSigner = { ...launcher, signerSha256: '6d'.repeat(32), versionCode: 9,
   apkUrl: 'https://updates.example.invalid/other-signer.apk', sha256: 'b7'.repeat(32) };
 const manifest = JSON.stringify({ schema: 'alpha-update/index-v1', releases: [otherSigner, launcher] }, null, 2) + '\n';
@@ -36,7 +35,6 @@ test('idle Home requests the exact launcher update on startup without opening Se
   expect(await installs(page)).toEqual([]);
 
   await harness(page, f => f.appUpdate.releaseOffer());
-  // Startup can overlap resident restoration. Allow one scheduler retry on the now-idle Home.
   await page.clock.runFor(60_001);
   await expect.poll(() => installs(page)).toEqual([expectedInstall]);
   expect(await updateChecks(page)).toHaveLength(1);
@@ -91,7 +89,6 @@ test('a blurred sign-in draft holds the launcher update until the field is clear
   await expect(email).not.toBeFocused();
 
   await harness(page, f => f.appUpdate.releaseOffer());
-  // Cover the initial attempt and first retry with the unsent address still in the field.
   await page.clock.runFor(60_001);
   expect(await installs(page)).toEqual([]);
   await expect(email).toHaveValue(draft);

@@ -1,19 +1,15 @@
 import type {Page} from '@playwright/test';
 
-/** Actual Cloud controller with closed synthesis/playback ports; no provider or media. */
 export async function genericCloudSpeechFixture(page:Page,stateName='speechTest'){
  await page.route(/^https?:\/\/(?!127\.0\.0\.1:|localhost:)/,route=>route.abort());
  await page.evaluate(async name=>{
   const {BrowserVoice}=await import('/src/browser/voice.ts'),{connectionController:c}=await import('/src/runtime/connection-ui.tsx'),state=(window as any)[name];
   c.getCloudEnvironment=()=> 'production';c.getCloudClient=()=>({sessionId:'synthetic-cloud-account',credentialId:'synthetic-cloud-credential',client:{}} as any);
   const prepared=new Map<string,{text:string;requestId:string}>(),original=BrowserVoice.prototype.play;
-  // The busy checks below read BrowserVoice's private fields. A renamed field would read undefined
-  // and silently turn the check off, so fail by name instead.
   const fields=(own:object)=>{for(const field of ['activeSpeechId','activeSpeechRequestId','audio','pendingAudioId','speechRequests','agentAudio'])if(!(field in own))throw Error(`Speech fixture: BrowserVoice has no field ${field}`);};
   BrowserVoice.prototype.synthesize=async function(input:any){
    fields(this);
    if(input.replace===false&&((this as any).activeSpeechId||(this as any).audio||(this as any).pendingAudioId||(this as any).speechRequests.has('stt')||(this as any).speechRequests.has('tts')))throw Object.assign(Error('Synthetic speaker busy'),{code:'playback-busy'});
-   // Mirrors BrowserVoice.synthesize: withAgentSpeech(kind,run,requestId) since 1af960b6c (per-kind speech requests).
    return (this as any).withAgentSpeech('tts',async(signal:AbortSignal)=>{
     if(state.holdSynthesis)await new Promise<void>((resolve,reject)=>{state.releaseSynthesis=resolve;signal.addEventListener('abort',()=>reject(signal.reason),{once:true});});signal.throwIfAborted();
     if(state.billing)throw Object.assign(Error('Synthetic billing refusal'),{code:'voice-http-402'});

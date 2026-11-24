@@ -1,14 +1,9 @@
 import {test,expect} from '@playwright/test';
 import {preloadPageModules} from './helpers/page-modules';
-// The fixture models an installation that already finished access setup; a signed-in account with
-// pending setup is owed the startup walkthrough, which would otherwise cover Home once the swapped
-// snapshot re-renders (startup-permissions-walkthrough.spec.ts owns that flow).
 for(const reason of ['disconnected','scope-revoked'] as const)test(`Gmail same-ID ${reason} clears read availability and recovers explicitly`,async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('alpha:startup-permission-walkthrough:v1',JSON.stringify({version:1,status:'completed',step:4})));
  await page.goto('/');
  await preloadPageModules(page,['/src/runtime/connection-ui.tsx']);
- // Finish startup before replacing the live binding. A late startup update would
- // otherwise make the Inbox observer see the fixture account as a new session.
  await page.waitForFunction(()=>{
   const {connectionController}=(window as any).__alphaModules['/src/runtime/connection-ui.tsx'];
   const state=connectionController.getSnapshot();
@@ -23,7 +18,6 @@ for(const reason of ['disconnected','scope-revoked'] as const)test(`Gmail same-I
   const snapshot={...c.getSnapshot(),cloudAccount:{environment:'production',userId:'fixture-owner',sessionId:'fixture-cloud',credentialId:'fixture-only'}};c.getSnapshot=()=>snapshot as any;
  });
  await page.getByRole('button',{name:'Inbox',exact:true}).click();
- // Opening Inbox loads the connected account once, without another tap.
  await expect(page.getByRole('button',{name:'Refresh inbox',exact:true})).toBeVisible();
  await expect.poll(()=>page.evaluate(()=>(window as any).gmailGrantFixture.reads)).toBe(1);
  await page.evaluate(reason=>{const f=(window as any).gmailGrantFixture;if(reason==='disconnected')f.connected=false;else f.triage=false;},reason);
@@ -43,10 +37,6 @@ for(const reason of ['disconnected','scope-revoked'] as const)test(`Gmail same-I
  expect(await page.evaluate(()=>(window as any).gmailGrantFixture.oauth)).toBe(0);
 });
 
-// Recovery after a revoked grant. Since the Gmail navigation polish (78ac2d30e) Reconnect Gmail opens
-// the one Google accounts panel (google-connection-ui.tsx), which owns the authorization handoff: the
-// page is the system browser's (AlphaConnection.openExternal, stubbed at the Capacitor bridge). Google,
-// OAuth and Eliza Cloud are not involved and no URL is opened for real.
 test('Reconnect Gmail opens Google accounts; each authorization hands off once and nothing is read until the owner checks again',async({page})=>{
  const AUTH='https://accounts.google.com/o/oauth2/v2/auth?client_id=fixture&state=synthetic';
  await page.addInitScript(()=>{
@@ -78,23 +68,17 @@ test('Reconnect Gmail opens Google accounts; each authorization hands off once a
  const panel=page.getByRole('dialog',{name:'Google accounts',exact:true});
  const next=panel.getByText('Waiting for Google…',{exact:true});
  await page.getByRole('button',{name:'Inbox',exact:true}).click();
- // The first read finds the grant revoked; Reconnect is offered and nothing retries on its own.
  const reconnect=page.getByRole('button',{name:'Reconnect Gmail',exact:true});
  await expect(reconnect).toBeVisible();
  expect((await f()).reads).toBe(1);
  await reconnect.click();
  await expect(panel).toBeVisible();
  await expect(panel.getByRole('img',{name:/Gmail: Read and send access/})).toBeVisible();
- // Opening the panel lists connections only: nothing was authorized, opened or read.
  let state=await f();
  expect(state.initiates).toEqual([]);expect(state.opened).toEqual([]);expect(state.reads).toBe(1);
- // Since 10e15eff9 Add Google account asks once for Gmail send and Calendar edit, and the old
- // "Gmail permissions / Enable Gmail changes" upgrade is the Calendar edits switch: this grant
- // lacks Calendar write, so turning it on starts the same consent.
  for(const [label,role] of [['Add account','button'],['Edit events','switch']] as const){
   const before=await f();
   await panel.getByRole(role,{name:label,exact:true}).click();
-  // The previous handoff's notice is still shown, so wait for this handoff's own open first.
   await expect.poll(async()=>(await f()).opened.length,label).toBe(before.opened.length+1);
   await expect(next).toBeVisible();
   const after=await f();
@@ -102,12 +86,10 @@ test('Reconnect Gmail opens Google accounts; each authorization hands off once a
   expect(after.opened.slice(before.opened.length),label).toEqual([AUTH]);
   expect(after.reads,label+': no mailbox read until the owner checks again').toBe(before.reads);
  }
- // A confirmed account update refreshes the connection and the visible Inbox once.
  const lists=(await f()).lists;
  await page.evaluate(async()=>window.dispatchEvent(new Event((await import('/src/runtime/google-accounts.ts')).GOOGLE_ACCOUNTS_CHANGED)));
  await expect.poll(async()=>(await f()).lists).toBeGreaterThan(lists);
  await expect.poll(async()=>(await f()).reads).toBe(2);
- // A handoff abandoned while the browser is open (Escape closes the panel) reports nothing as pending.
  await page.evaluate(()=>{const f=(window as any).handoffFixture;f.hold=new Promise<void>(resolve=>{f.release=resolve;});});
  await panel.getByRole('button',{name:'Add account',exact:true}).click();
  await expect.poll(async()=>(await f()).opened.length).toBe(3);

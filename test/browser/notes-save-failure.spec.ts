@@ -25,7 +25,6 @@ for (const failure of ['quota', 'concurrent edit'] as const) {
     await body.fill('Unsaved text that must not disappear');
     await expect(body).toHaveValue('Unsaved text that must not disappear');
     await expect(page.getByRole('status').filter({ hasText: 'Keep this screen open' })).toBeVisible();
-    // A refused edit must neither overwrite the concurrent value nor repeat an uncertain write.
     expect(await page.evaluate(async () => (await (await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw()))).toBe(stored);
     await page.getByRole('button', { name: 'Back to notes', exact: true }).click();
     await page.getByRole('button', { name: 'Open Recovery note', exact: true }).click();

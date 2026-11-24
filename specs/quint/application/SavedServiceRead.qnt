@@ -1,4 +1,3 @@
-// Read-only cache projection. Freshness and authorization are independent.
 module SavedServiceRead {
   type State = {owner: int, credential: int, query: int, epoch: int, readEpoch: int,
     reading: bool, settled: bool, shown: str, now: int, refusedAt: int,
@@ -27,12 +26,10 @@ module SavedServiceRead {
     reading:false,shown:"none",checkFailed:false,detail:"closed"}}
   action otherQuery = all {s.epoch < 8,s' = {...s,epoch:s.epoch+1,query:1-s.query,reading:false,
     shown:"none",checkFailed:false,detail:"closed"}}
-  /// Inbox may retain the same local bytes after a transport failure. A retry checks the grant.
   action checkFailed = all {liveRead,s.shown == "saved",
     s' = {...s,reading:false,settled:true,checkFailed:true}}
   action recheck = all {s.shown == "saved",s.checkFailed,s.epoch < 8,
     s' = {...s,epoch:s.epoch+1,readEpoch:s.epoch+1,reading:true,settled:false,checkFailed:false}}
-  /// Account readback authorizes the Inbox view without updating the saved page's read time.
   action acceptGrant = all {liveRead,s.shown == "saved",
     s' = {...s,reading:false,settled:true,shown:"fresh",checkFailed:false}}
   action openSavedDetail(found: bool): bool = all {s.shown == "saved",

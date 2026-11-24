@@ -1,7 +1,4 @@
 import { test, expect } from '@playwright/test';
-// Development lane. `?surface=assistant` (development server only) previews the surface Android
-// renders for ACTION_ASSIST (AlphaAssistActivity, DailyApps.surfaceInfo().assistant). The Android
-// entry itself is covered by AssistantInstrumentedTest; this checks the renderer surface only.
 
 test('the assistant surface shows chat and Close only: no app grid, digests or startup permissions', async ({ page }, info) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
@@ -10,7 +7,6 @@ test('the assistant surface shows chat and Close only: no app grid, digests or s
   const close = page.getByRole('button', { name: 'Close assistant', exact: true });
   await expect(close).toBeVisible();
   await expect(page.getByRole('button', { name: 'Minimize chat', exact: true })).toHaveCount(0);
-  // Home's app grid and Apps drawer are not part of the assistant surface.
   await expect(page.locator('[data-alpha-layer="home"]')).toBeHidden();
   await expect(page.getByRole('button', { name: 'Apps', exact: true })).toBeHidden();
   await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeHidden();

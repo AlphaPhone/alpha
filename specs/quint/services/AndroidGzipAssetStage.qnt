@@ -1,4 +1,3 @@
-// Gzip protection and byte-preserving packaging for one selected web asset.
 module AndroidGzipAssetStage {
   type State = {web: int, raw: int, wrapper: int, packaged: int, plain: bool,
     protection: str, audit: str}

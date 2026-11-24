@@ -1,36 +1,5 @@
 import {openBrowserCalendar} from './helpers/browser-calendar';
 import {localDraftRow} from './inbox-draft-navigation';
-// Journey F: Email + reconnect notifications, driven through rendered controls in the browser build.
-//
-// Evidence boundary: a pass is source/test evidence for the browser renderer only. It is NOT
-// APK, emulator, AOSP image, physical-device or real-integration evidence. No real account,
-// OAuth grant, Gmail request or mail delivery is involved anywhere in this file.
-//
-// The tests are independent (each has a fresh context) and cover the product's two distinct mail paths:
-//  1. Development profile (/?mode=dev): the built-in local development mailbox. Inbox load,
-//     open a message, local draft that survives reload, local send, exactly one Sent record.
-//     This path has no provider review and no receipt by design ("Sent locally").
-//  2. Production renderer (/) with a SYNTHETIC managed mail provider installed at the Cloud
-//     client boundary (connectionController.getCloudClient + the secure slot store), the same
-//     boundary inbox-folders-drafts.spec.ts and gmail-mvp-scope.spec.ts control. The fixture
-//     keeps its "server" state in localStorage under a test-owned key so it survives reloads
-//     like a remote provider would. Reviewed send, exactly one receipt, and a lost dispatch
-//     response (the provider accepts the message, the reply never arrives) are driven here.
-//  3. Development profile with tools (/?mode=dev&tools=1): a Calendar reminder notice that
-//     becomes due, survives a reload and, when tapped, opens exactly its own event. The clock
-//     is a Playwright fixed clock; media is guarded so no alert sound is played.
-//
-// Native-only steps (not provable here):
-// - Real Gmail OAuth grant, provider delivery and server-side idempotency.
-// - Keystore-encrypted draft/operation slots (the fixture store is plain test storage).
-// - OS notification delivery, the system shade, notification permission, lock-screen taps and
-//   process death between delivery and tap (the browser build shows a simulated shade).
-// - Hosted scheduled-digest results need a local-agent build (VITE_LOCAL_AGENT) and are covered
-//   by dev-hosted-journey.spec.ts on its own server; they are not repeated here.
-//
-// After a provider-confirmed send the local copies of exactly that draft (open composer, retained
-// unsaved copy, saved local draft) are removed, so the sent email is not offered again. Unknown and
-// failed outcomes keep every copy.
 import {test, expect, type Page} from '@playwright/test';
 import {guardCalendarFixture} from './calendar-draft-readiness';
 import {returnToApps} from './app-navigation';
@@ -38,7 +7,6 @@ import {returnToApps} from './app-navigation';
 const button = (page: Page, name: string) => page.getByRole('button', {name, exact: true});
 const PROVIDER = 'journey-f-provider';
 
-/** Synthetic managed provider. Re-installed after every load; its state lives in localStorage. */
 async function installProvider(page: Page) {
   await page.evaluate(async KEY => {
     const {connectionController: c} = await import('/src/runtime/connection-ui.tsx');
@@ -73,8 +41,6 @@ async function installProvider(page: Page) {
         const receipt = {requestId, kind: proposal.kind, state: 'prepared', reviewDigest: await digest(JSON.stringify(review)), providerResult: null, rejectionCode: null};
         value.receipts[requestId] = receipt; save(value); return {receipt, review};
       },
-      // The provider accepts each request id once. With loseNextReply the message IS accepted
-      // and recorded, but the reply is lost in transit (the client sees a network failure).
       gmailDispatchOperation: async (_grant: string, requestId: string, reviewDigest: string, proposal: any) => {
         const value = load(); value.dispatches++;
         if (value.receipts[requestId]?.state !== 'succeeded') {
@@ -84,11 +50,9 @@ async function installProvider(page: Page) {
         }
         const lost = value.loseNextReply; value.loseNextReply = false; save(value);
         if (lost) throw new TypeError('Failed to fetch');
-        // A provider reply that names another operation (wrong request ID) must never be accepted.
         if (value.wrongReceipt) return {...value.receipts[requestId], requestId: 'another-request'};
         return value.receipts[requestId];
       },
-      // While "unsure" the provider cannot yet tell whether delivery completed.
       gmailOperation: async (_grant: string, requestId: string) => { const value = load(), receipt = value.receipts[requestId]; return value.unsure ? {...receipt, state: 'outcome-unknown', providerResult: null} : receipt; },
     };
     c.getCloudClient = () => ({client, sessionId: 'fixture-session', credentialId: 'fixture'} as any);
@@ -101,16 +65,11 @@ const setProvider = (page: Page, patch: Record<string, boolean>) => page.evaluat
 async function openProviderInbox(page: Page, reload = false) {
   await guardCalendarFixture(page.context());
   await page.addInitScript(() => localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({kind: 'offline'})));
-  // A signed-in fixture account models an installation that already finished access setup; with
-  // setup pending the startup walkthrough would cover Inbox once the swapped snapshot re-renders.
   await page.addInitScript(() => localStorage.setItem('alpha:startup-permission-walkthrough:v1', JSON.stringify({version: 1, status: 'completed', step: 4})));
   await page.route(/^https?:\/\/(?!127\.0\.0\.1:|localhost:)/, route => route.abort());
-  // Provider initialization and rendered Inbox controls below establish readiness.
-  // Loading unrelated resources is not part of the mail operation contract.
   if (reload) await page.reload({waitUntil: 'domcontentloaded'}); else await page.goto('/', {waitUntil: 'domcontentloaded'});
   await installProvider(page);
   await button(page, 'Inbox').click();
-  // A saved operation reopens its review over the list, so either surface proves the mailbox loaded.
   await expect(button(page, 'Refresh inbox').or(page.getByRole('dialog', {name: 'Review mail operation'}))).toBeVisible();
 }
 async function compose(page: Page, subject: string, body: string) {
@@ -168,7 +127,6 @@ test('synthetic provider: reviewed send leaves exactly one receipt and one messa
   const review = page.getByRole('dialog', {name: 'Review mail operation'});
   await test.step('Read message and conversation', async () => {
     await openProviderInbox(page);
-    // Account-switch controls appear only when multiple readable accounts exist.
     await expect(button(page, 'Fixture mailbox')).toHaveCount(0);
     await expect(button(page, 'Synthetic sender, Harbour schedule')).toBeVisible();
     await button(page, 'Synthetic sender, Harbour schedule').click();
@@ -215,12 +173,10 @@ test('synthetic provider: reviewed send leaves exactly one receipt and one messa
     await expect(review.getByRole('status')).toHaveText('Provider confirmed this operation.');
     await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toHaveCount(0);
     await expect(review).toContainText('"messageId":"sent-1"');
-    // The confirmed send removes the saved local draft and the composer copy it came from.
     await expect.poll(() => page.evaluate(KEY => Object.keys(JSON.parse(localStorage.getItem(KEY)!).slots).filter(key => key.startsWith('inbox-drafts:')), PROVIDER)).toEqual([]);
   });
 
   await test.step('Reload receipt without replay', async () => {
-    // Reload: the saved receipt is shown again; nothing is prepared or dispatched a second time.
     await openProviderInbox(page, true);
     await expect(review.getByRole('status')).toHaveText('Saved mail operation. Check its exact review and receipt before continuing.');
     await expect(review).toContainText('"messageId":"sent-1"');
@@ -230,7 +186,6 @@ test('synthetic provider: reviewed send leaves exactly one receipt and one messa
     await review.getByRole('button', {name: 'Close receipt', exact: true}).click();
     await expect(review).toHaveCount(0);
     await expect(button(page, 'Mail review / receipt')).toHaveCount(0);
-    // The sent email is not offered again in any form.
     for (const name of ['Restore local draft', 'Resume unsaved email', 'Continue draft']) await expect(button(page, name)).toHaveCount(0);
     await button(page, 'Sent').click();
     await expect(page.getByRole('button', {name: /Journey reviewed send/})).toHaveCount(1);
@@ -259,12 +214,10 @@ test('synthetic provider: a lost send reply is an unknown outcome and is never s
   await expect(review.getByRole('button', {name: 'Close receipt', exact: true})).toHaveCount(0);
   await expect(review.getByRole('button', {name: 'Cancel unsent review', exact: true})).toHaveCount(0);
   expect(await provider(page)).toMatchObject({prepares: 1, dispatches: 1});
-  // "Retry" after an uncertain dispatch only re-reads the receipt; it must not dispatch again.
   await review.getByRole('button', {name: 'Retry', exact: true}).click();
   await expect(review.getByRole('status')).toHaveText('Delivery outcome is unknown. Check the saved receipt; do not send this message again.');
   expect(await provider(page)).toMatchObject({prepares: 1, dispatches: 1});
 
-  // Reload while the outcome is unknown: no automatic resend, no way to confirm or discard.
   await openProviderInbox(page, true);
   await expect(review.getByRole('status')).toHaveText('Saved mail operation. Check its exact review and receipt before continuing.');
   await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toHaveCount(0);
@@ -273,7 +226,6 @@ test('synthetic provider: a lost send reply is an unknown outcome and is never s
   await expect(review.getByRole('button', {name: 'Close receipt', exact: true})).toHaveCount(0);
   await review.getByRole('button', {name: 'Close mail review', exact: true}).click();
   await expect(button(page, 'Mail review / receipt')).toBeVisible();
-  // An unknown outcome keeps the local copy. A second operation cannot start while it is unresolved.
   await (await localDraftRow(page)).click();
   await expect(page.getByRole('textbox', {name: 'Subject', exact: true})).toHaveValue('Journey lost reply');
   await button(page, 'Send email').click();
@@ -281,12 +233,10 @@ test('synthetic provider: a lost send reply is an unknown outcome and is never s
   await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toHaveCount(0);
   expect(await provider(page)).toMatchObject({prepares: 1, dispatches: 1});
 
-  // The provider later resolves the receipt; an explicit check reconciles to exactly one message.
   await setProvider(page, {unsure: false});
   await review.getByRole('button', {name: 'Check saved receipt', exact: true}).click();
   await expect(review.getByRole('status')).toHaveText('Provider confirmed this operation.');
   await expect(review).toContainText('"messageId":"sent-1"');
-  // Only now, with the provider's confirmation, is the retained copy of that email removed.
   await expect.poll(() => page.evaluate(KEY => Object.keys(JSON.parse(localStorage.getItem(KEY)!).slots).filter(key => key.startsWith('inbox-drafts:')), PROVIDER)).toEqual([]);
   await openProviderInbox(page, true);
   await expect(review).toContainText('"messageId":"sent-1"');
@@ -306,17 +256,14 @@ test('synthetic provider: a send reply that names another operation is not shown
   await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toBeVisible();
   await setProvider(page, {wrongReceipt: true});
   await review.getByRole('button', {name: 'Send this email', exact: true}).click();
-  // The reply is refused: no confirmation, no provider message ID from the foreign receipt, no second Send.
   await expect(review.getByRole('status')).toHaveText('Gmail answered for a different request, so nothing was confirmed. Check the saved receipt before trying again; do not send this message again.');
   await expect(review).not.toContainText('"messageId"');
   await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toHaveCount(0);
   expect(await provider(page)).toMatchObject({prepares: 1, dispatches: 1});
-  // After a reload the saved operation is still unresolved and still cannot be sent again.
   await openProviderInbox(page, true);
   await expect(review.getByRole('status')).toHaveText('Saved mail operation. Check its exact review and receipt before continuing.');
   await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toHaveCount(0);
   expect(await provider(page)).toMatchObject({prepares: 1, dispatches: 1});
-  // Its own receipt, read back by request ID, reconciles to exactly one message.
   await setProvider(page, {wrongReceipt: false});
   await review.getByRole('button', {name: 'Check saved receipt', exact: true}).click();
   await expect(review.getByRole('status')).toHaveText('Provider confirmed this operation.');
@@ -339,7 +286,6 @@ test('a due reminder notice tapped after reload opens exactly its own event, onc
     await button(page, '10 min').click();
     await button(page, 'Save event').click();
     await expect(button(page, 'Save event')).toHaveCount(0);
-    // Saving opens the new event's detail page.
     await expect(page.getByRole('heading', {name: title, exact: true})).toBeVisible();
     await button(page, 'Back to calendar').click();
   }
@@ -348,7 +294,6 @@ test('a due reminder notice tapped after reload opens exactly its own event, onc
   expect(rows.every(row => row.alert === 10)).toBe(true);
   expect(await notices()).toEqual([]);
 
-  // Both reminders become due, then the app is reloaded before either notice is tapped.
   await page.clock.setFixedTime(new Date(Math.max(...rows.map(row => row.begin)) - 60_000));
   await page.reload();
   await openBrowserCalendar(page);
@@ -362,7 +307,6 @@ test('a due reminder notice tapped after reload opens exactly its own event, onc
   await expect(button(page, 'Back to calendar')).toBeVisible();
   await expect(page.getByRole('heading', {name: 'Harbour pickup', exact: true})).toBeVisible();
   await expect(page.getByRole('heading', {name: 'Dentist check', exact: true})).toHaveCount(0);
-  // The tapped notice is consumed exactly once; the other reminder is untouched.
   await expect.poll(notices).toEqual(['Dentist check']);
   await page.reload();
   await expect.poll(notices).toEqual(['Dentist check']);

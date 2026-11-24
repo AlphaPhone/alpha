@@ -78,7 +78,6 @@ for(const [label,name,content,excerpt] of [['a UTF-8 BOM text file','bom.txt','\
   expect(retained.draft.length).toBeLessThan(512);if(excerpt)expect(retained.draft).toContain(excerpt);
   expect(await fileQuestionEffects(page)).toEqual({reads:2,retains:1,sends:0});
  });
-// Observe the actual source boundary, without replacing its result or the send behavior.
 async function observeFileQuestionEffects(page:import('@playwright/test').Page){
  await page.evaluate(async()=>{
   const effects={reads:0,retains:0,sends:0};(window as any).fileQuestionEffects=effects;
@@ -103,8 +102,6 @@ for(const [name,bytes] of [['long.txt',2_500_000],['huge.txt',6*1024*1024]] as c
   expect(await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');return (await registerPlugin<any>('AlphaFiles').list({})).entries.map((row:any)=>({name:row.name,size:row.size}));})).toEqual([{name,size:bytes}]);
  });
 test('Ask Alpha says a file over 5 MiB is too large to link',async({page})=>{
- // A real image remains reviewable under #927. Its actual bytes exceed the separate source-link
- // limit, so the original refusal/unlink UI path is exercised without inventing a text preview.
  await observeFileQuestionEffects(page);
  const bytes=await page.evaluate(async()=>{
   const canvas=document.createElement('canvas');canvas.width=canvas.height=1536;const context=canvas.getContext('2d')!,image=context.createImageData(1536,1536);let random=0x12345678;

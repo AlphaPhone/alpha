@@ -12,7 +12,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Complete native bridge and service, with controlled Android command delivery. */
 public final class NavigationServiceTraces {
  final AlphaMapsTransportPlugin a=new AlphaMapsTransportPlugin(),b=new AlphaMapsTransportPlugin();
  final AlphaNavigationService service=new AlphaNavigationService();

@@ -1,8 +1,6 @@
 import {agentBrowserVoice} from './voice-fixture';
 import {genericCloudSpeechFixture} from './generic-cloud-speech-fixture';
 import {test,expect,type Page} from '@playwright/test';
-// P-43: no Web Speech. The workflow Speak step runs through the explicit development speech route,
-// stubbed by genericCloudSpeechFixture; nothing here touches speechSynthesis.
 const initial=Date.parse('2026-10-02T06:59:50'),due=Date.parse('2026-10-02T07:00:01');
 const runs=(page:Page)=>page.evaluate(async()=>Object.values(JSON.parse(localStorage.getItem('alpha.dev.app.workflows')!).localRuns||{}) as any[]);
 async function setup(page:Page,pickup=false){await page.clock.setFixedTime(new Date(initial));await page.addInitScript(pickup=>{if(!localStorage.getItem('automaticSpeechSeed')){localStorage.setItem('automaticSpeechSeed','1');localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));localStorage.setItem('alpha.dev.app.workflows',JSON.stringify({flows:[{id:977,name:'Automatic speech',on:true,trig:{kind:'time',t:7},steps:[{k:'Do',t:'Turn on Do Not Disturb',apps:['Settings']},{k:'Speak',t:pickup?'Speak it when I pick up the phone':'Read it aloud',apps:[]},{k:'Do',t:'Turn off Do Not Disturb',apps:['Settings']}],runs:[]}],localRuns:{}}));}(window as any).speechFixture={spoken:[],cancelled:0};},pickup);await page.goto('/?mode=dev&tools=1');await genericCloudSpeechFixture(page,'speechFixture');await agentBrowserVoice(page,{state:'speechFixture'});await expect.poll(()=>page.evaluate(async()=>JSON.parse(localStorage.getItem('alpha.dev.app.workflows')!).triggerState?.cursors.length)).toBe(1);}

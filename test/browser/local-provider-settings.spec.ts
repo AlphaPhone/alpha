@@ -1,18 +1,14 @@
 import { test, expect } from '@playwright/test';
 import { installResidentAgentPlugin } from './helpers/resident-agent-plugin';
-// Rendered provider section over a synthetic native Agent bridge. No key reaches Cerebras: the
-// native check is simulated here and covered by LocalAgentProviderInstrumentedTest on Android.
 
 async function stubAgent(page: import('@playwright/test').Page, cloud = false) {
   await installResidentAgentPlugin(page);
   await page.addInitScript((cloud: boolean) => {
-    // Account navigation models an existing installation whose access review is complete.
     localStorage.setItem('alpha:startup-permission-walkthrough:v1',JSON.stringify({version:1,status:'completed',step:4}));
     const w = window as any; w.androidBridge = {};
     const f = w.providerFixture = { statusReads: 0, statusOverride: null as null | { provider: string; configured: boolean; model: string }, statusUnavailable: false, saved: null as null | { model: string }, configures: [] as any[], leases: [] as string[], cancelled: [] as string[], clears: 0, stops: 0, reject: '' };
     const methods = (names: string[]) => names.map(name => ({ name, rtype: name==='addListener'?'callback':'promise' }));
     const agent = w.residentAgent = w.createResidentAgentPlugin({ owner: () => 'provider-owner', agentId: 'provider-agent' });
-    // Eliza Cloud reports the same Qwen model with its Cerebras vendor prefix.
     const status = () => cloud ? { provider: 'elizacloud', configured: true, model: 'cerebras/qwen-3.8-27b' } : f.saved ? { provider: 'cerebras', configured: true, model: 'qwen-3.8-27b' } : { provider: 'cerebras', configured: false };
     w.Capacitor = {
       PluginHeaders: [
@@ -22,7 +18,6 @@ async function stubAgent(page: import('@playwright/test').Page, cloud = false) {
         { name: 'AlphaVoiceCloud', methods: methods(['checkPermissions']) },
         { name: 'AlphaHostedResults', methods: methods(['disableBackground', 'addListener', 'removeListener', 'pendingResult', 'status']) },
         { name: 'ElizaSystem', methods: methods(['getBuildInfo']) },
-        // Removing a key while the resident runs retires its background delivery (e15f0b735 starts it on save).
         { name: 'AlphaHostedResults', methods: methods(['disableBackground', 'pendingResult', 'status', 'addListener', 'removeListener']) },
       ],
       nativeCallback: (plugin: string, method: string, input: any, callback: (value: unknown) => void) => plugin === 'Agent' ? agent.nativeCallback(plugin, method, input, callback) : 'provider-fixture-listener',
@@ -30,7 +25,6 @@ async function stubAgent(page: import('@playwright/test').Page, cloud = false) {
         if (plugin === 'ElizaSystem' && method === 'getBuildInfo') return { launcher: false, version: 'provider-fixture' };
         if (plugin === 'AlphaNotifications') return { permissionGranted: true, appEnabled: true };
         if (plugin === 'AlphaVoiceCloud') return { microphone: 'granted' };
-        // Stopping the running agent pauses its hosted background work.
         if (plugin === 'AlphaHostedResults') return {};
         if (plugin === 'AlphaConnection') return method === 'secureRead' ? { value: null } : {};
         if (plugin === 'AlphaHostedResults') return {};
@@ -51,7 +45,6 @@ async function stubAgent(page: import('@playwright/test').Page, cloud = false) {
             if (f.statusUnavailable) throw Error('Synthetic provider read unavailable');
             return f.statusOverride ?? status();
           }
-          // Native reserves a cancellable request lease before each key check.
           if (method === 'prepareProviderConfiguration') { const requestId = 'provider-lease-' + (f.leases.length + 1); f.leases.push(requestId); return { requestId }; }
           if (method === 'cancelProviderConfiguration') { f.cancelled.push(input.requestId); return {}; }
           if (method === 'configureProvider') { f.configures.push(input); if (input.requestId !== f.leases.at(-1)) throw new Error('Provider request cancelled'); if (f.reject) throw new Error(f.reject); f.saved = { model: input.model }; return status(); }
@@ -64,8 +57,6 @@ async function stubAgent(page: import('@playwright/test').Page, cloud = false) {
   }, cloud);
 }
 
-/** Only the Account presentation is signed in. Native provider status/configuration remain real
- * responses from the isolated Agent fixture, and this identity cannot call a Cloud provider. */
 async function openAccountProvider(page:import('@playwright/test').Page){
   await page.evaluate(async()=>{
     const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');
@@ -86,7 +77,6 @@ test('provider status, pinned model, verified save and confirmed key removal', a
   await expect(chooser).toBeVisible();
   await chooser.getByText('Model provider', { exact: true }).click();
   await expect(chooser.getByText('Not set', { exact: true })).toBeVisible();
-  // The model is fixed; there is no editable model field.
   await expect(chooser.getByLabel('Model')).toHaveCount(0);
   await expect(chooser.getByText('qwen-3.8-27b', { exact: true })).toBeVisible();
 
@@ -99,8 +89,6 @@ test('provider status, pinned model, verified save and confirmed key removal', a
   await page.evaluate(() => { (window as any).providerFixture.reject = ''; });
   await chooser.getByLabel('Cerebras API key').fill('synthetic-accepted-key');
   await chooser.getByRole('button', { name: 'Save', exact: true }).click();
-  // A verified key is selected at once and the agent restarts with it; the chooser closes on it
-  // (the receipt is a toast, not a message left in the closed sheet).
   await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'About', exact: true }).click();
@@ -112,7 +100,6 @@ test('provider status, pinned model, verified save and confirmed key removal', a
   await expect(chooser.getByLabel('Cerebras API key')).toHaveValue('');
   const { configures, cancelled } = await page.evaluate(() => (window as any).providerFixture);
   expect(configures.map((item: any) => item.model)).toEqual(['qwen-3.8-27b', 'qwen-3.8-27b']);
-  // Each check ran under its own lease; only the rejected check's lease was released.
   expect(configures.map((item: any) => item.requestId)).toEqual(['provider-lease-1', 'provider-lease-2']);
   expect(cancelled).toEqual(['provider-lease-1']);
 
@@ -122,7 +109,6 @@ test('provider status, pinned model, verified save and confirmed key removal', a
   expect(await page.evaluate(() => (window as any).providerFixture.clears)).toBe(0);
   await chooser.getByRole('button', { name: 'Remove key', exact: true }).click();
   await chooser.getByRole('button', { name: 'Remove', exact: true }).click();
-  // Removal stops the agent that holds the key, deletes the key, then starts the agent again without it.
   await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0);
   expect(await page.evaluate(() => { const f = (window as any).providerFixture; return { clears: f.clears, stops: f.stops }; })).toEqual({ clears: 1, stops: 1 });
   await page.getByRole('button', { name: 'Back to Settings', exact: true }).click();
@@ -137,7 +123,6 @@ test('provider status, pinned model, verified save and confirmed key removal', a
   await expect(chooser.getByText('Not set', { exact: true })).toBeVisible();
   await expect(chooser.getByLabel('Cerebras API key')).toHaveValue('');
   await expect(chooser.getByRole('button', { name: 'Remove key', exact: true })).toHaveCount(0);
-  // Nothing in the page carries the key.
   expect(await page.content()).not.toContain('synthetic-accepted-key');
 });
 
@@ -179,7 +164,6 @@ test('Settings uses its normalized provider status read and keeps the retained M
   });
   expect.soft(reads.raw - before.reads).toBe(reads.normalized);
 
-  // Models no longer has a Settings navigation row. Exercise its retained renderer directly.
   await page.evaluate(() => {
     const screen = document.querySelector('[data-screen]') as any;
     const key = Object.keys(screen).find(name => name.startsWith('__reactFiber$'))!;
@@ -217,7 +201,6 @@ for(const cloud of [false,true])test(`native AI connection keeps the selected Cl
  await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0);
  await page.getByRole('button',{name:'Settings',exact:true}).click();
  const provider=await openAccountProvider(page);await expect(provider).toBeVisible();
- // Account selects the Cloud route independently of whether the resident admitted inference.
  await expect(provider.getByRole('button',{name:'Cloud',exact:true})).toHaveAttribute('aria-pressed','true');
  await expect(provider.getByRole('button',{name:'Direct',exact:true})).toHaveAttribute('aria-pressed','false');
  expect(await page.evaluate(async()=>(await import('/src/runtime/connection-ui.tsx')).connectionController.getSnapshot().providerStatus?.configured)).toBe(cloud);

@@ -39,7 +39,6 @@ public final class MmsDispatchTraces {
  }
  static void check(boolean value,String reason){if(!value)throw new AssertionError(reason);}
  static void drain()throws Exception{
-  // A queued review can enqueue its durable decision after the first barrier.
   SmsTelephony.WORK.submit(()->{}).get(5,TimeUnit.SECONDS);
   SmsTelephony.WORK.submit(()->{}).get(5,TimeUnit.SECONDS);
  }

@@ -6,7 +6,6 @@ import android.database.Cursor;
 import android.net.Uri;
 import java.util.ArrayList;
 
-/** Closed provider rows from the existing scoped Calendar guard fixture. */
 public final class ScopedCalendarReviewProvider extends ContentResolver {
  private final ScopedCalendarSnapshotTest.Provider rows = new ScopedCalendarSnapshotTest.Provider();
 

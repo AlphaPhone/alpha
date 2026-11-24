@@ -6,7 +6,6 @@ import com.getcapacitor.JSObject;
 import com.getcapacitor.PluginCall;
 import org.json.JSONObject;
 
-/** Carries the mounted renderer's raw request to the exact Java bridge without reconstructing it. */
 public final class AppInfoHandoffProbe {
  public static void main(String[] args) {
   JSONObject input = new JSONObject(args[0]);

@@ -1,4 +1,3 @@
-/// Shared browser Calendar and Reminder journal retention at the production cutoffs.
 module BrowserJournalRetention {
   pure val keepReceipts = 200
   pure val keepSettled = 127

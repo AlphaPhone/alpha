@@ -1,6 +1,3 @@
-/// The assistant's reviewed change to the device photo library: one pending review over the
-/// visible Photos grid, opened only after the provider confirms the revisions the assistant
-/// read, confirmed by the owner, re-validated, dispatched once and checked again by Android.
 module PhotoLibraryAgentReview {
   type Request = { phase: str, token: int, revision: int }
   type Confirm = { review: int, pending: bool }
@@ -24,14 +21,11 @@ module PhotoLibraryAgentReview {
   }
   val visible = s.inPhotos and not(s.hidden) and not(s.disposed)
   val reviewBusy = s.acting != 0 or s.review != 0 or s.hostReview
-  /// An approved change request names the revision the assistant read. It is admitted only over
-  /// the visible grid with no review open, then the provider is asked whether it is current.
   action request(slot: int, read: int): bool = all {
     Slots.contains(slot), s.requests.get(slot).phase == "none", not(s.disposed), visible, not(reviewBusy),
     read <= s.revision, read >= 0,
     s' = { ...s, requests: s.requests.set(slot, { phase: "validating", token: s.epoch, revision: read }) }
   }
-  /// The provider answers. Photos may have been left or another review opened meanwhile.
   action validated(slot: int): bool = all {
     Slots.contains(slot), s.requests.get(slot).phase == "validating",
     val asked = s.requests.get(slot)
@@ -41,13 +35,10 @@ module PhotoLibraryAgentReview {
       else if (reviewBusy or not(visible)) { ...settled, refusedBusy: bump(s.refusedBusy) }
       else { ...settled, review: s.serial + 1, serial: s.serial + 1, reviewRevision: asked.revision, reviewEpoch: s.epoch }
   }
-  /// The owner presses Confirm; a second press can arrive before the first re-validation returns.
   action confirmPress(slot: int): bool = all {
     Slots.contains(slot), not(s.confirms.get(slot).pending), s.review != 0, s.acting == 0,
     s' = { ...s, confirms: s.confirms.set(slot, { review: s.review, pending: true }) }
   }
-  /// Re-validation returns. Only the press that still finds its own review open goes on: a
-  /// changed item closes the review, a current one is handed to Android exactly once.
   action confirmValidated(slot: int): bool = all {
     Slots.contains(slot), s.confirms.get(slot).pending,
     val pressed = s.confirms.get(slot)
@@ -57,17 +48,13 @@ module PhotoLibraryAgentReview {
       else { ...settled, review: 0, acting: pressed.review, actingRevision: s.reviewRevision,
         dispatched: s.dispatched.append(pressed.review) }
   }
-  /// Android's own dialog settles. It applies the change only at the reviewed revision.
   action androidSettles(approved: bool): bool = all { s.acting != 0,
     s' = if (approved and s.actingRevision == s.revision) { ...s, acting: 0, applied: s.applied.append(s.acting) }
       else { ...s, acting: 0, androidStale: if (approved) bump(s.androidStale) else s.androidStale }
   }
   action cancel = all { s.review != 0, s' = { ...s, review: 0 } }
-  /// Leaving Photos drops the open review and retires every request still being validated.
   action leave = all { s.epoch < 3, s' = { ...s, review: 0, epoch: s.epoch + 1, inPhotos: false, hostReview: false } }
   action show = all { not(s.disposed), not(s.inPhotos), s' = { ...s, inPhotos: true } }
-  /// A hidden page ends an open review without leaving the Photos visit. A native request
-  /// already dispatched retains ownership; a held confirm can no longer use its old review.
   action hidePage = all { not(s.disposed), not(s.hidden),
     s' = { ...s, hidden: true, review: 0, hostReview: false } }
   action showPage = all { not(s.disposed), s.hidden, s' = s.with("hidden", false) }
@@ -76,7 +63,6 @@ module PhotoLibraryAgentReview {
   action sourceChanges = all { s.revision < 2, s' = { ...s, revision: s.revision + 1 } }
   action dispose = all { not(s.disposed), s.epoch < 3,
     s' = { ...s, disposed: true, epoch: s.epoch + 1, inPhotos: false, hostReview: false } }
-  // Preserve the visit interleaving campaign. Visibility also runs in the directed schedules below.
   action step = {
     nondet slot = Slots.oneOf()
     nondet read = 0.to(2).oneOf()
@@ -105,7 +91,6 @@ module PhotoLibraryAgentReview {
     .expect(s.review == 1 and safety).then(confirmPress(1)).then(confirmPress(2)).then(confirmValidated(1))
     .then(confirmValidated(2)).expect(s.dispatched == [1] and s.acting == 1 and s.review == 0 and safety)
     .then(androidSettles(true)).expect(s.applied == [1] and s.acting == 0 and safety)
-  /// Photos is left and shown again while the provider checks: the answer opens no review.
   run leftDuringValidationOpensNothingTest = init.then(request(1, 0)).then(leave).then(show).then(validated(1))
     .expect(s.review == 0 and s.refusedLeft == 1 and safety)
   run hideRetiresPendingConfirmTest = init.then(request(1, 0)).then(validated(1))

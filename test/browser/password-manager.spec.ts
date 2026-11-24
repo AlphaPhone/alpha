@@ -1,9 +1,6 @@
 import { returnToApps } from './app-navigation';
 import { test, expect, type Page } from '@playwright/test';
 
-// Settings → Passwords over the shared plugin-native-passwords contract.
-// The development vault exists only with ELIZA_DEV_ALLOW_TEST_MOCKS=1 on the development
-// server (?mode=dev); native cases use a controlled Capacitor boundary. All values synthetic.
 const SECRET_MARKERS = ['synthetic-dev-', 'typed-synthetic-Z9q', 'abcdefghjkmnpqrstuvw'];
 
 async function devVault(page: Page) {
@@ -30,7 +27,6 @@ test('development vault: unlock, search, add, generate, edit and delete without 
   await devVault(page);
   await expect(page.getByRole('button', { name: 'Unlock passwords', exact: true })).toBeVisible();
   await expect(page.getByText('Other', { exact: true }).first()).toBeVisible();
-  // The agent observation is paused for the whole password surface.
   expect((await agentContext(page)).sensitive).toBe(true);
   await page.getByRole('button', { name: 'Unlock passwords', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Open Example sign-in', exact: true })).toBeVisible();
@@ -49,7 +45,6 @@ test('development vault: unlock, search, add, generate, edit and delete without 
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.getByText('Use an HTTPS website address.', { exact: true })).toBeVisible();
   await page.getByRole('textbox', { name: 'Add website', exact: true }).fill('https://Shop.Example.test/login?next=1');
-  // A rejected save clears nothing the user still needs except the password, which is re-entered.
   await page.locator('input[aria-label="Password"]').fill('typed-synthetic-Z9q');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.getByText('Saved', { exact: true })).toBeVisible();
@@ -67,7 +62,6 @@ test('development vault: unlock, search, add, generate, edit and delete without 
   await expect(page.getByText('Saved', { exact: true })).toBeVisible();
   await noSecretOutsideDialogs(page);
 
-  // Reveal is a separate, dismissible surface; the value never enters the page itself.
   await shop.click();
   await page.getByRole('button', { name: 'Show password', exact: true }).click();
   const reveal = page.getByRole('dialog', { name: 'Development vault secret' });
@@ -88,7 +82,6 @@ test('development vault locks when leaving and reports autofill selection only a
   await devVault(page);
   await expect(page.getByText('None', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Use for autofill', exact: true }).click();
-  // The synthetic picker emits no Android resume event; the UI confirms selection only after readback.
   await expect(page.getByRole('region', { name: 'Settings', exact: true }).getByText('None', { exact: true })).toBeVisible();
   await expect(page.getByText('Confirm Alpha Phone passwords in Android, then return here.', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Refresh autofill status', exact: true }).click();
@@ -197,13 +190,11 @@ test('native vault: Android unlock, app bindings, copy and autofill picker with 
   await expect(page.getByText('Copied', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Back to Password manager', exact: true }).click();
   await page.getByRole('button', { name: 'Use for autofill', exact: true }).click();
-  // Opening Android's confirmation is not a selection; only the readback changes the status.
   await expect(page.getByText('None', { exact: true })).toBeVisible();
   await page.evaluate(() => { const f = (window as any).vaultFixture; f.selected = 'this-app'; for (const callback of f.listeners.appResumed || []) callback({}); });
   await expect(page.getByRole('region', { name: 'Settings', exact: true }).getByText('Alpha', { exact: true })).toBeVisible();
   const calls = await page.evaluate(() => (window as any).vaultFixture.calls.map((c: any) => c.method));
   expect(calls).toEqual(expect.arrayContaining(['status', 'unlock', 'list', 'copy', 'openAutofillSettings']));
-  // Proton Pass remains an alternative provider on the same page.
   await expect(page.getByText('Other', { exact: true }).first()).toBeVisible();
   await page.getByRole('button', { name: 'Proton Pass', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Get Proton Pass', exact: true })).toBeVisible();
@@ -229,13 +220,11 @@ test('native vault whose key was lost can only be deleted after confirmation and
   await expect(page.getByText('Saved passwords can no longer be decrypted on this device.', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Add password', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Reset vault', exact: true }).click();
-  // The first tap only arms the action; nothing is deleted yet.
   expect(await page.evaluate(() => (window as any).vaultFixture.calls.filter((c: any) => c.method === 'reset').length)).toBe(0);
   await expect(page.getByText('Can’t be undone.', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Confirm reset vault', exact: true }).click();
   await expect(page.getByText('Vault reset', { exact: true })).toBeVisible();
   const calls: string[] = await page.evaluate(() => (window as any).vaultFixture.calls.map((c: any) => c.method));
-  // Reset follows its own unlock, never the earlier one that discovered the damage.
   expect(calls.slice(calls.lastIndexOf('reset') - 1, calls.lastIndexOf('reset') + 1)).toEqual(['unlock', 'reset']);
   await expect(page.getByRole('button', { name: 'Add password', exact: true })).toBeVisible();
   await expect(page.getByText('No saved passwords', { exact: true })).toBeVisible();
@@ -267,8 +256,6 @@ test('outbound capture: vault work sends no request containing typed or stored v
   await page.locator('input[aria-label="Password"]').fill('typed-synthetic-Z9q');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.getByText('Saved', { exact: true })).toBeVisible();
-  // The open vault marks the agent context sensitive. That AlphaClient then refuses every turn is
-  // tested in test/alpha-client-sensitive.test.mjs.
   const sensitive = await page.evaluate(async () => {
     const { alphaClient } = await import('/src/runtime/alpha-client.ts');
     return alphaClient.getState().context.sensitive;
@@ -290,10 +277,8 @@ test('leaving Settings for another view locks the development vault', async ({ p
   expect(await page.evaluate(async () => (await import('/src/passwords/password-manager.ts')).passwordManagerHoldsEntries())).toBe(true);
   await returnToApps(page);
   await expect.poll(async () => (await agentContext(page)).view).not.toBe('settings');
-  // Locked and forgotten as soon as Settings is left, not only when it is reopened.
   expect(await page.evaluate(async () => (await import('/src/passwords/password-manager.ts')).passwordManagerHoldsEntries())).toBe(false);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  // A fresh Settings visit starts at its root and never retains an unlocked vault.
   await page.getByRole('button', { name: 'Apps', exact: true }).click();
   await page.getByRole('button', { name: 'Passwords', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Unlock passwords', exact: true })).toBeVisible();

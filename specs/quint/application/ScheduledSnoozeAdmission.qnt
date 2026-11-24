@@ -1,4 +1,3 @@
-// Alpha computes one explicit snooze instant before the exact protocol call.
 module ScheduledSnoozeAdmission {
   type State = {clock: int, next: int, saved: int, differentDay: bool,
     scheduled: bool, snoozed: bool, until: int, phase: str, requests: int,

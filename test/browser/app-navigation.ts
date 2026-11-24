@@ -1,10 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 
-/** Return through the standalone app's visible controls, including nested app pages. */
 export async function returnToApps(page: Page) {
   const settings = page.getByRole('button', {name: 'Settings', exact: true});
-  // Read-only nested detail pages hide the app header. Unwind their visible
-  // back controls first, rather than opening and dragging the chat over them.
   for (let depth = 0; depth < 4 && !await settings.isVisible(); depth++) {
     const nested = page.getByRole('button', {name: /^(Back to calendar|Back to notes|Back from photo|Back to albums)$/}).filter({visible:true});
     if (!await nested.count()) break;
@@ -22,10 +19,6 @@ export async function returnToApps(page: Page) {
     await home.press('Enter');
   }
   }
-  // Go Home deliberately preserves an open conversation. Minimize it through
-  // the visible control before interacting with Home underneath. The layer's
-  // own hidden state says whether it is open: the Minimize button is still
-  // rising with the sheet right after Go Home, so its visibility is not.
   const conversation=page.locator('[data-alpha-layer="conversation"]');
   if(await conversation.getAttribute('aria-hidden')==='false'){
     await page.getByRole('button',{name:'Minimize chat',exact:true}).press('Enter');

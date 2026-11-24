@@ -1,4 +1,3 @@
-// ListenerPolicy precedence, SystemUI lease and ListeningEpoch ticket invalidation.
 module AlwaysOnListener {
   type State = {
     image: bool, consent: bool, enabled: bool, permission: bool, notification: bool,
@@ -49,7 +48,6 @@ module AlwaysOnListener {
     s' = evaluated({lease: "fresh", explainedPause: not(visible), processed: false, invoked: false,
       epoch: if (visible) s.epoch else s.epoch + 1, ...s})
   }
-  // Unexplained loss while capturing or already paused for an indicator latches.
   action loseLease = all {
     s.epoch < 8,
     s' = evaluated({lease: "expired", indicatorLost: s.indicatorLost or holdsMic(s) or s.explainedPause,

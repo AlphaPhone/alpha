@@ -1,8 +1,6 @@
-// Synthetic native HTTP boundaries; real flag-off renderer and MapLibre. No Google key or location.
 import {test,expect} from '@playwright/test';
 import {flagOffAndroid,residentHome,button} from './flag-off-android';
 import {residentStub} from './resident-stub';
-// Valid opaque-white 1×1 gray/alpha PNG; IDAT CRC and zlib checksum are verified.
 const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP4/x8AAwAB/2+Bq7YAAAAASUVORK5CYII=';
 test.use({video:{mode:'on',size:{width:915,height:915}}});
 test.beforeEach(({},info)=>test.skip(info.project.name!=='production','Flag-off renderer'));
@@ -52,7 +50,6 @@ for(const tiles of ['valid','malformed','copyright-unavailable','unavailable'] a
  const plane=page.locator('[data-alpha-map-plane]');await expect(plane).toBeVisible();
  const attribution=page.locator('.alpha-map-credits');
  await expect(attribution.getByRole('img',{name:'Google Maps',exact:true})).toBeVisible();
- // The Google Maps badge is the only credit control; it opens the copyright and the request disclosure.
  const privacy=attribution.locator('details.alpha-google-credit'),badge=privacy.locator('summary');
  await expect(attribution.locator('.alpha-map-privacy')).toHaveCount(0);
  await expect(attribution.locator('summary')).toHaveCount(1);
@@ -102,24 +99,20 @@ for(const tiles of ['valid','malformed','copyright-unavailable','unavailable'] a
    {name:'landscape',width:915,height:412,scale:1},
   ]){
    await page.setViewportSize({width:layout.width,height:layout.height});
-   // Exercise the production text-measurement probe and enlarged attribution glyphs.
    await page.addStyleTag({content:`[data-alpha-text-probe]{font-size:${100*layout.scale}px!important}.alpha-map-credits{font-size:${12*layout.scale}px!important}.alpha-map-info{font-size:${14*layout.scale}px!important}`});
    await expect.poll(()=>page.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--alpha-text-scale').trim())).toBe(String(layout.scale));
    await expect(attribution.getByRole('img',{name:'Google Maps',exact:true})).toBeVisible();
    await expect(async()=>{
     expect(await badge.evaluate(el=>{const r=el.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return hit===el||el.contains(hit);})).toBe(true);
-    // 44 CSS px before the shell's own landscape scaling.
     expect(await badge.evaluate(el=>getComputedStyle(el).minHeight)).toBe('44px');
    }).toPass();
    await badge.click();
-   // The viewport's complete copyright and the full recipient roles open from the badge at every size.
    await expect(privacy.locator('[data-maps-google-attribution]')).toHaveText('Map data © Google · synthetic viewport');
    await expect(privacy.locator('[data-maps-disclosure]')).toContainText('Google Routes for routing, operated by Google');
    const panel=await privacy.locator('.alpha-map-info').boundingBox();
    expect(panel!.x).toBeGreaterThanOrEqual(0);expect(panel!.y).toBeGreaterThanOrEqual(0);
    expect(panel!.x+panel!.width).toBeLessThanOrEqual(layout.width);
    expect(panel!.y+panel!.height).toBeLessThanOrEqual(layout.height);
-   // A failed hide of the in-app browser says nothing over the map.
    await expect(page.getByText('Unavailable',{exact:true})).toHaveCount(0);
    await page.screenshot({path:info.outputPath(`google-credit-${stage}-${layout.name}.png`),animations:'disabled'});
    await badge.click();

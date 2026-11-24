@@ -1,7 +1,3 @@
-// Complementary audit scope; the canonical model and its source correspondence remain registered separately.
-/// Manual production workflows, optional development triggers, and durable reviewed submissions.
-/// The agent admits a submission identity at most once. An agent without submission identities
-/// (legacy) cannot be asked what became of a request.
 module WorkflowExecutionAuditAdmission {
   type Workflow = {
     mocks: bool, legacy: bool, owner: int, epoch: int, version: int, reviewedVersion: int,
@@ -19,9 +15,7 @@ module WorkflowExecutionAuditAdmission {
     admitted: false, subExecutions: 0, ranVersion: 0, abandoned: false, ownerReview: false,
     runOwner: 0, runEpoch: 0, approval: "none", requestDigest: 0,
     reviewedDigest: 0, effectDigest: 0, effects: 0, cancelRequested: false, outcome: "none" }
-  /// An agent that keeps submission identities.
   action initFor(mocks: bool): bool = s' = initialState(mocks, false)
-  /// An agent without submission identities.
   action initLegacy(mocks: bool): bool = s' = initialState(mocks, true)
   action init = {
     nondet mocks = Set(false, true).oneOf()
@@ -40,24 +34,20 @@ module WorkflowExecutionAuditAdmission {
     s.phase == "review", s.reviewedVersion == s.version,
     s' = { ...s, phase: "installed" }
   }
-  /// The workflow changes on the agent while this phone holds an older copy or an open request.
   action remoteEdit = all {
     s.phase.in(Set("installed", "submitting", "uncertain", "unadmitted")), s.version < 2,
     s' = { ...s, version: s.version + 1 }
   }
-  /// The current steps are read and reviewed again before another run.
   action reviewCurrent = all {
     s.phase == "installed", s.reviewedVersion != s.version,
     s' = { ...s, reviewedVersion: s.version }
   }
   action enable = all { s.phase == "installed", s' = { ...s, enabled: true } }
-  /// Disabling leaves a queued occurrence in the saved queue until the next foreground check.
   action disable = s' = { ...s, enabled: false }
   action trigger = all {
     s.mocks, s.phase == "installed", s.enabled, not(s.queued),
     s' = { ...s, queued: true, queuedVersion: s.version }
   }
-  /// A foreground check drops queued occurrences of a disabled or changed workflow.
   action scanTick = all {
     s.mocks,
     s' = { ...s, queued: s.queued and s.enabled and s.queuedVersion == s.version }
@@ -72,13 +62,10 @@ module WorkflowExecutionAuditAdmission {
       queued: manual and s.queued,
       triggerDispatchEnabled: if (manual) s.triggerDispatchEnabled else s.enabled }
   }
-  /// The request reaches the agent. With submission identities the agent refuses a version it
-  /// was not asked for; a legacy agent runs whatever version it holds.
   action serverAdmit = all {
     Retained, not(s.admitted), s.legacy or s.submittedVersion == s.version,
     s' = { ...s, admitted: true, subExecutions: s.subExecutions + 1, ranVersion: s.version }
   }
-  /// A refusal is a known non-run: the request is cleared and the changed steps need review.
   action admissionRejected = all {
     s.phase == "submitting", not(s.legacy), not(s.admitted), s.submittedVersion != s.version, Bound,
     s' = { ...s, phase: "installed", intentSaved: false }
@@ -87,14 +74,11 @@ module WorkflowExecutionAuditAdmission {
     s.phase == "submitting", s.admitted, s.ranVersion == s.submittedVersion, Bound,
     s' = { ...s, phase: "running", intentSaved: false }
   }
-  /// A run of another version is reported and never shown as the accepted run.
   action versionMismatch = all {
     s.phase == "submitting", s.admitted, s.ranVersion != s.submittedVersion, Bound,
     s' = { ...s, phase: "uncertain" }
   }
   action unknownSubmission = all { s.phase == "submitting", s' = { ...s, phase: "uncertain" } }
-  /// Reconciliation only reads. A request the agent never admitted waits for the owner, or is
-  /// cleared when the workflow has changed since and can no longer start.
   action reconcile = all {
     s.phase == "uncertain", not(s.legacy), Bound,
     if (s.admitted) s' = { ...s, phase: "running", intentSaved: false, ownerReview: false }
@@ -102,14 +86,11 @@ module WorkflowExecutionAuditAdmission {
       s' = { ...s, phase: "installed", intentSaved: false, abandoned: true, ownerReview: false }
     else s' = { ...s, phase: "unadmitted", ownerReview: false }
   }
-  /// The first tap asks for confirmation. The second sends the same submission identity again.
   action resend = all {
     s.phase == "unadmitted", Bound,
     if (s.ownerReview) s' = { ...s, ownerReview: false, phase: "submitting" }
     else s' = { ...s, ownerReview: true }
   }
-  /// A legacy request can never be matched to a run. The owner clears it after checking the
-  /// executions list. Clearing sends nothing.
   action clearRequest = all {
     s.phase == "uncertain", s.legacy, Bound,
     if (s.ownerReview) s' = { ...s, ownerReview: false, phase: "installed", intentSaved: false }
@@ -119,7 +100,6 @@ module WorkflowExecutionAuditAdmission {
     s.phase == "running", s.approval == "none", s.effects == 0, not(s.cancelRequested),
     s' = { ...s, approval: "pending", requestDigest: 1 }
   }
-  /// The run asks again with different content. An earlier decision does not cover it.
   action requestChanged = all {
     s.phase == "running", s.approval.in(Set("pending", "approved")), s.requestDigest < 2, s.effects == 0,
     s' = { ...s, requestDigest: s.requestDigest + 1 }
@@ -135,7 +115,6 @@ module WorkflowExecutionAuditAdmission {
     Bound, not(s.cancelRequested), s.effects == 0,
     s' = { ...s, effects: 1, effectDigest: s.requestDigest }
   }
-  /// Cancellation names an execution receipt, so it exists only for an accepted run.
   action cancel = all {
     s.phase == "running", Bound,
     s' = { ...s, cancelRequested: true }
@@ -146,7 +125,6 @@ module WorkflowExecutionAuditAdmission {
   }
   action restart = s' = { ...s, ownerReview: false,
     phase: if (s.phase.in(Set("submitting", "unadmitted"))) "uncertain" else s.phase }
-  /// Another account stops this phone acting on the run. The agent's run is not cancelled.
   action switchOwner = all {
     s.epoch < 2,
     s' = { ...s, owner: if (s.owner == 1) 2 else 1, epoch: s.epoch + 1, queued: false,
@@ -187,7 +165,6 @@ module WorkflowExecutionAuditAdmission {
   run reviewedExecutionTest = initFor(false).then(validate).then(save).then(retainSubmission(true))
     .then(serverAdmit).then(receipt).then(propose).then(decide(true)).then(execute).then(finish)
     .expect(s.effects == 1 and s.outcome == "succeeded" and safety)
-  /// A request the agent never saw is not sent again until the owner confirms the repeat.
   run unknownSubmissionTest = initFor(false).then(validate).then(save).then(retainSubmission(true))
     .then(unknownSubmission).then(restart).then(reconcile)
     .expect(s.phase == "unadmitted" and s.subExecutions == 0 and s.intentSaved)
@@ -205,8 +182,6 @@ module WorkflowExecutionAuditAdmission {
     .then(remoteEdit).then(admissionRejected)
     .expect(s.phase == "installed" and s.subExecutions == 0 and safety)
     .then(retainSubmission(true).fail())
-  /// A legacy agent runs the changed version. The run is reported, not accepted, and only the
-  /// owner can clear the request.
   run legacyVersionRaceReportedTest = initLegacy(false).then(validate).then(save).then(retainSubmission(true))
     .then(remoteEdit).then(serverAdmit).expect(s.ranVersion != s.submittedVersion)
     .then(versionMismatch).expect(s.phase == "uncertain" and s.intentSaved and safety)
@@ -229,8 +204,6 @@ module WorkflowExecutionAuditAdmission {
   run cancelNeedsReceiptTest = initFor(false).then(validate).then(save).then(retainSubmission(true))
     .then(unknownSubmission).expect(safety)
     .then(cancel.fail())
-  /// The queued occurrence of a disabled workflow stays visible until a check removes it, and
-  /// is never dispatched.
   run triggerDisableTest = initFor(true).then(validate).then(save).then(enable).then(trigger)
     .then(disable).expect(s.queued and safety)
     .then(scanTick).expect(not(s.queued) and safety)

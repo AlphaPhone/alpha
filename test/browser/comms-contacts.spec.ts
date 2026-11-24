@@ -1,25 +1,19 @@
 import {test, expect, type Page} from '@playwright/test';
 import {setupTelephony} from './telephony-fixture';
-// AP-16 Contacts (docs/agentic-comms.md AC-03, AC-22): the list filter typed in the bar or applied by
-// Alpha, its clearable chip, and the contact header order. Renderer evidence only: no address book,
-// device or hosted model is involved, and the AOSP block's provider is the stubbed bridge.
 const field = '[data-alpha-bar-field="filter"]';
 const chip = '[data-alpha-list-filter-chip]';
 const row = (page: Page, name: string) => page.locator('[data-alpha-layer="app"] button.tap').filter({hasText: name});
-/** Requests that leave the renderer for data (fetch, XHR, sockets) from now on. */
 function requests(page: Page) {
   const seen: string[] = [];
   page.on('request', request => { if (['fetch', 'xhr', 'websocket', 'eventsource'].includes(request.resourceType())) seen.push(request.url()); });
   return seen;
 }
-/** Contrast ratio of an element's text color on its own background. */
 const contrast = (page: Page, selector: string) => page.locator(selector).evaluate(el => {
   const rgb = (value: string) => (value.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
   const lum = ([r, g, b]: number[]) => { const c = [r, g, b].map(v => { v /= 255; return v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; }); return .2126 * c[0] + .7152 * c[1] + .0722 * c[2]; };
   const style = getComputedStyle(el), [a, b] = [lum(rgb(style.color)), lum(rgb(style.backgroundColor))];
   return (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
 });
-/** The listed controls in document order, by their data marker. */
 const order = (page: Page, markers: string[]) => page.evaluate(markers => {
   const found = markers.map(marker => [marker, document.querySelector(`[data-alpha-contact-detail] ${marker}`)] as const).filter(([, el]) => el);
   return found.sort(([, a], [, b]) => a!.compareDocumentPosition(b!) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1).map(([marker]) => marker);
@@ -44,7 +38,6 @@ test.describe('dev Contacts (?mode=dev&fixture=1 dev build with ELIZA_DEV_ALLOW_
   });
 
   test('a sentence is not a filter; Enter asks Alpha, whose answer filters the list behind a chip that clears it', async ({page}) => {
-    // A whole sentence at once: typed word by word, its first words would filter (D9).
     await page.locator(field).fill('Who do I know at Lumen?');
     await expect(row(page, 'Sam Okafor')).toBeVisible();
     await page.locator(field).press('Enter');
@@ -115,7 +108,6 @@ test.describe('AOSP Contacts (stubbed Alpha image bridge, as aosp-telephony-view
     await setupTelephony(page);
     await page.evaluate(()=>{
       const w=window as any,cap=w.Capacitor,native=cap.nativePromise;
-      // Android leaves notes out of get() when they are ambiguous (several rows, too long, control characters).
       w.providerContact={id:'13',lookup:'lookup-13',displayName:'Carmen Ruiz',givenName:'Carmen',familyName:'Ruiz',storedNotes:['first note','second note'],starred:false,phoneNumbers:[{number:'+15550100103',type:'mobile'}],emailAddresses:[{address:'carmen@example.invalid',type:'home'}],version:'a'.repeat(64)};
       cap.nativePromise=async(plugin:string,method:string,input:any)=>{
         if(plugin==='AlphaContacts'&&method==='get'&&input.id==='13'){const {storedNotes,...detail}=w.providerContact;return structuredClone(detail);}

@@ -2,7 +2,6 @@ package ai.alphacompute.alphaphone;
 
 import java.util.function.BiConsumer;
 
-/** Observation-only hooks called by the external Android fixture ports. */
 public final class ResetTraceHooks {
  public static BiConsumer<String, String> observer = (kind, detail) -> {};
  public static String failWrite;

@@ -1,8 +1,6 @@
 import {test,expect} from '@playwright/test';
 import {openLegacyNotes} from './helpers/legacy-notes';
 
-// The store takes an edit's revision at once and commits it later. A second edit made while the
-// first commit is still pending is this editor's own continuation, not a change from another view.
 test('an edit made while the previous Notes save is still committing is saved, not refused',async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.goto('/?mode=dev');await openLegacyNotes(page);

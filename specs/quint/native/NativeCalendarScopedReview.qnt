@@ -1,4 +1,3 @@
-// Android scoped-deletion inspection tickets, foreground dialog, and staging boundary.
 module NativeCalendarScopedReview {
   type State = {epoch: int, retired: bool, ticket: bool, ticketEpoch: int, expires: int, now: int,
     inspectHeld: bool, inspectEpoch: int, inspectResult: str, reviewPhase: str, reviewEpoch: int, reviewResult: str,

@@ -21,7 +21,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Full shared recording entry points, callback epochs and actual cancellation worker barriers. */
 public final class SharedRecordingTraces {
  public static final class Bridge extends LocalSpeechBridgePlugin {
   Bridge(){super("alpha-cloud-voice-","alpha-cloud-tts-");}

@@ -1,4 +1,3 @@
-// Explicit browser owner-reminder action and acknowledgement reconciliation.
 module BrowserOwnerReminderAction {
   type State = {owner: str, capturedOwner: str, phase: str, active: bool,
     privacy: bool, shade: bool, row: str, status: str, uncertain: bool, blocked: bool,

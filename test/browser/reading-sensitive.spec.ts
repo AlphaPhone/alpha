@@ -1,8 +1,6 @@
 import {readFileSync,realpathSync} from 'node:fs';
 import {test,expect} from '@playwright/test';
-// The shared public page-source reader, served from the prepared client features (vite fs.allow).
 const pageSourceModule='/@fs'+realpathSync('.eliza/client-features/plugins/plugin-native-browser-surface/src/page-source.ts');
-// The extraction script is the shared BrowserPageReading.EXTRACT text block at the pin; undo its escapes.
 const native=readFileSync('vendor/eliza/plugins/plugin-native-browser-surface/android/src/main/java/ai/eliza/plugins/browsersurface/BrowserPageReading.java','utf8').split('public static final String EXTRACT = """')[1].split('""";')[0].replaceAll('\\\\','\\');
 const cases=[['api-key','<article>API key: SYNTHETIC-ONLY</article>'],['access-token','<article>Access token: SYNTHETIC-ONLY</article>'],['refresh-token','<article>refresh_token: SYNTHETIC-ONLY</article>'],['vault','<article><h1>Password vault</h1><div>SYNTHETIC-ONLY</div></article>'],['otp','<main><span>Verification</span><span>code</span><div>001122</div></main>'],['recovery','<article>Account recovery codes TEST-ONLY</article>'],['hidden-field','<input type="password" hidden><article>Garden journal</article>'],['normalized','<article>Ｐａｓｓｗｏｒｄ: synthetic</article>'],['split-zero-width','<article>pass\u200Bword: synthetic</article>'],['bare-code','<article>001122</article>']]as const;
 for(const [kind,body]of cases)test(`browser and native extraction refuse credential prose: ${kind}`,async({page,context})=>{

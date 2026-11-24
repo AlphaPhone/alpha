@@ -1,5 +1,3 @@
-// One SMS thread: unread state, owner draft, agent-suggested reply, a draft the owner asked the
-// agent for, and the owner-tapped reviewed send.
 module MessageThreads {
   type State = {
     ready: bool, open: bool,
@@ -19,14 +17,12 @@ module MessageThreads {
     review: "none", reviewText: -1,
     taps: 0, sends: 0, outcome: "none", uncertain: false
   }
-  // ready = verified image, SMS role and permission, unlocked and in front.
   action becomeReady = s' = {ready: true, ...s}
   action loseReady = s' = {
     ready: false, open: false, suggest: "idle",
     review: if (s.review == "showing") "none" else s.review, ...s}
   action openThread = all { s.ready, s' = {open: true, readThrough: s.inbound, ...s} }
   action closeThread = all { s.open, s.review != "showing", s' = {open: false, ...s} }
-  // A new inbound message retires an untouched agent suggestion; an owner draft is never touched.
   action receive = all {
     s.inbound < 3,
     s' = {inbound: s.inbound + 1,
@@ -37,8 +33,6 @@ module MessageThreads {
       suggest: "idle",
       review: if (s.review == "showing" and s.draft == "agent") "none" else s.review, ...s}
   }
-  // The agent drafts only for an unanswered inbound message and only into an empty composer, and
-  // never again for a message whose suggestion the owner dismissed or rewrote.
   action requestSuggestion = all {
     s.ready, s.inbound > s.answered, s.draft == "none", s.suggest == "idle", s.inbound != s.declined,
     s' = {suggest: "running", suggestTicket: s.inbound, ...s}
@@ -53,16 +47,11 @@ module MessageThreads {
     s.draft.in(Set("agent", "asked")), s.review != "showing",
     s' = {draft: "none", draftBase: -1, declined: if (s.draft == "agent") s.draftBase else s.declined, uncertain: false, ...s}
   }
-  // The owner asked the agent to draft for the open thread (AC-14). The draft replaces whatever the
-  // slot holds, the owner's own text included (the displaced text is kept for one Undo, which is not
-  // modelled here); it is still only a draft, and a newer message does not retire it. A draft whose
-  // send outcome is unknown stays bound to that operation, so no asked draft replaces it.
   action placeAskedDraft = all {
     s.ready, s.open, s.review != "showing", not(s.uncertain),
     s' = {draft: "asked", draftText: 1 - s.draftText, draftBase: -1, suggest: "idle",
       declined: if (s.draft == "agent") s.draftBase else s.declined, uncertain: false, ...s}
   }
-  // Typing takes ownership; a running suggestion can no longer land.
   action typeText = all {
     s.ready, s.open, s.review != "showing",
     s' = {draft: "owner", draftText: 1 - s.draftText, draftBase: -1, suggest: "idle",
@@ -71,7 +60,6 @@ module MessageThreads {
   action clearDraft = all {
     s.draft == "owner", s.review != "showing", s' = {draft: "none", draftBase: -1, uncertain: false, ...s}
   }
-  // The owner's send tap opens the native review of the exact text.
   action tapSend = all {
     s.ready, s.draft != "none", s.review == "none",
     s' = {review: "showing", reviewText: s.draftText, taps: s.taps + 1, open: true,
@@ -81,8 +69,6 @@ module MessageThreads {
   action confirmReview(result: str): bool = all {
     s.ready, s.review == "showing", s.reviewText == s.draftText, s.draft != "none",
     result.in(Set("sent", "failed", "unknown")),
-    // An unknown outcome keeps the draft bound to the same operation: confirming it again reads that
-    // operation back and never hands a second copy to the radio.
     s' = if (s.uncertain)
         (if (result == "unknown") {review: "none", ...s}
          else if (result == "failed") {review: "none", outcome: "failed", uncertain: false, ...s}

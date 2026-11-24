@@ -7,7 +7,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import org.json.*;
 
-/** Observes the real provider and lease. Ports supply Binder, caller and clock facts. */
 public final class IndicatorProviderTraces {
  static final IndicatorLeaseProvider provider=new IndicatorLeaseProvider();
  static final Map<Integer,Token> tokens=new HashMap<>();

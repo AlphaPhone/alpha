@@ -1,6 +1,4 @@
 import {test,expect} from '@playwright/test';
-// Photos review 6: an agent share or album review belongs to the Photos visit it opened in. Leaving
-// Photos ends it, so it neither reappears on a later visit nor blocks the next agent review.
 test.beforeEach(async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));await page.goto('/');
  await page.evaluate(async()=>{const {importBrowserPhoto}=await import('/src/prototype/browser-camera.ts');const canvas=document.createElement('canvas');canvas.width=16;canvas.height=12;const ctx=canvas.getContext('2d')!;ctx.fillStyle='teal';ctx.fillRect(0,0,16,12);await importBrowserPhoto({original:new File([],'source.jpg'),image:canvas.toDataURL('image/jpeg'),width:16,height:12},new AbortController().signal);});

@@ -2,10 +2,6 @@ import {openCanonicalCalendar} from './helpers/canonical-calendar';
 import { openLegacyNotes } from './helpers/legacy-notes';
 import { test, expect, type Page, type Locator } from '@playwright/test';
 
-// Issue #411, responsive-surface matrix. Production renderer in a
-// touch viewport: synthetic storage/provider inputs, no shipped developer surfaces. Viewport changes stand in for rotation,
-// window resizing and the software keyboard; they do not qualify Android rotation, process
-// recreation, TalkBack or a device keyboard.
 test.use({ hasTouch: true, isMobile: true, viewport: { width: 412, height: 915 } });
 
 const PORTRAIT = { width: 412, height: 915 }, SMALL_LANDSCAPE = { width: 640, height: 360 }, LANDSCAPE = { width: 915, height: 412 };
@@ -15,7 +11,6 @@ const COLUMN = 720;
 
 async function open(page: Page, app: string) {
   if(app==='Calendar'){
-    // Layout-only CalendarService read, through the same canonical source as the app.
     await openCanonicalCalendar(page,{eventTitle:'Column check',launcher:false});
     return;
   }
@@ -29,15 +24,11 @@ const geometry = (page: Page) => page.evaluate(() => {
   return { scale: Number(getComputedStyle(root).getPropertyValue('--phone-scale')), landscape: root.classList.contains('alpha-landscape'), wide: root.classList.contains('alpha-wide') };
 });
 async function box(locator: Locator) { const value = await locator.boundingBox(); expect(value).not.toBeNull(); return value!; }
-/** Resize, then wait until the renderer has measured the new window and rendered it. */
 async function resize(page: Page, viewport: { width: number; height: number }) {
   await page.setViewportSize(viewport);
-  // Maps can occupy the renderer while it redraws after rotation. Wait for the
-  // measured viewport before inspecting layout.
   await expect(page.locator('html')).toHaveCSS('--alpha-visible-height', `${viewport.height}px`, { timeout: 15_000 });
   await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(() => done(null)))));
 }
-/** Within the readable column and centred in the window, or the full phone width when narrow. */
 async function expectColumn(page: Page, locator: Locator) {
   const { width } = page.viewportSize()!, bounds = await box(locator);
   if (width < 760) { expect(bounds.width).toBeGreaterThan(width - 80); return; }
@@ -54,18 +45,15 @@ test('the canvas keeps its own density and takes its arrangement from measured s
   await open(page, 'Settings');
   expect(await geometry(page)).toEqual({ scale: 1, landscape: false, wide: false });
   await resize(page, SMALL_LANDSCAPE);
-  // A small phone turned sideways is not shrunk: 44px controls stay 44px.
   await expect.poll(() => geometry(page)).toEqual({ scale: 1, landscape: true, wide: false });
   await expectTarget(page, page.getByRole('button', { name: 'Back to apps', exact: true }));
   await expectTarget(page, page.getByRole('button', { name: 'About', exact: true }));
-  // A tablet is never drawn as a magnified phone, in either orientation.
   await resize(page, TABLET_LANDSCAPE);
   await expect.poll(() => geometry(page)).toEqual({ scale: 1, landscape: true, wide: true });
   await resize(page, TABLET_PORTRAIT);
   await expect.poll(() => geometry(page)).toEqual({ scale: 1, landscape: false, wide: true });
   expect((await box(page.getByRole('button', { name: 'Back to apps', exact: true }))).height).toBeLessThan(60);
 
-  // Typing in portrait: the keyboard shortens the window below its width, which is not a rotation.
   await resize(page, PORTRAIT);
   await page.getByRole('button', { name: 'Back to apps', exact: true }).click();
   await openLegacyNotes(page);
@@ -75,7 +63,6 @@ test('the canvas keeps its own density and takes its arrangement from measured s
   await resize(page, { width: 412, height: 380 });
   await expect.poll(() => geometry(page)).toEqual({ scale: 1, landscape: false, wide: false });
   await expect(body).toBeFocused();
-  // A real rotation changes the width; the arrangement follows it even while typing.
   await resize(page, LANDSCAPE);
   await expect.poll(() => geometry(page)).toMatchObject({ scale: 1, landscape: true });
   await expect(body).toHaveValue('Typed with the keyboard open');
@@ -125,9 +112,7 @@ test('the Calendar month picker is a bounded sheet on a wide screen and scrolls 
   expect(wide.width).toBeLessThanOrEqual(561);
   expect(Math.abs(wide.x - (1280 - wide.x - wide.width))).toBeLessThan(4);
   await resize(page, SMALL_LANDSCAPE);
-  // The sheet's own transition can still be settling after the renderer has measured.
   await expect.poll(async () => { const bounds = await box(dialog); return bounds.y + bounds.height; }).toBeLessThanOrEqual(361);
-  // Every day stays reachable by scrolling the sheet, at full tap size.
   const last = dialog.getByRole('button').last();
   await last.scrollIntoViewIfNeeded();
   await expect(last).toBeInViewport({ ratio: 1 });
@@ -150,7 +135,6 @@ test('Workflows and Files lists keep a readable column instead of stretching', a
     await expect(async () => {
       const scroller = await box(page.locator('[data-alpha-app-scroll="files"]'));
       const tile = await box(documents);
-      // The window's full width, with the two-column folder grid inside the centred column.
       expect(scroller.width).toBeGreaterThan(viewport.width - 2);
       expect(tile.x + tile.width).toBeLessThanOrEqual(scroller.x + (scroller.width + COLUMN) / 2 + 1);
       expect(tile.x).toBeGreaterThanOrEqual(scroller.x + (scroller.width - COLUMN) / 2 - 1);
@@ -167,7 +151,6 @@ test('the Browser menu ends above the dock on short screens and its rows stay re
     await expect(menu).toBeVisible();
     const bounds = await box(menu);
     const docks = await page.evaluate(() => Array.from(document.querySelectorAll<HTMLElement>('[data-alpha-layer="composer"],[data-alpha-layer="pill"] > *')).filter(dock => dock.getClientRects().length && !dock.closest('[inert]')).map(dock => dock.getBoundingClientRect().top));
-    // Whether or not a dock is shown on this page, the menu ends above it and on screen.
     expect(bounds.y + bounds.height).toBeLessThanOrEqual(Math.min(viewport.height, ...docks) + 0.5);
     const rows = menu.getByRole('button');
     const last = rows.last();
@@ -181,8 +164,6 @@ test('the Browser menu ends above the dock on short screens and its rows stay re
 });
 
 test('the Maps notice sits beside the map in landscape and is bounded on a wide portrait screen', async ({ page }) => {
-  // The base map has no notice until there is news; a refused location request is the fullest one
-  // (message, help, My location and Location settings).
   await page.addInitScript(() => { navigator.geolocation.watchPosition = ((_: unknown, error: (value: {code: number}) => void) => { queueMicrotask(() => error({code: 1})); return 19; }) as typeof navigator.geolocation.watchPosition; navigator.geolocation.clearWatch = () => {}; });
   await open(page, 'Maps');
   const notice = page.locator('[data-alpha-maps-status]');
@@ -219,7 +200,6 @@ test('Camera keeps one capture session and an undistorted preview through rotati
     expect(await video.evaluate((element, previous) => element === previous, original)).toBe(true);
     expect(await video.evaluate((v: HTMLVideoElement) => getComputedStyle(v).objectFit)).not.toBe('fill');
     await expectTarget(page, shutter);
-    // Zoom chips draw small but take a 44px touch target.
     for (const name of ['Zoom 1x', 'Zoom 2x']) await expectTarget(page, page.getByRole('button', { name, exact: true }));
     await page.screenshot({ animations: 'disabled', path: test.info().outputPath(`camera-${viewport.width}x${viewport.height}.png`) });
   }
@@ -232,8 +212,6 @@ test('Camera keeps one capture session and an undistorted preview through rotati
   const tile = page.getByRole('button', { name: /^Photo, / });
   await expect(tile).toHaveCount(1);
   for (const tab of ['Library', 'Albums']) await expectTarget(page, page.getByRole('button', { name: tab, exact: true }));
-  // Photos retains its selected density through rotation. The default is four
-  // columns with 2px gaps and the existing 12px inset.
   const grid = page.locator('.photo-grid').filter({visible: true}).first();
   for (const viewport of [PORTRAIT, LANDSCAPE]) {
     await resize(page, viewport);
@@ -246,7 +224,6 @@ test('Camera keeps one capture session and an undistorted preview through rotati
     expect(Math.abs(tileBounds.width - tileBounds.height)).toBeLessThan(1);
   }
   await tile.click();
-  // The viewer fits the whole frame on screen in landscape instead of cropping it to the width.
   const frame = page.locator('[data-alpha-photo-frame]');
   await expect(frame).toBeVisible();
   for (const viewport of [LANDSCAPE, SMALL_LANDSCAPE, PORTRAIT, TABLET_LANDSCAPE]) {
@@ -282,7 +259,6 @@ test('Notes opens beside its list on a wide canvas and keeps each draft through 
   const list = page.locator('[data-alpha-subview="notes-list"]'), editor = page.locator('[data-alpha-subview="notes-editor"]');
   await page.getByRole('button', { name: 'New note', exact: true }).click();
   await title.fill('First draft'); await body.fill('Words for the first note that must not be lost.');
-  // The list stays usable beside the open note, and marks it.
   await expect(list).toBeVisible();
   await expect.poll(() => inert(list)).toBe(false);
   const listBox = await box(list), editorBox = await box(editor);
@@ -296,7 +272,6 @@ test('Notes opens beside its list on a wide canvas and keeps each draft through 
   await expect(body).toHaveValue('The second note, typed beside the list.');
   await body.evaluate((element: HTMLTextAreaElement) => { element.focus(); element.setSelectionRange(4, 10); });
   const original = await body.elementHandle();
-  // Collapsing to one column keeps the open note, its element and caret; the list leaves the order.
   for (const viewport of [PORTRAIT, LANDSCAPE, TABLET_LANDSCAPE, SMALL_LANDSCAPE]) {
     await resize(page, viewport);
     await expect(body).toHaveValue('The second note, typed beside the list.');
@@ -305,7 +280,6 @@ test('Notes opens beside its list on a wide canvas and keeps each draft through 
     await expect.poll(() => inert(list)).toBe(viewport.width < 1000);
     await page.screenshot({ animations: 'disabled', path: test.info().outputPath(`notes-split-${viewport.width}x${viewport.height}.png`) });
   }
-  // Large text returns to one pane on a wide canvas, with the same editor and draft.
   const probe = (size: string) => page.evaluate(value => { document.querySelector<HTMLElement>('[data-alpha-text-probe]')!.style.fontSize = value; }, size);
   await resize(page, TABLET_LANDSCAPE);
   await expect.poll(() => inert(list)).toBe(false);
@@ -315,7 +289,6 @@ test('Notes opens beside its list on a wide canvas and keeps each draft through 
   await expect(body).toHaveValue('The second note, typed beside the list.');
   await probe('100px');
   await expect.poll(() => inert(list)).toBe(false);
-  // Focus left on the list when it is covered moves to the open note's controls.
   await page.getByRole('button', { name: 'Open First draft', exact: true }).focus();
   await resize(page, PORTRAIT);
   await expect(page.getByRole('button', { name: 'Back to notes', exact: true })).toBeFocused();
@@ -329,12 +302,10 @@ test('switching notes beside the list leaves the previous one as Back does', asy
   await title.fill('List A');
   await page.getByRole('button', { name: 'Turn into checklist', exact: true }).click();
   await newItem.fill('Half-typed item for list A');
-  // The unsent item belongs to List A; it is not carried into the next note.
   await page.getByRole('button', { name: 'New note', exact: true }).click();
   await title.fill('List B');
   await page.getByRole('button', { name: 'Turn into checklist', exact: true }).click();
   await expect(newItem).toHaveValue('');
-  // An untouched new note is dropped when another note is opened beside the list, as Back drops it.
   await page.getByRole('button', { name: 'New note', exact: true }).click();
   await expect(title).toHaveValue('New note');
   await page.getByRole('button', { name: 'Open List A', exact: true }).click();
@@ -349,7 +320,6 @@ test('Calendar shows readable day columns on wide screens, a single-day agenda a
   const columns = page.locator('[data-alpha-calendar-day]');
   await expect(columns).toHaveCount(5);
   for (const column of await columns.all()) expect((await box(column)).width).toBeGreaterThanOrEqual(200);
-  // From three columns the previous day leads; the selected day is marked.
   const selected = columns.nth(1);
   await expect(selected).toHaveAttribute('aria-current', 'date');
   await expect(columns.first()).toHaveAttribute('aria-current', 'false');
@@ -363,7 +333,6 @@ test('Calendar shows readable day columns on wide screens, a single-day agenda a
   await event.click();
   const detail = page.locator('[data-alpha-subview="calendar-detail"]');
   await expect(detail).toContainText('Column check');
-  // The opened event survives rotation and collapsing to one day.
   for (const viewport of [PORTRAIT, LANDSCAPE, TABLET_PORTRAIT]) {
     await resize(page, viewport);
     await expect(detail).toContainText('Column check');
@@ -372,14 +341,11 @@ test('Calendar shows readable day columns on wide screens, a single-day agenda a
   await resize(page, PORTRAIT);
   await expect(columns).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^Column check, / })).toBeVisible();
-  // Enlarged text below 150% keeps fewer, wider columns.
   await resize(page, TABLET_LANDSCAPE);
   await expect(columns).toHaveCount(5);
   const probe = (size: string) => page.evaluate(value => { document.querySelector<HTMLElement>('[data-alpha-text-probe]')!.style.fontSize = value; }, size);
   await probe('130px');
   await expect(columns).toHaveCount(3);
-  // Large text: the days give way to the selected day's agenda list even on a wide screen. The
-  // timeline stays mounted, hidden, and comes back with its scroll position.
   const timeline = page.getByRole('region', { name: 'Calendar timeline', exact: true });
   await timeline.evaluate(element => { element.scrollTop = 120; });
   const original = await timeline.elementHandle();

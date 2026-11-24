@@ -1,15 +1,6 @@
 import {returnToApps} from './app-navigation';
 import {test, expect, type Page} from '@playwright/test';
 
-// AP-16 Alpha behaviours (docs/agentic-comms.md AC-10, AC-24, AC-25, AC-26, AC-30, AC-31).
-// Mode: the development build with the agent adapter installed (no ?fixture=1), as in
-// chat-continuity.spec.ts and chat-reply-announcement.spec.ts. The agent is an in-page stub of
-// alphaClient.send; nothing leaves the page, no model is called and nothing is dialed or sent.
-// A test-only `bar` is assigned to the admitted Notes view inside the spec, so the shell treats it
-// as a comms view; Phone, Messages and Contacts stay unadmitted outside the AOSP image.
-// The proposal, note and faint-suggestion assertions need the shell package's api.propose,
-// api.note and faint slot (contract 3.5, 3.9) and run after integration. Browser evidence only:
-// this proves nothing about the emulator, the AOSP image or a device.
 const BAR = `({target:{kind:'contact',app:'Contacts',name:'Maya Chen',first:'Maya',initials:'MC'},
  closed:{kind:'alpha',placeholder:'Ask about Maya',value:'',onText:null,submit:null,canSubmit:false,maxLength:null,suggestion:null,acceptSuggestion:null},
  left:{icon:'avatar',label:"Back to Maya's card",initials:'MC',run:null},context:'Maya Chen · Contacts',contextKey:'notes:contact:maya',
@@ -31,7 +22,6 @@ async function setup(page: Page, options: {comms?: boolean} = {}) {
 		const {connectionController} = await import('/src/runtime/connection-ui.tsx');
 		const f = (window as any).commsAlpha;
 		Component.prototype.connectAgent = async () => {};
-		// The stub agent answers with whatever the test queued; every request body is captured.
 		f.replies = [];
 		alphaClient.send = async (text: string) => { f.sent.push(text); return f.replies.shift() ?? {text: 'Noted.'}; };
 		alphaClient.approve = async (id: string) => { f.approved.push(id); throw Error('Approval is not part of this test.'); };
@@ -70,7 +60,6 @@ test.describe('comms Alpha (dev build, agent adapter installed)', () => {
 		await expect(cards.nth(0)).toContainText('Replaced');
 		await expect(cards.nth(1).getByRole('button', {name: 'Call: Call (415) 555-0199'})).toBeVisible();
 		await expect(cards.nth(1).locator('[data-alpha-proposal-detail]')).toHaveText('(415) 555-0199 · not in Contacts');
-		// The replaced proposal is declined upstream; nothing was approved, dialed or sent.
 		await expect.poll(async () => (await fixture(page)).declined).toEqual(['first']);
 		expect((await fixture(page)).approved).toEqual([]);
 	});
@@ -82,7 +71,6 @@ test.describe('comms Alpha (dev build, agent adapter installed)', () => {
 		const card = page.locator('[data-alpha-chat-proposal]');
 		await expect(card.getByRole('button', {name: 'Call: Call Maya Chen'})).toBeVisible();
 		await expect(card.locator('[data-alpha-proposal-detail]')).toHaveText('(415) 555-0132');
-		// A contact target shows the contact's one number.
 		await page.evaluate(() => (window as any).commsAlpha.replies.push({text: 'Calling Maya?', proposals: [{id: 'c', title: 'Place call', description: 'Contact: Maya\n\nCalls this number from your phone after you confirm.', expiresAt: Date.now() + 600_000, contextRevision: 0}]}));
 		await ask(page, 'Call Maya again');
 		await expect(card.nth(1).getByRole('button', {name: 'Call: Call Maya Chen'})).toBeVisible();
@@ -103,10 +91,8 @@ test.describe('comms Alpha (dev build, agent adapter installed)', () => {
 		}, BAR);
 		const screen = () => page.evaluate(() => (window as any).commsAlpha.shell.S().msgs.filter((m: any) => m.card?.kind === 'screen').map((m: any) => [m.card.args.ring, m.card.state]));
 		await expect.poll(screen).toEqual([['ring-1', 'open']]);
-		// The ring ends: its card can never screen a later call.
 		await page.evaluate(() => { (window as any).ring = null; (window as any).commsAlpha.shell.setState({}); });
 		await expect.poll(screen).toEqual([['ring-1', 'replaced']]);
-		// The same caller rings again: a new card for the new ring.
 		await page.evaluate(() => { (window as any).ring = 'ring-2'; (window as any).commsAlpha.shell.setState({}); });
 		await expect.poll(screen).toEqual([['ring-1', 'replaced'], ['ring-2', 'open']]);
 	});
@@ -120,7 +106,6 @@ test.describe('comms Alpha (dev build, agent adapter installed)', () => {
 		await page.evaluate(() => (window as any).commsAlpha.shell.setState({chat: 'sheet'}));
 		await page.waitForTimeout(300);
 		await expect(briefing).toHaveCount(1);
-		// AC-31: the briefing is a local line; it is never part of what is sent to the agent.
 		await ask(page, 'Thanks');
 		await expect.poll(async () => (await fixture(page)).sent).toEqual(['Thanks']);
 	});

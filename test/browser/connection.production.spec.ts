@@ -1,5 +1,4 @@
 import {test,expect} from '@playwright/test';
-// Flag-off product boundary. Remote development protocol fixtures live in the dev-* lane.
 for(const legacy of [null,{kind:'remote',origin:'https://agent.example.test'},{kind:'cloud',environment:'production',agentId:'legacy-agent',ownerId:'legacy-owner'}])test(`local-only product does not reconnect ${legacy?.kind||'cold start'}`,async({page})=>{
  const outside:string[]=[];
  await page.route('**/*',route=>{const url=new URL(route.request().url());if(['127.0.0.1','localhost'].includes(url.hostname))return route.continue();outside.push(url.href);return route.abort();});
@@ -16,7 +15,6 @@ for(const legacy of [null,{kind:'remote',origin:'https://agent.example.test'},{k
  await expect(chooser.getByRole('button',{name:'Continue',exact:true})).toBeVisible();
  await expect(page.getByLabel('Pairing code',{exact:true})).toHaveCount(0);
  await expect(page.getByRole('button',{name:/Connect remote|Dedicated|Create agent|Connect personal/})).toHaveCount(0);
- // #406: a saved hosted agent is never reconnected; the stored choice is left as it was.
  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha.connection.selection.v1')!))).toEqual(legacy??{kind:'none'});
  expect(await page.evaluate(()=>localStorage.getItem('alpha.connection.conversations.v1'))).toBe(JSON.stringify({'legacy-owner-a':'conversation-a','legacy-owner-b':'conversation-b'}));
  await page.reload();await expect(chooser).toBeVisible();

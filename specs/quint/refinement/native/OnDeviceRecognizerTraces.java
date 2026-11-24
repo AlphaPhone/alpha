@@ -12,7 +12,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.json.JSONObject;
 
-/** Observes a real recognition session with a controlled platform recognizer and pipe. */
 public final class OnDeviceRecognizerTraces {
  final Context context=new Context();
  final OnDeviceRecognizer source=new OnDeviceRecognizer(context);

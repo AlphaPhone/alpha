@@ -1,4 +1,3 @@
-// Optional Calendar cleanup and independently authorized Google privacy revoke.
 module GoogleCalendarDisconnect {
   type Result = {privacy: str, calendarPause: str, callbackRetirement: str, providerDrain: str, pauseRevision: int}
   type State = {review: str, independent: bool, pausePort: str, retirementPort: str, live: str,

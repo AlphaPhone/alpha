@@ -1,11 +1,5 @@
 import {preloadPageModules} from './page-modules.ts';
 import {expect,type Page} from '@playwright/test';
-/** Closed canonical app-record transport. Real Notes controller/client/editor/rendering run unchanged.
- * This fixture tests UI contracts, not the server store or account/provider integration.
- * Setting `canonicalNotesFixture.delay` (ms) holds every later response that long, like a slow link.
- * Setting `canonicalNotesFixture.dictation` to a list of transcripts answers the platform speech
- * recognition (DailyApps voice) with them in order, counted in `heard`; unset, the browser build's
- * own answer (no recognition) stands. */
 export async function canonicalNotesFixture(page:Page,{path='/',notes=[],trash=[],failReads=false}:{path?:string;notes?:unknown[];trash?:unknown[];failReads?:boolean}={}){
  const foreign:string[]=[],errors:string[]=[];
  page.on('pageerror',error=>errors.push(error.message));
@@ -17,7 +11,6 @@ export async function canonicalNotesFixture(page:Page,{path='/',notes=[],trash=[
   const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');
   const f=(window as any).canonicalNotesFixture={state:{notes,trash,revision:notes.length||trash.length?1:0},requests:[],otherRequests:[],fail:false,failReads,failAfterApplied:false};
   f.acceptedReads=[];
-  // Observe the SAME canonical class used by the real UI; never replace its controller.
   const {CanonicalNotesController}=await import('/src/prototype/canonical-notes-controller.ts');
   const refresh=CanonicalNotesController.prototype.refresh;
   CanonicalNotesController.prototype.refresh=async function(this:InstanceType<typeof CanonicalNotesController>){

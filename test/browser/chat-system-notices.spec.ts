@@ -1,10 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
 
-// Upstream escalation notices in a restored and a live conversation. Real composer, shell adapter
-// and connection controller; only the Android IPC boundary and a remote agent are in-page
-// fixtures. Nothing leaves the page and no model is called. This is browser source evidence, not
-// emulator or device acceptance. The collapse rules are pinned in test/system-notice-collapse.test.mjs;
-// chat-system-notices.production.spec.ts proves this case on the resident agent.
 const REMOTE = 'https://agent.example.test';
 const UPSTREAM_RUNTIME = 'Eliza needs attention. Check the connected host\'s diagnostics before trying again.';
 const UPSTREAM_MODEL = 'Eliza cannot respond yet. Configure a model provider on the connected host in Settings.';
@@ -21,7 +16,6 @@ async function remoteAgent(page: Page, rows: Row[]) {
     const expiresAt = Date.now() + 86_400_000;
     store.set('remote:' + remote, JSON.stringify({ origin: remote, token: 'remote-session-token', identityId: 'fixture-owner', sessionId: 'remote-session-token', expiresAt }));
     localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({ kind: 'remote', origin: remote }));
-    // The phone last had this conversation open, so the start restores its history.
     localStorage.setItem('alpha.connection.conversations.v1', JSON.stringify({ [JSON.stringify([remote, 'fixture-owner', '6f1d3c3e-8c55-4c1b-9d1f-2b6f0b0d3a11'])]: 'fixture-chat' }));
     const history = rows.map((row, index) => ({ id: `77777777-7777-4777-8777-${String(index).padStart(12, '0')}`, ...row, timestamp: 1_000 + index }));
     const f = w.notices = { ready: false, historyReads: 0, posts: 0, release: null as null | ((text: string) => void) };

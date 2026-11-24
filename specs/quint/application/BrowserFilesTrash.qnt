@@ -1,4 +1,3 @@
-// Same-namespace BrowserStorageVolume journal custody and exact marker identity.
 module BrowserFilesTrash {
   type Request = {owner: int, kind: str, subject: int}
   type State = {mode: str, active: Request, queued: Request, prepared: bool, rows: int -> str,

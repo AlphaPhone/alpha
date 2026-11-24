@@ -56,7 +56,7 @@ module BrowserReminderOrphan {
   action load = all {not(s.canonical), s' = {...s, canonical: true}}
   action inspect = all {s.canonical, s' = s}
   action readSelected(expected: int): bool = all {s.canonical, s.row.revision == expected, s' = s}
-  action settle = all {s.canonical, s' = s} // No proved expiry in this campaign.
+  action settle = all {s.canonical, s' = s}
   action advance = all {s.now < 3, s' = {...s, now: s.now + 1}}
   action setNotifications(on: bool): bool = s' = {...s, notifications: on}
   action list = all {s.row.revision < 12, s' = afterList(s)}
@@ -69,9 +69,9 @@ module BrowserReminderOrphan {
     s.canonical, guarded, s.row.marker,
     s' = {...s, row: {...s.row, marker: false}, journal: "undone"}
   }
-  action dismiss = all {false, s' = s} // No unknown or dispatching entry in these states.
-  action directCancel = all {false, s' = s} // The normal operation must use reviewed staging.
-  action createSame = all {false, s' = s} // The selected identity already exists.
+  action dismiss = all {false, s' = s}
+  action directCancel = all {false, s' = s}
+  action createSame = all {false, s' = s}
 
   action edit(id: int, expected: int, reschedule: bool): bool = all {
     canChange, s.row.status != "cancelled", s.row.revision == expected, id.in(receiptIds), not(id.in(s.receipts)),
@@ -93,8 +93,6 @@ module BrowserReminderOrphan {
       receipts: if (reviewed) s.receipts.union(Set(3)) else s.receipts}
   }
 
-  // One-off Done retains the occurrence's snooze metadata, as the shared native
-  // engine does. The completed status prevents further occurrence decisions.
   pure def completed(row: Row): Row =
     {...row, status: "completed", revision: row.revision + 1, history: row.history + 1}
   pure def snoozed(row: Row, at: int, on: bool): Row =

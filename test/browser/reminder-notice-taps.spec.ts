@@ -1,7 +1,5 @@
 import {selectCalendarSource} from './helpers/browser-calendar';
 import {test,expect} from '@playwright/test';
-// Rendered production navigation with a controlled encrypted-native boundary.
-// OS delivery/process death are exercised separately by Android instrumentation.
 for(const mode of ['recover','stale','read-failure','draft-race','navigation-race','queue-change','consume-failure','dismiss-stale','reload-recovery','chooser-close'] as const)test('durable reminder tap '+mode,async({page})=>{
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
  await page.addInitScript(mode=>{
@@ -49,7 +47,6 @@ for(const mode of ['recover','stale','read-failure','draft-race','navigation-rac
  },mode);
  await page.goto('/');
  if(mode==='chooser-close'){
-  // P-43: no offline choice exists; the owner closes the chooser.
   await expect(page.getByRole('button',{name:'Close connection settings',exact:true})).toBeVisible();
   expect(await page.evaluate(()=>(window as any).reminderTapFixture.consumed)).toEqual([]);
   await page.getByRole('button',{name:'Close connection settings',exact:true}).click();
@@ -71,7 +68,6 @@ for(const mode of ['recover','stale','read-failure','draft-race','navigation-rac
  }
  if(mode==='dismiss-stale'){
   const dismiss=page.getByRole('button',{name:'Dismiss saved reminder link',exact:true});await expect(dismiss).toBeVisible();
-  // Dismiss clears only the saved link, so it acts without a confirm.
   await dismiss.click();await expect.poll(()=>page.evaluate(()=>(window as any).reminderTapFixture.pending.token)).toBe('older-valid-token');
   await expect(page.getByRole('heading',{name:'Original notification reminder',exact:true})).toHaveCount(0);
   await page.getByRole('button',{name:'Open saved reminder notification',exact:true}).click();await expect(page.getByRole('heading',{name:'Original notification reminder',exact:true})).toBeVisible();
@@ -86,10 +82,8 @@ for(const mode of ['recover','stale','read-failure','draft-race','navigation-rac
   await expect(page.getByRole('heading',{name:'Original notification reminder',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Complete reminder occurrence',exact:true})).toBeVisible();await expect(page.locator('body')).toContainText('Exact saved body');
   if(mode==='recover')await expect.poll(()=>page.evaluate(()=>(window as any).reminderTapFixture.consumed)).toEqual(['original-token']);
  }else{
-  // Wait for the point where each tap is decided, then check nothing opened and the tap is kept.
   if(mode==='stale')await expect(page.getByRole('button',{name:'Dismiss saved reminder link',exact:true})).toBeVisible();
   if(mode==='read-failure'){await expect.poll(()=>page.evaluate(()=>(window as any).reminderTapFixture.failedLists)).toBeGreaterThan(0);await expect(page.getByRole('button',{name:'Open saved reminder notification',exact:true})).toBeVisible();}
-  // The confirmation read after listReminders sees the newer token.
   if(mode==='queue-change')await expect.poll(()=>page.evaluate(()=>{const f=(window as any).reminderTapFixture;return f.readsAtQueueChange!==undefined&&f.reads>f.readsAtQueueChange;})).toBe(true);
   await expect(page.getByRole('heading',{name:'Original notification reminder',exact:true})).toHaveCount(0);
   expect(await page.evaluate(()=>(window as any).reminderTapFixture.pending.token)).toBe(mode==='queue-change'?'newer-token':'original-token');

@@ -1,4 +1,3 @@
-/// Product vault UI lifetime, native-origin admission and secret clearing.
 module CredentialVault {
   type State = { locked: bool, active: bool, foreground: bool, secret: bool,
     entries: bool, generation: int, captured: int, loading: bool, damaged: bool,
@@ -57,7 +56,6 @@ module CredentialVault {
     s.resetGeneration == s.generation, s' = { ...s, resetAuthorized: true } }
   action beginResetAuthentication = all { s.resetReviewed, s.active, s.foreground, s.damaged,
     s.operation == "", s' = { ...s, operation: "reset", operationGeneration: s.generation, notice: false } }
-  /// Leave retires the task's page lifetime. Its late rejection cannot publish a notice.
   action authenticationRefused = s' = if (s.operation == "reset" and s.active and s.foreground)
     { ...s, operation: "", notice: true } else s
   action resetAuthenticationRetired = s' = { ...s, operation: "" }

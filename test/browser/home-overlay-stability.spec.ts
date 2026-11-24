@@ -4,8 +4,6 @@ test('Home icons stay fixed while chat is dragged and its resting controls anima
   await page.emulateMedia({reducedMotion:'no-preference'});
   await page.addInitScript(() => localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({kind:'offline'})));
   await page.goto('/?shell=launcher');
-  // Match the physical Pixel's system-bar clearance; the desktop dock fits
-  // below the minimum reserve and would hide this native-only regression.
   await page.evaluate(() => {
     document.documentElement.classList.add('native-phone');
     document.documentElement.style.setProperty('--native-bottom-inset', '48px');
@@ -14,7 +12,6 @@ test('Home icons stay fixed while chat is dragged and its resting controls anima
   const handle = page.getByRole('button', {name:'Resize chat', exact:true});
   await expect(handle).toBeVisible();
   const icon = page.locator('[data-alpha-home-apps]').getByRole('button', {name:'Inbox', exact:true});
-  // Finish the entry animation before measuring movement caused by this drag.
   await page.waitForTimeout(500);
   const box = (await handle.boundingBox())!;
   const positions = [await icon.evaluate(el => el.getBoundingClientRect().top)];

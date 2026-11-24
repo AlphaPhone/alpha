@@ -19,7 +19,6 @@ async function noHandOff(page:Page){
  expect(all.filter(c=>c.method==='openExternal')).toEqual([]);
  expect(all.filter(c=>c.path?.startsWith('/api/auth/cli-session')||c.path?.startsWith('/steward/')||c.path?.startsWith('/api/v1/app-auth/'))).toEqual([]);
 }
-// The same sign-in surface keeps its identity as its heading changes for codes and legal text.
 const signInDialog=(page:Page)=>page.locator('.alpha-cloud-sign-in');
 async function readySignIn(page:Page){
  await expect.poll(async()=>(await snapshot(page)).signIn?.step).toBe('choose');
@@ -27,8 +26,6 @@ async function readySignIn(page:Page){
 }
 
 test('a required page shown before startup stays rendered while its owner retries readiness',async({page})=>{
- // Import and render the complete production module. Only startup completion and the native
- // readiness response are held; the actual work slot, key-save refusal and renderer execute.
  const held=await startNativeCloudSignInFixture('test-results/signin-readiness-held/vite-cache',[{name:'held-signin-startup',enforce:'post',transform(code,id){
   if(!id.split('?')[0].endsWith('/runtime/connection-ui.tsx'))return;
   return code+`\nstartup=new Promise(()=>{});
@@ -66,8 +63,6 @@ test('a required page shown before startup stays rendered while its owner retrie
   await expect(main).toBeVisible();
   expect((await snapshot(page)).startupResolved).toBe(false);
   expect(await readiness()).toHaveLength(1);
-  // A retained page still ends for the existing account, own-provider, offline-identity and
-  // provider-settings boundaries. No actual startup is admitted by retaining the page.
   const endings=[
    {cloudAccount:{environment:'production',userId:USER,expiresAt:Date.now()+60000}},
    {providerStatus:{selected:true,provider:'cerebras'}},
@@ -85,7 +80,6 @@ test('a required page shown before startup stays rendered while its owner retrie
  }finally{await held.close();}
 });
 
-/** The email and SMS methods each have an input with the corresponding keyboard. */
 const entry=(page:Page)=>signInDialog(page).getByRole('textbox',{name:'Email',exact:true});
 const phoneEntry=(page:Page)=>signInDialog(page).getByRole('textbox',{name:'Phone number',exact:true});
 const googleButton=(page:Page)=>signInDialog(page).getByRole('button',{name:'Continue with Google',exact:true});
@@ -112,7 +106,6 @@ test.describe('in-app Eliza Cloud sign-in on the production Android composition'
   expect((await calls(page)).find(c=>c.method==='startEmail')).toMatchObject({email:'synthetic-signin@example.invalid',environment:'production'});
   await dialog.getByLabel('Code',{exact:true}).fill('000000');await dialog.getByRole('button',{name:'Verify',exact:true}).click();
   await expect(dialog.getByRole('alert')).toContainText('Wrong code');
-  // A rejected code stays editable for correction; it is never stored as a credential.
   await expect(dialog.getByLabel('Code',{exact:true})).toHaveValue('000000');
   await expect(dialog.getByLabel('Code',{exact:true})).toBeFocused();
   expect((await fixture(page)).saved).toBe(false);
@@ -131,7 +124,6 @@ test.describe('in-app Eliza Cloud sign-in on the production Android composition'
   await agent(page,'unavailable');
   await readySignIn(page);
   const dialog=signInDialog(page);
-  // Change wall time without a timer tick: the host's new cooldown must not use panel-mount time.
   const later=await page.evaluate(()=>Date.now()+120000);
   await page.clock.setSystemTime(later);
   await entry(page).fill('synthetic-signin@example.invalid');
@@ -147,7 +139,6 @@ test.describe('in-app Eliza Cloud sign-in on the production Android composition'
   await agent(page,'unavailable');
   await readySignIn(page);
   const dialog=signInDialog(page);
-  // The method is discoverable before the device can use it.
   await expect(googleButton(page)).toBeDisabled();
   await expect(dialog.getByText(/compatible browser and a verified link/)).toBeVisible();
   const retry=dialog.getByRole('button',{name:'Check sign-in options',exact:true});
@@ -264,11 +255,9 @@ test.describe('in-app Eliza Cloud sign-in on the production Android composition'
   await expect(welcome.getByText(/Checking.*sign-in/)).toHaveCount(0);
   await expect(google).toHaveCount(0);
   await expect(welcome.getByRole('form',{name:'Sign in with email',exact:true})).toHaveCount(0);
-  // The required page's own readiness check is not an attempt the owner started: nothing to go Back from.
   await expect(welcome.getByRole('button',{name:/^(Back|Cancel sign-in)$/})).toHaveCount(0);
   const ownKeys=welcome.getByRole('button',{name:'Use my own keys',exact:true});
   await expect(ownKeys).toHaveCount(0);
-  // The check ends by itself (6 s cap): email stays usable in Alpha, and a late answer adopts Google.
   await expect(welcome.getByRole('button',{name:'Send code',exact:true})).toBeEnabled({timeout:10_000});
   const heading=welcome.getByRole('heading',{name:'Alpha',exact:true});
   await expect(heading.locator('..')).toHaveCSS('animation-name','alpha-auth-reveal');
@@ -317,11 +306,9 @@ test.describe('in-app Eliza Cloud sign-in on the production Android composition'
    await readySignIn(page);
    const dialog=signInDialog(page);
    await expect(dialog).toBeVisible();
-   // Google stays visible with its requirements while email is usable.
    await expect(googleButton(page)).toBeDisabled();
    expect(await fixture(page)).toMatchObject({saved:false,bound:false,running:true});
    if(mode==='readiness-hold'){
-    // A validated late answer updates only the same still-current chooser (cloud-sign-in-late-readiness).
     await page.evaluate(()=>(window as any).signInFixture.releaseReadiness());
     await expect(dialog.getByRole('button',{name:'Continue with Google',exact:true})).toBeEnabled();
    }else await expect(googleButton(page)).toBeDisabled();
@@ -359,7 +346,6 @@ test.describe('in-app Eliza Cloud sign-in on the production Android composition'
   await expect(dialog.getByRole('button',{name:'Continue with Google',exact:true})).toBeEnabled();
   expect(await fixture(page)).toMatchObject({saved:false,bound:false});
   await agent(page,'unavailable');
-  // Required sign-in returns to the usable chooser and still cannot be dismissed.
   await expect(dialog.getByRole('heading',{name:'Alpha',exact:true})).toBeVisible();
   await expect(dialog.getByRole('button',{name:'Back',exact:true})).toHaveCount(0);
   await noHandOff(page);
@@ -409,7 +395,6 @@ for (const mode of ['ok','mfa'] as const) test(`phone code stays inside Alpha th
  await expect(dialog.getByRole('button',{name:/^Resend · \d+s$/})).toBeDisabled();
  await dialog.getByLabel('Code',{exact:true}).fill('000000');await dialog.getByRole('button',{name:'Verify',exact:true}).click();
  await expect(dialog.getByRole('alert')).toContainText('Wrong code');
- // A rejected code stays editable for correction; it is never stored as a credential.
   await expect(dialog.getByLabel('Code',{exact:true})).toHaveValue('000000');
  expect((await fixture(page)).saved).toBe(false);
  await dialog.getByLabel('Code',{exact:true}).fill('123456');await dialog.getByRole('button',{name:'Verify',exact:true}).click();
@@ -433,7 +418,6 @@ test('phone code cancellation discards the in-app step without a credential',asy
  await expect(dialog.getByRole('form',{name:'Enter your phone code'})).toBeVisible();
  await dialog.getByRole('button',{name:'Back',exact:true}).click();
  await expect(dialog.getByRole('form',{name:'Enter your phone code'})).toHaveCount(0);
- // Back returns to the phone entry with the number kept, so a typo is a one-field fix.
  await expect(phoneEntry(page)).toHaveValue('+1 (415) 555-0100');
  await expect(dialog.getByRole('heading',{name:'Alpha',exact:true})).toBeVisible();
  expect((await fixture(page)).saved).toBe(false);
@@ -475,8 +459,6 @@ test('sign-in has no provider documents or explainer and keeps phone entry and t
  await noHandOff(page);
 });
 
-/** Every sign-in control on one step uses the shared button system: equal heights and radii for
- * filled and outlined actions, centred labels, and visible space between consecutive controls. */
 async function expectButtonSystem(page:Page){
  const boxes=await signInDialog(page).locator('.alpha-auth-methods > *, .alpha-auth-methods form > *, .alpha-own-keys > *, .alpha-own-keys .alpha-form-actions > *, .alpha-cloud-sign-in-code > *').evaluateAll(nodes=>nodes.filter(node=>(node as HTMLElement).offsetParent).map(node=>{const r=node.getBoundingClientRect(),style=getComputedStyle(node);return {tag:node.tagName,cls:node.className,top:r.top,bottom:r.bottom,height:r.height,radius:style.borderRadius,align:style.textAlign,justify:style.justifyContent};}));
  const filled=boxes.filter(box=>/alpha-btn--(primary|secondary)/.test(String(box.cls)));
@@ -512,7 +494,6 @@ test('Google waiting: one heading, a way to reopen the Google page, and Back',as
  await dialog.getByRole('button',{name:'Continue with Google',exact:true}).click();
  await expect(dialog.getByRole('heading',{name:'In browser',exact:true})).toBeVisible();
  await expect(dialog.getByRole('button')).toHaveText(['Reopen Google','Back']);await expectButtonSystem(page);await shot('07-google-waiting');
- // A closed Custom Tab is not a dead end: the waiting attempt is cancelled and a fresh one opens.
  await dialog.getByRole('button',{name:'Reopen Google',exact:true}).click();
  await expect.poll(async()=>(await calls(page)).filter(c=>c.method==='startGoogle').length).toBe(2);
  expect((await calls(page)).some(c=>c.plugin==='AlphaCloudSignIn'&&c.method==='cancel')).toBe(true);

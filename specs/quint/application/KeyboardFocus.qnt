@@ -1,4 +1,3 @@
-/// Android IME visibility and composer focus; viewport size is independent of native visibility.
 module KeyboardFocus {
   type State = { native: int, covered: bool, focus: str, draft: str, selection: int }
   var s: State

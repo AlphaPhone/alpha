@@ -1,4 +1,3 @@
-/// Current shared daemon with two agent queues and independent process tasks.
 module TaskSchedulerRuntime {
   type Registration = {service: int, id: int}
   type Group = {agent: int, rows: List[int]}

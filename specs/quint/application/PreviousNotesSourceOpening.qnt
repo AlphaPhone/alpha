@@ -1,4 +1,3 @@
-// Explicit retained source selection reads only and reports its own result.
 module PreviousNotesSourceOpening {
   type Request = {phase: str, target: str, owner: str, epoch: int, task: int, document: int, rows: int}
   type State = {device: bool, owner: str, mode: str, epoch: int, legacyOwner: str, status: str, failed: bool,
@@ -42,7 +41,6 @@ module PreviousNotesSourceOpening {
     val request = {phase: "wait", target: target, owner: s.owner, epoch: s.epoch, task: s.task, document: 0, rows: 0}
     val waiting = s.retention.contains(s.task)
     all {
-      // Bound to one waiter per retained task; a superseded waiter may still settle.
       not(waiting and target != s.mode and s.pending.keys().exists(key => {
         val held = s.pending.get(key)
         held.phase == "wait" and held.task == s.task

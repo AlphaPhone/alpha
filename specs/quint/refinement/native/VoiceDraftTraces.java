@@ -11,7 +11,6 @@ import java.util.Map;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Executes the shared draft recorder with primitive Android media and clock ports. */
 public final class VoiceDraftTraces {
  static LocalVoiceRecording draft;
  static Context context;

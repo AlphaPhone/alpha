@@ -5,7 +5,6 @@ import {preloadPageModules} from './helpers/page-modules';
 
 const tile=(page:Page)=>page.getByRole('region',{name:'Home',exact:true}).locator('[data-alpha-home-inbox]');
 async function fixture(page:Page,theme='light'){
-// Model an existing configured account; permission onboarding has its own acceptance tests.
  await page.addInitScript(()=>{localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));localStorage.setItem('alpha.startup-permissions.v1',JSON.stringify({dismissed:true,attempted:{}}));});
  await page.goto('/?theme='+theme);
  await preloadPageModules(page,['/src/runtime/connection-ui.tsx','/src/runtime/native-connection.ts']);
@@ -95,18 +94,14 @@ for(const scenario of ['recent','expired','owner-change-during-restore'] as cons
  }
  await expect.poll(()=>page.evaluate(()=>(window as any).homeInboxFixture.reads)).toBeGreaterThan(0);
  expect(await page.evaluate(()=>(window as any).homeInboxFixture.bodyReads??0)).toBe(0);
- // Settings can still check authorization while Home's metadata-only read is held.
  await page.getByRole('button',{name:'Settings',exact:true}).click();
  await expect.poll(()=>page.evaluate(()=>(window as any).homeInboxFixture.accountReads)).toBeGreaterThan(1);
  await returnToApps(page);
  expect(await page.evaluate(()=>(window as any).homeInboxFixture.bodyReads??0)).toBe(0);
 });
 
-// This Inbox fixture owns an existing installation, not fresh permission prompts.
 test.beforeEach(async({page})=>seedCompletedAccessSetup(page));
 
-// Synchronous on purpose: a dynamic import settles in a later task even for a loaded module, and the
-// inspector holds an awaited evaluate's promise weakly, so CI collected it (helpers/page-modules.ts).
 const notifyHomeOwner=(page:Page)=>page.evaluate(()=>{(window as any).__alphaModules['/src/runtime/connection-ui.tsx'].connectionController.close();});
 
 test('pending optional Cloud restoration does not offer a second sign-in',async({page})=>{
@@ -168,7 +163,6 @@ for(const failOld of [false,true])test(`Home retires another owner's delayed ${f
  await page.evaluate(()=>(window as any).homeInboxFixture.releases.b());
  await expect(tile(page)).toContainText('Owner B current summary');
  await page.evaluate(async()=>{const f=(window as any).homeInboxFixture;f.releases.a();await f.responses.a;
-  // The real warmup awaits this same response; its synchronous acceptance/catch runs before this continuation.
   await new Promise<void>(resolve=>queueMicrotask(resolve));});
  await expect.poll(()=>page.evaluate(()=>(window as any).homeInboxFixture.aborted)).toContain('a');
  await expect(page.getByRole('region',{name:'Home',exact:true})).not.toContainText('Synthetic quarterly planning subject');await expect(tile(page)).toContainText('Owner B current summary');

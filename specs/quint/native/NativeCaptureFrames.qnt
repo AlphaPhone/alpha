@@ -1,4 +1,3 @@
-/// Actual capture-loop input/output relation, including pre-roll and stop-tail flushing.
 module NativeCaptureFrames {
   type Packet = {frames: List[int], edges: List[str], peak: int}
   type Pipeline = {n: int, speaking: bool, above: int, below: int, preroll: List[int],

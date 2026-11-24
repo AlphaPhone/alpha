@@ -1,8 +1,6 @@
 import {test,expect,type Page} from '@playwright/test';
 import {openScanDraftOptions} from './scan-review-navigation';
 
-// Actual Camera session, scanner, review and draft store. Only Android IPC is
-// controlled. Chromium cannot prove that a CameraX surface is visible on a phone.
 async function nativeCamera(page:Page){
  await page.addInitScript(()=>{
   const w=window as any;w.androidBridge={};localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));

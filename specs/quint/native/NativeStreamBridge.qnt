@@ -1,24 +1,17 @@
-/// The native event bridge for one streamed agent reply (`streamNativeAgent`): listener, request,
-/// response, chunks and completion, bounded by the caller's signal, a per-turn time limit and an
-/// idle limit that every frame of the stream restarts. A send
-/// is reported as not dispatched only when it was refused before any response.
 module NativeStreamBridge {
   type State = { active: bool, listener: str, started: bool, responded: bool, terminal: bool, outcome: str,
     failure: str, chunks: int, cancelRequested: bool, readyRevoked: bool, settled: bool }
   var s: State
-  // fail(): the first terminal outcome wins.
   pure def failed(st: State, failure: str, revokeReady: bool): State =
     if (st.terminal) st
     else { ...st, terminal: true, outcome: "failed", failure: failure, readyRevoked: revokeReady }
 
   action init = s' = { active: true, listener: "pending", started: false, responded: false, terminal: false,
     outcome: "none", failure: "none", chunks: 0, cancelRequested: false, readyRevoked: false, settled: false }
-  // A listener that attaches after the call ended is removed at once.
   action listenerAttached = all { s.listener == "pending",
     s' = { ...s, listener: if (s.active) "attached" else "removed" } }
   action requestStream = all { s.active, s.listener == "attached", not(s.started), not(s.terminal),
     s' = { ...s, started: true } }
-  // Native rejects the request only before it sent anything to the runtime.
   action requestRejected = all { s.started, not(s.responded), s' = failed(s, "before-dispatch", false) }
   action responseEvent(status: int): bool = all { s.active, s.started, not(s.terminal),
     s' = if (not(s.responded) and status == 200) { ...s, responded: true }
@@ -26,14 +19,11 @@ module NativeStreamBridge {
       else failed(s, "unknown", true) }
   action chunkEvent(valid: bool): bool = all { s.active, s.started, not(s.terminal), s.chunks < 3,
     s' = if (s.responded and valid) { ...s, chunks: s.chunks + 1 } else failed(s, "unknown", true) }
-  // An error reported after the response began is an interrupted reply with an unknown outcome.
   action completeEvent(error: bool): bool = all { s.active, s.started, not(s.terminal),
     s' = if (error or not(s.responded)) failed(s, "unknown", not(error and s.responded))
       else { ...s, terminal: true, outcome: "completed" } }
-  // The caller's signal, the turn limit, or a minute without any frame.
   action abort = all { s.active, not(s.terminal),
     s' = { ...failed(s, "unknown", false), cancelRequested: s.cancelRequested or s.started } }
-  // The call returns or throws: the listener is removed and a started stream is cancelled.
   action finish = all { s.active, s.terminal,
     s' = { ...s, active: false, settled: true, cancelRequested: s.cancelRequested or s.started,
       listener: if (s.listener == "attached") "removed" else s.listener } }
@@ -64,7 +54,6 @@ module NativeStreamBridge {
     .expect(s.outcome == "completed" and s.listener == "removed" and s.cancelRequested and safety)
   run busyRefusalIsNotDispatchedTest = init.then(listenerAttached).then(requestStream).then(responseEvent(429))
     .expect(s.failure == "before-dispatch" and s.readyRevoked and safety)
-  // A second response after the first one is an error with an unknown outcome, never "not sent".
   run busyAfterResponseIsUnknownTest = init.then(listenerAttached).then(requestStream).then(responseEvent(200))
     .then(responseEvent(429)).expect(s.failure == "unknown" and s.outcome == "failed" and safety)
   run interruptedAfterResponseTest = init.then(listenerAttached).then(requestStream).then(responseEvent(200))

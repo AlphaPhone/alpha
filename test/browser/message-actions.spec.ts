@@ -12,8 +12,6 @@ async function conversation(page:Page,theme='light',reply=answer){
   const {LocalAgentProtocol}=await import('/src/runtime/local-agent.ts');LocalAgentProtocol.prototype.send=async(room)=>{(window as any).messageActionsRoom=room;return {text:reply};};
  },reply);
  const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await input.fill('My original request');await input.press('Enter');await expect(agent(page)).toBeVisible();
- // Raw CDP touches bypass Playwright actionability. Wait for the opening sheet
- // to settle and receive input before measuring coordinates; no click is sent.
  await agent(page).click({trial:true});
 }
 for(const theme of ['light','dark'])test(`tap reveals quiet actions and copies exact message: ${theme}`,async({page},info)=>{
@@ -114,8 +112,6 @@ test('Home shows populated Calendar and Inbox cards without empty Workflows',asy
 
 test('chat brand Home preserves the existing conversation and unsent draft',async({page})=>{
  await conversation(page);await page.getByRole('button',{name:'Minimize chat',exact:true}).click();await page.getByRole('button',{name:'Notes',exact:true}).click();
- // Keep the next deliberate click inside the gesture's 350ms suppression window,
- // independent of runner speed; timers and browser actionability still run.
  await page.clock.setFixedTime(new Date());await page.getByRole('button',{name:'Open conversation',exact:true}).click();
  await page.getByRole('textbox',{name:'Message Alpha',exact:true}).fill('Unsent after the original response');await page.getByRole('button',{name:'Go Home',exact:true}).click();
  await expect(page.locator('html')).toHaveAttribute('data-active-view','home');await expect(page.locator('[data-alpha-layer="conversation"]')).toBeHidden();await page.getByRole('button',{name:'Open conversation',exact:true}).click();
@@ -127,7 +123,6 @@ test('transcript reading position survives a keyboard resize, Back from full and
  const transcript=page.locator('[data-alpha-transcript]'),layer=page.locator('[data-alpha-layer="conversation"]');await expect(transcript.locator('[data-alpha-message-id]')).toHaveCount(48);
  const settle=async()=>{await layer.evaluate(element=>Promise.all(element.getAnimations({subtree:true}).filter(animation=>animation.timeline===document.timeline&&Number.isFinite(animation.effect?.getTiming().iterations)).map(animation=>animation.finished.catch(()=>{}))));await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));};
  await expect(page.getByRole('button',{name:'Shrink chat',exact:true})).toBeVisible();await settle();
- // Offset of a message from the top of the visible transcript, and the distance from the bottom.
  const offset=(id:string)=>transcript.evaluate((element,id)=>element.querySelector(`[data-alpha-message-id="${id}"]`)!.getBoundingClientRect().top-element.getBoundingClientRect().top,id);
  const fromBottom=()=>transcript.evaluate(element=>element.scrollHeight-element.clientHeight-element.scrollTop);
  const steps:Array<[string,()=>Promise<unknown>]>=[
@@ -136,10 +131,8 @@ test('transcript reading position survives a keyboard resize, Back from full and
   ['Back from full',async()=>{await page.evaluate(()=>window.dispatchEvent(new Event('alpha-back',{cancelable:true})));await expect(page.getByRole('button',{name:'Expand chat',exact:true})).toBeVisible();await settle();}],
   ['HOME then reopen',async()=>{await page.evaluate(()=>window.dispatchEvent(new Event('launcher-home')));await expect(layer).toHaveAttribute('aria-hidden','true');await settle();await page.getByRole('button',{name:'Open conversation',exact:true}).click();await expect(layer).not.toHaveAttribute('aria-hidden','true');await settle();}],
  ];
- // Reading older history: the anchored message stays where it was after every step.
  const before=await transcript.evaluate(element=>{element.scrollTop=element.scrollHeight/3;const top=element.getBoundingClientRect().top;const anchor=Array.from(element.querySelectorAll('[data-alpha-message-id]')).find(row=>row.getBoundingClientRect().bottom>top)!;return {id:anchor.getAttribute('data-alpha-message-id')!,y:anchor.getBoundingClientRect().top-top};});
  for(const [name,step] of steps){await step();expect(Math.abs(await offset(before.id)-before.y),name).toBeLessThan(2);}
- // At the bottom: every step keeps following the newest message.
  await page.getByRole('button',{name:'Expand chat',exact:true}).click();await settle();
  await transcript.evaluate(element=>element.scrollTop=element.scrollHeight);await settle();
  for(const [name,step] of steps){await step();expect(await fromBottom(),name).toBeLessThan(2);}

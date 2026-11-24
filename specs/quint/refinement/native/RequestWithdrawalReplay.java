@@ -3,8 +3,6 @@ package ai.alphacompute.alphaphone;
 import java.nio.file.*;
 import org.json.*;
 
-/** Actions, never model states, enter this process. Every observation comes from the actual
- * request runnable, call callbacks, withdrawal registry and controlled worker-port entries. */
 public final class RequestWithdrawalReplay {
  static String id(int request){return String.format("00000000-0000-4000-8000-%012d",request);}
  static JSObject input(int request){return new JSObject().put("path","/api/status").put("method","GET")
@@ -55,7 +53,7 @@ public final class RequestWithdrawalReplay {
      case "transportAnswers":host.transportAnswers(request);break;
      case "cancelRequest":cancellation=host.cancel(id(request));break;
      case "supersede":host.supersede();break;
-     case "abort":case "check":case "":break; // renderer-only or a pure assertion boundary
+     case "abort":case "check":case "":break;
      default:throw new AssertionError("Unrecognized action "+action);
     }
     observations.put(observe(host,cancellation));

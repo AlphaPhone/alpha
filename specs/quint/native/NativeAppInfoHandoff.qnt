@@ -1,4 +1,3 @@
-// A selected launcher entry may disappear before App info reaches Android.
 module NativeAppInfoHandoff {
   type Reply = {result: str, query: str, queryUser: int, includeDisabled: bool,
     attempt: str, launchUser: int, target: str, intentAction: str, newTask: bool, opened: bool}

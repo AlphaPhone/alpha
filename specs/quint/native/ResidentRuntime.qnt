@@ -1,4 +1,3 @@
-// Alpha resident process and Cloud provider admission. See README.md for source mapping.
 module ResidentRuntime {
   type State = {
     phase: str, epoch: int, profile: str, packaged: bool, sourceValid: bool,
@@ -26,7 +25,6 @@ module ResidentRuntime {
     s.phase == "stopped", s.packaged, s.sourceValid, not(s.resetPending),
     s' = {phase: "starting", localProcess: true, inferenceAccepted: false, ownedStart: true, ...s}
   }
-  // Native bridge admission advances its epoch, including reenrollment of a live service.
   action admitStart(ownsLaunch: bool): bool = all {
     s.phase.in(Set("stopped", "ready", "starting")), s.epoch < 3,
     s.packaged, s.sourceValid, not(s.resetPending),
@@ -34,8 +32,6 @@ module ResidentRuntime {
       pending: false, bindingEpoch: -1, inferenceAccepted: false,
       ownedStart: ownsLaunch, attachedStart: false }
   }
-  // Startup can fail after the service launched. Retire that call's launch ownership
-  // without asserting shutdown or admitting an enrolled inference session.
   action failedStart(running: bool): bool = all { s.phase == "starting",
     s' = { ...s, phase: if (running) "ready" else "stopped", localProcess: running,
       ownedStart: false, attachedStart: false, pending: false,
@@ -84,13 +80,11 @@ module ResidentRuntime {
     s.bindingEpoch == s.epoch, not(s.resetPending),
     s' = s.with("inferenceAccepted", true)
   }
-  // Uncertain removal does not prove the provider is unbound or stop the resident.
   action clearBinding(confirmed: bool): bool = all {
     s.phase.in(Set("ready", "stopped")), s.provider != "none",
     s' = {provider: if (confirmed) "none" else "unconfirmed",
       bindingEpoch: -1, inferenceAccepted: false, ...s}
   }
-  // A newly admitted credential retires the previous provider generation before binding.
   action replaceCredential = all {
     s.epoch < 3,
     s' = {credential: true, epoch: s.epoch + 1, pending: false,

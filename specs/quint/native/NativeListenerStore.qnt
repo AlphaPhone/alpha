@@ -1,4 +1,3 @@
-/// Device-protected settings, per-process consent and durable crash markers.
 module NativeListenerStore {
   type Data = {consent: int, consentAt: int, enabled: bool, pause: int, pauseBoot: int,
     open: bool, markerBoot: int, markerInstall: int, exits: List[int], tripped: bool}

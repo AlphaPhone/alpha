@@ -1,4 +1,3 @@
-/// Two durable effects and recovery ownership from planInterruptedPermanentDeletion.
 module PermanentVoiceDeletion {
   pure def recoveryPlan(note: str, known: bool, owned: bool, inTrash: bool, receipt: str, referenced: bool): str =
     if (note == "changed" or not(known) or not(owned) or receipt == "unreadable") "review"
@@ -13,7 +12,6 @@ module PermanentVoiceDeletion {
       else if (receipt == "removed") { if (inTrash) "restore-recording" else "review" }
       else if (inTrash) "review" else "retire"
     }
-  /// Shared by the registered state-machine scenario and the source planner table adapter.
   pure val decisionRows = tuples(Set("original", "deleted", "changed"), Set(false, true),
     Set(false, true), Set(false, true), Set("unknown", "removed", "restored", "purged", "unreadable"), Set(false, true))
     .map(((note, known, owned, inTrash, receipt, referenced)) => { note: note, known: known,
@@ -82,7 +80,6 @@ module PermanentVoiceDeletion {
   run decisionTableTest = init.expect(decisionRows.size() == 240)
 }
 
-/// Exhaustive finite decision table, kept separate from mutable recovery state.
 module PermanentVoiceDeletionContract {
   import PermanentVoiceDeletion.decisionRows
   type Row = { note: str, known: bool, owned: bool, inTrash: bool, receipt: str, referenced: bool, plan: str }

@@ -1,6 +1,5 @@
 import {test,expect} from '@playwright/test';
 for(const theme of ['light','dark'])for(const size of [{width:360,height:640},{width:740,height:360}])test(`Gmail attachment review retains exit and keyboard reading ${theme} ${size.height}`,async({page},info)=>{
- // This mail fixture starts after the browser access walkthrough was reviewed; this grants no platform permission.
  await page.addInitScript(()=>localStorage.setItem('alpha:startup-permission-walkthrough:v1',JSON.stringify({version:1,status:'completed',step:4,choices:['skipped','skipped','skipped','skipped']})));
  await page.setViewportSize(size);await page.goto('/?theme='+theme);
  await page.evaluate(async()=>{
@@ -20,7 +19,7 @@ for(const theme of ['light','dark'])for(const size of [{width:360,height:640},{w
  await expect(back).toBeFocused();
  await expect(page.getByRole('button',{name:'Back to inbox',exact:true})).toHaveCount(0);
  await content.focus();await page.keyboard.press('Tab');await expect(back).toBeFocused();
- await expect(content).toBeVisible();await expect(content).toHaveCSS('font-size','24px');await expect(back).toBeInViewport();// The desktop phone preview is scaled; target geometry is measured in its CSS coordinate space.
+ await expect(content).toBeVisible();await expect(content).toHaveCSS('font-size','24px');await expect(back).toBeInViewport();
  expect(await back.evaluate(el=>el.clientHeight)).toBeGreaterThanOrEqual(44);
  expect(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);await content.focus();await page.keyboard.press('End');await expect.poll(()=>content.evaluate(el=>el.scrollTop)).toBeGreaterThan(0);await expect(back).toBeInViewport();await expect(content.locator('img')).toHaveCount(0);await expect(content).toContainText('<img src=x onerror=alert(1)>');
  const accountReads=await page.evaluate(()=>(window as any).attachmentFixture.accounts);await page.evaluate(()=>window.dispatchEvent(new Event('focus')));await expect.poll(()=>page.evaluate(()=>(window as any).attachmentFixture.accounts)).toBeGreaterThan(accountReads);
@@ -29,7 +28,6 @@ for(const theme of ['light','dark'])for(const size of [{width:360,height:640},{w
  const draft=page.getByRole('textbox',{name:'Message Alpha',exact:true}),remove=page.getByRole('button',{name:'Remove email',exact:true});
  await expect(draft).toHaveValue('Summarize this for me');await expect(remove).toBeVisible();
  await expect(remove).toBeInViewport();expect(await remove.evaluate(el=>el.clientHeight)).toBeGreaterThanOrEqual(44);
- // Ask only stages the selected email. Keyboard removal does not send or change the source.
  await remove.focus();await page.keyboard.press('Enter');await expect(remove).toHaveCount(0);
  await expect(draft).toHaveValue('Summarize this for me');await page.getByRole('button',{name:'Minimize chat',exact:true}).click();
  await expect(page.getByText('Choose the attachment below.',{exact:true})).toBeVisible();

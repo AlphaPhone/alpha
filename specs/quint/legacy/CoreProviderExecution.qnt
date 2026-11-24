@@ -1,4 +1,3 @@
-// Literal conversion of packages/core/tla/ProviderExecution.tla at 4787d51a142.
 module CoreProviderExecutionTemplate {
   const Callers: Set[str]
   const Signalled: Set[str]

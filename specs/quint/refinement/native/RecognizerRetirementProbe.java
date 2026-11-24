@@ -4,7 +4,6 @@ import android.content.Context;
 import android.speech.SpeechRecognizer;
 import org.json.JSONObject;
 
-/** Compares availability after current and retired recognition callbacks. */
 public final class RecognizerRetirementProbe {
  public static void main(String[] args)throws Exception {
   String mode=args[0];Context context=new Context();

@@ -2,7 +2,6 @@ import {openBrowserCalendar} from './helpers/browser-calendar';
 import {test,expect} from '@playwright/test';
 
 test.describe('Calendar detail accessibility', () => {
-  // Layout fixtures use UTC civil dates independently of the runner locale.
   test.use({timezoneId:'UTC'});
   for(const theme of ['light','dark'])for(const kind of ['event','reminder'])test(`calendar detail keeps long text readable: ${kind} ${theme}`,async({page},info)=>{
    await page.setViewportSize({width:360,height:640});await page.clock.setFixedTime(new Date('2027-03-13T00:00Z'));

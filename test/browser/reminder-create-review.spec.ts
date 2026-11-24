@@ -16,7 +16,6 @@ for(const mode of ['fresh','double','response-loss','reload-loss','mismatch','mi
   if(mode==='history-navigate'){const read=Storage.prototype.getItem;let first=true;(window as any).confirmCalls=0;window.confirm=()=>{(window as any).confirmCalls++;return true;};Storage.prototype.getItem=function(k){const result=read.call(this,k);if(k==='alpha.browser.reminder-creations.v1'&&first){first=false;queueMicrotask(()=>{const buttons=[...document.querySelectorAll('button')];(buttons.find(b=>b.getAttribute('aria-label')==='Back to calendar') as HTMLButtonElement)?.click();(buttons.find(b=>b.getAttribute('aria-label')==='Back to apps') as HTMLButtonElement)?.click();});}return result;};}
   if(mode==='persistence-failure'){const write=IDBObjectStore.prototype.put;IDBObjectStore.prototype.put=function(v,k){if(k==='alpha.browser.reminder-creations.v1')throw Error('Storage full');return write.call(this,v,k);};}
   if(mode==='edit-during-retain'){
-   // Pause the actual retained document write, independent of browser Web Locks wrappers.
    const {reminderCreationDocument}=await import('/src/browser/reminder-creation-document.ts');
    const edit=reminderCreationDocument.editJson.bind(reminderCreationDocument);let first=true;
    reminderCreationDocument.editJson=async(update,signal)=>{
@@ -31,7 +30,6 @@ for(const mode of ['fresh','double','response-loss','reload-loss','mismatch','mi
   await expect.poll(()=>page.evaluate(()=>typeof(window as any).releaseCreate)).toBe('function');
   await expect(save).toBeDisabled();
   if(mode==='double'){
-   // Bypass actionability only to exercise the handler's duplicate guard.
    await save.dispatchEvent('click');
    expect(await page.evaluate(()=>(window as any).creates)).toBe(1);
   }else{
@@ -55,7 +53,6 @@ for(const mode of ['fresh','double','response-loss','reload-loss','mismatch','mi
   await expect(page.getByText(unknown,{exact:true})).toBeVisible();await save.click();expect(await page.evaluate(()=>(window as any).creates)).toBe(1);
   await page.getByRole('button',{name:'Back to calendar',exact:true}).last().click();await expect(page.getByRole('button',{name:'Check new reminder status',exact:true})).toBeVisible();
   if(mode==='fresh-attempt'){
-   // New event resumes the retained form; explicitly discard only that draft before a separate attempt.
    await page.getByRole('button',{name:'New event',exact:true}).click();await reviewCalendarAction(page,()=>page.getByRole('button',{name:'Discard calendar draft',exact:true}).click());await expect(page.getByRole('textbox',{name:'Title',exact:true})).toHaveCount(0);
    await newForm();await reviewCalendarAction(page,()=>save.click(),false);await expect(save).toBeEnabled();expect(await page.evaluate(()=>(window as any).creates)).toBe(1);
    await reviewCalendarAction(page,()=>save.click());await expect.poll(()=>page.evaluate(()=>(window as any).creates)).toBe(2);expect(await page.evaluate(async()=>Object.keys(await (await import('/src/runtime/reminder-creations.ts')).reminderCreations()).length)).toBe(2);return;

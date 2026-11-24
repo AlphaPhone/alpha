@@ -1,4 +1,3 @@
-// Selected Personal Assistant policies and the scheduling SQL store at the b181 pin.
 module PersonalAssistantScheduledTaskCustody {
   type Slot = {phase: str, at: int, completed: int}
   type Dossier = {enabled: bool, generation: int, admittedAt: int, consumedDay: str}

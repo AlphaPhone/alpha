@@ -44,7 +44,6 @@ public final class ServicePolicies {
    BrowserSitePermissions permissions = BrowserSitePermissionRecord.read(null);
    Trace trace = new Trace("site-decision-" + privateTab + allow, Trace.fields("decisions", decisions(permissions)));
    trace.value.put("init", Trace.action("initFor", privateTab));
-   // WebView construction is an environmental precondition of this persistence projection.
    trace.step("build", Trace.fields("decisions", decisions(permissions)), true);
    trace.macro("page and permission request", Trace.fields("decisions", decisions(permissions)), Trace.action("navigate", 1), Trace.action("commit"), Trace.action("permissionRequest", 1));
    permissions.record("https://a.example", "camera", allow, privateTab);

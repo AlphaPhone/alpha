@@ -1,4 +1,3 @@
-// One explicit native dictation request under a captured selected voice route.
 module KeyboardDictationCloud {
   type State = { route: str, phase: str, authority: bool, provider: bool, account: bool,
     password: bool, expired: bool, cancelled: bool, connection: bool, requests: int,

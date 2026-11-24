@@ -1,7 +1,3 @@
-/// Importing a text file into Notes and exporting a note through the system document picker.
-/// One document operation runs at a time. A result that arrives after Notes was left is dropped,
-/// and a receipt is shown at once on a visible page; on a hidden page it waits until the page is
-/// visible again and is then shown only in the visit it belongs to.
 module NotesDocumentTransfer {
   type Operation = { kind: str, token: int }
   type State = {
@@ -17,19 +13,13 @@ module NotesDocumentTransfer {
     receipts: [], shown: 0, dropped: 0, settled: 0, imported: 0, reads: 0,
     refusedBusy: 0, lastShownEpoch: -1
   }
-  /// Import or export is chosen in Notes. A second choice while one runs is refused.
   action choose(kind: str): bool = all { Set("import", "export").contains(kind), s.active, not(s.hidden), s.settled < 3,
     s' = if (s.busy) { ...s, refusedBusy: more(s.refusedBusy) }
       else { ...s, busy: true, operation: { kind: kind, token: s.epoch } } }
-  /// Every waiting receipt is resolved in order: shown in the Notes visit it came from, dropped
-  /// otherwise.
   pure def delivered(v: State): State = v.receipts.foldl({ ...v, receipts: [] }, (acc, token) =>
     if (token == v.epoch and v.active) { ...acc, shown: acc.shown + 1, lastShownEpoch: token }
     else { ...acc, dropped: acc.dropped + 1 })
-  /// A receipt issued on a visible page is shown in the same turn.
   pure def issued(v: State): State = if (v.hidden) v else delivered(v)
-  /// The picker covers the app, then the provider answers: a file was read or written, the
-  /// request was refused, or the call threw.
   action settles(outcome: str, stored: bool): bool = all { s.operation.kind != "none",
     Set("done", "refused", "threw").contains(outcome),
     val current = s.operation.token == s.epoch
@@ -44,7 +34,6 @@ module NotesDocumentTransfer {
   action leaveNotes = all { s.active, s.epoch < 3, s' = { ...s, active: false, epoch: s.epoch + 1 } }
   action enterNotes = all { not(s.active), s' = { ...s, active: true } }
   action hide = all { not(s.hidden), s' = { ...s, hidden: true } }
-  /// The page is visible again: the waiting receipts are resolved.
   action show = all { s.hidden, s' = delivered({ ...s, hidden: false }) }
   action step = {
     nondet kind = Set("import", "export").oneOf()
@@ -64,21 +53,17 @@ module NotesDocumentTransfer {
   val LateResultDroppedWitness = s.settled > 0 and s.receipts.length() == 0 and s.shown == 0 and s.dropped == 0 and s.epoch > 0
   val StaleReceiptDroppedWitness = s.dropped > 0
   val ImportedWitness = s.imported > 0 and s.shown > 0
-  /// The picker result arrives while the app is still covered: the receipt waits and is shown
-  /// once the page is visible again.
   run receiptWaitsForVisiblePageTest = init.then(choose("export")).then(hide).then(settles("done", true))
     .expect(s.receipts == [0] and s.shown == 0 and not(s.busy) and safety)
     .then(show).expect(s.shown == 1 and s.receipts == [] and safety)
   run secondChoiceRefusedWhileBusyTest = init.then(choose("import")).then(choose("export"))
     .expect(s.operation.kind == "import" and s.refusedBusy == 1 and safety)
-  /// Notes is left while the picker is open: the file that comes back is not imported.
   run resultAfterLeavingNotesIsDroppedTest = init.then(choose("import")).then(leaveNotes).then(enterNotes)
     .then(settles("done", true))
     .expect(s.imported == 0 and s.reads == 0 and s.receipts == [] and not(s.busy) and safety)
   run receiptOfEarlierVisitIsNotShownTest = init.then(choose("export")).then(hide).then(settles("refused", false))
     .then(leaveNotes).then(enterNotes).then(show)
     .expect(s.shown == 0 and s.dropped == 1 and s.receipts == [] and safety)
-  /// On a visible page the receipt is shown as the operation settles.
   run visibleReceiptShownAtOnceTest = init.then(choose("export")).then(settles("refused", false))
     .expect(s.shown == 1 and s.receipts == [] and s.lastShownEpoch == 0 and not(s.busy) and safety)
   run unsavedImportShowsNoReceiptTest = init.then(choose("import")).then(settles("done", false))

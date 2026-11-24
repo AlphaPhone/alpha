@@ -1,4 +1,3 @@
-// A rendered review authorizes one exact local draft suggestion.
 module EmailSuggestionReview {
   type Environment = {session: int, cloud: int, token: int, text: str, front: str,
     ready: bool, room: bool, appendMode: bool}

@@ -1,4 +1,3 @@
-/// BufferedStreamExchange.exchange owns one handle and assembles a bounded response without retry.
 module VoiceIpcAssembly {
   type State = {
     phase: str, active: int, foreignActive: bool, opened: bool, claimed: bool, cancelled: bool,
@@ -42,7 +41,6 @@ module VoiceIpcAssembly {
     s.phase == "requesting", s.guardCurrent, status.in(Set(0, 200, 500)),
     s' = { ...s, status: status }
   }
-  /// Chunks may precede response status. The native callback enforces cumulative byte size.
   action chunk(amount: int): bool = all {
     s.phase == "requesting", s.guardCurrent, amount.in(Set(0, 1, 2)),
     if (s.bytes + amount <= 2) s' = { ...s, bytes: s.bytes + amount }
@@ -61,7 +59,6 @@ module VoiceIpcAssembly {
     s.phase == "requesting", not(s.guardCurrent),
     s' = { ...s, cancelled: true, failure: if (s.failure == "none") "guard" else s.failure }
   }
-  /// A deadline after the return decision cannot change the response already selected.
   action deadlineFires = all {
     s.deadline,
     s' = { ...s, cancelled: true, failure: if (s.failure == "none") "deadline" else s.failure }

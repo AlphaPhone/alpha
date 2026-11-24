@@ -1,4 +1,3 @@
-/// Source-owned OS defaults; serialized version-3 writes and finite retained layout classes.
 module OSDefaults {
   type State = { saved: str, selected: str, version: int, pending: bool,
     written: bool, appop: str, eligible: bool, writeAuthorized: bool }

@@ -1,4 +1,3 @@
-/// One persisted task and three invocation identities of the actual core TaskService.
 module TaskServiceLifecycle {
   type Row = {exists: bool, created: bool, repeating: bool, paused: bool, due: bool,
     orphan: bool, failures: int, backoff: bool, blocking: bool}

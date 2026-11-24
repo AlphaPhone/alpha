@@ -47,7 +47,6 @@ test('System follows the color scheme until an explicit theme is chosen',async({
  await expect.poll(()=>theme(page)).toBe('#000000');expect(await page.evaluate(key=>localStorage.getItem(key),key)).toBe('system');
  await expect(page.getByRole('button',{name:'Theme: System',exact:true})).toHaveAttribute('aria-pressed','true');
  await page.emulateMedia({colorScheme:'light'});await expect.poll(()=>theme(page)).toBe('#FFFFFF');
- // Following the scheme never replaces the saved choice with the theme it drew.
  expect(await page.evaluate(key=>localStorage.getItem(key),key)).toBe('system');
  await page.emulateMedia({colorScheme:'dark'});await page.reload();await expect.poll(()=>theme(page)).toBe('#000000');
  await choose(page,'Light');await expect.poll(()=>theme(page)).toBe('#FFFFFF');expect(await page.evaluate(key=>localStorage.getItem(key),key)).toBe('light');

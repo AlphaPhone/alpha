@@ -6,7 +6,6 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 import org.json.*;
 
-/** Drives the actual warm-up writer at its output-factory and audio port boundaries. */
 public final class SpeechWarmupTraces {
  static final class Port implements StreamingSpeechPlayback.Output {
   final CountDownLatch opening=new CountDownLatch(1),open=new CountDownLatch(1);

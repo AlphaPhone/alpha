@@ -1,5 +1,3 @@
-/// AssistantDraftController queues writes by conversation and retains held text until dispatch.
-/// The initial, switched and restarted bindings are observed after opening.
 module DraftDispatch {
   type State = { active: int, failed: bool, draft: str, savedOne: str,
     savedTwo: str, holding: bool, heldBinding: int, queuedBinding: int,
@@ -33,7 +31,6 @@ module DraftDispatch {
       markedOne: s.markedOne and s.queuedBinding != 1, markedTwo: s.markedTwo and s.queuedBinding != 2, queuedBinding: 0 } }
   action saveFailed = all { s.queuedBinding != 0,
     s' = { ...s, queuedBinding: 0, failed: true, error: true } }
-  /// A failed release write offers the readable saved copy for conflict review.
   action saveConflict = all { s.queuedBinding != 0,
     s' = { ...s, queuedBinding: 0, failed: true, error: false } }
   action switchConversation = all { s.active != 2,

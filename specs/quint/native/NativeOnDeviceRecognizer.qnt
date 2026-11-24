@@ -1,4 +1,3 @@
-/// One on-device recognizer session, audio pipe and first-result ownership.
 module NativeOnDeviceRecognizer {
   type State = {pipe: bool, serviceStarted: bool, recognizerOwned: bool, released: bool,
     serviceDestroyed: bool, serviceCancelled: bool, readClosed: bool, writeClosed: bool,

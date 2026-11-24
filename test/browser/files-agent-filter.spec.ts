@@ -20,7 +20,6 @@ test('an agent filter from Home opens Files on its first visit and leaves the re
  const row=page.getByRole('button',{name:'Open bank statement.pdf',exact:true});
  await expect(row).toBeVisible();
  await expect(page.getByText('No results to show',{exact:true})).toHaveCount(0);
- // Not stuck busy: the row opens the file.
  await row.click();
  await expect(page.getByRole('region',{name:'Files'}).getByRole('button',{name:'Rename',exact:true})).toHaveText('bank statement.pdf');
 });

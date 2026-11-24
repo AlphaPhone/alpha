@@ -10,7 +10,6 @@ for(const mode of ['compose','cancel','source-changed','owner-changed'] as const
  if(mode==='cancel'){await review.getByRole('button',{name:'Cancel',exact:true}).click();await expect.poll(()=>page.evaluate(()=>(window as any).deliveryFixture.released)).toBe(1);expect(await page.evaluate(()=>(window as any).deliveryFixture.consumed||0)).toBe(0);await page.evaluate(()=>{const f=(window as any).deliveryFixture;f.reminderTap=f.savedTap;document.dispatchEvent(new Event('visibilitychange'));});await expect(review).toBeVisible();}
  else{
   if(mode==='source-changed')await page.evaluate(()=>{(window as any).deliveryFixture.reminderTap.retained=false;});
-  // The review stays open after the owner changes; Use must refuse in place and keep the tap.
   if(mode==='owner-changed')await page.evaluate(async()=>{const c=(await import('/src/runtime/connection-ui.tsx')).connectionController;await c.disconnect();});
   await review.getByRole('button',{name:'Use in conversation',exact:true}).click();
   if(mode==='compose'){await expect(page.getByRole('textbox',{name:'Message Alpha',exact:true})).toHaveValue(/Reviewable reminder/);expect(await page.evaluate(()=>(window as any).deliveryFixture.consumed)).toBe(1);}

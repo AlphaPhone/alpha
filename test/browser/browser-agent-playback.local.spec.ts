@@ -1,6 +1,5 @@
 import {test,expect} from '@playwright/test';
 
-// Explicit real-host qualification; ordinary CI does not start a speech service.
 async function attach(page:any){
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.goto('/');

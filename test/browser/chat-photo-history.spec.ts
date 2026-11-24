@@ -54,8 +54,6 @@ test(`the first sent photo stays with its recorded message after ${failed?'a fai
  await expect(page.getByText('What is in this photo?',{exact:true})).toBeVisible();
  await expect(sent).toHaveAttribute('src',pixels!);
 
- // Legacy history without a client ID still reads the recorded ID. An explicit
- // mismatched client ID cannot resolve the photo through an alternate key.
  await page.evaluate(async()=>{
   const {connectionController}=await import('/src/runtime/connection-ui.tsx');
   const {room,fixture}=(window as any).photoHistory;

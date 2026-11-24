@@ -1,17 +1,11 @@
 import {expect,type Page} from '@playwright/test';
 import {preloadPageModules} from './page-modules.ts';
 
-/** Closed fixture for the one merged Calendar: the agent's CalendarService feed (built-in Eliza Calendar plus
- * the Google calendars the owner shows in Google) and the Cloud Google connection behind Settings. Nothing
- * leaves the page; the agent port and Cloud client are read-only. `googleInFeed` is the CalendarService
- * answer: false is the earlier opt-in default, true is the managed host's Google-visible default. With
- * `google: false` no Google account is connected: the agent lists only its built-in calendar. */
 export async function installOneCalendar(page:Page,{googleInFeed,google=true,localEvents=true}:{googleInFeed:boolean;google?:boolean;localEvents?:boolean}){
  await page.route(/^https?:\/\/(?!127\.0\.0\.1:|localhost:)/,route=>route.abort());
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.goto('/',{waitUntil:'domcontentloaded'});
  await expect(page.getByRole('button',{name:'Calendar',exact:true})).toBeVisible();
- // Loaded first: an evaluate left awaiting a cold module import can be collected (page-modules.ts).
  await preloadPageModules(page,['/src/runtime/connection-ui.tsx']);
  const initialize=async({googleInFeed,google,localEvents}:{googleInFeed:boolean;google:boolean;localEvents:boolean})=>{
   const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');
@@ -22,7 +16,6 @@ export async function installOneCalendar(page:Page,{googleInFeed,google=true,loc
   const source=(provider:string,grantId:string,calendarId:string,summary:string,accessRole:string,included:boolean)=>({provider,side:'owner',grantId,connectorAccountId:grantId,accountEmail:provider==='google'?owner:null,calendarId,summary,description:null,primary:calendarId===owner||provider==='eliza',accessRole,backgroundColor:null,foregroundColor:null,timeZone:null,selected:true,includeInFeed:included,selectionVersion:0});
   const calendars=[source('eliza','eliza-calendar','primary','Eliza Calendar','owner',true),source('google',grant,owner,owner,'owner',googleInFeed),source('google',grant,holidays,'Holidays in United States','reader',googleInFeed)].slice(0,google?3:1);
   const event=(calendar:typeof calendars[number],id:string,title:string,startAt:string,endAt:string,isAllDay=false)=>({id:`${calendar.grantId}:${id}`,externalId:id,agentId:identity.agentId,provider:calendar.provider,side:'owner',grantId:calendar.grantId,connectorAccountId:calendar.connectorAccountId,calendarId:calendar.calendarId,title,description:'',location:'',status:'confirmed',startAt,endAt,isAllDay,timezone:isAllDay?null:'UTC',htmlLink:null,conferenceLink:null,organizer:null,attendees:[],metadata:{etag:`"${id}-v1"`},syncedAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
-  // Tomorrow, from three sources: the built-in calendar, the owner's Google calendar and Google's Holidays.
   const events=[...(localEvents?[event(calendars[0],'dentist','Dentist',at(1,11),at(1,12))]:[]),...(google?[event(calendars[1],'standup','Team standup',at(1,9),at(1,10)),event(calendars[1],'design-review','Design review',at(1,14),at(1,15)),event(calendars[2],'holiday','Public holiday',civil(1),civil(2),true)]:[])];
   const included=()=>events.filter(e=>calendars.some(s=>s.includeInFeed&&s.grantId===e.grantId&&s.calendarId===e.calendarId));
   const f=(window as any).oneCalendarFixture={requests:[] as string[],googleCalendarLists:0};
@@ -53,7 +46,6 @@ export async function installOneCalendar(page:Page,{googleInFeed,google=true,loc
   c.getSnapshot=()=>snapshot as any;
   window.dispatchEvent(new CustomEvent('alpha:canonical-calendar-invalidated',{detail:{sessionId:identity.sessionId}}));
  };
- // Keep tsx's function-name helper in the serialized callback's own scope.
  await page.evaluate(`(() => {
   const __name = (value, name) => Object.defineProperty(value, 'name', {value: name, configurable: true});
   return (${initialize.toString()})(${JSON.stringify({googleInFeed,google,localEvents})});

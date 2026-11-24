@@ -1,4 +1,3 @@
-// A complete private client cache is published once; a collision loser only reads.
 module ClientFeaturePublication {
   type Worker = {phase: str, target: int, candidate: bool, aside: int,
     retirements: int, publications: int, reads: int, accepted: int, outcome: str}
@@ -19,8 +18,6 @@ module ClientFeaturePublication {
   }
   action init = initFor(1, "regular")
 
-  // Source authentication, a private copy and its stamp finish before the first rename.
-  // Initial unknown or linked paths are refused before retirement; stale regular trees repair.
   action prepare(actor: int, target: int): bool = all {
     actor.in(Actors), target.in(Targets), s.workers.get(actor).phase == "idle",
     val refused = s.kind != "regular"
@@ -51,16 +48,12 @@ module ClientFeaturePublication {
         accepted: if (installed) worker.target else 0,
         outcome: if (installed) "published" else "contended"})},
   }
-  // A directory lstat is only a probe, never authenticated success.
-  // reads is the finite class 0,1,2-or-more; it is not the source's 30-second deadline.
   action probe(actor: int): bool = all {
     actor.in(Actors), s.workers.get(actor).phase == "readback",
     val worker = s.workers.get(actor)
     s' = {...s, workers: s.workers.set(actor,
       {...worker, reads: if (worker.reads < 2) worker.reads + 1 else 2})},
   }
-  // stable=false represents a vanished/replaced directory, not accepted authentication.
-  // A successful source read includes both inode checks and the complete stamp/inventory.
   action readback(actor: int, stable: bool): bool = all {
     actor.in(Actors), s.workers.get(actor).phase == "readback",
     val worker = s.workers.get(actor)
@@ -98,8 +91,6 @@ module ClientFeaturePublication {
   action cleanup(actor: int, succeeds: bool): bool = if (succeeds)
     cleanupAside(actor, true).then(cleanupStage(actor, true))
     else cleanupAside(actor, false)
-  // One outside writer can leave a different or unrecognized winner during readback.
-  // Its tree remains outside this caller's private cleanup paths.
   action foreignWinner(kind: str): bool = all {
     not(s.foreignUsed), kind.in(Kinds),
     Actors.exists(actor => s.workers.get(actor).phase == "readback"),
@@ -150,7 +141,6 @@ module ClientFeaturePublication {
     s' = s,
   }
 
-  // The source campaign's first checkpoint joins three fully authenticated private copies.
   action preparedPublishers = init.then(prepare(1, 2)).then(prepare(2, 2)).then(prepare(3, 2))
 
   run loserOnlyReadsWhileLaterPeerRetiresWinnerTest = init

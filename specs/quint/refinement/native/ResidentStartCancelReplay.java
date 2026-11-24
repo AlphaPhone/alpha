@@ -18,15 +18,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/**
- * Replays ResidentStartCancel model steps on the whole
- * AlphaLocalAgentPlugin. The harness plays the service and Android: whether the resident process
- * is up, when a strict stop is acknowledged, window focus, the clock, and whether the facts an
- * attach needs hold. It parks the shutdown recheck at its first probe so that the step that ends
- * the wait is the model's. Every admission, epoch and ownership decision is the plugin's.
- */
 public final class ResidentStartCancelReplay {
-  /** Controlled service read held outside the product's lifecycle lock. */
   private static final class BootProbe {
     final CountDownLatch arrived = new CountDownLatch(1);
     final CountDownLatch release = new CountDownLatch(1);
@@ -45,7 +37,6 @@ public final class ResidentStartCancelReplay {
     }
   }
 
-  /** Credential-stop, boot observation, focus and clock ports. */
   public static final class Ports {
     public static volatile boolean focused = true, parking = true;
     public static volatile long clockOffset;
@@ -78,7 +69,6 @@ public final class ResidentStartCancelReplay {
     public static void strictStop(long request) {
       strictStops++;
     }
-    /** The recheck's probe runs outside the lifecycle lock and waits here; every other read answers at once. */
     public static boolean confirmed(long request) {
       if (!Thread.holdsLock(lifecycleLock)) {
         arrived.release();
@@ -151,14 +141,11 @@ public final class ResidentStartCancelReplay {
   static String nativeState() {
     return !ResidentTestPorts.serviceActive ? "stopped" : stopRequested ? "stopping" : "running";
   }
-  /** A start request: the ordinary start or, when a shutdown needs rechecking, its strict retry. */
   static void startRequest(int request, boolean attachable, boolean focused) throws Exception {
     Ports.focused = focused;
     if (!attachable)
       ResidentTestPorts.rootToken = "root-fixture-" + ++roots;
     else if (ResidentTestPorts.serviceActive) {
-      // The facts an attach is admitted against: an enrollment under the running resident's root
-      // and the generation it was launched with.
       AlphaLocalAgentPlugin.enrollForTest(ResidentTestPorts.rootToken, "owner-fixture", "identity-fixture", System.currentTimeMillis() + 3600000);
       AlphaLocalAgentPlugin.launchedGenerationForTest(LocalAgentProviderAdmission.NO_PROVIDER_GENERATION);
     }
@@ -250,7 +237,6 @@ public final class ResidentStartCancelReplay {
     check(mutation != null, "No mutation owns the held boot probe");
     long request = number("credentialShutdownRequest");
     if (deadlinePassed) {
-      // An acknowledgement for a different stop cannot authorize this mutation.
       Ports.acknowledged.add(request + 1000);
       Ports.clockOffset += 15001;
     }
@@ -374,7 +360,6 @@ public final class ResidentStartCancelReplay {
             boolean active = ResidentTestPorts.serviceActive;
             int starts = ResidentTestPorts.starts, request = request(field("startRequestId"));
             Ports.focused = picks.getBoolean("flag");
-            // The wait ends on this pass: by success, by its guard, or because its 15 s have passed.
             Ports.clockOffset += 15001;
             Ports.release();
             await(retry);

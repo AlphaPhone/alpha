@@ -1,5 +1,3 @@
-// Literal upstream TaskScheduler at 4787d51a142c. Model values are distinct
-// integers. The heterogeneous absent registry value is the id-zero entry.
 module CoreTaskSchedulerTemplate {
   const Services: Set[int]
   const Adapters: Set[int]
@@ -44,8 +42,6 @@ module CoreTaskSchedulerTemplate {
       activeTick: if (take) k else s.activeTick,
       taken: if (take) s.registry.svc else s.taken}
   }
-  // Deterministic witnesses for the four original Query branches. Query
-  // remains their union; source traces choose the branch they observed.
   action QueryFailure(k: int): bool = all {
     s.tk.get(k).pc == "query", QueryCanFail,
     s' = Marks(Settle({...s, dirty: s.dirty or Current(k)}, k), s.taken)

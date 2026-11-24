@@ -2,9 +2,6 @@ import {openCloudPlanFromSettings} from './helpers/cloud-plan-settings';
 import {expect, test, type Page} from '@playwright/test';
 import {completeAccessSetup, expectNoDevelopmentSurface, fenceNetwork, flagOffAndroid, residentHome} from './flag-off-android';
 
-// The flag-off bundle and its real connection/controller UI run against the existing native
-// fixture. The extra methods model native request leases and return only public provider status.
-// No provider keys, account login, microphone, network provider, or Android device are real.
 const AI_KEY='synthetic-own-cerebras-ui-key';
 const VOICE_KEY='synthetic-own-cartesia-ui-key';
 const DATA_KEY='own-provider-ui-existing-data';
@@ -15,8 +12,6 @@ async function fixture(page:Page, signedOut=false, freshAccess=false,nativeEmail
  await page.addInitScript(({signedOut,dataKey,nativeEmail})=>{
   const w=window as any,base=w.Capacitor.nativePromise;
   const leases=new Set<string>();let mode:'cloud'|'own'='cloud',revision=crypto.randomUUID(),unbound=false;const keys:{text?:string;voice?:string}={};
-  // reject: true refuses the key; 'echo' refuses it with a message that repeats most of the entered key.
-  // holdReply holds the next chat reply until releaseReply(): the turn is dispatched, nothing has streamed yet.
   const f=w.ownProvider={events:[] as string[],saved:0,edited:0,removed:0,revealed:0,selected:0,cancelled:0,cleared:0,checks:0,hold:false,reject:false as boolean|'echo',pending:false,release:null as null|(()=>void),matched:false,holdCloudRead:false,cloudReadPending:false,cloudReadCompletions:0,releaseCloudRead:null as null|(()=>void),emailStarts:0,emailVerifications:0,holdVerify:false,verifyPending:false,releaseVerify:null as null|(()=>void),startFail:false,startHold:false,startRelease:null as null|(()=>void),starting:false,holdReply:false,replyHeld:false,releaseReply:null as null|(()=>void),holdSelect:false,selectPending:false,releaseSelect:null as null|(()=>void)};
   localStorage.setItem(dataKey,'existing local app data');
   if(signedOut){delete w.flagOff.slots['cloud:production'];w.flagOff.persist();}
@@ -28,9 +23,7 @@ async function fixture(page:Page, signedOut=false, freshAccess=false,nativeEmail
   const current=(input:any)=>{if(!leases.has(input.requestId)||input.expectedRevision!==revision)throw Error('Provider request changed');};
   const committed=(input:any)=>{leases.delete(input.requestId);revision=crypto.randomUUID();};
   w.Capacitor.PluginHeaders.find((p:any)=>p.name==='AlphaNotifications').methods.push({name:'addListener',rtype:'callback'},{name:'removeListener',rtype:'callback'});
-  // The chat-only image confirms its wake listener is off at startup.
   if(!w.Capacitor.PluginHeaders.some((p:any)=>p.name==='ElizaSense'))w.Capacitor.PluginHeaders.push({name:'ElizaSense',methods:[{name:'turnOff',rtype:'promise'},{name:'status',rtype:'promise'}]});
-  // A provider change retires the running agent's background delivery before restarting it.
   if(!w.Capacitor.PluginHeaders.some((p:any)=>p.name==='AlphaHostedResults'))w.Capacitor.PluginHeaders.push({name:'AlphaHostedResults',methods:[{name:'disableBackground',rtype:'promise'},{name:'addListener',rtype:'callback'},{name:'removeListener',rtype:'callback'}]});
   w.Capacitor.PluginHeaders.find((p:any)=>p.name==='Agent').methods.push(...['prepareProviderConfiguration','configureProvider','cancelProviderConfiguration','selectProvider','editProviderKeys','removeProviderKey','revealProviderKey'].map(name=>({name,rtype:'promise'})));
   if(nativeEmail)w.Capacitor.PluginHeaders.push({name:'AlphaCloudSignIn',methods:['status','startEmail','verifyEmail','cancel','addListener','removeListener'].map(name=>({name,rtype:'promise'}))});
@@ -57,7 +50,6 @@ async function fixture(page:Page, signedOut=false, freshAccess=false,nativeEmail
    if(plugin==='AlphaHostedResults'&&method==='disableBackground')return {};
    if(plugin==='ElizaSense')return {available:true,state:'OFF',label:'Listening off',consented:false,listening:false,microphoneOpen:false,...(method==='turnOff'?{saved:true}:{})};
    if(plugin!=='Agent')return base(plugin,method,input);
-   // The agent restart after a provider change: held, or refused, when a test asks.
    if(method==='start'&&f.startHold){f.starting=true;await new Promise<void>(resolve=>f.startRelease=resolve);f.starting=false;}
    if(method==='start'&&f.startFail)throw Error('Local agent failed to start.');
    if(method==='requestStream'&&f.holdReply){f.holdReply=false;f.replyHeld=true;await new Promise<void>(resolve=>f.releaseReply=resolve);f.replyHeld=false;}
@@ -109,7 +101,6 @@ async function openProvider(page:Page,pressed:'Cloud'|'Own keys'='Cloud'){
  await expect(dialog(page)).toBeVisible();
  await expect(dialog(page).getByRole('button',{name:pressed==='Own keys'?'Direct':pressed,exact:true})).toHaveAttribute('aria-pressed','true');
 }
-/** Settings uses the Cloud / Own keys choice; the welcome page offers one "Use my own keys" entry. */
 async function enterKeys(page:Page,container=dialog(page),entry='Direct'){
  await container.getByRole('button',{name:entry,exact:true}).click();
  await expect(container.getByLabel('Text key',{exact:true})).toHaveAttribute('type','password');
@@ -123,7 +114,6 @@ async function noLeaks(page:Page,observed:Awaited<ReturnType<typeof fixture>>){
  expect(values.data).toBe('existing local app data');expect(observed.errors).toEqual([]);expect(observed.foreign).toEqual([]);
  await expectNoDevelopmentSurface(page);
 }
-/** First-run setup after own keys ends on "All set" without a false AI warning (#772 regression). */
 async function ownKeySetupReady(page:Page){
  const setup=page.locator('dialog.alpha-startup-permissions');
  if(await setup.count())await expect(setup).not.toContainText('AI connection isn’t confirmed yet');
@@ -151,7 +141,6 @@ test('Cloud is the default; explicit own-key save and return to Cloud preserve e
  const observed=await fixture(page);await residentHome(page);
  const account=await page.evaluate(()=>({cloud:(window as any).flagOff.slots['cloud:production'],agent:sessionStorage.getItem('flag-off-agent')}));
  await openProvider(page);await expect(dialog(page).getByLabel('Text key',{exact:true})).toHaveCount(0);
- // One dialog title, with no duplicated AI provider heading.
  await expect(dialog(page).getByRole('heading',{name:'AI connection',exact:true})).toHaveCount(1);
  const selectedColor=await dialog(page).getByRole('button',{name:'Cloud',exact:true}).evaluate(el=>getComputedStyle(el).backgroundColor);
  await expect(page.locator('.alpha-cloud-sign-in')).toHaveCount(0);
@@ -163,7 +152,6 @@ test('Cloud is the default; explicit own-key save and return to Cloud preserve e
  expect(await page.evaluate(()=>(window as any).ownProvider.events)).toEqual([]);
  await expect(dialog(page).getByRole('button',{name:'Cloud',exact:true})).toHaveAttribute('aria-pressed','true');
  await enterKeys(page);await dialog(page).getByRole('button',{name:'Save',exact:true}).click();
- // A provider change from Settings is not onboarding: no access walkthrough, just a receipt.
  await expect(dialog(page)).toHaveCount(0);await expect(toast(page)).toContainText('Saved');
  await expect(page.locator('dialog.alpha-startup-permissions')).toHaveCount(0);
  await expect((await openCloudPlanFromSettings(page)).getByRole('button',{name:/^AI(?: Cloud| Own keys)?$/})).toContainText('Own keys');
@@ -183,7 +171,6 @@ test('Cloud is the default; explicit own-key save and return to Cloud preserve e
  await expect(dialog(page)).not.toContainText(/keys will be removed/);
  expect(await page.evaluate(async()=>{const f=(window as any).ownProvider;return {cleared:f.cleared,saved:f.saved,selected:f.selected,status:await (window as any).Capacitor.nativePromise('Agent','providerStatus',{})};})).toMatchObject({cleared:0,saved:1,selected:1,status:{mode:'cloud',voiceConfigured:false,keys:{text:{configured:true},voice:{configured:true}}}});
  await page.screenshot({path:info.outputPath('own-provider-cloud-retained.png'),animations:'disabled'});
- // Select the already saved keys without another entry, validation or save.
  await dialog(page).getByRole('button',{name:'Direct',exact:true}).click();
  await dialog(page).getByRole('button',{name:'Switch to Direct',exact:true}).click();
  await expect(dialog(page)).toHaveCount(0);
@@ -196,9 +183,6 @@ test('Cloud is the default; explicit own-key save and return to Cloud preserve e
  await expect(page.locator('.alpha-cloud-sign-in')).toHaveCount(0);await noLeaks(page,observed);
 });
 
-// A reply in flight does not survive opening AI provider: an open connection dialog is a sensitive
-// screen, so the reply stops there with the usual stopped-reply notice (never "The connection
-// changed."), before any switch. Its switch lock lifts as that stop settles, and the switch works.
 test('opening AI provider during a reply stops it as a sensitive screen; the switch is then usable and works',async({page})=>{
  const observed=await fixture(page);await residentHome(page);
  await page.getByRole('button',{name:'Settings',exact:true}).click();
@@ -208,19 +192,16 @@ test('opening AI provider during a reply stops it as a sensitive screen; the swi
  await composer.fill('Reply while I open AI provider');await composer.press('Enter');
  await expect.poll(()=>page.evaluate(()=>(window as any).ownProvider.replyHeld)).toBe(true);
  await expect(page.getByRole('button',{name:'Stop reply',exact:true})).toBeVisible();
- // A touch outside the open chat only collapses it, so collapse it before reaching Settings.
  await page.getByRole('button',{name:'Minimize chat',exact:true}).click();
  await (await openCloudPlanFromSettings(page)).getByRole('button',{name:/^AI(?: Cloud| Own keys)?$/}).click();
  await expect(dialog(page)).toBeVisible();
  const stoppedNotice='May still finish';
  const retainedNotice=page.locator('[data-alpha-message-id="stopped-reply-notice"]');
  await expect(retainedNotice).toHaveCount(1);await expect(retainedNotice).toHaveText(stoppedNotice);
- // The second text node is the intentional clipped screen-reader announcer, not a duplicate bubble.
  await expect(page.locator('[data-alpha-reply-announcer]')).toHaveCount(1);
  await expect(page.locator('[data-alpha-reply-announcer]')).toHaveText(stoppedNotice);
  await expect(page.getByRole('button',{name:'Stop reply',exact:true})).toHaveCount(0);
  await expect(page.getByText(/The connection changed/)).toHaveCount(0);
- // The sensitive sheet conceals the chat. Its one retained notice is visible when chat is reopened.
  await dialog(page).getByRole('button',{name:'Close Account',exact:true}).click();
  await page.getByRole('button',{name:'Open conversation',exact:true}).click();
  await expect(retainedNotice).toBeVisible();await expect(retainedNotice).toHaveCount(1);
@@ -240,10 +221,8 @@ test('a rejected own-key check keeps Cloud selected and the entered keys for cor
  const observed=await fixture(page);await residentHome(page);await openProvider(page);await enterKeys(page);
  await page.evaluate(()=>(window as any).ownProvider.reject=true);
  await dialog(page).getByRole('button',{name:'Save',exact:true}).click();
- // The reason sits with the form it refers to.
  const alert=dialog(page).getByRole('form',{name:'Own API keys'}).getByRole('alert');
  await expect(alert).toContainText('Cerebras didn’t accept this key');await expect(dialog(page).getByRole('alert')).toHaveCount(1);
- // Only the rejected key is retyped: it is focused and selected, and the Cartesia key stays.
  const rejected=dialog(page).getByLabel('Text key',{exact:true});
  await expect(rejected).toBeFocused();await expect(rejected).toHaveAttribute('aria-invalid','true');
  expect(await rejected.evaluate((el:HTMLInputElement)=>[el.selectionStart,el.selectionEnd,el.value.length])).toEqual([0,AI_KEY.length,AI_KEY.length]);
@@ -285,7 +264,6 @@ test('Back cancels an in-flight native lease before the key can be saved',async(
  await page.evaluate(()=>(window as any).ownProvider.hold=true);
  await dialog(page).getByRole('button',{name:'Save',exact:true}).click();
  await expect.poll(()=>page.evaluate(()=>(window as any).ownProvider.pending)).toBe(true);
- // The check shows on its own button; the form's Cancel stays available to abort it.
  await expect(dialog(page).getByRole('button',{name:'Checking key',exact:true})).toHaveAttribute('aria-busy','true');
  await expect(dialog(page).getByRole('button',{name:'Cancel',exact:true})).toBeEnabled();
  await page.keyboard.press('Escape');
@@ -310,18 +288,15 @@ test('Settings offers Cancel during a slow key check; it stops the check and a l
  const cancel=dialog(page).getByRole('button',{name:'Cancel',exact:true});
  await expect(cancel).toBeVisible();await expect(cancel).toBeEnabled();
  await cancel.click();
- // The check ends while native still holds the request: Cancel revoked its lease.
  await expect(dialog(page).getByRole('button',{name:'Save',exact:true})).toBeEnabled();
  await expect(dialog(page).getByRole('status')).toHaveCount(0);await expect(dialog(page).getByRole('alert')).toHaveCount(0);
  expect(await page.evaluate(()=>{const f=(window as any).ownProvider;return {pending:f.pending,cancelled:f.cancelled,saved:f.saved,events:f.events};})).toEqual({pending:true,cancelled:1,saved:0,events:['reserve','configure','cancel']});
  await expect(dialog(page).locator('.alpha-provider-own').getByText('Voice',{exact:true})).toHaveCount(0);
- // A late native completion of the cancelled request is refused and selects nothing.
  await page.evaluate(()=>{const f=(window as any).ownProvider;f.hold=false;f.release();});
  await expect.poll(()=>page.evaluate(()=>(window as any).ownProvider.pending)).toBe(false);
  expect(await page.evaluate(()=>(window as any).ownProvider.saved)).toBe(0);
  expect(await page.evaluate(()=>({cloud:(window as any).flagOff.slots['cloud:production'],agent:sessionStorage.getItem('flag-off-agent')}))).toEqual(account);
  await expect(page.locator('.alpha-cloud-sign-in')).toHaveCount(0);
- // The same form saves normally afterwards.
  await dialog(page).getByLabel('Text key',{exact:true}).fill(AI_KEY);
  await dialog(page).getByLabel('Voice key',{exact:true}).fill(VOICE_KEY);
  await dialog(page).getByRole('button',{name:'Save',exact:true}).click();
@@ -336,13 +311,11 @@ test('Settings offers Cancel during a slow key check; it stops the check and a l
 test('signed-out onboarding can explicitly select own keys without starting a Cloud sign-in',async({page},info)=>{
  const observed=await fixture(page,true);await page.goto('/');
  const welcome=welcomePage(page);await expect(welcome).toBeVisible();
- // The page is the Cloud sign-in first; own keys are one quiet entry below it, not a settings toggle above the brand.
  await expect(welcome.getByRole('region',{name:'AI provider'})).toHaveCount(0);
  const own=welcome.getByRole('button',{name:'Use my own keys',exact:true});
  const heading=await welcome.getByRole('heading',{name:'Alpha',exact:true}).boundingBox(),entry=await own.boundingBox();
  expect(entry!.y).toBeGreaterThan(heading!.y);
  await enterKeys(page,welcome,'Use my own keys');
- // The key form replaces the Cloud methods instead of stacking two flows.
  await expect(welcome.getByRole('button',{name:'Continue with Google',exact:true})).toHaveCount(0);
  await expect(welcome.getByRole('form',{name:'Sign in with email'})).toHaveCount(0);
  await expect(welcome.getByRole('button',{name:'Back',exact:true})).toBeVisible();
@@ -367,7 +340,6 @@ test('welcome-page own keys: a rejected key is explained at the form, Back retur
  await expect(welcome.getByLabel('Voice key',{exact:true})).toHaveValue(VOICE_KEY);
  await page.screenshot({path:info.outputPath('welcome-own-keys-rejected.png'),animations:'disabled'});
  await welcome.getByRole('button',{name:'Back',exact:true}).click();
- // Back leaves the key form for the Cloud sign-in state it replaced (this fixture's Cloud readiness is unavailable).
  await expect(welcome.getByRole('form',{name:'Own API keys'})).toHaveCount(0);
  await expect(welcome).not.toContainText('Cerebras didn’t accept this key');
  await expect(welcome.getByRole('button',{name:'Use my own keys',exact:true})).toBeEnabled();
@@ -404,22 +376,18 @@ test('a rejected key on the welcome screen is reported inside the own-key form, 
  const observed=await fixture(page,true);await page.goto('/');
  const welcome=welcomePage(page);await expect(welcome).toBeVisible();
  await enterKeys(page,welcome,'Use my own keys');
- // The signed-out agent's startup unbind may already have cleared an absent binding; count from here.
  const before=await page.evaluate(()=>{const f=(window as any).ownProvider;f.hold=true;f.reject=true;return f.cleared;});
  await welcome.getByRole('button',{name:'Save',exact:true}).click();
  const own=welcome.getByRole('form',{name:'Own API keys'});
  await expect.poll(()=>page.evaluate(()=>(window as any).ownProvider.pending)).toBe(true);
  await expect(own.getByRole('button',{name:'Checking key',exact:true})).toHaveAttribute('aria-busy','true');
  await page.evaluate(()=>(window as any).ownProvider.release());
- // The shared provider slot's refusal reads in Alpha's words.
  await expect(own.getByRole('alert')).toHaveText('Cerebras didn’t accept this key. Nothing was saved.');
- // A provider message that repeats the entered key, even partly, is replaced before it is shown.
  await page.evaluate(()=>{const f=(window as any).ownProvider;f.hold=false;f.reject='echo';});
  await own.getByLabel('Text key',{exact:true}).fill(AI_KEY);await own.getByLabel('Voice key',{exact:true}).fill(VOICE_KEY);
  await own.getByRole('button',{name:'Save',exact:true}).click();
  await expect(own.getByRole('alert')).toHaveText('Keys rejected');
  expect(await page.evaluate(()=>document.body.innerText)).not.toContain(AI_KEY.slice(1,-1));expect(observed.logs.join('\n')).not.toContain(AI_KEY.slice(1,-1));
- // Still the own-key form on the welcome page: Cloud was neither selected nor started.
  await expect(welcome).toBeVisible();await expect(welcome.getByRole('button',{name:'Continue with Google',exact:true})).toHaveCount(0);
  expect(await page.evaluate(()=>{const f=(window as any).ownProvider;return {saved:f.saved,cleared:f.cleared};})).toEqual({saved:0,cleared:before});
  expect(await page.evaluate(()=>(window as any).flagOff.slots['cloud:production']??null)).toBeNull();
@@ -432,7 +400,6 @@ test('own keys chosen on a fresh phone continue into first-run access setup',asy
  const welcome=welcomePage(page);await expect(welcome).toBeVisible();
  await enterKeys(page,welcome,'Use my own keys');await welcome.getByRole('button',{name:'Save',exact:true}).click();
  await expect(welcome).toHaveCount(0);
- // Setup used to require a Cloud account, so an owner who skipped Cloud never saw it.
  await expect(page.locator('dialog.alpha-startup-permissions')).toBeVisible({timeout:15_000});
  await expect(page.locator('dialog.alpha-startup-permissions')).not.toContainText('AI connection isn’t confirmed yet');
  await page.screenshot({path:info.outputPath('own-keys-access-setup.png'),animations:'disabled'});
@@ -443,7 +410,6 @@ test('a failed restart after a Settings key save is shown in the AI provider dia
  const observed=await fixture(page);await residentHome(page);await openProvider(page);await enterKeys(page);
  await page.evaluate(()=>{(window as any).ownProvider.startFail=true;});
  await dialog(page).getByRole('button',{name:'Save',exact:true}).click();
- // The key was saved; the restart's failure comes back to the dialog that started it.
  await expect(dialog(page)).toBeVisible();
  await expect(dialog(page).getByRole('alert')).toBeVisible();
  await expect(dialog(page).getByRole('button',{name:'Direct',exact:true})).toHaveAttribute('aria-pressed','true');
@@ -457,7 +423,6 @@ test('first-run setup opens while the agent is still starting on own keys',async
  await page.evaluate(()=>{(window as any).ownProvider.startHold=true;});
  await enterKeys(page,welcome,'Use my own keys');await welcome.getByRole('button',{name:'Save',exact:true}).click();
  await expect.poll(()=>page.evaluate(()=>(window as any).ownProvider.starting)).toBe(true);
- // Setup never waits for the agent's first boot (the same rule as after Cloud sign-in).
  await expect(page.locator('dialog.alpha-startup-permissions')).toBeVisible();
  expect(await page.evaluate(()=>(window as any).ownProvider.starting)).toBe(true);
  await page.evaluate(()=>{const f=(window as any).ownProvider;f.startHold=false;f.startRelease?.();});
@@ -484,12 +449,10 @@ test('the welcome own-key form offers Cancel during a slow key check without sel
  expect(await page.evaluate(()=>{const f=(window as any).ownProvider;return {pending:f.pending,cancelled:f.cancelled,saved:f.saved};})).toEqual({pending:true,cancelled:1,saved:0});
  await page.evaluate(()=>{const f=(window as any).ownProvider;f.hold=false;f.release();});
  await expect.poll(()=>page.evaluate(()=>(window as any).ownProvider.pending)).toBe(false);
- // Still the own-key form on the welcome page: nothing saved or cleared, Cloud neither selected nor started.
  await expect(welcome).toBeVisible();await expect(welcome.getByRole('button',{name:'Continue with Google',exact:true})).toHaveCount(0);
  expect(await page.evaluate(()=>{const f=(window as any).ownProvider;return {saved:f.saved,cleared:f.cleared};})).toEqual({saved:0,cleared:before});
  expect(await page.evaluate(()=>(window as any).flagOff.slots['cloud:production']??null)).toBeNull();
  expect(await page.evaluate(()=>(window as any).flagOff.calls.filter((call:string)=>/AlphaCloudSignIn\.(start|verify)/.test(call)))).toEqual([]);
- // The same form saves normally afterwards.
  await own.getByLabel('Text key',{exact:true}).fill(AI_KEY);await own.getByLabel('Voice key',{exact:true}).fill(VOICE_KEY);
  await own.getByRole('button',{name:'Save',exact:true}).click();
  await expect(welcome).toHaveCount(0);await ownKeySetupReady(page);
@@ -557,7 +520,6 @@ for(const superseding of ['Close','already-selected Own'] as const)test(`delayed
  }
  await page.evaluate(()=>{(window as any).ownProvider.releaseCloudRead();});
  await expect.poll(()=>page.evaluate(()=>(window as any).ownProvider.cloudReadCompletions)).toBe(1);
- // Allow the released promise and its render to settle, not an arbitrary timeout.
  await page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))));
  await expect(page.locator('.alpha-cloud-sign-in')).toHaveCount(0);
  if(superseding==='Close')await expect(dialog(page)).toHaveCount(0);

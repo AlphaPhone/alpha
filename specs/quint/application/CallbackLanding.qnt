@@ -1,4 +1,3 @@
-/// Static delegation-return page. Query values are finite validity classes.
 module CallbackLanding {
   type Query = {
     stateCount: int, validState: bool, codeCount: int, codePresent: bool,

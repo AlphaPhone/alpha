@@ -1,4 +1,3 @@
-/// RoleController's serialized worker owns each step. Durable intent precedes grants.
 module OSRoleUpgrade {
   type State = { holder: str, receipt: str, eligible: bool, qualified: bool,
     applying: bool, ownerChoice: bool, ownerValue: str, changed: bool }
@@ -20,11 +19,9 @@ module OSRoleUpgrade {
   action restore = all { s.receipt == "pending", s.holder == "none", not(s.applying),
     s' = { ...s, holder: "legacy" } }
   action restart = s' = { ...s, applying: false }
-  /// An explicit request records the receipt whether or not the migration is eligible now.
   action ownerSelect(value: str): bool = all { not(s.applying),
     s' = { ...s, holder: value, receipt: "done", ownerChoice: true, ownerValue: value } }
   action ineligible = all { not(s.applying), s' = { ...s, eligible: false } }
-  /// Setup completing, or the app being enabled or unsuspended, makes the migration eligible again.
   action eligibleAgain = all { not(s.applying), s' = { ...s, eligible: true } }
   action unqualified = all { not(s.applying), s' = { ...s, qualified: false } }
   action step = any { prepare, adopt, acknowledge, failure, partialFailure, restore,

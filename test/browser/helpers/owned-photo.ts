@@ -1,6 +1,5 @@
 import {expect,type Page} from '@playwright/test';
 
-/** Isolated browser-owned pixels: exercises the real library/editor, never device media. */
 export async function openOwnedPhotoViewer(page:Page,theme='light',mode?:'dev'){
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.goto(`/?theme=${theme}${mode?'&mode='+mode:''}`);
@@ -15,7 +14,6 @@ export async function openOwnedPhotoViewer(page:Page,theme='light',mode?:'dev'){
  await expect(page.locator('[data-alpha-subview="photos-viewer"]:not([inert])')).toBeVisible();
 }
 
-/** Open the visible Photos menu without toggling an already-open menu closed. */
 export async function openPhotoTools(page:Page){
  const menu=page.locator('details').filter({has:page.getByLabel('Photos tools',{exact:true})}).filter({visible:true});
  await expect(menu).toBeVisible();
@@ -23,7 +21,6 @@ export async function openPhotoTools(page:Page){
  return menu;
 }
 
-/** Choose an action from the current single-photo menu. */
 export async function choosePhotoAction(page:Page,name:string){
  const menu=page.locator('details').filter({has:page.getByLabel('Photo actions',{exact:true})}).filter({visible:true});
  await expect(menu).toBeVisible();
@@ -31,5 +28,4 @@ export async function choosePhotoAction(page:Page,name:string){
  await menu.getByRole('button',{name,exact:true}).click();
 }
 
-/** Open the current single-photo Share action. */
 export const openPhotoShare=(page:Page)=>choosePhotoAction(page,'Share');

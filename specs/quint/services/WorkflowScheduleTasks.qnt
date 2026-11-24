@@ -1,4 +1,3 @@
-/// Durable workflow activation and external task registration are separate commits.
 module WorkflowScheduleTasks {
   type Schedule = {version: int, active: bool, typed: bool, valid: bool, removed: bool, cleanup: str,
     tasks: int -> int, retired: Set[int], pendingId: int, pendingVersion: int, phase: str,
@@ -38,7 +37,6 @@ module WorkflowScheduleTasks {
     id.in(1.to(3)), s.tasks.get(id) != 0, allKinds or s.tasks.get(id) > 0,
     s' = {...s, tasks: s.tasks.set(id, 0), retired: s.retired.union(Set(id))}
   }
-  /// A second host completes its own source coordinator while the first call is still pending.
   action otherCreate(id: int): bool = all {
     s.active, not(s.removed), s.valid, id.in(1.to(3)), id != s.pendingId, s.tasks.get(id) == 0, not(s.retired.contains(id)),
     s' = {...s, tasks: s.tasks.set(id, s.version)}

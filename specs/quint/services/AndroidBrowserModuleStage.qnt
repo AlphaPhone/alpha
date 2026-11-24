@@ -1,4 +1,3 @@
-// The independently compiled browser module binds one pinned-source staging key to its host profile.
 module AndroidBrowserModuleStage {
   type State = {selected: int, reviewed: bool, sourceValid: bool, stage1: str, stage2: str,
     host: str, hostGeneration: int, fresh: bool, result: str}

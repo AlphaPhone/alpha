@@ -1,18 +1,9 @@
 import { test, expect, type Page } from '@playwright/test';
 import { button, fenceNetwork, flagOffAndroid, harness, residentHome } from './flag-off-android';
-// J05 on Android, flag-off production bundle: when the isolated-world page reader is unavailable (an
-// old Android System WebView) or returns nothing usable, Ask about page opens the question review with
-// an empty excerpt and Continue disabled until the user pastes text, as the web CORS-denied path does.
-// A sensitive page, or excerpt text that looks like credentials, opens no review at all.
-//
-// The AlphaBrowser native plugin is a stub added at the Capacitor bridge in this file: it commits a
-// test-owned page and answers reviewQuestion as each case needs. Evidence boundary: renderer source/
-// test evidence only. Not the native BrowserReading code, an Android WebView, an APK or a device.
 
 const PAGE = 'https://paste-fixture.test/harbour';
 type Answer = { reject?: { message: string; code?: string }; text?: unknown };
 
-/** Adds the AlphaBrowser plugin to the flag-off Android bridge. `window.browserStub.answer` decides reviewQuestion. */
 async function nativeBrowser(page: Page) {
   await page.addInitScript(() => {
     const w = window as any, bridge = w.Capacitor, previous = bridge.nativePromise;
@@ -26,7 +17,6 @@ async function nativeBrowser(page: Page) {
       if (method === 'browsingState') return {};
       if (method === 'setBookmark') return { urls: [] };
       if (method === 'navigate') {
-        // The page commits at once: one navigation, no error.
         const navigation = ++stub.navigation;
         setTimeout(() => w.flagOff.emit('AlphaBrowser', 'stateChanged', { session: input.session, id: input.id, private: false, sequence: ++stub.sequence, navigation, url: input.url, title: 'Harbour report', loading: false, committed: true, error: '', canBack: false, canForward: false }), 0);
         return {};
@@ -79,7 +69,6 @@ test('an unreadable page opens the review with an empty excerpt; pasting enables
     await expect(review.getByRole('button', { name: 'Use in conversation', exact: true }), name).toBeDisabled();
     await excerpt.fill('Pasted: the ferry leaves at nine.');
     await expect(review.getByRole('button', { name: 'Use in conversation', exact: true }), name).toBeEnabled();
-    // The review still names its page source.
     await expect(review.getByRole('checkbox', { name: 'Link source' }), name).toBeChecked();
     await review.getByRole('button', { name: 'Cancel', exact: true }).click();
     await expect(review).toHaveCount(0);

@@ -19,7 +19,6 @@ import java.util.concurrent.TimeUnit;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** The same extracted update methods and platform ports as UpdateFlowTest. */
 public final class UpdateBarrierHarness {
  private final Context context;
  private final Map<Integer,AlphaDevicePlugin> bridges = new HashMap<>();

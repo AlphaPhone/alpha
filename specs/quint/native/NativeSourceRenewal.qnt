@@ -1,4 +1,3 @@
-// Hosted source renewal journal, redacted alert, and latest exact tap receipt.
 module NativeSourceRenewal {
   type Row = {phase: str, token: int, question: bool}
   type Reply = {status: str, id: int, token: int, question: bool}
@@ -110,7 +109,6 @@ module NativeSourceRenewal {
   }
   action pending = all {
     s.cancels<12,
-    // The current bridge retries the last uncommitted intent on an unlocked read.
     val retried=if (not(s.locked) and s.retryId!=0) attemptCapture(s,s.retryId,s.retryMode,false) else s
     val id=pendingId(retried)
     s'=if (s.locked) result(s,"rejected")

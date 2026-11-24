@@ -7,7 +7,6 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 import org.json.*;
 
-/** Holds the provider monitor while two real acquire calls reach it. */
 public final class IndicatorProviderProbe {
  public static final class Token implements IBinder {
   public volatile DeathRecipient recipient;

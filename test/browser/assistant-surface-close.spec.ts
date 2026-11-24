@@ -1,10 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-// Development lane. The ACTION_ASSIST surface (`?surface=assistant`) is the conversation itself, so
-// dismissing the conversation closes the window: drag down, the close path behind the scrim, and
-// Go Home. The window close is observed on the shell's closeAssistant(); the Android finish is
-// covered by AssistantInstrumentedTest. Back order over Home's drawer is checked on the launcher.
 
-/** Runs `body` against the phone shell instance found through the rendered tree. */
 const onShell = <T,>(page: Page, body: string) => page.evaluate(body => {
   const screen = document.querySelector('[data-screen]') as any;
   const key = Object.keys(screen).find(name => name.startsWith('__reactFiber$'))!;
@@ -34,8 +29,6 @@ test.describe('on the assistant surface', () => {
   });
 
   test('dragging the conversation down closes the window', async ({ page }) => {
-    // The full surface first shrinks to a sheet. Its actual captured pointer gesture
-    // then dismisses to the app below, rather than leaving an unreachable Home behind.
     await page.getByRole('button', {name: 'Shrink chat', exact: true}).click();
     await expect(page.getByRole('button', {name: 'Expand chat', exact: true})).toBeVisible();
     const grip = page.getByRole('button', {name: 'Resize chat', exact: true});
@@ -56,7 +49,6 @@ test('Back closes shade, then voice and conversation before Home\'s drawer', asy
   await expect(page.getByRole('button', { name: 'Apps', exact: true })).toBeVisible();
   const state = () => onShell<{ shade: boolean; drawer: boolean; chat: string; stopped: number }>(page, 'const s = shell.S(); return { shade: !!s.shade, drawer: !!s.drawer, chat: s.chat, stopped: window.__stopped || 0 };');
   await onShell(page, 'window.__stopped = 0; shell.stopVoice = () => { window.__stopped++; shell.setState({ voice: "off" }); }; shell.setState({ shade: true, drawer: true, chat: "full", voice: "listening" });');
-  // Shade alone closes first. Voice and the conversation stay above the drawer.
   await onShell(page, 'shell.back();');
   expect(await state()).toEqual({ shade: false, drawer: true, chat: 'full', stopped: 0 });
   await onShell(page, 'shell.back();');

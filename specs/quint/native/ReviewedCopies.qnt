@@ -1,4 +1,3 @@
-/// Alpha's main and assistant bridges share a temporary attachment cache in one process.
 module ReviewedCopies {
   type State = {
     sweeper: int, swept: bool, present: Set[int], allocated: Set[int],

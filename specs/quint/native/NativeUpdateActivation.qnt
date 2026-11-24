@@ -1,6 +1,3 @@
-// The process-local AlphaDevicePlugin barrier. The session and resident stop
-// are observable port effects. Durable journal and Android install semantics
-// are independent models and obligations.
 module NativeUpdateActivation {
   type State = {
     registered: Set[int],
@@ -112,8 +109,6 @@ module NativeUpdateActivation {
     ready: "none", invalid: false, sealed: false, stopRequested: false
   }
 
-  // The fixture executes a confirmed stop and a successful commit call.
-  // The journal and unknown commit/reply cases are outside this macrostep.
   action handOff = all {
     s.active != 0,
     s.stopRequested,

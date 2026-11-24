@@ -1,8 +1,4 @@
-// Current canonical Calendar receiver shared by mounted Note and scan review.
 module CanonicalCalendarDraftHandoff {
-  // noteNotice is the last captured Note toast event; its on-screen timeout is separate.
-  // Accepted Note event and reminder drafts emit the current Check time notice.
-  // Scan drafts have their own review status and do not emit a Note notice.
   type State = {owner: int, view: str, ready: bool, editor: str, retained: str,
     busy: str, scanOpen: bool, scanNotice: str, noteNotice: str}
   var s: State

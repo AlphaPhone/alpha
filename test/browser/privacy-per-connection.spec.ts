@@ -3,8 +3,6 @@ import { test, expect, type Page } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { installResidentAgentPlugin } from './helpers/resident-agent-plugin';
 
-// Real rendered Settings over the real connection controller; only the Android IPC boundary is
-// synthetic. No runtime, provider key, model request or external account is used.
 const SYNTHETIC_KEY = 'synthetic-provider-key-7f3a9c0e5b';
 const REMOTE = 'https://agent.example.test';
 const REDACTION = {
@@ -12,7 +10,6 @@ const REDACTION = {
   agent: 'Depends on your agent',
   offline: 'AI off',
 };
-// Former fixture activity rows and claims must never be presented as this phone's history.
 const fixtureActivity = [/Drafted a reply to Maya/, /Filed Jordan's term sheet/, /Moved Gym to 7:30 PM/, /Summarized 14 emails/, /Ran Morning brief/, /Redaction receipt saved/, /Booked Nopa/, /\b\d+ today\b/];
 const forbidden = [/Redaction on/, /Identifiers replaced/, /Pre-egress redaction is not connected/];
 
@@ -30,8 +27,7 @@ async function nativeStub(page: Page, scenario: Scenario, options: { strayKeyInS
         sessionStorage.setItem('privacy-fixture-seeded', '1');
         localStorage.setItem('alpha.connection.selection.v1', JSON.stringify(scenario === 'remote' ? { kind: 'remote', origin: remote } : scenario === 'offline' ? { kind: 'offline' } : { kind: 'none' }));
       }
-    } catch { /* storage-blocked runs are covered elsewhere */ }
-    // The native credential slot holds the provider key; only providerStatus may describe it.
+    } catch { }
     const provider = { key, name: providerStatus?.provider ?? 'cerebras', model: providerStatus?.model ?? 'qwen-3.8-27b', voiceConfigured: providerStatus?.voiceConfigured === true };
     w.privacyFixture = { calls: [] as unknown[], unexpected: [] as string[] };
     const agent = w.residentAgent = w.createResidentAgentPlugin({ owner: () => 'fixture-owner', agentId: 'fixture-agent' });
@@ -147,14 +143,11 @@ for (const scenario of ['resident', 'remote', 'offline'] as const) test(`current
   expect(await privacyContract(page)).toBe(REDACTION[scenario === 'remote' ? 'agent' : scenario]);
   await openSettings(page, 'AI provider');
   const provider = page.getByRole('dialog', {name: 'AI connection', exact: true});
-  // This dialog reports the phone's saved provider independently of a remote/offline selection.
   await expect(provider.getByRole('button', {name: 'Direct', exact: true})).toHaveAttribute('aria-pressed', 'true');
   await expect(provider.getByText('Voice off', {exact: true})).toHaveCount(0);
-  // Direct is in use with keys this panel cannot manage: the tab offers the key form, never an empty panel.
   await expect(provider.getByLabel('Voice key', {exact: true})).toHaveValue('');
   await assertNoInventedActivity(page);
   await provider.getByRole('button', {name: 'Close Account', exact: true}).click();
-  // The slim Settings design delegates provider state to its dialog and exposes no old pages.
   for (const name of ['Privacy & data', 'Models', 'Activity']) await expect(page.getByRole('button', {name, exact: true})).toHaveCount(0);
   await openSettings(page,'About');
   await expect(page.getByRole('button', {name: 'Export diagnostics', exact: true})).toHaveCount(0);
@@ -166,8 +159,6 @@ for (const scenario of ['resident', 'remote', 'offline'] as const) test(`current
 test('the Cloud provider selection does not present a raw provider path', async ({page}) => {
   await nativeStub(page, 'resident', {providerStatus: {provider: 'elizacloud', model: 'cerebras/qwen-3.8-27b'}});
   await connect(page, 'resident');
-  // This fixture has no Cloud account. Inspect the provider renderer through the
-  // development controller; product Account correctly requires sign-in first.
   await page.evaluate(async()=>{const {connectionController}=await import('/src/runtime/connection-ui.tsx');connectionController.openProviderSettings();});
   const provider = page.getByRole('dialog', {name: 'AI connection', exact: true});
   await expect(provider.getByRole('button', {name: 'Cloud', exact: true})).toHaveAttribute('aria-pressed', 'true');

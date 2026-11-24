@@ -35,7 +35,7 @@ test('batch controls remain reachable above the assistant pill in compact light 
  await page.setViewportSize({width:360,height:640});
  for(const theme of ['light','dark']){
   await page.goto('/?theme='+theme);await page.getByRole('button',{name:'Photos',exact:true}).click();await openPhotoTools(page);await page.getByRole('button',{name:'Select photos',exact:true}).click();await page.locator('button[data-owned-media-id^="native-camera-"]').first().click();
-  await page.screenshot({path:info.outputPath('batch-'+theme+'.png')});// Favorite toggles: the second theme run finds the tile already a favourite and removes it.
+  await page.screenshot({path:info.outputPath('batch-'+theme+'.png')});
   await page.getByRole('button',{name:/^(Favorite|Unfavorite) selected$/}).click();await expect(page.getByText(/^1 (favorited|unfavorited)$/)).toBeVisible();
  }
 });
@@ -102,8 +102,6 @@ for(const destination of ['share','save'])for(const retirement of ['back','home-
  await page.evaluate(()=>{
   const w=window as any;w.mediaHandoffCalls=0;w.mediaReadStarted=false;const original=window.fetch;let release!:()=>void;const gate=new Promise<void>(resolve=>release=resolve);w.releaseMediaRead=release;const click=HTMLAnchorElement.prototype.click;w.restoreMediaFetch=()=>{window.fetch=original;HTMLAnchorElement.prototype.click=click;};
   Object.defineProperty(navigator,'canShare',{configurable:true,value:()=>true});Object.defineProperty(navigator,'share',{configurable:true,value:async()=>{w.mediaHandoffCalls++;}});
-  // A save starts its download with a link click in the same task as its final check. The read counts as
-  // released once its bytes are read: the handoff opens its revision check in the same task.
   HTMLAnchorElement.prototype.click=function(){if(this.download)w.mediaHandoffCalls++;return click.call(this);};
   window.fetch=async(...args)=>{if(typeof args[0]==='string'&&args[0].startsWith('data:image/')){w.mediaReadStarted=true;await gate;const response=await original(...args),blob=response.blob.bind(response);response.blob=async()=>{const bytes=await blob();w.mediaReadReleased=true;return bytes;};return response;}return original(...args);};
  });
@@ -115,8 +113,6 @@ for(const destination of ['share','save'])for(const retirement of ['back','home-
  else{await page.evaluate(()=>window.dispatchEvent(new Event('alpha-back',{cancelable:true})));await expect(page.getByRole('button',{name:'Share photo',exact:true})).toHaveCount(0);if(retirement==='home-return'){await page.evaluate(()=>window.dispatchEvent(new Event('launcher-home')));await page.getByRole('button',{name:'Photos',exact:true}).click();await page.locator('button[data-owned-media-id^="native-camera-"]').first().click();}}
  await page.evaluate(()=>{(window as any).releaseMediaRead();});
  await expect.poll(()=>page.evaluate(()=>(window as any).mediaReadReleased)).toBe(true);
- // The released handoff rechecks revisions in a read transaction and then decides. A read-write
- // transaction on the same store starts only after that one finishes; this one changes nothing.
  expect(await page.evaluate(async()=>{const p=(await import('/src/prototype/browser-camera.ts')).browserPhotoLibrary;return (await p.changeMany({operation:'favorite',items:[{id:'settled-probe',revision:'none'}]})).outcomes.map(row=>row.status);})).toEqual(['conflict']);
  expect(await page.evaluate(async()=>{const p=(await import('/src/prototype/browser-camera.ts')).browserPhotoLibrary;return (await p.list()).items.map(row=>[row.id,row.mutationRevision]);})).toEqual(before);
  expect(await page.evaluate(()=>(window as any).mediaHandoffCalls)).toBe(0);expect(downloads).toEqual([]);
@@ -134,7 +130,6 @@ test('a library refresh keeps the Share panel open and a changed selection close
  const tiles=page.locator('button[data-owned-media-id^="native-camera-"]');await expect(tiles).toHaveCount(3);await tiles.first().click();
  const share=()=>openPhotoShare(page),panel=page.getByRole('dialog',{name:'Share',exact:true});
  await share();await expect(panel).toBeVisible();
- // The same refresh counters the device library and capture loads write; the panel checks every 250 ms.
  await setPhotos({nativeLibraryRevision:Date.now(),nativeCaptureRevision:Date.now()});await page.waitForTimeout(600);
  await expect(panel).toBeVisible();await panel.getByRole('button',{name:'Share',exact:true}).click();
  await expect.poll(()=>page.evaluate(()=>(window as any).sharedMedia)).toEqual([1]);

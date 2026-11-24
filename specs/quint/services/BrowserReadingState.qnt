@@ -1,5 +1,3 @@
-/// Isolated native page extraction, the separate user-reviewed question draft and its
-/// empty-excerpt fallback when the page cannot be read in isolation.
 module BrowserReadingState {
   type Reading = {
     owner: int, epoch: int, navigation: int, capturedEpoch: int, capturedNavigation: int,
@@ -24,8 +22,6 @@ module BrowserReadingState {
       capturedNavigation: s.navigation, remaining: 2, excerpt: 0, approved: false,
       draft: false, userText: "none" }
   }
-  /// Ask about page only: when the page cannot be read in isolation the review opens with an
-  /// empty excerpt, and nothing can be approved until the user supplies text.
   action requestQuestionFallback = all {
     s.phase == "idle", s.foreground, not(s.isolated), not(s.sensitive),
     s' = { ...s, phase: "review", question: true, capturedEpoch: s.epoch,
@@ -62,7 +58,6 @@ module BrowserReadingState {
       token: s.token and s.remaining > 1, approved: s.approved and s.remaining > 1,
       speech: s.speech and s.remaining > 1 }
   }
-  /// Sensitivity is decided per page, so a later page is judged on its own.
   action navigation = all {
     s.navigation < 2,
     s' = { ...s, navigation: s.navigation + 1, phase: "idle", ready: false, sensitive: false, token: false,
@@ -108,7 +103,6 @@ module BrowserReadingState {
     .then(navigation).expect(not(s.token or s.speech) and safety)
   run questionDraftTest = init.then(worldHandshake(true)).then(request(true)).then(extracted(false)).then(approve)
     .expect(s.draft and not(s.speech or s.token) and safety)
-  /// One sensitive page does not stop a later page from being read.
   run sensitiveThenNextPageTest = init.then(worldHandshake(true)).then(request(false)).then(extracted(true))
     .expect(s.sensitive and s.phase == "blocked").then(navigation).expect(not(s.sensitive))
     .then(worldHandshake(true)).then(request(false)).then(extracted(false)).then(approve).then(consume)

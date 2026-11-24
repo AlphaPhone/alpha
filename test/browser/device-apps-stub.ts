@@ -1,7 +1,4 @@
 import type { Page } from '@playwright/test';
-/** A native-plugin stub whose ElizaSystem launcher lists `count` installed Android apps ("App 00" …),
- * for specs that need the Apps drawer filled. Development lane only; no Android package manager is
- * involved (home-app-library.spec.ts covers launch, refusals and changes). */
 export async function deviceAppsStub(page: Page, count = 40) {
   await page.addInitScript(count => {
     localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({ kind: 'offline' }));

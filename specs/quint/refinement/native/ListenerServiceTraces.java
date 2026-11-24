@@ -7,7 +7,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.*;
 import org.json.*;
 
-/** Actual shared Listener, ListeningService, ListenerStore and engine lifecycle under primitive ports. */
 public final class ListenerServiceTraces {
  static ListeningService service;static Trace trace;
  static ExecutorService executor()throws Exception{return (ExecutorService)Trace.read(service,"recognizer");}

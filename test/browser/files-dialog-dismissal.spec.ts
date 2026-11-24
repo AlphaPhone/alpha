@@ -6,7 +6,6 @@ for(const theme of ['light','dark'])test(`${theme} file rename and delete dialog
  await page.goto(`/?mode=dev&theme=${theme}`);
  await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');await registerPlugin<any>('AlphaFiles').importFile(new File(['Retained contents'],'keep.txt',{type:'text/plain'}));});
  await page.getByRole('textbox',{name:'Ask Alpha',exact:true}).fill('Retained unsent file question');
- // The first outside tap lowers the raised composer; it preserves the draft.
  await page.locator('[data-alpha-dock-scrim="true"]').click({position:{x:12,y:12}});
  await expect(page.getByRole('textbox',{name:'Ask Alpha',exact:true})).toHaveValue('Retained unsent file question');
  await page.getByRole('button',{name:'Files',exact:true}).click();await page.getByRole('button',{name:'Internal storage',exact:true}).click();await page.getByRole('button',{name:'Open keep.txt',exact:true}).click();
@@ -16,7 +15,6 @@ for(const theme of ['light','dark'])test(`${theme} file rename and delete dialog
  const dock=await page.locator('[data-alpha-layer="pill"]').boundingBox(),confirm=await dialog.getByRole('button',{name:'Rename',exact:true}).boundingBox();
  expect(confirm!.y+confirm!.height).toBeLessThan(dock!.y);
  await page.screenshot({path:test.info().outputPath('rename-review.png'),animations:'disabled'});
- // A native HTML review above the inline sheet owns the first Back.
  await page.evaluate(()=>{const review=document.createElement('dialog');review.setAttribute('aria-label','Owned outer review');review.textContent='Synthetic review';review.addEventListener('close',()=>review.remove());document.body.append(review);review.showModal();});
  await page.evaluate(()=>window.dispatchEvent(new Event('alpha-back',{cancelable:true})));await expect(page.getByRole('dialog',{name:'Owned outer review',exact:true})).toHaveCount(0);await expect(name).toBeVisible();
  await page.evaluate(()=>window.dispatchEvent(new Event('alpha-back',{cancelable:true})));await expect(name).toHaveCount(0);await expect(rename).toBeFocused();expect(await page.evaluate(async()=>(await import('/src/runtime/alpha-client.ts')).alphaClient.getState().context.selectedObject)).toEqual(selection);

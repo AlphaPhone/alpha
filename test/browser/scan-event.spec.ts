@@ -23,8 +23,6 @@ test('event review rejects nonexistent DST time and can be corrected before hand
  await page.getByLabel('Event start time',{exact:true}).fill('03:30');await page.getByRole('button',{name:'Review in Calendar',exact:true}).click();expect(await page.evaluate(()=>(window as any).drafts)).toHaveLength(1);
 });
 
-// Uncertain OCR dates stay blank in the rendered review, the notes say why, and nothing reaches
-// Calendar until the user enters the date (and, since the time was left blank too, the time).
 for(const [name,poster,reasons] of [
  ['ambiguous numeric date with a zone abbreviation','Open studio\n10/11/2026 7 PM EST\nVenue: Main hall',['A numeric date such as 10/11 can mean different days in different regions. Enter the date yourself.','Time zone “EST” is ambiguous. Enter the local start time yourself.']],
  ['weekday that conflicts with the printed date','Open studio\nFriday, October 10, 2026\n7 PM\nVenue: Main hall',['“Friday” does not match the printed date. Enter the date yourself.']],

@@ -1,4 +1,3 @@
-/// Focus ownership in retained and same-depth replacement Settings pages.
 module SettingsPageFocus {
   type State = { page: int, focus: int, saved: int -> int }
   var s: State

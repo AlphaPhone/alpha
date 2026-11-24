@@ -6,14 +6,7 @@ import {flagOffAndroid, residentHome, fenceNetwork} from './flag-off-android';
 import {residentStub} from './resident-stub';
 import {settled} from './helpers/settled';
 
-// The same renderer checks against the flag-off production bundle: no mocks, fixtures or
-// developer surfaces, so these are the screens a disconnected phone actually shows, with names,
-// focus, contrast and TalkBack reading order. Large text
-// is checked on the development server only (the scale is applied through a source module).
-// Not a TalkBack, physical large-font, rotation or device pass (MVP-48 acceptance stays open).
 test.describe.configure({ mode: 'parallel' });
-// Production browsers have no installed inventory. Exercise the packaged drawer through
-// the synthetic Android bridge instead; these checks remain renderer-only evidence.
 const PRODUCTION_APPS_STATE: State = {
   name: 'launcher Apps',
   open: async page => {
@@ -34,7 +27,6 @@ const PRODUCTION_APPS_STATE: State = {
     });
     await residentHome(page);
     const notice=page.getByRole('region',{name:'Eliza Cloud sign-in notice',exact:true});
-    // This fixture retains a 30-day sign-in; it must not show the 14-day expiry warning.
     await expect(notice).toHaveCount(0);
     await page.getByRole('button', {name: 'Apps', exact: true}).click();
     const drawer = page.getByRole('dialog', {name: 'Apps', exact: true});
@@ -65,7 +57,6 @@ const STATES = [...LIVE_STATES, PRODUCTION_APPS_STATE, PRODUCTION_CONNECTIONS_ST
 for (const state of STATES) {
   test(`production names, roles, focus, contrast and clipping: ${state.name}`, async ({ page }) => {
     await state.open(page);
-    // Walk every exposed component row in the license inventory, with room for the browser edge.
     const tabLimit=state.name==='live Settings licenses'?await exposedTabStopBudget(page):undefined;
     if(tabLimit)test.setTimeout(90_000);
     const found = blocking(format([

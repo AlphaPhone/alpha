@@ -1,6 +1,3 @@
-// Current BaseDrizzleAdapter named-space fence. Widths, source texts and
-// provider markers are finite classes. One target row and one delayed request
-// share one adapter. The pre-fence dimension translation is separate.
 module NamedEmbeddingProvenance {
   type Pending = { kind: str, vector: str, text: str, current: bool, width: int }
   type State = {

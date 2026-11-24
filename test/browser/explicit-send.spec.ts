@@ -7,13 +7,11 @@ async function ready(page:Page){
   const {LocalAgentProtocol:P}=await import('/src/runtime/local-agent.ts'),{Component}=await import('/src/prototype/model.js');
   P.prototype.send=async(room,text)=>{fixture.room=room;fixture.sent.push(text);const u=crypto.randomUUID(),a=crypto.randomUUID();fixture.rows.push({id:u,role:'user',text},{id:a,role:'assistant',text:'Reply '+fixture.sent.length});return {text:'Reply '+fixture.sent.length,agentName:'Alpha',userMessageId:u,messageId:a};};
   P.prototype.messages=async()=>({messages:structuredClone(fixture.rows)});P.prototype.listConversations=async()=>[{id:fixture.room,title:'Owned conversation'}];
-  // Edit and resend changes history only by forking; no test here expects a fork.
   P.prototype.forkConversation=async()=>{fixture.forks++;throw Error('No fork expected');};
   const render=Component.prototype.renderVals;Component.prototype.renderVals=function(){fixture.shell=this;return render.call(this);};
  });
  const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await input.fill('Original request');await input.press('Enter');await expect(page.locator('[data-alpha-message-text]').filter({hasText:'Reply 1'})).toBeVisible();
 }
-// The transport binds a phone observation before the exact owner-authored prompt.
 const sent=(page:Page)=>page.evaluate(()=>(window as any).explicitSend.sent.map((text:string)=>text.split('[USER MESSAGE]\n').at(-1)));
 const bubbles=(page:Page,text:string)=>page.locator('[data-alpha-message-text]').filter({hasText:text});
 test('an explicit prompt with an empty composer posts once and shows one user bubble',async({page})=>{

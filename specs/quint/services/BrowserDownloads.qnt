@@ -1,4 +1,3 @@
-/// Native download review, exact-origin cookies, captured bytes and MediaStore publication.
 module BrowserDownloads {
   type Download = {
     privateTab: bool, tabOpen: bool, navigation: int, reviewedNavigation: int,
@@ -26,7 +25,6 @@ module BrowserDownloads {
       cookie: kind == "signed", pendingFile: kind.in(Set("blob", "data")),
       reviewedNavigation: s.navigation }
   }
-  /// Only the expected isolated main-frame nonce and next chunk may append bytes.
   action chunk(token: int, index: int): bool = all {
     s.phase == "capturing", s.chunks < 2,
     if (token != s.captureToken) s' = s
@@ -61,7 +59,6 @@ module BrowserDownloads {
     s' = { ...s, phase: "completed", pendingFile: false, published: true,
       completed: true, persisted: s.entry and not(s.privateTab) }
   }
-  /// DownloadManager completion is learned from the actual provider row.
   action osReceipt(success: bool): bool = all {
     s.phase == "queued",
     s' = { ...s, phase: if (success) "completed" else "failed",
@@ -78,8 +75,6 @@ module BrowserDownloads {
     s' = { ...s, phase: "cancelled", cancelled: true, entry: false,
       persisted: false, pendingFile: false, cookieSent: false }
   }
-  /// Removing a signed-in entry stops its fetch at the next check. When the copy has already
-  /// finished, the saved file stays in Downloads with no entry.
   action cancelAfterCopy = all {
     s.kind == "signed", s.phase == "publishing", s.reviewed, not(s.cancelled),
     s' = { ...s, phase: "cancelled", cancelled: true, entry: false, persisted: false,
@@ -143,7 +138,6 @@ module BrowserDownloads {
     .then(approve).then(publish).expect(s.published and s.chunks == 0 and safety)
   run publicTransferOutlivesTabTest = initFor(false).then(request("public")).then(approve)
     .then(closeTab).then(osReceipt(true)).expect(s.completed and safety)
-  /// A cancel that lands after the last byte was copied leaves the file and removes the entry.
   run cancelAfterCopyTest = initFor(false).then(request("signed")).then(approve).then(requestHop)
     .then(response).then(cancelAfterCopy)
     .expect(s.published and not(s.entry or s.persisted or s.completed or s.cookieSent) and safety)

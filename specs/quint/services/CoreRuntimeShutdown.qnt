@@ -1,4 +1,3 @@
-/// Shared runtime stop admission, best-effort completion and strict quiescence.
 module CoreRuntimeShutdown {
   val callers = Set(1, 2, 3)
   type State = {

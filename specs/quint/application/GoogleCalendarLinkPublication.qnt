@@ -1,4 +1,3 @@
-// Current mounted Google panel, with separate link and account-read ownership.
 module GoogleCalendarLinkPublication {
   type Intent = {current: bool, authorizing: bool, review: int}
   type Read = {owner: int, settled: bool, grant: str}

@@ -2,8 +2,6 @@ import {test,expect,type Page} from '@playwright/test';
 async function seed(page:Page){await page.addInitScript(()=>{localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:navigator.mediaDevices});});await page.goto('/?mode=dev');return page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');const cal=registerPlugin<any>('AlphaCalendar');await cal.save({creationId:crypto.randomUUID(),separateCreation:true,calendarId:'local',title:'Local test room',body:'',location:'',begin:Date.now()+3600000,end:Date.now()+7200000,who:['maya'],video:true});return JSON.parse(await (await import('/src/browser/calendar-store.ts')).calendarDocument.readRaw()!).events[0];});}
 async function media(page:Page){await page.evaluate(()=>{
  const w=window as any;w.roomStreams=[];const endings:Array<()=>void>=[];
- // Firefox ignores untrusted events on MediaStreamTrack. Drive the registered
- // source-loss callbacks explicitly while still stopping real captured tracks.
  w.endRoomTracks=()=>{for(const end of endings.splice(0))end();};
  navigator.mediaDevices.getUserMedia=async c=>{
   const canvas=document.createElement('canvas');canvas.width=100;canvas.height=100;canvas.getContext('2d')!.fillRect(0,0,100,100);

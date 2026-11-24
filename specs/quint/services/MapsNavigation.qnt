@@ -1,4 +1,3 @@
-/// Maps keeps navigation on the phone while service requests are generation fenced.
 module MapsNavigation {
   type Navigation = {
     owner: int, epoch: int, requestEpoch: int, generation: int, requestGeneration: int,
@@ -39,7 +38,6 @@ module MapsNavigation {
     s.phase == "ready", s.route != 0, s.locationGranted, s.fixFresh,
     s' = { ...s, guidance: true, phase: "navigating" }
   }
-  /// Agent direct start uses a separately read owner preference, defaulting to false.
   action allowDirectStart = s' = { ...s, directStart: true }
   action agentStart = all {
     s.directStart, s.phase == "ready", s.route != 0, s.locationGranted, s.fixFresh,

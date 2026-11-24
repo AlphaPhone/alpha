@@ -1,29 +1,22 @@
 import {test, expect, type Page} from '@playwright/test';
 import {setupTelephony} from './telephony-fixture';
 import {setTextScale} from './accessibility-states';
-// AP-16 Messages (docs/agentic-comms.md AC-01, AC-10, AC-13 to AC-16, AC-22, AC-24, AC-31): the one
-// bottom bar, the thread's draft slot and the draft bubble in the stage. Renderer evidence only: no
-// device, SIM, carrier or SMS provider is involved, and a text handed to the stub bridge proves
-// nothing about a radio.
 const personField = '[data-alpha-bar-field="person"]', filterField = '[data-alpha-bar-field="filter"]', alphaField = '[data-alpha-bar-field="alpha"]';
 const bubble = '[data-alpha-draft-bubble]';
 const barSend = (page: Page) => page.locator('[data-alpha-input-bar]').getByRole('button', {name: 'Send', exact: true});
 const openAlpha = (page: Page) => page.getByRole('button', {name: 'Open Alpha', exact: true}).click();
 const inputs = (page: Page, method: string) => page.evaluate(method => ((window as any).telephonyInputs as [string, any][]).filter(row => row[0] === method).map(row => row[1]), method);
 const sms = (page: Page, call: string, ...args: unknown[]) => page.evaluate(async ([call, args]) => ((await import('/src/prototype/sms-adapter.ts' as string)) as any)[call as string](...(args as unknown[])), [call, args] as const);
-/** Requests the page makes while `act` runs, other than the development server's own modules. */
 async function requestsDuring(page: Page, act: () => Promise<void>) {
   const seen: string[] = [], record = (request: {url(): string; resourceType(): string}) => { if (['fetch', 'xhr', 'websocket', 'eventsource'].includes(request.resourceType())) seen.push(request.url()); };
   page.on('request', record);
   try { await act(); } finally { page.off('request', record); }
   return seen;
 }
-/** Every line of the draft can be brought into the stage, and Edit and Send stay on screen (AC-13). */
 async function draftReachable(page: Page) {
   const draft = page.locator(bubble);
   await expect(draft).toBeVisible();
   for (const block of ['start', 'end'] as const) {
-    // The sheet and stage can still resize after a text-size change.
     await expect(async()=>{
       await draft.evaluate((el, block) => el.scrollIntoView({block}), block);
       const [box, sheet] = await Promise.all([draft.boundingBox(), page.locator('[data-alpha-layer="conversation"]').boundingBox()]);
@@ -187,12 +180,10 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
     const proposal = (id: string) => `({id: "${id}", kind: "other", title: "Save Ada", detail: "Ada Okafor", button: "Save", acts: true, act: {mod: "messages", fn: "none"}, args: {}})`;
     expect(await page.evaluate(`${shell}.propose(${proposal('before')}).shown`)).toBe(true);
     await expect(page.locator('[data-alpha-proposal-act]')).toHaveCount(1);
-    // Telecom reports a live call whose kind it cannot tell: AC-19 holds, through the image's own path.
     await page.evaluate(() => (window as any).setDeviceCallState({inCall: true, emergency: null, emergencyLive: true, watching: true}));
     await expect(page.locator('[data-alpha-proposal-act]')).toHaveCount(0);
     expect(await page.evaluate(`${shell}.emergencyLive()`)).toBe(true);
     expect(await page.evaluate(`JSON.stringify(${shell}.propose(${proposal('during')}))`)).toBe(JSON.stringify({shown: false, replaced: []}));
-    // An ordinary call does not hold it; neither does the call ending.
     await page.evaluate(() => (window as any).setDeviceCallState({inCall: true, emergency: false, emergencyLive: false, watching: true}));
     await expect(page.locator('[data-alpha-proposal-act]')).toHaveCount(1);
     await page.evaluate(() => (window as any).setDeviceCallState({inCall: false, emergency: false, emergencyLive: false, watching: true}));
@@ -201,7 +192,6 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
 
   test('nothing reaches the SMS bridge until Send on the bubble; a retry keeps one journal entry; Alpha notes the send quietly', async ({page}) => {
     await setupTelephony(page);
-    // The first send fails in transport; the retry returns a receipt bound to the reviewed text.
     await page.addInitScript(() => { let first = true; (window as any).telephonyAnswers = {sendComposedSms: async (input: any) => {
       if (first) { first = false; throw Error('transport'); }
       const {smsBindingHash} = await import('/src/runtime/aosp-telephony.ts' as string);
@@ -226,8 +216,6 @@ test.describe('Messages on the Alpha image: the telephony stub bridge (as aosp-t
 
   test('type to Ada, open Alpha, reload: the SMS draft returns to the thread', async ({page}) => {
     await setupTelephony(page);
-    // The stub bridge keeps no secure slots; this one keeps the SMS draft slots across a reload, as the
-    // phone's renderer secure store would (a stand-in, not the Android store).
     await page.addInitScript(() => {
       const cap = (window as any).Capacitor, native = cap.nativePromise, key = (slot: string) => 'fixture.secure.' + slot;
       cap.PluginHeaders.find((header: any) => header.name === 'AlphaConnection').methods.push({name: 'secureCompareExchange', rtype: 'promise'});
@@ -341,7 +329,6 @@ test.describe('Messages in the development build: ?mode=dev&fixture=1 with ELIZA
       await composer.press('Enter');
       await expect(page.locator('[data-alpha-sheet-context]')).toHaveText('Maya Chen · Messages', {timeout: 10_000});
       await expect(page.locator(bubble)).toHaveAttribute('data-alpha-draft-bubble', 'alpha');
-      // Each request's own draft is in the slot: the reply replaces the first draft, kept for one Undo.
       const draft = await page.evaluate(() => {
         const el = document.querySelector('[data-screen]') as any;
         let fiber = el[Object.keys(el).find(key => key.startsWith('__reactFiber$'))!];

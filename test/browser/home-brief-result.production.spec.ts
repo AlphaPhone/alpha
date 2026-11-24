@@ -1,38 +1,18 @@
-// MVP-19 on the FLAG-OFF bundle: one run from a scheduled-digest result to the Home brief card,
-// and the canonical Agent Calendar ownership boundary on the Home card.
-//
-// Digest results enter the way they do on a phone, through the connected resident agent:
-//  - `native`: the Android result inbox (AlphaHostedResults) commits what the agent produced and
-//    the renderer reads its retained history, the normal route on Android;
-//  - `renderer`: background delivery could not be configured, so the renderer reads the agent's
-//    result page over the bridge, commits each result to the secure store and acknowledges it.
-// The retained-result binding publishes the newest result that ran and Home renders it.
-// The removed Scheduled summaries entry/popup is not used to inspect these deliveries.
-// Nothing is placed in the retained-result store or the renderer by the test.
-//
-// Evidence boundary: source/test evidence for the flag-off renderer with the Android bridge
-// stubbed (test/browser/flag-off-android.ts). The stub is not the resident runtime, its scheduler,
-// HostedDeliveryWorker, the native inbox journal or CalendarProvider, and no digest ran: the rows
-// are synthetic results in the agent's wire shape. Not APK, emulator, device or real-provider
-// acceptance.
 import { test, expect, type Page } from '@playwright/test';
 import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface, residentHome, AGENT_NAME } from './flag-off-android';
 
 const home = (page: Page) => page.getByRole('region', { name: 'Home', exact: true });
 const brief = (page: Page) => home(page).locator('[data-alpha-home-brief]');
-/** The app's "Read/Ran <when>" wording for an instant: the time today, otherwise the date too. */
 const when = (page: Page, at: number) => page.evaluate(at => {
   const clean = (text: string) => text.replace(/[  ]/g, ' '), date = new Date(at);
   const time = clean(date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
   return date.toDateString() === new Date().toDateString() ? time : `${clean(date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }))} ${time}`;
 }, at);
-/** One occurrence as the agent's result page returns it. */
 const result = (cursor: number, runId: string, completed: number, extra: Record<string, unknown>) => {
   const iso = (value: number) => new Date(value).toISOString();
   return { cursor, runId, workflowId: 'workflow-morning', workflowVersionId: 'version-1', templateVersion: 'hosted-digest-1', scheduledAt: iso(completed - 60_000),
     source: { observedAt: iso(completed - 60_000), expiresAt: iso(completed + 86_400_000) }, startedAt: iso(completed - 30_000), completedAt: iso(completed), error: null, ...extra };
 };
-/** The agent has new occurrences; the phone comes back online, which is when the app syncs. */
 async function deliver(page: Page, rows: unknown[]) {
   const before = await harness(page, f => f.digests.syncs + f.digests.pages);
   await page.evaluate(rows => { (window as any).flagOff.digests.results.push(...rows); (window as any).flagOff.persist(); window.dispatchEvent(new Event('online')); }, rows);
@@ -44,11 +24,9 @@ for (const route of ['native', 'renderer'] as const) test(`a digest result from 
   const foreign = await fenceNetwork(page);
   await flagOffAndroid(page, { digests: route });
   await residentHome(page);
-  // The first sync finds no result; there is no empty brief widget.
   await expect.poll(() => harness(page, f => f.digests.syncs + f.digests.pages), { timeout: 30_000 }).toBeGreaterThan(0);
   await expect(brief(page)).toHaveCount(0);
 
-  // 1. A run finishes. Its summary is the typed-steps text; the step payload is source material.
   const now = Date.now(), ranAt = now - 2 * 3_600_000;
   await deliver(page, [result(1, 'run-morning', ranAt, { status: 'finished', output: [{ nodeId: 'typed-steps', runId: 'run-morning', text: 'Synthetic brief: two meetings and one reply to send.', steps: [{ id: 'source', text: 'SYNTHETIC_RAW_SOURCE_456' }] }] })]);
   const card = brief(page);
@@ -56,7 +34,6 @@ for (const route of ['native', 'renderer'] as const) test(`a digest result from 
   const ran = await when(page, ranAt);
   await expect(card).toContainText('Latest brief');
   await expect(card.locator('.home-brief-title')).toHaveText('Synthetic brief: two meetings and one reply to send.');
-  // Source attribution is the connected agent; freshness is when the run completed, not when it was read.
   await expect(card.locator('.home-brief-status')).toHaveText(`${AGENT_NAME} · Ran ${ran}`);
   expect(await card.getAttribute('aria-label')).toContain(`Latest brief from ${AGENT_NAME}, ran ${ran}: Synthetic brief: two meetings and one reply to send.`);
   await expect(card).toHaveAttribute('data-alpha-home-brief-failed', 'false');
@@ -64,15 +41,10 @@ for (const route of ['native', 'renderer'] as const) test(`a digest result from 
   await card.scrollIntoViewIfNeeded();
   await page.screenshot({ path: info.outputPath(`home-brief-${route}.png`), animations: 'disabled' });
 
-  // 2. Later occurrences that the agent recorded without running them: a missed time, an
-  // overlapping run and a source that was not available. They are newer than the brief and must
-  // not replace it or count as a run.
   await deliver(page, [
     result(2, 'run-missed', now - 3_600_000, { status: 'missed', output: { status: 'missed', text: 'The scheduled time was missed. No backlog was executed.' } }),
     result(3, 'run-overlap', now - 1_800_000, { status: 'overlap', output: { status: 'overlap', text: 'An earlier run was still active.' } }),
     result(4, 'run-unavailable', now - 1_500_000, { status: 'unavailable', output: { status: 'unavailable', text: 'The source was not available.' } })]);
-  // Every non-run occurrence reached the real result reader. Native delivery commits
-  // full entries; renderer delivery acknowledges only after committing the page.
   if(route==='native')await expect.poll(()=>harness(page,f=>f.digests.inbox.map(row=>[row.runId,row.status]))).toEqual([
     ['run-morning','finished'],['run-missed','missed'],['run-overlap','overlap'],['run-unavailable','unavailable']]);
   else await expect.poll(()=>harness(page,f=>f.digests.acked)).toBe(4);
@@ -83,22 +55,17 @@ for (const route of ['native', 'renderer'] as const) test(`a digest result from 
   await expect(card).not.toContainText(/missed|Did not run|earlier run|not available/i);
   await expect(card).toHaveAttribute('data-alpha-home-brief-failed', 'false');
 
-  // 3. A newer run replaces it, with its own completion time.
   const secondAt = now - 600_000;
   await deliver(page, [result(5, 'run-evening', secondAt, { status: 'finished', output: { summary: 'Synthetic evening brief: nothing left open.' } })]);
   await expect(card.locator('.home-brief-title')).toHaveText('Synthetic evening brief: nothing left open.', { timeout: 20_000 });
   await expect(card.locator('.home-brief-status')).toHaveText(`${AGENT_NAME} · Ran ${await when(page, secondAt)}`);
 
-  // 4. A newer failed run is shown as a failure with the agent's own error text.
   const failedAt = now - 120_000;
   await deliver(page, [result(6, 'run-failed', failedAt, { status: 'failed', output: null, error: 'Synthetic source expired' })]);
   await expect(card).toHaveAttribute('data-alpha-home-brief-failed', 'true', { timeout: 20_000 });
   await expect(card.locator('.home-brief-title')).toHaveText('This digest stopped with an error on your agent. Open execution details to see what ran.');
   await expect(card.locator('.home-brief-status')).toHaveText(`${AGENT_NAME} · Failed ${await when(page, failedAt)}`);
 
-  // The harness counters start again when the page reloads, so what the first session asked of the
-  // agent is checked here: delivering and showing results started or changed no schedule, and on the
-  // native route the renderer never read the agent's result page itself.
   const firstSession = await harness(page, f => ({ refused: f.digests.refused as string[], runs: f.digests.runs, pages: f.digests.pages, configured: f.digests.configured.length, unexpected: f.unexpected }));
   expect(firstSession.refused).toEqual([]);
   expect(firstSession.runs).toBe(0);
@@ -106,24 +73,20 @@ for (const route of ['native', 'renderer'] as const) test(`a digest result from 
   if (route === 'native') { expect(firstSession.configured).toBeGreaterThan(0); expect(firstSession.pages).toBe(0); }
   else { expect(firstSession.configured).toBe(0); expect(firstSession.pages).toBeGreaterThan(0); }
 
-  // 5. The retained result survives a restart of the renderer and is shown again for the same agent.
   await page.reload();
   await expect(brief(page)).toHaveAttribute('data-alpha-home-brief-failed', 'true', { timeout: 30_000 });
   await expect(brief(page).locator('.home-brief-title')).toHaveText('This digest stopped with an error on your agent. Open execution details to see what ran.');
   expect(await page.evaluate(() => document.body.innerText.includes('SYNTHETIC_RAW_SOURCE_456'))).toBe(false);
   await expect(home(page)).not.toContainText('"nodeId"');
 
-  // After the reload, too, nothing was started or changed on the agent.
   const state = await harness(page, f => ({ refused: f.digests.refused as string[], runs: f.digests.runs, pages: f.digests.pages, acks: f.digests.acks, configured: f.digests.configured.length, inbox: f.digests.inbox.length, unexpected: f.unexpected }));
   expect(state.refused).toEqual([]);
   expect(state.runs).toBe(0);
   if (route === 'native') {
-    // The Android inbox was bound to the resident agent and is the only reader of the agent's results.
     expect(state.configured).toBeGreaterThan(0);
     expect(state.pages).toBe(0);
     expect(state.inbox).toBe(6);
   } else {
-    // The renderer committed each page before acknowledging it, in cursor order.
     expect(state.configured).toBe(0);
     expect(state.acks).toEqual([1, 4, 5, 6]);
   }
@@ -161,7 +124,6 @@ test('a retained Home brief does not reopen the retired Scheduled digests popup'
   expect(await harness(page,f=>f.digests.runs)).toBe(0);
 });
 
-// ---- Canonical Agent Calendar owns the Home card; native provider rows cannot replace its authority. ----
 const calendarCard = (page: Page) => page.locator('[data-alpha-home-calendar]');
 const soon = () => { const begin = Date.now() + 3_600_000; return { begin, end: begin + 1_800_000 }; };
 async function canonicalHome(page: Page, mode: 'event' | 'empty' | 'stale-empty' | 'future-empty' | 'wrong-owner') {
@@ -186,8 +148,6 @@ async function canonicalHome(page: Page, mode: 'event' | 'empty' | 'stale-empty'
     };
   }, mode);
   await residentHome(page);
-  // Hidden cards must be checked after the owner-bound reads, not against the
-  // transient empty markup before the fixture responses have been processed.
   await expect.poll(()=>page.evaluate(()=>[...new Set((window as any).canonicalHomeReads)].sort())).toEqual([
     '/api/lifeops/calendar/calendars','/api/lifeops/calendar/feed','/api/lifeops/calendar/next-context']);
   await page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>resolve())));
@@ -198,7 +158,6 @@ test('Home renders the canonical agent event without borrowing device names or i
   await canonicalHome(page, 'event');
   const card = calendarCard(page);
   await expect(card).toContainText('Agent calendar meeting');
-  // The shared agenda card names the event, its day and its time, as it does for device calendars.
   await expect(card).toHaveAccessibleName(/^Open calendar event: Agent calendar meeting, \w{3}, \w{3} \d{1,2}, (All day|\d{1,2}:\d{2})/);
   await expect(card).not.toContainText(/Device-only event|Private device calendar/);
   await expect(card).not.toHaveAttribute('aria-description', /Read|device/);
@@ -236,7 +195,6 @@ test('Calendar settings retain canonical Home authority even when native device 
   await button(page, 'Calendar').click();
   const settings = page.locator('[data-settings-page]:not([inert])').last();
   await expect(settings.getByRole('heading', {name:'Calendar',exact:true})).toBeVisible();
-  // The current product has one Calendar; native rows remain covered by native/retained-source tests.
   await expect(settings.getByRole('button', {name:'Android calendars',exact:true})).toHaveCount(0);
   await expect(settings.getByRole('button', {name:'Agent Calendar',exact:true})).toHaveCount(0);
   await page.evaluate(() => window.dispatchEvent(new Event('launcher-home')));
@@ -248,7 +206,6 @@ test('Calendar settings retain canonical Home authority even when native device 
 
 test('an event from another agent is not presented as this agent’s next event or as a verified empty calendar', async ({ page }) => {
   await canonicalHome(page, 'wrong-owner');
-  // No authorized item means no Home card; the existing Calendar entry still exposes the failure.
   await expect(calendarCard(page)).toHaveCount(0);
   await expect(home(page)).not.toContainText(/Nothing planned|Agent calendar meeting|Device-only event|Private device calendar/);
   await page.getByRole('button',{name:'Calendar',exact:true}).click();

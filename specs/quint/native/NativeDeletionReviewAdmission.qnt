@@ -1,4 +1,3 @@
-// One native reminder review's admission and bridge settlement token.
 module NativeDeletionReviewAdmission {
   type State = {phase: str, admissions: int, settlements: int, returned: bool}
   var s: State

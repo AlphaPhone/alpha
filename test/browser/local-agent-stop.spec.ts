@@ -2,9 +2,6 @@ import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import { test, expect } from '@playwright/test';
 import { installResidentAgentPlugin } from './helpers/resident-agent-plugin';
 
-// Real rendered connection UI/controller; only the native IPC boundary is synthetic.
-// No runtime, provider key, model request or external account is used.
-// Decision P-43: Stop is replaced by Restart; the agent is never left stopped.
 for (const scenario of ['confirmed', 'incomplete-timeout'] as const) {
   test(`Restart local agent waits for native shutdown, then starts again: ${scenario}`, async ({ page }) => {
     await installResidentAgentPlugin(page);
@@ -38,8 +35,6 @@ for (const scenario of ['confirmed', 'incomplete-timeout'] as const) {
             if (method === 'start') { f.starts++; return { state: 'ready' }; }
             if (method === 'stop') { f.stops++; return { state: 'stopping' }; }
             if (method === 'request') {
-              // Connected Notes and Calendar mount read-only source checks alongside the agent.
-              // This shutdown fixture supplies no source data and admits no write operation.
               if (input.method === 'GET' && (input.path === '/api/notes/state' || /^\/api\/lifeops\/calendar\/(feed|calendars|next-context)\?/.test(input.path))) return { status: 503, body: '{}' };
               let body: any;
               if (input.path === '/api/auth/me') body = { identity: { kind: 'owner', id: 'fixture-owner' }, access: { role: 'OWNER', mode: 'session' } };
@@ -95,8 +90,6 @@ for (const scenario of ['confirmed', 'incomplete-timeout'] as const) {
       }
       await page.evaluate(() => { (window as any).stopFixture.status = { state: 'stopped', serviceActive: false, socketListening: false }; });
       await page.clock.runFor(400);
-      // Confirmed shutdown is followed at once by a new start; the dialog closes on the new session.
-      // The fake clock also drives the new start's timers.
       for (let tick = 0; tick < 40 && await page.evaluate(() => (window as any).stopFixture.starts) < 2; tick++) await page.clock.runFor(500);
       await expect.poll(() => page.evaluate(() => (window as any).stopFixture.starts)).toBe(2);
       await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0);

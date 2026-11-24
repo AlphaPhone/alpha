@@ -1,8 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
 
-// Real composer, draft store, shell adapter and connection controller. Only the Android IPC
-// boundary and a remote agent are synthetic, in-page fixtures; nothing leaves the page and no
-// model is called. This is browser source evidence, not emulator or device acceptance.
 const REMOTE = 'https://agent.example.test';
 const ROOM = '99999999-8888-4777-8666-555555555555';
 type Options = { holdIdentity?: boolean; createFails?: boolean; createHangs?: boolean; createLimited?: boolean; abortRoute?: boolean; abortResult?: boolean; long?: boolean; assistantEntry?: boolean };
@@ -11,14 +8,12 @@ async function remoteAgent(page: Page, options: Options = {}) {
   await page.addInitScript(({ remote, room, options }) => {
     const w = window as any;
     w.androidBridge = {};
-    // Stands in for Android secure storage, which survives a reload of the page.
     let saved: [string, string][] = [];
-    try { saved = JSON.parse(sessionStorage.getItem('continuity-store') || '[]'); } catch { /* fixture only */ }
+    try { saved = JSON.parse(sessionStorage.getItem('continuity-store') || '[]'); } catch { }
     const store = new Map<string, string>(saved);
-    const keep = () => { try { sessionStorage.setItem('continuity-store', JSON.stringify([...store])); } catch { /* fixture only */ } };
+    const keep = () => { try { sessionStorage.setItem('continuity-store', JSON.stringify([...store])); } catch { } };
     const expiresAt = Date.now() + 86_400_000;
     store.set('remote:' + remote, JSON.stringify({ origin: remote, token: 'remote-session-token', identityId: 'fixture-owner', sessionId: 'remote-session-token', expiresAt }));
-    // The agent's own state survives a page reload; the phone's visible chat does not.
     let agent: { created: boolean; history: any[] } = { created: false, history: [] };
     try {
       if (!sessionStorage.getItem('continuity-seeded')) {
@@ -26,14 +21,13 @@ async function remoteAgent(page: Page, options: Options = {}) {
         localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({ kind: 'remote', origin: remote }));
         if (options.long) agent.history = Array.from({ length: 230 }, (_, index) => ({ id: `77777777-7777-4777-8777-${String(index).padStart(12, '0')}`, role: index % 2 ? 'assistant' : 'user', text: `Synthetic message ${index}`, timestamp: 1_000 + index }));
       } else agent = JSON.parse(sessionStorage.getItem('continuity-agent') || 'null') ?? agent;
-    } catch { /* storage failures are covered elsewhere */ }
-    const persist = () => { try { sessionStorage.setItem('continuity-agent', JSON.stringify(agent)); } catch { /* fixture only */ } };
+    } catch { }
+    const persist = () => { try { sessionStorage.setItem('continuity-agent', JSON.stringify(agent)); } catch { } };
     const f = w.continuity = {
       ownerId: 'fixture-owner', posts: 0, creates: 0, aborts: 0, historyReads: 0, pageReads: 0, ready: false, messageIds: [] as unknown[],
       createFails: !!options.createFails, createHangs: !!options.createHangs, createLimited: !!options.createLimited, abortResult: !!options.abortResult,
       holdReads: false, identityReleased:false, heldIdentity:null as null|(()=>void), lists: 0, heldRead: null as null | (() => void), heldList: null as null | (() => void),
       release: null as null | ((text: string) => void), assistantClosed: 0,
-      /** The agent finishes the held turn and persists its reply, whether or not the phone still listens. */
       finish(text: string) { const user = [...agent.history].reverse().find(item => item.role === 'user'); agent.history.push({ id: crypto.randomUUID(), role: 'assistant', text, timestamp: Date.now() + 1, replyToMessageId: user?.id }); persist(); },
     };
     const methods = (names: string[]) => names.map(name => ({ name, rtype: 'promise' }));
@@ -45,7 +39,6 @@ async function remoteAgent(page: Page, options: Options = {}) {
         { name: 'AlphaNotifications', methods: methods(['status', 'crossAppStatus', 'addListener', 'removeListener']) },
         { name: 'AlphaVoiceCloud', methods: methods(['checkPermissions']) },
         { name: 'ElizaSystem', methods: methods(['getBuildInfo']) },
-        // With `assistantEntry`, sessionStorage chooses whether this renderer is AlphaAssistActivity's.
         ...(options.assistantEntry ? [{ name: 'DailyApps', methods: methods(['surfaceInfo', 'closeAssistant']) }] : []),
       ],
       nativePromise: async (plugin: string, method: string, input: any) => {
@@ -72,7 +65,6 @@ async function remoteAgent(page: Page, options: Options = {}) {
         if (path === '/api/workflow/status') return ok({ status: 'unavailable' });
         if (path === '/api/conversations' && input.method === 'POST') {
           f.creates++;
-          // Offline: the request never completes, so no conversation exists and nothing was posted.
           if (f.createFails) throw Error('Network unavailable');
           if (f.createHangs) return new Promise(() => {});
           if (f.createLimited) return { status: 429, data: {} };
@@ -87,7 +79,6 @@ async function remoteAgent(page: Page, options: Options = {}) {
           const body = JSON.parse(input.body || '{}');
           f.posts++; f.messageIds.push(body.clientMessageId ?? null);
           agent.history.push({ id: crypto.randomUUID(), role: 'user', text: body.text, timestamp: Date.now() }); persist();
-          // Held until the test lets the agent answer over the still-open request.
           return new Promise(resolve => { f.release = (text: string) => { f.release = null; resolve(ok({ text, agentName: 'Continuity fixture' })); }; });
         }
         if (path === '/api/conversations/fixture-chat/messages' && input.method === 'GET') {
@@ -102,7 +93,6 @@ async function remoteAgent(page: Page, options: Options = {}) {
     };
   }, { remote: REMOTE, room: ROOM, options });
 }
-// The home composer and the conversation sheet each render one visible composer textbox.
 const composer = (page: Page) => page.locator('[data-alpha-layer="composer"][aria-hidden="false"], [data-alpha-layer="conversation"][aria-hidden="false"]').getByRole('textbox').first();
 const conversation = (page: Page) => page.locator('[data-alpha-layer="conversation"]');
 const fixture = <T>(page: Page, read: (f: any) => T) => page.evaluate(`(${read.toString()})(window.continuity)`) as Promise<T>;
@@ -129,16 +119,10 @@ async function typeDraft(page: Page, text: string) {
   await expect.poll(() => savedDraft(page), { timeout: 15_000 }).toBe(text);
 }
 const MAY_FINISH = 'May still finish';
-// The pending notice (may still finish, or cancelled) until the single check settles it.
 const CHECK_PENDING = /^(May still finish|Cancelled)$/;
 const UNKNOWN = 'Your message may have reached the agent. Check before sending it again.';
 const UNSETTLED = 'This message may already have been sent. Check the conversation before sending it again.';
 
-// A restart (the process dies) while a posted message waits for its reply: the device copy of the
-// sent text is marked as sending, so the next start never offers it as a draft. It is shown for
-// review, and keeping the empty composer clears only that copy. Nothing is posted again. The
-// conversation already exists, so the restart reopens the same draft slot (a new chat's first
-// message is covered by the next two tests).
 test('a restart while a message is in flight offers it for review, never as a draft, and posts nothing', async ({ page }) => {
   test.setTimeout(120_000);
   await connected(page);
@@ -168,10 +152,6 @@ test('a restart while a message is in flight offers it for review, never as a dr
   expect(await fixture(page, f => ({ posts: f.posts, creates: f.creates }))).toEqual({ posts: 0, creates: 0 });
 });
 
-// A new chat's first message is held in the "no conversation yet" slot, and its send creates and
-// selects the conversation. No warmup send: the restart opens that new conversation, and the held
-// message is offered for review there (not only when a later new chat opens). Sending stays
-// refused until it is reviewed, and nothing is posted or created again.
 async function firstSendRestart(page: Page, text: string) {
   await connected(page);
   await typeDraft(page, text);
@@ -188,7 +168,6 @@ async function firstSendRestart(page: Page, text: string) {
   const key = await bindingKey(page);
   expect(JSON.parse(key)[3]).toBe('fixture-chat');
   expect(await savedDraft(page, slot)).toBe(text);
-  // Enter while the review is open sends nothing.
   await composer(page).fill('Not before the review');
   await composer(page).press('Enter');
   await composer(page).fill('');
@@ -201,7 +180,6 @@ test('a restart during a new chat\'s first message offers it on the conversation
   await page.getByRole('button', { name: 'Replace saved draft with this text', exact: true }).click();
   await expect(status).toHaveCount(0);
   await expect.poll(() => savedDraft(page, slot)).toBe('');
-  // The composer is now the conversation's own draft.
   await typeDraft(page, 'Next words for the conversation');
   expect(await savedDraft(page, key)).toBe('Next words for the conversation');
   expect(await savedDraft(page, slot)).toBe('');
@@ -216,15 +194,11 @@ test('restoring a new chat\'s first message after a restart moves it into the co
   await expect(composer(page)).toHaveValue('Restore this first message');
   await expect(page.getByRole('button', { name: 'Restore saved draft', exact: true })).toHaveCount(0);
   await expect.poll(() => savedDraft(page, key), { timeout: 15_000 }).toBe('Restore this first message');
-  // Only once the conversation holds it is the "no conversation yet" copy cleared.
   await expect.poll(() => savedDraft(page, slot), { timeout: 15_000 }).toBe('');
   await page.waitForTimeout(1_000);
   expect(await fixture(page, f => ({ posts: f.posts, creates: f.creates }))).toEqual({ posts: 0, creates: 0 });
 });
 
-// The ACTION_ASSIST surface (AlphaAssistActivity) and the app are two renderers over the same device
-// draft slot of a conversation: words typed in either open in the other, Close keeps them, and
-// nothing is sent. A reload with the other entry stands in for the other Activity's renderer.
 test('the assistant surface and the app share the conversation draft through Close', async ({ page }) => {
   test.setTimeout(120_000);
   await connected(page, { assistantEntry: true });
@@ -257,15 +231,12 @@ test('an offline failure before the message is posted keeps the text and a later
   await composer(page).press('Enter');
   await expect.poll(() => fixture(page, f => f.creates)).toBe(1);
   await expect(composer(page)).toHaveValue('Keep this while offline');
-  // The text simply comes back: no line under the composer and no toast (owner, 2026-11-03).
   await expect(page.getByText('Your message is back in the composer')).toHaveCount(0);
   await expect(page.getByRole('status', { name: 'Assistant draft status', exact: true })).toHaveCount(0);
-  // Nothing carrying the message left the phone, so no unknown-outcome claim and no reconciliation.
   await expect(page.getByText(UNKNOWN, { exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^Check saved conversation/ })).toHaveCount(0);
   expect(await fixture(page, f => ({ posts: f.posts, creates: f.creates, reads: f.historyReads }))).toEqual({ posts: 0, creates: 1, reads: 0 });
   expect(await savedDraft(page, key)).toBe('Keep this while offline');
-  // Back online: only the person's own second Send posts the message, exactly once.
   await fixture(page, f => { f.createFails = false; });
   await expect(stop(page)).toHaveCount(0);
   await composer(page).press('Enter');
@@ -298,18 +269,15 @@ test('Stop says the agent may still finish, discards the late reply and reconcil
   await composer(page).press('Enter');
   await expect.poll(() => fixture(page, f => f.posts), { timeout: 15_000 }).toBe(1);
   await stop(page).click();
-  // The honest state is shown in the chat itself, not only in Agent connection.
   await expect(conversation(page).getByText(MAY_FINISH, { exact: true })).toBeVisible();
   await expect(stop(page)).toHaveCount(0);
   await expect(page.getByText(UNKNOWN, { exact: true })).toHaveCount(0);
   await expect(composer(page)).toHaveValue('');
   await expect.poll(() => savedDraft(page, key)).toBe('');
-  // The agent answers on the closed request and persists the reply: the late transport reply is discarded.
   await fixture(page, f => { f.release('Finished after Stop'); f.finish('Finished after Stop'); });
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await expect(conversation(page).getByText('Finished after Stop', { exact: true })).toHaveCount(0);
   expect(await fixture(page, f => f.historyReads)).toBe(0);
-  // One reconciliation read later shows it exactly once.
   await expect(conversation(page).getByText('Finished after Stop', { exact: true })).toHaveCount(1, { timeout: 40_000 });
   await expect(conversation(page).getByText(MAY_FINISH, { exact: true })).toHaveCount(0);
   await expect(conversation(page).getByText('Please finish anyway', { exact: true })).toHaveCount(1);
@@ -346,7 +314,6 @@ test('a new message after Stop retires the pending check and stale notice; nothi
   await expect(conversation(page).getByText(UNCHECKED, { exact: true })).toHaveCount(0);
   await fixture(page, f => f.release('Answer to the second question'));
   await expect(conversation(page).getByText('Answer to the second question', { exact: true })).toHaveCount(1);
-  // Two messages the person sent, two distinct identities, no automatic history replacement.
   expect(await fixture(page, f => ({ posts: f.posts, ids: new Set(f.messageIds).size, reads: f.historyReads }))).toEqual({ posts: 2, ids: 2, reads: 0 });
   await expect(conversation(page).getByText('First question', { exact: true })).toHaveCount(1);
 });
@@ -367,7 +334,6 @@ test('a new conversation after Stop retires the check; the stopped reply never r
   await page.evaluate(async () => { const { connectionController } = await import('/src/runtime/connection-ui.tsx'); await connectionController.newConversation(); });
   await expect.poll(selected, { timeout: 15_000 }).toEqual({ conversation: 'fixture-chat-2', messages: 0, replyNotice: '' });
   await expect(conversation(page).getByText(MAY_FINISH, { exact: true })).toHaveCount(0);
-  // The first conversation's reply lands on the agent; the pending check would have fired by now.
   await fixture(page, f => { f.release('Reply for the first conversation'); f.finish('Reply for the first conversation'); });
   await page.waitForTimeout(17_000);
   await expect(conversation(page).getByText('Reply for the first conversation', { exact: true })).toHaveCount(0);
@@ -382,7 +348,6 @@ test('pressing Send twice dispatches one message', async ({ page }) => {
   await typeDraft(page, 'Only once please');
   const box = composer(page);
   await box.focus();
-  // Two key presses with no wait between them, as a fast double tap delivers them.
   await Promise.all([page.keyboard.press('Enter'), page.keyboard.press('Enter')]);
   await expect.poll(() => fixture(page, f => f.posts), { timeout: 15_000 }).toBe(1);
   await expect(page.getByText('Review local draft storage before sending.', { exact: true })).toHaveCount(0);
@@ -402,9 +367,7 @@ test('disconnecting the agent mid-reply never shows the old reply or a recovery 
   await expect.poll(() => page.evaluate(async () => { const { connectionController } = await import('/src/runtime/connection-ui.tsx'); return connectionController.getSnapshot().session; }), { timeout: 15_000 }).toBeNull();
   await fixture(page, f => f.release?.('Late reply for the old agent'));
   await page.locator('.alpha-connection').getByRole('button', { name: 'Close connection settings', exact: true }).first().click({ timeout: 5_000 }).catch(() => {});
-  // The interruption is stated once; the old turn's text, reply and recovery offer never appear under the new owner.
   await expect(conversation(page).getByText(/^Request cancelled\./)).toHaveCount(1);
-  // The message was posted before the owner changed: the notice says it may have arrived, so it is not blindly resent.
   await expect(conversation(page).getByText(/It may already have been sent, so check before sending it again\.$/)).toHaveCount(1);
   for (const text of ['Asked the first agent', 'Late reply for the old agent', UNKNOWN, MAY_FINISH]) await expect(conversation(page).getByText(text, { exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^Check saved conversation/ })).toHaveCount(0);
@@ -422,7 +385,6 @@ test('reconnecting restores the saved remote conversation with older pages; the 
   await expect(conversation(page).getByText('Newest answer', { exact: true })).toHaveCount(1);
   await page.reload();
   await expect.poll(() => fixture(page, f => f.ready), { timeout: 30_000 }).toBe(true);
-  // Restored from the agent on connect: the recent window plus one older page, oldest first, once each.
   await expect.poll(() => fixture(page, f => ({ reads: f.historyReads, pages: f.pageReads })), { timeout: 30_000 }).toEqual({ reads: 1, pages: 1 });
   const restored = () => page.evaluate(async () => {
     const { connectionController } = await import('/src/runtime/connection-ui.tsx');
@@ -436,7 +398,6 @@ test('reconnecting restores the saved remote conversation with older pages; the 
   expect(JSON.parse(key).at(-1)).toBe('fixture-chat');
   await page.evaluate(() => { window.dispatchEvent(new Event('launcher-home')); window.dispatchEvent(new Event('alpha-back', { cancelable: true })); });
   await expect(composer(page)).toHaveValue('Unsent across navigation');
-  // A soft keyboard shrinks the viewport: the composer stays on screen with the same text.
   await page.setViewportSize({ width: 412, height: 520 });
   await expect(composer(page)).toHaveValue('Unsent across navigation');
   await expect(composer(page)).toBeInViewport();
@@ -445,7 +406,6 @@ test('reconnecting restores the saved remote conversation with older pages; the 
   await page.reload();
   await expect.poll(() => fixture(page, f => f.ready), { timeout: 30_000 }).toBe(true);
   await expect(composer(page)).toHaveValue('Unsent across navigation', { timeout: 30_000 });
-  // Nothing was sent by restoring, navigating, resizing or reloading.
   expect(await fixture(page, f => f.posts)).toBe(0);
   await expect.poll(restored, { timeout: 30_000 }).toMatchObject({ count: 232, conversation: 'fixture-chat' });
 });
@@ -460,21 +420,17 @@ test('a restored conversation longer than the chat window scrolls up to its firs
   await page.reload();
   await expect.poll(() => fixture(page, f => ({ reads: f.historyReads, pages: f.pageReads })), { timeout: 30_000 }).toEqual({ reads: 1, pages: 1 });
   const transcript = conversation(page).locator('[data-alpha-transcript]'), rows = transcript.locator('[data-alpha-message-id]');
-  // Closed, only the newest rows are rendered; open, a page of them; each scroll to the top adds a page.
   await expect(rows.last()).toContainText('Newest answer', { timeout: 20_000 });
   await expect(rows).toHaveCount(20);
   await page.getByRole('button', { name: 'Open conversation', exact: true }).click();
   await expect(rows).toHaveCount(100);
   await expect.poll(async () => { await transcript.evaluate(element => { element.scrollTop = 0; }); return rows.first().textContent(); }, { timeout: 20_000 }).toContain('Synthetic message 0');
   await expect(rows).toHaveCount(232);
-  // Prepending a history page preserves the reading anchor. Once the oldest page
-  // is mounted, the next upward scroll reaches its first message.
   await transcript.evaluate(element => { element.scrollTop = 0; });
   await expect(transcript.getByText('Synthetic message 0', { exact: true })).toBeInViewport();
   expect(await fixture(page, f => f.posts)).toBe(0);
 });
 
-// One notice for every stop the single check could not settle (not run, not finished, overtaken).
 const UNCHECKED = 'Outcome unknown';
 
 test('a rate limit before the message is posted keeps the text instead of reporting an unknown outcome', async ({ page }) => {
@@ -497,7 +453,6 @@ test('Stop is offered before the first reply chunk of a later message in the sam
   await expect.poll(() => fixture(page, f => f.posts), { timeout: 15_000 }).toBe(1);
   await fixture(page, f => f.release('First answer'));
   await expect(conversation(page).getByText('First answer', { exact: true })).toHaveCount(1);
-  // The conversation already exists, so nothing but the held post happens before the first chunk.
   await typeDraft(page, 'Second message');
   await composer(page).press('Enter');
   await expect.poll(() => fixture(page, f => f.posts), { timeout: 15_000 }).toBe(2);
@@ -520,7 +475,6 @@ test('a confirmed stop of one turn is never repeated as the outcome of a later s
   await expect.poll(() => fixture(page, f => f.posts), { timeout: 15_000 }).toBe(2);
   await stop(page).click();
   await expect(conversation(page).getByText(CHECK_PENDING)).toHaveCount(1, { timeout: 15_000 });
-  // A third message retires the second check. The first confirmed stop remains; no second outcome is invented.
   await typeDraft(page, 'A third message');
   await composer(page).press('Enter');
   await expect.poll(() => fixture(page, f => f.posts), { timeout: 15_000 }).toBe(3);
@@ -541,7 +495,6 @@ test('a check that reported its result keeps that statement, with no Check saved
   await typeDraft(page, 'Another message');
   await composer(page).press('Enter');
   await expect.poll(() => fixture(page, f => f.posts), { timeout: 15_000 }).toBe(2);
-  // The check did run; its statement stays and is not repeated for the later message.
   await expect(conversation(page).getByText(UNCHECKED, { exact: true })).toHaveCount(1);
   await expect(page.getByRole('button', { name: /^Check saved conversation/ })).toHaveCount(0);
   expect(await fixture(page, f => f.historyReads)).toBe(1);
@@ -557,7 +510,6 @@ test('a check overtaken by another connection operation says so instead of promi
   await expect(conversation(page).getByText(MAY_FINISH, { exact: true })).toBeVisible();
   await fixture(page, f => { f.holdReads = true; });
   await expect.poll(() => fixture(page, f => f.historyReads), { timeout: 40_000 }).toBe(1);
-  // The person opens the conversation list while the single read is still in flight.
   await page.evaluate(async () => { const { connectionController } = await import('/src/runtime/connection-ui.tsx'); void connectionController.listHistory(); });
   await expect.poll(() => fixture(page, f => f.lists), { timeout: 15_000 }).toBe(1);
   await fixture(page, f => { f.holdReads = false; f.heldRead(); });
@@ -570,7 +522,6 @@ test('a check overtaken by another connection operation says so instead of promi
 
 test('Stop is offered while an agent has not produced its first chunk, and a late first chunk is discarded', async ({ page }) => {
   test.setTimeout(90_000);
-  // A directly attached transport whose reply stays silent: nothing but the pending request can show Stop.
   await page.addInitScript(() => localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({ kind: 'offline' })));
   await page.goto('/');
   const box = page.getByRole('textbox', { name: 'Ask Alpha', exact: true });
@@ -589,22 +540,11 @@ test('Stop is offered while an agent has not produced its first chunk, and a lat
   await expect(stop(page)).toBeVisible({ timeout: 5_000 });
   await stop(page).click();
   await expect(stop(page)).toHaveCount(0);
-  // The late chunk is delivered; two frames later it would have rendered.
   await page.evaluate(() => { (window as any).silent.emit('Late first chunk'); return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); });
   await expect(conversation(page).getByText('Late first chunk', { exact: true })).toHaveCount(0);
-  // This transport is attached below the shell's dispatch tracking, so only Stop itself is asserted here;
-  // the outcome after Stop is covered by the connection-backed tests above.
   expect(await page.evaluate(() => (window as any).silent.posts)).toBe(1);
 });
 
-// Back and HOME during a reply. Collapsing the chat (Back from full to sheet, HOME while Home is the
-// current app) is not a Stop: the reply keeps arriving and is shown once. HOME from another app
-// changes the screen the turn was asked from, which is an explicit Stop with its one reconciliation.
-// That is the current behaviour: AlphaClient.setViewContext (runtime/alpha-client.ts) aborts the
-// foreground request whenever the view context's revision moves. Whether a view change should stop a
-// reply at all, or let it finish while refusing only the actions bound to the old screen, is an open
-// owner question;
-// this test pins the current answer until it is decided.
 for (const step of ['Back from full to sheet', 'HOME on Home'] as const) {
   test(`${step} during a reply keeps it: the finished reply appears once and nothing is resent`, async ({ page }) => {
     test.setTimeout(90_000);
@@ -622,7 +562,6 @@ for (const step of ['Back from full to sheet', 'HOME on Home'] as const) {
       await page.evaluate(() => window.dispatchEvent(new Event('launcher-home')));
       await expect(conversation(page)).toHaveAttribute('aria-hidden', 'true');
     }
-    // The reply arrives on the still-open request and brings the conversation sheet back.
     await fixture(page, f => { f.finish('Finished while collapsed'); f.release('Finished while collapsed'); });
     await expect(conversation(page).getByText('Finished while collapsed', { exact: true })).toHaveCount(1);
     await expect(conversation(page).getByText(`Keep replying after ${step}`, { exact: true })).toHaveCount(1);
@@ -648,7 +587,6 @@ test('HOME from another app during a reply is a Stop: one cancel, the reconcilia
   await expect(conversation(page).getByText(MAY_FINISH, { exact: true })).toBeVisible();
   await expect(stop(page)).toHaveCount(0);
   await expect.poll(() => fixture(page, f => f.aborts)).toBe(1);
-  // The agent finishes anyway; the late transport reply is discarded and the one check shows it once.
   await fixture(page, f => { f.release('Finished after HOME'); f.finish('Finished after HOME'); });
   await expect(conversation(page).getByText('Finished after HOME', { exact: true })).toHaveCount(1, { timeout: 40_000 });
   await expect(conversation(page).getByText('Asked from Notes', { exact: true })).toHaveCount(1);
@@ -665,7 +603,6 @@ test('typing during initial identity verification survives Minimize and admissio
 
 
 for(const edit of [false,true])test(`initial identity admission never transfers a restored offline draft${edit?' with edits':''}`,async({page})=>{
- // Two loads (the first and a reload) on the development server; under load one reload alone took the 30s default.
  test.setTimeout(90_000);
  await remoteAgent(page,{holdIdentity:true});await page.goto('/');await expect.poll(()=>fixture(page,f=>!!f.heldIdentity)).toBe(true);
  await page.evaluate(async()=>{const {assistantDraftStore}=await import('/src/runtime/assistant-draft-store.ts');const store=await assistantDraftStore(JSON.stringify(['offline']));await store.save(await store.read(),'Earlier offline private words');});

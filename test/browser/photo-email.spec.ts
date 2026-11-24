@@ -3,12 +3,10 @@ import {test,expect,type Page} from '@playwright/test';
 import {photosBridge} from './helpers/photos-bridge';
 const dialog=(page:Page)=>page.getByRole('dialog',{name:'Attach to email',exact:true});
 async function setup(page:Page){
- // Start from Home: Inbox must load its reviewed draft target before Photos hands it a source.
  await photosBridge(page,'full',false);
  await page.evaluate(async()=>{
   const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');
   const {Component}=await import('/src/prototype/model.js');
-  // Synthetic restartable native-slot stand-in; browser production intentionally has no Inbox secret slots.
   const {secureConnectionStore:s}=await import('/src/runtime/native-connection.ts');
   s.read=async(key:string)=>structuredClone(JSON.parse(sessionStorage.getItem('file-email-slots')||'{}')[key]??null) as any;
   s.compareExchange=async(key:string,prior:unknown,next:unknown)=>{const slots=JSON.parse(sessionStorage.getItem('file-email-slots')||'{}');if(JSON.stringify(slots[key]??null)!==JSON.stringify(prior))return {status:'conflict'} as any;slots[key]=next;sessionStorage.setItem('file-email-slots',JSON.stringify(slots));return {status:'saved'} as any;};

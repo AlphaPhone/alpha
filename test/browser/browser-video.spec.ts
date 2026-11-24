@@ -1,5 +1,4 @@
 import {test,expect} from '@playwright/test';
-// Synthetic camera/microphone sources; real MediaRecorder, codecs and IndexedDB.
 test.beforeEach(async({page})=>{
  await page.addInitScript(()=>{
  const devices=navigator.mediaDevices;Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:devices});
@@ -44,7 +43,6 @@ test('microphone denial and size overflow produce no saved video and permit a fr
  const result=await page.evaluate(async()=>{
   const {browserCamera:c,browserPhotoLibrary:p}=await import('/src/prototype/browser-camera.ts');const s=(window as any).videoTest;let denied=false,overflow=false;s.deny=true;
   try{await c.startRecording({audio:true,maxDuration:1,maxFileSize:1000000});}catch{denied=true;}s.deny=false;
-  // Wait for an actual encoded chunk, rather than assuming each codec starts in 300 ms.
   const recorded=async()=>{while(true){const state=await c.getRecordingState();if(state.fileSize>0||!state.isRecording)return;await new Promise(r=>setTimeout(r,25));}};
   await c.startRecording({audio:true,maxDuration:2,maxFileSize:1});await recorded();try{await c.stopRecording();}catch(error){overflow=String(error).includes('Video exceeded the size limit.');}const empty=(await p.list()).items.length;
   await c.startRecording({audio:true,maxDuration:2,maxFileSize:1000000});await recorded();await c.stopRecording();return {denied,overflow,empty,saved:(await p.list()).items.length};

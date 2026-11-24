@@ -1,4 +1,3 @@
-/// Per-runtime turn ownership, cancellation and asynchronous-context lookup.
 module CoreTurnControllers {
   val ids = Set(1, 2, 3)
   val registries = Set(1, 2)

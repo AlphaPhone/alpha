@@ -1,4 +1,3 @@
-/// Projection of createStartupPermissionFlow and the versioned walkthrough record.
 module StartupPermissions {
   type State = { status: str, attempted: bool, granted: bool, enabled: bool,
     requestable: bool, pending: bool, generation: int, captured: int,
@@ -35,7 +34,6 @@ module StartupPermissions {
   action resumeDuringPrompt = s' = s
   action step = any { check, enable, prompt, result(true), result(false), failed, denied,
     persistNext, persistFailed, restart, storageFails, storageRecovers, oldCompletedInstall, resumeDuringPrompt }
-  /// Failed best-effort storage retains the attempt only until the flow is recreated.
   val NoRepeatedPrompt = s.sessionRequests <= 1
   val PersistedAttemptRestored = s.persistedAttempted implies s.attempted
   val DurableProgress = s.step == s.persistedStep

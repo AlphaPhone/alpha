@@ -1,4 +1,3 @@
-/// One minute is one clock step. Failed server reads do not create network-return permits.
 module CloudPlanRecheck {
   type State = { online: bool, visible: bool, scope: int, lost: int,
     clock: int, last: int, reading: bool, startedOffline: bool, reads: int }

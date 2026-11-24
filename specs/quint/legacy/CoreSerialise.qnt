@@ -1,4 +1,3 @@
-// Literal conversion of packages/core/tla/Serialise.tla at 4787d51a142.
 module CoreSerialiseTemplate {
   const Calls: Set[str]
   type State = {chain: List[str], pc: str -> str, outcome: str -> str}

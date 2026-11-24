@@ -1,4 +1,3 @@
-// External browser dispatch is admitted at the final presentation boundary.
 module BrowserExternalHandoff {
   type Launch = {tab: str, revision: int, privateConfirmed: bool, approved: bool, exact: bool}
   type State = {privateTab: bool, https: bool, hidden: bool, left: bool, locked: bool, disposed: bool,

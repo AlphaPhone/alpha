@@ -1,9 +1,5 @@
 import { test, expect } from '@playwright/test';
 
-// The live voice client (apps/app/src/runtime/live-voice.ts) in a real browser against a stub
-// agent: POST /api/asr/local-inference/live answered by a route handler, and the ephemeral
-// voice-transcript agent events delivered over a stubbed agent WebSocket. No microphone, model or
-// network: the stub speaks the upstream wire format (elizaOS #36213 / #36214).
 test('live voice: partials render as interim text, stale turns are dropped and the final arrives once', async ({ page }) => {
   const posts: any[] = [];
   let socket: import('@playwright/test').WebSocketRoute | undefined;
@@ -39,7 +35,6 @@ test('live voice: partials render as interim text, stale turns are dropped and t
   await expect(page.locator('[data-test-interim]')).toHaveText('Remind me');
   send({ turnId: 'turn-1', phase: 'partial', text: 'Remind me to call Sam', seq: 2 });
   await expect(page.locator('[data-test-interim]')).toHaveText('Remind me to call Sam');
-  // A stale turn and another session never replace the interim text.
   send({ turnId: 'turn-0', phase: 'partial', text: 'from an earlier turn', seq: 7 });
   socket!.send(JSON.stringify({ type: 'agent_event', stream: 'voice-transcript', payload: { type: 'voice-transcript', sessionId: 'other', turnId: 'turn-1', phase: 'partial', text: 'not this session', seq: 3 } }));
   await page.waitForTimeout(100);
@@ -55,17 +50,12 @@ test('live voice: partials render as interim text, stale turns are dropped and t
   expect(typeof finals[0].latency.firstPartialMs).toBe('number');
   expect(posts.map(body => body.vad?.[0]?.type)).toEqual(['speech-start', 'speech-end']);
   expect(posts[0].frames[0]).toMatchObject({ sampleRate: 16000, channels: 1, samples: 512 });
-  // Interim text never reaches storage.
   const stored = await page.evaluate(() => JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage }));
   expect(stored).not.toContain('Remind me to call Sam');
   await page.evaluate(() => (window as any).liveSession.close());
   expect(posts.at(-1)).toMatchObject({ sessionId, close: true });
 });
 
-// The shared native live transport (@elizaos/voice/native-live, projected from the pin) that
-// native-live-voice.ts binds to AlphaVoiceCloud, driven in a real browser by a fake bridge that
-// emits the bridge's events, with partials over a stubbed agent WebSocket. No microphone, VAD,
-// model or native code: the bridge here is a page object speaking the bridge's event contract.
 test('native live transport: owner-routed capture admits only its own events, gates partials and fences an owner change', async ({ page }) => {
   let socket: import('@playwright/test').WebSocketRoute | undefined;
   await page.routeWebSocket('ws://stub-agent.invalid/ws', ws => { socket = ws; });
@@ -98,7 +88,6 @@ test('native live transport: owner-routed capture admits only its own events, ga
   send({ sessionId: captureId, turnId: 't1', phase: 'speech-start' });
   send({ sessionId: captureId, turnId: 't1', phase: 'partial', text: 'Call Sam', seq: 1 });
   await expect(page.locator('[data-test-native-interim]')).toHaveText('Call Sam');
-  // Another capture's partials and a stale capture's final never reach this one.
   send({ sessionId: 'another-capture', turnId: 't1', phase: 'partial', text: 'not mine', seq: 2 });
   await page.evaluate(() => (window as any).bridge.emit('liveCaptureTranscript', { captureId: 'stale', final: { turnId: 'x', text: 'stale', mode: 'stream' } }));
   await page.waitForTimeout(100);
@@ -106,7 +95,6 @@ test('native live transport: owner-routed capture admits only its own events, ga
   await page.evaluate(id => { const b = (window as any).bridge; b.emit('liveCaptureFrames', { captureId: id, vad: [{ type: 'speech-start', timestampMs: 1 }, { type: 'speech-end', timestampMs: 2 }] }); b.emit('liveCaptureTranscript', { captureId: id, final: { turnId: 't1', text: 'Call Sam at five', mode: 'stream' } }); }, captureId);
   await expect(page.locator('[data-test-native-interim]')).toHaveText('');
   expect(await page.evaluate(() => (window as any).segments)).toEqual(['Call Sam at five']);
-  // An owner change fences the next event and discards the capture.
   await page.evaluate(id => { const w = window as any; w.owner = 'owner-2'; w.bridge.emit('liveCaptureTranscript', { captureId: id, final: { turnId: 't2', text: 'private', mode: 'stream' } }); }, captureId);
   await expect.poll(() => page.evaluate(() => (window as any).bridge.stops.length)).toBe(1);
   expect(await page.evaluate(() => (window as any).bridge.stops[0])).toMatchObject({ captureId, discard: true });

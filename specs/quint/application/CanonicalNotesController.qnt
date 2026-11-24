@@ -1,5 +1,3 @@
-// Current CanonicalNotesController + Alpha's NotesController / NotesSnapshotState.
-// Note bodies are opaque IDs. Transport callbacks may outlive cancellation.
 module CanonicalNotesController {
   type State = { owner: bool, retired: bool, revision: int, notes: Set[int],
     readId: int, readAbortId: int, reads: Set[int], readCalls: Set[int], aborted: Set[int],
@@ -14,7 +12,6 @@ module CanonicalNotesController {
     { ...value, seq: id, readId: id, readAbortId: id,
       reads: value.reads.union(Set(id)), readCalls: value.readCalls.union(Set(id)), invalidated: false, phase: "loading" }
   }
-  // A completed operation coalesces all intervening invalidations into one GET.
   pure def settle(value: State): State =
     if (value.invalidated and current(value) and value.writeId == 0)
       if (value.readId == 0) beginRead(value)

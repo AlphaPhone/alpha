@@ -10,17 +10,10 @@ import java.util.TreeSet;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/**
- * Replays HomeInstanceHandoff model steps on the real MainActivity. The harness plays Android: it
- * resolves a start to the task of its kind (1 home, 2 standard), reuses that task's page owner or
- * creates an instance, and lists the standard task for a move only when the step says the move
- * works. Every hand-off, acknowledgement and task-kind decision is MainActivity's.
- */
 public final class HomeInstanceHandoffReplay {
   static final String START = "replay.start";
   static boolean counting;
   static int delivered;
-  /** Records the delivery of an external start's intent; decides nothing. */
   static final class Page extends MainActivity {
     @Override
     public void onNewIntent(Intent intent) {

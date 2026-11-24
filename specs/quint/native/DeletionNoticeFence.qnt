@@ -1,8 +1,3 @@
-// The renderer's quiet-polling policy over the reviewed deletion Undo window. The policy keeps
-// the set of pending deletions the current owner was last shown. A passive status read that
-// fails stays quiet unless such a row is known; an owner change starts a new generation with
-// nothing known, and a read, Undo or dismissal admitted under an earlier generation can neither
-// add to nor remove from what the new generation knows, even after the owner changes back.
 module DeletionNoticeFence {
   type Call = { kind: str, admitted: int, row: int, outcome: str }
   type State = {
@@ -20,26 +15,21 @@ module DeletionNoticeFence {
   def flying(slot: int, kind: str): bool = s.calls.get(slot).kind == kind and s.calls.get(slot).outcome == "flying"
   def current(slot: int): bool = s.calls.get(slot).admitted == s.generation
   def settle(slot: int, outcome: str): int -> Call = s.calls.set(slot, { ...s.calls.get(slot), outcome: outcome })
-  // The signed-in owner changes while the notice is subscribed: a new generation, nothing known.
   action ownerChanges = all { s.generation < 3,
     s' = { ...s, owner: 1 - s.owner, generation: s.generation + 1, known: Set() } }
   action startCall(slot: int, kind: str, row: int): bool = all {
     s.calls.get(slot).outcome != "flying",
     s' = { ...s, calls: s.calls.set(slot, { kind: kind, admitted: s.generation, row: if (kind == "pending") -1 else row, outcome: "flying" }) } }
-  // The bridge answers a status read with the rows still inside their notice phases. The answer
-  // is always handed on; only a read admitted under the current generation replaces what is known.
   action pendingAnswers(slot: int, rows: Set[int]): bool = all { flying(slot, "pending"),
     s' = { ...s, calls: settle(slot, "returned"),
       known: if (current(slot)) rows else s.known,
       knownGeneration: if (current(slot)) s.generation else s.knownGeneration,
       staleEffects: if (current(slot)) s.staleEffects else s.staleEffects + 1 } }
-  // A failed status read is reported only to a generation that knows a pending deletion.
   action pendingFails(slot: int): bool = all { flying(slot, "pending"),
     val surfaced = current(slot) and s.known != Set()
     s' = { ...s, calls: settle(slot, if (surfaced) "error" else "quiet"),
       surfacedUnknown: s.surfacedUnknown or (surfaced and s.known == Set()),
       hiddenKnown: s.hiddenKnown or (not(surfaced) and current(slot) and s.known != Set()) } }
-  // Only a confirmed Undo retires its row; an Undo that found the deletion already done does not.
   action undoAnswers(slot: int, confirmed: bool): bool = all { flying(slot, "undo"),
     val applies = current(slot) and confirmed
     s' = { ...s, calls: settle(slot, "returned"),
@@ -49,7 +39,6 @@ module DeletionNoticeFence {
     s' = { ...s, calls: settle(slot, "returned"),
       known: if (current(slot)) s.known.exclude(Set(s.calls.get(slot).row)) else s.known,
       staleEffects: if (current(slot)) s.staleEffects else s.staleEffects + 1 } }
-  // An explicit Undo or dismissal that fails is always reported.
   action explicitFails(slot: int): bool = all { flying(slot, "undo") or flying(slot, "dismiss"),
     s' = { ...s, calls: settle(slot, "error") } }
   action step = {
@@ -61,7 +50,6 @@ module DeletionNoticeFence {
     any { ownerChanges, startCall(slot, kind, row), pendingAnswers(slot, rows), pendingFails(slot),
       undoAnswers(slot, confirmed), dismissAnswers(slot), explicitFails(slot), s' = s }
   }
-  // What is known was shown to the generation that is current.
   val KnownIsCurrent = s.known != Set() implies s.knownGeneration == s.generation
   val GenerationFollowsOwner = s.owner == s.generation % 2 and s.generation <= 3
   val FailuresSurfaceOnlyForKnownRows = not(s.surfacedUnknown)
@@ -82,7 +70,6 @@ module DeletionNoticeFence {
     .expect(s.calls.get(0).outcome == "quiet" and safety)
     .then(startCall(0, "pending", 0)).then(pendingAnswers(0, Set(1))).then(startCall(0, "pending", 0)).then(pendingFails(0))
     .expect(s.calls.get(0).outcome == "error" and s.known == Set(1) and safety)
-  // A read admitted under the first owner answers after the owner changed and changed back.
   run oldReadCannotReviveWarningsTest = init.then(startCall(0, "pending", 0)).then(ownerChanges).then(ownerChanges)
     .then(pendingAnswers(0, Set(0))).expect(s.known == Set() and s.staleEffects == 1 and safety)
     .then(startCall(1, "pending", 0)).then(pendingFails(1)).expect(s.calls.get(1).outcome == "quiet" and safety)

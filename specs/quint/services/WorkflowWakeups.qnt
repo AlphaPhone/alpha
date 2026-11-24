@@ -1,4 +1,3 @@
-/// One persisted execution, two timer identities and its host-owned wake-up reservation.
 module WorkflowWakeups {
   type Run = { present: bool, typed: bool, status: str, finished: bool, active: bool,
     starts: int, now: int, wakeAt: int, stopped: bool, cancelled: bool,

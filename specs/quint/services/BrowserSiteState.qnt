@@ -1,4 +1,3 @@
-/// Native isolated-profile admission, per-origin decisions and HTTP authentication.
 module BrowserSiteState {
   type Site = {
     privateTab: bool, phase: str, foreground: bool, selected: bool,
@@ -20,7 +19,6 @@ module BrowserSiteState {
     nondet privateTab = Set(false, true).oneOf()
     initFor(privateTab)
   }
-  /// Cookie policy is read back. WebAuthn stays at the fresh WebView default NONE.
   action buildWithEngine(cookiePolicyAccepted: bool, engineAvailable: bool): bool = all {
     s.phase == "new",
     s' = { ...s, phase: if (cookiePolicyAccepted and engineAvailable) "ready" else "failed",
@@ -61,7 +59,6 @@ module BrowserSiteState {
       permissionResult: granted and s.phase == "committed" and
         s.requestedOrigin == s.origin and s.requestedNavigation == s.navigation }
   }
-  /// Standard WebView supplies host/realm only, so current HTTP auth stays manual.
   action authChallenge(secureSameHost: bool): bool = all {
     s.phase.in(Set("loading", "committed")), s.foreground, s.selected, s.prompt == "none",
     s.authAttempts < 3,
@@ -75,8 +72,6 @@ module BrowserSiteState {
     s' = { ...s, prompt: "none", passwordPresent: false, passwordSubmitted: true }
   }
   action dismiss = s' = { ...s, prompt: "none", passwordPresent: false }
-  /// Android's own permission dialog pauses the app and is not a site prompt: pausing or
-  /// showing another tab cancels a site or sign-in prompt and leaves that dialog to answer.
   action hide = s' = { ...s, foreground: false,
     prompt: if (s.prompt == "runtime") "runtime" else "none", passwordPresent: false }
   action resume = s' = { ...s, foreground: true }
@@ -123,7 +118,6 @@ module BrowserSiteState {
   run switchedTabCancelsPromptTest = initFor(false).then(build(true)).then(navigate(1))
     .then(commit).then(permissionRequest(1)).then(deselect).expect(s.prompt == "none" and safety)
   run unavailableEngineRefusesTabTest = initFor(false).then(buildWithEngine(true, false)).expect(s.phase == "failed" and safety)
-  /// The Android dialog pauses the app. Its answer still counts for the same page and origin.
   run runtimeDialogSurvivesPauseTest = initFor(false).then(build(true)).then(navigate(1))
     .then(commit).then(permissionRequest(1)).then(permissionDecision(true)).then(hide)
     .expect(RuntimePromptWhilePausedWitness and safety).then(androidResult(true)).expect(s.permissionResult and safety)

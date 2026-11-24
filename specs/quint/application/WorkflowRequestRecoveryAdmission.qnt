@@ -1,4 +1,3 @@
-// Browser recovery binds the installed workflow-request document to one live review.
 module WorkflowRequestRecoveryAdmission {
   type State = {allowed: bool, seen: int, owner: int, reading: Set[int], loading: Set[int],
     offered: Set[int], closed: Set[int], captured: Set[int], saving: Set[int], published: Set[int], reported: Set[int]}

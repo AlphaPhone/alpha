@@ -1,5 +1,3 @@
-/// Native seven-permission React coordinator. Progress is installation UI state.
-/// Platform status is authority. Old platform calls may outlive a UI generation.
 module PermissionWalkthrough {
   pure val Keys = 0.to(6)
   pure val States = Set("checking", "request", "settings", "ready", "unavailable")
@@ -61,8 +59,6 @@ module PermissionWalkthrough {
     s.operations.get(key) != s.generation,
     s' = { ...s, operations: s.operations.set(key, -1) } }
   action retiredResult = s' = s
-  /// A reviewed choice advances this session even when its durable write fails.
-  /// The last choice records completion. The Ready button only acknowledges that UI result.
   action advance = all { s.signedIn, s.enabled or s.reopened, s.phase == "permissions", s.pending == -1,
     s.target == -1, s.progress.in(Keys), s.states.get(s.progress) == "ready",
     val finalStep = s.progress == 6
@@ -140,8 +136,6 @@ module PermissionWalkthrough {
     .then(ownerChange).then(openTarget(1)).then(platformStatus(1, false)).then(begin).then(request)
     .then(staleResult(0)).expect(s.pending == 1 and s.operations.get(1) == s.generation and safety)
   run completedRemountTest = orderedProgressTest.then(restart).expect(s.phase == "home" and s.progress == -1 and safety)
-  /// Image provisioning supplies platform status, not a completed installation marker. The
-  /// existing advance transition needs a ready row and never issues a permission request.
   run imageGrantedProgressTest = orderedProgressTest
     .expect(Keys.forall(key => s.requests.get(key) == 0) and s.completed and s.savedProgress == 7 and safety)
 }

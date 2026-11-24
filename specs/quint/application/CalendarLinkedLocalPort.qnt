@@ -1,27 +1,12 @@
-// The browser calendar's local port for linked calendar sync: one stored event read, updated
-// from the provider or staged for deletion on behalf of the sync controller. Every call is
-// fenced by the controller's binding and the calendar source it was created for, an update
-// names the revision the controller last read, and a pending deletion holds the event.
 module CalendarLinkedLocalPort {
   type State = {
-    // bound: the controller's owner and Google binding are still the enabled ones.
-    // sourceSame: the stored calendar is still the source this port was created for.
     bound: bool, sourceSame: bool,
-    // The event in the stored calendar: present, its revision, and an unresolved deletion.
     exists: bool, revision: int, pending: bool,
-    // Whether the stored event keeps the reviewed repeat/guests, and what scope was staged.
     series: bool, guests: bool, richUpdate: bool, stagedScope: str,
-    // known: the revision the controller last read (-1 before any read).
     known: int,
-    // The call in progress. phase: "admitted" after the first check, "written" once the
-    // document step ended and only the closing check remains. wrote: the revision an update
-    // stored (-1 otherwise); the owner may edit the event again before the closing check.
     op: str, phase: str, expected: int, ownerCurrent: bool, result: str, wrote: int,
     outcome: str,
-    // Notices sent to the page, completed calls and stored writes made by the port.
     documentNotices: int, deletionNotices: int, finished: int, writes: int,
-    // What a stored write found: a revision other than the one named, an ended binding or a
-    // replaced source, an unresolved deletion. lateAbort: a write whose call then gave no result.
     staleWrite: bool, unboundWrite: bool, heldWrite: bool, lateAbort: bool
   }
   var s: State
@@ -35,16 +20,12 @@ module CalendarLinkedLocalPort {
     staleWrite: false, unboundWrite: false, heldWrite: false, lateAbort: false }
   pure def ended(st: State, outcome: str): State =
     { ...st, op: "none", phase: "idle", expected: -1, result: "none", wrote: -1, richUpdate: false, outcome: outcome }
-  // A stored write, with what it found recorded.
   pure def wrote(st: State, result: str): State = {
     ...st, phase: "written", result: result, writes: st.writes + 1,
     staleWrite: st.staleWrite or st.revision != st.expected or not(st.exists),
     unboundWrite: st.unboundWrite or not(st.bound) or not(st.sourceSame),
     heldWrite: st.heldWrite or st.pending
   }
-  // The call starts: an unbound controller is refused before anything is read, and a provider
-  // event that cannot be stored without losing fields before anything is written. An update or
-  // deletion names the revision the controller holds.
   action beginWithFields(kind: str, valid: bool, richUpdate: bool): bool = all {
     s.op == "none", Ops.contains(kind), kind == "get" or s.known >= 0,
     s' = if (not(s.bound)) ended(s, "aborted")
@@ -53,13 +34,10 @@ module CalendarLinkedLocalPort {
         ownerCurrent: true, richUpdate: richUpdate }
   }
   action begin(kind: str, valid: bool): bool = beginWithFields(kind, valid, false)
-  // A valid provider patch carries a supported series with a nonempty guest list.
   action beginSeriesUpdate = beginWithFields("apply", true, true)
-  // The person the deletion would be attributed to changed while it waited for the calendar.
   action ownerChanged = all {
     s.op == "delete", s.phase == "admitted", s.ownerCurrent, s' = { ...s, ownerCurrent: false }
   }
-  // The stored calendar is read and, for an update or deletion, changed in the same transaction.
   action transact = all {
     s.phase == "admitted",
     s' = if (not(s.bound) or not(s.sourceSame)) ended(s, "aborted")
@@ -75,8 +53,6 @@ module CalendarLinkedLocalPort {
       else if (s.revision != s.expected or not(s.ownerCurrent)) ended(s, "changed")
       else { ...wrote(s, "staged"), pending: true, stagedScope: if (s.series) "series" else "event" }
   }
-  // The closing check: a controller unbound meanwhile gets no result and the page no notice,
-  // though a write already made stays.
   action finish = all {
     s.phase == "written",
     s' = if (not(s.bound)) { ...ended(s, "aborted"), lateAbort: s.lateAbort or s.result != "absent" }
@@ -85,7 +61,6 @@ module CalendarLinkedLocalPort {
         documentNotices: s.documentNotices + 1,
         deletionNotices: if (s.op == "delete") s.deletionNotices + 1 else s.deletionNotices }
   }
-  // The owner's own changes to the stored calendar, and the controller's binding ending.
   action localEdit = all {
     s.exists, not(s.pending), s.revision < 4, s' = { ...s, revision: s.revision + 1 }
   }
@@ -97,9 +72,6 @@ module CalendarLinkedLocalPort {
   action step = {
     nondet kind = Ops.oneOf()
     nondet valid = Bool.oneOf()
-    // The port's own steps are taken more often than the owner's, and the changes that cannot be
-    // taken back (a finished deletion, a replaced source, an ended binding) least often, so
-    // sampled walks complete calls.
     nondet lot = 0.to(9).oneOf()
     any {
       begin(kind, valid), transact, finish,
@@ -109,18 +81,13 @@ module CalendarLinkedLocalPort {
     }
   }
 
-  // The port never overwrites an event the controller has not read at its current revision.
   val NoStaleWrite = not(s.staleWrite)
-  // Nothing is written for an unbound controller or into a different calendar source.
   val WritesAreFenced = not(s.unboundWrite)
-  // An event with an unresolved deletion is neither updated nor staged again.
   val PendingDeletionHolds = not(s.heldWrite)
   val OneCall = (s.op == "none") == (s.phase == "idle") and (s.phase == "written" implies s.op != "get")
     and (s.result != "none") == (s.phase == "written") and (s.wrote >= 0) == (s.result == "applied")
-  // The page is told only about calls that completed for a bound controller.
   val NoticesFollowCompletion = s.documentNotices <= s.finished and s.deletionNotices <= s.documentNotices
   val WritesAreCounted = s.writes <= s.revision + s.deletionNotices + 1
-  // The controller never holds a revision newer than the stored one.
   val KnownWasRead = s.known <= s.revision
   val TypeOK = s.op.in(Ops.union(Set("none"))) and s.phase.in(Set("idle", "admitted", "written"))
     and Outcomes.contains(s.outcome) and s.result.in(Set("none", "applied", "staged", "absent"))
@@ -134,7 +101,6 @@ module CalendarLinkedLocalPort {
   val StaleRefusedWitness = s.outcome == "changed" and s.writes == 0 and s.revision > 0
   val PendingBlockedWitness = s.outcome == "pending" and s.pending
   val SourceReplacedWitness = s.outcome == "aborted" and s.bound and not(s.sourceSame)
-  // The update was stored, then the binding ended before the closing check: no result, no notice.
   val WrittenThenAbortedWitness = s.lateAbort and s.outcome == "aborted" and s.documentNotices == 0
   val AbsentDeleteWitness = s.outcome == "absent" and not(s.exists)
 
@@ -148,7 +114,6 @@ module CalendarLinkedLocalPort {
     .expect(s.outcome == "snapshot" and s.series and s.guests and safety)
     .then(begin("delete", true)).then(transact).then(finish)
     .expect(s.pending and s.series and s.guests and s.stagedScope == "series" and safety)
-  // The owner edited the event after the controller read it: the update is refused, nothing written.
   run staleUpdateRefusedTest = init.then(begin("get", true)).then(transact).then(localEdit)
     .then(begin("apply", true)).then(transact)
     .expect(StaleRefusedWitness and s.revision == 1 and s.documentNotices == 0 and safety)
@@ -159,7 +124,6 @@ module CalendarLinkedLocalPort {
     .then(begin("get", true)).then(transact).expect(s.outcome == "pending")
     .then(undoDeletion).then(begin("apply", true)).then(transact).then(finish)
     .expect(s.outcome == "applied" and safety)
-  // A deletion from sync is staged with the owner's Undo window; the event itself stays.
   run deleteIsStagedTest = init.then(begin("get", true)).then(transact).then(begin("delete", true)).then(transact)
     .then(finish).expect(StagedWitness and s.deletionNotices == 1 and s.documentNotices == 1 and s.revision == 0)
     .then(begin("delete", true)).then(transact).expect(s.outcome == "pending" and s.writes == 1 and safety)
@@ -172,8 +136,6 @@ module CalendarLinkedLocalPort {
   run unboundAfterWriteTest = init.then(begin("get", true)).then(transact).then(begin("apply", true)).then(transact)
     .then(unbind).then(finish)
     .expect(WrittenThenAbortedWitness and s.revision == 1 and s.known == 0 and s.finished == 1 and safety)
-  // The owner edits the event between the stored update and the closing check: the controller
-  // is given the revision its update stored, so its next update is refused until it reads again.
   run editAfterWriteTest = init.then(begin("get", true)).then(transact).then(begin("apply", true)).then(transact)
     .then(localEdit).then(finish).expect(s.outcome == "applied" and s.known == 1 and s.revision == 2)
     .then(begin("apply", true)).then(transact).expect(s.outcome == "changed" and s.writes == 1 and safety)

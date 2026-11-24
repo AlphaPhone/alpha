@@ -4,7 +4,6 @@ import ai.alphacompute.alphaphone.Trace;
 import java.util.*;
 import org.json.*;
 
-/** Read-only observations of the actual adaptive floor, ring and float sample storage. */
 public final class SpeechGateTraces {
  float[] output;
  int outputs;

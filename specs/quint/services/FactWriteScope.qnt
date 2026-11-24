@@ -13,7 +13,6 @@ module FactWriteScope {
   pure val seedRow: Row = {id: 0, evidence: Set(0)}
   pure val candidateLimit = 120
 
-  // In these schedules, seed, unrelated rows and attempt IDs order the distinct SQL timestamps.
   pure def rank(room: Room, row: Row): int =
     room.rows.filter(other => other.id > row.id).size() + (if (row.id == 0) room.padding else 0)
   pure def candidate(room: Room): Row =

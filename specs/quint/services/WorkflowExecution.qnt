@@ -1,7 +1,3 @@
-/// Version-fenced manual submissions and the separate development trigger queue.
-/// Current receipt delivery for an account-owned run is fenced to that account. Another account
-/// cannot decide it and claims at most one best-effort cancellation with the existing request.
-/// Completed/device-owned history is a separate policy; this model tracks one signed-in submission.
 module WorkflowExecution {
   type Workflow = {
     mocks: bool, owner: int, epoch: int, version: int, reviewedVersion: int,
@@ -43,7 +39,6 @@ module WorkflowExecution {
   }
   action enable = all { s.phase == "installed", s' = s.with("enabled", true) }
   action disable = s' = s.with("enabled", false)
-  // The stored job may remain until an unblocked foreground tick filters disabled work.
   action pruneDisabledQueue = all { not(s.enabled) or s.queuedVersion != s.version, s' = s.with("queued", false) }
   action trigger = all {
     s.mocks, s.phase == "installed", s.enabled, not(s.queued),
@@ -56,21 +51,16 @@ module WorkflowExecution {
     s' = { ...s, phase: "submitting", intentSaved: true, runOwner: s.owner,
       runEpoch: s.epoch, ownershipPending: true, queued: if (manual) s.queued else false }
   }
-  /// A reservation must be durable before the request leaves. A refused read or write never
-  /// dispatches the run. The separate intent journal may still retain the unsent request.
   action reservationRefused = all {
     s.phase == "installed", not(s.storageReadable and s.storageWritable),
     s' = { ...s, ownershipRefused: true }
   }
-  /// Controlled storage outcomes at the ownership guard. A failed read cannot deliver a receipt.
   action ownershipStorage(readable: bool, writable: bool): bool =
     s' = { ...s, storageReadable: readable, storageWritable: writable,
       receiptVisible: s.receiptVisible and readable }
-  /// Other runs may add ownership records, but cannot evict this run's unfinished ownership.
   action otherOwnershipRecorded = all {
     s.ownershipPending or s.recorded, s' = { ...s, ownershipChurn: true }
   }
-  // A different writer can change the current version while the reviewed request is in flight.
   action serverVersionChanged = all {
     s.phase.in(Set("submitting", "uncertain", "unadmitted", "resend-review", "running")), s.version < 2,
     s' = s.with("version", s.version + 1)
@@ -83,16 +73,12 @@ module WorkflowExecution {
       executions: if (knownExecution) s.executions else s.executions + 1,
       ownershipPending: false, recorded: true, sourceAcknowledged: true }
   }
-  /// The agent accepted a dispatched request, but promoting its reservation failed. The durable
-  /// pending ownership still fences the run, and the account-bearing intent is not acknowledged.
   action acceptedWithoutPromotion = all {
     s.phase == "submitting", s.intentSaved, s.ownershipPending, s.reviewedVersion == s.version,
     not(s.storageReadable and s.storageWritable),
     s' = { ...s, phase: "uncertain", receiptVisible: false, ownershipRefused: true,
       admittedSubmission: s.submission, executions: if (knownExecution) s.executions else s.executions + 1 }
   }
-  /// The promotion write applied, but its readback failed. The exact accepted ownership is
-  /// durable; the caller still refuses publication and leaves the separate intent unacknowledged.
   action acceptedPromotionUnconfirmed = all {
     s.phase == "submitting", s.intentSaved, s.ownershipPending, s.reviewedVersion == s.version,
     s.storageReadable, s.storageWritable,
@@ -100,15 +86,12 @@ module WorkflowExecution {
       storageReadable: false, ownershipRefused: true, admittedSubmission: s.submission,
       executions: if (knownExecution) s.executions else s.executions + 1 }
   }
-  /// Receipt lookup, also by another account, may promote the retained request. Publication is
-  /// still restricted to the current account; only then can the separate intent be acknowledged.
   action promoteOwnership = all {
     s.ownershipPending, knownExecution, s.storageReadable, s.storageWritable,
     s' = { ...s, ownershipPending: false, recorded: true, sourceAcknowledged: true,
       phase: if (currentRunOwner) receiptPhase else "uncertain", receiptVisible: currentRunOwner }
   }
   action unknownSubmission = all { s.phase == "submitting", s' = s.with("phase", "uncertain") }
-  // The original request can arrive after a missing lookup but before a confirmed resend.
   action lateAdmission = all {
     s.phase.in(Set("uncertain", "unadmitted", "resend-review")), s.intentSaved,
     s.reviewedVersion == s.version, not(knownExecution),
@@ -118,7 +101,6 @@ module WorkflowExecution {
     s.phase == "submitting", s.reviewedVersion != s.version, not(knownExecution),
     s' = { ...s, phase: "abandoned", intentSaved: false, ownershipPending: false }
   }
-  // A retained identity is scoped to the same owner. A fresh view obtains its own epoch.
   action reopenOwner = all {
     s.intentSaved, s.runOwner == s.owner, s.runEpoch != s.epoch,
     s' = { ...s, runEpoch: s.epoch, phase: "uncertain", receiptVisible: false }
@@ -138,7 +120,6 @@ module WorkflowExecution {
     s.phase == "unadmitted", currentRunOwner, s.reviewedVersion == s.version,
     s' = s.with("phase", "resend-review")
   }
-  // A second tap rechecks the retained identity. A receipt wins over any repeat submission.
   action confirmResend = all {
     s.phase == "resend-review", currentRunOwner, s.intentSaved, s.storageReadable,
     not(knownExecution) or s.recorded or s.storageWritable,
@@ -174,7 +155,6 @@ module WorkflowExecution {
     s' = { ...s, phase: if (s.phase == "running") "finished" else s.phase,
       outcome: if (s.cancelRequested) "cancelled" else "succeeded" }
   }
-  /// A restart keeps the saved run record and its claim.
   action restart = s' = { ...s, receiptVisible: false,
     phase: if (s.phase.in(Set("submitting", "unadmitted", "resend-review", "running", "finished"))) "uncertain" else s.phase }
   action switchOwner = all {
@@ -182,18 +162,11 @@ module WorkflowExecution {
     s' = { ...s, owner: if (s.owner == 1) 2 else 1, epoch: s.epoch + 1, receiptVisible: false,
       phase: if (s.phase.in(Set("unadmitted", "resend-review"))) "uncertain" else s.phase }
   }
-  /// The signed-in account is not the one that started a run this phone recorded as unfinished.
-  /// The claim for the one cancellation is saved before the request leaves, so a request that is
-  /// lost (`delivered` false) is never repeated. Nothing waits for it: switchOwner is a separate
-  /// step and is enabled whether or not this one happens. Through another agent connection the
-  /// request cannot be sent and this step does not happen. The agent ignores it for a finished run.
   action cancelOtherAccountRun(delivered: bool): bool = all {
     s.recorded, s.runOwner != s.owner, not(s.cancelClaimed), s.storageReadable, s.storageWritable,
     s' = { ...s, cancelClaimed: true, switchCancels: s.switchCancels + 1,
       cancelRequested: s.cancelRequested or (delivered and s.outcome == "none") }
   }
-  /// A claim write may apply before its readback fails. No request leaves, and the saved claim
-  /// prevents a later retry: best effort permits zero requests as well as one lost request.
   action unconfirmedCancelClaim = all {
     s.recorded, s.runOwner != s.owner, not(s.cancelClaimed), s.storageReadable, s.storageWritable,
     s' = { ...s, cancelClaimed: true, claimUnconfirmed: true, storageReadable: false, receiptVisible: false }
@@ -255,15 +228,11 @@ module WorkflowExecution {
   run changedVersionRefusesInFlightRequestTest = initFor(false).then(validate).then(save).then(retainSubmission(true))
     .then(serverVersionChanged).then(refuseVersion)
     .expect(s.phase == "abandoned" and s.executions == 0 and safety)
-  /// The switch itself sends nothing and waits for nothing; without a cancellation request
-  /// (another agent connection) the run finishes and its own account finds it again.
   run ownerSwitchDoesNotCancelRunTest = initFor(false).then(validate).then(save).then(retainSubmission(true))
     .then(admit).then(switchOwner).expect(not(s.receiptVisible or s.cancelRequested) and safety)
     .then(finish).expect(s.outcome == "succeeded" and safety)
     .then(switchOwner).then(reopenOwner).then(reconcile(true))
     .expect(s.phase == "finished" and s.receiptVisible and s.executions == 1 and safety)
-  /// The other account never sees the run. The one cancellation is not repeated, and no effect
-  /// runs after it.
   run accountSwitchCancelsOnceTest = initFor(false).then(validate).then(save).then(retainSubmission(true))
     .then(admit).then(propose).expect(s.receiptVisible and s.recorded and safety)
     .then(switchOwner).expect(not(s.receiptVisible or s.cancelRequested) and safety)
@@ -279,19 +248,15 @@ module WorkflowExecution {
   run ownAccountRunNotCancelledTest = initFor(false).then(validate).then(save).then(retainSubmission(true))
     .then(admit).expect(s.recorded and safety)
     .then(cancelOtherAccountRun(true).fail())
-  /// A cancellation that never arrives is not sent again.
   run lostSwitchCancelTest = initFor(false).then(validate).then(save).then(retainSubmission(true))
     .then(admit).then(switchOwner).then(cancelOtherAccountRun(false))
     .expect(not(s.cancelRequested) and s.switchCancels == 1 and safety)
     .then(cancelOtherAccountRun(true).fail())
-  /// A lost cancellation holds up neither a later switch nor the run, whose own account finds it again.
   run lostSwitchCancelKeepsSwitchingTest = initFor(false).then(validate).then(save).then(retainSubmission(true))
     .then(admit).then(switchOwner).then(cancelOtherAccountRun(false)).then(switchOwner)
     .expect(s.owner == 1 and s.switchCancels == 1 and safety)
     .then(finish).then(reopenOwner).then(reconcile(true))
     .expect(s.outcome == "succeeded" and s.receiptVisible and safety)
-  /// A run accepted after the account changed is recorded for the account that asked for it,
-  /// stays hidden, and is cancelled once.
   run acceptedAfterSwitchCancelledTest = initFor(false).then(validate).then(save).then(retainSubmission(true))
     .then(switchOwner).then(admit).expect(s.phase == "uncertain" and not(s.receiptVisible) and s.recorded and safety)
     .then(cancelOtherAccountRun(true)).then(finish)

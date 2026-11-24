@@ -7,7 +7,6 @@ import com.getcapacitor.PluginCall;
 import java.util.ArrayList;
 import org.json.JSONArray;
 
-/** External lifecycle, permission and UI queue inputs for the product note bridge. */
 public final class NoteBridgePorts {
  public static final Context context=new Context();
  public static final AudioManager audio=new AudioManager();

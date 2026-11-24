@@ -1,4 +1,3 @@
-// Own-notice questions in the simulated development shade.
 module ShadeNoticeQuestionAdmission {
   type Composition = {id: int, notice: str}
   type Report = {id: int, result: str}

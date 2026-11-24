@@ -1,4 +1,3 @@
-// Package, visibility and resume notifications for the shared launcher.
 module LauncherObserver {
   type State = {active: bool, hidden: bool, scheduled: bool, subscription: str,
     removal: str, removals: int, refreshes: int}

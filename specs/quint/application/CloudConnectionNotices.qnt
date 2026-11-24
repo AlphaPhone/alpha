@@ -1,7 +1,5 @@
 module CloudConnectionNotices {
   pure val kinds = Set("plan")
-  // keyExpiring is the upstream near-expiry requirement; accountExpiry is whether the Account
-  // dialog shows that expiry with Renew. Home has no expiry notice kind of its own.
   type State = { required: Set[str], dismissed: Set[str], keyExpiring: bool, accountExpiry: bool,
     covered: bool, accountOpen: bool, compact: bool, largeText: bool }
   var s: State
@@ -29,7 +27,6 @@ module CloudConnectionNotices {
   val ExactDismissal = s.dismissed.subseteq(s.required) and mounted.intersect(s.dismissed) == Set()
   val ForegroundOwnership = if (s.covered) exposed == Set() else exposed == mounted
   val RenderOrder = order.length() == exposed.size() and s.required == kinds
-  /// The near-expiry key is shown exactly while Account is open, and never as a Home notice.
   val AccountOwnsExpiry = s.accountExpiry == (s.accountOpen and s.keyExpiring) and mounted.subseteq(kinds)
   val safety = ExactDismissal and ForegroundOwnership and RenderOrder and AccountOwnsExpiry
 

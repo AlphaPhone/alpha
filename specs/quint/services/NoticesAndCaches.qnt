@@ -1,4 +1,3 @@
-/// Owner retirement, delivery claims, acknowledgements and bounded read-only snapshots.
 module NoticesAndCaches {
   type Notices = {
     owner: int, epoch: int, transitionEpoch: int, phase: str, retry: bool,
@@ -56,7 +55,6 @@ module NoticesAndCaches {
     s.notice == "consumed", s.acknowledgements == 0,
     s' = { ...s, notice: "acknowledged", acknowledgements: 1 }
   }
-  /// Retry retains the delivery identity. A restart does not enqueue a duplicate.
   action restart = s' = { ...s, notice: if (s.notice == "claimed") "queued" else s.notice,
     claim: if (s.notice == "claimed") 0 else s.claim }
   action switchOwner = all {

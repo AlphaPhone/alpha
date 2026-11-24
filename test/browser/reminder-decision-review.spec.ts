@@ -1,7 +1,6 @@
 import { returnToApps } from './app-navigation';
 import {test,expect} from '@playwright/test';
 test.use({timezoneId:'UTC'});
-// Storage tests launch Calendar from the keyboard; a delayed pointer release is a Home long press.
 for(const action of ['done','snooze'] as const)for(const mode of ['fresh','stale','duplicate','response-loss','reload-loss','late-stale','navigate','unknown-same-target','navigate-after-dispatch'] as const)test(`reviewed reminder ${action}: ${mode}`,async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.clock.setFixedTime(new Date('2027-03-13T00:00Z'));await page.goto('/');await page.getByRole('button',{name:'Calendar',exact:true}).waitFor();
@@ -39,12 +38,9 @@ for(const action of ['done','snooze'] as const)for(const mode of ['fresh','stale
    await page.reload();await page.getByRole('button',{name:'Calendar',exact:true}).press('Enter');await page.getByRole('button',{name:/^Changed elsewhere,/}).click();await button.click();await expect(page.getByText(action==='done'?'Done':'Snoozed 10 minutes',{exact:true})).toBeVisible();await expect.poll(()=>page.evaluate(async()=>(await import('/src/runtime/reminder-deletions.ts')).pendingReminderDeletions())).toEqual(retained);
   }
  }else await expect(page.getByText(action==='done'?'Done':'Snoozed 10 minutes',{exact:true})).toBeVisible();
- // The short success toast "Done" also matches a Done button; wait for the saved receipt before reading it.
  await expect.poll(()=>page.evaluate(async()=>Object.keys(JSON.parse((await (await import('/src/browser/reminder-store.ts')).reminderDocument.readRaw())??'{}').receipts??{}).length)).toBe(1);
  const data=await page.evaluate(async ()=>JSON.parse((await (await import('/src/browser/reminder-store.ts')).reminderDocument.readRaw())!));expect(Object.keys(data.receipts)).toHaveLength(1);expect(data.reminders[0].status).toBe(action==='done'?'completed':'scheduled');if(action==='snooze'){expect(data.reminders[0].at).toBe(Date.parse('2027-03-13T00:10Z'));expect(data.reminders[0].occurrenceId).toBe(original.occurrenceId);}else expect(data.reminders[0].history).toHaveLength(1);
 });
-// Controlled provider-result boundary; Android notification permission/scheduler
-// behavior itself remains native acceptance. No permission or alarm is changed.
 for(const status of ['permission-denied','scheduling-failed','completed'] as const)test(`reviewed snooze provider result ${status}`,async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));await page.clock.setFixedTime(new Date('2027-03-13T00:00Z'));await page.goto('/');await page.getByRole('button',{name:'Calendar',exact:true}).waitFor();
  await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');await registerPlugin<any>('DailyApps').scheduleReminder({id:'outcome',title:'Outcome reminder',at:Date.parse('2027-03-13T14:00Z')});});await page.reload();await page.getByRole('button',{name:'Calendar',exact:true}).press('Enter');await page.getByRole('button',{name:/^Outcome reminder,/}).click();

@@ -27,7 +27,6 @@ test('encoded video and thumbnail use the zoomed crop and release the processing
  const result=await page.evaluate(async()=>{
   const {browserCamera:c,browserPhotoLibrary:p}=await import('/src/prototype/browser-camera.ts');await c.setZoom({zoom:2});await c.startRecording({audio:false,maxDuration:.5,maxFileSize:1000000});await new Promise(r=>setTimeout(r,750));await c.stopRecording();
   const row=await p.read({id:(await p.list()).items.find(r=>r.kind==='video')!.id}),video=document.createElement('video');video.muted=true;video.src=row.path!;
-  // A resolved play() is not evidence that a decoded frame has been presented.
   const frame=new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Recorded video did not present a frame')),5000);video.requestVideoFrameCallback(()=>{clearTimeout(timer);resolve();});});await video.play();await frame;
   const canvas=document.createElement('canvas');canvas.width=320;canvas.height=240;const ctx=canvas.getContext('2d')!;ctx.drawImage(video,0,0);const pixels=[20,300].map(x=>Array.from(ctx.getImageData(x,120,1,1).data).slice(0,3));video.pause();video.removeAttribute('src');video.load();
   const thumb=new Image();thumb.src=row.image;await thumb.decode();ctx.drawImage(thumb,0,0);const thumbnail=[20,300].map(x=>Array.from(ctx.getImageData(x,120,1,1).data).slice(0,3));
@@ -52,8 +51,6 @@ for (const mime of ['video/webm;codecs=vp8', 'video/mp4;codecs=avc1.42001f']) {
    const [prefix, overflow] = chunks;
    if (!prefix || !overflow) throw Error('The browser recorder did not emit a prefix and a terminal chunk');
 
-   // Use the real encoder bytes with a controlled delivery order. Reaching the
-   // exact cap requests stop, then the encoder's nonempty terminal chunk arrives.
    let deliver!: () => void;
    class CappedRecorder {
     state: RecordingState = 'inactive';
@@ -175,7 +172,6 @@ test('the last capture opens directly and Back returns to the Camera viewfinder'
 test('switching with flash on and zoom 2x keeps both reset when the switch fails',async({page})=>{
  await page.evaluate(async()=>{
   const {browserCamera:c}=await import('/src/prototype/browser-camera.ts');const calls=(window as any).flipCalls=[] as string[],setZoom=c.setZoom,switchCamera=c.switchCamera;
-  // Refuse the front lens at the media boundary after the real switch releases the old preview.
   const getUserMedia=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
   navigator.mediaDevices.getUserMedia=async constraints=>{
    if((window as any).failSwitch&&typeof constraints?.video==='object'&&constraints.video.facingMode==='user')throw new DOMException('Front camera unavailable','NotFoundError');

@@ -1,9 +1,4 @@
 import { test, expect, type Page } from '@playwright/test';
-// Development lane with a native-plugin stub: the page sees an Android Capacitor bridge whose
-// ElizaSystem launcher answers and `launcherAppsChanged` events come from this file. The stub's inventory is the
-// "device": tests add and remove entries there, never in the renderer. No Android package manager,
-// work profile or HOME role is involved; LauncherAppsInstrumentedTest and
-// LauncherHomeInstrumentedTest cover the Android side, and a phone covers acceptance.
 
 type App = { packageName: string; label: string; activityName?: string; user?: string; profile?: string; locked?: boolean; icon?: string };
 type Refusal = { message: string; code: string; remove?: boolean };
@@ -11,13 +6,11 @@ type Refusal = { message: string; code: string; remove?: boolean };
 async function nativeStub(page: Page, apps: App[], refusals: Record<string, Refusal> = {}, emptyHome = true) {
   await page.addInitScript(({ apps, refusals, emptyHome }) => {
     localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({ kind: 'offline' }));
-    // Native-shortcut scenarios choose an empty Home explicitly; fresh-default coverage opts out.
     if (emptyHome && !sessionStorage.getItem('stub.homeChoice')) {
       localStorage.setItem('alpha.launcher.favorites.v1', JSON.stringify({version:2,keys:[],defaultPolicy:'alpha-apps'}));
       sessionStorage.setItem('stub.homeChoice','1');
     }
     const w = window as any; w.nativeCalls = []; w.androidBridge = {};
-    // The device inventory survives a reload of the page (sessionStorage), like a real phone's.
     const saved = sessionStorage.getItem('stub.device');
     const device = w.device = { apps: saved ? JSON.parse(saved) : apps, refusals, failList: false };
     const persist = () => sessionStorage.setItem('stub.device', JSON.stringify(device.apps));
@@ -70,7 +63,6 @@ async function nativeStub(page: Page, apps: App[], refusals: Record<string, Refu
     for (const name of Object.keys(plugins)) cap.Plugins[name] = { addListener: () => ({ remove: async () => {} }) };
   }, { apps, refusals, emptyHome });
 }
-/** Shared launcher calls on ElizaSystem, by their old short names (list, launch). */
 const calls = (page: Page, method: string) => page.evaluate(method => (window as any).nativeCalls.filter((c: any) => c.plugin === 'ElizaSystem' && c.method === method).map((c: any) => c.options ?? null), ({ list: 'listLauncherApps', launch: 'launchApp' } as Record<string, string>)[method] ?? method);
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 const PNG2 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
@@ -84,12 +76,9 @@ const WORK_NOTES: App = { packageName: 'com.vendor.notes', activityName: 'com.ve
 const CLOCK: App = { packageName: 'com.android.deskclock', activityName: 'com.android.deskclock.DeskClock', label: 'Clock' };
 const ALL = [SETTINGS, NOTES_A, NOTES_B, SUITE_MAIL, SUITE_CAL, WORK_NOTES, CLOCK];
 
-/** Home's icons in order, by label (edit mode renames the buttons to their removal). */
 const homeOrder = (page: Page) => page.locator('[data-alpha-home-apps] [data-alpha-home-key]').evaluateAll(nodes => nodes.map(node => node.closest('[data-mobile-shell-tile]')!.querySelector('[data-mobile-shell-tile-label]')!.textContent));
 const names = (list: ReturnType<Page['locator']>) => list.evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label')));
-/** The drawer's tiles in order, by accessible name. */
 const tiles = (drawer: ReturnType<Page['locator']>) => names(drawer.locator('[data-launcher-app] > button'));
-/** Long press: the platform's context-menu gesture on that tile or icon. */
 const longPress = (target: ReturnType<Page['locator']>) => target.click({ button: 'right' });
 async function openDrawer(page: Page) {
   await page.getByRole('button', { name: 'Apps', exact: true }).click();
@@ -107,7 +96,6 @@ test('fresh Alpha Home shows core apps and loads installed apps only in Apps', a
   expect(await calls(page, 'list')).toHaveLength(0);
   const drawer = await openDrawer(page);
   await expect(drawer.getByRole('button', {name: 'Open Clock', exact: true})).toHaveCount(1);
-  // Only installed Android entries; Alpha's Settings stays on Home and is not repeated here.
   await expect(drawer.getByRole('button', {name: 'Open Settings', exact: true})).toHaveCount(1);
   await expect(drawer.getByRole('button', {name: /Alpha Phone/})).toHaveCount(0);
   await expect(drawer.getByRole('button', {name: 'Open Inbox', exact: true})).toHaveCount(0);
@@ -131,7 +119,6 @@ test('Home and Apps icons fade on pointer press while keyboard focus stays visib
     const icon=face.locator(':scope > :first-child');
     await expect(tile).toBeVisible();
     await expect(icon).toHaveCSS('opacity', '1');
-    // Alpha's shared reduced-motion rule leaves a negligible 0.01 ms transition.
     expect(await icon.evaluate(node=>Number.parseFloat(getComputedStyle(node).transitionDuration))).toBeLessThan(0.001);
     const background=await face.evaluate(node=>getComputedStyle(node).backgroundColor);
     const bounds=(await icon.boundingBox())!;
@@ -216,12 +203,10 @@ test('same-label apps are separate tiles and each opens exactly its own componen
   await nativeStub(page, ALL, { 'com.vendor.notes/com.vendor.notes.Launch#10': { message: 'Work apps are paused or locked. Turn on work apps in Android, then try again.', code: 'profile-locked' } });
   await page.goto('/');
   const drawer = await openDrawer(page);
-  // Alphabetical 4-column grid; two packages, two activities of one package and a work copy share labels.
   await expect.poll(() => tiles(drawer)).toEqual(['Open Clock', 'Open Notes (com.vendor.notes)', 'Open Notes (Work · locked)', 'Open Notes (org.example.notes)', 'Open Settings', 'Open Suite (CalendarActivity)', 'Open Suite (MailActivity)']);
   const columns = await drawer.locator('[data-launcher-app]').evaluateAll(nodes => new Set(nodes.slice(0, 4).map(node => Math.round(node.getBoundingClientRect().top))).size);
   expect(columns).toBe(1);
   await expect(drawer.getByRole('button', { name: 'Open Notes', exact: true })).toHaveCount(0);
-  // Each tile shows its own icon, not one chosen by label.
   await expect(drawer.getByRole('button', { name: 'Open Notes (org.example.notes)', exact: true }).locator('img')).toHaveAttribute('src', PNG);
   await expect(drawer.getByRole('button', { name: 'Open Notes (com.vendor.notes)', exact: true }).locator('img')).toHaveAttribute('src', PNG2);
   await expect(drawer.getByRole('button', { name: 'Open Suite (MailActivity)', exact: true }).locator('img')).toHaveCount(0);
@@ -235,7 +220,6 @@ test('same-label apps are separate tiles and each opens exactly its own componen
   ]);
   await expect(drawer.getByRole('alert')).toHaveCount(0);
 
-  // The locked work copy is asked for by profile and its refusal is shown; the personal copy is not opened instead.
   await drawer.getByRole('button', { name: 'Open Notes (Work · locked)', exact: true }).click();
   await expect(drawer.getByRole('alert')).toHaveText('Notes could not be opened. Work apps are paused or locked. Turn on work apps in Android, then try again.');
   expect((await calls(page, 'launch')).slice(2)).toEqual([{ packageName: 'com.vendor.notes', activityName: 'com.vendor.notes.Launch', user: '10' }]);
@@ -251,16 +235,13 @@ test('long-pressing an app offers Add to Home and App info; Home order persists 
     await longPress(tile);
     const menu = drawer.getByRole('menu');
     await expect(menu.getByRole('menuitem')).toHaveText(['Add to Home', 'App info']);
-    // The long press opened the menu only.
     expect(await calls(page, 'launch')).toEqual([]);
     await menu.getByRole('menuitem', { name: 'Add to Home', exact: true }).click();
-    // Adding returns to Home, where the app now is.
     await expect(drawer).toHaveCount(0);
     if (name !== 'Clock') drawer = await openDrawer(page);
   }
   await expect.poll(() => homeOrder(page)).toEqual(['Settings', 'Notes', 'Clock']);
   drawer = await openDrawer(page);
-  // An app already on Home says so; App info opens Android's screen for exactly that entry.
   const clockTile = drawer.getByRole('button', { name: 'Open Clock', exact: true });
   await longPress(clockTile);
   const appInfo = drawer.getByRole('menuitem', { name: 'App info', exact: true });
@@ -271,7 +252,6 @@ test('long-pressing an app offers Add to Home and App info; Home order persists 
   await expect.poll(() => calls(page, 'openAppInfo')).toEqual([{ packageName: CLOCK.packageName, activityName: CLOCK.activityName }]);
   await expect(drawer.getByRole('menu')).toHaveCount(0);
   await expect(clockTile).toBeFocused();
-  // Back closes an open menu before the drawer.
   await longPress(drawer.getByRole('button', { name: 'Open Settings', exact: true }));
   await expect(drawer.getByRole('menu')).toBeVisible();
   await page.evaluate(() => window.dispatchEvent(new Event('alpha-back', { cancelable: true })));
@@ -280,7 +260,6 @@ test('long-pressing an app offers Add to Home and App info; Home order persists 
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('alpha.launcher.favorites.v1') || 'null'))).toEqual({ version: 2, defaultPolicy: 'alpha-apps', keys: [
     'com.android.settings/com.android.settings.Settings', 'com.vendor.notes/com.vendor.notes.Launch', 'com.android.deskclock/com.android.deskclock.DeskClock' ] });
 
-  // Cold start: same Home, same order, and a Home icon opens its exact component.
   await page.reload();
   await expect.poll(() => homeOrder(page)).toEqual(['Settings', 'Notes', 'Clock']);
   await page.getByRole('button', { name: 'Notes', exact: true }).click();
@@ -294,7 +273,6 @@ test('a long-press menu on a tile at the bottom edge of a full drawer is shown w
   const drawer = await openDrawer(page);
   const scroller = drawer.locator('[data-installed-apps-scroll]');
   const tile = drawer.locator('[data-launcher-app]').nth(32);
-  // Scroll so this tile's row ends just above the scroller's bottom edge: no room for a menu below it.
   await tile.evaluate(node => { const scroller = node.closest('[data-installed-apps-scroll]') as HTMLElement; scroller.scrollTop += node.getBoundingClientRect().bottom - (scroller.getBoundingClientRect().bottom - 4); });
   await tile.locator('> button').dispatchEvent('contextmenu');
   const menu = drawer.getByRole('menu');
@@ -311,7 +289,6 @@ test('Home edit mode removes and rearranges icons, "+" restores hidden views, an
   const start = await homeOrder(page);
   const [first] = start;
   expect(start).toContain('Calendar');
-  // Holding a Home icon enters edit mode and opens nothing.
   const held = page.getByRole('button', { name: first, exact: true });
   const box = (await held.boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -321,23 +298,18 @@ test('Home edit mode removes and rearranges icons, "+" restores hidden views, an
   await expect(done).toBeVisible();
   const add = page.getByRole('button', { name: 'Add to Home', exact: true });
   await expect(add).toBeDisabled();
-  // Apps is not offered while editing; each icon is named for its removal.
   await expect(page.getByRole('button', { name: 'Apps', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Remove Calendar from Home', exact: true })).toHaveCount(1);
-  // The "−" sits on the icon's corner and icons wiggle (Alpha's edit-mode stylesheet is applied).
   expect(await page.locator('[data-alpha-home-key="alpha:calendar"] [data-alpha-home-remove]').evaluate(el => getComputedStyle(el).position)).toBe('absolute');
   expect(await page.locator('[data-alpha-home-key="alpha:calendar"]').evaluate(el => getComputedStyle(el).animationName)).toBe('alpha-wiggle');
-  // A tap on an icon itself opens nothing and removes nothing; its "−" removes it.
   await page.getByRole('button', { name: 'Remove Calendar from Home', exact: true }).click();
   await expect.poll(() => homeOrder(page)).toEqual(start);
   await page.locator('[data-alpha-home-key="alpha:calendar"] [data-alpha-home-remove]').click();
   const left = start.filter(name => name !== 'Calendar');
   await expect.poll(() => homeOrder(page)).toEqual(left);
-  // Arrow keys move the focused icon.
   await page.getByRole('button', { name: `Remove ${left[1]} from Home`, exact: true }).focus();
   await page.keyboard.press('ArrowLeft');
   await expect.poll(async () => (await homeOrder(page)).slice(0, 2)).toEqual([left[1], left[0]]);
-  // Dragging an icon onto another's place moves it there.
   const icons = page.locator('[data-alpha-home-apps] [data-mobile-shell-tile]');
   const from = (await icons.nth(0).boundingBox())!, to = (await icons.nth(2).boundingBox())!;
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
@@ -355,7 +327,6 @@ test('Home edit mode removes and rearranges icons, "+" restores hidden views, an
   await expect.poll(async () => (await homeOrder(page)).at(-1)).toBe('Calendar');
   await done.click();
   await expect(done).toHaveCount(0);
-  // Taps open again after Done, and the arrangement survives a cold start.
   const arranged = await homeOrder(page);
   await page.reload();
   await expect.poll(() => homeOrder(page)).toEqual(arranged);
@@ -403,30 +374,23 @@ test('an open drawer follows installs and removals, and a removed Home app is no
   await expect.poll(() => homeOrder(page)).toEqual(['Clock', 'Settings']);
   await openDrawer(page);
 
-  // Android reports a removal: the entry and its Home icon leave without reopening the drawer,
-  // and without a loading state replacing the list.
   await page.evaluate(([settings, notes]) => (window as any).deviceChange([settings, notes], true), [SETTINGS, NOTES_A]);
   await expect(drawer.getByRole('button', { name: 'Open Clock', exact: true })).toHaveCount(0);
   await expect.poll(() => tiles(drawer)).toEqual(['Open Notes', 'Open Settings']);
   await expect.poll(() => homeOrder(page)).toEqual(['Settings']);
 
-  // An install appears; a second app with an existing label becomes distinguishable at once.
-  // Android announces one install as several changes; the device is read once for the burst.
   const readsBefore = (await calls(page, 'list')).length;
   await page.evaluate(apps => { for (let i = 0; i < 3; i++) (window as any).deviceChange(apps, true); }, [SETTINGS, NOTES_A, NOTES_B, CLOCK]);
   await expect(drawer.getByRole('button', { name: 'Open Notes (com.vendor.notes)', exact: true })).toBeVisible();
   await expect(drawer.getByRole('button', { name: 'Open Notes (org.example.notes)', exact: true })).toBeVisible();
   expect((await calls(page, 'list')).length).toBe(readsBefore + 1);
-  // The reinstalled Home app returns to its saved place.
   await expect.poll(() => homeOrder(page)).toEqual(['Clock', 'Settings']);
 
-  // A change Android did not announce is picked up when Alpha returns to the foreground.
   await page.evaluate(apps => (window as any).deviceChange(apps, false), [SETTINGS]);
   await expect.poll(() => tiles(drawer)).toHaveLength(4);
   await page.evaluate(() => document.dispatchEvent(new Event('resume')));
   await expect.poll(() => tiles(drawer)).toEqual(['Open Settings']);
 
-  // Saved native shortcuts also follow inventory changes while the drawer is closed.
   await drawer.getByRole('button', { name: 'Close apps', exact: true }).click();
   const reads = (await calls(page, 'list')).length;
   await page.evaluate(apps => (window as any).deviceChange(apps, true), [SETTINGS, CLOCK]);
@@ -445,17 +409,14 @@ test('an app removed or disabled behind a stale tile reports why and leaves the 
   const drawer = await openDrawer(page);
   await drawer.getByRole('button', { name: 'Open Notes', exact: true }).click();
   await expect(drawer.getByRole('alert')).toHaveText('Notes could not be opened. This app is no longer installed.');
-  // The stale tile is gone after the refusal; the reason stays visible and nothing else was opened.
   await expect(drawer.getByRole('button', { name: 'Open Notes', exact: true })).toHaveCount(0);
   await drawer.getByRole('button', { name: 'Open Clock', exact: true }).click();
   await expect(drawer.getByRole('alert')).toHaveText('Clock could not be opened. This app is disabled. Enable it in Android settings to open it.');
   await expect(drawer.getByRole('button', { name: 'Open Clock', exact: true })).toHaveCount(0);
   expect(await calls(page, 'launch')).toHaveLength(2);
   await expect.poll(() => tiles(drawer)).toEqual(['Open Settings']);
-  // Still on Home with the drawer open: a refusal is never presented as an opened app.
   await expect(page.locator('html')).toHaveAttribute('data-active-view', 'home');
   await expect(drawer).toBeVisible();
-  // A new search drops the old error.
   await drawer.getByRole('searchbox', { name: 'Search apps', exact: true }).fill('set');
   await expect(drawer.getByRole('alert')).toHaveCount(0);
 });
@@ -472,7 +433,6 @@ test('a failed refresh clears the grid instead of leaving a stale one, and HOME 
   await drawer.getByRole('button', { name: 'Try again', exact: true }).click();
   await expect(drawer.getByRole('button', { name: 'Open Settings', exact: true })).toBeVisible();
 
-  // Returning with HOME after opening an app lands on Home with the drawer closed and the search cleared.
   await drawer.getByRole('searchbox', { name: 'Search apps', exact: true }).fill('set');
   await drawer.getByRole('button', { name: 'Open Settings', exact: true }).click();
   await expect.poll(() => calls(page, 'launch')).toHaveLength(1);
@@ -505,7 +465,6 @@ test('the entry menu is a keyboard menu: focus moves in, arrows move between ite
   await expect(menu).toHaveCount(0);
   await expect(drawer).toBeVisible();
   await expect(tile).toBeFocused();
-  // On Home is disabled and skipped: the menu of an app already on Home starts on App info.
   await longPress(tile);
   await menu.getByRole('menuitem', { name: 'Add to Home', exact: true }).click();
   const again = await openDrawer(page);

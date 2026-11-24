@@ -14,14 +14,7 @@ import java.util.Map;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/**
- * Replays RendererBackgroundRebuild model steps on two real MainActivity surfaces sharing the
- * process-wide RendererRecoveryBudget. The harness plays Android and the renderer process: it
- * holds each activity's started state, which WebViews lost their renderer and whether that was a
- * crash, and the clock. Every count, decision and rebuild is the product's.
- */
 public final class RendererBackgroundRebuildReplay {
-  /** A surface whose started state the harness sets; decides nothing. */
   static final class Surface extends MainActivity {
     final boolean assistant;
     final Lifecycle lifecycle = new Lifecycle();
@@ -112,7 +105,6 @@ public final class RendererBackgroundRebuildReplay {
     Slot launcher = new Slot();
     launcher.activity = create("launcher", home, true);
     slots.put("launcher", launcher);
-    // Earlier counted crashes of the launcher's page, each recovered through the product's path.
     for (int i = 0; i < prior; i++) {
       report(launcher, true);
       fire(launcher.activity);

@@ -1,5 +1,3 @@
-// Literal translation of files-browser/Spec.tla and its four TLC configurations.
-// FreeName realizes TLA CHOOSE with the lowest free numeric name (TLC's ordering).
 module FilesBrowser {
   type Configuration = { name: str, Budget: int, FixCategories: bool, FixConflict: bool, FixIdentity: bool }
   type Review = { f: str, from: str, to: str, ver: int }
@@ -45,7 +43,6 @@ module FilesBrowser {
     nondet directory = Dirs.oneOf()
     StartState(configName, names, directory)
   }
-  // Separate entry points avoid Quint 0.33.1 init/action-helper conversion overlap.
   action checkerInit = {
     nondet names = FilesSet.setOfMaps(1.to(2)).oneOf()
     nondet directory = Dirs.oneOf()
@@ -170,7 +167,6 @@ module FilesBrowser {
   temporal CheckedConfiguredTemporal = CheckedTemporal
   pure val testNames = Map("photo" -> 1, "pdf" -> 1, "scan" -> 2)
   action TestInit(configName) = StartState(configName, testNames, "DCIM/Camera")
-  // Deterministic branches of the original External action aid reproducible traces.
   action Rewrite(f) = all { s.budget > 0, Dirs.contains(s.loc.get(f)), Track({ ...s,
     budget: s.budget - 1, stale: true, ver: s.ver.set(f, s.ver.get(f) + 1) }) }
   action Remove(f) = all { s.budget > 0, Dirs.contains(s.loc.get(f)), Track({ ...s,

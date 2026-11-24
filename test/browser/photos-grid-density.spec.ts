@@ -47,8 +47,6 @@ for (const viewport of [{width: 412, height: 915}, {width: 800, height: 1280}]) 
         const rendered = await scroller.locator('[data-owned-media-id]').count();
         expect(rendered).toBeGreaterThan(columns);
         expect(rendered).toBeLessThan(120);
-        // Query the tiles inside the scroller in one synchronous pass: virtual rows are replaced while scrolling,
-        // so a tile handle resolved earlier can already be detached from the scroller.
         await expect.poll(() => scroller.evaluate(el => {
           const viewport = el.getBoundingClientRect();
           return [...el.querySelectorAll('[data-owned-media-id]')].filter(item => { const box = item.getBoundingClientRect(); return box.bottom > viewport.top && box.top < viewport.bottom; }).length;

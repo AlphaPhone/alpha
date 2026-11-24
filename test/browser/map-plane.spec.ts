@@ -10,7 +10,6 @@ const locationPhase = (page: Page) => page.locator('[data-map-diagnostics]').eva
 test('the map renderer loads its real worker and draws host-styled route geometry', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
-  // Explicit synthetic tile transport; this does not qualify a real map provider.
   await page.route('https://maps-fixture.invalid/**', route => route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*' } }));
   await page.goto('/?mode=dev');
   await page.evaluate(async () => {
@@ -35,7 +34,6 @@ test('the map renderer loads its real worker and draws host-styled route geometr
   expect(errors).toEqual([]);
 });
 
-// Location stays independent of search/routing; the public basemap is a closed render fixture here.
 for(const mode of ['granted','denied','late-fix'] as const)test(`Maps location recovery without a configured search or route provider: ${mode}`,async({page,context})=>{
  await page.route('https://tiles.openfreemap.org/**',route=>route.fulfill({json:{version:8,sources:{},layers:[{id:'background',type:'background',paint:{'background-color':'#e7ebed'}}]}}));
  await context.grantPermissions(['geolocation']);await context.setGeolocation({latitude:43.739,longitude:7.425,accuracy:5});await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
@@ -48,8 +46,6 @@ for(const mode of ['granted','denied','late-fix'] as const)test(`Maps location r
  if(mode==='late-fix'){await page.evaluate(()=>(window as any).mapsLateFix({coords:{latitude:43.73,longitude:7.42,accuracy:5},timestamp:Date.now()}));await expect(page.getByText('Dropped pin',{exact:true})).toBeVisible();await expect(page.getByText('Current location',{exact:true})).toHaveCount(0);}
 });
 
-// A separate server configures this group with the synthetic Maps provider.
-// Every request to that synthetic endpoint is fulfilled here, never sent out.
 test.describe('configured synthetic Maps provider',()=>{
  let server:ViteDevServer,origin:string,cache:string;
  test.beforeAll(async()=>{cache=await mkdtemp(path.join(tmpdir(),'alpha-maps-vite-'));server=await createServer({cacheDir:cache,define:{'import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS':JSON.stringify('1'),'import.meta.env.VITE_MAPS_BASE_URL':JSON.stringify('https://maps-fixture.invalid')},server:{host:'127.0.0.1',port:0,hmr:false,watch:null}});await server.listen();origin=`http://127.0.0.1:${(server.httpServer!.address() as any).port}`;});

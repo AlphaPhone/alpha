@@ -11,7 +11,6 @@ import java.util.Set;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Actual bridge methods and allowlist, with a closed Activity that records only synthetic intents. */
 public final class SettingsHandoffTraces {
  final Activity host;
  final Context context;

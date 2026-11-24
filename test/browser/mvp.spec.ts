@@ -11,14 +11,11 @@ for (const theme of ['light', 'dark']) {
       await page.setViewportSize({ width, height: 915 });
       const errors: string[] = [];
       page.on('pageerror', error => errors.push(error.message));
-      // One boot per test; Maps is reached through a fresh load to keep one reload case. Home must be
-      // rendered before returnToApps reads it and before the deferred apps are checked absent.
       const boot = async () => { await page.goto(`/?theme=${theme}`); await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible(); };
       await boot();
       for (const name of views) {
         if (name === 'Maps') await boot();
         else await returnToApps(page);
-        // The Home grid is drawn first, so a deferred tile would already be there.
         await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
         for (const deferred of ['Phone', 'Messages', 'Contacts', 'Wallet']) await expect(page.getByRole('button', {name: deferred, exact: true})).toHaveCount(0);
         await page.getByRole('button', { name, exact: true }).click();
@@ -38,7 +35,6 @@ for (const theme of ['light', 'dark']) {
 test('Notes create, edit, reload and delete to Recently deleted', async ({ page }) => {
   await page.goto('/');
   await openLegacyNotes(page);
-  // Header: Record and New note only; no search pill, Trash icon or empty-state copy.
   await expect(page.getByRole('button', { name: 'Search notes', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Open Trash', exact: true })).toHaveCount(0);
   await expect(page.getByText('No notes yet', { exact: false })).toHaveCount(0);
@@ -46,24 +42,19 @@ test('Notes create, edit, reload and delete to Recently deleted', async ({ page 
   await page.getByRole('button', { name: 'New note', exact: true }).click();
   await page.getByRole('textbox', { name: 'Title', exact: true }).fill('Browser audit note');
   await page.getByRole('textbox', { name: 'Note', exact: true }).fill('A real local draft.\nSecond line.');
-  // Editor toolbar: Back · Checklist · More (Share is in More); Read aloud and Dictate are not on it.
   await expect(page.getByRole('button', { name: 'Dictate', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Read aloud', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Back to notes', exact: true }).click();
   await page.reload();
   await openLegacyNotes(page);
-  // One-column row: title, then the date and a two-line preview.
   await expect(page.getByRole('button', { name: 'Open Browser audit note', exact: true })).toContainText('A real local draft.');
   await page.getByRole('button', { name: 'Open Browser audit note', exact: true }).click();
   await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
-  // Deletion is not immediate erasure: the note waits in Recently deleted for 30 days.
   await expect(page.getByText('Deleted', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Recently deleted', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Browser audit note, 30 days left', exact: true })).toBeVisible();
 });
-// Folder controls were removed at the owner's request. Canonical Notes CRUD and
-// retained-device-data isolation remain covered by canonical-notes.spec.ts.
 test('the single Notes list preserves retained folder records across reload',async({page})=>{
  await page.goto('/');
  const folderId=await page.evaluate(async()=>{
@@ -173,7 +164,6 @@ test('MVP mock account and privacy journeys exclude Contacts controls', async ({
   await expect(page.getByText('Gmail, Calendar',{exact:true})).toBeVisible();
   await expect(page.getByText(/CardDAV|Gmail, Calendar, Contacts/)).toHaveCount(0);
   await page.getByRole('button',{name:'Google',exact:true}).click();
-  // Fixture credentials stay in the explicitly labelled mock; no account call occurs.
   await page.getByRole('textbox',{name:'Email',exact:true}).fill('mvp-fixture@example.test');
   await page.getByRole('textbox',{name:'Password',exact:true}).fill('mock-only');
   await page.getByRole('button',{name:'Sign in',exact:true}).click();

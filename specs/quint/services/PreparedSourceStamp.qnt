@@ -1,4 +1,3 @@
-// Source-only reuse of a prepared runtime: the stamp must match the lock and the tracked bytes must verify.
 module PreparedSourceStamp {
   type State = { source: str, current: bool, result: str }
   var s: State

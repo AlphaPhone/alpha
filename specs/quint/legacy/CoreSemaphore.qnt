@@ -1,4 +1,3 @@
-// Literal conversion of packages/core/tla/Semaphore.tla at 4787d51a142.
 module CoreSemaphoreTemplate {
   const Callers: Set[str]
   const N: int
@@ -35,8 +34,6 @@ module CoreSemaphoreTemplate {
     s' = {...s, listener: s.listener.set(c, false), waiters: if (Queued(c)) Remove(s.waiters, c) else s.waiters,
       pc: if (Queued(c)) s.pc.set(c, "rejected") else s.pc}
   }
-  // The historical recurrence visits indices in order. A set fold must instead use the
-  // order-independent first live index (or the length when every waiter is aborted).
   def Skipped(sequence: List[str]): int = sequence.indices().fold(sequence.length(), (count, i) =>
     if (not(s.aborted.get(sequence.nth(i))) and i < count) i else count)
   action Release(c: str): bool = all {

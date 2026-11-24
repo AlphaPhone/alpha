@@ -1,7 +1,5 @@
 import {test,expect} from '@playwright/test';
 test.beforeEach(async({page})=>{await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));await page.goto('/');});
-// Seeds retained-audio (1 s) plus extra rows. A portable row is the {bytes,mimeType} shape WebKit
-// stores; it is seeded in every engine so its migration is always exercised.
 async function seed(page:any,extra:{audioId:string;seconds:number;portable:boolean}[]=[]){await page.evaluate(async({portable,extra})=>{
  const wav=(seconds:number)=>{const rate=8000,buffer=new ArrayBuffer(44+rate*2*seconds),v=new DataView(buffer);const text=(at:number,s:string)=>{for(let i=0;i<s.length;i++)v.setUint8(at+i,s.charCodeAt(i));};text(0,'RIFF');v.setUint32(4,buffer.byteLength-8,true);text(8,'WAVE');text(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,rate,true);v.setUint32(28,rate*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);text(36,'data');v.setUint32(40,buffer.byteLength-44,true);return buffer;};
  const rows=[{audioId:'retained-audio',seconds:1,portable},...extra].map(({audioId,seconds,portable})=>{const buffer=wav(seconds);return {audioId,noteId:'owner-note',...(portable?{bytes:buffer,mimeType:'audio/wav'}:{blob:new Blob([buffer],{type:'audio/wav'})}),durationMs:seconds*1000};});
@@ -23,7 +21,6 @@ test('failed trash commit rolls back; expired trash is purged and malformed lega
 test('saved playback emits native started and ended events; deletion in another tab stops current playback',async({page,context})=>{
  await seed(page,[{audioId:'long-audio',seconds:8,portable:false}]);await page.evaluate(async()=>{const a=(window as any).noteAudio,w=window as any;w.audioEvents=[];for(const name of ['started','ended','failed'])await a.addListener(name,(value:any)=>w.audioEvents.push({name,...value}));for(const [index,audioId] of ['retained-audio','long-audio'].entries()){const b=document.createElement('button');b.textContent='Play '+audioId;b.style.cssText=`position:fixed;top:${index*48}px;z-index:99999`;b.onclick=()=>{w.startedAt=performance.now();w.playing=a.play({audioId});};document.body.append(b);}});
  await page.getByRole('button',{name:'Play retained-audio'}).click();await page.evaluate(()=>(window as any).playing);await expect.poll(()=>page.evaluate(()=>(window as any).audioEvents.map((e:any)=>e.name))).toEqual(['started','ended']);
- // An 8 s clip, so the other tab's delete lands while it is still playing rather than after it ends.
  const other=await context.newPage();await other.goto('/');await page.getByRole('button',{name:'Play long-audio'}).click();await page.evaluate(()=>(window as any).playing);
  await expect.poll(()=>page.evaluate(async()=>(await (window as any).noteAudio.state()).positionMs)).toBeGreaterThan(0);
  await other.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');await registerPlugin<any>('AlphaNoteAudio').remove({audioId:'long-audio',noteId:'owner-note',operationId:'11111111-1111-4111-8111-111111111111'});});

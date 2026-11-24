@@ -1,4 +1,3 @@
-// Committed Camera view and synchronous retirement before the next shell commit.
 module CameraPreviewRetirement {
   type State = {view: str, phase: str, released: bool, current: int, preview: int,
     lastRequest: int, requests: int -> str}

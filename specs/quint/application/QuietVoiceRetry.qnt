@@ -1,40 +1,27 @@
-/// Quiet recovery of a voice conversation from a transient Cloud voice refusal (`quietVoiceRetry`):
-/// a rate limit or warm-up waits out the server's delay and listens again with a fresh start, at
-/// most twice and with one wait at a time; a long wait, a third refusal or a chat that stopped
-/// being current ends voice calmly. Other failures, and own-key voice, show their error.
 module QuietVoiceRetry {
   type State = { voice: bool, phase: str, retries: int, timer: bool, current: bool, direct: bool,
     starts: int, quietStarts: int, waits: int, pauses: int, shownErrors: int, opens: int }
   var s: State
-  // cancelChat()/cleanup(): the surface closes and its pending wait is cleared.
   pure def paused(st: State): State = { ...st, voice: false, phase: "idle", timer: false, pauses: st.pauses + 1 }
 
   action init = s' = { voice: false, phase: "idle", retries: 0, timer: false, current: true, direct: false,
     starts: 0, quietStarts: 0, waits: 0, pauses: 0, shownErrors: 0, opens: 0 }
-  // Own-key voice is chosen outside a conversation.
   action chooseProvider(direct: bool): bool = all { not(s.voice), s' = { ...s, direct: direct } }
   action open = all { not(s.voice), s.current, s.opens < 3,
     s' = { ...s, voice: true, phase: "starting", retries: 0, starts: s.starts + 1, opens: s.opens + 1 } }
   action listening = all { s.voice, s.phase == "starting", not(s.timer), s' = { ...s, phase: "listening" } }
-  // Reply speech proves the service works again: the next refusal starts a new count.
   action speaking = all { s.voice, s.phase == "listening", s' = { ...s, phase: "speaking", retries: 0 } }
-  // A start failure or a failed turn. `transient` is a 503 or a rate-limited 429; `long` is a
-  // server delay of more than thirty seconds. Nothing runs during a wait, so the only failure
-  // seen then is the second report of the refusal that started it.
   action failure(transient: bool, long: bool): bool = all { s.voice, s.phase.in(Set("starting", "listening", "speaking")),
     s.waits < 5, not(s.timer) or (transient and not(s.direct)),
     s' = if (s.direct or not(transient)) { ...s, phase: "error", shownErrors: s.shownErrors + 1 }
       else if (s.timer) s
       else if (s.retries >= 2 or long) paused(s)
       else { ...s, retries: s.retries + 1, phase: "starting", timer: true, waits: s.waits + 1 } }
-  // The wait ends: a chat that is still current listens again, any other ends voice.
   action waitElapsed = all { s.timer,
     s' = if (s.current) { ...s, timer: false, phase: "starting", starts: s.starts + 1, quietStarts: s.quietStarts + 1 }
       else paused(s) }
-  // The page is hidden, the account sheet opens, or the composer or screen changes; and back.
   action currencyLost = all { s.current, s' = { ...s, current: false } }
   action currencyBack = all { not(s.current), s' = { ...s, current: true } }
-  // Retry on the shown error starts again with a fresh count.
   action recover = all { s.voice, s.phase == "error", s.current, s.opens < 3,
     s' = { ...s, phase: "starting", retries: 0, starts: s.starts + 1, opens: s.opens + 1 } }
   action close = all { s.voice, s' = { ...s, voice: false, phase: "idle", timer: false } }

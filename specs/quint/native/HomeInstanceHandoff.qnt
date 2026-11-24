@@ -1,6 +1,4 @@
-// One live launcher MainActivity: second-instance hand-off, bring-to-front starts and task kind.
 module HomeInstanceHandoff {
-  // Task 1 is the display's home task (home activity type); task 2 is a standard task.
   type State = {
     liveTask: int, liveTaskId: int, liveTaskHome: bool, pages: Set[int],
     unacked: int, unreliable: bool, frontInFlight: int,
@@ -16,14 +14,10 @@ module HomeInstanceHandoff {
     starts: 0, delivered: 0, handOffs: 0, handedOffWhileUnreliable: false,
     operation: "init"
   }
-  // An instance that keeps its page becomes the page owner. The kind is read from the start intent
-  // only for the first instance in a task; a relaunch in the same task keeps the stored answer.
   pure def owning(state: State, task: int, intentHome: bool): State = {
     liveTask: task, liveTaskId: task, pages: state.pages.union(Set(task)),
     liveTaskHome: if (task != state.liveTaskId) intentHome else state.liveTaskHome, ...state
   }
-  // A HOME, launcher, notification or sign-in-return start. Android resolves a home-type intent to
-  // the home task and every other intent to a standard task, and reuses the instance of that task.
   action externalStart(home: bool, moveWorks: bool, startWorks: bool): bool = {
     val task = if (home) 1 else 2
     val counted = {starts: s.starts + 1, delivered: s.delivered + 1, ...s}
@@ -31,7 +25,6 @@ module HomeInstanceHandoff {
       s.starts < 4,
       if (s.pages.contains(task)) s' = {operation: "new-intent", ...counted}
       else if (s.liveTask != 0 and not(s.unreliable)) {
-        // A standard live task is moved by id; a home-type one needs the marked HOME start.
         val moved = not(s.liveTaskHome) and moveWorks
         val started = moved or startWorks
         val unacked = if (started) s.unacked + 1 else s.unacked
@@ -43,8 +36,6 @@ module HomeInstanceHandoff {
       else s' = {operation: "own-page", ...owning(counted, task, home)}
     }
   }
-  // The marked bring-to-front start reaches the live instance, makes another instance, or comes
-  // back to the finishing instance that asked. It carries no intent of its own.
   action frontStartArrives(outcome: str, home: bool): bool = all {
     s.frontInFlight > 0, outcome.in(Set("live", "new-instance", "returned")),
     {
@@ -56,8 +47,6 @@ module HomeInstanceHandoff {
       else if (outcome == "returned") s' = {operation: "front-returned", ...landed}
       else if (s.liveTask != 0) s' = {unreliable: true, operation: "front-made-instance", ...landed}
       else all {
-        // No live instance is left: the instance keeps its page, and its own start intent, which
-        // carries the marker, reaches it as the page owner and answers every outstanding start.
         not(s.pages.contains(task)),
         s' = {unacked: 0, operation: "own-page", ...owning(landed, task, home)}
       }
@@ -66,7 +55,6 @@ module HomeInstanceHandoff {
   action liveResumes = all {
     s.liveTask != 0, s' = {unacked: 0, operation: "resume", ...s}
   }
-  // Renderer recovery or a configuration change: same task, whatever intent setIntent last held.
   action relaunch(heldIntentHome: bool): bool = all {
     s.liveTask != 0,
     s' = {operation: "relaunch", ...owning(s, s.liveTask, heldIntentHome)}
@@ -109,8 +97,6 @@ module HomeInstanceHandoff {
     .then(check(s.frontInFlight == 1 and s.pages == Set(1)))
     .then(frontStartArrives("live", true))
     .then(check(safety and s.unacked == 0 and not(s.unreliable)))
-  // The live instance never comes forward: the hand-off stops after three unanswered starts and
-  // the next HOME start keeps its own page instead of finishing and being started again.
   run unansweredHandOffStopsLoopingTest = init.then(externalStart(false, true, true))
     .then(externalStart(true, true, true)).then(externalStart(true, true, true))
     .then(check(not(s.unreliable) and s.unacked == 2))
@@ -124,13 +110,10 @@ module HomeInstanceHandoff {
   run failedFrontStartIsUnreliableTest = init.then(externalStart(true, true, true))
     .then(externalStart(false, false, false))
     .then(check(safety and s.unreliable and s.unacked == 0 and s.frontInFlight == 0))
-  // A home-type owner relaunched while holding the sign-in return intent stays home-type.
   run relaunchKeepsHomeKindTest = init.then(externalStart(true, true, true))
     .then(relaunch(false)).then(check(safety and s.liveTaskHome))
     .then(externalStart(false, false, true))
     .then(check(safety and s.frontInFlight == 1 and s.handOffs == 1))
-  // The live instance died before the front start landed: the instance it makes owns the page
-  // and no hand-off stays unanswered.
   run frontStartAfterOwnerDiedOwnsPageTest = init.then(externalStart(true, true, true))
     .then(externalStart(false, false, true)).then(check(s.unacked == 1 and s.frontInFlight == 1))
     .then(destroyLive).then(frontStartArrives("new-instance", true))

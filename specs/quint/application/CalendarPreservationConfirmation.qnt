@@ -1,4 +1,3 @@
-// Exact mounted review admission and owner-keyed saved Calendar retention.
 module CalendarPreservationConfirmation {
   type Attempt = {owner: int, session: int, review: int, stage: str, result: str, aborted: bool, expected: int}
   type Marker = {review: int, receipt: int}

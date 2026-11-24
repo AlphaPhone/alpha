@@ -1,6 +1,4 @@
 import {test,expect} from '@playwright/test';
-// Renderer side of patch 0041: provider fields for all-day, chosen-zone and repeating direct
-// saves, handoff routing and the on-device source disclosure. No provider writes here.
 test.use({timezoneId:'America/New_York'});
 test.beforeEach(async({page})=>{await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));await page.goto('/');});
 test('all-day, zoned and repeating forms map to exact provider fields',async({page})=>{

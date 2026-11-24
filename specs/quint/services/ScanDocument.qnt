@@ -1,4 +1,3 @@
-/// Ordered scan pages, associated text layers, serialized draft writes and irreversible export.
 module ScanDocument {
   type Page = { image: int, text: int }
   type Scan = {
@@ -32,7 +31,6 @@ module ScanDocument {
     val pages = [s.pages.nth(1), s.pages.nth(0)]
     s' = { ...s, pages: pages, queued: queuePages(s.native, s.queued, pages) }
   }
-  /// Replacing/correcting an image retires its old OCR text layer.
   action correct = all {
     editable, s.pages.length() > 0,
     val pages = s.pages.replaceAt(0, { image: 3, text: 0 })
@@ -81,7 +79,6 @@ module ScanDocument {
     s' = { ...s, pages: s.savedPages, expectedRevision: s.storedRevision,
       autoSaved: false, userSaved: true, exported: false, output: "none", conflict: false }
   }
-  /// User-confirmed deletion retires the stored draft and preserves the open pages.
   action deleteDraft = all {
     not(s.closed or s.saving), s.phase == "review", s.queued.length() == 0,
     s.expectedRevision != 0, s.expectedRevision == s.storedRevision,
@@ -116,7 +113,6 @@ module ScanDocument {
     outcome.in(Set("cancelled", "failed", "unavailable", "too-large", "exported", "requested", "unverified")),
     s' = { ...s, phase: "review", picker: false, output: outcome, exported: not(retryable(outcome)) }
   }
-  /// A thrown export call may have written a file. The same review stays locked.
   action exportThrew = all {
     s.phase == "exporting", not(s.closed),
     s' = { ...s, phase: "review", picker: false, output: "unverified", exported: true }
@@ -126,7 +122,6 @@ module ScanDocument {
     s.expectedRevision != 0, s.expectedRevision == s.storedRevision,
     s' = { ...s, storedRevision: 0, expectedRevision: 0, savedPages: [], autoSaved: false }
   }
-  /// The system picker may hide the WebView without closing its owning review.
   action hide = if (s.picker) s' = { ...s, hidden: true }
     else s' = { ...s, hidden: true, closed: true, phase: "closed", pages: [],
       queued: [], saving: false, pendingPages: [] }
@@ -153,7 +148,6 @@ module ScanDocument {
   val ClosedNoWriter = s.closed implies not(s.saving)
   val TypeOK = s.phase.in(Set("review", "saving", "picking", "preparing", "exporting", "closed"))
     and s.output.in(Set("none", "conversion-failed", "cancelled", "failed", "unavailable", "too-large", "exported", "requested", "unverified"))
-  /// Explicitly saved or loaded drafts remain user-owned through later automatic saves and exports.
   val ExplicitlySavedDraftPreserved = s.userSaved and s.output == "exported" implies s.storedRevision != 0
   val safety = TypeOK and TextStaysWithPage and BoundedDraft and WriterSerialized and ImmutableExport and UnknownExportLocked and ClosedNoWriter and ExplicitlySavedDraftPreserved
   run orderedLayersTest = initFor(false).then(add(1)).then(add(2)).then(keepReviewedText)
@@ -177,7 +171,6 @@ module ScanDocument {
   run automaticDraftCleanupTest = initFor(true).then(add(1)).then(beginAutoSave).then(saveCommit)
     .then(beginExport).then(requestExport).then(exportReply("exported")).then(clearAutoDraft)
     .expect(s.storedRevision == 0 and s.exported and safety)
-  /// Explicit save turns a previous auto-draft into a user-owned saved draft.
   run explicitSaveAfterAutosavePreservedTest = initFor(true).then(add(1)).then(beginAutoSave).then(saveCommit)
     .then(beginManualSave).then(saveCommit).then(beginExport).then(requestExport)
     .then(exportReply("exported")).expect(ExplicitlySavedDraftPreserved and not(s.autoSaved) and safety)

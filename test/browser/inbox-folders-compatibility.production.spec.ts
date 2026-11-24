@@ -1,14 +1,11 @@
 import {test,expect} from '@playwright/test';
 import {flagOffAndroid,fenceNetwork,residentHome} from './flag-off-android';
 
-// Full flag-off production renderer and bundled CSS, closed native/Gmail ports only.
-// Deleting the API before mount exercises the WebView113 path; no real mail is read.
 for(const legacy of [false,true])for(const width of [360,412])test(`Inbox folders stay hidden and dismiss safely: ${legacy?'legacy-no-popover':'modern'} ${width}px`,async({page},info)=>{
  await page.setViewportSize({width,height:740});await fenceNetwork(page);
  if(legacy)await page.addInitScript(()=>{delete (HTMLElement.prototype as Partial<HTMLElement>).showPopover;delete (HTMLElement.prototype as Partial<HTMLElement>).hidePopover;});
  await flagOffAndroid(page,{accounts:[{connectionId:'qa-mailbox',email:'qa@example.invalid',connected:true,messages:[]}]});
  await residentHome(page);
- // The 30-day fixture has no expiry warning; the mailbox starts unobstructed.
  await expect(page.getByRole('region',{name:'Eliza Cloud sign-in notice',exact:true})).toHaveCount(0);
  await page.getByRole('button',{name:'Inbox',exact:true}).click();
  const trigger=page.getByRole('button',{name:'Other mail folders',exact:true}),menu=page.getByRole('menu',{name:'Mail folders',exact:true});

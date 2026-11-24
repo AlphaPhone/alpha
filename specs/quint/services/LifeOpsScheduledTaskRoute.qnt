@@ -1,4 +1,3 @@
-// Pinned LifeOps route and in-memory runner behavior with two closed callers.
 module LifeOpsScheduledTaskRoute {
   type Slot = {phase: str, at: int, completed: int}
   type Claim = {actor: int, result: str, at: int}
@@ -114,7 +113,6 @@ module LifeOpsScheduledTaskRoute {
     reply.http == 0 or (reply.http == 200 and reply.task == (if (reply.kind == "raced") "" else "weekly"))
   })
   val safety = EgressHasClaimAndGuard and FireReplyIdentity
-  // The current generic runner violates these stronger occurrence properties.
   val ExactOccurrenceEgress = s.guards.indices().forall(i => {
     val guard = s.guards.nth(i)
     guard.allowed implies guard.at == guard.currentAt

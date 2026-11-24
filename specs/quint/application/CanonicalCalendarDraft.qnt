@@ -1,4 +1,3 @@
-// Calendar's owner-bound editor and held durable slot operations.
 module CanonicalCalendarDraft {
   type Draft = {owner: str, title: str}
   type Slot = {present: bool, draft: Draft}
@@ -90,9 +89,6 @@ module CanonicalCalendarDraft {
     s' = if (job.kind == "write") {...settled, slots: s.slots.set(owner, row(job.draft))}
       else if (s.bound == owner and s.lease == job.lease and selected(s) and s.text == job.draft)
         {...settled, consuming: false, text: NoDraft, slots: s.slots.set(owner, row(NoDraft))}
-      // A failed retired clear remains unconfirmed when the same owner has
-      // reopened. Preserve its bytes and require review in the new lifetime.
-      // This bounded model admits no newer same-owner write while one is held.
       else if (s.bound == owner)
         {...settled, consuming: false, conflict: true, savedText: s.slots.get(owner).draft}
       else settled}

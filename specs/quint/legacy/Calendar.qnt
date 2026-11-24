@@ -1,5 +1,3 @@
-// Faithful translation of the working Calendar.tla, including its updated
-// undo-window and outbox semantics. Provider contents are three boolean rows.
 module Calendar {
   type State = { Design: str, access: str, picked: bool, net: str, view: str, top: str, focus: int,
     server: int -> bool, local: int -> bool, op: int -> str, conflict: int -> bool,
@@ -24,8 +22,6 @@ module Calendar {
     net: net, view: "Day", top: "Day", focus: 0, server: Ids.mapBy(i => i != Fresh),
     local: Ids.mapBy(i => i != Fresh), op: Ids.mapBy(i => "none"), conflict: Ids.mapBy(i => false),
     undo: 0, bad: bad, rsvp: "none", remote: 0, flips: 0 }
-  // Persistent monitors are the exact state extension for the original
-  // action properties. They observe transitions without constraining them.
   pure val initialChecks = { UndoBeforeSend: true }
   pure def UndoBeforeSendRelation(before: State, after: State): bool = Ids.forall(i => (before.undo == i and before.op.get(i) == "delete") implies
       not(after.op.get(i) == "none" and before.server.get(i) and not(after.server.get(i))))

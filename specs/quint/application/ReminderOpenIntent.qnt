@@ -1,4 +1,3 @@
-// Legacy read-only reminder open across refresh ownership and shell navigation visits.
 module ReminderOpenIntent {
   type Intent = {id: str, occurrence: str, at: int, view: str, visit: int, followedCalendar: bool}
   type Delivery = {kind: str, intentVisit: int, viewVisit: int}

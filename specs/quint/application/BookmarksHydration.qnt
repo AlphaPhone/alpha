@@ -1,10 +1,6 @@
-/// Browser bookmarks in the renderer: one serial queue of reads and writes, coalesced refreshes,
-/// the read a write waits for, and the recovery offer for a damaged saved list.
 module BookmarksHydration {
   type State = {
-    // The web build can tell a damaged saved list from another read failure; Android cannot.
     web: bool, disposed: bool,
-    // Operations in order; the first is the one running. `stage` is "idle" only when none waits.
     queue: List[str], stage: str,
     refreshQueued: bool, hydrated: bool, recovery: bool,
     damaged: bool, stored: int, marks: int, marksAtDispose: int,
@@ -19,21 +15,15 @@ module BookmarksHydration {
     initFor(web)
   }
   val refreshes = s.queue.select(op => op == "refresh").length()
-  // Ends the running operation.
   pure def done(t: State): State = { ...t, queue: t.queue.tail(), stage: "idle",
     refreshQueued: if (t.queue.head() == "refresh") false else t.refreshQueued }
-  // Begins the first waiting operation when none is running. A refresh is dropped after
-  // disposal; a write first reads the list when it has not been read yet.
   pure def started(t: State): State =
     if (t.stage != "idle" or t.queue.length() == 0) t
     else if (t.queue.head() == "refresh") (if (t.disposed) done(t) else { ...t, stage: "reading" })
     else if (not(t.hydrated)) { ...t, stage: "reading" }
     else if (t.disposed) done(t)
     else { ...t, stage: "writing" }
-  // An operation begins as soon as the one before it ends; at most three wait.
   pure def settled(t: State): State = started(started(started(t)))
-  // First render, entering the Browser, resume, a visible return and a changed bookmark document
-  // all ask for a refresh; only one waits at a time.
   action requestRefresh = all {
     not(s.disposed), not(s.refreshQueued), s.queue.length() < 3,
     s' = settled({ ...s, refreshQueued: true, queue: s.queue.append("refresh") })
@@ -42,8 +32,6 @@ module BookmarksHydration {
     s.queue.length() < 3,
     s' = settled({ ...s, queue: s.queue.append("save") })
   }
-  // A damaged saved list cannot be read. On the web build its first failure is reported with the
-  // recovery offer; later failures stay quiet while the offer is already shown.
   action readSettles(ok: bool): bool = all {
     s.stage == "reading", ok implies not(s.damaged),
     s' = settled(
@@ -58,7 +46,6 @@ module BookmarksHydration {
           else { ...s, hydrated: false, stage: "writing" })
         else done({ ...s, hydrated: false, errorShown: not(s.disposed) or s.errorShown }))
   }
-  // The store refuses to change a damaged list.
   action writeSettles(ok: bool): bool = all {
     s.stage == "writing", ok implies (not(s.damaged) and s.stored < 3),
     s' = settled(
@@ -66,10 +53,8 @@ module BookmarksHydration {
           marks: if (s.disposed) s.marks else s.stored + 1 })
         else done({ ...s, errorShown: not(s.disposed) or s.errorShown }))
   }
-  // Another surface changes the saved list.
   action externalChange = all { s.stored < 3, not(s.damaged), s' = { ...s, stored: s.stored + 1 } }
   action damage = all { s.web, not(s.damaged), s.episodes < 2, s' = { ...s, damaged: true } }
-  // The recovery dialog replaces the damaged list.
   action repair = all { s.damaged, s' = { ...s, damaged: false } }
   action dispose = all { not(s.disposed), s' = { ...s, disposed: true, marksAtDispose: s.marks } }
   action step = {
@@ -90,8 +75,6 @@ module BookmarksHydration {
     NoticeOncePerEpisode and MarksComeFromStore and StageMatchesQueue
   val RecoveryOfferedWitness = s.recovery and s.stage == "idle" and s.queue.length() == 0
   val SaveWaitsForReadWitness = s.stage == "reading" and s.queue.head() == "save"
-  // After the offer is shown, a write goes ahead on a list the renderer has not read; only the
-  // store's own refusal of a damaged list protects it.
   val UnreadWriteAttemptWitness = s.stage == "writing" and not(s.hydrated) and s.recovery
   run saveReadsFirstTest = initFor(false).then(requestSave)
     .expect(s.stage == "reading").then(readSettles(true)).expect(s.stage == "writing" and s.hydrated)
@@ -99,7 +82,6 @@ module BookmarksHydration {
   run refreshCoalescedTest = initFor(false).then(requestRefresh)
     .expect(s.refreshQueued and refreshes == 1).then(readSettles(true))
     .expect(not(s.refreshQueued) and s.hydrated).then(requestRefresh).expect(refreshes == 1 and safety)
-  // A damaged list is reported once with the recovery offer and is never replaced by a write.
   run damagedListTest = initFor(true).then(damage).then(requestRefresh).then(readSettles(false))
     .expect(s.recovery and s.notices == 1 and not(s.hydrated))
     .then(requestRefresh).then(readSettles(false)).expect(s.notices == 1)

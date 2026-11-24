@@ -1,4 +1,3 @@
-/// Native Maps bridge, service command authority and notification ownership.
 module NativeNavigationOwnership {
   type Command = {kind: str, id: int, authority: int}
   type Event = {owner: int, id: int, reason: str}

@@ -3,7 +3,6 @@ package ai.alphacompute.alphaphone;
 import java.io.File;
 import java.io.IOException;
 
-/** Executes the real writer against the private directory of a disposable host fixture. */
 public final class NativeGoogleAccessFileTraces {
  public static void main(String[] args) {
   if (args.length != 3) throw new IllegalArgumentException("Expected directory and two switches");

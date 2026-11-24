@@ -10,7 +10,6 @@ import java.util.concurrent.TimeUnit;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Drives the entire plugin. Observations read source state and controlled service replies. */
 public final class ResidentCoordinatorTraces {
   static final String FIRST = "00000000-0000-4000-8000-000000000001";
   static final String SECOND = "00000000-0000-4000-8000-000000000002";

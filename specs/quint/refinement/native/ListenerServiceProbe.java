@@ -5,7 +5,6 @@ import java.nio.file.*;
 import java.util.concurrent.*;
 import org.json.*;
 
-/** Drives the real onCreate/start/destroy lifecycle, then observes cleanup after a release fault. */
 public final class ListenerServiceProbe {
  public static void main(String[]args)throws Exception {
   StorePorts.preferences=new StorePorts.Preferences(Path.of(args[0]));
@@ -23,7 +22,6 @@ public final class ListenerServiceProbe {
    .put("playbackRegistered",ServicePorts.audio.playbackRegistered).put("observerRegistered",ServicePorts.resolver.observed)
    .put("executorShutdown",recognizer.isShutdown()).put("engineClosed",ServicePorts.engine.closed)
    .put("recording",ServicePorts.record.recording).put("released",ServicePorts.record.released).put("superDestroyed",service.superDestroyed));
-  // Harness teardown occurs after observations, even when the original lifecycle stranded its worker.
   ServicePorts.record.unblock.countDown();recognizer.shutdownNow();recognizer.awaitTermination(5,TimeUnit.SECONDS);
  }
 }

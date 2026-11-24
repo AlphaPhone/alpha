@@ -1,17 +1,3 @@
-// J04 with Eliza Cloud Maps on the FLAG-OFF bundle: a canonical Calendar event's location is passed to
-// Maps once, searched through the account-bound Cloud Maps routes (/api/v1/maps capabilities, search
-// and routes), routed from an explicit origin with an explicit travel-mode choice, started and
-// stopped, and Back to event restores that exact event. A mid-search cancel, an out-of-coverage
-// place and a Retry-After request limit are shown as the shipped renderer words them.
-//
-// Synthetic boundaries, all at the Capacitor bridge (flag-off-android.ts, resident-stub.ts):
-// CalendarService rows, the Cloud Maps HTTP answers (resident-stub `maps`), the ElizaLocation fix
-// stream and the AlphaMapsTransport screen-off service. The shipped renderer, CloudProtocol, the
-// plugin-maps Cloud provider, controller and screen all run.
-//
-// Evidence boundary: source/test evidence for the flag-off renderer only. Nothing here is a
-// deployed Cloud Maps service, Nominatim or GraphHopper, GPS, the Android foreground service, an
-// APK, an emulator or a device.
 import { test, expect, type Page } from '@playwright/test';
 test.use({locale:'en-GB'});
 import {installCanonicalCalendarFixture} from './helpers/canonical-calendar';
@@ -30,13 +16,11 @@ const MAPS: StubMaps = {
       { id: 'N1001', name: 'Port Hercule', latitude: PORT.latitude, longitude: PORT.longitude, address: 'Quai Albert 1er, Monaco' },
       { id: 'N1002', name: 'Port Hercule fuel dock', latitude: 43.7351, longitude: 7.4232, address: 'Quai Rainier III, Monaco' },
     ],
-    // A real place that Cloud found, but outside every coverage region.
     'Nice harbour': [{ id: 'N2001', name: 'Port of Nice', latitude: 43.6955, longitude: 7.2853, address: 'Quai Lunel, Nice' }],
   },
   routes: [{ minutes: 7, meters: 1200, via: 'Boulevard Albert 1er' }, { minutes: 9, meters: 1500, via: 'Avenue de la Costa' }],
 };
 
-/** Adds the event location, a granted ElizaLocation fix stream and the AlphaMapsTransport service. */
 async function devicePorts(page: Page, location: string) {
   await page.addInitScript(location => {
     const w = window as any, base = w.Capacitor, f = w.flagOff;
@@ -72,9 +56,7 @@ async function devicePorts(page: Page, location: string) {
 const calendarReads=(page:Page)=>page.evaluate(()=>(window as any).canonicalCalendarAccessibility.requests as Array<{path:string;method:string}>);
 const j04 = (page: Page) => page.evaluate(() => (window as any).j04 as { lists: Array<{ begin: number; end: number }>; navigation: string[]; watches: string[]; cleared: string[] });
 const mapsRequests = (page: Page) => stub(page, s => s.maps.requests.map((row: any) => ({ route: row.route, body: row.body })));
-/** Route request endpoints and mode; whether alternatives were asked for is asserted separately. */
 const routeBodies = async (page: Page) => (await mapsRequests(page)).filter(row => row.route === 'routes').map(({ body }) => ({ from: body.from, to: body.to, mode: body.mode }));
-/** A fresh precise fix from the stubbed ElizaLocation stream. */
 const fix = (page: Page, point: { latitude: number; longitude: number }) => page.evaluate(point => (window as any).flagOff.emit('ElizaLocation', 'locationChange', { coords: { ...point, accuracy: 5, timestamp: Date.now(), heading: null, speed: null }, cached: false }), point);
 
 test('an event location is searched once in Cloud Maps, routed from an explicit origin, started and stopped, and Back returns to the event', async ({ page }) => {
@@ -94,16 +76,13 @@ test('an event location is searched once in Cloud Maps, routed from an explicit 
     await button(page,'Calendar').click();
     await page.getByRole('button', { name: new RegExp(`^${TITLE},`) }).first().click();
     await expect(page.getByRole('heading', { name: TITLE, exact: true })).toBeVisible();
-    // Viewing the event contacts no Maps route.
     expect((await mapsRequests(page)).filter(row => row.route !== 'capabilities')).toEqual([]);
     await button(page, LOCATION).click();
     await expect(page.locator('html')).toHaveAttribute('data-active-view', 'maps');
     await expect(search).toHaveValue(LOCATION);
     await expect(page.getByRole('button', { name: /^Port Hercule fuel dock/ }).first()).toBeVisible();
     await expect(page.getByRole('button', { name: /^Port Hercule,|^Port Hercule$|^Port Hercule Quai/ }).first()).toBeVisible();
-    // The Cloud provider's own credit sits beside its results.
     await expect(page.locator('.alpha-map-credits [data-maps-cloud-credit]')).toHaveText(' · © OpenStreetMap contributors (ODbL). Search: Nominatim. Routing: GraphHopper.');
-    // Two candidates: nothing is selected or routed until the user chooses.
     await expect(button(page, 'Directions')).toHaveCount(0);
     expect(await mapsRequests(page)).toEqual([{ route: 'capabilities', body: null }, { route: 'places/search', body: { query: LOCATION } }]);
   });
@@ -119,7 +98,6 @@ test('an event location is searched once in Cloud Maps, routed from an explicit 
     await expect(maps).toContainText(/7 min\s*1\.2 km · no live traffic/);
     const destination = { latitude: 43.7351, longitude: 7.4232 };
     expect(await routeBodies(page)).toEqual([{ from: ORIGIN, to: destination, mode: 'drive' }]);
-    // Cloud serves no transit: it is refused by name and nothing is requested.
     await button(page, 'Transit').click();
     await expect(maps.getByRole('status').first()).toContainText('Transit schedules are not available for this region.');
     await button(page, 'Walk').click();
@@ -149,7 +127,6 @@ test('an event location is searched once in Cloud Maps, routed from an explicit 
     await expect(page.locator('html')).toHaveAttribute('data-active-view', 'calendar');
     expect((await calendarReads(page)).slice(before).some(row=>{const url=new URL(row.path,'http://fixture.invalid');return row.method==='GET'&&url.pathname==='/api/lifeops/calendar/feed'&&Date.parse(url.searchParams.get('timeMin')!)===begin-1&&Date.parse(url.searchParams.get('timeMax')!)===begin+1;})).toBe(true);
     expect(await harness(page,f=>f.calendar.lists)).toBe(0);
-    // The hand-off searched once; returning replays nothing.
     expect((await mapsRequests(page)).filter(row => row.route === 'places/search')).toHaveLength(1);
   });
 
@@ -180,7 +157,6 @@ test('a cancelled search shows nothing late, a place outside coverage is named, 
     await expect.poll(() => stub(page, s => s.maps.cancelled.length)).toBe(1);
     const [held] = await stub(page, s => s.maps.requests.filter((row: any) => row.route === 'places/search').map((row: any) => row.requestId));
     expect(await stub(page, s => s.maps.cancelled)).toEqual([held]);
-    // The cancelled request's answer arrives late anyway; it is not shown.
     await page.evaluate(() => (window as any).residentStub.releaseSearch());
     await page.waitForTimeout(500);
     await expect(page.getByRole('button', { name: /^Port Hercule/ })).toHaveCount(0);
@@ -205,11 +181,9 @@ test('a cancelled search shows nothing late, a place outside coverage is named, 
     const searches = (await mapsRequests(page)).filter(row => row.route === 'places/search').length;
     await page.waitForTimeout(1_000);
     expect((await mapsRequests(page)).filter(row => row.route === 'places/search')).toHaveLength(searches);
-    // A user retry also honors Cloud's account-wide pause.
     await search.press('Enter');
     await expect(maps).toContainText('Maps request limit reached. Try again in about 30 seconds.');
     expect((await mapsRequests(page)).filter(row => row.route === 'places/search')).toHaveLength(searches);
-    // Expiry alone does not replay the search. The next explicit retry succeeds.
     await page.clock.setFixedTime(new Date(cooldownStart.getTime() + 30_001));
     expect((await mapsRequests(page)).filter(row => row.route === 'places/search')).toHaveLength(searches);
     await search.press('Enter');
@@ -239,7 +213,6 @@ test('Cloud route alternatives are offered in order; choosing one requests nothi
   await origin.fill(`${ORIGIN.latitude}, ${ORIGIN.longitude}`);
   await origin.press('Enter');
 
-  // One admitted request asks Cloud for alternatives; both come back in Cloud's order.
   const routes = page.getByRole('group', { name: 'Routes' });
   const recommended = routes.getByRole('button', { name: 'Recommended, 7 min, 1.2 km', exact: true });
   const alternative = routes.getByRole('button', { name: 'Alternative 1, 9 min, 1.5 km', exact: true });
@@ -249,7 +222,6 @@ test('Cloud route alternatives are offered in order; choosing one requests nothi
   const routeRequests = async () => (await mapsRequests(page)).filter(row => row.route === 'routes').map(row => row.body);
   expect(await routeRequests()).toEqual([{ from: ORIGIN, to: { latitude: 43.7351, longitude: 7.4232 }, mode: 'drive', alternatives: true }]);
 
-  // Choosing the alternative is local: nothing more is requested.
   await alternative.click();
   await expect(alternative).toHaveAttribute('aria-pressed', 'true');
   await expect(recommended).toHaveAttribute('aria-pressed', 'false');
@@ -257,12 +229,10 @@ test('Cloud route alternatives are offered in order; choosing one requests nothi
   await expect(maps).toContainText('Head along Avenue de la Costa');
   expect(await routeRequests()).toHaveLength(1);
 
-  // Start guides along the chosen route; End stops the screen-off service.
   await page.getByRole('button', { name: 'Start', exact: true }).click();
   await expect(button(page, 'End navigation')).toBeVisible();
   await expect.poll(async () => (await j04(page)).navigation[0]).toBe('startNavigation Route to Port Hercule fuel dock');
   await fix(page, ORIGIN);
-  // Guidance runs on the chosen route: its 9-minute duration, not the recommended 7.
   await expect(page.getByRole('status', { name: 'Remaining distance and time' })).toBeVisible();
   await expect(maps).toContainText('9 min');
   await expect(maps).not.toContainText('7 min');

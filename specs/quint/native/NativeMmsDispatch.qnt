@@ -1,5 +1,3 @@
-// Actual Alpha MMS review, shared SMS/MMS ID ownership, and outgoing PDU custody.
-// Binding 1 and 2 differ in reviewed attachment bytes. Binding 3 is SMS.
 module NativeMmsDispatch {
   type Record = { binding: int, status: str, dispatching: bool, boot: int, row: bool }
   type Review = { binding: int, sim: bool }
@@ -108,7 +106,6 @@ module NativeMmsDispatch {
   }
 
   val callbackModes=Set("complete","bad-uri","foreign-kind","failure-conf","unreadable-conf","before","after")
-  // Preserve four publications per bridge; the two live bridges each receive the same callback.
   pure def noticeBudget(events: Events): bool = events.deliveries.keys()==actors and
     actors.forall(actor=>events.deliveries.get(actor)>=0 and events.deliveries.get(actor)<=4)
   action callback(mode: str, ok: bool): bool = all {

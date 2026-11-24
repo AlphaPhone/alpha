@@ -1,5 +1,3 @@
-/// Current StartupPermissions component over seven native or four browser flows.
-/// Installation progress is best effort. Platform status remains authoritative.
 module PermissionChoices {
   pure val AllKeys = 0.to(6)
   pure val States = Set("checking", "request", "settings", "ready", "unavailable")
@@ -39,8 +37,6 @@ module PermissionChoices {
   action init = s' = initial(true)
   action browserInit = s' = initial(false)
   action imageInit = s' = { ...initial(true), image: true }
-  /// Select the immutable platform profile before mounting. Named scenarios keep their exact
-  /// initializers; sampled safety now exercises ordinary Android, image and browser profiles.
   action profileInit = {
     nondet profile = Set("native", "image", "browser").oneOf()
     s' = { ...initial(profile != "browser"), image: profile == "image" }
@@ -113,8 +109,6 @@ module PermissionChoices {
       s' = if (state == "ready" and s.target < 0) advanced(current, s.pendingChoice) else current
     } }
   action result(granted: bool): bool = resultState(if (granted) "ready" else "settings")
-  /// The verified image's already-ready row advances without requesting access. Completion
-  /// goes Home when every row was continued and the write succeeds. Account attention is out of scope.
   action imageContinue = all { shown, automatic, not(busy), s.states.get(selected) == "ready",
     val current = advanced(s, "continued")
     val pregranted = s.choices.foldl(true, (allContinued, choice) => allContinued and choice == "continued")
@@ -124,8 +118,6 @@ module PermissionChoices {
     s.operations.get(key) != s.generation, s' = { ...s, operations: s.operations.set(key, -1),
       flowTickets: if (s.flowTickets.get(key) == s.operations.get(key)) s.flowTickets.set(key, -1) else s.flowTickets } }
   action retiredResult = s' = s
-  /// The recovery timer also runs behind the image's hidden initial check. When it expires,
-  /// Checking is shown with Skip; an unknown read is never treated as a grant.
   action skipAvailable = all { shown, not(s.ready), s' = { ...s, canSkip: true } }
   val skipAllowed = s.canSkip or (s.pending == -1 and s.states.get(selected) != "checking")
   action skip = all { visible, skipAllowed, s.generation < MaxGeneration, {

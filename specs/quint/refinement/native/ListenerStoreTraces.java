@@ -6,7 +6,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import org.json.*;
 
-/** Executes actual store methods. Only preferences persistence and OS facts are ports. */
 public final class ListenerStoreTraces {
  static ListenerStore store;static Trace trace;static String reply="none";
  static long normalized(long value){return value==Long.MAX_VALUE?-1:value;}

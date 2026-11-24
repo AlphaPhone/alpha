@@ -1,4 +1,3 @@
-// Host Java and its provenance manifest share one settled publication generation.
 module ResidentJavaSourceStage {
   type State = {selected: int, admission: str, occupied: bool, published: int,
     previous: int, candidate: int, before: int, result: str}

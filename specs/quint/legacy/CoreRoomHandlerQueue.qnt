@@ -1,4 +1,3 @@
-// Literal conversion of packages/core/tla/RoomHandlerQueue.tla at 4787d51a142.
 module CoreRoomHandlerQueueTemplate {
   const Turns: Set[str]
   const NumRooms: int
@@ -36,7 +35,6 @@ module CoreRoomHandlerQueueTemplate {
     writes: Turns.mapBy(_ => Rooms.mapBy(_ => 0)), closed: false, admissionHistory: true, releaseHistory: true}
   action Init = s' = initial
   val Initial = s == initial
-  // Record the two source action properties without restricting any projected transition.
   action Track(after: State): bool = s' = {...after,
     admissionHistory: s.admissionHistory and (s.closed implies Rooms.forall(r => after.queue.get(r).length() <= s.queue.get(r).length())),
     releaseHistory: s.releaseHistory and Rooms.forall(r => {

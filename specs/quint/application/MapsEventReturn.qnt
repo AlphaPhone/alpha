@@ -1,4 +1,3 @@
-// View-owned Calendar return from the Maps renderer.
 module MapsEventReturn {
   type Origin = {event: str, kind: str}
   type Attempt = {origin: int, aborted: bool, settled: bool}

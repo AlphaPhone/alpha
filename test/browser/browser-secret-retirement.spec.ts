@@ -22,7 +22,6 @@ test('a failed IndexedDB read or removal never reports a temporary sign-out and 
    }
   }finally{IDBFactory.prototype.open=open;}
   const retained=(await blocked.secureRead({slot})).value;
-  // Another client replaces the exact old generation. The old compare-and-clear must leave it.
   await store.secureWrite({slot,value:'synthetic-replacement'});
   const oldClear=await blocked.secureCompareExchange({slot,expectedValue:'synthetic-production',value:null});
   const replacement=(await createBrowserConnection().secureRead({slot})).value;

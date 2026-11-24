@@ -9,11 +9,9 @@ test('browser voice encodes audio, reviews a transcript, persists audio and relo
   const {registerPlugin}=await import('/src/platform-plugins.ts');const voice=registerPlugin<any>('AlphaVoiceCloud');
   await voice.startRecording();
  });
- // Allow the real MediaRecorder to encode several audio packets from the synthetic source.
  await page.waitForTimeout(400);
  const clip=await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');return registerPlugin<any>('AlphaVoiceCloud').stopRecording();});
  expect(clip.durationMs).toBeGreaterThan(0);
- // The reviewed transcript is the user's text; the local-agent recognition route is covered by browser-speech.spec.ts.
  await page.evaluate(()=>{(window as any).transcript=Promise.resolve({text:'Reviewed local audio'});});
  const saved=await page.evaluate(async(id)=>{
   const {registerPlugin}=await import('/src/platform-plugins.ts');const voice=registerPlugin<any>('AlphaVoiceCloud'),transcript=await (window as any).transcript;
@@ -26,11 +24,9 @@ test('browser voice encodes audio, reviews a transcript, persists audio and relo
   return {...result,stopped};
  },clip.recordingId);
  expect(saved.stopped).toBe(true);expect(saved.transcript).toBe('Reviewed local audio');
- // A pending local-agent transcription is cancelled by pagehide; the agent sees the abort.
  await page.evaluate(async(id)=>{
   const {connectionController}=await import('/src/runtime/connection-ui.tsx');
   const fixture=(window as any).agentFixture={requested:false,aborted:false};
-  // One agent object: the facade treats a different object as a changed voice selection.
   const agent={session:{sessionId:'synthetic-audio'},speechRequest:(_audio:Uint8Array,signal:AbortSignal)=>new Promise((_resolve,reject)=>{fixture.requested=true;signal.addEventListener('abort',()=>{fixture.aborted=true;reject(signal.reason);},{once:true});})};
   (connectionController as any).getBrowserSpeechAgent=()=>agent;
   const {registerPlugin}=await import('/src/platform-plugins.ts');(window as any).cancelledTranscript=registerPlugin<any>('AlphaVoiceCloud').transcribeLocalRecording({recordingId:id}).then(()=>false,(error:Error)=>error.name);
@@ -56,7 +52,6 @@ test('permission denial can retry; pagehide releases active audio and cancels pe
   let release!:(stream:MediaStream)=>void;
   Object.defineProperty(navigator.mediaDevices,'getUserMedia',{value:()=>new Promise<MediaStream>(resolve=>release=resolve),configurable:true});
   const pending=voice.startRecording().then(()=>false,()=>true);
-  // Capacitor dispatches the web method asynchronously.
   while(!release)await new Promise(resolve=>setTimeout(resolve,0));
   window.dispatchEvent(new Event('pagehide'));
   const ctx=new AudioContext(),sink=ctx.createMediaStreamDestination();release(sink.stream);const cancelled=await pending;

@@ -8,10 +8,6 @@ import java.util.concurrent.TimeUnit;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/**
- * Whole-plugin credential mutation campaigns. Primitive storage and service
- * replies are controlled.
- */
 public final class CredentialCoordinatorTraces {
   static Trace trace;
   static final JSONArray observations = new JSONArray();

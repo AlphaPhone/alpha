@@ -2,8 +2,6 @@ import {reviewCalendarAction} from './helpers/calendar-review';
 import {openBrowserCalendar, chooseCalendarEventAction} from './helpers/browser-calendar';
 import {expectSavedCalendarDraft,guardCalendarFixture} from './calendar-draft-readiness';
 import {test,expect} from '@playwright/test';
-// Each reload re-enters Settings and Calendar. Their 460ms entry animation is not under test here,
-// and clicking during it waits out Playwright's stability retries on every step.
 test.use({timezoneId:'UTC',contextOptions:{reducedMotion:'reduce'}});
 test.beforeEach(async({context})=>guardCalendarFixture(context));
 const status=(page:any)=>page.getByRole('status',{name:'Calendar edit draft status'});

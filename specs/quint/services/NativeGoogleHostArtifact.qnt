@@ -1,4 +1,3 @@
-// Input-bound candidate and serial publication of the fixed-name worker artifact.
 module NativeGoogleHostArtifact {
   type Receipt = {bundle: int, source: int, connector: bool}
   type Attempt = {projection: bool, version: bool, compile: bool, moduleWritten: bool, metadata: bool,

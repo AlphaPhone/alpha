@@ -3,7 +3,6 @@ package ai.eliza.voice;
 import ai.alphacompute.alphaphone.Trace;
 import org.json.*;
 
-/** Actual lead trim, report-before-write wrapper, and controlled audio output port. */
 public final class SpeechOutputPreparationTraces {
  static final class WriteFault extends RuntimeException {}
  static final class CallbackFault extends RuntimeException {}

@@ -5,7 +5,6 @@ for(const mode of ['compose','cancel','source-changed','owner-changed'] as const
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
  await installDeliveryFixture(page,{gmail:true});
  await startResidentAgent(page);
- // Completed-installation UI progress keeps this fixture focused on the Gmail notice review.
  await page.evaluate(async()=>{
   const c=(await import('/src/runtime/connection-ui.tsx')).connectionController,f=(window as any).deliveryFixture,snapshot=c.getSnapshot.bind(c);f.reads=0;
   const client={gmailAccounts:async()=>[{connectionId:'grant',connected:true,label:'Owned mailbox',grantedCapabilities:['google.gmail.triage']}],gmailRead:async()=>{f.reads++;return {message:{id:'mail',threadId:'thread',subject:'Public subject',snippet:f.changed?'Changed snippet':'Public snippet'},bodyText:'PRIVATE BODY NEVER SHARED',historyId:f.changed?'11':'10',attachments:[]};}};

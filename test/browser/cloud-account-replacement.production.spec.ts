@@ -1,11 +1,5 @@
 import {openCloudPlanFromSettings,confirmCloudSignOut} from './helpers/cloud-plan-settings';
 import {seedCompletedAccessSetup} from './flag-off-android';
-// Replacing one Eliza Cloud account with another on the flag-off Android renderer, and a second
-// sign-in over a saved key.
-//
-// Evidence boundary: source/test evidence for the flag-off renderer only. The bridge stub
-// (flag-off-android.ts and resident-stub.ts) is not the native plugins, Eliza Cloud, Google, the
-// resident runtime or a device. Two synthetic accounts stand in for two real ones.
 import { test, expect, type Page } from '@playwright/test';
 import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface, residentHome, openYourAgent, completeAccessSetup } from './flag-off-android';
 import { residentStub, stub, setStub, enterNativeEmailCode, type StubAccount } from './resident-stub';
@@ -25,7 +19,6 @@ test('signing out of account A and into account B stops the resident before A is
   const foreign = await fenceNetwork(page);
   await flagOffAndroid(page);
   await residentStub(page, { nativeSignIn:true, accounts: [A, B] });
-  // Account A left a Cloud personal-setup intent on this phone; the renderer records who reads it.
   await page.addInitScript(key => {
     if (!sessionStorage.getItem('replacement-seeded')) { sessionStorage.setItem('replacement-seeded', '1'); localStorage.setItem(key, JSON.stringify({ version: 1, credentialId: 'a-credential', phase: 'activation', personalElizaId: 'personal-a', state: 'attempting' })); }
     const w = window as any, read = Storage.prototype.getItem; w.personalReads = [];
@@ -40,16 +33,13 @@ test('signing out of account A and into account B stops the resident before A is
   await dialog.getByRole('button',{name:'Close Account',exact:true}).click();
   await page.evaluate(() => window.dispatchEvent(new Event('launcher-home')));
   await button(page, 'Inbox').click();
-  // Inbox reads A's Gmail accounts with A's key (the account label is shown only beside a second account).
   await expect.poll(() => stub(page, s => s.cloud.filter((row: any) => row.path === '/api/v1/eliza/google/accounts' && row.auth === 'Bearer ' + 'account-a-key').length), { timeout: 30_000 }).toBeGreaterThan(0);
 
-  // Sign out of A: the resident stops before A's key is revoked and removed.
   dialog = await cloudPlan(page);
   await dialog.getByRole('button', { name: 'Sign out', exact: true }).click();await confirmCloudSignOut(page);
   dialog=page.locator('[role="main"].alpha-cloud-sign-in');
   await expect(dialog.getByRole('button', { name: 'Send code', exact: true })).toBeEnabled({ timeout: 30_000 });
   const signOut = await stub(page, s => s.order.length) as number;
-  // Sign in as B.
   await setStub(page, { nextToken: B.token });
   await enterNativeEmailCode(page,undefined,{checkLayout:true});
   await expect(page.locator('[role="main"].alpha-cloud-sign-in')).toHaveCount(0, { timeout: 30_000 });
@@ -60,22 +50,16 @@ test('signing out of account A and into account B stops the resident before A is
   expect(stored.token).toBe(B.token);
   const firstStart = order.indexOf('Agent.start'), lastStart = order.lastIndexOf('Agent.start');
   const removeA = order.indexOf('remove cloud key'), revokeA = order.indexOf('revoke Bearer ' + A.token), storeB = order.indexOf('store ' + B.token);
-  // A's agent was stopped before A's key was revoked and removed, and before B's key was stored.
   expect(order.slice(firstStart, revokeA)).toContain('Agent.stop');
   expect(revokeA).toBeLessThan(removeA);
   expect(removeA).toBeLessThan(storeB);
-  // P-43: after sign-out the resident runs with no provider, and it keeps running while the owner signs
-  // in as B in the native form; it is stopped only after B's key is stored, then restarted bound to B.
   expect(order.slice(signOut, storeB)).not.toContain('Agent.stop');
   expect(order.slice(storeB, lastStart)).toContain('Agent.stop');
-  // B's key binds the provider before the agent starts again, with B's plan read first.
   expect(order.indexOf('plan ' + B.email)).toBeGreaterThan(storeB);
   expect(order.indexOf('configureCloudProvider ' + stored.credentialId)).toBeGreaterThan(order.indexOf('plan ' + B.email));
   expect(lastStart).toBeGreaterThan(order.indexOf('configureCloudProvider ' + stored.credentialId));
-  // A's key never binds the provider again, and was signed out once (sign-out, not the new sign-in).
   expect(order.filter(entry => entry.startsWith('revoke'))).toEqual(['revoke Bearer ' + A.token]);
 
-  // Account copy, plan status and the connected Inbox account are B's (subscription-entitlement.ts).
   dialog = await cloudPlan(page);
   await expect(dialog.getByText(B.email, { exact: true })).toBeVisible();
   await expect(dialog.getByText(A.email, { exact: true })).toHaveCount(0);
@@ -86,21 +70,15 @@ test('signing out of account A and into account B stops the resident before A is
   await button(page, 'Inbox').click();
   await expect.poll(() => stub(page, s => s.cloud.filter((row: any) => row.path === '/api/v1/eliza/google/accounts' && row.auth === 'Bearer account-b-key').length), { timeout: 30_000 }).toBeGreaterThan(0);
   await expect(page.getByText(A.inbox!, { exact: false })).toHaveCount(0);
-  // After A's sign-out, no Cloud request carried A's key, and A's personal-setup intent was neither
-  // read nor removed; no digest delegation was asked for.
   const cloud = await stub(page, s => s.cloud) as Array<{ path: string; auth?: string }>;
   const afterSignOut = cloud.slice(cloud.findIndex(row => row.path === '/api/v1/api-keys/current') + 1);
   expect(afterSignOut.filter(row => row.auth === 'Bearer ' + A.token)).toEqual([]);
   expect(await page.evaluate(() => (window as any).personalReads)).toEqual([]);
   expect(await page.evaluate(key => localStorage.getItem(key), PERSONAL_A)).not.toBeNull();
-  // Neither the native delegation callback, a Cloud delegation route, nor (via f.unexpected below) the
-  // agent's cloud-delegation route was used.
   expect(await harness(page, f => f.calls.filter((call: string) => /Delegation/.test(call)))).toEqual([]);
   expect(cloud.filter(row => /delegation/i.test(row.path))).toEqual([]);
   expect(await page.locator('body').innerText()).not.toContain('personal-a');
 
-  // Current behaviour: the resident's conversation lives on this phone under the local owner, not the
-  // Cloud account, so B's session restores the conversation started under A.
   await page.evaluate(() => window.dispatchEvent(new Event('launcher-home')));
   await button(page, 'Open conversation').click();
   await expect(bubble(page, 'Asked while signed in as A')).toHaveCount(1, { timeout: 30_000 });
@@ -117,17 +95,14 @@ test('a second sign-in over a saved key uses the native replacement result witho
   await residentStub(page, { nativeSignIn:true, emptyKeystore: true, accounts: [A, B] });
   await page.goto('/');
   await setStub(page, { nextToken: A.token });
-  // P-43: the resident starts signed out and the sign-in gate opens.
   await expect.poll(() => harness(page, f => f.calls.includes('Agent.start')), { timeout: 30_000 }).toBe(true);
   let welcome = await openYourAgent(page);
   await enterNativeEmailCode(page,undefined,{checkLayout:true});
   await expect(page.locator('[role="main"].alpha-cloud-sign-in')).toHaveCount(0, { timeout: 30_000 });
   await completeAccessSetup(page);
   expect(await stub(page, s => s.order.filter((entry: string) => entry.startsWith('revoke')))).toEqual([]);
-  // Eliza Cloud stops accepting A's key; the next start asks for a new sign-in.
   await page.evaluate(() => { const s = (window as any).residentStub; s.accounts[0].userStatus = 401; s.nextToken = 'account-b-key'; s.polls = 0; s.persist(); });
   await page.reload();
-  // The resident starts again with AI off; Your agent says the saved sign-in is no longer valid.
   await expect.poll(() => harness(page, f => f.calls.includes('Agent.start')), { timeout: 30_000 }).toBe(true);
   welcome = await openYourAgent(page);
   await expect(welcome.getByRole('alert')).toHaveText('Sign-in expired', { timeout: 30_000 });
@@ -142,5 +117,4 @@ test('a second sign-in over a saved key uses the native replacement result witho
   expect(JSON.parse(await harness(page, f => f.slots['cloud:production'])).token).toBe(B.token);
 });
 
-// UI progress only: this feature fixture does not manufacture OS/provider grants.
 test.beforeEach(async({page})=>seedCompletedAccessSetup(page));

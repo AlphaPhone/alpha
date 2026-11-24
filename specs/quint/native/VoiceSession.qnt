@@ -1,4 +1,3 @@
-// VoiceAssistantSession generations and distinct dictation behavior.
 module VoiceSession {
   type State = {
     phase: str, route: str, disclosure: bool, startedExplicitly: bool,
@@ -25,8 +24,6 @@ module VoiceSession {
       startedExplicitly: true, fullDuplex: fullDuplex, text: false, muted: false,
       pendingReview: false, draft: false, inputHeld: false, closingInput: false, ...s}
   }
-  // The conversation publishes `starting` while its capture opens. `start` above is the same
-  // start with the capture already open.
   action beginStart(fullDuplex: bool): bool = all {
     s.phase.in(Set("idle", "error")), s.session < 2, s.route == "native" or s.disclosure,
     s' = {phase: "starting", capture: false, startedExplicitly: true, fullDuplex: fullDuplex,
@@ -35,7 +32,6 @@ module VoiceSession {
   action captureOpened = all {
     s.phase == "starting", s' = { ...s, phase: "listening", capture: true }
   }
-  // A capture that cannot open ends the conversation with nothing sent.
   action captureOpenFailed = all {
     s.phase == "starting", s.session < 2,
     s' = { ...s, phase: "error", session: s.session + 1, capture: false, requestTurn: -1, playbackTurn: -1, text: false }
@@ -56,7 +52,6 @@ module VoiceSession {
     if (ticket == s.utterance and s.endpoint == "pending")
       s' = s.with("endpoint", if (complete) "complete" else "unavailable")
     else s' = s
-  // A complete semantic result or the long gap permits exactly one submission.
   action submit(longGap: bool): bool = all {
     s.phase == "listening", s.text, s.turn < 4,
     longGap or s.endpoint == "complete", not(s.sent.contains(s.turn + 1)),
@@ -80,15 +75,11 @@ module VoiceSession {
     s' = { ...s, phase: "error", session: s.session + 1, capture: false,
       closingInput: false, inputHeld: false, requestTurn: -1, playbackTurn: -1, text: false }
   }
-  // A sentence of a streamed reply that is confirmed model text of a plain direct reply is spoken
-  // before the reply itself is confirmed. The turn stays busy and its input stays closed.
   action streamSentence(ticketSession: int, ticketTurn: int): bool =
     if (s.phase.in(Set("thinking", "speaking")) and s.inputHeld and not(s.replyConfirmed) and
         ticketSession == s.session and ticketTurn == s.turn and s.availableSentences < 2)
       s' = { ...s, phase: "speaking", playbackTurn: ticketTurn, availableSentences: s.availableSentences + 1 }
     else s' = s
-  // The confirmed reply. An owner-input pause is never spoken: sentences that already played from
-  // the stream are stopped and dropped, and the resumed reply is accounted on its own.
   action reply(ticketSession: int, ticketTurn: int, needsReview: bool): bool =
     if ((s.phase == "thinking" or (s.phase == "speaking" and not(s.replyConfirmed))) and s.inputHeld and
         ticketSession == s.session and ticketTurn == s.turn)
@@ -98,8 +89,6 @@ module VoiceSession {
         heard: if (needsReview) 0 else s.heard,
         availableSentences: if (needsReview) 0 else 2, ...s}
     else s' = s
-  // A reply that is not confirmed for this turn, or that carries action proposals, ends the
-  // conversation. Voice never approves a proposal; the host shows the review.
   action replyRejected(ticketSession: int, ticketTurn: int): bool =
     if ((s.phase == "thinking" or (s.phase == "speaking" and not(s.replyConfirmed))) and s.inputHeld and
         ticketSession == s.session and ticketTurn == s.turn and s.session < 2)
@@ -114,14 +103,12 @@ module VoiceSession {
     s.phase == "speaking", s.replyConfirmed, s.heard == s.availableSentences,
     s' = {phase: "listening", capture: not(s.muted), playbackTurn: -1, inputHeld: false, closingInput: false, ...s}
   }
-  // A busy response owns the closed input. Audio callbacks cannot interrupt it.
   action bargeIn(confirmed: bool): bool = all {
     s.phase.in(Set("thinking", "speaking")), s.turn < 4,
     s' = if (confirmed and s.capture and (s.phase == "thinking" or s.fullDuplex))
       {phase: "listening", turn: s.turn + 1, text: true,
         endpoint: "none", playbackTurn: -1, requestTurn: -1, ...s} else s
   }
-  // Explicit UI interruption keeps capture closed until playback has drained.
   action interruptSpeech = all {
     s.phase == "speaking", s.turn < 4,
     s' = { ...s, phase: "listening", turn: s.turn + 1, text: false,
@@ -167,8 +154,6 @@ module VoiceSession {
   val StopReleasesCapture = s.phase.in(Set("idle", "starting", "error", "awaiting-review")) implies not(s.capture)
   val PlaybackCurrent = s.phase == "speaking" implies s.playbackTurn == s.turn
   val HeardIsCompleted = s.heard >= 0 and s.heard <= s.availableSentences
-  // An owner-input pause holds nothing audible, and only a confirmed reply or a resumed one is
-  // accounted as the turn's reply.
   val PauseSpeaksNothing = s.phase == "awaiting-review" implies
     (s.pendingReview and not(s.replyConfirmed) and s.availableSentences == 0 and s.heard == 0 and s.playbackTurn == -1)
   val EarlySpeechKeepsInputClosed = (s.phase == "speaking" and not(s.replyConfirmed)) implies
@@ -228,21 +213,16 @@ module VoiceSession {
     .expect(not(s.text)).then(captureOpened).expect(safety and s.phase == "listening" and s.capture)
   run failedOpenEndsSessionTest = init.then(beginStart(true)).then(captureOpenFailed)
     .expect(safety and s.phase == "error" and s.session == 1 and not(s.capture) and s.sent.size() == 0)
-  // A sentence streamed from a direct reply plays before the reply is confirmed, and playback
-  // cannot be reported finished until that reply arrived.
   run streamedPlaybackBeforeReplyTest = init.then(start(false, true)).then(segment(0, true)).then(submit(true))
     .then(streamSentence(0, 1)).expect(safety and s.phase == "speaking" and not(s.replyConfirmed) and not(s.capture))
     .then(sentenceFinished(0, 1)).expect(s.heard == 1).then(reply(0, 1, false))
     .expect(safety and s.replyConfirmed and s.availableSentences == 2 and s.heard == 1)
     .then(sentenceFinished(0, 1)).then(playbackFinished).expect(safety and s.phase == "listening" and s.heard == 2)
-  // A reply that turns out to pause for the owner stops what was already playing from its stream:
-  // none of it is kept as heard, and the resumed reply plays in full.
   run pauseAfterStreamedSpeechSpeaksNothingTest = init.then(start(false, true)).then(segment(0, true)).then(submit(true))
     .then(streamSentence(0, 1)).then(sentenceFinished(0, 1)).then(reply(0, 1, true))
     .expect(safety and s.phase == "awaiting-review" and s.heard == 0 and s.availableSentences == 0 and not(s.capture))
     .then(resumeReview(0, 1, true)).then(sentenceFinished(0, 1)).then(sentenceFinished(0, 1)).then(playbackFinished)
     .expect(safety and s.phase == "listening" and s.heard == 2 and s.sent == Set(1))
-  // A reply carrying proposals is not confirmed for voice: the conversation ends and nothing more is sent.
   run proposalReplyEndsSessionTest = init.then(start(false, true)).then(segment(0, true)).then(submit(true))
     .then(replyRejected(0, 1)).expect(safety and s.phase == "error" and s.session == 1 and not(s.capture))
     .then(reply(0, 1, false)).expect(safety and s.phase == "error" and s.sent == Set(1))

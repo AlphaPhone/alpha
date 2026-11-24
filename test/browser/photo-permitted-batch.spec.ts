@@ -2,8 +2,6 @@ import {openPhotoTools} from './helpers/owned-photo';
 import {test,expect,type Page} from '@playwright/test';
 import {photosBridge} from './helpers/photos-bridge';
 
-// Renderer + real shared batching contract with a synthetic native transport.
-// This does not establish Android consent, MediaStore writes or device acceptance.
 async function selection(page:Page,count:number,declineAt=0,holdFirst=false,unknownAt=0){
  await photosBridge(page,'full',false);
  await page.evaluate(async({count,declineAt,holdFirst,unknownAt})=>{

@@ -1,4 +1,3 @@
-/// Current shared LocalVoiceRecording draft, timer and callback lifecycle.
 module NativeVoiceDraft {
   type State = {
     id: int, capture: int, issued: int, file: bool, size: int,

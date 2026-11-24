@@ -10,7 +10,6 @@ import java.util.*;
 import java.util.concurrent.*;
 import org.json.JSONObject;
 
-/** External ports only. The tested plugin owns protocol, cancellation and persistence sequencing. */
 public final class SignInTestPorts {
   public static final Map<String, String> values = new ConcurrentHashMap<>();
   public static final List<JSObject> outcomes = new CopyOnWriteArrayList<>();

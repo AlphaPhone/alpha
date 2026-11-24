@@ -1,6 +1,5 @@
 import {test,expect} from '@playwright/test';
 
-// Real renderer/client with a held synthetic transport; never calls a model.
 for(const outcome of ['complete','cancel','failure','done-then-failure'] as const){
  test(`native adapter streamed reply renders before completion and handles ${outcome}`,async({page},info)=>{
   await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));

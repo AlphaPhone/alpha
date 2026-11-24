@@ -18,7 +18,6 @@ test('blocked Notes microphone opens the existing access panel and keeps the ret
  await page.screenshot({path:info.outputPath('microphone-access.png')});
  expect(await page.evaluate(()=>(window as any).notePermissionFixture.requests)).toBe(1);
  expect(await page.evaluate(()=>(window as any).canonicalNotesFixture.state.notes.length)).toBe(0);
- // Model the browser reporting the user's changed setting; the app cannot grant it itself.
  await page.evaluate(()=>{(window as any).notePermissionFixture.state='granted';});
  await access.getByRole('button',{name:'Check',exact:true}).click();
  await expect(access.locator('[aria-current=step]').getByText('Allowed',{exact:true})).toBeVisible();

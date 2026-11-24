@@ -1,5 +1,4 @@
 import {test,expect,type Page} from '@playwright/test';
-// The closing sheet keeps an inert composer briefly; interact with the one exposed to users.
 import {preloadPageModules} from './helpers/page-modules';
 
 const voice=(page:Page)=>page.getByRole('region',{name:'Voice conversation',exact:true});
@@ -38,18 +37,11 @@ async function setup(page:Page,signed=true,theme='light'){
  await expect.poll(()=>page.evaluate(()=>!!(window as any).chatVoiceFixture.shell)).toBe(true);
  await expect.poll(()=>page.evaluate(()=>(window as any).chatVoiceFixture.shell.swallowed())).toBe(false);
 }
-// A retained typed draft intentionally shows Send instead of Talk. This is
-// explicit public-API coverage of preserving that draft, not a claim that a
-// second Talk control is visible beside Send.
 async function startWithRetainedDraft(page:Page){
  await expect(page.getByRole('button',{name:'Talk',exact:true})).toHaveCount(0);
  await page.evaluate(()=>(window as any).chatVoiceFixture.shell.startVoice());
 }
 async function utterance(page:Page){await page.evaluate(()=>(window as any).chatVoiceFixture.peak=.25);await page.waitForTimeout(950);await page.evaluate(()=>(window as any).chatVoiceFixture.peak=0);}
-// The Home pill is the hidden-chat voice surface off the Cloud route; Cloud speech opens the sheet
-// (voice-adapter startVoice). A refused Cloud request holds this account on on-device speech
-// (voice-selection noteNetworkSpeechFailure): the account stays signed in and the fixture's
-// synthetic speech ports stay in use, so pill tests run on the on-device route.
 async function onDeviceRoute(page:Page){expect(await page.evaluate(async()=>{const v=await import('/src/runtime/voice-selection.ts');v.noteNetworkSpeechFailure(Object.assign(Error('Synthetic plan refusal'),{code:'voice-http-402'}));return v.speechRoute();})).toBe('device');}
 async function noMedia(page:Page){expect(await page.evaluate(()=>{const f=(window as any).chatVoiceFixture;return {media:f.media,local:f.localProbes};})).toEqual({media:0,local:0});}
 
@@ -64,7 +56,6 @@ test('unsigned chat voice stays in Home and can stop without opening the microph
 test('ongoing Cloud conversation stays in Calendar, sends only new speech and preserves the saved draft and Notes',async({page})=>{
  await setup(page);await page.getByRole('button',{name:'Calendar',exact:true}).click();await page.evaluate(()=>new Promise<void>(resolve=>{const f=(window as any).chatVoiceFixture;f.shell.setState({chat:'hidden',draft:'Existing unsent draft'},()=>{f.notes=JSON.stringify(f.shell.vget('notes'));resolve();});}));
  expect(await page.evaluate(async()=>(await import('/src/runtime/voice-selection.ts')).speechRoute())).toBe('cloud');
- // Cloud speech opens the voice sheet from the hidden chat, over Calendar.
  await page.getByRole('button',{name:'Talk',exact:true}).click();await expect(voice(page)).toHaveAttribute('data-voice-state','listening');await expect(page.locator('[data-alpha-pill-voice]')).toHaveCount(0);expect(await page.evaluate(()=>(window as any).chatVoiceFixture.shell.S().chat)).toBe('sheet');await expect(page.locator('html')).toHaveAttribute('data-active-view','calendar');await expect(voice(page).getByRole('textbox',{name:'Review transcript',exact:true})).toHaveCount(0);await utterance(page);await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
  expect(await page.evaluate(()=>{const f=(window as any).chatVoiceFixture;return {notes:JSON.stringify(f.shell.vget('notes'))===f.notes,draft:f.shell.S().draft,starts:f.starts,uploads:f.uploads,sends:f.sends,sent:f.sent,speech:f.speech};})).toEqual({notes:true,draft:'Existing unsent draft',starts:1,uploads:1,sends:1,sent:'Synthetic Cloud transcript',speech:1});
  await voice(page).getByRole('button',{name:'Stop voice conversation',exact:true}).click();await expect(voice(page)).toHaveCount(0);expect(await page.evaluate(()=>(window as any).chatVoiceFixture.shell.S().draft)).toBe('Existing unsent draft');await noMedia(page);

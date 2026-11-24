@@ -1,7 +1,6 @@
 import {test,expect,type Page} from '@playwright/test';
 import {execFileSync} from 'node:child_process';
 test.beforeEach(async({page})=>{await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));await page.goto('/?mode=dev');});
-// Files browser (PLAN section 4): select mode from the folder menu; Delete moves to Trash; only a confirmed Empty deletes.
 async function openStorage(page:Page){await page.getByRole('button',{name:'Files',exact:true}).click();await page.getByRole('button',{name:'Internal storage',exact:true}).click();}
 async function startSelect(page:Page){await page.getByRole('button',{name:'Files options',exact:true}).click();await page.getByRole('button',{name:'Select',exact:true}).click();}
 const zipJson=(path:string)=>JSON.parse(execFileSync('python3',['-c','import zipfile,json,sys; z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; print(json.dumps({n:z.read(n).decode() for n in z.namelist()}))',path],{encoding:'utf8'}));
@@ -63,7 +62,6 @@ for(const mode of ['supported','unsupported','cancelled'])test('sharing a select
  },mode);
  await openStorage(page);await startSelect(page);await page.getByRole('button',{name:'Select one.txt',exact:true}).click();
  await page.getByRole('toolbar',{name:'Selection actions'}).getByRole('button',{name:'Share',exact:true}).click();
- // Files' share panel has no unavailable-email row and no explanatory text.
  const panel=page.getByRole('dialog',{name:'Share',exact:true});await expect(panel.getByRole('button',{name:'Email',exact:true})).toHaveCount(0);await expect(panel.getByText(/unavailable/i)).toHaveCount(0);
  await panel.getByRole('button',{name:'Share',exact:true}).click();
  if(mode==='unsupported')await expect(page.getByText('Sharing is unavailable in this browser.',{exact:true})).toBeVisible();

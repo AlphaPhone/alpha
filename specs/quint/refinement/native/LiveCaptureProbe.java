@@ -10,7 +10,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import org.json.JSONObject;
 
-/** Real shared parent/controller/capture with controlled physical AudioRecord and inference. */
 public final class LiveCaptureProbe {
  public static final class Bridge extends LocalSpeechBridgePlugin {
   Bridge(){super("alpha-cloud-voice-","alpha-cloud-tts-");}

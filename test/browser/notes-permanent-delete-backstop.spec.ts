@@ -1,12 +1,6 @@
 import {openLegacyNotes} from './helpers/legacy-notes';
 import {returnToApps} from './app-navigation';
 import {test,expect,type Page} from '@playwright/test';
-// MVP-15: retained-source recovery for a permanent voice deletion interrupted by process death.
-// Canonical Notes leaves the old document and its pending operations untouched on Home.
-// Explicitly selecting Older notes activates its recovery pass; exact ownership and receipt
-// checks still determine which operation may finish or roll back.
-// Browser build only. The Android slot store and the native backstop
-// (NotesTrashBackstopInstrumentedTest) are separate gates and are not exercised here.
 test.describe.configure({timeout:60_000});
 type Stage='row'|'tombstone'|'trashed'|'recording-trashed-first'|'recording-erased-first';
 const savedRecords=(page:Page)=>page.evaluate(async()=>JSON.parse(await (await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw()).records as any[]);
@@ -16,7 +10,6 @@ const pendingDeletions=(page:Page)=>page.evaluate(async()=>Object.values(await (
 const describeAudio=(page:Page,audioId:string)=>page.evaluate(async audioId=>{const {registerPlugin}=await import('/src/platform-plugins.ts');return registerPlugin<any>('AlphaNoteAudio').describe({audioId});},audioId);
 const audioBytes=(page:Page,audioId:string)=>page.evaluate(async audioId=>(await (await import('/src/browser/note-audio-store.ts')).audioRecord(audioId,true)).blob.size,audioId);
 async function openNotes(page:Page){await openLegacyNotes(page);await expect(page.getByRole('button',{name:'New note',exact:true})).toBeEnabled();}
-/** Canonical Notes never adopts or mutates this retained source. Activate it explicitly. */
 async function restartWithRetainedSource(page:Page){
  const before={notes:await savedRecords(page),deleted:await tombstones(page),pending:await pendingDeletions(page)};
  const audio=await Promise.all(before.pending.map(row=>describeAudio(page,row.audioId)));
@@ -39,15 +32,6 @@ async function seedVoice(page:Page,noteId:string,audioId:string,title:string,wor
   await store.replace([...store.list,{id:noteId,kind:'voice',title,body:words,audio,dur:1,lines:[],summary:[],actions:[]}]);
  },{noteId,audioId,title,words});
 }
-/**
- * The durable state of a permanent deletion killed at `stage`, written with the product's own
- * storage modules in the product's own order (or, for the two "-first" stages, with the recording
- * effect ahead of the note). Returns the deletion's operation id.
- *
- * The writer takes the deletion-effects lock and, like a process that is killed, never releases
- * it: this page cannot settle anything afterwards. Only the reload (the restart) frees the lock,
- * so whatever is settled later was settled by the next start.
- */
 async function interrupt(page:Page,noteId:string,stage:Stage){
  return page.evaluate(async({noteId,stage})=>{
   const {openBrowserNotes}=await import('/src/runtime/browser-notes-document.ts');
@@ -75,7 +59,6 @@ test('death after the tombstone commit, before the recording moved: explicit sou
  await seedVoice(page,'other-voice','other-audio','Other memo','Words to keep');
  const other=(await savedRecords(page)).find(n=>n.id==='other-voice');
  const operation=await interrupt(page,'cut-voice','tombstone');
- // What the killed process left: tombstone committed, recording live and playable, one recovery row.
  expect((await savedRecords(page)).map(n=>n.id)).toEqual(['other-voice']);
  expect((await tombstones(page)).map(d=>[d.id,d.operationId])).toEqual([['cut-voice',operation]]);
  expect((await pendingDeletions(page)).map(row=>[row.id,row.note.id,row.audioId,row.permanent])).toEqual([[operation,'cut-voice','cut-audio',true]]);
@@ -89,17 +72,14 @@ test('death after the tombstone commit, before the recording moved: explicit sou
  expect(erased.noteId).toBe('cut-voice');expect(erased.transcript).toBe('');expect(erased.expired).toBe(true);
  expect(erased.deletionOperations).toEqual({[operation]:'purged'});expect(erased.activeDeletionOperation).toBe(operation);
  expect(await audioBytes(page,'cut-audio')).toBe(0);
- // Exact ownership: the other note and its recording are byte-identical and untouched.
  expect(await savedRecords(page)).toEqual([other]);
  const kept=await describeAudio(page,'other-audio');
  expect(kept.transcript).toBe('Words to keep');expect(kept.deletedAt).toBeUndefined();expect(kept.deletionOperations).toBeUndefined();
  expect(await audioBytes(page,'other-audio')).toBeGreaterThan(0);
- // A permanent deletion never leaves a restorable copy.
  expect(await trashEntries(page)).toEqual([]);
  await expectNoReview(page);
  await expect(page.getByRole('button',{name:'Open Other memo',exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'Open Cut memo',exact:true})).toHaveCount(0);
- // A further restart repeats nothing.
  await restartWithRetainedSource(page);
  await expect.poll(()=>pendingDeletions(page)).toEqual([]);
  expect((await describeAudio(page,'cut-audio')).deletionOperations).toEqual({[operation]:'purged'});
@@ -157,12 +137,10 @@ test('the other order: a recording moved or erased before its note was deleted i
  await restartWithRetainedSource(page);
  await expect(page.locator('html')).not.toHaveAttribute('data-active-view','notes');
  await expect.poll(()=>pendingDeletions(page)).toEqual([]);
- // Recording in the audio trash, note still saved: the recording is given back to its note.
  const restored=await describeAudio(page,'moved-audio');
  expect(restored.deletedAt).toBeUndefined();expect(restored.activeDeletionOperation).toBeUndefined();
  expect(restored.transcript).toBe('Moved words');expect(restored.deletionOperations).toEqual({[moved]:'restored'});
  expect(await audioBytes(page,'moved-audio')).toBeGreaterThan(0);
- // Recording already erased under the confirmed deletion: the exact reviewed note is deleted with this operation's tombstone.
  expect((await savedRecords(page))).toEqual(before.filter(n=>n.id!=='erased-voice'));
  expect((await tombstones(page)).map(d=>[d.id,d.operationId])).toEqual([['erased-voice',erasedOperation]]);
  expect((await describeAudio(page,'erased-audio')).deletionOperations).toEqual({[erasedOperation]:'purged'});
@@ -188,21 +166,16 @@ test('source activation never erases a recording that a different or a restored 
   const {openBrowserNotes}=await import('/src/runtime/browser-notes-document.ts');const audio=await import('/src/browser/note-audio-store.ts');
   const store=await openBrowserNotes();
   await store.replace([
-   // The edited note of a recording that was erased first: no longer the reviewed revision.
    ...store.list.map((n:any)=>n.id==='changed-voice'?{...n,body:'After the edit'}:n),
-   // A different saved note now references the first recording.
    {id:'adopter',kind:'voice',title:'Adopter memo',body:'Adopted',audio:{audioId:'shared-audio',noteId:'adopter',durationMs:1000,transcript:'Shared words'},dur:1,lines:[],summary:[],actions:[]},
-   // The deleted note is saved again under its own id as a newer revision.
    {id:'edited-voice',kind:'voice',title:'Edited memo',body:'Second words',audio:{audioId:'edited-audio',noteId:'edited-voice',durationMs:1000,transcript:'First words'},dur:1,lines:[],summary:[],actions:[]},
   ]);
-  // A restore of the fourth deletion was started: its recording is live again under that operation.
   await audio.changeAudioDeleted('undone-audio','undone-voice',false,undone);
  },{undone});
  const before=await savedRecords(page);
 
  await restartWithRetainedSource(page);
  await expect(page.locator('html')).not.toHaveAttribute('data-active-view','notes');
- // Explicit source activation settled nothing; the exact rows remain under review.
  await openNotes(page);
  await expect(page.getByRole('button',{name:'Check deletion status',exact:true})).toBeVisible();
  await page.getByRole('button',{name:'Check deletion status',exact:true}).click();
@@ -216,11 +189,9 @@ test('source activation never erases a recording that a different or a restored 
  expect((await describeAudio(page,'shared-audio')).deletionOperations).toBeUndefined();
  expect((await describeAudio(page,'edited-audio')).deletionOperations).toBeUndefined();
  expect((await describeAudio(page,'undone-audio')).deletionOperations).toEqual({[undone]:'restored'});
- // The edited note whose recording was already erased is kept; its text is never deleted for it.
  expect((await savedRecords(page)).find(n=>n.id==='changed-voice').body).toBe('After the edit');
  expect((await tombstones(page)).some(d=>d.id==='changed-voice')).toBe(false);
 
- // The started restore can still be completed from the review row: note and recording come back together.
  const review=page.getByRole('status').filter({hasText:'Voice note deletion not confirmed.'});
  await review.locator('div',{hasText:'Undone memo'}).getByRole('button',{name:'Restore note and recording',exact:true}).click();
  await expect(page.getByText('Voice note restored.',{exact:true})).toBeVisible();
@@ -230,7 +201,6 @@ test('source activation never erases a recording that a different or a restored 
  expect(back.transcript).toBe('Restored words');expect(back.deletedAt).toBeUndefined();
 });
 
-/** A later host with an entry limit of `limit`: only NOTES_TRASH_MAX_ENTRIES is replaced in the served policy module. Test-only. */
 async function lowerEntryLimit(page:Page,limit:number){
  await page.route(/\/src\/runtime\/notes-trash-policy\.ts(\?.*)?$/,async route=>{
   const response=await route.fetch(),source=await response.text();
@@ -240,10 +210,6 @@ async function lowerEntryLimit(page:Page,limit:number){
  });
 }
 const lockIdle=(page:Page)=>expect.poll(()=>page.evaluate(async()=>{const locks=await navigator.locks.query();return [...(locks.held||[]),...(locks.pending||[])].filter(lock=>lock.name==='alpha.notes-audio-effects.v1').length;})).toBe(0);
-/**
- * Runs `trigger` and returns once a deletion-status pass of this page has read the recording after
- * it and released the deletion-effects lock. Every pass reads each row's recording under the lock.
- */
 async function afterPass(page:Page,trigger:()=>Promise<unknown>){
  await lockIdle(page);
  const seen=await page.evaluate(()=>(window as any).recordingReads as number);
@@ -258,7 +224,6 @@ test('a permanent deletion that fails inside the process that started it is neve
  await seedVoice(page,'late-voice','late-audio','Late memo','Late words');
  await seedVoice(page,'bystander-voice','bystander-audio','Bystander memo','Bystander words');
  await restartWithRetainedSource(page);await openNotes(page);
- // One Trash entry fills the lowered Trash, so the voice deletion is refused and offers the permanent path.
  await page.getByRole('button',{name:'New note',exact:true}).click();
  await page.getByRole('textbox',{name:'Title',exact:true}).fill('Filler');
  await page.getByRole('button',{name:'Back to notes',exact:true}).click();
@@ -266,7 +231,6 @@ test('a permanent deletion that fails inside the process that started it is neve
  await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
  await expect(page.getByText('Deleted',{exact:true})).toBeVisible();
  await page.getByRole('button',{name:'Open Late memo',exact:true}).click();
- // The tombstone commit reports a failure to this process but is not lost: it can still land later.
  await page.evaluate(async()=>{
   const {DocumentNotesStore}=await import('/src/runtime/browser-notes-document.ts');const {BrowserVoice}=await import('/src/browser/voice.ts');
   const execute=DocumentNotesStore.prototype.execute,describe=BrowserVoice.prototype.describe;
@@ -287,9 +251,6 @@ test('a permanent deletion that fails inside the process that started it is neve
  expect((await savedRecords(page)).some(n=>n.id==='late-voice')).toBe(true);
  expect(await tombstones(page)).toEqual([]);
 
- // To a later process this state is "death before the tombstone commit" and is rolled back by retiring
- // the row. The process that started the deletion must not do that: a status check and a maintenance
- // pass (resume) both leave the row, because the commit it believes failed can still land.
  await page.getByRole('button',{name:'Back to notes',exact:true}).click();
  await expect(page.getByRole('button',{name:'Check deletion status',exact:true})).toBeVisible();
  await afterPass(page,()=>page.getByRole('button',{name:'Check deletion status',exact:true}).click());
@@ -299,16 +260,13 @@ test('a permanent deletion that fails inside the process that started it is neve
  const untouched=await describeAudio(page,'late-audio');
  expect(untouched.transcript).toBe('Late words');expect(untouched.deletedAt).toBeUndefined();expect(untouched.deletionOperations).toBeUndefined();
 
- // The lost commit lands. The note is gone and its recording is still live: only the row ties them together.
  await page.evaluate(()=>(window as any).landTombstone());
  expect((await tombstones(page)).map(d=>[d.id,d.operationId])).toEqual([['late-voice',operation]]);
  expect((await savedRecords(page)).map(n=>n.id)).toEqual(['bystander-voice']);
  await afterPass(page,()=>page.evaluate(()=>{document.dispatchEvent(new Event('visibilitychange'));}));
- // Never orphaned: while the recording is not erased, the recovery row for exactly this operation exists.
  const during=await describeAudio(page,'late-audio');
  if(during.deletionOperations?.[operation]!=='purged')expect((await pendingDeletions(page)).map(row=>[row.id,row.note.id,row.audioId])).toEqual([[operation,'late-voice','late-audio']]);
 
- // The next explicit source activation finishes this confirmed deletion only.
  await restartWithRetainedSource(page);
  await expect(page.locator('html')).not.toHaveAttribute('data-active-view','notes');
  await expect.poll(()=>pendingDeletions(page)).toEqual([]);
@@ -328,9 +286,6 @@ test('a recording that another finisher erased under the same operation while th
  await seedVoice(page,'raced-voice','raced-audio','Raced memo','Raced words');
  await seedVoice(page,'bystander-voice','bystander-audio','Bystander memo','Bystander words');
  const operation=await interrupt(page,'raced-voice','tombstone');
- // On Android the native pass runs beside the renderer's startup pass and shares no lock with it: it can
- // move and erase the recording under this operation after the renderer read it as live. Here the
- // next start's own move request finds exactly that: moved and already erased under the same operation.
  let rewritten=0;
  await page.route(/\/src\/browser\/voice\.ts(\?.*)?$/,async route=>{
   const response=await route.fetch(),source=await response.text();

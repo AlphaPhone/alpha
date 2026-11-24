@@ -1,10 +1,3 @@
-// Upstream escalation notices in the resident agent's saved conversation, restored on the flag-off
-// renderer: the notices after an unanswered message collapse to one owner-facing notice, and a later
-// reply retires it. The collapse rules themselves are in test/system-notice-collapse.test.mjs.
-//
-// Evidence boundary: source/test evidence for the flag-off renderer only. The Capacitor bridge is
-// the stub in flag-off-android.ts plus resident-stub.ts. This is not the native Agent plugin, the
-// resident runtime's escalation service or a device.
 import { test, expect, type Page } from '@playwright/test';
 import { flagOffAndroid, harness, button, fenceNetwork, residentHome } from './flag-off-android';
 import { residentStub } from './resident-stub';
@@ -24,7 +17,6 @@ test('notices after an unanswered message collapse to one owner-facing notice, w
   await composer(page).fill('Hello agent');
   await composer(page).press('Enter');
   await expect(conversation(page).getByText('Resident reply 1', { exact: true })).toHaveCount(1, { timeout: 30_000 });
-  // The resident's saved conversation then holds an unanswered message and four replayed notices.
   await page.evaluate(notice => {
     const agent = JSON.parse(sessionStorage.getItem('resident-stub-agent') || 'null'), id = agent.conversations[0].id;
     const at = Date.now();
@@ -36,7 +28,6 @@ test('notices after an unanswered message collapse to one owner-facing notice, w
   await expect(conversation(page).getByText('Still there?', { exact: true })).toHaveCount(1, { timeout: 30_000 });
   await expect(conversation(page).getByText(ALPHA_RUNTIME, { exact: true })).toHaveCount(1);
   await expect(conversation(page).getByText(UPSTREAM_RUNTIME, { exact: true })).toHaveCount(0);
-  // After a restart the resident's stream counter starts again, so the reply is named.
   await harness(page, f => f.replies.push('Here now.'));
   await composer(page).fill('Try again');
   await composer(page).press('Enter');

@@ -8,7 +8,6 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import org.json.*;
 
-/** Runs the real shared bridge, capture controller, recorder and ASR pipe together. */
 public final class PipedCaptureTraces {
  static final String ID="00000000-0000-0000-0000-000000000001";
  static final Object lock=new Object();static Exchange pending;static int posts;
@@ -44,7 +43,6 @@ public final class PipedCaptureTraces {
   while(!stop.isShutdown()&&!barrierComplete){
    try{stop.submit(()->{}).get(deadline-System.nanoTime(),TimeUnit.NANOSECONDS);barrierComplete=true;}
    catch(RejectedExecutionException full){
-    // The source has a one-slot queue. An already-queued stop can briefly block the fixture barrier.
     if(System.nanoTime()>=deadline)throw full;
     Thread.sleep(1);
    }

@@ -14,8 +14,6 @@ for (const viewport of [{width:320,height:568},{width:412,height:430},{width:915
     await title.fill('Compact viewport');
     await body.fill('A draft that must stay reachable while the keyboard reduces available height.');
     for(const control of [title,body,page.getByRole('button',{name:'Back to notes',exact:true})]) {
-      // Font/layout updates can follow fill; require the actual geometry and
-      // pointer target to settle, just as locator assertions await UI updates.
       await expect(async()=>{
       const box=await control.boundingBox();expect(box).not.toBeNull();
       expect(box!.y).toBeGreaterThanOrEqual(0);
@@ -55,8 +53,6 @@ for(const theme of ['light','dark']) test(`Retained digest panel respects ${them
   await page.getByRole('button',{name:'Apps',exact:true}).click();
   await page.getByRole('button',{name:'Workflows',exact:true}).click();
   await expect(page.getByRole('button',{name:'Scheduled summaries',exact:true})).toHaveCount(0);
-  // The owner removed this Settings entry. Retained result/renewal handlers still use the panel.
-  // Exercise its existing event directly; this is component coverage, not a settings journey.
   await openRetainedDigests(page);
   const dialog=page.getByRole('dialog',{name:'Scheduled digests',exact:true});
   await expect(dialog).toHaveCSS('background-color',theme==='dark'?'rgb(0, 0, 0)':'rgb(255, 255, 255)');
@@ -77,7 +73,6 @@ test('Sign-in dialog follows a live theme change and remains keyboard accessible
   await page.getByRole('button',{name:'General',exact:true}).click();
   await page.getByRole('button',{name:'Display',exact:true}).click();
   await page.getByRole('button',{name:'Theme: Dark',exact:true}).click();
-  // Open by keyboard: WebKit intentionally does not focus buttons on a pointer click.
   await returnToApps(page);await page.getByRole('button',{name:'Settings',exact:true}).click();await expect(page.getByRole('heading',{name:'Settings',exact:true})).toBeVisible();
   const opener=page.getByRole('button',{name:'Account',exact:true});await opener.focus();await opener.press('Enter');
   const dialog=page.getByRole('dialog',{name:'Alpha',exact:true});
@@ -85,8 +80,6 @@ test('Sign-in dialog follows a live theme change and remains keyboard accessible
   await page.setViewportSize({width:412,height:300});
   await expect(dialog.getByText('Remote agent',{exact:true})).toHaveCount(0);
   const signIn=dialog.getByRole('textbox',{name:'Email',exact:true});
-  // The email field may already hold focus from opening; move focus to the dialog first so focusing
-  // the field again must bring it into the compact viewport.
   await expect(signIn).toBeEnabled();await dialog.focus();await signIn.focus();await expect(signIn).toBeFocused();await expect(signIn).toBeInViewport();
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);

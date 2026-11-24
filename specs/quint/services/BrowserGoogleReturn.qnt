@@ -1,4 +1,3 @@
-/// A loopback callback is only a wakeup. The canonical account read grants access.
 module BrowserGoogleReturn {
   type State = { credential: int, pendingCredential: int, pendingHost: int, nonce: int,
     consumed: bool, expired: bool, candidate: bool, verified: bool, panel: bool }

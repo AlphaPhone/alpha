@@ -1,4 +1,3 @@
-/// Bound source plan; all preimages admitted before writes, with preserved recovery inputs.
 module OSSourceStaging {
   type State = { source: bool, assets: bool, preimages: bool, phase: str,
     backedUp: bool, writes: int, accepted: bool }

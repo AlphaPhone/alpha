@@ -2,8 +2,6 @@ import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import {test,expect} from '@playwright/test';
 import {installResidentAgentPlugin} from './helpers/resident-agent-plugin';
 
-// Production renderer and connection controller; native IPC and storage are controlled.
-// No model, provider, real notification, or workflow execution is involved.
 for(const scenario of ['ready','rejected','late','mock-ready','mock-retire-rejected'] as const){
  test(`resident background result binding: ${scenario}`,async({page},info)=>{
   await installResidentAgentPlugin(page);
@@ -96,8 +94,6 @@ for(const scenario of ['ready','rejected','late','mock-ready','mock-retire-rejec
    await unentered();
    await page.evaluate(()=>(window as any).deliveryFixture.mockReleases.unscoped());await unentered();
    await page.evaluate(()=>(window as any).deliveryFixture.mockReleases.notifications());await unentered();
-   // AP-16 retires only the local stage cache here. Connection/account data must
-   // remain untouched while the original active session retirement is held.
    expect(await page.evaluate(()=>(window as any).deliveryFixture.removed)).toEqual(['stage-session:v1']);
    await page.evaluate(()=>(window as any).deliveryFixture.mockReleases.scoped());
    if(scenario==='mock-retire-rejected'){
@@ -118,7 +114,6 @@ for(const scenario of ['ready','rejected','late','mock-ready','mock-retire-rejec
    expect(await page.evaluate(()=>(window as any).deliveryFixture.nativeSync)).toBe(0);
    return;
   }
-  // Use the same shell command event as the scheduled-digest launcher.
   await page.evaluate(()=>window.dispatchEvent(new Event('alpha:hosted-digests')));
   const dialog=page.getByRole('dialog',{name:'Scheduled digests',exact:true});
   await expect(dialog.getByRole('img',{name:'Runs on this phone',exact:true})).toBeVisible();

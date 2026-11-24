@@ -6,7 +6,6 @@ import java.util.Map;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Reads the chain fixture's actual attempt and port state, with exact patched Java methods. */
 public final class GoogleBrowserReturnClaimTraces extends CloudSignInChainTest {
  private final Map<Runnable, JSONObject> workLabels = new IdentityHashMap<>();
  private final Map<Runnable, String> graceLabels = new IdentityHashMap<>();

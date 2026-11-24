@@ -3,7 +3,6 @@ import {guardCalendarFixture as guardNoMedia} from './calendar-draft-readiness';
 import { returnToApps } from './app-navigation';
 import {test,expect} from '@playwright/test';
 test.use({timezoneId:'America/Los_Angeles'});
-// The browser-provider source remains separate from Home's Agent Calendar agenda.
 async function openSavedDay(page:any){
  await openBrowserCalendar(page);
  await page.getByRole('button',{name:'Month view',exact:true}).click();

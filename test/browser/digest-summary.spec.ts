@@ -12,7 +12,6 @@ for(const theme of ['light','dark'])for(const kind of ['snapshot','native'])test
   const text=await article.innerText();expect(text).not.toContain(times.observedAt);expect(text).not.toContain(times.expiresAt);expect(text).not.toContain('"nodeId"');
  }else{
   const details=article.locator('details');await expect(details).not.toHaveAttribute('open');await expect(details.locator('pre')).toBeHidden();await article.locator('summary[aria-label="Execution details"]').click();await expect(details.locator('p')).toHaveText(/^Started .+\. Finished .+\.$/);
-  // The raw output is a development surface only (this lane); production shows the readable line alone.
   await expect(details.locator('pre')).toContainText('SYNTHETIC_RAW_SOURCE_123');
  }
  await page.reload();await page.evaluate(()=>window.dispatchEvent(new Event('alpha:hosted-digests')));await expect(summary).toBeVisible();

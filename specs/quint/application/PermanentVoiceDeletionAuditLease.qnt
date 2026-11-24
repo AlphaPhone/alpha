@@ -1,5 +1,3 @@
-// Complementary audit scope; the canonical model and its source correspondence remain registered separately.
-/// Two durable effects and recovery ownership from planInterruptedPermanentDeletion.
 module PermanentVoiceDeletionAuditLease {
   pure def recoveryPlan(note: str, known: bool, owned: bool, inTrash: bool, receipt: str, referenced: bool): str =
     if (note == "changed" or not(known) or not(owned) or receipt == "unreadable") "review"
@@ -14,7 +12,6 @@ module PermanentVoiceDeletionAuditLease {
       else if (receipt == "removed") { if (inTrash) "restore-recording" else "review" }
       else if (inTrash) "review" else "retire"
     }
-  /// Shared exhaustive table for the registered scenario and the isolated contract view.
   pure val decisionRows = tuples(Set("original", "deleted", "changed"), Set(false, true),
     Set(false, true), Set(false, true), Set("unknown", "removed", "restored", "purged", "unreadable"), Set(false, true))
     .map(((note, known, owned, inTrash, receipt, referenced)) => { note: note, known: known,
@@ -31,18 +28,14 @@ module PermanentVoiceDeletionAuditLease {
     lease: 0, locked: false, revision: 0, capturedRevision: 0, planned: "none",
     erasures: 0, safeErase: true }
   action initial(note: str, receipt: str, inTrash: bool): bool = initialFor(note, receipt, inTrash, true)
-  /// The row either survived an earlier process or was just started by this live view.
   action init = {
     nondet previous = Bool.oneOf()
     initialFor("deleted", "unknown", false, previous)
   }
-  /// A live view starts a new deletion row of its own. Recovery leaves it alone until that
-  /// view's process is gone.
   action startOwn = all { not(s.row),
     s' = { ...s, row: true, previousProcess: false, note: "deleted", receipt: "unknown",
       inTrash: false, recordingKnown: true, owned: true, referenced: false, locked: false,
       planned: "none", claimedElsewhere: false, lease: 0 } }
-  /// The recording stops being this note's alone to delete.
   action loseOwnership = all { not(s.locked), s.owned, s.revision < 2,
     s' = { ...s, owned: false, revision: s.revision + 1 } }
   val plan = recoveryPlan(s.note, s.recordingKnown, s.owned, s.inTrash, s.receipt, s.referenced)
@@ -100,7 +93,6 @@ module PermanentVoiceDeletionAuditLease {
       .expect((plan == "erase" implies (s.note == "deleted" and s.owned and s.inTrash and not(s.referenced) and s.recordingKnown))
         and (not(s.owned) or not(s.recordingKnown) or s.note == "changed" implies plan == "review") and safety)
   }
-  /// A row a live view started is not recovered until that view's process is gone.
   run liveOwnRowNotRecoveredTest = initial("deleted", "unknown", false).then(acquire).then(apply).then(acquire).then(apply)
     .then(acquire).then(apply).expect(not(s.row)).then(startOwn)
     .expect(s.row and not(s.previousProcess) and not(s.locked) and safety)
@@ -112,7 +104,6 @@ module PermanentVoiceDeletionAuditLease {
     and decisionRows.forall(row => (row.note == "changed" or not(row.known) or not(row.owned) or row.receipt == "unreadable") implies row.plan == "review"))
 }
 
-/// Exhaustive finite decision table, kept separate from mutable recovery state.
 module PermanentVoiceDeletionAuditLeaseContract {
   import PermanentVoiceDeletionAuditLease.decisionRows
   type Row = { note: str, known: bool, owned: bool, inTrash: bool, receipt: str, referenced: bool, plan: str }

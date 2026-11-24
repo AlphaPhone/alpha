@@ -1,4 +1,3 @@
-// Renderer ownership and source revalidation for linked Calendar control.
 module AgentCalendarSyncControl {
   type Binding = {owner: str, session: int, scope: int}
   type Candidate = {key: str, version: int}

@@ -1,9 +1,4 @@
 import {openBrowserCalendar} from './helpers/browser-calendar';
-// Maps "Back to event": shown only when Maps was opened from a calendar event's location, returns to
-// exactly that event, never replays the hand-off and fails closed when the event is gone.
-// Also: the travel-mode buttons expose their selected state (aria-pressed).
-//
-// Evidence boundary: browser build, development profile, synthetic Maps provider. Source/test only.
 import {test, expect, type Page} from '@playwright/test';
 import {returnToApps} from './app-navigation';
 
@@ -36,9 +31,7 @@ async function systemBack(page: Page) {
   if (await close.isVisible()) await close.click();
   await expect(controls).toBeHidden();
 }
-/** Two events that share one location text, so a return to the wrong one would be visible. */
 async function setup(page: Page) {
-  // Keep the default one-hour events within one civil day in every test timezone.
   await page.clock.setFixedTime(new Date(2026, 10, 13, 10, 0));
   await page.addInitScript(() => { if (!localStorage.getItem('alpha.connection.selection.v1')) localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({kind: 'offline'})); });
   await page.goto('/?mode=dev&tools=1');
@@ -66,7 +59,6 @@ test('Back to event returns to exactly the originating event from every Maps lay
   await handOff(page, 'Dock meeting');
   await expect(back(page)).toHaveCount(1);
   expect(await requests(page)).toEqual({queries: [address], routes: []});
-  // Results -> place -> directions: the control stays available and the modes expose their state.
   await page.getByRole('button', {name: /^West entrance/}).first().click();
   await expect(back(page)).toHaveCount(1);
   await button(page, 'Directions').click();
@@ -76,7 +68,6 @@ test('Back to event returns to exactly the originating event from every Maps lay
   await button(page, 'Walk').click();
   await expect(button(page, 'Walk')).toHaveAttribute('aria-pressed', 'true');
   expect(await pressed()).toEqual({Drive: 'false', Walk: 'true', Bike: 'false', Transit: 'false'});
-  // A refused mode is not shown as selected.
   await button(page, 'Transit').click();
   await expect(page.getByRole('region', {name: 'Maps'}).getByRole('status')).toHaveText('Transit schedules are not available for this region.');
   expect(await pressed()).toEqual({Drive: 'false', Walk: 'true', Bike: 'false', Transit: 'false'});
@@ -87,17 +78,14 @@ test('Back to event returns to exactly the originating event from every Maps lay
   await expect(button(page, address)).toBeVisible();
   await expect(view(page)).toHaveAttribute('data-active-view', 'calendar');
   expect((await requests(page)).queries).toEqual([address]);
-  // The return consumed the cross-app step: system Back now leaves Calendar, it does not reopen Maps.
   await button(page, 'Back to calendar').click();
   await systemBack(page);
   await expect(view(page)).toHaveAttribute('data-active-view', 'home');
-  // Maps opened from the launcher has no event to return to and replays nothing.
   await button(page, 'Maps').click();
   await expect(page.getByRole('searchbox', {name: 'Search places', exact: true})).toHaveValue('');
   await expect(back(page)).toHaveCount(0);
   expect((await requests(page)).queries).toEqual([address]);
 
-  // The other event with the same location returns to itself.
   await returnToApps(page);
   await openBrowserCalendar(page);
   await handOff(page, 'Harbour meeting');
@@ -111,7 +99,6 @@ test('a deleted or moved event fails closed: Maps stays open and the control is 
   await setup(page);
   for (const change of ['moved', 'deleted'] as const) {
     await handOff(page, 'Harbour meeting');
-    // Another window changes the event while Maps is open.
     await page.evaluate(async change => {
       const {calendarDocument} = await import('/src/browser/calendar-store.ts');
       await calendarDocument.edit(() => ({sourceRevision: '', events: []}) as any, (data: any) => {
@@ -124,7 +111,6 @@ test('a deleted or moved event fails closed: Maps stays open and the control is 
     await expect(view(page)).toHaveAttribute('data-active-view', 'maps');
     await expect(back(page)).toHaveCount(0);
     await expect(page.getByRole('searchbox', {name: 'Search places', exact: true})).toHaveValue(address);
-    // The other event is never opened in its place.
     await expect(page.getByRole('heading', {name: 'Dock meeting', exact: true})).toHaveCount(0);
     if (change === 'moved') { await returnToApps(page); await openBrowserCalendar(page); }
   }
@@ -150,7 +136,6 @@ test('double activation returns once; a reload in Maps drops the return and repl
   await expect(page.getByRole('searchbox', {name: 'Search places', exact: true})).toHaveValue('');
   await expect(back(page)).toHaveCount(0);
   expect((await requests(page)).queries).toEqual([address, address]);
-  // Leaving through Home also drops it: Maps reopened later has no control.
   await returnToApps(page);
   await openBrowserCalendar(page);
   await handOff(page, 'Dock meeting');
@@ -174,10 +159,8 @@ test('a refused or failed calendar read keeps Back to event and never claims the
     await expect(page.getByText('Event moved', {exact: true})).toHaveCount(0);
     await expect(view(page)).toHaveAttribute('data-active-view', 'maps');
     await expect(back(page)).toHaveCount(1);
-    // One read of the event's own instant per tap; Calendar's own refreshes may read other windows.
     expect(await page.evaluate(() => (window as any).calendarListCalls.filter((input: any) => input?.end - input?.begin === 2).length)).toBe(1);
   }
-  // Once the read works again, the same control returns to the event.
   await page.evaluate(async () => { const {BrowserCalendar} = await import('/src/browser/calendar.ts'); BrowserCalendar.prototype.list = (window as any).realCalendarList; });
   await back(page).click();
   await expect(page.getByRole('heading', {name: 'Harbour meeting', exact: true})).toBeVisible();
@@ -186,14 +169,12 @@ test('a refused or failed calendar read keeps Back to event and never claims the
 
 test('system Back from the hand-off returns to that event; a place the user opened is unwound first; nothing is searched again', async ({page}) => {
   await setup(page);
-  // The hand-off search alone: one system Back returns to the originating event.
   await handOff(page, 'Dock meeting');
   await systemBack(page);
   await expect(view(page)).toHaveAttribute('data-active-view', 'calendar');
   await expect(page.getByRole('heading', {name: 'Dock meeting', exact: true})).toBeVisible();
   await expect(page.getByRole('heading', {name: 'Harbour meeting', exact: true})).toHaveCount(0);
   expect((await requests(page)).queries).toEqual([address]);
-  // A place the user chose from the hand-off results is its own layer: Back closes it, Maps stays.
   await button(page, 'Back to calendar').click();
   await handOff(page, 'Dock meeting');
   await page.getByRole('button', {name: /^West entrance/}).first().click();
@@ -204,7 +185,6 @@ test('system Back from the hand-off returns to that event; a place the user open
   await expect(view(page)).toHaveAttribute('data-active-view', 'calendar');
   await expect(page.getByRole('heading', {name: 'Dock meeting', exact: true})).toBeVisible();
   expect((await requests(page)).queries).toEqual([address, address]);
-  // Maps opened afterwards carries no replayed search and no event to return to.
   await returnToApps(page);
   await button(page, 'Maps').click();
   await expect(page.getByRole('searchbox', {name: 'Search places', exact: true})).toHaveValue('');

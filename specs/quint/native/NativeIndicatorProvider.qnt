@@ -1,4 +1,3 @@
-/// Actual provider admission, generation/death-link pairing and caller restoration.
 module NativeIndicatorProvider {
   type State = {generation: int, live: bool, acknowledged: bool, expiresAt: int,
     leaseBoot: int, surface: bool, chip: bool, recording: bool, display: str, reason: str,

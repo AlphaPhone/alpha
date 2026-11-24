@@ -37,8 +37,6 @@ for (const height of [600, 915]) test(`Apps fills the screen and its last contro
     }
     for (const inset of [0, 72]) {
       await page.evaluate(inset => document.documentElement.style.setProperty('--native-bottom-inset', inset + 'px'), inset);
-      // A recovery notice can arrive after the drawer has opened. Wait for the whole
-      // composer footprint before scrolling, including the notice above its input bar.
       await expect.poll(() => list.evaluate(el => {
         const screen = document.querySelector('[data-screen]')!.getBoundingClientRect();
         const dock = document.querySelector('[data-alpha-layer="composer"]')!.getBoundingClientRect();

@@ -1,13 +1,7 @@
-// Reminder refreshes in Calendar: only the newest refresh publishes, device-calendar rows are
-// published whether or not the reminder store can be read, and a notification's navigation
-// intent is settled by the newest refresh: opened when it succeeds, dropped when it fails.
 module ReminderRefresh {
   type State = {
     live: bool,
-    // generation numbers refreshes; inFlight holds the ones still running.
     generation: int, inFlight: Set[int],
-    // Versions of what exists (device rows as last read by the calendar adapter, the reminder
-    // store) and of what the view currently shows.
     deviceRows: int, reminderStore: int, shownDevice: int, shownReminders: int,
     stale: bool, failedBefore: bool, toasts: int,
     pendingOpen: bool, openRequests: int, opened: int, dropped: int,
@@ -20,9 +14,7 @@ module ReminderRefresh {
   pure def begun(state: State): State =
     { ...state, generation: state.generation + 1, inFlight: state.inFlight.union(Set(state.generation + 1)) }
 
-  // Mount, resume, a committed reminder change, or the midnight timer.
   action refresh = all { s.live, s.generation < 5, s' = begun(s) }
-  // The calendar adapter read the device calendars and asks for the reminders to be merged in.
   action deviceRead = all {
     s.live, s.generation < 5, s.deviceRows < 3,
     s' = begun({ ...s, deviceRows: s.deviceRows + 1 })
@@ -31,14 +23,10 @@ module ReminderRefresh {
     s.live, s.generation < 5, s.reminderStore < 3,
     s' = begun({ ...s, reminderStore: s.reminderStore + 1 })
   }
-  // A tapped reminder notification keeps its intent across refreshes that supersede its own.
   action reminderOpened = all {
     s.live, s.generation < 5, s.openRequests < 2, not(s.pendingOpen),
     s' = begun({ ...s, pendingOpen: true, openRequests: s.openRequests + 1 })
   }
-  // A superseded refresh publishes nothing and leaves the intent for the newest one. A failed
-  // refresh still publishes the device rows, with the reminders last read marked out of date;
-  // it drops a waiting intent with its own message, and otherwise reports the failure once.
   action complete(token: int, ok: bool): bool = all {
     s.inFlight.contains(token),
     s' = if (not(s.live) or token != s.generation) { ...s, inFlight: s.inFlight.exclude(Set(token)) }
@@ -60,12 +48,9 @@ module ReminderRefresh {
   }
 
   val Settled = s.live and s.generation > 0 and s.inFlight.size() == 0
-  // Device calendar rows never wait on the reminder store.
   val DeviceRowsAlwaysPublished = Settled implies s.shownDevice == s.deviceRows
-  // Reminders shown are the ones in the store, or they are marked out of date.
   val RemindersCurrentOrMarked = Settled implies (s.shownReminders == s.reminderStore or s.stale)
   val OnlyNewestPublishes = s.publishedBy == s.publishedWhen
-  // A navigation intent is settled once, by the newest refresh, and never outlives it.
   val OpenIntentSettledOnce = s.opened + s.dropped <= s.openRequests
     and (s.pendingOpen implies s.opened + s.dropped < s.openRequests)
     and (Settled implies not(s.pendingOpen))
@@ -80,7 +65,6 @@ module ReminderRefresh {
   val DroppedOpenWitness = s.dropped > 0 and s.stale
   val OpenedWitness = s.opened > 0
 
-  // The reminder store cannot be read: the new device rows still show, marked beside stale reminders.
   run deviceRowsSurviveReminderFailureTest = init.then(refresh).then(complete(1, true))
     .then(deviceRead).then(complete(2, false))
     .expect(StaleRemindersWitness and s.shownDevice == 1 and s.toasts == 1 and safety)
@@ -90,7 +74,6 @@ module ReminderRefresh {
     .expect(SupersededRefreshWitness).then(complete(1, true))
     .expect(s.shownReminders == 0 and s.publishedBy == 0).then(complete(2, true))
     .expect(s.shownReminders == 1 and s.publishedBy == 2 and safety)
-  // A resume supersedes the notification's own refresh: the intent waits for the newest one.
   run openIntentFollowsNewestRefreshTest = init.then(reminderOpened).then(refresh).then(complete(1, true))
     .expect(s.pendingOpen and s.opened == 0).then(complete(2, true))
     .expect(s.opened == 1 and not(s.pendingOpen) and safety)

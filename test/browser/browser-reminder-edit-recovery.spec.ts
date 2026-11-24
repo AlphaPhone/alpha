@@ -2,7 +2,6 @@ import {reviewCalendarAction} from './helpers/calendar-review';
 import {chooseCalendarEventAction} from './helpers/browser-calendar';
 import {test,expect} from '@playwright/test';
 test.use({timezoneId:'Asia/Tokyo'});
-// Storage tests launch Calendar from the keyboard; a delayed pointer release is a Home long press.
 async function editor(page:any,completed=false){
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.clock.setFixedTime(new Date('2027-03-13T00:00Z'));await page.goto('/');await page.getByRole('button',{name:'Calendar',exact:true}).waitFor();
@@ -54,7 +53,6 @@ for(const scenario of ['double-save','draft-after-dispatch','navigate-after-disp
  await page.evaluate(async()=>{const {BrowserDaily}=await import('/src/browser/daily.ts');const original=BrowserDaily.prototype.operateReminder;(window as any).editCalls=0;BrowserDaily.prototype.operateReminder=async function(input){(window as any).editCalls++;const result=await original.call(this,input);await new Promise<void>(resolve=>(window as any).releaseEdit=resolve);return result;};});
  await page.getByRole('button',{name:'Save event',exact:true}).click();await expect.poll(()=>page.evaluate(()=>typeof (window as any).releaseEdit)).toBe('function');
  await expect(page.getByRole('button',{name:'Save event',exact:true})).toBeDisabled();
- // Bypass the disabled UI only to prove the handler still rejects duplicate dispatch.
  if(scenario==='double-save')await page.getByRole('button',{name:'Save event',exact:true}).dispatchEvent('click');else if(scenario==='draft-after-dispatch')await page.getByRole('textbox',{name:'Title',exact:true}).fill('Later unsaved draft');else await page.getByRole('button',{name:'Back to calendar',exact:true}).last().click();
  await page.evaluate(()=>(window as any).releaseEdit());await expect.poll(()=>page.evaluate(async()=>Object.keys(await (await import('/src/runtime/reminder-deletions.ts')).pendingReminderDeletions()).length)).toBe(0);
  expect(await page.evaluate(()=>(window as any).editCalls)).toBe(1);

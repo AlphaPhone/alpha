@@ -3,12 +3,6 @@ import { ASSISTANT_GROUP, auditPage, auditReadingOrder, auditTree, format } from
 import { setTextScale } from './accessibility-states';
 import { settled } from './helpers/settled';
 
-// PRD AP-15 across views, in the renderer: repeated HOME, popups open when HOME arrives, rotation
-// and a reload (the renderer's process death) leave every screen announced, operable and in
-// reading order. Chromium on the development server: Android's HOME key arrives as the renderer's
-// `launcher-home` event and rotation as a viewport change, as main.tsx and MainActivity deliver
-// them. Not TalkBack, an emulator or a device (AccessibilityLifecycleInstrumentedTest and
-// MVP-48's device list).
 const offline = () => localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({ kind: 'offline' }));
 const VIEWS = ['Inbox', 'Calendar', 'Browser', 'Camera', 'Photos', 'Maps', 'Notes', 'Files', 'Workflows', 'Settings'] as const;
 const DRAFT = 'Lifecycle draft kept across every screen';
@@ -20,7 +14,6 @@ async function start(page: Page, url = '/') {
   await page.evaluate(() => document.fonts.ready);
 }
 const activeView = (page: Page) => page.evaluate(() => document.documentElement.dataset.activeView);
-/** Where focus is, as a person would find it: nowhere (dropped), or a named element on the screen in front. */
 const focusState = (page: Page) => page.evaluate(() => {
   const el = document.activeElement as HTMLElement | null;
   const dropped = !el || el === document.body || el === document.documentElement || !el.isConnected || !!el.closest('[inert],[aria-hidden="true"],[hidden]') || !el.getClientRects().length;
@@ -32,14 +25,12 @@ const focusState = (page: Page) => page.evaluate(() => {
     region: document.querySelector('[data-alpha-layer="app"][role="region"]')?.getAttribute('aria-label') || '',
   };
 });
-/** Focus is on the screen's name, as view-focus.ts's screenFocusTarget picks it: the app's title, else its labelled region. */
 async function expectScreenName(page: Page, where: string) {
   await expect.poll(async () => {
     const focus = await focusState(page);
     return !focus.dropped && (focus.title || (!!focus.region && focus.name === focus.region));
   }, { message: `${where}: focus is not on the screen's name` }).toBe(true);
 }
-/** Activates a Home app tile from the keyboard, as Switch Access or a TalkBack double tap does. */
 async function openFromHome(page: Page, view: string) {
   const tile = page.locator('[data-alpha-layer="home"]').getByRole('button', { name: view, exact: true }).and(page.locator('[data-mobile-shell-tile]'));
   await tile.focus();
@@ -49,7 +40,6 @@ async function openFromHome(page: Page, view: string) {
 async function pressHome(page: Page, times = 1) {
   for (let press = 0; press < times; press++) {
     await page.evaluate(() => window.dispatchEvent(new Event('launcher-home')));
-    // Press cadence, not readiness: repeated presses land while the previous one is still moving.
     await page.waitForTimeout(120);
   }
   await expect.poll(() => activeView(page)).toBe('home');
@@ -69,7 +59,6 @@ test.describe('repeated HOME across views', () => {
       await start(page);
       await composer(page).fill(DRAFT);
       await openFromHome(page, view);
-      // Opening an app from the keyboard announces it: focus is on its name, not dropped behind Home.
       await expect.poll(async () => (await focusState(page)).dropped, { message: `${view}: focus was dropped when it opened` }).toBe(false);
       expect((await focusState(page)).onHome).toBe(false);
       await expectScreenName(page, `${view} opened from Home`);
@@ -80,12 +69,10 @@ test.describe('repeated HOME across views', () => {
       await expect(page.getByRole('group', { name: ASSISTANT_GROUP, exact: true })).toHaveCount(1);
       await expect(composer(page)).toHaveValue(DRAFT);
       await screenIsSound(page, `Home after HOME from ${view}`);
-      // Tab continues into Home from its name, not from a control of the closed app.
       await page.keyboard.press('Tab');
       const next = await focusState(page);
       expect(next.dropped).toBe(false);
       expect(next.onHome || next.name === 'Open conversation', `Tab after HOME went to '${next.name}'`).toBe(true);
-      // The app opens again, in front and exposed.
       await openFromHome(page, view);
       await expect.poll(async () => (await focusState(page)).dropped).toBe(false);
       await expect(page.locator('[data-alpha-layer="home"]')).toHaveAttribute('aria-hidden', 'true');
@@ -107,11 +94,8 @@ test.describe('repeated HOME across views', () => {
 });
 
 test.describe('HOME while a popup, subview or field is open', () => {
-  // Menus and sheets over a scrim own focus (subview-accessibility.ts); HOME must retire them, not
-  // leave the page inert or focus behind them. Live screens: HOME is the product's own handler.
   for (const steps of [['Browser', 'Menu'], ['Browser', 'Edit address'], ['Workflows', 'New automation', 'Clock alarms'], ['Workflows', 'New automation'], ['Settings', 'About']] as const) {
     test(`${steps.join(' > ')}: HOME retires it and Home is announced`, async ({ page }) => {
-      // Two app openings, a popup and two audits: explicit, as the 200% sweeps run beside it.
       test.setTimeout(60_000);
       await start(page);
       await openFromHome(page, steps[0]);
@@ -120,7 +104,6 @@ test.describe('HOME while a popup, subview or field is open', () => {
       await pressHome(page, 2);
       await expect.poll(async () => (await focusState(page)).onHome).toBe(true);
       await screenIsSound(page, `Home after HOME from ${steps.join(' > ')}`);
-      // The app opens again without the popup in front of it.
       await openFromHome(page, steps[0]);
       await expect(page.locator('[role="dialog"][aria-modal="true"]:visible, dialog[open]')).toHaveCount(0);
       await expectScreenName(page, `${steps[0]} reopened after HOME`);
@@ -132,7 +115,6 @@ test.describe('rotation across views', () => {
   test.use({ hasTouch: true, isMobile: true });
   for (const view of VIEWS) {
     test(`${view}: rotating keeps the screen, focus and draft, with every control on screen`, async ({ page }) => {
-      // Four rotations, each audited: explicit, as the 200% sweeps run beside it.
       test.setTimeout(90_000);
       await page.setViewportSize({ width: 412, height: 915 });
       await start(page);
@@ -146,7 +128,6 @@ test.describe('rotation across views', () => {
         if (landscape) await expect(html).toHaveClass(/alpha-landscape/); else await expect(html).not.toHaveClass(/alpha-landscape/);
         await settled(page);
         expect(await activeView(page), `${view} is still in front after rotating`).toBe(view.toLowerCase());
-        // Focus stays on the screen's name; a layer the new layout rebuilt hands it back within a few frames.
         await expect.poll(async () => { const focus = await focusState(page); return focus.dropped ? 'dropped' : focus.name; }, { message: `${view}: rotating dropped focus` }).toBe(before);
         const found = format([...await auditReadingOrder(page), ...await auditPage(page, { clipping: true, overlap: true, dock: true })]).filter(line => !line.startsWith('text-truncated:'));
         expect(found, `${view} ${landscape ? 'landscape' : 'portrait'}:\n${found.join('\n')}`).toEqual([]);
@@ -159,7 +140,6 @@ test.describe('rotation across views', () => {
 
 test.describe('a reload (the renderer restarted)', () => {
   test('the chosen text size survives, and Home comes back announced and in reading order', async ({ page }) => {
-    // A reload plus three audited views: 5 s alone, past the 30 s default when run beside the 200% sweeps.
     test.setTimeout(90_000);
     await start(page, '/?mode=dev');
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -176,7 +156,6 @@ test.describe('a reload (the renderer restarted)', () => {
     await expect.poll(() => page.evaluate(() => Number(getComputedStyle(document.documentElement).getPropertyValue('--alpha-text-scale')))).toBeCloseTo(scale, 1);
     await settled(page);
     await screenIsSound(page, 'Home after a reload at the larger text size');
-    // Every app still opens announced at that size.
     for (const view of ['Settings', 'Files', 'Calendar'] as const) {
       await openFromHome(page, view);
       await expectScreenName(page, `${view} after reload`);
@@ -207,7 +186,6 @@ test.describe('a reload (the renderer restarted)', () => {
 test.describe('permission loss and offline', () => {
   test('camera permission withdrawn while away: Camera reopens to an announced recovery, and HOME still works', async ({ page }) => {
     test.setTimeout(60_000);
-    // Granted first (a synthetic canvas stream), then withdrawn as Android Settings would while Alpha is in the background.
     await page.addInitScript(() => {
       const devices = navigator.mediaDevices;
       Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: devices });
@@ -229,7 +207,6 @@ test.describe('permission loss and offline', () => {
     await expect.poll(async () => (await focusState(page)).dropped).toBe(false);
     const found = format([...await auditTree(page), ...await auditReadingOrder(page), ...await auditPage(page, { dock: true })]);
     expect(found, `Camera with access withdrawn:\n${found.join('\n')}`).toEqual([]);
-    // The way back to the camera is reachable from the keyboard, not only by touch.
     const retry = recovery.getByRole('button', { name: 'Retry', exact: true });
     await retry.focus();
     await expect(retry).toBeFocused();

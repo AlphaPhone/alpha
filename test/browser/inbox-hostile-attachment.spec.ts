@@ -1,13 +1,3 @@
-// J03-8: hostile mail attachments. An HTML file with script, an SVG with
-// script, an oversized file and files whose bytes do not match their declared type are driven
-// through the rendered Inbox attachment controls. None may execute, navigate, load anything, or
-// reach the agent; what the review shows is inert text.
-//
-// Evidence boundary: source/test evidence for the browser renderer. The mailbox is a synthetic
-// provider at the Cloud client boundary; each attachment response is the JSON a hostile or broken
-// server would return, passed through the product's own CloudProtocol response validation
-// (gmailAttachment / gmailOpaqueAttachment) so the real checks run. Android's MailAttachment
-// plugin, its viewer handoff and Files provider are native and not exercised here.
 import {createHash} from 'node:crypto';
 import {test,expect,type Page} from '@playwright/test';
 
@@ -20,7 +10,6 @@ type Part={partId:string;name:string;mimeType:string;size:number;supported:boole
 const part=(partId:string,name:string,mimeType:string,supported:boolean,bytes:string,extra:Partial<Part>&{opaque?:boolean}={}):Part=>({partId,name,mimeType,size:Buffer.byteLength(bytes,'latin1'),supported,
  response:{version:1,messageId:'selected',partId,historyId:'1',name,mimeType,dataBase64:b64(bytes),sha256:sha(bytes),size:Buffer.byteLength(bytes,'latin1'),...(supported?{}:{opaque:true})},...extra});
 
-/** Records everything a hostile attachment could do: requests, navigation, dialogs, popups, script effects. */
 async function watch(page:Page){
  const seen={requests:[] as string[],navigations:[] as string[],dialogs:[] as string[],popups:0};
  await page.route(url=>url.hostname===ATTACKER,route=>{seen.requests.push(route.request().url());return route.abort();});
@@ -30,18 +19,14 @@ async function watch(page:Page){
  return seen;
 }
 async function expectInert(page:Page,seen:Awaited<ReturnType<typeof watch>>){
- await page.waitForTimeout(400); // a refresh, onload or image fetch would have fired by now
+ await page.waitForTimeout(400);
  expect(seen).toEqual({requests:[],navigations:[],dialogs:[],popups:0});
  expect(await page.evaluate(()=>(window as any).hostile)).toBeUndefined();
  expect(new URL(page.url()).hostname).toBe('127.0.0.1');
- // No frame was created for attachment content, and no element built from it is in the document.
  expect(page.frames().filter(frame=>frame!==page.mainFrame()&&!/^about:blank$/.test(frame.url())).map(frame=>frame.url())).toEqual([]);
  expect(await page.evaluate(()=>document.querySelectorAll('a#a, input[name="password"], img[src*="attacker"], svg image, foreignObject').length)).toBe(0);
 }
 async function setup(page:Page,parts:Part[],options:{opaque?:boolean;agent?:boolean}={}){
- // The fixture models an installation that already finished access setup; a signed-in account with
- // pending setup is owed the startup walkthrough, which would otherwise cover Home once the swapped
- // snapshot re-renders (startup-permissions-walkthrough.spec.ts owns that flow).
  await page.addInitScript(()=>localStorage.setItem('alpha:startup-permission-walkthrough:v1',JSON.stringify({version:1,status:'completed',step:4})));
  await page.goto('/');
  await page.evaluate(async({parts,options})=>{
@@ -52,8 +37,6 @@ async function setup(page:Page,parts:Part[],options:{opaque?:boolean;agent?:bool
   const f=(window as any).hostileFixture={attachmentRequests:[] as string[],mutations:0,agentPosts:[] as unknown[]};
   const {alphaClient}=await import('/src/runtime/alpha-client.ts');alphaClient.send=async(...args:any[])=>{f.agentPosts.push(args);throw Error('This fixture never authorizes an agent send');};
   const message={id:'selected',threadId:'thread',from:'Fixture sender',fromEmail:'sender@example.invalid',to:['reader@example.invalid'],cc:[],replyTo:null,subject:'Invoices attached',snippet:'See attached',receivedAt:'2026-10-04T12:00:00Z',unread:false};
-  // The product's own response validation (CloudProtocol over the shared managed Gmail client), fed the
-  // server's JSON for the requested part through a synthetic authenticated transport.
   const validated=(method:'gmailAttachment'|'gmailOpaqueAttachment')=>async(grant:string,messageId:string,partId:string,historyId:string,signal:AbortSignal)=>{
    f.attachmentRequests.push(`${method}:${partId}`);
    const row=parts.find(part=>part.partId===partId);
@@ -79,8 +62,6 @@ const fixture=(page:Page)=>page.evaluate(()=>(window as any).hostileFixture as {
 const files=(page:Page)=>page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');return (await registerPlugin<any>('AlphaFiles').list({})).entries.map((entry:any)=>entry.name as string);});
 const review=(page:Page)=>page.getByRole('dialog',{name:'Review attachment'});
 const REFUSED='This attachment does not match its type or is too large. It was not opened or saved.';
-/** A refused file is reported as refused: never as Gmail being unavailable, with no Retry (the same bytes
- * would be refused again), and the message stays open for the next file. */
 async function expectRefused(page:Page){
  await expect(page.getByText(REFUSED,{exact:true}).first()).toBeVisible();
  await expect(page.getByText(/Gmail is unavailable/)).toHaveCount(0);
@@ -104,7 +85,6 @@ test(`${label} is never rendered: the review is inert text, Save to Files keeps 
  const row=page.getByRole('region',{name:'Email message'});
  await expect(row).toContainText(' · No preview · Save to Files');
  await page.getByText(name,{exact:true}).click();
- // The review names the file, its hash, type and size, and shows none of its content.
  await expect(review(page).getByRole('heading',{name,exact:true})).toBeVisible();
  const details=review(page).locator('details');
  await expect(details).toHaveJSProperty('open',false);
@@ -127,7 +107,6 @@ test(`${label} is never rendered: the review is inert text, Save to Files keeps 
  expect(await fixture(page)).toMatchObject({attachmentRequests:['gmailOpaqueAttachment:p1'],mutations:0});
  await expectInert(page,seen);
 
- // Opening the saved copy in Files: the bytes are stored, never interpreted as a page.
  await openFile(page,name);
  await expect(page.getByText(new RegExp(`^${mimeType.replace(/[+/]/g,'\\$&')} · `)).first()).toBeVisible();
  await expectInert(page,seen);
@@ -137,9 +116,7 @@ test('active content served under a previewable type is shown as literal text or
  test.setTimeout(120_000);
  const seen=await watch(page);
  await setup(page,[
-  // A .txt that is really a web page: allowed, because text is only ever shown as text.
   part('as-text','notes.txt','text/plain',true,html),
-  // Bytes that do not match the declared image or PDF type, and a name that does not match its type.
   part('as-png','photo.png','image/png',true,html),
   part('as-pdf','scan.pdf','application/pdf',true,svg),
   part('as-jpeg','logo.jpg','image/jpeg',true,svg),
@@ -148,19 +125,16 @@ test('active content served under a previewable type is shown as literal text or
  ]);
  await page.getByText('notes.txt',{exact:true}).click();
  await expect(review(page).getByRole('heading',{name:'notes.txt',exact:true})).toBeVisible();
- // The markup is visible as characters; no element was created from it.
  await expect(review(page).getByText(html,{exact:true})).toBeVisible();
  await expectInert(page,seen);
  await review(page).getByRole('button',{name:'Back to message',exact:true}).click();
 
  for(const [name,requested] of [['photo.png','as-png'],['scan.pdf','as-pdf'],['logo.jpg','as-jpeg'],['page.html','html-named-text'],['vector.svg','svg-as-supported']] as const){
   await page.getByRole('region',{name:'Email message'}).getByText(name,{exact:true}).click();
-  // The response fails the type check: no review opens and the person is told the file was refused.
   await expectRefused(page);
   await expect(review(page)).toHaveCount(0);
   await expect(page.getByRole('dialog',{name:'Reviewed attachment'})).toHaveCount(0);
   await expectInert(page,seen);
-  // Choosing it again asks again and is refused again; it never falls back to showing the file.
   await page.getByRole('region',{name:'Email message'}).getByText(name,{exact:true}).click();
   await expect.poll(async()=>(await fixture(page)).attachmentRequests.filter(request=>request.endsWith(':'+requested)).length).toBe(2);
   await expectRefused(page);
@@ -176,10 +150,10 @@ test('an oversized attachment is refused before any bytes are requested, and a r
  const big='A'.repeat(5*1024*1024+1);
  const lying=part('lying','small.bin','application/octet-stream',false,big);
  const swapped=part('swapped','ledger.bin','application/octet-stream',false,'declared bytes');
- swapped.response={...swapped.response!,dataBase64:b64(html)}; // not the bytes its hash and size describe
+ swapped.response={...swapped.response!,dataBase64:b64(html)};
  await setup(page,[
   {partId:'honest',name:'archive.zip',mimeType:'application/zip',size:6*1024*1024,supported:false,response:null},
-  {...lying,size:120}, // the listing understates the size
+  {...lying,size:120},
   swapped,
   part('traversal','..','text/html',false,html),
  ]);
@@ -189,7 +163,6 @@ test('an oversized attachment is refused before any bytes are requested, and a r
  expect((await fixture(page)).attachmentRequests).toEqual([]);
 
  for(const [name,requested] of [['small.bin','lying'],['ledger.bin','swapped'],['..','traversal']] as const){
-  // An understated size (the bytes exceed the cap), bytes other than the hash describes, and an unsafe name.
   await page.getByRole('region',{name:'Email message'}).getByText(name,{exact:true}).click();
   await expectRefused(page);
   await expect(review(page)).toHaveCount(0);
@@ -214,7 +187,6 @@ test('an account that cannot save unpreviewed types offers nothing for an HTML a
 test('Ask Alpha stages only the selected email, excludes attachment names and bytes, and waits for Send',async({page})=>{
  const seen=await watch(page);
  await setup(page,[part('p1','invoice.html','text/html',false,html),part('p2','notes.txt','text/plain',true,html)],{agent:true});
- // Looking at an attachment does not put it in front of the agent.
  await page.getByText('notes.txt',{exact:true}).click();
  await expect(review(page).getByText(html,{exact:true})).toBeVisible();
  expect(JSON.stringify(await page.evaluate(async()=>(await import('/src/runtime/alpha-client.ts')).alphaClient.getState().context))).not.toMatch(/notes\.txt|invoice\.html|attacker\.invalid|onerror/);
@@ -222,7 +194,6 @@ test('Ask Alpha stages only the selected email, excludes attachment names and by
  await page.getByLabel('Message actions',{exact:true}).click();await page.getByRole('button',{name:'Ask Alpha',exact:true}).click();
  const draft=page.getByRole('textbox',{name:'Message Alpha',exact:true});await expect(draft).toHaveValue('Summarize this for me');
  await expect(page.getByRole('button',{name:'Remove email',exact:true})).toBeVisible();
- // Read the product's staged, revalidated context without invoking Send or any provider action.
  const staged=await page.evaluate(async()=>{
   const root=document.getElementById('root') as any,key=Object.keys(root).find(k=>k.startsWith('__reactContainer$'));if(!key)throw Error('Missing mounted shell');
   const pending=[root[key]];while(pending.length){const fiber=pending.pop(),shell=fiber?.stateNode;if(shell?.mailAttachment)return await shell.mailAttachment.validate();if(fiber?.sibling)pending.push(fiber.sibling);if(fiber?.child)pending.push(fiber.child);}throw Error('No staged email');
@@ -234,8 +205,6 @@ test('Ask Alpha stages only the selected email, excludes attachment names and by
  await expectInert(page,seen);
 });
 
-// A file that is a valid image for its first bytes and a web page after them, and names that look
-// like URLs. The type check passes the polyglot, so its preview is what has to be inert.
 test('a PNG-and-HTML polyglot is previewed only as a sandboxed image, and URL-like names are refused or shown as plain text',async({page})=>{
  test.setTimeout(120_000);
  const seen=await watch(page);
@@ -257,12 +226,10 @@ test('a PNG-and-HTML polyglot is previewed only as a sandboxed image, and URL-li
  await review(page).getByRole('button',{name:'Open file',exact:true}).click();
  const opened=page.getByRole('dialog',{name:'Reviewed attachment'});
  await expect(opened.getByRole('heading',{name:'photo.png',exact:true})).toBeVisible();
- // One frame, with every sandbox restriction, showing a blob typed as the image it was checked as.
  const frames=await opened.locator('iframe').evaluateAll(nodes=>nodes.map(node=>({sandbox:node.getAttribute('sandbox'),blob:(node as HTMLIFrameElement).src.startsWith('blob:'),attributes:node.getAttributeNames().sort()})));
  expect(frames).toEqual([{sandbox:'',blob:true,attributes:['sandbox','src','title']}]);
  expect(await opened.locator('iframe').evaluate(async node=>(await (await fetch((node as HTMLIFrameElement).src)).blob()).type)).toBe('image/png');
  expect(await opened.locator('script, object, embed, a[href]:not([download]), form').count()).toBe(0);
- // The Download control saves the blob under the checked name; it is not a link that navigates.
  expect(await opened.locator('a[download]').evaluateAll(nodes=>nodes.map(node=>[node.getAttribute('download'),(node as HTMLAnchorElement).protocol,node.getAttribute('target')]))).toEqual([['photo.png','blob:',null]]);
  await page.waitForTimeout(600);
  expect(seen).toEqual({requests:[],navigations:[],dialogs:[],popups:0});
@@ -274,12 +241,10 @@ test('a PNG-and-HTML polyglot is previewed only as a sandboxed image, and URL-li
  expect(page.frames().filter(frame=>frame.url().startsWith('blob:'))).toEqual([]);
  await review(page).getByRole('button',{name:'Back to message',exact:true}).click();
 
- // A data: URL as a file name contains a path separator: the response is refused, nothing opens.
  await page.getByRole('region',{name:'Email message'}).getByText(dataName,{exact:true}).click();
  await expectRefused(page);
  await expect(review(page)).toHaveCount(0);
 
- // A name that reads as a script URL is only ever text: in the list, the review and Files.
  await page.getByRole('region',{name:'Email message'}).getByText(scheme,{exact:true}).click();
  await expect(review(page).getByRole('heading',{name:scheme,exact:true})).toBeVisible();
  await expect(review(page).getByText(html,{exact:true})).toBeVisible();

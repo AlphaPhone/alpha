@@ -1,4 +1,3 @@
-// Renderer control and retained intent for one LifeOps scheduled task.
 module ScheduledTaskControls {
   type Request = {verb: str, text: str, cron: str, zone: str, minutes: int}
   type Intent = {owner: str, request: Request}
@@ -49,8 +48,6 @@ module ScheduledTaskControls {
   }
 
   val busy = s.visible and s.pending.owner == s.owner
-  // The current mutation owns its journaled intent while busy. The separate lock
-  // is exposed only after it settles without confirming that retained request.
   val locked = s.detail and ownerHasIntent(s) and not(busy)
   val reviewVerb = s.review.verb
   val clockEditable = s.detail and s.kind == "preset"

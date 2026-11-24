@@ -1,5 +1,3 @@
-// Flag-off Android renderer: explicit native email sign-in, permission setup, resident binding,
-// cancellation, expiry and refusal. Synthetic native outcomes do not establish real authentication.
 import { test, expect, type Page } from '@playwright/test';
 import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface, openYourAgent } from './flag-off-android';
 import { residentStub, stub, setStub, enterNativeEmailCode, type StubAccount } from './resident-stub';
@@ -14,8 +12,6 @@ async function firstRun(page: Page, overrides: Partial<StubAccount> = {}, ownedL
   const foreign = await fenceNetwork(page);
   await flagOffAndroid(page,{freshAccess:true});
   await residentStub(page, { nativeSignIn:true, emptyKeystore: true, accounts: [{ ...account, ...overrides }] });
-  // Only this fresh-install fixture owns permission prompts. Each explicit Allow changes the
-  // synthetic native status; the product must read it back before advancing. No UI completion seed.
   await page.addInitScript(() => {
     const w=window as any, previous=w.Capacitor.nativePromise;
     const state:Record<string,boolean>={notifications:false,microphone:false,camera:false,location:false,calendar:false,photos:false,files:false};
@@ -58,7 +54,6 @@ async function firstRun(page: Page, overrides: Partial<StubAccount> = {}, ownedL
         }
         w.firstRunLifecycle.push({path:input.path,method:input.method,ownerId:input.ownerId,credentialId});
         w.flagOff.calls.push('Agent.request');
-        // No observation capability is advertised; warming is advisory and synthetic.
         return {status:200,body:JSON.stringify({})};
       }
       return previous(plugin,method,input);
@@ -66,8 +61,6 @@ async function firstRun(page: Page, overrides: Partial<StubAccount> = {}, ownedL
   }, {ownerId:id});
   await page.goto('/');
   await setStub(page, { nextToken: account.token });
-  // P-43: the resident starts by itself, signed out. Every Alpha Phone needs an Eliza Cloud account,
-  // so the sign-in page opens by itself and cannot be dismissed while the agent runs.
   await expect.poll(() => starts(page), { timeout: 30_000 }).toBe(1);
   const welcome = page.locator('[role="main"].alpha-cloud-sign-in');
   await expect(welcome).toBeVisible();
@@ -82,12 +75,9 @@ async function firstRun(page: Page, overrides: Partial<StubAccount> = {}, ownedL
   await expect(welcome.getByRole('button',{name:'New conversation',exact:true})).toHaveCount(0);
   return { foreign, welcome };
 }
-/** No key was kept or bound, and the resident is running without AI (P-43). `untouched`: the sign-in
- * never stored a key, so the resident kept running throughout (never stopped, never restarted). */
 async function nothingLeft(page: Page, welcome: ReturnType<Page['getByRole']>, untouched = false, codeKept = false) {
   await expect.poll(()=>harness(page,f=>f.calls.filter((call:string)=>call==='Agent.start').length)).toBeGreaterThan(0);
   await expect(welcome).toBeVisible();
-  // An expired code retains its address and offers Resend once the native cooldown ends.
   await expect(welcome.getByRole('button', { name: codeKept ? 'Resend' : 'Send code', exact: true })).toBeEnabled();
   expect(await harness(page, f => f.slots['cloud:production'] ?? null)).toBeNull();
   expect(await stub(page, s => s.order.some((entry: string) => entry.startsWith('configureCloudProvider')))).toBe(false);
@@ -103,7 +93,6 @@ test('first run: a neutral loading screen, never Home, until the sign-in page op
   await flagOffAndroid(page);
   await residentStub(page, { nativeSignIn: true, emptyKeystore: true, accounts: [account] });
   await recordStartupFrames(page);
-  // The first agent start is held (a first boot took about 27 s on the owner's run).
   await page.addInitScript(() => {
     const w = window as any, previous = w.Capacitor.nativePromise; w.firstStart = { release: null };
     w.Capacitor.nativePromise = async (plugin: string, method: string, input: any) => { if (plugin === 'Agent' && method === 'start' && !w.firstStart.release) await new Promise<void>(resolve => { w.firstStart.release = resolve; }); return previous(plugin, method, input); };
@@ -129,7 +118,6 @@ test('first run: native email sign-in, credits, provider binding, then the resid
   const { foreign, welcome } = await firstRun(page, {}, true);
   await enterNativeEmailCode(page);
   await expect(welcome).toHaveCount(0, { timeout: 30_000 });
-  // Fresh sign-in follows the ordered access sequence, with explicit Skip and no automatic requests.
   const access=page.locator('dialog.alpha-startup-permissions');
   await expect(access).toBeVisible();
   expect(await page.evaluate(()=>(window as any).firstRunAccess.requests)).toEqual([]);
@@ -150,21 +138,17 @@ test('first run: native email sign-in, credits, provider binding, then the resid
   const order = await stub(page, s => s.order) as string[];
   const stored = JSON.parse(await harness(page, f => f.slots['cloud:production']));
   expect(stored.token).toBe(account.token);
-  // In call order: the native email result, the key stored, the plan read, the provider
-  // bound to that key, and only then the agent started. Nothing was revoked (no key was saved before).
   const at = (entry: string) => order.indexOf(entry);
   expect(order.filter(entry => entry.startsWith('openExternal'))).toEqual([]);
   expect(order.filter(entry => entry.startsWith('poll'))).toEqual([]);
   expect(at('native sign-in verifyEmail')).toBeLessThan(at('store first-run-key'));
   expect(at('store first-run-key')).toBeLessThan(at('plan new-owner@example.invalid'));
   expect(at('plan new-owner@example.invalid')).toBeLessThan(at('configureCloudProvider ' + stored.credentialId));
-  // The resident restarts after the provider is bound to the new key.
   expect(at('configureCloudProvider ' + stored.credentialId)).toBeLessThan(order.lastIndexOf('Agent.start'));
   expect(order.indexOf('Agent.start')).toBeLessThan(at('native sign-in startEmail'));
   expect(order.filter(entry => entry.startsWith('revoke'))).toEqual([]);
   expect(await stub(page, s => s.opened)).toEqual([]);
   expect(await stub(page, s => s.cloud.filter((row: any) => row.path.startsWith('/api/auth/cli-session')))).toEqual([]);
-  // Every Cloud request went to the Cloud API through the native transport.
   expect((await stub(page, s => s.cloud) as Array<{ path: string }>).map(row => row.path)).toEqual(expect.arrayContaining(['/api/v1/user', '/api/v1/billing/limits']));
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('alpha.connection.selection.v1')!))).toEqual({ kind: 'resident' });
 
@@ -194,7 +178,6 @@ test('first run: Cancel while verifying the email code keeps no key and the resi
   await expect(page.getByText(WAITING, { exact: true })).toBeVisible();
   await expect.poll(() => stub(page, s => s.order.includes('native sign-in verifyEmail'))).toBe(true);
   await page.getByRole('button', { name: 'Back', exact: true }).click();
-  // Back cancels the native attempt, which ends the held verify; nothing is stored afterwards.
   await expect.poll(() => stub(page, s => s.order.includes('native sign-in cancel'))).toBe(true);
   await nothingLeft(page, welcome, true);
   expect(foreign).toEqual([]);
@@ -207,7 +190,6 @@ test('first run: an expired sign-in session keeps no key and the resident runs w
   await setStub(page, { login: 'expired' });
   await enterNativeEmailCode(page);
   await expect(page.getByRole('alert')).toContainText('expired');
-  // The native startEmail fixture supplies a one-minute cooldown even if verification expires.
   await expect(welcome.getByRole('button', { name: /^Resend/ })).toBeDisabled();
   await page.clock.fastForward(60_001);
   await nothingLeft(page, welcome, true, true);
@@ -226,19 +208,11 @@ test('first run: Cloud refusing the new key (401 on the account read) removes it
   await expect(welcome.getByRole('button',{name:'New conversation',exact:true})).toHaveCount(0);
 });
 
-// An account Cloud reports unable to use AI no longer blocks the resident agent: billing state never
-// retires local orchestration and Cloud refuses AI requests itself (subscription-entitlement.ts,
-// connection-ui.tsx admitCloudResident). The plan view and its billing link are covered by
-// native-cloud-subscription.spec.ts; the refusal on send by resident-failures.production.spec.ts.
-
-// A provider rebind can fail once while native shuts down, then recover in ensureResident.
-// The recovered connection must not restore the earlier startup error.
 test('first run: recovered provider restart clears its stale startup error', async ({ page }) => {
   test.setTimeout(120_000);
   const { foreign, welcome } = await firstRun(page);
   await setStub(page, { start: 'reject-once' });
   await enterNativeEmailCode(page);
-  // Successful sign-in now continues into access setup; the recovered start must leave no error anywhere.
   await expect(welcome).toHaveCount(0, { timeout: 30_000 });
   await expect(page.locator('dialog.alpha-startup-permissions')).toBeVisible();
   await expect.poll(() => starts(page)).toBe(3);

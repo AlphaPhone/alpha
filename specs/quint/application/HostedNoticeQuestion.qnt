@@ -1,4 +1,3 @@
-// Retained Android result question review as driven by the renderer.
 module HostedNoticeQuestion {
   type State = {owner: bool, sensitive: bool, composer: bool, phase: str, dialog: bool,
     proceed: bool, validation: str, interrupted: bool, closes: int, discards: int,

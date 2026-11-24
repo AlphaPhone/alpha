@@ -11,7 +11,6 @@ import java.util.Set;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Exact ledger operations over controlled storage and notification ports. */
 public final class HostedResultNoticeTraces {
  private static final String SECRET = "synthetic retained result contents";
  private static final Set<String> ROUTE_FIELDS = Set.of(
@@ -367,8 +366,6 @@ public final class HostedResultNoticeTraces {
 
  private static JSONObject capacity() throws Exception {
   Fixture f = new Fixture("source-capacity");
-  // Seed durable historical rows at strictly different times; Android clock ties
-  // are unrelated to which record the fixture expects the source to evict.
   JSONObject rows = new JSONObject();
   String first = "", second = "";
   for (int i = 1; i <= 200; i++) {

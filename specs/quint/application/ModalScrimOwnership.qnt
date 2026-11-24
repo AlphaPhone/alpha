@@ -42,8 +42,6 @@ module ModalScrimOwnership {
     s.modal != "none",
     s' = {...s, modal: "none", inputFocused: s.modal == "native-only" or s.modal == "nonmodal" and s.inputFocused}
   }
-  // An inline review can live inside the assistant itself. Its own controls
-  // keep the review; only a press on the assistant outside it dismisses it.
   action assistantPress(inside: bool): bool =
     if (s.modal == "inline" and not(inside)) close else s' = s
   action sameTaskModal(kind: str): bool = all {

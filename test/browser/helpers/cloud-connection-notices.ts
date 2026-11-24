@@ -1,6 +1,5 @@
 import type {Page} from '@playwright/test';
 
-/** Observe the actual rendered notice, clipping, and point ownership without invoking actions. */
 export function observeCloudNotices(page: Page) {
   return page.evaluate(() => ({
     view: document.documentElement.dataset.activeView ?? 'home',

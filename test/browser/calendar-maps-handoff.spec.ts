@@ -22,8 +22,6 @@ test('event address searches once, preserves result choice and returns to the sa
  expect(await page.evaluate(()=>(window as any).travelQueries)).toEqual([address]);
  await page.getByRole('button',{name:/^West entrance/}).first().click();await expect(page.getByRole('button',{name:'Directions',exact:true})).toBeVisible();
  await page.getByRole('button',{name:'Directions',exact:true}).click();const origin=page.getByRole('textbox',{name:'Starting point'});await origin.fill('43.738, 7.424');await expect(page.getByText(/no live traffic/).first()).toBeVisible();await origin.press('Enter');expect(await page.evaluate(()=>(window as any).travelRoutes)).toEqual([{from:{latitude:43.738,longitude:7.424},to:{latitude:43.74,longitude:7.425},mode:'drive'}]);await page.screenshot({path:info.outputPath('reviewed-event-route.png')});
- // Unwind the route and selected place, then the event-owned search returns directly to Calendar.
- // A fourth Back would dismiss the event detail we are checking.
  await back(page);await expect(page.getByRole('button',{name:'Directions',exact:true})).toBeVisible();
  await back(page);await expect(page.getByRole('searchbox',{name:'Search places',exact:true})).toHaveValue(address);
  await back(page);await expect(page.locator('html')).toHaveAttribute('data-active-view','calendar');

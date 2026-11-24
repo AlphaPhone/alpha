@@ -15,8 +15,6 @@ test('bounded receipts reject new admission and old restoration cannot undo newe
 });
 
 test('expired recording clears bytes but preserves replay fence',async({page})=>{
- // The shared audio store reads its clock through the Date.now it captured when created, so the
- // page clock is faked before load and moved past the 60-day orphan-recording backstop (twice the 30-day Recently deleted retention) after the deletion.
  const start=Date.now();await page.clock.setFixedTime(start);
  await page.goto('/');const operation=await page.evaluate(async()=>{const api=await import('/src/browser/note-audio-store.ts');const operation=crypto.randomUUID();await api.retainAudio('expired-fenced','owner','Private transcript',{blob:new Blob(['audio']),durationMs:1000});await api.changeAudioDeleted('expired-fenced','owner',true,operation);return operation;});
  await page.clock.setFixedTime(start+61*24*60*60*1000);

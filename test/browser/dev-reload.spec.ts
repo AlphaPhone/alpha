@@ -18,7 +18,6 @@ for(const polling of [false,true]) for(const replacement of [false,true]) test(`
   if(replacement){
    const original=await stat(file),temporary=path.join(root,'src/value.js.next');
    await writeFile(temporary,'export const value="after";');await utimes(temporary,original.atime,original.mtime);await rename(temporary,file);
-   // Native watchers can announce an existing path as added during replacement.
    if(!polling)server.watcher.emit('add',file);
   }else await writeFile(file,'export const value="after";');
   await expect(page.locator('body')).toHaveText('after:2');

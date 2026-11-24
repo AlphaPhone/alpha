@@ -1,4 +1,3 @@
-/// Staged speech lead trimming and first-write report ownership.
 module NativeSpeechOutputPreparation {
   type State = {preRoll: int, threshold: int, open: bool, held: List[int], returned: List[int],
     caller: List[int], sameInput: bool, firstPending: bool, writes: int, outcome: str,

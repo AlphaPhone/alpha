@@ -1,4 +1,3 @@
-/// One captured Cloud session owns a Google request and its readback.
 module GoogleAccounts {
   type Accounts = {
     owner: int, epoch: int, pendingEpoch: int, attempt: int, phase: str,
@@ -27,7 +26,6 @@ module GoogleAccounts {
         phase: if (granted) "refreshing" else "denied" }
     else s' = s
   }
-  /// Returning without a verified App Link still prompts an account-list read.
   action background = all { s.phase == "waiting", s' = {...s, backgrounded: true} }
   action refreshAccounts = s' = {...s, phase: "refreshing", refreshNeeded: true, pendingEpoch: s.epoch}
   action browserResume = all {
@@ -42,7 +40,6 @@ module GoogleAccounts {
       calendarGrant: calendar and account != 0, cacheVisible: false,
       review: false, refreshNeeded: false, revoked: false, disconnectOutcome: "none", disconnectRowsKnown: false }
   }
-  /// AppReturn offers and native one-use consume callbacks never grant account capabilities.
   action returnOffer(supported: bool): bool = all { s.phase == "waiting", s' = { ...s, nativeReturn: supported } }
   action startDrain = all { not(s.drainBusy), s' = { ...s, drainBusy: true, drainQueued: false, drainEpoch: s.epoch } }
   action queueDrain = all { s.drainBusy, s' = { ...s, drainQueued: true } }

@@ -8,26 +8,14 @@ import {installHomeCalendar} from './helpers/home-calendar';
 import {calendarSyncFixture} from './calendar-sync-fixture';
 import {settled} from './helpers/settled';
 
-/**
- * The retained MVP surface, as a list of states the accessibility sweep visits.
- *
- * "live" states use the product adapters with no connection and no data: they are what a
- * new or disconnected phone shows, including each app's empty, unavailable and
- * permission-denied states. The event form explicitly supplies a closed canonical
- * read port because a disconnected agent correctly refuses to open that form.
- * "mock" states are the labelled fixture mode with populated
- * lists and open subviews, reached by its `start=` deep links (development server only).
- */
 export type State = {
   name: string; open: (page: Page, theme?: 'light' | 'dark') => Promise<void>;
-  /** The subview this state must put on screen; opening fails if it is not the exposed one. */
   shows?: string;
 };
 
 const offline = () => localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({ kind: 'offline' }));
 const settle = async (page: Page) => {
   await expect(page.locator('.alpha-phone')).toBeVisible();
-  // Entry motion has finished and fonts are loaded: final geometry, not a fixed wait.
   await settled(page);
 };
 
@@ -45,7 +33,6 @@ const press = async (page: Page, steps: string[]) => {
     await (step === 'Photos tools' || step === 'Message actions' ? page.getByLabel(step, {exact: true}) : page.getByRole('button', {name: step, exact: true}).first()).click();
   }
 };
-/** The named subview is on screen and exposed (not retired behind another subview). */
 const showing = async (page: Page, subview?: string) => {
   if (subview) await expect(page.locator(`[data-alpha-subview="${subview}"]:not([inert])`)).toBeVisible();
 };
@@ -60,7 +47,6 @@ const live = (name: string, steps: string[] = [], shows?: string): State => ({
     await showing(page, shows);
   },
 });
-/** The shared Files browser is exercised over the development browser's own storage port. */
 export async function openFilesStorage(page:Page,theme='light') {
   await page.addInitScript(offline);
   await page.goto(`/?theme=${theme}`);
@@ -69,7 +55,6 @@ export async function openFilesStorage(page:Page,theme='light') {
   await expect(page.getByRole('button',{name:'Files options',exact:true})).toBeVisible();
 }
 
-/** Legacy-only controls remain covered through the explicit Older notes source. */
 const legacyNotes = (name: string, steps: string[], shows?: string): State => ({
   name: `live ${name}`, shows,
   open: async (page, theme) => {
@@ -81,12 +66,10 @@ const legacyNotes = (name: string, steps: string[], shows?: string): State => ({
     await showing(page, shows);
   },
 });
-/** Fixture screens that finish arriving on a timer: the control that marks them complete. */
 const ARRIVES: Record<string, string> = {};
 const mock = (start: string, steps: string[] = [], shows?: string): State => ({
   name: `mock ${[start, ...steps].join(' > ')}`, shows,
   open: async (page, theme) => {
-    // Edit and info require a real library revision; prototype images have none.
     if(start==='photos:viewer'&&steps.some(step=>step==='Edit photo'||step==='Photo info'||step==='Share photo'))await openOwnedPhotoViewer(page,theme);
     else await page.goto(`/?mode=mock&theme=${theme || 'light'}&start=${start}`);
     await settle(page);
@@ -96,13 +79,11 @@ const mock = (start: string, steps: string[] = [], shows?: string): State => ({
   },
 });
 
-/** Primary views and the subviews, dialogs and failure states reachable without a provider. */
 export const LIVE_STATES: State[] = [
   live('Home'),
   live('Conversation', ['Open conversation']),
   live('Inbox (not connected)', ['Inbox']),
   live('Calendar', ['Calendar']),
-  // An admitted read-only source exposes the real form; no calendar event write runs.
   {name:'live Calendar new event',shows:'calendar-form',open:async(page,theme)=>{await openCanonicalCalendarForm(page,theme);await settle(page);await showing(page,'calendar-form');}},
   live('Calendar month', ['Calendar', 'Month view']),
   live('Browser', ['Browser']),
@@ -112,7 +93,6 @@ export const LIVE_STATES: State[] = [
   live('Maps (no location)', ['Maps']),
   live('Notes (empty)', ['Notes']),
   legacyNotes('Notes new note', ['New note']),
-  // The current Previous notes surface recovers retained records; folder creation belongs to the earlier layout.
   {name:'live Notes retained records',open:async(page,theme)=>{
     await page.addInitScript(offline);await page.goto(theme?`/?theme=${theme}`:'/');
     await openLegacyNotes(page,[{id:'retained-accessibility-note',kind:'text',title:'Retained note',body:'Existing text remains available.'}]);
@@ -126,19 +106,14 @@ export const LIVE_STATES: State[] = [
   live('Settings display', ['Settings', 'General', 'Display']),
   live('Settings privacy', ['Settings', 'Privacy']),
   live('Settings about', ['Settings', 'About']),
-  // About exposes the existing connection recovery controls in the grouped layout.
   {name:'live Settings licenses',open:async(page,theme)=>{
     await live('Settings licenses',['Settings','About','Licenses']).open(page,theme);
-    // The shipped notice JSON changes the exposed tab stops after the page opens.
-    // Audit the populated inventory, using the existing budget and every focus rule.
     await expect(page.getByRole('searchbox',{name:'Search components',exact:true})).toBeVisible();
     await settle(page);
   }},
   live('Settings app permissions', ['Settings', 'Privacy', 'Permissions']),
-  // The remaining Settings pages, and each app's open menu, search field and editor.
   live('Settings apps', ['Settings', 'Apps']),
   live('Settings accounts', ['Settings', 'Account']),
-  // Google account management needs a signed-in fixture; production checks provide it.
   live('Settings notifications', ['Settings', 'General', 'Notifications']),
   live('Settings calendar', ['Settings', 'Apps', 'Calendar']),
   live('Settings password manager', ['Settings', 'Apps', 'Passwords']),
@@ -151,10 +126,8 @@ export const LIVE_STATES: State[] = [
   live('Workflows new automation', ['Workflows', 'New automation'], 'automations-detail'),
 ];
 
-/** The simulated browser inventory exists only in test-mocks builds. */
 export const BROWSER_APP_STATES: State[] = [live('Apps', ['Apps'])];
 
-/** The subview each fixture deep link must put on screen. */
 const SUBVIEW: Record<string, string> = {
   'inbox:mail': 'inbox-detail', 'inbox:compose': 'inbox-composing',
   'calendar:event': 'calendar-detail', 'calendar:invite': 'calendar-detail', 'calendar:add': 'calendar-detail', 'calendar:new': 'calendar-form',
@@ -165,7 +138,6 @@ const SUBVIEW: Record<string, string> = {
   'workflows:flow': 'workflows-detail', 'workflows:run': 'workflows-runOpen', 'workflows:failed': 'workflows-runOpen', 'workflows:new': 'workflows-builder',
 };
 
-/** Populated lists and open subviews of every retained view (fixture data, development only). */
 export const MOCK_STATES: State[] = [
   'home', 'shade', 'sheet', 'full',
   'inbox', 'inbox:mail', 'inbox:compose',
@@ -179,7 +151,6 @@ export const MOCK_STATES: State[] = [
   'workflows', 'workflows:flow', 'workflows:run', 'workflows:failed', 'workflows:new',
   'settings',
 ].map(start => mock(start, [], SUBVIEW[start])).concat([
-  // Subviews, menus, sheets and search fields one or two taps inside a view.
   mock('inbox', ['Search email']),
   mock('inbox:mail', ['Message actions', 'Reply'], 'inbox-composing'),
   mock('calendar:event', ['Edit event'], 'calendar-form'),
@@ -193,31 +164,19 @@ export const MOCK_STATES: State[] = [
   mock('photos:viewer', ['Photo info']),
   mock('photos:viewer', ['Share photo']),
   mock('photos', ['Photos tools', 'Select photos']),
-  // Earlier folder-creation controls were retired; the live retained-record state above covers recovery.
   mock('notes', ['Open The case for on-device agents'], 'notes-link'),
   mock('notes:editor', ['More', 'Share note']),
   {name:'live Files sort',open:async(page,theme)=>{await openFilesStorage(page,theme);await press(page,['Files options']);await settle(page);}},
   mock('files:preview', ['Rename']),
   mock('files:preview', ['Move file']),
   mock('files:preview', ['Share file']),
-  // Deleting a fixture file shows the toast with Undo over the folder.
   mock('files:preview', ['Delete file']),
   mock('workflows:flow', ['Change'], 'workflows-builder'),
-  // The builder's trigger and step sheets. (Settings' Connections page and its per-service sheets
-  // were removed; the Google accounts panel is swept live as 'Settings Google'.)
   mock('workflows', ['New automation', 'Edit When step'], 'workflows-builder'),
   mock('workflows:new', ['Add Read step'], 'workflows-builder'),
   mock('settings', ['About']),
-  // Calendars exists only in the live Settings adapter. Its accessibility audits
-  // remain in the live Settings calendars state above, rather than a nonexistent mock page.
 ]);
 
-/**
- * A signed-in phone with one connected mailbox, held at the provider boundary: the product's own
- * Inbox, Home and Settings adapters render against a synthetic cloud client. No account, OAuth
- * or mail exists; the names and subjects are invented. Development server only, because the
- * boundary is replaced by importing the page's own modules.
- */
 export async function connectMailbox(page: Page) {
   await page.evaluate(async () => {
     const { connectionController: controller } = await import('/src/runtime/connection-ui.tsx' as string);
@@ -261,7 +220,6 @@ const connected = (name: string, steps: Array<string | RegExp> = [], options: { 
     await page.goto(theme ? `/?theme=${theme}` : '/');
     await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
     await connectMailbox(page);
-    // The mailbox is read when Inbox opens; Home's card and badge come from that read.
     await page.getByRole('button', { name: 'Inbox', exact: true }).and(page.locator('[data-mobile-shell-tile]')).click();
     await expect(page.getByRole('button', { name: /^Unread, Synthetic Sender A/ })).toBeVisible();
     if (options.home) { await page.getByRole('button', { name: 'Back to apps', exact: true }).click(); await expect(page.locator('[data-alpha-home-inbox]')).toContainText('2 unread'); }
@@ -271,7 +229,6 @@ const connected = (name: string, steps: Array<string | RegExp> = [], options: { 
   },
 });
 
-/** Provider-connected screens: a signed-in account with a connected mailbox (synthetic, see connectMailbox). */
 export const CONNECTED_STATES: State[] = [
   connected('Home', [], { home: true }),
   connected('Inbox'),
@@ -284,7 +241,6 @@ export const CONNECTED_STATES: State[] = [
   connected('Settings Google', ['Settings', 'Account', 'Google & email'], { home: true }),
 ];
 
-/** Live states that exist only behind the one Developer gate: the development server opened with ?tools=1. */
 export const DEVELOPMENT_STATES: State[] = [
   {
     name: 'live Settings developer',
@@ -298,7 +254,6 @@ export const DEVELOPMENT_STATES: State[] = [
   },
 ];
 
-/** The renderer's own failure screens. */
 export const FAILURE_STATES: State[] = [
   {
     name: 'render failure recovery',
@@ -316,8 +271,6 @@ export const FAILURE_STATES: State[] = [
     open: async page => {
       await page.addInitScript(offline); await page.goto('/');
       await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
-      // The plain-DOM screen used when React never mounted, shown over a live page here so the
-      // sweep also proves it takes the page behind it out of focus order.
       await page.evaluate(async () => { const module = await import('/src/runtime/error-boundary.tsx' as string); module.showRecoveryScreen('startup', new Error('private detail')); });
       const recovery = page.getByRole('alertdialog', { name: 'Something went wrong' });
       await expect(recovery).toBeVisible();
@@ -326,11 +279,6 @@ export const FAILURE_STATES: State[] = [
   },
 ];
 
-/**
- * Fixture screens no tap path reaches (development server only). The lock screen is the fixture
- * shell's own; the photos-empty viewer is the Photos viewer left open after its photo is gone,
- * reached by pointing the open viewer at a photo that is no longer in the library.
- */
 export const FIXTURE_STATES: State[] = [
   mock('lock'),
   {
@@ -338,7 +286,6 @@ export const FIXTURE_STATES: State[] = [
     open: async (page, theme) => {
       await mock('photos:viewer', [], 'photos-viewer').open(page, theme);
       await page.evaluate(() => {
-        // The phone's root component holds each view's state; the viewer re-reads it on render.
         const root = document.getElementById('root') as any, key = Object.keys(root).find(name => name.startsWith('__reactContainer$'))!;
         const pending = [root[key]];
         while (pending.length) {
@@ -355,11 +302,6 @@ export const FIXTURE_STATES: State[] = [
   },
 ];
 
-/**
- * The Android HOME (launcher) presentation, booted as home-native-launcher.spec.ts does: an
- * Android Capacitor bridge whose ElizaSystem reports the launcher build. Its headers and system
- * bars differ from the standalone app the other states show.
- */
 const launcherBridge = () => {
   localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({ kind: 'offline' }));
   const w = window as any; w.androidBridge = {};
@@ -427,7 +369,6 @@ export const LAUNCHER_STATES: State[] = [
   launcher('Home'),
   INSTALLED_APPS_STATE,
   launcher('Conversation', ['Open conversation']),
-  // Every retained app view in the launcher presentation (its headers and system bars differ).
   launcher('Inbox', ['Inbox']),
   launcher('Calendar', ['Calendar']),
   launcher('Calendar month', ['Calendar', 'Month view']),
@@ -442,7 +383,6 @@ export const LAUNCHER_STATES: State[] = [
   launcher('Settings about', ['Settings', 'About']),
 ];
 
-/** A seeded local calendar (browser store), so the Calendar view has events to audit. */
 const syntheticCalendar = async (page: Page) => page.evaluate(async () => {
   const { BrowserCalendar } = await import('/src/browser/calendar.ts' as string), calendar = new BrowserCalendar(), day = new Date(); day.setHours(10, 0, 0, 0);
   for (const [title, offset] of [['Synthetic design review', 0], ['Synthetic venue walkthrough', 2]] as const)
@@ -461,13 +401,6 @@ const calendarWithEvents: State = {
 };
 CONNECTED_STATES.push(calendarWithEvents);
 
-/**
- * Connected states other than a mailbox (MVP-48): an agent's own calendar, a linked Google Calendar
- * account and a connected agent with a conversation. Each is held at the same boundary its own
- * browser spec uses (home-daily-overview, calendar-sync-settings, journey-d-digests); every
- * account, event and reply is synthetic, and none of these states writes to a provider.
- */
-// A fixed local noon keeps the agent's event inside today's Calendar window whenever the sweep runs.
 const AGENT_CALENDAR_DAY = { year: 2026, month: 9, day: 14 };
 const agentCalendar = (name: string, steps: string[] = []): State => ({
   name: `connected Agent Calendar ${name}`,
@@ -484,7 +417,6 @@ const agentCalendar = (name: string, steps: string[] = []): State => ({
     await settle(page);
   },
 });
-/** The Google Calendar sync sheet for a linked account, before and after its read-only review. */
 const googleCalendar = (name: string, review: boolean): State => ({
   name: `connected Google Calendar sync ${name}`,
   open: async (page, theme) => {
@@ -499,7 +431,6 @@ const googleCalendar = (name: string, review: boolean): State => ({
   },
 });
 const DEVELOPMENT_REPLY = 'Development reply. Edit this response in Agent connection.';
-/** The on-device development agent profile (no model or network) answering one typed message. */
 const developmentAgent = (name: string, conversation: boolean): State => ({
   name: `connected agent ${name}`,
   open: async (page, theme) => {
@@ -528,21 +459,6 @@ CONNECTED_STATES.push(
   developmentAgent('Conversation', true),
 );
 
-/**
- * Large text as the renderer sees it: every declared pixel size multiplied, as WebView text zoom does.
- *
- * WebView text zoom (Alpha's size times the system font scale) is applied by the renderer before
- * any script can measure, and the app never writes it. The emulation here differs in two ways that
- * it has to cancel out:
- * - It rewrites declared sizes in a MutationObserver (browser/display.ts). Observers run in the order
- *   they were created, so a dock publisher created at startup would measure a status row added to
- *   the composer before the row's text was scaled, and publish a clearance that only the next
- *   frame's resize corrects. The publisher is restarted once, after the rewriting observer exists,
- *   so it measures scaled content as it would under real text zoom.
- * - The browser build applies its own stored text size to `--browser-text-scale` when its device
- *   settings load or change, which can land after this call. The emulated size is held by an
- *   !important rule, which the app's inline value does not override.
- */
 export async function setTextScale(page: Page, scale: number) {
   await page.evaluate(async value => {
     const harness = window as unknown as { __alphaTextZoom?: HTMLStyleElement };
@@ -558,9 +474,6 @@ export async function setTextScale(page: Page, scale: number) {
     }
     harness.__alphaTextZoom.textContent = `:root{--browser-text-scale:${value}!important}`;
   }, scale);
-  // The renderer's own probe (runtime/text-scale.ts) has measured the new size and published it, so
-  // the layout rules that read it have applied; then any reflow motion settles.
-  // The probe reports on its next layout; a starved renderer can take seconds to lay out a frame.
   await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--alpha-text-scale').trim()), { timeout: 15_000 }).toBe(String(scale));
   await settled(page);
 }

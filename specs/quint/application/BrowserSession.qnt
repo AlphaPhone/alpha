@@ -1,21 +1,14 @@
-/// Normal/private tab projection, the open-tab limit, hydration-gated persistence, the cold-start
-/// merge of a saved record, row identity and navigation fencing.
 module BrowserSession {
-  // The source allows 8 open tabs (normal and private together); 3 stand for that limit.
   pure val Cap = 3
-  // Three saved normal tabs and a fresh launch tab need four distinct identities.
   pure val NormalIds = Set(1, 2, 4, 5)
   type State = { normal: Set[int], privateTabs: Set[int], saved: Set[int], active: int,
     epoch: int, captured: int, navigating: bool, committed: bool, pristine: bool,
     history: Set[int], privatePage: bool, privateHistory: Set[int],
     order: List[int], savedOrder: List[int], savedActive: int,
     tabsOpen: bool, focusedTab: int, intendedTab: int,
-    // Saving is on only after this launch read the saved record (or cleared it).
     hydrated: bool, restorePending: bool, clearing: bool,
     savedHistory: Set[int], launchSaved: Set[int], launchHistory: Set[int],
-    // Pages whose load committed; a failed or abandoned load never joins them.
     committedPages: Set[int],
-    // Saved tabs a non-replacing restore added after the open ones and the user has not closed.
     owed: Set[int] }
   var s: State
   pure def without(tabs: List[int], removed: int): List[int] =
@@ -30,7 +23,6 @@ module BrowserSession {
     hydrated: true, restorePending: false, clearing: false,
     savedHistory: Set(), launchSaved: Set(), launchHistory: Set(), committedPages: Set(), owed: Set() }
   val open = s.normal.union(s.privateTabs)
-  // Saved tabs, in saved order, that are not already open and still fit under the limit.
   val added = s.savedOrder.foldl(List(), (fit, id) =>
     if (open.contains(id) or open.size() + fit.length() >= Cap) fit else fit.append(id))
   action normalTabWithId(id: int): bool = all { NormalIds.contains(id), not(open.contains(id)), open.size() < Cap,
@@ -43,8 +35,6 @@ module BrowserSession {
     s' = { ...s, privateTabs: s.privateTabs.union(Set(3)), order: s.order.append(3), active: 3,
       privatePage: true, pristine: false, navigating: false,
       tabsOpen: false, focusedTab: 0, intendedTab: 0 } }
-  // A pop-up the native browser opened inherits its opener's privacy. Past the limit the
-  // renderer closes it again instead of keeping a tab that would never be saved.
   action popupOpened(id: int): bool = all { not(open.contains(id)),
     if (s.privatePage) id == 3 else NormalIds.contains(id),
     s' = if (open.size() >= Cap) s
@@ -78,9 +68,7 @@ module BrowserSession {
       history: if (s.privatePage) s.history else s.history.union(Set(s.active)),
       committedPages: if (s.privatePage) s.committedPages else s.committedPages.union(Set(s.active)),
       privateHistory: if (s.privatePage) s.privateHistory.union(Set(s.active)) else s.privateHistory } }
-  // A load that ends in an error page is not a visit.
   action loadFailed = all { s.navigating, s.captured == s.epoch, s' = { ...s, navigating: false } }
-  // Nothing is written before the saved record was read, or while it is being cleared.
   action snapshot = all { s.hydrated, not(s.clearing), s' = { ...s, saved: s.normal,
     savedOrder: s.order.foldl(List(), (saved, id) => if (s.normal.contains(id)) saved.append(id) else saved),
     savedActive: if (s.normal.contains(s.active)) s.active else 0, savedHistory: s.history } }
@@ -100,9 +88,6 @@ module BrowserSession {
       history: s.savedHistory, hydrated: true, restorePending: false, clearing: false,
       launchSaved: s.saved, launchHistory: s.savedHistory, owed: Set() }
   }
-  // A launch whose saved record has not been read yet: one fresh tab, nothing may be saved.
-  // Canonicalize the random source identity to an unused representative. The old process's
-  // open tabs retire here; only saved identities must remain distinct from the new placeholder.
   action coldStart = {
     val fresh = if (not(s.saved.contains(1))) 1 else if (not(s.saved.contains(5))) 5
       else if (not(s.saved.contains(2))) 2 else 4
@@ -111,8 +96,6 @@ module BrowserSession {
       intendedTab: 0, history: Set(), hydrated: false, restorePending: true, clearing: false,
       launchSaved: s.saved, launchHistory: s.savedHistory, owed: Set() }
   }
-  // The read settles while the launch tab is untouched. A failed read leaves saving off, so the
-  // record stays as it was.
   action restoreRead(ok: bool): bool = all { s.restorePending, (s.pristine and not(s.tabsOpen)) or not(ok),
     s' = if (not(ok)) { ...s, restorePending: false }
       else if (s.saved.size() == 0) { ...s, restorePending: false, hydrated: true,
@@ -120,13 +103,10 @@ module BrowserSession {
       else { ...s, restorePending: false, hydrated: true, normal: s.saved, order: s.savedOrder,
         active: if (s.saved.contains(s.savedActive)) s.savedActive else firstTab(s.savedOrder),
         privatePage: false, history: s.history.union(s.savedHistory) } }
-  // The read settles after the user already acted or opened the tab chooser: open tabs and
-  // focus stay, history is merged and saved tabs that fit follow them, so the next save keeps them.
   action lateRestore = all { not(s.pristine) or s.tabsOpen, s.restorePending,
     s' = { ...s, restorePending: false, hydrated: true, normal: s.normal.union(tabSet(added)),
       order: s.order.concat(added), owed: tabSet(added), history: s.history.union(s.savedHistory) } }
   action clearStart = all { not(s.clearing), not(s.restorePending), s' = { ...s, clearing: true } }
-  // Clearing closes every normal tab, empties history and the saved record, and keeps private tabs.
   action clearDone(ok: bool): bool = all { s.clearing,
     s' = if (not(ok)) { ...s, clearing: false }
       else {
@@ -171,8 +151,6 @@ module BrowserSession {
   val SavedTabDoesNotFitWitness = s.hydrated and s.owed.size() > 0 and not(s.launchSaved.subseteq(s.normal))
   run privateRestartTest = init.then(privateTab).then(navigate).then(commit).then(snapshot)
     .then(restart).expect(s.privateTabs.size() == 0 and s.privateHistory.size() == 0 and safety)
-  // A user who acts before the saved record is read keeps the open tabs, and the saved tab is
-  // added after them, so the next save still contains it.
   run lateRestoreTest = init.then(thirdNormalTab).then(navigate).then(commit).then(snapshot)
     .then(coldStart).then(normalTab).then(lateRestore)
     .expect(s.active == 2 and s.order == List(5, 2, 1) and s.owed == Set(1) and s.history == Set(4) and safety)

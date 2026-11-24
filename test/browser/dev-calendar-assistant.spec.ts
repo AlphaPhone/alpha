@@ -4,9 +4,6 @@ import {presentDeviceRecordOperation} from '../../apps/app/src/runtime/device-re
 import { returnToApps } from './app-navigation';
 import { test, expect } from '@playwright/test';
 
-// Real renderer, pairing, connection controller, proposal parser and journal
-// orchestration and real browser Calendar storage/review. Connection and journal
-// boundaries are controlled fixtures; no real agent or external calendar is used.
 for (const mode of ['confirm', 'cancel', 'read', 'update', 'delete'] as const) {
   test(`browser assistant Calendar action: ${mode}`, async ({ page }) => {
     await page.addInitScript((mode) => {

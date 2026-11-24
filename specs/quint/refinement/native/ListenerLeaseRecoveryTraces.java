@@ -7,7 +7,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.*;
 import org.json.*;
 
-/** Current service capture identity is observed separately from its durable crash marker. */
 public final class ListenerLeaseRecoveryTraces {
  static ListeningService service;static Trace trace;static final JSONArray observations=new JSONArray();
  static JSONObject observe()throws Exception {

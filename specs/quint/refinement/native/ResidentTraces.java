@@ -4,7 +4,6 @@ import ai.alphacompute.alphaphone.Trace;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** The existing fixture store delegates admission to the actual source compare/exchange policy. */
 public final class ResidentTraces {
  static JSONObject observe(NativeProviderAdmissionTest.Store store) {
   boolean configured = NativeProviderAdmission.providerStatus(store.provider, store.cloud, NativeProviderAdmissionTest.NOW).optBoolean("configured");

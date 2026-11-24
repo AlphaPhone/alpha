@@ -1,17 +1,8 @@
 import {test,expect,type Page} from '@playwright/test';
-// The closing sheet keeps an inert composer briefly; interact with the one exposed to users.
 import {button} from './flag-off-android';
 import {setupNativeSpeech} from './native-speech-fixture';
 import {setupLiveAssistant} from './voice-assistant-fixture';
 import {attachVoiceFailureMetadata} from './voice-fixture-failure-metadata';
-// Source-served synthetic API checks, NOT production-bundle UI or phone acceptance.
-// Preserved from native-speech.production: append reviewed text, cancel late ASR,
-// unavailable capture, background retirement (four cases). Preserved from
-// voice-assistant.production: live dictation versus assistant submission and lost
-// capture recovery (two cases; the echo-canceller hold is in voice-assistant.production); interruptSpeech accounting (the busy hold closes capture on submission; interrupting reopens it) is retained separately.
-// Dictation's public component API is retained but there is no chat dictation button.
-// Override only the source build-flags module to exercise local/native branches; no shipped hooks.
-// The stub must export every build flag: updateChannelCheckEnabled joined the module in f4ebce3b3 (#713).
 test.beforeEach(async({page})=>{await page.route('**/src/build-flags.ts*',route=>route.fulfill({contentType:'application/javascript',body:'export const testMocksEnabled=false;export const devSurfacesEnabled=false;export const privateLocalPreviewEnabled=false;export const updateChannelCheckEnabled=false;'}));});
 test.afterEach(async({page},info)=>{await attachVoiceFailureMetadata(page,info);});
 async function captureApi(page:Page){
@@ -21,7 +12,6 @@ async function captureApi(page:Page){
 async function setupNative(page:Page){const foreign=await setupNativeSpeech(page);await captureApi(page);return foreign;}
 async function setupLive(page:Page){
  const foreign=await setupLiveAssistant(page,{echoCancelled:false});await captureApi(page);
- // Observe the actual shared controller, not an obsolete renderer callback.
  await page.evaluate(async()=>{const {VoiceAssistantSession}=await import('/src/runtime/voice-assistant.ts');const start=VoiceAssistantSession.prototype.start;VoiceAssistantSession.prototype.start=function(){(window as any).live.sharedVoiceSession=this;return start.call(this);};});
  return foreign;
 }
@@ -44,7 +34,7 @@ test('API dictation: Transcribe cancellation discards late ASR and preserves the
  const foreign=await setupNative(page);await page.getByRole('textbox',{name:/^(Ask|Message) Alpha$/}).fill('Keep this draft');await page.evaluate(()=>(window as any).nativeSpeech.holdTranscript=true);await invokeDictation(page);await expect(transcription(page)).toHaveAttribute('data-voice-state','recording');await button(page,'Stop recording').click();await expect(transcription(page)).toHaveAttribute('data-voice-state','transcribing');await button(page,'Cancel transcription').click();await expect(transcription(page)).toHaveCount(0);await page.evaluate(()=>(window as any).nativeSpeech.releaseTranscript());await expect(page.getByRole('textbox',{name:/^(Ask|Message) Alpha$/})).toHaveValue('Keep this draft');expect(await page.evaluate(()=>(window as any).flagOff.posts)).toEqual([]);expect(await page.evaluate(()=>(window as any).nativeSpeech.starts)).toBe(1);await noCloud(page,foreign);
 });
 test('API dictation: unavailable Transcribe retains keyboard and never starts a capture',async({page})=>{
- const foreign=await setupNative(page);await page.evaluate(()=>(window as any).nativeSpeech.ready=false);await invokeDictation(page);// #780 (2e6254afbe) keeps voice failure text quiet: the disabled primary control names the state.
+ const foreign=await setupNative(page);await page.evaluate(()=>(window as any).nativeSpeech.ready=false);await invokeDictation(page);
  await expect(transcription(page).getByRole('button',{name:'On-device speech unavailable',exact:true})).toBeDisabled();await expect(transcription(page)).not.toContainText('On-device speech is unavailable');await expect(transcription(page)).not.toContainText('Retry local speech');await button(page,'Switch to keyboard').click();await expect(transcription(page)).toHaveCount(0);await expect(page.getByRole('textbox',{name:/^(Ask|Message) Alpha$/})).toBeVisible();expect(await page.evaluate(()=>(window as any).nativeSpeech.starts)).toBe(0);await noCloud(page,foreign);
 });
 test('API dictation: leaving foreground during Transcribe discards late output without changing the draft',async({page})=>{
@@ -60,7 +50,6 @@ test('API dictation and assistant stay distinct: draft editing never sends, voic
  await expect(transcription(page)).toHaveAttribute('data-voice-state','recording');
  expect(await live(page,f=>f.captures.map((c:any)=>c.echoCancel))).toEqual([false]);
  await say(page,'Pick up the dry cleaning');
- // Stop: one frame read before the tap is still in flight; one stamped after it must not be used.
  await page.evaluate(()=>{const f=(window as any).live;f.onStop=(id:string)=>{const t=Date.now();f.emit('liveCaptureFrames',{captureId:id,frames:[f.frame(t-1000),f.frame(t+400)],vad:[],peak:.2});f.finals.push('and the mail');f.onStop=null;};});
  await page.evaluate(()=>{const f=(window as any).live,t=Date.now();f.frames([t],[{type:'speech-start',timestampMs:t}]);});
  await button(page,'Stop recording').click();
@@ -80,7 +69,6 @@ test('API dictation and assistant stay distinct: draft editing never sends, voic
  await button(page,'Talk').click();
  await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
  expect(await live(page,f=>f.captures.map((c:any)=>c.echoCancel))).toEqual([false,true]);
- // Status copy stays secondary to the capture state and interruption assertions.
  await expect(voice(page)).toContainText('Listening');
  await say(page,'What is on my calendar today');
  await expect.poll(()=>posts(page)).toEqual(['What is on my calendar today']);
@@ -111,8 +99,6 @@ test('API interruptSpeech preserves listening; Mute controls capture with presse
  expect(await page.evaluate(()=>(window as any).live.sharedVoiceSession.interruptSpeech())).toBe(true);
  await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
  await expect.poll(()=>live(page,f=>f.stopped)).toBeGreaterThan(0);
- // Busy hold (shared session at the #780 pin 35e0a605b3): submitting closed the Unmute capture, and
- // interrupting reopens exactly one capture once the cut playback settles; nothing else starts.
  await expect.poll(()=>live(page,f=>({starts:f.captures.length,stops:f.stops.length,open:f.active!==null}))).toEqual({starts:3,stops:2,open:true});
  await button(page,'Stop voice conversation').click();
  await expect.poll(()=>live(page,f=>({starts:f.captures.length,stops:f.stops.length}))).toEqual({starts:3,stops:3});
@@ -123,7 +109,6 @@ test('API interruptSpeech preserves listening; Mute controls capture with presse
 
 test('API dictation recovery: a lost Transcribe capture can start again',async({page})=>{
  const foreign=await setupLive(page);
- // The microphone is lost mid-recording; recording again works.
  await invokeDictation(page);
  await expect(transcription(page)).toHaveAttribute('data-voice-state','recording');
  await page.evaluate(()=>{const f=(window as any).live;f.emit('liveCaptureEnded',{captureId:f.active,error:'capture'});f.active=null;});
@@ -137,8 +122,6 @@ test('API dictation recovery: a lost Transcribe capture can start again',async({
  await clean(page,foreign);
 });
 
-// AP-16 AC-12: dictation into a comms bar's own field (the text to the person) records on the bar
-// and fills that field; the Alpha sheet does not open and nothing is sent.
 test('API dictation: a comms person draft records on the bar and fills the person field',async({page})=>{
  const foreign=await setupNative(page);
  await page.evaluate(async()=>{

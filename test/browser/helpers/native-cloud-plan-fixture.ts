@@ -15,7 +15,6 @@ async function signer(){
  };
  return {jwk,sign};
 }
-/** Tokens for every plan status, signed with one throwaway key. */
 export async function entitlements(overrides:Record<string,unknown>={}){
  const {jwk,sign}=await signer();const now=Math.floor(Date.now()/1000);
  const claims=(status:string)=>({iss:'https://api.eliza.app',aud:'eliza-alpha-phone',sub:USER,jti:'synthetic-entitlement-'+status,iat:now,exp:now+600,
@@ -26,21 +25,14 @@ export async function entitlements(overrides:Record<string,unknown>={}){
 
 type Fixture={plan?:string;route?:'signed'|'absent'|'503'|'401'|'offline';limits?:'active'|'past_due'|'none'|'canceled'|'balance-only'|'absent'|'503';identity?:'ok'|'offline'|'401';
  redeem?:'ok'|'invalid'|'rate'|'already'|'transport-once';redeemPlan?:string;saved?:boolean;expiresAt?:number;holdProvider?:boolean;providerFailure?:string;
- /** Exact USD organization credit balance in the billing snapshot (data.v2.balance); absent when unset. */
  credits?:string;storage?:Record<string,string>;fullApp?:boolean;
- /** Actual Android connectivity observation, independent of whether Cloud answers. */
  networkConnected?:boolean;
- /** Holds the next entitlement read with the answer it had when asked, until releaseEntitlement() (a slow, stale read). */
  holdEntitlement?:boolean;
- /** The plan the held read answers (a read that started before Cloud recorded the purchase); else the plan when asked. */
  holdEntitlementAs?:string;
- /** Cloud has no payment evidence yet: a checkout confirm answers no subscription. */
  confirmUnpaid?:boolean;
- /** Alpha Cloud cutover: Cloud's payment evidence confirms the pending checkout (otherwise only once the plan is active). */
  checkoutPaid?:boolean};
 export type NativePlanFixture = Fixture & {tokens?:Record<string,string>;keys?:unknown[]};
 
-/** Supply closed native ports to the actual chooser and resident controller. */
 export async function installNativeCloudPlanPorts(page:Page, initial:NativePlanFixture={}){
  await installResidentAgentPlugin(page);
  await page.addInitScript(initial=>{
@@ -52,7 +44,6 @@ export async function installNativeCloudPlanPorts(page:Page, initial:NativePlanF
   const resident=w.residentAgent=w.createResidentAgentPlugin({owner:()=>residentId,agentId:residentId});
   const credential={credentialId:'11111111-1111-4111-8111-111111111111',token:'synthetic-plan-token',expiresAt:initial.expiresAt??Date.now()+60*24*3600*1000};
   const names={ElizaSystem:['getNetworkStatus'],AlphaCloudSignIn:['status','startEmail','verifyEmail','cancel','addListener','removeListener'],AlphaConnection:['secureRead','secureWrite','secureRemove','request','cancel','openExternal','addListener','removeListener'],Agent:['stop','getStatus','configureCloudProvider','clearProvider','providerStatus','start','request','setGoogleAgentAccess'],AlphaHostedResults:['disableBackground','addListener','removeListener'],DailyApps:['addListener','removeListener'],AlphaNotifications:['status','addListener','removeListener'],AlphaVoiceCloud:['checkPermissions'],AlphaBillingAuthority:['status','start','verify','clear','perform']};
-  // Android's active-network observation follows the simulated network events.
   window.addEventListener('offline',()=>{f.networkConnected=false;});
   window.addEventListener('online',()=>{f.networkConnected=true;});
   w.Capacitor={PluginHeaders:Object.entries(names).map(([name,methods])=>({name,methods:name==='Agent'?resident.methods(methods):methods.map(name=>({name,rtype:'promise'}))})),nativeCallback:resident.nativeCallback,nativePromise:async(plugin:string,method:string,input:any)=>{
@@ -71,15 +62,11 @@ export async function installNativeCloudPlanPorts(page:Page, initial:NativePlanF
     const owned=resident.answer(method,input);if(owned)return owned;
     if(method==='getStatus')return {packaged:true,state:'stopped',serviceActive:false,socketListening:false};
     if(method==='configureCloudProvider'){if(f.providerFailure)throw Error(f.providerFailure);if(f.holdProvider)await new Promise<void>(resolve=>f.releaseProvider=resolve);return {};}
-    // Unbinding removes the stored provider; native confirms it (provider status reads unconfigured).
     if(method==='clearProvider')return {configured:false};
     if(method==='providerStatus')return {provider:'elizacloud',configured:false};
-    // The always-running resident answers its owner and agent reads (P-43).
     if(method==='request'){const id=residentId;const body=input.path==='/api/auth/me'?{identity:{id,kind:'owner'},access:{role:'OWNER',mode:'local'}}:input.path==='/api/agents'?{agents:[{id,name:'Alpha',status:'running'}]}:input.path==='/api/conversations'?{conversations:[]}:{};return {status:200,body:JSON.stringify(body)};}
     return {};
    }
-   // Alpha Cloud cutover: the native billing authority with an account session already confirmed. Plan
-   // changes answer synthetic quotes and commands; an upgrade needs payment action on a synthetic invoice page.
    if(plugin==='AlphaBillingAuthority'){
     if(method==='status')return {status:'authorized',expiresAt:Date.now()+3_600_000};
     if(method!=='perform')return {};
@@ -91,7 +78,6 @@ export async function installNativeCloudPlanPorts(page:Page, initial:NativePlanF
     return {status:404,body:{}};
    }
    if(plugin==='AlphaNotifications')return method==='status'?{permissionGranted:false,appEnabled:false}:{};
-   // Retiring a running agent pauses its hosted background delivery.
    if(plugin==='AlphaHostedResults')return {};
    if(plugin==='AlphaVoiceCloud')return {microphone:'prompt'};
    if(plugin==='DailyApps')return {remove:async()=>{}};
@@ -101,7 +87,6 @@ export async function installNativeCloudPlanPorts(page:Page, initial:NativePlanF
    if(method!=='request')return {};
    const path=new URL(input.url).pathname;
    if(path==='/api/v1/user'){if(f.identity==='offline')throw Error('Connection request failed');return f.identity==='401'?{status:401,data:{}}:{status:200,data:{success:true,data:{id:'22222222-2222-4222-8222-222222222222',email:'synthetic-plan@example.invalid'}}};}
-   // Alpha Cloud cutover, in-app plans (cloud-plans.ts): the public catalogue and the owner's referral code.
    if(path==='/api/v1/subscriptions/plans')return {status:200,data:{success:true,data:{catalogVersion:'v1',plans:[{key:'plus_monthly',name:'Plus',amountCents:3000,allowance:{amountUsd:'25.00'}},{key:'pro_monthly',name:'Pro',amountCents:10000,allowance:{amountUsd:'90.00'}}]}}};
    if(path==='/api/v1/referrals')return {status:200,data:{code:'ALPHA-FIXTURE',total_referrals:0,is_active:true}};
    if(path==='/api/v1/subscription/entitlement-keys')return {status:200,data:{keys:f.keys??[]}};
@@ -136,11 +121,8 @@ export async function installNativeCloudPlanPorts(page:Page, initial:NativePlanF
     return {status:200,data:{success:true,replayed:f.bodies.length>1,grant:{id:'synthetic-grant',planKey:'plus_monthly',startsAt:'2026-10-13T00:00:00.000Z',endsAt:'2027-04-14T00:00:00.000Z',revoked:false,paidPlanTakesPrecedence:false},entitlement:{plan:{id:'plus_monthly',name:'Plus',status:'active'},source:'grant',effectiveUntil:'2027-04-14T00:00:00.000Z'}}};
    }
    if(path==='/api/auth/cli-session')return {status:503,data:{}};
-   // Alpha Cloud cutover, in-app plans (cloud-plans.ts): device-key checkout on a synthetic Stripe URL
-   // (the browser opening is the recorded openExternal call; nothing is bought).
    if(path==='/api/v1/credits/checkout'){f.funds=JSON.parse(input.body);return {status:200,data:{url:'https://checkout.stripe.com/c/pay/cs_test_funds',sessionId:'cs_test_funds'}};}
    if(path==='/api/v1/subscriptions/checkout'){f.bodies.push(JSON.parse(input.body));return {status:200,data:{success:true,data:{status:'open',commandId:'cmd_synthetic',checkoutUrl:'https://checkout.stripe.com/c/pay/cs_test_synthetic',sessionId:'cs_test_synthetic',expiresAt:new Date(Date.now()+1_800_000).toISOString()}}};}
-   // Cloud confirms only from its own payment evidence: here, once the synthetic plan became active (or checkoutPaid).
    if(path==='/api/v1/subscriptions/checkout/confirm'){const body=JSON.parse(input.body);f.bodies.push({confirm:body});return {status:200,data:{success:true,data:{subscriptionId:body.sessionId==='cs_test_synthetic'&&(f.plan==='active'||f.checkoutPaid)&&!f.confirmUnpaid?'sub_synthetic':null}}};}
    throw Error('Unexpected Cloud route '+path);
   }};

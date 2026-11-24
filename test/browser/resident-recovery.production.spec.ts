@@ -2,7 +2,6 @@ import {seedCompletedAccessSetup} from './flag-off-android';
 import {test,expect,type Page} from '@playwright/test';
 import {flagOffAndroid,fenceNetwork,harness,button,completeAccessSetup} from './flag-off-android';
 import {residentStub} from './resident-stub';
-// Actual flag-off UI/CSS with closed native boundary fixtures. These tests do not archive real files.
 const token='d32f7f34-962b-47b7-8f0d-f2fe7f12610a';
 type Mode='success'|'held-review'|'review-unavailable'|'changed'|'partial'|'transient'|'lost'|'attach-pending'|'startup-read'|'changed-provider';
 async function boot(page:Page,mode:Mode='success',signedOut=false){
@@ -68,7 +67,6 @@ test('recovery waits for explicit restart and a backgrounded review cannot archi
  await page.evaluate(()=>{const c=(window as any).recoveryControl;c.hidden=true;document.dispatchEvent(new Event('visibilitychange'));c.release();});
  await expect.poll(()=>page.evaluate(()=>(window as any).recoveryControl.pending)).toBe(false);
  expect(await calls(page)).toEqual({starts:1,reviews:1,archives:[]});
- // An explicit restart cannot continue or obtain another review in the background.
  await panel.getByRole('button',{name:'Restart Alpha',exact:true}).evaluate(button=>(button as HTMLButtonElement).click());
  expect(await calls(page)).toEqual({starts:1,reviews:1,archives:[]});
  await page.evaluate(()=>{(window as any).recoveryControl.hidden=false;document.dispatchEvent(new Event('visibilitychange'));});
@@ -123,7 +121,6 @@ test('automatic recovery continues past the old retry limit without a Status pag
  const panel=await boot(page,'transient');
  await expect(panel.getByRole('button',{name:'Restart Alpha',exact:true})).toHaveCount(0);
  await expect(panel.getByRole('button',{name:'Retry',exact:true})).toHaveCount(0);
- // These are the delays between attempts, including a second use of the capped delay.
  for(const [index,delay] of [3000,10000,30000,60000,60000].entries()){
   await page.clock.fastForward(delay+50);
   await expect.poll(()=>calls(page)).toEqual({starts:index+2,reviews:0,archives:[]});
@@ -185,5 +182,4 @@ test('a signed-out startup refusal keeps guarded restart reachable on the sign-i
  expect(await harness(page,f=>f.slots['cloud:production']??null)).toBeNull();
 });
 
-// UI progress only: this feature fixture does not manufacture OS/provider grants.
 test.beforeEach(async({page})=>seedCompletedAccessSetup(page));

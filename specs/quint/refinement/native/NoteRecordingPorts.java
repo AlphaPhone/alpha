@@ -8,7 +8,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Controlled clock, recorder outcomes and Android service command transport. */
 public final class NoteRecordingPorts {
  public static File root;
  public static long now=100;

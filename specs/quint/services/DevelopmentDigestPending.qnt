@@ -1,4 +1,3 @@
-// Selected pending digest slot. Raw encodings and payload identities are distinguished.
 module DevelopmentDigestPending {
   type Value = {payload: int, phase: str, pretty: bool}
   type Cached = {known: bool, raw: Value}
@@ -58,7 +57,6 @@ module DevelopmentDigestPending {
         compares: s.compares + (if (guard) 0 else 1), commits: s.commits + (if (commit) 1 else 0),
         operations: s.operations + 1} },
   }
-  // A legacy host writer can change only serialization, bypassing the renderer's pending guard.
   action hostReencode: bool = all {
     s.operations < 12, s.stored.pretty,
     s' = {...s, stored: {...s.stored, pretty: false}, actor: 0, before: s.stored,

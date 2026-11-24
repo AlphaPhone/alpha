@@ -1,4 +1,3 @@
-/// Pure controls for retained browser Calendar forms. No provider mutation is modeled.
 module CalendarFormControls {
   type State = { off: int, start: int, duration: int, days: int, leading: int }
   var s: State
@@ -8,7 +7,6 @@ module CalendarFormControls {
   val rows = if (s.days + s.leading <= 35) 35 else 42
   action init = s' = {off: 0, start: 720, duration: 60, days: 30, leading: 1}
   action chooseDay(off: int): bool = all {window(s.off).contains(off), s' = {...s, off: off}}
-  // Times are civil minutes. A date edit changes the chosen day, not the duration.
   pure def atLeast(value: int, minimum: int): int = if (value < minimum) minimum else value
   pure def atMost(value: int, maximum: int): int = if (value > maximum) maximum else value
   val end = s.start + s.duration

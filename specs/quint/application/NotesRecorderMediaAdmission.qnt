@@ -1,4 +1,3 @@
-// Fresh Notes microphone capture across the saved-audio retirement boundary.
 module NotesRecorderMediaAdmission {
   type State = {view: str, owner: str, playback: str, recorder: str, attempts: int, active: int,
     drains: int, control: str, controlAttempt: int, captures: int, lastCapture: int, unconfirmedCapture: bool}

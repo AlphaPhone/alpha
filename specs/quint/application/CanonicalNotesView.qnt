@@ -1,5 +1,3 @@
-// CanonicalNotesUi collection projection, draft overlay and navigation waiters.
-// Editor and controller callbacks are inputs with their own source-bound models.
 module CanonicalNotesView {
   type Data = {kind: str, title: int, body: int, hasPinned: bool, pinned: bool,
     hasFolder: bool, folder: int, voiceContent: bool, linkUrl: bool, handles: bool}
@@ -44,8 +42,6 @@ module CanonicalNotesView {
   val PublicOpen = if (s.current) s.open else 0
   action init = s' = {current: true, baseRows: List(), rows: List(), open: 0, blank: 0,
     trash: List(), draft: EmptyDraft, waiters: List()}
-  // This callback runs after accepted raw snapshot rows are projected and before
-  // editor reconciliation emits its own changed callback.
   action published(notes: List[Note], trash: List[int], revision: int): bool = all {
     s.current, notes.length() <= 2, revision.in(0.to(4)), trash.length() <= 2,
     notes.indices().forall(i => notes.nth(i).id.in(1.to(2)) and validData(notes.nth(i).data)),

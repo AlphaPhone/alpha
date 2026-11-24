@@ -2,16 +2,11 @@ import {chooseMailAction} from './helpers/mail-actions.ts';
 import { test, expect, type Page, type Locator } from '@playwright/test';
 import {cloudNotesVoiceFixture,noPhysicalOrLocalVoice} from './cloud-notes-voice-fixture';
 
-// Issue #411: surfaces that need seeded mail, photos or the scripted voice session, so they run in
-// the labelled mock mode of the development server. Production behaviour of the same layout rules
-// is covered by responsive-surfaces.production.spec.ts. Viewport changes stand in for rotation and
-// resizing only; they do not qualify Android rotation, process recreation or TalkBack.
 test.use({ hasTouch: true, isMobile: true, viewport: { width: 412, height: 915 } });
 
 const MATRIX = [{ width: 640, height: 360 }, { width: 915, height: 412 }, { width: 800, height: 1280 }, { width: 1280, height: 800 }, { width: 412, height: 915 }];
 const COLUMN = 720;
 async function box(locator: Locator) { const value = await locator.boundingBox(); expect(value).not.toBeNull(); return value!; }
-/** Resize, then wait until the renderer has measured the new window and rendered it. */
 async function resize(page: Page, viewport: { width: number; height: number }) {
   await page.setViewportSize(viewport);
   await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--alpha-visible-height'))).toBe(`${viewport.height}px`);
@@ -30,7 +25,6 @@ test('an Inbox message reads in a bounded column and a reply draft survives ever
   await resize(page, { width: 1280, height: 800 });
   const text = await box(paragraph);
   expect(text.width).toBeLessThanOrEqual(COLUMN + 1);
-  // On a split canvas the message is the right pane; its text is centred in that pane.
   const pane = await box(page.locator('[data-alpha-subview="inbox-detail"]'));
   expect(Math.abs((text.x - pane.x) - (pane.x + pane.width - text.x - text.width))).toBeLessThan(4);
   await resize(page, { width: 412, height: 915 });
@@ -144,14 +138,11 @@ test('Inbox shows the open message beside its list on a wide canvas and keeps th
   await expect.poll(() => inert(list)).toBe(false);
   expect((await box(list)).x + (await box(list)).width).toBeLessThanOrEqual((await box(detail)).x + 1);
   await expect(page.getByRole('button', { name: /Jordan Park/ }).first()).toHaveAttribute('aria-current', 'true');
-  // Another message opens in the same pane, from the list beside it.
   await page.getByRole('button', { name: /Maya Chen/ }).first().click();
   await expect(detail).toContainText('Notes for the 3:00 review');
   await expect(page.getByRole('button', { name: /Maya Chen/ }).first()).toHaveAttribute('aria-current', 'true');
-  // The message it replaced is left read, as Back leaves it, and is no longer the open row.
   await expect(jordan).not.toHaveAttribute('aria-label', /^Unread, /);
   await expect(jordan).toHaveAttribute('aria-current', 'false');
-  // A reply covers both panes, and its draft survives collapsing and widening again.
   await chooseMailAction(page, 'Reply');
   await expect.poll(() => inert(list)).toBe(true);
   const reply = page.getByRole('region', { name: 'Email draft fields', exact: true }).getByRole('textbox').last();
@@ -163,7 +154,6 @@ test('Inbox shows the open message beside its list on a wide canvas and keeps th
   await expect.poll(() => inert(list)).toBe(true);
   await page.getByRole('button', { name: 'Back from draft', exact: true }).click();
   await expect.poll(() => inert(list)).toBe(false);
-  // Focus on the list when the split collapses moves into the open message that now covers it.
   await jordan.focus();
   await resize(page, { width: 412, height: 915 });
   await expect.poll(() => detail.evaluate(element => element.contains(document.activeElement))).toBe(true);
@@ -188,7 +178,6 @@ test('Files previews beside its folder on a tablet-width canvas and full screen 
   await resize(page, { width: 412, height: 915 });
   await expect.poll(() => inert(list)).toBe(true);
   expect((await box(preview)).width).toBeGreaterThan(400);
-  // A phone in landscape stays one pane; a tablet-width window splits again.
   await resize(page, { width: 915, height: 412 });
   await expect.poll(() => inert(list)).toBe(true);
   await resize(page, { width: 1280, height: 800 });
@@ -197,16 +186,12 @@ test('Files previews beside its folder on a tablet-width canvas and full screen 
 });
 
 test('Calendar day columns open the occurrence of the column that was tapped and keep the days on screen', async ({ page }) => {
-  // Seed on Monday so the later columns contain weekday Standup occurrences even when CI runs Thursday.
   await page.clock.setFixedTime(new Date('2026-10-12T12:00:00Z'));
   await openMock(page, 'Calendar');
   await resize(page, { width: 1280, height: 800 });
   const columns = page.locator('[data-alpha-calendar-day]');
   await expect(columns).toHaveCount(5);
   const labels = await columns.evaluateAll(list => list.map(column => column.getAttribute('aria-label')));
-  // The weekday Standup repeats, so the same event is in several columns: the tapped column's
-  // occurrence opens, not the first one.
-  // From three columns the previous day leads, so column i shows the day i - 1 from today.
   await expect(columns.nth(1)).toHaveAttribute('aria-current', 'date');
   let index = -1;
   for (let i = labels.length - 1; i >= 3 && index < 0; i--) if (await columns.nth(i).getByRole('button', { name: /^Standup, / }).count()) index = i;
@@ -219,7 +204,6 @@ test('Calendar day columns open the occurrence of the column that was tapped and
   await resize(page, { width: 412, height: 915 });
   await expect(detail).toContainText('Standup');
   await expect(detail).toContainText(day);
-  // Closing on the wide canvas keeps the same days on screen instead of jumping to the event's day.
   await resize(page, { width: 1280, height: 800 });
   await page.getByRole('button', { name: 'Back to calendar', exact: true }).click();
   await expect(detail).toHaveCount(0);

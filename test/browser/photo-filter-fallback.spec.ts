@@ -1,5 +1,4 @@
 import {test,expect} from '@playwright/test';
-// One blank same-origin page for all six filters: the module needs Vite and a canvas, not the app.
 test('portable photo filters match the native canvas filter',async({page})=>{
  await page.route('**/photo-filter-fixture',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><title>Photo filter</title>'}));await page.goto('/photo-filter-fixture');
  for(const filter of ['saturate(1.55) contrast(1.08)','sepia(.3) saturate(1.35) hue-rotate(-8deg)','saturate(1.1) hue-rotate(14deg) brightness(1.03)','grayscale(1) contrast(1.05)','contrast(.78) brightness(1.12) saturate(.75)','grayscale(1) contrast(1.55) brightness(.88)']){

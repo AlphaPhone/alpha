@@ -1,4 +1,3 @@
-/// Separate legacy Trash/CAS and canonical resident Notes contracts. Content is an opaque identity.
 module NotesLifecycle {
   type Canonical = {
     current: bool, owner: int, visibleOwner: int, phase: str,
@@ -34,7 +33,6 @@ module NotesLifecycle {
       revision: s.revision + 1, expected: s.revision + 1 } }
   action concurrentSave = all { s.live, s.revision < 2,
     s' = { ...s, content: "concurrent", storedContent: "concurrent", revision: s.revision + 1 } }
-  /// The editor updates immediately while the document store serializes commits.
   action enqueue(value: str): bool = all { s.live, not(s.locked or s.fault), s.writes.length() < 2,
     value.in(Set("first", "second")), s' = { ...s, draft: value, writes: s.writes.append(value) } }
   action publishWrite = all { s.writes.length() > 0, not(s.fault), s.storedContent == s.content,

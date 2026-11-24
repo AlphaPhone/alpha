@@ -4,7 +4,6 @@ import android.content.Context;
 import ai.eliza.plugins.agent.runtime.CredentialShutdownLease;
 import java.util.concurrent.CountDownLatch;
 
-/** Test port for the resident's real lease with a controllable stop observation. */
 final class AlphaLocalAgentPlugin {
  static final CredentialShutdownLease lease = new CredentialShutdownLease();
  static volatile boolean confirmed = true;

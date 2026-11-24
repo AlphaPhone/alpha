@@ -1,4 +1,3 @@
-/// Two physical plain notes, one serialized writer, one independent stale view.
 module CanonicalNotesStore {
   type Document = {revision: int, notes: List[int], trash: Set[int], trashPresent: bool, body: int -> int,
     order: int -> int, clock: int -> int, seen: Set[int]}
@@ -114,7 +113,6 @@ module CanonicalNotesStore {
   action openShared = all {
     s.handles == 1, s.phase == "ready", s' = {...s, handles: 2}
   }
-  /// One of two handles closes. The selected survivor keeps its shared cache and failure.
   action closeShared = all { s.handles == 2, s.stage == "idle", s' = {...s, handles: 1} }
   action refuseFenced = all { s.fenced, s' = {...s, reply: {...noReply, outcome: "error"}} }
   action requestStop = s' = {...s, stopRequested: true}

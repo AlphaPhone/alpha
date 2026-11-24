@@ -1,4 +1,3 @@
-// Exact connector registration custody after the authenticated shared runtime repair.
 module CoreConnectorCustody {
   type Capture = {runtime: int, owner: int}
   type Route = {owner: int, label: str}
@@ -11,7 +10,6 @@ module CoreConnectorCustody {
 
   pure val Runtimes = Set(1, 2)
   pure val Owners = Set(1, 2, 3)
-  // Default message, named message, default post, named post, legacy send.
   pure val Keys = Set(1, 2, 3, 4, 5)
   pure val DefaultKeys = Set(1, 3, 5)
   pure val NamedKeys = Set(2, 4)

@@ -1,4 +1,3 @@
-/// Current shared LinkedCalendarReconciler plus reviewed controller admission.
 module CalendarLinkedSync {
   type State = {
     state: str, pending: str, phase: str, local: int, remote: int, common: int,
@@ -45,7 +44,6 @@ module CalendarLinkedSync {
     pending: if(s.local == 0 or s.localDeleted)"delete" else if(s.remote == 0)"create" else "update",
     checkpointRevision: s.revision}}
   action dispatch = all {s.phase == "staged", s.writes < 2, s' = {...s, phase: "dispatch", writes: s.writes + 1}}
-  /// Side-effect observation is separate from the returned status and durable checkpoint.
   action providerResult(status: str, effected: bool): bool = all {
     s.phase == "dispatch", status.in(Set("succeeded","unknown","not_accepted","precondition_failed")),
     (status == "succeeded") implies effected,
@@ -62,7 +60,6 @@ module CalendarLinkedSync {
         outcome: if(status == "succeeded")"pushed" else if(status == "unknown")"quarantined" else if(status == "not_accepted")"dirty" else "conflicted"}
     }
   }
-  /// Cancellation can prevent the checkpoint even when an already sent provider request applied.
   action abandonedWrite(effected: bool): bool = all {s.phase == "dispatch",
     s' = {...s, phase: "idle", remote: if(effected){if(s.pending == "delete")0 else s.local}else s.remote,
       etag: if(effected){if(s.pending == "delete")0 else 2}else s.etag, outcome: "unknown"}}
@@ -97,7 +94,6 @@ module CalendarLinkedSync {
   val Bounded = s.writes.in(0.to(2)) and s.epoch.in(0.to(2)) and s.local.in(0.to(3)) and s.remote.in(0.to(3))
   val TypeOK = s.state.in(Set("clean","dirty","paused","local_only","conflicted","quarantined")) and
     s.phase.in(Set("idle","read","push","staged","dispatch","pull","pull-delete","recover")) and s.pending.in(Set("none","create","update","delete"))
-  /// A standing review belongs to the current owner and never to a later local revision.
   val ReviewOwnerBound = s.reviewed implies s.reviewedEpoch == s.epoch and s.reviewedRevision <= s.revision
   val safety = TypeOK and Bounded and DurableMutation and SettledCheckpoint and ReviewOwnerBound
   val QuarantinedWriteWitness = s.state == "quarantined" and s.writes == 1 and s.remote == s.local
@@ -121,7 +117,6 @@ module CalendarLinkedSync {
   run pausedInFlightPreservesPendingTest = init.then(begin).then(analyzed).then(stage).then(dispatch).then(pause).then(abandonedWrite(true))
     .expect(s.state=="dirty" and s.pending=="create" and not(s.knownProvider)).then(reviewSync).then(enable).then(begin).then(analyzed)
     .expect(s.state=="clean" and s.writes==1 and safety)
-  /// A review made for one owner cannot enable sync for the next.
   run reviewRetiredByOwnerSwitchTest = init.then(pause).then(reviewSync).then(switchOwner).expect(not(s.reviewed) and safety)
     .then(enable.fail())
   run freshReviewRequiredTest = init.then(pause).then(reviewSync).then(localEdit).expect(not(s.enabled)).then(reviewSync).then(enable).expect(s.enabled and safety)

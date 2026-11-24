@@ -7,7 +7,6 @@ async function nativeContent(page:any,url:string,insets:{top:number;bottom:numbe
   const names=['DailyApps','AlphaBrowser','AlphaConnection','AlphaDevice','AlphaLocalAgent','AlphaHostedResults','AlphaVoiceCloud','AlphaNotifications','ElizaSystem','AlphaCalendar','AlphaNoteDocuments','AlphaNoteAudio','AlphaFiles','AlphaPhotos','DeviceApps','ElizaLocation','AlphaActionJournal','AlphaDeletions'];
   const methods=['addListener','removeListener','surfaceInfo','readPending','readPendingResult','readDelegationCallback','readSecret','secureRead','secureWrite','secureRemove','get','status','getStatus','getState','state','permissionState','permissions','list','listCalendars','listEvents','listReminders','listBookmarks','getBookmarks','bookmarks','settings','getSettings','buildInfo','capabilities','query','read','readJournal','getPending','readSelection','pending'];
   w.Capacitor={Plugins:{},PluginHeaders:names.map(name=>({name,methods:methods.map(name=>({name,rtype:name==='addListener'?'callback':'promise'}))})),nativeCallback:()=> 'fixture-callback',nativePromise:async(_plugin:string,method:string)=>{
-   // Standalone bars are outside the WebView; launcher bars remain inside it.
    if(method==='surfaceInfo')return {topInset:residualInsets.top,bottomInset:residualInsets.bottom};
    if(method==='buildInfo')return {launcher};
    if(_plugin==='AlphaDeletions'&&method==='pending')return {deletions:[],deletedOrigins:[]};
@@ -18,7 +17,6 @@ async function nativeContent(page:any,url:string,insets:{top:number;bottom:numbe
  await page.setViewportSize({width,height});
  await page.route('**/__native-insets-fixture',route=>route.fulfill({contentType:'text/html',body:'<!DOCTYPE html><html><body style="margin:0"></body></html>'}));
  await page.goto(new URL('/__native-insets-fixture',url).href);
- // An iframe is the WebView's usable native rectangle. It does not emulate Android framework dispatch.
  await page.setContent(`<iframe title="Standalone WebView" src="${url}" style="position:absolute;border:0;left:${insets.left}px;top:${insets.top}px;width:${width-insets.left-insets.right}px;height:${height-insets.top-insets.bottom}px"></iframe>`);
  const frame=page.frameLocator('iframe');
  await expect(frame.getByRole('button',{name:'Notes',exact:true})).toBeVisible();
@@ -54,8 +52,6 @@ for(const width of [412,360])test(`native launcher chat clears three-button navi
  await panel.getByRole('button',{name:'Expand chat',exact:true}).click();
  await clearOfBottom(panelComposer,height-navigation);
  await panelComposer.locator('textarea').fill('Keep this draft\nwhile the keyboard opens');
- // MainActivity fits the visible IME natively and clears the residual CSS inset.
- // This models the resulting WebView rectangle, not Android keyboard dispatch.
  await frame.locator('html').evaluate(node=>node.style.setProperty('--native-bottom-inset','0px'));
  await page.locator('iframe').evaluate((node:any)=>node.style.height='420px');
  await clearOfBottom(panelComposer,420);
@@ -106,7 +102,6 @@ test('native launcher keeps a long actionable notice scrollable above a multilin
   return input.getBoundingClientRect().top-node.getBoundingClientRect().bottom;
  })).toBeGreaterThanOrEqual(8);
  await expect.poll(()=>notice.evaluate(node=>node.scrollHeight-node.clientHeight)).toBeGreaterThan(0);
- // The start of a long message must not be centered above its scroll container.
  await expect.poll(()=>notice.evaluate(node=>node.querySelector('span')!.getBoundingClientRect().top-node.getBoundingClientRect().top)).toBeGreaterThanOrEqual(0);
  await page.screenshot({path:testInfo.outputPath('long-notice-multiline-composer.png'),animations:'disabled'});
  await notice.getByRole('button',{name:'Undo',exact:true}).click();
@@ -122,7 +117,6 @@ for(const width of [412,640])test(`a very short window with the keyboard open ke
   Component.prototype.renderVals=function(){(window as any).noticeLayoutShell=this;return render.call(this);};
  });
  await expect.poll(()=>frame.locator('html').evaluate(()=>!!(window as any).noticeLayoutShell)).toBe(true);
- // The floating dock is up; the soft keyboard then leaves only about 150px of window.
  await page.locator('iframe').evaluate((node:any)=>node.style.height='150px');
  await frame.locator('html').evaluate(()=>{(window as any).noticeUndoInvoked=false;(window as any).noticeLayoutShell.toast('Note deleted',{undo:()=>{(window as any).noticeUndoInvoked=true;}});});
  const notice=frame.locator('[data-alpha-toast]'),undo=notice.getByRole('button',{name:'Undo',exact:true});
@@ -160,7 +154,6 @@ test('wide native standalone keeps a usable transcript and touch navigation at n
    for(const type of ['pointerdown','pointermove','pointerup','pointercancel','gotpointercapture','lostpointercapture','click'])screen.addEventListener(type,event=>{const e=event as PointerEvent;events.push({type,label:(e.target as Element)?.closest('button')?.getAttribute('aria-label'),x:e.clientX,y:e.clientY,pointerType:e.pointerType,half:screen.getAttribute('data-alpha-chat-half')});},true);
   });
   const open=frame.getByRole('button',{name:'Open conversation',exact:true});
-  // Cancellation must retire the exact native listener before a later touch.
   await open.dispatchEvent('pointerdown',{pointerId:91,pointerType:'touch',isPrimary:true,button:0,clientX:47,clientY:311});
   await open.dispatchEvent('pointercancel',{pointerId:91,pointerType:'touch',isPrimary:true});
   expect(await open.evaluate(node=>{const event=new TouchEvent('touchstart',{bubbles:true,cancelable:true});node.dispatchEvent(event);return event.defaultPrevented;})).toBe(false);
@@ -172,7 +165,6 @@ test('wide native standalone keeps a usable transcript and touch navigation at n
   await expect.poll(()=>transcript.evaluate(e=>e.clientHeight)).toBeGreaterThanOrEqual(80);
   const screen=await frame.locator('[data-screen]').boundingBox();
   expect(screen!.width).toBeGreaterThanOrEqual(880);
-  // Measure both edges in one animation frame; separate browser calls can sample different sheet positions.
   await expect.poll(()=>transcript.evaluate(node=>{
    const header=node.closest('[data-screen]')!.querySelector('[aria-label="Go Home"]')!;
    return node.getBoundingClientRect().top-header.getBoundingClientRect().bottom;
@@ -190,8 +182,6 @@ for(const launcher of [false,true])test(`native ${launcher?'launcher':'standalon
  await page.locator('iframe').evaluate((node:any)=>Object.assign(node.style,{width:'839px',height:'412px'}));
  await page.setViewportSize({width:412,height:839});
  await page.locator('iframe').evaluate((node:any)=>Object.assign(node.style,{width:'412px',height:'839px'}));
- // WebView 124 observed these inflated dimensions while its CSS root stayed 412x839.
- // Reproduce that measurement mismatch without claiming this browser emulates Android rotation.
  await frame.locator('html').evaluate(()=>{
   Object.defineProperty(window,'innerWidth',{configurable:true,value:863});
   Object.defineProperty(window,'innerHeight',{configurable:true,value:1757});
@@ -202,7 +192,6 @@ for(const launcher of [false,true])test(`native ${launcher?'launcher':'standalon
   const box=node.getBoundingClientRect(),root=document.documentElement;
   return box.width<=root.clientWidth+1&&box.height<=root.clientHeight+1;
  })).toBe(true);
- // A real smaller visual viewport must still make room for the keyboard.
  await frame.locator('html').evaluate(()=>{
   Object.defineProperty(window.visualViewport!,'height',{configurable:true,value:390});
   window.visualViewport!.dispatchEvent(new Event('resize'));

@@ -1,4 +1,3 @@
-/// Lifecycle of the live-only native renderer subscription and its two asynchronous admissions.
 module NativeViewSubscription {
   type State = { phase: str, registered: bool, dispatched: bool, ended: int,
     removals: int, unsubscribes: int, delivered: int }
@@ -21,7 +20,6 @@ module NativeViewSubscription {
       else if (s.ended == 0 and matching) { ...s, phase: "ready" }
       else { ...closed(s), phase: "failed", unsubscribes: closed(s).unsubscribes + 1 }
   }
-  /// kind 1 is a valid view-interact event, kind 2 is the native terminal frame.
   action frame(subscription: bool, client: bool, kind: int): bool = all {
     kind.in(0.to(2)),
     if (s.ended == 0 and subscription and kind == 1 and client)

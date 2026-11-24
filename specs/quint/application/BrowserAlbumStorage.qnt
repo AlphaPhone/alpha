@@ -1,4 +1,3 @@
-// Browser-owned album metadata and saved media are in separate IndexedDB databases.
 module BrowserAlbumStorage {
   type State = {
     media: int -> int, trashed: Set[int], album: int, serial: int,

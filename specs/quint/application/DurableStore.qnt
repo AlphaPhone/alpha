@@ -1,5 +1,3 @@
-/// BrowserDomainDocument read/create/CAS, corruption recovery and legacy-write fencing.
-/// Opaque values distinguish saved bytes, drafts and retained legacy bytes without parsing content.
 module DurableStore {
   type State = { version: int, value: str, legacy: str, baselineLegacy: str,
     readable: bool, draft: str, capturedVersion: int, capturedLegacy: str,
@@ -15,8 +13,6 @@ module DurableStore {
       capturedLegacy: s.legacy, phase: "editing", committed: false } }
   action prepare = all { s.phase == "editing", s.readable, s.legacy == s.capturedLegacy,
     s' = { ...s, phase: "prepared" } }
-  // The last legacy check runs inside the editor before Documents commits its CAS.
-  // Another legacy writer can run after that check. A later read detects it.
   action commit = all { s.phase == "prepared", s.readable, not(s.writeFault),
     s.version == s.capturedVersion, s.version < 2,
     s' = { ...s, value: s.draft, version: s.version + 1, phase: "saved", committed: true } }
@@ -39,8 +35,6 @@ module DurableStore {
   action step = any { read, edit, prepare, commit, concurrentWrite, legacyWrite, corrupt,
     failWrites, captureRecovery, restoreReviewed, clearReviewed, restart, s' = s }
   val CommitCurrent = s.committed implies s.version == s.capturedVersion + 1
-  // Stronger cross-store condition, retained as a separately falsifiable claim.
-  // The source detects a late external legacy write on its next read.
   val CommitLegacyCurrent = s.committed implies s.legacy == s.capturedLegacy
   val LegacyRetained = s.legacy.in(Set("old", "changed"))
   val BoundedVersion = s.version.in(0.to(2))

@@ -1,5 +1,3 @@
-// Shared observation classes for Android's monotonic, boot-relative uptime.
-// A process restart preserves uptime. Only a new boot resets readiness.
 module UpdateBootAdmissionPolicy {
   type Boot = {sdk: int, consent: bool, uptime: int, boot: int, process: int, readySeen: bool}
   pure val uptimes = Set(0, 26681, 29999, 30000, 30001, 35000)
@@ -17,9 +15,6 @@ module UpdateBootAdmissionPolicy {
     and (p.readySeen implies p.uptime > 30000)
 }
 
-// Bounded Settings offer and Android cache-file custody before activation.
-// A target is one exact reviewed URL/digest/size/version tuple. Four bytes
-// represent a synthetic APK. PackageInstaller.commit is beyond this model.
 module NativeUpdateStaging {
   import UpdateBootAdmissionPolicy as Boot
   type State = {
@@ -67,8 +62,6 @@ module NativeUpdateStaging {
     s' = {...s, platform: Boot::advanced(s.platform, uptime)}
   }
   action consent(value: bool): bool = s' = {...s, platform: {...s.platform, consent: value}}
-  // These two actions cover admission between attempts. In-flight process death,
-  // sealed sessions and durable pause recovery remain RuntimeUpdatePause's scope.
   action processRestart = all {
     s.owner == 0, s.platform.process < 2,
     s' = {...s, platform: Boot::restarted(s.platform), automatic: false, kept: 0,
@@ -112,8 +105,6 @@ module NativeUpdateStaging {
   action loadBridge(deleted: bool): bool =
     s' = if (s.phase == "idle" and s.kept == 0 and deleted) { ...s, file: "absent", bytes: 0 } else s
 
-  // Only a same-process hint can avoid HTTP. It cannot admit changed bytes,
-  // another current offer, Android metadata, or any pending session/pause.
   pure def cacheMatches(state: State): bool = state.kept == state.cached and
     state.kept != 0 and state.file != "absent"
   val attemptAvailable = if (cacheMatches(s)) s.reuses < 2 else s.fetches < 2
@@ -140,8 +131,6 @@ module NativeUpdateStaging {
       s' = admittedCopy(s, bridge, false)
     }
   }
-  // This branch precedes worker submission, download, session allocation and the
-  // activation/pause composition. Refusal changes only the returned status.
   action automaticTap(bridge: int): bool = all {
     bridgeIds.contains(bridge),
     if (automaticCapability != "supported") s' = {...s, outcome: automaticCapability}
@@ -158,7 +147,6 @@ module NativeUpdateStaging {
     s.bytes + count <= 4,
     s' = { ...s, bytes: s.bytes + count }
   }
-  // copyVerified checks the deadline after non-EOF reads only.
   action verify(digestMatches: bool, lateEof: bool): bool = all {
     s.phase.in(Set("copying", "rechecking")),
     s.bytes == 4,

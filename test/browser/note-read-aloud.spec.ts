@@ -1,11 +1,7 @@
 import {openLegacyNotes} from './helpers/legacy-notes';
 import {test,expect,type Page} from '@playwright/test';
 import {agentBrowserVoice} from './voice-fixture';
-// P-43: read aloud has no Web Speech fallback. It runs through the local agent's speech
-// (libelizainference Paradee), stubbed here at the agent boundary (agentBrowserVoice).
 
-// Read aloud uses the agent's on-device speech only; editing or leaving the note stops it.
-// The development server is shared and slow on a loaded machine.
 test.describe.configure({timeout:120000});
 test.beforeEach(async({page})=>{await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));});
 async function openNote(page:Page){
@@ -14,11 +10,8 @@ async function openNote(page:Page){
  await page.getByRole('button',{name:'New note',exact:true}).click();
  await page.getByRole('textbox',{name:'Title',exact:true}).fill('Groceries');
  await page.getByRole('textbox',{name:'Note',exact:true}).fill('Milk and eggs.');
- // Autosave is asynchronous: wait until the note is stored before anything reads its id.
  await expect.poll(()=>page.evaluate(async()=>{const raw=await(await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw();return raw?JSON.parse(raw).records.some((n:any)=>n.title==='Groceries'&&n.body==='Milk and eggs.'):false;})).toBe(true);
 }
-/** Starts reading through the module entry point, so the resolved outcome is observable. The editor
- * has no Read aloud button: reading a note is asked of Alpha. */
 async function readAloud(page:Page){
  await expect(page.getByRole('textbox',{name:'Note',exact:true})).toBeVisible();
  await page.evaluate(async()=>{

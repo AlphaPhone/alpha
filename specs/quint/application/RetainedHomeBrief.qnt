@@ -1,4 +1,3 @@
-// Exact current Home brief scope, selection and observer publication.
 module RetainedHomeBrief {
   type Brief = {summary: str, time: int, agent: str, status: str}
   type State = {scope: str, brief: Brief, accepted: str, events: int,

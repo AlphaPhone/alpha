@@ -183,7 +183,7 @@ public final class UpdateCompositionHarness {
    require(lease == (request >= 0), "wrapper and exact resident shutdown lease agree");
    if (lease) {
     try { AlphaLocalAgentPlugin.lease.beforeStart(); throw new AssertionError("owned lease admitted startup"); }
-    catch (CredentialShutdownLease.Pending pending) { /* Actual service lease rejected startup. */ }
+    catch (CredentialShutdownLease.Pending pending) { }
    }
    int terminal = exactActivation((String)field("settledActivation"));
    int audience = bridgeNumber(field("settledResumeBridge"));
@@ -296,7 +296,6 @@ public final class UpdateCompositionHarness {
    require(call.resolved.get() == 1,"exact draft receipt admitted");
    var observation=observe();
    var ack=Trace.action("acknowledge",bridge,1,bridge,ready ? "yes" : "no",eligible ? "eligible" : "absent");
-   // Android staging can be abandoned before the worker reacquires updateBarrier to publish failure.
    if (!ready && "absent".equals(observation.getJSONObject("state.pause.evidence").getString("session")))
     trace.macro("draft refusal and independently observed staging abandonment",observation,ack,Trace.action("observeAbandonedStage"));
    else trace.macro("exact draft receipt",observation,ack);
@@ -364,7 +363,6 @@ public final class UpdateCompositionHarness {
     break;
    case "offer-changed-before-commit":
     register(1);begin(true);ack(1,true,true);stopBeforeOffer();
-    // Same selected tuple, different raw bytes. Even an equivalent JSON object needs a fresh binding.
     byte[] original = (byte[])servedManifest.get(null);
     byte[] changed = Arrays.copyOf(original,original.length+1);
     changed[original.length] = '\n';

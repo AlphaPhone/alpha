@@ -1,6 +1,4 @@
 import { test, expect } from '@playwright/test';
-// Production lane (flag-off build, mocks unset). Unconnected or empty Home widgets are hidden.
-// Connection setup and the apps remain reachable without fabricating provider rows.
 const offline = () => localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({ kind: 'offline' }));
 
 test('unconnected Home hides empty widgets and keeps sign-in reachable', async ({ page }, info) => {

@@ -1,27 +1,4 @@
 import {openBrowserCalendar} from './helpers/browser-calendar';
-// Journey J04: Schedule -> travel, driven through rendered controls in the browser build
-// (development profile with the development device controls, /?mode=dev&tools=1).
-//
-// Evidence boundary: a pass is source/test evidence for the browser renderer only. It is NOT
-// APK, emulator, AOSP image, physical-device or real-integration evidence.
-//
-// Synthetic fixtures:
-// - The Maps provider (place search, place detail, routing) is an external boundary. It is
-//   replaced with configureMapsProvider(), the same hook calendar-maps-handoff.spec.ts uses.
-//   The fixture logs every search and route request to a test-owned localStorage key so the
-//   exactly-once assertions survive reloads. No map tiles, geocoder or router is contacted.
-// - "Device controls -> Back" is the development stand-in for the Android system Back gesture.
-// - Events live in the development browser calendar, an explicit test-mocks Calendar source
-//   (openBrowserCalendar); Agent Calendar is not involved.
-//
-// Native-only steps (not provable here; the honest browser state is asserted where one exists):
-// - Device location as a route origin and turn-by-turn "Start": the browser build reports that
-//   location permission was not granted and offers a manual origin.
-// - Map rendering, GPS, background navigation and voice guidance.
-// - Android system Back itself; hand-off to another installed maps application.
-//
-// Maps offers an explicit "Back to event" control when it was opened from an event's location; it
-// returns to that exact event and never replays the hand-off. System Back still works as before.
 import {test, expect, type Page} from '@playwright/test';
 test.use({locale:'en-US'});
 
@@ -29,7 +6,6 @@ const address = '12 Market Street, Test Town';
 const LOG = 'journey-j04-maps';
 const button = (page: Page, name: string) => page.getByRole('button', {name, exact: true});
 
-/** Synthetic Maps provider; module state is lost on reload so it is installed after every load. */
 async function installMaps(page: Page) {
   await page.evaluate(async ({address, LOG}) => {
     const log = (kind: 'queries' | 'routes', value: unknown) => { const v = JSON.parse(localStorage.getItem(LOG) || '{"queries":[],"routes":[]}'); v[kind].push(value); localStorage.setItem(LOG, JSON.stringify(v)); };
@@ -80,7 +56,6 @@ test('calendar event location is handed to Maps once, routed by explicit choices
     const saved = await events(page);
     expect(saved).toHaveLength(1);
     expect(saved[0]).toMatchObject({title: 'Harbour meeting', location: address});
-    // Creating and viewing the event must not contact the Maps provider.
     expect(await requests(page)).toEqual({queries: [], routes: []});
   });
 
@@ -95,7 +70,6 @@ test('calendar event location is handed to Maps once, routed by explicit choices
     await expect(search).toHaveValue(address);
     await expect(page.getByRole('button', {name: /^East entrance/}).first()).toBeVisible();
     await expect(page.getByRole('button', {name: /^West entrance/}).first()).toBeVisible();
-    // Two candidates: nothing is selected or routed until the user chooses.
     await expect(button(page, 'Directions')).toHaveCount(0);
     expect(await requests(page)).toEqual({queries: [address], routes: []});
   });
@@ -112,13 +86,11 @@ test('calendar event location is handed to Maps once, routed by explicit choices
     await origin.press('Enter');
     await expect(page.getByRole('region', {name: 'Maps'})).toContainText(/5 min\s*0\.3 mi · no live traffic/);
     expect((await requests(page)).routes).toEqual([{from, to, mode: 'drive'}]);
-    // A mode the provider does not offer is refused by name and requests nothing.
     await button(page, 'Transit').click();
     await expect(status).toHaveText('Transit schedules are not available for this region.');
     await button(page, 'Bike').click();
     await expect(status).toHaveText('Bike directions are not available from this Maps provider.');
     expect((await requests(page)).routes).toEqual([{from, to, mode: 'drive'}]);
-    // The selected mode is exposed as state, not by color only; a refused mode is not selected.
     await expect(button(page, 'Drive')).toHaveAttribute('aria-pressed', 'true');
     for (const mode of ['Walk', 'Bike', 'Transit']) await expect(button(page, mode)).toHaveAttribute('aria-pressed', 'false');
     await button(page, 'Walk').click();
@@ -126,7 +98,6 @@ test('calendar event location is handed to Maps once, routed by explicit choices
     await expect(button(page, 'Drive')).toHaveAttribute('aria-pressed', 'false');
     await expect(page.getByRole('region', {name: 'Maps'})).toContainText(/9 min\s*0\.2 mi · no live traffic/);
     expect((await requests(page)).routes).toEqual([{from, to, mode: 'drive'}, {from, to, mode: 'walk'}]);
-    // Native-only: live navigation needs device location; the browser build says so.
     await button(page, 'Start').click();
     await expect(status).toHaveText('Location permission was not granted. You can choose an origin manually.');
     expect((await requests(page)).queries).toEqual([address]);
@@ -134,7 +105,6 @@ test('calendar event location is handed to Maps once, routed by explicit choices
 
   await test.step('"Back to event" returns to the same event without another hand-off', async () => {
     const routesBefore = (await requests(page)).routes.length;
-    // Offered in directions, on the place and in results; used here from directions.
     await expect(button(page, 'Back to event')).toHaveCount(1);
     await button(page, 'Back to event').click();
     await expect(heading).toBeVisible();
@@ -147,7 +117,6 @@ test('calendar event location is handed to Maps once, routed by explicit choices
   });
 
   await test.step('system Back also returns to the same event without another hand-off', async () => {
-    // A second, explicit hand-off from the event (one new search), then the system Back path.
     await button(page, address).click();
     await expect(search).toHaveValue(address);
     await page.getByRole('button', {name: /^West entrance/}).first().click();
@@ -174,7 +143,6 @@ test('calendar event location is handed to Maps once, routed by explicit choices
     await button(page, 'Maps').click();
     await expect(search).toHaveValue('');
     await expect(page.getByRole('button', {name: /entrance/})).toHaveCount(0);
-    // Maps opened from the launcher has no event to return to.
     await expect(button(page, 'Back to event')).toHaveCount(0);
     await systemBack(page);
     await openBrowserCalendar(page);

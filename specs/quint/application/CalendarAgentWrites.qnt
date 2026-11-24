@@ -1,9 +1,3 @@
-/// The agent's phone-side Calendar operations (device actions on the phone's own calendar):
-/// create, read next, read/update/delete the selected event. None is on the direct allow-list;
-/// every one needs the owner's card, and the native calendar then shows its own review, which
-/// the owner may cancel. A delete is queued with a short Undo window and is reported as unknown
-/// until that window settles. Canonical Calendar edits by the agent are AgentCalendarMutation;
-/// admission, journal and claim are DeviceActionReview; the deletion journal is DeletionJournal.
 module CalendarAgentWrites {
   type State = {
     op: str, authority: str, view: str, sensitive: bool, hidden: bool, permission: str,
@@ -20,7 +14,6 @@ module CalendarAgentWrites {
     appliedSelected: true, appliedCurrent: true}
   val idle = s.authority == "none"
   val running = not(idle) and s.outcome == "none"
-  /// Screen binding: the selected-record operations need Calendar with that record selected.
   val bound = not(s.sensitive) and not(s.hidden) and
     (s.op.in(unbound) or (s.view == "calendar" and s.selected))
   action scene(view: str, sensitive: bool, selected: bool, permission: str): bool = all {idle,
@@ -31,15 +24,12 @@ module CalendarAgentWrites {
     s' = {...s, op: op, native: "none", outcome: "none"}}
   action eventChanges = s' = {...s, targetCurrent: false}
   action hide = s' = {...s, hidden: true}
-  /// There is no direct path: the only way in is the owner's card on the bound screen.
   action approve = all {idle, bound, s' = {...s, authority: "review"}}
-  /// Create-on-phone and read-next ask for Calendar access first.
   action permissionRefused = all {running, s.native == "none", s.op.in(unbound),
     s.permission != "granted" or not(bound), s' = {...s, outcome: "unknown"}}
   action nativeReview = all {running, s.native == "none", bound,
     s.op.in(unbound) implies s.permission == "granted", s' = {...s, native: "reviewing"}}
   action nativeCancel = all {running, s.native == "reviewing", s' = {...s, native: "cancelled", outcome: "failed"}}
-  /// The native side re-reads the selected record; a changed record is refused there.
   action nativeTargetChanged = all {running, s.native == "reviewing", s.op.in(selectedOps),
     not(s.targetCurrent), s' = {...s, native: "refused", outcome: "failed"}}
   action nativeApply = all {running, s.native == "reviewing",
@@ -49,7 +39,6 @@ module CalendarAgentWrites {
       events: s.events + (if (s.op.in(Set("calendar_create_local", "calendar_create"))) 1 else 0),
       edits: s.edits + (if (s.op == "calendar_update") 1 else 0),
       shared: s.shared + (if (s.op.in(Set("calendar_read_next", "calendar_read_selected"))) 1 else 0)}}
-  /// A delete is only queued; the receipt says unknown while Undo is still possible.
   action nativeQueueDelete = all {running, s.native == "reviewing", s.op == "calendar_delete",
     s.targetCurrent, s' = {...s, native: "queued", queued: true, queues: s.queues + 1, outcome: "unknown"}}
   action nativeUnknown = all {running, s.native == "reviewing", s' = {...s, native: "unknown", outcome: "unknown"}}
@@ -70,7 +59,6 @@ module CalendarAgentWrites {
   val UpdateBoundToSelectedRevision = (s.outcome == "succeeded" and s.op.in(selectedOps)) implies
     (s.appliedSelected and s.appliedCurrent)
   val QueuedDeleteIsUnknownUntilSettled = (s.op == "calendar_delete" and not(idle)) implies s.outcome != "succeeded"
-  /// Every queued delete ends exactly once: deleted when the window ends, or undone.
   val UndoneDeleteDeletesNothing = s.deleted + s.undone + (if (s.queued) 1 else 0) == s.queues
   val CancelledReviewChangesNothing = s.native == "cancelled" implies s.outcome == "failed"
   val ProtectedScreenBlocksCalendar = (s.sensitive and not(idle)) implies s.native == "none"
@@ -78,10 +66,6 @@ module CalendarAgentWrites {
     QueuedDeleteIsUnknownUntilSettled and UndoneDeleteDeletesNothing and CancelledReviewChangesNothing and
     ProtectedScreenBlocksCalendar
 
-  /// KNOWN DIVERGENCE (app review AGENT-06, phone side): denied Calendar access, or a screen that
-  /// changed while access was asked, throws in the executor before the native calendar is
-  /// called. Nothing happened, yet the action is journaled and reported as "unknown".
-  /// Registered as an expected violation.
   val UnknownOnlyAfterNativeCall = s.outcome == "unknown" implies s.native != "none"
   val UnknownWithoutNativeCall = s.outcome == "unknown" and s.native == "none"
 

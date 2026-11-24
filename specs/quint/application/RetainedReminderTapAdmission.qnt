@@ -1,4 +1,3 @@
-// Admission after the exact retained reminder detail's render callback.
 module RetainedReminderTapAdmission {
   type State = {view: str, visit: int, detail: bool, captured: str, capturedVisit: int,
     waiting: bool, pending: str, chooser: bool, sensitive: bool, form: bool, foreground: bool,

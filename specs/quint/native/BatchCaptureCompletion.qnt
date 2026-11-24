@@ -1,4 +1,3 @@
-/// Renderer ownership of one recorded conversation draft and its terminal callback.
 module BatchCaptureCompletion {
   type State = {
     acquisition: str, active: bool, recording: bool, owner: int,

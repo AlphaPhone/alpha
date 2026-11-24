@@ -1,4 +1,3 @@
-// Browser and Android renderer-fallback digest retention before provider acknowledgement.
 module RendererHostedInbox {
   type State = {scope: str, phase: str, client: bool, cancelled: bool, result: str,
     rows: int -> int, retained: Set[int], removals: Set[int], notices: Set[int],

@@ -1,7 +1,5 @@
 import {test,expect} from '@playwright/test';
 
-// Real renderer/client with a held synthetic transport; never calls a model. The complete, cancel and
-// failure outcomes are covered with the native stream adapter in local-agent-native-stream.spec.ts.
 test('authored composer text reaches the verified transport unchanged and blank-only stays local',async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.goto('/');

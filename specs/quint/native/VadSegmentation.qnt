@@ -1,6 +1,3 @@
-// Exact finite probability partition and counters of LiveVadGate. The capture loop calls only
-// accept and speaking; close is the gate's own contract for ending an open segment. A stopped
-// capture drops its gate and a new capture starts with a new one.
 module VadSegmentation {
   type Gate = {
     speaking: bool, above: int, below: int, edge: str,
@@ -9,7 +6,6 @@ module VadSegmentation {
   }
   var s: Gate
   action check(condition: bool): bool = all {assert(condition), s' = s}
-  // Probability is encoded in thousandths. -1001/-1000/-999 represent NaN/+Inf/-Inf.
   pure def normalized(probability: int): int = if (probability <= -999) 0 else probability
   pure val initial: Gate = {
     speaking: false, above: 0, below: 0, edge: "NONE",
@@ -17,7 +13,6 @@ module VadSegmentation {
     probability: 0, operation: "init", closeReturned: false
   }
   action init = s' = initial
-  // All possible pre-window counter states, including the fifteenth silent window.
   action counterInit = {
     nondet speaking = Set(false, true).oneOf()
     nondet count = 0.to(15).oneOf()
@@ -84,7 +79,6 @@ module VadSegmentation {
     .then(check(safety and s.closeReturned)).then(close).then(check(safety and not(s.closeReturned)))
   run closeResetsPartialOpeningTest = init.then(accept(500)).then(close).then(accept(500))
     .then(check(safety and not(s.speaking) and s.above == 1))
-  // The capture stops mid-segment: no gate edge is produced, and a new capture starts closed.
   run stoppedCaptureStartsClosedTest = init.then(accept(500)).then(accept(500))
     .then(check(s.speaking)).then(init).then(accept(349))
     .then(check(safety and not(s.speaking) and s.edge == "NONE")).then(accept(500))

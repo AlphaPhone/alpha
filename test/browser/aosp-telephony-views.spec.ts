@@ -1,16 +1,11 @@
 import {test, expect, type Page} from '@playwright/test';
 import {setupTelephony} from './telephony-fixture';
 import {setTextScale} from './accessibility-states';
-// The designed Phone, Messages and Contacts views against a stubbed bridge in the Alpha image shape
-// (telephony-fixture.ts). Evidence for the renderer only: no device, SIM, carrier or provider is
-// involved, and a call "placed" or a text handed to the bridge here proves nothing about a radio.
 const inputs = (page: Page, method: string) => page.evaluate(method => ((window as any).telephonyInputs as [string, any][]).filter(row => row[0] === method).map(row => row[1]), method);
 const open = (page: Page, name: string) => page.getByRole('button', {name, exact: true}).first().click();
 const pill = '[data-alpha-layer="pill"]';
-// AP-16: the one bottom bar is the composer. In a conversation it addresses the person; on the list it filters.
 const personField = '[data-alpha-bar-field="person"]';
 const barSend = (page: Page) => page.locator('[data-alpha-input-bar]').getByRole('button', {name: 'Send', exact: true});
-/** True when two elements' boxes overlap on screen. */
 async function overlaps(page: Page, first: string, second: string) {
   const [a, b] = await Promise.all([page.locator(first).boundingBox(), page.locator(second).boundingBox()]);
   if (!a || !b) throw Error(`missing ${!a ? first : second}`);
@@ -153,9 +148,7 @@ test('a conversation has one bottom bar: the bar addresses the person, with no s
   await expect(page.locator(personField)).toHaveAttribute('placeholder', /^Text /);
   for (const gone of ['[data-alpha-messages-body]', '[data-alpha-messages-send]', '[data-alpha-messages-alpha]']) await expect(page.locator(gone)).toHaveCount(0);
   await expect(page.locator('[data-alpha-messages-accessories]')).toBeInViewport({ratio: 1});
-  // An empty bar offers dictation; Send appears with text.
   await expect(barSend(page)).toHaveCount(0);
-  // Text typed in the bar is the owner's text to the person; nothing goes anywhere until Send.
   await page.locator(personField).fill('tell her I am ten minutes away');
   await expect(page.locator(personField)).toHaveValue('tell her I am ten minutes away');
   await expect(barSend(page)).toBeEnabled();
@@ -220,7 +213,6 @@ test('an outgoing SMS bubble appears on Send and an exact provider row replaces 
   await expect(send).toBeDisabled();
   const [request] = await inputs(page, 'sendComposedSms');
   const provisional = thread.locator(`[data-alpha-message-id="${request.operationId}"]`);
-  // The bubble and its inline action row share one wrapper, which carries the pending dimming.
   const provisionalRow = provisional.locator('xpath=..');
   await expect(provisionalRow).toHaveCSS('opacity', '0.68');
   await page.evaluate(() => (window as any).smsReview.finish('sent'));
@@ -285,7 +277,6 @@ test('leaving Messages after the composer took the draft keeps the operation and
   await expect.poll(async () => (await inputs(page, 'sendComposedSms')).length).toBe(1);
   const [first] = await inputs(page, 'sendComposedSms');
 
-  // The native composer already holds the draft; hiding the page aborts the visit before it replies.
   const visible = (hidden: boolean) => page.evaluate(hidden => {
     Object.defineProperty(document, 'hidden', {configurable: true, get: () => hidden});
     document.dispatchEvent(new Event('visibilitychange'));
@@ -298,7 +289,6 @@ test('leaving Messages after the composer took the draft keeps the operation and
   await expect(page.getByText(/Nothing was sent/)).toHaveCount(0);
   await expect.poll(async () => (await inputs(page, 'smsSendResult')).map(input => input.operationId)).toContain(first.operationId);
 
-  // A retry asks about the same operation; it never mints a fresh one that could send twice.
   await send.click();
   await expect.poll(async () => (await inputs(page, 'sendComposedSms')).map(input => input.operationId)).toEqual([first.operationId, first.operationId]);
   await expect(page.getByText(/Nothing was sent/)).toHaveCount(0);
@@ -529,7 +519,6 @@ test('Messages adds a selected contact number and keeps its unsent draft at larg
   await expect(picker).toBeVisible();
   await expect(recipients).toHaveAttribute('placeholder','Recipient 2');
   await expect(recipients).toBeFocused();
-  // Names are typed here, so the field must bring up the text keyboard, never the dial pad.
   await expect(recipients).toHaveAttribute('type','text');
   await recipients.fill('Bao');
   await expect.poll(async () => (await inputs(page, 'contacts.list')).at(-1)?.query).toBe('Bao');
@@ -555,13 +544,11 @@ test('Messages keeps a number typed into the open contact picker when the picker
   await page.getByRole('button', {name: 'Choose contacts'}).click();
   const picker = page.getByRole('region', {name: 'Choose a contact'});
   await expect(picker).toBeVisible();
-  // A number with no saved contact: nothing to pick, and closing must not discard it.
   await recipients.fill('+1 (555) 010-0999');
   await expect.poll(async () => (await inputs(page, 'contacts.list')).at(-1)?.query).toBe('+1 (555) 010-0999');
   await page.getByRole('button', {name: 'Close contact picker'}).click();
   await expect(picker).toHaveCount(0);
   await expect(recipients).toHaveValue('+15550100101, +15550100999');
-  // A name that matched nobody is a search, not a recipient.
   await page.getByRole('button', {name: 'Choose contacts'}).click();
   await recipients.fill('Nobody here');
   await page.getByRole('button', {name: 'Close contact picker'}).click();
@@ -572,7 +559,6 @@ test('Messages keeps a number typed into the open contact picker when the picker
 test('Contacts searches from the bar, edits in the app with the version it read, and deletes after confirmation', async ({page}) => {
   await setupTelephony(page);
   await open(page, 'Contacts');
-  // AP-16 (AC-22): the bar is the search field; the list header keeps only its title.
   await expect(page.locator('[data-alpha-bar-field="filter"]')).toHaveAttribute('placeholder', 'Search or ask');
   await expect(page.getByRole('heading', {name: 'Contacts'})).toBeVisible();
   await page.locator('[data-alpha-bar-field="filter"]').fill('carm');

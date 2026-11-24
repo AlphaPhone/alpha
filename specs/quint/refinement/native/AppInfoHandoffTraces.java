@@ -9,7 +9,6 @@ import com.getcapacitor.PluginCall;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Exercises the production entry point and records only closed Android and Capacitor ports. */
 public final class AppInfoHandoffTraces {
  private static final String PACKAGE = "fixture.app";
  private final Context host = new Context();

@@ -1,24 +1,5 @@
 import {openLegacyNotes} from './helpers/legacy-notes';
 import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
-// Journey J05: Web research -> note, driven through rendered controls in the browser build
-// (development profile, /?mode=dev, with the development agent profile connected).
-//
-// Evidence boundary: a pass is source/test evidence for the browser renderer only. It is NOT
-// APK, emulator, AOSP image, physical-device or real-integration evidence.
-//
-// Synthetic fixtures:
-// - The web page is test-owned: https://public-fixture.test/harbour is fulfilled by Playwright
-//   (page.route), the approach web-summary-note.spec.ts uses. A question source must be a public
-//   HTTPS address, so a plain-HTTP 127.0.0.1 server cannot stand in here (journey E asserts that
-//   refusal). No real site is contacted; any other external request fails the test.
-// - The agent is the development agent profile with a scripted reply saved through Settings.
-//   No model or hosted agent is involved, so answer quality is not evidence of anything.
-//
-// Native-only steps (not provable here):
-// - Excerpt extraction from the isolated native WebView (Browser.reviewQuestion) and its
-//   navigation/revision binding; the browser build re-fetches the public page without credentials.
-// - A real agent answering from the reviewed excerpt.
-// - Encrypted native Notes storage; here the browser Notes document is read back.
 import {test, expect, type Page} from '@playwright/test';
 import {returnToApps} from './app-navigation';
 
@@ -26,16 +7,12 @@ const url = 'https://public-fixture.test/harbour';
 const html = '<article><h1>Harbour report</h1><p>The ferry leaves at nine from pier four.</p><p>OMIT THIS: internal planning detail.</p></article>';
 const answer = 'The ferry leaves at nine.';
 const button = (page: Page, name: string) => page.getByRole('button', {name, exact: true});
-// The test selects the retained (Older notes) document explicitly, as web-summary-note.spec.ts does.
 const notes = (page: Page) => page.evaluate(async () => JSON.parse((await (await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw()) || '{"records":[]}').records as any[]);
 const agentMessages = (page: Page) => page.evaluate(async () => (await (await import('/src/browser/development-agent-document.ts')).readDevelopmentAgent((await import('/src/browser/development-identity.ts')).developmentIdentity('local'))).conversations.flatMap((c: any) => c.messages) as {role: string; text: string}[]);
 const sourceHeading = (page: Page) => page.locator('iframe[title="Website"]:visible').contentFrame().getByRole('heading', {name: 'Harbour report', exact: true});
 
-/** Connects the development agent with a scripted reply, then opens the fixture page in Browser. */
 async function begin(page: Page, external: string[], crossOriginReadable: boolean) {
   page.on('request', request => { const host = new URL(request.url()).hostname; if (/^https?:/.test(request.url()) && !['127.0.0.1', 'localhost', 'public-fixture.test'].includes(host)) external.push(request.url()); });
-  // The frame navigation always loads; the renderer's credential-free re-read is a fetch, which a
-  // site without CORS denies.
   await page.route(url, route => route.request().resourceType() === 'fetch' && !crossOriginReadable ? route.abort() : route.fulfill({contentType: 'text/html', headers: crossOriginReadable ? {'access-control-allow-origin': '*'} : {}, body: html}));
   await page.goto('/?mode=dev');
   await button(page, 'Settings').click();
@@ -57,7 +34,6 @@ async function askAboutPage(page: Page) {
   await button(page, 'Ask about page').click();
   return page.getByRole('dialog', {name: 'Ask about selected content'});
 }
-/** Sends the reviewed draft, checks what the agent received and returns the summary review. */
 async function sendAndOpenSummary(page: Page, question: string, excerpt: string) {
   await expect(page.getByRole('textbox', {name: 'Message Alpha', exact: true})).toHaveValue(new RegExp(question.replace(/[.?]/g, '\\$&')));
   expect((await agentMessages(page)).filter(message => message.role === 'user')).toEqual([]);
@@ -69,7 +45,6 @@ async function sendAndOpenSummary(page: Page, question: string, excerpt: string)
   expect(sent[0]).toContain(excerpt);
   expect(sent[0]).toContain(url);
   expect(JSON.stringify(await agentMessages(page))).not.toContain('OMIT THIS');
-  // An answer alone saves nothing.
   expect(await notes(page)).toEqual([]);
   await page.getByRole('button', {name: /^Review summary note/}).click();
   return page.getByRole('dialog', {name: 'Save summary'});
@@ -92,7 +67,6 @@ async function expectOneLinkedNoteAfterReload(page: Page, title: string, body: s
   await expect(source).toHaveCount(0);
   await expect(sourceHeading(page)).toBeVisible();
   await expect(button(page, 'Edit address')).toContainText('public-fixture.test');
-  // Opening the source is navigation only: the note is unchanged and still the only one.
   expect(await notes(page)).toEqual(saved);
 }
 
@@ -106,7 +80,6 @@ test('reviewed page excerpt, development agent answer and explicit Save leave ex
   await expect(excerpt).toHaveValue(/The ferry leaves at nine from pier four\./);
   await expect(excerpt).toHaveValue(/OMIT THIS/);
   await expect(review.getByRole('checkbox', {name: 'Link source'})).toBeChecked();
-  // The user bounds what is shared: the edited excerpt and question are the only page text sent.
   await excerpt.fill('The ferry leaves at nine from pier four.');
   await review.getByRole('textbox', {name: 'Question about content'}).fill('When does the ferry leave?');
   await review.getByRole('button', {name: 'Use in conversation', exact: true}).click();
@@ -115,7 +88,6 @@ test('reviewed page excerpt, development agent answer and explicit Save leave ex
   const summary = await sendAndOpenSummary(page, 'When does the ferry leave?', 'The ferry leaves at nine from pier four.');
   await expect(summary).toContainText(url);
   await expect(summary.getByRole('textbox', {name: 'Summary note text'})).toHaveValue(answer);
-  // Cancel is a real cancel.
   await summary.getByRole('button', {name: 'Cancel', exact: true}).click();
   await expect(summary).toHaveCount(0);
   expect(await notes(page)).toEqual([]);
@@ -126,7 +98,6 @@ test('reviewed page excerpt, development agent answer and explicit Save leave ex
   await expect(summary).toHaveCount(0);
   await expect(page.getByText('Summary note saved with its source.', {exact: true})).toBeVisible();
   expect(await notes(page)).toHaveLength(1);
-  // The saved marker is not a second Save.
   await expect(page.getByRole('button', {name: /^Review summary note/})).toHaveCount(0);
   await page.getByRole('button', {name: `Summary note saved ${url}`, exact: true}).click();
   await expect(summary).toHaveCount(0);
@@ -143,7 +114,6 @@ test('when cross-origin reading is denied, pasted text is reviewed instead and s
 
   const review = await askAboutPage(page);
   const excerpt = review.getByRole('textbox', {name: 'Content excerpt'});
-  // Nothing was read from the page; nothing can continue until the user supplies text.
   await expect(excerpt).toHaveValue('');
   await expect(review.getByRole('button', {name: 'Use in conversation', exact: true})).toBeDisabled();
   await excerpt.fill('Pasted: the ferry leaves at nine.');
@@ -160,8 +130,6 @@ test('when cross-origin reading is denied, pasted text is reviewed instead and s
   expect(external).toEqual([]);
 });
 
-// J05-6: the tab navigates after the question review is already open (the fetch has finished). The
-// review belongs to the page it was made from, so it closes and leaves nothing behind.
 test('navigating after the question review opens closes it: no draft, no message and no note', async ({page}) => {
   test.setTimeout(240_000);
   const external: string[] = [];
@@ -179,7 +147,6 @@ test('navigating after the question review opens closes it: no draft, no message
   await page.evaluate(async () => { const {registerPlugin} = await import('/src/platform-plugins.ts'); const event = (window as any).webNavigation; await registerPlugin<any>('AlphaBrowser').navigate({session: event.session, id: event.id, url: 'https://public-fixture.test/elsewhere'}); });
   await expect(page.locator('iframe[title="Website"]:visible').contentFrame().getByRole('heading', {name: 'Another page', exact: true})).toBeVisible();
   await expect(review).toHaveCount(0);
-  // Nothing was placed in the conversation: opening it shows an empty composer.
   await expect(page.getByRole('textbox', {name: 'Message Alpha', exact: true})).toHaveCount(0);
   await button(page, 'Open conversation').click();
   await expect(page.getByRole('textbox', {name: 'Message Alpha', exact: true})).toHaveValue('');

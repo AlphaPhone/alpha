@@ -1,7 +1,5 @@
 import {test,expect} from '@playwright/test';
 import {agentBrowserVoice} from './voice-fixture';
-// P-43: reading aloud has no Web Speech fallback; it runs through the local agent's on-device
-// speech (libelizainference Paradee), stubbed at the agent boundary (agentBrowserVoice).
 test.beforeEach(async({page})=>{
  await page.addInitScript(()=>{localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));});
  await page.route('https://example.com/**',route=>route.abort());
@@ -74,14 +72,9 @@ test('Back dismisses the reading review and cancels only its speech before brows
  await open(page);const dialog=page.getByRole('dialog',{name:'Read page excerpt'});await dialog.getByRole('textbox').fill('Reviewed local text');await dialog.getByRole('button',{name:'Read locally',exact:true}).click();await expect(dialog.getByRole('status')).toHaveText('Reading locally…');
  await page.evaluate(()=>{(window as any).backEscaped=false;window.addEventListener('alpha-back',()=>{(window as any).backEscaped=true;},{once:true});window.dispatchEvent(new Event('alpha-back',{cancelable:true}));});
  await expect(dialog).toHaveCount(0);expect(await page.evaluate(()=>(window as any).backEscaped)).toBe(false);expect(await page.evaluate(()=>(window as any).voiceFixture.cancels)).toBeGreaterThan(0);
- // Its capture listener must be gone: the next Back belongs to the app again.
  await page.evaluate(()=>window.dispatchEvent(new Event('alpha-back',{cancelable:true})));expect(await page.evaluate(()=>(window as any).backEscaped)).toBe(true);
 });
 
-// LOOP-E: production Android reads through the resident runtime. The renderer must pick the resident
-// binding (execution 'device') over a paired voice, hand native only the one-use token with that
-// binding, and abort when the binding changes mid-reading or before the next one. The native call is
-// a synthetic in-page stub on the browser voice; this is renderer source evidence, not native.
 test('resident reading uses the resident binding and a binding change aborts it',async({page})=>{
  const result=await page.evaluate(async()=>{
   const {connectionController}=await import('/src/runtime/connection-ui.tsx');
@@ -95,13 +88,11 @@ test('resident reading uses the resident binding and a binding change aborts it'
   controller.subscribe=(listener:()=>void)=>{listeners.add(listener);return ()=>{listeners.delete(listener);};};
   let pending:{requestId:string;reject:(error:unknown)=>void}|null=null;
   proto.synthesizeLocalBrowserReading=function(input:any){calls.push(input);return new Promise((_,reject)=>{pending={requestId:input.requestId,reject};});};
-  // The real native cancellation settles its owned preparation call.
   proto.cancel=async(input:any)=>{if(pending&&(!input?.requestId||input.requestId===pending.requestId)){const owned=pending;pending=null;owned.reject(new DOMException('Cancelled','AbortError'));}};
   try{
    const voice=createNativeReadingVoice();
    if(!voice)return {voice:false};
    const chosen={binding:voice.binding,current:voice.isCurrent()};
-   // Resident reading needs playback (Kokoro) only: recognition being unavailable must not block it.
    proto.localSpeechStatus=async()=>({ready:false,playback:true,execution:'browser'});
    const readAloudWithoutRecognition=await voice.ready(new AbortController().signal);
    proto.localSpeechStatus=async()=>({ready:false,playback:false,execution:'browser'});
@@ -121,7 +112,6 @@ test('resident reading uses the resident binding and a binding change aborts it'
  expect(result.chosen!.binding).toMatchObject({execution:'device',ownerId:'fixture-owner',sessionId:'fixture-session'});
  expect(result.chosen!.binding.expiresAt).toBeGreaterThan(Date.now());
  expect(result.chosen!.current).toBe(true);
- // Exactly one native call, carrying the resident binding and the one-use token, never page text.
  expect(result.before).toBe(1);expect(result.calls).toHaveLength(1);
  expect(result.calls![0]).toMatchObject({execution:'device',ownerId:'fixture-owner',sessionId:'fixture-session',readingToken:'token-one'});
  expect(Object.keys(result.calls![0]).sort()).toEqual(['execution','expiresAt','ownerId','readingToken','requestId','sessionId']);

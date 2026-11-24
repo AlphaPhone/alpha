@@ -1,8 +1,6 @@
 import {test,expect,type Page} from '@playwright/test';
 import {readFile} from 'node:fs/promises';
 import {photosBridge} from './helpers/photos-bridge';
-// Real renderer/native-bridge contract with an explicitly held native Save.
-// This fixture does not qualify Android MediaStore or provider publication.
 async function openPendingVideoCopy(page:Page){
  const clip=await readFile(new URL('../../android/video-fixture/src/main/assets/qa-source.mp4',import.meta.url));
  await page.route('**/qa-video-source.mp4',route=>route.fulfill({status:200,contentType:'video/mp4',body:clip}));
@@ -92,14 +90,13 @@ test('late validated receipt does not replace a newer selected video',async({pag
  await page.getByRole('button',{name:'Back from photo',exact:true}).click();
  await page.evaluate(()=>(window as any).mediaFixture.emit());
  await expect(page.getByRole('button',{name:/^Video, /})).toHaveCount(2);
- await page.getByRole('button',{name:/^Video, /}).first().click();// newest first: the later copy leads
+ await page.getByRole('button',{name:/^Video, /}).first().click();
  await showsCopy(page);
  await page.evaluate(()=>(window as any).mediaFixture.releaseChecks());
  await expect.poll(()=>page.evaluate(()=>localStorage.getItem('alpha.photos.pending-copy.v1'))).toBe(null);
  await showsCopy(page);
  expect(await page.evaluate(()=>(window as any).mediaFixture.saveCount)).toBe(1);
 });
-/** The viewer shows the saved copy: its Info lists the copy's dimensions. */
 async function showsCopy(page:Page){
  await page.getByRole('button',{name:'Video info',exact:true}).click();
  await expect(page.getByRole('dialog',{name:'Video info',exact:true}).getByText('240 × 320',{exact:true})).toBeVisible();

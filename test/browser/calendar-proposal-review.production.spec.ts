@@ -3,21 +3,7 @@ import { completeAccessSetup } from './flag-off-android';
 import { test, expect, type Page } from '@playwright/test';
 import { installResidentAgentPlugin } from './helpers/resident-agent-plugin';
 
-// B-13 on the FLAG-OFF bundle with the Android bridge stubbed.
-//
-// On Android an agent calendar proposal is reviewed twice: first as a card in the conversation,
-// rendered by this renderer, then in a native dialog owned by the pinned Calendar plugin
-// (vendor/eliza plugin-native-calendar), which the stub stands in for. This file asserts the half
-// the renderer owns: the card states the title, the exact time in the event's zone, the zone, the
-// calendar and what happens to attendees; nothing reaches the native plugin before Approve; and
-// Approve hands over exactly the reviewed operation, once.
-//
-// Evidence boundary: source/test evidence for the shipped renderer. The agent, its proposal store,
-// the action journal and the Calendar plugin are in-page fixtures. The native dialog's own text
-// (calendar display name, time, location, description) is not rendered here and is not evidence
-// of anything; CalendarAgentCrudInstrumentedTest is the emulator gate for it.
 const AGENT = '6f1d3c3e-8c55-4c1b-9d1f-2b6f0b0d3a11';
-// Fixed instants in a zone that is not the browser's, so the card has to show the event's zone.
 const fields = { title: 'Venue booking call', description: 'From the venue meeting note', location: 'Main hall', start: '2027-03-01T05:00:00.000Z', end: '2027-03-01T06:00:00.000Z', timeZone: 'Asia/Tokyo' };
 const operation = { type: 'calendar_create_local', fields };
 const card = [
@@ -46,7 +32,6 @@ async function residentAgent(page: Page, operation: unknown, capabilities: strin
       payload: { action: 'device_action', version: 1, installationId: f.installationId, enrollmentId: 'fixture-enrollment', operation },
       ...extra,
     });
-    // One synthetic resident agent: authenticated identity, device enrollment and proposal store.
     const agent = (method: string, path: string, body: any, headers: Record<string, string>): { status: number; data: unknown } => {
       const ok = (data: unknown) => ({ status: 200, data });
       if (path === '/api/auth/me') return ok({ identity: { id: 'fixture-owner', kind: 'owner' }, access: { role: 'OWNER', mode: 'local' } });
@@ -106,8 +91,6 @@ async function residentAgent(page: Page, operation: unknown, capabilities: strin
           if (method === 'finish') { Object.assign(f.entry, { phase: 'terminal', status: input.status, summary: input.summary, result: input.result }); return {}; }
           throw Error('Unexpected journal effect');
         }
-        // The native Calendar plugin: Android shows its own review dialog inside executeAgent. The
-        // stub records exactly what the renderer handed over and answers as an approved save.
         if (plugin === 'AlphaCalendar') {
           if (method === 'requestAccess') return { status: 'granted' };
           if (method === 'executeAgent') { f.calendar.push(structuredClone(input)); return { status: 'applied', result: { version: 1, kind: input.operation.type, sourceId: '7', eventId: '42', revision: 'c'.repeat(64) } }; }
@@ -135,7 +118,7 @@ async function residentAgent(page: Page, operation: unknown, capabilities: strin
           if (method === 'request') {
             const path = new URL(input.url).pathname;
             if (path === '/api/v1/user') return { status: 200, data: { success: true, data: { id: account } } };
-            if (path === '/api/v1/subscription/entitlement') return { status: 404, data: {} }; // Deployed Cloud has no subscription entitlement route yet.
+            if (path === '/api/v1/subscription/entitlement') return { status: 404, data: {} };
             if (path === '/api/v1/billing/limits') return { status: 200, data: { success: true, data: { v2: { subscription: { status: 'available', value: { planKey: 'plus_monthly', state: 'active', currentPeriodEnd: '2099-01-01T00:00:00.000Z' } } } } } };
             f.unexpected.push('cloud ' + path); return { status: 404, data: {} };
           }
@@ -152,7 +135,6 @@ const fixture = (page: Page) => page.evaluate(() => {
 });
 async function connected(page: Page) {
   await page.goto('/');
-  // Development builds offer an explicit start; production starts the funded resident agent itself.
   const start = page.locator('.alpha-connection').getByRole('button', { name: 'Start local agent', exact: true });
   await expect.poll(async () => await start.isVisible().catch(() => false) || await page.evaluate(() => (window as any).declineFixture.installationId !== ''), { timeout: 30_000 }).toBe(true);
   if (await start.isVisible().catch(() => false)) await start.click();
@@ -170,12 +152,10 @@ test('Android: the proposal card states time zone, calendar and attendees, and A
   await expect.poll(async()=> (await page.locator('[data-alpha-layer="conversation"]').boundingBox())?.height??0).toBeGreaterThan(700);
   const approve = page.getByText('Create event', { exact: true });
   await expect(approve).toBeVisible({ timeout: 20_000 });
-  // The whole reviewed text, line for line, in the conversation.
   await expect(page.getByText(card.slice(1).join('\n'), { exact: true })).toBeVisible();
   await expect(page.getByText(card.slice(1).join('\n'), { exact: true })).toHaveCSS('white-space','pre-wrap');
   await expect(page.locator('.alpha-action-review button > span').first()).toBeHidden();
   await testInfo.attach('calendar-action-review',{body:await page.screenshot({animations:'disabled'}),contentType:'image/png'});
-  // Nothing has reached the native Calendar plugin or the journal.
   let state = await fixture(page);
   expect(state.calendar).toEqual([]);
   expect(state.decisions).toEqual([]);
@@ -187,7 +167,6 @@ test('Android: the proposal card states time zone, calendar and attendees, and A
   await expect(completed).toHaveCount(1);
   await expect(page.locator('.alpha-action-review')).toHaveCount(0);
   state = await fixture(page);
-  // One native request binds the reviewed operation to its reserved journal identity.
   expect(state.calendar).toHaveLength(1);
   expect(state.calendar[0].operation).toEqual(operation);
   expect(Object.keys(state.calendar[0]).sort()).toEqual(['journalIdentity', 'operation', 'operationId']);
@@ -197,9 +176,7 @@ test('Android: the proposal card states time zone, calendar and attendees, and A
   expect(state.decisions).toEqual(['approve']);
   expect(state.states).toEqual([['fixture-calendar', 'succeeded']]);
   expect(state.receipts).toEqual([expect.objectContaining({ outcome: 'applied', result: { version: 1, kind: 'calendar_create_local', sourceId: '7', eventId: '42', revision: 'c'.repeat(64) } })]);
-  // The renderer shows no second review of its own on Android: the native dialog is the second review.
   await expect(page.getByRole('dialog', { name: 'Review calendar change' })).toHaveCount(0);
-  // A reload does not run it again.
   await page.reload();
   await expect.poll(() => page.evaluate(() => (window as any).declineFixture.installationId), { timeout: 30_000 }).not.toBe('');
   expect((await fixture(page)).calendar).toEqual([]);
@@ -225,7 +202,6 @@ test('Android: a calendar proposal from an agent that has not negotiated Calenda
   await residentAgent(page, operation, []);
   await connected(page);
   await page.getByRole('button', { name: 'Open conversation', exact: true }).click();
-  // The phone has read the agent's proposals; the unsupported one gets no approval control.
   await expect.poll(() => page.evaluate(() => (window as any).declineFixture.lists), { timeout: 30_000 }).toBeGreaterThan(0);
   await page.waitForTimeout(1500);
   await expect(page.getByText('Create event', { exact: true })).toHaveCount(0);
@@ -235,5 +211,4 @@ test('Android: a calendar proposal from an agent that has not negotiated Calenda
   expect(state.states).toEqual([['fixture-calendar', 'pending']]);
 });
 
-// UI progress only: this feature fixture does not manufacture OS/provider grants.
 test.beforeEach(async({page})=>seedCompletedAccessSetup(page));

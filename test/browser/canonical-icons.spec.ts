@@ -5,16 +5,11 @@ for(const theme of ['light','dark'])test(`canonical launcher, dock and Files ass
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.goto('/?mode=dev&theme='+theme);
  const camera=page.getByRole('button',{name:'Camera',exact:true});
- // Home's app grid is Alpha's mobile shell (ui/mobile-shell, installed by prototype/home-shell.ts): each tile draws its
- // published asset as a single-color mask. Camera stays an ordinary named button; inspecting it
- // never starts a device capture.
  const tileGlyph=(name:string)=>page.getByRole('region',{name:'Home',exact:true}).getByRole('button',{name,exact:true}).locator('[data-mobile-shell-tile-face] > span[aria-hidden="true"]');
  for(const [name,asset] of [['Camera','camera'],['Workflows','workflow']]){
   await expect(tileGlyph(name)).toHaveCount(1);
   expect(await tileGlyph(name).evaluate(el=>getComputedStyle(el).maskImage)).toMatch(new RegExp('/icons/lucide/'+asset+'\\.svg"?\\)$'));
  }
- // Every shared Home tile names the published glyph it draws (data-mobile-shell-tile-icon); its
- // accessible name stays the label. The count covers every product tile and Apps.
  const homeTiles=await page.getByRole('region',{name:'Home',exact:true}).locator('[data-mobile-shell-tile]').evaluateAll(tiles=>tiles.map(tile=>({name:tile.getAttribute('aria-label'),icon:tile.getAttribute('data-mobile-shell-tile-icon'),mask:getComputedStyle(tile.querySelector('[data-mobile-shell-tile-face] > span[aria-hidden="true"]')||tile).maskImage,image:!!tile.querySelector('img')})));
  expect(homeTiles.length,'shared Home tiles').toBeGreaterThan(1);
  const glyphs=new Set([...Object.values(record.icons.views),record.icons.allApps]);
@@ -37,7 +32,6 @@ for(const theme of ['light','dark'])test(`canonical launcher, dock and Files ass
  const row=page.getByRole('button',{name:'Open Synthetic folder',exact:true});await expect(row.locator('[data-alpha-icon="/icons/lucide/folder.svg"]')).toHaveAttribute('data-alpha-icon','/icons/lucide/folder.svg');
  await page.screenshot({animations:'disabled',path:info.outputPath('folders-'+theme+'.png')});
  const icon=row.locator('[data-alpha-icon="/icons/lucide/folder.svg"]');expect(await icon.evaluate(el=>({tag:el.tagName,mask:getComputedStyle(el).maskImage,color:getComputedStyle(el).backgroundColor,width:el.getBoundingClientRect().width,hidden:el.getAttribute('aria-hidden'),viewbox:el.hasAttribute('viewBox')}))).toMatchObject({tag:'SPAN',hidden:'true',viewbox:false});expect(await icon.evaluate(el=>getComputedStyle(el).maskImage)).toContain('folder.svg');
- // The folder's own Back control uses the same pack.
  await expect(page.getByRole('button',{name:'Back',exact:true}).first().locator('[data-alpha-icon]')).toHaveAttribute('data-alpha-icon','/icons/lucide/chevron-left.svg');
  await page.screenshot({animations:'disabled',path:info.outputPath('folders-'+theme+'.png')});
 });

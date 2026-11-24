@@ -1,4 +1,3 @@
-// Scope-keyed promise ownership in the pinned renderer digest inbox.
 module RendererDigestQueue {
   type Request = {scope: str, order: int, phase: str, cancelled: bool, gets: int}
   type State = {lastOrder: int, requests: int -> Request}

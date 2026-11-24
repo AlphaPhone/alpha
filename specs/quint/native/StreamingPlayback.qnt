@@ -1,4 +1,3 @@
-// One StreamingSpeechPlayback writer and its single terminal callback.
 module StreamingPlayback {
   type State = {
     started: bool, terminal: bool, stopped: bool, writer: str, outputOpen: bool,
@@ -16,7 +15,6 @@ module StreamingPlayback {
     timestampAvailable: false, headFallback: false, callback: "none", callbacks: 0,
     failure: "none", zeroed: 0, ducked: false
   }
-  // Each admitted chunk contains two abstract sample frames, preserving partial writes.
   action offer(audible: bool): bool = all {
     not(s.stopped), not(s.terminal), not(s.complete), s.produced < 4, s.queue < 2,
     s' = {queue: s.queue + 1, produced: s.produced + 2,
@@ -76,7 +74,6 @@ module StreamingPlayback {
       failure: reason, queue: 0, zeroed: s.zeroed + s.queue * 2 + s.chunkRemaining,
       chunkRemaining: 0, ...s}
   }
-  // Owner stop is terminal and silent. Cleanup may still be releasing the output.
   action stop = s' = {terminal: true, stopped: true, queue: 0,
     zeroed: s.zeroed + s.queue * 2 + s.chunkRemaining, chunkRemaining: 0, ...s}
   action writerReleased = all {

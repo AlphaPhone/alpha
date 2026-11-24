@@ -5,7 +5,6 @@ import java.nio.file.*;
 import java.util.*;
 import org.json.*;
 
-/** Memory and disk are independent observations at the SharedPreferences boundary. */
 public final class StorePorts {
  public static int boot=1,stops;public static long install=1;
  public static Preferences preferences;

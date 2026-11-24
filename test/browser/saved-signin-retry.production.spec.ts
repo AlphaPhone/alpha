@@ -3,15 +3,6 @@ import {completeAccessSetup} from './flag-off-android';
 import { test, expect, type Page } from '@playwright/test';
 import {installResidentAgentPlugin} from './helpers/resident-agent-plugin';
 
-// A Cloud sign-in kept on the phone after a restart, under decision P-43 (resident agent always
-// present). An older build's "local apps without AI" choice is stored; it now reads as the resident.
-// The resident starts by itself at app start and the kept sign-in is tried once to bind inference.
-// An unreachable saved sign-in leaves local use available with no Cloud notice; the app can
-// reopen with that same key. A rejected key is reported as no longer valid and is not
-// offered again, while an admitted one binds inference. The agent runs in every case on this device.
-//
-// Flag-off production bundle with the Android bridge stubbed. The stub is not the native plugins,
-// the keystore or Eliza Cloud; the Android run is test-native-restart.ts inbox on an emulator.
 type Mode = 'offline' | 'rejected' | 'funded';
 type Call = { plugin: string; method: string; path?: string; url?: string; slot?: string };
 
@@ -21,7 +12,6 @@ async function boot(page: Page, mode: Mode) {
     const w = window as any; w.androidBridge = {}; w.residentCalls = [];
     const id = '9f1dc45a-4011-4e44-947a-30d999d24fa5';
     const resident = w.residentAgent = w.createResidentAgentPlugin({ owner: () => id, agentId: id });
-    // The state an older build's restart leaves: local apps chosen, and a sign-in still in the keystore.
     if (!sessionStorage.getItem('saved-signin-fixture')) { sessionStorage.setItem('saved-signin-fixture', '1'); localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({ kind: 'offline', localApps: true })); }
     const values: Record<string, string> = { 'cloud:production': JSON.stringify({ token: 'synthetic-cloud-key', credentialId: id, expiresAt: Date.now() + 600000 }) };
     const methods = (names: string[]) => names.map(name => ({ name, rtype: 'promise' }));
@@ -55,13 +45,11 @@ async function boot(page: Page, mode: Mode) {
       if (method === 'secureWrite') { values[input.slot] = input.value; return {}; }
       if (method === 'secureRemove') { delete values[input.slot]; return {}; }
       if (method === 'request') {
-        // No network: every Cloud request fails before an answer.
         if (mode === 'offline') throw Error('Connection request failed');
         const path = new URL(input.url).pathname;
-        // Cloud no longer accepts the kept sign-in.
         if (mode === 'rejected') return { status: 401, data: { error: 'unauthorized' } };
         if (path === '/api/v1/user') return { status: 200, data: { success: true, data: { id } } };
-        if (path === '/api/v1/subscription/entitlement') return { status: 404, data: {} }; // Deployed Cloud has no subscription entitlement route yet.
+        if (path === '/api/v1/subscription/entitlement') return { status: 404, data: {} };
         if (path === '/api/v1/billing/limits') return { status: 200, data: { success: true, data: { v2: { subscription: { status: 'available', value: { planKey: 'plus_monthly', state: 'active', currentPeriodEnd: '2099-01-01T00:00:00.000Z' } } } } } };
         if (path === '/api/v1/eliza/google/accounts') return { status: 200, data: { accounts: [] } };
         throw Error('Unexpected Cloud route: ' + path);
@@ -71,7 +59,6 @@ async function boot(page: Page, mode: Mode) {
   }, mode);
   await page.goto('/');
   await expect(page.getByRole('button', { name: 'Notes', exact: true })).toBeVisible();
-  // P-43: the resident starts by itself. Only a sign-in Cloud rejects opens the sign-in dialog.
   await expect.poll(() => agentCalls(page)).toContain('start');
   if (mode === 'funded') await completeAccessSetup(page);
   if (mode !== 'rejected') await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -88,7 +75,6 @@ test('an unreachable saved sign-in survives a new resident connection without re
   await expect.poll(() => calls(page)).toContainEqual(
     expect.objectContaining({plugin:'Agent',method:'request',path:'/api/auth/me'}),
   );
-  // An unreachable Cloud keeps local Home open and asks for no new sign-in.
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByRole('region',{name:'Eliza Cloud plan notice',exact:true})).toHaveCount(0);
   await expect(page.getByText(/Cloud cannot be reached|Sign in required/)).toHaveCount(0);
@@ -104,7 +90,6 @@ test('an unreachable saved sign-in survives a new resident connection without re
 
 test('a kept sign-in Cloud rejects is reported as no longer valid in the sign-in dialog that opens by itself; the agent keeps running', async ({ page }) => {
   await boot(page, 'rejected');
-  // Every Alpha Phone needs an Eliza Cloud account: the sign-in dialog opens and cannot be dismissed.
   const dialog = page.locator('[role="main"].alpha-cloud-sign-in');
   await expect(dialog.getByText('Sign-in expired', { exact: true })).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0);
@@ -117,8 +102,6 @@ test('a kept sign-in Cloud rejects is reported as no longer valid in the sign-in
 
 test('a kept sign-in Cloud admits binds inference at start and runs the on-device agent only', async ({ page }) => {
   await boot(page, 'funded');
-  // Identity and plan status were read. Once signed in, Inbox may read its Gmail accounts. No
-  // Cloud-hosted agent is listed, provisioned or restored and no remote session is opened.
   await expect.poll(() => agentCalls(page)).toContain('configureCloudProvider');
   const paths = await cloudRequests(page);
   expect(paths).toEqual(expect.arrayContaining(['/api/v1/user', '/api/v1/billing/limits']));
@@ -130,5 +113,4 @@ test('a kept sign-in Cloud admits binds inference at start and runs the on-devic
   expect((await selection(page))?.kind).toBe('resident');
 });
 
-// UI progress only: this feature fixture does not manufacture OS/provider grants.
 test.beforeEach(async({page})=>seedCompletedAccessSetup(page));

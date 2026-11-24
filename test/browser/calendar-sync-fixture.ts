@@ -1,5 +1,4 @@
 import type {Page} from '@playwright/test';
-// Synthetic Google/native boundaries; actual Settings, controller and checkpoint code.
 export async function calendarSyncFixture(page:Page,native=false,theme?:'light'|'dark'){
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.goto(theme?`/?mode=dev&theme=${theme}`:'/?mode=dev');

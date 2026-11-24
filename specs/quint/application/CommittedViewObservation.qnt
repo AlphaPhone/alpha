@@ -1,4 +1,3 @@
-// A settled manual-view observation across the renderer and host waiter.
 module CommittedViewObservation {
   type State = {view: str, hidden: bool, session: bool, disposed: bool, cacheView: str,
     accepted: bool, returned: str, host: str, lastReply: str, prepares: int, claims: int, replies: int, history: int}

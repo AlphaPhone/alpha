@@ -1,4 +1,3 @@
-/// Shared bridge permission epochs, draft admission and cancellation barrier.
 module SharedRecordingAdmission {
   type State = {
     epoch: int, foreground: bool, destroyed: bool, inCall: bool, permission: str,

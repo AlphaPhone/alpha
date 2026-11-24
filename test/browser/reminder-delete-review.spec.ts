@@ -28,7 +28,6 @@ for(const mode of ['fresh','stale','response-loss','staging-loss','navigate','le
   if(mode==='navigate')await page.evaluate(()=>window.dispatchEvent(new Event('alpha-back',{cancelable:true})));
   else await review.getByRole('button',{name:'Delete reminder',exact:true}).click();
  }
- // A changed selection is refused before admission: definite, never reported as an uncertain outcome.
  if(mode==='stale'){await expect(page.getByText('This reminder changed. Review it again before deleting.',{exact:true})).toBeVisible();await expect(page.getByText('Unconfirmed',{exact:true})).toHaveCount(0);expect(await page.evaluate(()=>(window as any).stages)).toBe(0);}
  if(['staging-loss','late-stale'].includes(mode))await expect(page.getByText('Unconfirmed',{exact:true})).toBeVisible();
  if(['fresh','response-loss','reload-loss'].includes(mode)){

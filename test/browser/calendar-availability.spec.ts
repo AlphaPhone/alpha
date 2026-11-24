@@ -2,10 +2,6 @@ import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import { returnToApps } from './app-navigation';
 import { test, expect, type Page } from '@playwright/test';
 
-// Real renderer, pairing, connection controller, proposal parser, journal orchestration,
-// foreground review dialogs and the browser's in-app calendar store. The agent's HTTP routes
-// and the two native bridges (connection, journal) are synthetic. This does not exercise
-// Android CalendarProvider, the calendar permission dialog, multiple accounts or a real agent.
 test.use({ timezoneId: 'America/New_York' });
 
 type Mode = 'share' | 'all-day' | 'free' | 'cancel-choice' | 'cancel-result' | 'changed-during-review' | 'left-during-review' | 'other-zone' | 'not-offered';
@@ -81,7 +77,6 @@ async function connect(page: Page, mode: Mode) {
   await local.getByRole('button', { name: 'Connect local agent', exact: true }).click();
   await page.locator('.alpha-connection-scrim').waitFor({ state: 'detached' });
 }
-/** Saves through the product's in-app calendar plugin. Titles exist only to prove they never leave. */
 async function saveEvent(page: Page, title: string, offsetHours: number, hours: number, allDay = false) {
   await page.evaluate(async ({ title, offsetHours, hours, allDay }) => {
     const { registerPlugin } = await import('/src/platform-plugins.ts');
@@ -99,21 +94,18 @@ for (const mode of ['share', 'all-day', 'free', 'cancel-choice', 'cancel-result'
     await connect(page, mode);
     if (mode !== 'free') await saveEvent(page, TITLES[0], 9, 1);
     if (mode === 'all-day') await saveEvent(page, TITLES[1], 0, 24, true);
-    // Outside the asked window: never part of the answer.
     await saveEvent(page, TITLES[2], 30, 1);
     await returnToApps(page);
     const input = page.getByRole('textbox', { name: 'Ask Alpha', exact: true });
     await input.fill('Am I free tomorrow?'); await input.press('Enter');
     await expect.poll(async () => (await fixture(page)).posts).toBe(1);
     const asked = await fixture(page);
-    // The request itself carries no calendar content, and the capability is sent only when offered.
     for (const title of TITLES) expect(JSON.stringify(asked.sent)).not.toContain(title);
     expect(asked.capabilityHeader.split(',').includes('calendar.availability-read.v1')).toBe(mode !== 'not-offered');
     expect(asked.sent.metadata.clientDevice.context.timeZone).toBe('America/New_York');
     const approve = page.getByText('Check availability', { exact: true });
 
     if (mode === 'other-zone' || mode === 'not-offered') {
-      // Unavailable and wrong-zone actions remain visible but never approvable.
       await expect(page.getByText(mode === 'other-zone' ? /Check availability: This availability check used a different time zone\. Ask again from this phone\./ : "This action isn't available on this phone.",{exact:mode==='not-offered'}).last()).toBeVisible();
       await expect(approve).toHaveCount(0);
       const after = await fixture(page);
@@ -128,7 +120,6 @@ for (const mode of ['share', 'all-day', 'free', 'cancel-choice', 'cancel-result'
     await expect(choose).toBeVisible();
     const check = choose.getByRole('button', { name: 'Check', exact: true });
     const box = choose.getByRole('checkbox', { name: 'In this app · Saved on this device' });
-    // Nothing is preselected and nothing can be read until the owner ticks a calendar.
     await expect(box).not.toBeChecked(); await expect(check).toHaveAttribute('aria-disabled', 'true');
     await expect(choose.getByRole('status')).toHaveText('Pick a calendar');
     await check.click({ force: true }); await expect(choose).toBeVisible(); await expect(choose.getByRole('status')).toHaveText('Pick a calendar');
@@ -157,7 +148,6 @@ for (const mode of ['share', 'all-day', 'free', 'cancel-choice', 'cancel-result'
     await expect(result.getByRole('heading')).toHaveText(mode === 'free' ? 'Free' : 'Busy');
     await expect(result.getByRole('listitem')).toHaveCount(mode === 'free' ? 0 : mode === 'all-day' ? 2 : 1);
     if (mode === 'all-day') await expect(result.getByRole('listitem').first()).toContainText('all day');
-    // The owner sees times only; titles, notes and places are not read into the review.
     for (const hidden of [...TITLES, 'PRIVATE_BODY', 'PRIVATE_PLACE']) await expect(result).not.toContainText(hidden);
     await expect(result).toContainText('Read from: In this app · Saved on this device.');
     await expect(result).toContainText('Shares times only');
@@ -169,12 +159,10 @@ for (const mode of ['share', 'all-day', 'free', 'cancel-choice', 'cancel-result'
       return;
     }
     if (mode === 'left-during-review') {
-      // Leaving the app during the review closes it; it never counts as approval.
       await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); });
       await expect(page.getByRole('dialog')).toHaveCount(0);
       await expect.poll(async () => (await fixture(page)).retained?.status).toBeTruthy();
       const left = await fixture(page);
-      // The journal records that nothing was shared; no result is retained or uploaded.
       expect(left.retained.status).not.toBe('succeeded');
       expect(left.retained.result.foregroundResult).toBeUndefined();
       for (const receipt of left.receipts) { expect(receipt.outcome).not.toBe('applied'); expect(receipt.result).toBeUndefined(); }
@@ -197,7 +185,6 @@ for (const mode of ['share', 'all-day', 'free', 'cancel-choice', 'cancel-result'
       busy: mode === 'free' ? [] : mode === 'all-day' ? [{ start: done.window.start, end: done.window.end, allDay: true, tentative: false }, timed] : [timed],
     };
     expect(done.receipts[0].outcome).toBe('applied');
-    // The uploaded receipt is exactly the reviewed result, and the journal retains the same value.
     expect(done.receipts[0].result).toEqual(expected);
     expect(done.retained.result.foregroundResult).toEqual(expected);
     const shared = JSON.stringify([done.receipts, done.retained]);
@@ -211,8 +198,6 @@ for (const mode of ['share', 'all-day', 'free', 'cancel-choice', 'cancel-result'
   });
 }
 
-// Exercise the actual in-app provider contract as well as the executor: an empty local
-// store is free, but loss of its freshness marker at either bridge read is unknown.
 test('empty browser calendar requires freshness evidence on both reads', async ({ page }) => {
   await page.goto('/');
   const outcomes = await page.evaluate(async () => {

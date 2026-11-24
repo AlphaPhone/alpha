@@ -1,9 +1,5 @@
 import {test,expect} from '@playwright/test';
 import {fenceNetwork} from './flag-off-android';
-// Production lane (flag-off build, mocks unset): the daily overview on a fresh profile with no
-// account. Empty widgets, avatars and fixture content are absent; the app grid still opens
-// Workflows without inventing results, and loading Home makes no
-// request beyond the app's own origin.
 
 test('fresh Home hides empty widgets without fixture content or outside requests',async({page},info)=>{
  const errors:string[]=[],outside=await fenceNetwork(page);
@@ -22,7 +18,6 @@ test('fresh Home hides empty widgets without fixture content or outside requests
  expect(outside).toEqual([]);
  expect(errors).toEqual([]);
  await page.screenshot({path:info.outputPath('home-overview-production.png'),animations:'disabled'});
- // The app remains reachable without an empty Home card.
  const workflows=home.getByRole('button',{name:'Workflows',exact:true});
  await expect(workflows).toBeVisible();
  await workflows.click();

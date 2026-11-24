@@ -17,8 +17,6 @@ async function audioJourney(page:Page,info:TestInfo,unsupported=false){
  await page.addInitScript(()=>{const play=HTMLMediaElement.prototype.play;HTMLMediaElement.prototype.play=function(){this.muted=true;return play.call(this);};});
  await canonicalNotesFixture(page);
  await installCloudVoiceFixture(page,'A recorded note saved through the real Notes interface.');
- // The synthetic signal goes only to the recording stream, never the speakers. Resume on
- // the actual Record click, since a prior navigation click need not unlock background Web Audio.
  await page.bringToFront();
  await page.evaluate(async()=>{
   const ctx=new AudioContext(),osc=ctx.createOscillator(),gain=ctx.createGain(),sink=ctx.createMediaStreamDestination();gain.gain.value=.1;osc.connect(gain);gain.connect(sink);osc.start();
@@ -54,8 +52,6 @@ async function audioJourney(page:Page,info:TestInfo,unsupported=false){
   expect(await page.evaluate(async()=>{const {pendingAudio}=await import('/src/browser/note-audio-store.ts');await pendingAudio();const db=await new Promise<IDBDatabase>(resolve=>{const r=indexedDB.open('alpha.browser.audio.v1');r.onsuccess=()=>resolve(r.result);});const count=await new Promise<number>(resolve=>{const r=db.transaction('audio').objectStore('audio').count();r.onsuccess=()=>resolve(r.result);});db.close();return count;})).toBe(0);
   await recorder.getByRole('button',{name:'Discard recording',exact:true}).click();await expect(recorder).toHaveCount(0);
   encodedSha256=await page.evaluate(async()=>{
-   // A valid three-second, mono PCM WAV. This represents retained bytes from an earlier
-   // capable client, not a MediaRecorder replacement or fabricated recording result.
    const rate=24000,samples=rate*3,bytes=new ArrayBuffer(44+samples*2),view=new DataView(bytes),text=(at:number,value:string)=>{for(let i=0;i<value.length;i++)view.setUint8(at+i,value.charCodeAt(i));};
    text(0,'RIFF');view.setUint32(4,bytes.byteLength-8,true);text(8,'WAVE');text(12,'fmt ');view.setUint32(16,16,true);view.setUint16(20,1,true);view.setUint16(22,1,true);view.setUint32(24,rate,true);view.setUint32(28,rate*2,true);view.setUint16(32,2,true);view.setUint16(34,16,true);text(36,'data');view.setUint32(40,samples*2,true);
    for(let sample=0;sample<samples;sample++)view.setInt16(44+sample*2,Math.round(Math.sin(2*Math.PI*440*sample/rate)*3276),true);
@@ -63,7 +59,6 @@ async function audioJourney(page:Page,info:TestInfo,unsupported=false){
    await retainPendingAudio('encoded-audio-storage-fixture',(window as any).fixture.binding,{blob:new Blob([bytes],{type:'audio/wav'}),durationMs:3000},'');
    return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),byte=>byte.toString(16).padStart(2,'0')).join('');
   });
-  // Recover through the real recorder journal and canonical claim/save; do not create a note by hand.
   await page.getByRole('button',{name:'Record voice note',exact:true}).click();
   await expect(recorder).toHaveAttribute('data-recorder-state','stopped');
   await recorder.getByRole('button',{name:'Save recording',exact:true}).click();
@@ -72,14 +67,11 @@ async function audioJourney(page:Page,info:TestInfo,unsupported=false){
  expect(await page.evaluate(()=>(window as any).cloudVoiceFixture.transcriptions.length)).toBe(0);
  await expect(page.getByRole('button',{name:'Play recording',exact:true})).toBeVisible();
  await page.getByRole('textbox',{name:'Title',exact:true}).fill('Browser audio journey');
- // Reload only after asynchronous title autosave reaches the durable document.
  await expect.poll(()=>page.evaluate(()=>(window as any).canonicalNotesFixture.state.notes.some((note:any)=>note.title==='Browser audio journey'&&note.body===''&&!!note.format?.data.audio?.audioId))).toBe(true);
  const stored=await storedAudio(page);expect(stored.bytes).toBeGreaterThan(44);expect(stored.decodedSeconds).toBeGreaterThan(0);expect(stored.channels).toBeGreaterThan(0);
  if(encodedSha256){expect(stored.sha256).toBe(encodedSha256);expect(stored.durationMs).toBe(3000);expect(stored.decodedSeconds).toBe(3);expect(stored.channels).toBe(1);}
  await info.attach('audio-storage-bytes',{body:JSON.stringify({capture:captures,...stored}),contentType:'application/json'});
  await page.evaluate(async()=>{const {ctx,osc}=(window as any).fixture;osc.stop();await ctx.close();});
- // The canonical transport is closed fixture state, not server persistence proof.
- // Rebind its unchanged records after a real client reload; audio stays in real IndexedDB.
  const kept=await page.evaluate(()=>(window as any).canonicalNotesFixture.state.notes);
  await canonicalNotesFixture(page,{notes:kept});await openCanonicalNotes(page);await page.getByRole('button',{name:'Open Browser audio journey',exact:true}).click();
  await expect(page.getByRole('button',{name:'Play recording',exact:true})).toBeVisible();
@@ -101,7 +93,6 @@ async function audioJourney(page:Page,info:TestInfo,unsupported=false){
  expect(replay).toEqual({audioId:note.audio.audioId,wrongOwner:true,count:1});
  await page.getByRole('button',{name:'Play recording',exact:true}).click();
  await expect(page.getByRole('button',{name:'Stop recording playback',exact:true})).toBeVisible();
- // Input cadence determines the captured clip's length; await its actual decoded duration.
  await expect(page.getByRole('button',{name:'Play recording',exact:true})).toBeVisible({timeout:Math.ceil(stored.decodedSeconds*1000)+5000});
  await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
  await expect(page.getByText('Deleted',{exact:true})).toBeVisible();

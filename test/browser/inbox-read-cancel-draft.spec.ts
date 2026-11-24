@@ -2,7 +2,6 @@ import {seedCompletedAccessSetup} from './flag-off-android';
 import {returnToApps} from './app-navigation';
 import {localDraftRow} from './inbox-draft-navigation';
 import {test,expect} from '@playwright/test';
-// Model an existing configured account; permission onboarding has its own acceptance tests.
 test.beforeEach(async({context})=>{await context.addInitScript(()=>{localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));localStorage.setItem('alpha.startup-permissions.v1',JSON.stringify({dismissed:true,attempted:{}}));});});
 
 for(const request of ['Refresh inbox','Search Gmail','Account revalidation'])for(const saved of [false,true])test(`${request==='Account revalidation'?'Late account revalidation after leaving Inbox':'Cancelling '+request} retains ${saved?'edited saved':'unsaved'} local mail`,async({page})=>{
@@ -60,7 +59,6 @@ for(const request of ['Refresh inbox','Search Gmail','Account revalidation'])for
  await expect(page.getByRole('textbox',{name:'Bcc',exact:true})).toHaveValue('blind@example.invalid');
  await expect(page.getByText('fixture@example.invalid',{exact:true})).toBeVisible();
  expect(await page.evaluate(()=>JSON.stringify((window as any).cancelMail.slots))).toBe(before);
- // Shared account metadata also serves Home, so it outlives this view. Explicit Inbox reads are cancelled.
  expect(await page.evaluate(()=>({aborts:(window as any).cancelMail.aborts,mutations:(window as any).cancelMail.mutations}))).toEqual({aborts:request==='Account revalidation'?0:1,mutations:0});
 });
 

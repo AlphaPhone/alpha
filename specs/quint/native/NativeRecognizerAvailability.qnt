@@ -1,4 +1,3 @@
-/// Per-language recognition availability, probe tickets and demotion deadlines.
 module NativeRecognizerAvailability {
   type Entry = {kind: str, until: int, ticket: int}
   type State = {entries: str -> Entry, pending: int -> str, tickets: int, now: int,

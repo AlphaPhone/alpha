@@ -1,4 +1,3 @@
-/// Native Cloud sign-in. Source mappings and finite abstractions are in manifest.json.
 module IdentitySession {
   type Activation = {
     owner: int, phase: str, receipt: bool, acknowledged: bool, ackTries: int,
@@ -20,7 +19,6 @@ module IdentitySession {
     oldKey: false, revoked: false, steward: false, callbackAccepted: false, cancelRequested: false
   }
   val workerBusy = s.activation.running or s.cleanupOwner != 0 or s.steward
-  /// The current Attempt may be replaced while its old worker is still returning.
   action begin(method: str): bool = all {
     s.phase.in(Set("idle", "authenticated", "cancelled", "expired", "exhausted", "failed", "activation-pending"))
       or (s.key and s.cancelRequested),
@@ -37,20 +35,17 @@ module IdentitySession {
       receipt: false, key: false, acknowledged: false, ackTries: 0,
       oldKey: s.owner != 0, revoked: false, steward: false, callbackAccepted: false, cancelRequested: false }
   }
-  /// The serialized worker reaches the new attempt only after the previous activation returns.
   action beginWork = all {
     s.phase == "starting", not(s.activation.running), s.cleanupOwner == 0,
     s' = { ...s, phase: if (s.method == "google") "browser" else "code",
       pending: if (s.method == "google") true else s.pending,
       pendingOwner: if (s.method == "google") s.attemptOwner else s.pendingOwner, pendingWrite: false }
   }
-  /// A replacement can retire the previous durable browser record after its own admission.
   action retireOrphanedPending = all { s.pending, s.pendingOwner != s.attemptOwner,
     s' = { ...s, pending: false, pendingOwner: 0, consumed: s.consumed.union(Set(s.pendingOwner)) } }
   action orphanedCallback = all {
     s.pending, not(s.liveIntent) or s.pendingOwner != s.attemptOwner, s' = s
   }
-  /// Wrong-state callbacks do not burn the encrypted pending record.
   action callback(token: int): bool = all {
     s.phase == "browser", s.pending, s.pendingOwner == s.attemptOwner, not(s.activation.running), s.cleanupOwner == 0,
     if (s.liveIntent and token == s.epoch)
@@ -58,24 +53,19 @@ module IdentitySession {
         consumed: s.consumed.union(Set(token)), callbackAccepted: true }
     else s' = s
   }
-  /// A failed durable burn retains the record and cannot enter exchange.
   action callbackBurnFailed = all {
     s.phase == "browser", s.pending, s.pendingOwner == s.attemptOwner, not(s.activation.running), s.cleanupOwner == 0,
     s' = { ...s, phase: "failed", callbackAccepted: false }
   }
-  /// Failed cancellation cannot claim that the stored pending record was removed.
   action cancelBurnFailed = all {
     s.phase == "browser", s.pending,
     s' = { ...s, phase: "cancelled", liveIntent: false, cancelRequested: true, callbackAccepted: false }
   }
-  /// Reloading an unretired record does not mint a new in-memory credential intent.
   action restorePending = all {
     s.pending, s.phase.in(Set("failed", "cancelled")),
     s' = { ...s, phase: "browser", liveIntent: false, cancelRequested: false }
   }
-  /// Browser resume without a result leaves the pending record for a late return.
   action browserClosed = all { s.phase == "browser", s' = s }
-  /// The browser-return grace deadline retires authority even if durable retirement fails.
   action browserGraceElapsed(retired: bool): bool = all {
     s.phase == "browser", s.pending, s.liveIntent,
     s' = { ...s, phase: "cancelled", liveIntent: false, cancelRequested: true,
@@ -101,7 +91,6 @@ module IdentitySession {
       activation: if (s.activation.owner != s.attemptOwner)
         { ...s.activation, receipt: false } else s.activation }
   }
-  /// A storage failure cannot proceed to acknowledging an unsaved key.
   action storageFailure = all {
     s.phase.in(Set("minted", "receipt-saved")), s' = { ...s, phase: "failed" }
   }
@@ -129,7 +118,6 @@ module IdentitySession {
       ackTries: if (current) updated.ackTries else s.ackTries }
   }
   action ack(success: bool): bool = ackWithReceipt(success, false)
-  /// Restart drops transient revocation authority and preserves any already-observed server revocation.
   action restart = if (s.owner == 0) {
     s' = { ...s, phase: if (s.pending) "browser" else "idle",
       attemptOwner: if (s.pending) s.attemptOwner else 0,
@@ -161,7 +149,6 @@ module IdentitySession {
       revoked: if (current) success else s.revoked }
   }
   action cooldownElapsed = all { s.cooldown, s' = { ...s, cooldown: false } }
-  /// Key persistence is the commit point. Cancelling the UI cannot stop activation.
   action cancel = all {
     not(s.phase.in(Set("idle", "authenticated"))),
     if (s.key) s' = { ...s, cancelRequested: true, liveIntent: false }
@@ -171,7 +158,6 @@ module IdentitySession {
       liveIntent: false, pendingWrite: false, cancelRequested: true,
       consumed: if (s.method == "google") s.consumed.union(Set(s.epoch)) else s.consumed }
   }
-  /// complete() publishes authentication before its finally block drops the transient session.
   action releaseSteward = all {
     val currentDone = s.steward and s.phase.in(Set("authenticated", "activation-pending", "cancelled", "failed"))
     val activationDone = s.activation.steward and s.activation.phase.in(Set("authenticated", "activation-pending"))

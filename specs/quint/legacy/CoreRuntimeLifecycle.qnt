@@ -1,5 +1,3 @@
-// Literal upstream RuntimeLifecycle at 4787d51a142c. Stable model values are
-// integer identities; one monitor encodes the source action invariant exactly.
 module CoreRuntimeLifecycleTemplate {
   const Turns: Set[int]
   const Stoppers: Set[int]

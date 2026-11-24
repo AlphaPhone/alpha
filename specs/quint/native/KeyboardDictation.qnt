@@ -1,4 +1,3 @@
-/// Explicit keyboard dictation gate. Same-field/account facts are external observations.
 module KeyboardDictation {
  var phase: str
  var generation: int

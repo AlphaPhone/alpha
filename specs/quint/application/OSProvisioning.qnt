@@ -1,4 +1,3 @@
-/// Recoverable first-run Home request and keyboard defaults; explicit appearance action.
 module OSProvisioning {
   type State = { eligible: bool, alive: bool, phase: str, generation: int,
     held: bool, keyboard: str, complete: bool, completionAuthorized: bool,

@@ -1,10 +1,3 @@
-// What the flag-off Android renderer says when a resident reply fails, when the phone loses its
-// network, and when the native stream refuses, is rate-limited or drops; and what a restart during
-// a held reply shows. None of these resends a message.
-//
-// Evidence boundary: source/test evidence for the flag-off renderer only. The Capacitor bridge is
-// the stub in flag-off-android.ts plus resident-stub.ts; it is not the native Agent plugin, the
-// resident runtime, Eliza Cloud, Cerebras or a device.
 import { test, expect, type Page } from '@playwright/test';
 import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface, residentHome } from './flag-off-android';
 import { residentStub, stub, setStub } from './resident-stub';
@@ -15,7 +8,6 @@ const composer = (page: Page) => page.locator('[data-alpha-layer="composer"][ari
 const conversation = (page: Page) => page.locator('[data-alpha-layer="conversation"]');
 const bubble = (page: Page, text: string) => page.getByRole('button', { name: 'Message actions: ' + text, exact: true });
 const UNKNOWN = 'Sorry, I couldn’t finish that reply.';
-// Retired generic refusal (owner, 2026-11-03): it never shows at the composer or as a toast.
 const NOT_SENT = 'Your message is back in the composer';
 
 async function connected(page: Page, nativeSignIn = true) {
@@ -26,8 +18,6 @@ async function connected(page: Page, nativeSignIn = true) {
   return foreign;
 }
 async function send(page: Page, text: string) { await composer(page).fill(text); await composer(page).press('Enter'); }
-/** A send refused before dispatch says nothing (owner, 2026-11-03). It is seen settling in the
- * composer's own saved copy: marked as sending, then unmarked with the text back in the composer. */
 async function sendRefused(page: Page, text: string) {
   await page.evaluate(() => {
     const w = window as any, native = w.Capacitor.nativePromise; w.draftMarks = [];
@@ -42,11 +32,9 @@ async function sendRefused(page: Page, text: string) {
 }
 
 const KINDS = {
-  // Cloud's billing refusal of a signed-in account: one answer naming both ways back (cloud-membership-ui.tsx).
   insufficient_credits: 'Billing declined',
   provider_issue: 'Reply failed',
   generation_timeout: 'Reply failed',
-  // Bound to an admitted plan, yet the agent ran without a provider: a check of what native bound is offered.
   no_provider: 'AI offline',
 } as const;
 
@@ -58,13 +46,10 @@ for (const [kind, text] of Object.entries(KINDS)) for (const frame of ['done', '
     if (kind === 'insufficient_credits') await stub(page, s => { s.accounts[0].balance = 0; s.accounts[0].plan = 'none'; s.persist(); });
     await send(page, `Failing ${kind}`);
     await expect(conversation(page).getByText(text, { exact: true })).toHaveCount(1);
-    // Upstream's provider prose is never shown, and the agent's own outcome needs no history check.
     await expect(page.getByText(/PRIVATE_PROVIDER_ERROR_CANARY/)).toHaveCount(0);
     await expect(page.getByText(UNKNOWN, { exact: true })).toHaveCount(0);
     await expect(bubble(page, `Failing ${kind}`)).toHaveCount(1);
     if (kind === 'insufficient_credits') {
-      // One answer in the chat, and Subscription opens with plan selection and code entry.
-      // The fixture confirms zero cash and no active plan; neither is inferred from the other.
       const account = page.getByRole('dialog', { name: 'Account', exact: true });
       await expect(account).toBeVisible();
       const membership = account.getByRole('region', { name: 'Balance and membership', exact: true });
@@ -77,7 +62,6 @@ for (const [kind, text] of Object.entries(KINDS)) for (const frame of ['done', '
       await account.getByRole('button', { name: 'Close Account', exact: true }).click();
       await expect(account).toHaveCount(0);
       await button(page, 'Expand chat').click();
-      // No second billing message; the answer carries the one offer, which reopens the same popup.
       await expect(page.getByRole('button', { name: /^Manage billing in Eliza Cloud/ })).toHaveCount(0);
       const offer = page.getByRole('button', { name: /^Subscription/ });
       await expect(offer).toHaveCount(1);
@@ -90,15 +74,12 @@ for (const [kind, text] of Object.entries(KINDS)) for (const frame of ['done', '
       await expect(account.getByRole('textbox',{name:'Membership code'})).toBeVisible();
       await page.screenshot({path:info.outputPath('membership-code-wide.png'),animations:'disabled'});
       await page.setViewportSize({width:412,height:915});
-      // Plan selection opens Cloud billing only after the account check; nothing is bought here.
       await membership.getByRole('button', { name: 'Choose a plan', exact: true }).click();
-      // This explicit action opens the existing billing site; it does not purchase a plan.
       await expect(page.getByRole('region',{name:'Plans',exact:true}).getByText('Plus',{exact:true})).toBeVisible();
       expect(await stub(page,s=>s.opened)).toEqual([]);
     } else {
       if (kind === 'no_provider') await expect(page.getByRole('button', { name: /^Check Eliza Cloud again/ })).toHaveCount(1);
       else await expect(page.getByRole('button', { name: /^(Manage (plan|billing)|Check Eliza Cloud again|Set up AI)/ })).toHaveCount(0);
-      // Agent connection no longer says the agent is ready.
       await page.evaluate(() => window.dispatchEvent(new Event('launcher-home')));
       await button(page, 'Settings').click();
       await button(page, 'Account').click();
@@ -107,10 +88,8 @@ for (const [kind, text] of Object.entries(KINDS)) for (const frame of ['done', '
       await expect(connection).toBeVisible();
       await expect(connection).not.toContainText('Connected');
     }
-    // Exactly one stream request and no automatic resend of any kind.
     await page.waitForTimeout(1500);
     if(kind==='insufficient_credits'){
-      // A later plan refresh must not turn this known terminal refusal into an unknown outcome.
       await expect(conversation(page).getByText(text,{exact:true})).toHaveCount(1);
       await expect(page.getByText('May still finish',{exact:true})).toHaveCount(0);
     }
@@ -122,15 +101,12 @@ for (const [kind, text] of Object.entries(KINDS)) for (const frame of ['done', '
   });
 }
 
-// The on-device agent runs without Eliza Cloud inference when the account has no plan (P-43). A chat
-// turn gets the agent's honest answer in the conversation with the plan actions, never "Set up AI".
 for (const frame of ['done', 'error'] as const) test(`a provider-less turn without a plan (${frame} frame) answers honestly and offers Redeem code or choose a plan`, async ({ page }) => {
   test.setTimeout(120_000);
   const foreign = await fenceNetwork(page);
   await flagOffAndroid(page);
   await residentStub(page, { accounts: [{ ...owner, plan: 'none' }] });
   await residentHome(page);
-  // No plan is a notice beside the running agent, not a gate.
   await expect(page.getByRole('region', { name: 'Eliza Cloud plan notice' })).toContainText('AI off');
   await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(await harness(page, f => f.calls.filter((call: string) => call === 'Agent.start').length)).toBeGreaterThan(0);
@@ -143,12 +119,9 @@ for (const frame of ['done', 'error'] as const) test(`a provider-less turn witho
   const plan = page.getByRole('button', { name: /^Choose plan/ });
   await expect(plan).toHaveCount(1);
   await plan.click();
-  // On the phone's own agent the plan action opens the resident account & plan panel (plan headline,
-  // Recheck, Renew); it carries the Subscription controls.
   const account = page.getByRole('dialog', { name: 'Account', exact: true });
   await expect(account).toBeVisible();
   await expect(account.getByRole('region', { name: 'Balance and membership', exact: true })).toBeVisible();
-  // Nothing was purchased or opened, and the message was sent once.
   expect(await stub(page, s => s.opened)).toEqual([]);
   expect(await harness(page, f => f.streams)).toBe(1);
   expect(await harness(page, f => f.unexpected)).toEqual([]);
@@ -159,7 +132,6 @@ test('without a network the composer stays silent, sends nothing, keeps the draf
   test.setTimeout(120_000);
   await connected(page);
   const draftStatus = page.getByRole('status', { name: 'Assistant draft status', exact: true });
-  // Owner, 2026-11-03: no line, toast or banner says the phone is offline or that the send was refused.
   const offlineText = page.getByText(/AI needs a connection|until this phone is back online|Cloud cannot be reached/);
   await expect(draftStatus).toHaveCount(0);
   await context.setOffline(true);
@@ -172,12 +144,10 @@ test('without a network the composer stays silent, sends nothing, keeps the draf
   await expect(offlineText).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Eliza Cloud plan notice', exact: true })).toHaveCount(0);
   expect(await harness(page, f => f.streams)).toBe(0);
-  // Local apps keep working: Notes opens.
   await page.evaluate(() => window.dispatchEvent(new Event('launcher-home')));
   await button(page, 'Notes').click();
   await expect(page.locator('html')).toHaveAttribute('data-active-view', 'notes');
   await page.evaluate(() => window.dispatchEvent(new Event('launcher-home')));
-  // Readiness is retracted while offline.
   await button(page, 'Settings').click();
   await button(page, 'Account').click();
   await page.getByRole('button', {name:/^AI (Cloud|Own keys)$/}).click();
@@ -188,7 +158,6 @@ test('without a network the composer stays silent, sends nothing, keeps the draf
   await context.setOffline(false);
   await page.waitForFunction(() => navigator.onLine);
   await expect(offlineText).toHaveCount(0);
-  // Only the owner's own Send posts it, once.
   await composer(page).fill('Sent when back online'); await composer(page).press('Enter');
   await expect(bubble(page, 'Resident reply 1')).toHaveCount(1);
   expect(await harness(page, f => f.posts)).toHaveLength(1);
@@ -200,7 +169,6 @@ for (const mode of ['reject', 'busy'] as const) {
     await connected(page);
     await setStub(page, { stream: mode });
     await sendRefused(page, `Refused by ${mode}`);
-    // A 429 refusal names its own reason; a refusal with none says nothing, the text simply comes back.
     if (mode === 'busy') await expect(page.getByText('Not sent. Busy · not sent', { exact: true })).toBeVisible();
     await expect(page.getByText(NOT_SENT)).toHaveCount(0);
     await expect(bubble(page, `Refused by ${mode}`)).toHaveCount(0);
@@ -224,7 +192,6 @@ test('a resident stream that fails after the turn was recorded says the reply co
   await expect(conversation(page).getByText(UNKNOWN, { exact: true })).toHaveCount(1);
   await expect(page.getByRole('button', { name: /^Check saved conversation/ })).toHaveCount(0);
   await expect(composer(page)).toHaveValue('');
-  // The one re-read of a dropped stream reuses the same clientMessageId; nothing new is posted.
   const [body] = await stub(page, s => s.bodies);
   expect(await stub(page, s => s.recoveries)).toEqual([body.clientMessageId]);
   await page.waitForTimeout(1500);
@@ -249,7 +216,6 @@ test('a restart while the resident holds a reply posts nothing and shows the use
   await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0, { timeout: 30_000 });
   await button(page, 'Open conversation').click();
   await expect(bubble(page, 'Held across a restart')).toHaveCount(1, { timeout: 30_000 });
-  // The restored chat says it will check once; the agent finishes after the restart.
   await expect(conversation(page).getByText('May still finish', { exact: true })).toHaveCount(1);
   await stub(page, s => s.finishHeld());
   await expect(bubble(page, 'Held reply 1')).toHaveCount(1, { timeout: 60_000 });

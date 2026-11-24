@@ -1,4 +1,3 @@
-// Alpha Home edit gestures, pointer ownership and retirement at shell boundaries.
 module HomeGesture {
   type Press = {pointer: int, key: str}
   type Drag = {pointer: int, key: str, moved: bool}

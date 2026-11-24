@@ -1,4 +1,3 @@
-/// Finite projection of the shared service lifecycle and its actual host registries.
 module CoreServiceLifecycle {
   val ids = Set(1, 2)
   val callers = Set(1, 2, 3)

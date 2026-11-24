@@ -1,4 +1,3 @@
-// Exact renderer ownership of the common destination chooser.
 module SharePanelAdmission {
   type Effect = {panel: int, destination: str, closed: bool}
   type State = {seen: int, active: int, hidden: bool, invalid: Set[int], emails: Set[int],

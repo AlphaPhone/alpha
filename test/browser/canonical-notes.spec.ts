@@ -88,8 +88,6 @@ test('a lost canonical recording save reply is reconciled without another create
  expect(result.notes[0].format.data).toMatchObject({recordingId:'11111111-2222-4333-8444-555555555555',folderId:'f-original',dur:3});
 });
 
-// Live agent Notes render through Alpha's own Notes template (the one mock mode shows), saved through
-// the canonical Notes client: the same committed identity, expectedRevision and Trash restore.
 test('canonical Notes UI creates, edits, trashes and restores the same committed identity',async({page})=>{
  const {foreign,errors}=await canonicalNotesFixture(page);await openCanonicalNotes(page);
  await expect(page.getByRole('heading',{name:'Notes',exact:true})).toBeVisible();
@@ -107,7 +105,6 @@ test('canonical Notes UI creates, edits, trashes and restores the same committed
  await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
  await expect.poll(()=>snapshot(page).then((s:any)=>s.notes.length)).toBe(0);
  await expect(page.getByText('Deleted',{exact:true})).toBeVisible();
- // The agent's restore-only Trash is the Recently deleted folder: no retention line, no Empty, no Delete now.
  await page.getByRole('button',{name:'Recently deleted',exact:true}).click();
  const trash=page.locator('[data-alpha-subview="notes-trash"]');
  await expect(trash.getByRole('button',{name:'Empty Recently deleted',exact:true})).toHaveCount(0);
@@ -117,13 +114,11 @@ test('canonical Notes UI creates, edits, trashes and restores the same committed
  await ask.getByRole('button',{name:'Recover',exact:true}).click();
  await expect.poll(()=>snapshot(page).then((s:any)=>s.notes.length)).toBe(1);
  const after=(await snapshot(page)).notes[0];expect(after.id).toBe(before.id);expect(after.body).toBe('\nUpdated exact text.');expect((await snapshot(page)).trash).toEqual([]);
- // The last item recovered: the folder closes and the chip goes.
  await expect(trash).toHaveCount(0);await expect(page.getByRole('button',{name:'Recently deleted',exact:true})).toHaveCount(0);
  await page.getByRole('button',{name:'Open Canonical browser note',exact:true}).click();
  await expect(page.getByRole('textbox',{name:'Note',exact:true})).toHaveValue('Updated exact text.');
  const requests=await page.evaluate(()=>(window as any).canonicalNotesFixture.requests);
  for(const capability of ['create-note','update-note','delete-note','restore-note'])expect(requests.some((r:any)=>r.path==='/api/views/notes/interact'&&r.body.capability===capability)).toBe(true);
- // Every edit of an existing record names the revision it was made against.
  for(const update of requests.filter((r:any)=>r.body?.capability==='update-note'))expect(Number.isSafeInteger(update.body.params.expectedRevision)).toBe(true);
  expect(requests.every((r:any)=>['/api/notes/state','/api/views/notes/interact'].includes(r.path))).toBe(true);expect(requests.filter((r:any)=>r.path==='/api/notes/state').length).toBeGreaterThanOrEqual(2);
  expect(foreign).toEqual([]);expect(errors).toEqual([]);
@@ -240,7 +235,6 @@ test('a checklist, pin and Back leave Alpha cards in the same canonical record',
  await expect.poll(()=>snapshot(page).then((s:any)=>s.notes[0]?.format)).toEqual({kind:'list',data:{items:[{t:'Oat milk',done:true},{t:'Lemons',done:false}],pinned:true}});
  const card=page.getByRole('button',{name:'Open Groceries',exact:true});
  await expect(card).toBeVisible();
- // The checklist row: its items in the two-line preview, under Pinned.
  await expect(card).toContainText('☑ Oat milk');await expect(card).toContainText('☐ Lemons');
  await expect(page.locator('.notes-section',{hasText:'Pinned'})).toBeVisible();
  expect(foreign).toEqual([]);expect(errors).toEqual([]);
@@ -269,7 +263,6 @@ test('slow saves: typing during a new note\'s first save makes one record, and D
  await expect.poll(()=>snapshot(page).then((s:any)=>s.notes.map((n:any)=>[n.title,n.body]))).toEqual([['Hello','\nWorld']]);
  const creates=(await page.evaluate(()=>(window as any).canonicalNotesFixture.requests)).filter((r:any)=>r.body?.capability==='create-note');
  expect(creates).toHaveLength(1);
- // Delete while the first save of a new note is still in flight: it waits, then trashes that record.
  await page.getByRole('button',{name:'New note',exact:true}).click();
  await title.fill('Fresh');
  await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
@@ -287,8 +280,6 @@ test('an agent append refreshes the open note and its row, and a stale owner edi
   {id:'groceries',title:'Groceries',body:'',color:'yellow',createdAt:at,updatedAt:at,format:{kind:'list',data:{items:[{t:'Oat milk',done:false}]}}},
  ]});
  await openCanonicalNotes(page);
- // The agent's NOTES action commits outside the view; its reply's same-session invalidation
- // (connection-ui.tsx, app-record-completion.ts) is the only signal the view gets.
  const agentEdit=(id:string,announce=true)=>page.evaluate(({id,announce})=>{
   const f=(window as any).canonicalNotesFixture,note=f.state.notes.find((n:any)=>n.id===id);
   if(note.format?.kind==='list')note.format.data.items.push({t:'Agent item',done:false});else note.body+='\nAppended by the agent';
@@ -300,15 +291,12 @@ test('an agent append refreshes the open note and its row, and a stale owner edi
  await expect(body).toHaveValue('Confirm attestation flow');
  await agentEdit('launch');
  await expect(body).toHaveValue('Confirm attestation flow\nAppended by the agent');
- // The owner's next edit names the revision that includes the agent's append.
  await body.fill('Confirm attestation flow\nAppended by the agent\nOwner line');
  await expect.poll(()=>snapshot(page).then((s:any)=>s.notes.find((n:any)=>n.id==='launch').body)).toBe('\nConfirm attestation flow\nAppended by the agent\nOwner line');
  await page.getByRole('button',{name:'Back to notes',exact:true}).click();
  await expect(page.getByRole('button',{name:'Open Launch plan',exact:true})).toContainText('Owner line');
  await agentEdit('groceries');
  await expect(page.getByRole('button',{name:'Open Groceries',exact:true})).toContainText('Agent item');
- // An agent change the view has not heard about yet: the owner's edit names an older revision, so
- // it is refused, the owner's text stays in the editor and nothing overwrites the agent's change.
  await page.getByRole('button',{name:'Open Launch plan',exact:true}).click();
  await agentEdit('launch',false);
  await body.fill('Owner text against an older revision');
@@ -373,7 +361,6 @@ test('canonical Notes editor stays focusable beside half chat and isolates witho
  expect(foreign).toEqual([]);expect(errors).toEqual([]);
 });
 
-// Existing authenticated invalidation triggers a read without closing or discarding the editor.
 const refreshCanonicalRead=(page:import('@playwright/test').Page)=>page.evaluate(()=>{
  window.dispatchEvent(new CustomEvent('alpha:canonical-notes-invalidated',{detail:{sessionId:'canonical-fixture-session'}}));
 });
@@ -430,7 +417,6 @@ test('a later read failure and recovery cannot clear accepted-write uncertainty 
  const acceptedReadsBeforeRecovery=await page.evaluate(()=>(window as any).canonicalNotesFixture.acceptedReads.length);
  await page.evaluate(()=>(window as any).canonicalNotesFixture.failReads=false);
  await refreshCanonicalRead(page);
- // Only a successful original refresh records the current controller's accepted snapshot.
  await expect.poll(()=>page.evaluate(({after,revision})=>(window as any).canonicalNotesFixture.acceptedReads
   .slice(after).some((read:any)=>read.current&&read.sameController&&read.revision===revision),
   {after:acceptedReadsBeforeRecovery,revision:accepted.revision})).toBe(true);
@@ -468,7 +454,6 @@ test('read recovery cannot replace a no-draft uncertain interaction with a read-
  await expect(restore).toBeVisible();
  await page.evaluate(()=>(window as any).canonicalNotesFixture.failReads=false);
  await refreshCanonicalRead(page);
- // The old Trash row disappearing proves the accepted read snapshot reached the actual UI.
  await expect(restore).toHaveCount(0);
  await expect(page.getByText(changeWarning,{exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'Reload Notes',exact:true})).toBeVisible();

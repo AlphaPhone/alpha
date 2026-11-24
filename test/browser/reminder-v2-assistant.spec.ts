@@ -3,11 +3,6 @@ import {presentDeviceRecordOperation} from '../../apps/app/src/runtime/device-re
 import { returnToApps } from './app-navigation';
 import { test, expect } from '@playwright/test';
 
-// Real renderer, pairing, connection controller, proposal parser and journal
-// orchestration and real browser reminder storage/review. Connection and journal
-// boundaries are controlled fixtures; no real agent or external service is used.
-// v1: a legacy reminder (no alertMinutes, no timingVersion) and a v1-only peer.
-// v2: a no-alert reminder (timingVersion 2), except snooze-alert, which seeds a 0-minute alert.
 const cases = [
   ...(['create', 'read', 'update', 'complete', 'snooze', 'cancel', 'stale', 'recurring-complete'] as const).map(mode => ({ target: 'v1' as const, mode })),
   ...(['read', 'update', 'complete', 'snooze', 'snooze-alert', 'cancel', 'stale', 'recurring-complete', 'older-peer', 'create-none', 'create-lead', 'create-repeat', 'create-old-peer'] as const).map(mode => ({ target: 'v2' as const, mode })),
@@ -102,8 +97,6 @@ for (const { target: version, mode } of cases) {
     const input=page.locator('[data-alpha-layer="composer"][aria-hidden="false"], [data-alpha-layer="conversation"][aria-hidden="false"]').getByRole('textbox').first();
     await input.fill('Review this reminder action before applying it.');await input.press('Enter');
     if(mode==='older-peer'||mode.startsWith('create-')){
-      // Browser reminders use the runtime scheduler, not a second phone-creation
-      // lifecycle. The saved unsupported proposal is explained, never approved.
       await expect(page.getByText("This action isn't available on this phone.",{exact:true}).first()).toBeVisible();
       await expect(page.getByText(/Review the action below\./)).toHaveCount(0);
       const fixture=await page.evaluate(()=>(window as any).recoveryFixture);
@@ -147,9 +140,6 @@ for (const { target: version, mode } of cases) {
     }
     await expect.poll(()=>page.evaluate(()=>(window as any).recoveryFixture.receipts),{timeout:mode==='cancel'?20_000:5_000}).toBe(1);
     if(mode==='cancel')await expect.poll(()=>page.evaluate(async()=>JSON.parse((await(await import('/src/browser/reminder-store.ts')).reminderDocument.readRaw())!).reminders[0].status),{timeout:20_000}).toBe('cancelled');
-    // A no-alert reminder cannot be snoozed: the approved v2 snooze is refused and changes nothing.
-    // The refusal follows the claimed boundary: retain conservative uncertainty,
-    // prove the exact browser record stayed unchanged, and never report success.
     const refused=v2&&mode==='snooze';
     const rows=await page.evaluate(async ()=>JSON.parse((await (await import('/src/browser/reminder-store.ts')).reminderDocument.readRaw())!).reminders);expect(rows).toHaveLength(mode==='create'||mode.startsWith('create-')?2:1);
     const receipt=await page.evaluate(()=>(window as any).calendarRetained);expect(receipt.summary).not.toContain('Android');expect(receipt.status).toBe(mode==='stale'?'failed':mode==='cancel'||refused?'unknown':'succeeded');

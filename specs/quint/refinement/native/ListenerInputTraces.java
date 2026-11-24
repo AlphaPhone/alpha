@@ -11,7 +11,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import org.json.JSONObject;
 
-/** Runs the whole listener capture loop and recognition worker with synthetic PCM and callbacks. */
 public final class ListenerInputTraces {
  final ListeningService service=new ListeningService();
  final Trace trace;

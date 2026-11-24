@@ -1,7 +1,5 @@
 import {test,expect} from '@playwright/test';
 
-// Rendered shipping adapters with a controlled native metadata/handoff boundary.
-// No vault, credentials, real provider selection or installed APK is accessed.
 async function nativeFixture(page:any,installation='installed',selection='none') {
  await page.addInitScript(({installation,selection}:any)=>{
   const w=window as any;w.androidBridge={};localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));
@@ -35,11 +33,8 @@ async function nativeFixture(page:any,installation='installed',selection='none')
  await page.getByRole('button',{name:'Settings',exact:true}).click();
  await page.getByRole('button',{name:'Apps',exact:true}).click();
  await page.getByRole('button',{name:'Passwords',exact:true}).click();
- // Proton Pass is one collapsed row (status dot + word); its choices open beneath it.
  await page.getByRole('button',{name:'Proton Pass',exact:true}).click();
 }
-// Settings › Passwords › Password provider: one row whose value is the selection Android reports
-// Android's answer is read again when Alpha returns to the front.
 const provider=(page:any)=>page.getByRole('button',{name:'Choose provider',exact:true});
 const selection=(page:any)=>page.getByText('Selection',{exact:true}).locator('..');
 const autofill=(page:any)=>page.getByText('Autofill',{exact:true}).locator('..');

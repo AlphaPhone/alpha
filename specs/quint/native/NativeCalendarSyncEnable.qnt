@@ -1,4 +1,3 @@
-// Native Calendar consent activation and pause, with exact journal CAS read positions.
 module NativeCalendarSyncEnable {
   type State = {epoch: int, lease: bool, leaseEpoch: int, dialog: bool, prepareResult: str,
     enableResult: str, pauseResult: str, statusResult: str, durable: str, writes: List[str],
@@ -41,7 +40,6 @@ module NativeCalendarSyncEnable {
   }
   action pause = all {
     s.epoch<3,s.compareAttempts<=24,
-    // The scope contains a completed consent, or consent whose positive click is already owned.
     s.enableResult!="pending" or s.held!="none",
     val exhausted=s.pauseRefusals==8
     val retired={...s,epoch:s.epoch+1,lease:false,leaseEpoch:-1,dialog:false,pauseRefusals:0,

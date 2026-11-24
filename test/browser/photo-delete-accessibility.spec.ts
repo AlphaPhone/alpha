@@ -7,7 +7,6 @@ for(const theme of ['light','dark'])for(const height of [915,420])test(`photo de
  await page.goto(`/?theme=${theme}`);
  await page.evaluate(async({delayPreparation})=>{
   const {importBrowserPhoto,browserPhotoLibrary:library}=await import('/src/prototype/browser-camera.ts');
-  // Keep the compact-layout preparation asynchronous to expose premature Back.
   if(delayPreparation){const prepare=library.prepareDeleteTrash.bind(library);library.prepareDeleteTrash=async(input)=>{await new Promise(resolve=>setTimeout(resolve,100));return prepare(input);};}
   const canvas=document.createElement('canvas');canvas.width=100;canvas.height=80;canvas.getContext('2d')!.fillRect(0,0,100,80);
   await importBrowserPhoto({original:new File([],'fixture.jpg'),image:canvas.toDataURL('image/jpeg'),width:100,height:80},new AbortController().signal);
@@ -27,7 +26,6 @@ for(const theme of ['light','dark'])for(const height of [915,420])test(`photo de
  await expect(page.getByRole('button',{name:/^Photo, /})).toHaveCount(1);
  await opener.click();await expect(cancel).toBeFocused();await cancel.click();await expect(opener).toBeFocused();
  await opener.click();await expect(cancel).toBeFocused();await page.evaluate(()=>window.dispatchEvent(new Event('alpha-back')));await expect(dialog).toHaveCount(0);await expect(opener).toBeFocused();
- // Deletion is exercised only against the isolated, test-created image.
  await opener.click();await expect(cancel).toBeFocused();await remove.click();await expect(dialog).toHaveCount(0);
  await expect(page.getByRole('button',{name:/^Photo, /})).toHaveCount(0);
 });

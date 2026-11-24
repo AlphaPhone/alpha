@@ -1,4 +1,3 @@
-// A notification Ask reviews one exact phone-source tap before composing.
 module SourceRenewalQuestion {
   type State = {
     owner: int, visited: Set[int], pending: int, exact: bool, dialog: int,

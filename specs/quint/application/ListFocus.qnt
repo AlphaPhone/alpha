@@ -1,5 +1,3 @@
-// One helper instance, two retained render captures and two list-root identities.
-// Node identity is distinct from logical row identity so reparenting can replace a node.
 module ListFocus {
   type Capture = {
     valid: bool, root: int, key: int, node: int, moved: bool, committed: bool,
@@ -32,14 +30,12 @@ module ListFocus {
     connectedRoots: Roots, hiddenRoots: Set(), hiddenNodes: Set(), disabled: Set(),
     documentHidden: false, dialog: false, focus: 0, captures: Slots.mapBy(_ => EmptyCapture),
     queue: List(), lastRestored: 0, lastIntended: 0, preservedOtherFocus: true }
-  // Capture returns null on an ineligible surface. Such renders still have a ref callback.
   action capture(slot: int): bool = all { Slots.contains(slot),
     not(s.captures.get(slot).captureQueued), not(s.captures.get(slot).restoreQueued),
     s' = { ...s, queue: if (captureEligible) s.queue.append(slot) else s.queue, captures: s.captures.set(slot, if (captureEligible) {
       valid: true, root: s.root, key: NodeKey.get(s.focus), node: s.focus,
       moved: false, committed: false, listening: true, captureQueued: true,
       restoreQueued: false, ticket: 0 } else EmptyCapture) } }
-  // Both ref detachment and attachment advance the generation. A null capture only sets root.
   action ref(slot: int, root: int): bool = all { Slots.contains(slot), root.in(0.to(2)), s.revision < 8,
     not(s.captures.get(slot).restoreQueued),
     { val c = s.captures.get(slot)
@@ -69,7 +65,6 @@ module ListFocus {
             (allowed and pending.listening and target != pending.node) } }),
         lastRestored: if (allowed) target else 0, lastIntended: c.key,
         preservedOtherFocus: s.focus == 0 or not(allowed) } } }
-  // DOM removal drops focus to body without emitting a new element's focusin event.
   action renderNodes(nodes: Set[int]): bool = all { nodes.subseteq(Nodes),
     s' = { ...s, present: nodes, focus: if (nodes.contains(s.focus)) s.focus else 0 } }
   action focusNode(node: int): bool = all { Nodes.contains(node), visible(node), not(s.disabled.contains(node)),

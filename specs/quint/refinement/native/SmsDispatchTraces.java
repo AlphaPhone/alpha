@@ -41,7 +41,6 @@ public final class SmsDispatchTraces {
  static void check(boolean condition,String reason){if(!condition)throw new AssertionError(reason);}
  static String wire(SmsSendJournal.Record record){return record==null?"none":record.status();}
  static void drain()throws Exception{
-  // A queued review can enqueue its durable decision after the first barrier.
   SmsTelephony.WORK.submit(()->{}).get(5,TimeUnit.SECONDS);
   SmsTelephony.WORK.submit(()->{}).get(5,TimeUnit.SECONDS);
  }
@@ -310,7 +309,6 @@ public final class SmsDispatchTraces {
   }
 
   void restart(boolean reboot)throws Exception{
-   // A process kill does not execute the plugin's graceful review cancellation.
    for(int bridge=1;bridge<=2;bridge++){
     var executor=(java.util.concurrent.ExecutorService)Trace.read(plugins[bridge],"reader");
     executor.shutdownNow();reviewCalls[bridge]=null;reviewedBinding[bridge]=0;reviewedSim[bridge]=0;

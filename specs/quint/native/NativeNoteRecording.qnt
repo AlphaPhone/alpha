@@ -1,4 +1,3 @@
-/// Segmented AlphaNoteRecorder resource, journal and restart state.
 module NativeNoteRecording {
   type State = {
     phase: str, id: int, owner: int, folder: int, capture: int, issued: int,

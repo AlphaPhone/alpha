@@ -10,7 +10,6 @@ import java.util.Map;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Real foreground service commands, paired with the actual recorder's current ID. */
 public final class NoteRecordingServiceTraces {
  static final Map<String,Integer> identities=new HashMap<>();
  static AlphaNoteRecorder recorder;

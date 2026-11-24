@@ -15,7 +15,6 @@ import java.util.Set;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Real MainActivity callbacks and native buttons against controlled Android primitives. */
 public final class MainActivityRecoveryTraces {
   static MainActivity owner;
   static Trace trace;
@@ -164,7 +163,6 @@ public final class MainActivityRecoveryTraces {
     boolean wasRecovering = (Boolean) activityField("recoveringRenderer");
     handled = owner.getBridge().listeners.get(0).onRenderProcessGone(view, new RenderProcessGoneDetail());
     if (matching && !wasRecovering) {
-      // Read-only history of the Activity/clock supplied to the actual admitted callback.
       pendingActivity = activity;
       lossTime = now;
     }

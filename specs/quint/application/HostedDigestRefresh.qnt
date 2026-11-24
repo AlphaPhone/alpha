@@ -1,4 +1,3 @@
-// Browser-mounted digest history, poll ownership and single-flight refresh.
 module HostedDigestRefresh {
   type State = {session: int, hidden: bool, open: bool, available: bool,
     histories: Set[int], visited: Set[int], statusOwner: int, statusFull: bool,

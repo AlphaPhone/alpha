@@ -1,4 +1,3 @@
-// Native Photos Recently deleted loader, including hidden/resumed ownership.
 module PhotosTrash {
   import PhotosWindow.Row from "./PhotosWindow"
   import PhotosWindow.validRows from "./PhotosWindow"

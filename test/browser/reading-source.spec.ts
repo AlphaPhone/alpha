@@ -1,7 +1,6 @@
 import {realpathSync} from 'node:fs';
 import {createServer} from 'node:http';
 import {test,expect,type Page} from '@playwright/test';
-// The shared public page-source reader, served from the prepared client features (vite fs.allow).
 const pageSourceModule='/@fs'+realpathSync('.eliza/client-features/plugins/plugin-native-browser-surface/src/page-source.ts');
 const address='https://reading.test/article';
 async function open(page:Page,url=address){await page.evaluate(async(url)=>{const {reviewBrowserReading}=await import('/src/browser/reading-review.ts');const w=window as any;w.readAbort=new AbortController();w.readDone=reviewBrowserReading(url,w.readAbort.signal,()=>w.readAbort.signal.throwIfAborted());},url);}

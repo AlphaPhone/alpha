@@ -1,5 +1,3 @@
-/// The Inbox message list: one read in flight, page cursors used once, and results applied
-/// only to the account and folder they were requested for.
 module InboxListPaging {
   type Flight = { pending: bool, account: int, query: int, more: bool }
   type Saved = { present: bool, account: int, query: int, pages: int, cursor: int, seen: Set[int] }
@@ -23,22 +21,18 @@ module InboxListPaging {
     failure: false, cachedShown: false }
   pure def current(v: Paging, t: int): bool =
     t == v.generation and v.flights.get(t).account == v.account and v.flights.get(t).query == v.query
-  /// A first-page read replaces the list. It drops the saved copy of this folder.
   action loadFirst = all {
     not(s.busy), s.generation < 5,
     s' = { ...s, generation: s.generation + 1, busy: true, failure: false, cachedShown: false,
       flights: s.flights.set(s.generation + 1, { pending: true, account: s.account, query: s.query, more: false }),
       saved: if (s.saved.account == s.account and s.saved.query == s.query) nothingSaved else s.saved }
   }
-  /// The cursor is given up when its page is requested, whether or not the page arrives.
   action loadMore = all {
     not(s.busy), s.generation < 5, s.cursor != 0, s.query == s.loadedQuery,
     s' = { ...s, generation: s.generation + 1, busy: true, failure: false, cursor: 0,
       usedCursors: s.usedCursors.union(Set(s.cursor)),
       flights: s.flights.set(s.generation + 1, { pending: true, account: s.account, query: s.query, more: true }) }
   }
-  /// `following` is the provider's cursor for the following page (0 for none). `shifted` says the
-  /// mailbox changed between pages.
   action reply(t: int, following: int, shifted: bool): bool = all {
     s.flights.get(t).pending,
     val landed = { ...s, flights: s.flights.set(t, idle) }
@@ -55,7 +49,6 @@ module InboxListPaging {
         newerMail: s.newerMail or shifted, cachedShown: false }
     }
   }
-  /// A failed page keeps the messages already shown. Retry starts again from the first page.
   action pageFailed(t: int): bool = all {
     s.flights.get(t).pending,
     val landed = { ...s, flights: s.flights.set(t, idle) }
@@ -70,7 +63,6 @@ module InboxListPaging {
     s' = { ...cleared(s), generation: if (s.busy) s.generation + 1 else s.generation,
       account: if (s.account == 1) 2 else 1 }
   }
-  /// A settled list is kept so that returning to its folder shows it at once.
   action remember = all {
     not(s.busy), not(s.failure), s.pages > 0,
     s' = { ...s, saved: { present: true, account: s.account, query: s.loadedQuery, pages: s.pages,
@@ -82,7 +74,6 @@ module InboxListPaging {
       loadedQuery: s.query, cursor: s.saved.cursor, seenCursors: s.saved.seen,
       usedCursors: s.saved.seen.exclude(Set(s.saved.cursor)), cachedShown: true }
   }
-  /// A changed grant or session drops every saved list.
   action invalidate = s' = { ...s, saved: nothingSaved }
   action step = any {
     loadFirst, loadMore, changeFolder, selectAccount, remember, restoreSaved, invalidate,
@@ -109,14 +100,12 @@ module InboxListPaging {
   val SavedListShownWitness = s.cachedShown and s.cursor != 0
   val ChangedMailboxWitness = s.newerMail and s.pages == 2
   val RepeatedCursorWitness = s.pages == 2 and s.cursor == 0 and s.seenCursors.size() == 1 and not(s.failure)
-  /// A reply for the folder that was left is dropped, even though it arrives after the change.
   run staleReplyDroppedTest = init.then(loadFirst).then(changeFolder)
     .expect(not(s.busy) and s.flights.get(1).pending and safety)
     .then(reply(1, 1, false)).expect(s.pages == 0 and s.cursor == 0 and safety)
   run replyForOtherAccountDroppedTest = init.then(loadFirst).then(selectAccount).then(loadFirst)
     .then(reply(1, 1, false)).expect(s.pages == 0 and s.busy and safety)
     .then(reply(3, 0, false)).expect(s.pages == 1 and s.shownAccount == 2 and safety)
-  /// A provider cursor that repeats would page forever. It ends the list instead.
   run repeatedCursorEndsPagingTest = init.then(loadFirst).then(reply(1, 1, false))
     .expect(s.cursor == 1).then(loadMore).then(reply(2, 1, false))
     .expect(s.pages == 2 and s.cursor == 0 and safety)

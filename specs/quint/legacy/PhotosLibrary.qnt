@@ -1,6 +1,3 @@
-// Literal translation of photos-library/Spec.tla and all five configurations.
-// Take uses the count of strictly newer/older IDs, equivalent to the original
-// recursive maximum/minimum extraction on the finite totally ordered ID set.
 module PhotosLibrary {
   type Configuration = { name: str, Ids: Set[int], W: int, Cap: int, Budget: int,
     FixWindow: bool, FixPatch: bool, FixFavToggle: bool, FixNoCap: bool }
@@ -39,7 +36,6 @@ module PhotosLibrary {
     s' = initialState(name, favorites), history' = initialHistory }
   action Init(name) = { nondet favorites = configuration(name).Ids.setOfMaps(Set(false, true)).oneOf()
     StartState(name, favorites) }
-  // Separate entry points avoid Quint 0.33.1 init/action-helper conversion overlap.
   action checkerInit = {
     nondet favorites = configuration("Design").Ids.setOfMaps(Set(false, true)).oneOf()
     all { s' = initialState("Design", favorites), history' = initialHistory }

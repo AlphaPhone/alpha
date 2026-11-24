@@ -7,7 +7,6 @@ import java.util.Map;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Observes the real request and service-stop leases at public entry points. */
 public final class CredentialLeaseTraces {
  static JSONObject shutdown(CredentialShutdownLease lease) throws Exception {
   return Trace.fields("leaseSequence", Trace.read(lease,"sequence"), "leasePending", Trace.read(lease,"pending"),

@@ -19,7 +19,6 @@ test('external storage edits are preserved when generation finishes',async({page
  await begin(page);
  const external=await page.evaluate(()=>{const key='alpha.dev.app.workflows',state=JSON.parse(localStorage.getItem(key)!);state.flows[0].steps[1].t='External instruction';const raw=JSON.stringify(state);localStorage.setItem(key,raw);(window as any).generation.finish({text:'Old instruction answer'});return raw;});
  await expect(page.getByRole('button',{name:'Run now',exact:true})).toBeVisible();
- // Trigger polling can replace the transient toast. The run must retain its recovery guidance.
  await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
  await expect.poll(()=>page.evaluate(()=>(window as any).workflowApi.get('workflows').localTriggerError)).toBe('Development app save failed.');
  await page.evaluate(()=>(window as any).workflowApi.toast('Unrelated status'));
@@ -46,7 +45,6 @@ test('external edit warning survives a scheduler storage refusal',async({page})=
  await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
  await expect.poll(()=>page.evaluate(()=>(window as any).workflowApi.get('workflows').localTriggerError)).toBe('Development app save failed.');
  await expect(page.getByText('Run state could not be saved. Reload to inspect its last saved step.',{exact:true})).toBeVisible();
- // Another workflow must not inherit this run's recovery warning.
  await page.evaluate(()=>{const api=(window as any).workflowApi;api.setView('workflows',{open:999});});
  await expect(page.getByRole('heading',{name:'Other workflow',exact:true})).toBeVisible();
  await expect(page.getByText('Run state could not be saved. Reload to inspect its last saved step.',{exact:true})).toHaveCount(0);
@@ -63,7 +61,6 @@ test('concurrent run refusals retain both workflow recovery messages',async({pag
  const external=await page.evaluate(async()=>{
   const {VIEWS}=await import('/src/prototype/model.js');const api=(window as any).workflowApi;
   const key='alpha.dev.app.workflows',state=JSON.parse(localStorage.getItem(key)!);state.flows[0].steps[1].t='External instruction';const raw=JSON.stringify(state);localStorage.setItem(key,raw);
-  // Invoke the real second workflow's Run handler before React can commit its error.
   VIEWS.workflows.render({...api.get('workflows'),open:999},api).fd.run();
   (window as any).generation.finish({text:'Old instruction answer'});return raw;
  });

@@ -1,4 +1,3 @@
-/// Actual listener callback, frame and recognition path, under fixed PCM input classes.
 module NativeListenerInput {
   type State = {now: int, quietSince: int, locked: bool, indicator: bool, lease: bool,
     lost: bool, leaseStopPosted: bool, inCall: bool, other: bool, silenced: bool, paused: bool,

@@ -1,10 +1,3 @@
-/// The speech route chosen at run time (`speechRoute`) and the hold a failed network speech request
-/// places on it (`noteNetworkSpeechFailure`): the owner's own provider with a speech key, Cloud
-/// speech for a signed-in account with no limit in force, otherwise this phone. A failure of the
-/// network route moves the turn to on-device speech and keeps the next turns there for a time that
-/// depends on the failure; the hold belongs to one account or key, lapses on its own, and is
-/// dropped when on-device speech turns out to be unavailable. A failure that is not the network's
-/// changes nothing. Time is in minutes.
 module SpeechRouteHold {
   type State = { account: str, limited: bool, now: int, holdKey: str, holdUntil: int, route: str, lastKind: str,
     fell: bool, failures: int }
@@ -12,40 +5,31 @@ module SpeechRouteHold {
   pure val BRIEF = 1
   pure val ACCOUNT = 10
   pure val MAX = 60
-  // The account or key a hold belongs to. Own keys without a speech key have none.
   pure def keyOf(account: str): str = if (account.in(Set("none", "directNoKey"))) "" else account
   pure def held(st: State): bool = st.holdKey != "" and st.holdKey == keyOf(st.account) and st.holdUntil > st.now
   pure def route(st: State): str =
     if (keyOf(st.account) == "" or held(st)) "device"
     else if (st.account.in(Set("direct1", "direct2"))) "direct"
     else if (st.limited) "device" else "cloud"
-  // Minutes a failure keeps speech on this phone; -1 when the failure is not the network route's.
-  // A rate limit holds for its stated wait, at most an hour, and briefly when none is stated.
   pure def holdFor(kind: str, wait: int): int =
     if (kind.in(Set("offline", "server"))) BRIEF
     else if (kind == "account") ACCOUNT
     else if (kind == "rate") (if (wait <= 0) BRIEF else if (wait > MAX) MAX else wait)
     else if (kind == "signIn") 0
     else -1
-  // Every step ends with the route speechRoute() would now return.
   pure def routed(st: State): State = { ...st, route: route(st) }
 
   action init = s' = { account: "none", limited: false, now: 0, holdKey: "", holdUntil: 0, route: "device",
     lastKind: "none", fell: false, failures: 0 }
-  // Sign-in, sign-out, another Cloud account, own keys with or without a speech key, a changed key.
   action accountChanges(account: str): bool = all { account != s.account, s' = routed({ ...s, account: account }) }
-  // A Cloud plan or rate limit is recorded for the account, or cleared.
   action limitChanges(limited: bool): bool = all { limited != s.limited, s' = routed({ ...s, limited: limited }) }
   action timePasses(minutes: int): bool = all { s.now + minutes <= 150, s' = routed({ ...s, now: s.now + minutes }) }
-  // A network speech request failed. The turn falls back to on-device speech when the failure is
-  // the network route's; a hold is recorded only for a known account or key and a positive time.
   action failure(kind: str, wait: int): bool = all { s.failures < 6,
     val hold = holdFor(kind, wait)
     val key = keyOf(s.account)
     s' = routed({ ...s, lastKind: kind, fell: hold >= 0, failures: s.failures + 1,
       holdKey: if (hold > 0 and key != "") key else s.holdKey,
       holdUntil: if (hold > 0 and key != "") s.now + hold else s.holdUntil }) }
-  // On-device speech is unavailable: the network route is all there is.
   action clearHold = all { s.holdKey != "", s' = routed({ ...s, holdKey: "", holdUntil: 0 }) }
   action step = {
     nondet account = Set("none", "cloudA", "cloudB", "direct1", "direct2", "directNoKey").oneOf()
@@ -59,7 +43,6 @@ module SpeechRouteHold {
   val RouteIsCurrent = s.route == route(s)
   val NoAccountIsDevice = keyOf(s.account) == "" implies route(s) == "device"
   val HeldAccountIsDevice = held(s) implies route(s) == "device"
-  // The phone is chosen only for a reason: no account or key, a hold for this one, or a Cloud limit.
   val DeviceHasReason = route(s) == "device" implies
     (keyOf(s.account) == "" or held(s) or (s.account.in(Set("cloudA", "cloudB")) and s.limited))
   val OwnKeyIgnoresCloudLimit = (s.account.in(Set("direct1", "direct2")) and not(held(s))) implies route(s) == "direct"

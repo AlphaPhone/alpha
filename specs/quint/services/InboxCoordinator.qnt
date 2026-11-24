@@ -18,7 +18,6 @@ module RetainedInboxOperation {
   export InboxDelivery.restoreGrants
 }
 
-/// Composer coordination around two independently retained account/grant operation slots.
 module InboxCoordinator {
   import RetainedInboxOperation(instance = 1) as First
   import RetainedInboxOperation(instance = 2) as Second
@@ -166,7 +165,6 @@ module InboxCoordinator {
     owner.in(Set(1,2)),failedFor(owner),
     s'=if(owner==s.owner and s.busyOwner==s.owner and s.busyEpoch==s.epoch) {...s,busy:"idle"} else s
   }
-  /// A capability withdrawn after confirmation does not prove that an admitted request did not run.
   action dispatched = all {
     s.busy=="dispatch",s.busyOwner==s.owner,s.busyEpoch==s.epoch,s.network.get(s.owner)==0,keepOperations,
     s'={...s,busy:"reply",network:s.network.set(s.owner,1)}
@@ -200,13 +198,11 @@ module InboxCoordinator {
       (copies.retained!=s.sourceContent.get(owner) or copies.retainedAttachment!=s.sourceAttachment.get(owner)))
   }
   def cleanupBlocked(owner:int):bool = copyBlocks(s.copies.get(owner),owner)
-  /// A failed set-aside can leave a shelf snapshot beside the unchanged active/saved copy.
   action shelveSnapshot = all {
     s.bound,draftReady,copy.current!=0,keepOperations,
     s'={...s,copies:s.copies.set(s.owner,{...copy,shelfId:copy.currentId,shelf:copy.current,
       shelfAttachment:copy.attachment}),cleanupChecked:false}
   }
-  /// An edit that keeps the same content still writes the retained recovery record.
   action retainDraft = all {
     s.bound,draftReady,copy.current!=0,keepOperations,
     s'={...s,copies:s.copies.set(s.owner,{...copy,retainedId:copy.currentId,retained:copy.current,
@@ -223,7 +219,6 @@ module InboxCoordinator {
       copies:if(cleanupBlocked(s.owner))s.copies else s.copies.set(s.owner,{...copy,
         current:if(copy.currentId==s.sourceId.get(s.owner))0 else copy.current})}
   }
-  /// Durable completion can precede its callback, including an intervening owner change.
   action publishRetainedClear = all {
     s.cleanupStage=="retained",cleanupCopy.retainedId==cleanupSource,cleanupCopy.retained!=0,keepOperations,
     s'={...s,copies:s.copies.set(s.cleanupOwner,{...cleanupCopy,retained:0})}
@@ -241,7 +236,6 @@ module InboxCoordinator {
       }
     }
   }
-  /// AssistantDraftController restores its own known clear when the binding retired before ack.
   action restoreRetained(committed:bool):bool = all {
     s.cleanupStage=="restore",keepOperations,
     s'={...s,cleanupStage:"idle",copies:if(committed)s.copies.set(s.cleanupOwner,{...cleanupCopy,
@@ -274,7 +268,6 @@ module InboxCoordinator {
       }
     }
   }
-  /// A second live composer can save while this instance awaits its compare-and-exchange.
   action peerSave = all {
     s.bound,copy.saved!=0,copy.savedVersion<2,keepOperations,
     s'={...s,copies:s.copies.set(s.owner,{...copy,saved:2,savedVersion:copy.savedVersion+1}),cleanupChecked:false}

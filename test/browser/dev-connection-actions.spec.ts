@@ -8,8 +8,6 @@ const key='alpha.browser.execution.local.v1';
 async function open(page:Page){await page.getByRole('button',{name:'Settings',exact:true}).click();await openConnectionDiagnostics(page);}
 async function setup(page:Page){await page.goto('/?mode=dev');await open(page);await page.getByRole('button',{name:'Connect development profile'}).click();await returnToApps(page);await openLegacyNotes(page);await returnToApps(page);await open(page);await page.getByText('Development device actions',{exact:true}).click();}
 async function queue(page:Page){await page.getByRole('button',{name:'Queue action for review'}).click();await expect(page.getByText('Action queued. Send a chat message to review it on the current screen.',{exact:true})).toBeVisible();}
-// A recovered card can appear before the first chat finishes saving its conversation.
-// Wait for this reply before injecting failures or confirming its action.
 async function sendReviewMessage(page:Page,input:Locator,message:string){
  const replies=page.getByText('Development reply. Edit this response in Agent connection.',{exact:true});
  const previous=await replies.count();
@@ -85,9 +83,6 @@ test('two tabs cannot execute the same development proposal twice',async({page,c
  await other.getByRole('textbox',{name:/^(Ask Alpha|Message Alpha)$/}).fill('Review this proposal');
  await other.getByRole('textbox',{name:/^(Ask Alpha|Message Alpha)$/}).press('Enter');
  await expect(other.getByText('Create note',{exact:true})).toBeVisible();
- // Queue both real UI intents before either storage claim can complete. Without
- // this barrier the winning tab can disable the other button before its click,
- // testing Playwright timing rather than the document's one-execution claim.
  await page.evaluate(async key=>{
   await new Promise<void>(ready=>{
    void navigator.locks.request(JSON.stringify(['browser-document','alpha.browser.documents.v1',key]),async()=>{
@@ -115,8 +110,6 @@ for(const action of ['set','show','dismiss','snooze'] as const)test(`approved de
  await setup(page);
  const operation=await page.evaluate(action=>action==='set'?{type:'clock_handoff',action,hour:7,minute:30,label:'Agent alarm',timeZone:Intl.DateTimeFormat().resolvedOptions().timeZone}:action==='snooze'?{type:'clock_handoff',action,snoozeMinutes:12}:{type:'clock_handoff',action},action);
  await page.getByRole('textbox',{name:'Action JSON'}).fill(JSON.stringify(operation));await queue(page);await page.getByRole('button',{name:'Close connection settings'}).click();await returnToApps(page);await sendReviewMessage(page,page.getByRole('textbox',{name:/^(Ask Alpha|Message Alpha)$/}),'Review Clock action');await expect(page.getByText('clock handoff',{exact:true})).toBeVisible();
- // Seed the ringing alarm after navigation, then close its modal explicitly.
- // Closing Clock silences its UI without dismissing or snoozing the alarm.
  if(action==='dismiss'||action==='snooze'){
   await page.evaluate(async()=>{const {DailyApps}=await import('/src/daily.ts');await DailyApps.scheduleReminder({id:'alarm_reviewed',title:'Ringing alarm',at:Date.now()+60000});await (await import('/src/browser/reminder-store.ts')).reminderDocument.edit(()=>({reminders:[] as any[]}),data=>{data.reminders[0].status='posted';data.reminders[0].at=Date.now()-1000;});});
   const clock=page.getByRole('dialog',{name:'Clock alarms',exact:true});await expect(clock).toBeVisible();await clock.getByRole('button',{name:'Back',exact:true}).click();await expect(clock).toHaveCount(0);

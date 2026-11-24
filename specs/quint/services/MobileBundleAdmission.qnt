@@ -1,4 +1,3 @@
-// Exact producer receipt admission against selected private file identities.
 module MobileBundleAdmission {
   type Fingerprint = {producer: int, adapter: int, stamp: int, bundle: int}
   type Receipt = {shape: str, fingerprint: Fingerprint, uuid: str, core: str, tamper: str}

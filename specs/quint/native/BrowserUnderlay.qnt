@@ -1,4 +1,3 @@
-/// Below-host input admission and gesture ownership; coordinates are native-library evidence.
 module BrowserUnderlay {
   type State = { selected: bool, shown: bool, rects: bool, paused: bool, disposed: bool,
     target: str, beganOnHost: bool, pageStartedWithoutRects: bool }
@@ -18,14 +17,12 @@ module BrowserUnderlay {
         pageStartedWithoutRects: page and not(s.rects) }
     }
   }
-  /// Split fingers and later motion retain the owner of DOWN.
   action secondFinger = all { s.target != "none", s' = s }
   action move = all {
     s.target != "none",
     s' = if (s.target == "page" and (not(s.shown) or s.paused or s.disposed))
       { ...s, target: "cancelled" } else s
   }
-  /// A withdrawn page consumes the rest of its gesture; it never falls through to host controls.
   action hide = s' = { ...s, selected: false, shown: false, rects: false,
     target: if (s.target == "page") "cancelled" else s.target }
   action pause = s' = { ...s, shown: false, paused: true, rects: false,

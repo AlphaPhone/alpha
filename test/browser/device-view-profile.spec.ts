@@ -1,8 +1,6 @@
 import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import {test,expect} from '@playwright/test';
 
-// Real chooser and IPC serializer; authenticated host responses are controlled.
-// The upstream HTTP/PGlite suite separately proves persistence and server enforcement.
 for(const scenario of ['supported','legacy','unsupported','malformed','lost','retained'] as const){
  test(`enabled views via native resident enrollment: ${scenario}`,async({page})=>{
   const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
@@ -26,10 +24,8 @@ for(const scenario of ['supported','legacy','unsupported','malformed','lost','re
     if(plugin==='Agent'){
      if(method==='getStatus')return {packaged:true,state:'ready'};
      if(method==='start')return {state:'ready'};
-     // The real Agent plugin always exposes the Android resident renderer feed.
      if(method==='subscribeViewEvents')return {subscriptionId:input.subscriptionId};
      if(method==='unsubscribeViewEvents'||method==='addListener'||method==='removeListener'||method==='setGoogleAgentAccess')return {};
-     // Read before every resident start since e15f0b735; nothing is saved, so Cloud stays the default.
      if(method==='providerStatus')return {provider:'elizacloud',configured:false};
      const path=input.path;let body:any;
      if(path==='/api/auth/me')body={identity:{kind:'owner',id:'fixture-owner'},access:{role:'OWNER',mode:'session'}};
@@ -63,7 +59,6 @@ for(const scenario of ['supported','legacy','unsupported','malformed','lost','re
   const snapshot=await page.evaluate(async()=>{const {connectionController}=await import('/src/runtime/connection-ui.tsx');return connectionController.getSnapshot();});
   expect(snapshot.session?.ownerId).toBe('fixture-owner');
   const f=await page.evaluate(()=>(window as any).viewProfileFixture);
-  // Android resident connect confirms the committed enrollment only after view negotiation succeeds.
   expect(f.contextReads).toBe(['supported','legacy','retained'].includes(scenario)?1:0);
   if(scenario==='supported'){
    expect(snapshot.phoneActionsAvailable).toBe(true);expect(snapshot.phoneCapabilityReason).toBe('');
@@ -73,7 +68,6 @@ for(const scenario of ['supported','legacy','unsupported','malformed','lost','re
   else {expect(snapshot.phoneActionsAvailable).toBe(false);await expect(page.getByText('Chat only')).toBeVisible();expect(f.writes).toHaveLength(scenario==='lost'?1:0);}
   for(const headers of f.headers){expect(headers['X-Eliza-Device-Key']).toMatch(/^[a-f0-9]{64}$/);expect(headers['X-Eliza-Device-Id']).toMatch(/^[a-f0-9-]{36}$/);expect(Object.keys(headers).some(k=>/view-profile/i.test(k))).toBe(false);}
   if(scenario==='lost'){
-   // Reconnect reads the committed profile; it must not repeat the unknown write.
    await page.getByRole('button',{name:'Disconnect agent',exact:true}).click();
    await page.getByRole('button',{name:'Start local agent',exact:true}).click();
    await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0);

@@ -1,4 +1,3 @@
-/// Explicit test-mocks device/prototype actions. Every transition changes prototype state only.
 module DevelopmentDevice {
   type State = { mocks: bool, screen: str, call: str, callGeneration: int,
     timerGeneration: int, microphoneMuted: bool, speaker: bool, hold: bool, voicemails: int,
@@ -25,11 +24,9 @@ module DevelopmentDevice {
       { ...s, call: "active" } else s }
   action hangup = all { s.mocks, s.call != "idle",
     s' = { ...s, call: "idle", timerGeneration: -1, microphoneMuted: false, speaker: false, hold: false } }
-  /// A decline with a quick reply leaves no voicemail; a plain decline leaves one.
   action decline(reason: bool): bool = all { s.mocks, s.call.in(Set("ringing", "screening")),
     s' = { ...s, call: "idle", timerGeneration: -1,
       voicemails: if (not(reason) and s.voicemails < 2) s.voicemails + 1 else s.voicemails } }
-  /// The in-call controls are shown from the moment the call screen opens, before the call is live.
   val inCall = s.call.in(Set("dialing", "active"))
   action mute = all { s.mocks, inCall, s' = { ...s, microphoneMuted: not(s.microphoneMuted) } }
   action speaker = all { s.mocks, inCall, s' = { ...s, speaker: not(s.speaker) } }
@@ -64,7 +61,6 @@ module DevelopmentDevice {
     .expect(s.call == "idle" and safety)
   run missedCallTest = init.then(incomingCall).then(decline(false)).expect(s.voicemails == 1 and safety)
   run declineWithReplyTest = init.then(incomingCall).then(decline(true)).expect(s.voicemails == 0 and safety)
-  /// Mute and speaker toggle while the call is still dialing, and are cleared when it ends.
   run controlsWhileDialingTest = init.then(dial).then(mute).then(speaker)
     .expect(MutedWhileDialingWitness and s.speaker and safety)
     .then(hangup).expect(not(s.microphoneMuted or s.speaker) and safety)

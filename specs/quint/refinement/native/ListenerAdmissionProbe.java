@@ -6,7 +6,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import org.json.JSONObject;
 
-/** Drives real service admission when the durable open-session write fails. */
 public final class ListenerAdmissionProbe {
  public static void main(String[] args)throws Exception {
   StorePorts.preferences=new StorePorts.Preferences(Path.of(args[0]));

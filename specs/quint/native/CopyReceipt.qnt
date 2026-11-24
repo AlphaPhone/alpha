@@ -1,7 +1,3 @@
-// The receipt of one photo edit in the browser library. A save claims the receipt for one
-// attempt and one mode; the written photo and the saved receipt commit together; reading an
-// uncommitted outcome retires it so a suspended save cannot commit afterwards. A copy never
-// writes the original; a replace overwrites exactly the reviewed revision.
 module CopyReceipt {
   type State = {
     status: str, parameters: int, replace: bool, attempt: int, serial: int, inflight: Set[int],
@@ -15,11 +11,8 @@ module CopyReceipt {
     externalEdits: 0, copies: 0, replaces: 0, reportedNoCopy: false, refusedSaves: 0
   }
   pure val Terminal = Set("saved", "failed", "cancelled", "unchanged", "abandoned")
-  // Opening the editor writes a prepared receipt bound to the source revision shown.
   action begin = all { s.status == "none", not(s.sourceTrashed),
     s' = { ...s, status: "prepared", sessionActive: true, recordedRevision: s.sourceRevision } }
-  // Parameters 0 is the identity edit. A receipt serves one set of parameters, one mode and one
-  // attempt: a retry cannot turn a copy into a replace.
   action save(parameters: int, replace: bool): bool = all { Set(0, 1, 2).contains(parameters), s.serial < 3,
     val other = s.parameters != -1 and (s.parameters != parameters or s.replace != replace)
     val refused = s.status.in(Set("none", "abandoned")) or other or s.status == "saving"
@@ -28,8 +21,6 @@ module CopyReceipt {
       else if (parameters == 0) { ...s, status: "unchanged", parameters: parameters, replace: replace, attempt: s.serial + 1, serial: s.serial + 1 }
       else { ...s, status: "saving", parameters: parameters, replace: replace, attempt: s.serial + 1, serial: s.serial + 1,
         inflight: s.inflight.union(Set(s.serial + 1)) } }
-  // The rendered copy is committed only by the attempt that still owns the saving receipt, over
-  // an open editor and an unchanged, untrashed source.
   action commit(attempt: int): bool = all { s.inflight.contains(attempt),
     val owns = s.status == "saving" and s.attempt == attempt
     val admitted = s.sessionActive and not(s.sourceTrashed) and s.sourceRevision == s.recordedRevision
@@ -41,7 +32,6 @@ module CopyReceipt {
   action renderFails(attempt: int): bool = all { s.inflight.contains(attempt),
     s' = { ...s, inflight: s.inflight.exclude(Set(attempt)),
       status: if (s.status == "saving" and s.attempt == attempt) "failed" else s.status } }
-  // Recovery reads the outcome. An uncommitted receipt is cancelled in the same transaction.
   action readResult = all { s.status != "none",
     s' = { ...s, status: if (s.status.in(Set("prepared", "saving"))) "cancelled" else s.status,
       reportedNoCopy: s.reportedNoCopy or s.status.in(Set("prepared", "saving", "cancelled", "abandoned")) } }
@@ -52,7 +42,6 @@ module CopyReceipt {
   action sessionExpires = s' = { ...s, sessionActive: false }
   action externalEdit = all { s.externalEdits < 2,
     s' = { ...s, sourceRevision: s.sourceRevision + 1, externalEdits: s.externalEdits + 1 } }
-  // Trashing is an external mutation of the original row, with its own fresh mutation revision.
   action trashSource = all { not(s.sourceTrashed), s.externalEdits < 2,
     s' = { ...s, sourceTrashed: true, sourceRevision: s.sourceRevision + 1, externalEdits: s.externalEdits + 1 } }
   action step = {
@@ -77,13 +66,11 @@ module CopyReceipt {
   run copyAndReceiptCommitTogetherTest = init.then(begin).then(save(1, false)).then(commit(1))
     .expect(s.status == "saved" and s.copies == 1 and safety).then(save(1, false)).then(readResult)
     .expect(s.copies == 1 and s.status == "saved" and not(s.reportedNoCopy) and safety)
-  // Recovery reports no copy while a save is suspended: that save can no longer commit.
   run readRetiresSuspendedSaveTest = init.then(begin).then(save(1, false)).then(readResult)
     .expect(s.status == "cancelled" and s.reportedNoCopy and safety).then(commit(1))
     .expect(s.copies == 0 and s.status == "cancelled" and safety)
   run changedSourceFailsTest = init.then(begin).then(save(2, false)).then(externalEdit).then(commit(1))
     .expect(s.status == "failed" and s.copies == 0 and safety)
-  // A copy save retried as a replace is refused; the suspended copy still commits as a copy.
   run retryCannotTurnCopyIntoReplaceTest = init.then(begin).then(save(1, false)).then(save(1, true))
     .expect(s.refusedSaves == 1 and not(s.replace) and safety).then(commit(1))
     .expect(s.copies == 1 and s.replaces == 0 and s.sourceRevision == 0 and safety)

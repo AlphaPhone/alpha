@@ -1,9 +1,7 @@
 import {test,expect,type Page} from '@playwright/test';
 import {fenceNetwork} from './flag-off-android';
 import {photosBridge} from './helpers/photos-bridge';
-// Waits until Home or the optional prompt is shown before deciding, so a late prompt is not missed.
 const dismissPrompt=async(page:Page)=>{const skip=page.getByRole('button',{name:'Not now',exact:true});await expect(skip.or(page.getByRole('button',{name:'Photos',exact:true})).filter({visible:true}).first()).toBeVisible();if(await skip.isVisible())await skip.click();};
-// Flag-off bundled renderer/CSS with a closed native boundary; no Android/MediaStore acceptance claim.
 for(const slow of [false,true])test(`native Photos grid opens and stays open ${slow?'delayed read':'immediate read'}`,async({page})=>{
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
  await fenceNetwork(page);await photosBridge(page,'full',false,true);
@@ -23,7 +21,6 @@ test('a store change during a pending read keeps the viewer and publishes the re
  await expect(page.getByRole('button',{name:/^Photo, /})).toHaveCount(1);
  await page.evaluate(()=>{const w=window as any,c=w.Capacitor,original=c.nativePromise;w.heldReads=0;c.nativePromise=async(p:string,m:string,i:any)=>{if(p==='AlphaPhotos'&&m==='read'&&++w.heldReads===1)await new Promise(r=>{w.releaseHeldRead=r;});return original(p,m,i);};});
  await page.getByRole('button',{name:/^Photo, /}).click();await expect(page.locator('[data-alpha-subview="photos-viewer"]')).toBeVisible();
- // FixPatch: an external MediaStore change patches the window; the viewer of a surviving item stays.
  await page.evaluate(()=>(window as any).mediaFixture.emit());await page.waitForTimeout(300);
  await expect(page.locator('[data-alpha-subview="photos-viewer"]')).toBeVisible();
  await page.evaluate(()=>(window as any).releaseHeldRead());await page.waitForTimeout(300);
@@ -35,7 +32,6 @@ test('native Photos keeps the deep window after a catalog event and reloads evic
  await page.addInitScript(()=>{
   const w=window as any,c=w.Capacitor,original=c.nativePromise;
   const photos=c.PluginHeaders.find((plugin:any)=>plugin.name==='AlphaPhotos');photos.methods.push({name:'thumbnails',rtype:'promise'});
-  // Keep the synthetic six-minute gallery in one browser-local day, including midnight runs.
   const noon=new Date();noon.setHours(12,0,0,0);
   const image=w.mediaFixture.row.image,now=noon.getTime();
   const rows=Array.from({length:400},(_,index)=>({...w.mediaFixture.row,id:`m:external_primary:i:${1000+index}`,date:now-index*1000,image}));
@@ -54,14 +50,12 @@ test('native Photos keeps the deep window after a catalog event and reloads evic
  const skip=page.getByRole('button',{name:'Not now',exact:true});if(await skip.isVisible())await skip.click();
  await page.getByRole('button',{name:'Photos',exact:true}).click();
  const grid=page.locator('[data-alpha-app-scroll="photos"]'),count=page.locator('.photo-day-header span');
- // The current grid opens one native page; each deeper page is requested by scrolling.
  await expect(count).toHaveText('24');
  for(let expected=48;expected<=384;expected+=24){await grid.evaluate(el=>el.scrollTo(0,el.scrollHeight));await expect(count).toHaveText(String(expected));}
  await page.waitForTimeout(180);
  await page.evaluate(()=>(window as any).mediaFixture.emit());
  await expect(count).toHaveText('384');
  await page.waitForTimeout(180);
- // Scroll back to old rows after the deep window has dropped their image data.
  await grid.evaluate(el=>el.scrollTo(0,0));
  await expect.poll(()=>page.evaluate(()=>(window as any).thumbnailReads.flat().includes('m:external_primary:i:1000'))).toBe(true);
  const first=page.locator('[data-owned-media-id="native-camera-m:external_primary:i:1000"]');

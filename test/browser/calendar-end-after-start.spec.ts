@@ -1,7 +1,5 @@
 import {test,expect} from '@playwright/test';
 import {openBrowserCalendar} from './helpers/browser-calendar';
-// The calendarFormTimeProblem messages are covered in test/calendar-end-after-start.test.mjs.
-// This case keeps the rendered End controls, which need the browser.
 test.use({timezoneId:'America/New_York'});
 test('rendered End controls cannot reach the start, and the shortest form still saves with end after start',async({page})=>{
  test.setTimeout(120_000);
@@ -10,7 +8,6 @@ test('rendered End controls cannot reach the start, and the shortest form still 
  await page.goto('/');await openBrowserCalendar(page);
  await page.getByRole('button',{name:'New event',exact:true}).click();
  await page.getByRole('textbox',{name:'Title',exact:true}).fill('End validation');
- // End cannot be stepped to or before the start through rendered controls.
  for(let i=0;i<12;i++)await page.getByRole('button',{name:'End earlier',exact:true}).click();
  const events=()=>page.evaluate(async()=>(await new (await import('/src/browser/calendar.ts')).BrowserCalendar().list({begin:0,end:Date.parse('2030-01-01')})).events);
  await page.getByRole('button',{name:'Save event',exact:true}).click();

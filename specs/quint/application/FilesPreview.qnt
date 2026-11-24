@@ -1,5 +1,3 @@
-// Current per-volume Files preview ownership. Provider storage and full browser
-// load/filter/review state are separate obligations.
 module FilesPreview {
   type State = { active: bool, epoch: int, pending: bool, requestedEpoch: int,
     preview: int, released: bool, publishedActive: bool, publishedRequestEpoch: int, publishedCurrentEpoch: int }

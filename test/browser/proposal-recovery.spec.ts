@@ -1,8 +1,6 @@
 import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import { test, expect } from '@playwright/test';
 
-// Real renderer, pairing, connection controller, proposal parser and journal
-// orchestration; synthetic HTTP/native boundaries, no provider or device effects.
 for (const mode of ['pending', 'unknown-receipt', 'wrong-owner', 'expired', 'wrong-reminder-context', 'rate-limit-empty', 'stale-session', 'notes-from-calendar'] as const) {
   test(`interrupted reply recovers only reviewable proposals: ${mode}`, async ({ page }) => {
     await page.addInitScript((mode) => {
@@ -136,8 +134,6 @@ for (const mode of ['pending', 'unknown-receipt', 'wrong-owner', 'expired', 'wro
         await page.getByRole('button',{name:'Go Home',exact:true}).click();
         await page.evaluate(()=>new Promise(requestAnimationFrame));
         const after=await counts();
-        // Read-only status checks may run on navigation; the uncertain effect
-        // must never be claimed, executed or journaled again without a new tap.
         expect({...after,journal:after.journal.filter(method=>method!=='get')}).toEqual({posts:1,decisions:1,claims:1,receipts:1,effects:1,journal:['reserve','markApplying','finish']});
       }else await expect(page.getByText('Synthetic approved effect recorded', { exact: true }).last()).toBeVisible();
     } else {

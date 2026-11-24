@@ -37,7 +37,6 @@ public final class VaultReadbackTraces {
   private static final Map<String, Key> keys = new HashMap<>();
   private static PasswordsConfig config;
 
-  /** Only this disposable host JVM sees this provider. It cannot create or access device keys. */
   public static final class FixtureProvider extends Provider {
     public FixtureProvider() {
       super("AndroidKeyStore", "1", "In-memory vault replay key registry");
@@ -176,7 +175,6 @@ public final class VaultReadbackTraces {
     refused(invoke(bridge::list), "key-invalidated");
     retained();
     checkpoint("lost key invalidates the live native grant", "keyInvalidated");
-    // Review itself belongs to the renderer. The host fixture supplies that intent.
     checkpoint("renderer requests reset review", "reviewReset");
   }
 

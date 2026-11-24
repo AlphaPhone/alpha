@@ -6,7 +6,6 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import org.json.*;
 
-/** Actual recognizer cache with worker probes held at the provider return boundary. */
 public final class RecognizerAvailabilityTraces {
  static final class Probe {
   final String language;

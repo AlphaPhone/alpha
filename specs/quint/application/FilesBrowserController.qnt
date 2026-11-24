@@ -1,4 +1,3 @@
-// Current installed Files folder-read coordinator. Storage effects remain ports.
 module FilesBrowserController {
   type Request = {generation: int, place: int, agent: bool}
   type State = {bound: bool, active: bool, place: int, generation: int, stateGeneration: int,

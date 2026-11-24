@@ -9,8 +9,6 @@ module AccessibleToastLifetime {
 
   action init = state' = {scale: 100, latest: 0, started: Set(), pending: Set(),
     message: 0, undo: false, duration: 0, held: false, timerDelay: 0, queued: []}
-  // Message 3 is the controlled 191-character passage; 1 and 2 are short. An Undo offer stays
-  // 10 s, the same window as the reviewed-deletion notice.
   pure def duration(message: int, undo: bool, scale: int): int =
     (if (message == 3) 10050 else if (undo) 10000 else 1900) * scale / 100
 

@@ -1,4 +1,3 @@
-// One durable native deletion row, with operation-id deduplication and Undo window.
 module DeletionJournal {
   type State = {
     phase: str, window: str, owner: int, currentOwner: int, targetRevision: int,
@@ -16,7 +15,6 @@ module DeletionJournal {
     s.phase == "absent", s.storageWorks,
     s' = {phase: "queued", owner: s.currentOwner, targetRevision: s.currentRevision, ...s}
   }
-  // Replaying the same operation never creates a second row or dispatch.
   action repeatStage(owner: int, revision: int): bool =
     if (s.phase != "absent" and owner == s.owner and revision == s.targetRevision)
       s' = s
@@ -31,14 +29,11 @@ module DeletionJournal {
   action sourceChanges = s' = s.with("currentRevision", 1 - s.currentRevision)
   action storageFailure = s' = s.with("storageWorks", false)
   action storageRecovers = s' = s.with("storageWorks", true)
-  // Undo of a row that is already undone returns that row again.
   action undo = all {
     s.phase.in(Set("queued", "paused", "undone")), s.owner == s.currentOwner,
     s.phase != "queued" or s.window != "expired", s.storageWorks,
     s' = {phase: "undone", lastUndo: true, ...s}
   }
-  // Admission and durable dispatch intent precede the provider call. A changed owner or source
-  // pauses the row before any dispatch; conflict is only ever a provider outcome.
   action claim = all {
     s.phase == "queued", s.window == "expired", s.storageWorks,
     s' = if (s.owner != s.currentOwner or s.targetRevision != s.currentRevision)
@@ -91,7 +86,6 @@ module DeletionJournal {
     .then(check(safety and s.phase == "undone"))
   run repeatedUndoReturnsUndoneRowTest = init.then(stage).then(undo).then(undo)
     .then(check(safety and s.phase == "undone" and s.dispatches == 0 and s.lastUndo))
-  // A source that changed during the Undo window is never marked conflict without a dispatch.
   run changedSourcePausesBeforeDispatchTest = init.then(stage).then(sourceChanges).then(expireWindow)
     .then(claim).then(check(safety and s.phase == "paused" and s.dispatches == 0))
     .then(undo).then(check(safety and s.phase == "undone" and not(s.providerApplied)))

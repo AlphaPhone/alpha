@@ -3,9 +3,6 @@ import { completeAccessSetup, openYourAgent } from './flag-off-android';
 import { test, expect, type Page } from '@playwright/test';
 import { installResidentAgentPlugin } from './helpers/resident-agent-plugin';
 
-// Flag-off product surfaces: the packaged resident agent behind a funded Eliza Cloud account, over
-// a synthetic Android IPC boundary. The agent, its proposal store and the action journal are
-// in-page fixtures; no provider, real account, credential or device effect is used.
 const AGENT = '6f1d3c3e-8c55-4c1b-9d1f-2b6f0b0d3a11';
 
 async function residentAgent(page: Page, seed: 'pending' | 'reconcile') {
@@ -24,7 +21,6 @@ async function residentAgent(page: Page, seed: 'pending' | 'reconcile') {
       payload: { action: 'device_action', version: 1, installationId: f.installationId, enrollmentId: 'fixture-enrollment', operation: { type: 'create_note', title: id === 'fixture-reconcile' ? 'Reconcile fixture note' : 'Declined fixture note', body: 'Synthetic fixture only' } },
       ...extra,
     });
-    // One synthetic resident agent: authenticated identity, device enrollment and proposal store.
     const agent = (method: string, path: string, body: any, headers: Record<string, string>): { status: number; data: unknown } => {
       const ok = (data: unknown) => ({ status: 200, data });
       if (path === '/api/auth/me') return ok({ identity: { id: 'fixture-owner', kind: 'owner' }, access: { role: 'OWNER', mode: 'local' } });
@@ -94,7 +90,7 @@ async function residentAgent(page: Page, seed: 'pending' | 'reconcile') {
           if (method === 'request') {
             const path = new URL(input.url).pathname;
             if (path === '/api/v1/user') return { status: 200, data: { success: true, data: { id: account } } };
-            if (path === '/api/v1/subscription/entitlement') return { status: 404, data: {} }; // Deployed Cloud has no subscription entitlement route yet.
+            if (path === '/api/v1/subscription/entitlement') return { status: 404, data: {} };
             if (path === '/api/v1/billing/limits') return { status: 200, data: { success: true, data: { v2: { subscription: { status: 'available', value: { planKey: 'plus_monthly', state: 'active', currentPeriodEnd: '2099-01-01T00:00:00.000Z' } } } } } };
             f.unexpected.push('cloud ' + path); return { status: 404, data: {} };
           }
@@ -111,12 +107,10 @@ const fixture = (page: Page) => page.evaluate(() => {
 });
 async function connected(page: Page, options: { review?: boolean } = {}) {
   await page.goto('/');
-  // Development builds offer an explicit start; production starts the funded resident agent itself.
   const start = page.locator('.alpha-connection').getByRole('button', { name: 'Start local agent', exact: true });
   await expect.poll(async () => await start.isVisible().catch(() => false) || await page.evaluate(() => (window as any).declineFixture.installationId !== ''), { timeout: 30_000 }).toBe(true);
   if (await start.isVisible().catch(() => false)) await start.click();
   await expect.poll(() => page.evaluate(() => (window as any).declineFixture.installationId), { timeout: 30_000 }).not.toBe('');
-  // Review history is retained for Activity without opening an automatic modal.
   await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0, { timeout: 30_000 });
   await completeAccessSetup(page);
 }
@@ -125,7 +119,6 @@ test('a proposal is declined from its chat card and the agent records the reject
   test.setTimeout(90_000);
   await residentAgent(page, 'pending');
   await connected(page);
-  // A pending proposal is recovered into the conversation for review; nothing is sent.
   await page.getByRole('button', { name: 'Open conversation', exact: true }).click();
   await expect(page.getByText('Create note', { exact: true })).toBeVisible({ timeout: 20_000 });
   const decline = page.getByRole('button', { name: /^Decline Keep things as they are\./ });
@@ -135,13 +128,11 @@ test('a proposal is declined from its chat card and the agent records the reject
   await expect(declined).toBeVisible({ timeout: 20_000 });
   await expect(declined).toHaveCount(1);
   await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0);
-  // Server state reads back as rejected; nothing was claimed, journaled or executed.
   const state = await fixture(page);
   expect(state.states).toEqual([['fixture-decline', 'rejected']]);
   expect(state.decisions).toEqual(['reject']);
   expect(state.effects).toBe(0);
   expect(state.journal.filter((m: string) => ['reserve', 'markApplying', 'finish'].includes(m))).toEqual([]);
-  // The declined card has no approval or decline action left.
   await expect(page.getByRole('button', { name: /^Decline Keep things as they are\./ })).toHaveCount(0);
   await expect(page.getByText('Create note', { exact: true })).toHaveCount(0);
 });
@@ -152,8 +143,6 @@ test('Activity reconciles a reconciliation-required entry as not applied', async
   await connected(page, { review: true });
   await openYourAgent(page);
   const app = page.locator('[data-alpha-layer="app"]');
-  // Background proposal recovery stays passive. Activity loads its history only
-  // when the owner asks, before any reconciliation decision is available.
   await app.getByRole('button', { name: 'Refresh actions', exact: true }).click();
   await expect(app.getByRole('button', { name: 'Refresh actions', exact: true })).toBeVisible();
   await expect(app.getByText('Review', { exact: true })).toBeVisible();
@@ -167,5 +156,4 @@ test('Activity reconciles a reconciliation-required entry as not applied', async
   expect(state.journal.filter((m: string) => ['reserve', 'markApplying', 'finish'].includes(m))).toEqual([]);
 });
 
-// UI progress only: this feature fixture does not manufacture OS/provider grants.
 test.beforeEach(async({page})=>seedCompletedAccessSetup(page));

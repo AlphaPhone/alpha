@@ -56,7 +56,6 @@ test('closing an earlier tab preserves the focused tab and its activation identi
   intent = 2;
   await page.evaluate(() => (window as any).originalFocusedTab = document.activeElement);
   trace.steps.push({label:'focus middle tab',action:{name:'focusTab',args:[2]},expect:await observe()});
-  // Invoke the actual close handler without moving keyboard focus to its button.
   await page.getByRole('button', {name:'Close tab',exact:true}).first().evaluate(button => (button as HTMLButtonElement).click());
   await expect(choices).toHaveCount(2);
   expect(await page.evaluate(() => document.activeElement === (window as any).originalFocusedTab)).toBe(true);
@@ -113,7 +112,6 @@ for (const viewport of [{width:390,height:844},{width:1280,height:900}]) {
             tabs:[{id:savedId,url:'https://focus.example/saved',title:'Saved page'}],
             cur:savedId,
           }));
-          // Hold the real document migration while the owner opens the tab chooser.
           const w = window as any;
         void navigator.locks.request(
             JSON.stringify(['browser-document','alpha.browser.documents.v1','alpha.browser.session.v1']),
@@ -140,7 +138,6 @@ for (const viewport of [{width:390,height:844},{width:1280,height:900}]) {
         expect.soft(restored.current).toBe(temporary);
         expect.soft(await page.evaluate(() => document.activeElement === (window as any).focusedBeforeRestore)).toBe(true);
         await expect(page.getByRole('button',{name:'Switch to Saved page',exact:true})).toBeVisible();
-        // Complete the owner's original keyboard action even when a regression moved focus.
         await page.keyboard.press('Enter');
         await expect(choices).toHaveCount(0);
         expect((await browserState(page)).current).toBe(temporary);

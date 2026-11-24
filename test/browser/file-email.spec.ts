@@ -7,7 +7,6 @@ async function setup(page:Page,reviewFile=true,openInbox=true){
  await page.evaluate(async()=>{
   const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');
   const {Component}=await import('/src/prototype/model.js');
-  // Synthetic restartable native-slot stand-in; browser production intentionally has no Inbox secret slots.
   const {inboxLocalStore:s}=await import('/src/runtime/inbox-local-store.ts');
   s.read=async(key:string)=>structuredClone(JSON.parse(sessionStorage.getItem('file-email-slots')||'{}')[key]??null) as any;
   s.compareExchange=async(key:string,prior:unknown,next:unknown)=>{const slots=JSON.parse(sessionStorage.getItem('file-email-slots')||'{}');if(JSON.stringify(slots[key]??null)!==JSON.stringify(prior))return {status:'conflict'} as any;slots[key]=next;sessionStorage.setItem('file-email-slots',JSON.stringify(slots));return {status:'saved'} as any;};

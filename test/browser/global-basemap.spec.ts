@@ -2,7 +2,6 @@ import {test,expect} from '@playwright/test';
 import {returnToApps} from './app-navigation';
 const styleUrl='https://tiles.openfreemap.org/styles/bright';
 test.use({hasTouch:true,isMobile:true});
-// Real MapLibre/worker/GL with closed style+GeoJSON ports; no public tiles or physical location.
 async function setup(page:any,fail=false){
  await page.addInitScript(()=>{localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));(window as any).locationRequests=0;Object.defineProperty(navigator,'geolocation',{configurable:true,value:{getCurrentPosition:()=>{(window as any).locationRequests++;throw Error('Physical location forbidden');},watchPosition:()=>{throw Error('Physical location forbidden');},clearWatch:()=>{}}});});
  await page.route('https://**/*',async(route:any)=>{

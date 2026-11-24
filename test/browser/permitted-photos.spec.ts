@@ -4,7 +4,6 @@ test('full access shows the library with no access row and requests no permissio
  await photosBridge(page);await expect(page.getByRole('button',{name:'Allow all photos',exact:true})).toHaveCount(0);
  await expect(page.getByRole('button',{name:/^Photo, /})).toHaveCount(1);
  expect(await page.evaluate(()=>(window as any).mediaFixture.calls.filter((c:any)=>c.method==='requestLibraryAccess').length)).toBe(0);
- // One catalog: the grid pages AlphaPhotos.list; the search box and its provider query are gone.
  await expect(page.getByRole('button',{name:'Search photos',exact:true})).toHaveCount(0);
  expect(await page.evaluate(()=>(window as any).mediaFixture.calls.some((c:any)=>c.method==='listPermitted'))).toBe(false);
 });

@@ -6,11 +6,8 @@ import {join,resolve} from 'node:path';
 import {createLocalAgentDevHandler} from '../../scripts/local-agent-dev-bridge';
 import {scaledTimeout} from '../../specs/quint/refinement/timeouts.mjs';
 
-// Closed fixture: the real development bridge and renderer against a fake paired agent whose Cloud
-// read-aloud body the test releases chunk by chunk. No Cloud account, provider or audio device.
 test.beforeEach(({},info)=>info.setTimeout(scaledTimeout(30_000)));
 const owner='11111111-1111-4111-8111-111111111111',paired='closed-owner-session';
-// MPEG-1 Layer III, 32 kbit/s, 32 kHz, mono: 144-byte frames, each 36 ms of silence.
 function mp3(frames:number){const out=new Uint8Array(frames*144);for(let i=0;i<frames;i++)out.set([0xff,0xfb,0x18,0xc0],i*144);return out;}
 type Host={requests:number;refuse:boolean;upstream?:ReadableStreamDefaultController<Uint8Array>;signal?:AbortSignal};
 type Proof={outcome:string|null;events:string[];firstAudioMs?:number;speak():void;stop():void;prepare():Promise<string>;play(playbackId:string):Promise<string>;hide(hidden:boolean):void;state():Promise<{playing:boolean;positionMs:number}>;gate():boolean};
@@ -28,7 +25,6 @@ async function start(page:Page,options:{mediaSource:boolean}={mediaSource:true})
   expect(path).toBe('/api/tts/cloud');host.requests++;host.upstream=undefined;
   if(host.refuse)return Response.json({secret:'never-project-provider-error'},{status:402});
   const signal=host.signal=input.signal!;
-  // Like fetch, an aborted request errors its body. The test owns every chunk and the end.
   return new Response(new ReadableStream<Uint8Array>({start(controller){host.upstream=controller;signal.addEventListener('abort',()=>controller.error(signal.reason),{once:true});}}),
    {headers:{'Content-Type':'audio/mpeg','X-Eliza-Speech-Provider':'cartesia','X-Eliza-Speech-Route':'cloud'}});
  }});
@@ -44,10 +40,8 @@ async function start(page:Page,options:{mediaSource:boolean}={mediaSource:true})
    const {createCloudVoice}=await import('/src/runtime/cloud-voice.ts'),{registerPlugin}=await import('/src/platform-plugins.ts'),markers=await import(/* @vite-ignore */ activity);
    const voice=registerPlugin<any>('AlphaVoiceCloud');let controller:AbortController|undefined,speakAt=0;
    const proof:Proof=(window as any).ttsStream={outcome:null,events:[],
-    // The voice conversation's speaker: no onStarted, so it marks half-duplex playback itself.
     speak(){controller=new AbortController();proof.outcome=null;proof.events=[];proof.firstAudioMs=undefined;speakAt=performance.now();createCloudVoice().speak('Streaming speech test.',controller.signal).then(()=>{proof.outcome='finished';},(error:Error)=>{proof.outcome=error.name==='AbortError'?'stopped':'failed: '+error.message;});},
     stop(){controller?.abort();},
-    // A clip prepared for later and played by id, as the read-aloud queue does.
     prepare:()=>voice.synthesizeDevelopmentCloud({text:'Prepared speech test.',requestId:crypto.randomUUID()}).then(({playbackId}:{playbackId:string})=>playbackId),
     play:playbackId=>voice.play({playbackId}).then(()=>'played',(error:Error)=>error.message),
     hide(hidden){Object.defineProperty(document,'hidden',{configurable:true,get:()=>hidden});if(hidden)document.dispatchEvent(new Event('visibilitychange'));},
@@ -60,7 +54,6 @@ async function start(page:Page,options:{mediaSource:boolean}={mediaSource:true})
  const audible=()=>proof(async value=>{const state=await value.state();return state.playing&&state.positionMs>100;});
  return {host,foreign,proof,audible,cleanup};
 }
-/** Starts the voice conversation's speaker on a fresh fixture request and waits for the agent to receive it. */
 async function speak(page:Page,host:Host,body=true){host.upstream=undefined;host.signal=undefined;const requests=host.requests;await page.evaluate(()=>(window as any).ttsStream.speak());await expect.poll(()=>host.requests).toBe(requests+1);if(body)await expect.poll(()=>host.upstream!==undefined).toBe(true);}
 
 test('Cloud read-aloud plays its first frames before the agent finishes sending the clip',async({page},info)=>{
@@ -69,7 +62,6 @@ test('Cloud read-aloud plays its first frames before the agent finishes sending 
   expect(await page.evaluate(()=>MediaSource.isTypeSupported('audio/mpeg'))).toBe(true);
   await speak(page,f.host);
   f.host.upstream!.enqueue(mp3(28));
-  // Audible and advancing while the body is still open: nothing below has ended it.
   await expect.poll(f.audible,{timeout:10000}).toBe(true);
   expect(await f.proof(value=>value.outcome)).toBeNull();
   expect(await f.proof(value=>value.gate())).toBe(true);
@@ -86,12 +78,10 @@ test('Cloud read-aloud plays its first frames before the agent finishes sending 
 test('Stop aborts the Cloud read-aloud download and its playback, before and after the first frames',async({page})=>{
  const f=await start(page);
  try{
-  // Before any audio: the request itself is aborted.
   await speak(page,f.host);
   await page.evaluate(()=>(window as any).ttsStream.stop());
   await expect.poll(()=>f.proof(value=>value.outcome)).toBe('stopped');
   await expect.poll(()=>f.host.signal?.aborted).toBe(true);
-  // While playing: the playback stops and the bridge aborts the agent's body.
   await speak(page,f.host);
   expect(f.host.signal?.aborted).toBe(false);
   f.host.upstream!.enqueue(mp3(28));
@@ -132,7 +122,6 @@ test('a clip cut off after playback started fails instead of finishing, and refu
   expect(await f.proof(value=>value.events)).toEqual(['playbackFailed']);
   expect(await f.proof(async value=>(await value.state()).playing)).toBe(false);
   expect(await f.proof(value=>value.gate())).toBe(false);
-  // A billing refusal before any audio is the sanitized HTTP error, with no playback at all.
   f.host.refuse=true;await speak(page,f.host,false);
   await expect.poll(()=>f.proof(value=>value.outcome)).toBe('failed: Cloud speech unavailable (HTTP 402).');
   expect(await f.proof(value=>value.events)).toEqual([]);
@@ -143,7 +132,6 @@ test('a clip cut off after playback started fails instead of finishing, and refu
 test('a clip prepared before play stops downloading when the page is hidden, and never plays',async({page})=>{
  const f=await start(page);
  try{
-  // Headers, and so the playback id, arrive with the first chunk; the rest of the body stays open.
   const prepared=f.proof(value=>value.prepare());
   await expect.poll(()=>f.host.upstream!==undefined).toBe(true);
   f.host.upstream!.enqueue(mp3(28));const playbackId=await prepared;
@@ -166,7 +154,6 @@ test('an element that lets its MediaSource go stops the streamed download and re
    const revoked:string[]=[],revoke=URL.revokeObjectURL;URL.revokeObjectURL=url=>{revoked.push(url);revoke(url);};
    try{
     const {url,fed}=streamedSpeechSource(new StreamedSpeech(body),new AbortController().signal),audio=new Audio(url);
-    // Attached and fed its first chunk while the rest of the clip downloads, then the source is reset.
     await new Promise(resolve=>audio.addEventListener('loadedmetadata',resolve,{once:true}));
     audio.removeAttribute('src');audio.load();
     const outcome=await Promise.race([fed.then(()=>'fed',(error:Error)=>'failed: '+error.message),new Promise(resolve=>setTimeout(resolve,3000,'pending'))]);

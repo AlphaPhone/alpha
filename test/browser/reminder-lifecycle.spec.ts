@@ -1,7 +1,4 @@
 import {test,expect} from '@playwright/test';
-// Renderer reminder lifecycle: refusal retirement and reopen against browser storage. No device
-// effects. Refusal copy, overdue and to-do listing, time zones and Clock days are node tests in
-// test/reminder-lifecycle-pure.test.mjs.
 const offline=async({page}:{page:import('@playwright/test').Page})=>{await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));await page.goto('/');};
 
 test.describe('reminder lifecycle',()=>{
@@ -20,7 +17,6 @@ test.describe('reminder lifecycle',()=>{
    const id=`accepted-${crypto.randomUUID()}`,request={id,title:'Accepted after refusals',body:'',at:Date.now()+3600000};
    await creations.retainReminderCreation({id,request,state:'pending'});
    const accepted=await DailyApps.scheduleReminder(request);
-   // A refusal code for an ID that readback finds saved is never retired.
    const keptSaved=await creations.retireRefusedCreation(id,'failed');
    const found=await creations.checkReminderCreation(id);
    const notRefusal=await creations.retireRefusedCreation('absent-id','scheduled');

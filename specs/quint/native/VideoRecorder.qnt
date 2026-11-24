@@ -1,6 +1,3 @@
-// One browser video recording: chunk admission against the size limit, the stop and settle
-// race, cancellation, and the adapter's finalisation before the preview stops.
-// Sizes are in units; the limit of two units stands for 100 MB.
 module VideoRecorder {
   pure val Max = 2
   type State = {
@@ -28,8 +25,6 @@ module VideoRecorder {
           bytes: 0, chunks: 0, full: false, truncated: false, prefix: "unread", settles: 0, cause: "none" }
       else { ...s, adapter: "idle" }
   }
-  // A chunk that would pass the limit is left out and recording stops with what was collected.
-  // Once the limit stopped the recording every later chunk is left out too.
   action chunk(units: int): bool = all {
     s.session.in(Set("recording", "stopping")), Set(1, 2, 3).contains(units),
     val admitted = admit(s.bytes, units, Max)
@@ -37,7 +32,6 @@ module VideoRecorder {
       chunks: if (admitted.keep) s.chunks + 1 else s.chunks, truncated: not(admitted.keep),
       full: admitted.stop, session: if (admitted.stop) "stopping" else s.session }
   }
-  // The duration limit or an ended camera track stops the recorder.
   action limitOrTrackEnded = all { s.session == "recording", s' = { ...s, session: "stopping" } }
   pure def settled(v: State, ok: bool, cause: str): State =
     { ...v, session: if (ok) "saved-pending" else "failed-pending", settles: v.settles + 1,
@@ -52,22 +46,18 @@ module VideoRecorder {
       ok, if (ok) "none" else "prefix-invalid") }
   action recorderError = all { s.session.in(Set("recording", "stopping")), s' = settled(s, false, "recorder-error") }
   action stopDeadline = all { s.session == "stopping", s' = settled(s, false, "deadline") }
-  // The shutter again, back, the recording poll or leaving the view finalises once.
   action finish = all { s.adapter == "recording", not(s.finalizing),
     s' = { ...s, adapter: "idle", finalizing: true,
       session: if (s.session == "recording") "stopping" else s.session } }
-  // Finalisation saves exactly one row for a settled recording of the current session.
   action finalized = all { s.finalizing, s.session.in(Set("saved-pending", "failed-pending", "cancelled", "none")),
     val saved = s.session == "saved-pending" and s.rows < 3
     s' = { ...s, finalizing: false, session: "none", rows: if (saved) s.rows + 1 else s.rows,
       savedGeneration: if (saved) s.generation else s.savedGeneration,
       failures: if (saved or s.failures == 2) s.failures else s.failures + 1 } }
-  // Leaving the camera finalises a recording before the preview is stopped.
   action leave = all { not(s.leaving), s' = { ...s, leaving: true } }
   action finishOnLeave = all { s.leaving, s.adapter == "recording", not(s.finalizing),
     s' = { ...s, adapter: "idle", finalizing: true,
       session: if (s.session == "recording") "stopping" else s.session } }
-  // Stopping the preview cancels whatever recorder session is left.
   action stopPreview = all { s.leaving, s.adapter != "recording", not(s.finalizing), not(s.previewStopped),
     s' = { ...s, previewStopped: true,
       session: if (s.session == "none") "none" else "cancelled",
@@ -100,7 +90,6 @@ module VideoRecorder {
   val SavedRowWitness = s.rows > 0
   val LeavingWhileRecordingWitness = s.leaving and s.finalizing and not(s.previewStopped)
   val FailedFinalisationWitness = s.failures > 0
-  // The size limit is reached mid-recording: the video collected so far is saved.
   run limitReachedStillSavesTest = init.then(shutter).then(startResolved(true)).then(chunk(1)).then(chunk(2))
     .expect(s.full and s.bytes == 1 and s.chunks == 1 and s.session == "stopping" and safety)
     .then(chunk(1)).expect(s.bytes == 1 and safety).then(recorderStopped)

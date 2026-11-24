@@ -8,7 +8,6 @@ import java.util.Set;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Controlled Android scheduling/task/Settings facts. No recovery policy is evaluated here. */
 public final class MainActivityPorts {
   public record Scheduled(View view, Runnable callback, long due, long delay) {}
   public static long time;

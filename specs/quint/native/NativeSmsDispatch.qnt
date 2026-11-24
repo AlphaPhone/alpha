@@ -1,5 +1,3 @@
-// Alpha's reviewed SMS coordinator and manifest callback boundary.
-// One fixed operation ID, two payloads, two bridge actors and up to four parts.
 module NativeSmsDispatch {
   type Record = {
     binding: int, status: str, decision: str, dispatching: bool, submitted: bool, unknown: bool, boot: int,
@@ -67,7 +65,6 @@ module NativeSmsDispatch {
   action simAt(value: int): bool = all { value.in(0.to(3)), s' = { ...s,sim:value } }
   action refuseOutbox(value: bool): bool = s' = { ...s,refuseOutbox:value }
   action age = all { s.memory.binding!=0, s' = { ...s,old:true } }
-  // A successful journal capacity write retires the fixed ID into an exact-binding tombstone.
   action prune = all {
     s.old, s.memory.binding!=0, s.memory.binding==s.disk.binding, not(s.memory.dispatching),
     s' = { ...s,memory:noRecord,disk:noRecord,tombstoneBinding:s.memory.binding }
@@ -159,8 +156,6 @@ module NativeSmsDispatch {
 
   pure def ownedProvider(state: State): bool = Set(1).intersect(state.outbox.union(state.sentRows).union(state.failedRows)).size()>0
 
-  // A provider match can attach a row without making the send delivered.
-  // Only a reported, successfully sent single part can use that row's status.
   pure def reconciled(state: State): State = {
     val memory=state.memory
     val partSet=partsOf(1,state.parts)
@@ -184,8 +179,6 @@ module NativeSmsDispatch {
     if (not(changed)) state else { ...state,events:actors.mapBy(actor=>
       state.events.get(actor)+(if (receivers.contains(actor)) 1 else 0)) }
   }
-  // The original eight callback publications remain available to each bridge.
-  // Two eligible bridges can receive the same publication; no recipient gains past eight.
   pure def noticeBudget(state: State): bool = state.events.keys()==actors and
     actors.forall(actor=>state.events.get(actor)>=0 and state.events.get(actor)<=8)
   pure def deliveryChanged(before: Record, after: Record): bool =
@@ -230,7 +223,6 @@ module NativeSmsDispatch {
     val current={ ...s,process:s.process+1,boot:boot,reviews:actors.mapBy(_actor=>noReview),foreground:actors,closed:Set(),
       listeners:Set(1),events:actors.mapBy(_=>0),reply:"none",replyBinding:0,memory:loaded,disk:loaded }
     val recovered=reconciled(current)
-    // The fixture drains the first bridge's startup reconcile before loading the second.
     val published=announce(recovered,deliveryChanged(current.memory,recovered.memory))
     s' = { ...published,listeners:actors }
   }

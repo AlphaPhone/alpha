@@ -1,8 +1,6 @@
 import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import { test, expect } from '@playwright/test';
 
-// Actual renderer/chooser and controller, synthetic native packaging boundary.
-// Never starts a runtime, sends a real key, signs in, or calls a remote service.
 for (const mode of ['checking', 'unavailable', 'available'] as const) {
   test(`native local-agent packaging: ${mode}`, async ({ page }) => {
     await page.addInitScript(mode => {
@@ -27,7 +25,6 @@ for (const mode of ['checking', 'unavailable', 'available'] as const) {
             }
             if (method === 'prepareProviderConfiguration') return { requestId: 'packaging-lease' };
             if (method === 'cancelProviderConfiguration') return {};
-            // Publishes typed preferences only; this fixture has no Google account or provider.
             if (method === 'setGoogleAgentAccess') { if(typeof input.gmailChanges!=='boolean'||typeof input.calendarEdits!=='boolean')throw Error('Invalid Google preferences');return {}; }
             if (method === 'configureProvider') { if (input.requestId !== 'packaging-lease') throw Error('Unleased provider request'); w.packagingFixture.saved++; w.packagingFixture.keys.push(input.apiKey); return { configured: true }; }
             if (method === 'providerStatus') return w.packagingFixture.saved ? { provider: 'cerebras', configured: true, model: 'qwen-3.8-27b' } : { provider: 'cerebras', configured: false };
@@ -49,7 +46,6 @@ for (const mode of ['checking', 'unavailable', 'available'] as const) {
       };
     }, mode);
     await page.goto('/');
-    // Initial native launch may open automatically; otherwise use the product control.
     if (!await page.locator('.alpha-connection-scrim').isVisible())
       await openConnectionDiagnostics(page);
     await expect(page.locator('.alpha-connection-scrim')).toBeVisible();
@@ -68,7 +64,6 @@ for (const mode of ['checking', 'unavailable', 'available'] as const) {
       await chooser.locator('summary').filter({ hasText: /^Model provider$/ }).click();
       await chooser.getByLabel('Cerebras API key').fill('synthetic-e2e-key');
       await chooser.getByRole('button', { name: 'Save', exact: true }).click();
-      // A verified key is selected and the agent restarts with it at once; this fixture refuses the start.
       const provider = page.getByRole('dialog', { name: 'AI connection', exact: true });
       await expect(provider.getByRole('alert')).toHaveText('Runtime start is outside this fixture');
       await expect(chooser.getByText('Cerebras key verified and saved in Android Keystore. Own API keys selected.')).toHaveCount(0);

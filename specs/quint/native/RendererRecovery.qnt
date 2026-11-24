@@ -1,5 +1,3 @@
-// RendererRecoveryBudget shared by the launcher and assistant surfaces, and the MainActivity
-// callback/recreation boundary.
 module RendererRecovery {
   type Recovery = {
     started: bool, windowStart: int, losses: int, home: bool,
@@ -33,7 +31,6 @@ module RendererRecovery {
     assistReportDue: false, assistDecision: "none", lossHome: false, lossCreatedAt: 0, lossDecision: "none"
   }
   action init = s' = initial
-  // Stronger finite proof entry. Every saturated budget count is reachable by prior losses.
   action budgetInit = {
     nondet losses = 0.to(4).oneOf()
     nondet window = Set(0, 1, 60000).oneOf()
@@ -44,7 +41,6 @@ module RendererRecovery {
       delay: if (losses == 4 and not(home)) 5000 else 0, ...initial}
   }
   action setHome(home: bool): bool = s' = {home: home, operation: "context", ...s}
-  /// Android/Capacitor has constructed this instance and reported whether its bridge exists.
   action activityReady(home: bool, bridge: bool): bool = all {
     s.operation == "init",
     s' = {home: home, bridgeAvailable: bridge, rendererAlive: bridge, escape: home and not(bridge),
@@ -56,9 +52,6 @@ module RendererRecovery {
   }
   pure def decided(losses: int, home: bool): str =
     if (losses <= 3) "RECREATE_NOW" else if (home) "SHOW_ESCAPE" else "RECREATE_AFTER_BACKOFF"
-  // onLoss for a crash seen by a started activity whose WebView was created when the budget had
-  // counted createdAt deaths. The first report of a renderer death counts it. A WebView that
-  // predates a counted death is reporting that same death and spends nothing.
   pure def reported(state: Recovery, time: int, createdAt: int): Recovery =
     if (createdAt != state.deaths) state
     else {
@@ -67,10 +60,6 @@ module RendererRecovery {
         losses: if (resetWindow) 1 else if (state.losses < 4) state.losses + 1 else 4,
         deaths: state.deaths + 1, ...state}
     }
-  // The launcher surface's WebView reports its renderer gone. The app's WebViews share one
-  // renderer, so the assistant surface's WebView, when open, died with it and reports separately.
-  // reportDue marks a death the assistant surface reported first; actualDeaths counts real deaths
-  // from that, independently of the creation count the budget compares.
   action rendererGone(time: int, matchingWebView: bool): bool = all {
     time >= 0,
     if (not(matchingWebView) or not(s.bridgeAvailable)) s' = {handled: false, operation: "ignored", ...s}
@@ -91,7 +80,6 @@ module RendererRecovery {
         assistAlive: if (newDeath) false else s.assistAlive, ...counted}
     }
   }
-  // The assistant surface is a second MainActivity in the same process with its own WebView.
   action openAssist = all {
     not(s.assistOpen),
     s' = {assistOpen: true, assistAlive: true, assistRecovering: false, assistCreatedAt: s.deaths,
@@ -102,7 +90,6 @@ module RendererRecovery {
     s' = {assistOpen: false, assistAlive: false, assistRecovering: false, assistReportDue: false,
       operation: "assist-close", ...s}
   }
-  // The assistant surface is never HOME: past the budget it backs off and never shows the escape view.
   action assistRendererGone(time: int): bool = all {
     time.in(Set(0, 1, 59999, 60000, 60001, 120002)), s.assistOpen, not(s.assistRecovering),
     s.assistAlive or s.assistReportDue,
@@ -123,7 +110,6 @@ module RendererRecovery {
   action delayElapsed = all {
     s.pending, s' = {remaining: 0, operation: "delay", ...s}
   }
-  /// The posted Runnable requests recreation; Android destruction and creation occur later.
   action dispatchRecreation(activity: int): bool =
     if (s.pending and s.pendingActivity == activity and activity == s.activity and s.remaining == 0)
       s' = {pending: false, recreateRequested: not(s.finishing or s.destroyed),
@@ -166,7 +152,6 @@ module RendererRecovery {
     available.subseteq(Set("home-settings", "default-apps", "settings")),
     s' = {availableSettings: available, operation: "resolve", ...s}
   }
-  /// A secondary launcher instance never loads a bridge while it can hand off to the page owner.
   action handoff(frontMarker: bool, sameTask: bool, started: bool): bool = all {
     not(s.handoffUnreliable) or frontMarker,
     val count = if (frontMarker or sameTask or not(started)) s.unackedFrontStarts
@@ -220,7 +205,6 @@ module RendererRecovery {
       chooseSettings(flag), openAssist, closeAssist, assistRendererGone(time), assistRecreated, s' = s}
   }
   val TypeOK = s.losses.in(0.to(4)) and s.activity.in(0.to(6)) and s.remaining.in(Set(0, 5000))
-  // Every report, counted or shared, from either surface gets the decision for the current count.
   val BudgetDecision = s.operation.in(Set("loss", "shared-loss", "assist-loss", "assist-shared-loss")) implies
     s.lossDecision == decided(s.losses, s.lossHome) and
     (s.lossDecision == "RECREATE_NOW" or s.losses == 4)
@@ -233,7 +217,6 @@ module RendererRecovery {
   val HandoffBounded = s.unackedFrontStarts.in(0.to(3))
   val NoLiveViewWithoutBridge = s.rendererAlive implies s.bridgeAvailable
   val TaskKindsBounded = s.task.in(Set(0, 1)) and s.taskHomes.keys().subseteq(Set(0, 1))
-  // Each death of the shared renderer spends exactly one loss, however many surfaces report it.
   val OneLossPerRendererDeath = s.deaths == s.actualDeaths
   val AssistantNeverEscapes = s.assistDecision != "SHOW_ESCAPE"
   val SharedReportSpendsNothing = s.operation.in(Set("shared-loss", "assist-shared-loss")) implies s.lossCreatedAt < s.deaths
@@ -296,8 +279,6 @@ module RendererRecovery {
     .then(check(safety and s.home and s.taskHomes.get(0) and not(s.taskHomes.get(1))))
   run finishedTaskIdReuseStartsFreshTest = init.then(activityReady(true, true)).then(destroyActivity(true))
     .then(newTaskActivity(0, false, true)).then(check(safety and not(s.home or s.taskHomes.get(0))))
-  // Two crashes of the shared renderer with the assistant surface open: each death is counted once,
-  // so the budget of three immediate recreations is not used up by two crashes.
   run sharedRendererDeathCountsOnceTest = init.then(openAssist).then(rendererGone(0, true))
     .then(check(s.losses == 1 and s.assistReportDue)).then(assistRendererGone(0))
     .then(check(safety and s.losses == 1 and s.deaths == 1 and s.assistDecision == "RECREATE_NOW"))

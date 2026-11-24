@@ -1,5 +1,3 @@
-// AOSP role and permission admission, durable SMS evidence, contacts and reminders.
-// Actual Clock review/journal/handoff evidence belongs to NativeClockReview.
 module DeviceActions {
   type State = {
     image: bool, foreground: bool, unlocked: bool, permission: bool, sim: int,
@@ -82,7 +80,6 @@ module DeviceActions {
     s' = {retiredId: true, phase: "retired", ...s}
   }
   action repeatOperation = s' = s
-  // Collapsed successful local creation, plus granular durable-intent/recovery actions below.
   action scheduleReminder = all {
     s.reminder == "none", s.reminderCreation == "none", s.reminderAttempts == 0,
     s' = {reminder: "scheduled", reminderCreation: "found", reminderAttempts: 1, ...s}
@@ -97,7 +94,6 @@ module DeviceActions {
     s' = {reminder: status, reminderAttempts: 1,
       reminderCreation: if (status == "none") "pending" else "found", ...s}
   }
-  // Readback confirms the same creation; it never calls the scheduling port again.
   action reconcileReminder(found: bool): bool = all {
     s.reminderCreation == "pending", s.reminderAttempts == 1,
     s' = if (found) {reminder: "scheduled", reminderCreation: "found", ...s} else s

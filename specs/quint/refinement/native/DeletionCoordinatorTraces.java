@@ -5,7 +5,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.json.*;
 
-/** Executes the whole coordinator and journal, observing persisted bytes and provider calls. */
 public final class DeletionCoordinatorTraces {
   static DeferredDeletionCoordinator coordinator;
   static Trace trace;
@@ -366,7 +365,6 @@ public final class DeletionCoordinatorTraces {
   public static void main(String[] args) throws Exception {
     DeletionTestPorts.initializeAgent();
     coordinator = NativeDeletionCoordinator.get(new android.content.Context());
-    // Establish the installation identity before tracing the selected deletion row.
     coordinator.manualOwner();
     trace = new Trace(args[0], observe());
     trace.value.put("sourceEvents", events).put("portEvents", DeletionTestPorts.portEvents);

@@ -1,4 +1,3 @@
-/// Browser Cloud bridge private-store transactions, request fencing and resident retirement.
 module DevelopmentHost {
   type State = { environment: str, credential: int, previous: int, claim: int,
     loginPending: bool, expired: bool, host: str, bound: int, generation: int,
@@ -55,7 +54,6 @@ module DevelopmentHost {
   val BoundedRequests = s.active.size() <= 2
   val CurrentResponse = s.repliedOwner == 0 or s.repliedOwner == s.credential
   val ReadyBinding = s.host == "ready" implies s.bound == s.credential and not(s.expired) and not(s.retiring)
-  /// A claim is only ever the successor of the credential it was requested against.
   val ClaimSucceedsCredential = s.claim == 0 or s.claim == s.previous + 1
   val ActiveRequestsOwned = s.active.forall(id => s.requestOwners.get(id) != 0)
   val ClosedIsQuiet = s.closed implies s.host == "stopped" and not(s.loginPending)

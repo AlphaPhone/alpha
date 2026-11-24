@@ -1,11 +1,9 @@
 import {returnToApps} from './app-navigation';
 import {test,expect} from '@playwright/test';
-// The settled reply is announced once through the page's status region, and focus stays on the composer.
 async function setup(page:any,reply:(text:string,onText:(value:string)=>void,f:any)=>Promise<{text:string}>){
  await page.route('https://**/*',r=>r.abort());await page.addInitScript(()=>{localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));(window as any).announce={sent:[],heard:[]};if(navigator.mediaDevices)navigator.mediaDevices.getUserMedia=async()=>{throw Error('No real microphone');};});await page.goto('/?connections=advanced');await expect(page.getByRole('textbox',{name:'Ask Alpha',exact:true})).toBeEnabled();
  await page.evaluate(async(source:string)=>{const {Component}=await import('/src/prototype/model.js'),{alphaClient}=await import('/src/runtime/alpha-client.ts');const f=(window as any).announce;const send=new Function('return '+source)();Component.prototype.connectAgent=async()=>{};alphaClient.send=async(text:string,onText:(value:string)=>void)=>{f.sent.push(text);return send(text,onText,f);};const render=Component.prototype.renderVals;Component.prototype.renderVals=function(){f.shell=this;return render.call(this);};
  },reply.toString());
- // Capture the fixture during an explicit render rather than waiting for an incidental one.
  await page.getByRole('button',{name:'Settings',exact:true}).click();
  await expect.poll(()=>page.evaluate(()=>!!(window as any).announce.shell)).toBe(true);
  await returnToApps(page);

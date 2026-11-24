@@ -1,4 +1,3 @@
-// Historical design translation; the executable Quint model is retained here.
 module GoogleConnect {
   type State = { Design: str, gms: bool, scopes: Set[str], screen: str, browser: str,
     requested: Set[str], inboxView: str, calView: str, calPicked: bool, taps: int, detours: int }
@@ -25,8 +24,6 @@ module GoogleConnect {
   pure def initialState(design, gms, scopes, screen) = { Design: design, gms: gms,
     scopes: scopes, screen: screen, browser: "none", requested: Set(),
     inboxView: InboxFor(scopes), calView: calFor(design, scopes, false), calPicked: false, taps: 0, detours: 0 }
-  // Persistent monitors are the exact state extension for the original
-  // action properties. They observe transitions without constraining them.
   pure val initialChecks = { ScopesNeverShrink: true, TwoTapsToMail: true }
   pure def ScopesNeverShrinkRelation(before: State, after: State): bool = {
       val revoked = before.scopes != Set() and before.detours < MaxDetours and after == { ...before,

@@ -3,7 +3,6 @@ for(const state of ['camera'])test(`camera text has contrast over a white feed: 
  await page.goto('/?mode=mock&start='+state);
  const controls=page.locator(state==='camera'?'button[aria-label^="Zoom "]':'button[aria-label="Save to Files"],button[aria-label="Open link"]');
  await expect(controls.first()).toBeVisible();
- // Composite the real rendered surface over the brightest possible camera pixel.
  const ratios=await controls.evaluateAll(elements=>elements.map(element=>{
   const css=getComputedStyle(element),rgba=(value:string)=>value.match(/[\d.]+/g)!.map(Number);
   const bg=rgba(css.backgroundColor),fg=rgba(css.color),a=bg[3]??1;

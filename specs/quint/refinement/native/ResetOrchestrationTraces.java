@@ -10,7 +10,6 @@ import java.nio.file.Path;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Calls the unchanged authorization, reset coordinator and application startup classes. */
 public final class ResetOrchestrationTraces {
  private static final class Scenario {
   final Trace trace;

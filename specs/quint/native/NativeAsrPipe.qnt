@@ -1,4 +1,3 @@
-/// Bounded shared LiveSegmentPipe queue, ASR warmup, cutoff and close acknowledgment.
 module NativeAsrPipe {
   type State = {started: bool, phase: str, owned: bool, closing: bool, cancelled: bool, finished: bool,
     ready: str, closed: str, cutoff: int, queued: List[int], lastMask: int, lastCutoff: int, accepted: bool,

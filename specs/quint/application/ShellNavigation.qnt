@@ -1,11 +1,9 @@
-/// Shell Back ordering and completed-action navigation claim fences.
 module ShellNavigation {
   type State = { view: str, chat: str, shade: bool, drawer: bool, modal: bool,
     draft: str, revision: int, captured: int, claim: str, destination: str, hidden: bool, focus: bool,
     settingsRows: List[str], focusedSetting: str, intendedSetting: str, activatedSetting: str,
     pageSuspended: bool, contextSensitive: bool, pending: bool, sendEpoch: int,
     sendRevision: int, replyVisible: bool,
-    // Text was typed and has not been sent.
     unsent: bool }
   var s: State
   pure def containsSetting(rows: List[str], value: str): bool = rows.foldl(false, (found, row) => found or row == value)
@@ -28,8 +26,6 @@ module ShellNavigation {
       focusedSetting: "", intendedSetting: "", activatedSetting: "" }
   action open(view: str): bool = all { view.in(Views), s.revision < 6,
     s' = opened(s, view) }
-  /// A finite projection of the dynamic Settings groups. Row identity survives
-  /// insertion and reordering. Removing the focused row clears its focus.
   action settingsRowsChanged(rows: List[str]): bool = all {
     s.view == "settings", rows.in(SettingRows),
     s' = { ...s, settingsRows: rows,
@@ -41,7 +37,6 @@ module ShellNavigation {
     s' = { ...s, focusedSetting: row, intendedSetting: row, activatedSetting: "" } }
   action activateSetting = all { s.focusedSetting != "", not(s.contextSensitive or s.modal or s.shade),
     s' = { ...s, activatedSetting: s.focusedSetting, focusedSetting: "", intendedSetting: "" } }
-  /// A native settings handoff leaves this renderer mounted with its focused row.
   action activateExternalSetting = all { s.focusedSetting != "", not(s.contextSensitive or s.modal or s.shade),
     s' = { ...s, activatedSetting: s.focusedSetting } }
   action expand = all { not(s.modal or s.contextSensitive), s' = { ...s, chat: "full", focus: true, shade: false,
@@ -66,8 +61,6 @@ module ShellNavigation {
     s' = { ...s, captured: s.revision, claim: "captured", destination: "" } }
   action claim(view: str): bool = all { s.claim == "captured", s.captured == s.revision, not(s.contextSensitive),
     view.in(Views), s' = { ...s, claim: "claimed", destination: view } }
-  /// Claim authority is checked on the original screen. The attempt's own
-  /// committed view change can advance its revision before acknowledgement.
   action commitClaimedView(view: str): bool = all {
     s.claim == "claimed", s.captured == s.revision, not(s.contextSensitive),
     view == s.destination, s.revision < 6,
@@ -112,8 +105,6 @@ module ShellNavigation {
   val CurrentClaim = (s.claim == "claimed" implies s.captured == s.revision and s.destination.in(Views) and not(s.contextSensitive))
     and (s.claim.in(Set("committed", "delivered", "unknown")) implies s.destination == s.view and not(s.contextSensitive))
   val VisibleFocus = s.focus implies not(s.shade or s.modal or s.contextSensitive)
-  /// Typed text stays in the composer until it is sent: navigation, Back, layers and
-  /// suspension never drop it.
   val DraftRetained = s.unsent == (s.draft == "draft")
   val FocusedSettingIdentity = s.focusedSetting == s.intendedSetting and
     (s.focusedSetting == "" or containsSetting(s.settingsRows, s.focusedSetting))

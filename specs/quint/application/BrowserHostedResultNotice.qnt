@@ -1,4 +1,3 @@
-// Browser hosted-result ledger and the renderer's verified tap readback.
 module BrowserHostedResultNotice {
   type Row = {phase: str, digest: int, revision: int}
   type Publication = {id: int, digest: int, binding: int}

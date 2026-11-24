@@ -1,4 +1,3 @@
-// Historical design translation; the executable Quint model is retained here.
 module HomeLayout {
   type State = { Design: str, cal: str, flows: str, mail: str, brief: bool,
     insets: str, dock: str, top0: int }
@@ -30,7 +29,6 @@ module HomeLayout {
     else if (c == "workflows") s.flows == "loading"
     else if (c == "inbox") s.mail == "loading" else false
   pure def Max(a, b) = if (a > b) a else b
-  // TLA+ integer division floors negative values; Quint / truncates to zero.
   pure def HalfFloor(n) = if (n >= 0) n / 2 else -((-n + 1) / 2)
   pure def gridTop(design, cal, flows, mail, insets, dock) = {
     val clear = if (insets == "pending") 28 else 60

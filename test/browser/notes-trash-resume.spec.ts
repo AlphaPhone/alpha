@@ -1,7 +1,6 @@
 import {returnToApps} from './app-navigation';
 import {openLegacyNotes} from './helpers/legacy-notes';
 import {test,expect,type Page} from '@playwright/test';
-// With the legacy source selected, resume and the shell's 15-minute timer purge Trash too, not only opening Notes.
 const DAY=24*60*60*1000;
 test.describe.configure({timeout:60_000});
 const trashEntries=(page:Page)=>page.evaluate(async()=>(await (await import('/src/runtime/notes-trash.ts')).readNotesTrash()).entries);
@@ -41,14 +40,12 @@ test('a resume on Home erases expired text and voice Trash entries without openi
  const last=Math.max(...entries.map((e:any)=>e.deletedAt));
  await home(page);
 
- // One minute short of three days, a resume keeps both entries restorable.
  await page.clock.setSystemTime(last+30*DAY-60_000);
  await page.evaluate(()=>{document.dispatchEvent(new Event('visibilitychange'));window.dispatchEvent(new Event('focus'));});
  await page.waitForTimeout(300);
  expect((await trashEntries(page)).length).toBe(2);
  expect((await describe(page)).transcript).toBe('Spoken resume words');
 
- // 72 hours plus one minute: returning to the foreground on Home purges both.
  await page.clock.setSystemTime(last+30*DAY+60_000);
  await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
  await expect.poll(()=>trashEntries(page)).toEqual([]);
@@ -67,7 +64,6 @@ test('the 15-minute shell timer purges an expired Trash entry with no navigation
  const [entry]=await trashEntries(page);
  await home(page);
  await page.clock.setSystemTime(entry.deletedAt+30*DAY+60_000);
- // No event: only the interval can notice that the entry is due. fastForward fires each due timer once.
  await page.clock.fastForward(15*60*1000);
  await expect.poll(()=>trashEntries(page)).toEqual([]);
  expect((await savedRecords(page)).some((n:any)=>n.id===entry.note.id)).toBe(false);

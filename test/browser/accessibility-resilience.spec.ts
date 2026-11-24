@@ -7,10 +7,8 @@ import {openOwnedPhotoViewer,openPhotoShare} from './helpers/owned-photo';
 import { auditPage, auditTabOrder, format } from './accessibility-audit';
 import { settled } from './helpers/settled';
 
-// Behaviour behind the defects the accessibility sweep found (MVP-48, renderer part).
 const offline = () => localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({ kind: 'offline' }));
 
-/** On screen and not covered: a pointer, switch or TalkBack double-tap would reach it. */
 async function reachable(page: Page, control: Locator) {
   await control.scrollIntoViewIfNeeded();
   await expect(async () => {
@@ -33,17 +31,13 @@ test.describe('camera in landscape', () => {
       const shutter = page.getByRole('button', { name: 'Take photo', exact: true });
       for (const control of [shutter, ...['Photo mode', 'Video mode', ...(mode === 'mock' ? ['Zoom 1x'] : []), 'Back to apps'].map(name => page.getByRole('button', { name, exact: true }))])
         await reachable(page, control);
-      // The viewfinder keeps the space the controls do not use, and no control sits on another.
       const finder = (await page.locator('[data-alpha-camera="viewfinder"]').boundingBox())!, capture = (await page.locator('[data-alpha-camera="capture"]').boundingBox())!;
       expect(finder.x + finder.width).toBeLessThanOrEqual(capture.x + 1);
-      // Mock mode shows the same assistant pill as a live connection, above its extra zoom control.
       expect(finder.height).toBeGreaterThan(mode === 'mock' ? 290 : 300);
       await page.screenshot({ path: info.outputPath('camera-landscape.png') });
-      // Keyboard: the mode switch is reachable and operable without a pointer.
       const video = page.getByRole('button', { name: 'Video mode', exact: true });
       await video.focus(); await page.keyboard.press('Enter');
       await expect(page.getByRole('button', { name: /recording/i }).first()).toBeVisible();
-      // Back to portrait: the portrait stack returns unchanged.
       await page.setViewportSize({ width: 412, height: 915 });
       await expect(page.locator('html')).not.toHaveClass(/alpha-landscape/);
       await reachable(page, page.getByRole('button', { name: 'Photo mode', exact: true }));
@@ -60,7 +54,6 @@ test.describe('maps sheets', () => {
     await setTextScale(page, 2);
     const start = page.getByRole('button', { name: 'Start', exact: true });
     await reachable(page, start);
-    // Travel modes wrap instead of printing over each other.
     const modes = await page.locator('[data-alpha-maps-directions] button[aria-label]').filter({ hasNotText: /^$/ }).evaluateAll(list => list.filter(el => el.getAttribute('aria-label') !== 'Back to place').map(el => { const r = el.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom, sw: el.scrollWidth, cw: el.clientWidth }; }));
     expect(modes.length).toBeGreaterThanOrEqual(2);
     for (const item of modes) expect(item.sw).toBeLessThanOrEqual(item.cw + 1);
@@ -96,7 +89,6 @@ test('a new browser tab shows no find bar until find is opened', async ({ page }
   await page.goto('/');
   await page.getByRole('button', { name: 'Browser', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Tabs', exact: true })).toBeVisible();
-  // The bar used to render on every page with an input bound to nothing.
   await expect(page.getByRole('search', { name: 'Find in page' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Close find in page', exact: true })).toHaveCount(0);
 });
@@ -105,7 +97,6 @@ test('the note editor keeps More (Pin, Move to, Delete) on screen beside the oth
   const {foreign,errors}=await canonicalNotesFixture(page);
   await openCanonicalNotes(page);
   await page.getByRole('button', { name: 'New note', exact: true }).click();
-  // Back · Checklist · ⋯ stay in one row; Share, Pin and Delete live in More.
   for (const name of ['Back to notes', 'Turn into checklist', 'More']) await reachable(page, page.getByRole('button', { name, exact: true }));
   const sizes = await page.locator('[data-alpha-subview="notes-editor"] [data-alpha-app-header="detail"] button').evaluateAll(list => list.map(el => el.getBoundingClientRect().width));
   for (const width of sizes) expect(width).toBeGreaterThanOrEqual(43.5);
@@ -115,7 +106,6 @@ test('the note editor keeps More (Pin, Move to, Delete) on screen beside the oth
 });
 
 test.describe('200% text keeps the way out on screen', () => {
-  // Large-text layouts re-measure every rule after the text grows: explicit, as other sweeps run beside them.
   test.describe.configure({ timeout: 60_000 });
   for (const [start, open, field] of [['inbox', 'Search email', 'Search mail']] as const) {
     test(`${start} search: the field shrinks and Close search stays reachable`, async ({ page }) => {
@@ -123,7 +113,6 @@ test.describe('200% text keeps the way out on screen', () => {
       await page.getByRole('button', { name: open, exact: true }).click();
       await setTextScale(page, 2);
       await reachable(page, page.getByRole('textbox', { name: field, exact: true }).or(page.getByRole('searchbox', { name: field, exact: true })));
-      // Inbox uses the back arrow to leave search; its clear button keeps the search open.
       const close = page.getByRole('button', { name: start === 'inbox' ? 'Back to inbox' : 'Close search', exact: true });
       if (start === 'inbox') {
         const field = page.getByRole('searchbox', { name: 'Search mail', exact: true });
@@ -161,7 +150,6 @@ test.describe('200% text keeps the way out on screen', () => {
 });
 
 test.describe('menus and sheets over a scrim own focus', () => {
-  // [state, steps, dialog name, scrim name, the opener focus returns to (when it survives)]
   const POPUPS = [
     ['live', ['Browser', 'Menu'], 'Browser menu', 'Close menu', 'Menu'],
     ['browser', ['Menu', 'Share'], 'Share page', 'Close share', null],
@@ -172,9 +160,6 @@ test.describe('menus and sheets over a scrim own focus', () => {
     ['files:preview', ['Move file'], 'Move to', 'Close move', 'Move file'],
     ['files:preview', ['Share file'], 'Share file', 'Close share', 'Share file'],
     ['workflows:new', ['Add Read step'], 'Step editor', 'Close', null],
-    // Settings > Google (live: the panel is not mounted in mock mode). The Google accounts panel
-    // has no scrim button; its Close button is the pointer dismissal, and Escape returns focus to
-    // the Google row.
     ['live', ['Settings', 'Account', 'Google & email'], 'Google accounts', 'Close Google accounts', 'Google & email'],
   ] as const;
   for (const [start, steps, name, scrim, opener] of POPUPS) {
@@ -183,7 +168,6 @@ test.describe('menus and sheets over a scrim own focus', () => {
       const noteShare=start==='notes:editor'&&name==='Share',photoShare=start==='photos:viewer'&&name==='Share';
       const nativeShare=noteShare||photoShare;
       if(noteShare){
-        // Alpha's note editor opens the share panel for agent Notes and Older notes alike; Older notes needs no agent fixture.
         await page.addInitScript(offline);await page.goto('/');await openLegacyNotes(page);
         await page.getByRole('button',{name:'New note',exact:true}).click();
         await page.getByRole('textbox',{name:'Title',exact:true}).fill('Owned share focus note');
@@ -196,7 +180,6 @@ test.describe('menus and sheets over a scrim own focus', () => {
       if(photoShare)await page.getByLabel('Photo actions',{exact:true}).click();
       const last = page.getByRole('button', { name: steps.at(-1)!, exact: true }).first();
       await expect(last).toBeVisible();
-      // Everything the user could operate before the popup opened must be operable again after it.
       await page.evaluate(() => { for (const el of document.querySelectorAll('.os button, .os input, .os textarea, .os a[href]')) if (el.getClientRects().length && !el.closest('[inert],[aria-hidden="true"]')) (el as any).__alphaBefore = true; });
       if(noteShare){
         await expect(page.getByRole('dialog',{name:'Note actions',exact:true}).getByRole('button',{name:'Share note',exact:true})).toBeVisible();
@@ -206,10 +189,7 @@ test.describe('menus and sheets over a scrim own focus', () => {
       await expect(dialog).toBeVisible();
       const inside = () => page.evaluate(() => !!document.activeElement?.closest('dialog,[role="dialog"]'));
       await expect.poll(inside).toBe(true);
-      // The page under the popup is out of the tab order and the accessibility tree; the
-      // popup's own scrim still closes it for a pointer or an assistive-technology tap.
       if(nativeShare){
-        // Native modal inertness is supplied by showModal, not copied inert attributes.
         expect(await dialog.evaluate(el=>el.matches('dialog:modal'))).toBe(true);
         if(photoShare){await expect(dialog.getByRole('button',{name:'Email',exact:true})).toHaveCount(0);await expect(dialog.getByRole('button',{name:'Share',exact:true})).toHaveCount(0);await expect(dialog.getByRole('button',{name:'Save file',exact:true})).toBeVisible();}
         else{await expect(dialog.getByRole('button',{name:'Email',exact:true})).toBeVisible();await expect(dialog.getByRole('button',{name:'Share',exact:true})).toBeVisible();}
@@ -217,8 +197,6 @@ test.describe('menus and sheets over a scrim own focus', () => {
         const exposed = await page.evaluate(() => Array.from(document.querySelectorAll('.os button, .os input, .os textarea, .os a[href]'))
           .filter(el => el.getClientRects().length && !el.closest('[inert],[aria-hidden="true"]') && !el.closest('[data-alpha-popup],[role="dialog"],[data-alpha-layer="pill"],[data-alpha-layer="composer"],[data-alpha-layer="conversation"]')).map(el => el.getAttribute('aria-label') || el.textContent));
         expect(exposed).toEqual([]);
-        // Live provider views keep the assistant available. Pure prototype fixtures
-        // can use a placeholder dock; they still must isolate the underlying app.
         if(start==='live'||start==='files-storage'||ownedInfo)await expect(page.getByRole('button',{name:'Open conversation',exact:true})).toBeVisible();
       }
       await expect(page.getByRole('button', { name: nativeShare?'Close share':scrim, exact: true })).toHaveCount(1);
@@ -232,7 +210,6 @@ test.describe('menus and sheets over a scrim own focus', () => {
         .filter(el => (el as any).__alphaBefore && el.isConnected && !!el.closest('[inert],[aria-hidden="true"]')).map(el => el.getAttribute('aria-label') || el.textContent));
       expect(stranded).toEqual([]);
       if(noteShare){
-        // Closing the nested native share panel returns to its still-open menu, then Escape closes that menu.
         await expect(page.getByRole('dialog',{name:'Note actions',exact:true})).toBeVisible();
         await page.keyboard.press('Escape');
         await expect(page.getByRole('dialog',{name:'Note actions',exact:true})).toHaveCount(0);
@@ -246,7 +223,6 @@ test.describe('menus and sheets over a scrim own focus', () => {
     await openPhotoShare(page);
     const dialog = page.getByRole('dialog', { name: 'Share', exact: true });
     await expect(dialog).toBeVisible();
-    // Delete photo sits under the sheet: before, Tab reached it there and Enter deleted unseen.
     await expect(page.getByRole('button',{name:'Delete photo',exact:true})).toBeHidden();
     const shareBox=(await dialog.boundingBox())!;
     await page.mouse.click(Math.max(1,shareBox.x-8),shareBox.y+shareBox.height/2);
@@ -254,7 +230,6 @@ test.describe('menus and sheets over a scrim own focus', () => {
     await page.getByLabel('Photo actions',{exact:true}).click();
     await expect(page.getByRole('button', { name: 'Delete photo', exact: true })).toBeVisible();
     await page.getByLabel('Photo actions',{exact:true}).click();
-    // The Android Back gesture reaches the renderer as alpha-back: it closes the sheet, not the viewer.
     await openPhotoShare(page);
     await expect(dialog).toBeVisible();
     expect(await page.evaluate(() => !window.dispatchEvent(new Event('alpha-back', { cancelable: true })))).toBe(true);
@@ -269,7 +244,6 @@ test.describe('toast status messages', () => {
     const region = page.locator('[data-alpha-toast]');
     await expect(region).toHaveCount(1);
     await expect(region).toHaveAttribute('aria-live', 'polite');
-    // Present and empty beforehand: a live region inserted together with its text is not announced reliably.
     await expect(region).toBeEmpty();
     expect(await region.evaluate(el => !!el.closest('[inert],[aria-hidden="true"]'))).toBe(false);
     await page.getByRole('button', { name: 'Delete file', exact: true }).click();
@@ -283,11 +257,9 @@ test.describe('toast status messages', () => {
     await page.getByRole('button', { name: 'Browser', exact: true }).click();
     await page.getByRole('button', { name: 'Menu', exact: true }).click();
     const menu = page.getByRole('dialog', { name: 'Browser menu', exact: true });
-    // Find in page is native-only, so the web build's menu refuses through Bookmark instead.
     await menu.getByRole('button', { name: 'Bookmark', exact: true }).click();
     const region = page.locator('[data-alpha-toast]');
     await expect(region).toContainText('HTTPS only');
-    // The menu is still open and holds the page inert; the status region is not part of what it retired.
     await expect(menu).toBeVisible();
     expect(await region.evaluate(el => !!el.closest('[inert],[aria-hidden="true"]'))).toBe(false);
     expect(await page.getByRole('button', { name: 'Tabs', exact: true }).count()).toBe(0);
@@ -303,7 +275,6 @@ test.describe('photo editor in landscape', () => {
     await expect(editor).toBeVisible();
     expect(await editor.evaluate(el => el.scrollHeight > el.clientHeight && getComputedStyle(el).overflowY === 'auto')).toBe(true);
     for (const name of ['Rotate', 'Center crop', 'Mono filter']) await reachable(page, page.getByRole('button', { name, exact: true }));
-    // Keyboard: a filter is operable without a pointer, and Save is still reachable afterwards.
     const mono = page.getByRole('button', { name: 'Mono filter', exact: true });
     await mono.focus(); await page.keyboard.press('Enter');
     await expect(mono).toHaveAttribute('aria-pressed', 'true');
@@ -338,7 +309,6 @@ test.describe('recovery screen', () => {
     await openLegacyAttachment(page);
     const dialog = page.getByRole('dialog', { name: 'Note source document' });
     await expect(dialog).toBeVisible();
-    // A modal <dialog> is in the top layer: left open, it covers recovery and makes it inert.
     expect(await page.evaluate(() => document.querySelector('dialog[open]')?.matches(':modal'))).toBe(true);
     await page.evaluate(() => window.dispatchEvent(new Event('alpha:force-render-error')));
     const recovery = page.getByRole('alertdialog', { name: 'Something went wrong' });
@@ -347,7 +317,6 @@ test.describe('recovery screen', () => {
     const reload = recovery.getByRole('button', { name: 'Reload', exact: true });
     await expect(reload).toBeFocused();
     await reachable(page, reload);
-    // The dismissed dialog linked nothing and focus stays in recovery.
     for (let step = 0; step < 4; step++) {
       await page.keyboard.press('Tab');
       expect(await page.evaluate(() => { const active = document.activeElement; return !active || active === document.body || !!active.closest('.alpha-recovery'); })).toBe(true);
@@ -367,11 +336,9 @@ test.describe('recovery screen', () => {
           recovery = page.getByRole('alertdialog', { name: 'Something went wrong' });
         }
         await expect(recovery).toBeVisible();
-        // The screen uses fixed pixel sizes outside the phone, so scale it the way text zoom would.
         await recovery.evaluate(el => { (el as HTMLElement).style.fontSize = '32px'; for (const pre of el.querySelectorAll('pre')) (pre as HTMLElement).style.fontSize = '24px'; });
         await recovery.getByText('Diagnostics', { exact: true }).click();
         expect(await recovery.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
-        // Scrolled to the top, the heading is whole; nothing sits above the scroll origin.
         await recovery.evaluate(el => { el.scrollTop = 0; });
         expect(await recovery.getByRole('heading', { name: 'Something went wrong' }).evaluate(el => el.getBoundingClientRect().top)).toBeGreaterThanOrEqual(0);
         await page.screenshot({ path: info.outputPath('recovery.png') });
@@ -384,12 +351,7 @@ test.describe('recovery screen', () => {
   }
 });
 
-// Round 10 (MVP-48). The round 8 emulator run found Home's last row drawn under the floating
-// composer at 200% text, read by TalkBack after the composer that sat above it. These are the
-// behaviours behind the fixes, measured from bounding boxes in Chromium; the emulator check is
-// AccessibilityInstrumentedTest and a device pass is still device acceptance.
 const HOME_SHELLS = [{ name: 'standalone app', url: '/' }, { name: 'launcher', url: '/?shell=launcher' }];
-/** Home controls whose painted box (after every clipping ancestor) meets the dock, and whether the last tile can be scrolled wholly above it. */
 const homeUnderDock = (page: Page) => page.evaluate(() => {
   const home = document.querySelector<HTMLElement>('[data-alpha-layer="home"]')!;
   const docks = Array.from(document.querySelectorAll<HTMLElement>('[data-alpha-layer="composer"],[data-alpha-layer="pill"] > *')).filter(el => el.getClientRects().length && !el.closest('[inert]')).map(el => el.getBoundingClientRect());
@@ -411,11 +373,6 @@ const homeUnderDock = (page: Page) => page.evaluate(() => {
   }
   return { docks: docks.length, under, scrolls: home.scrollHeight > home.clientHeight + 1, gap: Math.round(Math.min(...docks.map(dock => dock.top)) - home.getBoundingClientRect().bottom) };
 });
-/**
- * The Android check, in the page: actionable controls in document (TalkBack linear) order, by
- * the bounds left after clipping; the next one may start a new column to the right, otherwise
- * it must not sit above the one before it by more than half the taller of the two.
- */
 const readingOrderProblems = (page: Page) => page.evaluate(() => {
   const visible = (el: Element) => {
     const rect = el.getBoundingClientRect(), box = { left: Math.max(0, rect.left), top: Math.max(0, rect.top), right: Math.min(innerWidth, rect.right), bottom: Math.min(innerHeight, rect.bottom) };
@@ -454,7 +411,6 @@ for (const shell of HOME_SHELLS) for (const scale of [1, 1.5, 2, 3]) {
     const top = await homeUnderDock(page);
     expect(top.docks).toBe(1);
     expect(await home.evaluate(el=>Math.abs(el.getBoundingClientRect().bottom-document.querySelector('[data-screen]')!.getBoundingClientRect().bottom))).toBeLessThanOrEqual(1);
-    // Every scroll position, and the end of the list: the last tile is wholly visible above the bar.
     for (const position of [0.33, 0.66, 1]) {
       await home.evaluate((el, fraction) => { el.scrollTop = (el.scrollHeight - el.clientHeight) * fraction; }, position);
       const at = await homeUnderDock(page);
@@ -465,9 +421,7 @@ for (const shell of HOME_SHELLS) for (const scale of [1, 1.5, 2, 3]) {
     await expect(last).toBeInViewport({ ratio: 1 });
     const tile = (await last.boundingBox())!, bar = (await page.locator('[data-alpha-input-bar]').boundingBox())!;
     expect(tile.y + tile.height).toBeLessThanOrEqual(bar.y);
-    // Larger text may need scrolling. The bounds checks above preserve access to every row.
     if (scale === 3) expect(top.scrolls).toBe(true);
-    // The rule the sweep runs agrees.
     const found = format(await auditPage(page, { dock: true, clipping: true, overlap: true })).filter(line => !line.startsWith('text-truncated:'));
     expect(found, found.join('\n')).toEqual([]);
   });
@@ -496,7 +450,6 @@ test('a status line on the composer adds Home scroll clearance without moving it
 });
 
 test.describe('landscape Home', () => {
-  // Large-text layouts re-measure every rule after the text grows: explicit, as other sweeps run beside them.
   test.describe.configure({ timeout: 60_000 });
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 915, height: 412 } });
   for (const scale of [1, 2]) test(`the dock stays beside Home at ${scale * 100}% text`, async ({ page }) => {
@@ -506,7 +459,6 @@ test.describe('landscape Home', () => {
     expect(at.under, at.under.join(', ')).toEqual([]);
     const home = (await page.locator('[data-alpha-layer="home"]').boundingBox())!, bar = (await page.locator('[data-alpha-input-bar]').boundingBox())!;
     expect(home.x + home.width).toBeLessThanOrEqual(bar.x);
-    // Beside the dock, Home keeps the full height of the screen.
     expect(home.y + home.height).toBeGreaterThanOrEqual(bar.y + bar.height);
     await page.locator('[data-alpha-layer="home"]').evaluate(el => { el.scrollTop = el.scrollHeight; });
     await expect(page.getByRole('button', { name: 'Apps', exact: true })).toBeInViewport({ ratio: 1 });
@@ -516,7 +468,6 @@ test.describe('landscape Home', () => {
 });
 
 test.describe('keyboard focus and the floating dock', () => {
-  // Large-text layouts re-measure every rule after the text grows: explicit, as other sweeps run beside them.
   test.describe.configure({ timeout: 60_000 });
   for (const scale of [1, 2]) test(`every app Settings row that takes focus is wholly above the dock at ${scale * 100}% text`, async ({ page }) => {
     await page.addInitScript(offline);
@@ -528,7 +479,6 @@ test.describe('keyboard focus and the floating dock', () => {
     const scroller = page.locator('[data-settings-page]:not([inert])').last().locator('[data-alpha-app-scroll="settings"]');
     await expect(scroller).toBeVisible();
     if (scale !== 1) await setTextScale(page, scale);
-    // The page is long enough to pass under the dock, so some row would take focus there.
     expect(await scroller.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
     const dock = page.locator('[data-alpha-layer="pill"] > *, [data-alpha-layer="composer"]').first();
     await expect(dock).toBeVisible();
@@ -549,12 +499,10 @@ test.describe('keyboard focus and the floating dock', () => {
       expect(state.inside, `${state.name} is outside the scroll area`).toBe(true);
     }
     expect(visited).toBeGreaterThan(5);
-    // Rows below the fold were brought up, not skipped.
     expect(moved).toBe(true);
   });
 
   test('a tap on a row beside the dock still opens it', async ({ page }) => {
-    // Pointer focus is not scrolled: moving a pressed row out from under the finger loses the tap.
     await page.setViewportSize({ width: 412, height: 400 });
     await page.addInitScript(offline);
     await page.goto('/');
@@ -563,7 +511,6 @@ test.describe('keyboard focus and the floating dock', () => {
     const row = page.getByRole('button', { name: 'About', exact: true });
     await row.scrollIntoViewIfNeeded();
     const dock = (await page.locator('[data-alpha-layer="pill"] > *, [data-alpha-layer="composer"]').first().boundingBox())!;
-    // Put the row so that its lower edge is just inside the dock's band, to the left of the pill.
     await scroller.evaluate((el, top) => { const target = Array.from(el.querySelectorAll('button')).find(item => (item.getAttribute('aria-label') || item.textContent || '').trim().startsWith('About'))!; el.scrollTop += target.getBoundingClientRect().bottom - (top + 10); }, dock.y);
     const box = (await row.boundingBox())!, before = await scroller.evaluate(el => el.scrollTop);
     await page.mouse.click(box.x + 24, box.y + 8);
@@ -573,7 +520,6 @@ test.describe('keyboard focus and the floating dock', () => {
 });
 
 test.describe('screen titles with a large system font', () => {
-  // Large-text layouts re-measure every rule after the text grows: explicit, as other sweeps run beside them.
   test.describe.configure({ timeout: 60_000 });
   for (const title of [{ name: 'Photos', steps: ['Photos'], url: '/' }, { name: 'Password manager', steps: ['Settings', 'Apps', 'Passwords'], url: '/?mode=dev' }]) {
     test(`"${title.name}" is shown whole at 200% text`, async ({ page }) => {
@@ -582,7 +528,6 @@ test.describe('screen titles with a large system font', () => {
       for (const step of title.steps) await page.getByRole('button', { name: step, exact: true }).first().click();
       const heading = page.locator('[data-alpha-app-header] [data-alpha-app-title]').filter({ hasText: title.name }).filter({ visible: true }).first();
       await expect(heading).toBeVisible();
-      // The current header remains one row at the largest in-app text size.
       const headerHeight=await heading.evaluate(el=>Math.round(el.closest('[data-alpha-app-header]')!.getBoundingClientRect().height));
       await setTextScale(page, 1.5);
       await expect(page.locator('html')).not.toHaveClass(/alpha-text-xl/);
@@ -606,7 +551,6 @@ test.describe('screen titles with a large system font', () => {
       expect(measured.inside).toBe(true);
       expect(measured.overButtons).toBe(false);
       expect(measured.lines).toBe(1);
-      // The header's buttons keep their size beside it (24px is the sweep's floor; Photos' view switch is 38px tall at every size).
       expect(measured.smallest).toBeGreaterThanOrEqual(24);
       const found = format(await auditPage(page, { clipping: true, overlap: true, dock: true })).filter(line => line.includes('data-alpha-app-title'));
       expect(found, found.join('\n')).toEqual([]);
@@ -626,7 +570,6 @@ test.describe('screen titles with a large system font', () => {
 });
 
 test.describe('a toast raised while a top-layer dialog is open', () => {
-  /** The phone shell's own toast(), reached through the rendered tree: the call every adapter makes. */
   const raise = (page: Page, message: string, undo = false) => page.evaluate(({ message, undo }) => {
     const screen = document.querySelector('[data-screen]') as any;
     const key = Object.keys(screen).find(name => name.startsWith('__reactFiber$'))!;
@@ -648,16 +591,13 @@ test.describe('a toast raised while a top-layer dialog is open', () => {
   test('it takes space at the top of the dialog in a live region that was there before the text', async ({ page }) => {
     const dialog = await openDialog(page);
     const region = dialog.locator('[data-alpha-dialog-toast]');
-    // Present and empty as soon as the dialog is open.
     await expect(region).toHaveCount(1);
     await expect(region).toHaveAttribute('aria-live', 'polite');
-    // Marked like the page's own toast region: a live region with no role of its own.
     expect(await region.getAttribute('role')).toBeNull();
     await expect(region).toHaveAttribute('aria-atomic', 'true');
     await expect(region).toBeEmpty();
     await raise(page, 'Saved to Notes');
     await expect(region).toHaveText('Saved to Notes');
-    // The page's own region holds it too, but under the dialog and inert: not what is seen or read.
     await expect(page.locator('[data-alpha-toast]')).toContainText('Saved to Notes');
     const measured = await region.evaluate(el => {
       const body = el.firstElementChild!, box = body.getBoundingClientRect(), screen = document.querySelector('[data-screen]')!.getBoundingClientRect();
@@ -666,7 +606,6 @@ test.describe('a toast raised while a top-layer dialog is open', () => {
       return { onTop: !!hit && body.contains(hit), inside: box.left >= screen.left && box.right <= screen.right && box.bottom <= screen.bottom && box.top >= screen.top, height: Math.round(box.height), inert: !!el.closest('[inert]'), beforeContent: box.bottom <= content.top, position: getComputedStyle(el).position };
     });
     expect(measured).toEqual({ onTop: true, inside: true, height: 48, inert: false, beforeContent: true, position: 'sticky' });
-    // Assistive technology is offered it: the text is in Chromium's accessibility tree once, not ignored.
     const session = await page.context().newCDPSession(page);
     await session.send('Accessibility.enable');
     const { nodes } = await session.send('Accessibility.getFullAXTree') as { nodes: Array<{ ignored?: boolean; role?: { value?: string }; name?: { value?: string } }> };
@@ -674,14 +613,12 @@ test.describe('a toast raised while a top-layer dialog is open', () => {
     expect(exposed.filter(node => node.role?.value === 'StaticText' && node.name?.value === 'Saved to Notes')).toHaveLength(1);
     const found = format(await auditPage(page, { dock: true })).filter(line => line.startsWith('toast-'));
     expect(found, found.join('\n')).toEqual([]);
-    // It leaves when the toast does, and the region stays for the next one.
     await expect(region).toBeEmpty({ timeout: 5000 });
     await expect(region).toHaveCount(1);
   });
 
   test('feedback raised while a dialog is scrolled down stays in view with a usable Undo', async ({ page }) => {
     const dialog = await openDialog(page);
-    // A modal that scrolls its own content (Clock, retained data, permissions, large-text note source).
     await dialog.evaluate(el => {
       el.style.setProperty('max-height', '320px', 'important'); el.style.setProperty('overflow', 'auto', 'important');
       const filler = document.createElement('div'); filler.style.cssText = 'height:1600px;flex-shrink:0'; filler.setAttribute('aria-hidden', 'true');
@@ -689,7 +626,6 @@ test.describe('a toast raised while a top-layer dialog is open', () => {
       el.scrollTop = el.scrollHeight;
     });
     await expect.poll(() => dialog.evaluate(el => { el.scrollTop = el.scrollHeight; return el.scrollTop; })).toBeGreaterThan(400);
-    // An async source: no focus move and no scroll may be needed for it to be seen.
     await raise(page, 'Note deleted', true);
     const undo = dialog.locator('[data-alpha-dialog-toast]').getByRole('button', { name: 'Undo', exact: true });
     await expect(undo).toBeVisible();
@@ -698,7 +634,6 @@ test.describe('a toast raised while a top-layer dialog is open', () => {
       const hit = document.elementFromPoint(body.left + body.width / 2, body.top + body.height / 2);
       return body.height >= 40 && body.top >= frame.top - 1 && body.bottom <= frame.bottom + 1 && !!hit && el.querySelector('[data-alpha-dialog-toast]')!.contains(hit);
     })).toBe(true);
-    // Shown where the reader already is: the dialog was not scrolled back to its top.
     expect(await dialog.evaluate(el => el.scrollTop)).toBeGreaterThan(400);
     await undo.click();
     expect(await page.evaluate(() => (window as any).__undone)).toBe(1);
@@ -717,11 +652,8 @@ test.describe('a toast raised while a top-layer dialog is open', () => {
     await page.keyboard.press('Escape');
     await expect(page.locator('dialog[open]')).toHaveCount(0);
     await expect(page.locator('[data-alpha-dialog-toast]')).toHaveCount(0);
-    // Notes deliberately hides the composer while editing. Leave the editor and
-    // open chat so the notice is checked against an input the user can reach.
     await page.getByRole('button', { name: 'Back to notes', exact: true }).click();
     await page.getByRole('button', { name: 'Open conversation', exact: true }).click();
-    // With no dialog the page's own region is the one on screen again.
     await raise(page, 'Back on the page');
     await expect(page.locator('[data-alpha-toast]')).toContainText('Back on the page');
     const toast = (await page.locator('[data-alpha-toast]').boundingBox())!;
@@ -739,8 +671,6 @@ for (const url of ['/', '/?shell=launcher']) test(`${url}: Home offers no notifi
   await expect(page.getByRole('button', { name: 'Open notifications', exact: true })).toHaveCount(0);
 });
 
-// A notice raised while an in-phone sheet is open (here the launcher month picker) lands below
-// the sheet instead of over its header or dates, so every control in it stays tappable.
 test('a notice over an open month sheet leaves every sheet control tappable', async ({ page }) => {
   await LAUNCHER_STATES.find(state => state.name === 'launcher Calendar month')!.open(page, 'light');
   await page.evaluate(() => {

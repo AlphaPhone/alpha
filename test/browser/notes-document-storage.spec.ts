@@ -2,9 +2,6 @@ import {test,expect,type Page} from '@playwright/test';
 import {selectLegacyNotes} from './helpers/legacy-notes';
 const key='alpha.browser.notes.v1',legacyKey='alphaphone:notes:v2';
 const note={id:'n',kind:'text',title:'Original',body:'Exact text',custom:{keep:'verbatim'}};
-// Canonical Notes is the default source: the app shell no longer opens this device-local
-// document at start, so these storage cases open it explicitly through its module, and the
-// UI recovery case selects Older notes.
 async function ready(page:Page){await page.goto('/');await expect(page.getByRole('button',{name:'Notes',exact:true})).toBeVisible();}
 test.beforeEach(async({page})=>{await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));});
 test('two tabs share one collection without advancing its receipt on reopen',async({page,context})=>{

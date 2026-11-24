@@ -1,14 +1,9 @@
 import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
-// Hosted/CLI behavior is test-mocks-only diagnostic coverage. Enter that explicit controller
-// route; the production sign-in button uses native email and never falls back to this route.
 import { test, expect, type Page } from '@playwright/test';
 import { preloadPageModules } from './helpers/page-modules';
-// Modules the scenarios import inside page.evaluate (see helpers/page-modules.ts).
 const setupModules=['/src/runtime/connection-ui.tsx','/src/runtime/cloud-personal-intent.ts','/src/runtime/cloud-personal-protocol.ts','/src/browser/documents.ts'];
 
 async function intentSnapshot(page:Page){return page.evaluate(async()=>{const {personalIntentDocument}=await import('/src/runtime/cloud-personal-intent.ts');return (await personalIntentDocument({environment:'production',userId:'11111111-1111-4111-8111-111111111111',organizationId:'22222222-2222-4222-8222-222222222222',credentialId:'snapshot-only'})).capture();});}
-// Actual connection UI/controller/Cloud protocol; only native HTTP and secure storage are synthetic.
-// No live Cloud account, paid setup, mailbox access or Android permission is used.
 for(const scenario of ['decline','accepted-reload','lost-activation','quote-change','storage-failure','account-switch','definitive-rejection','lost-cutover','stopped-resume','stopped-before-finalize','expired-poll','unavailable-poll','stale-status','unreadable-intent','cancel-after-admission'] as const){
  test(`personal Cloud setup: ${scenario}`,async({page})=>{
   await page.addInitScript((scenario)=>{
@@ -51,11 +46,8 @@ for(const scenario of ['decline','accepted-reload','lost-activation','quote-chan
   },scenario);
   await page.goto('/');await page.getByRole('button',{name:'Settings',exact:true}).click();await openConnectionDiagnostics(page);await page.locator('summary').filter({hasText:/^Development Cloud agent infrastructure$/}).click();
   await preloadPageModules(page,setupModules);
-  // Keep this trigger synchronous. Chromium may collect an inspector-awaited import Promise
-  // even after its module has been preloaded; the retained namespace needs no new import.
   await page.evaluate(()=>{void (window as any).__alphaModules['/src/runtime/connection-ui.tsx'].connectionController.signInBrowser();});
   const review=page.getByRole('region',{name:'Dedicated hosting review'});
-  // Section has an accessible name and is a region; display real reviewed price fields.
   await expect(review).toBeVisible();await expect(review).toContainText('$2.40/day');await expect(review).toContainText('Minimum charge per successful start: $0.50');
   expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('fixture.cloud.setup')||'{"activation":0}').activation)).toBe(0);
   await expect(page.getByRole('button',{name:'Create agent',exact:true})).toHaveCount(0);
@@ -76,8 +68,6 @@ for(const scenario of ['decline','accepted-reload','lost-activation','quote-chan
   if(scenario==='definitive-rejection'){await expect(page.getByRole('alert')).toBeVisible();expect(JSON.parse((await intentSnapshot(page)).raw!)).toEqual({raw:null});await page.getByRole('button',{name:'Refresh agent status',exact:true}).click();await expect(page.getByRole('button',{name:'Start Dedicated',exact:true})).toBeEnabled();return;}
   if(scenario==='quote-change'){await expect(page.getByText('The hosting terms changed. Review the current quote before continuing.',{exact:true})).toBeVisible();expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('fixture.cloud.setup')!).activation)).toBe(0);await page.getByRole('button',{name:'Start Dedicated',exact:true}).click();}
   if(scenario==='lost-activation'){
-   // Busy disables this button before durable admission and the synthetic POST.
-   // Wait for the reconciled uncertain state before asserting its retained outcome.
    await expect(page.getByText('Setup could not be confirmed. Check status before taking another action.',{exact:true})).toBeVisible();
    await expect(page.getByRole('button',{name:'Start Dedicated',exact:true})).toBeDisabled();
   }
@@ -109,7 +99,6 @@ for(const scenario of ['decline','accepted-reload','lost-activation','quote-chan
   await expect(page.getByRole('button',{name:'Connect this agent',exact:true})).toBeVisible();
   expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('fixture.cloud.setup')!))).toMatchObject({activation:scenario==='stopped-resume'?2:1,cutover:1,ready:true});
   await page.getByRole('button',{name:'Connect this agent',exact:true}).click();
-  // During verification the chooser can change its accessible name before the owner is saved.
   await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem('alpha.connection.selection.v1')!))).toMatchObject({kind:'cloud',agentId:'33333333-3333-4333-8333-333333333333',ownerId:'11111111-1111-4111-8111-111111111111'});
   await expect(page.getByRole('dialog',{name:'Your agent. Your phone.'})).toHaveCount(0);
  });
@@ -159,7 +148,6 @@ for(const scenario of ['adopt-existing','owner-during-connect','organization-dur
    await page.getByRole('button',{name:'Start Dedicated',exact:true}).click();
    const review=page.getByRole('region',{name:'Dedicated hosting review'});await expect(review).toContainText('This reuses the existing Dedicated instance selected for this account.');await expect(review).toContainText('Hosting is already active. This does not start another server.');
    expect(await page.evaluate(()=>({activation:(window as any).personalBoundary.activationPosts,adoption:(window as any).personalBoundary.adoptionPosts,cutover:(window as any).personalBoundary.cutoverPosts}))).toEqual({activation:1,adoption:0,cutover:0});
-   // The old activation consent cannot silently authorize adoption or cutover.
    await page.getByRole('button',{name:'Use existing Dedicated',exact:true}).click();await expect(page.getByRole('button',{name:'Continue setup',exact:true})).toBeVisible();
    expect(await page.evaluate(()=>(window as any).personalBoundary.cutoverPosts)).toBe(0);
    await page.getByRole('button',{name:'Continue setup',exact:true}).click();await expect(page.getByRole('button',{name:'Connect this agent',exact:true})).toBeVisible();

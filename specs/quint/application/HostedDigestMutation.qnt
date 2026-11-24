@@ -1,4 +1,3 @@
-// Renderer journal and publication ownership during a scheduled digest save.
 module HostedDigestMutation {
   type State = {owner: int, visited: Set[int], loaded: bool, pending: str, busy: bool, notice: str,
     journal: int -> str, stage: int -> str, mutations: Set[int], removes: Set[int], refreshes: Set[int],
@@ -25,7 +24,6 @@ module HostedDigestMutation {
     Owners.contains(owner), not(s.visited.contains(owner)),
     s' = {...s, owner: owner, visited: s.visited.union(Set(owner)), loaded: false, pending: "", busy: false},
   }
-  // History, a successful read and opening the panel are grouped before any mutation tap.
   action restore(owner: int): bool = all {
     owner == s.owner, Owners.contains(owner), not(s.loaded), s.refreshes == Set(),
     s' = {...s, loaded: true, pending: s.journal.get(owner), notice: ""},

@@ -1,10 +1,7 @@
 import {openLegacyNotes} from './helpers/legacy-notes';
 import {expect,type Page} from '@playwright/test';
-// Closed media/Cloud ports. No microphone, speech model, audio playback or provider HTTP.
 export async function cloudNotesVoiceFixture(page:Page,signed=true,development=false){
  const foreign:string[]=[];
- // Keep the voice fixture's account entry independent of the dev host's optional
- // provider-readiness probe, which may take the full six-second email fallback.
  await page.route('**/__alpha-browser-cloud', async route => {
   if (route.request().method() === 'POST' && route.request().postDataJSON()?.operation === 'signInStatus') {
    await route.fulfill({json:{active:false,inApp:true,google:false,email:true}});
@@ -37,7 +34,6 @@ export async function cloudNotesVoiceFixture(page:Page,signed=true,development=f
   BrowserVoice.prototype.synthesize=async()=>{f.syntheses++;return {playbackId:crypto.randomUUID()};};
   BrowserVoice.prototype.play=async function(input:any){queueMicrotask(()=>void (this as any).notifyListeners('playbackEnded',{playbackId:input.playbackId}));};
   BrowserVoice.prototype.stopPlayback=async()=>{};BrowserVoice.prototype.cancel=async()=>{f.cancels++;};
-  // The Notes recorder (no length limit) runs on its own capture: a closed one-segment recording.
   const {BrowserAudioCapture}=await import('/src/browser/audio-capture.ts');const capture=BrowserAudioCapture.prototype as any;
   capture.start=async function(input:any){f.starts++;if(f.denied)throw new DOMException('Denied','NotAllowedError');const recordingId=crypto.randomUUID();f.clip=recordingId;f.active=recordingId;this.fixture={recordingId};return {recordingId,maxDurationMs:input?.unlimited?Infinity:59000};};
   capture.stop=async function(){const recordingId=this.fixture?.recordingId;f.stops++;f.active=null;this.clips.set(recordingId,{blob:new Blob(['closed-fixture'],{type:'audio/webm'}),durationMs:1500});return {recordingId,durationMs:1500};};
@@ -50,7 +46,6 @@ export async function cloudNotesVoiceFixture(page:Page,signed=true,development=f
 }
 export const notesRecorder=(page:Page)=>page.locator('[data-alpha-subview="notes-recorder"]');
 export async function openNotesRecorder(page:Page){await openLegacyNotes(page);await page.getByRole('button',{name:'Record voice note',exact:true}).click();}
-/** The recorder starts at once; Stop saves the recording locally without requesting transcription. */
 export async function recordAndFinish(page:Page){const panel=notesRecorder(page);await expect(panel).toHaveAttribute('data-recorder-state','recording');await panel.getByRole('button',{name:'Stop recording',exact:true}).click();}
 export const savedVoiceNotes=(page:Page)=>page.evaluate(async()=>JSON.parse((await(await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw())||'{"records":[]}').records.filter((n:any)=>n.kind==='voice'));
 export async function noPhysicalOrLocalVoice(page:Page){expect(await page.evaluate(()=>{const f=(window as any).cloudNotesVoice;return {mic:f.mic,plays:f.plays,local:f.local,paired:f.paired};})).toEqual({mic:0,plays:0,local:0,paired:0});}

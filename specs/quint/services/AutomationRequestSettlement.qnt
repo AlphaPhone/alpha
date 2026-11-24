@@ -1,9 +1,3 @@
-/// One agent automation in the Automations list, and the journal entry of a change to it.
-/// A change is recorded before it is sent and released when its outcome is known: by the reply,
-/// by a definite refusal, by a complete fresh list that proves it, or by the owner after
-/// checking the record. A list proves a removal when the row is gone and an enable or disable
-/// when the row shows the requested value. It never proves a run request, and a list with a
-/// failed source proves nothing.
 module AutomationRequestSettlement {
   type Req = { id: int, kind: str, target: bool }
   type Automations = {
@@ -22,7 +16,6 @@ module AutomationRequestSettlement {
   pure def release(v: Automations, why: str): Automations =
     { ...v, retained: none, unknown: false, lastRelease: why, releasedKind: v.retained.kind,
       releasedOn: if (why != "list") "none" else if (v.complete) "complete" else "partial" }
-  /// A change needs a list read for this connection and no retained change on the row.
   action change(kind: str, target: bool): bool = all {
     s.loaded, s.knownExists, not(s.busy), s.retained == none, s.admissions < 3,
     kind == "enable" implies target != s.knownEnabled,
@@ -30,7 +23,6 @@ module AutomationRequestSettlement {
     s' = { ...s, retained: req, busy: true, flight: s.flight.union(Set(req)), reply: "none",
       admissions: s.admissions + 1 }
   }
-  /// The agent applies a request to the row it names, or refuses one for a row that is gone.
   action serverTake(r: Req): bool = all {
     s.flight.contains(r),
     val answered = s.busy and s.retained == r
@@ -46,13 +38,10 @@ module AutomationRequestSettlement {
   }
   action requestLost(r: Req): bool = all { s.flight.contains(r), s' = { ...s, flight: s.flight.exclude(Set(r)) } }
   action okReply = all { s.busy, s.reply == "ok", s' = { ...release(s, "reply"), busy: false, reply: "none" } }
-  /// A definite refusal is a known non-change.
   action refusedReply = all {
     s.busy, s.reply == "rejected", s' = { ...release(s, "refused"), busy: false, reply: "none" }
   }
-  /// No answer, or one that does not say what happened: the entry stays and the row is locked.
   action unknownReply = all { s.busy, s' = { ...s, busy: false, reply: "none", unknown: true } }
-  /// A list read. Only a read with every source answered settles a retained change.
   action refresh(complete: bool): bool = all {
     not(s.busy),
     val read = { ...s, loaded: true, complete: complete, knownExists: s.exists, knownEnabled: s.enabled }
@@ -61,11 +50,8 @@ module AutomationRequestSettlement {
       (s.retained.kind == "enable" and s.exists and s.enabled == s.retained.target))
     if (proven) s' = release(read, "list") else s' = read
   }
-  /// The owner releases an unconfirmed change after checking the record. Nothing is sent again.
   action allowAnother = all { not(s.busy), s.retained != none, s' = release(s, "owner") }
-  /// Another connection: nothing may be changed until its list has been read.
   action switchConnection = s' = { ...s, loaded: false, busy: false, reply: "none" }
-  /// Someone else enables or disables the automation.
   action remoteToggle = all { s.exists, s' = { ...s, enabled: not(s.enabled) } }
   action step = any {
     change("delete", false), change("enable", true), change("enable", false), change("fire", false),
@@ -79,7 +65,6 @@ module AutomationRequestSettlement {
   val UnknownStaysLocked = s.unknown implies s.retained != none
   val RunNeverSettledByList = s.lastRelease == "list" implies s.releasedKind.in(Set("delete", "enable"))
   val PartialListSettlesNothing = s.releasedOn != "partial"
-  /// A removal is applied at most once, and one the list settled can never apply later.
   val RemovedOnce = s.deletes <= 1 and (s.deletes == 1 implies not(s.exists))
   val OneRetainedAtATime = s.flight.forall(r => r.id <= s.admissions) and s.retained.id.in(Set(0, s.admissions))
   val TypeOK = s.reply.in(Set("none", "ok", "rejected")) and s.admissions.in(0.to(3)) and s.runs.in(0.to(3))
@@ -89,8 +74,6 @@ module AutomationRequestSettlement {
   val ListSettledRemovalWitness = s.lastRelease == "list" and s.releasedKind == "delete" and s.retained == none
   val RunStaysLockedWitness = s.retained.kind == "fire" and s.unknown and s.runs == 1 and s.complete and s.loaded
   val PartialListKeepsLockWitness = s.retained.kind == "delete" and not(s.exists) and not(s.complete) and not(s.busy)
-  /// A list that showed the requested value released an enable whose request was still on its
-  /// way; that request later undid a newer choice.
   val LateEnableOverridesWitness = s.lateApplied
   run lostReplyRemovalSettledByListTest = init.then(change("delete", false))
     .then(serverTake({ id: 1, kind: "delete", target: false })).then(unknownReply)
@@ -116,8 +99,6 @@ module AutomationRequestSettlement {
     .expect(s.retained == none and s.lastRelease == "refused" and s.runs == 0 and s.knownExists and safety)
     .then(refresh(true)).expect(not(s.knownExists) and s.lastRelease == "refused" and safety)
   run unreadConnectionBlocksChangeTest = init.then(switchConnection).then(change("enable", true).fail())
-  /// The list shows the requested value because someone else set it. The delayed request is
-  /// released, and later overrides a newer choice.
   run lateEnableOverridesTest = init.then(change("enable", true)).then(unknownReply).then(remoteToggle)
     .then(refresh(true)).expect(s.retained == none and s.lastRelease == "list" and s.flight.size() == 1 and safety)
     .then(change("enable", false)).then(serverTake({ id: 2, kind: "enable", target: false })).then(okReply)

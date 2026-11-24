@@ -1,4 +1,3 @@
-// Product worker preparation is separate from verified worker staging.
 module PreparedWorkflowWorker {
   type State = {stamp: int, lock: int, outputStamp: int, outputLock: int,
     quality: str, phase: str, capturedStamp: int, capturedLock: int,

@@ -10,7 +10,6 @@ import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
 import org.json.JSONObject;
 
-/** Actual file locks and source admission, with synthetic listener/Android ports. */
 public final class ResetAdmissionRegression {
  private static int checks;
  private static AlphaApplication app;

@@ -1,25 +1,11 @@
-/// The image Phone view: the foreground-only recent-calls read with its epoch fence, and the dial
-/// handoff with its own latch, which belongs to the showing of Phone it started in.
-/// AP-16 AC-19 on the image: Telecom's call state reaches the renderer (AlphaCallState.java through
-/// the AlphaCallState plugin, runtime/call-state.ts). A live call that cannot be ruled out as an
-/// emergency call holds the display gate. The telephony executor's side effects (dial, dial handoff,
-/// SMS, contact write) fail closed: each runs only on a fresh reading that comes back, knows whether
-/// a call is live, and rules out an emergency call. The replay (test/quint-phone-session.test.mjs)
-/// runs the real executor through the real guarded ports and the real call-state watch.
-/// Approval before dial itself is replayed by PhoneCall on the shell and tested in the executor.
 module PhoneSession {
   type State = {
     viewOpen: bool, hidden: bool, active: bool,
-    // The read epoch and the reads in flight; `reading` is the read latch.
     epoch: int, reads: Set[int], reading: bool,
-    // The showing of Phone, the showings whose dial handoff is still in flight, and the dial latch.
     session: int, dials: Set[int], dialing: bool, handoffs: int,
     calls: bool, needsAccess: bool,
     notice: str,
-    // Telecom's last report: in a call ("yes", "no", "unknown" without phone-state access) and the
-    // call's kind ("emergency", "ordinary", "unknown"); Alpha's telephony side effects run and refused.
     inCall: str, callKind: str, effects: int, refused: int,
-    // The call-state bridge answers (false: the read throws).
     bridge: bool
   }
   var s: State
@@ -28,14 +14,10 @@ module PhoneSession {
     session: 0, dials: Set(), dialing: false, handoffs: 0, calls: false, needsAccess: false, notice: "none",
     inCall: "no", callKind: "ordinary", effects: 0, refused: 0, bridge: true
   }
-  /// The gate (AlphaCallState.emergencyLive): in a call whose kind is not known to be ordinary.
   pure def gate(v: State): bool = v.inCall == "yes" and v.callKind != "ordinary"
-  /// The side-effect guard fails closed: a broken bridge, unknown phone state or the gate refuse.
   pure def effectAllowed(v: State): bool = v.bridge and v.inCall != "unknown" and not(gate(v))
   pure def availableIn(v: State): bool = v.viewOpen and not(v.hidden)
   pure def busy(v: State): bool = v.reading or v.dialing
-  /// Becoming available starts a read; becoming unavailable ends the showing: the rows, the
-  /// notice and both latches are cleared under a new epoch and a new session.
   def synced(target: State): State =
     if (availableIn(target) == s.active) target
     else if (availableIn(target))
@@ -46,44 +28,33 @@ module PhoneSession {
   action closeView = all { s.viewOpen, s.epoch < 6, s' = synced({ ...s, viewOpen: false }) }
   action hide = all { not(s.hidden), s.epoch < 6, s' = synced({ ...s, hidden: true }) }
   action show = all { s.hidden, s.epoch < 6, s' = synced({ ...s, hidden: false }) }
-  /// Refresh, the owner's access request, or a return to the app. It supersedes a read in flight
-  /// and leaves a dial handoff and its latch alone.
   action refresh = all {
     s.epoch < 6,
     s' = if (s.active) { ...s, epoch: s.epoch + 1, reads: s.reads.union(Set(s.epoch + 1)), reading: true }
       else { ...s, epoch: s.epoch + 1 }
   }
-  /// The read answers: no call-log access on this image, access not granted, rows, or a failure.
   action readCompletes(token: int, outcome: str): bool = all {
     token.in(s.reads), outcome.in(Set("unsupported", "no-access", "rows", "error")),
     s' = if (token != s.epoch) { ...s, reads: s.reads.exclude(Set(token)) }
       else { ...s, reads: s.reads.exclude(Set(token)), reading: false, calls: outcome == "rows",
         needsAccess: if (outcome == "error") s.needsAccess else outcome == "no-access" }
   }
-  /// Dial hands a valid number to the system dial screen: one typed in the field, which clears the
-  /// notice, or one of the recent calls. Nothing is handed over while a read or a handoff runs.
   action dial(fromRow: bool): bool = all {
     s.active, not(busy(s)), s.handoffs < 3, fromRow implies s.calls,
     s' = { ...s, dialing: true, dials: s.dials.union(Set(s.session)), handoffs: s.handoffs + 1,
       notice: "none" }
   }
   action invalidNumber = all { s.active, not(busy(s)), s' = { ...s, notice: "invalid" } }
-  /// A handoff answers. One started in an earlier showing changes nothing.
   action dialCompletes(token: int, opened: bool): bool = all {
     token.in(s.dials),
     s' = if (token != s.session) { ...s, dials: s.dials.exclude(Set(token)) }
       else { ...s, dials: s.dials.exclude(Set(token)), dialing: false, notice: if (opened) "handed-off" else "failed" }
   }
-  /// Telecom reports a call-state change. Without a call the kind is ordinary; without phone-state
-  /// access both are unknown.
   action telecom(inCall: str, kind: str): bool = all { inCall.in(Set("yes", "no", "unknown")), kind.in(Set("emergency", "ordinary", "unknown")),
     s' = { ...s, inCall: inCall, callKind: if (inCall == "yes") kind else if (inCall == "no") "ordinary" else "unknown" } }
-  /// An approved Alpha action reaches the executor, whose side-effect port reads Telecom again first
-  /// (guardTelephonyPorts). The replay runs the real executor and compares runs and refusals.
   action alphaEffect = all { s.effects + s.refused < 6,
     s' = if (not(effectAllowed(s))) { ...s, refused: s.refused + 1 }
       else { ...s, effects: s.effects + 1 } }
-  /// The call-state bridge stops answering, or answers again.
   action bridgeAnswers(ok: bool): bool = all { s' = { ...s, bridge: ok } }
   action step = {
     nondet token = 0.to(6).oneOf()
@@ -96,7 +67,6 @@ module PhoneSession {
   }
   val ActiveMatchesAvailability = s.active == availableIn(s)
   val InactiveHoldsNothing = not(s.active) implies not(s.calls or s.needsAccess or busy(s)) and s.notice == "none"
-  /// Each latch has work in flight that will release it.
   val ReadingHasCurrentRead = s.reading implies s.epoch.in(s.reads)
   val DialingTracksHandoff = s.dialing == s.session.in(s.dials)
   val RowsNeedAccess = s.calls implies not(s.needsAccess)
@@ -116,18 +86,14 @@ module PhoneSession {
   run recentCallsTest = init.then(openView).expect(s.reading and s.epoch == 1)
     .then(readCompletes(1, "rows")).expect(s.calls and not(busy(s)) and safety)
     .then(dial(true)).then(dialCompletes(0, true)).expect(DialNoticeWitness and s.handoffs == 1 and safety)
-  /// A return to the app re-reads while a dial handoff is still answering: the settled read does
-  /// not release the dial latch, no second dial starts, and the handoff's answer is still shown.
   run refreshDuringDialTest = init.then(openView).then(readCompletes(1, "rows")).then(dial(true)).then(refresh)
     .expect(ReadDuringHandoffWitness and safety)
     .then(readCompletes(2, "rows")).expect(s.dialing and not(s.reading) and safety)
     .then(dialCompletes(0, true)).expect(s.notice == "handed-off" and not(busy(s)) and s.handoffs == 1 and safety)
-  /// The dial screen covers Alpha: the showing ends, and the handoff's answer shows nothing afterwards.
   run leaveDuringDialTest = init.then(openView).then(readCompletes(1, "rows")).then(dial(true)).then(hide)
     .expect(not(s.active or busy(s) or s.calls) and safety)
     .then(dialCompletes(0, true)).expect(s.notice == "none" and safety)
     .then(show).expect(s.reading and s.epoch == 3 and safety)
-  /// A handoff left over from an earlier showing neither blocks nor releases a dial in this one.
   run staleHandoffLeavesLaterDialTest = init.then(openView).then(readCompletes(1, "rows")).then(dial(true))
     .then(hide).then(show).then(readCompletes(3, "rows")).then(dial(false))
     .expect(StaleHandoffBesideLaterDialWitness and s.handoffs == 2 and safety)

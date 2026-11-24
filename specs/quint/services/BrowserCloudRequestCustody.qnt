@@ -1,4 +1,3 @@
-// The local browser bridge owns an active slot until its exact handler settles.
 module BrowserCloudRequestCustody {
   type State = {
     owners: int -> int, slots: int -> int, status: int -> int,

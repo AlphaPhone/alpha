@@ -1,5 +1,3 @@
-/// One durable run identity through real server admission, process execution and canonical approval.
-/// Process/receipt results and schedule classification are external inputs, with their own obligations.
 module WorkflowEngineAdmission {
   type Engine = {
     version: int, active: bool, removed: bool, otherActive: bool,
@@ -93,7 +91,6 @@ module WorkflowEngineAdmission {
     s' = {...s, approval: if (approve) "approved" else "denied",
       decisionOwner: owner, recordedApproval: if (approve) "approved" else "denied", controls: s.controls + 1}
   }
-  /// A process command can commit canonically while its host transaction fails or loses readback.
   action decisionUnconfirmed(approve: bool, owner: int, committed: bool): bool = all {
     s.approval == "pending", not(s.finished), not(s.cancelRequested),
     not(approve) or s.supported, owner.in(1.to(2)), s.controls < 3,

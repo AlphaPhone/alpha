@@ -1,4 +1,3 @@
-/// Whole shared listener/service lifecycle with controlled framework outcomes.
 module NativeListenerService {
   type State = {created: bool, destroyed: bool, foregroundRequested: bool, selfStopped: bool,
     modes: bool, recordings: bool, playback: bool, observer: bool, reapplyQueued: bool,

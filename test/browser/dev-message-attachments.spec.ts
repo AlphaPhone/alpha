@@ -1,5 +1,4 @@
 import {test,expect,Page} from '@playwright/test';
-// The one bottom bar is the composer (AP-16); the thread's draft slot is kept per thread.
 const field=(page:Page)=>page.locator('[data-alpha-bar-field="person"]');
 const sendButton=(page:Page)=>page.locator('[data-alpha-input-bar]').getByRole('button',{name:'Send',exact:true});
 async function open(page:Page){await page.getByRole('button',{name:'Messages',exact:true}).click();await page.getByRole('button',{name:/^(Unread, )?Maya Chen$/}).click();}

@@ -1,6 +1,5 @@
 import {expect,type Page} from '@playwright/test';
 
-// Holds a readwrite transaction on the browser documents store so a queued calendar write waits behind it.
 export async function holdDocumentsTransaction(page:Page){
  await page.evaluate(async()=>{
   const database=await new Promise<IDBDatabase>((resolve,reject)=>{const request=indexedDB.open('alpha.browser.documents.v1',1);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});

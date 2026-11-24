@@ -250,7 +250,6 @@ public final class ClockReviewTraces {
   }
 
   void seedLegacy()throws Exception{
-   // The original source could persist this shape before any nested marker existed.
    JSONObject saved=entry().put("phase","terminal").put("status","succeeded").put("summary","Synthetic receipt")
     .put("result",typedResult("opened")).put("finishedAt",now);
    slots.put(journal.entrySlot(SCOPE,ID),saved.toString());legacy=true;

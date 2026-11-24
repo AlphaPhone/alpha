@@ -1,4 +1,3 @@
-// One selected owner grant, two representative turn/message/revision IDs, two invocations.
 module GmailAgentMailboxRecovery {
   type Proposal = {request: int, message: int, history: int, kind: str}
   type Receipt = {state: str, kind: str, message: int}

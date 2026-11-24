@@ -1,6 +1,5 @@
 import {test,expect} from '@playwright/test';
 import {calendarSyncFixture} from './calendar-sync-fixture';
-// Renderer integration through a synthetic native boundary. This is not an Android/Google run.
 test('native Settings requires native consent, links its exact source, pulls edits and pauses both boundaries',async({page})=>{
  const dialog=await calendarSyncFixture(page,true);
  await dialog.getByRole('switch',{name:'Sync',exact:true}).click();

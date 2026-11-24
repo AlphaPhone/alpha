@@ -1,4 +1,3 @@
-// Renderer reservation and retirement of native hosted inbox setup.
 module HostedBackgroundAdmission {
   type Attempt = {session: str, phase: str, active: bool, retired: bool,
     begins: int, configs: int, cancels: int, cancelFault: str, outcome: str}

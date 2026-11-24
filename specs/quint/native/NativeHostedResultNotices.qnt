@@ -1,5 +1,3 @@
-// Actual HostedResultNotices ledger. The Android poster and retained inbox
-// are input boundaries. Four fixed routes stand for exact identity tuples.
 module NativeHostedResultNotices {
   type State = {
     owner: int,
@@ -39,7 +37,6 @@ module NativeHostedResultNotices {
     pending: 0, question: false, token: 0, issued: 0, outcome: "none"
   }
 
-  // Class 0 is absent, 1 is original, 2 is changed payload, 3 is route mismatch.
   action retain(key: int, result: int): bool = all {
     routes.contains(key),
     result.in(0.to(3)),
@@ -107,8 +104,6 @@ module NativeHostedResultNotices {
     else { ...s, outcome: "rejected" }
   }
 
-  // A partial withdrawal can leave a durable token. Matching that token
-  // also requires the current owner of its exact retained ledger route.
   action consume(token: int, mode: str): bool = all {
     token.in(0.to(4)),
     Set("complete", "ledger", "pending", "cancel").contains(mode),
@@ -128,8 +123,6 @@ module NativeHostedResultNotices {
     owners.contains(owner),
     Set("complete", "owner", "ledger", "cancel", "pending").contains(mode),
     val foreign = routes.filter(key => s.phases.get(key) != "none" and routeOwner(key) != owner)
-    // Failed sweeps bound the failing prefix to one foreign row. Successful
-    // sweeps cover every foreign row without relying on JSONObject key order.
     all {
       mode.in(Set("complete", "owner")) or foreign.size() == 1,
       mode != "pending" or foreign.contains(s.pending),
@@ -153,7 +146,6 @@ module NativeHostedResultNotices {
   val ExactReadOwner = readKey == 0 or matches(readKey)
   val PendingHasRoute = if (s.pending == 0) s.token == 0 and not(s.question)
     else s.phases.get(s.pending) != "none" and s.token == s.issued and s.token > 0
-  // An unchanged digest never creates another dispatch; a reconciled new digest starts a new generation.
   val NoReplayPost = routes.forall(key => s.postCount.get(key) <= s.dispatchGenerations.get(key))
   val DigestPrecedesEffect = s.posted.forall(key => s.digests.get(key).in(Set(1, 2)) and s.phases.get(key) != "none")
   val ReadRetentionIsExact = if (readRetained) s.retained.get(readKey) == s.digests.get(readKey) else true

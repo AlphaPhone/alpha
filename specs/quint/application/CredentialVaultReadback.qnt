@@ -1,7 +1,4 @@
-// Complementary audit scope; the canonical model and its source correspondence remain registered separately.
-/// Product vault UI lifetime, listing-read fencing, native-origin admission and secret clearing.
 module CredentialVaultReadback {
-  // Bound on the listing-read counter. A value is never reused for a later read.
   pure val GenMax = 12
   type State = { locked: bool, active: bool, foreground: bool, secret: bool,
     entries: bool, generation: int, captured: int, loading: bool, sawOpen: bool, vaultOpen: bool, damaged: bool,
@@ -12,30 +9,23 @@ module CredentialVaultReadback {
     entries: false, generation: 0, captured: 0, loading: false, sawOpen: false, vaultOpen: false, damaged: false,
     reviewedOrigin: 0, fieldOrigin: 1, filled: false, mocks: false, transferred: false, resetReviewed: false, resetAuthorized: false, resetGeneration: 0, resets: 0,
     operation: "", operationGeneration: 0, notice: false }
-  // Every lock of the page retires a listing read still in flight and forgets metadata and the typed secret.
   pure def lockedView(t: State): State = { ...t, generation: t.generation + 1, locked: true,
     entries: false, secret: false, reviewedOrigin: 0, filled: false }
-  // Leaving the password pages retires reads, locks the native vault and forgets everything held for them.
   pure def left(t: State): State = { ...lockedView({ ...t, generation: t.generation + 1 }), active: false,
     vaultOpen: false, damaged: false, resetReviewed: false, resetAuthorized: false, notice: false }
   action init = s' = start
-  // Rendering the password pages opens them only while the app is shown; a render while it is
-  // hidden leaves them closed.
   action open = all { s.foreground, s' = { ...s, active: true } }
   action unlock = all { s.active, s.foreground, not(s.damaged),
     s' = { ...s, locked: false, entries: true, vaultOpen: true } }
   action typeSecret = all { not(s.locked), s.active, s.foreground,
     s' = { ...s, secret: true } }
-  // A listing read records what the vault holds when it starts and disarms a pending reset confirmation.
   action refresh = all { s.active, s.foreground, s.generation < GenMax,
     s' = { ...s, loading: true, generation: s.generation + 1, captured: s.generation + 1,
       sawOpen: s.vaultOpen and not(s.damaged), resetReviewed: false, resetAuthorized: false } }
-  // Only the newest read of an open page is applied. A read that found the vault locked locks the page.
   action refreshResult = all { s.loading, s.captured == s.generation, s.active,
     s.sawOpen or s.generation < GenMax,
     s' = if (s.sawOpen) { ...s, loading: false, entries: true, locked: false }
       else lockedView({ ...s, loading: false }) }
-  // A read overtaken by a lock, by leaving or by a newer read changes nothing.
   action staleRefreshResult = all { s.loading, s.captured != s.generation or not(s.active),
     s' = { ...s, loading: false } }
   action reviewOrigin = all { not(s.locked), s.active, s.foreground,
@@ -43,7 +33,6 @@ module CredentialVaultReadback {
   action moveOrigin = s' = { ...s, fieldOrigin: if (s.fieldOrigin == 1) 2 else 1, reviewedOrigin: 0, filled: false }
   action fill = all { not(s.locked), s.active, s.foreground, s.reviewedOrigin == s.fieldOrigin,
     s.reviewedOrigin != 0, s' = { ...s, filled: true, secret: false } }
-  // Explicit Lock and the end of the unlock window.
   action lock = all { s.generation < GenMax, s' = lockedView({ ...s, vaultOpen: false }) }
   action leave = if (s.active and s.generation + 2 <= GenMax) s' = left(s) else s' = s
   action background = all { not(s.active) or s.generation + 2 <= GenMax,
@@ -58,8 +47,6 @@ module CredentialVaultReadback {
     s.resetGeneration == s.generation, s' = { ...s, resetAuthorized: true } }
   action beginResetAuthentication = all { s.resetReviewed, s.active, s.foreground, s.damaged,
     s.operation == "", s' = { ...s, operation: "reset", operationGeneration: s.generation, notice: false } }
-  /// Native lock retires a pending credential challenge. Its rejected result disarms the
-  /// confirmation and is reported only while the password pages are still open.
   action authenticationRefused = all { s.operation == "reset",
     s' = { ...s, operation: "", resetReviewed: false, resetAuthorized: false, notice: s.active } }
   action resetDamagedVault = all { s.resetReviewed, s.resetAuthorized, s.resetGeneration == s.generation,
@@ -88,8 +75,6 @@ module CredentialVaultReadback {
   val ResetPendingAfterLeaveWitness = s.operation == "reset" and not(s.active)
   val RefusedResetReportedWitness = s.notice and s.damaged and s.operation == "" and s.operationGeneration > 0 and not(s.resetReviewed)
   val ResetAuthorizedWitness = s.resetAuthorized
-  // A render while hidden does not reopen the pages; the next one after returning does, and its
-  // read finds the vault locked.
   run hiddenRenderStaysClosedTest = init.then(open).then(unlock).then(background).then(open).fail()
   run returnReopensLockedTest = init.then(open).then(unlock).then(background).then(foreground).then(open)
     .then(refresh).then(refreshResult)
@@ -114,7 +99,6 @@ module CredentialVaultReadback {
   run nativeLockRefusesPendingResetTest = init.then(open).then(refresh).then(keyInvalidated)
     .then(reviewReset).then(beginResetAuthentication).then(leave).then(authenticationRefused)
     .expect(s.resets == 0 and not(s.resetReviewed or s.resetAuthorized) and not(s.notice) and safety)
-  // A listing read that a lock overtakes is retired instead of repopulating the locked page.
   run lockFencesRefreshTest = init.then(open).then(unlock).then(refresh)
     .expect(s.loading and s.sawOpen).then(lock).expect(s.loading and s.captured != s.generation)
     .then(refreshResult).fail()

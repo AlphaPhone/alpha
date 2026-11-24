@@ -2,8 +2,6 @@ import {test,expect,type Page} from '@playwright/test';
 import {seedCompletedAccessSetup} from './flag-off-android';
 import {preloadPageModules} from './helpers/page-modules';
 
-// Rendered Inbox against a synthetic managed provider: Drafts/Archive/Trash folders, provider draft
-// editing and the rule that nothing is sent or saved remotely without the explicit review.
 async function install(page:Page,caps:Record<string,unknown>){
  await seedCompletedAccessSetup(page);
  await page.goto('/');
@@ -50,7 +48,6 @@ test('Older servers offer only the query-based Archive folder',async({page})=>{
 
 test('Drafts, Archive and Trash load their lists; edited Gmail draft stays local without an extra remote-save action',async({page})=>{
  await install(page,{draftsList:true,searchTrash:true});
- // Folder filters, including the overflow menu, are full 44px touch targets (#411).
  for(const control of [page.getByRole('button',{name:'Other mail folders',exact:true}),page.getByRole('button',{name:'Archive',exact:true})])expect((await control.boundingBox())!.height).toBeGreaterThanOrEqual(43.5);
  await page.getByRole('button',{name:'Other mail folders',exact:true}).click();await page.getByRole('menuitemradio',{name:'Trash',exact:true}).click();
  await expect(page.getByText('Trashed fixture',{exact:true})).toBeVisible();
@@ -59,7 +56,6 @@ test('Drafts, Archive and Trash load their lists; edited Gmail draft stays local
  await page.getByRole('button',{name:'Other mail folders',exact:true}).click();await page.getByRole('menuitemradio',{name:'Drafts',exact:true}).click();
  await expect(page.getByRole('button',{name:/^Gmail draft, Draft to friend@example\.invalid, Quarterly plan/})).toBeVisible();
  expect((await fixture(page)).searches.slice(-2)).toEqual(['in:trash','in:archive']);
- // A reply draft stays in Gmail: its thread headers cannot be reproduced exactly here.
  await page.getByRole('button',{name:/Re: Thread reply/}).click();
  await expect(page.getByText('Edit in Gmail',{exact:true})).toBeVisible();
  await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveCount(0);

@@ -6,7 +6,6 @@ test('a bound source shows its renewal window, pauses at expiry and renews with 
  await page.goto('/?mode=dev');await page.getByRole('button',{name:'Settings',exact:true}).click();await openConnectionDiagnostics(page);await page.getByRole('button',{name:'Connect development profile'}).click();
  await page.evaluate(()=>window.dispatchEvent(new Event('alpha:hosted-digests')));const panel=page.getByRole('dialog',{name:'Scheduled digests',exact:true});
  await panel.getByText('Share a snapshot',{exact:true}).click();
- // Default and maximum reviewed lifetime is 7 days.
  const expiry=panel.getByLabel('Expires after hours',{exact:true});await expect(expiry).toHaveValue('168');await expect(expiry).toHaveAttribute('max','168');
  await panel.getByLabel('Label',{exact:true}).fill('Daily source');await panel.getByLabel('Snapshot text',{exact:true}).fill('Reviewed snapshot content');await expiry.fill('20');
  await panel.getByRole('button',{name:'Review snapshot',exact:true}).click();await panel.getByRole('button',{name:'Confirm',exact:true}).click();
@@ -14,10 +13,7 @@ test('a bound source shows its renewal window, pauses at expiry and renews with 
  await panel.getByRole('button',{name:'Review morning schedule',exact:true}).click();await panel.getByRole('button',{name:'Confirm',exact:true}).click();
  const schedules=panel.getByRole('region',{name:'Digest schedules'}),renewal=panel.getByRole('region',{name:'Source renewal'});
  await expect(schedules).toContainText('Morning at 12:30 (UTC) · Daily source · On');
- // Inside the final 24 hours the in-app notice offers renewal.
  await expect(renewal).toContainText('Daily source expires');
- // At expiry the loop is paused with a clear state, and no failure brief is produced. Like the agent, the
- // schedule's next settlement is one explicit "unavailable" record (not a run), and nothing after it.
  await page.clock.setFixedTime(new Date('2026-10-04T08:30:00Z'));await panel.getByRole('button',{name:'Refresh',exact:true}).click();
  await expect(renewal).toContainText('Daily source expired');
  await expect(schedules).toContainText('Source expired — paused');
@@ -50,7 +46,6 @@ test('morning and evening schedules can share one reviewed source',async({page})
  const state=await digests(page);expect(new Set(state.loops.map((l:any)=>l.spec.sourceId)).size).toBe(1);expect(state.loops.map((l:any)=>l.spec.template).sort()).toEqual(['evening','morning']);
 });
 test('a default 7-day snapshot expires exactly at the agent bound of observedAt plus 7 days',async({page})=>{
- // Real clock: observedAt and expiresAt must come from one reading, or a 168-hour source drifts past the agent's bound.
  await page.goto('/?mode=dev');await page.getByRole('button',{name:'Settings',exact:true}).click();await openConnectionDiagnostics(page);await page.getByRole('button',{name:'Connect development profile'}).click();
  await page.evaluate(()=>window.dispatchEvent(new Event('alpha:hosted-digests')));const panel=page.getByRole('dialog',{name:'Scheduled digests',exact:true});
  await panel.getByText('Share a snapshot',{exact:true}).click();await expect(panel.getByLabel('Expires after hours',{exact:true})).toHaveValue('168');

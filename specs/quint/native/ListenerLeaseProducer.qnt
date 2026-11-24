@@ -1,4 +1,3 @@
-/// SystemUI measurements and the serial producer of listener-health acknowledgements.
 module ListenerLeaseProducer {
   type View = {
     verified: bool, primary: bool, switching: bool, recording: bool,
@@ -125,7 +124,6 @@ module ListenerLeaseProducer {
   action receiverReplacesGeneration = all {
     s.serverGeneration < 2, s' = { ...s, serverGeneration: s.serverGeneration + 1 }
   }
-  /// Sending the pause capability does not invent a stopped microphone observation.
   action requestPause = all { s.view.recording, s.view.verified, s' = { ...s, pauseRequested: true } }
   action crash = s' = { ...s, running: false, binderAlive: false, queue: [],
     phase: "idle", generation: -1, scheduled: false, result: "crashed" }

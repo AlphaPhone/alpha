@@ -1,68 +1,30 @@
-// Extra resident-agent and Eliza Cloud behaviour for the flag-off Android harness
-// (flag-off-android.ts), for the production specs that sign in, change accounts or fail a reply.
-//
-// It wraps the harness's Capacitor bridge stub in a second init script, so it must be installed
-// after flagOffAndroid(). Everything synthetic stays at that bridge: the bundle under test is the
-// flag-off build, and the shipped renderer, CloudProtocol and native-stream reader all run.
-//
-// Evidence boundary: source/test evidence for the flag-off renderer only. Nothing here is the
-// native Agent or AlphaConnection plugin, the resident runtime, Eliza Cloud, Cerebras or a device.
 import { expect, type Page } from '@playwright/test';
 
 export interface StubAccount { token: string; userId: string; email: string; balance: number; userStatus?: number; inbox?: string;
-  /** 'none': the billing snapshot reports a canceled plan, so no plan admits Cloud inference.
-   * 'credits': no subscription (Cloud's organization-credit mode, every new account); a redeemed
-   * code turns it into an active membership. Absent: an active Plus membership. */
   plan?: 'none' | 'credits' }
 export type StubStream =
-  /** Native refuses the stream call before anything reaches the runtime. */
   | 'reject'
-  /** The runtime refuses admission with HTTP 429; nothing is recorded. */
   | 'busy'
-  /** As 'busy', but the 429 is held until `release()`, so the owner can type while the send is pending. */
   | 'busyHeld'
-  /** The runtime answers 401: the resident's owner session is no longer accepted. */
   | 'expired'
-  /** HTTP 200 and the user turn is recorded, then the stream fails before a terminal frame. */
   | 'drop'
-  /** The reply is held until `release()`; the user turn is recorded first. */
   | 'hold'
-  /** The turn fails on the agent with this upstream failure kind, in a `done` or `error` frame.
-   * `runtime`: the exact `done` frame the agent's conversation stream writes when a Cloud 402 ends a
-   * turn before any text (fullText is upstream's credits reply, `failureKind` with no terminalFailure). */
   | { failure: string; frame: 'done' | 'error'; runtime?: boolean };
-/** One Cloud Maps place in the deployed `/api/v1/maps` shape. */
 export interface StubMapsPlace { id: string; name: string; latitude: number; longitude: number; address?: string }
-/** Eliza Cloud Maps (#412) behind the synthetic Cloud: capabilities, places/search and routes only.
- * Every request is recorded in `residentStub.maps.requests`. `residentStub.maps.hold` holds the next
- * search answer until `residentStub.releaseSearch()`, even after the renderer cancels it (recorded in
- * `cancelled`); `limit` refuses
- * the next search or route once with HTTP 429 and that Retry-After header. */
 export interface StubMaps {
   regions: { id: string; name: string; bounds: [number, number, number, number] }[];
-  /** Search answers by exact query text; anything else finds nothing. */
   places: Record<string, StubMapsPlace[]>;
-  /** Route candidates per request, recommended first (minutes, metres, via street). */
   routes: { minutes: number; meters: number; via: string }[];
   modes?: string[];
 }
 export interface ResidentStubOptions {
-  /** Eliza Cloud Maps routes. Omitted: the base harness refuses them (404, Maps not deployed). */
   maps?: StubMaps;
-  /** Synthetic native email-code boundary; no real code is sent. */
   nativeSignIn?: boolean;
-  /** First run: no Cloud key is saved on this phone. */
   emptyKeystore?: boolean;
-  /** Reject resident starts independently of account sign-in. */
   rejectStart?: boolean;
-  /** Eliza Cloud accounts, answered by bearer token. The first is the harness's saved key unless emptyKeystore. */
   accounts?: StubAccount[];
-  /** Device capabilities the resident agent offers at registration (the harness offers none). */
   offered?: string[];
-  /** What native DailyApps.surfaceInfo reports for Clock repeat days (absent: not reported). */
   clockRepeatDaysVersion?: number;
-  /** Conversations carry a room, so Stop reaches upstream's turn abort route; the agent answers
-   * that no turn was running (`aborted: false`), so the reply may still finish. */
   abortRoute?: boolean;
 }
 
@@ -71,28 +33,21 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
     const w = window as any, f = w.flagOff, base = w.Capacitor.nativePromise;
     const id = '9f1dc45a-4011-4e44-947a-30d999d24fa5';
     let kept: any = null;
-    try { kept = JSON.parse(sessionStorage.getItem('resident-stub') || 'null'); } catch { /* first load */ }
+    try { kept = JSON.parse(sessionStorage.getItem('resident-stub') || 'null'); } catch { }
     if (!kept) {
       if (options.emptyKeystore) delete f.slots['cloud:production'];
       else if (options.accounts?.length) f.slots['cloud:production'] = JSON.stringify({ token: options.accounts[0].token, credentialId: id, expiresAt: Date.now() + 86_400_000 });
       f.persist();
     }
-    // Ordered native and Cloud events that the specs assert on, kept across a reload.
     const s = w.residentStub = {
       order: [] as string[], cloud: [] as Array<{ method: string; path: string; auth?: string }>, bodies: [] as any[], opened: [] as string[],
       accounts: structuredClone(options.accounts ?? []) as any[], login: 'authenticated' as 'authenticated' | 'expired' | 'hold', nextToken: '', polls: 0,
       start: (options.rejectStart ? 'reject' : 'ok') as 'ok' | 'reject' | 'reject-once' | 'starting', held: null as null | { conversation: string; reply: string },
       ...kept,
-      // Per page load: the stream mode and a held reply do not survive a restart.
       stream: null as any, release: null as null | (() => void), recoveries: [] as string[], capabilities: '',
-      // Off by default: holdNextChunk() opens the next reply's stream and holds its chunk until releaseChunk().
       chunkHeld: false, heldChunk: null as null | (() => void),
-      // Per page load: conversation reads (the recent window, not older pages), list reads and turn
-      // aborts. holdReads holds both reads until heldRead() / heldList().
       reads: 0, lists: 0, aborts: 0, holdReads: false, heldRead: null as null | (() => void), heldList: null as null | (() => void),
       chatSearchQueries: [] as string[], chatSearchWindows: [] as Array<{conversationId:string;messageId:string}>,
-      // Cloud's answer to the next code redemption: 'ok' grants Plus; 'invalid' is Cloud's one answer
-      // for unknown, expired, disabled and used-up codes (400 invalid_subscription_code).
       redeem: 'ok' as 'ok' | 'invalid', redeemed: [] as Array<{ code: string; idempotencyKey: string }>,
       holdRedeem: false, releaseRedeem: null as null | (() => void),
       maps: { requests: [] as Array<{ route: string; body: any; requestId: string }>, cancelled: [] as string[], hold: false, limit: null as null | string },
@@ -100,14 +55,11 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
     const persist = () => sessionStorage.setItem('resident-stub', JSON.stringify({ order: s.order, cloud: s.cloud, bodies: s.bodies, opened: s.opened, accounts: s.accounts, login: s.login, nextToken: s.nextToken, polls: s.polls, start: s.start, held: s.held }));
     s.persist = persist; persist();
     s.holdNextChunk = () => { s.chunkHeld = true; };
-    // Emits the held chunk even after the owner pressed Stop, as a late chunk from the agent.
     s.releaseChunk = () => { const next = s.heldChunk; s.heldChunk = null; next?.(); };
     const emit = (streamId: string, event: unknown) => f.emit('Agent', 'alphaAgentStream', { streamId, event });
     const data = (streamId: string, value: unknown) => emit(streamId, { type: 'chunk', dataBase64: btoa('data: ' + JSON.stringify(value) + '\n\n') });
-    // This stub keeps the resident agent's conversations itself (the harness's store is private to it),
-    // so a recorded turn without a reply is visible to history reads and survives a reload.
     let agent: { conversations: { id: string; title: string }[]; history: Record<string, any[]> } = { conversations: [], history: {} };
-    try { agent = JSON.parse(sessionStorage.getItem('resident-stub-agent') || 'null') ?? agent; } catch { /* first load */ }
+    try { agent = JSON.parse(sessionStorage.getItem('resident-stub-agent') || 'null') ?? agent; } catch { }
     const record = (conversation: string, row: any) => { agent.history[conversation].push(row); sessionStorage.setItem('resident-stub-agent', JSON.stringify(agent)); };
     s.seedConversation = (id:string,text:string) => {
       const messageId=crypto.randomUUID();
@@ -149,17 +101,11 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
         return { status: 200, data: { messages: (agent.history[read[1]] || []).slice(-200) } };
       }
       if (/^\/api\/turns\/[^/]+\/abort$/.test(path)) { s.aborts++; return options.abortRoute && path.includes(room) ? { status: 200, data: { aborted: false, roomId: room } } : { status: 404, data: {} }; }
-      // The renderer's one non-streaming re-read of a dropped stream, under the same clientMessageId.
-      // Upstream answers it from the durable outcome; this runtime is unavailable for it.
       if (/^\/api\/conversations\/[^/]+\/messages$/.test(path) && method === 'POST') { s.recoveries.push(body.clientMessageId); return { status: 503, data: {} }; }
       return null;
     };
-    // The agent finishes a reply it held across a restart of the phone app: it is recorded, and only
-    // a history read can show it (the stream that would have carried it ended with the old page).
     s.finishHeld = () => { if (!s.held) return; record(s.held.conversation, { id: crypto.randomUUID(), role: 'assistant', text: s.held.reply, timestamp: Date.now() + 1 }); s.held = null; persist(); };
     const account = (auth?: string) => s.accounts.find((row: any) => auth === 'Bearer ' + row.token);
-    // Retiring a connection pauses native background digest delivery. The harness declares that
-    // plugin only with digests; here only its pause exists, recorded as a step.
     const pauseOnly = !w.Capacitor.PluginHeaders.some((row: any) => row.name === 'AlphaHostedResults');
     if (pauseOnly) w.Capacitor.PluginHeaders.push({ name: 'AlphaHostedResults', methods: [{ name: 'disableBackground', rtype: 'promise' }] });
     let rejectSignIn: null | ((error: Error) => void) = null;
@@ -179,8 +125,6 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
           const credential={credentialId:crypto.randomUUID(),token:s.nextToken,expiresAt:Date.now()+30*86400000};
           await base('AlphaConnection','secureWrite',{slot:'cloud:production',value:JSON.stringify(credential)});
           s.order.push('store '+s.nextToken);
-          // Native stores the acknowledged replacement before best-effort revocation. This is
-          // a synthetic native outcome, not proof of the real plugin's network ordering.
           if(old?.token && old.token!==s.nextToken)s.order.push('revoke Bearer '+old.token);
           persist();return {status:'authenticated',environment:'production',expiresAt:credential.expiresAt,...(old?.token?{previousSignIn:'revoked'}:{})};
         }
@@ -188,18 +132,14 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
       }
 
       if (pauseOnly && plugin === 'AlphaHostedResults' && method === 'disableBackground') { s.order.push('pause background delivery'); persist(); return {}; }
-      // Removing a stored provider stops the process launched with it (AlphaCredentialStore requiresShutdown).
       if (plugin === 'Agent' && method === 'clearProvider' && f.slots['native:local-agent-provider']) { s.order.push('Agent.stop'); persist(); }
       if (plugin === 'Agent' && ['start', 'stop', 'configureCloudProvider'].includes(method)) { s.order.push(method === 'configureCloudProvider' ? 'configureCloudProvider ' + input.credentialId : 'Agent.' + method); persist(); }
       if (plugin === 'Agent' && method === 'start' && (s.start === 'reject' || s.start === 'reject-once')) { if (s.start === 'reject-once') { s.start = 'ok'; persist(); } f.calls.push('Agent.start'); throw Error('Local agent failed to start.'); }
       if (plugin === 'Agent' && method === 'request' && input.path === '/api/agents' && s.start === 'starting') { f.calls.push('Agent.request'); return { status: 200, body: JSON.stringify({ agents: [{ id: '6f1d3c3e-8c55-4c1b-9d1f-2b6f0b0d3a11', name: 'Alpha', status: 'starting' }] }) }; }
-      // The harness still registers the device (it answers the committed-enrollment read from that
-      // registration); only the capabilities the agent offers in its answer change.
       if (plugin === 'Agent' && method === 'request' && input.path === '/api/client-devices/register' && options.offered) { const registered = await base(plugin, method, input); return { ...registered, body: JSON.stringify({ ...JSON.parse(registered.body), capabilities: options.offered }) }; }
       if (plugin === 'DailyApps' && method === 'surfaceInfo' && options.clockRepeatDaysVersion !== undefined) { f.calls.push('DailyApps.surfaceInfo'); return { assistant: false, clockRepeatDaysVersion: options.clockRepeatDaysVersion }; }
       if (plugin === 'Agent' && method === 'request') {
         const answer = await conversations(input.method || 'GET', input.path, input.body ? JSON.parse(input.body) : {});
-        // Anything else reaches the harness, which records it as unexpected.
         if (answer) { f.calls.push('Agent.request'); return { status: answer.status, body: JSON.stringify(answer.data) }; }
       }
       if (plugin === 'AlphaConnection' && method === 'secureWrite' && input.slot === 'cloud:production') { s.order.push('store ' + JSON.parse(input.value).token); persist(); }
@@ -213,7 +153,6 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
         s.cloud.push({ method: input.method, path, auth }); persist();
         if (path === '/api/auth/cli-session' && input.method === 'POST') return { status: 200, data: { sessionId: 'b7a2c1d0-5e4f-4a3b-8c2d-1e0f9a8b7c6d', status: 'pending', expiresAt: new Date(Date.now() + 600_000).toISOString() } };
         if (path === '/api/auth/cli-session/b7a2c1d0-5e4f-4a3b-8c2d-1e0f9a8b7c6d') {
-          // One pending poll, then the outcome the test chose. `hold` stays pending until changed.
           s.polls++; persist();
           if (s.polls === 1 || s.login === 'hold') { s.order.push('poll pending'); return { status: 200, data: { status: 'pending' } }; }
           s.order.push('poll ' + s.login);
@@ -233,7 +172,6 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
             const answer = { status: 200, data: { providerId: provider, attribution, places: (m.places[body.query] ?? []).map(wire) } };
             if (!maps.hold) return answer;
             maps.hold = false;
-            // Held until the test calls releaseSearch(), even after a cancel: a late answer still arrives.
             return new Promise(resolve => { s.releaseSearch = () => { s.releaseSearch = null; resolve(answer); }; });
           }
           if (route === 'places/details') { const found = Object.values(m.places).flat().find(p => p.id === body.id); return { status: 200, data: { providerId: provider, attribution, place: found ? wire(found) : null } }; }
@@ -248,8 +186,6 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
           const owner = account(auth);
           if (!owner) return { status: 401, data: {} };
           if (path === '/api/v1/user') { if (owner.userStatus && owner.userStatus !== 200) return { status: owner.userStatus, data: {} }; return { status: 200, data: { success: true, data: { id: owner.userId, email: owner.email } } }; }
-          // The billing snapshot answers the plan while the entitlement route is absent (404, from the base
-          // harness), and carries the organization credit balance (the retired /api/v1/credits/balance is never read).
           if (path === '/api/v1/subscription/redeem' && input.method === 'POST') {
             const body = JSON.parse(input.body); s.redeemed.push({ code: body.code, idempotencyKey: body.idempotencyKey }); s.order.push('redeem ' + owner.email); persist();
             if (s.holdRedeem) await new Promise<void>(resolve => { s.releaseRedeem = resolve; });
@@ -272,7 +208,6 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
         const conversation = /^\/api\/conversations\/([^/]+)\/messages\/stream$/.exec(input.path)![1], body = JSON.parse(input.body), streamId = input.streamId as string;
         if (mode === 'reject') throw Error('Local stream unavailable.');
         if (!mode || mode === 'hold') {
-          // The resident agent records the user turn, then streams its reply (held until release()).
           f.posts.push(String(body.text));
           record(conversation, { id: crypto.randomUUID(), role: 'user', text: body.text, timestamp: Date.now() });
           const reply = f.replies.shift() ?? (mode === 'hold' ? 'Held reply ' : 'Resident reply ') + f.streams;
@@ -302,12 +237,9 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
     };
   }, { options });
 }
-/** Reads (or changes) this stub's state from the test. */
 export const stub = <T>(page: Page, read: (s: any) => T) => page.evaluate(`(${read.toString()})(window.residentStub)`) as Promise<T>;
-/** Changes this stub's settings (stream mode, accounts, login outcome) from the test. */
 export const setStub = (page: Page, patch: Record<string, unknown>) => page.evaluate(patch => { Object.assign((window as any).residentStub, patch); (window as any).residentStub.persist(); }, patch);
 
-/** Explicit synthetic email/code journey through the shipped renderer. */
 export async function emailCode(page: Page, verify = true) {
   const dialog=page.locator('.alpha-cloud-sign-in');
   await expect(dialog).toBeVisible();
@@ -317,7 +249,6 @@ export async function emailCode(page: Page, verify = true) {
   if(verify){await dialog.getByRole('textbox',{name:'Code',exact:true}).fill('123456');await dialog.getByRole('button',{name:'Verify',exact:true}).click();}
 }
 
-/** Complete the visible native email form on the required page or an optional sign-in dialog. */
 export async function enterNativeEmailCode(page: Page, email='owner@example.invalid', {checkLayout=false}={}) {
   const panel=page.locator('.alpha-cloud-sign-in');
   await expect(panel).toBeVisible();

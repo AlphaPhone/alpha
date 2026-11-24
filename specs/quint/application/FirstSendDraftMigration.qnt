@@ -1,4 +1,3 @@
-// Alpha first-send source-slot cleanup over two independent durable draft stores.
 module FirstSendDraftMigration {
   type Draft = {revision: str, text: str, sending: bool}
   type Dispatch = {expected: str, current: bool, destination: Draft}

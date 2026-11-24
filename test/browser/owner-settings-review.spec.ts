@@ -21,8 +21,6 @@ test('Settings category state matches the selected context and resets on a fresh
 for(const size of [{width:390,height:844},{width:1280,height:900}]){
  test(`grouped Settings and signed-out Account fit at ${size.width}`,async({page},info)=>{
   await page.setViewportSize(size);
-  // This checks the settled signed-out layout, not the public Google readiness probe.
-  // As in compact-viewport, keep that optional request out of the geometry deadline.
   await page.route('**/__alpha-browser-cloud',async route=>{
    if(route.request().method()==='POST'&&route.request().postDataJSON()?.operation==='signInStatus'){
     expect(route.request().postDataJSON()).toEqual({operation:'signInStatus',environment:'production'});

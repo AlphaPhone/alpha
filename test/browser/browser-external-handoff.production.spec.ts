@@ -1,11 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
 import { button, fenceNetwork, flagOffAndroid, harness, residentHome } from './flag-off-android';
-// Open in another browser, flag-off production bundle: the rendered Browser menu item reaches the
-// adapter's handoff, a normal page leaves at once and a private page leaves only after its review.
-//
-// The AlphaBrowser native plugin is a stub added at the Capacitor bridge in this file: it commits a
-// test-owned page and records openExternalBrowser. Evidence boundary: renderer evidence only. Not the
-// native handoff (BrowserExternalHandoffInstrumentedTest checks privateConfirmed), a WebView or a device.
 
 const PAGE = 'https://handoff-fixture.test/harbour';
 

@@ -1,4 +1,3 @@
-// Host worker artifact verification and staged directory publication.
 module WorkflowWorkerStaging {
   type State = {
     source: int, quality: str, target: int, previous: int, lastSource: int,

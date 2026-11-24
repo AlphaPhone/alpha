@@ -1,8 +1,6 @@
 import {test,expect} from '@playwright/test';
 import {stubOcr} from './helpers/ocr-stub';
 
-/** Opens the scan review of an unsaved scan-mode capture whose Keep answers come from `answers` in order:
- * 'saved', or a ScanKeepError with or without retry. Records every Keep call on window.keepCalls. */
 async function open(page:any,answers:string[]){
  await stubOcr(page,'');await page.goto('/');await expect(page.getByRole('button',{name:'Camera',exact:true})).toBeVisible();
  await page.evaluate(async(answers:string[])=>{
@@ -16,7 +14,6 @@ async function open(page:any,answers:string[]){
    throw new ScanKeepError('Keep photo unconfirmed. Check Photos before keeping it again.',false);
   });
  },answers);
- // Stubbed recognition reports into the same status; let it settle so only Keep writes there next.
  await expect(status(page)).toContainText('No text');
 }
 function status(page:any){return page.getByRole('dialog',{name:'Review scanned text'}).getByRole('status',{name:'Scan status'});}

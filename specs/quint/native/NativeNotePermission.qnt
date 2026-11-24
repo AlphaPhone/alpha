@@ -1,4 +1,3 @@
-/// Product note start/resume admission across permission, call and lifecycle callbacks.
 module NativeNotePermission {
   type State = {
     foreground: bool, closed: bool, inCall: bool, permission: str,

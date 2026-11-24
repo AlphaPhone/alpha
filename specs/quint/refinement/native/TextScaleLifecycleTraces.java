@@ -14,7 +14,6 @@ import java.util.Set;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Actual MainActivity and AlphaDevicePlugin appearance members with a synthetic UI queue. */
 public final class TextScaleLifecycleTraces {
  record Pending(int owner,int percent,PluginCall call) {}
  final MainActivity[] activities=new MainActivity[3];
@@ -178,8 +177,6 @@ public final class TextScaleLifecycleTraces {
   var f=new TextScaleLifecycleTraces(name,name.equals("invalid-installed")?151:0);
   switch(name){
    case "two-views-config-and-resume":
-    // The launcher hands a second start to the live instance. Two live MainActivity instances
-    // remain only after that hand-off has been seen to miss (MainActivity.handOffUnreliable).
     var unreliable=MainActivity.class.getDeclaredField("handOffUnreliable");
     unreliable.setAccessible(true);unreliable.set(null,true);
     f.create(1,true,"normal");f.create(2,true,"large");f.request(1,125,"int");

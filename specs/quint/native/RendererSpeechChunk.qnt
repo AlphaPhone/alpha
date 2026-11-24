@@ -1,13 +1,8 @@
-/// One owned speech chunk in the renderer (`speakChunk`): terminal-event listeners, preparation
-/// and play with the busy-speaker retry, one terminal outcome, and a dispose that always runs.
-/// Every consumer waits for the original preparation to settle. Strict consumers also require the
-/// native cancel and stop to be confirmed; others bound them and never fail on them.
 module RendererSpeechChunk {
   type State = { phase: str, strict: bool, queue: bool, active: bool, listeners: int, retries: int,
     preparePending: bool, playback: bool, nativePlayback: bool, cancelRequested: bool, stopRequested: bool,
     finishedSignal: str, pendingOutcome: str, result: str, startedCalls: int, cleanupFailed: bool }
   var s: State
-  // dispose(): idempotent; removes the listeners and asks native to cancel and stop.
   pure def disposing(st: State, outcome: str): State = { ...st, phase: "disposing", active: false, listeners: 0,
     cancelRequested: true, stopRequested: true,
     pendingOutcome: if (st.pendingOutcome == "none") outcome else st.pendingOutcome }
@@ -17,23 +12,17 @@ module RendererSpeechChunk {
     finishedSignal: "none", pendingOutcome: "none", result: "none", startedCalls: 0, cleanupFailed: false }
   action begin(strict: bool, queue: bool): bool = all { s.phase == "new",
     s' = { ...s, phase: "listeners", strict: strict, queue: queue, active: true } }
-  // The three terminal-event listeners are registered before synthesis is requested.
   action listenerRegistered = all { s.phase == "listeners",
     s' = if (s.listeners == 2) { ...s, listeners: 3, phase: "preparing", preparePending: true }
       else { ...s, listeners: s.listeners + 1 } }
-  // A terminal event seen while playing or waiting for the speaker retires the chunk in the same
-  // task, so no abort or timer comes between the event and its retirement.
   pure def finishing(st: State): bool = st.finishedSignal != "none" and st.phase.in(Set("started", "play-wait"))
   action abort = all { s.active, not(finishing(s)), s' = disposing(s, "interrupted") }
-  // A busy speaker is retried after a short wait only for queued speech, for as long as it stays
-  // busy. The speaker is assumed to be busy at most twice per chunk here.
   pure def busyAllowed(st: State, kind: str): bool = not(kind == "busy" and st.queue and st.retries >= 2)
   action prepareResult(kind: str): bool = all { s.phase == "preparing", busyAllowed(s, kind),
     s' = if (kind == "ok") { ...s, phase: "play", preparePending: false, playback: true, nativePlayback: true }
       else if (kind == "busy" and s.queue)
         { ...s, phase: "prepare-wait", preparePending: false, retries: s.retries + 1 }
       else disposing({ ...s, preparePending: false }, "error") }
-  // A preparation that resolves after the chunk was retired stops the playback it produced.
   action latePrepare(ok: bool): bool = all { s.preparePending, not(s.active),
     s' = { ...s, preparePending: false, nativePlayback: s.nativePlayback or ok } }
   action waitElapsed = all { s.phase.in(Set("prepare-wait", "play-wait")), not(finishing(s)),
@@ -42,13 +31,10 @@ module RendererSpeechChunk {
     s' = if (kind == "ok") { ...s, phase: "started", startedCalls: s.startedCalls + 1 }
       else if (kind == "busy" and s.queue) { ...s, phase: "play-wait", retries: s.retries + 1 }
       else disposing(s, "error") }
-  // Ended, failed or stopped events count only for this chunk's playback while it is active.
   action terminalEvent(kind: str): bool = all { s.active, s.playback, s.finishedSignal == "none",
     s' = { ...s, finishedSignal: kind } }
-  // A terminal event also retires a prepared utterance that is still waiting for the speaker.
   action observeFinished = all { finishing(s),
     s' = disposing(s, if (s.phase == "started") s.finishedSignal else "error") }
-  // Cleanup waits for the original preparation. Only strict cleanup reports an unconfirmed native stop.
   action disposeSettled(confirmed: bool): bool = all { s.phase == "disposing", not(s.preparePending),
     s' = { ...s, phase: "settled", cleanupFailed: not(confirmed),
       result: if (s.strict and not(confirmed)) "cleanup-unconfirmed" else s.pendingOutcome } }
@@ -86,8 +72,6 @@ module RendererSpeechChunk {
   run busySpeakerRetryTest = listeningSetup.then(prepareResult("busy")).then(waitElapsed).then(prepareResult("ok"))
     .then(playResult("busy")).then(waitElapsed).then(playResult("ok"))
     .expect(s.phase == "started" and s.retries == 2 and s.startedCalls == 1 and safety)
-  // An abort while synthesis is pending: the late playback is stopped, and cleanup does not
-  // settle before that preparation has.
   run abortDuringPrepareStopsLatePlaybackTest = init.then(begin(true, false)).then(listenerRegistered)
     .then(listenerRegistered).then(listenerRegistered).then(abort)
     .expect(s.phase == "disposing" and s.preparePending and s.listeners == 0)

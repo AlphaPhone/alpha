@@ -2,7 +2,6 @@ package ai.alphacompute.alphaphone;
 import java.util.*;
 import org.json.*;
 
-/** External replies and durable values, with observed write/provider boundaries. */
 public final class DeletionTestPorts {
   public static final Map<String, String> values = new HashMap<>();
   public static final List<Long> schedules = new ArrayList<>();

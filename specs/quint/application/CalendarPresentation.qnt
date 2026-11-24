@@ -1,5 +1,3 @@
-// Current Calendar views, transient overlays, read generations and account-scoped preferences.
-// Provider mutations are composed with CalendarSync rather than executed by this model.
 module CalendarPresentation {
   type State = {
     view: str, day: int, month: int, active: bool, menu: bool, deleteSheet: bool,
@@ -11,7 +9,6 @@ module CalendarPresentation {
     generation: int, desiredRange: str, requestRange: str, requestDay: int,
     requestGeneration: int, requestOwner: int, loading: bool,
     lastReadGeneration: int, lastPublishedGeneration: int, truncated: bool,
-    // readToken numbers each read; only the latest one may publish or end loading.
     readToken: int, lastReadToken: int,
     nextCreation: int, saved: bool
   }
@@ -48,7 +45,6 @@ module CalendarPresentation {
   action askDelete = all { s.active, CanEditSelected, s.form == "none",
     s' = { ...s, deleteSheet: true, menu: false } }
   action expandChat = all { s.active, not(s.menu or s.deleteSheet), s' = { ...s, chat: "sheet" } }
-  // The + button resumes a retained creation form instead of starting another.
   action newForm = all { s.active, not(s.menu or s.deleteSheet), not(s.durableDraft), s.nextCreation < 3,
     s' = { ...s, form: "new", formDay: s.day, creationId: s.nextCreation + 1,
       nextCreation: s.nextCreation + 1, validTime: true,
@@ -59,7 +55,6 @@ module CalendarPresentation {
   action invalidClockTime = all { s.form != "none", s' = { ...s, validTime: false } }
   action saveDraft = all { s.form == "new",
     s' = { ...s, durableDraft: true, savedCreationId: s.creationId } }
-  // A restored creation draft keeps its idempotency key and civil date, with no provider authority.
   action restoreDraft = all { s.durableDraft, s.active,
     s' = { ...s, form: "new", creationId: s.savedCreationId, openEvent: 0,
       restoredDraft: true, saveRequested: false } }
@@ -68,14 +63,11 @@ module CalendarPresentation {
   action requestSave = all { s.active, s.form != "none", s.validTime,
     s.form == "new" or CanEditSelected, s' = { ...s, saveRequested: true, submittedTimeValid: s.validTime } }
   action failedSave = all { s.saveRequested, s' = { ...s, saveRequested: false } }
-  // A confirmed save closes the submitted form and shows its day. Schedule always runs from
-  // today, so the saved day applies there only through the opened event.
   action saveSucceeded = all { s.saveRequested, s.form != "none", s.generation < 5,
     s' = { ...s, form: "none", saveRequested: false, restoredDraft: false, openEvent: 0,
       month: 0, day: if (s.view == "schedule") 0 else s.formDay, saved: true,
       durableDraft: if (s.form == "new") false else s.durableDraft,
       generation: s.generation + 1 } }
-  // A forced read starts while another is in flight; the newer read supersedes the older.
   action request(force: bool): bool = all { s.active, not(s.loading) or force, s.readToken < 6,
     s' = { ...s, loading: true, requestRange: s.desiredRange, requestDay: s.day,
       requestGeneration: s.generation, requestOwner: s.owner, readToken: s.readToken + 1 } }
@@ -97,7 +89,6 @@ module CalendarPresentation {
   action changeOwner = all { s.generation < 5,
     s' = { ...s, owner: 3 - s.owner, generation: s.generation + 1, googleRows: false,
       googleRowsOwner: 0, openEvent: 0, deleteSheet: false, saveRequested: false } }
-  // The shell lowers the conversation first; the view then closes one layer per Back.
   action back = if (s.chat != "rest") s' = { ...s, chat: "rest" }
     else if (s.form != "none") s' = { ...s, form: "none", saveRequested: false, restoredDraft: false }
     else if (s.deleteSheet) s' = { ...s, deleteSheet: false }
@@ -125,9 +116,7 @@ module CalendarPresentation {
   val ScheduleStartsToday = s.view == "schedule" implies s.day == 0
   val MonthOffsetScoped = s.view == "month" or s.month == 0
   val ExclusiveTransientOverlay = not(s.menu and s.deleteSheet)
-  // Published rows were read for the view generation they are published under.
   val CurrentReadCommitted = s.lastReadGeneration == s.lastPublishedGeneration
-  // Only the newest read is awaited: a superseded read neither publishes nor ends loading.
   val LatestReadWins = s.lastReadToken <= s.readToken and (s.loading implies s.lastReadToken < s.readToken)
   val GoogleCacheOwnerBound = s.googleRows implies s.googleRowsOwner == s.owner
   val RevokedSourcesHidden = (not(s.localAccess) implies not(Visible.contains(1)))
@@ -149,7 +138,6 @@ module CalendarPresentation {
   val GoogleEventOpenWitness = s.openEvent == 2
   val RestoredDraftWitness = s.restoredDraft and s.durableDraft
 
-  // The shell lowers the conversation before the view closes its own layers.
   run overlayBackOrderTest = init.then(request(false)).then(reply(1, 1, false)).then(showEvent(1, 1))
     .then(expandChat).then(askDelete).then(back).expect(s.deleteSheet and s.chat == "rest")
     .then(back).expect(not(s.deleteSheet) and s.openEvent == 1)
@@ -159,7 +147,6 @@ module CalendarPresentation {
   run staleRangeReplyTest = init.then(request(false)).then(openSearch).then(reply(1, 1, false))
     .expect(not(s.localRows) and not(s.googleRows)).then(request(false)).then(reply(2, 1, true))
     .expect(s.localRows and s.googleRows and s.truncated and safety)
-  // A forced read supersedes the one in flight: the older answer changes nothing.
   run supersededReadTest = init.then(request(false)).then(request(false).fail())
   run latestReadWinsTest = init.then(request(false)).then(request(true))
     .expect(OverlappingReadWitness).then(reply(1, 1, true))
@@ -171,14 +158,12 @@ module CalendarPresentation {
   run scheduleReturnTest = init.then(chooseView("schedule")).then(request(false)).then(reply(1, 1, false))
     .then(showEvent(1, -1)).then(back).expect(s.day == 0 and safety)
   run formBlocksViewChangeTest = init.then(chooseDay(1)).then(newForm).then(chooseView("schedule").fail())
-  // A save from Schedule keeps Schedule on today; other views show the saved day.
   run scheduleSaveTest = init.then(chooseDay(1)).then(chooseView("schedule")).then(request(false))
     .then(reply(1, 1, false)).then(showEvent(1, 1)).then(editForm).then(requestSave).then(saveSucceeded)
     .expect(s.form == "none" and s.day == 0 and s.openEvent == 0 and safety)
   run daySaveShowsSavedDayTest = init.then(chooseDay(1)).then(newForm).then(chooseDay(-1))
     .then(requestSave).then(saveSucceeded)
     .expect(s.form == "none" and s.day == 1 and not(s.durableDraft) and safety)
-  // Changing account closes the open event and its delete sheet.
   run accountChangeClosesEventTest = init.then(request(false)).then(reply(1, 1, false))
     .then(showEvent(2, 0)).then(askDelete).expect(GoogleEventOpenWitness).then(changeOwner)
     .expect(s.openEvent == 0 and not(s.deleteSheet) and safety)

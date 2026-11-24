@@ -1,4 +1,3 @@
-// Agent read-only filter coordinator, from a mounted Files Browse view.
 module FilesFilter {
   type Operation = {kind: int, phase: str, queryTicket: int,
     aborted: bool, result: str, count: int}
@@ -22,9 +21,6 @@ module FilesFilter {
     val op = s.operations.get(id)
     if (op.aborted)
       s' = {...s, operations: s.operations.set(id, Settle({...op, kind: kind}, "aborted", 0))}
-    // After Files was left, the runner asks the agent host to reopen Files. This model
-    // covers only a refused reopen, which reports unavailable before admission. A
-    // successful reopen is FilesAgentActions.directFilterOpensFilesTest.
     else if (not(s.active))
       s' = {...s, operations: s.operations.set(id, Settle({...op, kind: kind}, "failed", 0))}
     else
@@ -57,10 +53,7 @@ module FilesFilter {
       operations: s.operations.set(id, Settle(op, if (success) "succeeded" else if (op.aborted) "aborted" else "failed", rows.length()))}
   }
   action clear = all {s.filter != 0, s' = {...s, filter: 0, rows: List()}}
-  // Leaving Files retires the pending and displayed filter with its rows (eliza#39740).
-  // Re-entering the view is outside this model.
   action leave = all {s.active, s' = {...s, active: false, pending: 0, filter: 0, rows: List()}}
-  // A reload with a pending agent filter owns only shared view state and skips a competing query.
   action reload = all {s.active, s.pending != 0, s.stateGeneration < 3, s' = {...s, stateGeneration: s.stateGeneration + 1}}
   action step = any {
     {nondet id = Ids.oneOf(); nondet kind = Kinds.oneOf(); begin(id, kind)},

@@ -8,8 +8,6 @@ test('real local OCR recognizes an image without remote model requests',async({p
   const assets:string[]=[];const remote:string[]=[];
   page.on('request',request=>{const url=new URL(request.url());if(url.pathname.startsWith('/ocr/'))assets.push(url.pathname);if(url.protocol.startsWith('http')&&url.hostname!=='127.0.0.1')remote.push(url.origin);});
   await page.addInitScript(()=>{
-    // Firefox does not reliably expose classic-worker importScripts requests in
-    // page request events. Observe the actual script imports inside this fixture.
     const NativeWorker=window.Worker;const imports:string[]=[];(window as any).ocrScriptImports=imports;
     window.Worker=class extends NativeWorker{
       readonly auditUrl:string;

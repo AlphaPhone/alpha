@@ -1,4 +1,3 @@
-// The simulated shade owns list publication and the exact targets of its rendered controls.
 module ShadeRowCustody {
   type Key = {id: str, revision: str, source: str}
   type Row = {id: str, revision: str, source: str, canOpen: bool, clearable: bool}

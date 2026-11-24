@@ -1,4 +1,3 @@
-// Home's projection of shared launcher failures into its notice surface.
 module HomeFailureNotice {
   type Notice = {surface: str, kind: str}
   type State = {surface: str, seenStatus: str, seenError: str, seenApps: int,

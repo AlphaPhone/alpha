@@ -57,8 +57,6 @@ async function setup(page:Page,documentBytes=0) {
 
 test('reviewed Files and Photos send exact bytes only on explicit attachment-only Send',async({page},testInfo)=>{
  const {picker,outbound}=await setup(page);
- // The picker replaces the full bottom surface rather than reserving space for the
- // underlying composer. Check both normal and shortened (keyboard) viewports.
  for(const height of [915,600]){
   await page.setViewportSize({width:412,height});
   await expect.poll(async()=>{
@@ -72,8 +70,6 @@ test('reviewed Files and Photos send exact bytes only on explicit attachment-onl
  }
  await page.screenshot({path:testInfo.outputPath('attachment-picker-bottom.png')});
  await page.setViewportSize({width:412,height:915});
- // Three-button navigation (48dp) in the edge-to-edge WebView reports env(safe-area-inset-bottom) as 0;
- // the footer's controls must still clear the native bottom inset.
  await page.evaluate(()=>document.documentElement.style.setProperty('--native-bottom-inset','48px'));
  await expect.poll(()=>picker.evaluate(el=>{
   const footer=el.querySelector('footer')!,screen=document.querySelector('[data-screen]')!.getBoundingClientRect();

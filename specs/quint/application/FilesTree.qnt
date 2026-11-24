@@ -1,6 +1,3 @@
-// Current volume-based Files browser and identity-bound agent moves.
-// The finite names, folders and external-change budget follow the reviewed
-// files-browser design model with its fixes enabled.
 module FilesTree {
   pure val Files = Set(1, 2, 3)
   pure val Folders = Set(10, 20, 30)

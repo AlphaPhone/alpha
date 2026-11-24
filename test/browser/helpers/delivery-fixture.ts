@@ -2,17 +2,11 @@ import {openConnectionDiagnostics} from './connection-diagnostics';
 import {expect,type Page} from '@playwright/test';
 import {installResidentAgentPlugin} from './resident-agent-plugin';
 
-/**
- * Controlled native boundary for the notice-question specs: the resident agent, reminder taps,
- * secure storage and hosted results. `gmail` adds the AlphaGmail notice plugin. The page exposes
- * `window.deliveryFixture` (tap state and consume/release counts) and `window.residentAgent`.
- */
 export async function installDeliveryFixture(page:Page,options:{gmail?:boolean}={}){
  await installResidentAgentPlugin(page);
  await page.addInitScript(defineDeliveryFixture,!!options.gmail);
 }
 
-/** Starts the resident agent from Settings and waits for the connection chooser to close. */
 export async function startResidentAgent(page:Page){
  await page.goto('/');await page.getByRole('button',{name:'Settings',exact:true}).click();await openConnectionDiagnostics(page);await page.getByRole('button',{name:'Start local agent',exact:true}).click();await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0);
 }
@@ -100,7 +94,6 @@ function defineDeliveryFixture(gmail:boolean){
    if(method==='status')return {enabled:f.notifications,backgroundEnabled:f.enabled&&f.polling};
    if(method==='setBackgroundPolling'){f.polling=input.enabled;return {backgroundEnabled:f.enabled&&f.polling};}
    if(method==='enable'){f.notifications=true;return {enabled:true};}
-   // The native notice ledger receives the complete owner fence, or null while offline.
    if(method==='withdrawOtherOwnerApprovalNotices'){f.ownerWithdrawals=(f.ownerWithdrawals||[]);f.ownerWithdrawals.push(input);if(w.__ownerWithdrawalFault&&f.ownerWithdrawals.length===1)throw Error('Synthetic withdrawal failure');return {withdrawn:0};}
    return {};
   }

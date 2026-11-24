@@ -1,4 +1,3 @@
-// Literal state/transition translation of upstream ActionSettlement.tla at 4787d51a142c.
 module CoreActionSettlementTemplate {
   const InHandler: int
   const Late: int
@@ -14,8 +13,6 @@ module CoreActionSettlementTemplate {
     emitted: 0, buffer: List(), chain: List(), busy: false, delivered: List(), target: 0}
   val Initial = s == InitialState
   action Init = s' = InitialState
-  // The source partial action is used only inside emission actions. This helper
-  // returns its update with all other source fields framed by the enclosing step.
   def Receive(id: int): State =
     if (s.phase == "pending") {...s, buffer: s.buffer.append(id)}
     else if (s.phase == "failed" or s.outcome == "replyFailure") s

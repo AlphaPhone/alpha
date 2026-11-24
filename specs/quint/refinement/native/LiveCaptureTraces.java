@@ -12,7 +12,6 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import org.json.*;
 
-/** Actual shared parent/controller/capture lifecycle with controlled physical media ports. */
 public final class LiveCaptureTraces {
  static final class Bridge extends LocalSpeechBridgePlugin {
   Bridge(){super("alpha-cloud-voice-","alpha-cloud-tts-");}
@@ -43,8 +42,6 @@ public final class LiveCaptureTraces {
   while(!stopWorker.isShutdown()){
    try{stopWorker.submit(()->{}).get(5,TimeUnit.SECONDS);break;}
    catch(RejectedExecutionException busy){
-    // The production stop worker has one queue slot. Wait for accepted work
-    // instead of treating rejection of the observer barrier as a source failure.
     if(System.nanoTime()>=deadline)throw busy;
     Thread.sleep(1);
    }

@@ -1,8 +1,6 @@
 import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import { test, expect } from '@playwright/test';
 import { installResidentAgentPlugin } from './helpers/resident-agent-plugin';
-// Real Settings Activity over the real connection controller and DeviceActions; only the Android
-// IPC boundary is synthetic. No runtime, model or account is used and no action is performed.
 
 test('Activity presents recorded phone actions in plain language with reconcile controls', async ({ page }) => {
   await installResidentAgentPlugin(page);
@@ -67,7 +65,6 @@ test('Activity presents recorded phone actions in plain language with reconcile 
   const history = panel.locator('details').filter({has: page.locator('summary').filter({hasText: 'Actions'})});
   await history.locator('summary').click();
   await history.getByRole('button', {name: 'Refresh actions', exact: true}).click();
-  // The uncertain action stays with its reconcile controls in the connection dialog.
   await expect(panel.getByText('Create note', { exact: true }).first()).toBeVisible();
   await expect(panel.getByRole('button', { name: 'Yes', exact: true })).toBeVisible();
   await expect(panel.getByRole('button', { name: 'Decline', exact: true })).toBeVisible();

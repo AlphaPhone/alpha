@@ -1,4 +1,3 @@
-// One prepared Google browser attempt and its native callback admission.
 module GoogleBrowserReturnClaim {
   type Work = {kind: str, claim: bool}
   type State = {live: bool, paused: bool, hint: bool, hintElapsed: bool,

@@ -1,10 +1,5 @@
 import { test, expect, type Page, type Locator } from '@playwright/test';
 
-// Every enabled root view on a fresh profile, and with browser storage blocked, in both themes.
-// Product rule: an honest, labelled empty or unconnected state (never fixture content), a
-// role=alert when persistent storage is unavailable, a named landmark for the active view, and
-// keyboard focus that lands on a named control inside it. No new dependency: plain Playwright.
-//
 const ROOT = ['Inbox', 'Calendar', 'Browser', 'Camera', 'Photos', 'Maps', 'Notes', 'Files', 'Workflows', 'Settings'] as const;
 type View = typeof ROOT[number] | 'Reminders' | 'Notifications';
 const VIEWS: View[] = [...ROOT, 'Reminders', 'Notifications'];
@@ -14,9 +9,7 @@ const EMPTY: Record<View, RegExp> = {
   Browser: /No open pages|New tab/,
   Camera: /^Can’t start camera$/,
   Photos: /^No photos$/,
-  // No location yet: the map with its credits, and no base notice (plugin-maps hides it until there is news).
   Maps: /© OpenStreetMap/,
-  // Agent Notes waiting for a connection (canonical-notes-ui.ts), as in production-surface.spec.ts.
   Notes: /Notes unavailable/,
   Files: /Internal storage|Storage Unavailable/,
   Workflows: /Connect your remote agent in Settings\./,
@@ -24,10 +17,8 @@ const EMPTY: Record<View, RegExp> = {
   Reminders: /Not connected/,
   Notifications: /No notifications/,
 };
-// Fixture identities from the reference prototype must never appear in a live profile.
 const FIXTURE = [/\bMaya\b/, /\bJordan\b/, /\bNopa\b/, /2,418 items/, /Morning brief/];
 
-// A cold dev server compiles the app on first load; allow for it without hiding slow views.
 test.describe.configure({ timeout: 60_000 });
 
 async function blockStorage(page: Page) {
@@ -38,12 +29,8 @@ async function blockStorage(page: Page) {
 }
 async function open(page: Page, view: View, theme: 'light' | 'dark'): Promise<Locator> {
   if(view==='Maps')await page.route('https://tiles.openfreemap.org/**',route=>route.fulfill({json:{version:8,sources:{},layers:[{id:'background',type:'background',paint:{'background-color':'#e7ebed'}}]}}));
-  // Android's shade is the notification surface (#416). This development build stands in for it,
-  // opened by a pull on launcher's empty Home; the standalone app has none.
   const launcher = view === 'Notifications' ? (theme === 'dark' ? '&shell=launcher' : '?shell=launcher') : '';
   await page.goto((theme === 'dark' ? '/?theme=dark' : '/') + launcher);
-  // Home shortcuts cannot be restored when storage is blocked. Apps must
-  // remain usable in that state, so exercise its actual built-in navigation.
   await page.getByRole('button', { name: 'Apps', exact: true }).waitFor({ state: 'visible' });
   if (view === 'Notifications') {
     const box=(await page.locator('[data-screen]').boundingBox())!,scale=box.width/412;await page.mouse.move(box.x+206*scale,box.y+420*scale);await page.mouse.down();await page.mouse.move(box.x+206*scale,box.y+660*scale,{steps:10});await page.mouse.up();
@@ -66,13 +53,11 @@ async function themeIsApplied(surface: Locator, theme: 'light' | 'dark') {
     const [r, g, b] = getComputedStyle(element).color.match(/\d+(\.\d+)?/g)!.slice(0, 3).map(Number);
     return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
   });
-  // Dark theme draws light foreground text; light theme draws dark text.
   if (theme === 'dark') expect(luminance).toBeGreaterThan(0.5); else expect(luminance).toBeLessThan(0.5);
 }
 for (const theme of ['light', 'dark'] as const) for (const view of VIEWS) {
   test(`${view} ${theme}: fresh profile is empty, labelled and keyboard accessible`, async ({ page }) => {
     const surface = await open(page, view, theme);
-    // One fresh profile covers the same root's content, landmark and focus.
     if (view !== 'Camera') await themeIsApplied(surface, theme);
     await expect(surface.getByText(EMPTY[view]).filter({visible:true}).first()).toBeVisible();
     if(view==='Settings')for(const name of ['Account','General','Privacy','Apps','About'])await expect(surface.getByRole('button',{name,exact:true})).toBeVisible();
@@ -91,8 +76,6 @@ for (const theme of ['light', 'dark'] as const) for (const view of VIEWS) {
     await page.keyboard.press('Tab');
     const focused = page.locator(':focus');
     await expect(focused).toHaveCount(1);
-    // An empty view can have only its Back control. Tab then reaches the persistent assistant;
-    // it must stay named and usable rather than being trapped inside that empty view.
     expect(await focused.evaluate((element, root) => root!.contains(element)||!!element.closest('[aria-label="Assistant controls"]'), await surface.elementHandle())).toBe(true);
     const label = await focused.evaluate(element => (element.getAttribute('aria-label') || (element as HTMLElement).innerText || element.getAttribute('title') || '').trim());
     expect(label.length, 'focused control has an accessible name').toBeGreaterThan(0);

@@ -1,16 +1,9 @@
-/// One reviewed SMS send in the Messages composer: the operation ID and draft revision the
-/// renderer holds, against the native send journal's answer for that ID.
 module SmsSend {
   type State = {
     active: bool, lifecycle: int, draftRevision: int, busy: bool,
-    // The operation ID the draft holds (0: none) and the IDs minted so far.
     operationId: int, minted: int, lastSent: int, draftReady: bool, sendWasCurrent: bool,
-    // The native call in flight: its ID, the visit and draft it was started under, and the answer
-    // native has resolved but the renderer has not yet received.
     call: int, callLifecycle: int, callDraft: int, reply: str,
     journal: int -> str, dispatches: int -> int,
-    // The receipt on screen, whether a send or a read-back put it there, and the visit and draft
-    // it was shown for.
     shown: str, shownFrom: str, shownLifecycle: int, shownDraft: int,
     sendAccess: bool, journalReadable: bool, edits: int, retainedShown: str, retainedFrom: str
   }
@@ -24,7 +17,6 @@ module SmsSend {
     shown: "none", shownFrom: "none", shownLifecycle: 0, shownDraft: 0, sendAccess: true, journalReadable: true, edits: 0,
     retainedShown: "none", retainedFrom: "none"
   }
-  /// Read availability is independent of whether native recorded a result.
   action journalReadsAvailable(available: bool): bool = s' = { ...s, journalReadable: available }
   pure def readBack(v: State, id: int): State =
     if (not(v.journalReadable) or id == 0) v
@@ -47,22 +39,17 @@ module SmsSend {
       shownLifecycle: s.lifecycle + 1, shownDraft: s.draftRevision }
     s' = if (s.draftReady) readBack(opened, id) else opened
   }
-  /// Leaving retires authority and publication, retaining the owner's unfinished private draft
-  /// and uncertain operation ID. Re-entry re-reads its record; it never sends automatically.
   action leave = all {
     s.active, s.lifecycle < 4, s.draftRevision < 5,
     s' = { ...s, active: false, lifecycle: s.lifecycle + 1, draftRevision: s.draftRevision + 1,
       busy: false, retainedShown: s.shown, retainedFrom: s.shownFrom, shown: "none", shownFrom: "none" }
   }
-  /// Editing recipients or text, picking a SIM, or Clear.
   action edit = all {
     s.active, not(s.busy), s.draftRevision < 5, s.edits < 3,
     s' = { ...s, draftRevision: s.draftRevision + 1, operationId: 0, shown: "none", shownFrom: "none",
       edits: s.edits + 1, draftReady: true }
   }
-  /// Granting or losing send access changes neither the draft nor its ID.
   action accessChanged = s' = { ...s, sendAccess: not(s.sendAccess) }
-  /// Send mints an ID only when the draft holds none. One native review is open at a time.
   action send = all {
     s.active, s.draftReady, not(s.busy), s.call == 0, s.operationId != 0 or s.minted < 3,
     val id = if (s.operationId != 0) s.operationId else s.minted + 1
@@ -70,8 +57,6 @@ module SmsSend {
       call: id, callLifecycle: s.lifecycle, callDraft: s.draftRevision, reply: "none",
       sendWasCurrent: s.active and not(s.busy) and s.draftReady }
   }
-  /// Native answers a repeated ID with its existing record. A new ID is reviewed: a refused send
-  /// access records denied, a declined review records cancelled, and a confirmed one dispatches once.
   action nativeDecide(confirmed: bool): bool = all {
     s.call != 0, s.reply == "none",
     val existing = s.journal.get(s.call)
@@ -80,9 +65,6 @@ module SmsSend {
       else { ...s, reply: decided, journal: s.journal.set(s.call, decided),
         dispatches: if (decided == "submitted") s.dispatches.set(s.call, s.dispatches.get(s.call) + 1) else s.dispatches }
   }
-  /// The renderer receives the answer. A visit or draft that moved on drops it. A record closed
-  /// without a dispatch releases the ID and starts a new draft revision, so the same text can be
-  /// sent again under a new ID while the receipt stays on screen.
   action deliver = all {
     s.call != 0, s.reply != "none",
     val current = s.active and s.callLifecycle == s.lifecycle and s.callDraft == s.draftRevision
@@ -100,8 +82,6 @@ module SmsSend {
       lastSent: if (accepted) s.call else s.lastSent, draftReady: s.draftReady and not(accepted) }
     s' = if (current) readBack(delivered, delivered.operationId) else delivered
   }
-  /// The call rejects. A refusal native makes before it journals anything releases the ID; any
-  /// other rejection keeps the ID available for read-back, or retry if no receipt can be read.
   action callRejected(beforeJournal: bool): bool = all {
     s.call != 0,
     beforeJournal implies s.reply == "none" and s.journal.get(s.call) == "none",
@@ -115,7 +95,6 @@ module SmsSend {
       operationId: if (current and beforeJournal) 0 else s.operationId }
     s' = if (current) readBack(rejected, rejected.operationId) else rejected
   }
-  /// Sent and delivery evidence, or startup reconciliation of an interrupted dispatch.
   action journalAdvance(id: int, status: str): bool = all {
     val before = s.journal.get(id)
     all {
@@ -123,7 +102,6 @@ module SmsSend {
       s' = { ...s, journal: s.journal.set(id, status) }
     }
   }
-  /// A native update or refresh can retire the idle draft after finding its accepted receipt.
   action reconcile = all {
     s.active,
     val id = if (s.operationId != 0) s.operationId else s.lastSent
@@ -141,10 +119,8 @@ module SmsSend {
   val AtMostOneDispatchPerOperation = IDS.forall(id => s.dispatches.get(id) <= 1)
   val DispatchJournaled = IDS.forall(id =>
     (s.dispatches.get(id) == 1) == s.journal.get(id).in(Set("submitted", "sent", "delivered", "failed", "unknown")))
-  /// A current send answer or journal read-back can prove that nothing was dispatched.
   val ClosedAnswerReleasesId = (s.shownFrom.in(Set("send", "read-back")) and not(s.busy) and s.shown.in(CLOSED.union(Set("refused")))) implies
     s.operationId == 0
-  /// An ID the draft holds while idle was minted for it and never refused before journaling.
   val HeldIdWasMinted = s.operationId <= s.minted and s.call <= s.minted
   val StaleResultNeverShown = s.shown != "none" implies
     s.active and s.shownLifecycle == s.lifecycle and s.shownDraft == s.draftRevision
@@ -169,8 +145,6 @@ module SmsSend {
   val SentEvidenceWitness = s.shown == "sent" and s.shownFrom == "read-back"
   val RefusedBeforeJournalWitness = s.shown == "refused" and s.operationId == 0 and s.journal.get(1) == "none" and s.minted == 1
 
-  /// A cancelled review, then access refused, then a confirmed send: each retry of the unedited
-  /// draft gets a new ID, and only the confirmed one is dispatched.
   run retryAfterCancelledAndDeniedTest = init.then(open).then(send).then(nativeDecide(false)).then(deliver)
     .expect(s.shown == "cancelled" and s.operationId == 0 and s.draftRevision == 1 and safety)
     .then(accessChanged).then(send).then(nativeDecide(true)).then(deliver)
@@ -178,7 +152,6 @@ module SmsSend {
     .then(accessChanged).then(send).then(nativeDecide(true)).then(deliver)
     .expect(s.shown == "submitted" and s.operationId == 0 and s.lastSent == 3 and not(s.draftReady) and s.dispatches.get(3) == 1
       and s.dispatches.get(1) == 0 and s.dispatches.get(2) == 0 and s.edits == 0 and safety)
-  /// After an unknown outcome the same ID is sent again and native answers from its record.
   run repeatedIdNeverDispatchesTwiceTest = init.then(open).then(send).then(nativeDecide(true)).then(journalReadsAvailable(false)).then(callRejected(false))
     .expect(s.shown == "outcome-unknown" and s.operationId == 1 and safety)
     .then(send).then(nativeDecide(true)).expect(RepeatedIdAnsweredFromJournalWitness)
@@ -192,14 +165,12 @@ module SmsSend {
   run deliveryEvidenceTest = init.then(open).then(send).then(nativeDecide(true)).then(deliver)
     .then(journalAdvance(1, "sent")).then(journalAdvance(1, "delivered")).then(reconcile)
     .expect(s.shown == "delivered" and s.shownFrom == "read-back" and s.operationId == 0 and s.lastSent == 1 and safety)
-  /// A read-back of the cancelled operation releases its ID while retaining the owner's text.
   run cancelledJournalReceiptReleasesIdTest = init.then(open).then(send).then(nativeDecide(false))
     .then(journalReadsAvailable(false)).then(callRejected(false))
     .expect(s.operationId == 1 and s.shown == "outcome-unknown").then(journalReadsAvailable(true)).then(reconcile)
     .expect(s.shown == "cancelled" and s.shownFrom == "read-back" and s.operationId == 0 and s.draftReady and s.dispatches.get(1) == 0 and safety)
     .then(send).then(nativeDecide(true)).then(deliver)
     .expect(s.shown == "submitted" and s.operationId == 0 and s.lastSent == 2 and s.dispatches.get(2) == 1 and s.edits == 0 and safety)
-  /// A refusal before anything is journaled releases the ID without a new draft revision.
   run refusedBeforeJournalTest = init.then(open).then(send).then(callRejected(true))
     .expect(RefusedBeforeJournalWitness and s.draftRevision == 0 and not(s.busy) and safety)
     .then(send).expect(s.operationId == 2 and safety)
@@ -217,8 +188,6 @@ module SmsSend {
     .expect(s.operationId == 0 and not(s.draftReady) and s.lastSent == 1 and s.minted == 1 and s.dispatches.get(1) == 1 and safety)
   run retainedRefusalIsNotNewAttemptAuthorityTest = init.then(open).then(send).then(callRejected(true)).then(send).then(leave).then(open)
     .expect(s.operationId == 2 and s.shown == "refused" and s.shownFrom == "retained" and safety)
-  /// A closed answer delivered to a retired visit is reconciled on return. Preserve the authored
-  /// draft and prior accepted receipt; only a new owner Send can mint the retry's operation ID.
   run staleCancelledAnswerReleasesIdOnOpenTest = init.then(open).then(send).then(nativeDecide(true)).then(deliver)
     .then(edit).then(send).then(nativeDecide(false)).then(leave).then(deliver)
     .expect(s.operationId == 2 and s.draftReady and s.lastSent == 1 and safety)

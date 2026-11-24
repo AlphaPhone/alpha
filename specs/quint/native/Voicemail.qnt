@@ -1,4 +1,3 @@
-// Carrier visual voicemail: provider sync, audio fetch, playback and transcription under the speech setting.
 module Voicemail {
   type State = {
     ready: bool, carrier: str,
@@ -22,14 +21,12 @@ module Voicemail {
   }
   def cleared(x: State): State = {item: "absent", heard: false, audio: "none", audioTicket: -1, transcript: "none",
     transcriptTicket: -1, engine: "none", playback: "idle", confirmDelete: false, ...x}
-  // ready = verified image, dialer role, voicemail access, unlocked and in front.
   action becomeReady = s' = {ready: true, ...s}
   action loseReady = s' = {ready: false, playback: "idle", confirmDelete: false, ...s}
   action carrierStatus(status: str): bool = all {
     status.in(Set("unsupported", "unconfigured", "ready")),
     s' = if (status == "ready") {carrier: status, ...s} else cleared({carrier: status, ...s})
   }
-  // The provider gains a message; a replacement is a new generation.
   action arrive = all {
     s.carrier == "ready", s.generation < 3,
     s' = {item: "present", generation: s.generation + 1, ...cleared(s)}
@@ -44,7 +41,6 @@ module Voicemail {
     if (s.audio == "fetching" and ticket == s.audioTicket and ticket == s.generation and s.item == "present")
       s' = {audio: if (ok) "ready" else "failed", ...s}
     else s' = s
-  // Transcription follows the owner's speech setting; an unavailable local recognizer never falls back to cloud.
   action transcribe = all {
     s.ready, s.item == "present", s.audio == "ready", s.transcript.in(Set("none", "failed", "unavailable")),
     if (s.stt == "local" and not(s.localStt)) s' = {transcript: "unavailable", engine: "none", ...s}
@@ -70,7 +66,6 @@ module Voicemail {
     s.ready, s.confirmDelete, s.item == "present",
     s' = if (ok) cleared(s) else {confirmDelete: false, ...s}
   }
-  // The carrier or another client removes the message.
   action remoteDelete = all { s.item == "present", s' = cleared(s) }
   action step = {
     nondet flag = Set(false, true).oneOf()

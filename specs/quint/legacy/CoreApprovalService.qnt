@@ -1,11 +1,9 @@
-// Literal upstream ApprovalService at 4787d51a142c. Model-value selectors are integer identities.
 module CoreApprovalServiceTemplate {
   const Selectors: Set[int]
   const CanFail: bool
   type State = {inMap: bool, timer: str, taskExists: bool, result: str, selRuns: int, toRuns: int,
     tpc: str, tHas: bool, spc: int -> str, sHas: int -> bool, cpc: str, stopped: bool}
   var s: State
-  // Exact prefix monitor for the source action property SettlesOnce.
   var settledOnce: bool
   val vars = s
   pure val InitialState: State = {inMap: true, timer: "armed", taskExists: true, result: "none",
@@ -15,7 +13,6 @@ module CoreApprovalServiceTemplate {
   action Init = all {s' = InitialState, settledOnce' = true}
   action Move(after: State): bool = all {s' = after,
     settledOnce' = (settledOnce and (s.result == "none" or after.result == s.result))}
-  // Source Settle changes only result; surrounding actions frame every other variable.
   def Settle(result: str): str = if (s.result == "none") result else s.result
   action Fire = all {s.timer == "armed", Move({...s, timer: "fired", tHas: s.inMap,
     inMap: false, tpc: if (s.inMap) "getTask" else "done"})}
@@ -81,7 +78,6 @@ module CoreApprovalService {
   action rawStep = Model::Next
   val safety = Model::TypeOK and Model::AtMostOneCallback and Model::ResultAgrees and Model::SingleOwner
   temporal CheckedTemporal = Model::Fairness implies Model::SettlesOnce and Model::CallerSettles
-  // Source driver names expose the same transitions and prefix monitor.
   val state = Model::s
   val settlementStable = Model::settledOnce
   action fire = Model::Fire

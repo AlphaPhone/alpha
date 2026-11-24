@@ -1,4 +1,3 @@
-// Native Android input report and the one preflight gate (pinned checkout and voice outputs).
 module AndroidBuildInputReadiness {
   type Inputs = {pin: str, voice: str, host: str, prepared: bool,
     payload: str, worker: str, support: bool, signer: str}
@@ -20,7 +19,6 @@ module AndroidBuildInputReadiness {
       .union(rowIf(i.prepared, "prepared")).union(rowIf(artifactReady, "worker"))
       .union(rowIf(payloadReady, "payload")).union(rowIf(i.support, "model")).union(rowIf(i.support, "gradle"))
       .union(rowIf(signerReady, "signer"))
-    // The native producer supplies voice inputs. Only signing custody needs a person.
     val attention = rowIf(not(signerReady), "signer")
     val preflight = rowIf(not(pinReady), "pin").union(rowIf(not(voiceReady), "voice"))
     val notices = rowIf(ready.size() == 9, "allInputs").union(rowIf(not(voiceReady), "voiceBlocker"))
@@ -61,8 +59,6 @@ module AndroidBuildInputReadiness {
     { nondet v = Set("unset", "envOnly", "identityOnly", "ready").oneOf(); setSigner(v) },
   }
 
-  // The preflight refuses exactly the pin and voice inputs the report shows missing, and nothing
-  // the build chain produces.
   val PreflightIsPinAndVoiceOnly = s.preflight == Set("pin", "voice").filter(row => not(s.ready.contains(row)))
   val ReportedPayloadRequiresExactStamp = s.ready.contains("payload") implies
     (s.input.prepared and s.input.payload == "exact" and s.input.worker.in(Set("staged", "both")))

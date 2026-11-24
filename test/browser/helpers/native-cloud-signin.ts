@@ -3,10 +3,6 @@ import {createServer,type Plugin,type ViteDevServer} from 'vite';
 import {resolve} from 'node:path';
 import {webcrypto} from 'node:crypto';
 
-// In-app Eliza Cloud sign-in (owner directive 2026-10-14) on the actual flag-off Android chooser and
-// controller composition. Only native ports are synthetic: AlphaCloudSignIn stands in for the native
-// Steward + mobile App Auth client and "stores" a synthetic key the way the plugin does. No device,
-// account, browser, Google consent, App Link verification, Cloud request or real code is involved.
 export async function startNativeCloudSignInFixture(cacheDir=resolve('test-results/native-cloud-signin/vite-cache'), plugins:Plugin[]=[]){
  let server:ViteDevServer;
  const previous=process.env.ELIZA_DEV_ALLOW_TEST_MOCKS;process.env.ELIZA_DEV_ALLOW_TEST_MOCKS='';
@@ -41,7 +37,6 @@ async function signer(){
  };
  return {jwk,sign};
 }
-/** Tokens for every plan status, signed with one throwaway key. */
 export async function entitlements(overrides:Record<string,unknown>={}){
  const {jwk,sign}=await signer();const now=Math.floor(Date.now()/1000);
  const claims=(status:string)=>({iss:'https://api.eliza.app',aud:'eliza-alpha-phone',sub:USER,jti:'synthetic-entitlement-'+status,iat:now,exp:now+600,
@@ -71,7 +66,6 @@ async function boot(page:Page,origin:string,initial:SignInFixtureInput={}){
   const listeners=new Map<string,{plugin:string;event:string;callback:(value:unknown)=>void}>();
   f.emit=(plugin:string,event:string,value:unknown)=>{for(const listener of listeners.values())if(listener.plugin===plugin&&listener.event===event)listener.callback(value);};
   const fail=(code:string)=>Object.assign(new Error(code),{code});
-  // The native host stores the key before reporting success and returns only non-secret fields.
   const store=()=>{f.saved=true;f.credential={credentialId:crypto.randomUUID(),token:'synthetic-mobile-key',expiresAt:Date.now()+((f as any).keyLifetimeMs??30*24*3600*1000),serverCredentialId:'55555555-5555-4555-8555-555555555555'};return {status:'authenticated',environment:'production',expiresAt:f.credential.expiresAt,accountCreated:f.signIn==='created'};};
   const reply=(status:number,body:unknown)=>({status,body:JSON.stringify(body)});
   w.Capacitor={PluginHeaders:Object.entries(names).map(([name,methods])=>({name,methods:methods.map(name=>({name,rtype:name==='addListener'?'callback':'promise'}))})),
@@ -141,13 +135,10 @@ async function boot(page:Page,origin:string,initial:SignInFixtureInput={}){
    throw Error('Unexpected Cloud route '+path);
   }};
  };
- // The transformed Node caller can emit __name calls inside the serialized
- // initializer. Keep the helper and initializer together in the browser.
  await page.addInitScript(`(() => {
   const __name = (value, name) => Object.defineProperty(value, 'name', {value: name, configurable: true});
   (${initialize.toString()})(${JSON.stringify(initial)});
  })();`);
  await page.goto(origin+'/subscription-composition',{waitUntil:'domcontentloaded',timeout:90000});
- // The composition imports the complete runtime before publishing its readiness marker.
  await expect.poll(()=>page.evaluate(()=>(window as any).planFlags),{timeout:90000}).toEqual({native:'android',mocks:false});
 }

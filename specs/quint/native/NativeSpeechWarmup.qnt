@@ -1,4 +1,3 @@
-/// Bounded silence writer and late output ownership in SpeechOutputWarmup.
 module NativeSpeechWarmup {
   type State = {created: bool, closed: bool, writerLive: bool, outputOwned: bool,
     opens: int, plays: int, writes: int, aborted: bool, releases: int, silent: bool, now: int}

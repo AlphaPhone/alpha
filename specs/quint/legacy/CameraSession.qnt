@@ -1,6 +1,3 @@
-// Historical design translation; the executable Quint model is retained here.
-// The immutable configuration is the former TLC .cfg selection. History only
-// observes transitions and does not restrict the original transition relation.
 module CameraSession {
   type Configuration = { name: str, FixFocus: bool, FixLeave: bool, FixLens: bool,
     FixAgentQueue: bool, FixChatGrace: bool, MaxEpoch: int, MaxMedia: int }
@@ -24,7 +21,6 @@ module CameraSession {
     thumb: 0, dropped: false, flipFailed: false }
   pure val initialHistory = { AgentFailsOnlyForCause: true, ChatKeepsPreview: true }
   action Init(name) = all { Configurations.contains(name), s' = initialState(name), history' = initialHistory }
-  // Separate entry points avoid Quint 0.33.1 init/action-helper conversion overlap.
   action checkerInit = all { s' = initialState("Design"), history' = initialHistory }
   action checkerAsBuilt_FocusInit = all { s' = initialState("AsBuilt_Focus"), history' = initialHistory }
   action checkerAsBuilt_LeaveInit = all { s' = initialState("AsBuilt_Leave"), history' = initialHistory }
@@ -159,7 +155,6 @@ module CameraSession {
   temporal CheckedTemporal = Fairness implies (AgentFailsOnlyForCause and ChatKeepsPreview
     and ChatGraceReleases and OpenReachesPreviewOrError and AgentCaptureSettles)
   temporal CheckedConfiguredTemporal = CheckedTemporal
-  // Deterministic permission choice is still the same original transition.
   action Grant = all { s.phase == "starting", s.perm != "granted", Track({ ...s, perm: "granted" }) }
   run designCaptureTest = init.then(Open).then(Grant).then(FirstFrame).then(Focus).then(Shutter)
     .then(CaptureDone(1)).expect(s.media == 1 and safety)

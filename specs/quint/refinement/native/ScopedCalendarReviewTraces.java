@@ -83,7 +83,6 @@ public final class ScopedCalendarReviewTraces {
  }
 
  private void holdInspect()throws Exception {
-  // The last permission read is after the worker's generation comparison and before remember().
   plugin.context.afterPermissionRead=count->{
    if(count!=4)return;
    entered.countDown();
@@ -115,7 +114,6 @@ public final class ScopedCalendarReviewTraces {
  private void request(String key)throws Exception {
   reviewEpoch=(Long)Trace.read(review,"epoch");
   reviewing=reviewCall(key);review.review(reviewing,null);
-  // A refusal resolves directly. A successful review posts its exact UI runnable.
   long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
   while("pending".equals(reviewing.status())&&queuedUi==null&&System.nanoTime()<deadline)
    queuedUi=plugin.activity.ui.poll(10,TimeUnit.MILLISECONDS);

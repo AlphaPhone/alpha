@@ -49,8 +49,6 @@ test('cross-tab restore waits for held audio trash and preserves restored record
  await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();await expect.poll(()=>page.evaluate(()=>(window as any).trashEntered)).toBe(true);
  const second=await context.newPage();await second.goto('/');await selectLegacyNotes(second);
  await second.getByRole('button',{name:'Restore note and recording',exact:true}).click();
- // Reconciliation, the Trash upkeep pass that releases unused source references (added with
- // linked-source grants) and the user-requested restore all queue behind held trash.
  await expect.poll(()=>second.evaluate(async()=> (await navigator.locks.query()).pending?.filter(x=>x.name==='alpha.notes-audio-effects.v1').length)).toBe(3);
  expect(await second.evaluate(async ()=>JSON.parse((await (await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw())!).records.length)).toBe(0);
  await page.evaluate(()=>(window as any).releaseTrash());

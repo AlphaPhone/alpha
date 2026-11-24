@@ -1,10 +1,6 @@
-// Hosted/CLI behavior is test-mocks-only diagnostic coverage. Enter that explicit controller
-// route; the production sign-in button uses native email and never falls back to this route.
 import {seedCompletedAccessSetup} from './flag-off-android';
 import {test,expect,type Page} from '@playwright/test';
 async function openInbox(page:Page){await page.locator('button[data-mobile-shell-tile][aria-label="Inbox"]').click();await page.getByRole('button',{name:'Connect Eliza Cloud',exact:true}).click();}
-// Signed out, an explicit account entry (Inbox Connect Eliza Cloud, Settings Eliza Cloud) is Alpha's
-// sign-in screen (explicitSignedOutCloudEntry); signed in, it is the current Account sheet.
 const signInDialog=(page:Page)=>page.getByRole('dialog',{name:'Alpha',exact:true});
 const membershipSheet=(page:Page)=>page.getByRole('dialog',{name:'Account',exact:true});
 async function fixture(page:Page){
@@ -39,7 +35,6 @@ async function fixture(page:Page){
 async function retainedAgent(page:Page){
  await page.evaluate(async()=>{const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');await c.pair('remote','https://qa-agent.invalid','synthetic-code'); });const composer=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await composer.fill('Keep this conversation');await composer.press('Enter');await expect(page.getByText('Retained answer',{exact:true})).toBeVisible();await page.evaluate(async()=>{const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');await c.restoreHistory((window as any).accountPanelFixture.room);(window as any).accountPanelBaseline={session:structuredClone(c.getSnapshot().session),history:structuredClone(c.getSnapshot().history),selection:localStorage.getItem('alpha.connection.selection.v1')};});await page.getByRole('button',{name:'Minimize chat',exact:true}).click();
 }
-// This fixture has no native sign-in plugin: the panel shows the reason and one retry, not disabled forms.
 test('Inbox opens focused account sign-in directly, without agent hosting or requests',async({page},info)=>{
  await fixture(page);await openInbox(page);const account=signInDialog(page);await expect(account.getByRole('button',{name:'Try again',exact:true})).toBeVisible();await expect(account.getByRole('button',{name:'Back',exact:true})).toBeVisible();await expect(account.getByRole('combobox',{name:'Environment'})).toHaveCount(0);for(const text of ['Your agent.','Your phone.','Remote agent','Refresh agent status','Dedicated hosting review'])await expect(account.getByText(text,{exact:true})).toHaveCount(0);expect(await page.evaluate(()=>(window as any).accountPanelFixture.paths)).toEqual([]);await page.screenshot({path:'test-results/cloud-account-panel/cloud-account-sign-in.png',animations:'disabled'});await account.getByRole('button',{name:'Back',exact:true}).click();await expect(account).toHaveCount(0);await expect(page.locator('html')).toHaveAttribute('data-active-view','inbox');expect(await page.evaluate(()=>(window as any).accountPanelFixture.paths)).toEqual([]);
 });
@@ -48,8 +43,6 @@ test('opening and closing account settings preserves connected agent, exact hist
 });
 test('account-only sign-in verifies actual email and skips hosted agent discovery or provisioning',async({page},info)=>{
  await fixture(page);await retainedAgent(page);await openInbox(page);await expect(signInDialog(page)).toBeVisible();const account=membershipSheet(page);await page.evaluate(async()=>{const {connectionController}=await import('/src/runtime/connection-ui.tsx');void connectionController.signInBrowser();});
- // An existing account signing in on a completed install keeps that install: no Ready popup (only a newly
- // created account gets one, startup-permission-completion.test.mjs), and the sign-in screen closes.
  await expect.poll(()=>page.evaluate(async()=>(await import('/src/runtime/connection-ui.tsx')).connectionController.getSnapshot().cloudAccount?.email)).toBe('verified-owner@example.invalid');
  const setup=page.locator('dialog.alpha-startup-permissions');await expect(signInDialog(page)).toHaveCount(0);await expect(setup).toHaveCount(0);
  await expect(page.locator('html')).toHaveAttribute('data-active-view','inbox');await page.getByRole('button',{name:'Back to apps',exact:true}).click();

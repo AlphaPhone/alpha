@@ -1,4 +1,3 @@
-/// Three independently retained requests model create, replacement and permanent provider deletion.
 module InboxProviderDrafts {
   import RetainedInboxOperation(instance=101) as Create from "./InboxCoordinator"
   import RetainedInboxOperation(instance=102) as Replace from "./InboxCoordinator"
@@ -99,7 +98,6 @@ module InboxProviderDrafts {
   action persisted = all {operation.phase=="committing",persistCurrent,s'={...s,busy:if(current)"dispatch" else s.busy}}
   action dispatched = all {s.busy=="dispatch",current,s.network.get(s.slot)==0,keep,
     s'={...s,busy:"reply",inFlight:s.inFlight.set(s.slot,true),flightEpoch:s.flightEpoch.set(s.slot,s.epoch),network:s.network.set(s.slot,1)}}
-  /// Provider replacement is explicitly non-atomic; it uses bytes fixed by the prepared review.
   action effect = all {s.inFlight.get(s.slot),not(s.effectDone.get(s.slot)),s.slot=="delete" or s.remoteRef<3,keep,
     s'={...s,effectDone:s.effectDone.set(s.slot,true),lastEffect:s.slot,remoteRef:if(s.slot=="delete")0 else s.remoteRef+1,remoteBody:if(s.slot=="delete")0 else proposal.body,
       remoteParts:if(s.slot=="delete")Set() else proposal.parts,remoteBytes:if(s.slot=="delete")0 else proposal.bytes}}

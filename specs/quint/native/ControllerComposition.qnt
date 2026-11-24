@@ -52,7 +52,6 @@ module CompositionVoice {
   export VoiceSession.playbackFinished
 }
 
-/// Native activation, renderer publication and captured consumer bindings are separate lifetimes.
 module ControllerComposition {
   import CompositionIdentity(instance=101) as Identity
   import CompositionCalendar(instance=102) as Calendar
@@ -84,7 +83,6 @@ module ControllerComposition {
   action acknowledgeIdentity = all {Identity::ack(true),keepCalendar,keepVoice,keepHost}
   action revokePreviousIdentity = all {Identity::revokePrevious(true),keepCalendar,keepVoice,keepHost}
   action releaseIdentitySession = all {Identity::releaseSteward,keepCalendar,keepVoice,keepHost}
-  /// The native result reaches the renderer only after activation. Existing consumers keep the captured old binding until then.
   action publishIdentity = all {
     Identity::s.activation.acknowledged,Identity::s.owner!=0,host.owner!=Identity::s.owner,host.epoch<3,
     keepIdentity,if(host.calendarOwner==0)keepCalendar else Calendar::switchOwner,stopVoice,
@@ -154,7 +152,6 @@ module ControllerComposition {
     .expect(host.owner==1 and Calendar::s.writes==0 and Voice::s.phase=="idle" and safety)
   run lateVoiceReplyCannotUseReplacementTest = signedInSetup.then(startVoice).then(voiceSegment).then(voiceBeginSubmission).then(voiceInputClosed)
     .then(beginSignIn).then(voiceReply(0,1)).expect(Voice::s.phase=="idle" and safety)
-  // Synthetic checker canary, excluded from step and source refinement claims.
   action unsafeUncoordinatedKey = all {Identity::s'={...Identity::s,owner:2},keepCalendar,keepVoice,keepHost}
   run uncoordinatedIdentityChangeDetectedTest = signedInSetup.then(startVoice).then(unsafeUncoordinatedKey)
     .expect(Identity::s.owner==2 and not(safety))

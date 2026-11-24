@@ -1,8 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { calendarEditorReady } from './calendar-draft-readiness';
 
-// Renderer geometry with a synthetic visual viewport. Native keyboard/IME and
-// device screen-reader acceptance remain separate from this regression.
 for (const editor of [false, true]) test(`${editor ? 'Calendar draft' : 'operation review'} keeps actions above a visual-only keyboard`, async ({ page }) => {
   await page.setViewportSize({ width: 412, height: 915 });
   await page.goto('/?mode=dev');
@@ -21,7 +19,6 @@ for (const editor of [false, true]) test(`${editor ? 'Calendar draft' : 'operati
     await dialog.getByLabel('Event title', { exact: true }).fill('Draft survives keyboard');
     await dialog.getByLabel('Event title', { exact: true }).evaluate((input: HTMLInputElement) => input.setSelectionRange(6, 14));
   }
-  // Keyboard changes visual height without changing the layout viewport.
   await page.evaluate(() => {
     Object.defineProperty(window.visualViewport!, 'height', { configurable: true, value: 320 });
     window.visualViewport!.dispatchEvent(new Event('resize'));

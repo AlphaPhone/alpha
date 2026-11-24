@@ -1,4 +1,3 @@
-// Mounted canonical Calendar form, Back ordering and retained draft controls.
 module CanonicalCalendarEditorClose {
   type Form = {id: int, owner: int, target: int, title: str}
   type State = {owner: int, view: str, detail: int, form: Form, retained: Form,

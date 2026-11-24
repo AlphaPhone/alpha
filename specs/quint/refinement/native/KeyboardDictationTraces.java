@@ -1,7 +1,6 @@
 package ai.alphacompute.alphaphone;
 import org.json.JSONArray;
 import org.json.JSONObject;
-/** Calls the real policy. Inputs and acceptance counts represent controlled service ports. */
 public final class KeyboardDictationTraces {
  private final KeyboardDictationPolicy policy=new KeyboardDictationPolicy();
  private int inserted;private String op="init";private int inputTicket;private boolean sameEditor=true,account=true;

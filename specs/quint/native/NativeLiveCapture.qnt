@@ -1,4 +1,3 @@
-/// Shared bridge and LiveCaptureController admission, source startup and teardown.
 module NativeLiveCapture {
   type Source = {allocated: bool, running: bool, released: bool, stopped: bool, releaseFailed: bool}
   type State = {epoch: int, foreground: bool, destroyed: bool, inCall: bool, permission: bool,
@@ -89,8 +88,6 @@ module NativeLiveCapture {
   }
   action pauseHost = all {
     s.epoch < 3,
-    // The OS permission prompt pauses the host before delivering its result. Only its
-    // non-running reservation survives; an active microphone is always retired.
     val waiting = s.active != 0 and s.active.in(s.permissions) and not(s.sources.get(s.active).running)
     val retired = if (waiting) s else retire(s, s.active)
     val reports = s.active != 0 and s.sources.get(s.active).running and not(s.active.in(s.discarded.union(s.endedTickets)))

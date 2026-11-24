@@ -1,4 +1,3 @@
-// Historical design translation; the executable Quint model is retained here.
 module SignIn {
   type State = { Design: str, gms: bool, appLink: bool, stewardOk: bool,
     net: str, cred: str, screen: str, browser: str, method: str,
@@ -60,8 +59,6 @@ module SignIn {
   }
   action init = Init("proposed")
   action currentInit = Init("current")
-  // Source Tap and Detour are partial updates. These values are inserted in
-  // each corresponding simultaneous full-record update.
   val Tap = if (s.taps < MaxTaps) s.taps + 1 else s.taps
   val Detour = s.detours + 1
   action Boot = all { s.screen == "Boot", s' = { ...s,

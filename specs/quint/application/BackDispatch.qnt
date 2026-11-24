@@ -1,21 +1,10 @@
-/// Native Back: the availability flag Android tests before it leaves the activity, and the one
-/// renderer layer each Back closes. Two views stand for every app: one rests on the composer
-/// bar, one on the pill.
 module BackDispatch {
   type State = {
-    // Host: "standalone", "launcher" (launcher flavour, not the HOME app), "home" or "assistant".
     host: str,
-    // Layers above the shell, topmost first: a menu popover, a dialog, a modal panel, and an
-    // inert phone that none of them owns.
     popover: bool, dialog: bool, panel: bool, inert: bool,
     shade: bool, voice: bool, chat: str,
-    // The open view ("" is Home), the views showing their own inner page (each view keeps its
-    // page while another view is in front), and the views Back returns to.
     view: str, inners: Set[str], stack: List[str],
-    // Home's launcher layers.
     drawer: bool, menu: bool, homeEdit: bool, homeAdd: bool,
-    // The last native Back: who took it, what it closed, how many layers went with it, and
-    // whether the activity was left while a layer was still open.
     outcome: str, closed: str, removed: int, lostLayer: bool
   }
   var s: State
@@ -27,9 +16,7 @@ module BackDispatch {
   pure val StackLimit = 2
 
   pure def rest(view: str): str = if (view == PillView) "hidden" else "input"
-  /// The open view is on its inner page.
   pure def inner(v: State): bool = v.view != "" and v.inners.contains(v.view)
-  /// The assistant surface is the conversation itself: it never rests on the bar or the pill.
   pure def chatOf(v: State): str =
     if (v.host == "assistant" and v.view == "" and (v.chat == "input" or v.chat == "hidden")) "full" else v.chat
   pure def count(flag: bool): int = if (flag) 1 else 0
@@ -37,7 +24,6 @@ module BackDispatch {
     count(v.popover) + count(v.dialog) + count(v.panel) + count(v.shade) + count(v.voice) +
     count(v.view != "") + count(v.drawer) + count(v.menu) + count(v.homeEdit) + count(v.homeAdd) +
     count(chatOf(v) == "sheet" or chatOf(v) == "full")
-  /// The flag the activity reads. It names every state the renderer's Back handler consumes.
   pure def canGoBack(v: State): bool =
     v.dialog or v.view != "" or v.drawer or v.homeEdit or v.homeAdd or v.shade or
     chatOf(v) == "sheet" or chatOf(v) == "full" or v.voice or v.inert or v.panel
@@ -60,12 +46,9 @@ module BackDispatch {
         val previous = v.stack.nth(v.stack.length() - 1)
         { ...v, view: previous, stack: v.stack.slice(0, v.stack.length() - 1), chat: rest(previous),
           closed: "stack" }
-      // The assistant surface has no Home under its views: leaving the last one closes it.
       else if (v.host == "assistant") { ...v, closed: "assistant" }
       else { ...home(v), closed: "view" }
     else { ...v, closed: "none" }
-  /// Home's launcher layers close innermost first; voice and an open conversation lie above
-  /// edit mode.
   pure def launcherBack(v: State): State =
     val chat = chatOf(v)
     val above = v.voice or chat == "full" or chat == "sheet" or v.host == "assistant"
@@ -78,7 +61,6 @@ module BackDispatch {
     if (v.popover) { ...v, popover: false, closed: "popover" }
     else if (v.dialog) { ...v, dialog: false, closed: "dialog" }
     else if (v.panel) { ...v, panel: false, closed: "panel" }
-    // An inert phone with no modal of its own is not navigated underneath.
     else if (v.inert) { ...v, closed: "none" }
     else launcherBack(v)
 
@@ -90,8 +72,6 @@ module BackDispatch {
 
   val running = s.outcome != "finish" and s.closed != "assistant"
   val unblocked = running and not(s.popover or s.dialog or s.panel or s.inert)
-  /// A view opened from elsewhere starts on its first page; opening the view already in front
-  /// leaves it as it is.
   action openView(view: str, push: bool): bool = all { unblocked, view.in(Views),
     s' = { ...s, view: view, inners: if (view != s.view) s.inners.exclude(Set(view)) else s.inners, shade: false, drawer: false, menu: false, homeEdit: false,
       homeAdd: false, chat: rest(view),
@@ -99,7 +79,6 @@ module BackDispatch {
           (if (s.stack.length() < StackLimit) s.stack.append(s.view) else s.stack.slice(1, StackLimit).append(s.view))
         else List() } }
   action openInner = all { unblocked, s.view != "", s' = { ...s, inners: s.inners.union(Set(s.view)) } }
-  /// Menus are opened from inside a view.
   action openPopover = all { running, s.view != "", not(s.dialog or s.panel or s.inert), s' = { ...s, popover: true } }
   action openDialog = all { running, s' = { ...s, dialog: true } }
   action openPanel = all { running, not(s.dialog), s' = { ...s, panel: true } }
@@ -115,15 +94,12 @@ module BackDispatch {
   action startVoice = all { unblocked, s' = { ...s, voice: true, shade: false } }
   action moveChat(chat: str): bool = all { unblocked, not(s.voice),
     chat.in(Set("hidden", "input", "sheet", "full")), s' = { ...s, chat: chat } }
-  /// Android hands Back to the page only while the flag is set. Otherwise the HOME app stays on
-  /// Home, the launcher flavour moves its task back and any other activity finishes.
   action nativeBack = all { running,
     val after = rendererBack(s)
     s' = if (canGoBack(s)) { ...after, outcome: "renderer", removed: layers(s) - layers(after), lostLayer: false }
       else if (s.host == "home") { ...home(s), outcome: "home", closed: "none", removed: 0, lostLayer: false }
       else { ...s, outcome: if (s.host == "launcher") "background" else "finish", closed: "none",
         removed: 0, lostLayer: layers(s) > 0 } }
-  /// The HOME gesture reaches the page as its own event.
   action homeGesture = all { running, s.host == "home", not(s.inert),
     s' = { ...home(s), outcome: "home", closed: "none", removed: 0 } }
   action step = {
@@ -135,9 +111,7 @@ module BackDispatch {
       homeGesture, s' = s }
   }
 
-  /// Leaving the activity never abandons an open layer.
   val FlagCoversLayers = not(canGoBack(s)) implies rendererBack(s).closed == "none" and layers(s) == 0
-  /// A Back the page takes closes something, unless the phone is held inert without a modal.
   val BackMakesProgress = canGoBack(s) and not(s.inert and not(s.popover or s.dialog or s.panel))
     implies rendererBack(s).closed != "none"
   val NoExitOverLayer = not(s.lostLayer)
@@ -154,11 +128,9 @@ module BackDispatch {
   val BackgroundWitness = s.outcome == "background"
   val StackReturnWitness = s.closed == "stack"
   val InertHoldWitness = s.outcome == "renderer" and s.closed == "none" and s.view != ""
-  /// Back returned to a view that was left on its inner page.
   val KeptInnerPageWitness = s.closed == "stack" and inner(s)
   val AssistantViewClosesWitness = s.closed == "assistant" and s.view != ""
 
-  // The drawer over Home in a standalone activity: Back closes it and only the next Back leaves.
   run drawerBeforeExitTest = initHost("standalone").then(openDrawer).then(nativeBack)
     .expect(s.outcome == "renderer" and s.closed == "drawer" and not(s.drawer) and safety)
     .then(nativeBack).expect(s.outcome == "finish" and not(s.lostLayer) and safety)
@@ -192,13 +164,11 @@ module BackDispatch {
   run stackReturnTest = initHost("standalone").then(openView(BarView, false)).then(openView(PillView, true))
     .then(nativeBack).expect(s.closed == "stack" and s.view == BarView and s.chat == "input")
     .then(nativeBack).expect(s.closed == "view" and s.view == "" and safety)
-  // Back returns to the earlier view on the page it was left on; the next Back closes that page.
   run stackReturnKeepsInnerPageTest = initHost("standalone").then(openView(BarView, false)).then(openInner)
     .then(openView(PillView, true)).expect(not(inner(s)))
     .then(nativeBack).expect(s.closed == "stack" and s.view == BarView and inner(s) and safety)
     .then(nativeBack).expect(s.closed == "inner" and s.view == BarView and safety)
     .then(openInner).then(openView(BarView, false)).expect(inner(s) and safety)
-  // The assistant surface has no Home: Back from its last view closes the surface.
   run assistantViewClosesSurfaceTest = initHost("assistant").then(openView(BarView, false)).then(nativeBack)
     .expect(s.outcome == "renderer" and s.closed == "assistant" and s.view == BarView and safety)
   run inertPhoneIsNotNavigatedTest = initHost("standalone").then(openView(BarView, false)).then(holdInert)
@@ -207,7 +177,6 @@ module BackDispatch {
     .expect(s.outcome == "renderer" and s.closed == "assistant" and safety)
   run voiceStopsBeforeConversationTest = initHost("standalone").then(moveChat("sheet")).then(startVoice)
     .then(nativeBack).expect(s.closed == "voice" and s.chat == "sheet" and safety)
-  // The assistant is above Apps, including its open entry menu. Each Back retires one layer.
   run assistantAboveDrawerMenuTest = initHost("home").then(openDrawer).then(openMenu)
     .then(moveChat("full")).then(startVoice)
     .then(nativeBack).expect(s.closed == "voice" and not(s.voice) and s.chat == "full" and s.drawer and s.menu and safety)

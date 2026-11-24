@@ -16,7 +16,6 @@ import java.util.Map;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-// Controls only package-local wall time in the compiled pinned sources.
 final class System {
  static long now;
  static long currentTimeMillis(){return now;}
@@ -59,7 +58,7 @@ public final class ReminderDeliveryTraces {
    System.now = BASE;
    engine = AlphaReminders.engine(context);
    check(engine == AlphaReminders.engine(context), "Product receiver and API share a process owner");
-   engine.list(); // Initialize the empty durable envelope before any fault injection.
+   engine.list();
    context.notices.beforePost = this::recordNotice;
    context.alarms.beforeArm = this::recordArm;
    trace = new Trace(name, observe());
@@ -103,8 +102,6 @@ public final class ReminderDeliveryTraces {
      check("effects-pending".equals(receipt.getString("phase")) &&
        "unknown".equals(receipt.getJSONObject("response").getString("status")), "Durable reviewed receipt precedes alarm effect");
     }
-    // Failed arms can create an OS Intent for an uncommitted UUID. Assign
-    // equality classes only from observed durable rows and actual retained arms.
    } catch (Exception unavailable) { throw new AssertionError(unavailable); }
   }
 
@@ -244,7 +241,6 @@ public final class ReminderDeliveryTraces {
   }
 
   void seedLegacy() throws Exception {
-   // The initial empty envelope is replaced with the observed pre-upgrade input.
    envelopePrefs().edit().clear().commit();
    JSONObject legacy = new JSONObject().put("id",ID).put("title",TITLE).put("body",BODY)
     .put("status","scheduled").put("mode","inexact").put("at",time(60)).put("createdAt",BASE);

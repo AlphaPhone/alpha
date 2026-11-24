@@ -1,4 +1,3 @@
-// Literal conversion of packages/core/tla/EmbeddingDimension.tla at 4787d51a142.
 module CoreEmbeddingDimensionTemplate {
   const Embedders: Set[str]
   const MaxProbes: int
@@ -48,7 +47,6 @@ module CoreEmbeddingDimensionTemplate {
     if (space != None and s.aspace != None and s.aspace != space) ProbeFails
     else s' = {...s, aspace: if (space != None) space else s.aspace, ppc: "spaced"}
   }
-  // This monotonic monitor is equivalent to the source action property on the projected state.
   action ProbePin = all {
     s.ppc == "spaced",
     val space = Space.get(s.pprov)
@@ -121,7 +119,6 @@ module CoreEmbeddingDimension {
   run pinRefusesDifferentProviderTest = init.then(M::ProbeStart("named")).then(M::ProbeResize).then(M::ProbeSpace)
     .then(M::ProbePin).then(M::ProbeClearAs(true)).then(M::ProbeStart("wide")).then(M::ProbeResize)
     .expect(safety and M::s.pinProv == "named" and M::s.ppc == "idle" and M::s.clearFailed)
-  // Upstream documents this as a known failure of the unchecked StoredOneSpace property.
   run unpinnedWriteCanBeRetaggedTest = init.then(M::EmbedCall("e1", "plain")).then(M::ProbeStart("named"))
     .then(M::ProbeResize).then(M::ProbeSpace).then(M::EmbedValidate("e1")).then(M::EmbedWrite("e1"))
     .expect(safety and not(M::StoredOneSpace))

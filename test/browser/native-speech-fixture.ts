@@ -1,19 +1,12 @@
 import {type Page} from '@playwright/test';
 import {flagOffAndroid,residentHome,fenceNetwork} from './flag-off-android';
-// Synthetic native ports: routing and lifecycle evidence only.
-// offline: Android reports no active network (ElizaSystem.getNetworkStatus, AlphaSystemPlugin), the
-// fact the renderer uses on Android instead of WebView's navigator.onLine hint.
 export async function setupNativeSpeech(page:Page,options:{offline?:boolean}={}){
  const foreign=await fenceNetwork(page);await flagOffAndroid(page);
  await page.addInitScript((options:{offline?:boolean})=>{
   const w=window as any,c=w.Capacitor,prior=c.nativePromise;
   if(options.offline)c.PluginHeaders.find((p:any)=>p.name==='ElizaSystem').methods.push({name:'getNetworkStatus',rtype:'promise'});
-  // This fixture exercises the supported local route: Text keys selected, no Cartesia key,
-  // and no saved Cloud account. The production renderer chooses its route normally.
   delete w.flagOff.slots['cloud:production'];w.flagOff.persist();
   const provider={mode:'own',revision:'synthetic-local-speech-provider-r1',persistence:'native-secure-store',keys:{text:{configured:true},voice:{configured:false}},provider:'cerebras',configured:true,selected:true,model:'qwen-3.8-27b',voiceConfigured:false};
-  // Voice replies require correlated durable message identities; the generic text-chat
-  // fixture omits them. Supply the provider's completed reply fields at its stream port.
   const emit=w.flagOff.emit;w.flagOff.emit=(plugin:string,event:string,value:any)=>{
    if(plugin==='Agent'&&event==='alphaAgentStream'&&value.event?.type==='chunk'){
     const raw=atob(value.event.dataBase64),data=JSON.parse(raw.slice(6));
@@ -37,7 +30,6 @@ export async function setupNativeSpeech(page:Page,options:{offline?:boolean}={})
    if(method==='stopRecording'){f.stops++;const recordingId=f.active;f.active=null;return {recordingId,durationMs:1500};}
    if(method==='cancelRecording'){f.active=null;return {};}
    if(method==='transcribeLocalRecording'){f.transcripts++;if(f.holdTranscript)await new Promise(resolve=>f.releaseTranscript=resolve);f.delivered++;return {text:'Local spoken request',local:true,execution:'device'};}
-   // Issue #395: the native collector binds renderer stages to one live turn id (ids only, no text).
    if(method==='markVoiceTurn'){f.stages.push(input.stage+(input.voiceTurnId?':linked':''));return {marked:true,voiceTurnId:'7d3c1a52-6d5e-4e0f-9a43-5c1d2e3f4a5b'};}
    if(method==='synthesizeLocal'){f.spoken.push(input.text);f.turns.push(input.voiceTurnId);return {playbackId:'play-'+f.spoken.length,execution:'device'};}
    if(method==='play'){f.plays++;return {};}

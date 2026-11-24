@@ -1,6 +1,5 @@
 import {test,expect} from '@playwright/test';
 
-// Exercise the real message action and playback ownership with a closed speaker port.
 for(const route of ['cloud','direct'] as const)test(`message Read aloud follows selected ${route} route`,async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.route('https://**/*',request=>request.abort());
@@ -15,7 +14,6 @@ for(const route of ['cloud','direct'] as const)test(`message Read aloud follows 
  export const cloudSpeechLimited=()=>false;
  export const setVoiceSendPolicyForTests=()=>false;
  `}));
- // Both development transports can exist; the selected account must decide the route.
  await page.route('**/src/runtime/development-cartesia-flag.ts*',request=>request.fulfill({contentType:'application/javascript',body:'export const developmentCartesiaVoiceEnabled=true;'}));
  await page.route('**/src/runtime/development-cloud-voice.ts*',request=>request.fulfill({contentType:'application/javascript',body:'export const developmentCloudVoiceEnabled=true;export const developmentCloudRealtimeVoiceEnabled=false;'}));
  await page.route('**/src/runtime/cloud-voice.ts*',request=>request.fulfill({contentType:'application/javascript',body:`

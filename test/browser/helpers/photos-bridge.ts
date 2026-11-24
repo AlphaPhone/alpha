@@ -1,7 +1,5 @@
 import {flagOffAndroid,completeAccessSetup} from '../flag-off-android';
 import {type Page} from '@playwright/test';
-// Renderer contract only. The synthetic bridge does not qualify Android permissions or MediaStore.
-// `owned` adds an Alpha-owned favorite that the native list returns whatever the provider scope.
 export async function photosBridge(page:Page,scope='full',openPhotos=true,authenticated=false,owned=false){
  if(authenticated)await flagOffAndroid(page);
  await page.addInitScript(({scope,owned})=>{

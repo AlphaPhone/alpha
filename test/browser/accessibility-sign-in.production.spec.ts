@@ -1,9 +1,3 @@
-// The first screen of a signed-out production phone (P-43's required Eliza Cloud sign-in page),
-// in the flag-off bundle with the synthetic Android bridge of flag-off-android.ts: names and roles,
-// keyboard order, contrast, TalkBack reading order and nothing of the phone behind the page, at
-// the default size, at 200% text and on its side. AccessibilityInstrumentedTest makes the same
-// check on an emulator (requiredCloudSignInAtDoubleFontScale). No address or code is entered and
-// nothing reaches Eliza Cloud: this is renderer evidence, not TalkBack, WebView or device acceptance.
 import { test, expect, type Page } from '@playwright/test';
 import { flagOffAndroid, fenceNetwork, expectNoDevelopmentSurface } from './flag-off-android';
 import { residentStub, type StubAccount } from './resident-stub';
@@ -12,12 +6,6 @@ import { ASSISTANT_GROUP, auditPage, auditReadingOrder, auditTabOrder, auditTree
 const account: StubAccount = { token: 'accessibility-sign-in-key', userId: '9f1dc45a-4011-4e44-947a-30d999d24fa5', email: 'owner@example.invalid', balance: 5 };
 const blocking = (lines: string[]) => lines.filter(line => !line.startsWith('text-truncated:'));
 
-/**
- * Large text as Android WebView text zoom delivers it to this bundle: every declared pixel font size
- * multiplied. The development server applies the product's own browser display module for this
- * (accessibility-states.ts setTextScale); the flag-off Android bundle under test runs the native
- * text zoom path instead, so the same rewrite is made here, at the test boundary.
- */
 async function zoomText(page: Page, scale: number) {
   await page.evaluate(value => {
     const w = window as any;
@@ -25,7 +13,7 @@ async function zoomText(page: Page, scale: number) {
       const scaled = (style: CSSStyleDeclaration) => { const size = style.fontSize; if (/^\d*\.?\d+px$/.test(size)) style.setProperty('font-size', `calc(${size} * var(--test-text-zoom, 1))`, style.getPropertyPriority('font-size')); };
       const rules = (list: CSSRuleList) => { for (const rule of Array.from(list)) { if ('style' in rule) scaled((rule as CSSStyleRule).style); if ('cssRules' in rule) rules((rule as CSSGroupingRule).cssRules); } };
       const all = () => {
-        for (const sheet of Array.from(document.styleSheets)) { try { rules(sheet.cssRules); } catch { /* cross-origin */ } }
+        for (const sheet of Array.from(document.styleSheets)) { try { rules(sheet.cssRules); } catch { } }
         for (const el of document.querySelectorAll<HTMLElement>('[style]')) scaled(el.style);
       };
       all();
@@ -63,7 +51,6 @@ test('the signed-out Cloud chooser stays usable after the resident fails to star
   expect(foreign).toEqual([]);
 });
 
-/** Everything the page offers can be brought on screen by scrolling and nothing is painted over it. */
 async function unreachable(page: Page) {
   return page.evaluate(() => {
     const out: string[] = [];
@@ -80,7 +67,6 @@ async function unreachable(page: Page) {
   });
 }
 
-/** Nothing of the phone behind the page reaches assistive technology or the keyboard. */
 async function phoneBehind(page: Page) {
   return page.evaluate(group => {
     const out: string[] = [];
@@ -96,7 +82,6 @@ for (const scale of [1, 2]) {
     const { foreign } = await signedOut(page);
     if (scale !== 1) {
       await zoomText(page, scale);
-      // The page measures the text it is drawn at (runtime/text-scale.ts), as on a phone.
       await expect.poll(() => page.evaluate(() => Number(getComputedStyle(document.documentElement).getPropertyValue('--alpha-text-scale')))).toBeCloseTo(scale, 1);
     }
     const found = blocking(format([
@@ -125,8 +110,6 @@ test.describe('landscape', () => {
   });
 });
 
-// The launcher variant draws under transparent system bars and reports them only as
-// --native-top-inset/--native-bottom-inset (env(safe-area-inset-*) stays 0 in its WebView).
 test('the sign-in page and sheet clear the native system bars', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 640 });
   const { welcome } = await signedOut(page);

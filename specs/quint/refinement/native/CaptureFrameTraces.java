@@ -6,7 +6,6 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.json.*;
 
-/** Real LiveVoiceCapture loop. Only PCM reads, VAD results and cleanup outcomes are ports. */
 public final class CaptureFrameTraces {
  static final class Window {final int probability,pieces,id;Window(int p,int pieces,int id){this.probability=p;this.pieces=pieces;this.id=id;}}
  static final class Source implements LiveVoiceCapture.Source {

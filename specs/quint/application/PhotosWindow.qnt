@@ -1,4 +1,3 @@
-// Current native Photos catalog window and its serialized access/page reads.
 module PhotosWindow {
   type Row = {id: int, rank: int, revision: int}
   type State = {hidden: bool, active: bool, disposed: bool, captures: List[Row], loaded: bool,

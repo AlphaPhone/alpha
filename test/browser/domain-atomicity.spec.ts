@@ -8,7 +8,6 @@ async function attachDomain(page:Page){
  });
 }
 
-// Exercise the production store in separate documents of the same origin.
 test.beforeEach(async({page})=>{await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));await page.goto('/');await attachDomain(page);});
 
 test('cross-tab edits read the last committed value after an asynchronous edit',async({page,context})=>{
@@ -83,7 +82,6 @@ test('rapid cross-tab edits retain every committed item and unique receipt',asyn
  const write=(tab:typeof page,owner:string)=>tab.evaluate(async owner=>{
   const domain=(window as any).domain,receipts:number[]=[];
   for(let i=0;i<25;i++){
-   // Prime a task-local snapshot before requesting the cross-tab lock.
    localStorage.getItem('alpha.test.atomic');
    receipts.push(await domain.edit(()=>({items:[] as string[]}),data=>{data.items.push(owner+':'+i);return data.items.length;}));
   }

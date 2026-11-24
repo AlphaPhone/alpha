@@ -1,7 +1,4 @@
 import {test,expect} from '@playwright/test';
-// Browser Notes recording in segments: like the
-// native recorder, finished segments of bounded recorded time arrive while recording, each a
-// standalone file that fits a transcription request; the whole recording is kept as well.
 async function source(page:any){await page.evaluate(async()=>{const context=new AudioContext(),osc=context.createOscillator(),sink=context.createMediaStreamDestination();osc.connect(sink);osc.start();await context.resume();const devices=navigator.mediaDevices;Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:devices});devices.getUserMedia=async()=>sink.stream;(window as any).segmentSource={context,osc};});}
 test('a browser recording is written as bounded standalone segments, the last one before stop resolves',async({page})=>{
  await page.goto('/?mode=dev');await source(page);

@@ -1,4 +1,3 @@
-// One invocation of scripts/start-combined-agent.ts and its returned child.
 module CombinedAgentLauncher {
   type Launcher = {
     checks: int, port: str, profile: bool, marker: bool, config: bool, identity: bool,
@@ -90,7 +89,6 @@ module CombinedAgentLauncher {
     (sig == "SIGTERM" and s.cleanupSignal == "none") or (sig == "SIGKILL" and s.cleanupSignal == "SIGTERM"),
     s' = { ...s, cleanupSignal: sig }
   }
-  // Boot is the external fixture acknowledgment after successful handoff.
   action childBoot = all {
     s.outcome == "running", s.supervised, s.metadata, s.pid == 1, not(s.booted), not(s.childExited),
     s' = { ...s, booted: true }

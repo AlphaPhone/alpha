@@ -1,4 +1,3 @@
-// Current Google account readback and consent admission in the mounted panel.
 module GoogleConsentAdmission {
   type Read = {owner: int, kind: str}
   type PermissionWait = {owner: int, read: int, panel: int}

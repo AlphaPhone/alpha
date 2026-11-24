@@ -1,4 +1,3 @@
-// Literal conversion of packages/core/tla/SingleFlightMemo.tla at 4787d51a142.
 module CoreSingleFlightMemoTemplate {
   const Readers: Set[str]
   const Writers: Set[str]

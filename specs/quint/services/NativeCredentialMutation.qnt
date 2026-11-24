@@ -1,4 +1,3 @@
-/// AlphaCredentialStore mutation classification, exact shutdown and guarded slot write.
 module NativeCredentialMutation {
   type Mutation = {
     phase: str, operation: str, ownerEpoch: int, capturedEpoch: int,
@@ -9,7 +8,6 @@ module NativeCredentialMutation {
     committed: bool, admissionInvalidated: bool, previousCredential: int, legacyBlocked: bool,
     leaseSequence: int, leasePending: bool, leaseConfirmed: bool, leaseAbandoned: bool,
     requestKnown: bool, requestBegun: bool, requestEpoch: int,
-    // The Cloud slot written is production's, and the Cloud-change observer ran for this mutation.
     productionSlot: bool, observerNotified: bool
   }
   var s: Mutation
@@ -47,10 +45,7 @@ module NativeCredentialMutation {
     s' = { ...s, acknowledgedStop: if (exact) s.requestedStop else 0,
       stopped: absent, running: not(absent) }
   }
-  /// Only a replaced or removed production Cloud key reaches the Cloud-change observer. A provider
-  /// change and a staging key do not.
   val cloudKeyReplaced = s.operation == "cloud" and s.productionSlot and s.replacement != s.before
-  /// The observer runs after the recheck and before the slot bytes change.
   action prepareCommit = all {
     s.phase == "captured" and not(s.requiresStop) or
       s.phase == "stopping" and s.stopped and s.acknowledgedStop == s.requestedStop,
@@ -85,7 +80,6 @@ module NativeCredentialMutation {
   action compareConflict = all {
     s.phase == "captured", s' = { ...s, phase: "conflict", committed: false }
   }
-  /// A retained legacy value may shrink; over-cap growth is refused before slot bytes change.
   action capacityFailure = all {
     s.phase == "writing", s.newSize > 2, s.newSize > s.oldSize,
     s' = { ...s, phase: "full" }
@@ -106,7 +100,6 @@ module NativeCredentialMutation {
   }
   action ordinarySize = all { s.phase == "idle", s' = { ...s, oldSize: 1 } }
   action otherEnvironment = all { s.phase == "idle", s' = { ...s, matchingEnvironment: false } }
-  /// The staging Cloud slot exists only with test mocks.
   action stagingSlot = all { s.phase == "idle", s' = { ...s, productionSlot: false } }
   action unbound = all { s.phase == "idle", s' = { ...s, providerPresent: false, admission: false } }
   action blockLegacy = s' = { ...s, legacyBlocked: true }
@@ -176,7 +169,6 @@ module NativeCredentialMutation {
   val Bounded = s.ownerEpoch.in(0.to(2)) and s.oldSize.in(1.to(3)) and s.providerRevision <= 4
   val LeaseBounds = s.leaseSequence.in(0.to(2)) and s.requestEpoch.in(0.to(2))
   val BegunRequestIsKnown = s.requestBegun implies s.requestKnown
-  /// Slot bytes of a replaced production Cloud key change only after the observer ran.
   val CloudChangeObserved = s.committed and cloudKeyReplaced implies s.observerNotified
   val ObserverOnlyForReplacedCloudKey = s.observerNotified implies cloudKeyReplaced
   val safety = LeaseBounds and BegunRequestIsKnown and ShutdownBeforeCriticalWrite and AdmissionInvalidated and CurrentMutation and RejectedWriteRetainsBytes and Bounded
@@ -229,14 +221,11 @@ module NativeCredentialMutation {
     .then(cancelProviderRequest(true)).expect(safety and s.ownerEpoch == 2 and not(s.requestKnown))
   run unknownProviderCancellationPreservesLeaseTest = init.then(reserveProviderRequest).then(cancelProviderRequest(false))
     .expect(safety and s.requestKnown and s.ownerEpoch == 1)
-  /// A replaced production key notifies the observer before the write; the same key written again does not.
   run cloudChangeObservedTest = init.then(begin("cloud", 2, 1)).then(retire).then(observeStop(true, true))
     .then(prepareCommit).expect(s.observerNotified and not(s.committed) and safety)
     .then(write).expect(s.credential == 2 and s.observerNotified and safety)
     .then(begin("cloud", 2, 1)).then(prepareCommit).then(write)
     .expect(s.committed and not(s.observerNotified) and safety)
-  /// The observer has already run when the write then fails, so Cloud-bound background state is
-  /// withdrawn although the stored key is unchanged.
   run observerPrecedesFailedWriteTest = init.then(begin("cloud", 2, 1)).then(retire).then(observeStop(true, true))
     .then(prepareCommit).then(operationFailure)
     .expect(ObserverBeforeFailedWriteWitness and s.credential == 1 and safety)

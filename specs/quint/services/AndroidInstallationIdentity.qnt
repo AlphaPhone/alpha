@@ -1,4 +1,3 @@
-// Synchronous source-view generation and verification; no APK/device/signing effect is modeled.
 module AndroidInstallationIdentity {
   type State = {selected: int, profile: int, revision: int, profileRevision: int,
     cache0: str, cache1: str, accepted: bool, result: str}

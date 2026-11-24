@@ -1,4 +1,3 @@
-// Mounted Alpha Apps drawer, exact menu owner and synthetic native App Info boundary.
 module DrawerInteraction {
   type Press = {pointer: int, app: int}
   type Focus = {kind: str, app: int}

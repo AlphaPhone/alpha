@@ -3,14 +3,6 @@ import {completeAccessSetup,expectNoDevelopmentSurface,fenceNetwork} from './fla
 import { test, expect, type Page } from '@playwright/test';
 import { installResidentAgentPlugin } from './helpers/resident-agent-plugin';
 
-// Reviewed send on the FLAG-OFF bundle with the Android bridge stubbed (
-// F-5, F-10). The mailbox is a synthetic managed Gmail answered at the native HTTP boundary
-// (AlphaConnection.request) in the Cloud server's own response shapes, so the shipped renderer,
-// the real CloudProtocol validation and the Keystore-slot operation journal (the stubbed secure
-// store) all run. No account, grant, Gmail request or mail delivery is real.
-//
-// Evidence boundary: source/test evidence for the shipped renderer. It is not evidence for the
-// native encrypted journal, Eliza Cloud, Google or delivery.
 const AGENT = '6f1d3c3e-8c55-4c1b-9d1f-2b6f0b0d3a11';
 type Wire = { requestId: string; digest: string; proposal: string };
 const button = (page: Page, name: string) => name==='Inbox'
@@ -28,7 +20,6 @@ async function androidWithMailbox(page: Page, unread = false) {
     const f = w.declineFixture = { decisions: [] as string[], reconciliations: [] as unknown[], effects: 0, journal: [] as string[], unexpected: [] as string[], proposals: [] as any[], installationId: '', calendar: [] as any[], receipts: [] as any[], entry: null as any, lists: 0,
       mail: { prepares: [] as { requestId: string; digest: string; proposal: string }[], dispatches: [] as { requestId: string; digest: string; proposal: string }[], operations: {} as Record<string, any>, sent: [] as string[], searches: 0 } };
     const resident = w.residentAgent = w.createResidentAgentPlugin({ owner: () => 'fixture-owner', agentId, unexpected: f.unexpected });
-    // One synthetic resident agent: authenticated identity, device enrollment and proposal store.
     const agent = (method: string, path: string, body: any, headers: Record<string, string>): { status: number; data: unknown } => {
       const ok = (data: unknown) => ({ status: 200, data });
       if (path === '/api/auth/me') return ok({ identity: { id: 'fixture-owner', kind: 'owner' }, access: { role: 'OWNER', mode: 'local' } });
@@ -85,8 +76,6 @@ async function androidWithMailbox(page: Page, unread = false) {
           if (method === 'finish') { Object.assign(f.entry, { phase: 'terminal', status: input.status, summary: input.summary, result: input.result }); return {}; }
           throw Error('Unexpected journal effect');
         }
-        // The native Calendar plugin: Android shows its own review dialog inside executeAgent. The
-        // stub records exactly what the renderer handed over and answers as an approved save.
         if (plugin === 'AlphaCalendar') {
           if (method === 'requestAccess') return { status: 'granted' };
           if (method === 'executeAgent') { f.calendar.push(structuredClone(input)); return { status: 'applied', result: { version: 1, kind: input.operation.type, sourceId: '7', eventId: '42', revision: 'c'.repeat(64) } }; }
@@ -99,8 +88,6 @@ async function androidWithMailbox(page: Page, unread = false) {
         if (plugin === 'Agent') {
           const owned = resident.answer(method, input); if (owned) return owned;
           if (method === 'getStatus') return { packaged: true, state: 'stopped', serviceActive: false, socketListening: false };
-          // Retained direct inference and the independent Cloud Gmail credential
-          // above must coexist; selecting own keys must not sign Cloud services out.
           if (method === 'providerStatus') return { provider: 'cerebras', configured: true, model: 'qwen-3.8-27b' };
           if (method === 'request') {
             const result = agent(input.method || 'GET', input.path, input.body ? JSON.parse(input.body) : {}, input.headers || {});
@@ -117,10 +104,8 @@ async function androidWithMailbox(page: Page, unread = false) {
             const path = new URL(input.url).pathname;
             if (path === '/api/v1/maps/capabilities') return { status: 503, data: { code: 'maps_not_configured', error: 'Synthetic Maps unavailable' } };
             if (path === '/api/v1/user') return { status: 200, data: { success: true, data: { id: account } } };
-            if (path === '/api/v1/subscription/entitlement') return { status: 404, data: {} }; // Deployed Cloud has no subscription entitlement route yet.
+            if (path === '/api/v1/subscription/entitlement') return { status: 404, data: {} };
             if (path === '/api/v1/billing/limits') return { status: 200, data: { success: true, data: { v2: { subscription: { status: 'available', value: { planKey: 'plus_monthly', state: 'active', currentPeriodEnd: '2099-01-01T00:00:00.000Z' } } } } } };
-            // Synthetic managed Gmail behind Eliza Cloud, in the server's own response shapes. The
-            // product's CloudProtocol validates every one of these replies.
             const m = f.mail, google = '/api/v1/eliza/google', body = input.body ? JSON.parse(input.body) : null;
             const digest = async (text: string) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))), b => b.toString(16).padStart(2, '0')).join('');
             const reply = (receipt: unknown, extra: Record<string, unknown> = {}) => ({ status: 200, data: { version: 1, providerExactlyOnce: false, receipt, ...extra } });
@@ -131,7 +116,6 @@ async function androidWithMailbox(page: Page, unread = false) {
             if (path === google + '/gmail/inbox-v1/operations' && input.method === 'POST') {
               const p = body.proposal, review = { kind: p.kind, mode: p.mode, from: 'owner@example.invalid', to: p.to, cc: p.cc, bcc: p.bcc, subject: p.subject, bodyText: p.bodyText, attachments: [] };
               const receipt = { requestId: body.requestId, kind: p.kind, state: 'prepared', reviewDigest: await digest(JSON.stringify(review)), providerResult: null, rejectionCode: null };
-              // The proposal exactly as it arrived on the wire.
               m.prepares.push({ requestId: body.requestId, digest: receipt.reviewDigest, proposal: JSON.stringify(body.proposal) }); m.operations[body.requestId] = receipt;
               return reply(receipt, { review });
             }
@@ -159,7 +143,6 @@ const fixture = (page: Page) => page.evaluate(() => {
 });
 async function connected(page: Page) {
   await page.goto('/');
-  // Development builds offer an explicit start; production starts the funded resident agent itself.
   const start = page.locator('.alpha-connection').getByRole('button', { name: 'Start local agent', exact: true });
   await expect.poll(async () => await start.isVisible().catch(() => false) || await page.evaluate(() => (window as any).declineFixture.installationId !== ''), { timeout: 30_000 }).toBe(true);
   if (await start.isVisible().catch(() => false)) await start.click();
@@ -197,7 +180,6 @@ test('Android: the send review shows Cc and Bcc, an edit after review is reviewe
   expect(state.prepares).toHaveLength(1);
   expect(state.dispatches).toEqual([]);
 
-  // Close without cancelling, edit the body: the saved review is discarded and cannot be sent.
   await review.getByRole('button', { name: 'Close mail review', exact: true }).click();
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Second body');
   await expect(page.getByText('This email was edited after this review, so the review was discarded. Nothing was sent. Review the current email before sending.', { exact: true })).toBeVisible();
@@ -209,7 +191,6 @@ test('Android: the send review shows Cc and Bcc, an edit after review is reviewe
   state = await fixture(page);
   expect(state.prepares).toHaveLength(2);
   expect(state.prepares[1].requestId).not.toBe(state.prepares[0].requestId);
-  // One dispatch: the second request, under the second digest, with the proposal text it was prepared with.
   expect(state.dispatches).toEqual([state.prepares[1]]);
   expect(JSON.parse(state.dispatches[0].proposal)).toEqual({ kind: 'send', mode: 'compose', to: ['friend@example.invalid'], cc: ['carol@example.invalid'], bcc: ['audit@example.invalid'], subject: 'Flag-off reviewed send', bodyText: 'Second body', attachments: [] });
   expect(state.sent).toEqual(['Flag-off reviewed send | Second body']);
@@ -230,8 +211,6 @@ test('Android: Home withholds the old count until a changed account is reverifie
   await expect(card).toContainText(/Updated \d{1,2}:\d{2}/);
   await expect(card).not.toContainText('Not updated since');
   await expect(card).toHaveAccessibleName('Open Inbox: 1 unread email');
-  // Hold the new account lookup: the old read cannot become current merely because
-  // Settings announced a change. Home now refreshes its authorized source itself.
   const searches = (await fixture(page)).searches;
   await page.evaluate(() => {
     const w=window as any,base=w.Capacitor.nativePromise;
@@ -244,8 +223,6 @@ test('Android: Home withholds the old count until a changed account is reverifie
     };
     window.dispatchEvent(new CustomEvent('alpha:gmail-accounts-changed', { detail: { source: 'settings' } }));
   });
-  // The current-account background reader clears the old identity while it is
-  // unverified, rather than retaining another account's count or timestamp.
   await expect(card).toHaveCount(0);
   await expect(page.locator('[data-alpha-layer="home"] [data-alpha-home-date]')).toHaveCount(0);
   await expect(page.locator('[data-alpha-layer="home"]').getByText('Harbour schedule',{exact:true})).toHaveCount(0);
@@ -255,7 +232,6 @@ test('Android: Home withholds the old count until a changed account is reverifie
   await expect(card).not.toContainText('Not updated since');
   await expect(card).toHaveAccessibleName('Open Inbox: 1 unread email');
   await expect.poll(async()=>(await fixture(page)).searches).toBeGreaterThan(searches);
-  // The current card still opens the same verified mailbox.
   await page.locator('[data-alpha-layer="home"]').evaluate(element=>{element.scrollTop=element.scrollHeight;});
   await card.scrollIntoViewIfNeeded();
   await card.click();
@@ -264,5 +240,4 @@ test('Android: Home withholds the old count until a changed account is reverifie
   expect(foreign).toEqual([]);
 });
 
-// UI progress only: this feature fixture does not manufacture OS/provider grants.
 test.beforeEach(async({page})=>seedCompletedAccessSetup(page));

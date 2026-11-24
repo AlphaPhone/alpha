@@ -2,9 +2,6 @@ import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import { returnToApps } from './app-navigation';
 import { test, expect } from '@playwright/test';
 
-// Real renderer, pairing, connection controller, proposal parser and journal
-// orchestration. Auth, transcript, durable journal and native Clock are controlled
-// boundaries: no model call, physical microphone, Android Intent or real alarm.
 for (const mode of ['confirm','transcribed','zone','modal','unknown','receipt-loss','unavailable','denied','failed','show','snooze','dismiss','browser','old-host','duplicate','review-cancel','review-owner','review-context','review-cancel-failure'] as const) {
   test(`agent Clock handoff: ${mode}`, async ({ page }) => {
     await page.addInitScript((mode) => {
@@ -109,8 +106,6 @@ for (const mode of ['confirm','transcribed','zone','modal','unknown','receipt-lo
     if(mode==='browser')await returnToApps(page);
     const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});
     if(mode==='transcribed'){
-      // Cloud identity is a closed selected-account port; real pairing, EOT,
-      // VOICE_DM send, proposal parsing and human approval remain exercised.
       await page.evaluate(async()=>{const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');c.getCloudEnvironment=()=> 'production';c.getCloudClient=()=>({sessionId:'synthetic-cloud-session',credentialId:'synthetic-cloud-credential',client:{}} as any);c.close();});
       await page.getByRole('button',{name:'Talk',exact:true}).first().press('Enter');
       const voice=page.getByRole('region',{name:'Voice conversation',exact:true});await expect(voice).toHaveAttribute('data-voice-state','listening');
@@ -142,8 +137,6 @@ for (const mode of ['confirm','transcribed','zone','modal','unknown','receipt-lo
       expect(await page.evaluate(async()=>{try{await (await import('/src/runtime/alpha-client.ts')).alphaClient.approve('fixture-proposal');return false;}catch{return true;}})).toBe(true);
       expect(await page.evaluate(()=>(window as any).recoveryFixture.effects)).toBe(0);return;
     }
-    // Activate the actual review button through its keyboard path. The chat sheet
-    // can still be settling after voice closes; nested text is not a stable click target.
     await page.getByRole('button',{name:/^clock handoff /}).press('Enter');
     if(mode==='zone'){await expect(page.getByText('No longer pending',{exact:true}).first()).toBeVisible();expect(await page.evaluate(()=>(window as any).recoveryFixture.effects)).toBe(0);return;}
 
@@ -198,8 +191,6 @@ for (const mode of ['confirm','transcribed','zone','modal','unknown','receipt-lo
       await page.evaluate(()=>{const keep=['fixture-secure','fixture-journal','fixture-effects'].map(k=>[k,localStorage.getItem(k)]);localStorage.clear();for(const [k,v] of keep)if(v)localStorage.setItem(k!,v);});
       await page.reload();await connect();
       const again=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await again.fill('Repeat this same request');await again.press('Enter');
-      // Let the reply settle, then keep the review card in the expanded chat.
-      // A newly opening sheet can scroll its inner text between pointer down/up.
       await expect(page.getByText(/Review the action below\./)).toBeVisible();
       await page.getByRole('button',{name:'Expand chat',exact:true}).click();
       await page.getByRole('button',{name:/^clock handoff /}).click();
@@ -209,10 +200,6 @@ for (const mode of ['confirm','transcribed','zone','modal','unknown','receipt-lo
   });
 }
 
-// Browser development profile: agent-adapter passes an approved Clock operation to
-// BrowserDaily.clockHandoff as `{...request,reviewed:true}` (the operation without `type`).
-// The browser host never negotiates clock.handoff.v1, so this replays that exact call shape and
-// result mapping rather than a protocol proposal. A repeat must not become one saved alarm.
 test('agent Clock handoff: browser development refuses a repeat instead of saving a one-time alarm',async({page})=>{
   await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
   await page.goto('/?mode=dev');
@@ -228,7 +215,6 @@ test('agent Clock handoff: browser development refuses a repeat instead of savin
   });
   expect(outcome).toEqual({days:[2,3,4,5,6],status:'failed',message:'No repeat here',clockStatus:'failed',alarms:0});
   expect(outcome.message).not.toContain('Alarm saved.');
-  // A one-time request through the same call still saves exactly one alarm.
   expect(await page.evaluate(async()=>{const {DailyApps}=await import('/src/daily.ts');const result=await DailyApps.clockHandoff({action:'set',hour:7,minute:0,label:'Once',reviewed:true});return [result.message,(await DailyApps.listReminders()).reminders.filter((row:any)=>row.id.startsWith('alarm_')).length];})).toEqual(['Alarm saved.',1]);
   await page.getByRole('button',{name:'Workflows',exact:true}).click();await page.getByRole('button',{name:'Clock alarms',exact:true}).click();
   const dialog=page.getByRole('dialog',{name:'Clock alarms',exact:true});await expect(dialog.getByText('Once',{exact:true})).toBeVisible();await expect(dialog.getByText('Weekday wake',{exact:true})).toHaveCount(0);

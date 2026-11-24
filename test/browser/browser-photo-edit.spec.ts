@@ -1,7 +1,6 @@
 import { returnToApps } from './app-navigation';
 import {test,expect,type Page} from '@playwright/test';
 
-// Controlled source pixels in real IndexedDB; the production editor/canvas and UI are used.
 async function seed(page:Page,width=240,height=120){
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.goto('/');
@@ -13,7 +12,6 @@ async function seed(page:Page,width=240,height=120){
   await new Promise<void>((resolve,reject)=>{const request=indexedDB.open('alpha.browser.photos.v1');request.onsuccess=()=>{const db=request.result,tx=db.transaction('photos','readwrite');tx.objectStore('photos').add(original);tx.oncomplete=()=>{db.close();resolve();};tx.onabort=()=>reject(tx.error);};request.onerror=()=>reject(request.error);});
   return original;
  },{width,height});
- // Boot after the durable seed exists, so the initial library read sees it.
  await page.reload();
  return original;
 }
@@ -52,8 +50,6 @@ test('lost photo-copy response and reload recover the same durable receipt witho
   const save=library.saveEdit,result=library.editResult,forget=library.forgetEdit;
   (window as any).copyFixture={save,result,recoveryReads:0,acknowledgements:0};
   library.saveEdit=async input=>{(window as any).savedEdit=input;await save(input);throw Error('Synthetic lost reply after commit');};
-  // Withhold recovery as well: an immediately readable result would be acknowledged
-  // and its receipt intentionally removed before this test tries a replay.
   library.editResult=async()=>{(window as any).copyFixture.recoveryReads++;throw Error('Synthetic unavailable recovery until reload');};
   library.forgetEdit=async input=>{(window as any).copyFixture.acknowledgements++;return forget(input);};
  });
@@ -172,7 +168,6 @@ test('Replace overwrites the original in place: same id and date, new revisions,
  expect(result.row.date).toBe(original.date);
  expect([result.row.width,result.row.height]).toEqual([original.height,original.width]);
  expect(result.row.revision).not.toBe(original.revision);expect(result.row.mutationRevision).not.toBe(original.mutationRevision);
- // A save that names the old revision can no longer apply (the reviewed revision is gone).
  const stale=await page.evaluate(async()=>{const {browserPhotoLibrary:library}=await import('/src/prototype/browser-camera.ts');try{await library.beginEdit({id:'1000',revision:'original-metadata'});return 'opened';}catch(error){return String((error as Error).message);}});
  expect(stale).toMatch(/changed/);
 });

@@ -1,7 +1,5 @@
 import {test,expect} from '@playwright/test';
 import {cloudNotesVoiceFixture,notesRecorder,openNotesRecorder,recordAndFinish,savedVoiceNotes,noPhysicalOrLocalVoice} from './cloud-notes-voice-fixture';
-// Default Notes UI is Cloud-only. The browser has no speech engine of its own: local speech
-// runs on the local agent (native libelizainference), and without one it is unavailable.
 
 test('without a local agent, local speech is unavailable and no engine, model or worker is loaded',async({page})=>{
  const engine:string[]=[];page.on('request',request=>{const url=new URL(request.url());if(url.pathname.startsWith('/browser-speech/')||/\.wasm$/.test(url.pathname))engine.push(url.pathname);});
@@ -19,10 +17,7 @@ test('without a local agent, local speech is unavailable and no engine, model or
    return {status,error,failure,clipKept:(voice as any).capture.get('no-agent')!==undefined,gate:{workers:(window as any).engineGate.workers-before.workers,wasm:(window as any).engineGate.wasm-before.wasm}};
   }finally{connectionController.getBrowserSpeechAgent=original;await voice.releaseLocalSpeech();}
  });
- // Recognition readiness names the local agent route and never an in-browser engine or model;
- // P-43: no Web Speech read-aloud either; replies are read as text until the agent's speech runs.
  expect(result.status).toEqual({ready:false,playback:false,execution:'browser',route:'local-agent',reason:'local-agent-required'});
- // No silent fallback to Cloud or to an in-browser engine: the clip stays, and the user is told what to connect.
  expect(result.error).toEqual({code:'local-agent-required',message:'Connect the local agent to transcribe on this computer.'});
  expect(result.failure?.kind).toBe('local-agent');expect(result.failure?.message).toMatch(/needs the local agent on this computer.*Your recording is kept/);
  expect(result.clipKept).toBe(true);expect(result.gate).toEqual({workers:0,wasm:0});expect(engine).toEqual([]);
@@ -32,7 +27,6 @@ test('with a local agent, transcription sends a 16 kHz mono WAV to the agent and
  await page.goto('/?tools=1');
  const result=await page.evaluate(async()=>{
   const {BrowserVoice}=await import('/src/browser/voice.ts'),{connectionController}=await import('/src/runtime/connection-ui.tsx');
-  // An 8 kHz PCM16 tone the browser decodes and the voice facade resamples before upload.
   const rate=8000,frames=rate,buffer=new ArrayBuffer(44+frames*2),view=new DataView(buffer),text=(at:number,s:string)=>{for(let i=0;i<s.length;i++)view.setUint8(at+i,s.charCodeAt(i));};
   text(0,'RIFF');view.setUint32(4,buffer.byteLength-8,true);text(8,'WAVE');text(12,'fmt ');view.setUint32(16,16,true);view.setUint16(20,1,true);view.setUint16(22,1,true);view.setUint32(24,rate,true);view.setUint32(28,rate*2,true);view.setUint16(32,2,true);view.setUint16(34,16,true);text(36,'data');view.setUint32(40,frames*2,true);
   for(let i=0;i<frames;i++)view.setInt16(44+i*2,Math.round(Math.sin(i/rate*2*Math.PI*440)*12000),true);
@@ -74,7 +68,6 @@ test('a recording saves its audio without needing recognized words',async({page}
 test('microphone denial keeps the recorder open with one line and no transcription or provider fallback',async({page})=>{
  await cloudNotesVoiceFixture(page);await page.evaluate(()=>(window as any).cloudNotesVoice.denied=true);await openNotesRecorder(page);const panel=notesRecorder(page);
  await expect(panel).toHaveAttribute('data-recorder-state','failed');await expect(panel.getByRole('alert')).toHaveText('Mic off');await expect(panel.getByRole('button',{name:'Stop recording',exact:true})).toBeDisabled();
- // A denied capture opens the existing permission review; dismiss it before retrying.
  const permission=page.getByRole('dialog',{name:'Access',exact:true});await expect(permission).toBeVisible();await expect(permission.locator('[aria-current=step]',{hasText:'Microphone'})).toBeVisible();await page.keyboard.press('Escape');await expect(permission).toHaveCount(0);
  await page.evaluate(()=>(window as any).cloudNotesVoice.denied=false);await panel.getByRole('button',{name:'Record',exact:true}).click();await expect(panel).toHaveAttribute('data-recorder-state','recording');
  expect(await page.evaluate(()=>(window as any).cloudNotesVoice.uploads)).toBe(0);await noPhysicalOrLocalVoice(page);

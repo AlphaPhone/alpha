@@ -1,7 +1,6 @@
 import {expect,type Page} from '@playwright/test';
 import {harness} from '../flag-off-android';
 import {selectLegacyNotes} from './legacy-notes';
-/** A synthetic retained native document, explicitly selected; no agent Notes fallback. */
 export async function openRetainedNativeNotes(page:Page){
  await harness(page,f=>{
   const key='notes-records:v1:device';

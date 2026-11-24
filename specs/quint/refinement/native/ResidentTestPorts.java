@@ -7,7 +7,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.json.JSONObject;
 
-/** Controlled service/OS replies. Production plugin code owns every lifecycle decision. */
 public final class ResidentTestPorts {
   public static String nativeDirectory;
   public static boolean packaged = true;

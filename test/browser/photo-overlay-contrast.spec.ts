@@ -28,7 +28,6 @@ for(const theme of ['light','dark']) {
   await page.getByRole('button',{name:/^Video,/}).first().click();
   const play=page.getByRole('button',{name:'Play video',exact:true});
   await expect(play).toBeVisible();await expectWhiteImageContrast(play);
-  // Worst-case photograph underneath the actual viewer controls.
   await page.locator('[data-alpha-subview="photos-viewer"] > button:first-child > span > span').first().evaluate(el=>(el as HTMLElement).style.background='#fff');
   await play.click();
   const pause=page.getByRole('button',{name:'Pause video',exact:true});

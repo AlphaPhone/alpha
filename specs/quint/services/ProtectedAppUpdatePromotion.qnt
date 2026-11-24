@@ -1,5 +1,3 @@
-// Current release command boundaries with closed GitHub/storage ports.
-// A restored synthetic signed bundle supplies no real signing or qualification authority.
 module ProtectedAppUpdatePromotion {
   type Public = {release: bool, apk: str, pointer: str, floor: int,
     apkVerified: bool, pointerWrite: bool, receipt: bool}
@@ -11,8 +9,6 @@ module ProtectedAppUpdatePromotion {
     apkVerified: false, pointerWrite: false, receipt: false}
   action init = s' = {lane: "none", plan: false, unsigned: false, candidateAttempt: 0, protectedAttempt: 0, object: false,
     privateReceipt: false, review: false, restored: false, public: emptyPublic}
-  // A main-push candidate needs its own exact route, including the successful
-  // run attempt, official archive, native input receipt and private mirror pin.
   action admit(lane: str, exact: bool): bool = all {
     s.lane == "none", lane.in(Set("dispatch", "private")),
     s' = {...s, lane: lane, plan: exact}
@@ -31,8 +27,6 @@ module ProtectedAppUpdatePromotion {
     s' = {...s, unsigned: exact and attempt == s.candidateAttempt,
       protectedAttempt: if (exact and attempt == s.candidateAttempt) attempt else 0}
   }
-  // Private media upload is create-if-absent. A lost response can leave a
-  // complete object without a receipt. An interrupted request can commit nothing.
   action uploadPrivate(fault: str): bool = all {
     s.lane.in(Set("push", "private")), s.unsigned,
     s' = {...s, object: s.object or fault.in(Set("ok", "after")),

@@ -1,6 +1,3 @@
-/// A photo the assistant asks Camera to take. The request waits for a preview that is still
-/// starting, is refused when a recording starts first, takes the shutter exclusively, and
-/// reports failed only when nothing was dispatched.
 module AgentPhotoRequest {
   type State = {
     view: bool, phase: str, busyBy: str, request: str, refused: bool, aborted: bool,
@@ -14,21 +11,16 @@ module AgentPhotoRequest {
   pure def finished(v: State, result: str): State =
     { ...v, request: "none", refused: false, aborted: false, result: result, holds: v.holds - 1,
       busyBy: if (v.busyBy == "agent") "none" else v.busyBy }
-  /// The view starts its preview, or the owner retries after an error.
   action startPreview = all { s.view, s.phase == "off" or s.phase == "error", s' = { ...s, phase: "starting" } }
   action startSettles(ok: bool): bool = all { s.phase == "starting",
     s' = { ...s, phase: if (ok) "ready" else "error" } }
   action leaveView = all { s.view, s.busyBy != "agent",
     s' = { ...s, view: false, phase: "off", busyBy: "none" } }
   action enterView = all { not(s.view), s' = { ...s, view: true } }
-  /// A recording that starts while a request is still queued refuses that request.
   action recordingStarts = all { s.phase == "ready", s.busyBy == "none",
     s' = { ...s, busyBy: "recording", refused: s.request == "queued" } }
   action ownerShutter = all { s.phase == "ready", s.busyBy == "none", s' = { ...s, busyBy: "owner" } }
   action cameraIdle = all { s.busyBy == "recording" or s.busyBy == "owner", s' = { ...s, busyBy: "none" } }
-  /// The assistant asks. A hidden Camera, an earlier request or a busy camera fails at once.
-  /// Over a ready preview the shutter follows without a pause; otherwise the request queues and
-  /// starts the preview unless a start is already in flight.
   action agentAsks = all { s.request == "none", s.agentRows < 3,
     val asked = { ...s, result: "none", dispatched: false, rowsAtRequest: s.agentRows, refused: false, aborted: false }
     s' = if (not(s.view) or s.busyBy != "none") { ...asked, result: "failed" }
@@ -36,16 +28,12 @@ module AgentPhotoRequest {
       else { ...asked, request: "queued", holds: s.holds + 1,
         phase: "starting", startsByAgent: if (s.phase == "starting") s.startsByAgent else s.startsByAgent + 1 }
   }
-  /// A stale context is detected when the queued request rechecks its authority.
   action requestChanges = all { s.request == "queued", s' = { ...s, aborted: true } }
-  /// An abort signal actively releases the wait without waiting for a sensor result.
   action cancelWaiting = all { s.request == "queued", s' = finished(s, "failed") }
-  /// The start settled: the queued request is checked again right before the shutter.
   action agentResumes = all { s.request == "queued", s.phase != "starting",
     s' = if (s.aborted or s.refused or not(s.view) or s.phase != "ready" or s.busyBy != "none") finished(s, "failed")
       else { ...s, request: "dispatched", dispatched: true, busyBy: "agent" }
   }
-  /// The shutter settles: a saved photo with its identity, a saved photo without one, or an error.
   action shutterSettles(outcome: str, written: bool): bool = all { s.request == "dispatched",
     Set("saved", "unidentified", "threw").contains(outcome),
     s' = if (outcome == "saved") finished({ ...s, agentRows: s.agentRows + 1 }, "succeeded")
@@ -71,7 +59,6 @@ module AgentPhotoRequest {
   val RecordingRefusedWitness = s.refused and s.busyBy == "recording"
   val AgentPhotoWitness = s.result == "succeeded" and s.agentRows == 2
   val UnknownWithoutRowWitness = s.result == "unknown" and s.agentRows == s.rowsAtRequest
-  /// The assistant asks while the preview is still starting: the photo waits for that start.
   run agentJoinsStartingPreviewTest = init.then(startPreview).then(agentAsks)
     .expect(s.request == "queued" and s.phase == "starting" and s.startsByAgent == 0 and s.result == "none" and safety)
     .then(startSettles(true)).then(agentResumes).then(shutterSettles("saved", true))

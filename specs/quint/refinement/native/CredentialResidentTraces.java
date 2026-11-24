@@ -8,10 +8,6 @@ import java.util.concurrent.TimeUnit;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/**
- * Real request/stream entry points must retire before a credential mutation
- * reaches storage.
- */
 public final class CredentialResidentTraces {
   static final JSONArray observations = new JSONArray();
   static Object field(String name) throws Exception {

@@ -1,4 +1,3 @@
-// Product assistant surfaces with process-local Sense receipts and controlled Android delivery.
 module NativeAssistantEntry {
   type Grant = {present: bool, invalid: bool, focused: bool, bridge: int,
     bound: bool, at: int, account: int, epoch: int}
@@ -41,7 +40,6 @@ module NativeAssistantEntry {
   action environment(locked: bool, policy: str, signers: bool, protected: bool): bool = all {
     policy.in(policies), s'={...s,locked:locked,policy:policy,signers:signers,systemSigner:signers,protected:protected}
   }
-  // These inputs summarize separately observed image qualification and current certificates.
   action imageAdmission(image: bool): bool = s'={...s,image:image}
   action trustedSigners(listener: bool, system: bool): bool =
     s'={...s,signers:listener,systemSigner:system}
@@ -52,8 +50,6 @@ module NativeAssistantEntry {
   }
   action tick(now: int): bool = all { now.in(times), now>=s.now, s'={...s,now:now} }
 
-  // Exact sanitized intent forwarding during Capacitor's load keeps the first origin.
-  // An adversarial copied argument takes the ordinary Activity delivery path.
   action createWithLoad(id: int, kind: str, restored: bool, bridge: bool, caller: str, exactLoad: bool): bool = all {
     id.in(ids), s.surfaces.get(id).kind=="none",
     kind.in(Set("assist","power")), caller.in(callers),

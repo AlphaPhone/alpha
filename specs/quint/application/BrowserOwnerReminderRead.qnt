@@ -1,4 +1,3 @@
-// Passive owner-reminder transport as implemented by the browser port.
 module BrowserOwnerReminderRead {
   type State = {owner: str, mode: str, epoch: int, privacy: bool, shade: bool,
     rows: str, status: str, blocked: bool, reads: int, now: int, lastRead: int,

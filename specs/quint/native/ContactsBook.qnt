@@ -1,4 +1,3 @@
-// Address-book reads, owner editing and agent-proposed create/edit/delete with owner approval.
 module ContactsBook {
   type State = {
     image: bool, permission: bool, front: bool, epoch: int,
@@ -23,14 +22,12 @@ module ContactsBook {
   val ready = s.image and s.permission and s.front
   action admitImage = s' = {image: true, ...s}
   action grant = all { s.image, s' = {permission: true, ...s} }
-  // Losing access closes every surface that shows or mutates a contact.
   action revoke = all {
     s.epoch < 3,
     s' = {permission: false, epoch: s.epoch + 1, list: "none", editor: "closed", dirty: false,
       confirmDelete: false,
       proposal: if (s.proposal == "proposed") "stale" else s.proposal, ...s}
   }
-  // Backgrounding or locking keeps an unsaved editor but retires reads and pending approvals.
   action pause = all {
     s.epoch < 3,
     s' = {front: false, epoch: s.epoch + 1, list: "none", confirmDelete: false,
@@ -42,7 +39,6 @@ module ContactsBook {
     if (s.list == "reading" and ticket == s.listEpoch and ticket == s.epoch and ready)
       s' = s.with("list", if (ok) "loaded" else "failed")
     else s' = s
-  // Another app or sync changes the same contact.
   action externalChange = all {
     s.exists, s.revision < 3,
     s' = {revision: s.revision + 1,
@@ -63,7 +59,6 @@ module ContactsBook {
   }
   action typeText = all { s.editor != "closed", s' = {dirty: true, ...s} }
   action cancelEditor = all { s.editor != "closed", s' = {editor: "closed", dirty: false, ...s} }
-  // A save against a changed or removed contact keeps the editor and reports the conflict.
   action save(ok: bool): bool = all {
     ready, s.editor != "closed", s.dirty, s.revision < 3,
     if (s.editor == "editing" and (not(s.exists) or s.editorBase != s.revision))
@@ -83,7 +78,6 @@ module ContactsBook {
         proposal: if (s.proposal == "proposed" and s.proposalKind != "create") "stale" else s.proposal, ...s}
       else {confirmDelete: false, notice: "failed", ...s}
   }
-  // The agent may only propose. Edit and delete bind the revision the agent was shown.
   action propose(kind: str): bool = all {
     ready, s.proposal.in(Set("none", "applied", "declined", "stale", "failed")),
     kind.in(Set("create", "edit", "delete")),
@@ -100,8 +94,6 @@ module ContactsBook {
       exists: s.proposalKind != "delete", revision: s.revision + 1,
       confirmDelete: false, ...s}
   }
-  // A dispatched provider batch may commit before its reply is lost. Neither result authorizes
-  // replaying this proposal; the actual write counter is an environment fact, not a success claim.
   action approveUnknown(committed: bool): bool = all {
     ready, s.proposal == "proposed", s.revision < 3,
     s.proposalKind == "create" or (s.exists and s.proposalBase == s.revision),
@@ -110,7 +102,6 @@ module ContactsBook {
       exists: if (committed) s.proposalKind != "delete" else s.exists,
       revision: s.revision + (if (committed) 1 else 0), confirmDelete: false, ...s}
   }
-  // A repeated approval or replayed operation id changes nothing.
   action repeat = s' = s
   action step = {
     nondet flag = Set(false, true).oneOf()

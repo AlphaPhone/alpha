@@ -10,8 +10,6 @@ export interface CanonicalCalendarFixtureOptions {
   organizerSelf?: boolean;
   guestEmails?: string[];
 }
-/** Closed read-only CalendarService transport. Install before navigation when another
- * native fixture adds event handoffs. The current client, controller and UI run unchanged. */
 export async function installCanonicalCalendarFixture(page: Page, options: CanonicalCalendarFixtureOptions = {}) {
   const foreign: string[] = [];
   await page.route(
@@ -138,8 +136,6 @@ export async function installCanonicalCalendarFixture(page: Page, options: Canon
   if(native)await page.addInitScript(install,{native,options});
   return {native,foreign,install,options};
 }
-/** Open the current Calendar view over the closed service fixture, without choosing
- * retired Settings authorities or creating a record. */
 export async function openCanonicalCalendar(page:Page,options:CanonicalCalendarFixtureOptions={}) {
   const native=test.info().project.name==='production';
   if(native)await flagOffAndroid(page);
@@ -166,7 +162,6 @@ export async function openCanonicalCalendar(page:Page,options:CanonicalCalendarF
   if(!options.eventTitle)await expect(page.getByText("No events", { exact: true })).toBeVisible();
   expect(fixture.foreign).toEqual([]);
 }
-/** Accessibility form fixture: opening New event never writes a record. */
 export async function openCanonicalCalendarForm(page:Page,theme='light') {
   await openCanonicalCalendar(page,{theme});
   await page.getByRole("button", { name: "New event", exact: true }).click();

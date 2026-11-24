@@ -1,9 +1,6 @@
 import {expect,test,type Page} from '@playwright/test';
 import {fenceNetwork,flagOffAndroid,residentHome} from './flag-off-android';
 
-// The shipped renderer, ProviderKeys and real connection controller run together.
-// Only the native boundary is synthetic. Status publishes the edited revision
-// before Agent.start resolves, reproducing the reconnect race; no provider/device use.
 async function fixture(page:Page){
  await fenceNetwork(page);await flagOffAndroid(page);
  await page.addInitScript(()=>{
@@ -62,7 +59,6 @@ test('A saved voice key can be removed after an explicit second step, and the pa
  await page.getByRole('button',{name:'Account',exact:true}).click();
  await page.getByRole('button',{name:/^AI (Cloud|Own keys)$/}).click();
  const panel=page.getByRole('dialog',{name:'AI connection',exact:true});await expect(panel).toBeVisible();
- // Direct is in use, so its tab is shown without the owner choosing it.
  await expect(panel.getByRole('button',{name:'Direct',exact:true})).toHaveAttribute('aria-pressed','true');
  await expect(panel.getByRole('button',{name:'Switch to Cloud',exact:true})).toHaveCount(0);
  await panel.getByRole('button',{name:'Remove saved voice key',exact:true}).click();

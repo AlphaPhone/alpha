@@ -1,7 +1,6 @@
 import { openLegacyNotes } from './helpers/legacy-notes';
 import { test, expect } from '@playwright/test';
 
-// Production renderer in a touch viewport. This does not qualify Android rotation or TalkBack.
 test.use({ hasTouch: true, isMobile: true, viewport: { width: 915, height: 412 } });
 
 test('Notes keeps a readable column and preserves the same draft, caret and scroll through resizing', async ({ page }) => {
@@ -34,7 +33,6 @@ test('Notes keeps a readable column and preserves the same draft, caret and scro
     const bounds = await body.boundingBox();
     expect(bounds!.width).toBeLessThanOrEqual(Math.min(721, viewport.width - 47));
     expect(bounds!.x).toBeGreaterThanOrEqual(23);
-    // Resizing must keep the owner's existing scroll position, not return to the first line.
     expect(await body.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
   }
   await page.getByRole('button', { name: 'Back to notes', exact: true }).click();

@@ -1,4 +1,3 @@
-// Current Agent Calendar read actor. Accepted mutations and replay are separate.
 module AgentCalendarRefresh {
   type Job = {phase: str, owner: str, session: int, query: int, revalidating: bool, aborted: bool,
     feed: str, sources: str, next: str}

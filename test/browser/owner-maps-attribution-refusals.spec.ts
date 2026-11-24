@@ -1,17 +1,10 @@
 import { returnToApps } from './app-navigation';
 import { test, expect, type Page } from '@playwright/test';
 
-// Owner prep for #667 (H-16, H-35). Test-mocks renderer with a synthetic Cloud Maps provider: the
-// real Maps screen, the real Cloud failure mapping (cloudMapsFailure) and no network provider.
-// It shows what Alpha renders for OpenStreetMap credit and for each typed Cloud Maps refusal. It is
-// not evidence of a deployed Cloud Maps service, real coverage or a device.
-
 const ATTRIBUTION = '© OpenStreetMap contributors (ODbL). Search: Nominatim. Routing: GraphHopper.';
 
 type Refusal = { status: number; code: string; retryAfterSeconds?: number };
 
-// Boots once. Each search refuses with window.mapsRefusal (none when null); window.refusalMessage
-// maps a refusal through the real cloudMapsFailure, and window.mapsSearches counts searches.
 async function openMaps(page: Page) {
   await page.goto('/?mode=dev');
   await page.evaluate(async ({ attribution }) => {
@@ -51,7 +44,6 @@ test('Maps keeps the OpenStreetMap copyright credit one tap away beside Cloud re
   await openMaps(page);
   await search(page, 'Port');
   await expect(page.getByRole('button', { name: /^Port Hercule/ }).first()).toBeVisible();
-  // Provider attribution stays visible; opening ⓘ keeps the same credit link available.
   await page.locator('.alpha-map-credits summary[aria-label="Map information and credits"]').click();
   const credit = page.locator('.alpha-map-credits a[href="https://www.openstreetmap.org/copyright"]');
   await expect(credit).toBeVisible();
@@ -61,7 +53,6 @@ test('Maps keeps the OpenStreetMap copyright credit one tap away beside Cloud re
 const REFUSALS: (Refusal & { text: RegExp })[] = [
   { status: 503, code: 'maps_allowance_unconfigured', text: /^Cloud Maps is not available yet\.$/ },
   { status: 403, code: 'subscription_required', text: /needs an active Cloud subscription/ },
-  // Not next to maps_allowance_unconfigured: the same message would already be on screen.
   { status: 503, code: 'maps_not_configured', text: /^Cloud Maps is not available yet\.$/ },
   { status: 422, code: 'unsupported_region', text: /outside Cloud Maps coverage/ },
   { status: 429, code: 'rate_limited', retryAfterSeconds: 42, text: /Try again in about 42 seconds/ },
@@ -81,8 +72,6 @@ test('each typed Cloud refusal is shown as its own message, with no invented res
     await expect(page.getByRole('button', { name: /^Port Hercule/ })).toHaveCount(0);
     shown.set(refusal.code, expected);
   }
-  // Both unconfigured codes mean this Cloud does not serve Maps, so they share one message.
-  // Every other code has a message of its own.
   expect(shown.get('maps_not_configured')).toBe(shown.get('maps_allowance_unconfigured'));
   expect(new Set(shown.values()).size).toBe(REFUSALS.length - 1);
 });

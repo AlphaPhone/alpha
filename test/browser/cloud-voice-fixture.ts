@@ -1,7 +1,5 @@
 import type {Page} from '@playwright/test';
 
-/** Closed Cloud account fixture. Recording still uses the browser's real recorder;
- * tests supply synthetic input and no provider or speaker is contacted. */
 export async function installCloudVoiceFixture(page:Page,transcript='Synthetic Cloud transcript',queuedSpeech=false){
  await page.evaluate(async({transcript,queuedSpeech})=>{
   const w=window as any;

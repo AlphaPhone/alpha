@@ -1,4 +1,3 @@
-/// Cached authorization and exact managed-service route admission are separate decisions.
 module ServiceAuthorization {
   type Authorization = {
     owner: int, epoch: int, tokenOwner: int, tokenEpoch: int,
@@ -17,12 +16,10 @@ module ServiceAuthorization {
     s.refresh == "idle", s.owner != 0,
     s' = { ...s, refresh: "pending", fallback: "none", tokenOwner: s.owner, tokenEpoch: s.epoch }
   }
-  /// An absent signed route permits an authenticated billing snapshot.
   action noSignedToken = all {
     s.refresh == "pending", s.fallback == "none",
     s' = { ...s, fallback: "absent" }
   }
-  /// Signed no-plan can be supplemented only by explicit organization-credit mode.
   action signedNoPlan = all {
     s.refresh == "pending", s.fallback == "none",
     s' = { ...s, fallback: "no-plan" }
@@ -55,7 +52,6 @@ module ServiceAuthorization {
       validFor: if (s.fallback == "no-plan") 0 else s.validFor,
       signedRefusal: false, credits: false }
   }
-  /// Snapshot/credit views have no signed lifetime. Their refresh timer is independent.
   action tick = all {
     s.source == "signed", s.validFor > 0,
     s' = { ...s, validFor: s.validFor - 1,
@@ -71,8 +67,6 @@ module ServiceAuthorization {
     "self-revoke", "billing", "entitlement", "redeem", "google-account"))
   val inferenceAdmitted = s.plan.in(Set("active", "past-due")) and
     (s.source == "snapshot" or s.validFor > 0) or s.credits
-  /// This is transport route admission. Cloud still authorizes every service request. A route
-  /// outside the table, or one Cloud refuses, is recorded as the last request and never dispatched.
   action serviceRequest(route: str, serverAllows: bool): bool = all {
     s.owner != 0,
     val admitted = allowedRoute(route) and serverAllows
@@ -94,7 +88,6 @@ module ServiceAuthorization {
   val ExpiryHonest = s.source == "signed" and s.plan.in(Set("active", "past-due")) implies s.validFor > 0
   val SnapshotHasNoSignedLifetime = s.source.in(Set("snapshot", "credits")) implies s.validFor == 0
   val CanonicalCreditView = s.credits implies s.source == "credits" and s.plan == "credits"
-  /// A last request without a dispatch was refused by the route table or by Cloud.
   val UndispatchedRequestWasRefused = s.request != "none" and not(s.dispatched) implies s.refusedRequests > 0
   val ExactManagedRoute = s.dispatched implies allowedRoute(s.request)
   val CurrentDispatch = s.dispatched implies s.requestOwner == s.owner and s.requestEpoch == s.epoch
@@ -129,7 +122,6 @@ module ServiceAuthorization {
     .then(snapshotReply("credits")).expect(s.credits and inferenceAdmitted and safety)
   run signedOutageKeepsUnexpiredTest = init.then(beginRefresh).then(refreshReply("active"))
     .then(beginRefresh).then(refreshOutage).expect(s.plan == "active" and inferenceAdmitted and safety)
-  /// A route outside the table and a request Cloud refuses each replace an earlier dispatch.
   run refusedRouteReplacesDispatchTest = init.then(serviceRequest("maps", true)).expect(s.dispatched)
     .then(rejectRoute("cli-session")).expect(not(s.dispatched) and s.request == "cli-session" and safety)
     .then(serviceRequest("billing", true)).expect(s.dispatched and safety)

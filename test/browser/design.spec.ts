@@ -27,7 +27,6 @@ for(const theme of ['light','dark']) test(`design ${theme}: shell and conversati
   for(const state of ['home','boot','lock','shade','sheet','full','voice','heads']){
     await page.goto(`/?mode=mock&theme=${theme}&start=${state}`);
     await expect(page.locator('.mock-mode-banner')).toBeVisible();
-    // SMS heads-up is deferred by the MVP scope and intentionally returns Home.
     if(state==='heads')await expect(page.getByRole('button',{name:'Inbox',exact:true})).toBeVisible();
   }
   expect(errors).toEqual([]);

@@ -47,8 +47,6 @@ async function requestFilter(page:Page){
  return review;
 }
 
-// Hold the mounted component's single filter write. Its real adapter, React updater,
-// and completion callback run unchanged when the test releases the call.
 async function holdFilterUpdate(page:Page){
  await page.evaluate(async()=>{
   const {Component}=await import('/src/prototype/model.js');
@@ -65,8 +63,6 @@ async function holdFilterUpdate(page:Page){
   };
  });
 }
-// Run the mounted component's filter write unchanged (its `when` updater runs and React commits
-// the state) but hold the completion callback, so success can only come from the commit callback.
 async function holdFilterCommit(page:Page){
  await page.evaluate(async()=>{
   const {Component}=await import('/src/prototype/model.js');
@@ -102,8 +98,6 @@ test('the approved canonical Notes filter receives success after the active list
  const {foreign,errors}=await setup(page,{text:'checklist',kind:'list'});
  await holdFilterCommit(page);
  await (await requestFilter(page)).click();
- // The admitted list has committed; only its completion callback is held. A receipt written
- // before that callback runs is a failure, not a wait condition.
  await expect.poll(async()=>await filterCommitted(page)||(await actionState(page)).journal.length>0).toBe(true);
  expect((await actionState(page)).journal).not.toContainEqual(['terminal','succeeded']);
  expect(await filterCommitted(page)).toBe(true);

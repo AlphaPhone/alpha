@@ -1,4 +1,3 @@
-// Current Calendar create/update/delete admission and read deferral.
 module AgentCalendarMutation {
   type Job = {phase: str, epoch: int, owner: str, session: int, kind: str, issue: str, profile: str, aborted: bool}
   type Dispatch = {id: int, owner: str, session: int, kind: str, side: str, grant: str, calendar: str,

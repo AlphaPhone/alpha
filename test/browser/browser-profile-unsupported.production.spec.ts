@@ -1,6 +1,5 @@
 import {test,expect,type Page} from '@playwright/test';
 import {flagOffAndroid,fenceNetwork,residentHome} from './flag-off-android';
-// Flag-off renderer/CSS; a closed native failure does not qualify WebView capability.
 async function failingBrowser(page:Page,message:string){await page.addInitScript(message=>{
  const w=window as any,c=w.Capacitor,previous=c.nativePromise;w.browserFailureCalls=[];
  c.PluginHeaders.push({name:'AlphaBrowser',methods:['create','navigate','present','close','bookmarks','browsingState','saveBrowsingState','readingSupport','share','openExternalBrowser'].map(name=>({name,rtype:'promise'})).concat([{name:'addListener',rtype:'callback'},{name:'removeListener',rtype:'callback'}])});
@@ -8,7 +7,6 @@ async function failingBrowser(page:Page,message:string){await page.addInitScript
 },message);}
 for(const width of [360,412])for(const unsupported of [true,false])test(`Browser ${unsupported?'profile refusal stays explained':'unrelated error stays distinct'} ${width}px`,async({page},info)=>{
  await page.setViewportSize({width,height:780});await fenceNetwork(page);await flagOffAndroid(page);await failingBrowser(page,unsupported?'This Android WebView does not support isolated browser profiles':'Transient browser creation failed');await residentHome(page);
- // The 30-day fixture has no expiry notice; inspect Browser geometry without fabricating one.
  await expect(page.getByRole('region',{name:'Eliza Cloud sign-in notice',exact:true})).toHaveCount(0);
  await page.getByRole('button',{name:'Browser',exact:true}).click();await page.getByRole('button',{name:'Search or type address',exact:true}).click();
  const address=page.getByRole('textbox',{name:'Address',exact:true});await address.fill('https://example.invalid/');await address.press('Enter');
@@ -18,8 +16,6 @@ for(const width of [360,412])for(const unsupported of [true,false])test(`Browser
  await page.keyboard.press('Escape');await expect(page.getByRole('button',{name:'Edit address',exact:true})).toBeVisible();if(unsupported)await expect(notice).toBeVisible();await page.evaluate(()=>window.dispatchEvent(new Event('alpha-back',{cancelable:true})));await expect(page.getByRole('button',{name:'Browser',exact:true})).toBeVisible();
 });
 
-// The existing Android fixture has no AlphaBrowser implementation. Capacitor's real proxy
-// throws CapacitorException(Unimplemented); this is renderer evidence, not a device failure.
 test('missing Browser implementation reports plain language without the internal plugin name',async({page})=>{
  await fenceNetwork(page);await flagOffAndroid(page);await residentHome(page);await page.getByRole('button',{name:'Browser',exact:true}).click();
  await expect(page.getByText('Unavailable',{exact:true})).toBeVisible();

@@ -7,9 +7,6 @@ import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { FORBIDDEN_ENGINE_PATH, engineFindings } from '../../scripts/audit-production-bundle.ts';
 import { openLegacyNotes } from './helpers/legacy-notes';
-// Runs only in the `production` project: a flag-off `vite build` served by `vite preview`.
-// It proves the shipped web bundle exposes no mock, fixture or developer surface.
-// It does not prove Android packaging, which is audited separately per APK.
 
 const fixtureNames = ['Maya Chen', 'Jordan Park', 'Priya Nair', 'Alex Kim', 'Ritual Coffee', 'Design review at', 'Unlock for details', 'you@gmail.example'];
 const offline = () => localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({ kind: 'offline' }));
@@ -24,8 +21,6 @@ async function trackCsp(page: Page) {
   return async () => [...violations, ...await page.evaluate(() => (window as any).cspViolations as string[])];
 }
 
-// Owner rule: speech runs only on the native libelizainference stack (on the phone, or the local
-// agent on a computer). The built web bundle carries no speech model, worker or inference runtime.
 test('the built bundle ships no in-browser speech engine, model or inference runtime', async ({ request }) => {
   const dir = path.resolve(`test-results/production-web-${Number(process.env.ALPHA_BROWSER_TEST_PORT||5317)+1}`);
   const walk = (current: string): string[] => readdirSync(current, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? walk(path.join(current, entry.name)) : [path.relative(dir, path.join(current, entry.name)).split(path.sep).join('/')]);
@@ -34,7 +29,6 @@ test('the built bundle ships no in-browser speech engine, model or inference run
   expect(files.filter(file => file.startsWith('browser-speech/'))).toEqual([]);
   const findings = files.flatMap(file => engineFindings(file, /\.(?:html?|js|mjs|css|json|txt)$/i.test(file) ? readFileSync(path.join(dir, file), 'utf8') : undefined));
   expect(findings).toEqual([]);
-  // The removed model manifest is not served (the preview's SPA fallback answers with HTML, never JSON).
   const manifest = await request.get('/browser-speech/manifest.json');
   expect(manifest.headers()['content-type'] ?? '').not.toContain('application/json');
 });
@@ -88,8 +82,6 @@ test('a stored mock selection on Android reads as the resident (P-43) and never 
   });
   await page.goto('/?tools=1');
   const chooser = page.locator('.alpha-connection');
-  // P-43: the resident is the selection (this stub has no packaged runtime). Signed out, the
-  // Eliza Cloud sign-in dialog opens; no chooser, mock or pairing surface does.
   await expect(page.locator('[role="main"].alpha-cloud-sign-in')).toBeVisible();
   await expect(chooser.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
   await expect(chooser.getByText(/Mock mode|Pairing code|Remote agent/)).toHaveCount(0);
@@ -98,12 +90,10 @@ test('a stored mock selection on Android reads as the resident (P-43) and never 
   expect(new URL(page.url()).searchParams.has('mode')).toBe(false);
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('alpha.connection.selection.v1')!))).toEqual({ kind: 'resident' });
   const calls: string[] = await page.evaluate(() => (window as any).nativeCalls);
-  // Neither the mock barrier nor any collector resume runs without an explicit choice.
   for (const call of ['AlphaConnection.pauseNotificationCollection', 'AlphaNotifications.resumeCrossApp']) expect(calls).not.toContain(call);
   await expect(page.getByText(/mock mode/i)).toHaveCount(0);
   await expect(page.getByText('Local development agent', { exact: true })).toHaveCount(0);
   await page.reload();
-  // After a restart the resident is still the selection and only the sign-in dialog opens.
   await expect(page.locator('[role="main"].alpha-cloud-sign-in')).toBeVisible();
   await expect(page.locator('.mock-mode-banner')).toHaveCount(0);
   expect(new URL(page.url()).searchParams.has('mode')).toBe(false);
@@ -112,7 +102,6 @@ test('a stored mock selection on Android reads as the resident (P-43) and never 
 test('the chooser and Settings offer only production connections', async ({ page }) => {
   await page.goto('/?tools=1');
   const chooser = page.locator('.alpha-connection');
-  // The browser build explains its real options on first run.
   await expect(chooser.getByText('Android only', { exact: true })).toBeVisible();
   for (const summary of await chooser.locator('summary').all()) await summary.click();
   const text = await chooser.innerText();
@@ -124,9 +113,7 @@ test('the chooser and Settings offer only production connections', async ({ page
   await expect(chooser.getByRole('button', { name: 'Start local agent', exact: true })).toHaveCount(0);
   for (const name of ['Connect remote agent', 'Manage Cloud account']) await expect(chooser.getByRole('button', { name, exact: true })).toHaveCount(0);
   await expect(chooser.getByRole('button',{name:'Continue',exact:true})).toBeVisible();
-  // P-43: the web preview offers no offline mode by that name.
   await expect(chooser.getByRole('button', { name: 'Continue offline', exact: true })).toHaveCount(0);
-  // Eliza Cloud refuses credentialed requests from this web origin, so no sign-in that always fails is offered.
   await expect(chooser.getByRole('button', { name: 'Sign in with Eliza Cloud', exact: true })).toHaveCount(0);
 
   await chooser.getByRole('button', { name: 'Continue', exact: true }).click();
@@ -138,13 +125,11 @@ test('the chooser and Settings offer only production connections', async ({ page
   expect(settingsText).not.toMatch(/mock mode/i);
   expect(settingsText).not.toMatch(/staging/i);
   await page.getByText('About', { exact: true }).click();
-  // About identifies the installed product and version.
   await expect(settings.getByText('Alpha Phone', { exact: true }).first()).toBeVisible();
   await expect(settings.getByText('Runtime', { exact: true })).toHaveCount(0);
   await expect(settings.getByText('Web app', { exact: true })).toHaveCount(0);
   await expect(settings.getByText('Development preview', { exact: true })).toHaveCount(0);
   await expect(settings.getByText(/^Version \d+\.\d+\.\d+/).first()).toBeVisible();
-  // The notices this build serves, unrouted: the page must render them, not the fallback.
   const served = await page.request.get('/licenses/third-party-notices.json');
   expect(served.ok()).toBe(true);
   const notices = await served.json();
@@ -172,11 +157,9 @@ test('Settings shows the flags and obligations of flagged license entries, and n
   await settings.getByText('Licenses', { exact: true }).click();
   await expect(settings.getByText('copyleft-package', { exact: true })).toBeVisible();
   await settings.getByRole('button', { name: 'copyleft-package 2.0.0', exact: true }).click();
-  // Known flags are labelled; a flag this build does not know is shown as written, never dropped.
   await expect(settings.getByText('Copyleft (GPL family) · Network copyleft (AGPL) · future-flag', { exact: true })).toBeVisible();
   await expect(settings.getByText('Corresponding source must be available at https://example.test/copyleft.', { exact: true })).toBeVisible();
   await expect(settings.getByText('The source offer extends to network use.', { exact: true })).toBeVisible();
-  // One flagged entry only: unflagged and pre-flag entries get no flag row.
   await expect(settings.getByText('Flagged', { exact: true })).toHaveCount(1);
   await expect(settings.getByText('Obligation', { exact: true })).toHaveCount(2);
   for (const name of ['plain-package 1.0.0', 'legacy-entry 3.0.0']) {
@@ -215,11 +198,9 @@ test('deferred apps are absent and root views show honest unconnected states', a
     await expect(page.locator('[data-screen]')).toContainText(expected);
     if (view === 'Maps') {
       await expect(page.getByRole('searchbox', { name: 'Search places', exact: true })).toBeVisible();
-      // No location yet: no base notice, and Recenter is the request for one.
       await expect(page.locator('[data-alpha-maps-status]')).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Recenter', exact: true })).toBeVisible();
       await page.locator('summary[aria-label="Map information and credits"]').click();
-      // The shortened tile-provider disclosure (6f8205cb4) names who receives map-area requests.
       await expect(page.locator('.alpha-map-privacy[open]').getByText('Map tiles: OpenFreeMap', { exact: true })).toBeVisible();
     }
     const text = await page.locator('body').innerText();
@@ -245,7 +226,6 @@ test('the CSP admits Home, Notes, Maps, Scan and PDF without violations', async 
   const violations = await trackCsp(page);
   await page.addInitScript(offline);
   await page.addInitScript(() => {
-    // Synthetic camera: a canvas stream with one line of text. Capture, scan review, OCR and PDF are the shipped code.
     const canvas = document.createElement('canvas'); canvas.width = 1200; canvas.height = 600; const context = canvas.getContext('2d')!;
     const paint = () => { context.fillStyle = 'white'; context.fillRect(0, 0, 1200, 600); context.fillStyle = 'black'; context.font = '60px Arial'; context.fillText('Alpha searchable document', 50, 120); };
     paint(); setInterval(paint, 50);
@@ -266,7 +246,6 @@ test('the CSP admits Home, Notes, Maps, Scan and PDF without violations', async 
   await page.getByRole('button', { name: 'Back to apps', exact: true }).click();
   await page.getByRole('button', { name: 'Camera', exact: true }).click();
   await expect.poll(() => page.locator('[aria-label^="Viewfinder."] video').evaluate((v: HTMLVideoElement) => v.readyState), { timeout: 60_000 }).toBeGreaterThanOrEqual(2);
-  // Scanning is reached by asking Alpha in Camera: one frame opens scan review, which builds the PDF.
   const scan = async () => {
     await page.getByRole('button', { name: 'Type', exact: true }).click();
     const input = page.locator('[data-alpha-layer="composer"][aria-hidden="false"], [data-alpha-layer="conversation"][aria-hidden="false"]').getByRole('textbox').first();
@@ -287,7 +266,6 @@ test('the CSP admits Home, Notes, Maps, Scan and PDF without violations', async 
   await scan();
   await page.getByRole('button', { name: 'Download searchable PDF', exact: true }).click();
   const review = page.getByRole('dialog', { name: 'Review searchable PDF' });
-  // Local OCR runs in a worker with WebAssembly: the policy must admit both.
   await expect(review.getByLabel('Page 1 line 1', { exact: true })).toHaveValue(/Alpha searchable/, { timeout: 90_000 });
   const searchable = page.waitForEvent('download');
   await review.getByRole('button', { name: 'Download reviewed searchable PDF', exact: true }).click();
@@ -306,12 +284,9 @@ test('production ignores the development render-failure hook', async ({ page }) 
   await expect(page.getByRole('button', { name: 'Account', exact: true })).toBeVisible();
 });
 
-// Production speech is device-only (owner rule): the browser build has no on-device engine, so the
-// Notes recorder records audio only, and no Cloud or network voice route is offered.
 test('production signed-out voice stays on-device with no upload, engine or Cloud route under the shipped CSP', async ({ page }) => {
   const violations = await trackCsp(page);
   const foreign: string[] = [], uploads: string[] = [], engines: string[] = [];
-  // Stop a regression before it can contact a provider or upload anything.
   await page.route('**/*', async route => {
     const request=route.request(),url=new URL(request.url());
     if (!['127.0.0.1','localhost'].includes(url.hostname) && !['data:','blob:'].includes(url.protocol)) { foreign.push(request.url()); await route.abort(); return; }
@@ -327,8 +302,6 @@ test('production signed-out voice stays on-device with no upload, engine or Clou
       const Original=(window as any)[name];
       if(Original)Object.defineProperty(window,name,{configurable:true,value:new Proxy(Original,{construct(){counts[key]++;throw Error('Unsigned voice must not start a local engine');}})});
     }
-    // Clock primes an alert context on user gestures independently of voice.
-    // Keep that inert while counting any capture, decode or synthesis processing.
     const processing=()=>{counts.audio++;throw Error('Unsigned voice must not process audio');};
     Object.defineProperty(window,'AudioContext',{configurable:true,value:class {
       state='suspended';resume=async()=>{};close=async()=>{};
@@ -341,7 +314,6 @@ test('production signed-out voice stays on-device with no upload, engine or Clou
   await page.goto('/');
   await openLegacyNotes(page);
   await page.getByRole('button', { name: 'Record voice note', exact: true }).click();
-  // The recorder asks for the microphone at once (refused here) and shows one line; no route choice exists.
   const recorder=page.locator('[data-alpha-subview="notes-recorder"]');
   await expect(recorder).toHaveAttribute('data-recorder-state','failed');
   await expect(recorder.getByRole('alert')).toHaveText('Mic unavailable');
@@ -361,7 +333,6 @@ for (const mode of ['signed-out','empty','credits','unavailable','funded','repla
    const id='9f1dc45a-4011-4e44-947a-30d999d24fa5';
    const resident=w.residentAgent=w.createResidentAgentPlugin({owner:()=>id,agentId:id});
    const values:Record<string,string>={};let credentialReplaced=false;
-   // An older build's "Use local apps without AI" choice.
    if(mode==='legacy-offline')localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline',localApps:true}));
    if(mode!=='signed-out'&&mode!=='unpackaged'&&mode!=='legacy-offline')values['cloud:production']=JSON.stringify({token:'synthetic-cloud-key',credentialId:id,expiresAt:Date.now()+60000});
    const methods=(names:string[])=>names.map(name=>({name,rtype:'promise'}));
@@ -397,7 +368,7 @@ for (const mode of ['signed-out','empty','credits','unavailable','funded','repla
     if(method==='request'){
      const path=new URL(input.url).pathname;
      if(path==='/api/v1/user')return{status:200,data:{success:true,data:{id}}};
-     if(path==='/api/v1/subscription/entitlement')return { status: 404, data: {} }; // Entitlement route absent: the billing snapshot answers.
+     if(path==='/api/v1/subscription/entitlement')return { status: 404, data: {} };
      if(path==='/api/v1/billing/limits'&&mode==='replaced'&&!credentialReplaced){credentialReplaced=true;values['cloud:production']=JSON.stringify({token:'synthetic-replacement-key',credentialId:'f04d4d24-6978-42a2-a968-995d76debf77',expiresAt:Date.now()+60000});}
      if(path==='/api/v1/billing/limits')return mode==='unavailable'?{status:503,data:{error:'temporary'}}:{status:200,data:{success:true,data:{v2:{subscription:mode==='funded'||mode==='replaced'?{status:'available',value:{planKey:'plus_monthly',state:'active',currentPeriodEnd:'2099-01-01T00:00:00.000Z'}}:{status:'not_applicable',reason:mode==='credits'?'no_organization_subscription':'subscription_not_active'}}}}};
      throw Error('Unexpected Cloud route: '+path);
@@ -406,18 +377,10 @@ for (const mode of ['signed-out','empty','credits','unavailable','funded','repla
    }};
   },mode);
   await page.goto('/');
-  // P-43: the resident starts at every app start; sign-in and plan state never withhold it.
   const agentCalls=async()=>((await page.evaluate(()=>(window as any).residentCalls)) as any[]).filter(c=>c.plugin==='Agent').map(c=>c.method);
   if(mode!=='unpackaged')await expect.poll(agentCalls).toContain('start');
-  // Signed-in first use offers optional access; complete its real skip before the account checks.
   if(mode==='empty'||mode==='unavailable'||mode==='credits'||mode==='funded'||mode==='replaced')await completeAccessSetup(page);
   for(const retired of ['without AI','Continue offline','Connect an agent'])expect(await page.locator('body').innerText()).not.toContain(retired);
-  // Every Alpha Phone needs an Eliza Cloud account for AI: signed out, the sign-in dialog opens
-  // by itself and cannot be dismissed. Without an admissible plan a non-blocking notice beside the
-  // running agent offers Redeem code and Choose a plan; its Redeem code opens the plan panel. A
-  // sign-in that changed underneath admission is reported in the dialog. Otherwise nothing opens.
-  // On the phone's own agent that plan panel is the resident account & plan panel; it carries the
-  // approved Subscription controls, opened at the code field.
   const signedOut=mode==='signed-out'||mode==='legacy-offline'||mode==='unpackaged',needsPlan=mode==='empty'||mode==='unavailable';
   const requiresSignIn=signedOut;
   const dialog=signedOut?page.locator('[role="main"].alpha-cloud-sign-in'):mode==='replaced'?page.getByRole('region',{name:'Settings',exact:true}):page.getByRole('dialog',{name:'Account',exact:true});
@@ -430,8 +393,6 @@ for (const mode of ['signed-out','empty','credits','unavailable','funded','repla
   }
   if(!signedOut&&!needsPlan){
    await expect(page.getByRole('button',{name:'Notes',exact:true})).toBeVisible();
-   // A sign-in replaced underneath admission is not a refused sign-in: the account stays attached
-   // and the required sign-in page never covers the running resident's Home.
    if(mode==='replaced')await expect(page.locator('[role="main"].alpha-cloud-sign-in')).toHaveCount(0);
    await expect(page.getByRole('dialog')).toHaveCount(0);
    if(mode==='replaced')await openYourAgent(page);
@@ -439,7 +400,6 @@ for (const mode of ['signed-out','empty','credits','unavailable','funded','repla
   }
   await expect(dialog).toBeVisible();
   if(mode==='unpackaged'){
-   // A developer build without the runtime still allows sign-in.
    await expect(dialog.getByRole('button',{name:'Send code',exact:true})).toBeVisible();
    await expect(dialog.getByRole('status').filter({hasText:'No on-device agent'})).toHaveText('No on-device agent');
   }else if(needsPlan)await expect(dialog.getByRole('region',{name:'Balance and membership',exact:true})).toBeVisible();
@@ -450,30 +410,24 @@ for (const mode of ['signed-out','empty','credits','unavailable','funded','repla
    await expect(dialog.getByRole('button',{name:'Close connection settings',exact:true})).toHaveCount(0);
    await page.keyboard.press('Escape');await expect(dialog).toBeVisible();
   }
-  // No admissible plan (none, or one Cloud cannot confirm): Redeem code and Choose a plan beside the
-  // running agent; nothing is bound. Cloud refuses AI requests without a plan.
   const admitted=mode==='funded'||mode==='credits';
   if(needsPlan){
    await expect(dialog.getByRole('textbox',{name:'Membership code',exact:true})).toBeFocused();
    await expect(dialog.getByRole('button',{name:'Redeem',exact:true})).toBeVisible();
    await expect(dialog.getByRole('button',{name:mode==='empty'?'Choose a plan':'Manage plan',exact:true})).toBeVisible();
-   // The subscription component owns the single plan summary; the host never repeats it.
    await expect(dialog.getByRole('region',{name:'Eliza Cloud plan',exact:true})).toHaveCount(0);
    await expect(dialog.getByRole('region',{name:'Balance and membership',exact:true}).getByText(mode==='empty'?'No plan':'Unconfirmed',{exact:true})).toHaveCount(1);
    await expect(dialog).not.toContainText(/Available credits|Add credits|\$\d/);
   }
   if(mode==='replaced'){await expect(dialog.getByText(/account changed/i)).toBeVisible();const saved=await page.evaluate(async()=>JSON.parse((await (window as any).Capacitor.nativePromise('AlphaConnection','secureRead',{slot:'cloud:production'})).value));expect(saved.credentialId).toBe('f04d4d24-6978-42a2-a968-995d76debf77');}
   if(admitted)await expect(dialog.getByRole('button',{name:'Sign out',exact:true})).toBeVisible();
-  // Legacy credit admission keeps the subscription and membership-code options visible.
   if(mode==='credits'){await expect(dialog).toContainText('Expires ');await expect(dialog.getByRole('button',{name:'Use code',exact:true})).toBeVisible();await expect(dialog.getByRole('textbox',{name:'Membership code',exact:true})).toHaveCount(0);}
   for(const retired of ['Use local apps without AI','Continue offline'])await expect(dialog.getByRole('button',{name:retired,exact:true})).toHaveCount(0);
-  // Every dialog but the required sign-in closes; the agent keeps running.
   if(needsPlan){await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);}else if(mode==='replaced'){await dialog.getByRole('button',{name:'Back to About',exact:true}).click();await expect(dialog.getByRole('heading',{name:'About',exact:true})).toBeVisible();}else if(!signedOut){await dialog.getByRole('button',{name:'Close Account',exact:true}).click();await expect(dialog).toHaveCount(0);await expect(page.getByRole('heading',{name:'Settings',exact:true})).toBeVisible();}
   if(mode==='legacy-offline'||mode==='signed-out')expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha.connection.selection.v1')!))).toEqual({kind:'resident'});
   const calls=await page.evaluate(()=>(window as any).residentCalls);
   expect(calls.some((c:any)=>c.url?.includes('/personal/')||c.url?.includes('/upgrade-tier')||c.url?.includes('/credits/'))).toBe(false);
   const native=await agentCalls();
-  // Inference is bound only when Cloud admits the plan; the agent runs either way.
   if(admitted){expect(native.indexOf('stop')).toBeLessThan(native.indexOf('configureCloudProvider'));expect(native.indexOf('configureCloudProvider')).toBeLessThan(native.lastIndexOf('start'));}
   else expect(native).not.toContain('configureCloudProvider');
   if(mode==='unpackaged')expect(native).not.toContain('start');
@@ -507,7 +461,6 @@ test('resident always present (P-43): a kept local-apps choice and a saved sign-
     return {status:200,body:JSON.stringify(body)};
    }
    if(method==='secureRead')return{value:input?.slot==='cloud:production'?JSON.stringify({token:'synthetic-cloud-token',credentialId:'synthetic-credential'}):null};
-   // Network is off: every Cloud request fails.
    if(plugin==='AlphaConnection'&&method==='request')throw Error('Connection request failed');
    return {};
   }};
@@ -516,7 +469,6 @@ test('resident always present (P-43): a kept local-apps choice and a saved sign-
  await expect(page.getByRole('button',{name:'Notes',exact:true})).toBeVisible();
  await expect.poll(async()=>((await page.evaluate(()=>(window as any).residentCalls)) as any[]).filter(c=>c.plugin==='Agent').map(c=>c.method)).toContain('start');
  await expect(page.locator('[role="main"].alpha-cloud-sign-in')).toHaveCount(0);
- // Owner, 2026-11-03: Cloud being unreachable shows no banner or status text, and asks for no sign-in.
  const settings=await openYourAgent(page);
  await expect(settings.getByRole('button',{name:'Load conversations',exact:true})).toBeVisible();
  await expect(settings).not.toContainText('Sign in required');
@@ -529,5 +481,4 @@ test('resident always present (P-43): a kept local-apps choice and a saved sign-
 });
 
 
-// UI progress only: this feature fixture does not manufacture OS/provider grants.
 test.beforeEach(async({page})=>seedCompletedAccessSetup(page));

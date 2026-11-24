@@ -1,5 +1,3 @@
-// Literal translation of the historical notes-view/Spec.tla and all seven configurations.
-// String values represent the former uninterpreted TLA model values without changing equality.
 module NotesView {
   type Configuration = { name: str, MaxSeg: int, CapSeg: int, Budget: int, Names: Set[str],
     FixUnlimited: bool, FixSegments: bool, FixStreamAsr: bool, FixRestoreFolder: bool, AsrWhileHidden: bool }
@@ -39,7 +37,6 @@ module NotesView {
     nondet assignments = Notes.setOfMaps(Folders.union(Set(None))).oneOf()
     StartState(name, names, assignments)
   }
-  // Separate entry points avoid Quint 0.33.1 init/action-helper conversion overlap.
   action checkerInit = {
     nondet names = Folders.setOfMaps(configuration("Design").Names).oneOf()
     nondet assignments = Notes.setOfMaps(Folders.union(Set(None))).oneOf()

@@ -33,7 +33,6 @@ module NativeGoogleAccessFile {
     s' = {...s, sidecars: true}
   }
 
-  // The observable commit is the atomic rename of one forced Java temp file.
   action publish(gmail: bool, calendar: bool): bool = all {
     s.file.in(writeable), s.writes < 5,
     s' = {...s, file: "valid", access: {gmailChanges: gmail, calendarEdits: calendar}, writes: s.writes + 1}
@@ -59,7 +58,6 @@ module NativeGoogleAccessFile {
     s' = {...s, readerOpen: false, lastRead: s.snapshot, snapshot: off}
   }
 
-  // Admission samples the file once before verification. A later request samples again.
   action request(id: int, kind: str): bool = all {
     not(s.readerOpen), id.in(slots), kind.in(operations), s.requests.get(id) == idle,
     val phase = if (permits(kind)) "verification" else "changes-off"

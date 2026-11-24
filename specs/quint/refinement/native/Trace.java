@@ -4,7 +4,6 @@ import java.lang.reflect.Field;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Serialization and read-only observation. No implementation policy is evaluated here. */
 public final class Trace {
  public final JSONObject value;
  final JSONArray steps = new JSONArray();
@@ -32,7 +31,7 @@ public final class Trace {
     Field field = type.getDeclaredField(fieldName);
     field.setAccessible(true);
     return field.get(instance);
-   } catch (NoSuchFieldException missing) { /* The shared implementation can own this field. */ }
+   } catch (NoSuchFieldException missing) { }
   }
   throw new NoSuchFieldException(fieldName);
  }

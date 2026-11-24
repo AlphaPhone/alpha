@@ -1,4 +1,3 @@
-// Alpha's explicit system Settings, allowlisted pages and password-provider Settings fallback.
 module NativeSettingsHandoff {
   type Attempt = {target: str, data: str, packageExtra: str, newTask: bool, result: str, phase: str}
   type Reply = {status: str, page: str, destination: str, specific: bool}

@@ -11,7 +11,6 @@ import java.util.LinkedHashSet;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Synthetic Android/owner ports. The compiled actor and bridge own the slot and gates. */
 final class TapPorts {
  interface Work {void run()throws Exception;}
  static final Context context=new Context();
@@ -30,7 +29,6 @@ final class TapPorts {
  }
 }
 
-// The product actor resolves the package-local clock in this JVM fixture.
 final class System {static long currentTimeMillis(){return TapPorts.now;}}
 final class ElizaAgentService {static final class LocalStreamHandle {void cancel(){}}}
 final class NativeOwnerReminderHost {
@@ -161,7 +159,6 @@ public final class CanonicalTapTraces {
     if(overlap!=null)overlap.run();
     return owner.equals(intent.getStringExtra("elizaNativeNotificationOwner"))&&"ok".equals(intent.getStringExtra("fixtureVerification"));
    };
-   // The exact verifier is also called by hydration/rechecks. Hold unrelated queued work.
    var consume=AlphaCanonicalNotifications.class.getDeclaredMethod("consumeWaitingTap");
    consume.setAccessible(true);consume.invoke(current);
    if(opening!=null){opening=null;opener=0;record("finishOpen");}

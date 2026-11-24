@@ -18,7 +18,6 @@ import java.util.concurrent.TimeUnit;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Actual cache and provider source with real host files and an observed URI grant port. */
 public final class ReviewedCopiesTraces {
  private static final String FOLDER="mail-attachments",AUTHORITY="ai.alphacompute.alphaphone.mailattachments";
  private static final int LIMIT=5;
@@ -129,7 +128,7 @@ public final class ReviewedCopiesTraces {
    boolean opened=false;
    try(var descriptor=provider.openFile(uri,readOnly?"r":"rw")){
     check(Arrays.equals(descriptor.readAllBytes(),new byte[]{(byte)id}),"opened bytes differ");opened=true;
-   }catch(FileNotFoundException unavailable){/* expected provider refusal is observed below */}
+   }catch(FileNotFoundException unavailable){ }
    check(opened==expected,"unexpected provider admission");lastOpen=opened?"opened":"denied";
    trace.step("providerOpen",observe(),id,readOnly,shape);
   }

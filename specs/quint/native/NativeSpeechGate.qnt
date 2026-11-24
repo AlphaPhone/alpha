@@ -1,4 +1,3 @@
-/// Always-on listener SpeechGate's adaptive floor and exact PCM ring/utterance buffers.
 module NativeSpeechGate {
   type State = {floor: int, lastLevel: int, lastSpeech: bool, active: bool,
     pre: List[int], preCount: int, preNext: int, utterance: List[int],

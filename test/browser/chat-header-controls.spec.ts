@@ -5,8 +5,6 @@ import {setTextScale} from './accessibility-states';
 import {settled} from './helpers/settled';
 import {guardCalendarFixture as guardNoMedia} from './calendar-draft-readiness';
 
-// The existing local development profile owns conversations. The real header/controller run;
-// no handler is replaced, no message is sent and no provider or microphone is used.
 async function conversations(page:Page){return page.evaluate(async()=>{
  const {developmentIdentity}=await import('/src/browser/development-identity.ts');
  const {readDevelopmentAgent}=await import('/src/browser/development-agent-document.ts');

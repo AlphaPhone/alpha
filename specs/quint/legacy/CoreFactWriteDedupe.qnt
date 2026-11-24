@@ -1,4 +1,3 @@
-// Literal conversion of packages/core/tla/FactWriteDedupe.tla at 4787d51a142.
 module CoreFactWriteDedupeTemplate {
   const Writers: Set[str]
   const Prefilled: bool
@@ -52,7 +51,6 @@ module CoreFactWriteDedupe {
   val safety = M::TypeOK and M::NoDuplicateFact and M::NoLostEvidence
   temporal DeadlockFree = M::DeadlockFree
   temporal CheckedTemporal = M::Fairness implies M::WriteReturns
-  // Source observations only; both configured transition relations stay intact.
   val observed = M::s
   action checkWriter(w: str): bool = M::Check(w)
   action insertFact(w: str): bool = M::Insert(w)

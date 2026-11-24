@@ -1,4 +1,3 @@
-/// Shared AgentRuntime retirement tracks work before hooks and drains newly spawned work.
 module CoreRuntimeRetirement {
   val taskIds = Set(1, 2, 3)
   val drainIds = Set(1, 2)

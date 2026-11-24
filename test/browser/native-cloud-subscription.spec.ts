@@ -10,13 +10,6 @@ import {readFileSync} from 'node:fs';
 import {deploymentOutputs} from '../../scripts/cloud-deployment.ts';
 import {ALPHA_CLOUD_POLICY_FILE} from '../../scripts/cloud-deployment-policy.ts';
 
-// Actual normal Android chooser/controller composition (flag-off build flags); only native ports are
-// synthetic. No device, account, real code, provider, billing purchase, microphone or playback is
-// used. Decision P-43: the on-device agent always runs; sign-in and plan state decide only whether
-// Eliza Cloud inference is bound into it. Entitlements are signed here with a throwaway ES256 key; plan names, codes and allowance
-// numbers are synthetic test data, not product prices, quotas or real grant codes.
-/** The Alpha Cloud cutover build (ALPHA_CLOUD_CUTOVER=1): the renderer's generated Cloud authorities are
- * cloud/policy.json's, exactly as scripts/cloud-deployment.ts writes them for that build. */
 function alphaCloudBuild(){
  const generated=resolve('apps/app/src/runtime/cloud-deployment.generated.ts');
  const contents=deploymentOutputs(JSON.parse(readFileSync(ALPHA_CLOUD_POLICY_FILE,'utf8')))['apps/app/src/runtime/cloud-deployment.generated.ts'];
@@ -50,10 +43,8 @@ let origin:string;
 test.beforeAll(async()=>{current=await composition(false);origin=current.origin;});
 test.afterAll(async()=>{await current?.server.close();await (await alphaServer)?.server.close();});
 
-// Synthetic, never a real grant code. 16 Crockford characters once normalized.
 const CODE='synt-hetc-0de0-0001',NORMALIZED='SYNTHETC0DE00001';
 
-/** `alphaCloud`: boot the Alpha Cloud cutover build (its own composition server, started once). */
 async function boot(page:Page,initial:NativePlanFixture&{alphaCloud?:boolean}={}){
  page.on('pageerror',(error:Error)=>console.error('Composition page error:',error.message));
  await page.route('https://**',route=>route.abort());
@@ -64,7 +55,6 @@ async function boot(page:Page,initial:NativePlanFixture&{alphaCloud?:boolean}={}
   const w=window as any;w.planController=(await import('/src/runtime/connection-ui.tsx')).connectionController;
   w.planFlags={native:(await import('/src/native.ts')).isAndroid?'android':'web',mocks:(await import('/src/build-flags.ts')).testMocksEnabled};
  });
- // A cold isolated Vite composition must finish its module graph before product assertions.
  await expect.poll(()=>page.evaluate(()=>(window as any).planFlags),{timeout:90_000}).toEqual({native:'android',mocks:false});
 }
 type Call={plugin:string;method:string;path?:string;url?:string;httpMethod?:string};
@@ -73,7 +63,6 @@ const admitted=(page:Page)=>expect.poll(()=>page.evaluate(()=>typeof(window as a
 const configured=async(page:Page)=>(await calls(page)).filter(c=>c.method==='configureCloudProvider').length;
 const idle=(page:Page)=>expect.poll(()=>page.evaluate(()=>(window as any).planController.getSnapshot().busy)).toBe(false);
 const observedBalance=(page:Page)=>page.evaluate(()=>(window as any).planController.getSnapshot().membershipCredits?.usd);
-/** Ends the held admission (the fixture has no runnable agent) without leaving work behind. */
 async function release(page:Page){await page.evaluate(()=>{const w=window as any;w.planController.cancel();w.planFixture.releaseProvider?.();});await idle(page);}
 const fixture=(page:Page,patch:Record<string,unknown>)=>page.evaluate(patch=>Object.assign((window as any).planFixture,patch),patch);
 async function changeNativeNetwork(page:Page,connected:boolean){
@@ -81,12 +70,9 @@ async function changeNativeNetwork(page:Page,connected:boolean){
   (window as any).planFixture.networkConnected=connected;
   window.dispatchEvent(new Event(connected?'online':'offline'));
  },connected);
- // A browser event asks Android for a fresh fact. Wait until that fact owns the connection state.
  await expect.poll(()=>page.evaluate(()=>(window as any).planController.getSnapshot().inferenceOffline)).toBe(!connected);
 }
 const started=(page:Page)=>expect.poll(async()=>(await calls(page)).some(c=>c.plugin==='Agent'&&c.method==='start')).toBe(true);
-/** This focused composition mounts account/plan UI. Agent controls themselves now live in
- * the actual Settings stack, covered by signed-out-page.production.spec.ts. */
 const accountPanel=(page:Page)=>page.getByRole('dialog',{name:/^Account$/});
 const planDetails=(page:Page)=>accountPanel(page).getByRole('region',{name:'Balance and membership',exact:true});
 const signInPage=(page:Page)=>page.locator('.alpha-cloud-sign-in[role="main"]');
@@ -98,8 +84,6 @@ async function confirmBillingAccount(page:Page){
 
 async function confirmSignOut(page:Page){const dialog=page.getByRole('dialog',{name:'Sign out?',exact:true});await expect(dialog).toBeVisible();await dialog.getByRole('button',{name:'Sign out',exact:true}).click();}
 
-/** No admissible plan: nothing opens by itself; the notice beside the running agent offers Redeem
- * code, which opens the plan panel (the notice's other action is Choose a plan). */
 async function needsPlan(page:Page){
  const notice=page.getByRole('region',{name:/^(Eliza|Alpha) Cloud plan notice$/});
  await expect(notice).toContainText('AI off');await expect(accountPanel(page)).toHaveCount(0);
@@ -118,13 +102,11 @@ test.describe('first run requires Eliza Cloud sign-in while the agent runs',()=>
   await expect(dialog).not.toContainText('Reconnect agent');await expect(dialog).not.toContainText('Phone action history');
   await expect(page.getByRole('button',{name:'Use local apps without AI',exact:true})).toHaveCount(0);
   await expect(page.getByRole('button',{name:/Close/})).toHaveCount(0);
-  // Back and Escape cannot dismiss the sign-in.
   await page.keyboard.press('Escape');await expect(dialog).toBeVisible();
   await page.evaluate(()=>{(window as any).planController.close();(window as any).planController.offline();});
   await expect(dialog).toBeVisible();
   expect(await page.evaluate(()=>localStorage.getItem('alpha.connection.selection.v1')??'')).not.toContain('localApps');
   await expect(page.getByRole('dialog',{name:'Set up Alpha access'})).toHaveCount(0);
-  // No Cloud request, provider binding or browser hand-off: the resident runs signed out.
   expect((await calls(page)).some(c=>(c.plugin==='AlphaConnection'&&c.method==='request')||c.method==='configureCloudProvider'||c.method==='openExternal')).toBe(false);
   await page.evaluate(()=>document.fonts.ready);await page.screenshot({path:info.outputPath('first-run-sign-in-gate.png'),animations:'disabled'});
  });
@@ -134,7 +116,6 @@ test.describe('first run requires Eliza Cloud sign-in while the agent runs',()=>
   await boot(page,{saved:false,storage:seeded});
   await expect(signInPage(page)).toBeVisible();
   await expect(page.getByRole('button',{name:'Use local apps without AI',exact:true})).toHaveCount(0);
-  // P-43: the retired choice reads as the always-running resident.
   expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('alpha.connection.selection.v1')!))).toEqual({kind:'resident'});
   expect(await page.evaluate(()=>localStorage.getItem('alpha.synthetic.local-data'))).toBe('kept');
  });
@@ -161,7 +142,6 @@ test.describe('plan state binds Cloud inference; the agent always runs',()=>{
   const signed=await entitlements();
   await page.setViewportSize({width:320,height:640});await boot(page,signed);
   await admitted(page);
-  // Admission and the initial membership summary each verify the signed plan.
   await expect.poll(async()=>(await calls(page)).filter(c=>c.path==='/api/v1/subscription/entitlement').length).toBe(2);
   await expect.poll(()=>page.evaluate(()=>(window as any).planController.getSnapshot().membershipBalance)).not.toBe('checking');
   expect(await configured(page)).toBe(1);
@@ -174,11 +154,9 @@ test.describe('plan state binds Cloud inference; the agent always runs',()=>{
   await expect(page.getByRole('button',{name:'Manage plan',exact:true})).toBeVisible();
   await page.evaluate(()=>document.fonts.ready);await page.screenshot({path:info.outputPath('signed-plan-resume.png'),animations:'disabled'});
   const routes=(await calls(page)).filter(c=>c.method==='request').map(c=>c.path);
-  // Explicitly opening the plan panel adds one read, without another admission or mutation.
   expect(routes.filter(p=>p==='/api/v1/subscription/entitlement')).toHaveLength(3);
   expect(await configured(page)).toBe(1);
   expect((await calls(page)).filter(c=>c.plugin==='AlphaConnection'&&c.method==='request').every(c=>c.httpMethod==='GET')).toBe(true);
-  // Concurrent initial checks may each fetch the key once; opening the panel reuses it.
   expect(routes.filter(p=>p==='/api/v1/subscription/entitlement-keys')).toHaveLength(initialKeyReads);
   expect(routes).not.toContain('/api/v1/credits/balance');
   expect((await calls(page)).filter(c=>c.path==='/api/v1/billing/limits').every(c=>c.httpMethod==='GET')).toBe(true);
@@ -187,7 +165,6 @@ test.describe('plan state binds Cloud inference; the agent always runs',()=>{
 
  test('a format v2 entitlement shows the share of the period allowance left, not an amount of money',async({page})=>{
   const now=Math.floor(Date.now()/1000);
-  // Synthetic micro-dollar figures (Cloud's allowance unit), not a product allowance.
   await boot(page,await entitlements({ver:2,allowance:undefined,plan_allowance:{unit:'usd_micros',granted:4_000_000,remaining:1_000_000,periodStart:now-86400,resetsAt:now+86400}}));
   await admitted(page);
   const panel=await openAccountPlan(page);
@@ -223,12 +200,10 @@ test.describe('plan state binds Cloud inference; the agent always runs',()=>{
   await expect(page.getByRole('button',{name:'Redeem',exact:true})).toBeVisible();
   await expect(page.getByRole('button',{name:'Refresh account',exact:true})).toBeVisible();
   await expect(page.getByRole('button',{name:'Use local apps without AI',exact:true})).toHaveCount(0);
-  // The plan notice can be closed: it never withholds the agent (P-43).
   await expect(page.getByRole('button',{name:'Close Account',exact:true})).toBeVisible();
   expect(await configured(page)).toBe(0);
   await started(page);
   await page.evaluate(()=>document.fonts.ready);await page.screenshot({path:info.outputPath(`needs-plan-${status}.png`),animations:'disabled'});
-  // Choose a plan opens exactly the allowlisted hosted page in the system browser.
   await page.getByRole('button',{name:'Choose a plan',exact:true}).click();await confirmBillingAccount(page);
   await expect.poll(async()=>(await calls(page)).filter(c=>c.method==='openExternal').map(c=>c.url)).toEqual([]);
   expect(await configured(page)).toBe(0);
@@ -312,12 +287,10 @@ test.describe('entitlement route unavailable: authenticated billing mode fallbac
   const panel=accountPanel(page);await expect(panel).toBeVisible();
   await expect(planDetails(page).getByText('No plan',{exact:true})).toBeVisible();
   await expect(panel.getByRole('button',{name:'Choose a plan',exact:true})).toBeVisible();
-  // The code field stays collapsed until the owner asks for it (here: explicit code entry).
   await expect(panel.getByRole('textbox',{name:'Membership code'})).toHaveCount(0);
   await page.evaluate(()=>(window as any).planController.openPlan({codeEntry:true}));
   await expect(panel.getByRole('textbox',{name:'Membership code'})).toBeVisible();
   await expect(panel.getByRole('button',{name:'Redeem',exact:true})).toBeVisible();
-  // Opening the existing field never redeems or changes the account's billing mode.
   expect((await calls(page)).filter(c=>c.path==='/api/v1/subscription/redeem')).toHaveLength(0);
   const routes=(await calls(page)).filter(c=>c.method==='request').map(c=>c.path);expect(routes).not.toContain('/api/v1/credits/balance');
   expect(await configured(page)).toBe(1);
@@ -370,7 +343,6 @@ test.describe('entitlement route unavailable: authenticated billing mode fallbac
   await expect(panel.getByRole('region',{name:'Eliza Cloud plan',exact:true})).toHaveCount(0);
   await expect(panel.getByRole('heading',{name:'AI',exact:true})).toHaveCount(0);
   await expect(panel.getByText('Your agent uses Eliza Cloud for AI.',{exact:true})).toHaveCount(0);
-  // An active plan admits the agent even though the backend reports zero cash balance.
   expect(await page.evaluate(()=>(window as any).planController.getSnapshot().membershipBalance)).toBe('member');
   const routes=(await calls(page)).filter(c=>c.method==='request').map(c=>c.path);
   expect(routes).toContain('/api/v1/billing/limits');expect(routes).not.toContain('/api/v1/credits/balance');
@@ -381,7 +353,6 @@ test.describe('entitlement route unavailable: authenticated billing mode fallbac
   await expect(planDetails(page).getByText('Unconfirmed',{exact:true})).toBeVisible();
   await expect(planDetails(page).getByText('Couldn’t refresh',{exact:true})).toBeVisible();
   expect(await configured(page)).toBe(0);
-  // Recheck reads Cloud again and admits once a plan is reported.
   await fixture(page,{limits:'active'});
   await page.getByRole('button',{name:'Refresh account',exact:true}).click();
   await admitted(page);await release(page);
@@ -419,7 +390,6 @@ test.describe('outages and offline use',()=>{
   expect(await configured(page)).toBe(0);
  });
  test('a failed background refresh does not renew the verified plan timestamp',async({page})=>{
-  // Cloud asks for a refresh 30 s out; the page clock runs past it instead of waiting.
   await page.clock.install();
   await boot(page,{...await entitlements({rfa:Math.floor(Date.now()/1000)+30}),holdProvider:false});
   await expect.poll(()=>configured(page)).toBe(1);await idle(page);
@@ -448,7 +418,6 @@ test.describe('outages and offline use',()=>{
   expect(await page.evaluate(()=>(window as any).planController.getSnapshot().residentSubscription)).toEqual({kind:'unavailable',reason:'outage'});
   await release(page);
  });
- // Owner, 2026-11-03: Cloud being unreachable shows no banner or status text.
  const noCloudNotice=async(page:Page)=>{
   await expect(page.getByRole('region',{name:'Eliza Cloud plan notice',exact:true})).toHaveCount(0);
   await expect(page.getByText(/Cloud cannot be reached/)).toHaveCount(0);
@@ -472,7 +441,6 @@ test.describe('outages and offline use',()=>{
   await started(page);await idle(page);
   await expect.poll(()=>page.evaluate(()=>(window as any).planController.getSnapshot().residentPlanNotice)).toBe('offline');
   const identityReads=async()=>(await calls(page)).filter(c=>c.path==='/api/v1/user').length;
-  // A return to the app while Cloud is unreachable checks once; a second return within a minute does not.
   const before=await identityReads();
   await page.evaluate(()=>(window as any).planController.recheckPlanOnReturn());
   await expect.poll(identityReads).toBe(before+1);
@@ -482,10 +450,6 @@ test.describe('outages and offline use',()=>{
   await noCloudNotice(page);
   await expect(page.getByRole('button',{name:'Try again',exact:true})).toHaveCount(0);
   expect(await configured(page)).toBe(0);
-  // The network goes away and comes back while Cloud is still unreachable: one read, the plan stays
-  // unknown with no notice or sign-in, and repeated online events read nothing more.
-  // Android re-reads native connectivity. Observe the offline result before returning online;
-  // synchronous browser hints would let the generation fence correctly discard that old read.
   await changeNativeNetwork(page,false);
   expect(await page.evaluate(()=>(window as any).planFixture.networkObservations.includes(false))).toBe(true);
   expect(await identityReads()).toBe(before+1);
@@ -498,17 +462,14 @@ test.describe('outages and offline use',()=>{
   expect(await page.evaluate(()=>(window as any).planController.getSnapshot().residentPlanNotice)).toBe('offline');
   await expect(signInPage(page)).toHaveCount(0);
   await noCloudNotice(page);
-  // The network goes away and returns again: the plan is read again at once and Cloud AI is bound, with no tap.
   await fixture(page,{identity:'ok'});
   await changeNativeNetwork(page,false);
   if(background){
-   // Wi-Fi and Airplane mode open Android Settings, so the network often returns while Alpha is hidden.
    await page.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});});
    await changeNativeNetwork(page,true);await idle(page);
    expect(await identityReads()).toBe(before+2);
    await page.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>false});document.dispatchEvent(new Event('visibilitychange'));});
   }else await changeNativeNetwork(page,true);
-  // Within the minute only the network's return could have read Cloud again (the rebind reads it once more).
   await admitted(page);
   expect(await identityReads()).toBeGreaterThan(before+2);
   await release(page);
@@ -547,17 +508,13 @@ test.describe('redeem a subscription code',()=>{
   expect(bodies[0].idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
   const redeem=(await calls(page)).filter(c=>c.path==='/api/v1/subscription/redeem');
   expect(redeem.map(c=>[c.httpMethod,c.url])).toEqual([['POST','https://api.eliza.app/api/v1/subscription/redeem']]);
-  // The entitlement is read again after redemption.
   const reads=(await calls(page)).filter(c=>c.path==='/api/v1/subscription/entitlement');expect(reads.length).toBe(beforeReads+1);
   expect((await calls(page)).some(c=>c.path==='/api/v1/credits/balance'||c.path==='/api/signup-code/redeem')).toBe(false);
   await expect(page.getByText(/^Code redeemed for Plus\. It runs until /)).toBeVisible();
-  // The membership refresh follows the actual provider binding. Complete the held native
-  // promise instead of cancelling it, then verify the new subscription and its access window.
   await page.evaluate(()=>(window as any).planFixture.releaseProvider());await idle(page);
   await expect.poll(()=>observedBalance(page)).toBe('0');
   await expect(planDetails(page).getByText('Active',{exact:true})).toBeVisible();
   await expect(planDetails(page).getByText(/^\d+d left$/)).toBeVisible();
-  // The code is not kept anywhere the renderer can read back.
   const stored=await page.evaluate(()=>JSON.stringify({...localStorage})+JSON.stringify({...sessionStorage})+document.body.innerText);
   expect(stored).not.toContain(NORMALIZED);expect(stored.toLowerCase()).not.toContain(CODE);
   await release(page);
@@ -575,7 +532,6 @@ test.describe('redeem a subscription code',()=>{
   const errorId=await page.getByRole('alert').getAttribute('id');expect(errorId).toBeTruthy();
   await expect(page.getByRole('textbox',{name:'Membership code'})).toHaveAttribute('aria-describedby',errorId!);
   expect(await configured(page)).toBe(0);
-  // Text that cannot be a code is refused locally with the same answer; nothing is sent.
   await page.getByRole('textbox',{name:'Membership code'}).fill('not-a-code');
   await page.getByRole('button',{name:'Redeem',exact:true}).click();
   await expect(page.getByRole('alert')).toHaveText('This code could not be redeemed. Check the code and try again.');
@@ -602,7 +558,6 @@ test.describe('redeem a subscription code',()=>{
   expect(bodies).toHaveLength(2);
   expect(bodies[1].idempotencyKey).toBe(bodies[0].idempotencyKey);
   await release(page);
-  // A second owner submission (from the plan panel) is a new attempt with a new key.
   await page.evaluate(()=>(window as any).planController.openPlan());
   await page.getByRole('button',{name:'Use code',exact:true}).click();
   await page.getByRole('textbox',{name:'Membership code'}).fill(CODE);
@@ -642,7 +597,6 @@ test.describe('account, plan and sign-in expiry',()=>{
   for(const name of ['Use code','Manage plan','Sign out'])await expect(dialog.getByRole('button',{name,exact:true})).toBeVisible();
   await page.evaluate(()=>document.fonts.ready);await page.screenshot({path:info.outputPath('plan-panel.png'),animations:'disabled'});
   await dialog.getByRole('button',{name:'Sign out',exact:true}).click();await confirmSignOut(page);
-  // Signed out, the dedicated page returns and the agent restarts without Cloud inference.
   await expect(signInPage(page)).toBeVisible();await expect(signInPage(page).getByRole('button',{name:'Send code',exact:true})).toBeVisible();
   expect(await page.evaluate(()=>localStorage.getItem('alpha.connection.plan-admission.v1'))).toBeNull();
   expect(await page.evaluate(()=>(window as any).planController.residentPlanSettings())).toMatchObject({signedIn:false,plan:'Not signed in'});
@@ -656,13 +610,11 @@ test.describe('account, plan and sign-in expiry',()=>{
   await page.evaluate(()=>document.fonts.ready);await page.screenshot({path:info.outputPath('sign-in-expiry-warning.png'),animations:'disabled'});
   await release(page);
   await page.getByRole('button',{name:'Renew',exact:true}).click();
-  // Re-approval opens the native email form without sending a code until explicitly requested.
   await expect(page.getByRole('textbox',{name:'Email',exact:true})).toBeVisible();
   expect((await calls(page)).some(c=>c.plugin==='AlphaCloudSignIn'&&c.method==='status')).toBe(true);
   expect((await calls(page)).filter(c=>c.path?.startsWith('/api/auth/cli-session')||c.method==='openExternal'||c.method==='startEmail')).toEqual([]);
  });
 
- // The warning starts at 14 days left: one hour either side of it, and the fixture's 60-day key.
  for(const [left,label,warned] of [[60*24*3600_000,'60 days',false],[14*24*3600_000+3600_000,'just over 14 days',false],[14*24*3600_000-3600_000,'just under 14 days',true]] as const)test(`a key with ${label} left ${warned?'shows an':'shows no'} expiry warning`,async({page})=>{
   await boot(page,{...await entitlements(),expiresAt:Date.now()+left});
   await admitted(page);await openAccountPlan(page);
@@ -681,15 +633,12 @@ test('failed native provider binding reports unconfirmed inference and exposes t
  const history=settings.getByRole('button',{name:'New conversation',exact:true});await expect(history).toBeVisible();
  expect(await error.evaluate((node,other)=>(node.compareDocumentPosition(other!)&Node.DOCUMENT_POSITION_FOLLOWING)!==0,await history.elementHandle())).toBe(true);
  expect(await configured(page)).toBe(1);
- // The configure call failed before returning a binding guard. The client cannot claim the
- // old provider was removed, and must not clear it with a fresh, unscoped mutation.
  expect(await page.evaluate(()=>(window as any).planController.getSnapshot().residentInference)).toBe('unknown');
  expect((await calls(page)).some(c=>c.plugin==='Agent'&&c.method==='clearProvider')).toBe(false);
  expect(await page.evaluate(()=>(window as any).residentAgent.state.unexpected)).toEqual([]);
  expect(pageErrors).toEqual([]);
 });
 
-// UI progress only: this feature fixture does not manufacture OS/provider grants.
 test.beforeEach(async({page})=>seedCompletedAccessSetup(page));
 
 
@@ -707,8 +656,6 @@ test.describe('explicit membership code entry',()=>{
   await boot(page,{...await entitlements(),plan:'none',holdProvider:false});await started(page);await idle(page);
   const notice=page.getByRole('region',{name:'Eliza Cloud plan notice'});await expect(notice).toBeVisible();return notice;
  }
- // On the phone's own agent the plan action opens the resident account & plan panel, which carries
- // the Subscription controls (code entry included) beside the plan headline and actions.
  const sheet=accountPanel;
  async function noEffects(page:Page){expect((await calls(page)).filter(c=>c.path==='/api/v1/subscription/redeem'||c.method==='openExternal')).toEqual([]);}
  test('one explicit Redeem code click reveals and focuses the current account input',async({page},info)=>{
@@ -774,8 +721,6 @@ test('Home keeps the plan notice without a sign-in expiry banner after Settings'
   }
 });
 
-// The Alpha Cloud cutover flag (docs/alpha-cloud.md). Off is every test above: the current Cloud's
-// hosted billing page, no in-app plans. On is the cutover build (cloud/policy.json authorities).
 test.describe('Alpha Cloud cutover flag',()=>{
  test('Add funds opens its amount form and creates only the reviewed balance checkout',async({page})=>{
   await boot(page,{...await entitlements(),plan:'active',limits:'active',credits:'0',holdProvider:false});
@@ -792,7 +737,6 @@ test.describe('Alpha Cloud cutover flag',()=>{
  });
 
  const alpha=async(extra:Record<string,unknown>={})=>({...await entitlements({iss:'https://api.alphacompute.ai',aud:'ai.alphacompute.alphaphone',...extra}),alphaCloud:true});
- /** The in-app plan manager opens with the catalogue; nothing opens in a browser until the owner subscribes. */
  async function openPlans(page:Page){
   await expect(page.getByRole('dialog',{name:'Review billing account',exact:true})).toHaveCount(0);
   const plans=page.getByRole('region',{name:'Plans',exact:true});
@@ -800,7 +744,6 @@ test.describe('Alpha Cloud cutover flag',()=>{
   expect((await calls(page)).filter(c=>c.method==='openExternal')).toEqual([]);
   return plans;
  }
- /** Subscribing opens exactly Stripe's hosted checkout page Cloud answered; nothing is bought here. */
  async function subscribePlus(page:Page){
   const plans=await openPlans(page);
   await plans.getByRole('listitem').filter({hasText:'Plus'}).getByRole('button',{name:'Subscribe',exact:true}).click();
@@ -839,14 +782,11 @@ test.describe('Alpha Cloud cutover flag',()=>{
  test('on: a plan change confirmed while a plan check is still reading is checked again, not dropped',async({page})=>{
   await boot(page,{...await alpha(),plan:'none',limits:'canceled'});
   await needsPlan(page);await idle(page);await started(page);
-  // A return's plan check reads the plan before Cloud has the purchase...
   await fixture(page,{holdEntitlement:true});
   expect(await page.evaluate(()=>(window as any).planController.recheckPlanNow())).toBe('started');
   await expect.poll(()=>page.evaluate(()=>typeof (window as any).planFixture.releaseEntitlement)).toBe('function');
-  // ...then the plan manager confirms the checkout (Cloud has it now) while that read is still running.
   await fixture(page,{plan:'active'});
   await page.evaluate(()=>(window as any).planController.planChanged());
-  // The stale read answers "no plan"; the confirmed change is checked once it ends and admits the plan.
   await page.evaluate(()=>(window as any).planFixture.releaseEntitlement());
   await admitted(page);expect(await configured(page)).toBe(1);
   await release(page);
@@ -856,15 +796,12 @@ test.describe('Alpha Cloud cutover flag',()=>{
   await boot(page,{...await alpha(),plan:'none',limits:'canceled'});
   await needsPlan(page);await idle(page);await started(page);
   await page.getByRole('button',{name:'Choose a plan',exact:true}).click();
-  // The open plan screen reads the catalogue once per opening, not on every re-render.
   await openPlans(page);await page.waitForTimeout(1500);
   expect((await calls(page)).filter(c=>c.path==='/api/v1/subscriptions/plans')).toHaveLength(1);
   await subscribePlus(page);await idle(page);
-  // Cloud now has the purchase; one plan read that started before that answers the stale "no plan".
   await fixture(page,{plan:'active',holdEntitlement:true,holdEntitlementAs:'none'});
   await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
   await expect.poll(async()=>(await calls(page)).filter(c=>c.path==='/api/v1/subscriptions/checkout/confirm').length).toBe(1);
-  // The checkout asked for exactly Plus on the mobile return, and the return confirmed exactly its session.
   const bodies=await page.evaluate(()=>(window as any).planFixture.bodies);
   expect(bodies).toEqual([{planKey:'plus_monthly',idempotencyKey:expect.stringMatching(/^[0-9a-f-]{36}$/),presentation:'mobile'},{confirm:{sessionId:'cs_test_synthetic'}}]);
   await expect(page.getByRole('region',{name:'Plans',exact:true}).getByText('Plan active',{exact:true})).toBeVisible({timeout:30_000});
@@ -878,14 +815,12 @@ test.describe('Alpha Cloud cutover flag',()=>{
   await boot(page,{...await alpha(),plan:'none',limits:'canceled',confirmUnpaid:true});
   await needsPlan(page);await idle(page);await started(page);
   await page.getByRole('button',{name:'Choose a plan',exact:true}).click();await openPlans(page);
-  // Spend the plan manager's own return allowance with a check that finds no plan.
   const reads=async()=>(await calls(page)).filter(c=>c.path==='/api/v1/subscription/entitlement').length;
   const before=await reads();
   await page.evaluate(()=>(window as any).planController.recheckPlanOnReturn());
   await expect.poll(reads).toBe(before+1);await idle(page);
   await page.evaluate(()=>(window as any).planController.recheckPlanOnReturn());await idle(page);
   expect(await reads()).toBe(before+1);
-  // Subscribe opens Stripe's page; Cloud has not confirmed the payment when the owner returns.
   const plans=page.getByRole('region',{name:'Plans',exact:true});
   await plans.getByRole('listitem').filter({hasText:'Plus'}).getByRole('button',{name:'Subscribe',exact:true}).click();
   await expect.poll(async()=>(await calls(page)).filter(c=>c.method==='openExternal').length).toBe(1);await idle(page);
@@ -901,7 +836,6 @@ test.describe('Alpha Cloud cutover flag',()=>{
   await fixture(page,{holdEntitlement:true});
   expect(await page.evaluate(()=>(window as any).planController.recheckPlanNow())).toBe('started');
   await expect.poll(()=>page.evaluate(()=>typeof (window as any).planFixture.releaseEntitlement)).toBe('function');
-  // The change lands while that refresh is still reading the old plan.
   await fixture(page,{plan:'past_due'});
   await page.evaluate(()=>(window as any).planController.planChanged());
   await page.evaluate(()=>(window as any).planFixture.releaseEntitlement());
@@ -915,14 +849,12 @@ test.describe('Alpha Cloud cutover flag',()=>{
   await page.getByRole('button',{name:'Manage plan',exact:true}).click();
   const plans=await openPlans(page);
   const reads=async()=>(await calls(page)).filter(c=>c.path==='/api/v1/subscription/entitlement').length;
-  // Spend the plan screen's own return allowance.
   await page.evaluate(()=>(window as any).planController.recheckPlanOnReturn());await idle(page);
   await plans.getByRole('listitem').filter({hasText:'Pro'}).getByRole('button',{name:'Switch to Pro',exact:true}).click();
   await plans.getByRole('group',{name:'Review plan change'}).getByRole('button',{name:'Confirm',exact:true}).click();
   await expect.poll(async()=>(await calls(page)).filter(c=>c.method==='openExternal').map(c=>c.url)).toEqual(['https://invoice.stripe.com/i/acct_synthetic/inv_synthetic']);
   await expect(plans.getByText('Finish payment, then come back',{exact:true})).toBeVisible();
   expect(await page.evaluate(()=>(window as any).planFixture.billing)).toEqual(['upgrade-review','upgrade-confirm','upgrade-payment']);
-  // The immediate check after the confirm has run; the owner's return from the invoice still checks again.
   await page.waitForTimeout(1500);await idle(page);
   const before=await reads();
   await page.evaluate(()=>(window as any).planController.recheckPlanOnReturn());

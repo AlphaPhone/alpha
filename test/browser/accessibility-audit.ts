@@ -1,16 +1,5 @@
 import type { Page } from '@playwright/test';
 
-/**
- * Dependency-free accessibility checks for the renderer, in the spirit of axe rules.
- *
- * Names, roles and focusability come from Chromium's own accessibility tree (the tree
- * Android WebView hands to TalkBack is computed by the same engine), so there is no
- * second, approximate accessible-name implementation here. Geometry, contrast and
- * clipping are measured in the page.
- *
- * These are renderer checks only. They are not a TalkBack, Switch Access, physical
- * large-font or device rotation pass; those stay device acceptance (MVP-48).
- */
 export type Violation = { rule: string; target: string; detail?: string };
 
 const NAMED_ROLES = new Set([
@@ -28,7 +17,6 @@ type AxNode = {
   properties?: Array<{ name: string; value: { value?: unknown } }>;
 };
 
-/** Every exposed control, dialog and image has a name, and every exposed control takes focus. */
 export async function auditTree(page: Page): Promise<Violation[]> {
   const session = await page.context().newCDPSession(page);
   try {
@@ -60,39 +48,15 @@ export async function auditTree(page: Page): Promise<Violation[]> {
 }
 
 export type PageAuditOptions = {
-  /** Check text contrast against the composited background (WCAG 1.4.3). */
   contrast?: boolean;
-  /** Check that text and controls are not clipped or pushed off the phone (WCAG 1.4.4, 1.4.10). */
   clipping?: boolean;
-  /** Smallest pointer target in CSS pixels (WCAG 2.5.8 requires 24). */
   targetSize?: number;
-  /**
-   * Check that no two pieces of readable text and no two controls are painted over each other, and
-   * that no control is cut through by a box that does not scroll (WCAG 1.4.4, 1.4.12). Measured from
-   * bounding boxes after clipping; text or a control under an opaque layer is not counted.
-   */
   overlap?: boolean;
-  /**
-   * Check the floating dock (the composer bar, the pill, the resting half sheet) and toasts:
-   * on Home and in the app library nothing readable or operable may be painted under the dock at
-   * all; in an app's own scroller a control or label under the dock must be reachable by scrolling
-   * it fully clear; and a toast on screen must be painted on top and not be inert (a toast left
-   * under a top-layer dialog is neither seen nor announced). Measured from bounding boxes after
-   * clipping and from hit tests.
-   */
   dock?: boolean;
-  /** Check an empty field's placeholder against the composited background, as text (WCAG 1.4.3). */
   placeholder?: boolean;
-  /**
-   * Check that a choice shown by colour is also exposed: in a row of three or more sibling buttons
-   * where one has a background the others share none of, some button in the row must expose
-   * aria-pressed, aria-selected, aria-checked or aria-current (WCAG 1.4.1, 4.1.2). Two buttons are
-   * not judged: a primary action beside a secondary one is emphasis, not a selection.
-   */
   selection?: boolean;
 };
 
-/** Structure, keyboard operability, contrast and clipping measured in the page. */
 export async function auditPage(page: Page, options: PageAuditOptions = {}): Promise<Violation[]> {
   return page.evaluate(({ contrast, clipping, targetSize, overlap, dock, placeholder, selection }) => {
     const out: Array<{ rule: string; target: string; detail?: string }> = [];
@@ -104,7 +68,6 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
     const shown = (el: Element) => {
       if (!(el instanceof HTMLElement || el instanceof SVGElement)) return false;
       if (!el.getClientRects().length) return false;
-      // Chromium retains geometry inside closed <details>; those descendants are not painted.
       if (typeof el.checkVisibility === 'function' && !el.checkVisibility()) return false;
       const style = getComputedStyle(el);
       return style.visibility === 'visible' && style.display !== 'none';
@@ -113,21 +76,14 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
     const INTERACTIVE = 'button,a[href],input:not([type=hidden]),select,textarea,summary,[role=button],[role=link],[role=checkbox],[role=switch],[role=tab],[role=menuitem],[role=radio],[role=slider],[role=option],[role=textbox],[role=searchbox],[role=combobox]';
     const TABBABLE = 'button,a[href],input:not([type=hidden]),select,textarea,summary,[tabindex],[contenteditable=""],[contenteditable=true]';
     const tabbable = (el: Element) => el.matches(TABBABLE) && !el.matches(':disabled,[tabindex="-1"]') && exposed(el);
-    // A top-layer <dialog> or an open inline dialog owns the screen; only it is judged for geometry.
     const top = Array.from(document.querySelectorAll('dialog[open]')).at(-1) || null;
     const within = (el: Element) => !top || top.contains(el);
-    // The map is a pannable surface: labels and pins outside the frame are reached by panning,
-    // and every place is also listed in the results sheet.
     const PANNABLE = '[data-alpha-map-canvas],[data-alpha-map-plane]';
     const viewport = { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight };
 
-    // 1. Focus must never be able to enter content that assistive technology cannot see.
     for (const el of document.querySelectorAll('[aria-hidden="true"]'))
       for (const control of el.querySelectorAll(TABBABLE)) if (tabbable(control)) out.push({ rule: 'aria-hidden-focus', target: describe(control) });
 
-    // 2. A click handler on an element that is not a control cannot be reached by keyboard,
-    //    switch or TalkBack. Pointer-only scrims with no content of their own are allowed
-    //    (their dialog must close another way; the keyboard sweep checks that).
     const handler = (el: Element) => {
       for (const key of Object.keys(el)) if (key.startsWith('__reactProps$')) return typeof (el as any)[key]?.onClick === 'function';
       return false;
@@ -141,7 +97,6 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
       out.push({ rule: 'click-without-control', target: describe(el) });
     }
 
-    // 3. References must resolve, and ids used by them must be unique.
     for (const el of document.querySelectorAll('[aria-labelledby],[aria-describedby],[aria-controls]')) {
       if (!exposed(el)) continue;
       for (const attribute of ['aria-labelledby', 'aria-describedby', 'aria-controls']) {
@@ -152,19 +107,15 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
       }
     }
 
-    // 4. Pointer targets.
     if (targetSize) for (const el of document.querySelectorAll(INTERACTIVE)) {
       if (!exposed(el) || !within(el) || el.closest('[aria-hidden="true"]') || el.matches(':disabled')) continue;
-      // An inline link inside a sentence is exempt (WCAG 2.5.8 inline exception).
       if (el.matches('a[href]') && getComputedStyle(el).display.startsWith('inline')) continue;
-      // A native checkbox, radio or range inside a label takes the label as its target.
       const subject = el.matches('input') && el.closest('label') ? el.closest('label')! : el;
       const rect = subject.getBoundingClientRect();
       if (!rect.width || !rect.height) continue;
       if (rect.width < targetSize - .5 || rect.height < targetSize - .5) out.push({ rule: 'target-size', target: describe(el), detail: `${Math.round(rect.width)}x${Math.round(rect.height)}` });
     }
 
-    // 5. Contrast of rendered text against whatever is painted behind it.
     const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
     const context = canvas.getContext('2d', { willReadFrequently: true })!;
     const cache = new Map<string, number[]>();
@@ -179,8 +130,6 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
     const opacity = (el: Element | null) => { let value = 1; for (let node = el; node; node = node.parentElement) value *= Number(getComputedStyle(node).opacity); return value; };
     const over = (top: number[], under: number[]) => { const a = top[3] + under[3] * (1 - top[3]); return a ? [0, 1, 2].map(i => (top[i] * top[3] + under[i] * under[3] * (1 - top[3])) / a).concat(a) : [0, 0, 0, 0]; };
     const luminance = (color: number[]) => { const [r, g, b] = color.map(v => { const c = v / 255; return c <= .03928 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4; }); return .2126 * r + .7152 * g + .0722 * b; };
-    // What is painted behind el, from el down its hit-test stack, composited onto white; null when
-    // imagery, a gradient or blur is part of it (the dedicated overlay specs check text over those).
     const backdrop = (el: Element, stack: Element[]) => {
       let background = [0, 0, 0, 0];
       for (const layer of stack.slice(stack.indexOf(el))) {
@@ -192,7 +141,6 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
       }
       return over(background, [255, 255, 255, 1]);
     };
-    // How far ink on a background falls short of WCAG 1.4.3 for text in this style ('' when it does not).
     const shortfall = (ink: number[], background: number[], style: CSSStyleDeclaration) => {
       const foreground = over(ink, background);
       const l1 = luminance(foreground), l2 = luminance(background);
@@ -203,7 +151,6 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
     };
     if (contrast) {
       const seen = new Set<Element>();
-      // Text that is fading or sliding in is judged once it has arrived, not mid-transition.
       const moving = document.getAnimations().filter(item => item.playState === 'running').map(item => (item.effect as KeyframeEffect | null)?.target).filter((target): target is Element => !!target);
       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
@@ -216,12 +163,10 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
         const x = rect.left + Math.min(rect.width / 2, 6), y = rect.top + rect.height / 2;
         if (x < 0 || y < 0 || x >= viewport.width || y >= viewport.height) continue;
         const stack = document.elementsFromPoint(x, y);
-        // Covered text is not what the user sees.
         if (!stack.length || !(stack[0] === el || el.contains(stack[0]) || stack[0].contains(el))) continue;
         const start = stack.indexOf(el); if (start < 0) continue;
         seen.add(el);
         const style = getComputedStyle(el);
-        // Text over imagery, gradients and blur is checked by the dedicated overlay specs.
         const background = backdrop(el, stack); if (!background) continue;
         const ink = rgba(style.color).slice(); ink[3] *= opacity(el);
         const short = shortfall(ink, background, style);
@@ -229,14 +174,12 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
       }
     }
 
-    // 5b. An empty field's placeholder is its only visible hint and is read as text.
     if (placeholder) for (const el of document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input[placeholder],textarea[placeholder]')) {
       const hint = (el.placeholder || '').trim();
       if (!hint || el.value || el.disabled || !exposed(el) || !within(el) || el.closest('[aria-hidden="true"]')) continue;
       const rect = el.getBoundingClientRect(); if (rect.width < 2 || rect.height < 2) continue;
       const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
       if (x < 0 || y < 0 || x >= viewport.width || y >= viewport.height) continue;
-      // A covered field is not what the user sees.
       const stack = document.elementsFromPoint(x, y);
       if (stack[0] !== el) continue;
       const background = backdrop(el, stack); if (!background) continue;
@@ -246,8 +189,6 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
       if (short) out.push({ rule: 'placeholder-contrast', target: describe(el), detail: `${short} "${hint.slice(0, 40)}"` });
     }
 
-    // 5c. A choice shown only by colour: one button in a row painted unlike the rest, and no
-    //     button in the row saying which is chosen.
     if (selection) {
       const BUTTON = 'button,[role=button],[role=radio],[role=tab],[role=option]';
       const STATE = '[aria-pressed],[aria-selected],[aria-checked],[aria-current]:not([aria-current="false"])';
@@ -264,7 +205,6 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
       }
     }
 
-    // 6. Clipping: nothing readable may be cut off, and nothing may leave the phone sideways.
     if (clipping) {
       const scrolls = (el: Element, axis: 'x' | 'y') => { const value = getComputedStyle(el)[axis === 'x' ? 'overflowX' : 'overflowY']; return value === 'auto' || value === 'scroll'; };
       const scroller = (el: Element, axis: 'x' | 'y') => { for (let node = el.parentElement; node; node = node.parentElement) if (scrolls(node, axis) && (axis === 'x' ? node.scrollWidth > node.clientWidth : node.scrollHeight > node.clientHeight)) return node; return null; };
@@ -281,36 +221,28 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
         const range = document.createRange(); range.selectNodeContents(node);
         const rects = Array.from(range.getClientRects()).filter(item => item.width > 1 && item.height > 1);
         if (!rects.length) continue;
-        // Text must stay inside every clipping ancestor, unless that ancestor scrolls to it.
         let freeX = false, freeY = false, hidden = false;
         for (let box: Element | null = el; box && box !== root.parentElement && !(freeX && freeY); box = box.parentElement) {
           const boxStyle = getComputedStyle(box);
-          // Past a scroller, the user can bring the text into view on that axis.
           if (scrolls(box, 'x')) freeX = true;
           if (scrolls(box, 'y')) freeY = true;
           const clipX = !freeX && boxStyle.overflowX !== 'visible', clipY = !freeY && boxStyle.overflowY !== 'visible';
           if (!clipX && !clipY) continue;
           const frame = box.getBoundingClientRect();
-          // Text wholly outside a clipping box is hidden, not cut; only a partial cut is illegible.
           if (rects.every(item => item.left >= frame.right - 1 || item.right <= frame.left + 1 || item.top >= frame.bottom - 1 || item.bottom <= frame.top + 1)) { hidden = true; break; }
           const cutX = clipX && rects.some(item => item.right > frame.right + 1.5 || item.left < frame.left - 1.5);
           const cutY = clipY && rects.some(item => item.bottom > frame.bottom + 2.5 || item.top < frame.top - 2.5);
           if (cutX || cutY) {
-            // Deliberate single-line truncation keeps the full text available to assistive
-            // technology; it is reported separately so it can be judged per surface.
             const ellipsis = cutX && !cutY && (style.textOverflow === 'ellipsis' || boxStyle.textOverflow === 'ellipsis' || style.webkitLineClamp !== 'none' && !!style.webkitLineClamp);
             const clamp = cutY && (boxStyle.webkitLineClamp !== 'none' && !!boxStyle.webkitLineClamp);
             out.push({ rule: ellipsis || clamp ? 'text-truncated' : 'text-clipped', target: describe(el), detail: `"${text.slice(0, 40)}" cut ${cutX ? 'horizontally' : 'vertically'} by ${box === el ? 'itself' : describe(box).slice(0, 80)}` });
-            hidden = true; // already reported; the part beyond the box is not painted
+            hidden = true;
             break;
           }
         }
-        // Wrapped lines must not print over each other: a line box shorter than the text it holds
-        // (a pixel line height under scaled text) overlaps the line above.
         const lineHeight = parseFloat(style.lineHeight), fontSize = parseFloat(style.fontSize);
         if (!hidden && lineHeight && lineHeight < fontSize * .95 && new Set(rects.map(item => Math.round(item.top))).size > 1)
           out.push({ rule: 'text-lines-overlap', target: describe(el), detail: `"${text.slice(0, 40)}" ${Math.round(fontSize)}px text on ${Math.round(lineHeight)}px lines` });
-        // Text must not run off the side of the phone where no scroller can bring it back.
         if (!hidden && !scroller(el, 'x') && rects.some(item => item.right > right + 1.5 || item.left < left - 1.5))
           out.push({ rule: 'text-off-screen', target: describe(el), detail: `"${text.slice(0, 40)}"` });
       }
@@ -318,12 +250,10 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
         if (!exposed(el) || el.closest('[aria-hidden="true"]') || el.closest(PANNABLE)) continue;
         const rect = el.getBoundingClientRect(); if (!rect.width || !rect.height) continue;
         if (!scroller(el, 'x') && (rect.right > right + 1.5 || rect.left < left - 1.5)) out.push({ rule: 'control-off-screen', target: describe(el), detail: `${Math.round(rect.left)}..${Math.round(rect.right)} outside ${Math.round(left)}..${Math.round(right)}` });
-        // A label wider or taller than its own control spills onto its neighbours.
         if (getComputedStyle(el).overflow === 'visible' && !el.matches('input,textarea,select')) {
           const labels = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
           for (let node = labels.nextNode(); node; node = labels.nextNode()) {
             if (!(node.nodeValue || '').trim() || !node.parentElement || !shown(node.parentElement) || getComputedStyle(node.parentElement).position === 'absolute') continue;
-            // Text clipped or truncated inside the control is judged by the clipping rules above.
             let inner = false; for (let box: Element | null = node.parentElement; box && box !== el; box = box.parentElement) if (getComputedStyle(box).overflow !== 'visible') { inner = true; break; }
             if (inner) continue;
             const range = document.createRange(); range.selectNodeContents(node);
@@ -332,17 +262,13 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
             }
           }
         }
-        // A control below or above the fold with no vertical scroller cannot be reached at all.
         if (!scroller(el, 'y') && (rect.top > viewport.height - 1 || rect.bottom < 1) && getComputedStyle(el).position !== 'fixed') out.push({ rule: 'control-unreachable', target: describe(el), detail: `top ${Math.round(rect.top)} in ${viewport.height}` });
       }
     }
-    // 7. Overlap: readable text must not be printed over other readable text, a control must not
-    //    sit on another control, and a control must not be cut through by a box that cannot scroll.
     if (overlap) {
       type Box = { left: number; top: number; right: number; bottom: number };
       const root = top || document.querySelector('.alpha-recovery') || document.querySelector('.os') || document.body;
       const scrolls = (value: string) => value === 'auto' || value === 'scroll';
-      // What is left of a box once every clipping ancestor and the viewport have cut it.
       const painted = (rect: Box, el: Element): Box | null => {
         const box = { left: Math.max(0, rect.left), top: Math.max(0, rect.top), right: Math.min(viewport.width, rect.right), bottom: Math.min(viewport.height, rect.bottom) };
         for (let node: Element | null = el; node && node !== document.documentElement; node = node.parentElement) {
@@ -355,8 +281,6 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
         }
         return box.right - box.left > 1 && box.bottom - box.top > 1 ? box : null;
       };
-      // Hit testing skips pointer-events:none content; for the duration of the measurement
-      // everything is hit-testable so the paint order of any two boxes can be read.
       const probe = document.createElement('style'); probe.textContent = '*{pointer-events:auto!important}'; document.head.append(probe);
       try {
         const opaque = (el: Element) => {
@@ -366,7 +290,6 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
           const parts = match ? match[1].split(/[,\s/]+/).filter(Boolean).map(Number) : [];
           return parts.length >= 3 && (parts.length < 4 || parts[3] >= .5);
         };
-        // Both boxes are painted where they meet: neither is behind an opaque layer of the other's stack.
         const together = (a: Element, b: Element, x: number, y: number) => {
           const stack = document.elementsFromPoint(x, y);
           const first = stack.indexOf(a), second = stack.indexOf(b);
@@ -376,8 +299,6 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
         };
         const meet = (a: Box, b: Box) => ({ left: Math.max(a.left, b.left), top: Math.max(a.top, b.top), right: Math.min(a.right, b.right), bottom: Math.min(a.bottom, b.bottom) });
 
-        // Text. A line's box is reduced to its em box (font size, centred): line boxes of adjacent
-        // lines overlap by design wherever the line height is below the font's content area.
         const runs: Array<{ el: Element; text: string; size: number; box: Box }> = [];
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
         for (let node = walker.nextNode(); node; node = walker.nextNode()) {
@@ -404,8 +325,6 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
           out.push({ rule: 'text-overlap', target: describe(a.el), detail: `"${a.text.slice(0, 30)}" is printed over "${b.text.slice(0, 30)}" (${Math.round(shared.right - shared.left)}x${Math.round(shared.bottom - shared.top)})` });
         }
 
-        // A short word in a control's label that is split across lines reads as two fragments
-        // ("Calenda" / "r"): the label needed more room than its control gave it.
         for (const el of root.querySelectorAll(INTERACTIVE)) {
           if (!exposed(el) || el.closest('[aria-hidden="true"]') || el.closest(PANNABLE) || el.matches('input,textarea,select')) continue;
           const labels = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
@@ -414,7 +333,6 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
             if (!node.parentElement || !shown(node.parentElement)) continue;
             const value = node.nodeValue || '';
             for (const word of value.matchAll(/[\p{L}\p{N}]{2,14}/gu)) {
-              // Only whole words: a fragment of a longer unbroken string (an address, a file name) is content, not a label.
               const before = value[word.index! - 1], after = value[word.index! + word[0].length];
               if ((before && !/\s/.test(before)) || (after && !/[\s.,:;!?…]/.test(after))) continue;
               const range = document.createRange(); range.setStart(node, word.index!); range.setEnd(node, word.index! + word[0].length);
@@ -425,7 +343,6 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
           if (broken) out.push({ rule: 'label-word-broken', target: describe(el), detail: `"${broken}" is split across lines` });
         }
 
-        // Controls.
         const controls: Array<{ el: Element; box: Box }> = [];
         for (const el of root.querySelectorAll(INTERACTIVE)) {
           if (!exposed(el) || el.closest('[aria-hidden="true"]') || el.closest(PANNABLE)) continue;
@@ -433,7 +350,6 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
           const box = painted(rect, el.parentElement || el);
           if (!box) continue;
           const cutX = Math.max(box.left - rect.left, rect.right - box.right), cutY = Math.max(box.top - rect.top, rect.bottom - box.bottom);
-          // Cut by a box the user cannot scroll: part of the control is not painted and cannot be brought back.
           let scrollable = false;
           for (let node = el.parentElement; node; node = node.parentElement) { const style = getComputedStyle(node); if ((scrolls(style.overflowX) && node.scrollWidth > node.clientWidth) || (scrolls(style.overflowY) && node.scrollHeight > node.clientHeight)) { scrollable = true; break; } }
           const inside = rect.left >= -1 && rect.top >= -1 && rect.right <= viewport.width + 1 && rect.bottom <= viewport.height + 1;
@@ -443,7 +359,6 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
         for (let i = 0; i < controls.length; i++) for (let j = i + 1; j < controls.length; j++) {
           const a = controls[i], b = controls[j];
           if (a.el.contains(b.el) || b.el.contains(a.el)) continue;
-          // A label and the native control it wraps, or a field and the affordance drawn inside it, are one target.
           if (a.el.matches('input,textarea,select') || b.el.matches('input,textarea,select')) continue;
           const shared = meet(a.box, b.box);
           if (shared.right - shared.left <= 4 || shared.bottom - shared.top <= 4) continue;
@@ -452,7 +367,6 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
         }
       } finally { probe.remove(); }
     }
-    // 8. The floating dock and toasts.
     if (dock) {
       type Box = { left: number; top: number; right: number; bottom: number };
       const scrolls = (value: string) => value === 'auto' || value === 'scroll';
@@ -468,12 +382,9 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
         }
         return box.right - box.left > 1 && box.bottom - box.top > 1 ? box : null;
       };
-      // The dock is whichever of these is on screen: the composer bar with anything stacked on
-      // it, the pill, or the conversation sheet resting over the lower part of the page.
       const DOCK = '[data-alpha-layer="composer"],[data-alpha-layer="pill"] > *,[data-alpha-layer="conversation"]';
       const docks = top ? [] : Array.from(document.querySelectorAll(DOCK)).filter(el => exposed(el) && !el.closest('[aria-hidden="true"]'))
         .map(el => ({ el, box: el.getBoundingClientRect() })).filter(item => item.box.width > 1 && item.box.height > 1);
-      // Only the page the dock floats over is judged; menus, sheets, the shade and toasts are drawn above it.
       const UNDER = '[data-alpha-layer="home"],[data-alpha-layer="drawer"],[data-alpha-layer="app"]';
       const scale = (() => { const screen = document.querySelector<HTMLElement>('[data-screen]'); return screen && screen.offsetWidth ? screen.getBoundingClientRect().width / screen.offsetWidth : 1; })();
       const judge = (el: Element, rect: Box, what: string) => {
@@ -482,11 +393,8 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
         for (const item of docks) {
           const width = Math.min(box.right, item.box.right) - Math.max(box.left, item.box.left), height = Math.min(box.bottom, item.box.bottom) - Math.max(box.top, item.box.top);
           if (width <= 2 || height <= 2) continue;
-          // The dock really is what is painted there (an inline dialog or a sheet above both is not the dock's doing).
           const hit = document.elementFromPoint(Math.max(box.left, item.box.left) + width / 2, Math.max(box.top, item.box.top) + height / 2);
           if (!hit || !(item.el === hit || item.el.contains(hit))) continue;
-          // Floating docks intentionally cover scroll content. Every covered
-          // control must have enough remaining scroll range to clear them.
           let room = 0;
           for (let node = el.parentElement; node; node = node.parentElement) {
             const style = getComputedStyle(node);
@@ -512,8 +420,6 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
           for (const rect of Array.from(range.getClientRects())) if (rect.width > 1 && rect.height > 1) judge(el, rect, `"${text.slice(0, 30)}"`);
         }
       }
-      // A toast on screen is the topmost thing where it is drawn, and assistive technology can
-      // reach it: under a top-layer dialog it would be covered and inert, so never announced.
       for (const el of document.querySelectorAll('[data-alpha-toast],[data-alpha-dialog-toast]')) {
         const text = (el.textContent || '').trim(); if (!text || !shown(el)) continue;
         const mirrored = el.matches('[data-alpha-toast]') && Array.from(document.querySelectorAll('[data-alpha-dialog-toast]')).some(copy => shown(copy) && (copy.textContent || '').trim() === text);
@@ -521,10 +427,7 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
         const body = el.firstElementChild || el, box = painted(body.getBoundingClientRect(), body);
         const modal = Array.from(document.querySelectorAll('dialog[open]')).filter(item => item.matches(':modal')).at(-1);
         if (el.closest('[inert]') || (modal && !modal.contains(el))) { out.push({ rule: 'toast-not-announced', target: describe(el), detail: `"${text.slice(0, 40)}" is inert${modal ? ' under a modal dialog' : ''}` }); continue; }
-        // A scrollable notice can retain more text than it currently paints. Hit-test
-        // its visible part, while still rejecting a fully clipped or covered notice.
         const hit = box ? document.elementFromPoint((box.left + box.right) / 2, (box.top + box.bottom) / 2) : null;
-        // pointer-events:none wrappers are skipped by hit testing; the toast body takes pointer events.
         if (!hit || !(body === hit || body.contains(hit) || hit.contains(body) && el.contains(hit))) out.push({ rule: 'toast-covered', target: describe(el), detail: `"${text.slice(0, 40)}" is under ${hit ? describe(hit).slice(0, 80) : 'nothing painted'}` });
       }
     }
@@ -532,47 +435,15 @@ export async function auditPage(page: Page, options: PageAuditOptions = {}): Pro
   }, { contrast: !!options.contrast, clipping: !!options.clipping, targetSize: options.targetSize || 0, overlap: !!options.overlap, dock: !!options.dock, placeholder: !!options.placeholder, selection: !!options.selection });
 }
 
-/** The accessible name of the one semantic group that holds the floating assistant controls. */
 export const ASSISTANT_GROUP = 'Assistant controls';
-/** Roles Android exposes as clickable or checkable nodes; their children are part of their label. */
 const ANDROID_ACTIONABLE = new Set([
   'button', 'ToggleButton', 'PopUpButton', 'DisclosureTriangle', 'link', 'checkbox', 'radio', 'switch', 'tab',
   'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'textbox', 'searchbox', 'combobox', 'slider', 'spinbutton',
 ]);
 type AxTreeNode = AxNode & { nodeId: string; childIds?: string[]; parentId?: string };
 type ReadGeometry = { box: { left: number; top: number; right: number; bottom: number }; live: boolean; where: string; group: number; surface: boolean };
-/**
- * Bars of controls read in one order in every layout. An app header keeps the navigation, title,
- * actions order of an Android toolbar when a large system font moves its title to a row of its own
- * below the buttons (Material's large top app bar is read the same way), and the camera's capture
- * row keeps its portrait order when landscape turns it into a rail that runs upward, as the device
- * itself turned. Order is judged between bars and the rest of the screen, not inside one bar.
- */
 export const READING_GROUPS = '[data-alpha-app-header],[data-alpha-camera="capture"]';
 
-/**
- * TalkBack's linear reading order, the check AccessibilityInstrumentedTest.talkBackOrder makes on
- * Android, made in Chromium so that every view and state of the sweep gets it.
- *
- * Android WebView builds its node tree from the same Blink accessibility tree that CDP returns.
- * The walk follows that tree in order and keeps what Android exposes as a node TalkBack visits: a
- * control (its children are part of its label), a heading, focusable element or element with only
- * text inside it (Chromium drops their children on Android and reads their text as one node), and
- * remaining text and named images. For each visible node, by the bounds left after clipping:
- *
- * - `reading-order`: the next node must not sit above the previous one by more than half the
- *   taller of the two, unless it starts a new column to the right (the Android rule, unchanged);
- * - `assistant-group-order`: the floating assistant controls form one group, read last, so no
- *   app content may follow it (it floats above the bottom edge, so moving into it may go up);
- * - `assistant-group-duplicate`: at most one such group is exposed.
- *
- * Live regions (toasts, status lines) are announced when they change, not found by reading on,
- * so their place in the order is not judged; nor is order inside one bar of controls
- * (READING_GROUPS), or among the names painted on the pannable map. The conversation sheet floats
- * over the app like the dock and is judged like it. Content outside the phone screen (the browser
- * preview's rail) is not on a phone. These are renderer checks: TalkBack itself, Switch Access and
- * WebView's own node exposure remain emulator and device evidence (AccessibilityInstrumentedTest).
- */
 export async function auditReadingOrder(page: Page): Promise<Violation[]> {
   const session = await page.context().newCDPSession(page);
   try {
@@ -588,7 +459,6 @@ export async function auditReadingOrder(page: Page): Promise<Violation[]> {
     const exposedChildren = (node: AxTreeNode): AxTreeNode[] => children(node).flatMap(child => child.ignored ? exposedChildren(child) : [child]);
     const text = (node: AxTreeNode): string => role(node) === 'StaticText' ? name(node) : exposedChildren(node).map(text).filter(Boolean).join(' ');
     const focusableBelow = (node: AxTreeNode): boolean => exposedChildren(node).some(child => (property(child, 'focusable') === true && role(child) !== 'option') || focusableBelow(child));
-    // BrowserAccessibilityAndroid::IsLeaf: which nodes Android reads as one node with their text.
     const leaf = (node: AxTreeNode) => {
       const kind = role(node);
       if (ANDROID_ACTIONABLE.has(kind) || kind === 'image' || kind === 'img' || kind === 'StaticText') return true;
@@ -615,14 +485,13 @@ export async function auditReadingOrder(page: Page): Promise<Violation[]> {
     walk(root, false);
     const out: Violation[] = [];
     if (groups > 1) out.push({ rule: 'assistant-group-duplicate', target: `${groups} groups named "${ASSISTANT_GROUP}"` });
-    // Geometry from the page: each node resolved once, all measured in one call.
     const resolved: Array<{ visit: Visit; objectId: string }> = [];
     for (const visit of visits) {
       if (!visit.node.backendDOMNodeId) continue;
       try {
         const { object } = await session.send('DOM.resolveNode', { backendNodeId: visit.node.backendDOMNodeId }) as { object: { objectId?: string } };
         if (object.objectId) resolved.push({ visit, objectId: object.objectId });
-      } catch { /* detached while reading */ }
+      } catch { }
     }
     if (!resolved.length) return out;
     const { result } = await session.send('Runtime.callFunctionOn', {
@@ -682,15 +551,6 @@ export async function auditReadingOrder(page: Page): Promise<Violation[]> {
   } finally { await session.detach().catch(() => {}); }
 }
 
-/**
- * Walk the tab order. Focus must move on every press, must never land in content hidden from
- * assistive technology, and must return to where it began (no trap, no dead end). A modal
- * dialog with a single control keeps focus on it by design; its dismissal is covered by the
- * dialog specs. Outside a modal, the walk must also reach every exposed tab stop: an order
- * that cycles through part of the page leaves the rest unreachable by keyboard. While a menu
- * or sheet is open over a scrim, no stop may sit under the scrim or the panel.
- */
-/** Enough steps to walk the current finite page inventory and pass through the browser edge. */
 export async function exposedTabStopBudget(page: Page): Promise<number> {
   return page.locator('button,a[href],input:not([type=hidden]),select,textarea,summary,[tabindex]').evaluateAll(elements =>
     elements.filter(element => !element.matches(':disabled,[tabindex="-1"]')
@@ -707,9 +567,6 @@ export async function auditTabOrder(page: Page, limit = 120): Promise<Violation[
     const dialog = el.closest('dialog,[role=dialog],[role=alertdialog]');
     const stops = dialog ? Array.from(dialog.querySelectorAll('button,a[href],input:not([type=hidden]),select,textarea,summary,[tabindex]'))
       .filter(item => !item.matches(':disabled,[tabindex="-1"]') && !item.closest('[inert]') && item.getClientRects().length > 0).length : 0;
-    // A scrim is an empty button laid over (nearly) the whole phone to close a menu or sheet.
-    // Focus on a control under it, or under the panel that follows it, is focus the user cannot
-    // see on a control a pointer cannot reach: the popup must take the page out of the tab order.
     const phone = (document.querySelector('.os') || document.documentElement).getBoundingClientRect();
     const scrim = Array.from(document.querySelectorAll('button')).find(item => {
       if (item === el || item.contains(el) || (item.textContent || '').trim() || item.closest('[inert]') || !item.getClientRects().length) return false;
@@ -718,14 +575,8 @@ export async function auditTabOrder(page: Page, limit = 120): Promise<Violation[
     });
     const hit = scrim ? document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) : null;
     const behind = !!scrim && !!hit && hit !== el && !el.contains(hit) && !hit.contains(el) && (hit === scrim || !!(scrim.compareDocumentPosition(hit) & Node.DOCUMENT_POSITION_FOLLOWING));
-    // The focused control must be wholly visible: no part of it under the floating dock (the
-    // composer bar, the pill or the resting sheet). Its painted box is what clipping leaves of it.
     let under = '';
-    // A focusable scroll region is the scroller itself: it runs under the dock by design and its
-    // content is scrolled clear, which the obscured-by-dock rule of auditPage judges.
     const region = ['auto', 'scroll'].includes(getComputedStyle(el).overflowY) || el.matches('canvas.maplibregl-canvas[role=region]') && !!el.closest('[data-alpha-map-plane]');
-    // The map is a keyboard-pannable region beneath floating controls. Its marker and buttons
-    // are still checked individually; the canvas viewport itself intentionally fills the view.
     if (!region && !el.closest('[data-alpha-layer="composer"],[data-alpha-layer="pill"],[data-alpha-layer="conversation"],dialog')) {
       const box = { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
       for (let node = el.parentElement; node && node !== document.documentElement; node = node.parentElement) {
@@ -746,7 +597,6 @@ export async function auditTabOrder(page: Page, limit = 120): Promise<Violation[
     return {
       key: anyEl.__alphaTabId as string, hidden: !!el.closest('[inert],[aria-hidden="true"]'),
       visible: rect.width > 0 && rect.height > 0, behind, under, modal: !!dialog, stops,
-      // Tab steps through the hour, minute and period fields of a native date or time input before leaving it.
       segmented: el.matches('input[type=time],input[type=date],input[type=datetime-local],input[type=month],input[type=week]'), text: el.outerHTML.replace(/\s+/g, ' ').replace(/ style="[^"]*"/g, '').slice(0, 140),
     };
   });
@@ -768,18 +618,9 @@ export async function auditTabOrder(page: Page, limit = 120): Promise<Violation[
     if (stuck) continue;
     if (current.key !== 'body' && order.includes(current.key)) { wrapped = true; break; }
     if (current.key !== 'body') { order.push(current.key); contained ||= current.modal; }
-    // Leaving the last stop passes through the browser's own controls. The walk starts wherever
-    // focus was (a newly opened subview takes it), so it carries on past the edge until a stop
-    // repeats: the stops before the starting point are part of the order too.
     else if (order.length ? ++edges > 1 : ++idle > 3) { wrapped = true; break; }
   }
   if (!wrapped && order.length >= limit - 1) out.push({ rule: 'focus-order-unbounded', target: `more than ${limit} tab stops` });
-  // A dialog legitimately keeps focus to itself. Anywhere else, a completed cycle must have
-  // visited every exposed tab stop. Radio groups share one stop, so radios are not counted.
-  // A walk that never leaves the page body is a completed cycle of no stops: if Tab is swallowed,
-  // every control on the page is unreachable by keyboard and is reported here.
-  // Only controls that were on screen before the walk and are still there count: content that
-  // arrives on a timer while the walk is under way is not a stop the walk skipped.
   if (wrapped && !contained) {
     const missed = await page.evaluate(() => Array.from(document.querySelectorAll('button,a[href],input:not([type=hidden]):not([type=radio]),select,textarea,summary,[tabindex]'))
       .filter(el => {
@@ -792,11 +633,7 @@ export async function auditTabOrder(page: Page, limit = 120): Promise<Violation[
   return out;
 }
 
-// Deliberate single-line ellipsis and line clamps on previews of user content are allowed: the
-// full text is one tap away and is exposed whole to assistive technology. Hard clipping is not, and
-// neither is a cut app title: it names the screen and has room to wrap.
 export const appTitle = (line: string) => /^text-truncated: .*<[^>]*\bdata-alpha-app-title\b/.test(line);
-/** The formatted findings a sweep fails on: everything but allowed truncation. */
 export const blocking = (lines: string[]) => lines.filter(line => !line.startsWith('text-truncated:') || appTitle(line));
 
 export function format(violations: Violation[]) {

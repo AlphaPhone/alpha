@@ -17,7 +17,6 @@ import java.util.concurrent.locks.ReentrantLock;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Executed product coordinator and inbox over controlled storage and resident IPC. */
 public final class HostedInboxTraces {
  static final String ORIGIN = "https://device.alpha.invalid";
  static final String RUNTIME = "synthetic-runtime";

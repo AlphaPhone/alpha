@@ -1,5 +1,3 @@
-/// One current Calendar mutation ledger entry and the linked-sync consent boundary.
-/// Queued/checking/dispatching/done name abstract phases, not persisted source enum strings.
 module CalendarSync {
   type Calendar = {
     owner: int, epoch: int, operationOwner: int, requestEpoch: int,
@@ -63,7 +61,6 @@ module CalendarSync {
       phase: if (s.kind != "create" and s.baseRevision != s.remoteRevision) "conflict" else "checking",
       holder: if (s.kind != "create" and s.baseRevision != s.remoteRevision) 0 else s.holder }
   }
-  /// Native/Cloud preconditions still apply after the durable claim.
   action dispatch = all {
     s.phase == "checking", s.checked, s.online, s.writable,
     s.operationOwner == s.owner, s.requestEpoch == s.epoch,
@@ -80,7 +77,6 @@ module CalendarSync {
     s' = { ...s, phase: "uncertain",
       holder: 0, retryAuthorized: false, checked: false }
   }
-  /// Only explicit provider non-acceptance or a read-only preflight failure is retryable.
   action providerFailure = all {
     s.phase.in(Set("checking", "dispatching")),
     s' = { ...s, phase: "failed", holder: 0, checked: false, retryAuthorized: true }
@@ -89,13 +85,10 @@ module CalendarSync {
     s.phase == "failed", s.retryAuthorized, s.operationOwner == s.owner,
     s' = { ...s, phase: "queued", checked: false }
   }
-  /// `found` means an exact source-bound receipt/readback, never existence alone.
   action findCreated(found: bool): bool = all {
     s.phase == "uncertain", s.online, s.operationOwner == s.owner,
     s' = { ...s, phase: if (found) "done" else "uncertain", applied: found }
   }
-  /// Hiding an ambiguous operation retains its durable uncertainty. A retry needs
-  /// a provider-confirmed non-acceptance, which is a different transition.
   action resolveUncertain(send: bool): bool = all {
     s.phase == "uncertain", s.operationOwner == s.owner, not(send),
     s' = { ...s, consent: false, resultVisible: false }
@@ -111,7 +104,6 @@ module CalendarSync {
   }
   action network = s' = { ...s, online: not(s.online) }
   action revoke = s' = { ...s, writable: false }
-  /// A fresh current-account permission read changes admission, not the durable operation.
   action restorePermission = s' = { ...s, writable: true }
   action restart = all {
     s.instance < 2,

@@ -1,13 +1,6 @@
 import {test, expect, type Page} from '@playwright/test';
 import {setupTelephony} from './telephony-fixture';
 
-// AP-16 AC-19 on the Alpha image: the executor installAgentAdapter registers, driven for its
-// phone-dial, telephony-action and sms-send branches with Capacitor faked only at the bridge
-// (telephony-fixture.ts: AlphaCallState, AlphaTelephony, AlphaContacts). The test reaches the
-// installed executor by recording what connectionController.setDeviceExecutor receives; nothing
-// else in the app is replaced except the session and context the review fence compares against.
-// Renderer evidence only: no device, Telecom, radio or address book.
-
 const bridgeEffects = (page: Page) => page.evaluate(() => ((window as any).telephonyInputs as [string, any][])
   .map(([method]) => method).filter(method => ['dial', 'placeCall', 'sendSms', 'contacts.save', 'contacts.remove'].includes(method)));
 
@@ -21,7 +14,6 @@ async function installedExecutor(page: Page) {
   await setupTelephony(page);
   await page.getByRole('button', {name: 'Messages', exact: true}).first().click();
   await expect.poll(() => page.evaluate(() => typeof (window as any).__installedDeviceExecutor)).toBe('function');
-  // The review fence compares the agent session and screen context; hold both steady as a live review would.
   await page.evaluate(async () => {
     const {connectionController} = await import('/src/runtime/connection-ui.tsx' as string);
     const {alphaClient} = await import('/src/runtime/alpha-client.ts' as string);
@@ -38,7 +30,6 @@ async function installedExecutor(page: Page) {
     (window as any).__reviewContext = context;
   });
 }
-/** Runs each guarded branch of the installed executor once; returns their summaries. */
 const runAll = (page: Page) => page.evaluate(async () => {
   const w = window as any, run = (operation: unknown) => w.__installedDeviceExecutor(operation, crypto.randomUUID(), w.__reviewContext, new AbortController().signal)
     .then((result: any) => result.summary ?? result.status, (error: Error) => `threw: ${error.message}`);
@@ -71,7 +62,6 @@ test.describe('Alpha image: the installed executor refuses side effects during a
     expect(summaries.send).toBe('Nothing was done during a call that may be an emergency call.');
   });
 
-  /** A contact deletion: the owner picks the contact in the approved card's review, then the write runs. */
   async function removeAda(page: Page) {
     await page.evaluate(() => {
       const el = document.querySelector('[data-screen]') as any;

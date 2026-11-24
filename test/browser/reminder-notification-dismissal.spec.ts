@@ -52,7 +52,6 @@ for(const mode of ['single','batch'])for(const change of ['lock','same-occurrenc
   const waiting=new Promise<void>(resolve=>{entered=resolve;}),gate=new Promise<void>(resolve=>{release=resolve;});
   const method=mode==='batch'?'dismissReminderNotices':'dismissReminderNotice';
   const original=daily[method]?.bind(daily);
-  // Pause after the exact list check, before admission to the authoritative reminder transaction.
   if(original)(daily as any)[method]=async(...args:any[])=>{entered();await gate;return (original as any)(...args);};
   else{
    const {notificationDocument}=await import('/src/browser/notification-store.ts');
@@ -60,7 +59,6 @@ for(const mode of ['single','batch'])for(const change of ['lock','same-occurrenc
    notificationDocument.edit=async(...args)=>{notificationDocument.edit=edit;entered();await gate;return edit(...args);};
   }
   const dismiss=mode==='batch'?notices.clear({items:[old]}).then(result=>result.outcomes[0].status==='requested',()=>false):notices.dismiss(old).then(()=>true,()=>false);
-  // Old source never reaches the guard. Race its settlement so the regression fails promptly there.
   const held=await Promise.race([waiting.then(()=>true),dismiss.then(()=>false)]);
   if(!held)return {held,accepted:await dismiss};
   if(change==='lock'){

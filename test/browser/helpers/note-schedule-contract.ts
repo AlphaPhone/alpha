@@ -1,7 +1,5 @@
 import {expect,type Page} from '@playwright/test';
 
-/** Test-only entry to the retained Notes scheduling contract. The owner removed
- * its overflow-menu controls; these tests still exercise the real draft flow. */
 export async function installNoteScheduleContract(page:Page){
  await page.route('**/src/main.tsx*',async route=>{
   const response=await route.fetch(),source=await response.text(),anchor='let shell;';

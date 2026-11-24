@@ -1,5 +1,3 @@
-/** Test-boundary protocol shared by the native renderer fixtures, never product code.
- * `ownerId` is the signed-in owner, or a getter for fixtures whose owner changes between connections. */
 export function installNativeNavigationFixture() {
   (window as any).createNativeNavigationFixture=(ownerId: string|(()=>string),agentId: string,f: {unexpected: string[]})=>{
     const owner=()=>typeof ownerId==='function'?ownerId():ownerId;
@@ -35,9 +33,6 @@ export function installNativeNavigationFixture() {
     return {
       register(headers: Record<string,string>){installationId=headers['X-Eliza-Device-Id'];deviceKey=headers['X-Eliza-Device-Key'];},
       request(method: string,path: string,body: any,headers: Record<string,string>,requestOwner: unknown){
-        // The current renderer probes optional observation support and warms an idle
-        // Cloud connection. These synthetic responses advertise no capabilities and
-        // perform no inference; retain the owner/method/body boundary of both routes.
         if(path==='/api/status'||path==='/api/cloud/warm'){
           const expectedMethod=path==='/api/status'?'GET':'POST';
           const emptyObject=body!==null&&typeof body==='object'&&!Array.isArray(body)&&Object.keys(body).length===0;

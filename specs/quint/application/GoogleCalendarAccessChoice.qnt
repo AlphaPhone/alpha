@@ -1,4 +1,3 @@
-// Verified Google Calendar access choice and permission continuation.
 module GoogleCalendarAccessChoice {
   type Read = {owner: int, grant: str}
   type Context = {owner: int, intent: int, read: int, kind: str}

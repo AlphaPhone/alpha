@@ -1,4 +1,3 @@
-/// One authenticated CalendarApprovalClient read admission, consumed before POST.
 module CalendarApprovalReview {
   type State = {epoch:int, readEpoch:int, reading:bool, admitted:bool, pending:bool,
     aborted:bool, unchanged:bool, matched:bool, inFlight:bool, dispatches:int, decision:str, returned:str}

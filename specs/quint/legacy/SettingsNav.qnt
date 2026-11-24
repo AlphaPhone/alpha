@@ -1,5 +1,3 @@
-// Historical design translation; the executable Quint model is retained here.
-// Both full row inventories are retained, including duplicate historical entries.
 module SettingsNav {
   type Row = (str, str, str)
   type State = { Design: str, stack: List[str], confirming: bool, unconfirmed: bool }

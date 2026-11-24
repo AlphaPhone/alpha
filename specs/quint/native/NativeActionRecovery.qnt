@@ -1,4 +1,3 @@
-// Exact selected action-journal recovery, durable write receipts and passive read projection.
 module NativeActionRecovery {
   type State = {kind: str, phase: str, attempt: bool, claim: bool, completeBinding: bool, result: str,
     proof: str, status: str, notice: str, visible: bool, live: bool, process: int,
@@ -9,9 +8,6 @@ module NativeActionRecovery {
   val kinds = Set("notice","calendar-delete","reminder-cancel","reminder-read","reminder-complete","reminder-create","reminder-update","reminder-snooze",
     "workflow-read","calendar-read","note-read","note-query","maps-read",
     "note-write","calendar-write","files-write","camera-capture","browser-navigate","view-only")
-  /// Journaled operation classes for which this native recovery has no receipt reader. Their
-  /// saved results are reconciled only by the shared coordinator from its own exact saved
-  /// receipts (camera, Calendar, Notes); navigation and Browser opens have no proof at all.
   val unproven = Set("note-write","calendar-write","files-write","camera-capture","browser-navigate","view-only")
   val phases = Set("absent","reserved","applying","unknown","failed","succeeded")
   val methods = Set("notice","deletion","reminder","list","get")
@@ -68,7 +64,6 @@ module NativeActionRecovery {
     initWithMetadata(kind,phase,attempt,attempt and deletionKind(kind) and hasClaim,completeBinding)
   }
 
-  // Child receipts are synthetic durable input. Only NoticeDelivery's readback may update its own receipt.
   pure def validReceipt(kind: str, status: str, proof: str): bool =
     if (status=="missing") proof=="exact"
     else if (kind=="notice")
@@ -185,7 +180,6 @@ module NativeActionRecovery {
     not(s.replyResult.in(Set("workflow","calendar-read","note","query","maps","reminder-read")))
   val ReminderLookupUsesSelectedBinding = s.method!="reminder" or s.reminderReads==0 or
     (s.requestedBinding=="exact" and s.completeBinding)
-  /// No notice, reminder or deletion recovery call settles a row of an unproven kind.
   val NoNativeProofNeverSettles = not(s.kind.in(unproven)) or (s.journalWrites==0 and s.noticeWrites==0)
   val ViewOnlyNeverRecoversToSuccess = not(s.kind.in(Set("view-only","browser-navigate"))) or
     (s.journalWrites==0 and s.noticeReads==0 and s.reminderReads==0)

@@ -1,4 +1,3 @@
-// Pending recording bytes and manifest publication on the real journal API.
 module BrowserNoteRecordingJournal {
   type State = {count: int, offset: bool, manifest: str, clips: List[str], texts: List[int],
     savePending: bool, readPending: bool, captured: List[int], readTexts: List[int], outcome: str}

@@ -10,7 +10,6 @@ import java.util.Map;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Only platform admission, command delivery and bounded faults are controlled. */
 public final class NavigationServicePorts {
  public static final Context context=new Context();
  public static final NotificationManager notifications=new NotificationManager();

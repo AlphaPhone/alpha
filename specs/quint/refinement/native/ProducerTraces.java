@@ -10,7 +10,6 @@ import java.util.ArrayList;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** The real serial lease producer runs with queued main/executor and provider ports. */
 public final class ProducerTraces {
  public static void main(String[] args) throws Exception {
   JSONArray traces = new JSONArray();

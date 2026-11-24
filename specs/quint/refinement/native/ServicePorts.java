@@ -5,7 +5,6 @@ import android.content.ContentResolver;
 import java.util.*;
 import java.util.concurrent.*;
 
-/** Framework observations and fault controls; no listener policy is reproduced here. */
 public final class ServicePorts {
  public static boolean permission=true,indicator=true,unlocked=true,userForeground=true,locked,foregroundFails,stopFails,releaseFails;
  public static int starts,invocations;public static long now=10000;public static String status="none";

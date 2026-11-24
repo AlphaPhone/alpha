@@ -1,5 +1,3 @@
-// HostedDelivery and HostedInbox with two exact scopes, three tracked runs and
-// a synthetic resident result channel. No workflow execution is an action.
 module NativeHostedInbox {
   type Entry = {id: int, cursor: int, revision: int}
   type Row = {cursor: int, revision: int}
@@ -52,7 +50,6 @@ module NativeHostedInbox {
   action stop(generation: int): bool =
     s' = { ...s, closed: s.closed or (generation == s.generation and s.runningOwner != 0) }
 
-  // One tracked oldest record followed by 99 anonymous historical rows.
   action seedFull(owner: int): bool = all {
     owners.contains(owner), s.stage == "idle",
     val bucket = s.buckets.get(owner)

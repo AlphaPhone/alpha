@@ -13,13 +13,9 @@ for(const scope of ['occurrence','series'] as const)test(`native Calendar ${scop
   prototype.inspectDeletion=async(input:any)=>{fixture.inspections.push(structuredClone(input));return {status:'ready',sourceId:'local',sourceRevision:'a'.repeat(64),revision:'b'.repeat(64),eventId:input.scope==='series'?'delete2:42:series':'delete2:42:occurrence:1791766800000',scope:input.scope||'occurrence'};};
   prototype.remove=async()=>{fixture.legacy++;throw Error('Legacy deletion must not be used for native scopes');};
   prototype.removeScoped=async(input:any)=>{fixture.staged.push(structuredClone(input));return {status:'queued'};};
-  // Direct fixture insertion does not emit the UI save-completion event. Refresh the
-  // mounted Calendar range after installing the native routing port.
   window.dispatchEvent(new Event('alpha:calendar-committed'));
  });
  await openBrowserCalendar(page);const event=page.getByRole('button',{name:/^Scoped native fixture,/});await expect(event).toBeVisible();
- // Exercise the native deletion routing branch after the real browser provider has loaded.
- // The platform and storage remain web; this is renderer routing evidence only.
  await page.evaluate(()=>{(window as any).Capacitor.isNativePlatform=()=>true;});await event.click();
  if(scope==='series')await page.getByRole('button',{name:'Delete series',exact:true}).click();
  else await chooseCalendarEventAction(page,'Delete event');

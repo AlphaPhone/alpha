@@ -1,4 +1,3 @@
-// Android's installed appearance preference, per-Activity text zoom, and queued bridge writes.
 module NativeTextScaleLifecycle {
   type View = { phase: str, font: str, zoom: int, writes: int }
   type Request = { owner: int, percent: int }

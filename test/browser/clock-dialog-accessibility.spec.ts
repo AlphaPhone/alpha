@@ -10,7 +10,6 @@ for(const theme of ['light','dark'])test(`${theme} Clock review owns focus and l
  await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);await expect(opener).toBeFocused();
  await opener.click();await dialog.getByRole('button',{name:'Review Clock request',exact:true}).click();
  await expect(dialog.getByRole('button',{name:'Confirm Clock request',exact:true})).toBeVisible();
- // Mock mode has no resident-agent native event bridge; exercise the shell Home handler.
  await page.locator('button[aria-label="Home"]').dispatchEvent('click');
  await expect(dialog).toHaveCount(0);await page.getByRole('button',{name:'Workflows',exact:true}).click();
  await expect(dialog).toHaveCount(0);

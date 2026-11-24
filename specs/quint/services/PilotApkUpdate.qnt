@@ -1,4 +1,3 @@
-/// One admitted pilot update with an explicit device lock and readback evidence.
 module PilotApkUpdate {
   type State = {phase: str, originalHome: str, home: str, moved: bool,
     restoration: str, locked: bool, before: str, installer: str,

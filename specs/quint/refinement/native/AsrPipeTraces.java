@@ -6,7 +6,6 @@ import java.util.*;
 import java.util.concurrent.*;
 import org.json.*;
 
-/** Executes the real pipe with a controlled owner-bound provider and serial worker. */
 public final class AsrPipeTraces {
  static LiveSegmentPipe pipe;static Trace trace;static Thread worker;static Runnable queuedWorker;
  static boolean started,executed,owned=true,throwFailure,throwCancel;static int warmPosts,batchPosts,closePosts,lastMask,cancels;static int lastCutoff=3;
@@ -98,8 +97,6 @@ public final class AsrPipeTraces {
  }
  static void boundedOffer(boolean byteBound,int index)throws Exception {
   JSONArray frames=new JSONArray(),edges=new JSONArray();
-  // Seven sixteen-frame batches plus thirteen reach 125 exactly; the next single
-  // frame independently exceeds that limit without approaching the byte cap.
   int count=byteBound?1:index<7?16:index==7?13:1;
   for(int i=0;i<count;i++)frames.put(new JSONObject().put("timestamp",0));
   if(byteBound){

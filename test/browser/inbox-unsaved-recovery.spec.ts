@@ -18,7 +18,6 @@ async function setup(page:any,owner='owner-a'){
  const f=(window as any).emailRecoveryFixture={mutations:0};const client={gmailAccounts:async()=>[{connectionId:'grant',label:'Mailbox '+owner,connected:true,grantedCapabilities:['google.gmail.triage']}],gmailInboxCapabilities:async()=>({send:false,providerDrafts:false,mailboxMutations:false}),gmailPrepareOperation:async()=>{f.mutations++;throw Error('Must not prepare provider writes');}};
  c.getCloudClient=()=>({client,sessionId:'session-'+owner} as any);const snapshot={...c.getSnapshot(),cloudAccount:{environment:'production',userId:owner,sessionId:'session-'+owner,credentialId:'fixture'}} as any;c.getSnapshot=()=>snapshot;
  },owner);
- // Keyboard activation opens Inbox without involving Home's press-and-hold gesture.
  await page.getByRole('button',{name:'Inbox',exact:true}).press('Enter');
  await expect(page.getByRole('button',{name:'Compose',exact:true})).toBeEnabled();
 }

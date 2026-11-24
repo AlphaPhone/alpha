@@ -1,4 +1,3 @@
-// Call lifecycle, missed calls and agent-proposed calls by name or number placed after one owner approval.
 module PhoneCalls {
   type State = {
     ready: bool, unlocked: bool,
@@ -17,7 +16,6 @@ module PhoneCalls {
     approvals: 0, agentPlaced: 0, ownerPlaced: 0, handoffs: 0
   }
   def ended(x: State): State = {call: "none", direction: "none", muted: false, speaker: false, keypad: false, ...x}
-  // ready = verified image holding the dialer role with call permission.
   action becomeReady = s' = {ready: true, ...s}
   action loseReady = all {
     s.call == "none",
@@ -27,14 +25,12 @@ module PhoneCalls {
     unlocked: false,
     proposal: if (s.proposal.in(Set("resolving", "choosing", "proposed"))) "expired" else s.proposal, ...s}
   action unlock = s' = {unlocked: true, ...s}
-  // Owner dialing from keypad, recents or a contact.
   action ownerDial = all {
     s.ready, s.unlocked, s.call == "none",
     s' = {call: "dialing", direction: "out", ownerPlaced: s.ownerPlaced + 1, ...s}
   }
   action remoteAnswers = all { s.call == "dialing", s' = {call: "active", ...s} }
   action incoming = all { s.ready, s.call == "none", s' = {call: "ringing", direction: "in", ...s} }
-  // Answering works over the lock screen.
   action answer = all { s.call == "ringing", s' = {call: "active", ...s} }
   action decline = all { s.call == "ringing", s' = ended(s) }
   action ringStops = all {
@@ -48,7 +44,6 @@ module PhoneCalls {
   action hangUp = all { s.call.in(Set("dialing", "active", "held")), s' = ended(s) }
   action remoteEnds = all { s.call.in(Set("dialing", "active", "held")), s' = ended(s) }
   action viewRecents = all { s.ready, s.unlocked, s' = {seenMissed: s.missed, ...s} }
-  // Agent request. A number target has exactly one match; a name is looked up in Contacts.
   action agentAsk(target: str, emergency: bool): bool = all {
     s.ready, s.unlocked, s.proposal.in(Set("none", "placed", "declined", "expired", "stale", "unresolved", "handed-off", "failed")),
     target.in(Set("number", "name")),
@@ -69,7 +64,6 @@ module PhoneCalls {
   action declineProposal = all {
     s.proposal.in(Set("choosing", "proposed")), s' = {proposal: "declined", ...s}
   }
-  // The contact's number changes after the card was shown.
   action numberChanges = all {
     s.numberRevision < 2,
     s' = {numberRevision: s.numberRevision + 1,
@@ -82,8 +76,6 @@ module PhoneCalls {
         call: "dialing", direction: "out", ...s}
       else {proposal: "failed", approvals: s.approvals + 1, ...s}
   }
-  // Telecom may accept the call before the bridge reply is lost. The approval is consumed;
-  // unknown is not a refusal or authorization to place the same call again.
   action approveUnknown(placed: bool): bool = all {
     s.ready, s.unlocked, s.proposal == "proposed", s.call == "none", not(s.emergency),
     s.target == "number" or s.proposalBase == s.numberRevision,

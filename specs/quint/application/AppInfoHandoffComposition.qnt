@@ -1,4 +1,3 @@
-// One admitted App info request through the mounted drawer, Capacitor and the Java bridge.
 module AppInfoHandoffComposition {
   type Target = {packageName: str, activityName: str, user: str}
   type Platform = {personal: str, work: str, profile: str, launch: str}

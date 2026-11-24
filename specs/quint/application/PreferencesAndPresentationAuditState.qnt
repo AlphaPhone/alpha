@@ -1,5 +1,3 @@
-// Complementary audit scope; the canonical model and its source correspondence remain registered separately.
-/// Layout projection of surfaceLayout, keyboardFreeHeight and preference readback.
 module PreferencesAndPresentationAuditState {
   type State = { width: int, freeHeight: int, visibleHeight: int, editing: bool,
     textScale: int, desktop: bool, theme: str, savedTheme: str, draft: str,
@@ -23,8 +21,6 @@ module PreferencesAndPresentationAuditState {
   action saveTheme = s' = { ...s, theme: "dark", savedTheme: "dark" }
   action failedSave = s' = s
   action restart = s' = { ...s, theme: s.savedTheme, editing: false, visibleHeight: s.freeHeight }
-  /// Android's shade is the only one on a phone; a browser development build has none and
-  /// draws a stand-in instead.
   action browserBuild = all { not(s.webShade), s' = { ...s, nativeShade: false } }
   action androidBuild = all { not(s.webShade), s' = { ...s, nativeShade: true } }
   action webShade = all { not(s.nativeShade), s' = { ...s, webShade: true } }
@@ -35,7 +31,6 @@ module PreferencesAndPresentationAuditState {
   val OneShade = not(s.nativeShade and s.webShade)
   val ReadableCalendar = calendarDays >= 1 and calendarDays <= 7 and (agenda implies calendarDays == 1)
   val LargeTextSinglePane = s.textScale >= 150 implies not(split)
-  /// Layout changes leave the text being edited and its selection as they were typed.
   val StatePreserved = (s.draft == "text" and s.selection == 1) or (s.draft == "edited" and s.selection == 2)
   val safety = OneShade and ReadableCalendar and LargeTextSinglePane and StatePreserved
   val WebShadeWitness = s.webShade

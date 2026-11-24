@@ -1,5 +1,3 @@
-// Literal upstream TaskService at 4787d51a142c. Keep its Set ownership
-// abstraction; the source refinement of repaired counted ownership is separate.
 module CoreTaskServiceTemplate {
   const Mode: str
   const Kind: str
@@ -161,7 +159,6 @@ module CoreTaskService {
   action init = Model::Init
   action step = Model::Step
   action rawStep = Model::Next
-  // Source replays observe the published row and existing transition outcomes.
   val sourceState = Model::s
   val sourceTickActive = Model::s.activeTick != 0
   action sourceBegin(r: int): bool = Model::Begin(r)
@@ -190,7 +187,6 @@ module CoreTaskServiceDaemonRepeat {
   action init = Model::Init
   action step = Model::Step
   action rawStep = Model::Next
-  // Source replays observe the published row and existing transition outcomes.
   val sourceState = Model::s
   val sourceTickActive = Model::s.activeTick != 0
   action sourceBegin(r: int): bool = Model::Begin(r)
@@ -215,7 +211,6 @@ module CoreTaskServiceLocalOneshot {
   action init = Model::Init
   action step = Model::Step
   action rawStep = Model::Next
-  // Source replays observe the published row and existing transition outcomes.
   val sourceState = Model::s
   val sourceTickActive = Model::s.activeTick != 0
   action sourceBegin(r: int): bool = Model::Begin(r)
@@ -239,7 +234,6 @@ module CoreTaskServiceLocalRepeat {
   action init = Model::Init
   action step = Model::Step
   action rawStep = Model::Next
-  // Source replays observe the published row and existing transition outcomes.
   val sourceState = Model::s
   val sourceTickActive = Model::s.activeTick != 0
   action sourceBegin(r: int): bool = Model::Begin(r)

@@ -1,5 +1,3 @@
-// Literal upstream PluginLifecycle at 4787d51a142c. Actor identities and
-// service-class indices are disjoint. CHOOSE over instance IDs picks the least.
 module CorePluginLifecycleTemplate {
   const NumClasses: int
   const Unloaders: Set[int]
@@ -235,8 +233,6 @@ module CorePluginLifecycleRegister {
   action sourceRegisterJoin(r: int): bool = Model::RJoin(r)
   val safety = Model::TypeOK and Model::TeardownExclusive and Model::StopAtMostOnce and Model::NoOrphanInstance
     and Model::StopStopsAll and Model::ConnectorOwnedByLast and Model::NoOrphanConnector and Model::RegisterHonest
-  // Other actor and class domains are empty in this profile. Expanding its
-  // two remaining weak-fairness clauses avoids TLC's vacuous-quantifier error.
   temporal RegisterFairness = Model::Register(51).weakFair(Model::vars) and Model::Register(52).weakFair(Model::vars)
   temporal CheckedTemporal = RegisterFairness implies Model::Terminates
   run registrationJoinsOwnerResultTest = init.then(Model::RCall(51)).then(Model::RCall(52)).then(Model::RInit(51)).then(Model::RJoin(52))

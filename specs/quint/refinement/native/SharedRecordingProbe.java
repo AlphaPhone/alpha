@@ -11,7 +11,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import org.json.JSONObject;
 
-/** Reproduces pending draft admission after the audio mode enters a phone call. */
 public final class SharedRecordingProbe {
  public static final class Bridge extends LocalSpeechBridgePlugin {
   Bridge(){super("alpha-cloud-voice-","alpha-cloud-tts-");}

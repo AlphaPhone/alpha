@@ -1,5 +1,3 @@
-// Alpha's exact Clock review and journal boundary. A delivery means an
-// Activity handoff to a synthetic external Clock, with no alarm-side receipt.
 module NativeClockReview {
   type State = {
     operation: str, outerPhase: str, outerStatus: str, outerClaim: str, legacy: bool,
@@ -57,8 +55,6 @@ module NativeClockReview {
     }
   }
 
-  // Each bounded actor has one exact dialog. A retired callback cannot
-  // consume another dialog's active claim.
   action answer(actor: int, choice: str, saved: str): bool = all {
     actors.contains(actor), s.confirming==0, faults.contains(saved),
     choice.in(Set("positive","negative","cancel")),
@@ -135,13 +131,11 @@ module NativeClockReview {
     }
   }
 
-  // A seed represents an old durable terminal row, not a new source result.
   action seedLegacy: bool = all {
     s.outerPhase=="applying", s.phase=="none", s.attempts==0,
     s' = { ...s,outerPhase:"terminal",outerStatus:"succeeded",outerClaim:"opened",legacy:true }
   }
 
-  // The fixture can supply historical bytes with an inconsistent nested binding.
   action corruptBinding: bool = all {
     s.outerPhase=="applying", s.phase=="finished", s.bound,
     s' = { ...s,bound:false }

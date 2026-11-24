@@ -1,4 +1,3 @@
-// IndicatorLease monotonic lease and ListenerStore/CrashLoopBreaker recovery.
 module ListenerLeaseRecovery {
   type State = {
     generation: int, live: bool, acknowledged: bool, expiresAt: int,
@@ -101,7 +100,6 @@ module ListenerLeaseRecovery {
     s' = endLease({sessionOpen: false, captureActive: false, captureSince: -1, processConsent: false, historyLoaded: true,
       exits: bounded, tripped: s.tripped or bounded.length() >= 3, ...s}, "binder-died")
   }
-  // Startup may restore records created by an earlier installed version.
   action loadSavedHistory(count: int, open: bool): bool = all {
     not(s.historyLoaded), s.generation == 0, count.in(0.to(3)),
     s' = {historyLoaded: true, sessionOpen: open, captureActive: false,
@@ -127,7 +125,6 @@ module ListenerLeaseRecovery {
   val AttributionAfterGrace = s.frameAccepted and s.now - s.captureSince >= 2500 implies s.recording and s.chip
   val CrashHistoryBounded = s.exits.length() <= 8
   val NoRenewExpiredLease = s.lastRenewAccepted implies s.live and s.boot == s.leaseBoot and (not(s.acknowledged) or s.now < s.expiresAt)
-  // A durable previous-process marker is crash evidence, never a current capture worker.
   val FrameNeedsActiveCapture = s.frameAccepted implies s.captureActive
   val ActiveCaptureHasTimestamp = s.captureActive == (s.captureSince >= 0) and
     (s.captureActive implies s.sessionOpen and s.captureSince <= s.now)

@@ -2,14 +2,8 @@ import {choosePhotoAction} from './helpers/owned-photo';
 import {chooseMailAction} from './helpers/mail-actions';
 import {preloadPageModules} from './helpers/page-modules';
 import {test,expect,type Page} from '@playwright/test';
-// Each test loads the app and drives Files, Inbox or the shade; under four workers on a loaded machine
-// one load has taken 10-30s, so the timeout is explicit. No step, wait or assertion changes.
 test.describe.configure({timeout:60_000});
-// Screen-entry motion is not under test here; waiting out its stability retries on every tap is what
-// ran these tests out of time under load (as in #700).
 test.use({contextOptions:{reducedMotion:'reduce'}});
-// MVP-13: folder, notification and capture questions keep the exact selected identity and
-// revision. A switch, delete or revoke during review adds nothing and never sends a neighbor.
 const offline=(page:Page)=>page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
 const selectedObject=(page:Page)=>page.evaluate(async()=>(await import('/src/runtime/alpha-client.ts')).alphaClient.getState().context.selectedObject??null);
 const composer=(page:Page)=>page.getByRole('textbox',{name:'Message Alpha',exact:true});
@@ -32,29 +26,23 @@ test.describe('notification',()=>{
   await post(page,rows);await expect(page.getByText('Ask about Tuesday',{exact:true})).toBeVisible();await expect(page.getByText('Other app title · Other app text',{exact:true})).toBeVisible();
   await expect(ask(page)).toHaveCount(2);await expect(page.getByRole('button',{name:/^Ask Alpha about this Mail/})).toHaveCount(0);
   await page.locator('.alpha-shade-list > div',{hasText:'Call the clinic'}).getByRole('button',{name:/^Ask Alpha/}).click();
-  // Pressing the row selects exactly that notification as opaque context while the shade is open.
   expect(await selectedObject(page)).toMatchObject({kind:'notification',id:'context-first',accountId:'own'});
   const dialog=review(page);await expect(dialog.getByRole('heading')).toHaveText('Ask Alpha');await expect(dialog.getByLabel('Selected source',{exact:true})).toHaveText('Alpha Phone notification');
   await expect(dialog.getByRole('textbox',{name:'Content excerpt'})).toHaveValue('Call the clinic\nAsk about Tuesday');
-  // Verification codes are not placed in a draft.
   await dialog.getByRole('textbox',{name:'Content excerpt'}).fill('Your verification code is 481516');await dialog.getByRole('button',{name:'Use in conversation',exact:true}).click();
   await expect(dialog.getByRole('status')).toHaveText('Remove secrets first');
   await dialog.getByRole('textbox',{name:'Content excerpt'}).fill('Call the clinic');await dialog.getByRole('button',{name:'Use in conversation',exact:true}).click();
   await expect(composer(page)).toHaveValue('Help me with this notification.\n\nSource: Alpha Phone notification\n\nCall the clinic');
-  // The selection does not outlive the shade.
   expect((await selectedObject(page))?.kind).not.toBe('notification');
  });
  test('a notification review ends with the shade it was opened from',async({page})=>{
   await post(page,rows);await page.locator('.alpha-shade-list > div',{hasText:'Call the clinic'}).getByRole('button',{name:/^Ask Alpha/}).click();
   const dialog=review(page);await expect(dialog.getByRole('textbox',{name:'Content excerpt'})).toHaveValue(/Call the clinic/);
-  // Home closes the shade underneath the review; the notification text must not stay on screen.
   await page.evaluate(()=>window.dispatchEvent(new Event('launcher-home')));
   await expect(dialog).toHaveCount(0);await expect(page.getByText('Ask about Tuesday',{exact:true})).not.toBeInViewport();
   await expect.poll(()=>selectedObject(page)).toBeNull();
  });
  test('a row whose content Android withheld offers no question',async({page})=>{
-  // The browser build redacts with an empty row. Stand in for Android's answer at the plugin
-  // boundary: fixed wording in place of a locked or secret notification's title and text.
   await page.evaluate(async()=>{
    const {BrowserNotifications}=await import('/src/browser/notifications.ts');const at=Date.now();
    const own={source:'own',appLabel:'Alpha Phone',clearable:true};
@@ -73,15 +61,12 @@ test.describe('notification',()=>{
   const dialog=review(page);await expect(dialog.getByRole('textbox',{name:'Content excerpt'})).toHaveValue(/Call the clinic/);
   await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');const notices=registerPlugin<any>('AlphaNotifications');const row=(await notices.list()).items.find((item:any)=>item.id==='context-first');await notices.dismiss({id:row.id,revision:row.revision,source:'own'});});
   await dialog.getByRole('button',{name:'Use in conversation',exact:true}).click();
-  // Either the open review reports the change or the final re-read refuses it; nothing is composed.
   await expect(page.getByText(/^(Selection changed|Gone|Changed|Couldn’t check)$/)).toBeVisible();
   await expect(composer(page)).toHaveCount(0);
   if(await dialog.count())await dialog.getByRole('button',{name:'Cancel',exact:true}).click();
   await expect(page.getByText('Neighbor reminder',{exact:true})).toBeVisible();await expect(page.getByText('Ask about Tuesday',{exact:true})).toHaveCount(0);
  });
  test('hosted-result, digest and workflow notices offer no question; reminder rows still do',async({page})=>{
-  // Stand in for both list shapes at the plugin boundary: Android's own rows carry a kind
-  // (AlphaNotificationsPlugin.noticeKind); the browser build's workflow notices have 'workflow:' ids.
   await page.evaluate(async()=>{
    const {BrowserNotifications}=await import('/src/browser/notifications.ts');const at=Date.now();
    const own={source:'own',appLabel:'Alpha Phone',clearable:true,canOpen:true};
@@ -104,13 +89,8 @@ test.describe('notification',()=>{
 });
 
 test.describe('mail',()=>{
- // MVP-13 re-audit of Inbox mail context. The mailbox is a synthetic provider at the Cloud client
- // boundary and the agent a fixed session; nothing is sent anywhere. Browser renderer only.
  const sent=(page:Page)=>page.evaluate(()=>(window as any).mailFixture.sent as string[]);
  async function setup(page:Page,beforeReview?:()=>Promise<void>){
-  // The first-run access walkthrough is not under test here. Left pending it opens a modal over Home
-  // on its own schedule and, under load, takes the Inbox tap (or, once the composer opens, covers the
-  // review), so it is recorded as finished before the page loads, as a returning phone has it.
   await page.addInitScript(()=>localStorage.setItem('alpha:startup-permission-walkthrough:v1',JSON.stringify({version:1,status:'completed',step:4})));
   await page.goto('/');
   await preloadPageModules(page,['/src/runtime/connection-ui.tsx']);
@@ -135,16 +115,13 @@ test.describe('mail',()=>{
    const agent={sessionId:'agent-session',agentId:'agent-1',ownerId:'fixture-owner',origin:'https://agent.example.invalid'};
    const snapshot={...c.getSnapshot(),cloudAccount:{environment:'production',userId:'fixture-owner',sessionId:'fixture-session',credentialId:'fixture'},session:agent} as any;
    c.getSnapshot=()=>snapshot;(window as any).mailSnapshot=snapshot;
-   // Anything that would reach the agent is recorded here instead.
    const {alphaClient}=await import('/src/runtime/alpha-client.ts');
    (alphaClient as any).send=async(text:string)=>{f.sent.push(text);throw Error("Fixture agent");};
-   // Publish the synthetic owner before opening Inbox; a later update must not first adopt it and clear the reader.
    c.close();
   });
   await page.getByRole('button',{name:'Inbox',exact:true}).click();
   await page.getByText('Reviewed message',{exact:true}).first().click();
   await expect(page.getByRole('region',{name:'Email message'})).toContainText('REVIEWED_BODY');
-  // The reader loads the thread beside the selected message without a separate expansion action.
   await expect(page.getByRole('group',{name:'Conversation',exact:true}).getByRole('button',{name:/Neighbor message$/})).toBeVisible();
   await expect(page.getByRole('region',{name:'Email message'})).toContainText('REVIEWED_BODY');
   await beforeReview?.();
@@ -160,17 +137,12 @@ test.describe('mail',()=>{
   const [text]=await sent(page);expect(text).toContain('REVIEWED_BODY');expect(text).not.toContain('NEIGHBOR_BODY_CANARY');
  });
  test('attaching an email retains the typed question and its saved draft until explicit Send',async({page})=>{
-  // Adding an attachment must not send or replace the person's question.
   const typed='Unrelated words I am still writing';
-  // Whichever composer is on screen: the dock's while the chat is closed, the sheet's once it opens.
   const chatComposer=()=>page.locator('[data-alpha-layer="composer"][aria-hidden="false"], [data-alpha-layer="conversation"][aria-hidden="false"]').getByRole('textbox').first();
   const sharing=await setup(page,async()=>{
    await page.evaluate(async()=>{const {alphaClient}=await import('/src/runtime/alpha-client.ts');(alphaClient as any).send=async(text:string)=>{(window as any).mailFixture.sent.push(text);return {text:'Shared email summary'};};});
-   // An open app shows the dock's Type control; it opens the composer's textbox.
    await page.getByRole('group',{name:'Assistant controls'}).getByRole('button',{name:'Type',exact:true}).click();
    await chatComposer().fill(typed);
-   // The raised bar takes the first touch outside it and lowers to the pill; the draft stays
-   // intact, so the next touch reaches Review.
    await page.mouse.click(206,300);
    await expect(page.getByRole('group',{name:'Assistant controls'}).getByRole('button',{name:'Type',exact:true})).toBeVisible();
   });
@@ -178,7 +150,6 @@ test.describe('mail',()=>{
   expect(await sent(page)).toEqual([]);
   await page.waitForTimeout(500);
   await expect(chatComposer()).toHaveValue(typed);
-  // Before explicit Send, its durable saved copy must still hold the question.
   await expect.poll(()=>page.evaluate(async()=>{const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');const binding=await c.assistantDraftBinding(new AbortController().signal);return (await(await(await import('/src/runtime/assistant-draft-store.ts')).assistantDraftStore(binding)).read())?.text??null;})).toBe(typed);
   await sharing.press('Enter');
   await expect.poll(()=>sent(page)).toHaveLength(1);
@@ -187,10 +158,7 @@ test.describe('mail',()=>{
  });
  test('a message changed after attachment is refused and the neighbor is never sent',async({page})=>{
   const sharing=await setup(page);
-  // The thread's other message replaces the open one while the review is showing (the chip sits
-  // under the modal, so the switch is delivered to its handler directly).
   await page.getByRole('group',{name:'Conversation',exact:true}).getByRole('button',{name:/Neighbor message$/}).dispatchEvent('click');
-  // The message under the modal is now the neighbor (inert, so read from the DOM); the review still shows the reviewed text.
   await expect.poll(()=>page.evaluate(()=>document.body.textContent?.includes('NEIGHBOR_BODY_CANARY'))).toBe(true);
   await expect(page.getByLabel('Attached email',{exact:true})).toContainText('Reviewed message');
   await sharing.press('Enter');
@@ -234,8 +202,6 @@ test.describe('capture',()=>{
   await expect(composer(page)).toHaveValue('');
   const expectedImage=await page.evaluate(async id=>{const {browserPhotoLibrary}=await import('/src/prototype/browser-camera.ts');return (await browserPhotoLibrary.read({id})).image;},selected!.id.replace(/^native-camera-/,''));
   await expect(page.getByAltText('Captured photo')).toHaveAttribute('src',expectedImage);
-  // The envelope still names the same item at the same revision; no content is in it, and the
-  // revision is a session-local counter rather than the library's own revision.
   expect(await selectedObject(page)).toEqual(selected);expect(Object.keys(selected!).sort()).toEqual(['id','kind','revision']);
   expect(selected!.revision).toMatch(/^capture-[0-9a-f]{12}-\d+$/);
   const library=await page.evaluate(async id=>{const {browserPhotoLibrary}=await import('/src/prototype/browser-camera.ts');const row=await browserPhotoLibrary.read({id});return [row.revision,row.mutationRevision];},selected!.id.replace(/^native-camera-/,''));

@@ -1,4 +1,3 @@
-// Alpha's problem-log worker, installed journal, and Android exit-history watermark.
 module NativeCrashJournal {
   type Row = {at: int, stamp: str, source: str, kind: str, detail: str, process: str, extra: bool}
   type Disk = {format: str, watermark: int, fillers: int, rows: List[Row]}

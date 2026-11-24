@@ -1,4 +1,3 @@
-/// Shared controller join between owner-bound ASR warmup and native capture.
 module NativePipedCapture {
   type State = {epoch: int, foreground: bool, destroyed: bool, inCall: bool, owned: bool,
     attempt: str, hasPipe: bool, ready: str, closed: str, pending: str, opening: bool,
@@ -32,8 +31,6 @@ module NativePipedCapture {
     val ready = success and s.owned
     val proceeds = ready and s.current
     s' = {...s, ready: if (ready) "true" else "false", opening: proceeds,
-      // Startup.hold keeps the failure private until the owned close completes;
-      // refuse then discards the reservation, without a transcript failure event.
       current: if (not(ready) and not(s.owned)) false else s.current,
       discard: s.discard or (not(ready) and not(s.owned)),
       pending: if (proceeds) "none" else if (s.owned) "close" else "none",

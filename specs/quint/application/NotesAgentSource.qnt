@@ -1,7 +1,3 @@
-/// The agent's Notes operations on the phone (device actions) and where they stop. Phone-side
-/// Notes actions act only on Previous notes; with the default source ("the agent's Notes") they
-/// refuse and the agent's own canonical Notes action writes instead, outside the phone's
-/// "Review phone actions first" preference. Admission, journal and claim are DeviceActionReview.
 module NotesAgentSource {
   type State = {
     source: str, storageFailed: bool, reviewFirst: bool, op: str, authority: str,
@@ -21,8 +17,6 @@ module NotesAgentSource {
   val idle = s.authority == "none"
   val running = not(idle) and s.outcome == "none"
   val previous = s.source == "legacy" and not(s.storageFailed)
-  /// Screen binding per operation: query from Home or Notes, selected-record operations from
-  /// Notes with the note selected, never from a protected screen.
   val bound = not(s.sensitive) and
     (if (s.op == "create_note") true
      else if (s.op == "notes_query") s.view.in(Set("home", "notes"))
@@ -36,7 +30,6 @@ module NotesAgentSource {
   action storageFails = s' = {...s, storageFailed: true}
   action fillTrash = s' = {...s, trashFull: true}
   action noteChanges = s' = {...s, targetCurrent: false}
-  /// Only note creation is on the direct allow-list, and never as a workflow step.
   action runDirect = all {idle, s.op == "create_note", not(s.workflow), not(s.reviewFirst), bound,
     s' = {...s, authority: "request"}}
   action approve = all {idle, bound, s' = {...s, authority: "review"}}
@@ -46,23 +39,17 @@ module NotesAgentSource {
     s' = {...s, outcome: "failed"}}
   action create = all {running, previous, s.op == "create_note",
     s' = {...s, notes: s.notes + 1, outcome: "succeeded"}}
-  /// A reviewed read shares one snapshot; an update may only follow such a share. The second half
-  /// is the server tool contract (update tools take no model-authored fields); the phone executor
-  /// does not re-check it, so here it is an ASSUMPTION, not a checked phone rule.
   action share = all {running, previous, bound, s.op.in(Set("notes_query", "notes_read_selected")),
     s.op == "notes_read_selected" implies s.targetCurrent,
     s' = {...s, shared: s.shared + 1, outcome: "succeeded",
       snapshotShared: s.snapshotShared or s.op == "notes_read_selected"}}
   action update = all {running, previous, bound, s.op == "notes_update", s.targetCurrent, s.snapshotShared,
     s' = {...s, edits: s.edits + 1, outcome: "succeeded", snapshotShared: false}}
-  /// Deletion: the restorable copy is written first, then the tombstone.
   action writeTrashCopy = all {running, previous, bound, s.op == "notes_delete", s.targetCurrent,
     not(s.trashFull), not(s.trashCopy), s' = {...s, trashCopy: true}}
   action writeTombstone(confirmed: bool): bool = all {running, s.op == "notes_delete", s.trashCopy, not(s.tombstone),
     s' = {...s, tombstone: confirmed, outcome: if (confirmed) "succeeded" else "unknown"}}
   action settle = all {not(idle), s.outcome != "none", s' = {...s, authority: "none", outcome: "none"}}
-  /// ASSUMPTION made visible: the agent's own Notes action writes canonical notes with no phone
-  /// card, whatever "Review phone actions first" says.
   action canonicalWrite = all {s.source == "canonical", s.canonicalWrites < 2,
     s' = {...s, canonicalWrites: s.canonicalWrites + 1,
       canonicalUnderReviewFirst: s.canonicalUnderReviewFirst or s.reviewFirst}}
@@ -91,8 +78,6 @@ module NotesAgentSource {
     DeleteWritesTrashBeforeTombstone and FullTrashDeletesNothing and ReadsNeedReview and
     ProtectedScreenSharesNothing
 
-  /// KNOWN GAP (app review AGENT-09), registered as an expected violation: the preference does
-  /// not cover the agent's canonical Notes writes.
   val ReviewFirstCoversCanonicalNotes = not(s.canonicalUnderReviewFirst)
   val CanonicalWriteIgnoresToggle = s.canonicalUnderReviewFirst
 

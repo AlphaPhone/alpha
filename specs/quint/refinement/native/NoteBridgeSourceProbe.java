@@ -7,7 +7,6 @@ import com.getcapacitor.PluginCall;
 import java.io.File;
 import org.json.JSONObject;
 
-/** Product note methods execute with controlled parent lifecycle and permission ports. */
 public final class NoteBridgeSourceProbe {
  public static void main(String[] args)throws Exception {
   NoteRecordingPorts.root=new File(args[0]);NoteRecordingPorts.root.mkdirs();

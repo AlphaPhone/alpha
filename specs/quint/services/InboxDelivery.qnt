@@ -1,4 +1,3 @@
-/// Selected-account Inbox operations persist intent before a single provider dispatch.
 module InboxDelivery {
   type Inbox = {
     owner: int, grant: int, epoch: int, opOwner: int, opGrant: int, requestEpoch: int,
@@ -42,14 +41,12 @@ module InboxDelivery {
     s.reviewedRevision == s.draftRevision, s.reviewedAttachments == s.attachments,
     s.dispatches == 0
   }
-  /// The coordinator may observe an in-flight durable compare-and-exchange before its result.
   action reserve = all { confirmable, s' = { ...s, phase: "committing" } }
   action persistDispatch = all {
     s.phase == "committing",
     s' = { ...s, phase: "dispatching", dispatches: 1, durable: true, outcome: "unknown" }
   }
   action reserveFailed = all { s.phase == "committing", s' = { ...s, phase: "review" } }
-  /// Compatibility macro for callers whose observation starts after the durable commit.
   action confirm = all {
     confirmable,
     s' = { ...s, phase: "dispatching", dispatches: 1, durable: true, outcome: "unknown" }
@@ -61,7 +58,6 @@ module InboxDelivery {
       outcome: if (outcome == "prepared") "unknown" else outcome,
       providerConfirmed: outcome == "succeeded" }
   }
-  /// Recovery reads the retained operation ID. It never redispatches it.
   action restart = s' = { ...s, providerConfirmed: false }
   action readReceipt(agrees: bool): bool = all {
     s.phase.in(Set("dispatching", "observed")), s.opOwner == s.owner, s.opGrant == s.grant,
@@ -83,7 +79,6 @@ module InboxDelivery {
   action withdrawRead = s' = { ...s, read: false, modify: false, cacheVisible: false,
     phase: if (s.phase.in(Set("preparing", "review"))) "empty" else s.phase,
     exactReview: false }
-  /// A fresh grant read enables new review; discarded reviews and caches remain discarded.
   action restoreGrants = s' = { ...s, read: true, modify: true }
   action switchOwner = all {
     s.epoch < 2,

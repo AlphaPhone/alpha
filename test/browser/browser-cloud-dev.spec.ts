@@ -12,7 +12,6 @@ import {cloudStorageNamespace} from '../../apps/app/src/runtime/cloud-deployment
 import {createBrowserCloudDevHandler} from '../../scripts/browser-cloud-dev-bridge';
 import {createLocalAgentDevHandler} from '../../scripts/local-agent-dev-bridge';
 
-// Closed Cloud/media fixture: normal production adapters, no external request or media device.
 test('browser restores an existing host Cloud account, uses canonical voice and preserves explicit logout',async({page},info)=>{
  test.setTimeout(scaledTimeout(45000));
  const profile=await mkdtemp(join(tmpdir(),'alpha-browser-cloud-ui-')),secret='synthetic-cloud-ui-credential',owner='11111111-1111-4111-8111-111111111111',organizationId='22222222-2222-4222-8222-222222222222',credentialId='33333333-3333-4333-8333-333333333333',reference='browser-cloud-reference:44444444-4444-4444-8444-444444444444',session=randomUUID(),calls:string[]=[];
@@ -57,10 +56,8 @@ test('browser restores an existing host Cloud account, uses canonical voice and 
   expect(voice.transcript).toEqual({text:'Closed fixture transcript',local:false});expect(voice.prepared).toBe(true);expect(voice.plan).toBe('active');expect(voice.publicStorage).not.toContain(secret);expect(voice.opened).toEqual(['https://cloud.eliza.app/cloud/billing']);
   await page.evaluate(async()=>{const c=(await import('/src/runtime/connection-ui.tsx')).connectionController;c.openCloudAccount();});
   const account=page.getByRole('dialog',{name:'Account',exact:true});await expect(account.getByRole('region',{name:'Balance and membership',exact:true}).getByText('owned@example.invalid',{exact:true})).toBeVisible();await page.screenshot({path:info.outputPath('existing-cloud-account.png'),animations:'disabled'});
-  // Signed in, the account dialog is the Subscription sheet; its footer signs out.
   await account.getByRole('button',{name:'Sign out',exact:true}).click();await confirmCloudSignOut(page);
   await expect(page.getByRole('status').filter({hasText:/^Signed out$/})).toBeVisible();
-  // Reload only after sign-out has removed the host credential, not its earlier in-memory detach.
   await expect.poll(async()=>{
    try{return JSON.parse(await readFile(join(deploymentProfile,'credentials.json'),'utf8'));}
    catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return null;throw error;}
@@ -69,12 +66,8 @@ test('browser restores an existing host Cloud account, uses canonical voice and 
   await page.reload();
   expect(calls.filter(p=>p==='/api/v1/api-keys/current')).toHaveLength(1);
   await expect.poll(()=>page.evaluate(async()=>{const state=(await import('/src/runtime/connection-ui.tsx')).connectionController.getSnapshot();return state.startupResolved===true&&!state.busy&&state.cloudAccount===null;})).toBe(true);
-  // An existing account signing in again from Settings keeps the completed install: no Ready popup
-  // (only a newly created account gets one; startup-permission-completion.test.mjs).
   await page.evaluate(()=>window.dispatchEvent(new Event('alpha:agent-settings')));
   await page.evaluate(async()=>(await import('/src/runtime/connection-ui.tsx')).connectionController.openCloudAccount());
-  // This test-mocks host's account button retains the diagnostic browser route. Exercise the
-  // shared in-app entry explicitly before that handoff; native production uses this entry.
   await page.evaluate(async()=>(await import('/src/runtime/connection-ui.tsx')).connectionController.beginSignIn('production'));
   const signIn=page.getByRole('dialog',{name:'Alpha',exact:true});
   await expect(signIn.getByRole('form',{name:'Sign in with email'})).toBeVisible();
@@ -135,5 +128,4 @@ test('flag-off real resident reads Notes through its owner-bound verified Cloud 
  }finally{handler.closeVoice();await server.close();await rm(directory,{recursive:true,force:true});}
 });
 
-// UI progress only: this feature fixture does not manufacture OS/provider grants.
 test.beforeEach(async({page})=>seedCompletedAccessSetup(page));

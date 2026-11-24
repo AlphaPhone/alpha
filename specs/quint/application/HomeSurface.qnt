@@ -1,17 +1,10 @@
-/// Home's per-render caches: the agenda card's remembered choice, valid until the clock reaches
-/// the next candidate's end, and the storage probe answered at most once per interval. Time is
-/// counted in ticks; three candidates stand for every agenda.
 module HomeSurface {
   type Candidate = { id: int, begin: int, end: int, allDay: bool, overdue: bool }
   type State = {
     now: int,
-    // What Home is given this render: the candidate list and whether the calendar is shown.
     input: Set[int],
-    // The remembered agenda: the list it was built from, when it was chosen, until when it
-    // stands, the card's item and the item after an overdue one (0 is none).
     built: bool, memoInput: Set[int], at: int, until: int, agenda: int, following: int,
     rendered: bool, selections: int,
-    // Browser storage, the remembered probe answer, and whether storage changed since the probe.
     storageWorks: bool, available: bool, probeAt: int, probed: bool, checked: bool, changedSince: bool, probes: int
   }
   var s: State
@@ -24,7 +17,6 @@ module HomeSurface {
   pure val Overdue: Candidate = { id: 3, begin: 0, end: Never, allDay: false, overdue: true }
   pure val Universe = Set(Timed, AllDay, Overdue)
   pure def candidates(ids: Set[int]): Set[Candidate] = Universe.filter(c => ids.contains(c.id))
-  /// A timed item stays through its last minute; an all-day item ends when its day does.
   pure def current(c: Candidate, now: int): bool = c.overdue or (if (c.allDay) c.end > now else c.end >= now)
   pure def rank(c: Candidate): int = (if (c.overdue) 0 else 100) + c.begin * 10 + c.id
   pure def first(cs: Set[Candidate]): int =
@@ -42,8 +34,6 @@ module HomeSurface {
   action tick = all { s.now < LastTick, s' = { ...s, now: s.now + 1, rendered: false, checked: false } }
   action clockBack = all { s.now > 0, s' = { ...s, now: s.now - 1, rendered: false, checked: false } }
   action setInput(ids: Set[int]): bool = all { ids != s.input, s' = { ...s, input: ids, rendered: false } }
-  /// The shell renders many times a second. The choice is made again only for a new list or
-  /// when the clock leaves the interval the last choice stands for.
   action render = {
     val changed = not(s.built) or s.memoInput != s.input
     val stale = changed or not(s.now >= s.at and s.now < s.until)
@@ -53,7 +43,6 @@ module HomeSurface {
       else { ...s, rendered: true }
   }
   action storageChanges = s' = { ...s, storageWorks: not(s.storageWorks), changedSince: true, checked: false }
-  /// The synchronous storage read runs once per interval, and again if the clock went back.
   action checkStorage = {
     val due = not(s.probed) or s.now - s.probeAt >= Ttl or s.now < s.probeAt
     s' = if (due) { ...s, probed: true, probeAt: s.now, available: s.storageWorks, checked: true, changedSince: false,
@@ -65,12 +54,10 @@ module HomeSurface {
     any { tick, clockBack, setInput(ids), render, storageChanges, checkStorage, s' = s }
   }
 
-  /// A render always shows the choice a fresh selection would make.
   val RememberedChoiceIsFresh = s.rendered implies
     s.agenda == chooseAgenda(s.input, s.now) and s.following == chooseFollowing(s.input, s.now)
   val FollowingOnlyUnderOverdue = s.following != 0 implies s.agenda == Overdue.id and s.following != s.agenda
   val ChoiceFromGivenList = s.rendered implies (s.agenda == 0 or s.input.contains(s.agenda)) and s.memoInput == s.input
-  /// A wrong storage answer is one that storage changed under, and it is at most one interval old.
   val ProbeAnswerBounded = s.checked and s.available != s.storageWorks implies
     s.changedSince and s.now - s.probeAt < Ttl and s.now >= s.probeAt
   val safety = RememberedChoiceIsFresh and FollowingOnlyUnderOverdue and ChoiceFromGivenList and ProbeAnswerBounded
@@ -80,7 +67,6 @@ module HomeSurface {
   val StaleProbeWitness = s.checked and s.available != s.storageWorks
   val OverdueLeadsWitness = s.rendered and s.agenda == Overdue.id and s.following == Timed.id
 
-  // The timed item is still the card in its last minute and gives way the tick after.
   run choiceExpiresAtCandidateEndTest = init.then(setInput(Set(1))).then(render)
     .expect(s.agenda == 1 and s.until == 3 and s.selections == 1)
     .then(tick).then(render).then(tick).then(render).expect(s.agenda == 1 and s.selections == 1)

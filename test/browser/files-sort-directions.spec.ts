@@ -24,7 +24,6 @@ test('All files exposes direct folder/view controls and all six sort directions 
  await page.getByRole('button',{name:'All files',exact:true}).click();
  await expect(page.getByRole('heading',{name:'All files',exact:true})).toBeVisible();
  const names=()=>page.locator('[data-alpha-subview="files-folder"] button[aria-label^="Open "]').evaluateAll(nodes=>nodes.map(n=>n.getAttribute('aria-label')!.slice(5)).filter(n=>['Zulu.txt','Alpha.txt','Middle.txt'].includes(n)));
- // Choosing a different field returns to that field's conventional order.
  await choose(page,'Newest first');await choose(page,'Name A–Z');
  await expect.poll(names).toEqual(['Alpha.txt','Middle.txt','Zulu.txt']);
  await choose(page,'Name Z–A');await expect.poll(names).toEqual(['Zulu.txt','Middle.txt','Alpha.txt']);

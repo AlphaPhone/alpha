@@ -1,4 +1,3 @@
-// Previous Notes Trash read admission and publication into the shell.
 module NotesTrashReadPublication {
   type Write = {id: int, latest: int, readEpoch: int, activeEpoch: int, live: bool, mode: str}
   type State = {live: bool, mode: str, epoch: int, started: int, pending: int -> int,

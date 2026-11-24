@@ -3,10 +3,8 @@ import {returnToApps} from './app-navigation';
 import {guardCalendarFixture as guardNoMedia} from './calendar-draft-readiness';
 import {test,expect,type Page} from '@playwright/test';
 test.beforeEach(async({context,page})=>{await guardNoMedia(context);await page.route(/^https?:\/\/(?!127\.0\.0\.1:|localhost:)/,route=>route.abort());});
-// Gmail MVP flows against a controlled provider-boundary fixture: no real account, OAuth or mail.
 type Options={accounts?:string[];readState?:boolean;pages?:Record<string,number>;deferPaging?:boolean};
 async function setup(page:Page,options:Options={}){
- // Provider fixtures use local apps; they do not perform resident/Cloud onboarding.
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.goto('/');
  await page.evaluate(async options=>{
@@ -61,7 +59,6 @@ async function setup(page:Page,options:Options={}){
  },options);
 }
 const gm=(page:Page)=>page.evaluate(()=>(window as any).gm);
-// The Home app grid is Alpha's mobile shell (ui/mobile-shell, installed by prototype/home-shell.ts); its tile marks unread with this badge.
 const inboxBadge=(page:Page)=>page.getByRole('button',{name:'Inbox',exact:true}).locator('[data-mobile-shell-tile-badge]');
 
 for(const scenario of ['connected','empty','error','restored'] as const)test(`Shared email waits for Gmail account readiness: ${scenario}`,async({page})=>{
@@ -101,7 +98,6 @@ for(const scenario of ['connected','empty','error','restored'] as const)test(`Sh
  await expect(page.getByRole('textbox',{name:'Subject',exact:true})).toHaveValue('Waiting shared note');
  await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Waiting shared note\n\nExact retained shared body');
  expect((await gm(page)).prepares).toEqual([]);expect((await gm(page)).dispatches).toEqual([]);
- // Saved grants are rechecked once in this session before the restored mailbox is trusted.
  if(scenario==='restored')expect((await gm(page)).accountReads).toBe(1);
 });
 
@@ -372,7 +368,6 @@ for(const destination of ['another account','Home'] as const)test(`Shared email 
   await expect.poll(async()=>(await gm(page)).searches.at(-1)?.grant).toBe('grant-1');
  }else await returnToApps(page);
  await page.evaluate(()=>(window as any).releaseShareShelf());
- // Observe completion of the held storage write, rather than adding a sleep.
  await expect.poll(()=>page.evaluate(()=>Object.entries((window as any).gmSlots).some(([key,value]:[string,any])=>key.startsWith('inbox-drafts:v1:shelf:')&&value?.items?.some((row:any)=>row.draft.subject==='Keep earlier email')))).toBe(true);
  if(destination==='Home')await page.getByRole('button',{name:'Inbox',exact:true}).click();
  await expect(page.getByRole('textbox',{name:'Subject',exact:true})).toHaveCount(0);

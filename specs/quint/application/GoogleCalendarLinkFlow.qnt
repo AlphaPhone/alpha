@@ -1,4 +1,3 @@
-// Google Calendar setup from verified grants through the renderer readback.
 module GoogleCalendarLinkFlow {
   type Review = {revision: int, destination: str, paused: bool, pending: str, sources: Set[str]}
   type Plan = {owner: str, operation: str, revision: int, destination: str}

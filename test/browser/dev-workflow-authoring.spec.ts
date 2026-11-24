@@ -17,7 +17,6 @@ test('Describe preserves the draft when the fixture agent has no typed generator
 });
 for(const outcome of ['saved','failed','left'])test(`Describe preserves pending draft storage: ${outcome}`,async({page})=>{
  await setup(page);
- // Nothing is stored before the first edit.
  expect(await savedDraft(page)).toBeNull();await page.getByRole('textbox',{name:'Workflow name',exact:true}).fill('Stored draft');
  await expect.poll(()=>savedDraft(page)).not.toBeNull();
  await page.evaluate(outcome=>{const request=navigator.locks.request.bind(navigator.locks);let held=false;navigator.locks.request=(async(name:any,...args:any[])=>{if(String(name).startsWith('["browser-document","alpha.browser.documents.v1","alpha.browser.workflow-draft:')&&!held){held=true;await new Promise<void>(resolve=>(window as any).releaseDraft=resolve);if(outcome==='failed')throw Error('Synthetic draft storage failure');}return (request as any)(name,...args);}) as any;},outcome);

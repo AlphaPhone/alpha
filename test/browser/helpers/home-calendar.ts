@@ -2,7 +2,6 @@ import {expect,type Page} from '@playwright/test';
 import {preloadPageModules} from './page-modules.ts';
 
 export type HomeCalendarEvent={title:string;startAt:string;endAt:string;isAllDay?:boolean};
-/** Read-only CalendarService fixture. Home never substitutes browser Calendar records. */
 export async function installHomeCalendar(page:Page,event:HomeCalendarEvent|null=null){
  await expect(page.getByRole('button',{name:'Calendar',exact:true})).toBeVisible();
  await preloadPageModules(page,['/src/runtime/connection-ui.tsx']);
@@ -26,7 +25,6 @@ export async function installHomeCalendar(page:Page,event:HomeCalendarEvent|null
    throw Error('Unexpected Home Calendar request '+path);
   }};
   connectionController.getAppRecordClient=()=>port as any;
-  // The fixture owns this read-only port; changing connection modes would start unrelated runtime work.
   window.dispatchEvent(new CustomEvent('alpha:canonical-calendar-invalidated',{detail:{sessionId:identity.sessionId}}));
  },event);
  await expect.poll(()=>page.evaluate(()=>(window as any).homeCalendarFixture.reads)).toBeGreaterThan(0);

@@ -1,5 +1,3 @@
-// CanonicalNotesUi feedback classifier at its actual controller/editor callbacks.
-// The latch is a history monitor for an unreviewed failed interaction.
 module CanonicalNotesFeedback {
   type State = {phase: str, review: str, failure: str, uncertain: bool}
   var s: State
@@ -22,8 +20,6 @@ module CanonicalNotesFeedback {
       s' = {...s, review: "none", failure: "none"}
     else s' = s
   action discard = s' = {...s, review: "none", failure: "none", uncertain: false}
-  // Try again found the current draft's words on its exact existing record ID.
-  // An unconfirmed new creation has no such identity and cannot emit this event.
   action retryConfirmed = s' = {phase: "ready", review: "none", failure: "none", uncertain: false}
   action step = any {
     {nondet value = Phases.oneOf(); phase(value)},

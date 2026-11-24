@@ -1,9 +1,5 @@
-// Foreground timer, cached offer ownership and bridge-call admission. Android
-// verifies the actual digest and offered APK at the install boundary.
 module AutomaticAppUpdateSchedule {
   type State = {active: bool, disposed: bool, busy: bool, failures: int, wakeAt: int, valid: bool}
-  // Zero is absent or unbound. Positive values identify distinct cached offer
-  // objects with a native digest, including a newer read of the same bytes.
   type Poll = {phase: str, capability: str, pending: bool, candidate: bool, requests: int,
     cachedOffer: int, attemptedOffer: int, cachedManual: bool,
     lastCapability: str, lastPending: bool, lastCandidate: bool, lastCurrent: bool, lastIdle: bool}
@@ -18,8 +14,6 @@ module AutomaticAppUpdateSchedule {
     state' = {active:false, disposed:false, busy:false, failures:0, wakeAt:0, valid:true}
   }
   action active(value: bool): bool = all {
-    // Facts admission, parsing and dispatch are one synchronous JS continuation.
-    // The ready microstep has no lifecycle-event interleaving in the source.
     poll.phase != "ready",
     now' = now, poll' = poll,
     state' = if (state.disposed) state else {...state, active:value,
@@ -41,8 +35,6 @@ module AutomaticAppUpdateSchedule {
     now' = now, state' = finished(state, now, failed), poll' = poll
   }
 
-  // The native port supplies capability classes. Its SDK/consent/boot clock is
-  // owned by the native admission model, not duplicated by the renderer.
   action beginPoll = all {
     state.active, not(state.disposed), not(state.busy), now >= state.wakeAt,
     poll.phase == "idle", poll.requests < 3,

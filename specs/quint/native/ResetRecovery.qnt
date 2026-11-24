@@ -1,4 +1,3 @@
-// Activity approval, durable attempt reservation and package-reset orchestration.
 module ResetRecovery {
   type State = {
     review: bool, confirmed: bool, authGeneration: int, authReady: bool, marker: bool,
@@ -39,7 +38,6 @@ module ResetRecovery {
     s' = {marker: success, authorizedRequest: success, authReady: false,
       startupAdmitted: not(success) and s.startupAdmitted, ...s}
   }
-  // Compatibility macro for callers observing the whole approval/storage operation.
   action authenticate(ticket: int, accepted: bool, stored: bool): bool =
     if (s.review and ticket == s.authGeneration and s.authGeneration < 4)
       s' = {review: false, confirmed: false, authGeneration: s.authGeneration + 1, authReady: false,
@@ -63,14 +61,12 @@ module ResetRecovery {
     s.marker, s.attemptStage == "idle",
     s' = {budgetReadable: false, budgetPresent: false, failures: 3, ...s}
   }
-  // Restored v1 markers remain pending. Missing/corrupt budgets need explicit recovery.
   action loadLegacy(readable: bool, count: int): bool = all {
     not(s.marker), not(s.review), not(s.erased), s.authGeneration == 0, count.in(0.to(3)),
     s' = {marker: true, authorizedRequest: true, startupAdmitted: false,
       budgetReadable: readable, budgetPresent: readable,
       failures: if (readable) count else 3, ...s}
   }
-  // One owner holds the process mutex and OS file lock through reservation and effects.
   action beginAttempt(explicit: bool): bool = all {
     s.marker, s.attemptStage == "idle",
     s' = {attemptStage: "reserving", explicitRetry: explicit, listenerRevoked: false, dispatched: false, ...s}
@@ -102,7 +98,6 @@ module ResetRecovery {
     s.attemptStage == "listener", s.reserved,
     s' = {attemptStage: "idle", reserved: false, explicitRetry: false, ...s}
   }
-  // Existing composition entry point. The counter advances before either result.
   action attempt(acknowledged: bool, accepted: bool, visible: bool): bool = all {
     s.marker, s.attemptStage == "idle",
     s.explicitRetry or (s.budgetReadable and s.failures < 3),
@@ -136,7 +131,6 @@ module ResetRecovery {
       recoveryVisible: false, processInitialized: false, startupAdmitted: false,
       attemptStage: "idle", reserved: false, ...s}
   }
-  // There is no post-effect counter write for a late callback to recreate.
   action lateFailure = s' = s
   action step = {
     nondet ticket = 0.to(4).oneOf()

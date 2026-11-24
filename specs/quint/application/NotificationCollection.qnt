@@ -1,5 +1,3 @@
-// Optional external-notification collection, privacy, policy epochs and metadata history.
-// Native NotificationMirror and browser Notifications retain distinct locked-row behavior.
 module NotificationCollection {
   type State = {
     native: bool, enabled: bool, paused: bool, access: bool, connected: bool,
@@ -64,7 +62,6 @@ module NotificationCollection {
   action competingPolicyChange = all { s.epoch < 4,
     s' = { ...s, policyRevision: s.policyRevision + 1, epoch: s.epoch + 1,
       rowPresent: false, rowText: false, historyCount: 0 } }
-  // Only the native collector can be paused. The browser double offers resume alone.
   action pause = all { s.native, s.epoch < 4,
     s' = { ...s, paused: true, epoch: s.epoch + 1, rowPresent: false, rowText: false, historyCount: 0 } }
   action resume = all { s.epoch < 4,
@@ -106,8 +103,6 @@ module NotificationCollection {
       eventPresent: if (not(opening) or s.autoCancel) false else s.eventPresent,
       rowPresent: if (not(opening) or s.autoCancel) false else s.rowPresent }
   }
-  // One of Alpha's own reminder rows in the browser double. Its dismissal lists the rows, then
-  // records the dismissal in a separate edit that checks the lock again.
   action postOwn = all { not(s.native), not(s.ownPosted),
     s' = { ...s, ownPosted: true, ownChecked: false, ownDismissed: false } }
   action checkOwn = all { not(s.native), not(s.locked), s.ownPosted, not(s.ownDismissed),
@@ -116,8 +111,6 @@ module NotificationCollection {
     val recorded = not(s.locked)
     s' = { ...s, ownChecked: false, ownDismissed: s.ownDismissed or recorded,
       ownDismissedLocked: s.ownDismissedLocked or (recorded and s.locked) } }
-  // Clear all validates every row against one listing and records the dismissals in one edit.
-  // Each row has the outcome a dismissal of that row alone would have had.
   action clearBatch = all { not(s.native), not(s.locked), s.ownPosted or CanDismiss,
     s' = { ...s, ownChecked: false, ownDismissed: s.ownDismissed or s.ownPosted,
       lastActionExpectedEpoch: if (CanDismiss) s.rowEpoch else s.lastActionExpectedEpoch,
@@ -210,7 +203,6 @@ module NotificationCollection {
   run ongoingCannotDismissTest = init.then(grantAccess).then(reviewPolicy(true, true, true, true))
     .then(commitPolicy(true)).then(post(false)).then(beginRead).then(readComplete)
     .then(makeOngoing).expect(not(CanDismiss) and safety)
-  // A lock between the listing and the edit leaves the row in place.
   run ownDismissLockRaceTest = initFor(false).then(postOwn).then(checkOwn).then(lock)
     .then(commitOwn).expect(not(s.ownDismissed) and not(s.ownChecked) and safety)
     .then(checkOwn.fail())

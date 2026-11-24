@@ -1,4 +1,3 @@
-// ResidentScheduleRearm admission and lifecycle-lock serialization.
 module ResidentScheduling {
   type State = {
     unlocked: bool, packaged: bool, enabled: bool, lifecycle: str,
@@ -19,7 +18,6 @@ module ResidentScheduling {
     running: false, epoch: 0, starts: 0, lastDecision: "IGNORE",
     lastStartAdmitted: false
   }
-  // The decision and start share one critical section. No delayed start token exists.
   action broadcast(event: str): bool = all {
     event.in(Set("boot", "update", "time", "zone", "other")),
     s.starts < 3 or s.running or decision(event, s) != "START",
@@ -43,7 +41,6 @@ module ResidentScheduling {
     s' = {packaged: value, running: s.running and value, ...s}
   action boot = s' = {unlocked: false, running: false, lifecycle: "idle", ...s}
   action unlock = s' = s.with("unlocked", true)
-  // Process-local Stop is not a permanent opt-out. A later broadcast may rearm.
   action processDeath = s' = {running: false, lifecycle: "idle", ...s}
   action step = {
     nondet event = Set("boot", "update", "time", "zone", "other").oneOf()
@@ -55,7 +52,6 @@ module ResidentScheduling {
   val NoStartDuringLifecycle = s.running implies s.lifecycle == "idle"
   val ActiveResidentAdmitted = s.running implies s.unlocked and s.enabled and s.packaged and s.lastStartAdmitted
   val BoundedStarts = s.starts.in(0.to(3)) and s.epoch.in(0.to(3))
-  // Occurrence recovery belongs to the task-scheduler models, not this rearm policy.
   val safety = NoStartDuringLifecycle and ActiveResidentAdmitted and BoundedStarts
 
   run allRearmBroadcastsTest = init.then(broadcast("boot")).then(broadcast("update"))

@@ -1,4 +1,3 @@
-// Current canonical Calendar selection and return readback.
 module AgentCalendarEventReturn {
   type Reference = {key: str, version: str, source: str}
   type Attempt = {reference: Reference, epoch: int, owner: str, session: int, scope: int,

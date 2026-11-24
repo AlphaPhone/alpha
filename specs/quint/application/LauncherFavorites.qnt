@@ -1,4 +1,3 @@
-// Ordered Home favorites, migration and storage publication in the shared launcher.
 module LauncherFavorites {
   type Stored = {schema: str, entries: List[str], policy: bool, hasPrevious: bool, previous: List[str]}
   type State = {disk: Stored, captured: List[str], capturedMissing: bool, favorites: List[str],

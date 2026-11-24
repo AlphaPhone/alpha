@@ -2,7 +2,6 @@ package ai.eliza.sense;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** External caller identity, clock and refresh observations. */
 public final class ProviderPorts {
  public static final android.content.Context context=new android.content.Context();
  public static boolean authorized=true,signed=true;

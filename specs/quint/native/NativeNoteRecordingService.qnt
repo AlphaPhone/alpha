@@ -1,4 +1,3 @@
-/// Actual Notes recording foreground-service command and notification ownership.
 module NativeNoteRecordingService {
   type State = {
     recording: int, phase: str, foreground: bool, owner: int,
@@ -52,8 +51,6 @@ module NativeNoteRecordingService {
       stopRequested: if (stale) s.stopRequested else true }
   }
   action stopService(ticket: int): bool = stopServiceWhen(ticket, true)
-  /// Stop in the notification: the current recording is stopped and kept for Notes, then the
-  /// service retires exactly as for a close command. A retired or blank ticket stops nothing.
   action finish(ticket: int): bool = all {
     ticket.in(Set(0, 1, 2)),
     val current = ticket != 0 and ticket == s.recording

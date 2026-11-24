@@ -1,26 +1,15 @@
-/// How the renderer shows and withdraws the native browser page: the poll's request, sent only
-/// when it differs from the last one, answers applied only for the latest request, and a
-/// presentation failure reported once and retried.
 module BrowserSurfacePresentation {
-  // 0 withdraws the page; 1 and 2 are two page geometries. -1 forgets the last request so the
-  // next poll sends again.
   pure val Hidden = 0
   pure val Forgotten = -1
   type State = {
     inBrowser: bool,
-    // A menu, the tab switcher, a dialog, the shade or another layer that must cover the page.
     overlay: bool,
-    // The app itself is not visible (a stopped Activity or a hidden document).
     appHidden: bool,
     tabReady: bool, disposed: bool,
     lastRequest: int,
-    // Requests the native side has not answered, oldest first.
     unanswered: List[int],
-    // The geometry the native side last acknowledged, 0 when none; it positions the page-input block.
     acknowledged: int,
-    // What the native side shows.
     native: int,
-    // Failures shown to the user, and failures that a later success ended.
     failed: bool, reports: int, recoveries: int
   }
   var s: State
@@ -28,25 +17,17 @@ module BrowserSurfacePresentation {
     lastRequest: Forgotten, unanswered: List(), acknowledged: 0, native: Hidden, failed: false,
     reports: 0, recoveries: 0 }
   val covered = s.overlay or not(s.inBrowser) or not(s.tabReady)
-  // A request equal to the last one is not sent again. Withdrawing forgets the acknowledged geometry.
   pure def requested(t: State, payload: int): State =
     if (payload == t.lastRequest) t
     else { ...t, lastRequest: payload, unanswered: t.unanswered.append(payload),
       acknowledged: if (payload == Hidden) 0 else t.acknowledged }
-  // The 100 ms poll. A hidden app is left alone: the native side has hidden the page itself, and
-  // withdrawing it would end what the page is in the middle of. Off the Browser with the page
-  // already withdrawn there is nothing to send.
   action poll(geometry: int): bool = all {
     not(s.disposed), geometry.in(Set(1, 2)), s.unanswered.length() < 3,
     s' = if (s.appHidden or (not(s.inBrowser) and s.lastRequest == Hidden)) s
       else requested(s, if (covered) Hidden else geometry)
   }
-  // Leaving the Browser and every render under a covering layer withdraw the page at once, whether
-  // or not the app is shown. A tab that is not ready is withdrawn by the poll instead.
   action withdraw = all { not(s.disposed), s.overlay or not(s.inBrowser), s.unanswered.length() < 3,
     s' = requested(s, Hidden) }
-  // The native side answers in order. Only the answer to the latest request counts; a failure
-  // forgets the request so the next poll sends it again, and is reported once until a success.
   action answer(ok: bool): bool = all {
     s.unanswered.length() > 0,
     val payload = s.unanswered.head()
@@ -58,7 +39,6 @@ module BrowserSurfacePresentation {
       else { ...s, unanswered: s.unanswered.tail(), native: native, lastRequest: Forgotten, acknowledged: 0,
         failed: true, reports: if (s.failed) s.reports else s.reports + 1 }
   }
-  // A visibility change, a resumed page surface, or a dialog closing: the next poll sends again.
   action forget = all { not(s.disposed), s' = { ...s, lastRequest: Forgotten } }
   action enterBrowser = s' = { ...s, inBrowser: true }
   action leaveBrowser = s' = { ...s, inBrowser: false }
@@ -72,7 +52,6 @@ module BrowserSurfacePresentation {
     any { poll(geometry), withdraw, answer(flag), forget, enterBrowser, leaveBrowser, setOverlay(flag),
       setAppHidden(flag), tabCreated, dispose, s' = s }
   }
-  // A withdrawn page has no acknowledged geometry left to block input with.
   val WithdrawnHasNoAcknowledgedPage = s.lastRequest == Hidden implies s.acknowledged == 0
   val FailedHasNoAcknowledgedPage = s.failed implies s.acknowledged == 0
   val FailureReportedOncePerEpisode = s.reports == s.recoveries + (if (s.failed) 1 else 0)
@@ -83,10 +62,8 @@ module BrowserSurfacePresentation {
     FailureReportedOncePerEpisode and RequestsAreDistinct
   val StaleAnswerPendingWitness = s.unanswered.length() > 1
   val RetryAfterFailureWitness = s.failed and s.unanswered.length() > 0 and s.reports == 1
-  // The page stays as it was while the app is hidden, even under a covering layer.
   val KeptWhileAppHiddenWitness = s.appHidden and s.overlay and s.native > 0 and s.lastRequest > 0 and
     s.unanswered.length() == 0
-  // An answer to an earlier geometry must not become the acknowledged geometry of a later request.
   run staleAnswerIgnoredTest = init.then(enterBrowser).then(tabCreated).then(poll(1)).then(poll(2))
     .expect(s.unanswered == List(1, 2)).then(answer(true))
     .expect(s.acknowledged == 0 and s.native == 1).then(answer(true))

@@ -1,4 +1,3 @@
-// Native worker admission, encrypted cursor, synthetic WorkManager commands and notice custody.
 module NativeGmailBackground {
   type State = {latestGeneration: int, credential: int, remoteOwner: int, grants: int, reset: bool,
     allowed: bool, observable: bool, locked: bool, phase: str, generation: int, grant: int,
@@ -128,8 +127,6 @@ module NativeGmailBackground {
   pure def page(st: State, response: str, fault: str): State =
     if (response=="unsupported") {...st,phase:"unsupported",workReply:"success"}
     else if (response=="unauthorized") unavailable(st)
-    // The verified owner/grant remains current. History-only403/409 may be a
-    // transient Cloud token mapping; three durable refusals stop this job.
     else if (response.in(Set("forbidden","conflict"))) {
       val failures=st.authFailures+1
       {...st,authFailures:failures,phase:if (failures>=3) "grant-unavailable" else "retrying",
@@ -195,7 +192,6 @@ module NativeGmailBackground {
     s'={...s,tap:if (recorded) (if (question) "question" else "open") else s.tap,
       consumeCurrent:s.consumeCurrent and not(recorded)}
   }
-  // Release is an exact local cancellation. Only consuming a notice requires remote admission.
   action tapCall(method: str, exact: bool): bool = all {
     method.in(tapMethods),s.consumeGeneration==0,
     val pending=method=="pending"

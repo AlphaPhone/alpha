@@ -1,4 +1,3 @@
-// Read-only Previous Notes presence is owned by the selected account and visible visit.
 module PreviousNotesAvailability {
   type State = {device: bool, visible: bool, hidden: bool, suspended: bool, owner: str, mode: str, epoch: int,
     legacyOwner: str, probeOwner: str, probeEpoch: int, active: int, started: int, pending: int -> str,

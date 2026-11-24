@@ -4,7 +4,6 @@ test.beforeEach(async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.route('**/photo-seed',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><title>Seed old photo storage</title>'}));
  await page.goto('/photo-seed');
- // A real version-1 database must upgrade without discarding media or edit receipts.
  await page.evaluate(async()=>{
   await new Promise<void>((resolve,reject)=>{const r=indexedDB.open('alpha.browser.photos.v1',1);r.onupgradeneeded=()=>r.result.createObjectStore('photos',{keyPath:'id'});r.onerror=()=>reject(r.error);r.onsuccess=()=>{
    const db=r.result,tx=db.transaction('photos','readwrite'),store=tx.objectStore('photos');
@@ -26,10 +25,8 @@ test('migrated mixed media pages use capture date and stable identity ties witho
  await page.getByRole('button',{name:'Photos',exact:true}).click();
  const tiles=page.locator('button[data-owned-media-id^="native-camera-"]');
  const shown=()=>tiles.evaluateAll(nodes=>nodes.map(node=>node.getAttribute('data-owned-media-id')!.replace('native-camera-','')));
- // One day section; its header counts what is loaded. The grid is virtualised: only on-screen rows are in the DOM.
  const count=page.locator('.photo-day-header span');await expect(count).toHaveText('40');
  const first=await shown();expect(first).toEqual(expected.slice(0,first.length));
- // Newest-first paging continues as the end of the grid scrolls into view; there is no Load more button.
  const grid=page.locator('[data-alpha-app-scroll="photos"]');
  await grid.evaluate(el=>el.scrollTo(0,el.scrollHeight));await expect(count).toHaveText('80');
  await grid.evaluate(el=>el.scrollTo(0,el.scrollHeight));await expect(count).toHaveText('120');

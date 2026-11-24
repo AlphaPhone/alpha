@@ -1,4 +1,3 @@
-/// reviewFileEmail rereads the same source before inserting into an account-bound local draft.
 module FilesAndSharing {
   type State = { phase: str, source: int, reviewedSource: int, owner: int,
     reviewedOwner: int, draft: int, reviewedDraft: int, checked: bool,
@@ -14,8 +13,6 @@ module FilesAndSharing {
   action insert = all { s.phase == "review", s.checked, s.foreground, s.grant,
     s.reviewedSource == s.source, s.reviewedOwner == s.owner, s.reviewedDraft == s.draft,
     s' = { ...s, phase: "inserted", inserted: true, checked: false } }
-  /// A confirmed insert that is refused or throws leaves the dialog busy: the confirmation and
-  /// its checkbox stay disabled, so only Cancel remains until the review is opened again.
   action insertFailed = all { s.phase == "review", s.checked,
     not(s.foreground and s.grant and s.reviewedSource == s.source and s.reviewedOwner == s.owner
       and s.reviewedDraft == s.draft),
@@ -42,7 +39,6 @@ module FilesAndSharing {
   run changedSourceTest = init.then(read).then(check).then(changeSource)
     .expect(s.source != s.reviewedSource and not(s.inserted) and safety)
   run changedOwnerTest = init.then(read).then(check).then(changeOwner).expect(not(s.inserted) and safety)
-  /// The source changed after review: the insert is refused and cannot be confirmed again.
   run failedInsertNeedsNewReviewTest = init.then(read).then(check).then(changeSource).then(insertFailed)
     .expect(s.phase == "failed" and not(s.checked) and not(s.inserted) and safety)
     .then(changeSource).then(cancel).then(restart).then(read).then(check).then(insert)

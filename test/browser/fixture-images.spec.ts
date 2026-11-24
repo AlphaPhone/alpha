@@ -1,7 +1,5 @@
 import { test, expect } from '@playwright/test';
 
-// Fixture photography is bundled in the fixture module; in mock mode the
-// rendered screens must load and decode it.
 for (const start of ['photos', 'browser', 'camera']) test(`mock ${start} decodes fixture images`, async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));

@@ -1,4 +1,3 @@
-// Workflows owns the Clock draft until departure. Opening a Clock app is not an alarm result.
 module WorkflowClockAdmission {
   type State = {browser: bool, view: str, shown: bool, review: bool, selection: str, hidden: bool,
     mock: bool, phase: str, record: str, handoffs: int, shows: int, opener: bool, retired: bool}

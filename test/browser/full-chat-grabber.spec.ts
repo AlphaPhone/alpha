@@ -1,9 +1,6 @@
 import {installHomeCalendar} from './helpers/home-calendar';
 import {test,expect,type Page} from '@playwright/test';
 
-// The Resize chat grabber moves the open sheet: it rests where released, snaps only near the
-// collapsed form or the top, and a flick jumps. Full screen has no grabber, so nothing of Alpha's
-// competes with the top edge, where a pull is Android's shade.
 const panel=(page:Page)=>page.locator('[data-alpha-layer="conversation"]');
 const grabber=(page:Page)=>page.getByRole('button',{name:'Resize chat',exact:true});
 const height=(page:Page)=>panel(page).evaluate(element=>parseFloat(getComputedStyle(element).height));
@@ -15,17 +12,13 @@ async function sheet(page:Page,url='/?shell=launcher&tools=1'){
  await expect(grabber(page)).toBeVisible();
  await panel(page).evaluate(element=>Promise.all(element.ownerDocument.getAnimations().map(animation=>animation.finished.catch(()=>{}))));
 }
-/** A deliberate drag: the finger stops before it lifts, so it is never a flick. */
 async function slow(page:Page,dy:number){
  const box=(await grabber(page).boundingBox())!,x=box.x+box.width/2,y=box.y+box.height/2;
  await page.mouse.move(x,y);await page.mouse.down();await page.mouse.move(x,y+dy,{steps:8});
  await page.waitForTimeout(160);await page.mouse.up();
 }
-/** A finger flick through Chromium's touch pipeline: lifted at speed, far from either zone. */
 async function flick(page:Page,dy:number){
  const box=(await grabber(page).boundingBox())!,x=box.x+box.width/2,y=box.y+box.height/2,cdp=await page.context().newCDPSession(page);
- // Observe Chromium's actual pointer events while controlling the intended input speed.
- // Host/CDP scheduling must not turn the fixture's flick into a deliberate slow drag.
  await page.evaluate(()=>{
   const w=window as any,abort=new AbortController();w.flickInputAbort=abort;w.flickInputSamples=[];
   for(const type of ['pointerdown','pointermove','pointerup'])window.addEventListener(type,event=>{
@@ -87,10 +80,8 @@ test.describe('touch',()=>{
 
 test('Shrink chat returns to the height the person left, and Minimize collapses',async({page})=>{
  await sheet(page);
- // The open sheet fits its chat (AC-04): an empty chat opens at 38% of the screen, so it is raised.
  await slow(page,-90);
  const rested=await height(page);
- // Toolbar taps are ignored for 350ms after a drag, as a compatibility click may follow one.
  await page.waitForTimeout(400);
  await page.getByRole('button',{name:'Expand chat',exact:true}).click();
  await page.getByRole('button',{name:'Shrink chat',exact:true}).click();
@@ -109,17 +100,12 @@ for(const inset of [0,52])test(`full chat header clears the status bar with no g
  await expect(grabber(page)).toHaveCount(0);
  await panel(page).evaluate(element=>Promise.all(element.ownerDocument.getAnimations().map(animation=>animation.finished.catch(()=>{}))));
  const box=(await shrink.boundingBox())!,screen=(await page.locator('[data-screen]').boundingBox())!;
- // 44px status bar band in the browser; on a phone the measured inset, plus 16 screen pixels.
  expect(box.y-screen.y).toBeGreaterThanOrEqual(Math.max(44,inset)+16);
- // The controls keep the right edge with the grabber's column empty.
  expect(box.x+box.width).toBeGreaterThan(screen.x+screen.width-120);
  await expect(page.locator('[data-alpha-layer="shade"]')).not.toBeInViewport();
 });
 
-// Outside the open sheet the first touch only collapses the chat; the next one is ordinary.
 const activeView=(page:Page)=>page.locator('html').getAttribute('data-active-view');
-// Home draws its calendar card only with an event, so one is saved first;
-// the card is the control above the sheet.
 const card=(page:Page)=>page.getByRole('button',{name:/^Open calendar event: Synthetic outside target/});
 async function eventSheet(page:Page){
  await page.setViewportSize({width:412,height:915});
@@ -228,7 +214,6 @@ test.describe('landscape',()=>{
  });
 });
 
-// One rule for every raised dock.
 test.describe('raised dock',()=>{
  const open=async(page:Page)=>{await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));await page.goto('/?shell=launcher&tools=1');};
  for(const lateClick of [true,false])test(lateClick?'a delayed Android click stays on the raised scrim':'a released scrim press without a click still lowers the dock',async({page})=>{
@@ -270,7 +255,6 @@ test.describe('raised dock',()=>{
   await expect(page.locator('[data-alpha-layer="composer"]')).toHaveCount(0);
   await expect(page.locator('html')).toHaveAttribute('data-active-view','notes');
   expect(await page.evaluate(()=>location.href+document.querySelector('[data-alpha-layer="app"]')?.innerHTML.length)).toBe(before);
-  // The draft survives lowering.
   await pill.getByRole('button',{name:'Type',exact:true}).click();
   await expect(composer).toHaveValue('keep this draft');
   await composer.blur();
@@ -296,7 +280,6 @@ test.describe('raised dock',()=>{
   const composer=page.locator('[data-alpha-layer="composer"] textarea[data-alpha-composer]');
   await composer.click();
   await expect(page.locator('[data-alpha-chat-scrim]')).toHaveCSS('pointer-events','auto');
-  // adjustResize: the window shrinks with the keyboard and grows back when it closes.
   const size=page.viewportSize()!;
   await page.setViewportSize({width:size.width,height:size.height-320});await page.waitForTimeout(300);
   await page.setViewportSize(size);

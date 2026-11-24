@@ -1,5 +1,3 @@
-// One location owner per Maps controller: serial admission, a generation fence over every
-// await of start(), and native listener and watch cleanup.
 module NativeMapsLocation {
   type Run = { phase: str, ticket: int, session: int, awaits: int, oneShot: bool }
   type Delivery = { session: int, ticket: int, generation: int }
@@ -7,12 +5,8 @@ module NativeMapsLocation {
     available: bool, hidden: bool,
     admitting: bool, generation: int, session: int, minted: int, requestingPermission: bool,
     admission: Run, tickets: int -> int, oneShots: Set[int], granted: Set[int],
-    // Native side: registered listener handles, live watches, and cleanups still in flight.
     listeners: Set[int], watches: Set[int], cleanup: Set[int], failedCleanups: Set[int],
-    // Sessions stopped by their own report or one-shot fix, and those whose callers heard
-    // through the error callback that this stop's cleanup was unconfirmed.
     selfStopped: Set[int], cleanupErrors: Set[int],
-    // What callers saw: the last start's outcome, fixes delivered and onError calls per session.
     lastStart: str, lastTicket: int, deliveries: Set[Delivery], errors: int -> int
   }
   var s: State
@@ -23,9 +17,6 @@ module NativeMapsLocation {
     "refused-cleanup", "superseded", "error", "watching")
   pure val Phases = Set("idle", "stopping", "checking", "requesting", "waiting-front",
     "listening", "watch-requested", "failing")
-  /// stop() up to its first await: the generation moves, and a session that registered
-  /// listeners hands them and its watch to native cleanup. A session without native handles
-  /// has nothing to wait for.
   pure def aborted(state: State): State =
     { ...state, generation: state.generation + 1, session: 0,
       cleanup: if (state.listeners.contains(state.session)) state.cleanup.union(Set(state.session))
@@ -33,21 +24,16 @@ module NativeMapsLocation {
   pure def finished(state: State, outcome: str): State =
     { ...state, admission: idle, admitting: false, requestingPermission: false, lastStart: outcome }
   pure def active(state: State, id: int): bool = id != 0 and state.session == id
-  /// The error callback, then stop, for the session still in place.
   pure def reported(state: State, id: int): State =
     { ...aborted(state), errors: state.errors.setBy(id, count => count + 1) }
-  /// report() and a one-shot fix stop their own session and pass a failed cleanup to the error callback.
   pure def selfStop(state: State, id: int): State =
     { ...state, selfStopped: state.selfStopped.union(Set(id)) }
-  /// The new session is in place and its permission check is under way.
   pure def minted(state: State): State = {
     val id = state.minted + 1
     { ...state, session: id, minted: id, tickets: state.tickets.set(id, state.admission.ticket),
-      // Only the start that put this session in place decides whether it ends on its first fix.
       oneShots: if (state.admission.oneShot) state.oneShots.union(Set(id)) else state.oneShots,
       admission: { ...state.admission, phase: "checking", session: id, awaits: 0 } }
   }
-  /// The step after the permission answer, and after the wait for the front when there is one.
   pure def permitted(state: State, grant: bool): State = {
     val id = state.admission.session
     val settled = { ...state, requestingPermission: false }
@@ -65,9 +51,6 @@ module NativeMapsLocation {
     lastStart: "none", lastTicket: 0, deliveries: Set(), errors: Ids.mapBy(id => 0)
   }
   action init = { nondet available = Set(false, true).oneOf() initWith(available) }
-  /// start(): refused outright while another start is settling or without native location;
-  /// otherwise it takes its ticket and stops the session in place. With nothing to clean up
-  /// the new session is in place at once; otherwise the start waits for that cleanup.
   action start(oneShot: bool): bool = all {
     s.generation < MaxGeneration,
     if (s.admitting) s' = { ...s, lastStart: "refused-admitting" }
@@ -82,13 +65,9 @@ module NativeMapsLocation {
   }
   action stop = all {
     s.generation < MaxGeneration,
-    // A wait for the front is cancelled by the stop and resumes as superseded.
     s' = if (s.admission.phase == "waiting-front" and s.session == s.admission.session) permitted(aborted(s), true)
       else aborted(s)
   }
-  /// Native cleanup of one stopped session settles. A start waiting on it resumes: an
-  /// unconfirmed cleanup rejects the start, a stop in between ends it quietly, otherwise the
-  /// new session is in place. A start whose watch failed ends once its own listeners are gone.
   action cleanupSettles(id: int, confirmed: bool): bool = {
     val native = { ...s, cleanup: s.cleanup.exclude(Set(id)),
       listeners: if (confirmed) s.listeners.exclude(Set(id)) else s.listeners,
@@ -114,7 +93,6 @@ module NativeMapsLocation {
       else if (grant) permitted(s, true)
       else { ...s, requestingPermission: true, admission: { ...s.admission, phase: "requesting" } }
   }
-  /// A grant that arrives while the page is hidden waits for the front before GPS starts.
   action permissionAnswered(grant: bool): bool = all {
     s.admission.phase == "requesting",
     s' = if (active(s, s.admission.session) and grant and s.hidden)
@@ -124,26 +102,22 @@ module NativeMapsLocation {
   action hide = s' = { ...s, hidden: true }
   action show = s' = if (s.admission.phase == "waiting-front") permitted({ ...s, hidden: false }, true)
     else { ...s, hidden: false }
-  /// Both listeners are registered before the watch exists.
   action listenersAdded = all {
     s.admission.phase == "listening",
     s' = if (not(active(s, s.admission.session))) finished(s, "superseded")
       else { ...s, listeners: s.listeners.union(Set(s.admission.session)),
         admission: { ...s.admission, phase: "watch-requested" } }
   }
-  /// A watch created after the session was left is cleared at once.
   action watchSettles(created: bool): bool = {
     val id = s.admission.session
     all {
       s.admission.phase == "watch-requested",
-      // A failed watch is reported and the start then waits for its own listeners to be removed.
       s' = if (not(active(s, id))) finished(s, "superseded")
         else if (not(created))
           { ...reported(s, id), admission: { ...s.admission, phase: "failing", awaits: id } }
         else finished({ ...s, watches: s.watches.union(Set(id)) }, "watching")
     }
   }
-  /// The native event carries no watch identity: every registered listener hears it.
   action nativeFix(id: int, valid: bool): bool = all {
     s.listeners.contains(id), s.watches.size() > 0, s.generation < MaxGeneration,
     s' = if (not(active(s, id))) s
@@ -161,7 +135,6 @@ module NativeMapsLocation {
   action step = {
     nondet id = Ids.oneOf()
     nondet flag = Set(false, true).oneOf()
-    // A stop is drawn less often, so sampled traces reach a delivered fix.
     nondet draw = 0.to(3).oneOf()
     any {
       start(flag), all { draw == 0, stop }, cleanupSettles(id, flag), permissionChecked(flag),
@@ -177,20 +150,15 @@ module NativeMapsLocation {
   val PermissionPromptWithinAdmission = s.requestingPermission implies
     s.admitting and s.admission.phase.in(Set("requesting", "waiting-front"))
   val SessionMatchesGeneration = s.session != 0 implies s.tickets.get(s.session) == s.generation
-  /// A fix reaches its caller only while no stop or later start followed that caller's start.
   val DeliveriesCurrent = s.deliveries.forall(delivery => delivery.ticket == delivery.generation)
   val ErrorReportedOncePerSession = Ids.forall(id => s.errors.get(id) <= 1)
-  /// The error callback hears of an unconfirmed cleanup only for a stop the session made itself.
   val CleanupErrorIsOwnStop = s.cleanupErrors.subseteq(s.failedCleanups.intersect(s.selfStopped))
-  /// A start waits only on a cleanup that is still in flight.
   val WaitedCleanupInFlight = s.admission.awaits != 0 implies
     s.admission.phase.in(Set("stopping", "failing")) and s.cleanup.contains(s.admission.awaits)
   val ListenersPrecedeWatch = s.watches.subseteq(s.listeners)
   val WatchNeedsGrant = s.watches.subseteq(s.granted)
-  /// A native watch outlives its session only when its cleanup was reported as unconfirmed.
   val OrphanWatchReported = settled implies
     s.watches.forall(id => id == s.session or s.failedCleanups.contains(id))
-  /// A start that ends without a session, an error or a rejection was overtaken by a stop.
   val QuietStartWasSuperseded = s.lastStart == "superseded" implies s.generation > s.lastTicket
   val WatchingStartHasWatch = s.lastStart == "watching" and s.session != 0 and settled implies
     s.watches.contains(s.session)
@@ -205,7 +173,6 @@ module NativeMapsLocation {
   val SupersededStartWitness = s.lastStart == "superseded"
   val WatchingWitness = settled and s.session != 0 and s.watches.contains(s.session)
   val UnconfirmedCleanupWitness = s.failedCleanups.size() > 0
-  /// A one-shot session was put in place by a one-shot start.
   val OneShotIsMintedSession = s.oneShots.forall(id => id <= s.minted)
   val FixDeliveredWitness = s.deliveries.size() > 0
   val FailedWatchWaitsWitness = s.admission.phase == "failing" and s.admitting

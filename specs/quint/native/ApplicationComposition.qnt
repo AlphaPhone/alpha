@@ -144,7 +144,6 @@ module ResetComponent {
   export ResetRecovery.lateFailure
 }
 
-// Product coordinator composed from six executable domain modules.
 module ApplicationComposition {
   import IdentityComponent(instance = 1) as Identity
   import VoiceComponent(instance = 2) as Voice
@@ -153,7 +152,6 @@ module ApplicationComposition {
   import InboxComponent(instance = 5) as Inbox
   import ResetComponent(instance = 6) as Reset
 
-  // Public read-only projection for implementation trace observations.
   val state = { identity: Identity::s, voice: Voice::s, resident: Resident::s,
     calendar: Calendar::s, inbox: Inbox::s, reset: Reset::s }
   type Host = {foreground: bool, voiceOwner: int, voiceIdentityEpoch: int}
@@ -173,8 +171,6 @@ module ApplicationComposition {
   action stopVoice = if (Voice::s.phase == "idle") keepVoice else Voice::stop
 
   val credentialPresent = Identity::s.owner != 0 and (Identity::s.key or Identity::s.oldKey)
-  // Precommit sign-in keeps the prior account and resident available. A newly
-  // committed key becomes active only after acknowledgement finishes.
   val accountReady = Identity::s.owner != 0 and
     Identity::s.activation.owner == Identity::s.owner and Identity::s.activation.acknowledged and
     not(Reset::s.marker) and not(Resident::s.resetPending)
@@ -189,7 +185,6 @@ module ApplicationComposition {
   val InferenceAccountBound = Resident::s.inferenceAccepted implies accountReady
   val safety = Identity::safety and Voice::safety and Resident::safety and Calendar::safety and Inbox::safety and Reset::safety and OwnerAgreement and VoiceAccountBound and ResetStopsConsumers and InferenceAccountBound
   action check(condition: bool): bool = all { assert(condition), keep }
-  // Every composite transition frames all unaffected imported variables explicitly.
   action beginSignIn(method: str): bool = all {
     host.foreground, not(Reset::s.marker), not(Resident::s.resetPending),
     Identity::begin(method), keepVoice, keepResident,
@@ -385,8 +380,6 @@ module ApplicationComposition {
     keepIdentity, keepVoice, keepResident, keepCalendar, keepInbox, keepHost
   }
 
-  // User actions, environmental callbacks and durable recovery all use the
-  // imported domain transitions, with account/reset coordination above.
   action identityBrowserClosed = all {
     not(Reset::s.marker), Identity::browserClosed,
     keepVoice, keepResident, keepCalendar, keepInbox, keepReset, keepHost
@@ -616,8 +609,6 @@ module ApplicationComposition {
     Reset::lateFailure,
     keepIdentity, keepVoice, keepResident, keepCalendar, keepInbox, keepHost
   }
-  // A process restart retires volatile voice/runtime work and recovers the
-  // existing durable identities. Bounds permit one Calendar restart per run.
   action restartApplication = all {
     Calendar::s.instance < 2,
     not(Resident::s.phase.in(Set("ready", "starting"))) or Resident::s.epoch < 3,
@@ -874,7 +865,6 @@ module ApplicationComposition {
   run accountReplacementRetiresPendingWorkTest = replacementSetup
     .then(check(safety and Identity::s.owner == 2 and Voice::s.phase == "idle" and
       Calendar::s.requestEpoch != Calendar::s.epoch and Inbox::s.requestEpoch != Inbox::s.epoch))
-  // fail() terminates the scenario at the rejected actual imported action.
   run retiredCalendarDispatchRejectedTest = replacementSetup.then(calendarDispatch.fail())
   run retiredInboxConfirmRejectedTest = replacementSetup.then(inboxConfirm.fail())
 
@@ -899,7 +889,6 @@ module ApplicationComposition {
     .then(voiceReply(0, 1)).then(resume)
     .then(check(safety and Voice::s.phase == "idle" and Voice::s.heard == 0))
 
-  // Canary: omission of coordinated retirement must violate the shared invariant.
   run uncoordinatedIdentityChangeDetectedTest = init.then(beginSignIn("google")).then(identityCallback(1))
     .then(identityExchanged).then(saveIdentityReceipt).then(acceptIdentityKey).then(acknowledgeIdentity(true))
     .then(startResident).then(residentStarted(1)).then(beginBinding).then(bindingReply(1)).then(startVoice)

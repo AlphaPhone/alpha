@@ -15,11 +15,9 @@ function routeSpeech(page:Page, paths:readonly string[], handle:(route:Route,inp
  });
 }
 
-// Transport fixtures isolate renderer lifecycle; the recording suite separately uses real host synthesis.
 function wav(){const b=Buffer.alloc(16044);b.write('RIFF');b.writeUInt32LE(b.length-8,4);b.write('WAVEfmt ',8);b.writeUInt32LE(16,16);b.writeUInt16LE(1,20);b.writeUInt16LE(1,22);b.writeUInt32LE(8000,24);b.writeUInt32LE(16000,28);b.writeUInt16LE(2,32);b.writeUInt16LE(16,34);b.write('data',36);b.writeUInt32LE(16000,40);return b.toString('base64');}
 test.beforeEach(async({page})=>{
  test.skip(process.env.VITE_LOCAL_AGENT!=='1','Requires the local-agent bridge profile');
- // Startup can still probe the host. Keep other bridge traffic local and unavailable.
  await page.route(bridge,route=>route.fulfill({status:503}));
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.goto('/');

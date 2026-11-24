@@ -5,14 +5,12 @@ test.beforeEach(async({context,page})=>{await guardNoMedia(context);await page.r
 
 for(const theme of ['light','dark'])test(`${theme} album manager owns keyboard focus and restores the photo control`,async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
- // This reference case checks the launcher Home indicator and Home dismissal.
  await page.goto(`/?shell=launcher&theme=${theme}`);
  await page.evaluate(async()=>{const {importBrowserPhoto}=await import('/src/prototype/browser-camera.ts');const canvas=document.createElement('canvas');canvas.width=100;canvas.height=80;canvas.getContext('2d')!.fillRect(0,0,100,80);await importBrowserPhoto({original:new File([],'fixture.jpg'),image:canvas.toDataURL('image/jpeg'),width:100,height:80},new AbortController().signal);});
  await page.getByRole('button',{name:'Photos',exact:true}).click();
  await page.getByRole('button',{name:/^Photo, /}).click();
  const info=page.getByRole('button',{name:'Photo info',exact:true});
  await info.focus();await page.keyboard.press('Enter');
- // Info lists the selected photo facts; album actions live in the photo menu.
  const sheet=page.getByRole('dialog',{name:'Photo info',exact:true});
  await expect(sheet.getByText('Dimensions',{exact:true})).toBeVisible();await expect(sheet.getByText('100 × 80',{exact:true})).toBeVisible();
  await page.keyboard.press('Escape');await expect(sheet).toHaveCount(0);await choosePhotoAction(page,'Add to album');

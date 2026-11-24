@@ -1,4 +1,3 @@
-/// Global startup recovery and the real React root boundary share one reload surface.
 module RendererFailureUI {
   type State = { installed: bool, plain: bool, mounted: bool, failed: bool,
     healthy: bool, reactPanel: bool, forced: bool, dialogs: int, rootInert: bool,

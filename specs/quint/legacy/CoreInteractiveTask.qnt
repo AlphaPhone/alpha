@@ -1,4 +1,3 @@
-// Literal upstream InteractiveTask reducer model at 4787d51a142c.
 module CoreInteractiveTask {
   pure val Ops = Set("op1", "op2")
   pure val Origins = Set("A", "B")
@@ -8,7 +7,6 @@ module CoreInteractiveTask {
   pure val Interrupts = Set("pause", "cancel", "recover", "revoke")
   type State = {status: str, auth: str, obs: str, op: str -> str, scopeB: bool, extended: bool}
   var s: State
-  // Prefix monitors of the two source action properties. They do not guard steps.
   var history: {outcomesFinal: bool, revocationFinal: bool}
   val vars = s
   pure def Unresolved(status: str): bool = Set("prepared", "dispatched", "unknown").contains(status)

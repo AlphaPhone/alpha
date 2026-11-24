@@ -1,8 +1,5 @@
 import {test,expect} from '@playwright/test';
 
-// `reducedMotion` is a browser context option, not a Playwright test option: a bare
-// `use.reducedMotion` is silently ignored. Specs that opt out of screen-entry motion use
-// contextOptions, and this check proves that opt-in reaches the page and its entry animation.
 test.use({contextOptions:{reducedMotion:'reduce'}});
 test('a spec that opts into reduced motion gets no screen-entry animation',async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
@@ -14,8 +11,6 @@ test('a spec that opts into reduced motion gets no screen-entry animation',async
  expect(await entering.evaluate(el=>parseFloat(getComputedStyle(el).animationDuration))).toBeLessThan(0.001);
 });
 
-// Under reduced motion an infinite animation is not shortened into a strobe: nothing loops, and
-// the typing dots, skeleton bars, call ring and sign-in spinner hold still where they are visible.
 test('reduced motion leaves no looping animation and holds the loading indicators still',async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.goto('/');

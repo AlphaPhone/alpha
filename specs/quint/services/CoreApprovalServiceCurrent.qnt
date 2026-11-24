@@ -1,4 +1,3 @@
-/// Current synchronous callback-bearing approvals, including refused duplicate delivery and draining stop.
 module CoreApprovalServiceCurrent {
   pure val selectors = Set(1, 2)
   type State = {inMap: bool, timer: str, taskExists: bool, result: str, selRuns: int, toRuns: int,
@@ -26,7 +25,6 @@ module CoreApprovalServiceCurrent {
   action timeoutTask = all {state.tpc == "getTask", move({...state,
     tpc: if (state.taskExists) "onTimeout" else "done", toRuns: state.toRuns + (if (state.taskExists) 1 else 0),
     result: if (state.taskExists) state.result else settle("rejected")})}
-  /// An observation checkpoint, not a fabricated delete request after a missing task.
   action timeoutMissingTaskNoEffects = all {state.tpc == "done", state.tHas, not(state.taskExists),
     state.result == "rejected", state.toRuns == 0, move(state)}
   action timeoutCallbackDone = all {state.tpc == "onTimeout", move({...state, tpc: "resolve"})}
@@ -86,7 +84,6 @@ module CoreApprovalServiceCurrent {
   val TimeoutSuccessRequiresCallback = state.result == "timedOut" implies state.toRuns == 1
   val safety = TypeOK and AtMostOneCallback and ResultAgrees and SingleOwner and settlementStable
     and RefusedCallbackHasNoEffect and StoppedAdmissionHasNoEffect and StopWaitsForWork and TimeoutSuccessRequiresCallback
-  /// Fairness assumes admitted callback/storage ports eventually answer; it does not assert bounded wall time.
   val vars = (state, settlementStable)
   temporal Fairness = fire.weakFair(vars) and timeoutTask.weakFair(vars)
     and (timeoutCallbackDone or timeoutCallbackFails).weakFair(vars)

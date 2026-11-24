@@ -1,4 +1,3 @@
-/// Layout results returned by surfaceLayout and keyboardFreeHeight, plus preference readback.
 module PreferencesAndPresentation {
   type State = { width: int, freeHeight: int, visibleHeight: int, editing: bool,
     textScale: int, desktop: bool, theme: str, savedTheme: str,
@@ -34,7 +33,6 @@ module PreferencesAndPresentation {
   val LargeTextSinglePane = s.textScale >= 150 implies not(split)
   val AgendaMatchesText = agenda == (not(s.desktop) and s.textScale >= 150)
   val safety = ReadableCalendar and LargeTextSinglePane and AgendaMatchesText
-  // These are excluded from step. They prove the result predicates reject broken publications.
   action brokenDayCount = s' = {...s, renderedDays: 0}
   action brokenLargeTextSplit = s' = {...s, renderedSplit: true}
   action brokenAgenda = s' = {...s, renderedAgenda: false}

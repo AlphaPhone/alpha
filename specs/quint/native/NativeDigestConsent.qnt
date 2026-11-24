@@ -1,4 +1,3 @@
-// Durable native digest consent, exact source identity and closed source readback.
 module NativeDigestConsent {
   type Grant = {present: bool, revoked: bool, integrity: bool, scope: int, reviewed: int, expiry: int}
   type GrantReply = {scope: int, expiry: int, revoked: bool}

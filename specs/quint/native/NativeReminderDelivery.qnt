@@ -1,5 +1,3 @@
-// The product ReminderReceiver and pinned ReminderStore, with one tracked row,
-// actual UTC-day/snooze units and synthetic inexact alarm/notification effects.
 module NativeReminderDelivery {
   type State = {
     now: int, permission: bool, boot: int, restoredBoot: int, markerView: int, process: int, quarantined: bool,
@@ -60,8 +58,6 @@ module NativeReminderDelivery {
     }
   }
 
-  // Direct schedule rolls back an arm failure. A reviewed operation instead
-  // commits its row and effects-pending receipt before calling AlarmManager.
   action operate(at: int, silent: bool, mode: str): bool = all {
     not(s.quarantined), s.occurrence == 0, s.receipt == "none",
     Set(60,120).contains(at), at > s.now, s.arms < 8,

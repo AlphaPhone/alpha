@@ -27,7 +27,6 @@ test('browser reminder repeats in its saved zone after reload and rejects old de
   return (await daily.listReminders()).reminders[0];
  });
  expect(second.at).toBe(Date.parse('2027-03-15T06:30Z'));expect(second.history).toHaveLength(2);
- // Select the occurrence's week before mounting the Calendar renderer.
  await page.clock.setFixedTime(new Date('2027-03-15T00:00Z'));await page.reload();
  await page.getByRole('button',{name:'Calendar',exact:true}).click();
  await expect(page.getByText('New York reminder',{exact:true}).first()).toBeVisible();

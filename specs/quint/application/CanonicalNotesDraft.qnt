@@ -1,5 +1,3 @@
-// Shared NotesEditor draft and save protocol over the current canonical controller.
-// The controller supplies revisioned records. Record body bytes use equality classes.
 module CanonicalNotesDraft {
   type Data = { title: int, body: int, separator: str, format: int, color: str }
   type Draft = { present: bool, token: int, id: int, base: int, version: int,

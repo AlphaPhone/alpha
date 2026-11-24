@@ -1,4 +1,3 @@
-// Historical design translation; the executable Quint model is retained here.
 module Maps {
   type State = { Design: str, net: str, plan: str, cloud: str, session: str,
     tried: bool, message: str, screen: str, route: bool, assistant: bool,
@@ -24,8 +23,6 @@ module Maps {
   pure def initialState(design, net, plan, cloud) = { Design: design, net: net, plan: plan, cloud: cloud,
     session: "idle", tried: false, message: "none", screen: "Away", route: false,
     assistant: false, agentReq: "none", faults: 0, asks: 0 }
-  // Persistent monitors are the exact state extension for the original
-  // action properties. They observe transitions without constraining them.
   pure val initialChecks = { HonestErrors: true, AgentLands: true, NavSurvivesAssistant: true, RouteKeptOnFailure: true }
   pure def HonestErrorsRelation(before: State, after: State): bool = (after.message != before.message and after.message != "none") implies after.message == cause(after)
   pure def AgentLandsRelation(before: State, after: State): bool = (before.agentReq != "none" and after.agentReq == "none" and serviceUp(before)
@@ -124,7 +121,6 @@ module Maps {
   temporal Spec = (Initial and s.Design == "proposed") and always(Next.orKeep(vars)) and Fairness
   temporal CurrentSpec = (Initial and s.Design == "current") and always(Next.orKeep(vars)) and Fairness
   val NoProviderTalk = s.message != "connectProvider"
-  // Back's guard has no additional constraints and the assignment is total.
   val AlwaysBack = Set("Results", "Place", "Route", "Nav", "Arrived").contains(s.screen) implies BackEnabled
   temporal HonestErrors = always(history.HonestErrors)
   temporal SelfHealing = leadsTo(eventually(always(ServiceUp)), s.session == "ready")

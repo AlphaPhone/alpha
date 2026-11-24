@@ -1,13 +1,10 @@
 import {expect,type Page,type BrowserContext,type Locator} from '@playwright/test';
-/** These storage fixtures never capture or play real media, including incidental alert priming. */
 export async function guardCalendarFixture(context:BrowserContext){await context.addInitScript(()=>{
  Object.defineProperty(window,'AudioContext',{configurable:true,value:class{state='suspended';resume=async()=>{};close=async()=>{};}});
  Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{getUserMedia:async()=>{throw Error('Calendar fixture must not capture media');}}});
  HTMLMediaElement.prototype.play=async()=>{throw Error('Calendar fixture must not play media');};
 });}
-/** The modal editor keeps its form inert until its draft opens, and fill() silently does nothing on an inert field. */
 export const calendarEditorReady=(dialog:Locator)=>expect(dialog.getByRole('button',{name:'Save event',exact:true})).toBeEnabled();
-/** Quiet autosave readiness is its durable receipt, not presentation copy. */
 export async function expectSavedCalendarDraft(page:Page,kind:'creation'|'edit'|'modal',extra:Record<string,unknown>={}){
  const hidden=kind==='modal'?null:await page.evaluate(()=>{const screen=document.querySelector('[data-screen]') as any;let fiber=screen[Object.keys(screen).find(key=>key.startsWith('__reactFiber$'))!];while(fiber&&!(fiber.stateNode&&typeof fiber.stateNode.vget==='function'))fiber=fiber.return;return fiber.stateNode.vget('calendar').form;});
  const expected=kind==='modal'?{

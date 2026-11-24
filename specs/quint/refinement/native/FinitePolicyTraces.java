@@ -5,7 +5,6 @@ import ai.eliza.voice.LiveVadGate;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Reachable-state prefixes execute the original classes, including boundary inputs. */
 public final class FinitePolicyTraces {
  static JSONObject vad(LiveVadGate gate) throws Exception {
   return Trace.fields("speaking", gate.speaking(), "above", Trace.read(gate, "above"), "below", Trace.read(gate, "below"));
@@ -19,7 +18,6 @@ public final class FinitePolicyTraces {
  static JSONArray vadTraces() throws Exception {
   JSONArray result = new JSONArray();
   int[] inputs = {-1001, -1000, -999, -1, 0, 349, 350, 499, 500, 1000, 1001};
-  // Every reachable counter state: closed above=0/1, open below=0..15.
   for (int state = 0; state < 18; state++) for (int choice = 0; choice <= inputs.length; choice++) {
    LiveVadGate gate = new LiveVadGate();
    Trace trace = new Trace("vad-state-" + state + "-input-" + choice, vad(gate));
@@ -40,7 +38,6 @@ public final class FinitePolicyTraces {
   return Trace.fields("started", Trace.read(budget, "started"), "windowStart", Trace.read(budget, "windowStart"),
     "losses", Math.min(4, (Integer) Trace.read(budget, "lossesInWindow")));
  }
- // The finite projection covers genuine crashes while the activity is visible.
  static void loss(Trace trace, RendererRecoveryBudget budget, int now, boolean home) throws Exception {
   RendererRecoveryBudget.Action outcome = budget.onLoss(now, home, true, true);
   trace.step("rendererGone", budget(budget).put("s.decision", outcome.name()).put("s.delay", RendererRecoveryBudget.delay(outcome)), now, true);
@@ -55,7 +52,6 @@ public final class FinitePolicyTraces {
     int activity = 0;
     for (int n = 0; n < count; n++) {
      loss(trace, budget, start, home);
-     // The projection covers the policy helper. Activity recreation is an environment step.
      if (n >= 3 && home) trace.step("reload", budget(budget));
      else {
       if (n >= 3) trace.step("delayElapsed", budget(budget));
@@ -66,7 +62,6 @@ public final class FinitePolicyTraces {
     loss(trace, budget, next, home);
     result.put(trace.value);
    }
-  // Reachable saturation and defensive overflow regression execute the actual source.
   RendererRecoveryBudget budget = new RendererRecoveryBudget();
   for (int i = 0; i < 10000; i++) budget.onLoss(0, false, true, true);
   if (!Trace.read(budget, "lossesInWindow").equals(4)) throw new AssertionError("budget did not saturate");

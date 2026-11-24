@@ -1,4 +1,3 @@
-// Appearance preference startup, listener custody and committed React state.
 module AppearancePreferenceAdmission {
   type Patch = {theme: str, marker: int}
   type State = {

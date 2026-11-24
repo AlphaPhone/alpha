@@ -1,5 +1,3 @@
-// NotesEditor remove/restore continuations over the canonical controller.
-// Payloads are represented by collection membership and authored-content classes.
 module CanonicalNotesMutation {
   type Draft = {present: bool, id: int, token: int, base: int, version: int, authored: bool}
   type Write = {kind: str, id: int, token: int, version: int, expectedRevision: int}
@@ -70,8 +68,6 @@ module CanonicalNotesMutation {
       else {...pending, mutation: {...pending.mutation, phase: "restore"},
         write: {kind: "restore", id: id, token: 0, version: 0, expectedRevision: s.revision}}
     }}
-  // A second remove/restore call is recorded only when its immediate guard or
-  // controller single-writer admission rejects it while another command waits.
   action probe(kind: str, id: int): bool = all {Set("delete", "restore").contains(kind), Ids.contains(id),
     Set("save", "delete", "restore").contains(s.mutation.phase),
     s' = {...s, probe: "false", review: s.review or

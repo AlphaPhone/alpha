@@ -4,7 +4,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Enumerates four-call histories using the actual review token and returned results. */
 public final class DeletionReviewAdmissionTraces {
  static JSONObject observe(DeletionReviewAdmission token, int admissions, int settlements, boolean returned) throws Exception {
   int state = ((AtomicInteger) Trace.read(token, "state")).get();

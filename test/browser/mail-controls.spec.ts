@@ -19,7 +19,6 @@ test('Folder menu supports keyboard and native Back; local Drafts needs no provi
  await page.getByRole('button',{name:'Inbox',exact:true}).click();const folders=page.getByRole('button',{name:'Other mail folders',exact:true});await expect(folders).toBeVisible();
  const metrics=await folders.evaluate(el=>({appearance:getComputedStyle(el).appearance,height:el.getBoundingClientRect().height,paddingRight:parseFloat(getComputedStyle(el).paddingRight)}));
 
- // Chromium layout transforms can introduce subpixel floating-point rounding.
  expect(metrics.height).toBeCloseTo(44,4);
  expect(await folders.evaluate(el=>el.getBoundingClientRect().right<=document.querySelector('[data-screen]')!.getBoundingClientRect().right-8)).toBe(true);
  await folders.press('ArrowDown');await expect(page.getByRole('menuitemradio',{name:'Starred',exact:true})).toBeFocused();await page.keyboard.press('Escape');await expect(folders).toBeFocused();

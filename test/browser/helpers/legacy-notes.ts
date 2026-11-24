@@ -1,8 +1,6 @@
 import {expect,test,type Page} from '@playwright/test';
 import type {DocumentNotesStore} from '../../../apps/app/src/runtime/browser-notes-document.ts';
 type RetainedNote = Parameters<DocumentNotesStore['replace']>[0][number];
-/** Seed only the isolated test's retained legacy document before selecting that source.
- * Production source selection never initializes or migrates a missing legacy document. */
 export async function openLegacyNotes(page:Page,records:RetainedNote[]=[]){
  if(test.info().project.name==='production')await seedRetainedNotes(page,records);
  else await page.evaluate(async records=>{
@@ -16,13 +14,11 @@ export async function openLegacyNotes(page:Page,records:RetainedNote[]=[]){
  await expect(page.getByText('Previous notes need a recovery review. Nothing was moved or changed.',{exact:true})).toHaveCount(0);
 }
 
-/** Navigate only; leave raw-store setup and recovery assertions to the caller. */
 export async function selectLegacyNotes(page:Page){
  await page.getByRole('button',{name:'Notes',exact:true}).click();
  await selectLegacyNotesSource(page);
 }
 
-/** Select within an already open Notes view without hiding its current ownership state. */
 export async function selectLegacyNotesSource(page:Page){
  await expect(page.locator('html')).toHaveAttribute('data-active-view','notes');
  if(await page.getByRole('heading',{name:'Previous notes',exact:true}).isVisible())return;
@@ -31,7 +27,6 @@ export async function selectLegacyNotesSource(page:Page){
  await expect(page.getByRole('heading',{name:'Previous notes',exact:true})).toBeVisible();
 }
 
-/** Retained attachment metadata only; no file picker, file contents, or real user store. */
 export async function openLegacyAttachment(page:Page){
  if(test.info().project.name==='production')await seedRetainedNotes(page,[{id:'retained-attachment',kind:'text',title:'Retained attachment',body:'Synthetic summary.',documentSource:{version:1,name:'fixture.txt',mimeType:'text/plain',sha256:'a'.repeat(64),size:1}}]);
  else await page.evaluate(async()=>{
@@ -44,8 +39,6 @@ export async function openLegacyAttachment(page:Page){
  await expect(page.getByRole('dialog',{name:'Note source document',exact:true})).toBeVisible();
 }
 
-/** Seed the isolated browser context through its persisted wire format, never source imports
- * or a production-only testing hook. Existing documents are left untouched. */
 async function seedRetainedNotes(page:Page,records:RetainedNote[]=[]){
  await page.evaluate(async(records)=>{
   const keys=['alphaphone:prototype:notes:v1','alphaphone:notes:v2','alphaphone:daily:v1'];

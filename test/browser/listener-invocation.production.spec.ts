@@ -1,14 +1,10 @@
 import {test,expect,type Page} from '@playwright/test';
 import {flagOffAndroid,residentHome,fenceNetwork,button} from './flag-off-android';
-// The production renderer binds Sense only on a qualified Android image. Android caller identity,
-// native microphone and storage are controlled fixtures; no device or external provider is used.
 type Options={assistant?:boolean;invocation?:'listener'|'power'|'assist';locked?:boolean;listener?:Record<string,unknown>|null;stopReceipt?:Record<string,unknown>;localSpeech?:boolean;image?:boolean;sense?:unknown};
 async function setup(page:Page,options:Options={}){
  const foreign=await fenceNetwork(page);await flagOffAndroid(page);
  await page.addInitScript((options:Options)=>{
   const w=window as any,c=w.Capacitor,prior=c.nativePromise;
-  // On-device speech is the route without a Cloud account (or with a Text key and no Cartesia key),
-  // as in voice-assistant-fixture.ts: the Cloud slot is absent at the native storage boundary.
   const provider={mode:'own',revision:'synthetic-local-voice-provider-r1',persistence:'native-secure-store',keys:{text:{configured:true},voice:{configured:false}},provider:'cerebras',configured:true,selected:true,model:'qwen-3.8-27b',voiceConfigured:false};
   if(options.localSpeech){delete w.flagOff.slots['cloud:production'];w.flagOff.persist();}
   const f=w.live={captures:[] as any[],stops:[] as string[],active:null as string|null,routes:[] as any[],invocations:0,binding:null as any,bindings:[] as any[],claims:[] as any[],listenerCalls:[] as string[],power:[] as string[],listener:options.listener??null,stopReceipt:options.stopReceipt,deviceSettings:[] as string[],forbidden:[] as string[]};
@@ -18,7 +14,6 @@ async function setup(page:Page,options:Options={}){
   c.PluginHeaders.push({name:'DeviceApps',methods:[{name:'platformCapabilities',rtype:'promise'}]});
   if(!header('AlphaDevice'))c.PluginHeaders.push({name:'AlphaDevice',methods:[]});
   header('AlphaDevice').methods.push({name:'openSettings',rtype:'promise'});
-  // turnOn, resume and start are declared so that a call to any of them reaches the stub and is recorded.
   header('ElizaSense').methods=['status','pause','turnOff','openSettings','turnOn','resume','start','bindInvocationSession','takeInvocation','claimProtectedPowerLaunch','discardProtectedPowerLaunch','discardProtectedPowerInvocation'].map(name=>({name,rtype:'promise'}));
   if(navigator.mediaDevices)Object.defineProperty(navigator.mediaDevices,'getUserMedia',{value:async()=>{f.forbidden.push('getUserMedia');throw Error('Unexpected browser capture');}});
   const callback=c.nativeCallback;c.nativeCallback=(plugin:string,method:string,input:any,fn:any)=>{if(plugin==='AlphaVoiceCloud'&&method==='addListener'){events.push({event:input.eventName,callback:fn});return String(events.length);}return callback(plugin,method,input,fn);};
@@ -35,11 +30,9 @@ async function setup(page:Page,options:Options={}){
     if(method==='takeInvocation'){
      if(!f.binding||!f.binding.sessionKey||input.generation!==f.binding.generation||input.bindingId!==f.binding.bindingId||input.sessionKey!==f.binding.sessionKey||Object.keys(input).sort().join(',')!=='bindingId,generation,sessionKey')throw Error('Invocation was not bound to the current owner');
      f.claims.push({request:structuredClone(input),binding:structuredClone(f.binding)});
-     // One-shot like AlphaAssistActivity: the listener origin is reported once, then "assist".
      const first=f.invocations++===0;
      return options.assistant?{assistant:true,invocation:first?options.invocation??'assist':'assist',locked:options.locked===true}:{assistant:false,invocation:null,locked:false};
     }
-    // This fixture exercises warm one-shot Power receipts through takeInvocation, not cold launch grants.
     if(method==='claimProtectedPowerLaunch'||method==='discardProtectedPowerLaunch'||method==='discardProtectedPowerInvocation'){
      if(!f.binding||input.generation!==f.binding.generation||input.bindingId!==f.binding.bindingId)throw Error('Power launch was not bound to the current owner');
      f.power.push(method);return method==='claimProtectedPowerLaunch'?{assistant:false,invocation:null,locked:true}:{};
@@ -87,7 +80,6 @@ for(const [name,options] of [
 ] as const) test(`${name} cannot start voice or consume a deferred invocation`,async({page})=>{
  const foreign=await setup(page,options);await openSurface(page);
  await expect.poll(()=>live(page,f=>f.listenerCalls)).toContain('turnOff');
- // Exercise a new native event and a foreground return as well as cold startup.
  await page.evaluate(()=>{window.dispatchEvent(new Event('alpha:assist-invocation'));document.dispatchEvent(new Event('visibilitychange'));});
  await page.waitForTimeout(500);
  await expect(voice(page)).toHaveCount(0);
@@ -113,7 +105,6 @@ test('startup stops a previously active image listener and Settings exposes no d
  await button(page,'Settings').click();
  for(const name of ['Listening','Always-on listening','Wake word','Wake assistant'])await expect(page.getByText(name,{exact:true})).toHaveCount(0);
  for(const name of ['Pause listening','Turn off listening','Listening settings'])await expect(button(page,name)).toHaveCount(0);
- // Startup only stops the listener; an earlier status read is the one other call allowed.
  const calls=await live(page,f=>f.listenerCalls as string[]);expect(calls[0]==='status'?calls.slice(1):calls).toEqual(['turnOff']);
  expect(await live(page,f=>f.captures)).toEqual([]);expect(foreign).toEqual([]);
 });

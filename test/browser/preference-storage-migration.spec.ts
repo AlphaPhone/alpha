@@ -2,8 +2,6 @@ import {test,expect,type Page} from '@playwright/test';
 async function boot(page:Page){await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));await page.goto('/?mode=dev&tools=1');}
 test('empty bookmark reads and sound polling do not invent stored data',async({page})=>{
  await boot(page);
- // The clock polls every second and reads the sound history each time. A second read means a whole
- // poll after this point has finished, including any write it would make.
  await page.evaluate(async()=>{const {alertSoundDocument:d}=await import('/src/browser/preference-documents.ts'),read=d.read,w=window as any;w.soundReads=0;(d as any).read=(...args:any[])=>(read as any)(...args).finally(()=>{w.soundReads++;});});
  await expect.poll(()=>page.evaluate(()=>(window as any).soundReads)).toBeGreaterThanOrEqual(2);
  expect(await page.evaluate(async()=>{const {BrowserSurface}=await import('/src/browser/browser-surface.ts'),{bookmarkDocument,alertSoundDocument}=await import('/src/browser/preference-documents.ts');await new BrowserSurface().bookmarks();return {bookmarks:(await bookmarkDocument.capture()).snapshot??null,sounds:(await alertSoundDocument.capture()).snapshot??null};})).toEqual({bookmarks:null,sounds:null});
@@ -26,7 +24,6 @@ for(const domain of ['bookmarkDocument','alertSoundDocument'] as const){
 }
 test('damaged bookmarks download exact bytes before explicit reset',async({page})=>{
  await page.addInitScript(()=>{localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));if(!sessionStorage.getItem('seeded')){localStorage.setItem('alpha.browser.bookmarks.v1','{damaged bookmarks');sessionStorage.setItem('seeded','1');}});await page.goto('/?mode=dev&tools=1');
- // Establish import completion before capturing; a later first import correctly invalidates an older capture.
  await page.evaluate(async()=>{const {bookmarkDocument}=await import('/src/browser/preference-documents.ts');await bookmarkDocument.readRaw();});
  await page.getByRole('button',{name:'Device controls',exact:true}).click();await page.getByRole('button',{name:'Bookmark recovery',exact:true}).click();const dialog=page.getByRole('dialog',{name:'Browser bookmark recovery'});
  const pending=page.waitForEvent('download');await dialog.getByRole('button',{name:'Download bookmarks backup',exact:true}).click();const stream=await (await pending).createReadStream(),chunks:Buffer[]=[];for await(const chunk of stream!)chunks.push(Buffer.from(chunk));expect(Buffer.concat(chunks).toString()).toBe('{damaged bookmarks');

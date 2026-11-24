@@ -1,5 +1,3 @@
-// Literal upstream ServiceLifecycle at 4787d51a142c. Class and caller model
-// values use disjoint integers. Instance numbers retain their original order.
 module CoreServiceLifecycleDesignTemplate {
   const Classes: Set[int]
   const LateClasses: Set[int]
@@ -178,7 +176,6 @@ module CoreServiceLifecycleDesign {
   action init = Model::Init
   action step = Model::Step
   action rawStep = Model::Next
-  // Observation and replay aliases for source schedules. Neither profile uses them in Next.
   val sourceState = Model::s
   val sourcePendingCallers = Set(21, 22).filter(e => Model::s.epc.get(e) == "wait")
   val sourceCompletedCallers = Set(21, 22).filter(e => Model::s.epc.get(e) == "done")
@@ -215,7 +212,6 @@ module CoreServiceLifecycleDesignSiblings {
   action init = Model::Init
   action step = Model::Step
   action rawStep = Model::Next
-  // Observation and replay aliases for source schedules. Neither profile uses them in Next.
   val sourceState = Model::s
   val sourcePendingCallers = Set(21, 22).filter(e => Model::s.epc.get(e) == "wait")
   val sourceCompletedCallers = Set(21, 22).filter(e => Model::s.epc.get(e) == "done")

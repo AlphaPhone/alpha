@@ -72,7 +72,6 @@ test('Photos tabs stay aligned in Albums and selection opens the real media libr
  const settle=()=>library.evaluate(async el=>{await document.fonts.ready;const animations=new Set(el.getAnimations({subtree:true}));for(let parent=el.parentElement;parent;parent=parent.parentElement)for(const animation of parent.getAnimations())animations.add(animation);await Promise.all([...animations].filter(animation=>animation.effect?.getComputedTiming().endTime!==Infinity).map(animation=>animation.finished));await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));});
  await settle();const before=await library.boundingBox();await page.getByRole('button',{name:'Albums',exact:true}).click();
  await settle();const after=await library.boundingBox();expect(after!.x).toBe(before!.x);expect(after!.y).toBe(before!.y);
- // Select belongs to grids (the Library and each album), not the album list.
  await expect(select).toHaveCount(0);await library.click();
  await page.getByLabel('Photos tools',{exact:true}).click();await select.click();await expect(page.getByRole('button',{name:'Cancel selection',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Delete selected',exact:true})).toBeVisible();
 });

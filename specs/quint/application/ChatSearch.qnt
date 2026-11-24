@@ -1,4 +1,3 @@
-/// A search response can publish only in its live owner scope.
 module ChatSearch {
   type State = {owner:int, held:int, open:bool, pending:bool, results:bool}
   var s:State

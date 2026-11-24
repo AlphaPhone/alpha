@@ -1,8 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { auditPage, auditReadingOrder, auditTabOrder, auditTree, format } from './accessibility-audit';
 
-// The sweep is only as good as its checks. Each rule is shown here to fire on a seeded defect
-// and to stay quiet on the corrected markup, so a silent sweep means a clean page.
 const page_ = (body: string) => `<!doctype html><html lang="en"><body style="margin:0;font:16px sans-serif;background:#fff;color:#000">${body}</body></html>`;
 const rules = (lines: string[]) => [...new Set(lines.map(line => line.split(':')[0]))].sort();
 async function load(page: Page, body: string) { await page.setContent(page_(body)); }
@@ -40,8 +38,6 @@ test('hidden focus, broken references, small targets and low contrast are report
 });
 
 test('faint placeholders and a choice shown only by colour are reported', async ({ page }) => {
-  // The Home composer before the fix (the UA placeholder grey on --s2), a sign-in field whose
-  // placeholder was faded to .8, and calendar repeat chips told apart by colour alone.
   await load(page, `<style>#faded::placeholder{color:#6b6b6b;opacity:.8}</style>
     <textarea aria-label="Ask Alpha" placeholder="Ask Alpha" style="background:#f3f3f3;border:0;height:44px"></textarea>
     <input id="faded" aria-label="Phone" placeholder="+14155550100" style="height:44px">
@@ -51,8 +47,6 @@ test('faint placeholders and a choice shown only by colour are reported', async 
   expect(found.filter(line => line.startsWith('placeholder-contrast'))).toHaveLength(2);
   expect(found.find(line => line.startsWith('selection-by-colour'))).toContain('Daily');
 
-  // --mut on --s2 and on white, a filled field (its placeholder is not drawn), the chips exposing
-  // aria-pressed, and a primary action beside one secondary action (emphasis, not a choice).
   await load(page, `<style>:is(input,textarea)::placeholder{color:#6b6b6b;opacity:1}#filled::placeholder{color:#ccc}</style>
     <textarea aria-label="Ask Alpha" placeholder="Ask Alpha" style="background:#f3f3f3;border:0;height:44px"></textarea>
     <input aria-label="Phone" placeholder="+14155550100" style="height:44px">
@@ -64,9 +58,6 @@ test('faint placeholders and a choice shown only by colour are reported', async 
 
 test('text printed over text, stacked or cut controls and labels split mid-word are reported', async ({ page }) => {
   await page.setViewportSize({ width: 400, height: 400 });
-  // The round-7 Home card at 200% text: a title too tall for its fixed box, printed over the time
-  // above it. A four-column tile whose one-word label breaks after its seventh letter. Two buttons
-  // on the same pixels. A button cut through by a box that does not scroll.
   await load(page, `<div class="os" style="position:relative;width:400px;height:400px">
     <div style="position:absolute;left:0;top:0;width:200px;height:60px">
       <span id="time" style="display:block;font-size:14px;line-height:18px">3:00 PM</span>
@@ -84,10 +75,6 @@ test('text printed over text, stacked or cut controls and labels split mid-word 
   expect(found.find(line => line.startsWith('control-clipped'))).toContain('id="cut"');
   expect(found.filter(line => line.startsWith('control-overlap'))).toHaveLength(1);
 
-  // The same content laid out with room: the card grows with its title, the tile is wide enough,
-  // the buttons sit side by side and the clipped row scrolls. Tight line heights, a label that
-  // wraps between words, a long unbroken address, a field with its clear button, text under an
-  // opaque sheet and text scrolled out of a list are not defects.
   await load(page, `<div class="os" style="position:relative;width:400px;height:400px">
     <div style="position:absolute;left:0;top:0;width:200px">
       <span style="display:block;font-size:14px;line-height:18px">3:00 PM</span>
@@ -123,7 +110,6 @@ test('clipped text, spilling labels and unreachable controls are reported; ellip
   expect(found.find(line => line.startsWith('text-truncated'))).toContain('Deliberately shortened');
   expect(found.find(line => line.startsWith('text-clipped'))).toContain('Cut through');
 
-  // Nothing clips this paragraph, so it simply runs off the side of the phone.
   await load(page, `<div class="os" style="position:relative;width:400px;height:300px"><p style="position:absolute;left:340px;top:20px;margin:0;white-space:nowrap">Runs off the side</p></div>`);
   expect(rules(format(await auditPage(page, { clipping: true })))).toEqual(['text-off-screen']);
 
@@ -144,36 +130,30 @@ test('a focus trap and focus inside hidden content are reported; a bounded order
   await load(page, `<button>One</button><div aria-hidden="true"><button>Hidden but focusable</button></div><button>Three</button>`);
   expect(rules(format(await auditTabOrder(page)))).toEqual(['focus-in-hidden-content']);
 
-  // A modal with one control holds focus by design.
   await load(page, `<div role="dialog" aria-label="Notice"><button id="only">OK</button></div>
     <script>document.getElementById('only').addEventListener('keydown',event=>{if(event.key==='Tab')event.preventDefault();});</script>`);
   expect(format(await auditTabOrder(page))).toEqual([]);
 
-  // A modal with a second control that Tab can never reach is a trap, not containment.
   await load(page, `<div role="dialog" aria-label="Notice"><button id="first">Cancel</button><button>Confirm</button></div>
     <script>document.getElementById('first').addEventListener('keydown',event=>{if(event.key==='Tab')event.preventDefault();});</script>`);
   expect(rules(format(await auditTabOrder(page)))).toEqual(['focus-trap']);
 
-  // A cycle through part of the page leaves the rest unreachable by keyboard.
   await load(page, `<button id="a">One</button><button id="b">Two</button><button>Never reached</button>
     <script>document.getElementById('b').addEventListener('keydown',event=>{if(event.key==='Tab'&&!event.shiftKey){event.preventDefault();document.getElementById('a').focus();}});</script>`);
   const partial = format(await auditTabOrder(page));
   expect(rules(partial)).toEqual(['focus-order-incomplete']);
   expect(partial.join()).toContain('Never reached');
 
-  // Tab swallowed for the whole page: nothing is ever focused, so every control is unreachable.
   await load(page, `<button>One</button><button>Two</button>
     <script>document.addEventListener('keydown',event=>{if(event.key==='Tab')event.preventDefault();},true);</script>`);
   const swallowed = format(await auditTabOrder(page));
   expect(rules(swallowed)).toEqual(['focus-order-incomplete']);
   expect(swallowed).toHaveLength(2);
 
-  // A control that arrives on a timer during the walk was not skipped by it.
   await load(page, `<button id="a">One</button><button id="b">Two</button>
     <script>document.getElementById('b').addEventListener('focus',()=>{const late=document.createElement('button');late.textContent='Late';document.getElementById('b').before(late);},{once:true});</script>`);
   expect(format(await auditTabOrder(page))).toEqual([]);
 
-  // The same cycle inside a dialog is containment: the page behind it is meant to be skipped.
   await load(page, `<button>Behind</button><div role="dialog" aria-label="Choose"><button id="a">One</button><button id="b">Two</button></div>
     <script>document.getElementById('a').focus();document.getElementById('b').addEventListener('keydown',event=>{if(event.key==='Tab'&&!event.shiftKey){event.preventDefault();document.getElementById('a').focus();}});</script>`);
   expect(format(await auditTabOrder(page))).toEqual([]);
@@ -181,8 +161,6 @@ test('a focus trap and focus inside hidden content are reported; a bounded order
   await load(page, `<button>One</button><a href="#two">Two</a><input aria-label="Three">`);
   expect(format(await auditTabOrder(page))).toEqual([]);
 
-  // A sheet over a scrim that leaves the page under it in the tab order: focus goes where it
-  // cannot be seen, onto controls (here a destructive one) a pointer could not reach.
   const sheet = (page_: string, popup: string) => `<div class="os" style="position:relative;width:400px;height:300px">${page_}${popup}</div>`;
   const popup = `<button aria-label="Close share" tabindex="-1" style="position:absolute;inset:0;z-index:7;border:0;background:rgba(0,0,0,.2)"></button>
     <div role="dialog" aria-label="Share" style="position:absolute;left:0;right:0;bottom:0;height:160px;z-index:8;background:#fff"><button>Copy link</button></div>`;
@@ -192,19 +170,15 @@ test('a focus trap and focus inside hidden content are reported; a bounded order
   expect(rules(under)).toEqual(['focus-behind-scrim']);
   expect(under).toHaveLength(2);
   expect(under.join()).toContain('Delete');
-  // The same sheet with the page under it retired holds focus to itself.
   await load(page, sheet(`<div inert><button>Share</button><button style="position:absolute;left:10px;bottom:10px">Delete</button></div>`, popup));
   expect(format(await auditTabOrder(page))).toEqual([]);
-  // A full-screen control under its own chrome is not a scrim over that chrome.
   await load(page, sheet(`<button aria-label="Photo" style="position:absolute;inset:0;border:0"></button><button style="position:absolute;left:10px;top:10px">Back</button>`, ''));
   expect(format(await auditTabOrder(page))).toEqual([]);
 
-  // Tab walks the fields inside a native time input before it leaves; that is not a trap.
   await load(page, `<div role="dialog" aria-label="Alarm"><input type="time" aria-label="Alarm time" value="07:00"><button>Save</button></div>`);
   expect(format(await auditTabOrder(page))).toEqual([]);
 });
 
-// Round 10: the floating dock and toasts, measured from bounding boxes and hit tests.
 const phone = (body: string) => `<div class="os" style="position:relative;width:400px;height:600px;overflow:hidden"><div data-screen="1" style="position:absolute;inset:0">${body}</div></div>`;
 const composer = `<div data-alpha-layer="composer" style="position:absolute;left:16px;right:16px;bottom:28px;z-index:40"><div data-alpha-input-bar style="height:62px;border-radius:31px;background:#eee"><button aria-label="Open conversation" style="width:44px;height:44px">A</button></div></div>`;
 const pill = `<div data-alpha-layer="pill" style="position:absolute;left:0;right:0;bottom:26px;z-index:40;display:flex;justify-content:center;pointer-events:none"><div style="pointer-events:auto;padding:5px;background:#eee"><button aria-label="Open conversation" style="width:44px;height:44px">A</button></div></div>`;
@@ -212,18 +186,15 @@ const rows = (count: number) => Array.from({ length: count }, (_, index) => `<bu
 
 test('a control or label under the floating dock is reported; one that ends above it or scrolls clear is not', async ({ page }) => {
   await page.setViewportSize({ width: 400, height: 600 });
-  // Home may flow under the composer, but its final content must scroll clear.
   await load(page, phone(`<div data-alpha-layer="home" style="position:absolute;inset:0;overflow-y:auto;z-index:10">${rows(12)}<p>Last line of Home</p></div>${composer}`));
   await page.locator('[data-alpha-layer="home"]').evaluate(el=>{el.scrollTop=el.scrollHeight;});
   const home = format(await auditPage(page, { dock: true }));
   expect(rules(home)).toEqual(['obscured-by-dock']);
   expect(home.join('\n')).toContain('under composer');
   expect(home.every(line => line.includes('[home]'))).toBe(true);
-  // The same Home ending above the dock: its last visible row is cut by the scroll area, not covered.
   await load(page, phone(`<div data-alpha-layer="home" style="position:absolute;inset:0 0 96px;overflow-y:auto;z-index:10">${rows(12)}<p>Last line of Home</p></div>${composer}`));
   expect(format(await auditPage(page, { dock: true }))).toEqual([]);
 
-  // An app page scrolls under the dock by design. With no room to scroll its last control clear, it is stuck there.
   const app = (padding: number, dock: string) => phone(`<div data-alpha-layer="app" style="position:absolute;inset:0;z-index:20;display:flex;flex-direction:column"><div data-alpha-app-scroll="x" style="flex:1;overflow-y:auto;padding-bottom:${padding}px">${rows(10)}<p>Fine print under the list</p></div></div>${dock}`);
   await load(page, app(0, composer));
   await page.locator('[data-alpha-app-scroll]').evaluate(el => { el.scrollTop = el.scrollHeight; });
@@ -231,12 +202,10 @@ test('a control or label under the floating dock is reported; one that ends abov
   expect(rules(stuck)).toEqual(['obscured-by-dock']);
   expect(stuck.join('\n')).toMatch(/only \d+px of the \d+px needed can be scrolled/);
   expect(stuck.join('\n')).toContain('Fine print under the list');
-  // With the dock's footprint as padding every row can be scrolled above it, wherever the page is scrolled to.
   await load(page, app(110, composer));
   expect(format(await auditPage(page, { dock: true }))).toEqual([]);
   await page.locator('[data-alpha-app-scroll]').evaluate(el => { el.scrollTop = 120; });
   expect(format(await auditPage(page, { dock: true }))).toEqual([]);
-  // The pill is narrower: only what is actually behind it counts, and a retired dock covers nothing.
   await load(page, app(0, pill));
   await page.locator('[data-alpha-app-scroll]').evaluate(el => { el.scrollTop = el.scrollHeight; });
   expect(format(await auditPage(page, { dock: true })).join('\n')).toContain('under pill');
@@ -247,15 +216,12 @@ test('a control or label under the floating dock is reported; one that ends abov
 test('keyboard focus left partly under the dock is reported; focus scrolled clear of it is not', async ({ page }) => {
   await page.setViewportSize({ width: 400, height: 600 });
   const app = (script: string) => phone(`<div data-alpha-layer="app" style="position:absolute;inset:0;z-index:20;display:flex;flex-direction:column"><div data-alpha-app-scroll="x" style="flex:1;overflow-y:auto;padding-bottom:120px">${rows(9)}</div></div>${composer}${script}`);
-  // Nine 60px rows in a 600px page: the last ones take focus where they are, under the composer.
   await load(page, app(''));
   const under = format(await auditTabOrder(page));
   expect(rules(under)).toEqual(['focus-obscured']);
   expect(under.join('\n')).toContain('under composer');
-  // The same page bringing whatever takes focus above the dock.
   await load(page, app(`<script>document.querySelector('[data-alpha-app-scroll]').addEventListener('focusin',event=>{const dock=document.querySelector('[data-alpha-layer="composer"]').getBoundingClientRect(),box=event.target.getBoundingClientRect();if(box.bottom>dock.top-8)event.currentTarget.scrollTop+=box.bottom-dock.top+8;});</script>`));
   expect(format(await auditTabOrder(page))).toEqual([]);
-  // A focusable scroll region is the scroller, not a control inside it.
   await load(page, phone(`<div data-alpha-layer="app" style="position:absolute;inset:0;z-index:20"><div tabindex="0" role="region" aria-label="Timeline" style="height:100%;overflow-y:auto"><p style="height:900px;margin:0">Hours</p></div></div>${composer}`));
   expect(format(await auditTabOrder(page))).toEqual([]);
 });
@@ -264,18 +230,14 @@ test('a toast under a top-layer dialog is reported; one shown inside the dialog,
   await page.setViewportSize({ width: 400, height: 600 });
   const toast = `<div data-alpha-toast aria-live="polite" aria-atomic="true" style="position:absolute;left:16px;right:16px;bottom:40px;z-index:97;display:flex;justify-content:center;pointer-events:none"><div style="pointer-events:auto;min-height:48px;padding:0 18px;background:#000;color:#fff;display:flex;align-items:center"><span>Saved to Notes</span></div></div>`;
   const dialog = (inside: string) => `<dialog aria-label="Review" style="width:360px;height:520px;margin:auto;border:0;padding:16px"><p>Review this page.</p><button>Close</button>${inside}</dialog><script>document.querySelector('dialog').showModal();</script>`;
-  // Nothing open: the page's toast is on top and reachable.
   await load(page, phone(toast));
   expect(format(await auditPage(page, { dock: true }))).toEqual([]);
-  // A modal dialog opened over it: covered, and inert, so never announced.
   await load(page, phone(toast) + dialog(''));
   const hidden = format(await auditPage(page, { dock: true }));
   expect(rules(hidden)).toEqual(['toast-not-announced']);
   expect(hidden.join('\n')).toContain('Saved to Notes');
-  // The same text in the dialog's own status region, drawn above the dialog.
   await load(page, phone(toast) + dialog(`<div data-alpha-dialog-toast aria-live="polite" aria-atomic="true" popover="manual" style="position:fixed;inset:auto;left:16px;width:368px;bottom:40px;margin:0;padding:0;border:0;background:transparent;display:flex;justify-content:center;pointer-events:none"><div style="pointer-events:auto;min-height:48px;padding:0 18px;background:#000;color:#fff;display:flex;align-items:center"><span>Saved to Notes</span></div></div>`) + `<script>document.querySelector('[data-alpha-dialog-toast]').showPopover();</script>`);
   expect(format(await auditPage(page, { dock: true }))).toEqual([]);
-  // A toast with something drawn over it is not on screen for a sighted user either.
   await load(page, phone(toast + `<div style="position:absolute;inset:0;z-index:99;background:#fff"><p>Cover</p></div>`));
   expect(rules(format(await auditPage(page, { dock: true })))).toEqual(['toast-covered']);
 });
@@ -297,24 +259,19 @@ test('closed message details are not painted under the dock; opening the same co
  expect(rules(format(await auditPage(page,{dock:true})))).toContain('obscured-by-dock');
 });
 
-// TalkBack's linear order (AccessibilityInstrumentedTest.talkBackOrder), read from the same
-// accessibility tree Android WebView is built from.
 const screen = (body: string) => `<div class="os" style="position:relative;width:400px;height:600px;overflow:hidden"><div data-screen="1" style="position:absolute;inset:0;overflow:hidden">${body}</div></div>`;
 const assistant = `<div role="group" aria-label="Assistant controls" style="position:absolute;left:16px;right:16px;bottom:28px;height:60px;display:flex;gap:8px"><button aria-label="Open conversation" style="width:44px;height:44px">A</button><textarea aria-label="Ask Alpha" rows="1"></textarea><button aria-label="Talk" style="width:44px;height:44px">M</button></div>`;
 const tiles = (count = 6) => `<div role="region" aria-label="Home" style="position:absolute;inset:44px 0 100px;overflow-y:auto"><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">${Array.from({ length: count }, (_, index) => `<button style="height:80px">App ${index + 1}</button>`).join('')}</div></div>`;
 
 test('reading order: content read after the assistant controls, or upward within a region, is reported', async ({ page }) => {
   await page.setViewportSize({ width: 400, height: 600 });
-  // The ongoing-activity chip drawn at the top of the screen but placed after the assistant controls.
   await load(page, screen(`${tiles()}${assistant}<button style="position:absolute;top:8px;left:84px;height:28px">Return to Maps</button>`));
   const after = format(await auditReadingOrder(page));
   expect(rules(after)).toEqual(['assistant-group-order']);
   expect(after.join('\n')).toContain('Return to Maps');
-  // The same chip where it is drawn, before the content below it.
   await load(page, screen(`<button style="position:absolute;top:8px;left:84px;height:28px">Return to Maps</button>${tiles()}${assistant}`));
   expect(format(await auditReadingOrder(page))).toEqual([]);
 
-  // A bottom action row placed before the page it acts on: TalkBack reads Save, then goes back up to the title.
   const bar = `<div style="position:absolute;left:0;right:0;bottom:0;height:64px;display:flex;justify-content:flex-end"><button style="height:48px">Save</button></div>`;
   const body = `<div style="position:absolute;left:0;right:0;top:0"><h1 style="margin:0;font-size:28px">Draft</h1><p>The body of the draft, long enough to be a paragraph.</p></div>`;
   await load(page, screen(bar + body));
@@ -324,7 +281,6 @@ test('reading order: content read after the assistant controls, or upward within
   await load(page, screen(body + bar));
   expect(format(await auditReadingOrder(page))).toEqual([]);
 
-  // A second column to the right starts higher up by design; a live region (a toast) is announced, not read on to.
   await load(page, screen(`<div style="position:absolute;left:0;top:0;width:190px"><button style="display:block;width:100%;height:200px">Long list item</button><button style="display:block;width:100%;height:200px">Second item</button></div><div style="position:absolute;left:200px;top:0;width:190px"><p>Detail of the open item</p></div>${assistant}<div aria-live="polite" style="position:absolute;left:16px;right:16px;bottom:104px"><span>Saved</span><button>Undo</button></div>`));
   expect(format(await auditReadingOrder(page))).toEqual([]);
 });
@@ -333,22 +289,17 @@ test('reading order: one assistant group; hidden, inert, scrolled-away and off-p
   await page.setViewportSize({ width: 600, height: 600 });
   await load(page, screen(`${tiles()}${assistant}${assistant}`));
   expect(rules(format(await auditReadingOrder(page)))).toEqual(['assistant-group-duplicate']);
-  // A retired copy (inert, aria-hidden) is not exposed; neither is a row scrolled out of its list,
-  // nor the development rail beside the phone.
   const retired = assistant.replace('aria-label="Assistant controls"', 'aria-label="Assistant controls" inert aria-hidden="true"');
   await load(page, `${screen(`${tiles(30)}${assistant}<div inert aria-hidden="true" style="position:absolute;top:0;left:0;right:0"><button>Hidden layer</button></div>${retired}`)}<div style="position:absolute;left:420px;top:0"><button>Jump to Home</button></div>`);
   expect(format(await auditReadingOrder(page))).toEqual([]);
   await page.locator('[role=region]').evaluate(el => { el.scrollTop = el.scrollHeight; });
   expect(format(await auditReadingOrder(page))).toEqual([]);
-  // The rule reads the tree, not the DOM's guesses: the same chip after the group is still found when everything else is clean.
   await load(page, screen(`${tiles(30)}${assistant}${retired}<p style="position:absolute;top:8px;left:84px;margin:0">Recording · 0:12</p>`));
   expect(rules(format(await auditReadingOrder(page)))).toEqual(['assistant-group-order']);
 });
 
 test('reading order: a bar of controls keeps its own order in every layout; the same order loose on the screen is reported', async ({ page }) => {
   await page.setViewportSize({ width: 400, height: 600 });
-  // Large system font: the header's title takes a row of its own below its buttons, and is still
-  // read between the navigation and the actions, as an Android toolbar's title is.
   const header = (hook: string) => `<div ${hook} style="position:absolute;top:0;left:0;right:0;display:flex;flex-wrap:wrap;align-items:center"><button aria-label="Back to apps" style="width:44px;height:44px">‹</button><h1 style="order:1;flex:1 0 100%;margin:0;font-size:40px">Inbox</h1><button aria-label="Search email" style="width:44px;height:44px;margin-left:auto">S</button></div><p style="position:absolute;top:120px;margin:0">First message</p>`;
   await load(page, screen(header('data-alpha-app-header="main"')));
   expect(format(await auditReadingOrder(page))).toEqual([]);

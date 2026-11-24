@@ -9,7 +9,6 @@ import java.util.concurrent.TimeUnit;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** The complete receiver and plugin run over controlled Android/service boundaries. */
 public final class ResidentScheduleAdmissionTraces {
   public static final class Ports {
     public static boolean unlocked = true, enabled = true, refuse;
@@ -24,7 +23,6 @@ public final class ResidentScheduleAdmissionTraces {
           throw new AssertionError("Start admitted while lifecycle closed");
         attempts++;
         if (refuse) throw new SecurityException("Controlled service refusal");
-        // Android/service allocation is an external port. Repeated starts target one instance.
         if (!ResidentTestPorts.serviceActive) ResidentTestPorts.starts++;
         ResidentTestPorts.state = "listening";
         ResidentTestPorts.serviceActive = true;
@@ -54,7 +52,6 @@ public final class ResidentScheduleAdmissionTraces {
         .put("physicalSocketListening", ResidentTestPorts.socketListening)
         .put("serviceStartAttempts", Ports.attempts).put("successfulAllocations", ResidentTestPorts.starts)
         .put("receiverDeferredLogs", Ports.deferredLogs).put("acknowledgedEpoch", acknowledgedEpoch));
-    // No equality with the abstract epoch or instantaneous physical-stop claim is made here.
     return Trace.fields("unlocked", Ports.unlocked, "packaged", ResidentTestPorts.packaged,
         "enabled", Ports.enabled, "lifecycle", idle ? "idle" : "stopping",
         "lastDecision", Ports.decision, "starts", ResidentTestPorts.starts,
@@ -115,7 +112,6 @@ public final class ResidentScheduleAdmissionTraces {
         int before = Ports.attempts;
         broadcast(trace, "time", true);
         if (Ports.attempts != before) throw new AssertionError("Stopped lifecycle admitted a broadcast");
-        // An external service ACK is read through the actual plugin status method.
         ResidentTestPorts.state = "dead"; ResidentTestPorts.serviceActive = false; ResidentTestPorts.socketListening = false;
         PluginCall status = call(); plugin.getStatus(status); await(status);
         if (!status.result.getString("state").equals("stopped")) throw new AssertionError("Missing stop ACK");

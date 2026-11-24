@@ -1,8 +1,6 @@
 import {test,expect,type Page} from '@playwright/test';
 import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
-// Local review dialogs for Notes: the query choice, name-targeted edits and the titles-only listing.
-// The real modules are served by the dev server on a same-origin page that does not boot the app.
 const css=readFileSync(resolve(import.meta.dirname,'../../apps/app/src/prototype/phone.css'),'utf8');
 async function load(page:Page,theme:'light'|'dark'='light'){
  await page.setViewportSize({width:360,height:740});

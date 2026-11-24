@@ -36,8 +36,6 @@ for(const matchingRows of [1,2])test(`an unknown new creation keeps Copy draft w
  await refresh(page);await expect.poll(()=>page.evaluate(()=>(window as any).canonicalNotesFixture.acceptedReads.length)).toBeGreaterThan(before.acceptedReads);
  await expect(copy).toBeVisible();await expect(page.getByRole('button',{name:'Try again',exact:true})).toHaveCount(0);
  await expect(editor).toHaveValue('Unconfirmed new words.\nSecond line.');
- // Editing after the matching rows were read must keep the unknown draft; adopting either
- // server identity would turn this into an update, and losing it would create a second note.
  await editor.fill('Still my unconfirmed draft.\nAdditional retained words.');await editor.press('Tab');await settled(page);
  await expect(copy).toBeVisible();await expect(page.getByRole('button',{name:'Discard',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Try again',exact:true})).toHaveCount(0);
  await expect(editor).toHaveValue('Still my unconfirmed draft.\nAdditional retained words.');

@@ -9,7 +9,6 @@ import java.lang.reflect.Method;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Executes complete product Note methods. Parent lifecycle/permission are external ports. */
 public final class NotePermissionTraces {
  static AlphaVoiceCloudPlugin plugin;
  static Trace trace;

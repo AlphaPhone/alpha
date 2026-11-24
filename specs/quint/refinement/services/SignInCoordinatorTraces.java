@@ -13,7 +13,6 @@ public final class SignInCoordinatorTraces {
   private static AlphaCloudSignInPlugin plugin() {
     AlphaCloudSignInPlugin value=new AlphaCloudSignInPlugin();plugins.add(value);return value;
   }
-  // Alpha adds no lifecycle override; the shared client's handlers are protected in its package.
   static void newIntent(AlphaCloudSignInPlugin plugin, Intent intent) throws Exception {
     java.lang.reflect.Method method = ai.eliza.auth.cloud.CloudSignInPlugin.class.getDeclaredMethod("handleOnNewIntent", Intent.class);
     method.setAccessible(true);
@@ -233,8 +232,6 @@ public final class SignInCoordinatorTraces {
       if (!"storage".equals(cancelled.rejection)) throw new AssertionError("Missing cancellation storage failure");
       PluginCall email = new PluginCall(new JSObject().put("environment", "production").put("email", "fixture@example.test"));
       plugin.startEmail(email);
-      // Sending email queues its own retirement of the older browser record. Keep that
-      // storage failure active so the record genuinely remains during this new attempt.
       SignInTestPorts.Event emailRetirement = SignInTestPorts.next("failed-remove:" + SignInTestPorts.PENDING);
       release(emailRetirement);
       drain(plugin);
@@ -414,7 +411,6 @@ public final class SignInCoordinatorTraces {
       drain(plugin);
       CloudSignInFlow.Pending pending =
           CloudSignInFlow.Pending.parse(SignInTestPorts.values.get(SignInTestPorts.PENDING), AlphaCloudSignInPlugin.REGISTRATION);
-      // Pause the shared worker's read of the pending record.
       SignInTestPorts.readsBeforePause = 0;
       SignInTestPorts.pauseReadSlot = SignInTestPorts.PENDING;
       newIntent(plugin, new Intent(Intent.ACTION_VIEW,
@@ -452,7 +448,6 @@ public final class SignInCoordinatorTraces {
     try {
       String oldRaw = SignInTestPorts.values.get(SignInTestPorts.PENDING);
       CloudSignInFlow.Pending oldPending = CloudSignInFlow.Pending.parse(oldRaw, AlphaCloudSignInPlugin.REGISTRATION);
-      // Pause the shared worker's read of the pending record.
       SignInTestPorts.readsBeforePause = 0;
       SignInTestPorts.pauseReadSlot = SignInTestPorts.PENDING;
       newIntent(plugin, new Intent(Intent.ACTION_VIEW,
@@ -569,7 +564,6 @@ public final class SignInCoordinatorTraces {
       drain(replacement);
       release(compare);
       drain(first);
-      // An old active Attempt must also reject the replacement's matching callback.
       CloudSignInFlow.Pending newPending = CloudSignInFlow.Pending.parse(newRaw, AlphaCloudSignInPlugin.REGISTRATION);
       newIntent(first, new Intent(Intent.ACTION_VIEW,
           Uri.parse(newPending.environment.callback() + "#code=fixture&state=" + newPending.state)));

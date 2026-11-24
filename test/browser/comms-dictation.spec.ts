@@ -7,7 +7,6 @@ test.beforeEach(async({page})=>{
   await page.route('**/src/build-flags.ts*',route=>route.fulfill({contentType:'application/javascript',body:'export const testMocksEnabled=false;export const devSurfacesEnabled=false;export const privateLocalPreviewEnabled=false;export const updateChannelCheckEnabled=false;'}));
 });
 
-// Synthetic native speech + provider ports. No microphone, carrier or real account is used.
 async function setup(page:Page){
   await setupNativeSpeech(page);
   await page.addInitScript({content:`(() => {
@@ -43,7 +42,6 @@ for(const scale of [1,2])test(`Messages mic fills only the editable unsent draft
   await expect(capture(page)).toHaveCount(0);
   await expect(field(page)).toHaveValue('Local spoken request');
   await expect(bar.getByRole('button',{name:'Send',exact:true})).toBeEnabled();
-  // Keep dictation available beside Send so more speech can extend the same unsent draft.
   await expect(bar.getByRole('button',{name:'Dictate a text to Ada',exact:true})).toBeInViewport({ratio:1});
   await bar.getByRole('button',{name:'Dictate a text to Ada',exact:true}).click();
   await expect(capture(page)).toHaveAttribute('data-voice-state','recording');

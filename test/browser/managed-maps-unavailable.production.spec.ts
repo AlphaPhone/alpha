@@ -1,4 +1,3 @@
-// UI fixtures only: synthetic native HTTP boundaries, no provider/account/location access.
 import {test,expect} from '@playwright/test';
 import {flagOffAndroid,residentHome,button,fenceNetwork} from './flag-off-android';
 import {residentStub} from './resident-stub';

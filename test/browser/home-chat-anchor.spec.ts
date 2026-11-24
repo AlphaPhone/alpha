@@ -12,7 +12,6 @@ for(const shell of ['standalone','launcher'])for(const size of [{width:360,heigh
  await page.getByRole('button',{name:'Open conversation',exact:true}).click();await expect(screen).toHaveAttribute('data-alpha-chat-half','true');await expect(page.getByRole('button',{name:'Expand chat',exact:true})).toBeVisible();
  const half=await measure();
  const handle=page.getByRole('button',{name:'Resize chat',exact:true});
- // Manual pointer coordinates must come from the settled sheet, not its opening animation.
  await handle.click({trial:true});
  const box=(await handle.boundingBox())!;
  await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width/2,box.y+box.height/2+18,{steps:4});
@@ -25,9 +24,7 @@ for(const shell of ['standalone','launcher'])for(const size of [{width:360,heigh
  expect(Math.abs(half.gridTop-before.gridTop),'open half must preserve the Home icon anchor').toBeLessThan(1);
  expect(Math.abs(during.gridTop-before.gridTop),'continuous sheet movement must preserve the Home icon anchor').toBeLessThan(1);
  expect(Math.abs(after.gridTop-before.gridTop),'collapse must preserve the Home icon anchor').toBeLessThan(1);
- // The overlay remains nonblocking; a lower app can still scroll above it and receive focus.
  await page.getByRole('button',{name:'Open conversation',exact:true}).click();await expect(screen).toHaveAttribute('data-alpha-chat-half','true');
- // Focus scrolling must use the settled sheet edge, as the pointer drag above does.
  await handle.click({trial:true});
  await expect.poll(()=>panel.evaluate(el=>Math.abs(el.getBoundingClientRect().height/(Number(getComputedStyle(document.documentElement).getPropertyValue('--phone-scale'))||1)-parseFloat(el.style.height)))).toBeLessThan(1);
  const settings=home.getByRole('button',{name:'Settings',exact:true});
@@ -47,10 +44,7 @@ test('Home focus stays above chat when the opening animation finishes',async({pa
  await page.goto('/?shell=launcher&tools=1');
  const home=page.locator('[data-alpha-layer="home"]'),panel=page.locator('[data-alpha-layer="conversation"]'),settings=home.getByRole('button',{name:'Settings',exact:true});
  await expect(settings).toBeVisible();await page.evaluate(()=>document.fonts.ready);
- // The open sheet fits its conversation (AP-16 AC-04): one long enough opens at the fitted maximum,
- // which covers the tile.
  await page.evaluate(()=>{const el=document.querySelector('[data-screen]') as any;let fiber=el[Object.keys(el).find(key=>key.startsWith('__reactFiber$'))!];while(fiber&&!(fiber.stateNode&&typeof fiber.stateNode.cardAct==='function'))fiber=fiber.return;fiber.stateNode.setState({msgs:Array.from({length:12},(_,i)=>({id:i+1,from:i%2?'agent':'user',text:'Line '+(i+1)+' of an earlier conversation'}))});});
- // Hold the real height transition at its start so focus arrives before the sheet covers the tile.
  await page.addStyleTag({content:'[data-alpha-layer="conversation"] {transition:height 10s linear!important}'});
  await page.getByRole('button',{name:'Open conversation',exact:true}).click();
  await expect(page.locator('[data-screen]')).toHaveAttribute('data-alpha-chat-half','true');

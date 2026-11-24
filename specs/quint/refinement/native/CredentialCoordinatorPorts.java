@@ -8,10 +8,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.function.Consumer;
 import org.json.*;
 
-/**
- * External storage, HTTP and service observations. No mutation policy is
- * evaluated here.
- */
 public final class CredentialCoordinatorPorts {
   public interface Observer {
     void event(String kind, String slot, String value);

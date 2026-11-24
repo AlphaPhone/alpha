@@ -2,8 +2,6 @@ import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import {test,expect} from '@playwright/test';
 import {returnToApps} from './app-navigation';
 
-// Actual shell, controller, navigation acknowledgement, action journal and camera adapter.
-// HTTP provider and camera sensor are synthetic; this is not a device acceptance test.
 for(const mode of ['capture','lost-ack','old-message','ask-first'] as const)test(`Home camera request: ${mode}`,async({page})=>{
  await page.addInitScript(mode=>{
   const w=window as any,store=new Map(),agentId='12345678-1234-4234-8234-123456789abc',userMessageId='87654321-4321-4321-8321-cba987654321';
