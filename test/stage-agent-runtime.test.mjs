@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import {installedPackageDirectory} from "../scripts/generate-licenses.ts";
 import {publishAgentRuntime, TARGET_ABIS} from "../scripts/stage-agent-runtime.ts";
 
 const main = "android/app/src/main";
@@ -54,4 +55,16 @@ test("the SDK's staged assets and both Node libraries land in Alpha's source set
     assert.equal(read(node(abi)), `Node 2 ${abi}`);
     assert.equal(read(voice(abi)), `qualified voice ${abi}`);
   }
+});
+
+test("the package inventory can resolve Alpha's private bundled resident by exact version", t => {
+  const product = fs.mkdtempSync(path.join(os.tmpdir(), "alpha-resident-package-"));
+  t.after(() => fs.rmSync(product, {recursive: true, force: true}));
+  const resident = path.join(product, "scripts", "resident");
+  const upstream = path.join(product, "vendor", "eliza");
+  fs.mkdirSync(resident, {recursive: true});
+  const name = "@alphacompute/alphaphone-resident";
+  fs.writeFileSync(path.join(resident, "package.json"), JSON.stringify({name, version: "0.1.0", private: true}));
+  assert.equal(installedPackageDirectory(product, upstream, name, "0.1.0"), resident);
+  assert.equal(installedPackageDirectory(product, upstream, name, "0.2.0"), undefined);
 });
