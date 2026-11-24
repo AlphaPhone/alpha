@@ -1,4 +1,4 @@
-// spec/voice/conversation.md, "Story: Start talking only when Alpha can listen safely"; spec/voice/conversation.md, "Story: Hear my turn end at the right moment"; spec/voice/conversation.md, "Story: Keep voice going through a passing failure"; spec/voice/conversation.md, "Story: Review what voice is about to do"; spec/voice/conversation.md, "Story: Mute the speaker without ending voice"; spec/voice/conversation.md, "Story: End voice cleanly, and never lose what I type"; spec/voice/conversation.md, "An open microphone ends a turn at the first pause and a 400 ms hold interrupts; Cloud streaming waits 400 ms after its final; Stop sends no heard report"; spec/voice/speech.md, "An email draft is said as one line, by whether its card was validated or the action failed; other action replies drop IDs and asides unless I asked for them word for word"; spec/voice/conversation.md, "Story: Keep talking on a screen the agent opens for me"; spec/voice/conversation.md, "Voice closed by hiding the page says once, when the page returns, that a call paused it if a call was live then or since; a plain app switch says nothing"; spec/voice/speech.md, "A reading the owner starts first retires a running voice conversation and waits for its replies to stop"; spec/voice/acknowledgement.md, "Story: Hear that Alpha is working on it, never over its answer"; spec/voice/conversation.md, "A Cloud stream listens, speaks the replies and the cue and mutes the speaker on one relay session, and only voice retiring ends it"; spec/assistant/context.md, "Every assistant request carries the capabilities this phone advertises of those the agent offered, and none when it offered none"; spec/assistant/context.md, "A spoken turn carries the screen context a typed turn sent at that moment would"
+// spec/voice/conversation.md, "Story: Start talking only when Alpha can listen safely"; spec/voice/conversation.md, "Story: Hear my turn end at the right moment"; spec/voice/conversation.md, "Story: Keep voice going through a passing failure"; spec/voice/conversation.md, "Story: Review what voice is about to do"; spec/voice/conversation.md, "Story: Mute the speaker without ending voice"; spec/voice/conversation.md, "Story: End voice cleanly, and never lose what I type"; spec/voice/conversation.md, "An open microphone ends a turn at the first pause and a 400 ms hold interrupts; Cloud streaming waits 400 ms after its final; Stop sends no heard report"; spec/voice/speech.md, "An email draft is said as one line, by whether its card was validated or the action failed; other action replies drop IDs and asides unless I asked for them word for word"; spec/voice/conversation.md, "Story: Keep talking on a screen the agent opens for me"; spec/voice/conversation.md, "Voice closed by hiding the page says once, when the page returns, that a call paused it if a call was live then or since; a plain app switch says nothing"; spec/voice/speech.md, "A reading the owner starts first retires a running voice conversation and waits for its replies to stop"; spec/voice/acknowledgement.md, "Story: Hear that Alpha is working on it, never over its answer"; spec/voice/conversation.md, "A Cloud stream listens, speaks the replies and the cue and mutes the speaker on one relay session, and only voice retiring ends it"; spec/assistant/context.md, "Every assistant request carries the capabilities this phone advertises of those the agent offered, and none when it offered none"; spec/assistant/context.md, "A spoken turn carries the screen context a typed turn sent at that moment would"; spec/voice/conversation.md, "Out of plan allowance and credits ends voice quietly as Stop does, and the chat gets the one line"
 import { readReplyStream } from "@elizaos/agent/client"
 import type { AssistantCapture, AssistantListenHandlers, CloudStreamingSpeech } from "@elizaos/os/bridges/voice"
 import { VOICE_TRANSCRIPT_STREAM, createLiveVoiceSession, defaultVoiceProfile, type CaptureEvents, type LiveVoiceSession, type SpeakerEvents, type VoiceProfile, type VoiceReply, type VoiceSessionPorts } from "@elizaos/agent/voice"
@@ -16,7 +16,7 @@ import { acknowledgement, voiceReplyHooks, type Acknowledgement } from "./acknow
 import { Microphone } from "./capture.vibe"
 import { voiceAbort } from "./cloud-stream.ts"
 import { Dictation } from "./dictation.vibe"
-import { callCaused, cancelledByPhone, pausedByPhone, refusalOf } from "./failure.vibe"
+import { callCaused, cancelledByPhone, outOfFundsCode, pausedByPhone, refusalOf } from "./failure.vibe"
 import { newId } from "../platform/ids.ts"
 import { Latency } from "./latency.vibe"
 import { Listener, type InvocationScreen } from "./listener.vibe"
@@ -40,6 +40,8 @@ export interface VoiceStart {
   readonly context?: () => { readonly [key: string]: unknown }!!
   /** Whether the conversation the voice started in is still the one on screen. */
   readonly chatCurrent: () => boolean
+  /** Voice ended out of plan allowance and credits: post the one out-of-funds line to the chat it went to. */
+  readonly outOfFunds?: () => void!!
 }
 
 /** The voice assistant: listens, sends each finished turn by itself, speaks the reply and can be interrupted. */
@@ -178,6 +180,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
         if (try send({ type: "stop", media: true })) try retire(true)
         return
       }
+      if (outOfFundsCode(facts.code)) return try fundsStop()
       const transient = facts.status === 503 || facts.status === 429
       try send({ type: "sessionFailed", transient, longWait: (facts.retryAfterSeconds ?? 0) > LONG_WAIT_SECONDS })
       if ((try held.get()).shown === "Retrying") {
@@ -193,6 +196,15 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
 
   function follows(): void {
     run(follow())
+  }
+
+  // spec/voice/conversation.md, "Out of plan allowance and credits ends voice quietly as Stop does, and the chat gets the one line".
+  effect function fundsStop() {
+    const media = live !== undefined
+    const chat = current
+    if (!(try send({ type: "outOfFunds", media }))) return
+    if (chat?.outOfFunds !== undefined) try chat.outOfFunds()
+    try retire(media)
   }
 
   effect function captureLive(captureId: string, start: VoiceStart, ticket: number, events: CaptureEvents) {
@@ -364,6 +376,10 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
       lastCause = { code: outcome.code }
       throw new Error("The agent's voice reply failed.")
     }
+    if (outcome.kind === "Done" && outOfFundsCode(outcome.failureKind)) {
+      lastCause = { code: outcome.failureKind }
+      throw new Error("The agent's voice reply was refused out of funds.")
+    }
     if (outcome.kind === "Done") {
       const awaitingReview = "awaitingReview" in outcome && outcome.awaitingReview === true
       const done: VoiceTurnReply = { messageId: outcome.messageId, text: outcome.text, ...(outcome.action === undefined ? {} : { action: outcome.action }), ...(awaitingReview ? { awaitingReview } : {}) }
@@ -458,6 +474,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
         const reply = ensuring(answerOf(start.conversationId, body, ack, microphoneClear, signal), sync(() => signal.removeEventListener("abort", retireCue))) catch effect (error) => {
           try ack.cancel()
           if (cue === ack) cue = undefined
+          if (outOfFundsCode(refusalOf(lastCause, 0).code)) run(fundsStop())
           throw error
         }
         if (signal.aborted) {

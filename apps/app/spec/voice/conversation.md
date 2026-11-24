@@ -261,6 +261,23 @@ pure def left(c: Conversation): Conversation = retiredAs(Retiring, c)
 pure def sometimesPausedForACall(c: Conversation): bool = c.shown == Off and c.notice == PausedForCall
 ```
 
+### Out of plan allowance and credits ends voice quietly as Stop does, and the chat gets the one line
+
+Cloud's own code for it (`insufficient_credits` or `allowance_exhausted`),
+as the agent's reply to a turn or as the speech relay's refusal code, is
+never retried as busy: voice retires as Stop does, nothing is spoken, no
+voice notice shows, and the chat the voice went to gets the one
+out-of-funds line with Manage plan (`spec/assistant/reply.md`). A speech
+429 that names the plan's voice allowance is a limit of the route
+(`route.md`), not this.
+
+```quint
+pure def canOutOfFunds(c: Conversation, media: bool): bool = active(c.shown)
+pure def outOfFunds(c: Conversation, media: bool): Conversation = { ...stop(c, media), notice: NoNotice }
+pure def stepOutOfFundsEndsVoiceQuietly(before: Conversation, via: str, after: Conversation): bool =
+  via == "outOfFunds" implies (not(active(after.shown)) and after.notice == NoNotice)
+```
+
 ### Voice closed by hiding the page says once, when the page returns, that a call paused it if a call was live then or since; a plain app switch says nothing
 
 On the Alpha image the call screen is its own activity, so a call hides Alpha before Telecom's

@@ -1,4 +1,4 @@
-// spec/assistant/receipts.md, "A receipt's title says what the journal proves"; spec/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/receipts.md, "A reply cut off after an effect says so, and a queued approval request reads as needing approval"
+// spec/assistant/receipts.md, "A receipt's title says what the journal proves"; spec/assistant/reply.md, "Out of plan allowance and credits is one fixed chat line, the same for a typed turn and Talk, with Manage plan"; spec/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/receipts.md, "A reply cut off after an effect says so, and a queued approval request reads as needing approval"
 import type { CutOff, ReceiptTitle } from "../../gen/assistant__receipts.ts"
 import { showsWait, waitSeconds, type FailureKind, type PlanAction } from "../../gen/assistant__reply.ts"
 import { hostOf } from "./grounding.vibe"
@@ -138,11 +138,28 @@ export function liveWaitOf(raw: unknown): number {
   return typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0 ? raw : -1
 }
 
-/** Alpha's sentence for a failed reply; a rate limit answered live says how long to wait. */
-export function failureText(kind: FailureKind, waitMs = -1): string {
+/** Where the one out-of-funds line is posted: a refused typed turn, or a voice conversation it ended. */
+export type FundsSurface = "TypedTurnRefused" | "TalkStopped"
+
+/** The one out-of-funds line, the same for a typed turn and Talk; it names the allowance reset only while one lies ahead. */
+export function outOfFundsLine(surface: FundsSurface, resetsAt: number | undefined, now: number): string {
+  const stopped = surface === "TalkStopped" ? "so Talk stopped" : "so I couldn’t reply"
+  let day = ""
+  if (resetsAt !== undefined && Number.isFinite(resetsAt) && resetsAt > now) {
+    try {
+      day = new Intl.DateTimeFormat(undefined, { month: "long", day: "numeric" }).format(resetsAt)
+    } catch {
+      day = ""
+    }
+  }
+  return `You’re out of plan allowance and credits, ${stopped}.${day === "" ? "" : ` Your allowance resets on ${day}.`}`
+}
+
+/** Alpha's sentence for a failed reply; a rate limit answered live says how long to wait, and spent credits name the allowance reset ahead. */
+export function failureText(kind: FailureKind, waitMs = -1, resetsAt?: number, now = 0): string {
   switch (kind) {
     case "CredentialInvalid": return "Your AI provider refused the sign-in. Sign in again to keep chatting."
-    case "InsufficientCredits": return "Your plan is out of credits. Manage your plan to keep chatting."
+    case "InsufficientCredits": return outOfFundsLine("TypedTurnRefused", resetsAt, now)
     case "LimitReached": return `The AI request rate limit was reached. ${showsWait(kind, waitMs) ? `Try again in ${retryDuration(waitMs)}.` : "Wait a moment before sending again."} Alpha did not retry your message.`
     case "ProviderIssue": return "The AI provider isn’t answering. Try again in a moment."
     case "TimedOut": return "Your agent took too long to finish this reply."
