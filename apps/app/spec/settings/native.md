@@ -139,3 +139,28 @@ type HandoffTarget = ListedPage | ProviderSettings | OtherTarget
 pure def mayHandOff(target: HandoffTarget): bool = target != OtherTarget
 pure def lawAnUnlistedPageNeverOpens(target: HandoffTarget): bool = mayHandOff(target) iff target != OtherTarget
 ```
+
+### Alpha's notice channels are grouped in Android's settings, and a blocked group posts nothing
+
+`AlphaNotificationChannels` puts each installed channel that has no group yet into one of four
+groups: Assistant (the shared `eliza_alerts`, `eliza_notifications`, `eliza_updates` and
+`eliza_quiet`), Mail and briefs (new Gmail messages and briefs), Workflows (workflow steps and
+approvals) and Ongoing activity (note recording and navigation). A channel the owner or Android
+already grouped keeps its group, and reminder, call and text channels stay ungrouped, so that
+blocking a group never hides a reminder, a call or a text. Every poster of a grouped channel refuses a
+blocked group as it refuses a blocked channel, and Alpha names its groups to the shared notice
+routing before any notice is posted, so its own grouping is not read as the owner's customisation.
+
+```quint
+type NoticeChannel = AssistantChannel | MailOrBriefChannel | WorkflowChannel | OngoingChannel | ReminderChannel | CallOrTextChannel
+type ChannelGroup = AssistantGroup | MailAndBriefsGroup | WorkflowsGroup | OngoingGroup | Ungrouped
+pure def groupOf(channel: NoticeChannel): ChannelGroup =
+  if (channel == AssistantChannel) AssistantGroup else if (channel == MailOrBriefChannel) MailAndBriefsGroup
+  else if (channel == WorkflowChannel) WorkflowsGroup else if (channel == OngoingChannel) OngoingGroup else Ungrouped
+pure def posts(channelBlocked: bool, groupBlocked: bool, channel: NoticeChannel): bool =
+  not(channelBlocked) and not(groupBlocked and groupOf(channel) != Ungrouped)
+pure def lawABlockedGroupNeverHidesARemindersCallOrText(channelBlocked: bool, groupBlocked: bool): bool =
+  posts(channelBlocked, groupBlocked, ReminderChannel) == not(channelBlocked) and posts(channelBlocked, groupBlocked, CallOrTextChannel) == not(channelBlocked)
+pure def lawABlockedGroupPostsNothing(channelBlocked: bool, channel: NoticeChannel): bool =
+  groupOf(channel) != Ungrouped implies not(posts(channelBlocked, true, channel))
+```
