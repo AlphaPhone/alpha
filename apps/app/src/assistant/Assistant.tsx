@@ -1,6 +1,6 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
 import {
-  Alert, AssistantChatHistorySheet, AssistantConversation, AssistantSearchSheet,
+  Alert, AssistantChatHistorySheet, AssistantConversation, AssistantGrabber, AssistantSearchSheet,
   type AssistantAttachment, type AssistantDraftNoticeProps, type AssistantMessageProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
@@ -14,18 +14,21 @@ import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts
 import type { Composer as Writing, Machine as ComposerMachine } from "../../gen/app__assistant__composer.effect.vibe";
 import { textLimit } from "../../gen/app__assistant__composer.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
+import type { Machine as DockMachine } from "../../gen/app__assistant__dock.effect.vibe";
+import { useMachine as useDock } from "../../gen/app__assistant__dock.react.ts";
 import type { Machine as ReplyMachine } from "../../gen/app__assistant__reply.effect.vibe";
 import { useMachine as useReply } from "../../gen/app__assistant__reply.react.ts";
 import type { Machine as SearchMachine } from "../../gen/app__assistant__search.effect.vibe";
 import { useMachine as useSearch } from "../../gen/app__assistant__search.react.ts";
 import type { Machine as ShellMachine } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
+import { untimed } from "../runtime/reactor.vibe";
 import { freedom } from "./assistant.vibe";
 import { Talk } from "./talk.vibe";
 
 export interface AssistantProps {
   /** Provides the assistant's machines and its board, `assisting` of assistant.vibe, and the shell, which holds Ask Alpha's height. */
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | ShellMachine | Talk, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | Talk, unknown>;
 }
 
 /** Where the last turn stands, below the last message, or nothing once it has settled with a reply. */
@@ -71,6 +74,9 @@ function waiting(writing: Writing): AssistantAttachment[] {
 
 const detached = { mail: "Mail", transcript: "Transcript", shown: "Shown" } as const;
 
+/** The height of Ask Alpha resting on its bar, in CSS pixels: where a drag's floor zone is measured from. */
+const barHeight = 80;
+
 /**
  * Ask Alpha: the conversation showing with the reply as it is written, the owner's conversations, search and the
  * composer, from the assistant's components, each control offered exactly when its machine's rules allow its event.
@@ -83,6 +89,7 @@ export function Assistant({ runtime }: AssistantProps) {
   const search = useSearch(runtime);
   const reply = useReply(runtime);
   const shell = useShell(runtime);
+  const dock = useDock(runtime);
   const [board] = useState(() => runtime.runSync(Talk.use((talk) => Effect.succeed(talk.board))));
   const seen = useSyncExternalStore(board.subscribe, board.snapshot);
   const [listing, setListing] = useState(false);
@@ -150,6 +157,22 @@ export function Assistant({ runtime }: AssistantProps) {
           onSearch: search.can({ type: "openSearch" }) ? () => { void chats.send({ type: "browse" }); void search.send({ type: "openSearch" }); } : undefined,
           onNew: chats.can(start) ? () => void chats.send(start) : undefined,
           making: making(shown),
+          grabber: shell.state ? (
+            <AssistantGrabber
+              onPress={() => {
+                const press = { type: "press", detent: shell.state?.assistant ?? "Bar", now: untimed } as const;
+                if (dock.can(press)) void dock.send(press);
+              }}
+              onDrag={() => { if (dock.can({ type: "drag" })) void dock.send({ type: "drag" }); }}
+              onRelease={({ direction, flick, y }) => {
+                const release = { type: "release", direction: direction === "up" ? "Up" : "Down", flick, height: Math.max(0, Math.round(window.innerHeight - y)), floor: barHeight, full: window.innerHeight, now: untimed } as const;
+                if (dock.can(release)) void dock.send(release);
+              }}
+              onLift={() => { if (dock.can({ type: "lift", now: untimed })) void dock.send({ type: "lift", now: untimed }); }}
+              onCancel={() => { if (dock.can({ type: "shift", now: untimed })) void dock.send({ type: "shift", now: untimed }); }}
+              onTap={() => { if (dock.can({ type: "click", now: untimed })) void dock.send({ type: "click", now: untimed }); }}
+            />
+          ) : undefined,
         }}
         transcript={{
           messages: [...messages, ...writingReply],

@@ -4,6 +4,7 @@ import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Conversation from "../../gen/app__assistant.effect.vibe"
 import * as Chats from "../../gen/app__assistant__chats.effect.vibe"
 import * as Composer from "../../gen/app__assistant__composer.effect.vibe"
+import * as Dock from "../../gen/app__assistant__dock.effect.vibe"
 import { zoneOf } from "../../gen/app__assistant__context.effect.vibe"
 import * as Reply from "../../gen/app__assistant__reply.effect.vibe"
 import * as Search from "../../gen/app__assistant__search.effect.vibe"
@@ -428,6 +429,18 @@ const bound = started(effect {
   })
 }, "binding the composer")
 
+// spec/app/assistant/dock.md, "A drag released asks the shell once for where it landed, and keeps a sheet's height"; spec/app/assistant/dock.md, "A gesture asks the shell to raise Ask Alpha, to go back a step or two, or nothing; a press that did not move is a tap on its control"
+function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell, []> {
+  return match (fx) {
+    when { tag: "Raise", let detent }: run("raise", effect { try contained((try Shell).send({ type: "raise", detent }), "raising Ask Alpha") });
+    when { tag: "Lower", let steps }: run("lower", effect {
+      const shell = try Shell
+      for (const _ of Array.from({ length: steps })) try contained(shell.send({ type: "goBack" }), "lowering Ask Alpha")
+    });
+    when { tag: "Tap" }: run("tap", Effect.void);
+  }
+}
+
 /** Ask Alpha: the conversation, the chats, the composer and search, kept across restarts but search, over the agent and the phone's store. */
 export const assisting = Layer.provideMerge(
   together(
@@ -436,6 +449,7 @@ export const assisting = Layer.provideMerge(
     reacting(Composer, { keep: 1, open: [{ type: "reopen" }], carry: carryComposer }),
     reacting(Search, { carry: carrySearch }),
     reacting(Reply, {}),
+    reacting(Dock, { carry: carryDock }),
     reached, looked, left, opening, saving, bound,
   ),
   Layer.merge(Layer.fresh(turns), talk),
