@@ -17,7 +17,7 @@ import type { Row } from "../../../gen/workflows__automations.ts";
 import { initial as placeStart } from "../../../gen/workflows__place.ts";
 import { Automations, type PromptInput, type PromptRunLine, type Report } from "../../workflows/automations.vibe";
 import { WorkflowClockDraft } from "../../workflows/clock-draft.vibe";
-import { WorkflowDefinitions, type ChangeOutcome, type Described, type ScheduleNote } from "../../workflows/definitions.vibe";
+import { WorkflowDefinitions, type ActivationNote, type ChangeOutcome, type Described, type ScheduleNote } from "../../workflows/definitions.vibe";
 import { Digests } from "../../workflows/digests.vibe";
 import { HostedResults } from "../../workflows/results.vibe";
 import { PhoneSteps } from "../../workflows/notices.vibe";
@@ -75,6 +75,7 @@ export function WorkflowsScreen({ onClose }: WorkflowsScreenProps) {
   const [textKept, setTextKept] = useState(true);
   const [clockOutcome, setClockOutcome] = useState<ClockOutcome | undefined>(undefined);
   const [activation, setActivation] = useState<boolean | undefined>(undefined);
+  const [activationNote, setActivationNote] = useState<ActivationNote | undefined>(undefined);
   const [removedRows, setRemovedRows] = useState<ReadonlyArray<Row> | "unavailable" | undefined>(undefined);
   const [activeOutcome, setActiveOutcome] = useState<ChangeOutcome | undefined>(undefined);
   const list = automations.state;
@@ -149,6 +150,7 @@ export function WorkflowsScreen({ onClose }: WorkflowsScreenProps) {
       {...(history === undefined ? {} : { history })}
       {...(removedRows === undefined ? {} : { removedRows })}
       {...(activation === undefined ? {} : { activation })}
+      {...(activationNote === undefined ? {} : { activationNote })}
       {...(activeOutcome === undefined ? {} : { activeOutcome })}
       {...(runOutcome === undefined ? {} : { runOutcome })}
       {...(change === undefined ? {} : { change })}
@@ -187,7 +189,12 @@ export function WorkflowsScreen({ onClose }: WorkflowsScreenProps) {
           }
         }),
       }}
-      onAskActive={(on) => { setActiveOutcome(undefined); setActivation(on); }}
+      onAskActive={(on) => {
+        setActiveOutcome(undefined);
+        setActivationNote(undefined);
+        setActivation(on);
+        if (on) void perform(WorkflowDefinitions.use((d) => d.activationNote(where.target))).then(setActivationNote);
+      }}
       onConfirmActive={() => {
         const on = activation === true;
         const workflowId = where.target;

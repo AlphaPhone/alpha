@@ -2,7 +2,7 @@
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import {
   type PhoneWorkflowCatalog, type PhoneWorkflowSpec, type PhoneWorkflowTrigger, type RemoteWorkflow, WorkflowActivationRejected, WorkflowLifecycleRejected,
-  WorkflowMetadataRejected, WorkflowPauseRejected, WorkflowResponseInvalid, WorkflowTypedRejected, phoneTriggerClockChangeNote, validatePhoneWorkflowSpec,
+  WorkflowMetadataRejected, WorkflowPauseRejected, WorkflowResponseInvalid, WorkflowTypedRejected, phoneTriggerClockChangeNote, validatePhoneWorkflowSpec, validatePhoneWorkflowTrigger,
   workflowSha, workflowSpecDigest, workflowUuid,
 } from "@elizaos/plugin-workflow/client"
 import { type TypedTrigger, generatedKeepsSchedule, missedWindowMs, validTrigger } from "../../gen/workflows__scheduling.effect.vibe"
@@ -49,6 +49,14 @@ export interface ScheduleNote {
   readonly manual: boolean
   readonly missedAfterMinutes: number
   readonly clockChange: string
+}
+
+/** What turning a workflow on names: the version it applies to, and when that version runs. */
+export interface ActivationNote {
+  readonly versionId: string
+  /** The version's ordinal on this phone, as the screen names it ("Version N"). */
+  readonly version: number
+  readonly schedule: ScheduleNote
 }
 
 /** A phone trigger as the scheduling rules read it. */
@@ -100,6 +108,8 @@ export service WorkflowDefinitions {
   resend(): ChangeOutcome!!
   /** Leave a review or a resend review; false when none was open, so Back is someone else's. */
   back(): boolean!!
+  /** The version turning the workflow `workflowId` on applies to, and when it runs; undefined when it could not be read. */
+  activationNote(workflowId: string): (ActivationNote | undefined)!!
   /** Turn a workflow on or off at its current version; a manual typed workflow is never activated. */
   setActive(workflowId: string, on: boolean): ChangeOutcome!!
   /** Describe a phone workflow; a refused description sends nothing. */
@@ -348,6 +358,18 @@ export const definitions = Layer.provideMerge(Layer.provideMerge(Layer.effect(Wo
     },
     effect back() {
       return ((life.send({ type: "back" }) catch () => undefined)) !== undefined
+    },
+    effect activationNote(workflowId: string) {
+      const workflow = (client.detail(workflowId) catch () => undefined)
+      if (workflow === undefined) return undefined
+      const stored = workflow.phoneSpec as { trigger?: unknown } | undefined
+      const trigger = stored?.trigger === undefined ? undefined : (validatePhoneWorkflowTrigger(stored.trigger) catch () => undefined)
+      const now = try Clock.currentTimeMillis
+      return {
+        versionId: workflow.versionId, version: try seen.ordinal(workflow.id, workflow.versionId),
+        schedule: { manual: trigger === undefined || trigger.kind === "manual", missedAfterMinutes: missedWindowMs / 60000,
+          clockChange: trigger?.kind === "time" ? phoneTriggerClockChangeNote(trigger, now) : "" },
+      } satisfies ActivationNote
     },
     effect setActive(workflowId: string, on: boolean) {
       const workflow = (client.detail(workflowId) catch () => undefined)

@@ -11,7 +11,7 @@ import type { Lifecycle } from "../../../gen/workflows__lifecycle.ts";
 import type { Place } from "../../../gen/workflows__place.ts";
 import type { Runs } from "../../../gen/workflows__runs.ts";
 import type { PromptInput, PromptRunLine, Report } from "../../workflows/automations.vibe";
-import type { ChangeOutcome, Described, ScheduleNote } from "../../workflows/definitions.vibe";
+import type { ActivationNote, ChangeOutcome, Described, ScheduleNote } from "../../workflows/definitions.vibe";
 import type { PlaceSheet } from "../../workflows/place.vibe";
 import type { RunOutcome } from "../../workflows/runs.vibe";
 import type { PhoneCalendars } from "../../workflows/sources.vibe";
@@ -95,6 +95,8 @@ export interface WorkflowsScreenViewProps {
   removedRows?: ReadonlyArray<Row> | "unavailable";
   /** The on or off the owner is reviewing for the open workflow. */
   activation?: boolean;
+  /** The version turning the open workflow on applies to, and when it runs, once read. */
+  activationNote?: ActivationNote;
   /** What the agent said about the last on or off. */
   activeOutcome?: ChangeOutcome;
   runOutcome?: RunOutcome;
@@ -155,7 +157,7 @@ export interface WorkflowsScreenViewProps {
  */
 export function WorkflowsScreenView({
   place: where, list, waiting, runs, lifecycle, steps, digests, sources, authoring, clockDraft, sheet, can, onPhone, zone, runOutput, report, history, removedRows,
-  activation, activeOutcome, runOutcome, change, runNowReview, promptEditing, draftText, textKept, described, note, clockOutcome, calendars, sourceOutcome,
+  activation, activationNote, activeOutcome, runOutcome, change, runNowReview, promptEditing, draftText, textKept, described, note, clockOutcome, calendars, sourceOutcome,
   onBack, onAdd, onCloseSheet, onOpenRow, onAllowAnother, onToggleRemoved, rowActions, onAskActive, onConfirmActive, onCancelActive, onTapStep, runActions,
   lifecycleActions, notifications, background, digestActions, onOpenDraft, onOpenPrompt, onOpenDigests, onOpenSources, onOpenClockDraft, clockActions, onSavePrompt, draftActions, sourceActions,
 }: WorkflowsScreenViewProps) {
@@ -215,9 +217,16 @@ export function WorkflowsScreenView({
           )}
           <ReviewDialog open={activation !== undefined} title={activation === true ? `Turn on “${workflowName}”?` : `Turn off “${workflowName}”?`}
             confirm={activation === true ? "Turn on" : "Turn off"} onConfirm={onConfirmActive} onCancel={onCancelActive}>
-            <p className="text-sm">{activation === true
-              ? "It runs on its schedule from now on, at the version you see. A workflow you run by hand stays off."
-              : "It stops running on its schedule until you turn it on again."}</p>
+            {activation === true ? (
+              // spec/workflows/lifecycle.md: the turn-on review names the version and, for a schedule, when a run is missed.
+              <div className="flex flex-col gap-2 text-sm">
+                <p>{activationNote === undefined ? "It runs on its schedule from now on, at the version you see." : `It runs on its schedule from now on, at Version ${activationNote.version}.`} A workflow you run by hand stays off.</p>
+                {activationNote !== undefined && !activationNote.schedule.manual && (
+                  <p className="text-muted-foreground">Runs only while your phone and agent are on. A run more than {activationNote.schedule.missedAfterMinutes} minutes late is recorded as missed and doesn’t run late.</p>
+                )}
+                {activationNote !== undefined && activationNote.schedule.clockChange !== "" && <Alert variant="info" role="status" className="text-sm">{activationNote.schedule.clockChange}</Alert>}
+              </div>
+            ) : <p className="text-sm">It stops running on its schedule until you turn it on again.</p>}
           </ReviewDialog>
           {activeOutcome !== undefined && activeOutcome !== "saved" && (
             <Alert variant="warn" role="status" className="mx-4 text-sm">{activeOutcome === "refused"

@@ -64,7 +64,10 @@ pure def open(l: Lifecycle, owner: str, workflowId: str, version: int, removed: 
 Removal is refused while a run is going; a run whose outcome is unknown is asked to stop before the
 removal is reviewed again (legacy `cancelReply`). Turning a workflow on or off is reviewed too, and
 goes at the version it was read at; a workflow that runs only when the owner taps Run is never turned
-on (legacy #1316, #1403).
+on (legacy #1316, #1403). The turn-on review names that version ("Version N", N its ordinal on this
+phone) and, for a workflow on a schedule, says that it runs only while the phone and agent are on,
+that a run more than 30 minutes late is recorded as missed and doesn't run late, and the next day a
+clock change skips its time, as the draft review does.
 
 ```quint
 pure def canBeginReview(l: Lifecycle, op: LifeOp): bool =

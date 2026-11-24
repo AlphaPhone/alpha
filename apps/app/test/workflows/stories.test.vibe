@@ -364,6 +364,21 @@ describe("Lifecycle (spec/workflows/lifecycle.md, \"Story: Remove a workflow onl
   })
 })
 
+describe("Turning on (spec/workflows/lifecycle.md, \"Story: Remove a workflow only once its runs have settled, and restore it safely\")", () => {
+  it.effect("the turn-on review names the version it applies to and the missed window of its schedule (spec/workflows/lifecycle.md, \"A change is reviewed before it is kept, never while a run is going, and an interrupted run is stopped first\")", () => effect {
+    const phone = { version: 1, name: "Morning", description: "", trigger: { kind: "time", localTime: "07:00", timeZone: "UTC", days: [1, 2, 3, 4, 5] }, steps: [] }
+    const timed = { ...definition, active: false, metadata: { elizaPhoneWorkflowSpec: JSON.stringify(phone) } }
+    const handlers: Handler[] = [statusRoute, (m, p) => m === "GET" && p === "/api/workflow/workflows/w1" ? { status: 200, data: timed } : undefined]
+    provide workflowsOf(handlers, []) {
+      const note = try (try WorkflowDefinitions).activationNote("w1")
+      try Effect.try(() => assert.deepStrictEqual(
+        { versionId: note?.versionId, version: note?.version, manual: note?.schedule.manual, missed: note?.schedule.missedAfterMinutes },
+        { versionId: "v1", version: 1, manual: false, missed: 30 },
+      ))
+    }
+  })
+})
+
 describe("Typed drafts (spec/workflows/authoring.md, \"Story: Describe a workflow and keep only what this phone can do\")", () => {
   it.effect("without the agent's phone catalog nothing is generated, and a save with no reviewed draft sends nothing (spec/workflows/authoring.md, \"Story: Save exactly the draft I reviewed, once\")", () => effect {
     const sent: Sent[] = []
