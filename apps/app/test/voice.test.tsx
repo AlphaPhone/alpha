@@ -183,24 +183,26 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     ]);
   });
 
-  // spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/voice/index.md, "Voice keeps talking after a navigation only when it is the one the conversation asked for; any other ends it"
-  it("keeps voice and mic open across agent navigation to an app, to Home, and same-screen refresh, while owner navigation stops voice", async () => {
+  // spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/voice/index.md, "Voice keeps talking after a navigation only when it is the one the conversation asked for; any other ends it"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"
+  it("keeps voice, mic, and raised Sheet open across agent navigation to an app, to Home, and same-screen refresh, while owner navigation stops voice", async () => {
     const world = { ...scene(), phone: true };
     const runtime = await startListening(world);
+    await sendShell(runtime, { type: "raise", detent: "Sheet" });
 
     world.ask.nextReplyChunks = ["[NAVIGATE:Calendar] Opening Calendar."];
     await speakUtterance(runtime, world, "Open my calendar");
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.followed === placeOf("Calendar") && s.claim === 0);
-    expect((await getShell(runtime)).trail.at(-1)).toBe("Calendar");
+    expect(await getShell(runtime)).toMatchObject({ trail: ["Calendar"], assistant: "Sheet" });
 
     world.ask.nextReplyChunks = ["[NAVIGATE:Home] Back on Home."];
     await speakUtterance(runtime, world, "Go home");
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.followed === placeOf(undefined) && s.claim === 0);
-    expect((await getShell(runtime)).trail).toEqual([]);
+    expect(await getShell(runtime)).toMatchObject({ trail: [], assistant: "Sheet" });
 
     world.ask.nextReplyChunks = ["[NAVIGATE:Home] Refreshed Home."];
     await speakUtterance(runtime, world, "Refresh home");
     await until(runtime, Voice.Machine, (s) => s.sent === 3 && s.phase === "Listening" && s.mic === "On" && s.claim === 0);
+    expect(await getShell(runtime)).toMatchObject({ trail: [], assistant: "Sheet" });
 
     await sendShell(runtime, { type: "openView", view: "Notes" });
     await until(runtime, Voice.Machine, (s) => s.phase === "Idle");

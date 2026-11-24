@@ -1,4 +1,4 @@
-// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"
+// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"
 import { ConversationRecord, TurnController } from "@elizaos/agent/client"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
@@ -217,8 +217,8 @@ effect function navigateForVoice(place: number): (Voice.Event | undefined)!!(She
   if (currentPlace === place) return { type: "navigated", place }
   const target = viewOfPlace(place)
   const moved = target === undefined
-    ? try contained(shell.send({ type: "goHome" }), "voice navigating home")
-    : try contained(shell.send({ type: "openView", view: target }), "voice navigating to view")
+    ? try contained(shell.send({ type: "agentGoHome" }), "voice navigating home")
+    : try contained(shell.send({ type: "agentOpenView", view: target }), "voice navigating to view")
   if (moved) return undefined
   const voice = try (try Voice.Machine).get()
   return { type: "claimReleased", session: voice.session }
