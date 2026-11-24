@@ -1,6 +1,7 @@
 // spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/messages/composer.md, "Story: Let Alpha suggest a draft"; spec/app/messages/composer.md, "Story: Send a message"; spec/app/messages/sending.md, "Story: Send a message once"; spec/app/messages/sending.md, "Story: Know whether it arrived"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { MMS_ATTACHMENT_TYPES, MMS_MAX_RECIPIENTS, MMS_MAX_TOTAL_BYTES, SMS_DIRECT_MAX_RECIPIENTS, type MmsAttachmentType, type MmsReview, type OperationId, type SmsReview, type SmsSendStatus } from "@elizaos/os/bridges/messages"
+import { MMS_ATTACHMENT_TYPES, MMS_MAX_RECIPIENTS, MMS_MAX_TOTAL_BYTES, SMS_DIRECT_MAX_RECIPIENTS } from "@elizaos/os/bridges/definitions/messages"
+import type { MmsAttachmentType, MmsReview, OperationId, SmsReview, SmsSendStatus } from "@elizaos/os/bridges/messages"
 import type { PhoneNumber } from "@elizaos/os/bridges/phone"
 import * as Composer from "../../gen/app__messages__composer.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__messages__composer.effect.vibe"
@@ -215,7 +216,11 @@ const opened = started(effect {
     if (thread === 0) return
     const status = telephony("status", (c) => c.messages.status()) catch () => undefined
     const count = status?.subscriptions?.length ?? 0
-    if (status !== undefined) try (try Drafts).setSending({ direct: status.sendMode === "direct", pictures: status.mmsSend })
+    if (status !== undefined) {
+      try (try Drafts).setSending({ direct: status.sendMode === "direct", pictures: status.mmsSend })
+      try contained(composer.send({ type: "accessReported", need: "SendAccess", grant: grantOf(status.permissions.sendSms) }), "send access")
+      try contained(composer.send({ type: "accessReported", need: "SimAccess", grant: grantOf(status.permissions.phoneState) }), "SIM access")
+    }
     if (count >= 1) try contained(composer.send({ type: "simsReported", count }), "the SIMs")
   })
 }, "the composer's conversation")
@@ -273,7 +278,7 @@ export effect function attachAll(files: ReadonlyArray<File>): void!!(Drafts | Co
     const held = try store.pictures()
     const fits = (MMS_ATTACHMENT_TYPES as ReadonlyArray<string>).includes(file.type) && file.size > 0 && held.reduce((sum, one) => sum + one.bytes.length, 0) + file.size <= MMS_MAX_TOTAL_BYTES
     if (!Composer.canAttach(try machine.get(), fits)) return
-    const bytes = try promise(() => file.arrayBuffer()) catch () => undefined
+    const bytes = promise(() => file.arrayBuffer()) catch () => undefined
     if (bytes === undefined) continue
     try store.setPictures([...held, { name: file.name, contentType: file.type as MmsAttachmentType, bytes: new Uint8Array(bytes) }])
     try ignore(machine.send({ type: "attach", fits }))

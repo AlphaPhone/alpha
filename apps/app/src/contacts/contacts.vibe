@@ -149,6 +149,7 @@ effect function written(id: number, change: Change): Event!!(Telephony | Rows) {
     }
     if (change === "Star") return answered(false)
     const done = try telephony("updateContact", (c) => c.contacts.updateContact(reviewed, draftFrom(card, linesOfForm(held.form, card))))
+    if (done.status === "saved" && done.version !== null) try (try Rows).set({ card: { ...card, version: done.version } })
     return done.status === "unknown" ? { made: false, known: false } : answered(done.status === "saved")
   } catch (failure) => answered(false, failure)
   return { type: "writeAnswered", id, ...outcome }

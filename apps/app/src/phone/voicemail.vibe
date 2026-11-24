@@ -52,8 +52,10 @@ effect function fetched(ticket: number): Event!!(Telephony | Voicemails) {
   const open = try opened()
   const source = Option.isNone(open) ? "" : effect {
     const id = open.value.id
-    const ready = try telephony("fetchVoicemailAudio", (c) => c.phone.fetchVoicemailAudio(id))
-    if (ready !== "ready") return ""
+    if (open.value.audio !== "AudioOnPhone") {
+      const ready = try telephony("fetchVoicemailAudio", (c) => c.phone.fetchVoicemailAudio(id))
+      if (ready !== "ready") return ""
+    }
     const found = try telephony("voicemailAudio", (c) => c.phone.voicemailAudio(id))
     return `data:${found.mimeType};base64,${found.data}`
   } catch () => ""
@@ -113,13 +115,26 @@ const shown = following(PhoneMachine, (phone) => phone.front && phone.tab === "V
 // spec/app/phone/voicemail.md, "A call that starts pauses playback"
 const calls = following(PhoneMachine, liveCall, Voicemail.Machine, (live): Event | undefined => (live ? { type: "callStarted" } : undefined))
 
+module audio {
+  /** Create the one audio element for voicemail playback. @throws {never} */
+  export function makeAudio(): HTMLAudioElement {
+    return new Audio()
+  }
+  /** Pause voicemail playback, resetting to the start when stopped. @throws {never} */
+  export function pauseAudio(element: HTMLAudioElement, reset: boolean): void {
+    element.pause()
+    if (reset) element.currentTime = 0
+  }
+}
+import { makeAudio, pauseAudio } from audio
+
 /** The one audio element the open voicemail plays in, outside any screen. */
 export service Player {
   element(): HTMLAudioElement!!
 }
 
 const player = Layer.sync(Player, () => {
-  const element = new Audio()
+  const element = makeAudio()
   return { element: () => sync(() => element) }
 })
 
@@ -127,8 +142,7 @@ const player = Layer.sync(Player, () => {
 const played = applying(Voicemail.Machine, (state) => (state.open ? state.playback : "Stopped"), effect (playback) => {
   const element = try (try Player).element()
   if (playback !== "Playing") {
-    element.pause()
-    if (playback === "Stopped") element.currentTime = 0
+    pauseAudio(element, playback === "Stopped")
     return
   }
   const audio = (try (try Voicemails).get()).audio

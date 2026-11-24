@@ -46,7 +46,7 @@ export effect function openCalls(): void!!(Phone | Voicemail | Shell) {
 export effect function openUnread(): void!!(Telephony | Messages | Conversations | Shell) {
   try contained((try Shell).send({ type: "openView", view: "Messages" }), "the unread card")
   const messages = try Messages
-  try Stream.runHead(Stream.filter(messages.changes, (s) => s.front && s.pane === "Threads"))
+  try Stream.runHead(Stream.filter(messages.changes, (s) => s.front && s.pane === "Threads" && s.sms.grant === "Granted"))
   const page = telephony("threadPage", (c) => c.messages.threadPage()) catch () => undefined
   const unread = (page?.rows ?? []).flatMap((row) => ("incomplete" in row || !row.unread ? [] : [row]))
   const only = unread.length === 1 ? try (try Conversations).of({ id: unread[0].id, addresses: unread[0].addresses }) : 0

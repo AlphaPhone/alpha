@@ -14,7 +14,7 @@ underAct();
 afterEach(closeAll);
 
 /** An Alpha image whose host registers eliza's telephony and contacts plugins and Alpha's call plugins. */
-const image = () => ({ ...scene(), phone: true, image: true });
+const image = () => ({ ...scene(), phone: true, image: true, now: 1_700_000_400_000 });
 
 /** Press a tab, as a finger does: Radix's tabs choose on the press, before the click. */
 const tab = (name: string) => act(async () => {

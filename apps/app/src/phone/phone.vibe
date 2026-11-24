@@ -66,7 +66,10 @@ effect function matchNumber(ticket: number): Event!!(Telephony | Dialer) {
   const store = try Dialer
   const digits = (try store.get()).digits
   const named = (row: AddressBookRow) => !("incomplete" in row) && row.phones.some((phone) => phone.replace(/[^\d+]/g, "").endsWith(digits.replace(/[^\d+]/g, "")))
-  const page = telephony("list", (c) => c.contacts.list({ query: digits, limit: 5 })) catch () => undefined
+  const page = effect {
+    try telephony("open", (c) => c.contacts.open())
+    return try telephony("list", (c) => c.contacts.list({ query: digits, limit: 5 }))
+  } catch () => undefined
   const found = page?.contacts.find(named)
   try store.set({ matched: found !== undefined && !("incomplete" in found) ? found.name : "" })
   return { type: "numberMatched", ticket, found: found !== undefined }
