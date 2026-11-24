@@ -158,6 +158,23 @@ pure def lawRelativeReferenceStaysWithTheAgent(hasTitle: bool): bool = not(opens
 pure def lawQuotedTitleAlwaysOpens(generic: bool, relative: bool): bool = opensLocally(false, true, generic, relative, true)
 ```
 
+### The agent opens the one saved note I named, and never over another note's unsaved edit
+
+A request the agent answers, such as my most recent note or that note, goes to the agent with the turn,
+which finds exactly one saved note by its title, its recency or an earlier reference, asks which one when
+several match, and prepares Notes at that note's id (spec/assistant/views.md). Notes then opens it in the
+editor as opening it from the list does, but saves nothing on the owner's behalf: while another note, or a
+new note, has an unsaved edit, nothing opens and that edit stays as it is. A note the collection on the
+phone does not hold yet, such as one the agent saved in the same turn, is read again from the agent first,
+and the editor is given at most 2 seconds to learn of it. The note already open counts as opened; a note
+the agent's Notes no longer hold does not open, and the note on screen stays open.
+
+```quint
+pure def agentOpensNote(alreadyOpen: bool, otherEdited: bool): bool = alreadyOpen or not(otherEdited)
+pure def lawAnotherNotesUnsavedEditIsNeverReplaced(alreadyOpen: bool): bool = agentOpensNote(alreadyOpen, true) == alreadyOpen
+pure val noteOpenWaitMs = 2000
+```
+
 ## Story: Turn text into a checklist and back
 
 > As the owner, I want a checklist written as text and read back to keep every item and its tick.
