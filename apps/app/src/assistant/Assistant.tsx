@@ -140,7 +140,6 @@ export function Assistant({ runtime }: AssistantProps) {
     void composer.send(hold);
   };
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"
-  /** The card of a reply that did not finish: live, with the fix the agent named and its wait, or read again from history, with neither. */
   const failureCard = ({ kind, fix, waitMs }: { kind: Failure; fix: Fix; waitMs: number }, live: boolean) => {
     const act = actionOf(kind, fix);
     const detail = showsWait(kind, waitMs) ? `Try again in about ${about(waitMs)}` : !live && kind === "LimitReached" ? "Wait a moment, then try again" : undefined;
@@ -194,6 +193,26 @@ export function Assistant({ runtime }: AssistantProps) {
     }
     if (focusField) composerRef.current?.focus();
   };
+  const grabber = shell.state ? (
+    <AssistantGrabber
+      variant={open ? "handle" : "mark"}
+      onPress={() => { void dock.send({ type: "press", detent: assistantDetent, now: untimed }); }}
+      onDrag={() => { void dock.send({ type: "drag" }); }}
+      onRelease={({ direction, flick, y }) => {
+        const height = Math.max(0, Math.round(window.innerHeight - y));
+        void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
+      }}
+      onLift={() => {
+        void dock.send({ type: "lift", now: untimed });
+        if (!open) composerRef.current?.focus();
+      }}
+      onCancel={() => { void dock.send({ type: "shift", now: untimed }); }}
+      onTap={({ keyboard }) => {
+        void dock.send({ type: "click", now: untimed });
+        if (!open && keyboard) composerRef.current?.focus();
+      }}
+    />
+  ) : undefined;
 
   return (
     <>
@@ -211,27 +230,12 @@ export function Assistant({ runtime }: AssistantProps) {
           onSearch: search.can({ type: "openSearch" }) ? () => { void chats.send({ type: "browse" }); void search.send({ type: "openSearch" }); } : undefined,
           onNew: chats.can(start) ? () => void chats.send(start) : undefined,
           onClose: open && shell.can({ type: "goBack" }) ? () => void shell.send({ type: "goBack" }) : undefined,
+          expanded: assistantDetent === "Full",
+          onResize: assistantDetent === "Full"
+            ? () => void shell.send({ type: "goBack" })
+            : shell.can({ type: "raise", detent: "Full" }) ? () => void shell.send({ type: "raise", detent: "Full" }) : undefined,
           making: making(shown),
-          grabber: shell.state ? (
-            <AssistantGrabber
-              onPress={() => {
-                void dock.send({ type: "press", detent: assistantDetent, now: untimed });
-              }}
-              onDrag={() => { void dock.send({ type: "drag" }); }}
-              onRelease={({ direction, flick, y }) => {
-                void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height: Math.max(0, Math.round(window.innerHeight - y)), floor: barHeight, full: window.innerHeight, now: untimed });
-              }}
-              onLift={() => {
-                void dock.send({ type: "lift", now: untimed });
-                if (!open) composerRef.current?.focus();
-              }}
-              onCancel={() => { void dock.send({ type: "shift", now: untimed }); }}
-              onTap={() => {
-                void dock.send({ type: "click", now: untimed });
-                if (!open) composerRef.current?.focus();
-              }}
-            />
-          ) : undefined,
+          grabber: open ? grabber : undefined,
         }}
         transcript={{
           messages: [...messages, ...writingReply, ...failed],
@@ -264,7 +268,8 @@ export function Assistant({ runtime }: AssistantProps) {
           attachments: waiting(writing),
           quote: quoted,
           editing: writing.editor.editing > 0,
-          onOpen: !open ? () => openWithFocus(true) : undefined,
+          opener: !open ? grabber : undefined,
+          onOpen: !open && !grabber ? () => openWithFocus(true) : undefined,
           onSend: sendable && !inFlight(talking.turn) ? send : undefined,
           onStop: conversation.can({ type: "stop" }) ? () => void conversation.send({ type: "stop" }) : undefined,
           stopping: talking.turn.stopping,
