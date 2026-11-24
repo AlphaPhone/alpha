@@ -55,7 +55,6 @@ export const CLIENT_FEATURE_PATHS = [
   // Import-free leaf of browser-request-grounding.
   'packages/contracts/src/strip-trailing-punctuation.ts',
   'packages/contracts/src/phone-dial.ts',
-  'packages/contracts/src/spoken-phone-number.ts',
   'packages/contracts/src/device-action-execution.ts',
   'packages/contracts/src/client-turn-observation.ts',
   'packages/contracts/src/contracts/remote-agent-pairing.ts',
@@ -312,14 +311,14 @@ export function prepareClientFeatures({ root = projectRoot, projectVoice = true,
     if (content.split(before).length !== 2) throw Error('Review changed browser address re-export: ' + name);
     project(name, content.replace(before, 'from "../../../packages/contracts/src/browser-address-input.ts";'));
   }
-  // The browser command parser reads the turn observation through the contracts
-  // package. Plain Node has no package alias, so bind that one reviewed value
-  // import to the exact authenticated leaf in this prepared tree.
+  // The shared history parser is a client-only entry. Resolve its one value
+  // import within the copied source graph for plain Node consumers.
   {
     const name = 'plugins/plugin-browser/src/native-client-command.ts';
     const before = 'import { readClientTurnObservation } from "@elizaos/contracts/client-turn-observation";';
     const content = text(name);
-    if (content.split(before).length !== 2) throw Error('Review changed browser observation import: ' + name);
+    if (content.split(before).length !== 2 || (content.match(/^import /gm) ?? []).length !== 1)
+      throw Error('Review changed browser history imports: ' + name);
     project(name, content.replace(before, 'import { readClientTurnObservation } from "../../../packages/contracts/src/client-turn-observation.ts";'));
   }
   // Upstream voice sessions import the shared random-id helper by its emitted .js name. Plain
@@ -452,7 +451,7 @@ export function prepareClientFeatures({ root = projectRoot, projectVoice = true,
   }
   const files = Object.fromEntries([...source].map(([name, file]) => [name, file.sha256]));
   const provenance = {
-    baseCommit: upstream.pin, sourceFiles, projectionVersion:projectVoice?16:0, files,
+    baseCommit: upstream.pin, sourceFiles, projectionVersion:projectVoice?18:0, files,
   };
   const parent = path.join(root, '.eliza'), destination = path.join(parent, 'client-features');
   regularPath(parent, true);
