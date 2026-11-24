@@ -9,7 +9,8 @@ import {scaledTimeout} from '../../specs/quint/refinement/timeouts.mjs';
 export const root=resolve(import.meta.dirname,'../..');
 export const nativeSource=name=>join(root,'android/app/src/main/java/ai/alphacompute/alphaphone',name);
 export const fixture=name=>join(root,'test/fixtures',name);
-export const upstreamConnection=name=>join(root,'vendor/eliza/plugins/plugin-native-agent/android/src/main/java/ai/eliza/plugins/agent/connection',name);
+// Alpha's port of the connection policies the earlier pin's plugin-native-agent held (package ai.alphacompute.alphaphone.connection).
+export const connectionSource=name=>nativeSource(join('connection',name));
 export const upstreamSecureStore=name=>join(root,'vendor/eliza/packages/os/android/secure-store/src/main/java/ai/eliza/plugins/securestore/nativeonly',name);
 export const upstreamAgentRuntime=name=>join(root,'vendor/eliza/plugins/plugin-native-agent/android/src/main/java/ai/eliza/plugins/agent/runtime',name);
 // Shared speech pipeline (ai.eliza.voice) and its upstream host-JVM fixtures at the reviewed pin.

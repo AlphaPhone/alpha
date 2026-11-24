@@ -29,11 +29,13 @@
   "test/assetlinks-cloud-config.test.mjs",
   "test/avatar-initials-audit.test.mjs",
   "test/browser-native-copy.test.mjs",
+  "test/browser-page-context-native.test.mjs",
   "test/ci-pin-bound-scripts.test.mjs",
   "test/ci-ruleset-readback.test.mjs",
   "test/cloud-auth-wire.test.mjs",
   "test/cloud-provision.test.mjs",
   "test/cloud-worker.test.mjs",
+  "test/connection-routes.test.mjs",
   "test/cuttlefish-launcher-postboot.test.mjs",
   "test/deliver-app-update.test.mjs",
   "test/dev-cartesia.test.mjs",
@@ -49,8 +51,10 @@
   "test/instrumentation-outcome-status.test.mjs",
   "test/manifest-label-strings.test.mjs",
   "test/maps-dataset-manifest.test.mjs",
+  "test/native-plugin-teardown.test.mjs",
   "test/native-review-mode.test.mjs",
   "test/os-update-enrollment.test.mjs",
+  "test/owner-route-parity.test.mjs",
   "test/paradee-runtime.test.mjs",
   "test/pilot-install-lock.test.mjs",
   "test/pilot-update-export.test.mjs",
@@ -58,10 +62,13 @@
   "test/pixel10a-image.test.mjs",
   "test/pixel10a-source.test.mjs",
   "test/playwright-projects.test.mjs",
+  "test/plugin-worker-guard.test.mjs",
   "test/production-bundle-audit.test.mjs",
   "test/publish-update-manifest.test.mjs",
   "test/record-release.test.mjs",
   "test/release-signing.test.mjs",
+  "test/renderer-recovery-budget.test.mjs",
+  "test/resident-android-json-compile.test.mjs",
   "test/shared-ui-overrides.test.mjs",
   "test/sign-release-apks.test.mjs",
   "test/update-apk-admission.test.mjs",
@@ -232,10 +239,11 @@
   },
   {
    "files": [
-    "test/aosp-image-capability.test.mjs"
+    "test/aosp-image-capability.test.mjs",
+    "test/product-identity.test.mjs"
    ],
-   "reason": "It imports apps/app/src/runtime/aosp-image.ts, a legacy renderer module.",
-   "movedTo": "The platform area (scripts/legacy-retirement.json maps the AOSP image capability to apps/app/spec/platform)."
+   "reason": "They import legacy renderer modules: aosp-image-capability imports apps/app/src/runtime/aosp-image.ts and product-identity imports apps/app/src/product/alpha-product-registration.ts, alpha-product.ts and ui/mobile-shell/product-registration.ts, none of which apps/app has.",
+   "movedTo": "The platform area (scripts/legacy-retirement.json maps the AOSP image capability and the product identity to apps/app/spec/platform); product-identity's app.config.json, Android identity and storage-namespace checks are still to be rewritten against apps/app/src."
   },
   {
    "files": [
@@ -288,13 +296,6 @@
    ],
    "reason": "They import scripts/prepare-patched-native.ts, the schema-1 patched native staging that the schema-2 osModules in android/consumer-host.json replaced (scripts/legacy-retirement.json). Each checks native behaviour that belongs to the area scripts/legacy-retirement.json names for it.",
    "movedTo": "Not moved yet: rewrite each against the os module sources (vendor/eliza/packages/os/android) and android/app, under its area spec."
-  },
-  {
-   "files": [
-    "test/browser-page-context-native.test.mjs"
-   ],
-   "reason": "It compiles AlphaPageContext.java against the pinned org.json jar at Java 21, as the app compiles it. The verify job (.github/workflows/verify.yml) sets up neither JDK 21 nor that jar (scripts/ci/prepare-host-test-json.sh), and on CI a missing tool fails rather than skips, so in the run list it would fail every pull request.",
-   "movedTo": "Not moved yet: no workflow runs it. Add it to a job that prepares JDK 21 and ALPHA_JSON_JAR (android.yml after its host-test JSON step, or verify.yml with setup-java 21 and scripts/ci/prepare-host-test-json.sh before pnpm verify). Locally it runs under node --test with a JDK 21 and the jar."
   },
   {
    "files": [

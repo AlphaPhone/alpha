@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {join} from 'node:path';
 import {mkdirSync,readFileSync,writeFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
-import {root,runJvm,nativeSource,upstreamConnection,fixture,jvmSkip} from './fixtures/jvm-tools.mjs';
+import {root,runJvm,nativeSource,connectionSource,fixture,jvmSkip} from './fixtures/jvm-tools.mjs';
 const TABLE_FILE=join(root,'apps/app/src/platform/owner-routes.json');
 const shippedTable=readFileSync(TABLE_FILE,'utf8');
 
@@ -65,7 +65,7 @@ test('the table claims the Notes routes the Notes area calls',()=>{
  }
 });
 
-const nativeSources=[nativeSource('OwnerRoutes.java'),upstreamConnection('OwnerRoutePolicy.java'),fixture('OwnerRoutesTest.java')];
+const nativeSources=[nativeSource('OwnerRoutes.java'),connectionSource('OwnerRoutePolicy.java'),fixture('OwnerRoutesTest.java')];
 const request=(name,path,method='GET',owner='owner',expected=true,body)=>({name,path,method,owner,expected,...(body===undefined?{}:{body})});
 const uuid='11111111-2222-4333-8444-555555555555';
 const nativeCases=[];
