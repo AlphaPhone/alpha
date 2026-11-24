@@ -1,6 +1,7 @@
 // spec/cloud/index.md, "Story: Serve one reviewed profile"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
+import { alphaCloudName } from "../gen/cloud.effect.vibe"
 import { Machine, machine } from "../gen/cloud__rollout.effect.vibe"
 import { sha256Hex } from "../src/digest.ts"
 import { edgeRouteOf, edgeWorker, type EdgeEnv } from "../src/edge.vibe"
@@ -12,10 +13,12 @@ import { PROFILE_ASSET, readProfileAsset } from "../src/profile-asset.ts"
 import { alphaCloudProfile, alphaHosts, alphaProfile, deploymentTable } from "../src/profile.vibe"
 import { colonFingerprint, environmentRegistration, problemsOf, registrationFile, registryVariable, releaseFingerprints, seedDocument } from "../src/registration.vibe"
 import { checkRuntimeConfig, cloudLaunchDocument } from "../src/runtime-config.vibe"
+import { smoke } from "../src/smoke.vibe"
 import { alphaCloudWorker } from "../src/worker.vibe"
 import { leakedElizaHost, renderEnvironment, problemsRendering } from "../src/wrangler.vibe"
 import { startCloudflare } from "./fakes/cloudflare.ts"
-import { operatorInputs, rotatedSigner, testResources } from "./support.ts"
+import { fakePlans, startLocalCloud } from "./local-cloud.ts"
+import { loopbackProfile, operatorInputs, rotatedSigner, testResources } from "./support.ts"
 
 const check = (assertion: () => void) => Effect.try(assertion)
 const templates = {
@@ -195,4 +198,19 @@ describe('Provisioning creates only what is missing (spec/cloud/rollout.md, "Sto
       try check(() => assert.strictEqual(foreign, "the Hyperdrive alpha-test-api-staging-db is not the one recorded"))
     }, promise(() => cloudflare.stop()))
   }.pipe(scoped, Effect.provide([NodeServices.layer, FetchHttpClient.layer])), { timeout: 30_000 })
+})
+
+describe('A deployed environment is ready when every public gate passes (spec/cloud/rollout.md, "Story: Tell whether a deployed environment is ready")', () => {
+  it.live("serves Alpha's staging profile from eliza's own cloud command, and every gate passes through the API host and the web host Worker", () => effect {
+    const { hosts } = try hosted()
+    const values = generated({ GOOGLE_CLIENT_SECRET: "google-secret", GOOGLE_CONNECT_CLIENT_SECRET: "google-secret", STRIPE_WEBHOOK_SECRET: "whsec_local", CEREBRAS_API_KEY: "cerebras", CARTESIA_API_KEY: "cartesia", GOOGLE_MAPS_API_KEY: "maps", RESEND_API_KEY: "resend" })
+    const signing = entitlementPublicKey(values.CLOUD_ENTITLEMENT_KEY ?? "")
+    const staging = { ...operatorInputs.staging, billing: { ...operatorInputs.staging.billing, plans: fakePlans }, entitlement: { keyId: operatorInputs.staging.entitlement.keyId, publicKeys: [{ kid: operatorInputs.staging.entitlement.keyId, kty: "EC" as const, crv: "P-256" as const, x: signing.x ?? "", y: signing.y ?? "" }] } }
+    const accepted = alphaCloudProfile({ ...operatorInputs, staging }, hosts)
+    const seed = seedDocument(try environmentRegistration(accepted, "staging"))
+    const cloud = try tryPromise(() => startLocalCloud((billingApi) => ({ profile: loopbackProfile(accepted, billingApi), seed, secrets: values, hosts: hosts.staging })))
+    const gates = try ensuring(Effect.provideService(smoke("staging", hosts.staging, alphaCloudName).pipe(Effect.provide(FetchHttpClient.layer)), FetchHttpClient.Fetch, cloud.fetch), promise(() => cloud.stop()))
+    try check(() => assert.deepStrictEqual(gates.filter((gate) => !gate.passed), []))
+    try check(() => assert.strictEqual(gates.length, 8))
+  }, { timeout: 120_000 })
 })

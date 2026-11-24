@@ -64,7 +64,7 @@ export const scratch = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(
 const children = new Set<ChildProcess>();
 process.once("exit", () => { for (const child of children) child.kill("SIGKILL"); });
 
-function ended(child: ChildProcess) {
+export function ended(child: ChildProcess) {
   return new Promise<void>((done) => {
     children.delete(child);
     if (child.exitCode !== null || child.signalCode !== null) return done();
@@ -73,7 +73,7 @@ function ended(child: ChildProcess) {
   });
 }
 
-async function freePort() {
+export async function freePort() {
   const server = createServer();
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
   const { port } = server.address() as AddressInfo;
@@ -116,8 +116,8 @@ export async function said<A>(url: string, init?: Parameters<typeof exchange>[1]
 interface Message { readonly role: string; readonly content?: unknown }
 
 /** The two plans the cloud sells, as its payment provider's catalog lists them: the cloud checks them before it serves billing. */
-const plans = { plus_monthly: { priceId: "price_plus", productId: "prod_plus", unitAmount: 3_000 }, pro_monthly: { priceId: "price_pro", productId: "prod_pro", unitAmount: 10_000 } };
-const paymentKey = "sk_test_local";
+export const plans = { plus_monthly: { priceId: "price_plus", productId: "prod_plus", unitAmount: 3_000 }, pro_monthly: { priceId: "price_pro", productId: "prod_pro", unitAmount: 10_000 } };
+export const paymentKey = "sk_test_local";
 
 /** The payment provider's catalog, read-only: a price or a product of `plans`, as Stripe's API answers one. */
 function catalogued(route: string, authorization: string | undefined): [number, unknown] {
@@ -139,7 +139,7 @@ function catalogued(route: string, authorization: string | undefined): [number, 
  * scripted, or repeats the owner's last message, and reports the tokens it is paid for. An agent is told apart by
  * its character's system prompt, which begins the system message eliza sends, so journeys share one cloud.
  */
-async function startProvider(key: string) {
+export async function startProvider(key: string) {
   const replies = new Map<string, Reply[]>();
   const asked = new Map<string, Message[][]>();
   const listed = <A>(lists: Map<string, A[]>, system: string) => lists.get(system) ?? lists.set(system, []).get(system)!;
@@ -222,7 +222,7 @@ function cloudCommand(secrets: string, args: readonly string[]) {
   return { child, exited, output: () => output };
 }
 
-async function served(secrets: string, args: readonly string[], origin: string) {
+export async function served(secrets: string, args: readonly string[], origin: string) {
   const running = cloudCommand(secrets, ["serve", ...args]);
   let over = false;
   void running.exited.then(() => { over = true; });
