@@ -69,7 +69,7 @@ const zoom = extract(({ document }) => {
   return !(recording && chips);
 });
 
-/** Zoom never changes during a recording: its chips are hidden while one runs. */
+/** In the browser build zoom never changes during a recording: its chips are hidden while one runs (the phone zooms while it records). */
 export const cameraZoomHiddenWhileRecording = always(() => zoom.current);
 
 const microphoneNotice = extract(({ document }) => {

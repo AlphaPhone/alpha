@@ -319,6 +319,9 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
     }))
   }
 
+  // spec/camera/viewfinder.md, "Zoom stays within the bound lens's range, and changes during a recording only on the phone":
+  // the browser's recorder draws its frames at the zoom and light it started with.
+  if (bridge.browser) try send({ type: "useBrowserRecorder" })
   const first = try front.get()
   if (first.view !== "camera") try send({ type: "leave" })
   try follow(first)

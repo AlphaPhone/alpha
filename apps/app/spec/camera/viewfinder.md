@@ -31,6 +31,7 @@ type Camera = {
   recording: Recording, withSound: bool, noSoundChosen: bool, stopCause: StopCause, saidMaxLength: bool, micDenied: bool,
   timer: int, countdown: int, capturing: bool, pendingShot: bool, elapsed: int, recordedBytes: int,
   flash: Flash, hasFlash: bool, light: bool, lens: Lens, zoom: int, widest: int, longest: int, grid: bool,
+  browserRecorder: bool, lightAtStart: bool, zoomAtStart: int,
   volumeKeys: bool, modal: bool, photos: int, lastShotChat: Chat, lastId: str, lastImage: str
 }
 ```
@@ -47,6 +48,7 @@ pure val initial: Camera = {
   recording: RecordingIdle, withSound: true, noSoundChosen: false, stopCause: NoStop, saidMaxLength: false, micDenied: false,
   timer: 0, countdown: 0, capturing: false, pendingShot: false, elapsed: 0, recordedBytes: 0,
   flash: FlashOff, hasFlash: false, light: false, lens: BackLens, zoom: 10, widest: 10, longest: 10, grid: false,
+  browserRecorder: false, lightAtStart: false, zoomAtStart: 10,
   volumeKeys: false, modal: false, photos: 0, lastShotChat: ChatHidden, lastId: "", lastImage: ""
 }
 pure def ready(c: Camera): bool = c.phase == PreviewReady
@@ -254,13 +256,26 @@ pure def cycleFlash(c: Camera): Camera = { ...c, flash: flashAfter(c.flash) }
 pure def alwaysFlashNeedsAFlashUnit(c: Camera): bool = c.flash != FlashOff implies c.hasFlash
 ```
 
-### Zoom stays within the bound lens's range and never changes during a recording
+### Zoom stays within the bound lens's range, and changes during a recording only on the phone
+
+On the phone the chips and a pinch zoom while a recording runs, one change at a time, the latest
+pinch last. The browser build's recorder draws its frames at the zoom it started with, so there zoom
+and Video's light are chosen before the recording starts. A finishing recording changes nothing.
 
 ```quint
 pure def clampZoom(tenths: int, c: Camera): int = if (tenths < c.widest) c.widest else if (tenths > c.longest) c.longest else tenths
-pure def canZoomTo(c: Camera, tenths: int): bool = active(c) and ready(c) and not(recordingBusy(c))
+pure def changesWhileRecording(c: Camera): bool = c.recording == RecordingIdle or (c.recording == RecordingActive and not(c.browserRecorder))
+pure def canUseBrowserRecorder(c: Camera): bool = not(c.browserRecorder) and c.recording == RecordingIdle
+pure def useBrowserRecorder(c: Camera): Camera = { ...c, browserRecorder: true }
+pure def canZoomTo(c: Camera, tenths: int): bool = active(c) and ready(c) and changesWhileRecording(c)
 pure def zoomTo(c: Camera, tenths: int): Camera = { ...c, zoom: clampZoom(tenths, c) }
 pure def sometimesZoomed(c: Camera): bool = c.zoom > 10
+pure def sometimesZoomedWhileRecording(c: Camera): bool = c.recording == RecordingActive and c.zoom != c.zoomAtStart
+pure def alwaysTheBrowserRecordsAsItStarted(c: Camera): bool =
+  (c.browserRecorder and c.recording == RecordingActive) implies (c.zoom == c.zoomAtStart and c.light == c.lightAtStart)
+pure def stepAControlKeepsTheRecording(before: Camera, via: str, after: Camera): bool =
+  (via == "zoomTo" or via == "toggleLight") implies
+    (after.recording == before.recording and after.elapsed == before.elapsed and after.withSound == before.withSound and after.mode == before.mode)
 ```
 
 ### Switching cameras turns the flash and light off and returns zoom to 1× first
@@ -346,7 +361,7 @@ A refused microphone shows the microphone notice; the camera stays usable.
 ```quint
 pure def startedWith(sound: bool, result: RecordStart, c: Camera): Camera =
   if (result == RecordingStarted) { ...c, recording: RecordingActive, elapsed: 0, recordedBytes: 0, withSound: sound, noSoundChosen: not(sound), notice: NoNotice,
-    micDenied: false, saidMaxLength: false, stopCause: NoStop }
+    micDenied: false, saidMaxLength: false, stopCause: NoStop, lightAtStart: c.light, zoomAtStart: c.zoom }
   else if (result == MicrophoneRefused) { ...c, notice: MicrophoneNotice, micDenied: true }
   else c
 pure def canRecord(c: Camera, result: RecordStart): bool =
@@ -408,12 +423,13 @@ pure val limitSecondsValues = Set(0, 60, 600)
 pure val limitBytesValues = Set(0, 100)
 ```
 
-### Video's light holds the flash unit on, chosen before the recording starts
+### Video's light holds the flash unit on, and on the phone it can change while a recording runs
 
 ```quint
-pure def canToggleLight(c: Camera): bool = active(c) and ready(c) and c.mode == VideoMode and not(recordingBusy(c)) and c.hasFlash
+pure def canToggleLight(c: Camera): bool = active(c) and ready(c) and c.mode == VideoMode and changesWhileRecording(c) and c.hasFlash
 pure def toggleLight(c: Camera): Camera = { ...c, light: not(c.light) }
 pure def alwaysLightOnlyInReadyVideo(c: Camera): bool = c.light implies (c.mode == VideoMode and ready(c) and c.hasFlash)
+pure def sometimesLightChangedWhileRecording(c: Camera): bool = c.recording == RecordingActive and c.light != c.lightAtStart
 ```
 
 ## Story: Recover when the camera is denied or stops

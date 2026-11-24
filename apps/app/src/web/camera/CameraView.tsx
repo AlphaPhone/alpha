@@ -173,7 +173,7 @@ export function CameraView({ camera, said, can, browser, actions }: CameraViewPr
       )}
 
       <div className="relative z-10 mt-auto flex flex-col gap-3 pb-6">
-        {stops.length > 1 && !recording && (
+        {stops.length > 1 && (!recording || can({ type: "zoomTo", tenths: camera.zoom })) && (
           <div className="flex justify-center gap-2" role="group" aria-label="Zoom">
             {stops.map(([tenths, label]) => (
               <button key={tenths} type="button" aria-label={`Zoom ${tenths / 10}×`} aria-pressed={camera.zoom === tenths} onClick={() => actions.zoomTo(tenths)}

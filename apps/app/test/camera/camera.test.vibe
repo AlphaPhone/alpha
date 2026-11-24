@@ -90,6 +90,36 @@ it.live("record a video without sound after the microphone is refused, then one 
   }
 })
 
+it.live("on the phone, zoom and Video's light change while a recording runs, and the recording goes on (spec/camera/viewfinder.md, \"Story: Record videos\")", () => effect {
+  const device = camera()
+  provide cameraOver(device) {
+    const view = try Viewfinder
+    try view.enter()
+    try until(() => effect { return (try view.get()).phase === "PreviewReady" })
+    try view.pickMode("VideoMode")
+    try until(() => effect { return !(try view.get()).binding })
+    try view.shutter()
+    const started = try view.get()
+    // spec/camera/viewfinder.md, "Zoom stays within the bound lens's range, and changes during a recording only on the phone"
+    try view.zoomTo(20)
+    try until(() => effect { return (try view.get()).zoom === 20 })
+    // spec/camera/viewfinder.md, "Video's light holds the flash unit on, and on the phone it can change while a recording runs"
+    try view.toggleLight()
+    const during = try view.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      {
+        started: started.recording, during: [during.recording, during.zoom, during.light, during.lightAtStart, during.zoomAtStart],
+        zoomed: device.calls.filter((call) => call.method === "ElizaCamera.setZoom").map((call) => call.args),
+        torch: device.calls.filter((call) => call.method === "ElizaCamera.setSettings").map((call) => call.args),
+      },
+      {
+        started: "RecordingActive", during: ["RecordingActive", 20, true, false, 10],
+        zoomed: [{ zoom: 2 }], torch: [{ settings: { flash: "torch" } }],
+      },
+    ))
+  }
+})
+
 // spec/camera/agentCapture.md, "Story: Let the assistant take the photo I asked for"
 it.live("the assistant's photo needs the visible Camera, flips to the named camera and names the library id only when offered (spec/camera/agentCapture.md, \"Story: Let the assistant take the photo I asked for\")", () => effect {
   const device = camera()
