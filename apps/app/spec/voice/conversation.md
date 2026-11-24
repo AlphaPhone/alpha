@@ -338,7 +338,10 @@ A turn claims one destination while voice runs and its chat is current; a second
 from a chat that is no longer current, is refused and leaves the first alone. The screen pins its
 context when it commits. Voice continues there only when the change was delivered, pinned and is
 still exactly what is shown; an undelivered, unpinned or changed screen retires voice. Any
-navigation by the owner, or by anything but the claim, retires voice as leaving does.
+navigation by the owner retires voice as leaving does. Browser brought forward with the page an
+applied open loaded, and each later page of that tab, are not a navigation and keep voice on
+(spec/shell/navigation.md, "Voice stays on through an app opened or shown again in front; only Back,
+Home, stopping voice or a boot closes it"); the next turn carries the page shown as it is sent.
 
 ```quint
 pure def canClaimScreen(c: Conversation, chatCurrent: bool): bool = running(c.shown)

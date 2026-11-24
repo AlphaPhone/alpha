@@ -322,6 +322,22 @@ pure def alwaysHomeKeepsItsBar(s: Nav): bool = keepsItsBar(s.app == "", s.chat)
 pure def sometimesVoiceOverConversation(s: Nav): bool = s.voice and s.chat == Full
 ```
 
+### Voice stays on through an app opened or shown again in front; only Back, Home, stopping voice or a boot closes it
+
+Opening an app, opening the app in front again, a sheet, a hold or a hidden page change nothing of
+voice here (a hidden page retires voice through the conversation, spec/voice/conversation.md). So
+Browser brought forward with the page an applied open loaded, and every later page of that tab (a
+redirect, a load that fails late, a navigation the agent caused), keep Talk on. The app opened again
+in front keeps its revision: a new page inside Browser is not a new screen.
+
+```quint
+pure def stepOnlyBackHomeStopOrBootClosesVoice(before: Nav, via: str, after: Nav): bool =
+  (before.voice and not(after.voice)) implies (via == "nativeBack" or via == "goHome" or via == "stopVoice" or via == "boot")
+pure def stepReopeningTheAppInFrontKeepsItsRevision(before: Nav, via: str, after: Nav): bool =
+  (via == "openApp" and before.app == after.app) implies after.revision == before.revision
+pure def sometimesVoiceOverAnOpenApp(s: Nav): bool = s.voice and s.app != ""
+```
+
 ### On Phone, Messages and Contacts the app's own bar stands in for the dock until a conversation opens
 
 The comms apps draw their own bar where the assistant's input would rest (PRD AC-01), so the dock
