@@ -76,7 +76,9 @@ describe("Settings", () => {
   });
 
   it("See what the phone says (spec/app/settings/facts.md, \"Story: See what the phone says\")", async () => {
-    const { alpha, machines, world } = await settingsOpen();
+    const initial = { ...scene(), phone: true };
+    initial.maps.precision = "approximate";
+    const { alpha, machines, world } = await settingsOpen(initial);
     await until(alpha, machines, Facts.Machine, (s) => s.read.read.status === "Loaded");
     const shown = await machines.runPromise(Facts.Machine.use((facts) => facts.get()));
     // spec/app/settings/facts.md, "Only the newest asking's answer is taken, and it replaces everything shown": what the phone did not report is unavailable, never guessed.
