@@ -62,6 +62,7 @@
   "test/publish-update-manifest.test.mjs",
   "test/record-release.test.mjs",
   "test/release-signing.test.mjs",
+  "test/runtime-licenses.test.mjs",
   "test/shared-ui-overrides.test.mjs",
   "test/sign-release-apks.test.mjs",
   "test/update-apk-admission.test.mjs",
@@ -224,7 +225,6 @@
   {
    "files": [
     "test/licenses.test.mjs",
-    "test/runtime-licenses.test.mjs",
     "test/sbom.test.mjs"
    ],
    "reason": "They read bun.lock and the legacy bundle manifests; the generator now reads pnpm-lock.yaml and upstream's manifest.json.",
