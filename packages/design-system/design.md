@@ -20,7 +20,8 @@ do next.
 - **Type.** `font-sans` is Public Sans, for everything read or pressed. `font-display` is Denton, with
   Fraunces behind it, at weight `light`: a screen's one title, the date on Home, a large figure. The sizes
   are in rem, so Android's text size scales them: `base` is body text, `3xl` a screen title, `4xl` the
-  Home date. `tracking-caps` with `text-xs` is a small uppercase label. A list row reads `text-base`,
+  Home date. `tracking-caps` with `text-xs` is a small uppercase label; `text-label` names an app tile on
+  Home and in the drawer. A list row reads `text-base`,
   `text-subject` and `text-snippet` line by line; `text-meta` is a status line under a header, and `text-body`
   the text of a message or of a field being typed; `text-2xs` is the time under a text message or a
   keypad key's letters; `text-keypad-number` the number being dialled, `text-keypad-digit` a key's
@@ -110,6 +111,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.2xs.leading` | 1.4 |
 | `text.xs.size` | 0.75rem |
 | `text.xs.leading` | 1.25 |
+| `text.label.size` | 0.75rem |
+| `text.label.leading` | 1.1667 |
 | `text.meta.size` | 0.8125rem |
 | `text.meta.leading` | 1.25 |
 | `text.snippet.size` | 0.84375rem |
