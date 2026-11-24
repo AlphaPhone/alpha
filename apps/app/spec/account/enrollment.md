@@ -148,3 +148,17 @@ pure def alwaysAnEnrolledPhoneHasAProtocol(e: Enrollment): bool = e.phase == Enr
 pure def sometimesEnrolled(e: Enrollment): bool = e.phase == Enrolled
 pure def sometimesReenrolled(e: Enrollment): bool = e.phase == Enrolled and e.enrollments >= 2
 ```
+
+### Each request advertises the offered capabilities the phone can serve now
+
+The enrollment keeps every capability the agent offered in its registration, not only those the
+phone could serve when it registered. Each request's `x-eliza-device-capabilities` names those of
+them the phone's areas can serve at that moment, so a capability that becomes available after the
+phone enrolled (a permission granted, a role taken) is advertised on the next request, without
+enrolling again, and one the agent did not offer never is.
+
+```quint
+pure def advertisedNow(offered: bool, servedNow: bool): bool = offered and servedNow
+pure def lawALaterCapabilityIsAdvertisedWithoutEnrollingAgain(offered: bool): bool = advertisedNow(offered, true) == offered
+pure def lawAnUnofferedCapabilityIsNeverAdvertised(servedNow: bool): bool = not(advertisedNow(false, servedNow))
+```

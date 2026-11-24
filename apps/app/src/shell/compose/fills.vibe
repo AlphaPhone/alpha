@@ -153,6 +153,7 @@ export const fillsLive = Layer.effectDiscard(effect {
     effect names() {
       const enrolled = try enrollment.enrolled()
       if (enrolled === undefined) return [] as readonly string[]
+      // spec/account/enrollment.md, "Each request advertises the offered capabilities the phone can serve now"
       return try capabilities.advertise(enrolled.capabilities)
     },
     effect device() {

@@ -1,4 +1,4 @@
-// spec/account/enrollment.md, "Story: Let my agent act on my phone once it knows this phone"; spec/account/enrollment.md, "Each connection enrolls once, and a result for an earlier connection changes nothing"; spec/account/enrollment.md, "The workflow protocol starts at what the phone can present and steps down only on a 409, never below 2"; spec/account/enrollment.md, "A registration is used only when it names the connected agent as the installation"; spec/account/enrollment.md, "The enabled views are agreed against the profile revision the phone read"; spec/account/enrollment.md, "Only an enrollment the agent's own context confirmed is used, and anything else leaves chat only"
+// spec/account/enrollment.md, "Story: Let my agent act on my phone once it knows this phone"; spec/account/enrollment.md, "Each connection enrolls once, and a result for an earlier connection changes nothing"; spec/account/enrollment.md, "The workflow protocol starts at what the phone can present and steps down only on a 409, never below 2"; spec/account/enrollment.md, "A registration is used only when it names the connected agent as the installation"; spec/account/enrollment.md, "The enabled views are agreed against the profile revision the phone read"; spec/account/enrollment.md, "Only an enrollment the agent's own context confirmed is used, and anything else leaves chat only"; spec/account/enrollment.md, "Each request advertises the offered capabilities the phone can serve now"
 import {
   type EnrollEffect, type Enrollment, Machine as EnrollmentMachine, contextConfirmed, enabled, enabledViews, imageViews,
   machine as enrollmentMachine, registrationVerified, viewChangeConfirmed
@@ -17,7 +17,7 @@ import { CloudSession } from "./session.vibe"
 /** The device slot could not be read or written, or held something that is not a device key. */
 error DeviceSlotRefused
 
-/** The enrollment the agent confirmed for this phone: whom and which connection it was made under, the installation, the enrollment, the capabilities the phone advertises and the workflow protocol it registered. */
+/** The enrollment the agent confirmed for this phone: whom and which connection it was made under, the installation, the enrollment, every capability the agent offered (each request advertises those the phone serves then) and the workflow protocol it registered. */
 export interface EnrolledDevice {
   readonly owner: string
   readonly agent: string
@@ -270,7 +270,7 @@ export const enrollmentService = Layer.effect(DeviceEnrollment, effect {
         enrolled: {
           owner: held.verified.owner, agent: held.verified.agent, generation: held.verified.generation,
           installationId: registered.installationId, enrollmentId: registered.enrollmentId,
-          capabilities: (held.headers["x-eliza-device-capabilities"] ?? "").split(",").filter((name) => name !== ""),
+          capabilities: registered.capabilities ?? [],
           workflowProtocol: s.protocol, userTextFormat: registered.userTextFormatVersion === 1,
         },
       })
