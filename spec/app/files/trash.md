@@ -322,9 +322,9 @@ pure def sometimesADeletionWaitsUnseen(s: Trash): bool = not(s.open) and s.undo.
 
 ## Story: Bring something back
 
-> As the owner, I want to restore exactly the item I chose, while it is
-> still kept, never a later deletion of the same file, and never over a
-> file of the same name.
+> As the owner, I want to restore exactly the item I chose while it is
+> still kept, or everything still kept at once, never a later deletion of
+> the same file, and never over a file of the same name.
 
 ### The owner restores a listed item before its time, from a list read since the last job
 
@@ -337,6 +337,19 @@ pure def canRestore(s: Trash, entry: Entry, now: int, by: Actor): bool =
 
 pure def restore(s: Trash, entry: Entry, now: int, by: Actor): Moved =
   take({ kind: Restoring, items: List(entry.item), entries: List(entry), approval: 0 }, s)
+```
+
+### The owner restores everything listed that is still kept, together, from a list read since the last job
+
+```quint
+pure def keptAt(s: Trash, now: int): List[Entry] = s.entries.select(e => now < e.until)
+
+pure def canRestoreAll(s: Trash, now: int, by: Actor): bool = by == Owner and fresh(s) and keptAt(s, now).length() > 1
+
+pure def restoreAll(s: Trash, now: int, by: Actor): Moved =
+  take({ kind: Restoring, items: keptAt(s, now).listMap(e => e.item), entries: keptAt(s, now), approval: 0 }, s)
+
+pure def sometimesEverythingIsComingBack(s: Trash): bool = busy(s) and s.job.kind == Restoring and s.job.entries.length() > 1
 ```
 
 ### Only entries the Trash lists are brought back
