@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { at, mounts } from "../src/areas.ts";
 import { adopt, earlierSlot, keptAt, vaulted } from "../src/platform/adoption.vibe";
-import { Agent } from "../src/platform/agent.vibe";
+import { Agent, type Reached } from "../src/platform/agent.vibe";
 import { Cloud } from "../src/platform/cloud.vibe";
 import { type Slot, Vault } from "../src/platform/vault.vibe";
 import type { Platform } from "../src/platform/platform.vibe";
@@ -100,10 +100,15 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     // spec/app/platform/index.md, "The agent hears the device headers a request names, on the phone as in a browser"
     expect(await call(HttpClientRequest.setHeader(heard, "x-eliza-device-id", "phone-1"))).toEqual(Exit.succeed({ "x-eliza-device-id": "phone-1" }));
     expect(failed(await call(HttpClientRequest.setHeader(heard, "authorization", "Bearer not-the-page's")))?._tag).toBe("Unsent");
-    // spec/app/platform/index.md, "A stream Alpha stops reading is withdrawn from the phone, and may still have reached the agent"
+    // spec/app/platform/index.md, "A request or stream Alpha stops waiting for is withdrawn from the phone, and may still have reached the agent"
     const first = alpha.runtime.runPromise(Effect.flatMap(Agent, (agent) => Stream.runCollect(Stream.take(agent.events(HttpClientRequest.post("/api/platform/drip")), 1))));
     expect(await first).toEqual(["first"]);
     await vi.waitFor(() => expect(world.platform.dripping.size).toBe(0));
+    // spec/app/account/index.md, "Story: Have the agent running": the phone's host reports and starts its agent; a page that is no phone reads the agent it reaches, and starts none.
+    const life = <A,>(work: (agent: Reached) => Effect.Effect<A, unknown>) => alpha.runtime.runPromiseExit(Effect.flatMap(Agent, work));
+    expect(await life((agent) => Effect.map(agent.life.status(), (status) => [status.available, status.state]))).toEqual(Exit.succeed([true, "running"]));
+    expect(await life((agent) => agent.life.review())).toEqual(Exit.succeed({ kind: "unavailable" }));
+    expect(Exit.isSuccess(await life((agent) => agent.life.start()))).toBe(phone);
     if (!phone) return;
     // spec/app/platform/index.md, "A streamed answer the phone relays never grows past two mebibytes"
     const flooded = (size: number) => alpha.runtime.runPromiseExit(Effect.flatMap(Agent, (agent) => Stream.runDrain(agent.events(HttpClientRequest.post(`/api/platform/flood?size=${size}`)))));

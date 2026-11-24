@@ -127,14 +127,16 @@ pure def lawTheBodyIsBounded(held: int, bytes: int): bool =
   (held >= 0 and chunkTaken(held, bytes)) implies (held + bytes >= 0 and held + bytes <= bodyLimit)
 ```
 
-### A stream Alpha stops reading is withdrawn from the phone, and may still have reached the agent
+### A request or stream Alpha stops waiting for is withdrawn from the phone, and may still have reached the agent
 
-A stream ends for Alpha when the screen that reads it goes, when the caller
-withdraws it, or when it says nothing for longer than its listener allows.
-Its listeners are then removed and the phone is asked to abort it, so
-nothing of it keeps running for a page that no longer reads it. Whether or
-not its answer had begun, the agent may have heard it: only the phone's
-refusal before the answer says a stream never left Alpha.
+Alpha stops waiting when the screen that asked goes, when the caller
+withdraws, when a request is not answered in time, or when a stream says
+nothing for longer than its listener allows. The phone is then asked to
+abort the request or stream by the id Alpha gave it, and a stream's
+listeners are removed, so nothing of it keeps running for a page that no
+longer reads it. Whether or not its answer had begun, the agent may have
+heard it: only the phone's refusal before the answer says a request never
+left Alpha.
 
 ```quint
 pure def lawAWithdrawnStreamMayHaveBeenSent(answered: bool): bool = deliveryOf(answered, Withdrawn) == MaybeSent

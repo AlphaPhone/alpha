@@ -116,6 +116,11 @@ effect function networked(wifi: WiFi.Shape): void!Unsent {
   if (refusedOffline(network)) throw new Unsent({ cause: "Android says the phone has no network" })
 }
 
+/** Whether Android has said the phone's network is down. */
+effect function offline(wifi: WiFi.Shape): boolean!! {
+  return effect { try networked(wifi); return false } catch () => true
+}
+
 const methods: ReadonlyArray<string> = ["GET", "POST", "PATCH", "DELETE"] satisfies ReadonlyArray<CloudMethod>
 const ours = (headers: Readonly<Record<string, string>>) => Object.fromEntries(Object.entries(headers).filter(([name]) => name !== "content-type" && name !== "content-length"))
 
@@ -155,7 +160,7 @@ function relaying(relay: Relay, wifi: WiFi.Shape): typeof globalThis.fetch {
       : body !== false && "text" in body ? relayed(method, url.pathname, Object.fromEntries(url.searchParams), headers, JSON.parse(body.text) as unknown)
       : undefined
     if (sent === undefined) throw new TypeError("the phone relays only JSON to the cloud")
-    if (await runPromise(effect { try networked(wifi); return false } catch () => true)) throw new TypeError("the phone has no network")
+    if (await runPromise(offline(wifi))) throw new TypeError("the phone has no network")
     try {
       const reply = await relay.request(signal === undefined ? sent : { ...sent, signal })
       const head = { etag: reply.etag, "content-type": reply.contentType, "retry-after": reply.retryAfter }
