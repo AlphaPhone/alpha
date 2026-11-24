@@ -1,5 +1,5 @@
-// spec/maps/screen.md, "A place opens from a result, a saved place, a pin, the phone's position or the agent"; spec/maps/plane.md, "Story: See the map for what I am looking at"; spec/maps/plane.md, "A plane is rebuilt only when its element or basemap changes, and reports only for its own generation"; spec/maps/plane.md, "Only the reply to the latest copyright request, for the view in place, is shown, and a failed one never fails the map"; spec/maps/plane.md, "Google content is drawn only on the Google raster, and other content on the world or open raster"
-import { type Basemap, type MapPlane, Machine as PlaneMachine, basemapFor, type PlaneState } from "../../gen/maps__plane.effect.vibe"
+// spec/maps/screen.md, "A place opens from a result, a saved place, a pin, the phone's position or the agent"; spec/maps/plane.md, "A pin press is one finger held still, and the menu that follows the same hold drops nothing more"; spec/maps/plane.md, "Story: See the map for what I am looking at"; spec/maps/plane.md, "A plane is rebuilt only when its element or basemap changes, and reports only for its own generation"; spec/maps/plane.md, "Only the reply to the latest copyright request, for the view in place, is shown, and a failed one never fails the map"; spec/maps/plane.md, "Google content is drawn only on the Google raster, and other content on the world or open raster"
+import { type Basemap, type MapPlane, Machine as PlaneMachine, basemapFor, longPressMs, type PlaneState, pressSlopPx } from "../../gen/maps__plane.effect.vibe"
 import { type Guidance, Machine as GuidanceMachine } from "../../gen/maps__guidance.effect.vibe"
 import { Machine as ScreenMachine } from "../../gen/maps__screen.effect.vibe"
 import { mode, type Screen } from "../../gen/maps__screen.effect.vibe"
@@ -17,8 +17,6 @@ function contains(outer: Area, inner: Area): boolean {
   return outer.north >= inner.north && outer.south <= inner.south && outer.east >= inner.east && outer.west <= inner.west
 }
 
-const LONG_PRESS_MS = 500
-const PRESS_SLOP_PX = 10
 
 /** The basemap the screen draws now: Google content only on the Google raster. */
 export effect function currentBasemap() {
@@ -159,7 +157,7 @@ export const planeLayer = Layer.effect(MapsPlane, effect {
     effect pressStarted(coordinate: Coordinate, x: number, y: number) {
       try cancelPress()
       const fiber = fork.detached effect {
-        try sleep(LONG_PRESS_MS)
+        try sleep(longPressMs)
         try Ref.set(pressing, undefined)
         try screen.dropPin(coordinate)
       }
@@ -167,7 +165,7 @@ export const planeLayer = Layer.effect(MapsPlane, effect {
     },
     effect pressMoved(x: number, y: number) {
       const held = try Ref.get(pressing)
-      if (held && Math.hypot(x - held.x, y - held.y) > PRESS_SLOP_PX) try cancelPress()
+      if (held && Math.hypot(x - held.x, y - held.y) > pressSlopPx) try cancelPress()
     },
     pressEnded: () => cancelPress(),
     states: plane.changes,

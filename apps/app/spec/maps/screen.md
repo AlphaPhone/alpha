@@ -153,7 +153,8 @@ A result or the agent's place is shown under its own name at once, and its
 provider details are fetched; they are shown only for the place still open.
 Opening a place retires the route of the place before it. A pin drops where
 the owner holds a finger still for 500 milliseconds (moving more than 10
-pixels is a pan) or opens the map's menu, never during guidance.
+pixels is a pan) or opens the map's menu, never during guidance; spec/maps/plane.md says which
+fingers and which menu count.
 
 ```quint
 pure def canPick(s: Screen, choice: Choice, id: int): bool =

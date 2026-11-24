@@ -5,7 +5,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { Compass } from "lucide-react";
 import { use, useCallback, useState } from "react";
 import type { Basemap } from "../../../gen/maps__plane.ts";
-import { cameraAim, compassShown, failsThePlane, northUpAfterGuidance, placeZoom, resultsMaxZoom, routeMaxZoom } from "../../../gen/maps__plane.ts";
+import { cameraAim, compassShown, failsThePlane, menuDrops, northUpAfterGuidance, placeZoom, pressCounts, resultsMaxZoom, routeMaxZoom } from "../../../gen/maps__plane.ts";
 import type { Coordinate } from "../../maps/maps.schema.vibe";
 import type { PlaneDrawing } from "../../maps/plane.vibe";
 import { Button } from "../components/ui/index.ts";
@@ -14,8 +14,6 @@ import { MapsDrawn } from "./map-drawing.ts";
 
 const WORLD_STYLE = "https://tiles.openfreemap.org/styles/bright";
 const OPENING: { center: [number, number]; zoom: number } = { center: [-98, 39], zoom: 2.6 };
-/** How long after a finger went down a context menu is that same press. */
-const TOUCH_MENU_MS = 1500;
 
 /** The basemap the plane is built for and the reports it makes; what it draws comes from the Maps plane's drawing. */
 export type MapPlaneProps = {
@@ -187,19 +185,17 @@ export function MapPlane(props: MapPlaneProps) {
       const c = instance.getCenter().wrap();
       props.onSettled({ latitude: c.lat, longitude: c.lng }, instance.getZoom(), node.clientWidth, node.clientHeight);
     });
-    // Only one finger held still is a press; a second finger makes it a pinch. The menu Android opens after a held
-    // finger is that same press, already timed by the shell, so it drops no second pin.
     let touchedAt = -Infinity;
     instance.on("touchstart", (e) => {
       touchedAt = Date.now();
-      if (e.originalEvent.touches.length === 1) props.onPressStart({ latitude: e.lngLat.lat, longitude: e.lngLat.lng }, e.point.x, e.point.y);
+      if (pressCounts(e.originalEvent.touches.length)) props.onPressStart({ latitude: e.lngLat.lat, longitude: e.lngLat.lng }, e.point.x, e.point.y);
       else props.onPressEnd();
     });
     instance.on("touchmove", (e) => props.onPressMove(e.point.x, e.point.y));
     instance.on("touchend", () => props.onPressEnd());
     instance.on("touchcancel", () => props.onPressEnd());
     instance.on("contextmenu", (e) => {
-      if (Date.now() - touchedAt < TOUCH_MENU_MS) return;
+      if (!menuDrops(Date.now() - touchedAt)) return;
       props.onLongPress({ latitude: e.lngLat.lat, longitude: e.lngLat.lng });
     });
     const turned = () => setTurn({ bearing: Math.trunc(instance.getBearing()), pitch: Math.trunc(instance.getPitch()) });

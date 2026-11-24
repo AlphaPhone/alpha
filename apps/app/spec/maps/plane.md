@@ -134,6 +134,32 @@ pure def lawTilesRunAtMostThePool(wanted: int, dropped: int): bool =
 pure def lawACancelledTileHoldsNoPlace(wanted: int): bool = tilesRunning(wanted, wanted) == 0
 ```
 
+### A pin press is one finger held still, and the menu that follows the same hold drops nothing more
+
+A press starts only while exactly one finger is down; a second finger makes it a pinch and ends the
+press. It drops a pin once the finger has stayed within 10 pixels for 500 milliseconds; moving
+farther is a pan. A secondary click, or the map's menu opened without a finger, drops a pin at once,
+but a menu that opens within 1500 milliseconds of a finger going down is the menu Android opens for
+that same hold, already timed as a press, and drops nothing.
+
+```quint
+pure val longPressMs = 500
+pure val pressSlopPx = 10
+pure val touchMenuMs = 1500
+pure def pressCounts(fingers: int): bool = fingers == 1
+pure def pressDrops(heldMs: int, movedPx: int): bool = heldMs >= longPressMs and movedPx <= pressSlopPx
+pure def menuDrops(sinceTouchMs: int): bool = sinceTouchMs >= touchMenuMs
+pure val fingersValues = Set(0, 1, 2, 3)
+pure val heldMsValues = Set(0, 499, 500, 2000)
+pure val movedPxValues = Set(0, 10, 11)
+pure val sinceTouchMsValues = Set(0, 499, 1499, 1500, 100000)
+pure def lawOnlyOneFingerPresses(fingers: int): bool = pressCounts(fingers) iff fingers == 1
+pure def lawAPanOrAShortHoldDropsNothing(heldMs: int, movedPx: int): bool =
+  (heldMs < longPressMs or movedPx > pressSlopPx) implies not(pressDrops(heldMs, movedPx))
+pure def lawTheMenuOfAHeldFingerDropsNoSecondPin(sinceTouchMs: int, heldMs: int): bool =
+  (heldMs <= sinceTouchMs and sinceTouchMs < touchMenuMs) implies not(menuDrops(sinceTouchMs))
+```
+
 ### The camera goes to what the owner picked, on every map
 
 Every map Alpha draws, the world map and the Cloud rasters alike, covers the world, so the camera
