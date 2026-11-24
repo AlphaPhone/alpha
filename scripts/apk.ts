@@ -155,7 +155,13 @@ function policyProblems(apk: DistributionInput, facts: ManifestFacts, exportedCo
   for (const name of apk.names.filter(entry => DEVELOPMENT_ENTRY.test(entry))) problems.push(`Development entry ${name} is packaged`);
   if (facts.application.usesCleartextTraffic !== AAPT_FALSE)
     problems.push(`usesCleartextTraffic must be false (found ${facts.application.usesCleartextTraffic ?? "unset"})`);
-  if (mode === "release" && !facts.application.networkSecurityConfig) problems.push("Release manifest has no networkSecurityConfig");
+  if (mode === "release") {
+    // Upstream's build type: a release APK is a declared, non-debuggable application.
+    const buildType = buildTypeOf(apk.xml);
+    if (buildType !== "ReleaseBuild")
+      problems.push(buildType === "DebuggableBuild" ? "Release APK is debuggable" : "Release APK declares no application, so its build type is unread");
+    if (!facts.application.networkSecurityConfig) problems.push("Release manifest has no networkSecurityConfig");
+  }
   if (facts.application.allowBackup !== AAPT_FALSE)
     problems.push(`allowBackup must be false (found ${facts.application.allowBackup ?? "unset"})`);
   for (const component of facts.exported) {
@@ -185,6 +191,7 @@ function policyProblems(apk: DistributionInput, facts: ManifestFacts, exportedCo
 /**
  * Pure release-policy assessment. `apk` holds aapt dumps, zip entry names and
  * the development class names found in dex. Returns `{ facts, problems }`.
+ * A release APK must be upstream's ReleaseBuild (declared and not debuggable).
  */
 export function distributionProblems(apk: DistributionInput, { mode, appId = CANONICAL_APP_ID }: DistributionOptions = {}) {
   // The caller selects the admitted installation identity. Only product-owned names move;
