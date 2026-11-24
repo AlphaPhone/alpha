@@ -70,26 +70,36 @@ def verify(apk, release=False):
             raise ValueError('The pinned workflow worker is not packaged')
         if packaged('assets/agent/' + WORKER + WORKER_REQUIRED[0]) != worker_sha:
             raise ValueError('The packaged workflow worker differs from the bundle pin')
-        inventory = json.loads(archive.read('assets/agent/inventory.json'))
+        inventory_bytes = archive.read('assets/agent/inventory.json')
+        if inventory_bytes != (STAGED / 'inventory.json').read_bytes():
+            raise ValueError('Packaged runtime inventory differs from the staged payload')
+        inventory = json.loads(inventory_bytes)
         rows = inventory.get('files') if isinstance(inventory, dict) and inventory.get('schema') == 1 else None
         if not isinstance(rows, list) or not rows:
             raise ValueError('Invalid runtime inventory')
+        packaged_abis = {name.split('/')[1] for name in names if name.startswith('lib/') and name.count('/') >= 2}
         checks, listed = 0, set()
         for row in rows:
             path, expected, size = row.get('path'), row.get('sha256'), row.get('size')
             if not isinstance(path, str) or path in listed or '..' in path.split('/') or type(size) is not int:
                 raise ValueError('Invalid runtime inventory row')
             listed.add(path)
+            # The payload lists native files for every staged ABI; the release APK is filtered to
+            # arm64-v8a and carries only its own, as the device checks only its own ABI's rows. A debug
+            # APK packages every staged ABI, so it must still carry every row.
+            if release and path == 'lib/x86_64/libeliza_node.so' and 'x86_64' not in packaged_abis:
+                continue
             entry = path if path in names else 'assets/' + path
             if entry not in names or archive.getinfo(entry).file_size != size or packaged(entry) != expected:
                 raise ValueError('Packaged runtime file differs from its inventory: ' + path)
             checks += 1
         lock = json.loads(NODE_LOCK.read_text())
         pins = {row['abi']: row['sha256'] for row in lock.get('entries', [])}
-        packaged_abis = {name.split('/')[1] for name in names if name.startswith('lib/') and name.count('/') >= 2}
         unexpected = packaged_abis - set(ABIS)
         if unexpected:
             raise ValueError(f'Unexpected packaged ABI: {sorted(unexpected)}')
+        if release and packaged_abis - {'arm64-v8a'}:
+            raise ValueError('Release APK must package only arm64-v8a')
         abis = sorted(packaged_abis | ({'arm64-v8a'} if release else set()))
         for abi in abis:
             node = f'lib/{abi}/libeliza_node.so'
