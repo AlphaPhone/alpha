@@ -172,7 +172,6 @@ const apart = (a: { x: number; y: number }, b: { x: number; y: number }) => Math
 export function MapView(props: MapViewProps) {
   const { label, surface, style, drawn = true, children, className } = props;
   const latest = useRef(props);
-  latest.current = props;
   const [map, setMap] = useState<MapLibre>();
   const [turn, setTurn] = useState({ bearing: 0, pitch: 0 });
   const painted = useRef<Painted>({ markers: [], here: undefined, pins: "", spot: "", route: "", camera: "" });
@@ -207,7 +206,7 @@ export function MapView(props: MapViewProps) {
     instance.once("style.load", () => { styleLoaded = true; });
     instance.on("load", () => {
       instance.addSource("route", { type: "geojson", data: lineOf([]) });
-      instance.addLayer({ id: "route-line", type: "line", source: "route", paint: { "line-width": 6, "line-color": getComputedStyle(node).getPropertyValue("--primary") || "#2563eb" } });
+      instance.addLayer({ id: "route-line", type: "line", source: "route", paint: { "line-width": 6, "line-color": getComputedStyle(node).getPropertyValue("--primary") || "currentColor" } });
       painted.current = { markers: [], here: undefined, pins: "", spot: "", route: "", camera: "" };
       paint(instance, painted.current, latest.current, pin);
       setMap(instance);
@@ -258,10 +257,10 @@ export function MapView(props: MapViewProps) {
     };
   }, [drawn, surface, raster]);
 
-  const drawing = JSON.stringify([props.pins, props.here, props.line, props.camera]);
-  const repaint = useCallback((node: HTMLSpanElement | null) => {
-    if (node && map) paint(map, painted.current, latest.current, (key) => latest.current.onPin(key));
-  }, [map, drawing]);
+  const repaint = (node: HTMLSpanElement | null) => {
+    latest.current = props;
+    if (node && map) paint(map, painted.current, props, (key) => latest.current.onPin(key));
+  };
 
   const northUp = () => {
     map?.easeTo({ bearing: 0, pitch: 0, duration: 300 });
@@ -270,8 +269,8 @@ export function MapView(props: MapViewProps) {
 
   return (
     <div className={cn("relative h-72 w-full overflow-hidden rounded-lg bg-muted", className)}>
-      <div ref={mount} role="application" aria-label={label} className="size-full" />
       <span ref={repaint} hidden />
+      <div ref={mount} role="application" aria-label={label} className="size-full" />
       {map && (
         <div className="absolute top-2 right-2 flex flex-col gap-1">
           <Button size="icon" variant="outline" aria-label="Zoom in" onClick={() => map.zoomIn()}><Plus /></Button>

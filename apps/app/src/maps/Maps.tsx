@@ -5,7 +5,7 @@ import { useState, useSyncExternalStore } from "react";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
 import { useMachine as useScreen } from "../../gen/app__maps.react.ts";
-import { googleShown, mode, panPixels } from "../../gen/app__maps.ts";
+import { googleShown, mode, panPixels, saysOutsideCoverage } from "../../gen/app__maps.ts";
 import type { Maps as State, SavedNotice } from "../../gen/app__maps.ts";
 import type { Machine as ScreenMachine } from "../../gen/app__maps.effect.vibe";
 import { useMachine as useCredits } from "../../gen/app__maps__credits.react.ts";
@@ -113,6 +113,11 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
   const after = way?.turns[state.trip.turn + 1];
   const ahead = way?.turns.slice(state.trip.turn) ?? [];
   const room = hasRoom(state.saved, state.place);
+  const inside = spot === undefined || !coverage?.available
+    || coverage.regions.some(({ bounds: [west, south, east, north] }) => {
+      const at = degreesOf(spot.at);
+      return at.lng >= west && at.lng <= east && at.lat >= south && at.lat <= north;
+    });
   return (
     <section aria-label="Maps" className="flex flex-col gap-3 p-4">
       {state.link.coverage.status === "Failed" && !holding(state.link) && (
@@ -242,6 +247,7 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
           <p className="text-muted-foreground">{spot.category || "Place"}</p>
           {spot.address !== undefined && <p>{spot.address}</p>}
           {spot.hours !== undefined && <p>{spot.hours}</p>}
+          {coverage?.available && saysOutsideCoverage(state, inside) && <p className="text-sm text-muted-foreground">{`This location is outside ${coverage.sources.data} coverage.`}</p>}
           <div className="flex flex-wrap gap-2">
             {can({ type: "openDirections" }) && <Button onClick={() => void send({ type: "openDirections" })}><Navigation />Directions</Button>}
             {can({ type: "handOn", kind: "SharePlace" }) && <Button variant="outline" onClick={() => void send({ type: "handOn", kind: "SharePlace" })}><Share2 />Share</Button>}

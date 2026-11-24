@@ -43,6 +43,7 @@ type Maps = {
   fromEvent: int, question: Question, review: V::Review, asked: int, telling: A::Attempt,
   startLat: int, startLng: int, pinning: bool, pressing: bool, presses: int, pressedAt: int,
   pressLat: int, pressLng: int, keepable: bool, notice: SavedNotice, alternatives: int, chosen: int,
+  details: R::Read,
 }
 
 pure val initial: Maps = {
@@ -52,6 +53,7 @@ pure val initial: Maps = {
   fromEvent: 0, question: NoQuestion, review: V::unreviewed, asked: 0, telling: A::plan(0),
   startLat: 0, startLng: 0, pinning: false, pressing: false, presses: 0, pressedAt: 0,
   pressLat: 0, pressLng: 0, keepable: true, notice: NoNotice, alternatives: 0, chosen: 0,
+  details: R::unread,
 }
 
 pure val accountValues = Set(1, 2)
@@ -75,6 +77,8 @@ pure val pressValues = Set(1, 2)
 pure val routesValues = Set(1, 3)
 pure val indexValues = Set(0, 1)
 pure val weight_chooseRoute = 10
+pure val weight_readDetails = 10
+pure val weight_answerDetails = 20
 pure val weight_cloudWaits = 5
 pure val weight_waitEnded = 10
 pure val weight_pressMap = 5
@@ -133,6 +137,7 @@ type Effect =
   | FindForAgent({ query: str })
   | PlanRoute({ ticket: int, origin: N::Origin, travel: N::Travel, place: int, lat: int, lng: int })
   | MakePin({ lat: int, lng: int })
+  | ReadDetails({ ticket: int, place: int })
   | StartLocation({ session: int, once: bool })
   | StopLocation
   | AskLocation
@@ -172,7 +177,7 @@ pure def voided(r: V::Review): V::Review = V::revise(V::dismiss(r))
 pure def chosen(place: int, m: Maps): Maps =
   if (place == m.place) m
   else { ...m, place: place, directions: false, sheet: Half, trip: N::forgetRoute(m.trip),
-    question: NoQuestion, review: voided(m.review) }
+    question: NoQuestion, review: voided(m.review), details: cleared(m.details) }
 
 pure def cleared(r: R::Read): R::Read = { ...N::withdrawn(r), status: R::Idle }
 ```
@@ -197,7 +202,7 @@ pure def goBack(m: Maps): Stepped =
   if (m.trip.guidance != N::Stopped) endGuidance(quiet)
   else if (m.directions) { state: { ...quiet, directions: false, link: withoutFinder(m.link) }, out: finderStops(m.link) }
   else if (m.place != 0)
-    { state: { ...quiet, place: 0, trip: N::forgetRoute(m.trip), sheet: if (m.searching) Full else Peek,
+    { state: { ...quiet, place: 0, details: cleared(m.details), trip: N::forgetRoute(m.trip), sheet: if (m.searching) Full else Peek,
         review: voided(m.review) }, out: List() }
   else { state: { ...quiet, searching: false, query: "", search: cleared(m.search), results: 0, sheet: Peek }, out: List() }
 ```
@@ -524,6 +529,35 @@ pure def stepOnlyThePlaceShownIsHandedOn(before: Maps, after: Maps, out: List[Ef
     | HandedOn(h) => h.place == before.place and h.place > 0 and (h.kind == EtaShare implies before.trip.route != 0)
     | _ => true
   })
+```
+
+### A place's details are read from its provider once it is on the card, and shown only while it still is
+
+```quint
+pure def canReadDetails(m: Maps, place: int): bool =
+  place > 0 and place == m.place and C::working(m.link) and not(C::holding(m.link)) and m.details.status == R::Idle
+
+pure def readDetails(m: Maps, place: int): Stepped =
+  val asked = R::ask(m.details)
+  { state: { ...m, details: asked }, out: List(ReadDetails({ ticket: asked.ticket, place: place })) }
+
+pure def canAnswerDetails(m: Maps, ticket: int, ok: bool): bool = R::canAnswer(m.details, ticket)
+
+pure def answerDetails(m: Maps, ticket: int, ok: bool): Maps = { ...m, details: R::answer(m.details, ok) }
+
+pure def stepDetailsAreForThePlaceShown(before: Maps, after: Maps, out: List[Effect]): bool =
+  out.every(e => match e { | ReadDetails(d) => d.place == after.place and d.place > 0 | _ => true })
+```
+
+### A place outside every region the provider covers keeps its coordinates and says so
+
+The card reads "This location is outside <provider> coverage.", naming the
+provider's data, and the place keeps its coordinates and its actions.
+
+```quint
+pure def saysOutsideCoverage(m: Maps, inside: bool): bool = C::working(m.link) and m.place > 0 and not(inside)
+
+pure def lawOnlyAPlaceOutsideIsTold(m: Maps): bool = not(saysOutsideCoverage(m, true))
 ```
 
 ### A saved place can be on the card
@@ -872,7 +906,7 @@ pure def changeAccount(m: Maps, account: int): Stepped =
   val guided = m.link.locator == C::Guide
   val link = C::changeAccount(if (guided) C::stopLocating(m.link) else m.link, account)
   { state: { ...m, link: link, trip: N::retireTrip(m.trip), searching: false, query: "",
-      search: cleared(m.search), results: 0, recent: List(), place: 0, directions: false, sheet: Peek,
+      search: cleared(m.search), results: 0, recent: List(), place: 0, details: cleared(m.details), directions: false, sheet: Peek,
       question: NoQuestion, review: voided(m.review), pinning: false, pressing: false },
     out: (if (guided) List(StopGuidance) else List())
       .concat(if (link.account != 0) List(ReadCoverage({ ticket: link.coverage.ticket })) else List())
@@ -923,6 +957,7 @@ pure def asksCloud(e: Effect): bool =
     | FindPlaces(f) => true
     | FindForAgent(a) => true
     | PlanRoute(p) => true
+    | ReadDetails(d) => true
     | _ => false
   }
 

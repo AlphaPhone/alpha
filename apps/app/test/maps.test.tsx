@@ -189,10 +189,13 @@ describe("Maps in a browser", () => {
     await until(alpha, runtime, Screen, (s) => s.link.provider !== 0 && !s.keepable);
     expect(document.body.textContent).toContain("Saved places could not be read. Existing data has not been replaced.");
     await focus("Search Maps");
-    await fill("Search Maps", "43.73, 7.42");
+    await fill("Search Maps", "48.85, 2.35");
     await enter("Search Maps");
     await until(alpha, runtime, Screen, (s) => s.place !== 0);
     expect([button("Save"), localStorage.getItem("alpha/maps/saved@1")]).toEqual([undefined, "{not json"]);
+
+    // spec/app/maps/index.md, "A place outside every region the provider covers keeps its coordinates and says so"
+    expect([document.body.textContent?.includes("This location is outside Test data coverage."), Boolean(button("Directions"))]).toEqual([true, true]);
   });
 
   it("Back off when Maps asks me to wait (spec/app/maps/connection.md, \"Story: Serve Maps through my cloud account\")", async () => {

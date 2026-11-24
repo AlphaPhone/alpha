@@ -131,6 +131,18 @@ effect function foundForAgent(query: string): void!!(Cloud | Time | Screen.Machi
     |> Effect.map(%, (found) => found.places.map((raw) => atlas.numberOf(spotOf(raw)))))
 }
 
+// spec/app/maps/index.md, "A place's details are read from its provider once it is on the card, and shown only while it still is"
+effect function detailed(ticket: number, place: number): Ev!!(Cloud | Time | Screen.Machine) {
+  const spot = atlas.spot(place)
+  return effect {
+    if (spot === undefined || spot.id === "") throw new Unanswered({ cause: "a pin has no provider details" })
+    const found = try asked((client, signal) => client.mapsPlaceDetails({ id: spot.id }, { signal }))
+    if (found.place === null) throw new Unanswered({ cause: "the provider no longer knows the place" })
+    atlas.numberOf(spotOf(found.place))
+    return { type: "answerDetails", ticket, ok: true }
+  } catch () => ({ type: "answerDetails", ticket, ok: false })
+}
+
 // spec/app/maps/index.md, "Coordinates typed into Search drop a pin"; spec/app/maps/index.md, "A finger held still on the map for half a second drops a pin there, never during guidance"
 effect function pinned(at: Point): Ev!!never {
   const name = `${(at.lat / 1e6).toFixed(5)}, ${(at.lng / 1e6).toFixed(5)}`
@@ -273,8 +285,11 @@ effect function restored(): readonly [Ev]!!KeyValueStore.KeyValueStore {
   const store = try KeyValueStore.KeyValueStore
   const read = (key: string) => store.get(key) |> Effect.orElseSucceed(%, () => undefined)
   const text = try read(savedKey)
-  const previous = text === undefined ? try read(previousKey) : undefined
-  const kept = text !== undefined ? keptIn(text) : previous !== undefined ? previouslyKeptIn(previous) : []
+  let kept = text === undefined ? [] : keptIn(text)
+  if (text === undefined) {
+    const previous = try read(previousKey)
+    if (previous !== undefined) kept = previouslyKeptIn(previous)
+  }
   if (kept === undefined) return [{ type: "savedUnreadable" }]
   return [{ type: "restoreSaved", saved: savedOf(kept) }]
 }
@@ -302,6 +317,7 @@ function carry(fx: Out): Job<Ev, Cloud | Time | Location | Screen.Machine | KeyV
     when { tag: "DrawMap" }: run("draw", Effect.void);
     when { tag: "FindPlaces", let ticket, let query }: answer("search", searched(ticket, query), { type: "answerSearch", ticket, ok: false, found: 0 });
     when { tag: "FindForAgent", let query }: run("agentSearch", foundForAgent(query));
+    when { tag: "ReadDetails", let ticket, let place }: answer("details", detailed(ticket, place), { type: "answerDetails", ticket, ok: false });
     when { tag: "MakePin", let lat, let lng }: answer("pin", pinned({ lat, lng }), { type: "dropPin", place: 0 });
     when { tag: "PlanRoute", let ticket, let origin, let travel, let place, let lat, let lng }: answer("route", planned(ticket, origin, travel, place, { lat, lng }), { type: "answerRoute", ticket, ok: false, turns: 0, routes: 0 });
     when { tag: "StartLocation", let session, let once }: stream("location", located(session, once), { type: "locationLost", session });
@@ -433,6 +449,7 @@ export const maps = together(
   retried,
   opening,
   following(Shell, (shell) => showing(shell, "Maps"), Screen.Machine, (shown): Ev => (shown ? { type: "comeBack" } : { type: "leaveMaps" })),
+  following(Screen.Machine, (state) => [state.place, state.details.status] as const, Screen.Machine, ([place, status]): Ev | undefined => (status !== "Idle" || (atlas.spot(place)?.id ?? "") === "" ? undefined : { type: "readDetails", place })),
   following(Screen.Machine, (state) => [state.link.plane, state.link.basemap === "Cloud"] as const, Credits.Machine, ([plane, raster]): CreditsEv => ({ type: "drawnOn", plane, raster })),
 )
 
