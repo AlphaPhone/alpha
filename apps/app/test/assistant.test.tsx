@@ -8,7 +8,7 @@ import { Machine as Reply } from "../gen/app__assistant__reply.effect.vibe";
 import { Machine as Search } from "../gen/app__assistant__search.effect.vibe";
 import type { Mount } from "../src/areas.ts";
 import assistant from "../src/assistant/index.tsx";
-import { button, closeAll, fill, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, fill, hardware, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -148,6 +148,9 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await fill("Search chats", "noon");
     await until(alpha, runtime, Search, (s) => s.hits.status === "Failed");
     expect(document.body.textContent).toContain("Search did not finish");
+    // spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"
+    await hardware("back");
+    await until(alpha, runtime, Search, (s) => !s.open);
   });
 
   // spec/app/assistant/index.md, "Story: Stop a reply"

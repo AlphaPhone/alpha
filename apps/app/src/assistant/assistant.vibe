@@ -441,6 +441,16 @@ function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell, []> {
   }
 }
 
+// spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"
+/** Back inside Ask Alpha: search first, then the quote; with neither open, Back is the shell's. */
+export const assistantBack = effect {
+  const search = try Search.Machine
+  const composer = try Composer.Machine
+  if ((try search.get()).open) return try contained(search.send({ type: "closeSearch" }), "back")
+  if ((try composer.get()).editor.quote > 0) return try contained(composer.send({ type: "unquote" }), "back")
+  return false
+}
+
 /** Ask Alpha: the conversation, the chats, the composer and search, kept across restarts but search, over the agent and the phone's store. */
 export const assisting = Layer.provideMerge(
   together(
