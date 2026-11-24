@@ -470,7 +470,15 @@ public class AlphaBrowserPlugin extends Plugin {
        return;
       }
       if (!TabNavigation.settlesInDocument(t.loading,t.documentStarted,t.lastCommittedUrl,BrowserWebOrigin.sameOrigin(url,t.lastCommittedUrl))) return;
-      clearTimeout(t); t.committed=true; t.loading=t.web.getProgress()<100; t.url=url; t.lastCommittedUrl=url; t.message.setVisibility(View.GONE); t.web.setVisibility(View.VISIBLE); syncAutofill(t); emit(t);
+      clearTimeout(t);
+      t.committed=true;
+      t.loading=false;
+      t.url=url;
+      t.lastCommittedUrl=url;
+      t.message.setVisibility(View.GONE);
+      t.web.setVisibility(View.VISIBLE);
+      syncAutofill(t);
+      emit(t);
      });
     }
     @Override public void onFormResubmission(WebView v, android.os.Message dontResend, android.os.Message resend) { resubmission(t,dontResend,resend); }
