@@ -939,7 +939,7 @@ function payloadEntries(packaged: boolean) {
     {name: 'On-device elizaOS agent runtime payload', version: 'pinned upstream runtime when present in the APK payload', license: UNVERIFIED,
       source: 'scripts/stage-agent-runtime.ts',
       text: packaged
-        ? 'The staged on-device agent payload is present. Node.js and every npm package bundled into the agent and the workflow worker are listed as separate entries. The remaining payload files (musl loader, libstdc++ and libgcc_s runtime libraries, PGlite WebAssembly and data, PostgreSQL extensions and models) are not enumerated here.'
+        ? 'The staged on-device agent payload is present. Node.js and every npm package bundled into the agent and the workflow worker are listed as separate entries. The remaining payload files (bundled assets such as PGlite WebAssembly and data, and models) are not enumerated here.'
         : 'This build does not include the on-device agent runtime (Node.js and the bundled elizaOS agent), so no agent notices are listed.'},
   ];
 }
