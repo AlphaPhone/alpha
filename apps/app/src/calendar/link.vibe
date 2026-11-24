@@ -4,8 +4,6 @@ import * as Link from "../../gen/app__calendar__link.effect.vibe"
 import type { Effect as Out, Event, Grant, LinksRead, Planned } from "../../gen/app__calendar__link.effect.vibe"
 import { grantOf } from "../../gen/app__calendar__link.ts"
 import * as View from "../../gen/app__calendar.effect.vibe"
-import * as Writes from "../../gen/app__calendar__editor.effect.vibe"
-import { inFlight } from "../../gen/app__calendar__editor.ts"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Cloud } from "../platform/cloud.vibe"
@@ -134,9 +132,8 @@ function carry(fx: Out): Job<Event, Agent | Cloud | Shell.Machine, []> {
 
 // spec/app/calendar/link.md, "Setup waits while Calendar reads or writes, and makes at most three control reviews, two writes and one link read"
 /** Whether Calendar can be read now, and whether a read or a write of it is under way, each time either changes. */
-const calendar = following(View.Machine, (view) => `${view.phone.status !== "Failed" || view.google.status !== "Failed"}:${view.phone.status === "Loading" || view.google.status === "Loading"}`,
+const calendar = following(View.Machine, (view) => `${view.phone.status !== "Failed" || view.google.status !== "Failed"}:${view.writing || view.phone.status === "Loading" || view.google.status === "Loading"}`,
   Link.Machine, (both): Event => ({ type: "calendarChanged", ready: both.startsWith("true"), busy: both.endsWith("true") }))
-const writing = following(Writes.Machine, (form) => inFlight(form), Link.Machine, (busy): Event => ({ type: "calendarChanged", ready: true, busy }))
 
 /** The link: in memory, a run at a time, its answers refused once another owner signs in. */
-export const linking = together(reacting(Link, { carry }), calendar, writing)
+export const linking = together(reacting(Link, { carry }), calendar)
