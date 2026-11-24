@@ -7,9 +7,11 @@
     "node": ">=26"
   },
   "bin": {
-    "eliza-harness": "./src/cli.ts"
+    "eliza-harness": "./src/cli.ts",
+    "alpha-providers": "./src/providers/cli.ts"
   },
   "exports": {
+    ".": "./src/index.ts",
     "./checkout": "./src/checkout.ts",
     "./pack": "./src/pack.ts",
     "./services": "./src/services.ts",

@@ -20,7 +20,7 @@ export const meta: ComponentMeta<SettingsPrivacyPageProps> = {
     onOpen,
     onSetUpAccess,
     onAskFirstChange,
-    shares: { "agent-location": true, "browser-page": true, "gmail-changes": false, "calendar-edits": true },
+    shares: { "agent-location": true, "browser-page": true, "gmail-changes": false, "calendar-edits": true, "telegram-context": false, "slack-context": true },
     onShareChange,
     onHandOver: fn(),
     children: (
