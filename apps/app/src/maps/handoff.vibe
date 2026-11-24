@@ -131,21 +131,25 @@ export const handoffLayer = Layer.effect(MapsHandoff, effect {
       : read.status !== "ready" ? "ReadUnknown" as const : matches === 1 ? "EventFound" as const : matches === 0 ? "EventMissing" as const : "EventAmbiguous" as const
   }
 
-  effect function flushOpen() {
-    const s = opens.send({ type: "flush" }) catch () => undefined
-    if (!s?.checking) return
-    const before = s.opened
-    const raw = native.invoke("AlphaMapsTransport", "consumeNavigationOpen") catch () => undefined
-    const read = raw === undefined ? undefined : (Schema.decodeUnknownEffect(NavigationOpen)(raw) catch () => undefined)
-    const after = opens.send({ type: "readSettles", ok: read !== undefined, found: read?.open === true }) catch () => undefined
-    if (after && after.opened > before) try shell.open("maps")
-    if (after?.checking) try flushOpen()
+  /** Send `event` to the open; when that step starts a read of the notification's record, read it, and any read its reply starts. */
+  effect function readOpen(event: { readonly type: "flush" } | { readonly type: "tapNotification" }) {
+    const reads = (try opens.get()).reads
+    let s = opens.send(event) catch () => undefined
+    let started = s !== undefined && s.checking && s.reads > reads
+    while (s !== undefined && started) {
+      const before = s
+      const raw = native.invoke("AlphaMapsTransport", "consumeNavigationOpen") catch () => undefined
+      const read = raw === undefined ? undefined : (Schema.decodeUnknownEffect(NavigationOpen)(raw) catch () => undefined)
+      s = opens.send({ type: "readSettles", ok: read !== undefined, found: read?.open === true }) catch () => undefined
+      if (s && s.opened > before.opened) try shell.open("maps")
+      started = s !== undefined && s.checking && s.reads > before.reads
+    }
   }
 
   fork.detached Stream.runForEach(shell.states, (state) => effect {
     const ready = canShowMaps(state)
     if ((try opens.get()).ready !== ready) opens.send({ type: "setReady", on: ready }) catch () => undefined
-    if (ready) try flushOpen()
+    if (ready) try readOpen({ type: "flush" })
     const inMaps = state.view === "maps"
     const r = try returns.get()
     if (r.inMaps && !inMaps) returns.send({ type: "leaveMaps" }) catch () => undefined
@@ -256,10 +260,7 @@ export const handoffLayer = Layer.effect(MapsHandoff, effect {
       if (notice) try content.update((c) => ({ ...c, message: notice, ...(after.notice === "EventMoved" || after.notice === "EventChanged" ? { eventOrigin: undefined } : {}) }))
     },
     returnOffered: Stream.map(returns.changes, offered),
-    effect notificationTapped() {
-      opens.send({ type: "tapNotification" }) catch () => undefined
-      try flushOpen()
-    },
+    notificationTapped: () => readOpen({ type: "tapNotification" }),
     effect goneHome() {
       opens.send({ type: "cancelOpen" }) catch () => undefined
       native.invoke("AlphaMapsTransport", "clearNavigationOpen") catch () => undefined
