@@ -1,5 +1,5 @@
 import {fixtureTest} from './support/fixture-build-context.mjs';
-// bun run android:build:fast (scripts/build-android-fast.ts) with stand-ins for `android:sync` and
+// pnpm android:build:fast (scripts/build-android-fast.ts) with stand-ins for `android:sync` and
 // Gradle: the Gradle stand-in zips android/app/src/main/assets into the APK path the way Gradle
 // packages assets, and the real inspection step then reads that zip. These checks run no Gradle
 // and assemble no real APK; they are not APK, emulator or device evidence.
@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {buildAndroidConsumer} from '../vendor/eliza/packages/app/scripts/mobile/android/build-consumer.mjs';
+import {buildAndroidConsumer} from '../vendor/eliza/packages/os/android/build-consumer.mjs';
 import {buildEnv} from '../scripts/build-android.ts';
 import {APK_FLAGS_ENTRY, APK_RUNTIME_ENTRY, FAST_APK, FAST_OUTPUT, PACKAGED_FLAGS, STAGED_RUNTIME, fastBuildOptions, inspect, markFastIteration, parseFastArgs, syncMarkAndBuild, systemPackageInstalled, systemUpdateRefusal} from '../scripts/build-android-fast.ts';
 import {auditWebBundle, FAST_ITERATION_ERROR} from '../scripts/audit-production-bundle.ts';
@@ -40,6 +40,10 @@ const zipEntries = (apk, entries) => {
  } finally {fs.rmSync(dir, {recursive: true, force: true});}
 };
 
+// How the fast build runs its own scripts: Node with the workspace's source conditions.
+const NODE_SCRIPT = ['--conditions=eliza-source', '--import', 'vibelang/register'];
+const INSPECT = [...NODE_SCRIPT, 'scripts/build-android-fast.ts', '--inspect'];
+
 /** A consumer-build runner: Gradle packages src/main/assets as assets/, the verify step runs the real inspect. */
 const fakeRunner = (root, calls) => (command, args, opts) => {
  calls.push({command, args, env: opts.env});
@@ -48,7 +52,7 @@ const fakeRunner = (root, calls) => (command, args, opts) => {
   fs.rmSync(apk, {force: true});
   fs.mkdirSync(path.dirname(apk), {recursive: true});
   execFileSync('zip', ['-q', '-r', apk, 'assets'], {cwd: path.join(root, MAIN)});
- } else if (command === 'bun' && args.join(' ') === 'scripts/build-android-fast.ts --inspect') inspect(root);
+ } else if (command === process.execPath && args.join(' ') === INSPECT.join(' ')) inspect(root);
  else throw new Error(`unexpected command ${command} ${args.join(' ')}`);
 };
 
@@ -106,7 +110,7 @@ fixtureTest('a fast build assembles only the debug launcher with a warm daemon, 
  assert.equal(gradle.length, 1);
  assert.deepEqual(gradle[0].args, ['--daemon', ':app:assembleLauncherDebug']);
  assert.equal(gradle[0].env.ELIZA_DEV_ALLOW_TEST_MOCKS, undefined);
- assert.deepEqual(calls.filter(call => call.command === 'bun').map(call => call.args), [['scripts/build-android-fast.ts', '--inspect']]);
+ assert.deepEqual(calls.filter(call => call.command === process.execPath).map(call => call.args), [INSPECT]);
  const output = path.join(root, FAST_OUTPUT);
  assert.deepEqual(fs.readdirSync(output).sort(), ['apk-manifest.json', 'build-config.json', 'launcher-debug.apk']);
  assert.equal(JSON.parse(fs.readFileSync(path.join(output, 'apk-manifest.json'), 'utf8')).apks[0].fastIteration, true);
@@ -124,15 +128,16 @@ fixtureTest('the marker follows the last sync and reaches the APK the inspection
  const steps = [];
  // android:sync recopies an unmarked build-flags.json from the web build, as the real sync does.
  const run = (command, args) => {
-  steps.push(`${command} ${args.join(' ')}`);
-  if (args.join(' ') === 'run android:sync') write(path.join(root, PACKAGED_FLAGS), JSON.stringify({testMocks: false}));
+  steps.push([command === process.execPath ? 'node' : command, ...args].join(' '));
+  if (command === 'pnpm' && args.join(' ') === 'android:sync') write(path.join(root, PACKAGED_FLAGS), JSON.stringify({testMocks: false}));
  };
  const calls = [];
  syncMarkAndBuild(root, run, () => {
   steps.push('build');
   buildAndroidConsumer({...fastBuildOptions(buildEnv({PATH: process.env.PATH}), root), run: fakeRunner(root, calls)});
  });
- assert.deepEqual(steps, ['bun scripts/android-host.ts', 'bun run android:sync', 'bun scripts/android-host.ts', 'build']);
+ const host = ['node', ...NODE_SCRIPT, 'scripts/android-host.ts'].join(' ');
+ assert.deepEqual(steps, [host, 'pnpm android:sync', host, 'build']);
  const apk = path.join(root, FAST_OUTPUT, FAST_APK);
  assert.deepEqual(JSON.parse(execFileSync('unzip', ['-p', apk, APK_FLAGS_ENTRY], {encoding: 'utf8'})), {testMocks: false, fastIteration: true});
  assert.equal(JSON.parse(fs.readFileSync(path.join(root, FAST_OUTPUT, 'apk-manifest.json'), 'utf8')).fastIteration, true);

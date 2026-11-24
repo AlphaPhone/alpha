@@ -7,6 +7,7 @@
   "test/agent-context-audit.test.mjs",
   "test/agent-launch-token-budget.test.mjs",
   "test/agent-speech-environment.test.mjs",
+  "test/android-build-fast.test.mjs",
   "test/android-gzip-assets.test.mjs",
   "test/android-stage-voice-models.test.mjs",
   "test/aosp-cloud-power-defaults.test.mjs",
@@ -191,7 +192,6 @@
   },
   {
    "files": [
-    "test/android-build-fast.test.mjs",
     "test/android-host.test.mjs",
     "test/android-identity.test.mjs",
     "test/aosp-capabilities.test.mjs",
