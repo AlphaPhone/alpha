@@ -12,9 +12,10 @@ import * as Search from "../../gen/app__assistant__search.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { stepping } from "../shell/shell.vibe"
 import { Agent } from "../platform/agent.vibe"
+import { Device } from "../platform/device.vibe"
 import { ask, outcomeOf } from "../platform/remote.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
-import { type Job, answer, contained, following, hearing, reacting, run, started, stream, tell, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, following, reacting, run, started, stream, tell, together, untimed } from "../runtime/reactor.vibe"
 import { type Board, type Line, Talk, talk } from "./talk.vibe"
 
 service Turns {
@@ -31,7 +32,6 @@ const listing = () => Schema.Struct({ conversations: Schema.Array(titled) })
 const made = () => Schema.Struct({ conversation: titled })
 const page = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.String, role: Schema.Literals(["user", "assistant"]), text: Schema.String, clientMessageId: Schema.optionalKey(Schema.String), failureKind: Schema.optionalKey(Schema.String) })) })
 const hits = () => Schema.Struct({ results: Schema.Array(Schema.Struct({ conversationId: Schema.NonEmptyString, roomId: Schema.NonEmptyString, messageId: Schema.String, text: Schema.String })) })
-const health = () => Schema.Struct({ ready: Schema.Boolean })
 
 const slotted = Schema.fromJsonString(Schema.Struct({ revision: Schema.Int, text: Schema.String, sending: Schema.Boolean }))
 
@@ -140,22 +140,31 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const reply = try Reply.Machine
     const shown = serializer()
     const show = (event: Reply.Event) => { shown.queue(() => runPromise(ignore(reply.send(event)))) }
-    const chats = try (try Chats.Machine).get()
+    const history = try Chats.Machine
+    const conversation = try Conversation.Machine
+    const chats = try history.get()
     const known = board.known(chats.chosen)
     const text = board.outgoing
     const held = (try (try Composer.Machine).get()).held
-    const quoted = held.quote > 0 ? board.latest()[held.quote - 1] : undefined
-    if (known === undefined || text === "") {
+    const quoted = board.line(chats.chosen, held.quote)
+    if (known === undefined || text === "" || (held.quote > 0 && quoted === undefined)) {
       Queue.offerUnsafe(queue, { type: "refuse", ticket })
       Queue.endUnsafe(queue)
       return
     }
     if (controller.conversation?.id !== known.record.id) try ignore(tryPromise(() => controller.bind(known.record)))
+    try ignore(reply.send({ type: "begin", turn: ticket }))
+    const current = try conversation.get()
+    if (!Conversation.canFinish(current, ticket) || current.turn.stopping || current.context.revision !== context.revision || (try history.get()).chosen !== chats.chosen) {
+      if (Conversation.canRefuse(current, ticket)) Queue.offerUnsafe(queue, { type: "refuse", ticket })
+      Queue.endUnsafe(queue)
+      return
+    }
+    const pageTicket = (try history.get()).page.ticket
     const mine: Line = { id: `sent ${ticket}`, mine: true, text, ...(quoted === undefined ? {} : { quote: quoted.text }) }
-    board.append(mine)
+    board.append(pageTicket, chats.chosen, mine)
     board.lastSent = text
     let heard = false
-    try ignore(reply.send({ type: "begin", turn: ticket }))
     board.change({ label: "", failure: undefined })
     const preview = (written: string, provisional: boolean) => {
       if (!heard) Queue.offerUnsafe(queue, { type: "hear", ticket })
@@ -184,12 +193,16 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     show(ending)
     try promise(() => shown.drain())
     const event = ended(ticket, heard, result)
-    const finishing = Conversation.canFinish(try (try Conversation.Machine).get(), ticket)
+    const finishing = Conversation.canFinish(try conversation.get(), ticket)
     if (result?.kind === "Replied" && finishing) {
-      if (result.reply.userMessageId !== undefined) board.rename(mine, result.reply.userMessageId)
-      board.append({ id: result.reply.messageId, mine: false, text: result.reply.text })
+      if (result.reply.userMessageId !== undefined) {
+        board.messageNumber(result.reply.userMessageId)
+        board.rename(pageTicket, mine, result.reply.userMessageId)
+      }
+      board.messageNumber(result.reply.messageId)
+      board.append(pageTicket, chats.chosen, { id: result.reply.messageId, mine: false, text: result.reply.text })
     }
-    if (event.type === "refuse") board.drop(mine)
+    if (event.type === "refuse") board.drop(pageTicket, mine)
     Queue.offerUnsafe(queue, event)
     Queue.endUnsafe(queue)
   })
@@ -271,11 +284,11 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
     if (known === undefined) return { type: "paged", ticket, ok: false, messages: 0 }
     const pivot = around > 0 ? board.messageId(around) : undefined
     const { messages } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(known.record.id)}/messages`, { urlParams: pivot === undefined ? {} : { around: pivot } }), page())
-    const next = new Map(board.snapshot().pages)
-    next.set(ticket, messages.map((one) => ({
+    const recorded = messages.map((one): Line => ({
       id: one.id, mine: one.role === "user", text: one.text, ...(one.failureKind === undefined ? {} : { failure: failures[one.failureKind] ?? "OtherFailure" }),
-    })))
-    board.change({ pages: next })
+    }))
+    const ids = new Set(recorded.map((one) => one.id))
+    board.putPage(ticket, conversation, [...recorded, ...board.page(ticket).filter((one) => !ids.has(one.id))])
     const numbers = messages.map((one) => board.messageNumber(one.id))
     return { type: "paged", ticket, ok: true, messages: Math.max(0, ...numbers) }
   } catch () => ({ type: "paged", ticket, ok: false, messages: 0 })
@@ -297,7 +310,7 @@ effect function making(ticket: number, request: HttpClientRequest.HttpClientRequ
 effect function forked(conversation: number, message: number, ticket: number): Chats.Event!!(Agent | Talk | Attempts | Chats.Machine) {
   const { board } = try Talk
   const known = board.known(conversation)
-  const line = board.latest()[message - 1]
+  const line = board.line(conversation, message)
   if (known === undefined || line === undefined) return { type: "made", ticket, confirmed: false, known: true, conversation: conversation + 1 }
   const key = try (try Attempts).key(ticket)
   return try making(ticket, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`/api/conversations/${encodeURIComponent(known.record.id)}/fork`), { messageId: line.id, requestId: key, expectedText: line.text }))
@@ -414,11 +427,22 @@ function carrySearch(fx: Search.Effect): Job<Search.Event, Agent | Talk | Chats.
 }
 
 // spec/app/assistant/index.md, "The resident agent says whether it can be reached, and losing it ends the turn in flight honestly"
-const reached = hearing(
-  Stream.fromEffect(Effect.orElseSucceed(Effect.map(ask(Agent, HttpClientRequest.get("/api/health"), health()), (one) => one.ready), () => false)),
-  Conversation.Machine,
-  (ready): Conversation.Event => ({ type: "reach", ready }),
-)
+const reached = started(effect {
+  const { life } = try Agent
+  const device = try Device
+  const conversation = try Conversation.Machine
+  const refresh = Stream.concat(Stream.succeed(true), Stream.filter(device.visible, (visible) => visible))
+  const reported = Stream.catch(Stream.map(life.changes, (status) => status.available && status.state === "running"), () => Stream.empty)
+  const seen = Stream.merge(Stream.as(refresh, undefined), reported)
+  const ready = Stream.switchMap(seen, (said) => Stream.fromEffect(said === undefined ? effect {
+    const status = life.status() catch () => undefined
+    return status?.available === true && status.state === "running"
+  } : succeed(said)))
+  try Stream.runForEach(ready, effect (ready) => {
+    const event: Conversation.Event = { type: "reach", ready }
+    if (Conversation.enabled(try conversation.get(), event)) try contained(conversation.send(event), "telling Ask Alpha whether the agent is ready")
+  })
+}, "following Ask Alpha's agent")
 
 /** The Settings pages whose screen the agent is never told: the carrier's identifiers (and Passwords once ported). */
 const sensitivePages: ReadonlySet<Pages.Page> = new Set(["CarrierPage"])
