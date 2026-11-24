@@ -7,6 +7,7 @@ export interface ChannelRelease {
   schema: "alpha-update/v1";
   versionCode: number;
   versionName?: string;
+  notes?: string;
   variant: string;
   signerSha256: string;
   apkUrl: string;
@@ -38,6 +39,8 @@ export interface UpdateScene {
   /** What `installUpdate` answers: none for an install Android took. */
   installAnswer?: "offer-unavailable" | "offer-withdrawn" | "offer-response-changed" | "starting" | "permission-required" | "unsupported";
   state: UpdateState;
+  /** While set, `updateState` cannot be read. */
+  stateUnreadable?: boolean;
   readonly checks: number[];
   readonly installs: Array<{ apkUrl: string; sha256: string; sizeBytes: number; versionCode: number; automatic?: boolean; manifestSha256?: string }>;
   readonly answers: Array<{ activationId: string; ready: boolean }>;
@@ -77,7 +80,7 @@ export function alphaDevice(scene: UpdateScene, now: () => number): Faked {
         scene.installs.push(options);
         return Promise.resolve(scene.installAnswer === undefined ? {} : { status: scene.installAnswer });
       },
-      updateState: () => Promise.resolve({ ...scene.state }),
+      updateState: () => (scene.stateUnreadable === true ? Promise.reject(rejection("Update state unreadable")) : Promise.resolve({ ...scene.state })),
       activateUpdate: (options: { activationId: string; ready: boolean }) => {
         scene.answers.push({ activationId: options.activationId, ready: options.ready });
         return Promise.resolve();

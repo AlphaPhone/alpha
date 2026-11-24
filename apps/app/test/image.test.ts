@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { alphaPrivileged, firstBootGrants } from "../gen/app__image.ts";
 import { aosp, otaArguments, place } from "../scripts/aosp.ts";
 import { inventory, licences } from "../scripts/licences.ts";
+import { kept, release } from "../scripts/release.ts";
 
 const scratches: string[] = [];
 afterEach(() => { for (const directory of scratches.splice(0)) rmSync(directory, { recursive: true, force: true }); });
@@ -113,5 +114,41 @@ describe("Ship what Alpha is built from, with its licences (spec/app/image/licen
     const bill = JSON.parse(readFileSync(sbom, "utf8")) as { bomFormat: string; components: { name: string; properties: unknown[] }[] };
     expect([bill.bomFormat, bill.components.length]).toEqual(["CycloneDX", found.notices.length]);
     expect(bill.components.find((component) => component.name === "Denton typeface")?.properties).toEqual([{ name: "alpha:licence-flag", value: "proprietary-licence-held-outside-repo" }]);
+  });
+});
+
+/** What a `pnpm release` command answered: its result, or the tag and words of the failure it ended with. */
+async function released(...argv: string[]) {
+  const exit = await Effect.runPromiseExit(release(argv));
+  if (Exit.isSuccess(exit)) return { ok: true as const, value: exit.value as Record<string, unknown> };
+  const failure = Cause.squash(exit.cause) as { _tag?: string; message?: string };
+  return { ok: false as const, tag: failure._tag, said: failure.message ?? "" };
+}
+
+describe("Qualify and publish a release (spec/release/index.md, \"Story: Qualify and publish a release\")", () => {
+  it("names the one launcher channel, and keeps the APKs of the repository's earlier names (spec/release/index.md, \"Phones read the launcher channel from the stable release of Alpha's repository, eliza-research/alpha, known by its permanent id; APKs kept under the repository's earlier names stay valid\")", async () => {
+    expect(await released("channel")).toEqual({ ok: true, value: {
+      repository: "eliza-research/alpha", repositoryId: 1396333361, tag: "app-stable-alphacompute",
+      manifestUrl: "https://github.com/eliza-research/alpha/releases/download/app-stable-alphacompute/alpha-update-stable.json",
+    } });
+    expect([
+      kept("https://github.com/alphacompute/alpha/releases/download/app-stable/alpha-phone-80.apk", 80),
+      kept("https://github.com/someone/alpha/releases/download/app-stable-alphacompute/alpha-phone-80.apk", 80),
+      kept("https://github.com/eliza-research/alpha/releases/download/app-stable-alphacompute/alpha-phone-80.apk", 81),
+    ]).toEqual([true, false, false]);
+  });
+
+  it("refuses a build its verification recorded with test mocks, and one with no row at all (spec/release/index.md, \"A build is a candidate only when its verification recorded it distributable: no test mocks, the production bundle audit passed, Alpha's one signer, the runtime packaged with its notices, an on-device voice slot, and for an image its platform certificate\")", async () => {
+    const directory = scratch();
+    const mocked = await released("blockers", "--apk-manifest", write(directory, "mocked.json", { apks: [{ variant: "launcher", build: "release", testMocks: true }] }));
+    const empty = await released("blockers", "--apk-manifest", write(directory, "empty.json", { apks: [] }));
+    expect([mocked.ok, mocked.ok ? "" : mocked.said.includes("\"mocks\":true"), empty.ok]).toEqual([false, true, false]);
+  });
+
+  it("moves nothing for an APK it cannot admit (spec/release/index.md, \"An APK is admitted to the channel only as Alpha's launcher, first signed by Alpha's one key, at the candidate's version, not debuggable, of at most 2 GiB, and with only the entries a release may hold\")", async () => {
+    const directory = scratch();
+    const missing = await released("deliver", "--apk", join(directory, "alpha-phone-122.apk"), "--manifest", write(directory, "m.json", {}), "--version", "122", "--execute");
+    expect([missing.ok, missing.tag !== "UsageError"]).toEqual([false, true]);
+    expect((await released("deliver", "--apk", "x", "--manifest", "y", "--version", "0")).tag).toBe("UsageError");
   });
 });

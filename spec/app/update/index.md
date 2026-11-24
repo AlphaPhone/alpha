@@ -26,6 +26,7 @@ releases, with the digest of the manifest's bytes.
 
 ```quint
 import read as R from "../../kit/read"
+import release as Rel from "../../release"
 
 type Variant = Launcher | OtherVariant
 type Release = {
@@ -38,7 +39,7 @@ pure val noRelease: Release = {
   variant: OtherVariant, signer: 0, version: 0, digest: 0, bytes: 0,
   https: false, credentials: false, url: 0, name: 0, notes: 0, versionName: "", releaseNotes: "",
 }
-pure val maxBytes = 2147483648
+pure val maxBytes = Rel::maxApkBytes
 pure val maxUrl = 2048
 pure val maxReleases = 16
 pure val maxName = 64
