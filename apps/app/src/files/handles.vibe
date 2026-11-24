@@ -22,16 +22,21 @@ export service Handles {
 }
 
 module text {
+  /** A place of the phone's storage, as the store keeps it. */
+  export interface Kept {
+    readonly volume: string
+    readonly path: string
+  }
   /** @throws {never} */
-  export function keyed(spot: Spot): string {
+  export function keyed(spot: Kept): string {
     return JSON.stringify([spot.volume, spot.path])
   }
   /** What the store kept: the spots in the order they were numbered, from 1. @throws {never} */
-  export function kept(raw: string | undefined): Spot[] {
+  export function kept(raw: string | undefined): Kept[] {
     if (raw === undefined) return []
     try {
       const found: unknown = JSON.parse(raw)
-      return Array.isArray(found) ? found.filter((one): one is Spot => typeof one?.volume === "string" && typeof one?.path === "string") : []
+      return Array.isArray(found) ? found.filter((one): one is Kept => typeof one?.volume === "string" && typeof one?.path === "string") : []
     } catch {
       return []
     }
