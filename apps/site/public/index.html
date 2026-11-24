@@ -1,11 +1,12 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" id="top">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#faf9f6">
-    <meta name="description" content="Your phone. Your agent. Meet Alpha, the mobile operating system with a personal agent that lives on your device.">
+    <meta name="theme-color" content="#ffffff">
+    <meta name="description" content="Alpha is an open-source phone with a personal agent built in. Ask for something and it works across your mail, calendar, maps and messages. Available now for Pixel 10 and Pixel 10a.">
     <meta property="og:title" content="Alpha — Your phone. Your agent.">
+    <meta property="og:description" content="An open-source phone with a personal agent built in. Available now for Pixel 10 and Pixel 10a.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://alphaphone.dev/">
     <meta property="og:image" content="https://alphaphone.dev/alpha-home.webp">
@@ -13,62 +14,264 @@
     <link rel="canonical" href="https://alphaphone.dev/">
     <link rel="icon" href="/alpha-mark.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/styles.css">
-    <link rel="stylesheet" href="/demo.css">
     <script type="module" src="/demo.js"></script>
     <title>Alpha — Your phone. Your agent.</title>
   </head>
   <body>
-    <header class="masthead layout">
-      <div class="wordmark">
-        <img src="/alpha-mark.svg" width="30" height="30" alt="">
+    <svg class="sprite" aria-hidden="true" focusable="false">
+      <symbol id="i-mail" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></symbol>
+      <symbol id="i-calendar" viewBox="0 0 24 24"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="2"/></symbol>
+      <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20M2 12h20"/></symbol>
+      <symbol id="i-camera" viewBox="0 0 24 24"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></symbol>
+      <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></symbol>
+      <symbol id="i-pin" viewBox="0 0 24 24"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></symbol>
+      <symbol id="i-note" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+      <symbol id="i-workflow" viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect x="13" y="13" width="8" height="8" rx="2"/></symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+      <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></symbol>
+      <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3ZM19 10v2a7 7 0 0 1-14 0v-2M12 19v3"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+      <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></symbol>
+      <symbol id="i-message" viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="14" height="14" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+      <symbol id="i-github" viewBox="0 0 16 16"><path fill="currentColor" stroke="none" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    </svg>
+
+    <header class="masthead wrap">
+      <a class="wordmark" href="/" aria-label="Alpha home">
+        <span class="mark" aria-hidden="true"></span>
         <span>Alpha</span>
-      </div>
-      <a class="github" href="https://github.com/eliza-research/alpha">GitHub</a>
+      </a>
+      <p class="masthead-note">Now on Pixel 10 and Pixel 10a</p>
+      <a class="button button-quiet" href="https://github.com/eliza-research/alpha">
+        <svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>
+        GitHub
+      </a>
     </header>
-    <main class="hero layout">
-      <div class="hero-copy">
-        <h1>Your phone.<br><em>Your agent.</em></h1>
-        <a class="credit" href="https://alphacompute.ai/">Built by <strong>Alpha Compute</strong></a>
-      </div>
-      <section class="demo" aria-label="Alpha phone demo">
+
+    <main>
+      <div class="tour wrap">
+        <section class="hero" data-scene="home">
+          <h1>Your phone.<br><em>Your agent.</em></h1>
+          <p class="lede">Alpha is an open-source phone with a personal agent built in. Ask for something, and it works across your mail, calendar, maps and messages to get it done.</p>
+          <div class="actions">
+            <a class="button button-primary" href="https://github.com/eliza-research/alpha">
+              <svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>
+              Get Alpha on GitHub
+            </a>
+            <p class="devices">Available now for <strong>Pixel 10</strong> and <strong>Pixel 10a</strong></p>
+          </div>
+          <a class="more" href="#calendar">
+            See what it does
+            <svg class="icon" aria-hidden="true"><use href="#i-down"/></svg>
+          </a>
+        </section>
+
         <div class="stage">
-          <div class="pedestal" aria-hidden="true"></div>
-          <div class="handset" role="img" aria-label="Alpha Home, a chat asking about today’s calendar, and the Calendar app on a 3D phone.">
-            <div class="handset-back" aria-hidden="true"></div>
-            <div class="handset-rail" aria-hidden="true"></div>
-            <div class="handset-keys" aria-hidden="true"></div>
-            <div class="handset-front" aria-hidden="true">
-              <div class="demo-screen">
-                <div class="demo-scene demo-home" data-scene="home" data-active="true">
-                  <img class="demo-capture" src="/alpha-home.webp" width="370" height="813" alt="" fetchpriority="high">
-                </div>
-                <div class="demo-scene demo-chat" data-scene="chat">
-                  <img class="demo-capture" src="/alpha-chat.webp" width="370" height="813" alt="">
-                  <div class="demo-messages">
-                    <p class="demo-request">What’s on my calendar today?</p>
-                    <div class="demo-typing"><i></i><i></i><i></i></div>
-                    <div class="demo-answer">
-                      <p>Two things this afternoon.</p>
-                      <div class="demo-event"><time datetime="13:00">1:00 PM</time><strong>Lunch · Priya</strong></div>
-                      <div class="demo-event"><time datetime="15:00">3:00 PM</time><strong>Design review</strong></div>
+          <div class="stage-pin">
+            <div class="rays" aria-hidden="true"></div>
+            <div class="phone" role="img" aria-label="An Alpha phone. As you scroll it shows Alpha answering a question about today's calendar, asking before it sends a text, finding coffee on a map, summarising an inbox and taking a spoken note.">
+              <div class="screen" data-scene="home" aria-hidden="true">
+                <span class="punch"></span>
+
+                <div class="home">
+                  <div class="cards">
+                    <div class="card card-now">
+                      <div class="card-top"><span>3:00 PM</span><svg class="icon"><use href="#i-calendar"/></svg></div>
+                      <strong>Design review</strong>
+                    </div>
+                    <div class="card card-next">
+                      <strong>Morning brief</strong>
+                      <span>7:02 AM</span>
                     </div>
                   </div>
+                  <ul class="apps">
+                    <li><span class="tile has-dot"><svg class="icon"><use href="#i-mail"/></svg></span>Inbox</li>
+                    <li><span class="tile"><svg class="icon"><use href="#i-calendar"/></svg></span>Calendar</li>
+                    <li><span class="tile"><svg class="icon"><use href="#i-globe"/></svg></span>Browser</li>
+                    <li><span class="tile"><svg class="icon"><use href="#i-camera"/></svg></span>Camera</li>
+                    <li><span class="tile"><svg class="icon"><use href="#i-image"/></svg></span>Photos</li>
+                    <li><span class="tile"><svg class="icon"><use href="#i-pin"/></svg></span>Maps</li>
+                    <li><span class="tile"><svg class="icon"><use href="#i-note"/></svg></span>Notes</li>
+                    <li><span class="tile"><svg class="icon"><use href="#i-folder"/></svg></span>Files</li>
+                    <li><span class="tile"><svg class="icon"><use href="#i-workflow"/></svg></span>Workflows</li>
+                    <li><span class="tile"><svg class="icon"><use href="#i-settings"/></svg></span>Settings</li>
+                    <li><span class="tile"><svg class="icon"><use href="#i-grid"/></svg></span>Apps</li>
+                  </ul>
+                  <div class="ask">
+                    <span class="orb"></span>
+                    <span class="ask-text" data-ask>Ask Alpha</span>
+                    <svg class="icon"><use href="#i-mic"/></svg>
+                  </div>
                 </div>
-                <div class="demo-scene demo-calendar" data-scene="calendar">
-                  <img class="demo-capture" src="/alpha-calendar.webp" width="370" height="813" alt="">
+
+                <div class="sheet">
+                  <div class="sheet-grip"></div>
+                  <div class="sheet-head">
+                    <span class="orb"></span>
+                    <strong>Alpha</strong>
+                    <svg class="icon"><use href="#i-down"/></svg>
+                  </div>
+
+                  <div class="thread" data-thread="calendar" data-beats="350,650,1100,260,220">
+                    <p class="said" data-at="1">What’s on my calendar today?</p>
+                    <div class="typing" data-only="2"><i></i><i></i><i></i></div>
+                    <p class="reply" data-at="3">Two things this afternoon.</p>
+                    <div class="event" data-at="4"><time>1:00 PM</time><span><strong>Lunch · Priya</strong><small>Guerrero St</small></span></div>
+                    <div class="event event-now" data-at="5"><time>3:00 PM</time><span><strong>Design review</strong><small>Video call</small></span></div>
+                  </div>
+
+                  <div class="thread" data-thread="text" data-beats="350,650,1100,1500,650,500">
+                    <p class="said" data-at="1">Text Priya I’m running 10 minutes late</p>
+                    <div class="typing" data-only="2"><i></i><i></i><i></i></div>
+                    <div class="approve" data-at="3">
+                      <div class="approve-head"><svg class="icon"><use href="#i-message"/></svg>Text message<span class="approve-state">Sent</span></div>
+                      <p class="approve-to"><span>To</span> Priya Shah</p>
+                      <p class="approve-body">Running about 10 minutes late. See you at 1:10!</p>
+                      <div class="approve-actions">
+                        <span class="chip">Cancel</span>
+                        <span class="chip chip-go"><svg class="icon"><use href="#i-check"/></svg>Send</span>
+                      </div>
+                    </div>
+                    <p class="reply" data-at="6">Sent. I’ll tell you when she replies.</p>
+                  </div>
+
+                  <div class="thread" data-thread="maps" data-beats="350,650,1100,420,200,200,200">
+                    <p class="said" data-at="1">Coffee near lunch?</p>
+                    <div class="typing" data-only="2"><i></i><i></i><i></i></div>
+                    <p class="reply" data-at="3">Three within a five-minute walk.</p>
+                    <div class="map" data-at="4">
+                      <i class="road r1"></i><i class="road r2"></i><i class="road r3"></i><i class="road r4"></i><i class="road r5"></i>
+                      <i class="park"></i>
+                      <b class="here"></b>
+                      <b class="spot s1">1</b><b class="spot s2">2</b><b class="spot s3">3</b>
+                    </div>
+                    <div class="place" data-at="5"><b>1</b><strong>Fog &amp; Filter</strong><span>3 min</span></div>
+                    <div class="place" data-at="6"><b>2</b><strong>Paper Crane Coffee</strong><span>4 min</span></div>
+                    <div class="place" data-at="7"><b>3</b><strong>Second Sun</strong><span>5 min</span></div>
+                  </div>
+
+                  <div class="thread" data-thread="inbox" data-beats="350,650,1200,300,260,260,500">
+                    <p class="said" data-at="1">What needs me in my inbox?</p>
+                    <div class="typing" data-only="2"><i></i><i></i><i></i></div>
+                    <p class="reply" data-at="3">Three need you. The other 41 can wait.</p>
+                    <div class="mail" data-at="4"><span class="avatar">NP</span><span><strong>Northpoint</strong><small>Wants a date for the partner dinner by Friday.</small></span></div>
+                    <div class="mail" data-at="5"><span class="avatar">DO</span><span><strong>Dana Okafor</strong><small>Contract redlines, with two questions for you.</small></span></div>
+                    <div class="mail" data-at="6"><span class="avatar">BO</span><span><strong>Building office</strong><small>Water is off Thursday from 9 to 11.</small></span></div>
+                    <div class="chips" data-at="7"><span class="chip chip-go">Draft replies</span><span class="chip">Show all</span></div>
+                  </div>
+
+                  <div class="compose">
+                    <span>Message Alpha</span>
+                    <span class="compose-mic"><svg class="icon"><use href="#i-mic"/></svg></span>
+                  </div>
+                </div>
+
+                <div class="voice" data-thread="voice" data-beats="500,450,450,450,450,900">
+                  <span class="voice-label">Listening</span>
+                  <span class="voice-orb"><span class="orb"></span></span>
+                  <p class="voice-words">
+                    <span data-at="1">Take a note.</span>
+                    <span data-at="2">The studio</span>
+                    <span data-at="3">gate code</span>
+                    <span data-at="4">is 4417.</span>
+                  </p>
+                  <div class="saved" data-at="6">
+                    <svg class="icon"><use href="#i-note"/></svg>
+                    <span><strong>Studio gate code</strong><small>Saved to Notes</small></span>
+                    <svg class="icon saved-check"><use href="#i-check"/></svg>
+                  </div>
                 </div>
               </div>
-              <span class="handset-camera"></span>
             </div>
+            <nav class="rail" aria-label="Walkthrough">
+              <a href="#top" data-go="home" aria-label="Home" aria-current="true"></a>
+              <a href="#calendar" data-go="calendar" aria-label="Calendar"></a>
+              <a href="#messages" data-go="text" aria-label="Messages and calls"></a>
+              <a href="#maps" data-go="maps" aria-label="Maps"></a>
+              <a href="#inbox" data-go="inbox" aria-label="Inbox"></a>
+              <a href="#voice" data-go="voice" aria-label="Voice"></a>
+            </nav>
           </div>
-          <div class="demo-controls" role="group" aria-label="Phone demo controls" hidden>
-            <button type="button" data-show="home" aria-label="Show Home" aria-pressed="true"></button>
-            <button type="button" data-show="chat" aria-label="Show Chat" aria-pressed="false"></button>
-            <button type="button" data-show="calendar" aria-label="Show Calendar" aria-pressed="false"></button>
-            <button type="button" data-toggle aria-label="Pause automatic playback" aria-pressed="false"><span></span></button>
+        </div>
+
+        <div class="steps">
+          <section class="step" id="calendar" data-scene="calendar">
+            <p class="kicker">Calendar</p>
+            <h2>Ask about your day.</h2>
+            <p>Alpha reads your calendar and answers in a sentence, with the events right there to tap.</p>
+          </section>
+          <section class="step" id="messages" data-scene="text">
+            <p class="kicker">Messages and calls</p>
+            <h2>It asks before it acts.</h2>
+            <p>Before it sends a text, places a call or changes an event, Alpha shows you exactly what it is about to do and waits for your yes.</p>
+          </section>
+          <section class="step" id="maps" data-scene="maps">
+            <p class="kicker">Maps</p>
+            <h2>Find a place without opening an app.</h2>
+            <p>Answers arrive as a map and a short list, inside the conversation. Tap one to go.</p>
+          </section>
+          <section class="step" id="inbox" data-scene="inbox">
+            <p class="kicker">Inbox</p>
+            <h2>Catch up on mail with one question.</h2>
+            <p>Alpha reads your Gmail and tells you what needs you. Then it drafts the replies for you to approve.</p>
+          </section>
+          <section class="step" id="voice" data-scene="voice">
+            <p class="kicker">Voice</p>
+            <h2>Or just say it.</h2>
+            <p>Tap the mic and talk. Alpha listens, answers out loud and does the same work, hands free.</p>
+          </section>
+        </div>
+      </div>
+
+      <section class="yours wrap" aria-labelledby="yours-title">
+        <h2 id="yours-title">The agent lives <em>on the phone.</em></h2>
+        <div class="facts">
+          <div class="fact">
+            <h3>Runs on your device</h3>
+            <p>The agent, its memory and its database run on the phone itself. A cloud account supplies model inference, speech and Gmail.</p>
+          </div>
+          <div class="fact">
+            <h3>Open source</h3>
+            <p>The phone’s interface, its built-in apps and the agent are all on GitHub. Read them, change them, build your own.</p>
+          </div>
+          <div class="fact">
+            <h3>You stay in charge</h3>
+            <p>Alpha asks before it does anything that matters, and shows you what it is about to do.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="get" aria-labelledby="get-title">
+        <div class="get-rays" aria-hidden="true"></div>
+        <div class="wrap get-inner">
+          <p class="kicker">Available now</p>
+          <h2 id="get-title">Put Alpha on your <em>Pixel&nbsp;10</em> or <em>Pixel&nbsp;10a.</em></h2>
+          <p class="get-copy">The source, the build steps and the releases are on GitHub.</p>
+          <div class="actions">
+            <a class="button button-invert" href="https://github.com/eliza-research/alpha">
+              <svg class="icon" aria-hidden="true"><use href="#i-github"/></svg>
+              Get Alpha on GitHub
+              <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg>
+            </a>
+          </div>
+          <div class="clone">
+            <code id="clone-command">git clone https://github.com/eliza-research/alpha</code>
+            <button type="button" class="copy" data-copy="clone-command" hidden>
+              <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg>
+              <span data-copy-label>Copy</span>
+            </button>
           </div>
         </div>
       </section>
     </main>
+
+    <footer class="foot wrap">
+      <span class="wordmark"><span class="mark" aria-hidden="true"></span><span>Alpha</span></span>
+      <a class="credit" href="https://alphacompute.ai/">Built by <strong>Alpha Compute</strong></a>
+      <a class="credit" href="https://github.com/eliza-research/alpha">GitHub</a>
+    </footer>
   </body>
 </html>

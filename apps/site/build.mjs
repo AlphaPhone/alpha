@@ -10,6 +10,8 @@ await cp(new URL('./public/', import.meta.url), output, { recursive: true });
 await Promise.all([
   copyFile(new URL('logo-mark.svg', appAssets), new URL('alpha-mark.svg', output)),
   copyFile(new URL('denton-300.woff2', appAssets), new URL('denton-300.woff2', output)),
+  // Public Sans, Latin: the face the phone itself is set in.
+  copyFile(new URL('fonts/5ed4d31c988e73b25889.woff2', appAssets), new URL('public-sans.woff2', output)),
 ]);
 
 // A returning visitor can still have assets cached from an earlier deployment.

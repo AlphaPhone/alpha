@@ -7,6 +7,7 @@ on:
       - 'apps/site/**'
       - 'apps/app/public/logo-mark.svg'
       - 'apps/app/public/denton-300.woff2'
+      - 'apps/app/public/fonts/5ed4d31c988e73b25889.woff2'
       - '.github/workflows/site-deploy.yml'
 
 permissions:
