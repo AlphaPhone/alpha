@@ -18,23 +18,23 @@ export const meta: ComponentMeta<HomeAppMenuProps> = {
       onAddToHome.mockClear();
       onShowAppInfo.mockClear();
       onClose.mockClear();
-      const menu = await screen.findByRole("dialog", { name: "Clock" });
-      await userEvent.click(within(menu).getByRole("button", { name: "Add to Home" }));
-      await userEvent.click(within(menu).getByRole("button", { name: "App info" }));
+      const menu = await screen.findByRole("menu", { name: "Clock" });
+      await userEvent.click(within(menu).getByRole("menuitem", { name: "Add to Home" }));
+      await userEvent.click(within(menu).getByRole("menuitem", { name: "App info" }));
       await userEvent.keyboard("{Escape}");
       await waitFor(() => expect([onAddToHome.mock.calls.length, onShowAppInfo.mock.calls.length, onClose.mock.calls.length]).toEqual([1, 1, 1]));
     },
     "On Home": async () => {
-      const menu = await screen.findByRole("dialog", { name: "Clock" });
-      await expect([within(menu).queryByRole("button", { name: "Add to Home" }), within(menu).getByText("On Home")]).toEqual([null, expect.anything()]);
+      const menu = await screen.findByRole("menu", { name: "Clock" });
+      await expect([within(menu).queryByRole("menuitem", { name: "Add to Home" }), within(menu).getByRole("menuitem", { name: "On Home" })]).toEqual([null, expect.anything()]);
     },
     Saving: async () => {
-      const menu = await screen.findByRole("dialog", { name: "Clock" });
-      await expect(within(menu).getByRole("button", { name: "Add to Home" })).toBeDisabled();
+      const menu = await screen.findByRole("menu", { name: "Clock" });
+      await expect(within(menu).getByRole("menuitem", { name: "Add to Home" })).toHaveAttribute("aria-disabled", "true");
     },
     "Android busy": async () => {
-      const menu = await screen.findByRole("dialog", { name: "Clock" });
-      await expect(within(menu).queryByRole("button", { name: "App info" })).toBeNull();
+      const menu = await screen.findByRole("menu", { name: "Clock" });
+      await expect(within(menu).queryByRole("menuitem", { name: "App info" })).toBeNull();
     },
   },
 };
