@@ -5,6 +5,7 @@ import { checkOffered } from "../../gen/calendar__availability.effect.vibe"
 import {
   type AvailabilityOutcome, type AvailabilitySource, type NamedCalendarReadContext, type NamedReadOutcome,
   executeCalendarAvailability, executeNamedCalendarRead, CALENDAR_CAPABILITY, CALENDAR_NAMED_READ_CAPABILITY,
+  ReviewedReadsMachine, reviewedReadsMachine,
 } from "@elizaos/plugin-calendar/client"
 import {
   type CalendarAvailabilityOperation, type CalendarAvailabilityResult, type ReadAnswer, type SourcesAnswer, AvailabilityUnavailable,
@@ -78,9 +79,10 @@ function namedOutcome(outcome: NamedReadOutcome): NamedOutcome {
 }
 
 /** The agent request service over the AlphaCalendar plugin and the device action machine. */
-export const requestsLayer = Layer.effect(AgentRequests, effect {
+const requests = Layer.effect(AgentRequests, effect {
   const native = try Native
   const machine = try ActionMachine
+  const namedReads = try ReviewedReadsMachine
   const sheets = try SubscriptionRef.make<RequestSheet>({ kind: "none" })
   const choice = try Ref.make<Deferred.Deferred<readonly string[] | null> | undefined>(undefined)
   const confirm = try Ref.make<Deferred.Deferred<boolean> | undefined>(undefined)
@@ -125,14 +127,18 @@ export const requestsLayer = Layer.effect(AgentRequests, effect {
       return deleteConfirmed(firstReply, mapped, plannerConfirmed, targetMatches)
     },
     effect namedRead(operation: unknown, operationId: string, context: NamedCalendarReadContext, current: () => NamedCalendarReadContext, journalIdentity?: AgentRun["journalIdentity"]) {
-      const outcome: NamedReadOutcome = shareOffered(context.view === "calendar", context.sensitive === true, context.selectedObject !== undefined)
-        ? executeNamedCalendarRead({
-            executeAgent: (input) => effect {
-              return try mapError(native.invoke(PLUGIN, "executeAgent", input), (cause) => new NamedReadUnavailable({ reason: cause._tag })) as { status: string; result?: unknown; feedComplete?: boolean }
-            },
-            cancelAgent: (input) => effect { native.invoke(PLUGIN, "cancelAgent", input) catch () => undefined },
-          }, operation, operationId, context, [CALENDAR_NAMED_READ_CAPABILITY, CALENDAR_CAPABILITY], current, journalIdentity) catch () => ({ status: "failed", summary: "unavailable" }) as NamedReadOutcome
-        : { status: "failed", summary: "Open the event first" }
+      let outcome: NamedReadOutcome = { status: "failed", summary: "Open the event first" }
+      if (shareOffered(context.view === "calendar", context.sensitive === true, context.selectedObject !== undefined)) {
+        const read = executeNamedCalendarRead({
+          executeAgent: (input) => effect {
+            return try mapError(native.invoke(PLUGIN, "executeAgent", input), (cause) => new NamedReadUnavailable({ reason: cause._tag })) as { status: string; result?: unknown; feedComplete?: boolean }
+          },
+          cancelAgent: (input) => effect { native.invoke(PLUGIN, "cancelAgent", input) catch () => undefined },
+        }, operation, operationId, context, [CALENDAR_NAMED_READ_CAPABILITY, CALENDAR_CAPABILITY], current, journalIdentity)
+        provide Layer.succeed(ReviewedReadsMachine, namedReads) {
+          outcome = read catch () => ({ status: "failed", summary: "unavailable" }) as NamedReadOutcome
+        }
+      }
       return { outcome, sentence: SENTENCES[namedSentence(namedOutcome(outcome))] ?? SENTENCES.SaysNotShared! }
     },
     effect availability(operation: unknown, contextTimeZone: string | undefined, current: () => boolean) {
@@ -175,3 +181,6 @@ export const requestsLayer = Layer.effect(AgentRequests, effect {
     },
   }
 })
+
+/** One reviewed-read machine for the lifetime of the phone’s Calendar request service. */
+export const requestsLayer = Layer.provide(requests, reviewedReadsMachine())
