@@ -74,7 +74,7 @@ const failures: Readonly<Record<string, Reply.Failure>> = {
 }
 
 /** Cloud's own codes for an account with no plan allowance and no credits left, as a failed turn names them. */
-const outOfFunds: ReadonlySet<string> = new Set(["insufficient_credits", "allowance_exhausted"])
+export const outOfFunds: ReadonlySet<string> = new Set(["insufficient_credits", "allowance_exhausted"])
 
 // spec/app/assistant/reply.md, "The settled reply is the whole final answer, shown and spoken, never the acknowledgment"; spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"
 function replied(turn: number, result: TurnResult | undefined): Reply.Event {

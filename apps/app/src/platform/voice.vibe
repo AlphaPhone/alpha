@@ -55,6 +55,17 @@ module capacitor {
     return (made ??= registerPlugin<LocalVoicePlugin>("AlphaVoiceCloud"))
   }
 
+  /** The Cloud speech relay's warm-up, which opens its connection to Cloud speech while no conversation runs. */
+  export interface RelayWarmup {
+    prewarmCloudSpeech(options: { environment: string }): Promise<unknown>
+  }
+
+  let relay: RelayWarmup | undefined
+  /** @throws {never} */
+  export function relayPlugin(name: string): RelayWarmup {
+    return (relay ??= registerPlugin<RelayWarmup>(name))
+  }
+
   /** @throws {never} */
   export function makeAbort(): AbortController {
     return new AbortController()
@@ -67,7 +78,7 @@ module capacitor {
     }
   }
 }
-import { localPlugin, makeAbort, makeSessionGuard } from capacitor
+import { localPlugin, makeAbort, makeSessionGuard, relayPlugin } from capacitor
 
 export error VoiceBridgeFailed { method: string; cause: unknown }
 
@@ -217,7 +228,10 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       const warmCloud = network
         ? ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/cloud/warm"), {}), Schema.Unknown))
         : Effect.void
-      try Effect.all([warmDevice, warmCloud], { concurrency: "unbounded" })
+      const warmRelay = network && registered(CLOUD_STREAM_PLUGIN)
+        ? ignore(tryPromise(() => relayPlugin(CLOUD_STREAM_PLUGIN).prewarmCloudSpeech({ environment: DEFAULT_ENV })))
+        : Effect.void
+      try Effect.all([warmDevice, warmCloud, warmRelay], { concurrency: "unbounded" })
     }, effect {
       prewarmFlight = undefined
       try Deferred.succeed(flight, undefined)

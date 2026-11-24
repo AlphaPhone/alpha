@@ -19,6 +19,7 @@ export interface VoiceScene {
   localSpeechStatusCalls: number;
   liveCaptureStatusCalls: number;
   cloudWarmCalls: number;
+  readonly relayWarmups: string[];
   holdEngineCalls: number;
   releaseEngineHoldCalls: number;
   engineHeld: boolean;
@@ -44,6 +45,7 @@ export function voiceScene(): VoiceScene {
     localSpeechStatusCalls: 0,
     liveCaptureStatusCalls: 0,
     cloudWarmCalls: 0,
+    relayWarmups: [],
     holdEngineCalls: 0,
     releaseEngineHoldCalls: 0,
     engineHeld: false,
@@ -123,10 +125,17 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
   };
 }
 
+/** `SpeechStreamBridgePlugin.java`'s `prewarmCloudSpeech`, which eliza's TypeScript definition does not list yet. */
+type RelayWarmup = { prewarmCloudSpeech(input: { environment: string }): Promise<unknown> };
+
 export function elizaCloudSpeech(voice: VoiceScene): Faked {
-  return plugin<ElizaCloudSpeechPlugin, { cloudSpeechEvent: CloudStreamEvent }>((emit) => {
+  return plugin<ElizaCloudSpeechPlugin & RelayWarmup, { cloudSpeechEvent: CloudStreamEvent }>((emit) => {
     voice.emitCloud = (event) => emit("cloudSpeechEvent", event);
     return {
+      prewarmCloudSpeech: ({ environment }) => {
+        voice.relayWarmups.push(environment);
+        return Promise.resolve();
+      },
       startCloudSpeech: ({ sessionId }) => {
         voice.startCloudSpeechCalls += 1;
         voice.activeMicSession = sessionId;
