@@ -11,6 +11,7 @@ import ai.alphacompute.alphaphone.browser.HostRect;
 import ai.alphacompute.alphaphone.browser.TabFrame;
 import ai.alphacompute.alphaphone.browser.TabInputRouter;
 import ai.alphacompute.alphaphone.browser.TabLayer;
+import ai.alphacompute.alphaphone.browser.TabNavigation;
 import ai.eliza.plugins.browsersurface.BrowserAutofillEligibility;
 import ai.eliza.plugins.browsersurface.BrowserBlobCapture;
 import ai.eliza.plugins.browsersurface.BrowserBookmarkStore;
@@ -223,7 +224,7 @@ public class AlphaBrowserPlugin extends Plugin {
  /** Kept separate from dispatch so resolver changes cannot bypass page/owner checks. */
  private java.util.function.Function<Intent,java.util.List<android.content.pm.ResolveInfo>> externalBrowserResolver =
   intent->getContext().getPackageManager().queryIntentActivities(intent,android.content.pm.PackageManager.MATCH_DEFAULT_ONLY|android.content.pm.PackageManager.GET_RESOLVED_FILTER);
- private static class Tab { BrowserReadingWorld readingWorld; BrowserBlobCapture capture; String findQuery; /** Latest main-frame request or redirect target (any thread). */ volatile String pendingMain; /** Main-frame start address before any document history updates. */ String startedMain; /** Origin of a submitted HTTP sign-in whose result is pending; Save waits for it. */ String authSaveOrigin; int authAttempts; boolean passkeys; String id, profile, opener, url = "", error = "", finishedUrl = "", lastCommittedUrl = ""; WebView web; TabFrame frame; TextView message; /** Engine-attested login fields (null when the WebView cannot attest field origins). */ BrowserLoginFields fields; boolean priv, handedOff, loading, dead, committed, autofillEnabled; int httpStatus, autofillVirtualId=View.NO_ID; long navigation; Runnable timeout; }
+ private static class Tab { BrowserReadingWorld readingWorld; BrowserBlobCapture capture; String findQuery; /** Latest main-frame request or redirect target (any thread). */ volatile String pendingMain; /** Main-frame start address before any document history updates. */ String startedMain; /** Origin of a submitted HTTP sign-in whose result is pending; Save waits for it. */ String authSaveOrigin; int authAttempts; boolean passkeys; String id, profile, opener, url = "", error = "", finishedUrl = "", lastCommittedUrl = ""; WebView web; TabFrame frame; TextView message; /** Engine-attested login fields (null when the WebView cannot attest field origins). */ BrowserLoginFields fields; boolean priv, handedOff, loading, dead, committed, autofillEnabled; /** The engine started a new document for the current load. */ boolean documentStarted; /** The host this load moved from HTTP to HTTPS, so a redirect back to HTTP fails instead of looping. */ String upgradedHost = ""; /** The address another browser may open after this page failed, or "". */ String elsewhereUrl = ""; int httpStatus, autofillVirtualId=View.NO_ID; long navigation; Runnable timeout; }
  /** Credentials stay in the framework/provider and the remote document. No bridge API
   * reads fields or replaces Chromium's frame-specific webDomain metadata. The only addition
   * is the committed top-level origin, which the password provider requires to equal the
@@ -342,11 +343,24 @@ public class AlphaBrowserPlugin extends Plugin {
   if(!startedCallback)t.authAttempts=0;
   if(t.readingWorld!=null&&!startedCallback)t.readingWorld.invalidate();
   t.navigation++;if(fileTab==t)cancelFile();
-  clearTimeout(t); t.loading=true; t.committed=false; t.error=""; t.httpStatus=0; t.finishedUrl="";
+  t.loading=true; t.committed=false; t.error=""; t.httpStatus=0; t.finishedUrl=""; t.elsewhereUrl="";
+  t.documentStarted=startedCallback;if(!startedCallback)t.upgradedHost="";
   t.startedMain=startedCallback?t.url:null;
   t.web.setVisibility(View.INVISIBLE); t.message.setText(AlphaBrowserCopy.LOADING); t.message.setVisibility(View.VISIBLE);
-  t.timeout=()->{if(t.loading&&!t.dead)fail(t,PAGE_LOAD_TIMEOUT);};
+  armTimeout(t);
+ }
+ /** A load gets 30 seconds while its tab is on screen. A hidden or paused tab cannot draw its first frame, so its timer stops and starts again when it shows. */
+ private void armTimeout(Tab t) {
+  clearTimeout(t);
+  t.timeout=()->{t.timeout=null;if(!t.loading||t.dead||!t.error.isEmpty())return;if(paused||!t.frame.isShown())return;fail(t,PAGE_LOAD_TIMEOUT,t.url);};
   navigationHandler.postDelayed(t.timeout,30000);
+ }
+ private void resumeTimeout(Tab t) { if(t.loading&&!t.dead&&t.error.isEmpty()&&t.timeout==null)armTimeout(t); }
+ /** Shows the tab's committed page again when the engine still shows it, after a load that left no new document. */
+ private boolean restoreCommitted(Tab t) {
+  if(t.lastCommittedUrl.isEmpty()||!Objects.equals(t.lastCommittedUrl,t.web.getUrl()))return false;
+  clearTimeout(t);t.loading=false;t.committed=true;t.url=t.lastCommittedUrl;t.message.setVisibility(View.GONE);t.web.setVisibility(View.VISIBLE);syncAutofill(t);emit(t);
+  return true;
  }
  private void dispose(Tab t) {
   if(t.readingWorld!=null)t.readingWorld.close();
@@ -397,8 +411,10 @@ public class AlphaBrowserPlugin extends Plugin {
  private boolean safe(String value) {
   try { Uri u = Uri.parse(value); return ("https".equalsIgnoreCase(u.getScheme()) || "http".equalsIgnoreCase(u.getScheme())) && u.getHost() != null && u.getUserInfo() == null && !value.contains("\n") && !value.contains("\r"); } catch (Exception e) { return false; }
  }
- private void fail(Tab t, String message) { finishAuthSave(t,null); disableAutofill(t); clearTimeout(t); t.error = message; t.loading = false; t.committed = false; t.web.stopLoading(); t.web.setVisibility(View.INVISIBLE); t.message.setText(AlphaBrowserCopy.pageError(message)); t.message.setVisibility(View.VISIBLE); emit(t); }
- private JSObject state(Tab t) { JSObject s = new JSObject(); s.put("session", session); s.put("id", t.id); s.put("sequence", ++sequence); s.put("navigation", String.valueOf(t.navigation)); s.put("url", t.url); s.put("title", t.dead ? "" : t.web.getTitle()); s.put("loading", t.loading); s.put("committed", t.committed); s.put("httpStatus", t.httpStatus); s.put("progress", t.dead ? 0 : t.web.getProgress()); s.put("canBack", !t.dead && t.web.canGoBack()); s.put("canForward", !t.dead && t.web.canGoForward()); s.put("error", t.error); s.put("private", t.priv); return s; }
+ private void fail(Tab t, String message) { fail(t,message,""); }
+ /** {@code elsewhere} is the address another browser may try for a normal tab, when the failure is the network's or this WebView's and not a refusal. */
+ private void fail(Tab t, String message, String elsewhere) { finishAuthSave(t,null); disableAutofill(t); clearTimeout(t); t.error = message; t.loading = false; t.committed = false; t.web.stopLoading(); t.web.setVisibility(View.INVISIBLE); t.message.setText(AlphaBrowserCopy.pageError(message)); t.message.setVisibility(View.VISIBLE); t.elsewhereUrl=!t.priv&&BrowserExternalPage.allowed(elsewhere,getBridge().getWebView().getUrl())?elsewhere:""; emit(t); }
+ private JSObject state(Tab t) { JSObject s = new JSObject(); s.put("session", session); s.put("id", t.id); s.put("sequence", ++sequence); s.put("navigation", String.valueOf(t.navigation)); s.put("url", t.url); s.put("title", t.dead ? "" : t.web.getTitle()); s.put("loading", t.loading); s.put("committed", t.committed); s.put("httpStatus", t.httpStatus); s.put("progress", t.dead ? 0 : t.web.getProgress()); s.put("canBack", !t.dead && t.web.canGoBack()); s.put("canForward", !t.dead && t.web.canGoForward()); s.put("error", t.error); s.put("private", t.priv); if(!t.elsewhereUrl.isEmpty())s.put("elsewhereUrl", t.elsewhereUrl); return s; }
  private void emit(Tab t) { if (tabs.get(t.id) == t) notifyListeners("stateChanged", state(t)); }
  /**
   * Capacitor can deliver a call the page made just before the activity was destroyed after
@@ -436,6 +452,8 @@ public class AlphaBrowserPlugin extends Plugin {
    // navigation has committed rather than rejecting an unstarted WebView.
    if (!WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROCESS) || !WebViewCompat.isMultiProcessEnabled()) throw new IllegalStateException();
    WebSettings settings = t.web.getSettings(); settings.setJavaScriptEnabled(true); settings.setDomStorageEnabled(true); settings.setAllowFileAccess(false); settings.setAllowContentAccess(false); settings.setAllowFileAccessFromFileURLs(false); settings.setAllowUniversalAccessFromFileURLs(false); settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW); settings.setJavaScriptCanOpenWindowsAutomatically(false); settings.setSupportMultipleWindows(true); settings.setSaveFormData(false); settings.setSafeBrowsingEnabled(true); t.web.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
+   // Lay pages out and zoom them as Chrome does: a page's viewport tag decides its width (980 CSS px without one), it opens fitted to the screen with readable text, and it pinches unless it forbids that.
+   settings.setUseWideViewPort(true); settings.setLoadWithOverviewMode(true); settings.setLayoutAlgorithm(WebSettings.LayoutAlgorithm.TEXT_AUTOSIZING); settings.setSupportZoom(true); settings.setBuiltInZoomControls(true); settings.setDisplayZoomControls(false);
    // P-19: embedded sign-ins may use third-party cookies in normal tabs only.
    // Apply through the isolated profile and refuse a provider that ignores it.
    CookieManager tabCookies=WebViewCompat.getProfile(t.web).getCookieManager();
@@ -461,7 +479,16 @@ public class AlphaBrowserPlugin extends Plugin {
      if (BrowserExternalHandoff.external(target)) { if (r.isForMainFrame()) handoff(t, target, r.hasGesture()); return true; }
      // A page that already shows keeps showing: only a tap gets a notice, a script's scheme probe stays silent.
      if (!safe(target)) { if (r.isForMainFrame()) { if (t.committed && t.error.isEmpty()) { if (r.hasGesture()) notice(t,"This address type is not supported."); } else fail(t,"This address type is not supported."); } return true; }
-     if (r.isForMainFrame()) t.pendingMain=target;
+     if (r.isForMainFrame()) {
+      String secure=upgradedAddress(target);
+      if (secure!=null) {
+       // A plain-HTTP link or redirect could only fail here, so it goes to HTTPS once per host; HTTPS sending it back to HTTP fails.
+       if (Objects.equals(TabNavigation.httpHost(target),t.upgradedHost)) fail(t,"This site has no secure (HTTPS) connection.",target);
+       else load(t,target);
+       return true;
+      }
+      t.pendingMain=target;
+     }
      return false;
     }
     @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) { if (r.isForMainFrame()) t.pendingMain=r.getUrl().toString(); if (r.isForMainFrame() && !safe(r.getUrl().toString())) return new WebResourceResponse("text/plain","UTF-8",new java.io.ByteArrayInputStream(new byte[0])); return null; }
@@ -474,7 +501,7 @@ public class AlphaBrowserPlugin extends Plugin {
      if (!url.equals(visible) && (!t.loading || t.committed || !url.equals(t.startedMain)
         || !currentDocumentUrl(t,visible))) return;
      if (WebViewCompat.getWebViewRenderProcess(v) == null) { fail(t,"Isolated browser renderer is unavailable."); return; }
-     clearTimeout(t); t.lastCommittedUrl=visible; t.committed=true; t.loading=!(visible.equals(t.finishedUrl) || v.getProgress()==100); t.url=visible; t.message.setVisibility(View.GONE); t.web.setVisibility(View.VISIBLE); finishAuthSave(t,visible); syncAutofill(t); emit(t);
+     clearTimeout(t); t.upgradedHost=""; t.lastCommittedUrl=visible; t.committed=true; t.loading=!(visible.equals(t.finishedUrl) || v.getProgress()==100); t.url=visible; t.message.setVisibility(View.GONE); t.web.setVisibility(View.VISIBLE); finishAuthSave(t,visible); syncAutofill(t); emit(t);
     }
     @Override public void onPageFinished(WebView v, String url) {
      if (!t.error.isEmpty() || !safe(url)) return;
@@ -488,9 +515,27 @@ public class AlphaBrowserPlugin extends Plugin {
      }
      clearTimeout(t); t.loading=false; syncAutofill(t); emit(t);
     }
+    @Override public void doUpdateVisitedHistory(WebView v, String url, boolean isReload) {
+     if (url==null || !safe(url) || !t.error.isEmpty()) return;
+     // A new document's start follows its history update, and it moves the tab's navigation on; the update is read one turn later so only a move that stayed in the shown document counts.
+     long navigation=t.navigation;
+     navigationHandler.post(() -> {
+      if (t.dead || tabs.get(t.id)!=t || t.navigation!=navigation || !t.error.isEmpty() || !url.equals(t.web.getUrl())) return;
+      if (t.committed) {
+       // pushState, replaceState and fragment moves change the address without a page load; Share, page context and the address bar follow it.
+       if (url.equals(t.url)) return;
+       disableAutofill(t); t.navigation++; t.url=url; t.lastCommittedUrl=url; syncAutofill(t); emit(t);
+       return;
+      }
+      // Back, Forward or an address that stayed inside the shown document reports no page start and no first paint.
+      if (!TabNavigation.settlesInDocument(t.loading,t.documentStarted,t.lastCommittedUrl,BrowserWebOrigin.sameOrigin(url,t.lastCommittedUrl))) return;
+      clearTimeout(t); t.committed=true; t.loading=t.web.getProgress()<100; t.url=url; t.lastCommittedUrl=url; t.message.setVisibility(View.GONE); t.web.setVisibility(View.VISIBLE); syncAutofill(t); emit(t);
+     });
+    }
+    @Override public void onFormResubmission(WebView v, android.os.Message dontResend, android.os.Message resend) { resubmission(t,dontResend,resend); }
     @Override public void onReceivedHttpAuthRequest(WebView v, HttpAuthHandler handler, String host, String realm) { httpAuth(t,handler,host,realm); }
     @Override public void onReceivedSslError(WebView v, SslErrorHandler handler, SslError error) { handler.cancel(); fail(t,"Secure connection failed. The certificate was not accepted."); }
-    @Override public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) { if (r.isForMainFrame()) { if (config().debugLogging) android.util.Log.w(config().logTag, "Main-frame network failure code=" + e.getErrorCode()); fail(t,"Page could not load. Check the address and connection, then reload."); } }
+    @Override public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) { if (r.isForMainFrame()) { if (config().debugLogging) android.util.Log.w(config().logTag, "Main-frame network failure code=" + e.getErrorCode()); String failed=r.getUrl().toString(); if (TabNavigation.httpHost(failed)!=null) fail(t,"This site has no secure (HTTPS) connection.",failed); else fail(t,"Page could not load. Check the address and connection, then reload.",safe(failed)?failed:t.url); } }
     @Override public void onReceivedHttpError(WebView v, WebResourceRequest r, WebResourceResponse response) {
      // An HTTP response is still a document: preserve the site's explanation,
      // retry links and traffic challenges. Transport/TLS failures remain fatal.
@@ -877,10 +922,10 @@ public class AlphaBrowserPlugin extends Plugin {
   // A private tab leaves private browsing only after the owner says so, as the menu's
   // "Open in another browser" does. The tap and pop-up rules hold first (LinkHandoff).
   switch(LinkHandoff.decide(fresh,shownSelf,shownOpener,gesture,supported,t.priv||report.priv)){
-   case IGNORE:return;
+   case IGNORE:if(!fresh)settleLeftWeb(t);return;
    case CLOSE_POPUP:closePopup(t);return;
-   case BLOCKED:notice(t,"Blocked a link to another app that opened without a tap.");return;
-   case UNSUPPORTED:notice(report,"This link type is not supported.");if(fresh)closePopup(t);return;
+   case BLOCKED:if(loadFallback(t,raw))return;notice(t,"Blocked a link to another app that opened without a tap.");settleLeftWeb(t);return;
+   case UNSUPPORTED:if(!fresh&&loadFallback(t,raw))return;notice(report,"This link type is not supported.");if(fresh)closePopup(t);else settleLeftWeb(t);return;
    case ASK:{
     long revision=report.navigation,shown=presentationRevision;
     AlertDialog dialog=new AlertDialog.Builder(getActivity()).setTitle(AlphaBrowserCopy.LEAVE_PRIVATE_TITLE).setMessage(AlphaBrowserCopy.LEAVE_PRIVATE_LINK)
@@ -894,12 +939,23 @@ public class AlphaBrowserPlugin extends Plugin {
    default:launchHandoff(t,report,fresh,raw,intent);
   }
  }
+ /** A link to an app that names a web page to use instead (Chrome's browser_fallback_url) opens that page in the tab. */
+ private boolean loadFallback(Tab t,String raw) {
+  String fallback=BrowserExternalHandoff.fallback(raw);
+  if(fallback==null||!safe(fallback))return false;
+  load(t,fallback);return true;
+ }
+ /** A load the host started that went to an app link instead of a page: the tab shows its page again, or asks for an address, rather than waiting out its timer. */
+ private void settleLeftWeb(Tab t) {
+  if(!t.loading||t.committed||t.documentStarted||restoreCommitted(t))return;
+  clearTimeout(t);t.loading=false;t.web.setVisibility(View.INVISIBLE);t.message.setText(AlphaBrowserCopy.LEFT_WEB);t.message.setVisibility(View.VISIBLE);emit(t);
+ }
  private void launchHandoff(Tab t,Tab report,boolean fresh,String raw,Intent intent) {
   for(Tab tab:tabs.values())disableAutofill(tab);
   try{getActivity().startActivity(intent);if(fresh)closePopup(t);}
   catch(android.content.ActivityNotFoundException missing){
    String fallback=BrowserExternalHandoff.fallback(raw);
-   if(fallback!=null&&safe(fallback)){t.url=fallback;loading(t);emit(t);if(t.readingWorld!=null)t.readingWorld.prepare(fallback);t.web.loadUrl(fallback);}
+   if(fallback!=null&&safe(fallback))load(t,fallback);
    else{notice(report,"No app on this device can open this link.");if(fresh)closePopup(t);}
   }
   catch(RuntimeException blocked){notice(report,"This link could not be opened.");if(fresh)closePopup(t);}
@@ -907,7 +963,28 @@ public class AlphaBrowserPlugin extends Plugin {
  private void tabClosed(String id){JSObject event=new JSObject();event.put("session",session);event.put("id",id);notifyListeners("tabClosed",event);}
  /** Close a pop-up after its callback returns; a WebView is not destroyed inside its own callback. */
  private void closePopup(Tab t){navigationHandler.post(()->{if(tabs.get(t.id)!=t)return;tabs.remove(t.id);dispose(t);tabClosed(t.id);});}
- @PluginMethod public void navigate(PluginCall call) { String url=call.getString("url"); if (url==null || !safe(url)) { call.reject("Enter an HTTP or HTTPS address without credentials"); return; } run(call,t -> { t.url=url; loading(t); emit(t); if(t.readingWorld!=null)t.readingWorld.prepare(url); t.web.loadUrl(url); }); }
+ @PluginMethod public void navigate(PluginCall call) { String url=call.getString("url"); if (url==null || !safe(url)) { call.reject("Enter an HTTP or HTTPS address without credentials"); return; } run(call,t -> load(t,url)); }
+ /** The HTTPS form of an address Android would refuse in the clear (typed, agent, bookmark, restored, link or redirect), or null. */
+ private String upgradedAddress(String url) {
+  String host=TabNavigation.httpHost(url);
+  boolean cleartext=host!=null&&android.security.NetworkSecurityPolicy.getInstance().isCleartextTrafficPermitted(host);
+  return TabNavigation.httpsUpgrade(url,cleartext,config().allowLoopback);
+ }
+ /** The host loads {@code url} in the tab, over HTTPS when it would otherwise be refused. */
+ private void load(Tab t,String url) {
+  String secure=upgradedAddress(url),target=secure==null?url:secure;
+  t.url=target; loading(t); if(secure!=null)t.upgradedHost=TabNavigation.httpHost(url); emit(t);
+  if(t.readingWorld!=null)t.readingWorld.prepare(target); t.web.loadUrl(target);
+ }
+ /** Reloading a page that came from a form asks before sending the form again, as Chrome does; anything but Send again keeps the page as it was. */
+ private void resubmission(Tab t,android.os.Message dontResend,android.os.Message resend) {
+  Runnable keep=()->{dontResend.sendToTarget();if(!restoreCommitted(t))fail(t,"Loading stopped. Reload from the menu to try again.");};
+  if(!promptable(t)){keep.run();return;}
+  AlertDialog dialog=new AlertDialog.Builder(getActivity()).setTitle(AlphaBrowserCopy.RESUBMIT_TITLE).setMessage(AlphaBrowserCopy.RESUBMIT_MESSAGE)
+   .setPositiveButton(AlphaBrowserCopy.RESUBMIT,(d,w)->{siteDialogCancel=null;resend.sendToTarget();})
+   .setNegativeButton(AlphaBrowserCopy.CANCEL,null).create();
+  showSiteDialog(t,dialog,keep);
+ }
  @PluginMethod public void command(PluginCall call) { run(call,t -> { String expected=call.getString("navigation");if(expected!=null&&(paused||!getActivity().hasWindowFocus()||siteDialog!=null||!expected.equals(String.valueOf(t.navigation))))throw new IllegalStateException("Browser foreground or document changed"); String op=call.getString("command"); if ("back".equals(op)) { if(t.web.canGoBack()){loading(t);if(t.readingWorld!=null)t.readingWorld.prepareHistory(-1);t.web.goBack();} } else if ("forward".equals(op)) { if(t.web.canGoForward()){loading(t);if(t.readingWorld!=null)t.readingWorld.prepareHistory(1);t.web.goForward();} } else if ("reload".equals(op)) {loading(t);if(t.readingWorld!=null)t.readingWorld.prepare(t.web.getUrl());t.web.reload();} else if ("stop".equals(op)) { clearTimeout(t); if(!t.committed)fail(t,"Loading stopped. Reload from the menu to try again."); else {t.web.stopLoading();t.loading=false;syncAutofill(t);} } else throw new IllegalArgumentException(); emit(t); }); }
  private TabInputRouter tabInputRouter;
  /** Below-host tabs take their gestures through one router placed just above Alpha's WebView. */
@@ -981,6 +1058,7 @@ public class AlphaBrowserPlugin extends Plugin {
    FrameLayout.LayoutParams p=new FrameLayout.LayoutParams(Math.max(0,Math.round(width*d)),Math.max(0,Math.round(height*d)));p.leftMargin=Math.round(x*d);p.topMargin=Math.round(y*d);
    t.frame.setLayoutParams(p);t.frame.setOcclusions(hostRects);t.frame.setHostRectsReceived(layer==TabLayer.BELOW_HOST&&!paused);
    t.frame.setVisibility(paused?View.GONE:View.VISIBLE);syncAutofill(t);
+   if(!paused)resumeTimeout(t);
   } call.resolve();
  }); }
  private boolean bookmarkSession(PluginCall call) {
@@ -1116,19 +1194,24 @@ public class AlphaBrowserPlugin extends Plugin {
   for(Tab tab:tabs.values())disableAutofill(tab);
   shareOutstanding=true;try{pageShare.launch(Intent.createChooser(send,AlphaBrowserCopy.SHARE_PAGE));}catch(RuntimeException failure){shareOutstanding=false;throw failure;}
  }); }
- /** Explicit user handoff of the unchanged visible HTTPS page, or a normal tab's timed-out attempt. */
+ /** Explicit user handoff of the unchanged visible HTTPS page. */
  @PluginMethod public void openExternalBrowser(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;
   Tab t=tabs.get(call.getString("id"));
-  boolean timedOut=Boolean.TRUE.equals(call.getBoolean("timedOut"));
   String changed="The visible HTTPS page changed. Review it again before leaving "+config().hostName+".";
   if(!Objects.equals(session,call.getString("session"))||t==null||t.dead||paused||destroyed||shareOutstanding||pickerOutstanding
-   ||!Objects.equals(presentedId,t.id)||t.loading||!Objects.equals(call.getString("navigation"),String.valueOf(t.navigation))
-   ||!Objects.equals(call.getString("url"),t.url)||!BrowserExternalPage.allowed(t.url,getBridge().getWebView().getUrl())){call.reject(changed);return;}
-  if(timedOut){
-   if(t.priv||t.committed||!PAGE_LOAD_TIMEOUT.equals(t.error)||!t.frame.isShown()||!AlphaDevicePlugin.shareForeground(getActivity())){call.reject(changed);return;}
-  }else if(!t.web.isShown()||!t.committed||!t.error.isEmpty()||!Objects.equals(t.web.getUrl(),t.url)
-   ||(t.priv&&!Boolean.TRUE.equals(call.getBoolean("privateConfirmed")))){call.reject(changed);return;}
-  Intent view=new Intent(Intent.ACTION_VIEW,Uri.parse(t.url)).addCategory(Intent.CATEGORY_BROWSABLE);
+   ||!Objects.equals(presentedId,t.id)||!t.web.isShown()||!t.committed||t.loading||!t.error.isEmpty()
+   ||!Objects.equals(call.getString("navigation"),String.valueOf(t.navigation))||!Objects.equals(call.getString("url"),t.url)||!Objects.equals(t.web.getUrl(),t.url)
+   ||!BrowserExternalPage.allowed(t.url,getBridge().getWebView().getUrl())||(t.priv&&!Boolean.TRUE.equals(call.getBoolean("privateConfirmed")))){call.reject(changed);return;}
+  java.util.ArrayList<Intent> candidates=externalBrowsers(Uri.parse(t.url));
+  if(candidates.isEmpty()){call.reject("No other installed browser can open this page. Use a password or another sign-in method.");return;}
+  Intent chooser=Intent.createChooser(candidates.remove(0),AlphaBrowserCopy.OPEN_ELSEWHERE);
+  chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS,candidates.toArray(new Intent[0]));
+  for(Tab tab:tabs.values())disableAutofill(tab);
+  try{getActivity().startActivity(chooser);call.resolve();}catch(RuntimeException unavailable){call.reject("The other browser could not be opened. Your page remains in "+config().hostName+".");}
+ }); }
+ /** One VIEW intent per installed full browser other than this app, each bound to its activity. */
+ private java.util.ArrayList<Intent> externalBrowsers(Uri page) {
+  Intent view=new Intent(Intent.ACTION_VIEW,page).addCategory(Intent.CATEGORY_BROWSABLE);
   java.util.ArrayList<Intent> candidates=new java.util.ArrayList<>();java.util.HashSet<String> seen=new java.util.HashSet<>();
   for(android.content.pm.ResolveInfo info:externalBrowserResolver.apply(BrowserExternalHandoff.browserProbe())){
    android.content.pm.ActivityInfo activity=info.activityInfo;
@@ -1137,12 +1220,45 @@ public class AlphaBrowserPlugin extends Plugin {
     if(seen.add(component.flattenToString()))candidates.add(new Intent(view).setComponent(component));
    }
   }
-  if(candidates.isEmpty()){call.reject(timedOut?"No other installed browser can open this page.":"No other installed browser can open this page. Use a password or another sign-in method.");return;}
-  Intent chooser=Intent.createChooser(candidates.remove(0),AlphaBrowserCopy.OPEN_ELSEWHERE);
-  chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS,candidates.toArray(new Intent[0]));
+  return candidates;
+ }
+ /**
+  * The owner's Open in browser on a normal tab whose page failed here for the network's or this
+  * WebView's reason: only that address goes, to the default browser's Custom Tab when it has one,
+  * or to the browser chooser. The page must still be the failed one the renderer showed.
+  */
+ @PluginMethod public void openFailedPage(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;
+  Tab t=tabs.get(call.getString("id"));
+  if(!Objects.equals(session,call.getString("session"))||t==null||t.dead||t.priv||paused||destroyed||shareOutstanding||pickerOutstanding
+   ||!Objects.equals(presentedId,t.id)||!t.frame.isShown()||t.loading||t.committed||t.error.isEmpty()
+   ||!AlphaDevicePlugin.shareForeground(getActivity())||!BrowserExternalPage.allowed(t.elsewhereUrl,getBridge().getWebView().getUrl())
+   ||!Objects.equals(call.getString("navigation"),String.valueOf(t.navigation))||!Objects.equals(call.getString("url"),t.elsewhereUrl)){call.reject("The page changed. Try again from the page.");return;}
+  Uri page=Uri.parse(t.elsewhereUrl);
+  java.util.ArrayList<Intent> candidates=externalBrowsers(page);
+  if(candidates.isEmpty()){call.reject("No other installed browser can open this page.");return;}
+  java.util.ArrayList<String> packages=new java.util.ArrayList<>();for(Intent candidate:candidates)packages.add(candidate.getComponent().getPackageName());
   for(Tab tab:tabs.values())disableAutofill(tab);
-  try{getActivity().startActivity(chooser);call.resolve();}catch(RuntimeException unavailable){call.reject("The other browser could not be opened. Your page remains in "+config().hostName+".");}
+  try{
+   String customTabs=androidx.browser.customtabs.CustomTabsClient.getPackageName(getContext(),packages);
+   if(customTabs!=null&&packages.contains(customTabs)){
+    androidx.browser.customtabs.CustomTabsIntent custom=new androidx.browser.customtabs.CustomTabsIntent.Builder().setShowTitle(true).setShareState(androidx.browser.customtabs.CustomTabsIntent.SHARE_STATE_OFF).build();
+    // On a Home host the tab opens in the browser's own task: Home returns to the host's single-task activity, which would finish a page above it.
+    custom.intent.setPackage(customTabs);if(hostIsHome())custom.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+    custom.launchUrl(getActivity(),page);
+   }else{
+    Intent chooser=Intent.createChooser(candidates.remove(0),AlphaBrowserCopy.OPEN_ELSEWHERE);
+    chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS,candidates.toArray(new Intent[0]));
+    getActivity().startActivity(chooser);
+   }
+   call.resolve();
+  }catch(RuntimeException unavailable){call.reject("The other browser could not be opened. Your page remains in "+config().hostName+".");}
  }); }
+ private boolean hostIsHome() {
+  try {
+   android.content.pm.ResolveInfo home=getContext().getPackageManager().resolveActivity(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),android.content.pm.PackageManager.MATCH_DEFAULT_ONLY);
+   return home!=null&&home.activityInfo!=null&&getContext().getPackageName().equals(home.activityInfo.packageName);
+  } catch(RuntimeException unavailable) { return false; }
+ }
  @PluginMethod public void downloads(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;String requested=call.getString("session");if(requested==null||(session!=null&&!Objects.equals(session,requested))){call.reject("Expired browser session");return;}session=requested;for(Tab tab:tabs.values())disableAutofill(tab);String shown=requested;downloads.show(()->{if(destroyed||!Objects.equals(session,shown))return;JSObject event=new JSObject();event.put("session",shown);notifyListeners("showDownloads",event);});call.resolve();}); }
  /** Whether website password fill can work in this browser (no secrets, no tab state). */
  @PluginMethod public void loginFillStatus(PluginCall call) { JSObject result=new JSObject(); boolean available=BrowserLoginFields.supported(); result.put("available",available); if(!available)result.put("reason",BrowserFieldOrigin.UNSUPPORTED); call.resolve(result); }
@@ -1161,6 +1277,7 @@ public class AlphaBrowserPlugin extends Plugin {
    // the same-document Autofill result passes its visibility check.
    t.frame.setVisibility(Objects.equals(presentedId,t.id)?View.VISIBLE:View.GONE);
    syncAutofill(t);
+   if(Objects.equals(presentedId,t.id))resumeTimeout(t);
    JSObject event=state(t);event.put("surfaceResumed",true);notifyListeners("stateChanged",event);
   }
  }

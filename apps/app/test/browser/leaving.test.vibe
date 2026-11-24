@@ -5,7 +5,7 @@ import { BrowserHandoff } from "../../src/browser/handoff.vibe"
 import { PAGE_LOAD_TIMEOUT } from "../../src/browser/messages.ts"
 import { BrowserReviews } from "../../src/browser/reviews.vibe"
 import { BrowserTabs } from "../../src/browser/session.vibe"
-import { callsTo, emit, fakeHost, loadPage, sessionOf, settledTabs, shownBrowser } from "./fakes.vibe"
+import { callsTo, emit, fakeHost, loadPage, report, sessionOf, settledTabs, shownBrowser } from "./fakes.vibe"
 
 // spec/browser/handoff.md, "Story: Open the page I see in another browser"
 it.live("a normal HTTPS page goes to another browser at once, a private one only after the owner confirms it, and a declined one never leaves", () => effect {
@@ -37,35 +37,39 @@ it.live("a normal HTTPS page goes to another browser at once, a private one only
   })
 })
 
-// spec/browser/handoff.md, "A normal HTTPS page that timed out can be opened in another browser from its error panel"
-it.live("the timeout action hands over only the currently visible normal native tab's timed-out HTTPS address", () => effect {
-  const fake = try fakeHost({ answers: { openExternalBrowser: () => new Error("No other installed browser can open this page.") } })
+// spec/browser/page.md, "A page that failed in a normal native tab offers another browser for the address the host named, and nothing else does"; spec/browser/handoff.md, "A failed normal native page can be opened in another browser only from its current error panel"
+it.live("Open in browser on a failed page sends only the address the host named, never for a private tab or a failure without one, and words a refusal", () => effect {
+  const fake = try fakeHost({ answers: { openFailedPage: (args) => args.url === "https://refused.test/" ? new Error("No other installed browser can open this page.") : {} } })
   try scoped(effect {
     provide fake.live {
       const tabs = try BrowserTabs
       const handoff = try BrowserHandoff
       try settledTabs(tabs)
       const session = try sessionOf(fake.calls)
-      const url = "https://example.test/"
-      const id = try loadPage(tabs, fake.events, session, url, "1", 1)
-      const shown = { id, url, navigation: "2" }
-      try handoff.retryTimedOutPage({ ...shown, navigation: "1" })
-      try emit(fake.events, "stateChanged", { session, ...shown, sequence: 2, error: PAGE_LOAD_TIMEOUT })
-      try handoff.retryTimedOutPage({ ...shown, navigation: "1" })
+      const id = try loadPage(tabs, fake.events, session, "https://example.test/", "1", 1)
+      const page = { id, navigation: "2", url: "https://example.test/next" }
+      const failed = { ...page, error: PAGE_LOAD_TIMEOUT }
+      try report(fake.events, session, { ...failed, sequence: 2 })
+      try handoff.openFailed(page)
+      try report(fake.events, session, { ...failed, sequence: 3, elsewhereUrl: page.url })
+      try handoff.openFailed({ ...page, navigation: "1" })
       try SubscriptionRef.set(fake.foreground, { ...shownBrowser, locked: true })
-      try handoff.retryTimedOutPage(shown)
+      try handoff.openFailed(page)
       try SubscriptionRef.set(fake.foreground, shownBrowser)
-      try handoff.retryTimedOutPage(shown)
+      try handoff.openFailed(page)
+      const refused = { id, navigation: "3", url: "https://refused.test/" }
+      try report(fake.events, session, { ...refused, sequence: 4, error: "Page could not load. Check the address and connection, then reload.", elsewhereUrl: refused.url })
+      try handoff.openFailed(refused)
       try tabs.dispatch({ type: "openTab", id: "bpriv", profile: "Private" })
-      try loadPage(tabs, fake.events, session, url, "1", 1)
-      const privatePage = { ...shown, id: "bpriv" }
-      try emit(fake.events, "stateChanged", { session, ...privatePage, sequence: 2, error: PAGE_LOAD_TIMEOUT })
-      try handoff.retryTimedOutPage(privatePage)
-      const calls = try callsTo(fake.calls, "openExternalBrowser")
-      const notices = try Ref.get(fake.toasts)
+      try loadPage(tabs, fake.events, session, "https://private.test/", "4", 1)
+      const privatePage = { id: "bpriv", navigation: "5", url: "https://private.test/next" }
+      try report(fake.events, session, { ...privatePage, sequence: 2, error: failed.error, elsewhereUrl: privatePage.url })
+      try handoff.openFailed(privatePage)
+      const sent = try callsTo(fake.calls, "openFailedPage")
+      const said = try Ref.get(fake.toasts)
       try Effect.try(() => assert.deepStrictEqual(
-        { calls: calls.map(({ args }) => args), notices },
-        { calls: [{ ...shown, timedOut: true, session }], notices: ["No other browser on this phone can open this page."] },
+        { sent: sent.map((c) => [c.args.id, c.args.url, c.args.navigation]), said },
+        { sent: [[id, "https://example.test/next", "2"], [id, "https://refused.test/", "3"]], said: ["No other browser on this phone can open this page."] },
       ))
     }
   })

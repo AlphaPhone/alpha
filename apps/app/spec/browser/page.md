@@ -89,7 +89,9 @@ pure def lawDigitsWithAPortAreSearched(facts: AddressFacts): bool =
 ### A tab is normal or private for its whole life, and its page is the native host's latest report
 
 `sequence` is the native host's event counter; `problem` is the host's reason for a page it could
-not show, which the shell words. A report is a web address (`web`) when it is HTTP or
+not show, which the shell words; `elsewhere` is the address the native host names for another
+browser to try when a normal tab's page failed for the network's or the WebView's reason, and
+empty otherwise. A report is a web address (`web`) when it is HTTP or
 HTTPS with a host, no credentials, clean text and at most 4,096 units; `secure` when it is also
 HTTPS. A settled page is committed, not loading, not failed, not a page only another browser can
 show, and has an address. The limits are the shared browsing session's.
@@ -99,11 +101,11 @@ type Profile = Normal | Private
 type TabPage = {
   url: str, title: str, navigation: str, sequence: int,
   loading: bool, committed: bool, failed: bool, canBack: bool, canForward: bool,
-  externalOnly: bool, web: bool, secure: bool, problem: str,
+  externalOnly: bool, web: bool, secure: bool, problem: str, elsewhere: str,
 }
 pure val blankPage: TabPage = {
   url: "", title: "", navigation: "", sequence: 0, loading: false, committed: false, failed: false,
-  canBack: false, canForward: false, externalOnly: false, web: false, secure: false, problem: "",
+  canBack: false, canForward: false, externalOnly: false, web: false, secure: false, problem: "", elsewhere: "",
 }
 pure val maxTabs = 8
 pure val maxHistory = 100
@@ -113,8 +115,24 @@ pure def settledSecurely(p: TabPage): bool = isSettled(p) and p.secure
 pure def lawASettledSecurePageIsSettled(p: TabPage): bool = settledSecurely(p) implies isSettled(p)
 pure val loadedPage: TabPage = { ...blankPage, url: "https://example.test/", title: "Example", navigation: "1", sequence: 2, committed: true, web: true, secure: true }
 pure val pValues: Set[TabPage] = List(blankPage, loadedPage, { ...loadedPage, loading: true, committed: false },
-  { ...loadedPage, failed: true, committed: false }, { ...loadedPage, secure: false }, { ...loadedPage, externalOnly: true })
+  { ...loadedPage, failed: true, committed: false }, { ...loadedPage, secure: false }, { ...loadedPage, externalOnly: true },
+  { ...loadedPage, failed: true, committed: false, elsewhere: "https://example.test/" })
   .foldl(Set(), (acc, p) => acc.union(Set(p)))
+```
+
+### A page that failed in a normal native tab offers another browser for the address the host named, and nothing else does
+
+The failed page shows Open in browser, which hands only that address to another browser. A private
+tab, a page still loading, a page that loaded and a failure the host gave no address for (a refusal,
+a certificate it did not accept, a stopped load) offer nothing; the browser build's frame surface
+has its own link.
+
+```quint
+pure def offersElsewhere(p: TabPage, priv: bool, native: bool): bool =
+  native and not(priv) and p.failed and not(p.loading) and p.elsewhere != ""
+pure def lawOnlyAFailedNormalNativePageOffersElsewhere(p: TabPage): bool =
+  (offersElsewhere(p, false, true) implies (p.failed and p.elsewhere != "")) and not(offersElsewhere(p, true, true))
+    and not(offersElsewhere(p, false, false)) and (isSettled(p) implies not(offersElsewhere(p, false, true)))
 ```
 
 ### The saved session holds normal tabs with known addresses, the history and the selected saved tab
