@@ -105,6 +105,7 @@ export const nativePlugins = {
     ],
     events: ["alphaUpdateReady", "alphaUpdateSettled"],
   },
+  AlphaCarrierSetup: { reach: "AnyNative", methods: ["read", "readEid", "openSettings"], events: ["foregroundEnded"] },
   AlphaFiles: {
     reach: "AnyNative",
     methods: [
