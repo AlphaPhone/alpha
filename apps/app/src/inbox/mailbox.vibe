@@ -149,8 +149,9 @@ export const layer = Layer.effect(Mailbox, effect {
       try send({ type: "detach" })
       return
     }
-    try send({ type: "show", account: a.selected, epoch: a.readEpoch, folder, query })
-    const s = try machine.get()
+    const changed = try send({ type: "show", account: a.selected, epoch: a.readEpoch, folder, query })
+    const s = changed ?? (try machine.get())
+    if (changed === undefined && (s.phase === "ListLoading" || (s.phase === "ListReady" && !s.cached))) return
     const current = try accounts.owner()
     const account = a.rows.find((r) => r.id === a.selected)
     if (current !== undefined && account !== undefined && a.revoked.every((id) => id !== a.selected)) {
