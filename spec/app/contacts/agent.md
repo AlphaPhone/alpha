@@ -370,13 +370,13 @@ again.
 ```quint
 pure def canActed(r: Request, id: int, by: Actor): bool = by == Device and r.stage == Acting and A::canConclude(r.attempt, id)
 
-pure def concluded(r: Request, done: bool, known: bool): Moved =
+pure def concluded(done: bool, known: bool, r: Request): Moved =
   val attempt = A::conclude(r.attempt, done, known)
   finish(if (attempt.outcome == A::Confirmed) Done else if (attempt.outcome == A::Refused) NotDone else Unsure, { ...r, attempt: attempt })
 
 pure def acted(r: Request, id: int, done: bool, known: bool, by: Actor): Moved =
   if (r.ask == Text and not(known)) { state: { ...r, stage: Confirming }, out: List(ReadBack({ id: r.attempt.id })) }
-  else concluded(r, done, known)
+  else concluded(done, known, r)
 
 pure def canAnswerLost(r: Request, by: Actor): bool = by == Device and r.stage == Acting and r.attempt.outcome == A::Sent
 
@@ -384,11 +384,11 @@ pure def answerLost(r: Request, by: Actor): Moved = acted(r, r.attempt.id, false
 
 pure def canReadBack(r: Request, id: int, by: Actor): bool = by == Device and r.stage == Confirming and A::canConclude(r.attempt, id)
 
-pure def readBack(r: Request, id: int, wasSent: bool, known: bool, by: Actor): Moved = concluded(r, wasSent, known)
+pure def readBack(r: Request, id: int, wasSent: bool, known: bool, by: Actor): Moved = concluded(wasSent, known, r)
 
 pure def canReadBackLost(r: Request, by: Actor): bool = by == Device and r.stage == Confirming
 
-pure def readBackLost(r: Request, by: Actor): Moved = concluded(r, false, false)
+pure def readBackLost(r: Request, by: Actor): Moved = concluded(false, false, r)
 ```
 
 ### A text whose outcome is unknown is read back, never sent again

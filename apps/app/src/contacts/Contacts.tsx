@@ -67,7 +67,7 @@ export function Contacts({ runtime }: ContactsProps) {
             <ListGroup aria-label="Contacts">
               {held.rows.map((row) => (
                 <ListRow key={row.id} aria-label={row.name} title={row.name} detail={row.phones[0] ?? row.emails[0] ?? ""} trailing={row.starred ? <Star aria-label="Favourite" className="size-4" /> : undefined}
-                  disabled={!can({ type: "openContact" })} onClick={() => { set({ tapped: row.id, card: undefined }); void send({ type: "openContact" }); }} />
+                  disabled={!can({ type: "openContact", contact: row.id })} onClick={() => { set({ card: undefined }); void send({ type: "openContact", contact: row.id }); }} />
               ))}
             </ListGroup>
           )}

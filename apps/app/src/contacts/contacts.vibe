@@ -21,12 +21,11 @@ export interface Form {
   readonly notes: string
 }
 
-/** What Contacts counts, kept beside it: the rows listed, the search, the contact the owner tapped and as the phone holds it, the form, and the number to reach. */
+/** What Contacts counts, kept beside it: the rows listed, the search, the open contact as the phone holds it, the form, and the number to reach. */
 export interface Book {
   readonly rows: ReadonlyArray<AddressBookContact>
   readonly next: ContactCursor | undefined
   readonly sought: string
-  readonly tapped: string
   readonly card: ContactDetail | undefined
   readonly form: Form
   readonly reach: string
@@ -34,7 +33,7 @@ export interface Book {
 
 export const blankForm: Form = { givenName: "", familyName: "", phones: [], emails: [], notes: "" }
 
-const empty: Book = { rows: [], next: undefined, sought: "", tapped: "", card: undefined, form: blankForm, reach: "" }
+const empty: Book = { rows: [], next: undefined, sought: "", card: undefined, form: blankForm, reach: "" }
 
 /** The contacts behind Contacts' counts. */
 export service Rows {
@@ -59,14 +58,41 @@ export function sheetOf(found: ContactDetail | Form): Sheet {
   }
 }
 
-/** The form as the phone saves it; notes the phone cannot edit are left out. */
-export function draftOf(form: Form, notable: boolean): ContactDraft {
+/** A contact's name, numbers and addresses as a change leaves them, and its notes where the change names them. */
+export interface Lines {
+  readonly name: string
+  readonly phones: ReadonlyArray<string>
+  readonly emails: ReadonlyArray<string>
+  readonly notes?: string
+  readonly given?: string
+  readonly family?: string
+}
+
+// spec/app/contacts/index.md, "Save writes a form that was changed and has a name, a number or an address"
+/**
+ * `after` as the phone saves it over `card`, the contact as the phone holds it now: a number or address it already
+ * had keeps its label, its name stays as the phone holds it unless the change renames it, and notes the phone cannot
+ * edit are left out.
+ */
+export function draftFrom(card: ContactDetail | undefined, after: Lines): ContactDraft {
+  const renamed = card === undefined || after.name !== card.displayName || (after.given ?? card.givenName) !== card.givenName || (after.family ?? card.familyName) !== card.familyName
+  const notable = card === undefined || card.notes !== undefined
+  const notes = after.notes ?? card?.notes
   return {
-    displayName: [form.givenName, form.familyName].filter((part) => part.trim() !== "").join(" "),
-    givenName: form.givenName, familyName: form.familyName,
-    ...(notable ? { notes: form.notes } : {}),
-    phoneNumbers: form.phones.filter((number) => number.trim() !== "").map((number) => ({ number, type: "mobile" })),
-    emailAddresses: form.emails.filter((address) => address.trim() !== "").map((address) => ({ address, type: "home" })),
+    displayName: after.name,
+    ...(renamed ? (after.given !== undefined || after.family !== undefined ? { givenName: after.given ?? "", familyName: after.family ?? "" } : {}) : { givenName: card.givenName, familyName: card.familyName }),
+    ...(notable && notes !== undefined ? { notes } : {}),
+    phoneNumbers: after.phones.filter((number) => number.trim() !== "").map((number) => card?.phoneNumbers.find((one) => one.number === number) ?? { number, type: "mobile" }),
+    emailAddresses: after.emails.filter((address) => address.trim() !== "").map((address) => card?.emailAddresses.find((one) => one.address === address) ?? { address, type: "home" }),
+  }
+}
+
+/** The form's lines: its name as given and family name joined, unless they are the name the phone already holds. */
+export function linesOfForm(form: Form, card: ContactDetail | undefined): Lines {
+  const unrenamed = card !== undefined && form.givenName === card.givenName && form.familyName === card.familyName
+  return {
+    name: unrenamed ? card.displayName : [form.givenName, form.familyName].filter((part) => part.trim() !== "").join(" "),
+    given: form.givenName, family: form.familyName, phones: form.phones, emails: form.emails, notes: form.notes,
   }
 }
 
@@ -90,10 +116,10 @@ effect function listed(ticket: number, further: boolean): Event!!(Telephony | Ro
 }
 
 // spec/app/contacts/index.md, "Only the newest read of the open contact is shown, and only if it is a contact Alpha can show"
-effect function read(ticket: number): Event!!(Telephony | Rows) {
+effect function read(ticket: number): Event!!(Telephony | Rows | Contacts.Machine) {
   const store = try Rows
-  const tapped = (try store.get()).tapped
-  const found = telephony("get", (c) => c.contacts.get(tapped as ContactId, "ExplicitRead")) catch () => undefined
+  const contact = (try (try Contacts.Machine).get()).contact
+  const found = telephony("get", (c) => c.contacts.get(contact as ContactId, "ExplicitRead")) catch () => undefined
   try store.set({ card: found })
   const blank: Sheet = { names: 0, phones: 0, emails: 0, notes: 0, notable: true }
   return { type: "contactRead", ticket, ok: found !== undefined, seen: found === undefined ? blank : sheetOf(found) }
@@ -110,7 +136,7 @@ effect function written(id: number, change: Change): Event!!(Telephony | Rows) {
   const card = held.card
   const outcome = effect {
     if (change === "Create") {
-      const done = try telephony("createContact", (c) => c.contacts.createContact(draftOf(held.form, true)))
+      const done = try telephony("createContact", (c) => c.contacts.createContact(draftFrom(undefined, linesOfForm(held.form, undefined))))
       return answered(done.status === "saved")
     }
     if (card === undefined) return answered(false)
@@ -119,11 +145,8 @@ effect function written(id: number, change: Change): Event!!(Telephony | Rows) {
       const done = try telephony("remove", (c) => c.contacts.remove(reviewed))
       return answered(done.status === "queued")
     }
-    if (change === "Star") {
-      const done = try telephony("updateContact", (c) => c.contacts.updateContact(reviewed, { ...draftOf({ givenName: card.givenName, familyName: card.familyName, phones: card.phoneNumbers.map((one) => one.number), emails: card.emailAddresses.map((one) => one.address), notes: card.notes ?? "" }, card.notes !== undefined) }))
-      return done.status === "unknown" ? { made: false, known: false } : answered(done.status === "saved")
-    }
-    const done = try telephony("updateContact", (c) => c.contacts.updateContact(reviewed, draftOf(held.form, card.notes !== undefined)))
+    if (change === "Star") return answered(false)
+    const done = try telephony("updateContact", (c) => c.contacts.updateContact(reviewed, draftFrom(card, linesOfForm(held.form, card))))
     return done.status === "unknown" ? { made: false, known: false } : answered(done.status === "saved")
   } catch (failure) => answered(false, failure)
   return { type: "writeAnswered", id, ...outcome }
@@ -165,7 +188,7 @@ const machine = reacting(Contacts, { carry })
 const shown = visiting(on("Contacts"), Contacts.Machine, (showing): Event => (showing ? { type: "show" } : { type: "leave" }))
 
 // spec/app/phone/comms.md, "A view change while the conversation is open keeps the sheet's height and remembers the view it left"
-const subject = following(Contacts.Machine, (state) => (!state.front ? "" : state.opened ? `contacts:contact:${state.card.ticket}` : "contacts:list:"), Comms,
+const subject = following(Contacts.Machine, (state) => (!state.front ? "" : state.opened ? `contacts:contact:${state.contact}` : "contacts:list:"), Comms,
   (key): CommsEvent | undefined => (key === "" ? undefined : { type: "subjectShown", app: "ContactsApp", subject: key === "contacts:list:" ? "ListSubject" : "ContactSubject", key }), "Device")
 
 /** Contacts: resident, so that a form the owner was filling in waits while Contacts is not showing; it reads only while its view is in front. */

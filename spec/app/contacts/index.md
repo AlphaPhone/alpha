@@ -33,7 +33,7 @@ type Sheet = { names: int, phones: int, emails: int, notes: int, notable: bool }
 type Contacts = {
   front: bool, access: P::Permission,
   list: R::Read, rows: int, more: bool, sought: bool, chip: Chip,
-  opened: bool, card: R::Read, held: Sheet, confirming: bool,
+  opened: bool, contact: str, card: R::Read, held: Sheet, confirming: bool,
   form: Form, sheet: Sheet, dirty: bool,
   write: A::Attempt, change: Change,
 }
@@ -43,7 +43,7 @@ pure val blankSheet: Sheet = { names: 0, phones: 0, emails: 0, notes: 0, notable
 pure val initial: Contacts = {
   front: false, access: P::unasked,
   list: R::unread, rows: 0, more: false, sought: false, chip: Everyone,
-  opened: false, card: R::unread, held: blankSheet, confirming: false,
+  opened: false, contact: "", card: R::unread, held: blankSheet, confirming: false,
   form: Shut, sheet: blankSheet, dirty: false,
   write: A::plan(0), change: Create,
 }
@@ -74,6 +74,7 @@ pure def writes(out: List[Effect]): bool = out.some(e => match e { | Write(w) =>
 
 ```quint
 pure val ticketValues = Set(1, 2, 3, 4)
+pure val contactValues = Set("", "7", "8")
 pure val idValues = Set(1, 2, 3)
 pure val countValues = Set(-1, 0, 1, 2, 21)
 pure val seenValues = Set(
@@ -255,12 +256,17 @@ pure def sometimesSettingsNeeded(s: Contacts): bool = s.front and P::needsSettin
 
 ### Opening a contact reads it from the phone afresh
 
-```quint
-pure def canOpenContact(s: Contacts): bool = readable(s) and s.rows > 0 and not(s.opened) and s.form == Shut
+The open contact is named by the phone's ID for it, which stays the same
+however often it is read again.
 
-pure def openContact(s: Contacts): Moved =
+```quint
+pure def canOpenContact(s: Contacts, contact: str): bool = readable(s) and s.rows > 0 and not(s.opened) and s.form == Shut and contact != ""
+
+pure def openContact(s: Contacts, contact: str): Moved =
   val card = R::ask(s.card)
-  { state: { ...s, opened: true, card: card, held: blankSheet }, out: List(Fetch({ source: Card, ticket: card.ticket })) }
+  { state: { ...s, opened: true, contact: contact, card: card, held: blankSheet }, out: List(Fetch({ source: Card, ticket: card.ticket })) }
+
+pure def alwaysAnOpenContactIsNamed(s: Contacts): bool = s.opened implies s.contact != ""
 ```
 
 ### A sheet holds at most one name and one note, twenty numbers and twenty addresses, and no notes where they are unavailable
@@ -386,6 +392,12 @@ pure def written(change: Change, s: Contacts): Moved =
 ```
 
 ### Save writes a form that was changed and has a name, a number or an address
+
+A change names the version of the contact the phone last read, and is
+written over the contact as the phone holds it: a number or an address it
+already had keeps its label, and its name stays as the phone holds it unless
+the form renames it. A contact changed on the phone since it was read is
+refused as stale: nothing is written, and the form stays for another try.
 
 ```quint
 pure def canSave(s: Contacts, clear: bool): bool =
