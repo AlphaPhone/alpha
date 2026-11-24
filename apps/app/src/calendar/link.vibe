@@ -8,7 +8,7 @@ import * as Shell from "../../gen/app__shell.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { ask } from "../platform/remote.vibe"
-import { type Job, answer, contained, following, reacting, run, together } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, following, reacting, run, started, together } from "../runtime/reactor.vibe"
 
 const base = "/api/lifeops/calendar"
 
@@ -135,5 +135,14 @@ function carry(fx: Out): Job<Event, Agent | Cloud | Shell.Machine, []> {
 const calendar = following(View.Machine, (view) => `${view.phone.status !== "Failed" || view.google.status !== "Failed"}:${view.writing || view.phone.status === "Loading" || view.google.status === "Loading"}`,
   Link.Machine, (both): Event => ({ type: "calendarChanged", ready: both.startsWith("true"), busy: both.endsWith("true") }))
 
+// spec/app/calendar/link.md, "Story: See whether my agent's Calendar reaches Google"
+/** The account area's read of Google, taken each time Calendar reads the agent's calendar, so the Google row says what the account allows now. */
+const account = started(effect {
+  const view = try View.Machine
+  const link = try Link.Machine
+  try Stream.runForEach(Stream.changesWith(view.changes, (a, b) => a.google.ticket === b.google.ticket && a.owner === b.owner), (state) =>
+    state.owner === 0 ? Effect.void : contained(flatMap(accountRead(), (event) => link.send(event)), "reading what Google allows"))
+}, "reading the Google account for the link")
+
 /** The link: in memory, a run at a time, its answers refused once another owner signs in. */
-export const linking = together(reacting(Link, { carry }), calendar)
+export const linking = together(reacting(Link, { carry }), calendar, account)

@@ -1,6 +1,7 @@
 // spec/app/calendar/index.md, "Story: See only my own account's calendar"; spec/app/calendar/index.md, "A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars"; spec/app/calendar/editor.md, "Another owner signing in closes the editor; the old owner's slot keeps its edits"; spec/app/calendar/link.md, "A result shows only for the owner it ran for; another owner signing in ends setup and refuses its late answers"; spec/app/calendar/deletions.md, "Another owner signing in drops a waiting deletion unsent"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { CloudError } from "@elizaos/cloud/client"
+import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as View from "../../gen/app__calendar.effect.vibe"
 import * as Editor from "../../gen/app__calendar__editor.effect.vibe"
 import * as Link from "../../gen/app__calendar__link.effect.vibe"
@@ -50,8 +51,8 @@ effect function account(): (string | undefined)!!Cloud {
 }
 
 // spec/app/calendar/index.md, "Google's rows are only ever an owner's who is signed in and connected"; spec/app/calendar/index.md, "Connecting an account reads the day from Google; disconnecting takes its rows away at once"
-/** Tell Calendar's machines who is signed in, each time Calendar is built: the view, the form and the Google link change owner together. */
-const session = started(effect {
+/** Tell Calendar's machines who is signed in: the view, the form, the deletions and the Google link change owner together, and whether the agent has Google. */
+effect function tellOwner() {
   const who = try account()
   if (who === undefined) return
   const owner = try numberOf(who)
@@ -65,6 +66,14 @@ const session = started(effect {
   if (owner === 0) return
   const connected = Option.isSome(readFeed(civilDay(try (try Time).now())) catch () => Option.none<ReadonlyArray<Read>>())
   try contained(view.send({ type: "googleChanged", connected }), "telling Calendar of the agent's account")
+}
+
+// spec/app/calendar/index.md, "Story: See only my own account's calendar"
+/** Who is signed in, read when Calendar is built and again each time the shell brings Calendar forward, so a sign-in, a sign-out, a switch of account or a change of Google made elsewhere is followed. */
+const session = started(effect {
+  try tellOwner()
+  const forward = Stream.filter(Stream.changes(Stream.map((try Shell.Machine).changes, (shell) => Shell.showing(shell, "Calendar"))), (front) => front)
+  try Stream.runForEach(forward, () => contained(tellOwner(), "reading who is signed in"))
 }, "reading who is signed in")
 
 // spec/app/calendar/index.md, "A switch of the Calendars sheet hides or shows one calendar"

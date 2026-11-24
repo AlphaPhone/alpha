@@ -230,7 +230,8 @@ pure def stepAWriteTakesTheNextNumber(before: Editor, after: Editor, out: List[E
 ### A saved form closes; a refused one keeps its edits to save again
 
 A change the phone refused because the event moved on is a conflict for the
-owner to choose. A write the agent took as a request for the owner's
+owner to choose. A saved event's day is then the day Calendar shows. A
+write the agent took as a request for the owner's
 approval is made only once the owner approves its card: its form closes,
 nothing is held in doubt, and Calendar says the change waits for approval.
 

@@ -250,8 +250,11 @@ effect function handOff() {
 // spec/app/calendar/index.md, "A read asked for during a write waits for it, and follows it once"; spec/app/calendar/deletions.md, "A refused send shows the event again; a sent deletion hides it until a read no longer has it unchanged"
 /** How write `attempt` ended; the calendar asks to read its day again, which waits for the write and then shows it or releases its doubt. */
 effect function written(attempt: number, kind: "Create" | "Update" | "Remove" | "Reply", id: number, scope: Scope, going: boolean): Event!!(PhoneCalendar | Agent | KeyValueStore.KeyValueStore | Attempts | Time | Editor.Machine | View.Machine | Held.Machine) {
+  const fields = try kept(0, try owner())
   const outcome = try send(attempt, kind, id, scope, going)
-  try contained((try View.Machine).send({ type: "changeCommitted" }), "reading the day again after a write")
+  const view = try View.Machine
+  try contained(view.send({ type: "changeCommitted" }), "reading the day again after a write")
+  if ((kind === "Create" || kind === "Update") && outcome.confirmed && !("filed" in outcome)) try contained(view.send({ type: "pickDay", day: civilDay(fields.begin) }), "showing the saved day")
   if (kind === "Remove") try contained((try Held.Machine).send({ type: "ended", id, done: outcome.confirmed && !("filed" in outcome) }), "telling the deletions how one ended")
   return { type: "written", attempt, confirmed: outcome.confirmed, known: outcome.known, filed: "filed" in outcome && outcome.filed === true }
 }

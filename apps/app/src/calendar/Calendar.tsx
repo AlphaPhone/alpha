@@ -11,7 +11,7 @@ import { useMachine as useView } from "../../gen/app__calendar.react.ts";
 import type * as Changes from "../../gen/app__calendar__agent.ts";
 import { useMachine as useChanges } from "../../gen/app__calendar__agent.react.ts";
 import * as Editor from "../../gen/app__calendar__editor.ts";
-import type * as Link from "../../gen/app__calendar__link.ts";
+import * as Link from "../../gen/app__calendar__link.ts";
 import { useMachine as useLink } from "../../gen/app__calendar__link.react.ts";
 import { setUp } from "./link.vibe";
 import { useTimed } from "../runtime/react.ts";
@@ -548,6 +548,10 @@ const said: Readonly<Record<Link.Said, string>> = {
   UnconfirmedLinks: "Alpha couldn't read the linked events back.", UnsentReview: "Alpha couldn't read sync. Nothing changed.", Linked: "Synced.",
 };
 
+const rowWords: Readonly<Record<Link.GoogleRow, string>> = {
+  RowConnected: "Connected", RowFinishSetup: "Finish setup", RowNotConnected: "Not connected", RowCouldNotCheck: "Couldn't check",
+};
+
 const endings: Readonly<Record<Link.Outcome, string>> = {
   NoOutcome: "Google Calendar", Synced: "Synced", Syncing: "Syncing", NeedsGrant: "Finish setup", NotLinked: "Not linked", Unconfirmed: "Couldn't check",
 };
@@ -561,7 +565,7 @@ function GoogleRow({ runtime }: CalendarProps) {
   const running = l.phase !== "Idle" && l.phase !== "Done";
   return (
     <ListGroup heading="Google Calendar" className="mx-4 my-2">
-      <ListRow title={running ? "Checking…" : view.state.connected || l.ending !== "NoOutcome" ? endings[l.ending] : "Not connected"} detail={said[l.said] || undefined} />
+      <ListRow title={running ? "Checking…" : rowWords[Link.rowOf(l)]} detail={said[l.said] || (l.ending === "NoOutcome" ? undefined : endings[l.ending])} />
       <div className="flex flex-wrap gap-2 p-2">
         {link.can({ type: "start", grant: "Writable" }) ? <Button variant={l.ending === "Synced" ? "outline" : "primary"} onClick={() => void runtime.runPromise(setUp())}>{l.ending === "NoOutcome" ? "Link Google Calendar" : "Check again"}</Button> : null}
         {link.can({ type: "cancel" }) ? <Button variant="ghost" onClick={() => void link.send({ type: "cancel" })}>Cancel</Button> : null}
