@@ -6,6 +6,9 @@ const Positive = Schema.Finite.check(Schema.isGreaterThan(0))
 /** A pixel size a preview reports. */
 export schema PixelSize { width: number; height: number }
 
+/** `ElizaCamera.getDevices`: each camera and the photo aspect ratios it accepts. */
+export schema DeviceList { devices: Array<{ deviceId: string; supportedCaptureAspectRatios?: string[] }> }
+
 /** What `ElizaCamera.startPreview` and `switchCamera` report about the bound lens. */
 export schema PreviewReply {
   width: number

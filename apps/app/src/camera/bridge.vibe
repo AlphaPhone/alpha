@@ -1,7 +1,7 @@
 // spec/camera/viewfinder.md, "Story: Keep the viewfinder only while Camera is in front"; spec/camera/viewfinder.md, "Story: Record videos"; spec/camera/focus.md, "Story: Focus where I tap"; spec/camera/scanDialogs.md, "Story: Keep my scan open while a system picker covers it"
 import { Build } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"
-import { AccessReply, ExportReply, PhotoReply, PickedImage, PreviewReply, RecordingReply, SourceBytes, VideoReply } from "./bridge.schema.vibe"
+import { AccessReply, DeviceList, ExportReply, PhotoReply, PickedImage, PreviewReply, RecordingReply, SourceBytes, VideoReply } from "./bridge.schema.vibe"
 import { browserCamera, pickBrowserImage, readContentImage } from "./browserCamera.ts"
 
 /** A camera, device or picker call failed; `code` is the plugin's code, `UNAVAILABLE` without the plugin, `MALFORMED` for a reply of the wrong shape. */
@@ -32,7 +32,10 @@ export const RECORDING = { quality: "medium", maxDuration: 300, maxFileSize: 104
 /** The phone's camera, its device controls and the system pickers, as Camera and scans reach them. */
 export service CameraBridge {
   readonly browser: boolean
-  startPreview(lens: LensDirection): PreviewReply!CameraFailed
+  /** Start the preview; `captureAspectRatio` is sent only for 16:9, so the default request is unchanged. */
+  startPreview(lens: LensDirection, aspect?: "16:9"): PreviewReply!CameraFailed
+  /** The photo aspect ratios the camera `deviceId` lists; none in the browser build. */
+  aspectsOf(deviceId: string): ReadonlyArray<string>!CameraFailed
   stopPreview(): void!CameraFailed
   setCaptureMode(mode: "photo" | "video"): void!CameraFailed
   switchCamera(lens: LensDirection): PreviewReply!CameraFailed
@@ -83,7 +86,8 @@ export const nativeCameraBridge = Layer.effect(CameraBridge, effect {
   const native = try Native
   return {
     browser: false,
-    startPreview: (lens: LensDirection) => call(native, CAMERA, "startPreview", PreviewReply, { direction: lens, resolution: { width: 1920, height: 1440 }, mirror: lens === "front" }),
+    startPreview: (lens: LensDirection, aspect?: "16:9") => call(native, CAMERA, "startPreview", PreviewReply, { direction: lens, resolution: { width: 1920, height: 1440 }, mirror: lens === "front", ...(aspect === undefined ? {} : { captureAspectRatio: aspect }) }),
+    aspectsOf: (deviceId: string) => Effect.map(call(native, CAMERA, "getDevices", DeviceList), (list) => list.devices.find((device) => device.deviceId === deviceId)?.supportedCaptureAspectRatios ?? []),
     stopPreview: () => run(native, CAMERA, "stopPreview"),
     setCaptureMode: (mode: "photo" | "video") => run(native, CAMERA, "setCaptureMode", { mode, quality: RECORDING.quality }),
     switchCamera: (lens: LensDirection) => call(native, CAMERA, "switchCamera", PreviewReply, { direction: lens }),
@@ -119,6 +123,7 @@ export const nativeCameraBridge = Layer.effect(CameraBridge, effect {
 export const browserCameraBridge = Layer.succeed(CameraBridge, {
   browser: true,
   startPreview: (lens: LensDirection) => lifted("startPreview", () => browserCamera.startPreview(lens)),
+  aspectsOf: () => Effect.succeed([]),
   stopPreview: () => lifted("stopPreview", () => browserCamera.stopPreview()),
   setCaptureMode: () => Effect.void,
   switchCamera: (lens: LensDirection) => lifted("switchCamera", () => browserCamera.switchCamera(lens)),

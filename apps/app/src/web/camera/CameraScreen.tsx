@@ -63,6 +63,7 @@ export function CameraScreen({ onClose }: CameraScreenProps) {
           cycleTimer: () => camera((v) => v.cycleTimer()),
           toggleGrid: () => camera((v) => v.toggleGrid()),
           toggleLight: () => camera((v) => v.toggleLight()),
+          pickAspect: (ratio) => camera((v) => v.pickAspect(ratio)),
           focusAt: (x, y) => camera((v) => v.focusAt(x, y)),
           retry: () => camera((v) => v.retry()),
           allow: () => camera((v) => v.allow()),

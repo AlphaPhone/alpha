@@ -1,7 +1,7 @@
 // spec/camera/viewfinder.md, "Story: Keep the viewfinder only while Camera is in front"; spec/camera/viewfinder.md, "Hiding the page stops the preview, and showing it again starts a fresh one"; spec/camera/viewfinder.md, "Story: Take photos"; spec/camera/viewfinder.md, "Story: Record videos"; spec/camera/viewfinder.md, "Story: Recover when the camera is denied or stops"; spec/camera/focus.md, "Story: Focus where I tap"; spec/camera/recorder.md, "Story: Keep every recording I make, within its limit"
 import {
   Machine as ViewMachine, canAnswerMicNotice, canFlip, canRecord, canReserveShutter, canZoomTo, clampZoom, shutterWanted,
-  type Camera, type Chat, type Event as ViewEvent, type Mode, type RecordStart,
+  type Aspect, type Camera, type Chat, type Event as ViewEvent, type Mode, type RecordStart,
 } from "../../gen/camera__viewfinder.effect.vibe"
 import { Machine as FocusMachine, type Event as FocusEvent } from "../../gen/camera__focus.effect.vibe"
 import { Machine as RecorderMachine, maxBytes, type Event as RecorderEvent } from "../../gen/camera__recorder.effect.vibe"
@@ -37,6 +37,8 @@ export service Viewfinder {
   cycleTimer(): void!!
   toggleGrid(): void!!
   toggleLight(): void!!
+  /** Photo's 4:3 or 16:9, which restarts an idle preview. */
+  pickAspect(ratio: Aspect): void!!
   focusAt(x: number, y: number): void!!
   retry(): void!!
   allow(): void!!
@@ -116,7 +118,7 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
   }
 
   effect function react(before: Camera, after: Camera): void!! {
-    if (after.phase === "PreviewStarting" && (before.phase !== "PreviewStarting" || before.epoch !== after.epoch)) try forkDetach(start(after.epoch, lensOf(after)))
+    if (after.phase === "PreviewStarting" && (before.phase !== "PreviewStarting" || before.epoch !== after.epoch)) try forkDetach(start(after.epoch, lensOf(after), after.aspect))
     if (before.phase !== "PreviewOff" && after.phase === "PreviewOff") {
       try focusSend({ type: "clear" })
       bridge.stopPreview() catch () => undefined
@@ -154,15 +156,24 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
     }
   }
 
-  effect function start(ticket: number, lens: LensDirection): void!! {
-    const answer = try exit(bridge.startPreview(lens))
+  // spec/camera/viewfinder.md, "Photo mode offers 4:3 or 16:9 only when the bound camera lists both, and a new ratio restarts an idle preview"
+  effect function readAspects(ticket: number, deviceId: string): void!! {
+    const listed = bridge.aspectsOf(deviceId) catch () => [] as ReadonlyArray<string>
+    try send({ type: "aspectsRead", ticket, both: listed.includes("4:3") && listed.includes("16:9") })
+  }
+
+  effect function start(ticket: number, lens: LensDirection, aspect: Aspect): void!! {
+    const answer = try exit(bridge.startPreview(lens, aspect === "SixteenNine" ? "16:9" : undefined))
     if (Exit.isSuccess(answer)) {
       const reply = answer.value
       const widest = Math.min(10, Math.max(1, Math.round((reply.minZoom ?? 1) * 10)))
       const longest = Math.max(10, Math.round((reply.maxZoom ?? 1) * 10))
       const ready = try send({ type: "previewReady", ticket, hasFlash: reply.hasFlash === true, widest, longest })
       if (ready === undefined && (try view.get()).phase === "PreviewOff") bridge.stopPreview() catch () => undefined
-      if (ready !== undefined) try send({ type: "sync" })
+      if (ready !== undefined) {
+        try send({ type: "sync" })
+        try forkDetach(readAspects(ticket, reply.deviceId))
+      }
       return
     }
     const failure = Cause.squash(answer.cause)
@@ -410,7 +421,8 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
         if (now.zoom !== 10) try bridge.setZoom(1)
         return try bridge.switchCamera(lensOf(now) === "back" ? "front" : "back")
       } catch () => undefined
-      try send({ type: "flip", ok: turned !== undefined })
+      const flipped = try send({ type: "flip", ok: turned !== undefined })
+      if (turned !== undefined && flipped !== undefined) try forkDetach(readAspects(flipped.epoch, turned.deviceId))
       if (turned === undefined) {
         if (bridge.browser) try send({ type: "bindStopsPreview" })
         else try say("Not supported")
@@ -433,6 +445,9 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
     },
     effect toggleGrid() {
       try send({ type: "toggleGrid" })
+    },
+    effect pickAspect(ratio: Aspect) {
+      try send({ type: "pickAspect", ratio })
     },
     effect toggleLight() {
       const after = try send({ type: "toggleLight" })

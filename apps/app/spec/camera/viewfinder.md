@@ -22,6 +22,7 @@ type Recording = RecordingIdle | RecordingActive | RecordingFinishing
 type StopCause = NoStop | OwnerStopped | LimitStopped | LeftCamera
 type Flash = FlashOff | FlashAuto | FlashOn
 type Lens = BackLens | FrontLens
+type Aspect = FourThree | SixteenNine
 type RecordStart = RecordingStarted | MicrophoneRefused | RecordingNotStarted
 type Grant = AccessGranted | AccessNotGranted | AccessUnreadable
 type Camera = {
@@ -31,7 +32,7 @@ type Camera = {
   recording: Recording, withSound: bool, noSoundChosen: bool, stopCause: StopCause, saidMaxLength: bool, micDenied: bool,
   timer: int, countdown: int, capturing: bool, pendingShot: bool, elapsed: int, recordedBytes: int,
   flash: Flash, hasFlash: bool, light: bool, lens: Lens, zoom: int, widest: int, longest: int, grid: bool,
-  browserRecorder: bool, lightAtStart: bool, zoomAtStart: int,
+  browserRecorder: bool, lightAtStart: bool, zoomAtStart: int, aspect: Aspect, bothAspects: bool,
   volumeKeys: bool, modal: bool, photos: int, lastShotChat: Chat, lastId: str, lastImage: str
 }
 ```
@@ -48,7 +49,7 @@ pure val initial: Camera = {
   recording: RecordingIdle, withSound: true, noSoundChosen: false, stopCause: NoStop, saidMaxLength: false, micDenied: false,
   timer: 0, countdown: 0, capturing: false, pendingShot: false, elapsed: 0, recordedBytes: 0,
   flash: FlashOff, hasFlash: false, light: false, lens: BackLens, zoom: 10, widest: 10, longest: 10, grid: false,
-  browserRecorder: false, lightAtStart: false, zoomAtStart: 10,
+  browserRecorder: false, lightAtStart: false, zoomAtStart: 10, aspect: FourThree, bothAspects: false,
   volumeKeys: false, modal: false, photos: 0, lastShotChat: ChatHidden, lastId: "", lastImage: ""
 }
 pure def ready(c: Camera): bool = c.phase == PreviewReady
@@ -287,7 +288,7 @@ or a zoom the camera no longer has.
 ```quint
 pure def canFlip(c: Camera, ok: bool): bool = active(c) and ready(c) and not(recordingBusy(c)) and not(c.capturing)
 pure def flip(c: Camera, ok: bool): Camera =
-  if (ok) { ...c, lens: if (c.lens == BackLens) FrontLens else BackLens, flash: FlashOff, light: false, zoom: 10, countdown: 0 }
+  if (ok) { ...c, lens: if (c.lens == BackLens) FrontLens else BackLens, flash: FlashOff, light: false, zoom: 10, countdown: 0, aspect: FourThree, bothAspects: false }
   else { ...c, flash: FlashOff, light: false, zoom: 10 }
 pure def stepFlipResetsLensSettings(before: Camera, via: str, after: Camera): bool =
   via == "flip" implies (after.flash == FlashOff and not(after.light) and after.zoom == 10)
@@ -306,6 +307,31 @@ pure def alwaysTileHasAnIdentity(c: Camera): bool = c.lastImage != "" implies c.
 ```quint
 pure def canToggleGrid(c: Camera): bool = c.visible and ready(c)
 pure def toggleGrid(c: Camera): Camera = { ...c, grid: not(c.grid) }
+```
+
+### Photo mode offers 4:3 or 16:9 only when the bound camera lists both, and a new ratio restarts an idle preview
+
+The ratios are read from the camera's device list once its preview is ready (the browser build
+lists none); a reply for an older preview is dropped. A ratio the camera does not list falls back to
+4:3, and switching cameras returns to 4:3 until the new camera's list is read. Only an idle Photo
+preview changes it: never under a capture, a countdown, a recording, a request holding Camera or a
+sheet over it such as a scan review. The preview restarts with the ratio; 4:3 sends no option, so the
+default request is unchanged. The viewfinder frame and the framing grid follow the ratio in Photo
+mode (9:16 upright for 16:9, 3:4 otherwise) and 4:3 in Video mode.
+
+```quint
+pure def canAspectsRead(c: Camera, ticket: int, both: bool): bool = ready(c) and ticket == c.epoch
+pure def aspectsRead(c: Camera, ticket: int, both: bool): Camera = { ...c, bothAspects: both, aspect: if (both) c.aspect else FourThree }
+pure def otherAspect(a: Aspect): Aspect = if (a == FourThree) SixteenNine else FourThree
+pure def canPickAspect(c: Camera, ratio: Aspect): bool =
+  active(c) and ready(c) and c.mode == PhotoMode and c.recording == RecordingIdle and c.countdown == 0 and not(c.capturing)
+    and not(c.pendingShot) and not(c.hold) and not(c.modal) and not(c.binding) and c.bothAspects and ratio != c.aspect
+pure def pickAspect(c: Camera, ratio: Aspect): Camera =
+  { ...c, aspect: ratio, phase: PreviewStarting, epoch: c.epoch + 1, light: false, volumeKeys: false }
+pure def framedAspect(c: Camera): Aspect = if (c.mode == PhotoMode) c.aspect else FourThree
+pure val ratioValues = Set(FourThree, SixteenNine)
+pure def alwaysSixteenNineOnlyWhenListed(c: Camera): bool = c.aspect == SixteenNine implies c.bothAspects
+pure def sometimesSixteenNine(c: Camera): bool = c.aspect == SixteenNine and ready(c) and c.mode == PhotoMode
 ```
 
 ### A volume key press is rechecked: one shutter press, or the keys go back to Android

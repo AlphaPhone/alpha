@@ -218,7 +218,7 @@ export const nativePlugins = {
     reach: "AnyNative",
     methods: [
       "checkPermissions", "startPreview", "stopPreview", "setCaptureMode", "switchCamera", "capturePhoto", "startRecording",
-      "stopRecording", "getRecordingState", "setSettings", "setZoom", "setFocusPoint",
+      "stopRecording", "getRecordingState", "setSettings", "setZoom", "setFocusPoint", "getDevices",
     ],
     events: [],
   },
