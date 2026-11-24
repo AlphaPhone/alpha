@@ -11,7 +11,7 @@ import { layer } from "../../src/assistant/layer.vibe"
 import { AssistantEmail, type ReviewedEmail } from "../../src/assistant/ports.vibe"
 import { Preferences } from "../../src/settings/preferences.vibe"
 import { Latency } from "../../src/voice/latency.vibe"
-import { AdvertisedCapabilities, BrowserPages, BrowserViews, MapsViews, type BrowserPage, type MapsShown, type ObservedTab, type PageObservation, type ViewAnswer } from "../../src/assistant/ports.vibe"
+import { AdvertisedCapabilities, BrowserPages, BrowserViews, MapsViews, NotesViews, type BrowserPage, type MapsShown, type ObservedTab, type PageObservation, type ViewAnswer } from "../../src/assistant/ports.vibe"
 import { ResidentFeeds } from "../../src/platform/view-events.vibe"
 import { CommsStage } from "../../src/telephony/comms.vibe"
 import { Navigation } from "../../src/shell/navigation.vibe"
@@ -62,6 +62,8 @@ export interface ResidentScript {
   readonly hits?: readonly unknown[]
   readonly listingStatus?: number
   readonly actionResults?: readonly { readonly action: string; readonly data: unknown }[]
+  /** What a saved Notes editor claim names: the agent's views answer a claim with it only when the claim adds `targetProtocol: "saved-note-v1"`, and refuse one without. */
+  readonly claimTarget?: unknown
   /** Frames the turn's stream sends before its reply: the cue as text, the agent's acknowledgment, a text restart and its tools. */
   readonly before?: readonly unknown[]
 }
@@ -73,7 +75,11 @@ export function fakeResident(seen: Seen, script: ResidentScript) {
     ensureRunning: () => succeed(undefined),
     json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown, headers?: { readonly [name: string]: string }) => effect {
       seen.calls.push({ method, path, body, ...(headers === undefined ? {} : { headers }) })
-      if (path === "/api/views/interact-claim") return { status: 200, data: { claimId: "claim-1" } }
+      if (path === "/api/views/interact-claim") {
+        if (script.claimTarget === undefined) return { status: 200, data: { claimId: "claim-1" } }
+        const supports = (body as { readonly targetProtocol?: unknown } | undefined)?.targetProtocol === "saved-note-v1"
+        return supports ? { status: 200, data: { claimId: "claim-1", target: script.claimTarget } } : { status: 409, data: { error: "claim_refused" } }
+      }
       if (path === "/api/views/interact-result") return { status: 200, data: { accepted: true } }
       if (path === "/api/conversations" && method === "POST") return { status: 200, data: { conversation: { id: "c1", roomId: "r1" } } }
       if (path === "/api/conversations") return { status: 200, data: { conversations: [{ id: "c1", roomId: "r1" }] } }
@@ -321,6 +327,15 @@ export function fakeMapsViews(shown: MapsShown | undefined, delivered: string[] 
       delivered.push(`${request}:${effectKey}`)
       try apply
     },
+  })
+}
+
+/** Notes' editor as a fake: `opens` says whether a saved note opens, and the editor then shows `shows`, or that note; each open asked is collected. */
+export function fakeNotesViews(opens: boolean, shows: string | undefined, asked: string[] = []) {
+  let shown: string | undefined = undefined
+  return Layer.succeed(NotesViews, {
+    openSaved: (noteId: string) => sync(() => { asked.push(noteId); if (opens) shown = shows ?? noteId; return opens }),
+    shown: () => sync(() => shown),
   })
 }
 

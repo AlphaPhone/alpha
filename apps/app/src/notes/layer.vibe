@@ -12,6 +12,7 @@ import { NotesCollection, collectionLayer } from "./collection.vibe"
 import { draftsLayer } from "./drafts.vibe"
 import { NotesEditor, editorLayer } from "./editor.vibe"
 import { foldersLayer } from "./folders.vibe"
+import { notesViewsLayer } from "./handoffs.vibe"
 import { importLegacyTrash } from "./legacyTrash.vibe"
 import { notesRouteRequest } from "./list.vibe"
 import { type ListScene, NotesListFilter, listFilterLayer } from "./listFilter.vibe"
@@ -24,7 +25,8 @@ import { NotesSources, sourceReferences, sourcesLayer } from "./sources.vibe"
 import { trashLayer } from "./trash.vibe"
 
 const records = Layer.provideMerge(Layer.mergeAll(editorLayer, handoffLayer), Layer.provideMerge(collectionLayer, Layer.merge(clientLayer, draftsLayer)))
-const devices = Layer.provideMerge(Layer.mergeAll(trashLayer, cleanupLayer, recorderLayer, audioLayer, originsLayer, shareLayer, sourcesLayer, recordingOpenLayer), records)
+const views = Layer.provideMerge(notesViewsLayer, records)
+const devices = Layer.provideMerge(Layer.mergeAll(trashLayer, cleanupLayer, recorderLayer, audioLayer, originsLayer, shareLayer, sourcesLayer, recordingOpenLayer), views)
 const agent = Layer.provideMerge(organizeLayer, Layer.provideMerge(Layer.mergeAll(foldersLayer, listFilterLayer), devices))
 
 effect function openUnlessShown(editor: NotesEditor.Shape, noteId: string) {

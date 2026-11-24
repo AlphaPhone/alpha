@@ -10,7 +10,7 @@ import { CAPABILITIES_HEADER, capabilityHeaders } from "../../src/assistant/tran
 import { AgentViews, appOfView, handoffOf } from "../../src/assistant/views.vibe"
 import { composeExecutors } from "../../src/shell/assistantHost.vibe"
 import {
-  assistantOver, browserScreen, countingExecutors, fakeAdvertised, fakeBrowserPages, fakeBrowserViews, fakeComms, fakeFeeds, fakeHost, fakeMapsViews,
+  assistantOver, browserScreen, countingExecutors, fakeAdvertised, fakeBrowserPages, fakeBrowserViews, fakeComms, fakeFeeds, fakeHost, fakeMapsViews, fakeNotesViews,
   fakePreferences, fakeResident, homeScreen, journalNative, noNative, wireProposal, type Seen,
 } from "./fakes.vibe"
 
@@ -254,6 +254,75 @@ it.effect("Have my agent open the screen it means (spec/assistant/views.md, \"A 
       },
     ))
   }
+})
+
+const notesScreen: ScreenFacts = {
+  exposure: { privateView: false, locked: false, hidden: false, connectionDialog: false },
+  observation: { view: "notes", revision: 4, sensitive: false },
+  onCalendar: false,
+  contextKey: "notes:",
+}
+
+effect function deliverNote(opens: boolean, shows: string | undefined, viewId: string, subview: unknown, claimTarget: unknown) {
+  const seen: Seen = { calls: [] }
+  const asked: string[] = []
+  provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "ok" }, proposals: [], claimTarget }), Layer.merge(fakeHost([], notesScreen), fakeNotesViews(opens, shows, asked)), countingExecutors({ count: 0 })) {
+    const views = try AgentViews
+    const binding = { clientId: views.clientId, requestId: `req-${viewId}`, viewId, viewType: "gui", installationId: "i1" }
+    const done = try views.deliver([{ action: "VIEWS", data: { values: { viewId, label: "Notes", navigationPrepared: true, navigationBinding: binding, subview } } }], notesScreen.contextKey)
+    const claims = seen.calls.filter((call) => call.path === "/api/views/interact-claim").map((call) => (call.body as { readonly targetProtocol?: unknown }).targetProtocol ?? "none")
+    const results = seen.calls.filter((call) => call.path === "/api/views/interact-result").map((call) => (call.body as { readonly result?: unknown }).result)
+    return { done, asked, claims, results }
+  }
+}
+
+it.effect("A prepared Notes view naming a saved note is delivered only while exactly that note is in front (spec/assistant/views.md, \"A prepared Notes view that names a saved note opens that note's editor, and is delivered only while exactly that note is in front\")", () => effect {
+  const groceries = { kind: "saved-note", noteId: "groceries" }
+  const opened = try deliverNote(true, undefined, "notes", "saved-note-v1", groceries)
+  const otherNote = try deliverNote(true, "recipes", "notes", "saved-note-v1", groceries)
+  const notOpened = try deliverNote(false, undefined, "notes", "saved-note-v1", groceries)
+  const namesNone = try deliverNote(true, undefined, "notes", "saved-note-v1", undefined)
+  const outsideNotes = try deliverNote(true, undefined, "chat", "saved-note-v1", groceries)
+  const notAnId = try deliverNote(true, undefined, "notes", "saved-note-v1", { kind: "saved-note", noteId: "../groceries" })
+  const plainNotes = try deliverNote(true, undefined, "notes", undefined, undefined)
+  try Effect.try(() => assert.deepStrictEqual({ opened, otherNote, notOpened, namesNone, outsideNotes, notAnId, plainNotes }, {
+    opened: { done: { status: "delivered", label: "Notes" }, asked: ["groceries"], claims: ["saved-note-v1"], results: [{ switched: true, shown: groceries }] },
+    otherNote: { done: { status: "unknown" }, asked: ["groceries"], claims: ["saved-note-v1"], results: [{ switched: false }] },
+    notOpened: { done: { status: "unknown" }, asked: ["groceries"], claims: ["saved-note-v1"], results: [{ switched: false }] },
+    namesNone: { done: { status: "unknown" }, asked: [], claims: ["saved-note-v1"], results: [{ switched: false }] },
+    outsideNotes: { done: { status: "none" }, asked: [], claims: [], results: [] },
+    notAnId: { done: { status: "unknown" }, asked: [], claims: ["saved-note-v1"], results: [] },
+    plainNotes: { done: { status: "delivered", label: "Notes" }, asked: [], claims: ["none"], results: [{ switched: true }] },
+  }))
+})
+
+it.effect("A turn names this renderer and its saved Notes editor in its voice context only beside its view fields (spec/assistant/views.md, \"A prepared Notes view that names a saved note opens that note's editor, and is delivered only while exactly that note is in front\")", () => effect {
+  const sent = effect function (screen: ScreenFacts, asks: boolean) {
+    const seen: Seen = { calls: [] }
+    provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "Done." }, proposals: [] }), fakeHost([], screen), countingExecutors({ count: 0 }), noNative, fakePreferences({ asks, shares: false })) {
+      const views = try AgentViews
+      const composer = try Composer
+      try composer.edit("Open my groceries note")
+      try composer.send()
+      const body = seen.calls.find((call) => call.method === "STREAM" || (call.method === "POST" && call.path.endsWith("/messages")))?.body as { readonly metadata?: { readonly viewClientId?: string; readonly voiceUi?: unknown } } | undefined
+      return { voiceUi: body?.metadata?.voiceUi, renderer: body?.metadata?.viewClientId, clientId: views.clientId }
+    }
+  }
+  const hiddenScreen: ScreenFacts = { ...notesScreen, exposure: { ...notesScreen.exposure, privateView: true } }
+  const observed = try sent(notesScreen, true)
+  const direct = try sent(notesScreen, false)
+  const hidden = try sent(hiddenScreen, true)
+  const hiddenDirect = try sent(hiddenScreen, false)
+  const editor = (clientId: string) => ({ viewDelivery: "completed-action", uiClientId: clientId, uiNotesEditor: "saved-note-v1" })
+  try Effect.try(() => assert.deepStrictEqual(
+    { observed: [observed.voiceUi, observed.renderer], direct: direct.voiceUi, hidden: [hidden.voiceUi, hidden.renderer], hiddenDirect: hiddenDirect.voiceUi },
+    {
+      observed: [editor(observed.clientId), observed.clientId],
+      direct: { agentActionMode: "direct-request-v1", ...editor(direct.clientId) },
+      hidden: [undefined, undefined],
+      hiddenDirect: { agentActionMode: "direct-request-v1" },
+    },
+  ))
 })
 
 it.effect("Let my agent press back or reload only on the page I am looking at (spec/assistant/views.md, \"A view command is claimed once, refused under \"Ask before Alpha acts\", run only in Browser, and answered once\")", () => effect {
