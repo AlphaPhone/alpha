@@ -20,7 +20,7 @@ const lines = { RemoveLine: "Remove", AddLine: "Add", KeepLine: "Keep" } as cons
 const blank: Lines = { name: "", phones: [], emails: [] };
 
 /** Each number and address of `before` and `after` on a line of its own, saying what the change does to it. */
-function Changes({ before, after, removing }: { before: Lines; after: Lines; removing: boolean }) {
+function Changes({ before, after, removing, saved }: { before: Lines; after: Lines; removing: boolean; saved: ReadonlyMap<string, string> }) {
   const was = new Set([...before.phones, ...before.emails]);
   const will = new Set([...after.phones, ...after.emails]);
   return (
@@ -28,7 +28,8 @@ function Changes({ before, after, removing }: { before: Lines; after: Lines; rem
       {before.name !== "" && after.name !== before.name && !removing && <ListRow title={after.name} detail={`Rename from ${before.name}`} className="font-semibold" />}
       {[...new Set([...was, ...will])].map((value) => {
         const change = removing ? "RemoveLine" : lineChange(was.has(value), will.has(value));
-        return <ListRow key={value} title={value} detail={lines[change]} className={change === "RemoveLine" ? "line-through" : change === "AddLine" ? "font-semibold" : undefined} />;
+        const elsewhere = change === "AddLine" ? saved.get(value) : undefined;
+        return <ListRow key={value} title={value} detail={elsewhere === undefined || elsewhere === before.name ? lines[change] : `${lines[change]}, saved as ${elsewhere}`} className={change === "RemoveLine" ? "line-through" : change === "AddLine" ? "font-semibold" : undefined} />;
       })}
     </ListGroup>
   );
@@ -76,7 +77,7 @@ export function Review({ runtime }: ReviewProps) {
           )}
           {state.ask === "AddContact" && <p className={held.matches.length > 0 ? "font-semibold" : undefined}>{held.matches.length > 0 ? "Add (keep existing)" : afterOf(held.operation, blank).name}</p>}
           {(state.ask === "AddContact" || state.ask === "ChangeContact" || state.ask === "DeleteContact") && (
-            <Changes before={before} after={afterOf(held.operation, before)} removing={state.ask === "DeleteContact"} />
+            <Changes before={before} after={afterOf(held.operation, before)} removing={state.ask === "DeleteContact"} saved={held.saved} />
           )}
           {!can(approve, "Owner") && can({ type: "showAgain" }, "Owner") && (
             <Banner variant="warn" action={<Button size="sm" onClick={() => void send({ type: "showAgain" }, "Owner")}>Show again</Button>}>This changed on the phone</Banner>

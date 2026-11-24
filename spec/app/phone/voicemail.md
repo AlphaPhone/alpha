@@ -116,6 +116,9 @@ pure def listed(s: Voicemail, ticket: int, ok: bool, carrier: bool, count: int, 
 
 ### The phone reports how many voicemails are unheard, for Home and the tab
 
+Home's calls card leads to Recents while there are missed calls not yet
+seen, and otherwise to the Voicemail tab while any voicemail is unheard.
+
 ```quint
 pure def canUnheardReported(s: Voicemail, count: int): bool = count >= 0
 

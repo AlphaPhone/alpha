@@ -191,6 +191,10 @@ pure def threadsRead(s: Messages, ticket: int, ok: bool, grant: P::Grant, count:
 
 ### The phone reports how many conversations are unread, for the list and Home
 
+Home shows the unread card while any conversation is unread. One tap on it
+opens the conversation when exactly one is unread, and the list filtered to
+the unread ones when several are.
+
 ```quint
 pure def canUnreadReported(s: Messages, count: int): bool = count >= 0
 

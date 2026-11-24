@@ -5,7 +5,7 @@ import type { DirectSmsReview, OperationId, SmsSendResult } from "@elizaos/os/br
 import type { PhoneNumber } from "@elizaos/os/bridges/phone"
 import * as Agent from "../../gen/app__contacts__agent.effect.vibe"
 import type { Ask, Effect as Out, Ending, Event } from "../../gen/app__contacts__agent.effect.vibe"
-import { Telephony, TelephonyRefused, telephony } from "../platform/telephony.vibe"
+import { Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, reacting, run, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
@@ -26,11 +26,12 @@ export interface Lines {
 export interface Asked {
   readonly operation: Asking | undefined
   readonly matches: ReadonlyArray<AddressBookContact>
+  readonly saved: ReadonlyMap<string, string>
   readonly sent: DirectSmsReview | undefined
   readonly ending: Ending | undefined
 }
 
-const quiet: Asked = { operation: undefined, matches: [], sent: undefined, ending: undefined }
+const quiet: Asked = { operation: undefined, matches: [], saved: new Map(), sent: undefined, ending: undefined }
 
 /** What the phone found for the request the agent's machine holds; only this shell writes it. */
 export service Requested {
@@ -82,7 +83,7 @@ export effect function propose(operation: Asking, written: boolean): boolean!!(R
   const machine = try Agent.Machine
   if (Agent.open(try machine.get())) return false
   const { ask, number, search, text, pictures } = askOf(operation)
-  try (try Requested).set({ operation, matches: [], sent: undefined, ending: undefined })
+  try (try Requested).set({ operation, matches: [], saved: new Map(), sent: undefined, ending: undefined })
   const event: Event = { type: "asked", ask, byName: number === "" && search !== "", emergency: judge(number) === "Emergency", written, pictures, number, text }
   return try contained(machine.send(event, "Agent"), "the agent's request")
 }
@@ -135,7 +136,8 @@ effect function searched(ticket: number): Event!!(Telephony | Requested | Agent.
   const all = complete(pages.flatMap((page) => page.contacts)).filter((one, at, rows) => rows.findIndex((other) => other.id === one.id) === at)
   const found = all.slice(0, Agent.maxMatches)
   const more = all.length > Agent.maxMatches || pages.some((page) => page.next !== null && page.next !== undefined)
-  try store.set({ matches: found })
+  const added = operation.type === "contact_create" ? operation.contact.phoneNumbers : operation.type === "contact_update" ? [...(operation.set?.phoneNumbers ?? []), ...(operation.add?.phoneNumbers ?? [])] : []
+  try store.set({ matches: found, saved: try namesOf("call", added) })
   const matches = Agent.reachesANumber(state.ask) ? choicesOf(found).length : found.length
   const only = found.length === 1 ? found[0] : undefined
   return { type: "found", ticket, ok: true, matches, more, unchanged: only !== undefined && unchangedBy(operation, only), contact: only?.id ?? "" }
