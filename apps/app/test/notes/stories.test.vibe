@@ -584,7 +584,7 @@ describe("Notes stories", () => {
   })
 
   it.live("A note's open items become a Calendar draft I review (spec/notes/origins.md, \"Story: Turn a note into an event or a reminder I review in Calendar\")", () => effect {
-    const agent = seeded(note("call", "Clinic", "\nCall the clinic at nine", 1), note("blank", "", "", 2))
+    const agent = seeded(note("call", "Clinic", "\nCall the clinic at nine", 1), note("blank", "Title only", "", 2))
     const device = new DeviceFake()
     provide notesOver(agent, device) {
       const origins = try NotesOrigins
