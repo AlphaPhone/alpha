@@ -1,0 +1,97 @@
+// spec/app/calendar/index.md, "Story: See only what the current read found, for the current account"
+import * as Calendar from "../../gen/app__calendar.effect.vibe"
+import type { Calendar as State, Effect as Out, Event, Layout, Row } from "../../gen/app__calendar.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import type { AndroidCalendarEvent } from "@elizaos/os/bridges/calendar"
+import type { Agent } from "../platform/agent.vibe"
+import { PhoneCalendar } from "../platform/calendar.vibe"
+import { Cloud } from "../platform/cloud.vibe"
+import { Device } from "../platform/device.vibe"
+import { Job, type Due, answer, due, following, hearing, reacting, started, together, untimed } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+import { readAgent, readBack, sendWrite } from "./agent.vibe"
+import { civilDay, nextMidnight, readRange } from "./time.ts"
+
+/** An event of the phone's calendars as a row of the screen; its version is what it says, so a change of it is seen. */
+function phoneRow(event: AndroidCalendarEvent, writable: boolean): Row {
+  const [title, place, notes] = [event.title ?? "", event.location ?? "", event.body ?? ""]
+  return {
+    id: event.id, source: "PhoneSource", title, place, notes, begin: event.begin, end: event.end, allDay: event.allDay,
+    version: JSON.stringify([title, place, notes, event.begin, event.end]), writable, organizer: true, invited: false, answer: "",
+    recurring: event.recurring, series: "", people: [], link: "",
+  }
+}
+
+// spec/app/calendar/index.md, "Only the newest ticket's answer of the phone is taken; access Android refused hides its rows at once"
+/** Read the phone's calendars for what the screen shows, after Android's one prompt where the owner asked for access. */
+effect function readPhone(ticket: number, today: number, layout: Layout, day: number, month: number, ask: boolean): Event!!(PhoneCalendar | Calendar.Machine) {
+  const phone = try PhoneCalendar
+  const { grant } = (try (try Calendar.Machine).get()).phone.access
+  if (!phone.present) return { type: "phoneRead", ticket, present: false, ok: false, grant, rows: [], truncated: false }
+  return effect {
+    if (ask) try phone.requestAccess()
+    const listed = try phone.list(readRange(today, layout, day, month))
+    if (listed.status !== "ready") return { type: "phoneRead", ticket, present: true, ok: true, grant: "Denied", rows: [], truncated: false } as Event
+    const writable = new Map(listed.calendars.map((calendar) => [calendar.id, calendar.writable]))
+    const rows = listed.events.map((event) => phoneRow(event, writable.get(event.calendarId) ?? false))
+    return { type: "phoneRead", ticket, present: true, ok: true, grant: "Granted", rows, truncated: listed.truncated } as Event
+  } catch () => ({ type: "phoneRead", ticket, present: true, ok: false, grant, rows: [], truncated: false })
+}
+
+/** The civil day of now and its next midnight, as the machine's `turnDay` and `reopen` take them. */
+effect function today(): { today: number; midnight: number }!!Time {
+  const now = try (try Time).now()
+  return { today: civilDay(now), midnight: nextMidnight(now) }
+}
+
+function carry(fx: Out): Job<Event, Agent | PhoneCalendar | Calendar.Machine | Time, []> {
+  return match (fx) {
+    when { tag: "ReadPhone", let ticket, let today, let layout, let day, let month, let ask }:
+      answer("phone", readPhone(ticket, today, layout, day, month, ask), { type: "phoneRead", ticket, present: true, ok: false, grant: "Unasked", rows: [], truncated: false });
+    when { tag: "ReadAgent", let ticket, let today, let layout, let day, let month }:
+      answer("agent", readAgent(ticket, today, layout, day, month), { type: "agentRead", ticket, feed: "FeedFailed", calendarsListed: true, rows: [] });
+    when { tag: "Send", let id, let kind, let target, let version, let edits, let decline, let scope }:
+      answer(`send ${id}`, sendWrite(id, kind, target, version, edits, decline, scope), { type: "sent", id, provider: "ProviderUnknown" });
+    when { tag: "Readback", let id, let kind, let target, let edits, let begin }:
+      answer(`readback ${id}`, readBack(id, kind, target, edits, begin), { type: "readBack", id, readback: "ReadbackFailed" });
+    when { tag: "Midnight", let at }:
+      Job.Run({ key: "midnight", answers: Stream.fromEffect(effect {
+        try (try Time).until(at)
+        return { type: "turnDay", ...(try today()) } as Event
+      }), lost: Option.none(), by: [] });
+  }
+}
+
+// spec/app/calendar/index.md, "While Calendar is in front it reads again once a minute, never hidden, during a read or a write"; spec/app/calendar/index.md, "Once the window is over the deletion waits for the agent to be free, and is then sent once"
+function timers(state: State): ReadonlyArray<Due<Event, []>> {
+  const front = state.shown && state.page
+  const idle = state.phase === "WriteIdle" && state.agent.read.status !== "Loading" && state.phone.read.status !== "Loading"
+  return [
+    ...(front && idle ? [due<Event, []>("reread", state.readAt + Calendar.minute, { type: "tick", now: untimed })] : []),
+    ...(state.held.undo.holding === "Held" ? [due<Event, []>("undo", state.held.undo.until, { type: "expire", now: untimed })] : []),
+  ]
+}
+
+// spec/app/calendar/index.md, "When Alpha opens again the overlays are closed, a read under way is asked again when Calendar is next in front, and a write that was sent is unknown"
+const kept = reacting(Calendar, {
+  keep: 1,
+  open: effect { return [{ type: "reopen", ...(try today()) }] as const },
+  carry,
+  timers,
+})
+
+// spec/app/calendar/index.md, "Calendar is in front while the shell shows it and the page is visible; leaving it ends its overlays"
+const followed = following(Shell, (shell) => showing(shell, "Calendar"), Calendar.Machine, (shown): Event => ({ type: "show", showing: shown, now: untimed }))
+
+const paged = hearing(Stream.unwrap(effect { return (try Device).visible }), Calendar.Machine, (visible): Event => ({ type: "turnPage", visible, now: untimed }))
+
+// spec/app/calendar/index.md, "The account is the one the cloud says is signed in; another account empties the agent's Calendar and closes what was opened for it"
+const bound = started(effect {
+  const cloud = try Cloud
+  const owner = try (tryPromise(() => cloud.client.account()) |> Effect.option(%))
+  const event: Event = Option.isSome(owner) ? { type: "bind", owner: owner.value.id, usable: true } : { type: "bind", owner: "", usable: false }
+  try ignore((try Calendar.Machine).send(event))
+}, "binding Calendar")
+
+/** Calendar: kept across restarts, carried out through the agent and the phone, told by the shell whether it shows, by the phone whether the page does, and by the cloud whose account it is. */
+export const calendar = together(kept, followed, paged, bound)

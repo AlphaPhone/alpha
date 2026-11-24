@@ -30,6 +30,7 @@ export default {
         "vibestack/design/cli.ts",
         "vibestack/stories/cli.ts",
         "vibestack/remote-cache.ts",
+        "vibestack/chromium.ts",
         "vibestack/*/test/*.test.ts",
         "vibestack/testing/test/fixture/*/src/*.{schema,contract}.{ts,vibe}"
       ],
@@ -76,6 +77,16 @@ export default {
         "openssl"
       ]
     },
+    "apps/agent": {
+      "entry": [
+        "src/main.vibe",
+        "test/**/*.test.{ts,vibe}"
+      ],
+      "project": [
+        "src/**/*.{ts,vibe,vibex}",
+        "test/**/*.{ts,vibe,vibex}"
+      ]
+    },
     "packages/deployment": {
       "entry": [
         "src/deployment.vibe",
@@ -86,15 +97,29 @@ export default {
         "test/**/*.{ts,vibe,vibex}"
       ]
     },
-    "vibestack/studio": {
+    "apps/cloud": {
       "entry": [
         "src/main.vibe",
+        "test/**/*.test.{ts,vibe}"
+      ],
+      "project": [
+        "src/**/*.{ts,vibe,vibex}",
+        "test/**/*.{ts,vibe,vibex}"
+      ]
+    },
+    "vibestack/studio": {
+      "entry": [
+        "scripts/build.mjs",
+        "src/main.vibe",
         "src/project.ts",
-        "src/doc.ts"
+        "src/doc.ts",
+        "pack-page.ts"
       ],
       "project": [
         "src/**/*.{ts,tsx,vibe,vibex,css}",
-        "test/**/*.{ts,tsx,vibe,vibex}"
+        "test/**/*.{ts,tsx,vibe,vibex}",
+        "scripts/*.mjs",
+        "pack-page.ts"
       ],
       "ignoreDependencies": [
         "tailwindcss"

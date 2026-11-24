@@ -12,10 +12,21 @@ export interface AskScene {
   stalled: boolean;
   /** The turns under way, by room: each stops its reply. */
   readonly turns: Map<string, () => void>;
+  /** What the agent keeps of each conversation, by its id, as eliza's history routes show it. */
+  readonly kept: Map<string, Kept>;
+  /** Searching answers 500. */
+  searchDown: boolean;
+}
+
+/** One conversation as the agent keeps it: its room, title and messages. */
+export interface Kept {
+  readonly roomId: string;
+  readonly title: string;
+  readonly messages: { id: string; role: "user" | "assistant"; text: string }[];
 }
 
 export function askScene(): AskScene {
-  return { opened: 0, said: [], down: false, stalled: false, turns: new Map() };
+  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false };
 }
 
 const encoder = new TextEncoder();
@@ -24,7 +35,7 @@ const frame = (data: unknown) => encoder.encode(`data: ${JSON.stringify(data)}\n
 const named = (turn: number) => ({ messageId: `m${turn}`, userMessageId: `u${turn}`, agentName: "Alpha", actionResults: [] });
 
 /** A streamed reply as eliza's agent writes one: what was said back in two pieces, or one piece that waits to be stopped. */
-function reply(scene: AskScene, room: string, text: string): Response {
+function reply(scene: AskScene, room: string, text: string, keep: (said: string) => void): Response {
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(frame({ type: "status", activity: "thinking" }));
@@ -35,6 +46,7 @@ function reply(scene: AskScene, room: string, text: string): Response {
       }
       controller.enqueue(frame({ type: "token", text: "You said: " }));
       controller.enqueue(frame({ type: "token", text }));
+      keep(`You said: ${text}`);
       controller.enqueue(frame({ type: "done", fullText: `You said: ${text}`, ...named(scene.said.length) }));
       controller.close();
     },
@@ -49,15 +61,52 @@ export function askRoutes(scene: AskScene): Route[] {
       if (request.method !== "POST" || url.pathname !== "/api/conversations") return;
       if (scene.down) return Response.json({ error: "starting" }, { status: 503 });
       const id = ++scene.opened;
+      scene.kept.set(`c${id}`, { roomId: `r${id}`, title: "Ask Alpha", messages: [] });
       return Response.json({ conversation: { id: `c${id}`, roomId: `r${id}`, title: "Ask Alpha", createdAt: 0, updatedAt: 0 } }, { status: 201 });
+    },
+    (request, url) => {
+      if (request.method !== "GET" || url.pathname !== "/api/conversations") return;
+      return Response.json({ conversations: [...scene.kept].map(([id, one]) => ({ id, roomId: one.roomId, title: one.title, createdAt: 0, updatedAt: 0 })) });
+    },
+    (request, url) => {
+      const id = /^\/api\/conversations\/([^/]+)\/messages$/.exec(url.pathname)?.[1];
+      if (request.method !== "GET" || id === undefined || id === "messages") return;
+      const one = scene.kept.get(id);
+      return one === undefined ? Response.json({ error: "unknown_conversation" }, { status: 404 }) : Response.json({ messages: one.messages.map((message) => ({ ...message, timestamp: 0 })) });
+    },
+    (request, url) => {
+      if (request.method !== "GET" || url.pathname !== "/api/conversations/messages/search") return;
+      if (scene.searchDown) return Response.json({ error: "down" }, { status: 500 });
+      const words = (url.searchParams.get("q") ?? "").toLowerCase();
+      const offset = Number(url.searchParams.get("offset") ?? "0");
+      const limit = Number(url.searchParams.get("limit") ?? "20");
+      const hits = [...scene.kept].flatMap(([id, one]) => one.messages.filter((message) => message.text.toLowerCase().includes(words))
+        .map((message) => ({ messageId: message.id, conversationId: id, roomId: one.roomId, role: message.role, text: message.text, createdAt: 0 })));
+      const results = hits.slice(offset, offset + limit);
+      return Response.json({ results, count: results.length });
+    },
+    (request, url) => {
+      const id = /^\/api\/conversations\/([^/]+)\/fork$/.exec(url.pathname)?.[1];
+      if (request.method !== "POST" || id === undefined) return;
+      return request.json().then(({ messageId }: { messageId: string }) => {
+        const source = scene.kept.get(id);
+        const at = source?.messages.findIndex((message) => message.id === messageId) ?? -1;
+        if (source === undefined || at < 0) return Response.json({ error: "unknown_message" }, { status: 404 });
+        const fork = ++scene.opened;
+        scene.kept.set(`c${fork}`, { roomId: `r${fork}`, title: `${source.title} (fork)`, messages: source.messages.slice(0, at + 1).map((message) => ({ ...message, id: `${message.id}f${fork}` })) });
+        return Response.json({ conversation: { id: `c${fork}`, roomId: `r${fork}`, title: `${source.title} (fork)`, createdAt: 0, updatedAt: 0 } }, { status: 201 });
+      });
     },
     (request, url) => {
       const found = /^\/api\/conversations\/c(\d+)\/messages(\/stream)?$/.exec(url.pathname);
       if (request.method !== "POST" || !found) return;
+      const messages = scene.kept.get(`c${found[1]}`)?.messages ?? [];
+      const keep = (role: "user" | "assistant", text: string) => void messages.push({ id: `m${scene.said.length}${role === "user" ? "u" : "a"}`, role, text });
       return request.json().then((body: { text: string }) => {
         if (found[2] === undefined) return Response.json({ text: `You said: ${body.text}`, ...named(scene.said.length) });
         scene.said.push(body.text);
-        return reply(scene, `r${found[1]}`, body.text);
+        keep("user", body.text);
+        return reply(scene, `r${found[1]}`, body.text, (said) => keep("assistant", said));
       });
     },
     (request, url) => {

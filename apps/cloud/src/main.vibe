@@ -1,0 +1,76 @@
+// spec/cloud/index.md, "Story: Know which cloud the app talks to"; spec/cloud/index.md, "Story: Register Alpha's app with the cloud"; spec/cloud/provisioning.md, "The steps run in one order, the same for staging and production, each one command"
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import { deployment } from "@repo/deployment"
+import { assetLinksNameAlpha, candidateApart, profileFits, type Environment } from "../gen/cloud.effect.vibe"
+import { commandOf, taskAt, total } from "../gen/cloud__provisioning.effect.vibe"
+import { assetLinks, entryOf, loopbackOnly, profileNamed, registrationAt, stagingSeed } from "./alpha.vibe"
+
+module node {
+  /** @throws {never} */
+  export function commandLine(): ReadonlyArray<string> {
+    return process.argv.slice(2)
+  }
+}
+import { commandLine } from node
+
+/** The command line names no command this program has. */
+export error UsageInvalid { message: string }
+
+/** What `check` found wrong, one line each. */
+export error CheckFailed { problems: ReadonlyArray<string> }
+
+/** A hosted row of `@repo/deployment`, with Alpha's registration there and its profile's own settings of that environment. */
+effect function hostedEnvironment(name: "staging" | "production", environment: Environment) {
+  const row = try deployment(name)
+  if (row.kind !== "hosted") throw new CheckFailed({ problems: [`@repo/deployment names ${name} a local cloud`] })
+  const settings = (try profileNamed(row.profile)).environments[row.profile]
+  return { name, environment, row, settings, registration: registrationAt(environment, row.appLinkHost) }
+}
+
+effect function environments() {
+  return [try hostedEnvironment("staging", "Staging"), try hostedEnvironment("production", "Production")]
+}
+
+/**
+ * Every rule of Alpha's deployment, on the profiles, the seed and `@repo/deployment` as they are: each profile accepted by
+ * eliza, each hosted profile at its deployment's hosts, each cut-over candidate apart, the local profile on this computer
+ * alone, the seed Alpha's staging registration, and each environment's asset links naming Alpha's package and signers.
+ */
+effect function check() {
+  const problems: string[] = []
+  const local = try deployment("local")
+  const localSettings = (try profileNamed(local.profile)).environments[local.profile]
+  if (!loopbackOnly(localSettings)) problems.push(`the local cloud's ${local.profile} profile names an adapter or provider off this computer`)
+  try Console.log(`local: the ${local.profile} profile, on this computer only`)
+  for (const { name, environment, row, settings, registration } of try environments()) {
+    const profile = { api: settings.api, webHost: settings.web.replace(/^https:\/\//, "") }
+    if (!profileFits(row, profile)) problems.push(`${name}: the profile answers at ${profile.api} for ${profile.webHost}, and @repo/deployment at ${row.cloud} for ${row.appLinkHost}`)
+    if (!candidateApart(row, row.cutoverCandidate)) problems.push(`${name}: the cut-over candidate names a host of the cloud it would replace`)
+    const statements = try assetLinks(registration, settings.api)
+    if (!assetLinksNameAlpha(statements, environment)) problems.push(`${name}: the asset links do not name Alpha's package with the ${name} signers alone`)
+    if (environment === "Staging" && JSON.stringify(stagingSeed.clients) !== JSON.stringify([entryOf(registration)])) problems.push("seed/staging.json is not Alpha's staging registration")
+    try Console.log(`${name}: ${row.cloud}, App Links on ${row.appLinkHost}; asset links ${JSON.stringify(statements)}`)
+  }
+  if (problems.length > 0) throw new CheckFailed({ problems })
+  try Console.log("Alpha's profiles, seed and registrations keep every rule of spec/cloud/index.md")
+}
+
+/** What the operator of the shipped Eliza Cloud enters for Alpha's app: one registration file per environment, applied by the steps of provisioning in order. Nothing is sent anywhere. */
+effect function registration() {
+  for (const { name, registration } of try environments()) {
+    try Console.log(`# ${name}: elizaos-cloud client apply --file <this file> --environment ${name}`)
+    try Console.log(JSON.stringify({ environment: name, clients: [entryOf(registration)] }, null, 2))
+  }
+  try Console.log("# the operator's steps, each read back before the next (spec/cloud/provisioning.md)")
+  for (let index = 0; index < total; index += 1) try Console.log(`${index + 1}. ${commandOf(taskAt(index))}`)
+}
+
+effect function main() {
+  const [command] = commandLine()
+  if (command === "check") return try check()
+  if (command === "registration") return try registration()
+  throw new UsageInvalid({ message: "usage: node dist/src/main.js check | registration" })
+}
+
+if (import.meta.main) NodeRuntime.runMain(Effect.provide(main(), NodeServices.layer))
