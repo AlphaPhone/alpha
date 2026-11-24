@@ -22,15 +22,18 @@ import { fixShown, managesPlan, showsWait, waitSeconds } from "../../gen/app__as
 import { useMachine as useReply } from "../../gen/app__assistant__reply.react.ts";
 import type { Machine as SearchMachine } from "../../gen/app__assistant__search.effect.vibe";
 import { useMachine as useSearch } from "../../gen/app__assistant__search.react.ts";
+import type { Machine as CommsMachine } from "../../gen/app__phone__comms.effect.vibe";
+import { useMachine as useComms } from "../../gen/app__phone__comms.react.ts";
 import { type Machine as ShellMachine, showing } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { isCommsView } from "../shell/views.tsx";
-import { freedom } from "./assistant.vibe";
+import { askComms, freedom } from "./assistant.vibe";
 import { Talk } from "./talk.vibe";
+import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | Talk, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | Talk, unknown>;
 }
 
 function turnOf(talking: Talking, label: string): AssistantTurnNoteProps["status"] | undefined {
@@ -105,6 +108,7 @@ export function Assistant({ runtime }: AssistantProps) {
   const reply = useReply(runtime);
   const shell = useShell(runtime);
   const dock = useDock(runtime);
+  const comms = useComms(runtime);
   const board = runtime.runSync(Effect.map(Talk, (talk) => talk.board));
   const seen = useSyncExternalStore((listener) => board.subscribe(listener), () => board.snapshot());
   const [listing, setListing] = useState(false);
@@ -118,7 +122,12 @@ export function Assistant({ runtime }: AssistantProps) {
   const hold = { type: "hold", askable: askable(talking) } as const;
   const start = { type: "start", ...free } as const;
   const newChat = shown.chosen === 0;
-  const sendable = newChat ? writing.editor.text && !writing.long && chats.can(start) && askable(talking) : composer.can(hold);
+  const onComms = isCommsView(shell.state?.trail.at(-1));
+  const subject = onComms ? comms.state?.key : undefined;
+  const request = subject === undefined ? "" : (comms.state?.requests.find((draft) => draft.about === subject)?.request ?? "");
+  const sendable = subject !== undefined
+    ? request.trim() !== "" && request.length <= textLimit && askable(talking) && (!newChat || chats.can(start))
+    : newChat ? writing.editor.text && !writing.long && chats.can(start) && askable(talking) : composer.can(hold);
   const status = turnOf(talking, seen.label);
   const notice = noticeOf(writing);
   const check = { type: "checkForReply" } as const;
@@ -126,10 +135,18 @@ export function Assistant({ runtime }: AssistantProps) {
   const settledLine = (id: string) => !id.startsWith("sent ") && !inFlight(talking.turn) && !pending(talking);
 
   const type = (text: string) => {
+    if (subject !== undefined) {
+      void comms.send({ type: "requestTyped", about: subject, request: text }, "Owner");
+      return;
+    }
     board.type(text);
     void composer.send({ type: "edit", blank: text.trim() === "", long: text.length > textLimit });
   };
   const send = () => {
+    if (subject !== undefined) {
+      void runtime.runPromise(askComms({ about: subject, text: request }));
+      return;
+    }
     const talk = runtime.runSync(Effect.map(Talk, (t) => t.board));
     if (newChat) {
       talk.sendWhenMade = true;
@@ -189,7 +206,7 @@ export function Assistant({ runtime }: AssistantProps) {
   const view = talking.context.showing.tag === "App" ? talking.context.showing.view : "Home";
   const assistantDetent = shell.state?.assistant ?? "Bar";
   const open = dockOpen(assistantDetent);
-  const comms = isCommsView(shell.state?.trail.at(-1));
+  const full = assistantDetent === "Full";
   const keptHeight = assistantDetent === "Sheet" && dock.state && dock.state.kept > 0 ? dock.state.kept : undefined;
   const openWithFocus = (focusField: boolean) => {
     for (const ask of dockFocused(assistantDetent)) {
@@ -200,10 +217,11 @@ export function Assistant({ runtime }: AssistantProps) {
 
   return (
     <>
-      {(!comms || open) && <AssistantConversation
+      {onComms && full && <CommsTarget runtime={runtime} placement="strip" />}
+      {(!onComms || open) && <AssistantConversation
         detent={assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
-        className={comms ? "relative w-full motion-safe:transition-[height] motion-safe:duration-[420ms]" : open ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
-        style={comms
+        className={onComms ? "relative w-full motion-safe:transition-[height] motion-safe:duration-[420ms]" : open ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
+        style={onComms
           ? { height: assistantDetent === "Full" ? "calc(100dvh - 52px)" : `clamp(38dvh, ${keptHeight === undefined ? "50dvh" : `${keptHeight}px`}, 60dvh)` }
           : keptHeight ? { height: keptHeight } : undefined}
         header={{
@@ -251,10 +269,12 @@ export function Assistant({ runtime }: AssistantProps) {
         }}
         composer={{
           fieldRef: composerRef,
-          value: seen.typed,
+          value: subject === undefined ? seen.typed : request,
           onValueChange: type,
-          closed: !composer.can({ type: "edit", blank: false, long: false }),
-          notice: notice === undefined ? undefined : {
+          placeholder: onComms ? "Ask Alpha" : undefined,
+          leading: onComms ? <CommsTarget runtime={runtime} placement="composer" /> : undefined,
+          closed: subject === undefined && !composer.can({ type: "edit", blank: false, long: false }),
+          notice: notice === undefined || onComms ? undefined : {
             status: notice,
             saved: seen.saved,
             onRetry: composer.can({ type: "retry" }) ? () => void composer.send({ type: "retry" }) : undefined,
@@ -268,9 +288,9 @@ export function Assistant({ runtime }: AssistantProps) {
             onCheck: writing.unsettled && conversation.can(check) ? () => void conversation.send(check) : undefined,
           },
           unavailable: !talking.ready ? "away" : talking.context.sensitive ? "sensitive" : undefined,
-          attachments: waiting(writing),
-          quote: quoted,
-          editing: writing.editor.editing > 0,
+          attachments: onComms ? undefined : waiting(writing),
+          quote: onComms ? undefined : quoted,
+          editing: !onComms && writing.editor.editing > 0,
           onOpen: !open ? () => openWithFocus(true) : undefined,
           onSend: sendable && !inFlight(talking.turn) ? send : undefined,
           onStop: conversation.can({ type: "stop" }) ? () => void conversation.send({ type: "stop" }) : undefined,

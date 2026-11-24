@@ -1,4 +1,4 @@
-import type { ComponentProps, Ref } from "react";
+import type { ComponentProps, ReactNode, Ref } from "react";
 import { ArrowUp, Mic, Paperclip, Square } from "lucide-react";
 import { cn } from "../../lib/cn.ts";
 import { Banner } from "../Banner.tsx";
@@ -45,6 +45,10 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
   onTalk?: () => void;
   /** Opens the conversation from the bar. */
   onOpen?: () => void;
+  /** The other target when Ask Alpha is open above a call or a conversation. */
+  leading?: ReactNode;
+  /** The current target named in the field. */
+  placeholder?: string;
   /** Called when the field takes focus: on the bar this opens Ask Alpha as a sheet. */
   onFocusField?: () => void;
   /** Ref to the composer field so a tap on the resting bar can focus it synchronously. */
@@ -66,7 +70,7 @@ const reasons = { away: "Alpha cannot be reached", sensitive: "This screen is pr
  */
 export function AssistantComposer({
   variant = "sheet", value, onValueChange, closed = false, notice, unavailable, attachments = [], limit = 4, quote, editing = false, lift,
-  onSend, onStop, stopping = false, onAttach, onTalk, onOpen, onFocusField, fieldRef, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
+  onSend, onStop, stopping = false, onAttach, onTalk, onOpen, leading, placeholder, onFocusField, fieldRef, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
 }: AssistantComposerProps) {
   const written = value.trim() !== "" || attachments.length > 0;
   const bar = variant === "bar";
@@ -78,20 +82,22 @@ export function AssistantComposer({
       {quote ? <AssistantQuoteBar kind="quote" text={quote} onRemove={onUnquote} /> : null}
       {editing ? <AssistantQuoteBar kind="editing" /> : null}
       <div className="flex items-end gap-1">
+        {leading}
         {bar && onOpen ? (
           <Button size="icon" aria-label="Open conversation" className="bg-alpha text-alpha-foreground hover:bg-alpha/90" onClick={onOpen}><Mark aria-hidden /></Button>
         ) : null}
-        <Button variant="ghost" size="icon" aria-label="Attach" disabled={!onAttach || closed} onClick={onAttach}><Paperclip /></Button>
+        {placeholder === undefined || onAttach ? <Button variant="ghost" size="icon" aria-label="Attach" disabled={!onAttach || closed} onClick={onAttach}><Paperclip /></Button> : null}
         <Textarea
           ref={fieldRef}
           data-alpha-composer=""
-          aria-label="Message Alpha"
+          aria-label={placeholder ?? "Message Alpha"}
+          placeholder={placeholder}
           rows={1}
           value={value}
           disabled={closed}
           onChange={(event) => onValueChange(event.target.value)}
           onFocus={onFocusField}
-          className="max-h-40 min-w-0 flex-1 touch-auto rounded-full border-0 bg-transparent px-2"
+          className={cn("max-h-40 min-w-0 flex-1 touch-auto rounded-full bg-transparent px-2", placeholder === undefined ? "border-0" : "border border-alpha px-3")}
         />
         {onStop || stopping ? (
           <Button size="icon" aria-label="Stop reply" loading={stopping} className="bg-foreground text-background hover:bg-foreground/90" onClick={onStop}><Square fill="currentColor" /></Button>
