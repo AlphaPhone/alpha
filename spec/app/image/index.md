@@ -213,15 +213,29 @@ the profile [OS](../../release/os.md) pins; eliza's operator checks every
 candidate and fallback against it.
 
 ```quint
+import os as Os from "../../release/os"
+
 type Channel = { name: str, product: str, device: str, downgradeAllowed: bool }
 
-pure val alphaChannel: Channel = { name: "stable", product: "alpha_stallion_phone", device: "stallion", downgradeAllowed: false }
+pure val alphaChannel: Channel = { name: "stable", product: Os::pinned.product, device: Os::pinned.device, downgradeAllowed: false }
 
 pure def channelIsAlphas(c: Channel): bool = c == alphaChannel
 
 pure val cValues = Set(alphaChannel, { ...alphaChannel, downgradeAllowed: true }, { ...alphaChannel, product: "alpha_cf_x86_64_phone" })
 
 pure def lawAlphasChannelNeverDowngrades(c: Channel): bool = channelIsAlphas(c) implies not(c.downgradeAllowed)
+```
+
+### A launcher replaced by cable on a pilot phone passes only as Pilot says: the run recorded, and the agent back
+
+The launcher itself is replaced by cable on a pilot phone as
+[Pilot](../../release/pilot.md) sets out; `pnpm release pilot` reports the
+run as passed only then.
+
+```quint
+import pilot as P from "../../release/pilot"
+
+pure def pilotPassed(p: P::Pilot): bool = p.leg == P::Done and p.passed
 ```
 
 ### Each operator command reads Alpha's channel and the stallion stock source lock where it reads one and the operator named none
