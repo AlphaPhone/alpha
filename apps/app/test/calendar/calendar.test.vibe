@@ -145,6 +145,27 @@ describe("Calendar journeys (spec/calendar/agent.md, \"Story: See my agent's Cal
     }
   })
 
+  it.live("an answer the agent files for approval says only that it waits, changes nothing and reads nothing again (spec/calendar/agent.md, \"Story: Change my agent's Calendar only as I reviewed, and be told what happened\")", () => effect {
+    // spec/calendar/agent.md, "An invitation answer is sent only by the invitee, at the version shown, and is saved only when a read shows the answer"
+    const fakeAgent = new CalendarAgentFake()
+    fakeAgent.invite("invite-q", "Vendor sync", 0, 23, "needsAction")
+    fakeAgent.queueAnswers = true
+    const shown: string[] = []
+    provide calendarOver(fakeAgent, new DeviceCalendarFake()), noticesInto(shown) {
+      try bindCalendar(binding)
+      try readCalendar(false, false)
+      const agent = try AgentCalendar
+      const invitation = (try agent.view()).feed!.events.find((event) => event.id === "invite-q")!
+      const readsBefore = fakeAgent.feedReads
+      const outcome = try answerRow(rowOf(invitation), "accepted")
+      const after = (try agent.view()).feed!.events.find((event) => event.id === "invite-q")!
+      try check(() => assert.deepStrictEqual({
+        outcome, notices: shown, sent: fakeAgent.writes.length, reads: fakeAgent.feedReads - readsBefore,
+        reply: after.attendees.find((guest) => guest.self)?.responseStatus,
+      }, { outcome: "WriteQueuedForApproval", notices: ["Waiting for your approval"], sent: 1, reads: 0, reply: "needsAction" }))
+    }
+  })
+
   it.live("a refused read drops the saved copy and Home stays unverified (spec/calendar/home.md, \"Story: See what is next on Home, and trust \\\"nothing planned\\\"\")", () => effect {
     const fakeAgent = new CalendarAgentFake()
     provide calendarOver(fakeAgent, new DeviceCalendarFake()) {

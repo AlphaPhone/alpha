@@ -14,6 +14,14 @@ export class CalendarAgentFake {
   resolved: { id: string; body: unknown }[] = [];
   writes: { method: string; path: string; body: unknown }[] = [];
   refuseReads = false;
+  /**
+   * Answer invitations as upstream's agent does on a linked provider calendar: file the answer for the owner's approval and change nothing yet.
+   * Upstream refuses an answer on its own resident calendar (not_invitee) and queues every provider answer, so the applied answer this fake
+   * gives otherwise models only Alpha's readback of an applied answer, not a path the pinned agent takes.
+   */
+  queueAnswers = false;
+  /** The feed reads asked of the agent. */
+  feedReads = 0;
   /** The linked-sync control, its writable Google calendars and the linked events, as upstream's sync-control routes keep them. */
   control = { revision: 0, paused: true, destination: null as { connectorAccountId: string; providerCalendarId: string } | null, pendingDispatch: null, conflicts: 0 };
   candidates: { connectorAccountId: string; providerCalendarId: string; side: "owner"; accessRole: string; primary: boolean; accountEmail: string | null }[] = [];
@@ -44,6 +52,7 @@ export class CalendarAgentFake {
     const url = new URL(path, "http://agent.test");
     if (this.refuseReads && method === "GET") throw Object.assign(new Error("refused"), { status: 401 });
     if (url.pathname === "/api/lifeops/calendar/feed") {
+      this.feedReads += 1;
       const timeMin = url.searchParams.get("timeMin") ?? "";
       const timeMax = url.searchParams.get("timeMax") ?? "";
       const begin = Date.parse(timeMin);
@@ -71,6 +80,7 @@ export class CalendarAgentFake {
       const request = body as { expectedProviderVersion: string; responseStatus: string };
       if (request.expectedProviderVersion !== target.etag) throw Object.assign(new Error("version"), { status: 409 });
       if (target.answer === undefined) throw Object.assign(new Error("not invitee"), { status: 403 });
+      if (this.queueAnswers) return { status: 202, data: { approvalRequestId: `approval-${this.writes.length}` } };
       Object.assign(target, { answer: request.responseStatus, etag: `${target.etag}+` });
       return { status: 200, data: { event: this.event(target), receipt: { operation: "respond_invitation", source: this.sourceKey(), eventId: target.id, providerVersion: target.etag, event: this.event(target), target: this.event(target), acceptedAt: target.startAt } } };
     }
