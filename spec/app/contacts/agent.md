@@ -29,8 +29,8 @@ One request at a time: what was asked, how far it got, how many contacts
 or numbers the search found, whether more matched than are shown, how many
 contacts already hold a new contact's name or number, whether a text names
 a number the owner wrote, whether the number is an emergency number, the
-search, the review shown to the owner, the action taken and how the request
-ended.
+exact number, text and contact the request acts on, the search, the review
+shown to the owner, the action taken and how the request ended.
 
 ```quint
 import read as R from "../../kit/read"
@@ -42,11 +42,13 @@ type Stage = Quiet | Looking | Choosing | Shown | Acting | Confirming | Ended
 type Ending = Done | Declined | Withdrawn | NotFound | Unavailable | EmergencyRefused | NotWritten | Unchanged | NotDone | Unsure
 type Request = {
   stage: Stage, ask: Ask, matches: int, more: bool, twins: int, addressed: bool, emergency: bool,
+  number: str, text: str, contact: str,
   lookup: R::Read, review: V::Review, attempt: A::Attempt, ending: Ending,
 }
 
 pure val initial: Request = {
   stage: Quiet, ask: Dial, matches: 0, more: false, twins: 0, addressed: false, emergency: false,
+  number: "", text: "", contact: "",
   lookup: R::unread, review: V::unreviewed, attempt: A::plan(0), ending: Done,
 }
 ```
@@ -62,7 +64,7 @@ agent's answer.
 ```quint
 type Effect =
   | Search({ ticket: int })
-  | Act({ id: int, ask: Ask })
+  | Act({ id: int, ask: Ask, number: str, text: str, contact: str })
   | ReadBack({ id: int })
   | Answer({ ending: Ending })
 
@@ -70,7 +72,8 @@ type Moved = { state: Request, out: List[Effect] }
 
 pure def told(ending: Ending): List[Effect] = List(Answer({ ending: ending }))
 
-pure def acting(id: int, ask: Ask): List[Effect] = List(Act({ id: id, ask: ask }))
+pure def acting(id: int, r: Request): List[Effect] =
+  List(Act({ id: id, ask: r.ask, number: r.number, text: r.text, contact: r.contact }))
 
 pure def acts(out: List[Effect]): bool = out.some(e => match e { | Act(a) => true | _ => false })
 ```
@@ -81,6 +84,9 @@ pure def acts(out: List[Effect]): bool = out.some(e => match e { | Act(a) => tru
 pure val ticketValues = Set(1, 2)
 pure val idValues = Set(1, 2, 3)
 pure val matchesValues = Set(-1, 0, 1, 2)
+pure val numberValues = Set("", "+14155550100")
+pure val textValues = Set("", "Running late")
+pure val contactValues = Set("", "7")
 pure val weight_found = 3
 pure val weight_approve = 3
 ```
@@ -107,13 +113,15 @@ pure def finish(ending: Ending, r: Request): Moved =
 
 pure def anew(v: V::Review): V::Review = V::present(V::revise(v))
 
-pure def canAsked(r: Request, ask: Ask, byName: bool, emergency: bool, written: bool, pictures: bool, by: Actor): bool = by == Agent and not(open(r))
+pure def canAsked(r: Request, ask: Ask, byName: bool, emergency: bool, written: bool, pictures: bool, number: str, text: str, by: Actor): bool =
+  by == Agent and not(open(r)) and (byName or not(reachesANumber(ask)) or number != "")
 
 pure def reachesANumber(ask: Ask): bool = ask == Dial or ask == Text
 
-pure def asked(r: Request, ask: Ask, byName: bool, emergency: bool, written: bool, pictures: bool, by: Actor): Moved =
+pure def asked(r: Request, ask: Ask, byName: bool, emergency: bool, written: bool, pictures: bool, number: str, text: str, by: Actor): Moved =
   val fresh = {
-    ...r, ask: ask, matches: 0, more: false, twins: 0,
+    ...r, ask: ask, matches: 0, more: false, twins: 0, contact: "",
+    number: if (reachesANumber(ask) and not(byName)) number else "", text: if (ask == Text) text else "",
     addressed: reachesANumber(ask) and not(byName), emergency: ask == Dial and emergency and not(byName),
   }
   val lookup = R::ask(r.lookup)
@@ -161,8 +169,11 @@ shown first. A failed search ends the request as unavailable.
 pure def canFound(r: Request, ticket: int, matches: int, by: Actor): bool =
   by == Device and r.stage == Looking and R::canAnswer(r.lookup, ticket) and matches >= 0
 
-pure def found(r: Request, ticket: int, ok: bool, matches: int, more: bool, unchanged: bool, by: Actor): Moved =
-  val searched = { ...r, lookup: R::answer(r.lookup, ok), matches: matches, more: ok and more and matches >= 1 }
+pure def found(r: Request, ticket: int, ok: bool, matches: int, more: bool, unchanged: bool, contact: str, by: Actor): Moved =
+  val searched = {
+    ...r, lookup: R::answer(r.lookup, ok), matches: matches, more: ok and more and matches >= 1,
+    contact: if (ok and matches == 1 and not(reachesANumber(r.ask)) and r.ask != AddContact) contact else "",
+  }
   if (not(ok)) finish(Unavailable, searched)
   else if (r.ask == AddContact) { state: { ...searched, stage: Shown, matches: 1, twins: matches, review: anew(r.review) }, out: List() }
   else if (matches == 0) finish(NotFound, searched)
@@ -178,10 +189,11 @@ the reason. A change that would leave the chosen contact as it is ends at
 once.
 
 ```quint
-pure def canChoose(r: Request, emergency: bool, unchanged: bool, by: Actor): bool = by == Owner and r.stage == Choosing
+pure def canChoose(r: Request, number: str, contact: str, emergency: bool, unchanged: bool, by: Actor): bool =
+  by == Owner and r.stage == Choosing and contact != "" and (reachesANumber(r.ask) iff number != "")
 
-pure def choose(r: Request, emergency: bool, unchanged: bool, by: Actor): Moved =
-  val chosen = { ...r, emergency: r.ask == Dial and emergency }
+pure def choose(r: Request, number: str, contact: str, emergency: bool, unchanged: bool, by: Actor): Moved =
+  val chosen = { ...r, number: number, contact: contact, emergency: r.ask == Dial and emergency }
   if (chosen.emergency) finish(EmergencyRefused, chosen)
   else if (r.ask == ChangeContact and unchanged) finish(Unchanged, chosen)
   else { state: { ...chosen, stage: Shown, matches: 1, review: anew(r.review) }, out: List() }
@@ -216,6 +228,10 @@ pure def lineChange(before: bool, after: bool): LineChange =
 
 pure def lawARemovedValueNeverReadsAsKept(before: bool, after: bool): bool =
   (before and not(after)) iff lineChange(before, after) == RemoveLine
+
+pure def alwaysAShownRequestNamesWhatItActsOn(r: Request): bool =
+  (r.stage == Shown or r.stage == Acting or r.stage == Confirming) implies
+    ((reachesANumber(r.ask) implies r.number != "") and ((r.ask == ChangeContact or r.ask == DeleteContact) implies r.contact != ""))
 
 pure def alwaysMoreMatchedOnlyAfterASearch(r: Request): bool =
   (r.more implies (r.lookup.status == R::Loaded and r.matches >= 1))
@@ -276,7 +292,7 @@ pure def canApprove(r: Request, clear: bool, spoken: bool, by: Actor): bool =
 
 pure def approve(r: Request, clear: bool, spoken: bool, by: Actor): Moved =
   val attempt = A::dispatch(A::record(A::plan(r.attempt.id + 1)))
-  { state: { ...r, stage: Acting, review: V::confirm(r.review), attempt: attempt }, out: acting(attempt.id, r.ask) }
+  { state: { ...r, stage: Acting, review: V::confirm(r.review), attempt: attempt }, out: acting(attempt.id, r) }
 ```
 
 ### The owner can decline, and a review Alpha stops showing is withdrawn
@@ -303,7 +319,7 @@ pure def sometimesAnAddressedText(r: Request): bool = r.stage == Shown and r.ask
 ```quint
 pure def stepOnlyApprovedRequestsAct(before: Request, via: str, after: Request, out: List[Effect]): bool =
   acts(out) implies (via == "approve" and before.stage == Shown and V::canConfirm(before.review)
-    and out == acting(before.attempt.id + 1, before.ask))
+    and out == acting(before.attempt.id + 1, before))
 ```
 
 ### The agent never calls an emergency number, and is told why
