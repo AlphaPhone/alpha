@@ -14,6 +14,7 @@ bad() { echo "FAIL: $*"; FAIL=$((FAIL + 1)); }
 ok() { echo "ok:   $*"; }
 expect() { [ "$PHASE" = post ]; }   # assertions apply only after the flash
 exec > >(tee "$OUT/checks.txt") 2>&1
+[ -n "$SERIAL" ] || die "set ALPHA_SERIAL to the target phone"
 [ "$(timeout 10 "$ADB" -s "$SERIAL" get-state 2>/dev/null)" = device ] || die "phone $SERIAL is not in adb 'device' state"
 
 say "Image"

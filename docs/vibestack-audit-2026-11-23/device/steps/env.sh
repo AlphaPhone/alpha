@@ -5,7 +5,7 @@
 # Required:  ALPHA_DIR     the alpha vibestack checkout to build (absolute path)
 #            VERSION_CODE  integer, must exceed the versionCode installed on the phone (630 on 2026-11-23)
 # Optional:  WORK          per-version work directory (default device/work/v$VERSION_CODE)
-#            ALPHA_SERIAL  adb serial (default 67091JEA313850)
+#            ALPHA_SERIAL  adb serial, required for steps that access a device
 
 : "${ALPHA_DIR:?set ALPHA_DIR to the alpha vibestack checkout to build}"
 : "${VERSION_CODE:?set VERSION_CODE (an integer above the installed versionCode)}"
@@ -15,7 +15,7 @@ case "$ALPHA_DIR" in /*) ;; *) echo "ALPHA_DIR must be an absolute path" >&2; ex
 DEVICE_DIR=/home/shaw/.cache/vibeaudit/device
 WORK=${WORK:-$DEVICE_DIR/work/v$VERSION_CODE}
 ROLLBACK_DIR=$DEVICE_DIR/rollback
-SERIAL=${ALPHA_SERIAL:-67091JEA313850}
+SERIAL=${ALPHA_SERIAL:-}
 PKG=ai.alphacompute.alphaphone
 
 # Resource wrapper: one of three machine-wide slots, E-cores only (AllowedCPUs=8-15,18-23), memory capped.

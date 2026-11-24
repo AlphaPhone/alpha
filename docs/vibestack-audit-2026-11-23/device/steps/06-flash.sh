@@ -9,6 +9,7 @@
 set -euo pipefail
 . "$(dirname "$0")/env.sh"
 [ "${CONFIRM_FLASH:-}" = yes ] || die "refusing to flash: set CONFIRM_FLASH=yes after the owner has agreed and steps 1-5 passed"
+[ -n "$SERIAL" ] || die "set ALPHA_SERIAL to the target phone"
 [ "$#" = 0 ] || die "this script takes no arguments (and never passes -w)"
 IMG=$WORK/img$VERSION_CODE.zip
 need "$IMG"; need "$WORK/Launcher$VERSION_CODE.apk"

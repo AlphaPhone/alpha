@@ -80,7 +80,7 @@ uptime; free -g | head -2; df -h /home | tail -1
 echo "note: /tmp is wiped on reboot; everything for this lane lives under $DEVICE_DIR"
 
 say "Phone $SERIAL (read-only)"
-if [ "$(timeout 10 "$ADB" -s "$SERIAL" get-state 2>/dev/null)" != device ]; then bad "phone not in adb 'device' state"; else
+if [ -z "$SERIAL" ]; then bad "set ALPHA_SERIAL to the target phone"; elif [ "$(timeout 10 "$ADB" -s "$SERIAL" get-state 2>/dev/null)" != device ]; then bad "phone not in adb 'device' state"; else
   FP=$(adbsh getprop ro.build.fingerprint); echo "fingerprint: $FP"; echo "slot: $(adbsh getprop ro.boot.slot_suffix)  model: $(adbsh getprop ro.product.model)"
   D=$(adbsh dumpsys package "$PKG")
   CUR=$(printf '%s\n' "$D" | sed -n 's/^ *versionCode=\([0-9]*\).*/\1/p' | head -1)

@@ -25,7 +25,7 @@ Who runs a check: **AGENT** (read-only or navigation only), **ASK** (agent, afte
 
 ## How to drive
 
-- **adb, read-only:** `adb -s 67091JEA313850 exec-out screencap -p > NN.png`, `shell dumpsys …`,
+- **adb, read-only:** `adb -s "$ALPHA_SERIAL" exec-out screencap -p > NN.png`, `shell dumpsys …`,
   `shell input keyevent KEYCODE_HOME` / `KEYCODE_BACK` (navigation only). Avoid `input tap` by coordinates.
 - **WebView over Chrome DevTools:** the image is userdebug, so the release launcher's WebView exposes its devtools
   socket (this is how v612-v630 were driven). The legacy driver is `~/.cache/alpha-v612/driver/`:
@@ -184,7 +184,7 @@ failure of equivalence; record it against the row.
 | ID | Who | Drive | Legacy showed | Pass |
 |---|---|---|---|---|
 | L1 | AGENT | Open the Clock tile (Vibestack); on legacy, "open workflows" | Legacy kept alarms in Workflows / the AOSP Clock; Clock tile is new | Opens; timers, stopwatch, world clocks present |
-| L2 | ASK | "remind me in 3 minutes to check v$N"; wait; read the notification shade (`adb shell dumpsys notification --noredact` is read-only) | *Capture before flashing* | A reminder notification from Alpha at the time, once |
+| L2 | ASK | "remind me in 3 minutes to check v$N"; wait; read the Alpha reminder in the notification shade | *Capture before flashing* | A reminder notification from Alpha at the time, once |
 | L3 | ASK | "create a workflow called Alpha device test that sends me a reminder every morning at 9", then delete it | v625: "Created “Alpha device test”. It is off until you turn it on. It can’t send you a notification …" | Same outcome; deleted at the end |
 | L4 | AGENT | Reminders created before the flash | *Capture before flashing* | Still listed (legacy `reminder-creations` slots are not adopted: predicted fail) |
 

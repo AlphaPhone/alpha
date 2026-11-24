@@ -12,7 +12,7 @@ post-flash checks, and the on-device checklist (`DEVICE-CHECKS.md`). Owner accep
 
 | Fact | Value | Source |
 |---|---|---|
-| Phone | Pixel 10a `stallion`, serial `67091JEA313850`, model "Alpha Phone Pixel 10a", bootloader unlocked, slot `_b` | `baseline/getprop.txt`, live `getprop` 12:50 |
+| Phone | Pixel 10a `stallion`, model "Alpha Phone Pixel 10a", bootloader unlocked, slot `_b` | `baseline/getprop.txt`, live `getprop` 12:50 |
 | Image on the phone | `Alpha/alpha_stallion_phone/stallion:17/CP2A.260605.016/alpha.v630:userdebug/test-keys`, built 08:54 PST | same |
 | Launcher on the phone | `ai.alphacompute.alphaphone` versionCode 630, versionName 0.1.0, `/product/priv-app/AlphaPhone`, flags SYSTEM + PRIVILEGED + PRODUCT, v3 signature, `signatures:[289df855]` | `baseline/package.txt`, live `dumpsys package` |
 | Signing certificate | repository debug key, SHA-256 `2242994d2d237f98d01927999157067df4e2495a8f980451ac3de5d40642584a` | `~/.cache/alpha-v612/image/apk630.sum` (apksigner output for Launcher630.apk). Not read from the phone: the allowed adb commands print only the short `289df855` value |
@@ -62,6 +62,7 @@ All steps take `ALPHA_DIR` and `VERSION_CODE`:
 
 ```sh
 export ALPHA_DIR=/abs/path/to/alpha-vibestack-checkout VERSION_CODE=632
+export ALPHA_SERIAL='<serial of the target phone>'
 cd /home/shaw/.cache/vibeaudit/device/steps
 ```
 
@@ -76,8 +77,8 @@ Work files go to `device/work/v$VERSION_CODE/`, rollback artifacts to `device/ro
   `node_modules`); the upstream-pin ancestry guard, evaluated with git before the build trips over it; that no
   `ELIZAOS_KEYSTORE_*` variable is set; `node scripts/android-build-preflight.ts --report` (reads files only);
   AOSP tree and staged launcher; no image build or fastboot running; load, memory, disk; phone state
-  (fingerprint, versionCode < `VERSION_CODE`, no /data update, roles, VPN), and that a rollback image exists for
-  the image the phone runs.
+  (fingerprint, versionCode < `VERSION_CODE`, no /data update, roles, VPN), and that a rollback image and build
+  record exist for the image the phone runs.
 - Artifact: `work/v$N/preflight.txt`. Pass: last line `PREFLIGHT OK`.
 - Failed before / expected now:
   - **Pin guard.** `scripts/android-build-preflight.ts` exits 2 when the pin is not `origin/main`'s pin or a
@@ -287,7 +288,7 @@ Keep these **before** flashing (step 6 does 1-4 and refuses to flash without 1 a
    legacy v631 launcher, not v630; to rebuild a v630 image, run the legacy `swap.py` with `Launcher630.apk` first.
 6. Do not delete `~/.cache/alpha-v612/image/` or `rollback/` until the owner has accepted the new build.
 
-To go back: bootloader, `fastboot -s 67091JEA313850 update <rollback-img.zip>` (no `-w`), boot, check versionCode
+To go back: bootloader, `fastboot -s "$ALPHA_SERIAL" update <rollback-img.zip>` (no `-w`), boot, check versionCode
 630 and the three roles. This restores the system partitions only. **App data is not rolled back**: `/data` is kept
 in both directions, the Vibestack build adopts some legacy slots lazily and starts its agent on a new state
 directory, and a system app going from a higher to a lower versionCode on kept data has not been tried on this
