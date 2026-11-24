@@ -147,7 +147,9 @@ class CloudSigningInputTest(unittest.TestCase):
         def git(base, *args):
             return subprocess.check_output(["git", "-C", str(base), *args], stderr=subprocess.PIPE).decode().strip()
         def commit(base):
-            git(base, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Synthetic reviewed source")
+            # Finish fixture Git writes before TemporaryDirectory cleanup.
+            git(base, "-c", "maintenance.auto=false", "-c", "user.name=fixture", "-c",
+                "user.email=fixture@example.invalid", "commit", "-qm", "Synthetic reviewed source")
             return git(base, "rev-parse", "HEAD")
         git(sdk, "init", "-q")
         engine_repository = "https://github.com/elizaOS/llama.cpp.git"
