@@ -67,6 +67,7 @@ const clockStart = String.raw`(?<![\p{L}\d:+./-])`;
 const clockRange = new RegExp(String.raw`${clockStart}(?:(${clock}(?:${meridiem})?)${rangeSeparator}(${clock}${meridiem})|(${bareClock})${rangeSeparator}(${bareClock}))${clockEnd}`, "giu");
 const clockWithMeridiem = new RegExp(String.raw`${clockStart}(${clock}${meridiem})${clockEnd}`, "giu");
 const bareClockTime = new RegExp(String.raw`${clockStart}${bareClock}${clockEnd}`, "gu");
+const signedClock = /(?<=[+−]|[\p{L}\d]-)(\d{1,2}):(\d{2})(?![\d:])/gu;
 
 /** A written clock time in words, as spec/voice/speech.md models it: "three thirty P M", "nine oh five", "seven o'clock", "noon". */
 function clockSaid(value: string): string {
@@ -97,6 +98,10 @@ function speakDatesAndTimes(text: string): string {
     .replace(clockRange, (_, from?: string, to?: string, fromBare?: string, toBare?: string) => `${clockSaid(from ?? fromBare ?? "")} to ${clockSaid(to ?? toBare ?? "")}`)
     .replace(clockWithMeridiem, clockSaid)
     .replace(bareClockTime, clockSaid)
+    // The final "." of "a.m." before a lower-case word ends no sentence, so "5 a.m. coffee" is said as one.
+    .replace(/(?<= [AP] M)\.(?=[ \t]+\p{Ll})/gu, "")
+    // An offset such as "GMT+5:30", or a clock run into a number as in "10-12:30", keeps the digit groups it was said in before.
+    .replace(signedClock, (_, hour: string, minute: string) => `${hour}${minute === "00" ? " o'clock" : minute[0] === "0" ? ` oh ${minute[1]}` : ` ${minute}`}`)
     .replace(/(?<=\d)%(?![\p{L}\d])/gu, " percent")
     .replace(/(?<=\p{L}):(?=[ \t]+\S)/gu, ",")
     .replace(/(?<=\p{L}):(?=$|[ \t]*\r?\n)/gmu, ".");
