@@ -20,6 +20,8 @@ export interface AskScene {
   acknowledgment?: string;
   /** What each turn told the agent beside its text, as it arrived. */
   metadata?: unknown[];
+  nextReplyChunks?: readonly string[];
+  cloudWarmCalls: number;
 }
 
 /** One conversation as the agent keeps it: its room, title and messages. */
@@ -30,7 +32,7 @@ export interface Kept {
 }
 
 export function askScene(): AskScene {
-  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false };
+  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, cloudWarmCalls: 0 };
 }
 
 const encoder = new TextEncoder();
@@ -38,8 +40,10 @@ const frame = (data: unknown) => encoder.encode(`data: ${JSON.stringify(data)}\n
 /** What ends a turn, as eliza's agent names its messages (`.eliza/packages/agent/src/client/reply-frame.schema.vibe`, `DoneFrame`). */
 const named = (turn: number) => ({ messageId: `m${turn}`, userMessageId: `u${turn}`, agentName: "Alpha", actionResults: [] });
 
-/** A streamed reply as eliza's agent writes one: what was said back in two pieces, or one piece that waits to be stopped. */
+/** A streamed reply as eliza's agent writes one: what was said back in two pieces, custom chunks, or one piece that waits to be stopped. */
 function reply(scene: AskScene, room: string, text: string, keep: (said: string) => void): Response {
+  const custom = scene.nextReplyChunks;
+  scene.nextReplyChunks = undefined;
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(frame({ type: "status", activity: "thinking" }));
@@ -48,6 +52,14 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
       if (scene.stalled) {
         controller.enqueue(frame({ type: "token", text: "Thinking" }));
         scene.turns.set(room, () => controller.close());
+        return;
+      }
+      if (custom !== undefined && custom.length > 0) {
+        for (const piece of custom) controller.enqueue(frame({ type: "token", text: piece }));
+        const full = custom.join("");
+        keep(full);
+        controller.enqueue(frame({ type: "done", fullText: full, ...named(scene.said.length) }));
+        controller.close();
         return;
       }
       controller.enqueue(frame({ type: "token", text: "You said: " }));
@@ -127,5 +139,10 @@ export function askRoutes(scene: AskScene): Route[] {
       });
     },
     (request, url) => (request.method === "GET" && url.pathname === "/api/status" ? Response.json({ serverInstanceId: "alpha-fake" }) : undefined),
+    (request, url) => {
+      if (request.method !== "POST" || url.pathname !== "/api/cloud/warm") return;
+      scene.cloudWarmCalls += 1;
+      return Response.json({ warmed: true });
+    },
   ];
 }
