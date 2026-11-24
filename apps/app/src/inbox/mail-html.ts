@@ -21,12 +21,12 @@ function format(html: string, links: Link[]): Formatted | undefined {
   content.append(template.content);
   template.content.append(content);
   const sources = new Map<HTMLImageElement, string>();
-  for (const node of content.querySelectorAll("img[src]")) {
+  for (const node of content.querySelectorAll<HTMLImageElement>("img[src]")) {
     const src = imageSource(node.getAttribute("src") ?? "");
     if (src) sources.set(node, src);
   }
   const destinations = new Map<HTMLAnchorElement, Link>();
-  for (const node of content.querySelectorAll("a[href]")) {
+  for (const node of content.querySelectorAll<HTMLAnchorElement>("a[href]")) {
     const link = linkOf(node.getAttribute("href") ?? "", node.textContent ?? "");
     if (link.secure) destinations.set(node, link);
   }

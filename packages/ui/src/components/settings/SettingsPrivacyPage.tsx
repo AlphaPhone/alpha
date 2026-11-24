@@ -7,9 +7,9 @@ import { SettingsPage } from "./SettingsPage.tsx";
 import { type Neighbour, placed, type SettingsPageName, type SettingsPlaceProps } from "./vocabulary.ts";
 
 /** What Alpha may share with a chat turn or change: `Share` in spec/app/settings/preferences.md. */
-export type SettingsShare = "agent-location" | "browser-page" | "gmail-changes" | "calendar-edits";
+export type SettingsShare = "agent-location" | "browser-page" | "gmail-changes" | "calendar-edits" | "telegram-context" | "slack-context";
 
-const shared: SettingsShare[] = ["agent-location", "browser-page", "gmail-changes", "calendar-edits"];
+const shared: SettingsShare[] = ["agent-location", "browser-page", "gmail-changes", "calendar-edits", "telegram-context", "slack-context"];
 
 export type SettingsPrivacyPageProps = SettingsPlaceProps & {
   /** How the phone's read of the device preferences stands. */

@@ -199,7 +199,7 @@ function telephony(world: TelephonyScene): Faked {
         const one = voicemail(id);
         if (one === undefined) return Promise.resolve({ status: "not-found" });
         one.deleted = true;
-        const staged = { id: `staged-${world.staged.length + 1}`, kind: "voicemail", target: { id }, phase: "queued", deadline: { expiresAt: 1_800_000_000_000 } };
+        const staged = { id: `staged-${world.staged.length + 1}`, kind: "voicemail", target: { id }, phase: "deleted", deadline: { expiresAt: 1_800_000_000_000 } };
         world.staged.push(staged);
         return Promise.resolve({ status: "queued", deletion: staged });
       },
