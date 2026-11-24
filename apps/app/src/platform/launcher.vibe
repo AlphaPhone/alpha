@@ -1,0 +1,108 @@
+// spec/app/home/index.md, "Story: Open an app"; spec/app/home/index.md, "Story: See the apps on this phone"
+import type { InstalledApp, LaunchTarget } from "@elizaos/os/bridges/definitions/system"
+
+module held {
+  import { appKey, launcherRefusalCode, systemClient } from "@elizaos/os/bridges/system"
+
+  let made: ReturnType<typeof systemClient> | undefined
+  /** eliza's client of the `ElizaSystem` plugin, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
+  export function client(): ReturnType<typeof systemClient> {
+    return (made ??= systemClient())
+  }
+  /** @throws {never} */
+  export function keyOf(app: LaunchTarget): string {
+    return appKey(app)
+  }
+  /** @throws {never} */
+  export function refusalOf(cause: unknown): string {
+    return launcherRefusalCode(cause) ?? "failed"
+  }
+  /** Each change of the phone's apps, until the listener is taken off again. @throws {never} */
+  export function onChange(heard: () => void): () => void {
+    const handle = client().addListener("launcherAppsChanged", () => heard())
+    return () => void handle.then((listening) => listening.remove(), () => undefined)
+  }
+}
+import { client, keyOf, onChange, refusalOf } from held
+export { keyOf }
+
+/** How Alpha is presented, as the phone says: as its launcher, as the assistant alone, or as an ordinary app. */
+export interface Presentation {
+  readonly phone: boolean
+  readonly launcher: boolean
+  readonly assistant: boolean
+}
+
+/** Why Android did not do what Home asked: the app has gone, is turned off, its profile is locked, Alpha is not in front, or Android was unable. */
+export type Why = "Gone" | "TurnedOff" | "ProfileLocked" | "NotInFront" | "Unable"
+
+/** Android's answer to an ask of Home's: done, or refused with why. */
+export type Asked = { readonly done: true } | { readonly done: false; readonly why: Why }
+
+/** The phone could not list its apps, or there is no launcher, as in a browser. */
+export error Unlisted { cause: unknown }
+
+/**
+ * The phone's launcher: what is installed, opening an installed app or its info page, and Android's notification
+ * shade, through eliza's client of the `ElizaSystem` plugin. An installed app is named by its key: its package, its
+ * activity and its profile, never its label.
+ */
+export service Launcher {
+  presentation(): Presentation!!
+  apps(): ReadonlyArray<InstalledApp>!Unlisted
+  open(app: InstalledApp): Asked!!
+  info(app: InstalledApp): Asked!!
+  shade(): Asked!!
+  /** Each time the phone's apps change. */
+  readonly changes: Stream.Stream<void>
+}
+
+const refusals: Readonly<Record<string, Why>> = {
+  "not-installed": "Gone", "no-launcher": "Gone", invalid: "Gone", disabled: "TurnedOff",
+  "profile-locked": "ProfileLocked", "profile-unavailable": "ProfileLocked", "not-in-front": "NotInFront",
+}
+
+const refused = (code: string | undefined): Asked => ({ done: false, why: refusals[code ?? ""] ?? "Unable" })
+
+/** The phone's launcher, through eliza's `systemClient()` of `@elizaos/os/bridges/system`. */
+export const phoneLauncher = Layer.sync(Launcher, () => {
+  const system = client()
+  return {
+    effect presentation() {
+      const build = tryPromise(() => system.getBuildInfo()) catch () => ({ launcher: false, version: "" })
+      const launch = tryPromise(() => system.getLaunchInfo()) catch () => ({ assistant: false })
+      return { phone: true, launcher: build.launcher, assistant: launch.assistant }
+    },
+    effect apps() {
+      const listed = try tryPromise({ try: () => system.listLauncherApps({ icons: true }), catch: (cause) => new Unlisted({ cause }) })
+      return listed.apps
+    },
+    effect open(app: InstalledApp) {
+      const target = { packageName: app.packageName, ...(app.activityName ? { activityName: app.activityName } : {}), ...(app.user ? { user: app.user } : {}) }
+      return effect {
+        try tryPromise({ try: () => system.launchApp(target), catch: (cause) => cause })
+        const done: Asked = { done: true }
+        return done
+      } catch (cause) => refused(refusalOf(cause))
+    },
+    effect info(app: InstalledApp) {
+      const handed = tryPromise(() => system.openAppInfo(app)) catch () => undefined
+      return handed === undefined ? refused(undefined) : handed.outcome === "Opened" ? { done: true } : refused(handed.refusal)
+    },
+    effect shade() {
+      const handed = tryPromise(() => system.openNotificationShade()) catch () => undefined
+      return handed === undefined ? refused(undefined) : handed.status === "opened" ? { done: true } : refused(handed.status)
+    },
+    changes: Stream.callback<void>((queue) => acquireRelease(sync(() => onChange(() => { Queue.offerUnsafe(queue, undefined) })), (off) => sync(off))),
+  }
+})
+
+/** A browser has no launcher: Alpha is an ordinary page, lists no app and opens nothing of Android's. */
+export const browserLauncher = Layer.succeed(Launcher, {
+  presentation: () => succeed({ phone: false, launcher: false, assistant: false }),
+  apps: () => Effect.fail(new Unlisted({ cause: "no launcher in a browser" })),
+  open: () => succeed<Asked>({ done: false, why: "Unable" }),
+  info: () => succeed<Asked>({ done: false, why: "Unable" }),
+  shade: () => succeed<Asked>({ done: false, why: "Unable" }),
+  changes: Stream.empty,
+})

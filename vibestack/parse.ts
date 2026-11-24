@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { isExcludedSpecPath, loadConfig } from "./config.ts";
 import { BUILTINS, LIST_HELPERS } from "./gen/print.ts";
 import { plainText, scanSpec } from "./scan.ts";
 import type { Input } from "./action.ts";
@@ -43,8 +44,12 @@ export function badSpecName(name: string): string | undefined {
 }
 
 /** The relative path gives a unique module name; a nested index names its directory. */
-export function specName(file: string): string {
-  const parts = file.replaceAll(path.sep, "/").replace(/^(?:spec|std)\//, "").replace(/\.md$/, "").split("/");
+export function specName(file: string, specDir = "spec"): string {
+  const normalized = file.replaceAll(path.sep, "/");
+  const stripped = normalized.startsWith("std/") ? normalized.slice(4)
+    : normalized.startsWith(`${specDir}/`) ? normalized.slice(specDir.length + 1)
+    : normalized.replace(/^spec\//, "");
+  const parts = stripped.replace(/\.md$/, "").split("/");
   for (const part of parts) {
     const bad = badSpecName(part);
     if (bad) throw new Error(`${file}: ${bad}`);
@@ -59,8 +64,8 @@ export function specName(file: string): string {
  * keeps every line on its own line number, so Quint errors point into the
  * Markdown file. A fence of any other kind is prose; scan.ts reads the fences.
  */
-export function parseSpec(root: string, file: string, text = fs.readFileSync(located(root, file), "utf8")): Spec {
-  const name = specName(file);
+export function parseSpec(root: string, file: string, text = fs.readFileSync(located(root, file), "utf8"), specDir = "spec"): Spec {
+  const name = specName(file, specDir);
   const rules: Rule[] = [];
   const stories: Story[] = [];
   const qnt: string[] = [];
@@ -170,23 +175,23 @@ function finish(spec: Spec, text: string) {
  * Which characters of Quint are code, as opposed to part of a string or a comment, which are comments, which are in a
  * string, its quotes included, and what is still open at the end. A string ends at its next quote: Quint's have no escapes.
  */
-function scan(text: string): { code: boolean[]; comment: boolean[]; quoted: boolean[]; strings: Set<number>; mode: "" | '"' | "//" | "/*" } {
-  const code: boolean[] = [];
-  const comment: boolean[] = [];
-  const quoted: boolean[] = [];
+function scan(text: string): { code: Uint8Array; comment: Uint8Array; quoted: Uint8Array; strings: Set<number>; mode: "" | '"' | "//" | "/*" } {
+  const code = new Uint8Array(text.length);
+  const comment = new Uint8Array(text.length);
+  const quoted = new Uint8Array(text.length);
   const strings = new Set<number>();
   let mode: "" | '"' | "//" | "/*" = "";
   for (let i = 0; i < text.length; i++) {
-    const two = text.slice(i, i + 2);
-    if (mode === "" && text[i] === '"') { strings.add(i); quoted[i] = true; mode = '"'; }
-    else if (mode === "" && two === "//") { comment[i] = comment[i + 1] = true; i++; mode = "//"; }
-    else if (mode === "" && two === "/*") { comment[i] = comment[i + 1] = true; i++; mode = "/*"; }
-    else if (mode === "") code[i] = true;
-    else if (mode === '"') { quoted[i] = true; if (text[i] === '"') mode = ""; }
-    else if (mode === "//" && text[i] === "\n") mode = "";
-    else if (mode === "//") comment[i] = true;
-    else if (mode === "/*" && two === "*/") { comment[i] = comment[i + 1] = true; i++; mode = ""; }
-    else if (mode === "/*") comment[i] = true;
+    const ch = text[i];
+    if (mode === "" && ch === '"') { strings.add(i); quoted[i] = 1; mode = '"'; }
+    else if (mode === "" && (ch === "/" && text[i + 1] === "/")) { comment[i] = comment[i + 1] = 1; i++; mode = "//"; }
+    else if (mode === "" && (ch === "/" && text[i + 1] === "*")) { comment[i] = comment[i + 1] = 1; i++; mode = "/*"; }
+    else if (mode === "") code[i] = 1;
+    else if (mode === '"') { quoted[i] = 1; if (ch === '"') mode = ""; }
+    else if (mode === "//" && ch === "\n") mode = "";
+    else if (mode === "//") comment[i] = 1;
+    else if (mode === "/*" && (ch === "*" && text[i + 1] === "/")) { comment[i] = comment[i + 1] = 1; i++; mode = ""; }
+    else if (mode === "/*") comment[i] = 1;
   }
   return { code, comment, quoted, strings, mode: mode === "//" ? "" : mode };
 }
@@ -310,27 +315,33 @@ function expandBuiltins(text: string, module: string): { text: string; names: st
 
 /** All Markdown sources under spec/, without reading unfinished contents. */
 export function specFiles(root: string): string[] {
-  const dir = path.join(root, "spec");
+  const { spec: specConfig } = loadConfig(root);
+  const dir = path.join(root, specConfig.dir);
   const files: string[] = [];
   const walk = (folder: string) => {
     for (const entry of fs.readdirSync(folder, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
       const file = path.join(folder, entry.name);
-      if (entry.isSymbolicLink()) throw new Error(`${path.relative(root, file)}: specs and their directories cannot be symbolic links`);
+      const rel = path.relative(root, file).split(path.sep).join("/");
+      if (isExcludedSpecPath(rel, specConfig)) continue;
+      if (entry.isSymbolicLink()) throw new Error(`${rel}: specs and their directories cannot be symbolic links`);
       if (entry.isDirectory()) walk(file);
-      else if (entry.isFile() && entry.name.endsWith(".md")) files.push(path.relative(root, file).split(path.sep).join("/"));
+      else if (entry.isFile() && entry.name.endsWith(".md")) files.push(rel);
     }
   };
   if (fs.existsSync(dir)) {
-    if (fs.lstatSync(dir).isSymbolicLink()) throw new Error("spec/: the spec directory cannot be a symbolic link");
+    if (fs.lstatSync(dir).isSymbolicLink()) throw new Error(`${specConfig.dir}/: the spec directory cannot be a symbolic link`);
     walk(dir);
   }
   return files;
 }
 
 /** Every spec after its imports; text snapshots also support Studio's unpublished changes. */
-export function readSpecs(root: string, texts?: Record<string, string>): Spec[] {
-  const files = texts ? Object.keys(texts).sort() : specFiles(root);
-  if (!files.length) throw new Error(`there are no specs: ${path.join(root, "spec")} holds no .md file`);
+export function readSpecs(root: string, texts?: Record<string, string>, ownerName?: string): Spec[] {
+  const { spec: specConfig } = loadConfig(root);
+  const specDir = specConfig.dir;
+  const files = texts ? Object.keys(texts).filter((file) => !isExcludedSpecPath(file, specConfig)).sort() : specFiles(root);
+  const available = new Set(files);
+  if (!files.length) throw new Error(`there are no specs: ${path.join(root, specDir)} holds no .md file`);
   const all: Spec[] = [];
   const byFile = new Map<string, Spec>();
   const byName = new Map<string, Spec>();
@@ -342,22 +353,33 @@ export function readSpecs(root: string, texts?: Record<string, string>): Spec[] 
     byName.set(spec.name, spec);
     return spec;
   };
-  for (const file of files) add(parseSpec(root, file, texts?.[file]));
-  const resolve = (spec: Spec, target: string, line: number, library = false): Spec => {
+  for (const file of files)
+    if (ownerName === undefined || file.startsWith(`${specDir}/${ownerName}/`)) add(parseSpec(root, file, texts?.[file], specDir));
+  if (!all.length) throw new Error(`${ownerName}: no specs under ${specDir}/${ownerName}/`);
+  const roots = all.slice();
+  const resolveTarget = (spec: Spec, target: string, line: number, library: boolean, allowExcluded: boolean): Spec | undefined => {
     const fail = (reason: string): never => { throw new Error(`${spec.file}:${line}: ${target}: ${reason}`); };
     let link: string;
     try { link = decodeURIComponent(target.split(/[?#]/, 1)[0]); } catch { return fail("invalid path encoding"); }
-    if (!link || link.includes("\\") || link.includes("\0") || path.posix.isAbsolute(link) || /^[a-z][a-z0-9+.-]*:/i.test(link)) return fail("use a relative path within spec/");
-    const scope = isStd(spec.file) ? "std" : "spec";
+    if (!link || link.includes("\\") || link.includes("\0") || path.posix.isAbsolute(link) || /^[a-z][a-z0-9+.-]*:/i.test(link)) return fail(`use a relative path within ${specDir}/`);
+    const scope = isStd(spec.file) ? "std" : specDir;
     const dest = path.posix.normalize(path.posix.join(path.posix.dirname(spec.file), link)).replace(/\/$/, "");
     if (dest !== scope && !dest.startsWith(`${scope}/`)) return fail(`the target must stay within ${scope}/`);
+    if (!isStd(spec.file) && isExcludedSpecPath(dest, specConfig)) {
+      if (allowExcluded) return undefined;
+      return fail("target is inside an excluded spec directory");
+    }
     const candidates = path.posix.extname(dest) ? [dest] : [`${dest}.md`, `${dest}/index.md`];
-    const found = candidates.map((file) => byFile.get(file)).filter((s) => s !== undefined);
+    const found = candidates.flatMap((file) => {
+      const existing = byFile.get(file);
+      if (existing !== undefined) return [existing];
+      return ownerName !== undefined && available.has(file) ? [add(parseSpec(root, file, texts?.[file], specDir))] : [];
+    });
     if (!found.length && (library || isStd(spec.file))) {
       // A bare sibling import may name a library shipped with the tools, after the local path was tried.
       const sibling = link.match(/^(?:\.\/)?([a-z][A-Za-z0-9]*)(?:\.md)?$/);
       const bundled = isStd(spec.file) ? candidates : sibling ? [`std/${sibling[1]}.md`] : [];
-      for (const file of bundled) if (fs.existsSync(located(root, file))) found.push(byFile.get(file) ?? add(parseSpec(root, file)));
+      for (const file of bundled) if (fs.existsSync(located(root, file))) found.push(byFile.get(file) ?? add(parseSpec(root, file, undefined, specDir)));
     }
     if (found.length !== 1) return fail(found.length ? "the path is ambiguous: name the .md file" : "no spec at this path (a directory needs index.md)");
     return found[0];
@@ -368,7 +390,7 @@ export function readSpecs(root: string, texts?: Record<string, string>): Spec[] 
     const imports = importSources.get(spec) ?? [];
     spec.uses = imports.map((imported) => {
       if (!imported.target) throw new Error(`${spec.file}:${imported.line}: import ${imported.module} needs a relative from path`);
-      const dep = resolve(spec, imported.target, imported.line, true);
+      const dep = resolveTarget(spec, imported.target, imported.line, true, false)!;
       const implicitAlias = !imported.alias && !imported.star && !imported.names.length && dep.name !== imported.module ? imported.module : undefined;
       replacements.push({ line: imported.pathLine!, column: imported.pathColumn!, length: imported.pathLength!, value: JSON.stringify(`./${dep.name}`) },
         { line: imported.line, column: imported.column, length: imported.module.length, value: implicitAlias ? `${dep.name} as ${implicitAlias}` : dep.name });
@@ -378,7 +400,10 @@ export function readSpecs(root: string, texts?: Record<string, string>): Spec[] 
     for (const { line, column, length, value } of replacements.sort((a, b) => b.line - a.line || b.column - a.column))
       lines[line - 1] = lines[line - 1].slice(0, column) + value + lines[line - 1].slice(column + length);
     if (replacements.length) finish(spec, lines.join("\n"));
-    spec.links = [...new Set(spec.references.map(({ target, line }) => resolve(spec, target, line).file))];
+    spec.links = [...new Set(spec.references.flatMap(({ target, line }) => {
+      const targetSpec = resolveTarget(spec, target, line, false, true);
+      return targetSpec ? [targetSpec.file] : [];
+    }))];
   }
   const ordered: Spec[] = [];
   const visit = (spec: Spec, trail: string[]) => {
@@ -387,6 +412,8 @@ export function readSpecs(root: string, texts?: Record<string, string>): Spec[] 
     for (const name of spec.imports) visit(byName.get(name)!, [...trail, spec.name]);
     ordered.push(spec);
   };
-  all.forEach((spec) => visit(spec, []));
-  return ordered;
+  roots.forEach((spec) => visit(spec, []));
+  const ownersAndImports = ordered.length;
+  all.slice(roots.length).forEach((spec) => visit(spec, []));
+  return ownerName === undefined ? ordered : ordered.slice(0, ownersAndImports);
 }

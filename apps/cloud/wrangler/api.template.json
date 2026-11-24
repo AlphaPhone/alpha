@@ -1,0 +1,17 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "{{workerName}}",
+  "account_id": "{{accountId}}",
+  "main": "{{main}}",
+  "assets": { "directory": "{{assetsDirectory}}", "binding": "ASSETS", "run_worker_first": true },
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "{{apiHost}}", "custom_domain": true }],
+  "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "{{hyperdriveId}}" }],
+  "ai": { "binding": "AI" },
+  "triggers": { "crons": ["*/5 * * * *"] },
+  "observability": { "enabled": true },
+  "vars": "{{vars}}"
+}

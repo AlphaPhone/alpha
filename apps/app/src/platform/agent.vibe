@@ -1,7 +1,9 @@
-// spec/kit/read.md, "Story: Read from outside"
-import { type RuntimeJsonBridge, type RuntimeStatus, type RuntimeStreamFrame, RuntimeRequestError, createRuntimeJsonClient } from "@elizaos/agent/client"
+// spec/kit/read.md, "Story: Read from outside"; spec/app/platform/index.md, "Story: Talk to the resident agent"; spec/app/platform/feed.md, "Story: Follow what my agent does on my screen"
+import { type RuntimeJsonBridge, type RuntimeRequestHeaders, type RuntimeStatus, type RuntimeStreamFrame, RuntimeRequestError, createRuntimeJsonClient } from "@elizaos/agent/client"
 import { BridgeUnavailable } from "@elizaos/os/bridges/bridge"
-import type { AgentMethod, AgentRoute, AgentStatus, AgentStreamData, AgentStreamEnd, ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent"
+import type { AgentEvent, AgentMethod, AgentRoute, AgentStatus, AgentStreamData, AgentStreamEnd, AgentTopic, ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent"
+import { chunkTaken, deliveryOf } from "../../gen/app__platform.effect.vibe"
+import { Machine as Feed, type FrameKind, machine as feedMachine } from "../../gen/app__platform__feed.effect.vibe"
 import { fresh } from "../runtime/attempts.vibe"
 import { type Failure, type Listening, type Opened, type Remote, type Wired, Refused, Unreachable, Unsent, parsed, patience, remoteAt, sse } from "./remote.vibe"
 
@@ -30,6 +32,12 @@ export type Runtime = ReturnType<typeof createRuntimeJsonClient>
  */
 export interface Reached extends Remote {
   readonly runtime: Runtime
+  /**
+   * The agent's live events of `topic` for this page, as eliza's agent sends them: `view` the steps it takes on the
+   * screen whose client id is `clientId`, each step's frame, and `voice` each transcript event, until the reader stops.
+   * Nothing is replayed; a page that is no phone hears no feed.
+   */
+  feed(topic: AgentTopic, clientId?: string): Stream.Stream<unknown, Unsent>
 }
 
 export service Agent: Reached {}
@@ -60,18 +68,37 @@ effect function carried(request: HttpClientRequest.HttpClientRequest): Option.Op
   return Option.some(parsed(new TextDecoder().decode(request.body.body)) catch effect (cause) => { throw new Unsent({ cause }) })
 }
 
-/** `request` as eliza's client takes one, a path and a JSON body or none: it carries only GET, and POST with a body, and no header of ours. */
-effect function plain(request: HttpClientRequest.HttpClientRequest): Option.Option<{ readonly path: string; readonly body?: unknown }>!! {
-  const ours = Object.keys(request.headers).filter((name) => name !== "content-type" && name !== "content-length")
-  if (ours.length > 0) return Option.none()
-  if (request.method === "GET") return request.body._tag === "Empty" ? Option.some({ path: located(request) }) : Option.none()
-  if (request.method !== "POST") return Option.none()
-  const body = carried(request) catch () => Option.none<unknown>()
-  return Option.map(body, (json) => ({ path: located(request), body: json }))
+/** The headers `request` names, but those of its body: what eliza's client admits or refuses by its own rule. */
+function named(request: HttpClientRequest.HttpClientRequest): RuntimeRequestHeaders {
+  return Object.fromEntries(Object.entries(request.headers).filter(([name]) => name !== "content-type" && name !== "content-length"))
 }
 
-/** One answer as eliza's client reads a stream: its head, each chunk, and how it ended. */
-function framed(opened: Opened!(Unsent | Unreachable)!Scope.Scope): AsyncIterable<RuntimeStreamFrame> {
+interface Plain { readonly path: string; readonly body?: unknown; readonly headers: RuntimeRequestHeaders }
+
+/** `request` as eliza's client takes one, a path, a JSON body or none, and the headers it names: it carries only GET, and POST with a body. */
+effect function plain(request: HttpClientRequest.HttpClientRequest): Option.Option<Plain>!! {
+  const headers = named(request)
+  if (request.method === "GET") return request.body._tag === "Empty" ? Option.some({ path: located(request), headers }) : Option.none()
+  if (request.method !== "POST") return Option.none()
+  const body = carried(request) catch () => Option.none<unknown>()
+  return Option.map(body, (json) => ({ path: located(request), body: json, headers }))
+}
+
+/** What eliza's client refuses before it sends anything: a path or a header it does not admit. */
+const refusedByTheClient = ["InvalidPath", "InvalidHeaders"]
+
+module aborting {
+  /** Once `signal` is aborted. @throws {never} */
+  export function abortedBy(signal: AbortSignal | undefined): Promise<void> {
+    if (signal === undefined) return new Promise<void>(() => {})
+    if (signal.aborted) return Promise.resolve()
+    return new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }))
+  }
+}
+import { abortedBy } from aborting
+
+/** One answer as eliza's client reads a stream: its head, each chunk, and how it ended, or nothing more once `signal` is aborted. */
+function framed(opened: Opened!(Unsent | Unreachable)!Scope.Scope, signal?: AbortSignal): AsyncIterable<RuntimeStreamFrame> {
   const frames = Stream.unwrap(effect {
     const { status, headers, body } = try opened
     const head: RuntimeStreamFrame = { kind: "head", status, headers }
@@ -79,11 +106,16 @@ function framed(opened: Opened!(Unsent | Unreachable)!Scope.Scope): AsyncIterabl
       |> Stream.concat(%, Stream.map(body, (data): RuntimeStreamFrame => ({ kind: "chunk", data })))
       |> Stream.concat(%, Stream.succeed<RuntimeStreamFrame>({ kind: "end" }))
   })
-  return Stream.toAsyncIterable(Stream.catch(frames, () => Stream.succeed<RuntimeStreamFrame>({ kind: "error" })))
+  const withdrawn = promise(() => abortedBy(signal))
+  return Stream.toAsyncIterable(Stream.interruptWhen(Stream.catch(frames, () => Stream.succeed<RuntimeStreamFrame>({ kind: "error" })), withdrawn))
 }
 
 const posted = (input: { readonly path: string; readonly body?: unknown }) =>
   input.body === undefined ? HttpClientRequest.post(input.path) : HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(input.path), input.body)
+
+/** `request` naming `headers`, which eliza's client admitted. */
+const naming = (request: HttpClientRequest.HttpClientRequest, headers: RuntimeRequestHeaders | undefined) =>
+  headers === undefined ? request : HttpClientRequest.setHeaders(request, headers)
 
 /**
  * eliza's bridge to an agent that `direct` reaches over HTTP: it is running once its health route says it is ready,
@@ -101,11 +133,11 @@ function httpBridge(direct: Wired): RuntimeJsonBridge {
     start: status,
     restart: status,
     request: (input) => runPromise(effect {
-      const { status: answered, text: whole } = try direct.open(input.method === "GET" ? HttpClientRequest.get(input.path) : posted(input))
+      const { status: answered, text: whole } = try direct.open(naming(input.method === "GET" ? HttpClientRequest.get(input.path) : posted(input), input.headers))
       const text = try timeout(whole, patience)
       return { status: answered, data: parsed(text) catch () => null }
     }),
-    requestStream: (input) => framed(direct.open(posted(input))),
+    requestStream: (input, signal) => framed(direct.open(naming(posted(input), input.headers)), signal),
   }
 }
 
@@ -114,27 +146,33 @@ function httpBridge(direct: Wired): RuntimeJsonBridge {
  * refusal from a failure. Every request that client cannot carry (a method other than GET and POST, a header, a
  * stream that is not a POST) goes to `direct`.
  */
-function over(bridge: RuntimeJsonBridge, direct: Remote): Reached {
+function over(bridge: RuntimeJsonBridge, direct: Remote, feed: Reached["feed"]): Reached {
   const runtime = createRuntimeJsonClient({ bridge: () => bridge, ...waits })
   return {
     runtime,
+    feed,
     effect call(request: HttpClientRequest.HttpClientRequest): unknown!Failure {
       const sent = try plain(request)
       if (Option.isNone(sent)) return try direct.call(request)
       return try tryPromise({
-        try: () => runtime.request(sent.value.path, sent.value.body),
-        catch: (cause): Failure => cause instanceof RuntimeRequestError ? new Refused({ status: cause.status }) : new Unreachable({ cause }),
+        try: () => runtime.request(sent.value.path, sent.value.body, sent.value.headers),
+        catch: (cause): Failure => cause instanceof RuntimeRequestError ? new Refused({ status: cause.status })
+          : cause instanceof Error && refusedByTheClient.includes(cause.message) ? new Unsent({ cause })
+          : new Unreachable({ cause }),
       })
     },
     events: (request: HttpClientRequest.HttpClientRequest, listening?: Listening) => direct.events(request, listening),
   }
 }
 
+/** A page that is no phone: the agent's feeds reach only the phone's own page. */
+const unfed = (topic: AgentTopic) => Stream.fail(new Unsent({ cause: `no ${topic} feed reaches a page that is no phone` }))
+
 /** The agent over HTTP at `base`: in a browser the page's own `/agent`, which the dev server answers, adding the token the page never holds. */
 export function agentAt(base: string) {
   return Layer.effect(Agent, effect {
     const direct = try remoteAt(base)
-    return over(httpBridge(direct), direct)
+    return over(httpBridge(direct), direct, unfed)
   })
 }
 
@@ -148,11 +186,12 @@ function undelivered(cause: unknown): Unsent | Unreachable {
 
 const methods: ReadonlyArray<string> = ["GET", "POST", "PUT", "PATCH", "DELETE"] satisfies ReadonlyArray<AgentMethod>
 
-/** `request` as the plugin reads one: a method, a path with its query, and a JSON object or no body. The plugin relays no header. */
+/** `request` as the plugin reads one: a method, a path with its query, the headers it names, which the plugin's channel admits or refuses, and a JSON object or no body. */
 effect function relayed(request: HttpClientRequest.HttpClientRequest): AgentRoute!Unsent {
   if (!methods.includes(request.method)) throw new Unsent({ cause: `the phone relays no ${request.method}` })
   const body = try carried(request)
-  const route = { method: request.method as AgentMethod, path: located(request) }
+  const headers = named(request)
+  const route: AgentRoute = { method: request.method as AgentMethod, path: located(request), ...(Object.keys(headers).length === 0 ? {} : { headers }) }
   if (Option.isNone(body)) return route
   if (typeof body.value !== "object" || body.value === null || Array.isArray(body.value)) throw new Unsent({ cause: "only a JSON object is relayed" })
   return { ...route, body: body.value as Record<string, unknown> }
@@ -193,14 +232,25 @@ function streamed(plugin: ElizaAgentPlugin, route: AgentRoute): Stream.Stream<Ag
   })
 }
 
-/** The plugin's stream as one answer: its head, which comes first, and its chunks until it ends. */
+/**
+ * The plugin's stream as one answer: its head, which comes first, and its chunks until it ends, two mebibytes at
+ * most. A stream the plugin ended as `failed` before its head never reached the agent.
+ */
 effect function opened(plugin: ElizaAgentPlugin, route: AgentRoute): Opened!(Unsent | Unreachable)!Scope.Scope {
   const [first, rest] = try Stream.peel(streamed(plugin, route), Sink.head())
   const head = Option.getOrUndefined(first)
-  if (head === undefined || !("status" in head)) throw new Unreachable({ cause: head ?? "the stream ended before its head" })
+  if (head === undefined || !("status" in head)) {
+    const ending = head?.kind === "failed" ? "RefusedByThePhone" : head?.kind === "aborted" ? "Withdrawn" : "Errored"
+    if (deliveryOf(false, ending) === "NeverSent") throw new Unsent({ cause: head })
+    throw new Unreachable({ cause: head ?? "the stream ended before its head" })
+  }
+  let held = 0
   const chunks = Stream.mapEffect(Stream.filter(rest, (frame) => frame.kind !== "end"), effect (frame): Uint8Array!Unreachable => {
-    if (frame.kind === "chunk") return bytes(frame.dataBase64)
-    throw new Unreachable({ cause: frame })
+    if (frame.kind !== "chunk") throw new Unreachable({ cause: frame })
+    const chunk = bytes(frame.dataBase64)
+    if (!chunkTaken(held, chunk.byteLength)) throw new Unreachable({ cause: "the answer grew past its limit" })
+    held += chunk.byteLength
+    return chunk
   })
   const body = Stream.mapError(chunks, (cause) => cause instanceof Unreachable ? cause : new Unreachable({ cause }))
   return { status: head.status, headers: head.headers, body, text: Stream.mkString(Stream.decodeText(body)) }
@@ -239,15 +289,85 @@ function statusOf(status: AgentStatus): RuntimeStatus {
   return { available: status.available && status.state !== "failed" && status.state !== "unavailable", state, requestBodyLimit: status.requestBodyLimit }
 }
 
+/** What eliza's client asks of a bridge, as the plugin reads it: the headers it admitted go with it. */
+function routed(input: { readonly path: string; readonly method: "GET" | "POST"; readonly body?: unknown; readonly headers?: RuntimeRequestHeaders }): AgentRoute {
+  return {
+    method: input.method, path: input.path,
+    ...(input.body === undefined ? {} : { body: input.body as Record<string, unknown> }),
+    ...(input.headers === undefined || Object.keys(input.headers).length === 0 ? {} : { headers: input.headers }),
+  }
+}
+
 /** eliza's bridge to the agent the phone runs, over eliza's own client of the `ElizaAgent` plugin, which decodes each answer. */
 function pluginBridge(plugin: ElizaAgentPlugin): RuntimeJsonBridge {
   return {
     status: async () => statusOf(await plugin.getStatus()),
     start: async () => statusOf(await plugin.start()),
     restart: async () => statusOf(await plugin.restart()),
-    request: (input) => plugin.request(input.body === undefined ? { method: input.method, path: input.path } : { method: input.method, path: input.path, body: input.body as Record<string, unknown> }),
-    requestStream: (input) => framed(opened(plugin, input.body === undefined ? { method: input.method, path: input.path } : { method: input.method, path: input.path, body: input.body as Record<string, unknown> })),
+    request: (input) => plugin.request(routed(input)),
+    requestStream: (input, signal) => framed(opened(plugin, routed(input)), signal),
   }
+}
+
+schema ViewPayload { readonly clientId: string; readonly frame: Schema.Unknown }
+/** A step the agent took on a screen, as eliza's agent publishes it on its `view` topic. */
+schema ViewStep { readonly stream: "view-interact"; readonly payload: ViewPayload }
+/** A transcript, as eliza's agent publishes it on its `voice` topic. */
+schema Transcript { readonly stream: "voice-transcript" }
+
+/** What one event of a feed of `topic` is for the screen `clientId` names: its kind, whether it is that screen's, and what the screen is given. */
+function stepOf(topic: AgentTopic, clientId: string | undefined, event: Record<string, unknown>): { readonly kind: FrameKind; readonly forClient: boolean; readonly given: ReadonlyArray<unknown> } {
+  if (topic === "view") {
+    const step = Schema.decodeUnknownOption(ViewStep)(event)
+    if (Option.isNone(step)) return { kind: "OtherFrame", forClient: false, given: [] }
+    return { kind: "Step", forClient: step.value.payload.clientId === clientId, given: [step.value.payload.frame] }
+  }
+  return Option.isSome(Schema.decodeUnknownOption(Transcript)(event)) ? { kind: "Step", forClient: true, given: [event] } : { kind: "OtherFrame", forClient: false, given: [] }
+}
+
+type Heard = { readonly kind: "event"; readonly event: Record<string, unknown> } | { readonly kind: "end" }
+
+/**
+ * One live feed of the plugin under an id made here: the listener is registered first, the subscription asked for
+ * once it is, and both are withdrawn when no one reads the feed any more. It ends where the phone ends it or refuses it.
+ */
+function fed(plugin: ElizaAgentPlugin, topic: AgentTopic, clientId: string | undefined): Stream.Stream<unknown, Unsent> {
+  return Stream.unwrap(effect {
+    provide feedMachine() {
+      const feed = try Feed
+      const id = fresh()
+      const heard = Stream.callback<Heard>((queue) => effect {
+        uninterruptible {
+          const listener = tryPromise(() => plugin.addListener("agentEvent", (said: AgentEvent) => {
+            if (said.id !== id) return
+            Queue.offerUnsafe(queue, said.kind === "event" ? { kind: "event", event: said.event } : { kind: "end" })
+          })) catch () => undefined
+          feed.send({ type: "listenerResult", success: listener !== undefined }) catch () => undefined
+          if (listener !== undefined) {
+            try addFinalizer(() => effect {
+              feed.send({ type: "close" }) catch () => undefined
+              tryPromise(() => listener.remove()) catch () => undefined
+              if ((try feed.get()).asked) tryPromise(() => plugin.unsubscribeEvents({ id })) catch () => undefined
+            })
+          }
+        }
+        if ((try feed.get()).phase !== "Subscribing") return Queue.endUnsafe(queue)
+        const admitted = tryPromise(() => plugin.subscribeEvents({ id, topic, ...(clientId === undefined ? {} : { clientId }) })) catch () => undefined
+        const after = feed.send({ type: "subscribeResult", success: admitted !== undefined, matching: admitted?.id === id }) catch () => undefined
+        if (after?.phase !== "Ready") Queue.endUnsafe(queue)
+      })
+      effect function given(one: Heard): ReadonlyArray<unknown>!! {
+        if (one.kind !== "event") return []
+        const step = stepOf(topic, clientId, one.event)
+        const after = feed.send({ type: "frame", ours: true, forClient: step.forClient, kind: step.kind }) catch () => undefined
+        return after !== undefined && after.phase !== "Ended" && step.forClient ? step.given : []
+      }
+      return heard
+        |> Stream.takeWhile(%, (one) => one.kind === "event")
+        |> Stream.mapEffect(%, given)
+        |> Stream.flatMap(%, (each) => Stream.fromIterable(each))
+    }
+  })
 }
 
 /**
@@ -256,5 +376,5 @@ function pluginBridge(plugin: ElizaAgentPlugin): RuntimeJsonBridge {
  */
 export const relayedAgent = Layer.sync(Agent, () => {
   const plugin = client()
-  return over(pluginBridge(plugin), plugged(plugin))
+  return over(pluginBridge(plugin), plugged(plugin), (topic: AgentTopic, clientId?: string) => fed(plugin, topic, clientId))
 })

@@ -1,0 +1,87 @@
+// spec/app/maps/location.md, "Only the owner's own locate or the guidance they started may prompt for permission"
+import type { LocationResult, LocationPermissionStatus } from "@elizaos/os/bridges/location"
+
+module held {
+  import { type LocationClient, locationClient } from "@elizaos/os/bridges/location"
+
+  let made: LocationClient | undefined
+  /** eliza's client of the phone's `ElizaLocation` plugin, made once: Capacitor registers a plugin a single time. @throws {never} */
+  export function client(): LocationClient {
+    return (made ??= locationClient())
+  }
+}
+import { client } from held
+
+/** What Android answers about location: allowed precisely, allowed only roughly, refused, or not yet asked. */
+export type Grant = "precise" | "approximate" | "denied" | "prompt"
+
+/** One position the phone reported, in whole millionths of a degree and meters, with the time it was taken. */
+export interface Sighting {
+  readonly lat: number
+  readonly lng: number
+  readonly accuracy: number
+  readonly precise: boolean
+  readonly taken: number
+}
+
+/** What a watch says: that it started, then each position it reports. */
+export type Heard = { readonly kind: "started" } | ({ readonly kind: "fix" } & Sighting)
+
+/** The native watch could not be started. */
+export error Unavailable { cause: unknown }
+
+/** The phone's location: its permission, one watch at a time, and what the watch reports until it fails. */
+export service Location {
+  permission(): Grant!!
+  /** Android's prompt, shown only for what the owner asked for. */
+  request(): Grant!!
+  /** A new native watch: that it started, then each position, high accuracy and at most one a second, until it fails; the watch outlives the stream until `clear`. */
+  watch(): Stream.Stream<Heard, Unavailable>
+  /** Remove every native watch this page started: whether Android confirmed it. */
+  clear(): boolean!!
+}
+
+export function grantOf(status: LocationPermissionStatus): Grant {
+  if (status.location === "denied") return "denied"
+  if (status.location === "prompt") return "prompt"
+  return status.accuracy === "approximate" ? "approximate" : "precise"
+}
+
+export function sightingOf(result: LocationResult): Sighting {
+  const { latitude, longitude, accuracy, timestamp } = result.coords
+  return { lat: Math.round(latitude * 1e6), lng: Math.round(longitude * 1e6), accuracy: Math.round(accuracy), precise: accuracy <= 100, taken: timestamp }
+}
+
+/** On the phone: eliza's client of its `ElizaLocation` plugin. */
+export const phoneLocation = Layer.sync(Location, () => {
+  const native = client()
+  const watches = new Set<string>()
+  return {
+    permission: () => tryPromise(() => native.checkPermissions()) |> Effect.map(%, grantOf) |> Effect.orElseSucceed(%, (): Grant => "denied"),
+    request: () => tryPromise(() => native.requestPermissions()) |> Effect.map(%, grantOf) |> Effect.orElseSucceed(%, (): Grant => "denied"),
+    watch: () => Stream.callback<Heard, Unavailable>((queue) => effect {
+      const fixes = try acquireRelease(promise(() => native.onLocation((result) => { Queue.offerUnsafe(queue, { kind: "fix", ...sightingOf(result) }) })), (handle) => promise(() => handle.remove()))
+      const errors = try acquireRelease(promise(() => native.onError(() => { Queue.failCauseUnsafe(queue, Cause.fail(new Unavailable({ cause: "the watch failed" }))) })), (handle) => promise(() => handle.remove()))
+      const started = try tryPromise({ try: () => native.watchPosition({ accuracy: "high", minInterval: 1000 }), catch: (cause) => new Unavailable({ cause }) })
+      watches.add(started.watchId)
+      Queue.offerUnsafe(queue, { kind: "started" })
+      return [fixes, errors]
+    }),
+    clear: () => effect {
+      let confirmed = true
+      for (const watchId of [...watches]) {
+        watches.delete(watchId)
+        confirmed = (try (tryPromise(() => native.clearWatch({ watchId })) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))) && confirmed
+      }
+      return confirmed
+    },
+  }
+})
+
+/** In a browser: no location is given to Maps, as on a phone where it was refused. */
+export const browserLocation = Layer.succeed(Location, {
+  permission: () => succeed<Grant>("denied"),
+  request: () => succeed<Grant>("denied"),
+  watch: () => Stream.fail(new Unavailable({ cause: "a browser gives Maps no location" })),
+  clear: () => succeed(true),
+})
