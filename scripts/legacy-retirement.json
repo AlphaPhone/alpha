@@ -17490,7 +17490,7 @@
   {
    "legacy": "scripts/test-cloud-delegation-return.ts",
    "area": "cloud",
-   "replacement": "cloud/src/*.vibe and cloud/test/*.test.vibe",
+   "replacement": "test/delegation-return.test.mjs (the return page) and apps/app/test/shell under spec/shell/landing.md (the landing)",
    "status": "removed"
   },
   {

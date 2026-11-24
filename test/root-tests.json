@@ -35,6 +35,7 @@
   "test/cloud-provision.test.mjs",
   "test/cloud-worker.test.mjs",
   "test/cuttlefish-launcher-postboot.test.mjs",
+  "test/delegation-return.test.mjs",
   "test/deliver-app-update.test.mjs",
   "test/dev-cartesia.test.mjs",
   "test/dev-speech-settings.test.mjs",
