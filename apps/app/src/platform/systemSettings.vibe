@@ -156,7 +156,7 @@ effect function opening(target: Target): Opened!! {
     if (page === undefined) return { outcome: "Refused" as const, specific: false }
     return try tryPromise(() => system.openSettingsPage({ page }))
   } catch () => ({ outcome: "Refused" as const, specific: false })
-  return openedOf(target, try handed)
+  return openedOf(target, handed)
 }
 
 /** The phone, through eliza's clients of its plugins. */

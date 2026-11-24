@@ -5,7 +5,7 @@ import { buildAgentBundle, readBundleManifest } from "@elizaos/agent/bundle"
 import { decodeLaunchDocument } from "@elizaos/agent/launch"
 import { defineRoutes } from "@elizaos/agent/routes"
 import { deployment } from "@repo/deployment"
-import { pinnedCheckout } from "@repo/eliza-harness/pinned"
+import { pinnedCheckout } from "@repo/eliza-harness"
 import {
   type Environment, type Manifest, characterAdmitted, cloudModel, localEmbeddings, packAdmitted, packedFor, persistMemory, policyAdmitted,
   refusedActions, routeListAdmitted,

@@ -228,6 +228,131 @@ lemma reopened_ensures(s: Resident, rebooted: bool)
   assert Effect.Unbind in after.out;
 }
 
+lemma boot_ensures(s: Resident, found: bool)
+  ensures (inv(s) ==> canBoot(s) ==> alwaysADownAgentWaitsForSomething(boot(s, found).state))
+  ensures (inv(s) ==> canBoot(s) ==> alwaysALaunchIsOwnedOnlyWhileStarting(boot(s, found).state))
+  ensures (inv(s) ==> canBoot(s) ==> alwaysAutomaticStartsAreBounded(boot(s, found).state))
+  ensures (inv(s) ==> canBoot(s) ==> alwaysTheAgentIsCheckedOnlyWhileUp(boot(s, found).state))
+  ensures (inv(s) ==> canBoot(s) ==> alwaysNothingRunsWhileHeld(boot(s, found).state))
+  ensures (inv(s) ==> canBoot(s) ==> alwaysErasingStopsTheAgent(boot(s, found).state))
+  ensures (inv(s) ==> canBoot(s) ==> alwaysEachPhaseHasItsReason(boot(s, found).state))
+  ensures (inv(s) ==> canBoot(s) ==> stepAnAgentWaitingForTheOwnerIsStartedOnlyByThem(s, "boot", boot(s, found).state, boot(s, found).out))
+  ensures (inv(s) ==> canBoot(s) ==> stepARefusedStartAsksTheOwner(s, "boot", boot(s, found).state))
+  ensures (inv(s) ==> canBoot(s) ==> stepACancelledStartStopsOnlyItsOwnLaunch(s, "boot", boot(s, found).state, boot(s, found).out))
+  ensures (inv(s) ==> canBoot(s) ==> stepOnlyAConfirmedStopEndsStopping(s, "boot", boot(s, found).state))
+  ensures (inv(s) ==> canBoot(s) ==> stepEveryStartTakesTheNextNumber(s, boot(s, found).state, boot(s, found).out))
+  ensures (inv(s) ==> canBoot(s) ==> stepAStopNamesItsStart(s, boot(s, found).state, boot(s, found).out))
+  ensures (inv(s) ==> canBoot(s) ==> stepOnlyAnAutomaticStartIsCounted(s, "boot", boot(s, found).state))
+  ensures (inv(s) ==> canBoot(s) ==> stepLivenessChecksAreTenSecondsApart(s, "boot", boot(s, found).state))
+  ensures (inv(s) ==> canBoot(s) ==> stepAnAgentThatLeavesUpIsUnbound(s, boot(s, found).state, boot(s, found).out))
+  ensures (inv(s) ==> canBoot(s) ==> stepReviewEndsOnlyWhenTheRecordsAreArchivedOrErased(s, "boot", boot(s, found).state))
+  ensures (inv(s) ==> canBoot(s) ==> stepEveryReviewIsOpened(s, boot(s, found).state, boot(s, found).out))
+  ensures (inv(s) ==> canBoot(s) ==> stepAHolderIsToldOnlyOnceTheAgentIsDown(s, boot(s, found).state, boot(s, found).out))
+  ensures (inv(s) ==> canBoot(s) ==> stepAChangeEndsWithTheAgentStarted(s, "boot", boot(s, found).state, boot(s, found).out))
+  ensures (inv(s) ==> canBoot(s) ==> stepNothingStartsAfterErasing(s, boot(s, found).state, boot(s, found).out))
+  ensures (inv(s) ==> canBoot(s) ==> stepAnAgentWaitingForReviewStillWaitsAfterReopening(s, "boot", boot(s, found).state))
+{
+  if inv(s) && canBoot(s) {
+    var after := boot(s, found);
+    var e := after.out[0];
+    assert after.out == [e] && e in after.out && e.Launch?;
+  }
+}
+
+lemma start_ensures(s: Resident, found: bool, origin: app__account__outside_Origin)
+  ensures (inv(s) ==> canStart(s, origin) ==> alwaysADownAgentWaitsForSomething(start(s, found, origin).state))
+  ensures (inv(s) ==> canStart(s, origin) ==> alwaysALaunchIsOwnedOnlyWhileStarting(start(s, found, origin).state))
+  ensures (inv(s) ==> canStart(s, origin) ==> alwaysAutomaticStartsAreBounded(start(s, found, origin).state))
+  ensures (inv(s) ==> canStart(s, origin) ==> alwaysTheAgentIsCheckedOnlyWhileUp(start(s, found, origin).state))
+  ensures (inv(s) ==> canStart(s, origin) ==> alwaysNothingRunsWhileHeld(start(s, found, origin).state))
+  ensures (inv(s) ==> canStart(s, origin) ==> alwaysErasingStopsTheAgent(start(s, found, origin).state))
+  ensures (inv(s) ==> canStart(s, origin) ==> alwaysEachPhaseHasItsReason(start(s, found, origin).state))
+  ensures (inv(s) ==> canStart(s, origin) ==> stepAnAgentWaitingForTheOwnerIsStartedOnlyByThem(s, "start", start(s, found, origin).state, start(s, found, origin).out))
+  ensures (inv(s) ==> canStart(s, origin) ==> stepARefusedStartAsksTheOwner(s, "start", start(s, found, origin).state))
+  ensures (inv(s) ==> canStart(s, origin) ==> stepACancelledStartStopsOnlyItsOwnLaunch(s, "start", start(s, found, origin).state, start(s, found, origin).out))
+  ensures (inv(s) ==> canStart(s, origin) ==> stepOnlyAConfirmedStopEndsStopping(s, "start", start(s, found, origin).state))
+  ensures (inv(s) ==> canStart(s, origin) ==> stepEveryStartTakesTheNextNumber(s, start(s, found, origin).state, start(s, found, origin).out))
+  ensures (inv(s) ==> canStart(s, origin) ==> stepAStopNamesItsStart(s, start(s, found, origin).state, start(s, found, origin).out))
+  ensures (inv(s) ==> canStart(s, origin) ==> stepOnlyAnAutomaticStartIsCounted(s, "start", start(s, found, origin).state))
+  ensures (inv(s) ==> canStart(s, origin) ==> stepLivenessChecksAreTenSecondsApart(s, "start", start(s, found, origin).state))
+  ensures (inv(s) ==> canStart(s, origin) ==> stepAnAgentThatLeavesUpIsUnbound(s, start(s, found, origin).state, start(s, found, origin).out))
+  ensures (inv(s) ==> canStart(s, origin) ==> stepReviewEndsOnlyWhenTheRecordsAreArchivedOrErased(s, "start", start(s, found, origin).state))
+  ensures (inv(s) ==> canStart(s, origin) ==> stepEveryReviewIsOpened(s, start(s, found, origin).state, start(s, found, origin).out))
+  ensures (inv(s) ==> canStart(s, origin) ==> stepAHolderIsToldOnlyOnceTheAgentIsDown(s, start(s, found, origin).state, start(s, found, origin).out))
+  ensures (inv(s) ==> canStart(s, origin) ==> stepAChangeEndsWithTheAgentStarted(s, "start", start(s, found, origin).state, start(s, found, origin).out))
+  ensures (inv(s) ==> canStart(s, origin) ==> stepNothingStartsAfterErasing(s, start(s, found, origin).state, start(s, found, origin).out))
+  ensures (inv(s) ==> canStart(s, origin) ==> stepAnAgentWaitingForReviewStillWaitsAfterReopening(s, "start", start(s, found, origin).state))
+{
+  if inv(s) && canStart(s, origin) {
+    var after := start(s, found, origin);
+    var e := after.out[0];
+    assert after.out == [e] && e in after.out && e.Launch?;
+  }
+}
+
+lemma halted_ensures(s: Resident, ticket: int, confirmed: bool, now: int)
+  ensures (inv(s) ==> canHalted(s, ticket) ==> alwaysADownAgentWaitsForSomething(halted(s, ticket, confirmed, now).state))
+  ensures (inv(s) ==> canHalted(s, ticket) ==> alwaysALaunchIsOwnedOnlyWhileStarting(halted(s, ticket, confirmed, now).state))
+  ensures (inv(s) ==> canHalted(s, ticket) ==> alwaysAutomaticStartsAreBounded(halted(s, ticket, confirmed, now).state))
+  ensures (inv(s) ==> canHalted(s, ticket) ==> alwaysTheAgentIsCheckedOnlyWhileUp(halted(s, ticket, confirmed, now).state))
+  ensures (inv(s) ==> canHalted(s, ticket) ==> alwaysNothingRunsWhileHeld(halted(s, ticket, confirmed, now).state))
+  ensures (inv(s) ==> canHalted(s, ticket) ==> alwaysErasingStopsTheAgent(halted(s, ticket, confirmed, now).state))
+  ensures (inv(s) ==> canHalted(s, ticket) ==> alwaysEachPhaseHasItsReason(halted(s, ticket, confirmed, now).state))
+  ensures (inv(s) ==> canHalted(s, ticket) ==> stepAnAgentWaitingForTheOwnerIsStartedOnlyByThem(s, "halted", halted(s, ticket, confirmed, now).state, halted(s, ticket, confirmed, now).out))
+  ensures (inv(s) ==> canHalted(s, ticket) ==> stepARefusedStartAsksTheOwner(s, "halted", halted(s, ticket, confirmed, now).state))
+  ensures (inv(s) ==> canHalted(s, ticket) ==> stepACancelledStartStopsOnlyItsOwnLaunch(s, "halted", halted(s, ticket, confirmed, now).state, halted(s, ticket, confirmed, now).out))
+  ensures (inv(s) ==> canHalted(s, ticket) ==> stepOnlyAConfirmedStopEndsStopping(s, "halted", halted(s, ticket, confirmed, now).state))
+  ensures (inv(s) ==> canHalted(s, ticket) ==> stepEveryStartTakesTheNextNumber(s, halted(s, ticket, confirmed, now).state, halted(s, ticket, confirmed, now).out))
+  ensures (inv(s) ==> canHalted(s, ticket) ==> stepAStopNamesItsStart(s, halted(s, ticket, confirmed, now).state, halted(s, ticket, confirmed, now).out))
+  ensures (inv(s) ==> canHalted(s, ticket) ==> stepOnlyAnAutomaticStartIsCounted(s, "halted", halted(s, ticket, confirmed, now).state))
+  ensures (inv(s) ==> canHalted(s, ticket) ==> stepLivenessChecksAreTenSecondsApart(s, "halted", halted(s, ticket, confirmed, now).state))
+  ensures (inv(s) ==> canHalted(s, ticket) ==> stepAnAgentThatLeavesUpIsUnbound(s, halted(s, ticket, confirmed, now).state, halted(s, ticket, confirmed, now).out))
+  ensures (inv(s) ==> canHalted(s, ticket) ==> stepReviewEndsOnlyWhenTheRecordsAreArchivedOrErased(s, "halted", halted(s, ticket, confirmed, now).state))
+  ensures (inv(s) ==> canHalted(s, ticket) ==> stepEveryReviewIsOpened(s, halted(s, ticket, confirmed, now).state, halted(s, ticket, confirmed, now).out))
+  ensures (inv(s) ==> canHalted(s, ticket) ==> stepAHolderIsToldOnlyOnceTheAgentIsDown(s, halted(s, ticket, confirmed, now).state, halted(s, ticket, confirmed, now).out))
+  ensures (inv(s) ==> canHalted(s, ticket) ==> stepAChangeEndsWithTheAgentStarted(s, "halted", halted(s, ticket, confirmed, now).state, halted(s, ticket, confirmed, now).out))
+  ensures (inv(s) ==> canHalted(s, ticket) ==> stepNothingStartsAfterErasing(s, halted(s, ticket, confirmed, now).state, halted(s, ticket, confirmed, now).out))
+  ensures (inv(s) ==> canHalted(s, ticket) ==> stepAnAgentWaitingForReviewStillWaitsAfterReopening(s, "halted", halted(s, ticket, confirmed, now).state))
+{
+  if inv(s) && canHalted(s, ticket) && confirmed && s.why.ForChange? && !held(s) {
+    var after := halted(s, ticket, confirmed, now);
+    var e := after.out[0];
+    assert after.out == [e] && e in after.out && e.Launch?;
+  }
+}
+
+lemma release_ensures(s: Resident, by_: Changer)
+  ensures (inv(s) ==> canRelease(s, by_) ==> alwaysADownAgentWaitsForSomething(release(s, by_).state))
+  ensures (inv(s) ==> canRelease(s, by_) ==> alwaysALaunchIsOwnedOnlyWhileStarting(release(s, by_).state))
+  ensures (inv(s) ==> canRelease(s, by_) ==> alwaysAutomaticStartsAreBounded(release(s, by_).state))
+  ensures (inv(s) ==> canRelease(s, by_) ==> alwaysTheAgentIsCheckedOnlyWhileUp(release(s, by_).state))
+  ensures (inv(s) ==> canRelease(s, by_) ==> alwaysNothingRunsWhileHeld(release(s, by_).state))
+  ensures (inv(s) ==> canRelease(s, by_) ==> alwaysErasingStopsTheAgent(release(s, by_).state))
+  ensures (inv(s) ==> canRelease(s, by_) ==> alwaysEachPhaseHasItsReason(release(s, by_).state))
+  ensures (inv(s) ==> canRelease(s, by_) ==> stepAnAgentWaitingForTheOwnerIsStartedOnlyByThem(s, "release", release(s, by_).state, release(s, by_).out))
+  ensures (inv(s) ==> canRelease(s, by_) ==> stepARefusedStartAsksTheOwner(s, "release", release(s, by_).state))
+  ensures (inv(s) ==> canRelease(s, by_) ==> stepACancelledStartStopsOnlyItsOwnLaunch(s, "release", release(s, by_).state, release(s, by_).out))
+  ensures (inv(s) ==> canRelease(s, by_) ==> stepOnlyAConfirmedStopEndsStopping(s, "release", release(s, by_).state))
+  ensures (inv(s) ==> canRelease(s, by_) ==> stepEveryStartTakesTheNextNumber(s, release(s, by_).state, release(s, by_).out))
+  ensures (inv(s) ==> canRelease(s, by_) ==> stepAStopNamesItsStart(s, release(s, by_).state, release(s, by_).out))
+  ensures (inv(s) ==> canRelease(s, by_) ==> stepOnlyAnAutomaticStartIsCounted(s, "release", release(s, by_).state))
+  ensures (inv(s) ==> canRelease(s, by_) ==> stepLivenessChecksAreTenSecondsApart(s, "release", release(s, by_).state))
+  ensures (inv(s) ==> canRelease(s, by_) ==> stepAnAgentThatLeavesUpIsUnbound(s, release(s, by_).state, release(s, by_).out))
+  ensures (inv(s) ==> canRelease(s, by_) ==> stepReviewEndsOnlyWhenTheRecordsAreArchivedOrErased(s, "release", release(s, by_).state))
+  ensures (inv(s) ==> canRelease(s, by_) ==> stepEveryReviewIsOpened(s, release(s, by_).state, release(s, by_).out))
+  ensures (inv(s) ==> canRelease(s, by_) ==> stepAHolderIsToldOnlyOnceTheAgentIsDown(s, release(s, by_).state, release(s, by_).out))
+  ensures (inv(s) ==> canRelease(s, by_) ==> stepAChangeEndsWithTheAgentStarted(s, "release", release(s, by_).state, release(s, by_).out))
+  ensures (inv(s) ==> canRelease(s, by_) ==> stepNothingStartsAfterErasing(s, release(s, by_).state, release(s, by_).out))
+  ensures (inv(s) ==> canRelease(s, by_) ==> stepAnAgentWaitingForReviewStillWaitsAfterReopening(s, "release", release(s, by_).state))
+{
+  var m := marked(false, by_, s);
+  if inv(s) && canRelease(s, by_) && !held(m) && m.phase.Down? && m.why.ForChange? {
+    var after := release(s, by_);
+    var e := after.out[0];
+    assert after.out == [e] && e in after.out && e.Launch?;
+  }
+}
+
 lemma LaunchTakesTheNextNumber(s: Resident, after: Resident, out: seq<Effect>)
   requires out == [Launch(s.launch + 1, false)] && after.launch == s.launch + 1 && after.phase.Starting? && !held(after)
   ensures stepEveryStartTakesTheNextNumber(s, after, out)

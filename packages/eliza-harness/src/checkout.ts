@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { Effect } from "effect";
 
 interface Lock {
   readonly remote: string;
@@ -75,11 +76,11 @@ async function alone<A>(at: Checkout, work: () => Promise<A>): Promise<A> {
   const lock = `${at.root}.building`;
   fs.mkdirSync(path.dirname(at.root), { recursive: true });
   for (let waited = 0; ; waited += 1) {
-    try { fs.mkdirSync(lock); break; } catch { /* Another worktree holds it. */ }
+    try { fs.mkdirSync(lock); break; } catch { void 0; }
     const held = fs.statSync(lock, { throwIfNoEntry: false })?.mtimeMs;
     if (held !== undefined && Date.now() - held > 3_600_000) fs.rmSync(lock, { recursive: true, force: true });
     if (waited % 12 === 0) process.stdout.write(`another worktree is building eliza ${at.commit.slice(0, 12)}: waiting\n`);
-    await new Promise((done) => setTimeout(done, 5_000));
+    await Effect.runPromise(Effect.sleep(5_000));
   }
   try { return await work(); } finally { fs.rmSync(lock, { recursive: true, force: true }); }
 }
