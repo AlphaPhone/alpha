@@ -85,15 +85,21 @@ export function Photos({ runtime, alpha }: PhotosProps) {
     const event = { type: "openItem", photo: number, listed: ids.includes(number), secure, only: secureItems, reviewing: false } as const;
     if (viewer.can(event, "Owner")) void viewer.send(event, "Owner");
   };
-  const select = async (photo: number) => {
-    if (!canStart) return;
+  const select = async (photo: number): Promise<boolean> => {
+    if (!canStart) return false;
     if (inTrash) {
       const sent = await trash.send({ type: "startSelect" }, "Owner");
-      if (sent._tag === "Success") void trash.send({ type: "toggle", photo }, "Owner");
-    } else {
-      const sent = await library.send({ type: "startSelect" }, "Owner");
-      if (sent._tag === "Success") void library.send({ type: "toggle", photo }, "Owner");
+      return sent._tag === "Success" && (await trash.send({ type: "toggle", photo }, "Owner"))._tag === "Success";
     }
+    const sent = await library.send({ type: "startSelect" }, "Owner");
+    return sent._tag === "Success" && (await library.send({ type: "toggle", photo }, "Owner"))._tag === "Success";
+  };
+  const viewerSelection = async (kind: "add" | "recover" | "delete") => {
+    if (opened === 0 || !viewer.can({ type: "close" }, "Owner")) return;
+    const closed = await viewer.send({ type: "close" }, "Owner");
+    if (closed._tag !== "Success" || !await select(opened)) return;
+    if (kind === "add") void library.send({ type: "chooseAlbum" }, "Owner");
+    else void trash.send({ type: kind === "recover" ? "recoverSelected" : "deleteForever" }, "Owner");
   };
   const actions: Tool[] = [];
   const menu: Tool[] = [];
@@ -115,6 +121,8 @@ export function Photos({ runtime, alpha }: PhotosProps) {
   } else {
     if (canStart) menu.push({ label: "Select", icon: <ListChecks />, run: start });
     if (owner(narrow("Matching", "photo"))) menu.push({ label: "Search", icon: <Search />, run: () => setSearching(true) });
+    add("Favorites", narrow("Favorites"), <Heart />, menu);
+    add("Videos", narrow("Videos"), <Images />, menu);
     if (owner({ type: "newAlbum" })) menu.push({ label: "New album", icon: <Plus />, run: () => { setName(""); talk({ type: "newAlbum" }); } });
     if (album?.owned && owner({ type: "renameAlbum" })) menu.push({ label: "Rename album", icon: <Album />, run: () => { setName(album.title); talk({ type: "renameAlbum" }); } });
     if (album?.owned) add("Delete album", { type: "deleteAlbum" }, <Trash2 />, menu);
@@ -191,7 +199,10 @@ export function Photos({ runtime, alpha }: PhotosProps) {
           <span className="max-h-28 overflow-y-auto">{request.items.map((number) => content.rows.get(number)?.item.name ?? "Photo").join(" · ")}</span>
         </span>}
       </ConfirmDialog>
-      <MediaViewer runtime={runtime} row={content.rows.get(opened)} before={index > 0 ? ids[index - 1] : undefined} after={index >= 0 ? ids[index + 1] : undefined} inTrash={inTrash} />
+      <MediaViewer runtime={runtime} row={content.rows.get(opened)} before={index > 0 ? ids[index - 1] : undefined} after={index >= 0 ? ids[index + 1] : undefined} inTrash={inTrash}
+        onAddToAlbum={!inTrash && canStart ? () => { void viewerSelection("add"); } : undefined}
+        onRecover={inTrash && canStart ? () => { void viewerSelection("recover"); } : undefined}
+        onDelete={inTrash && canStart ? () => { void viewerSelection("delete"); } : undefined} />
       <Sheet open={dialog === "NewAlbum" || dialog === "RenameAlbum" || dialog === "ChooseAlbum"} onOpenChange={(open) => { if (!open) talk({ type: "closeDialog" }); }}>
         <SheetContent title={dialog === "NewAlbum" ? "New album" : dialog === "RenameAlbum" ? "Rename album" : "Add to album"}
           actions={dialog === "ChooseAlbum" ? owner({ type: "newAlbum" }) && <Button variant="secondary" onClick={() => { setName(""); talk({ type: "newAlbum" }); }}><Plus />New album</Button>

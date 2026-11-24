@@ -23,15 +23,17 @@ const standardAlbums: readonly ListedAlbum[] = [
 ]
 
 /** Access to this library and to its video rows. */
-function accessEvent(access: LibraryAccess): Library.Event {
+type Access = Extract<Library.Event, { type: "accessIs" }>
+
+function accessEvent(access: LibraryAccess): Access {
   const grant: Grant = access.scope === "full" ? "Granted" : access.scope === "partial" || access.scope === "selected" ? "Limited" : "Denied"
   return { type: "accessIs", grant, videos: access.videos === "full" || access.videos === "selected" }
 }
 
-const denied: Library.Event = { type: "accessIs", grant: "Denied", videos: false }
+const denied: Access = { type: "accessIs", grant: "Denied", videos: false }
 
 /** The current permission, with a failed query left unconfirmed. */
-effect function permission(ask = false): (Library.Event | undefined)!!PhotosPort {
+effect function permission(ask = false): (Access | undefined)!!PhotosPort {
   const { phone } = try PhotosPort
   if (Option.isNone(phone)) return undefined
   const access = tryPromise(() => ask ? phone.value.requestLibraryAccess() : phone.value.libraryAccess()) catch () => undefined
@@ -204,7 +206,7 @@ const lifecycle = started(effect {
   const shell = try Shell
   const device = try Device
   const photos = try Library.Machine
-  const { phone } = try PhotosPort
+  const { phone, hasHandoff } = try PhotosPort
   const visibility = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
   try Stream.runForEach(Stream.changes(Stream.zipLatestWith(Stream.map(shell.changes, (state) => showing(state, "Photos")), visibility, (open, visible) => open && visible)), effect (open) => {
     const state = try photos.get()
@@ -215,9 +217,17 @@ const lifecycle = started(effect {
       return
     }
     const access = try permission()
-    if (access !== undefined) try ignore(photos.send(access, "Phone"))
+    if (access !== undefined) {
+      if (state.access.grant === "Granted" && access.grant === "Limited") try revoke()
+      try ignore(photos.send(access, "Phone"))
+    }
     if (!state.visible) try ignore(photos.send({ type: "showView", secure: false, only: [] }, "Phone"))
     else if (access === undefined) try ignore(photos.send({ type: "libraryChanged" }, "Phone"))
+    if (try hasHandoff()) {
+      const current = try photos.get()
+      if (current.tab === "Albums") try ignore(photos.send({ type: "showTab", tab: "Library" }, "Owner"))
+      else if (current.filter !== "Everything") try ignore(photos.send({ type: "narrow", narrowing: "Everything", query: "", person: 0 }, "Owner"))
+    }
     if (Option.isSome(phone)) try ignore(tryPromise(() => phone.value.watchLibrary(true)))
   })
 }, "Photos visibility")
@@ -228,7 +238,7 @@ const handoff = started(effect {
   const port = try PhotosPort
   const cache = try Catalog
   try Stream.runForEach(photos.changes, effect (state) => {
-    if (!state.visible || state.library.status !== "Loaded" || state.tab !== "Library") return
+    if (!state.visible || state.library.status !== "Loaded" || state.tab !== "Library" || state.filter !== "Everything") return
     const id = try port.takeHandoff()
     if (id === undefined) return
     const { rows } = try cache.displayed()
@@ -242,9 +252,13 @@ const libraryChanges = started(effect {
   const photos = try Library.Machine
   const cache = try Catalog
   try Stream.runForEach(changes, effect () => {
-    if (!(try photos.get()).visible) return
+    const before = try photos.get()
+    if (!before.visible) return
     try cache.changed()
     const access = try permission()
+    const after = try photos.get()
+    if (!after.visible) return
+    if (access?.grant === "Limited" && (before.access.grant === "Granted" || before.access.grant === "Limited")) try revoke()
     try ignore(photos.send(access ?? { type: "libraryChanged" }, "Phone"))
   })
 }, "Photos library changes")
@@ -259,8 +273,8 @@ const notices = started(effect {
   const time = try Time
   const device = try Device
   const outcomes = Stream.changesWith(Stream.map(photos.changes, (s) => ({
-    attempt: s.job.request.id, change: s.job.change, undo: s.visible && s.job.undoable,
-    outcome: s.job.request.outcome, done: s.job.done.length, missed: s.job.stale.length + s.job.skipped.length + s.job.unsure.length,
+    attempt: s.job.request.id, undo: s.visible && s.job.undoable,
+    outcome: s.job.request.outcome, done: s.job.done.length,
   })), (a, b) => a.attempt === b.attempt && a.outcome === b.outcome && a.undo === b.undo)
   let previous = 0
   try Stream.runDrain(Stream.switchMap(outcomes, (state) => Stream.fromEffect(effect {
