@@ -98,7 +98,7 @@ jobs:
         run: |
           set -euo pipefail
           test -f .eliza/native-inputs/receipt.json
-          test -f android/app/src/main/assets/agent/manifest.json
+          test -f .eliza/runtime-payload/android/app/src/main/assets/agent/inventory.json
           node --test --test-concurrency=1 --test-reporter=tap test/voice-host-record.test.mjs test/wallet-disabled.test.mjs | tee artifacts/android-postbuild-owners.tap
           python3 - <<'PY'
           import hashlib, json, pathlib, re, subprocess
@@ -109,7 +109,7 @@ jobs:
               assert re.search(r'^ok \d+ - ' + re.escape(name) + r'\s*$', text, re.M), name
           digest = lambda file: hashlib.sha256(pathlib.Path(file).read_bytes()).hexdigest()
           record = {'sourceCommit':subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip(), 'tests':int(re.search(r'^# tests (\d+)\s*$', text, re.M)[1]), 'skipped':0,
-                    'nativeReceiptSha256':digest('.eliza/native-inputs/receipt.json'), 'runtimeInventorySha256':digest('android/app/src/main/assets/agent/manifest.json'),
+                    'nativeReceiptSha256':digest('.eliza/native-inputs/receipt.json'), 'runtimeInventorySha256':digest('.eliza/runtime-payload/android/app/src/main/assets/agent/inventory.json'),
                     'scope':'Actual normal producer receipt and staged runtime inventory; no device execution.'}
           pathlib.Path('artifacts/android-postbuild-owners.json').write_text(json.dumps(record, indent=2) + '\n')
           PY

@@ -57,7 +57,6 @@ jobs:
     env:
       # One runtime profile: every build packages local speech and embeddings; speech is routed at run time.
       ALPHA_APP_UPDATE_CANDIDATE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '1' || '0' }}
-      ELIZA_BUN_CHANNEL: stable
       ELIZAOS_VERSION_CODE: ${{ github.event_name == 'workflow_dispatch' && inputs.build_version_code || '' }}
       ANDROID_NDK: /usr/local/lib/android/sdk/ndk/28.2.13676358
       ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/28.2.13676358
@@ -290,11 +289,12 @@ jobs:
               ('artifacts/sbom', 'artifacts/sbom'),
               ('apps/app/public/licenses', 'apps/app/public/licenses'),
               ('licenses', 'licenses'),
-              ('android/app/src/main/assets/agent', 'android/app/src/main/assets/agent'),
+              ('.eliza/runtime-payload/android/app/src/main/assets/agent', 'android/app/src/main/assets/agent'),
+              ('.eliza/runtime-payload/android/app/src/main/jniLibs', 'runtime-payload/jniLibs'),
               ('android/app/src/main/jniLibs', 'android/app/src/main/jniLibs'),
               (generated_manifest, 'native-source-manifest.json'),
               ('.eliza/native-inputs/receipt.json', 'native-build-receipt.json'),
-              ('android/app/src/main/assets/agent/alpha-source.json', 'staged-source-stamp.json'),
+              ('.eliza/runtime-payload/android/app/src/main/assets/agent/alpha-source.json', 'staged-source-stamp.json'),
               ('.eliza/agent-bundle/manifest.json', 'agent-bundle-manifest.json'),
               ('upstream.lock.json', 'upstream.lock.json'),
               ('pnpm-lock.yaml', 'pnpm-lock.yaml'),

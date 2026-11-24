@@ -249,6 +249,18 @@ function checkListenerPolicy(output, appId) {
     );
 }
 
+/**
+ * JNI libraries the image installs executable. Upstream @elizaos/os installs exactly one: the Android Node runtime
+ * libeliza_node.so (vendor/eliza spec/os/build/runtimePayload.md nativeMode; aosp/stage-launcher-overlay.ts
+ * renderNativeOverlay). stage-android-native.py RUNTIME_MODES writes the same table; every other library is 0644.
+ */
+export const EXECUTABLE_NATIVE_LIBRARIES = Object.freeze(["libeliza_node.so"]);
+
+/** The image file mode a staged JNI library must carry. */
+export function nativeLibraryMode(name) {
+  return EXECUTABLE_NATIVE_LIBRARIES.includes(name) ? "0755" : "0644";
+}
+
 function verifyNativeStaging(output, launcher, evidence) {
   if (evidence === undefined) return false;
   if (
@@ -275,13 +287,7 @@ function verifyNativeStaging(output, launcher, evidence) {
   for (const library of evidence.libraries) {
     const name =
       typeof library.path === "string" ? path.posix.basename(library.path) : "";
-    const mode = [
-      "libeliza_bun.so",
-      "libeliza_ld_musl_aarch64.so",
-      "libeliza_ld_musl_aarch64_real.so",
-    ].includes(name)
-      ? "0755"
-      : "0644";
+    const mode = nativeLibraryMode(name);
     if (
       !/^native-arm64\/lib[A-Za-z0-9_.+-]+\.so$/.test(library.path) ||
       !/^[a-f0-9]{64}$/.test(library.sha256) ||

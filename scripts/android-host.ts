@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {androidIdentity, readHostDescriptor, HOST_DESCRIPTOR, verifyAndroidIdentity} from './android-identity.ts';
+import {RUNTIME_PAYLOAD, STAGED_AGENT_INVENTORY} from './agent-payload.ts';
 export {readHostDescriptor, HOST_DESCRIPTOR};
 
 const OWNER_ROUTE_ASSET = '.eliza/generated-android/owner-routes.json';
@@ -45,8 +46,16 @@ export function stageOwnerRouteAsset(root = ROOT) {
  return file;
 }
 
-/** Every option the upstream generator receives for this checkout. */
-export function hostOptions(root = ROOT, runtime?: string) {
+/**
+ * The staged runtime payload root (`pnpm agent:stage-android`), or undefined when none is staged. The generator adds
+ * its android/app/src/main assets and jniLibs to the app and keeps libeliza_node.so's bytes unstripped.
+ */
+export function stagedRuntime(root = ROOT) {
+ return fs.existsSync(path.join(root, STAGED_AGENT_INVENTORY)) ? path.join(root, RUNTIME_PAYLOAD) : undefined;
+}
+
+/** Every option the upstream generator receives for this checkout; the staged runtime payload unless told otherwise. */
+export function hostOptions(root = ROOT, runtime: string | undefined = stagedRuntime(root)) {
  stageOwnerRouteAsset(root);
  return {
   consumerRoot: root,
@@ -75,7 +84,7 @@ export function claimHostOutput(root = ROOT) {
 }
 
 /** Write the generated host into android/. */
-export async function generateAlphaAndroidHost(root = ROOT, runtime?: string) {
+export async function generateAlphaAndroidHost(root = ROOT, runtime: string | undefined = stagedRuntime(root)) {
  const {generateAndroidHost} = await import('./upstream-os.ts');
  claimHostOutput(root);
  return generateAndroidHost(hostOptions(root, runtime));

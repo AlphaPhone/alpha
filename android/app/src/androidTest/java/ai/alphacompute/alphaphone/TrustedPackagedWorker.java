@@ -29,9 +29,9 @@ final class TrustedPackagedWorker implements AutoCloseable {
   journal=new File(root,".worker-owners/"+AlphaUtil.sha256Hex(runId)+"/owner.json");process=launch(payload);
  }
  private java.lang.Process launch(File payload)throws Exception {
-  String abi=Build.SUPPORTED_ABIS[0];
-  File libs=new File(context.getApplicationInfo().nativeLibraryDir),bun=new File(libs,"libeliza_bun.so"),loader=new File(libs,abi.equals("arm64-v8a")?"libeliza_ld_musl_aarch64.so":"libeliza_ld_musl_x86_64.so");if(!bun.isFile()||!loader.isFile())throw new IOException("Packaged runtime missing");
-  ProcessBuilder builder=new ProcessBuilder(loader.getPath(),bun.getPath(),new File(root,"trusted-worker.mjs").getPath(),payload.getPath()).directory(root).redirectInput(ProcessBuilder.Redirect.from(new File("/dev/null"))).redirectErrorStream(true).redirectOutput(new File(root,payload.getName().contains("replay")?"trusted-replay-worker.log":"trusted-worker.log"));Map<String,String> env=builder.environment();env.clear();env.put("HOME",home.getPath());env.put("TMPDIR",context.getCacheDir().getPath());env.put("PATH","/system/bin");env.put("LD_LIBRARY_PATH",libs.getPath()+":"+new File(home,"agent/"+abi).getPath());for(String flag:new String[]{"DISABLE_IO_POOL","FORCE_WAITER_THREAD","DISABLE_RWF_NONBLOCK","DISABLE_SPAWNSYNC_FAST_PATH","DISABLE_ASYNC_TRANSPILER"})env.put("BUN_FEATURE_FLAG_"+flag,"1");env.put("ELIZA_PLATFORM","android");
+  // The packaged Android Node runtime (upstream PayloadCheck.NODE) runs the worker directly; it needs no loader.
+  File libs=new File(context.getApplicationInfo().nativeLibraryDir),node=new File(libs,ai.eliza.os.agent.PayloadCheck.NODE);if(!node.isFile())throw new IOException("Packaged runtime missing");
+  ProcessBuilder builder=new ProcessBuilder(node.getPath(),new File(root,"trusted-worker.mjs").getPath(),payload.getPath()).directory(root).redirectInput(ProcessBuilder.Redirect.from(new File("/dev/null"))).redirectErrorStream(true).redirectOutput(new File(root,payload.getName().contains("replay")?"trusted-replay-worker.log":"trusted-worker.log"));Map<String,String> env=builder.environment();env.clear();env.put("HOME",home.getPath());env.put("TMPDIR",context.getCacheDir().getPath());env.put("PATH","/system/bin");env.put("LD_LIBRARY_PATH",libs.getPath());env.put("ELIZA_PLATFORM","android");
   return builder.start();
  }
 

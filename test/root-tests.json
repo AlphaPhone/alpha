@@ -62,6 +62,7 @@
   "test/publish-update-manifest.test.mjs",
   "test/record-release.test.mjs",
   "test/release-signing.test.mjs",
+  "test/runtime-payload.test.mjs",
   "test/shared-ui-overrides.test.mjs",
   "test/sign-release-apks.test.mjs",
   "test/update-apk-admission.test.mjs",

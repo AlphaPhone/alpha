@@ -31,10 +31,15 @@ final class ResidentTestFixture {
   return new JSONObject(ElizaAgentService.requestLocalAgent(new JSONObject().put("path",path).put("method","GET").put("headers",headers).put("timeoutMs",10000).toString()));
  }
  static String processStart(int pid)throws Exception {String stat=new String(Files.readAllBytes(new File("/proc/"+pid+"/stat").toPath()),StandardCharsets.UTF_8);String[] columns=stat.substring(stat.lastIndexOf(')')+2).split(" ");return columns[19];}
+ /** The agent entry upstream PayloadCheck extracted for this install: files/agent-runtime/releases/<versionCode>-<inventory digest>/agent/agent.mjs. */
+ static File extractedEntry(Context context)throws Exception {
+  File[] releases=new File(context.getFilesDir(),"agent-runtime/releases").listFiles(file->file.isDirectory()&&!file.getName().startsWith("."));assertNotNull("No extracted runtime release",releases);assertEquals("Exactly one extracted runtime release",1,releases.length);
+  File entry=new File(releases[0],"agent/agent.mjs");assertTrue("Extracted agent entry missing",entry.isFile());return entry;
+ }
  /** The one process of this UID running the packaged bundle with the fixture's executable hash. */
  static JSONObject ownedChild(Context context,String executableSha256)throws Exception {
   List<JSONObject> matches=new ArrayList<>();File[] processes=new File("/proc").listFiles();assertNotNull(processes);
-  String bundle=new File(context.getFilesDir(),"agent/agent-bundle.js").getCanonicalPath();
+  String bundle=extractedEntry(context).getCanonicalPath();
   for(File proc:processes){if(!proc.getName().matches("[0-9]+"))continue;
    try {if(Os.stat(proc.getPath()).st_uid!=Process.myUid())continue;
     String command=new String(Files.readAllBytes(new File(proc,"cmdline").toPath()),StandardCharsets.UTF_8);

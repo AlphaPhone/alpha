@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync,existsSync} from 'node:fs';
 import {join,resolve} from 'node:path';
 import {nativeViewDeclarationsJson} from '../scripts/native-view-policy.ts';
+import {STAGED_AGENT_ASSETS} from '../scripts/agent-payload.ts';
 // AP-13 / #422: Wallet is not in Alpha in either distribution or on the Alpha AOSP image. Its
 // views, deep links, native/payment adapters and agent actions stay unavailable; no payment, card
 // or pass-wallet effect can be reached from a product build.
@@ -14,7 +15,7 @@ const root=resolve(import.meta.dirname,'..');
 // so none of them may appear there (#674).
 const WALLET_CONNECTOR=/^(?:wagmi|@wagmi\/[^/]+|@rainbow-me\/[^/]+|@metamask\/[^/]+)$/;
 test('a staged resident runtime inventory lists no @metamask/*, wagmi or @rainbow-me/* package',t=>{
- const file=join(root,'android/app/src/main/assets/agent/manifest.json');
+ const file=join(root,STAGED_AGENT_ASSETS,'manifest.json');
  if(!existsSync(file)){t.skip('no staged resident runtime (pnpm agent:stage-android writes it)');return;}
  const {packages}=JSON.parse(readFileSync(file,'utf8'));
  assert.ok(Array.isArray(packages)&&packages.length>0,'staged manifest lists packages');

@@ -31,8 +31,9 @@ import {androidIdentity} from './android-identity.ts';
  * The default document is a source-pin inventory: it needs no build and is identical on every
  * checkout of a commit. Two options extend it to a release candidate on the machine that built it:
  *   --packaged-runtime  reads the staged payload (after `pnpm agent:stage-android`): SHA-256 of
- *     every staged file under android/app/src/main/assets/agent and android/app/src/main/jniLibs,
- *     and Node.js plus every npm package bundled into the agent and the workflow worker (name, version
+ *     every staged file under .eliza/runtime-payload/android/app/src/main/{assets/agent,jniLibs} and
+ *     android/app/src/main/jniLibs, and the Node.js runtime (libeliza_node.so) plus every npm package
+ *     bundled into the agent and the workflow worker (name, version
  *     and licence from the prepared source; those packages are bundled, so their bytes are covered
  *     by the hash of the bundle file, not by a hash of their own).
  *   --apks <dir>  reads <dir>/apk-manifest.json written by scripts/verify-apks.ts and lists each
@@ -44,7 +45,8 @@ import {androidIdentity} from './android-identity.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {AGENT_ASSETS, ANDROID_CLASSPATH, COMMERCIAL_FONT, FONT_LICENSES, HELD_OUTSIDE_REPOSITORY, KNOWN_LICENSES, NO_FONT_LICENCE, ROOT, RUNTIME_ENTRY, TESSERACT_CORE_SOURCES, UNKNOWN, UNVERIFIED, VOICE_HOST, collectNotices, exists, fontLicense, fontNames, listFonts, mavenFamily, packagedRuntimePresent, pinnedVoiceModels, productionLockPackages, readJson, voiceHostProblems, type PackageLock} from './generate-licenses.ts';
+import {AGENT_ASSETS, ANDROID_CLASSPATH, RUNTIME_ENTRY, COMMERCIAL_FONT, FONT_LICENSES, HELD_OUTSIDE_REPOSITORY, KNOWN_LICENSES, NO_FONT_LICENCE, ROOT, TESSERACT_CORE_SOURCES, UNKNOWN, UNVERIFIED, VOICE_HOST, collectNotices, exists, fontLicense, fontNames, listFonts, mavenFamily, packagedRuntimePresent, pinnedVoiceModels, productionLockPackages, readJson, voiceHostProblems, type PackageLock} from './generate-licenses.ts';
+import {STAGED_JNI_LIBS} from './agent-payload.ts';
 import {sha256} from './sha256.ts';
 import {METADATA as GRADLE_METADATA, coordinateChecksum, parseVerificationMetadata} from './gradle-verification.ts';
 import {classifyLicence, orderFlags} from './licence-policy.ts';
@@ -60,6 +62,8 @@ export const DEFAULT_OUTPUT = 'artifacts/sbom/alphaphone.cdx.json';
 const NOT_COVERED = 'Staged resident runtime payload (Node.js, bundled agent and workflow-worker packages, PGlite): present only after agent:stage-android; add it with --packaged-runtime. Verified per APK by scripts/verify-packaged-runtime.py.';
 const EMBEDDING_HOST = 'android/embedding-host/qualified-host.json';
 const JNI_LIBS = 'android/app/src/main/jniLibs';
+/** The staged Node runtime per ABI, packaged from the runtime payload's source set. */
+const RUNTIME_JNI_LIBS = STAGED_JNI_LIBS;
 
 interface Hash {
   alg: string;
@@ -231,7 +235,7 @@ function residentRuntimeComponents(root: string): Component[] {
   // Only current source inputs make the recorded hashes authoritative. A superseded record
   // stays in the source inventory while staged candidates are enumerated by their actual bytes.
   const embedding = embeddingInputsCurrent(root, record) ? record : null;
-  for (const [base, kind] of [[AGENT_ASSETS, 'asset'], [JNI_LIBS, 'native library']])
+  for (const [base, kind] of [[AGENT_ASSETS, 'asset'], [RUNTIME_JNI_LIBS, 'native library'], [JNI_LIBS, 'native library']])
     for (const rel of exists(root, base) ? walkFiles(path.join(root, base)) : []) {
       const file = `${base}/${rel}`;
       const bytes = fs.readFileSync(path.join(root, file));
@@ -246,7 +250,7 @@ function residentRuntimeComponents(root: string): Component[] {
   if (notices.errors.length) throw new Error(`--packaged-runtime: ${notices.errors.join('; ')}`);
   const runtime = notices.entries.find(item => item.name === RUNTIME_ENTRY);
   if (runtime) out.push({type: 'application', 'bom-ref': 'resident-runtime:node', name: runtime.name, version: runtime.version, licenses: licenses(runtime.license), externalReferences: [{type: 'vcs', url: runtime.source}],
-    properties: [property('ships-in', 'apk'), property('hash', `the staged libeliza_node.so files are listed by SHA-256 under ${JNI_LIBS}`), property('source', 'vendor/eliza/packages/os/aosp/runtime/node.lock.json'), property('resident-notice-flags', runtime.flags.join(',') || 'none')]});
+    properties: [property('ships-in', 'apk'), property('hash', `the staged libeliza_node.so files are listed by SHA-256 under ${RUNTIME_JNI_LIBS}`), property('source', 'vendor/eliza/packages/os/aosp/runtime/node.lock.json'), property('resident-notice-flags', runtime.flags.join(',') || 'none')]});
   for (const entry of notices.entries) {
     const scope = /^Bundled in the on-device (.*?)\./.exec(entry.text)?.[1];
     if (!scope) continue;

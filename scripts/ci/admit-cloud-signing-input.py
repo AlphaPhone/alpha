@@ -356,7 +356,7 @@ def producer_evidence_members(names, inventory):
     exact_paths = ("artifacts/build-config.json", "artifacts/apk-manifest.json", "native-source-manifest.json",
                    "prepared-source-stamp.json", "worker-manifest.json", "native-build-receipt.json")
     directories = ("artifacts/sbom/", "apps/app/public/licenses/", "licenses/",
-                   "android/app/src/main/assets/agent/", "android/app/src/main/jniLibs/")
+                   "android/app/src/main/assets/agent/", "android/app/src/main/jniLibs/", "runtime-payload/jniLibs/")
     total = 0
     for name, fact in inventory.items():
         relative = PurePosixPath(name)

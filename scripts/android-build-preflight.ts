@@ -22,6 +22,7 @@ import {VOICE_ASSET_ROOT, VOICE_HOST_MANIFEST, verifyVoiceHost} from './voice-ho
 import {BUILD_TOOLCHAIN, QUALIFIED_HOST, embeddingHostState, stagedLibraries} from './build-embedding-host.ts';
 import {readNativeBuildReceipt} from './native-build-inputs.ts';
 import {readUpstreamPin} from './upstream-pin.ts';
+import {STAGED_AGENT_ASSETS, STAGED_AGENT_INVENTORY} from './agent-payload.ts';
 
 export {VOICE_ASSET_ROOT, VOICE_HOST_MANIFEST};
 export const GRADLE_VERIFICATION = 'android/gradle/verification-metadata.xml';
@@ -195,10 +196,10 @@ export function strictBuildInputs(root: string, preparedSource: string | null, {
   }
   const prepared = preparedSource !== null && fs.existsSync(preparedSource);
   add('resident agent bundle', prepared, 'script', preparedSource ? path.relative(root, preparedSource) : '.eliza/agent-bundle is not built', 'pnpm agent:bundle');
-  const staged = path.join(root, 'android/app/src/main/assets/agent/alpha-source.json');
+  const staged = path.join(root, STAGED_AGENT_ASSETS, 'alpha-source.json');
   let current = false;
-  try { current = prepared && JSON.parse(fs.readFileSync(staged, 'utf8')).base === pin; } catch { current = false; }
-  add('staged resident runtime payload', current, 'script', !fs.existsSync(staged) ? 'android/app/src/main/assets/agent is not staged' : current ? 'staged from the pinned source' : 'staged from a different pin', 'pnpm agent:stage-android');
+  try { current = prepared && fs.existsSync(path.join(root, STAGED_AGENT_INVENTORY)) && JSON.parse(fs.readFileSync(staged, 'utf8')).base === pin; } catch { current = false; }
+  add('staged resident runtime payload', current, 'script', !fs.existsSync(staged) ? `${STAGED_AGENT_ASSETS} is not staged` : current ? 'staged from the pinned source' : 'staged from a different pin, or without its inventory', 'pnpm agent:stage-android');
   {
     const host = readJson(root, QUALIFIED_HOST), model = path.join(root, host.model.path);
     add('embedding model', fs.existsSync(model), 'script', host.model.path, 'pnpm agent:stage-android (it stages the pinned model with the payload)');

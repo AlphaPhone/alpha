@@ -22,7 +22,7 @@ public final class ResidentTestPorts {
   public static void initialize(String fixtureDirectory) throws Exception {
     nativeDirectory =
         Files.createTempDirectory(java.nio.file.Path.of(fixtureDirectory), "resident-libraries-").toString();
-    Files.createFile(java.nio.file.Path.of(nativeDirectory, "libeliza_bun.so"));
+    Files.createFile(java.nio.file.Path.of(nativeDirectory, "libeliza_node.so"));
   }
   public static void start() {
     starts++;

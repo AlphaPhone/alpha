@@ -14,7 +14,8 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-STAGED = ROOT / 'android/app/src/main/assets/agent'
+# The payload pnpm agent:stage-android writes (scripts/agent-payload.ts STAGED_AGENT_ASSETS).
+STAGED = ROOT / '.eliza/runtime-payload/android/app/src/main/assets/agent'
 NODE_LOCK = ROOT / 'vendor/eliza/packages/os/aosp/runtime/node.lock.json'
 REQUIRED = ('agent.mjs', 'manifest.json', 'inventory.json', 'alpha-source.json', 'alpha-runtime-profile.json')
 # The bundle carries the workflow plugin, so its manifest pins the worker; the worker program and its own manifest ship.

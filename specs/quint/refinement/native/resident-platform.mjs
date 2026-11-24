@@ -62,7 +62,7 @@ public class ApplicationInfo {
 import java.io.*;
 public class AssetManager {
   public InputStream open(String name) throws IOException {
-    if (name.equals("agent/agent-bundle.js") && ai.alphacompute.alphaphone.ResidentTestPorts.packaged)
+    if (name.equals("agent/inventory.json") && ai.alphacompute.alphaphone.ResidentTestPorts.packaged)
       return new ByteArrayInputStream(new byte[0]);
     throw new FileNotFoundException(name);
   }

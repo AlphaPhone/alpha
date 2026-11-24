@@ -85,9 +85,9 @@ public final class ResidentServiceInstrumentedTest {
   context=InstrumentationRegistry.getInstrumentation().getTargetContext();assertTrue("Fixture user must be unlocked",context.getSystemService(android.os.UserManager.class).isUserUnlocked());File input=new File(context.getFilesDir(),"resident-provider-input.json");assertTrue(input.isFile());assertEquals(0,Os.stat(input.getPath()).st_mode&0077);assertEquals(Process.myUid(),Os.stat(input.getPath()).st_uid);
   try(InputStream stream=new FileInputStream(input)){fixture=new JSONObject(new String(bounded(stream,16384),StandardCharsets.UTF_8));}assertTrue(input.delete());
   assertEquals(InstrumentationRegistry.getArguments().getString("residentRunId"),fixture.getString("runId"));assertNull("Fresh credential slot",new AlphaCredentialStore(context).readCredentialSlot(LocalAgentProviderAdmission.PROVIDER_SLOT));
-  File bun=new File(context.getApplicationInfo().nativeLibraryDir,"libeliza_bun.so");assertEquals(fixture.getString("bunSha256"),fileHash(bun));
-  try(InputStream in=new FileInputStream(bun)){byte[] h=new byte[20];assertEquals(20,in.read(h));assertEquals(0x7f,h[0]&255);assertEquals('E',h[1]);assertEquals('L',h[2]);assertEquals('F',h[3]);assertEquals(2,h[4]);assertEquals(1,h[5]);assertEquals(183,(h[18]&255)|((h[19]&255)<<8));}
-  try(InputStream in=context.getAssets().open("agent/agent-bundle.js")){assertEquals(fixture.getString("bundleSha256"),boundedHash(in,128L*1024*1024));}
+  File node=new File(context.getApplicationInfo().nativeLibraryDir,ai.eliza.os.agent.PayloadCheck.NODE);assertEquals(fixture.getString("nodeSha256"),fileHash(node));
+  try(InputStream in=new FileInputStream(node)){byte[] h=new byte[20];assertEquals(20,in.read(h));assertEquals(0x7f,h[0]&255);assertEquals('E',h[1]);assertEquals('L',h[2]);assertEquals('F',h[3]);assertEquals(2,h[4]);assertEquals(1,h[5]);assertEquals(183,(h[18]&255)|((h[19]&255)<<8));}
+  try(InputStream in=context.getAssets().open("agent/agent.mjs")){assertEquals(fixture.getString("bundleSha256"),boundedHash(in,128L*1024*1024));}
   try(InputStream in=context.getAssets().open("agent/alpha-source.json")){assertEquals(fixture.getString("sourceSha256"),boundedHash(in,8L*1024*1024));}
   JSONObject child=null,proof=new JSONObject().put("runId",fixture.getString("runId")).put("scope","native-service-instrumentation").put("uiAcceptance",false).put("ordinaryBackgroundStartAcceptance",false).put("passed",false);
   Throwable failure=null;
@@ -95,7 +95,7 @@ public final class ResidentServiceInstrumentedTest {
     assertFalse(ElizaAgentService.getLocalAgentBootState(context).optBoolean("socketListening"));
     new AlphaCredentialStore(context).writeCredentialSlot(LocalAgentProviderAdmission.PROVIDER_SLOT,new JSONObject().put("key",fixture.getString("apiKey")).put("model","qwen-3.8-27b").toString());fixture.remove("apiKey");
     startAndEnroll();proof.put("ownerEnrollmentCompleted",true);child=ownedChild();proof.put("firstProcess",child);
-    assertEquals(fixture.getString("bundleSha256"),fileHash(new File(context.getFilesDir(),"agent/agent-bundle.js")));
+    assertEquals(fixture.getString("bundleSha256"),fileHash(ResidentTestFixture.extractedEntry(context)));
     JSONObject who=owner(),agent=agent();proof.put("ownerAuthenticated",true);String ownerId=who.getJSONObject("identity").getString("id"),agentId=agent.getString("id");
     int denied=nativeGet("/api/conversations","synthetic-invalid-bearer").getInt("status");assertTrue("Explicit invalid bearer must deny",denied==401||denied==403);proof.put("invalidBearerDenied",true);
 

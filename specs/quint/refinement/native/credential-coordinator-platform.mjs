@@ -13,8 +13,8 @@ export function credentialCoordinatorPlatform() {
   delete files['ai/alphacompute/alphaphone/OwnerRoutes.java'];
   const routes=JSON.stringify(serializeOwnerRouteTable());
   files['android/content/res/AssetManager.java']=files['android/content/res/AssetManager.java'].replace(
-    'if (name.equals("agent/agent-bundle.js")',
-    'if(name.equals("owner-routes.json"))return new ByteArrayInputStream('+routes+'.getBytes(java.nio.charset.StandardCharsets.UTF_8));\n    if (name.equals("agent/agent-bundle.js")');
+    'if (name.equals("agent/inventory.json")',
+    'if(name.equals("owner-routes.json"))return new ByteArrayInputStream('+routes+'.getBytes(java.nio.charset.StandardCharsets.UTF_8));\n    if (name.equals("agent/inventory.json")');
   files['android/content/Context.java']=files['android/content/Context.java'].replace('public class Context {','public class Context {\npublic java.io.File getNoBackupFilesDir(){return getFilesDir();}');
   files['android/content/Intent.java']=`package android.content;
 public class Intent {

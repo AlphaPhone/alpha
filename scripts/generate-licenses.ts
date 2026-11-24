@@ -5,6 +5,7 @@ import {HOST_DESCRIPTOR, generateAlphaAndroidHost, readHostDescriptor} from './a
 import {HOST_TEMPLATES, referencePath} from './gradle-verification.ts';
 import {LOCKFILE, SHIPPING_IMPORTER, readPnpmLock as readLock, type PackageLock} from './pnpm-lock.ts';
 import {readUpstreamPin} from './upstream-pin.ts';
+import {STAGED_AGENT_ASSETS} from './agent-payload.ts';
 export type {PackageLock};
 // Generates the third-party notices shipped in the web bundle and in every APK payload.
 //
@@ -776,7 +777,8 @@ function voiceHostEntries(root: string, templates: Templates, errors: string[]):
   return [...components, ...models];
 }
 
-export const AGENT_ASSETS = 'android/app/src/main/assets/agent';
+/** The staged assets/agent directory (`pnpm agent:stage-android`, scripts/agent-payload.ts). */
+export const AGENT_ASSETS = STAGED_AGENT_ASSETS;
 
 /** The installed directory of name@version: a workspace package of the pinned upstream, or pnpm's store entry. */
 export function installedPackageDirectory(root: string, sourceDir: string, name: string, version: string): string | undefined {
@@ -914,7 +916,7 @@ function payloadEntries(packaged: boolean) {
     {name: 'On-device elizaOS agent runtime payload', version: 'pinned upstream runtime when present in the APK payload', license: UNVERIFIED,
       source: 'scripts/stage-agent-runtime.ts',
       text: packaged
-        ? 'The staged on-device agent payload is present. Node.js and every npm package bundled into the agent and the workflow worker are listed as separate entries. The remaining payload files (musl loader, libstdc++ and libgcc_s runtime libraries, PGlite WebAssembly and data, PostgreSQL extensions and models) are not enumerated here.'
+        ? 'The staged on-device agent payload is present. Node.js and every npm package bundled into the agent and the workflow worker are listed as separate entries. The remaining payload files (PGlite WebAssembly and data, PostgreSQL extensions and models) are not enumerated here.'
         : 'This build does not include the on-device agent runtime (Node.js and the bundled elizaOS agent), so no agent notices are listed.'},
   ];
 }
@@ -1076,8 +1078,8 @@ async function main(argv: readonly string[]) {
   const {entries, errors, warnings, flagLines, json, text} = generate(ROOT, {packagedRuntime});
   const summarize = (rows: readonly Notice[], label: string) => {
     const bundled = rows.filter(entry => /^Bundled in the on-device /.test(entry.text));
-    const bun = rows.find(entry => entry.name === RUNTIME_ENTRY);
-    console.log(`${label}: ${bun ? `${bun.name} ${bun.version}` : 'Node.js runtime MISSING'}; ${bundled.length} bundled agent/workflow-worker npm packages.`);
+    const runtime = rows.find(entry => entry.name === RUNTIME_ENTRY);
+    console.log(`${label}: ${runtime ? `${runtime.name} ${runtime.version}` : 'Node.js runtime MISSING'}; ${bundled.length} bundled agent/workflow-worker npm packages.`);
   };
   if (packagedRuntime) summarize(entries, 'PACKAGED runtime notices');
   else if (check && packagedRuntimePresent(ROOT)) {

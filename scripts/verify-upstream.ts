@@ -9,6 +9,7 @@ import {
 	verifyPinnedUpstream,
 } from "./pinned-upstream-source.ts";
 import { readUpstreamPin } from "./upstream-pin.ts";
+import {STAGED_AGENT_ASSETS} from "./agent-payload.ts";
 
 const argv = process.argv.slice(2);
 // --reachability-only reports the recorded upstream branch compare without re-authenticating vendor bytes.
@@ -48,7 +49,7 @@ if (!reachabilityOnly && argv.includes("--record-reachability")) {
 	console.log(`Recorded ${REACHABILITY_RECORD}: ${record.status}, ahead ${record.aheadBy}, behind ${record.behindBy}`);
 }
 
-const stampFile = "android/app/src/main/assets/agent/alpha-source.json";
+const stampFile = `${STAGED_AGENT_ASSETS}/alpha-source.json`;
 if (!reachabilityOnly && fs.existsSync(stampFile)) {
 	const stamp = JSON.parse(fs.readFileSync(stampFile, "utf8"));
 	const hash = (file: string) =>

@@ -166,7 +166,7 @@ public final class AlphaDevicePlugin extends Plugin {
     out.put("testMocks",false);out.put("sdkInt",Build.VERSION.SDK_INT);
     out.put("androidRelease",Build.VERSION.RELEASE);out.put("securityPatch",Build.VERSION.SECURITY_PATCH);
     JSObject hashes=new JSObject();
-    for(String asset:new String[]{"agent/alpha-source.json","agent/agent-bundle.js","agent/workflow-worker/manifest.json","agent/workflow-worker/files.sha256"}){String hash=assetSha256(asset);if(hash!=null)hashes.put(asset,hash);}
+    for(String asset:new String[]{"agent/alpha-source.json","agent/inventory.json","agent/agent.mjs","agent/workflow-worker/manifest.json","agent/workflow-worker/files.sha256"}){String hash=assetSha256(asset);if(hash!=null)hashes.put(asset,hash);}
     out.put("runtimeHashes",hashes);
     try(java.io.InputStream in=getContext().getAssets().open("agent/alpha-source.json")){
      String base=new org.json.JSONObject(new String(AlphaUtil.readBounded(in,64*1024,null),java.nio.charset.StandardCharsets.UTF_8)).optString("base","");
