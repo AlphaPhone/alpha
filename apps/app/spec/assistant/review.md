@@ -251,10 +251,9 @@ question mark in its first 80. An ungrounded Browser proposal of the
 current message gets the notice "I only open a site or search you ask for
 yourself" with an example, and no card; a grounded one that is not a
 direct command keeps its review card. Showing Browser's own list of open
-tabs is its own command ([Browser session](../browser/session.md)): it names
-nothing the owner typed and changes no tab, so the message it is bound to
-commands it in any words, "Show my open tabs" or "what tabs do I have open"
-alike, and it opens without a card. A Browser open of a link of the
+tabs uses Browser's whole-message tab list request ([Browser session](../browser/session.md)).
+"Show my open tabs" and "What tabs do I have open?" open the list without a
+card. Binding a tab-list proposal to unrelated words does not authorize it to open. A Browser open of a link of the
 page my message carried ([Turn context](./context.md)), exactly as the page
 gave it, also keeps its review card and never opens on its own (#1444): the
 page's words are not the owner's, so such an open counts as not typed even
@@ -267,13 +266,16 @@ pure val photoPrefixLimit = 80
 pure def keypadDirect(number: bool, typed: bool): bool = not(number) or typed
 pure def photoDirect(ownRequest: bool, len: int, alreadyTaken: bool): bool = ownRequest and len >= 1 and len <= photoRequestLimit and not(alreadyTaken)
 pure def browserDirect(grounded: bool, command: bool, ambiguousTab: bool): bool = grounded and command and not(ambiguousTab)
-pure def browserCommanded(typedCommand: bool, tabList: bool): bool = typedCommand or tabList
+pure def browserCommanded(typedCommand: bool, tabList: bool, askedForTabs: bool): bool =
+  if (tabList) askedForTabs else typedCommand
 pure def browserNoticeInstead(grounded: bool): bool = not(grounded)
 pure def lawAnUntypedNumberNeverDials(typed: bool): bool = typed or not(keypadDirect(true, typed))
 pure def lawOnePhotoPerMessage(own: bool, len: int): bool = not(photoDirect(own, len, true))
 pure def lawAnAmbiguousTabNeedsTheOwner(grounded: bool, command: bool): bool = not(browserDirect(grounded, command, true))
-pure def lawATabListNeedsNoCommandWords(typedCommand: bool): bool = browserDirect(true, browserCommanded(typedCommand, true), false)
-pure def lawOtherwiseTheWordsCommand(typedCommand: bool): bool = browserCommanded(typedCommand, false) == typedCommand
+pure def lawATabListNeedsItsOwnRequest(typedCommand: bool, askedForTabs: bool): bool =
+  browserCommanded(typedCommand, true, askedForTabs) == askedForTabs
+pure def lawOtherwiseTheWordsCommand(typedCommand: bool, askedForTabs: bool): bool =
+  browserCommanded(typedCommand, false, askedForTabs) == typedCommand
 pure def browserCarded(grounded: bool, pageLink: bool): bool = grounded or pageLink
 pure def ownerTyped(grounded: bool, pageLink: bool): bool = grounded and not(pageLink)
 pure def lawAPageLinkIsNeverOwnerTyped(grounded: bool): bool = not(ownerTyped(grounded, true))

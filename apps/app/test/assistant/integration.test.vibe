@@ -150,7 +150,7 @@ function tabListExecutors(runs: { count: number }) {
     classOf: () => "BrowserNavigate",
     target: () => ({ tag: "ContactTarget", nameWritten: true }),
     summarize: () => "Showing your open tabs in Browser.",
-    ownCommand: (operation) => (operation as { readonly type?: unknown }).type === "browser_tabs_show",
+    tabList: (operation) => (operation as { readonly type?: unknown }).type === "browser_tabs_show",
   }
   const notes: OperationPorts = {
     validate: (operation) => (operation as { readonly type?: unknown }).type === "notes_create" ? operation : undefined,
@@ -164,7 +164,7 @@ function tabListExecutors(runs: { count: number }) {
   return Layer.succeed(DeviceExecutors, { ports: composeExecutors([notes, browser]) })
 }
 
-it.effect("Showing my open tabs opens without a card in any words, while another control or a grounded open that is not a command keeps its card (spec/assistant/review.md, \"The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote or my own ask for its tab list\")", () => effect {
+it.effect("Asking to see my tabs opens the list, while unrelated words and other controls keep review (spec/assistant/review.md, \"The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote or my own ask for its tab list\")", () => effect {
   const sent = effect function (text: string, operation: unknown) {
     const runs = { count: 0 }
     provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "Here they are." }, proposals: [wireProposal("p31", digest("9"), operation, "u1")] }), fakeHost([]), tabListExecutors(runs), journalNative(new Map())) {
@@ -180,6 +180,8 @@ it.effect("Showing my open tabs opens without a card in any words, while another
   const outcomes = {
     showMine: try sent("Show my open tabs", show),
     asked: try sent("what tabs do I have open?", show),
+    unrelated: try sent("Show me the calendar", show),
+    declined: try sent("Do not show my open tabs", show),
     otherControl: try sent("Show my open tabs", { type: "browser_tab_new" }),
     openCommand: try sent("Open news.example.com", open),
     openQuestion: try sent("Is news.example.com any good?", open),
@@ -187,6 +189,8 @@ it.effect("Showing my open tabs opens without a card in any words, while another
   try Effect.try(() => assert.deepStrictEqual(outcomes, {
     showMine: { cards: [], runs: 1 },
     asked: { cards: [], runs: 1 },
+    unrelated: { cards: ["LiveCard"], runs: 0 },
+    declined: { cards: ["LiveCard"], runs: 0 },
     otherControl: { cards: ["LiveCard"], runs: 0 },
     openCommand: { cards: [], runs: 1 },
     openQuestion: { cards: ["LiveCard"], runs: 0 },
