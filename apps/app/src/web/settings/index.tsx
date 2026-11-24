@@ -1,11 +1,13 @@
-// spec/settings/index.md, "Story: Find a setting in a few taps"; spec/settings/index.md, "A page opens from its parent, and Back returns to that parent"; spec/settings/passwords.md, "Story: Use my saved passwords only after Android unlocks them"; spec/settings/passwords.md, "Android's Back cancels a pending confirmation first, then closes the entry shown"; spec/settings/updates.md, "Story: Let Android finish an update without losing what I typed"
+// spec/settings/index.md, "Story: Find a setting in a few taps"; spec/settings/index.md, "A page opens from its parent, and Back returns to that parent"; spec/settings/passwords.md, "Story: Use my saved passwords only after Android unlocks them"; spec/settings/passwords.md, "Android's Back cancels a pending confirmation first, then closes the entry shown"; spec/settings/updates.md, "Story: Let Android finish an update without losing what I typed"; spec/settings/carrier.md, "The page reads nothing until the owner taps Show identifiers, and leaving forgets what it read"
 import { Effect } from "effect";
 import { KeyRound, Settings as Gear } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useMachine as useNavigation } from "../../../gen/settings.react.ts";
 import { initial as navigationStart } from "../../../gen/settings.ts";
 import { useMachine as useAppearance } from "../../../gen/settings__appearance.react.ts";
 import { dark, initial as appearanceStart } from "../../../gen/settings__appearance.ts";
+import { useMachine as useCarrier } from "../../../gen/settings__carrier.react.ts";
+import { initial as carrierStart } from "../../../gen/settings__carrier.ts";
 import { useMachine as useDiagnostics } from "../../../gen/settings__diagnostics.react.ts";
 import { initial as diagnosticsStart } from "../../../gen/settings__diagnostics.ts";
 import { useMachine as useFacts } from "../../../gen/settings__facts.react.ts";
@@ -25,6 +27,7 @@ import { initial as updatesStart } from "../../../gen/settings__updates.ts";
 import { Build } from "../../platform/build.vibe";
 import { Native } from "../../platform/native.vibe";
 import { Appearance } from "../../settings/appearance.vibe";
+import { CarrierSetup } from "../../settings/carrier.vibe";
 import { Diagnostics } from "../../settings/diagnostics.vibe";
 import { DeviceFacts } from "../../settings/facts.vibe";
 import { SettingsPages } from "../../settings/navigation.vibe";
@@ -38,11 +41,12 @@ import { useAccountRows } from "../account/index.tsx";
 import type { AppScreen, AppSurface, ScreenProps } from "../app-screen.ts";
 import { NotificationsSettings } from "../shell/NotificationsPage.tsx";
 import type { DevCommand } from "./DeveloperPage.tsx";
+import { CarrierPage } from "./CarrierPage.tsx";
 import { backDialog, closeDialog, openDialog, useDialog } from "./dialogs.ts";
 import { PasswordsScreen } from "./PasswordsScreen.tsx";
 import { SettingsScreen } from "./SettingsScreen.tsx";
 import { UpdateActivation } from "./UpdateActivation.tsx";
-import { now, perform } from "../shell/services.ts";
+import { now, perform, start } from "../shell/services.ts";
 import { runtime } from "./runtime.ts";
 import { testMocksBuilt } from "../../platform/build-flags.ts";
 
@@ -119,6 +123,7 @@ function SettingsApp({ onClose }: ScreenProps) {
       dialog={dialog}
       onDialog={(next) => (next === undefined ? closeDialog() : openDialog(nav, next))}
       notifications={<NotificationsSettings />}
+      carrier={<CarrierSettings />}
       privacy={{ route, listener: privacyMachine.state ?? privacyStart, aosp: variant === "aosp" }}
       privacyActs={{
         stop: (stop) => void perform(Effect.flatMap(Effect.service(PrivacyRow), (p) => p.stop(stop))),
@@ -140,6 +145,27 @@ function SettingsApp({ onClose }: ScreenProps) {
         toggleProfile: () => { if (!mocks) return; const url = new URL(location.href); if (profile === "development") url.searchParams.delete("mode"); else url.searchParams.set("mode", "dev"); setProfile(profile === "development" ? "app" : "development"); location.assign(url.href); },
       }}
     />
+  );
+}
+
+const carrier = <A,>(use: (c: CarrierSetup.Shape) => Effect.Effect<A>) => perform(Effect.flatMap(Effect.service(CarrierSetup), use));
+
+/** Carrier & SIM setup while it is mounted: each stretch in front opens it empty, and leaving forgets what it read. */
+function CarrierSettings() {
+  const state = useCarrier(runtime).state ?? carrierStart;
+  const visit = useCallback((node: HTMLElement | null) => {
+    if (!node) return;
+    return start(Effect.flatMap(Effect.service(CarrierSetup), (c) => c.visit()));
+  }, []);
+  return (
+    <div ref={visit} className="contents">
+      <CarrierPage carrier={state} acts={{
+        read: () => void carrier((c) => c.read()),
+        readEid: () => void carrier((c) => c.readEid()),
+        copy: (target) => void carrier((c) => c.copy(target)),
+        openPage: (page) => void perform(Effect.flatMap(Effect.service(DeviceFacts), (f) => f.openPage(page))),
+      }} />
+    </div>
   );
 }
 
