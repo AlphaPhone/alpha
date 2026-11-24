@@ -6,16 +6,17 @@ import type { Access, AccessGrant, Holder, Reading } from "../../gen/app__settin
 import type { Grant } from "../../gen/kit__permission.ts"
 
 module held {
-  import { systemClient } from "@elizaos/os/bridges/system"
+  import type * as SystemBridge from "@elizaos/os/bridges/system"
   import { locationClient } from "@elizaos/os/bridges/location"
   import { wifiClient } from "@elizaos/os/bridges/wifi"
 
-  let system: ReturnType<typeof systemClient> | undefined
+  type System = ReturnType<typeof SystemBridge.systemClient>
+  let loaded: Promise<System> | undefined
   let location: ReturnType<typeof locationClient> | undefined
   let wifi: ReturnType<typeof wifiClient> | undefined
-  /** eliza's clients of the plugins, each made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
-  export function systemOf(): ReturnType<typeof systemClient> {
-    return (system ??= systemClient())
+  /** eliza's client of `ElizaSystem`, loaded the first time the phone's settings run: Capacitor binds the plugin once to what the host declared by then. @throws {never} */
+  export function systemOf(): Promise<System> {
+    return (loaded ??= import("@elizaos/os/bridges/system").then((found) => found.System))
   }
   /** @throws {never} */
   export function locationOf(): ReturnType<typeof locationClient> {
@@ -94,7 +95,7 @@ const settled = <A>(call: () => Promise<A>) => Effect.option(tryPromise(call))
 
 /** What the phone reports, through eliza's clients of `ElizaSystem` and `ElizaLocation`. */
 effect function phoneReport(): PhoneReport!! {
-  const system = systemOf()
+  const system = try promise(() => systemOf())
   const facts = try settled(() => system.getSystemFacts())
   const status = try settled(() => system.getStatus())
   const build = try settled(() => system.getBuildInfo())
@@ -143,7 +144,7 @@ function openedOf(target: Target, handoff: Pick<SettingsHandoff, "outcome" | "sp
 }
 
 effect function opening(target: Target): Opened!! {
-  const system = systemOf()
+  const system = try promise(() => systemOf())
   const handed = effect {
     if (target === "AndroidHome") return try tryPromise(() => system.openSettings())
     if (target === "InternetPanel") return { outcome: try tryPromise(() => wifiOf().openInternetPanel()), specific: true }
@@ -156,16 +157,19 @@ effect function opening(target: Target): Opened!! {
     if (page === undefined) return { outcome: "Refused" as const, specific: false }
     return try tryPromise(() => system.openSettingsPage({ page }))
   } catch () => ({ outcome: "Refused" as const, specific: false })
-  return openedOf(target, try handed)
+  return openedOf(target, handed)
 }
 
 /** The phone, through eliza's clients of its plugins. */
-export const phoneSystemSettings = Layer.succeed(SystemSettings, {
-  report: phoneReport,
-  requestHome: () => ignore(tryPromise(() => systemOf().requestRole({ role: "home" }))),
-  open: (target: Target, _channel: number) => opening(target),
-  problems: () => Effect.map(settled(() => systemOf().crashLog()), Option.map((log) => log.entries.length)),
-  clearProblems: () => Effect.map(settled(() => systemOf().clearCrashLog()), Option.isSome),
+export const phoneSystemSettings = Layer.effect(SystemSettings, effect {
+  const system = try promise(() => systemOf())
+  return {
+    report: phoneReport,
+    requestHome: () => ignore(tryPromise(() => system.requestRole({ role: "home" }))),
+    open: (target: Target, _channel: number) => opening(target),
+    problems: () => Effect.map(settled(() => system.crashLog()), Option.map((log) => log.entries.length)),
+    clearProblems: () => Effect.map(settled(() => system.clearCrashLog()), Option.isSome),
+  }
 })
 
 /** A browser: none of the phone's facts, roles, pages or log. */

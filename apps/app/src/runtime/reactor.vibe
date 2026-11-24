@@ -33,7 +33,7 @@ export interface Moved<S, Fx> {
 export interface Steps<S, Ev, M, Refused, Undecoded, By extends ReadonlyArray<unknown>> {
   readonly changes: Stream.Stream<S>
   get(): S!!
-  send(event: Ev, ...by: By): M!Refused
+  send(event: Ev, ...by: NoInfer<By>): M!Refused
   receive(input: unknown, ...by: By): M!Undecoded
 }
 
@@ -284,8 +284,8 @@ function reactor<I, S, Ev, M, Fx, Refused, Undecoded, By extends ReadonlyArray<u
       }
     }
     if (open !== undefined) {
-      if (Effect.isEffect(open)) try launch("open", effect { try contained(send(...(try open)), `opening ${scope}`) })
-      else try contained(send(...open), `opening ${scope}`)
+      if (Effect.isEffect(open)) try launch("open", effect { const [event, ...by] = (try open) as readonly [Ev, ...By]; try contained(send(event, ...by), `opening ${scope}`) })
+      else { const [event, ...by] = open as readonly [Ev, ...By]; try contained(send(event, ...by), `opening ${scope}`) }
     }
     try contained(Semaphore.withPermit(turn, effect { try arm(try inner.get()) }), `arming ${scope}`)
     return { changes: inner.changes, get: () => inner.get(), send, receive }
@@ -296,7 +296,7 @@ function reactor<I, S, Ev, M, Fx, Refused, Undecoded, By extends ReadonlyArray<u
  * The event a machine is sent once when it is built, with its sender: the event itself, or, where the event carries
  * what only the world knows (what the phone kept, today's date), an effect that asks and returns it.
  */
-export type Opening<Ev, R, By extends ReadonlyArray<unknown>> = readonly [event: Ev, ...by: By] | ((readonly [event: Ev, ...by: By])!never!R)
+export type Opening<Ev, R, By extends ReadonlyArray<unknown>> = NoInfer<readonly [event: Ev, ...by: By]> | (NoInfer<readonly [event: Ev, ...by: By]>!never!R)
 
 /** A machine is kept only with the event that takes up what was under way when Alpha stopped: the spec's `reopen`, `restart` or `start`. */
 type Kept<Ev, R, By extends ReadonlyArray<unknown>> =
@@ -323,13 +323,13 @@ type Needs<SR, R> = SR | KeyValueStore.KeyValueStore | Whole | Time | Install | 
  * the state that asked for it is kept, and each deadline of `timers` is told when its time has come. `open` is sent
  * once when the layer is built.
  */
-export function reacting<I, S, Ev, M, Refused, Undecoded, By extends ReadonlyArray<unknown>, SE, SR, R = never>(
+export function reacting<I, S, Ev, M, Refused, Undecoded, By extends ReadonlyArray<unknown>, SE, SR, RO = never, RC = never>(
   spec: Spec<I, S, Ev, M, Refused, Undecoded, By, SE, SR>,
-  options: Options<S, Ev, R, By> & Carrying<M, Ev, R, By>,
-): Layer.Layer<I, never, Needs<SR, R>> {
-  const carry = options.carry as ((fx: unknown) => Job<Ev, R, By>) | undefined
+  options: Options<S, Ev, RO, By> & Carrying<M, Ev, RC, By>,
+): Layer.Layer<I, never, Needs<SR, RO | RC>> {
+  const carry = options.carry as ((fx: unknown) => Job<Ev, RO | RC, By>) | undefined
   const key = options.keep === undefined ? undefined : storeKey(spec.Machine.key, options.keep)
-  const parts: Parts<S, Ev, M, unknown, R, By> = {
+  const parts: Parts<S, Ev, M, unknown, RO | RC, By> = {
     scope: key ?? spec.Machine.key,
     durable: key !== undefined,
     stateOf: (moved) => (carry === undefined ? moved as unknown as S : (moved as unknown as Moved<S, unknown>).state),
@@ -339,7 +339,7 @@ export function reacting<I, S, Ev, M, Refused, Undecoded, By extends ReadonlyArr
     open: options.open,
   }
   const inner = key === undefined ? spec.machine() : kept(key, spec.stored, spec.machine())
-  return Layer.provide(reactor(spec.Machine, parts), inner) as unknown as Layer.Layer<I, never, Needs<SR, R>>
+  return Layer.provide(reactor(spec.Machine, parts), inner) as unknown as Layer.Layer<I, never, Needs<SR, RO | RC>>
 }
 
 /**

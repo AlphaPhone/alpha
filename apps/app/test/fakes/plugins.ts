@@ -2,11 +2,31 @@ import { elizaCalendar } from "./calendar.ts";
 import { elizaLocation } from "./maps.ts";
 import { type Faked, elizaAgent, elizaCloud, elizaSecureStore, present } from "./phone.ts";
 import type { Answering } from "./routes.ts";
-import { elizaSystem } from "./launcher.ts";
+import { elizaSystem as launcherSystem } from "./launcher.ts";
 import { elizaFiles } from "./files.ts";
 import type { Scene } from "./scene.ts";
-import { alphaCarrierSetup, elizaLocation, elizaPasswords, elizaReset, elizaSystem, elizaWiFi } from "./settings.ts";
+import { alphaCarrierSetup, elizaPasswords, elizaReset, elizaSystem as settingsSystem, elizaWiFi } from "./settings.ts";
 import { telephonyPlugins } from "./telephony.ts";
+
+/**
+ * Combines Settings' and Home's parts of `ElizaSystem` into one plugin: Settings owns roles, device facts, crash logs
+ * and Alpha's own App info, while Home owns the installed apps, launching one, its App info, the shade and presentation.
+ */
+function combinedSystem(world: Scene): Faked {
+  return (emit) => {
+    const settings = settingsSystem(world.settings)(emit) as Record<string, (arg: unknown) => Promise<unknown>>;
+    const launcher = launcherSystem(world.launcher)(emit) as Record<string, (arg: unknown) => Promise<unknown>>;
+    return {
+      ...settings,
+      ...launcher,
+      getBuildInfo: () => Promise.resolve({ launcher: world.launcher.launcher, version: world.settings.version }),
+      openAppInfo: (target: unknown) =>
+        typeof target === "object" && target !== null && "packageName" in target && target.packageName === "ai.alphacompute.alphaphone"
+          ? settings.openAppInfo(target)
+          : launcher.openAppInfo(target),
+    };
+  };
+}
 
 /**
  * The plugins the fake phone's host registers, by the names their `@CapacitorPlugin` gives: one line per plugin, and
@@ -22,9 +42,7 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     ElizaFiles: elizaFiles(world.files),
     ElizaLocation: elizaLocation(world.maps, () => world.now),
     ...(world.image ? { ElizaTelephony: present, ElizaContacts: present } : {}),
-    ElizaSystem: elizaSystem(world.launcher),
-    ElizaSystem: elizaSystem(world.settings),
-    ElizaLocation: elizaLocation(world.settings),
+    ElizaSystem: combinedSystem(world),
     ElizaReset: elizaReset(world.settings),
     ElizaWiFi: elizaWiFi(world.settings),
     ElizaPasswords: elizaPasswords(world.settings),
