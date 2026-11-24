@@ -65,7 +65,7 @@ import { keepSend, keptSend } from text
 const drafts = Layer.effect(Drafts, effect {
   const store = try KeyValueStore.KeyValueStore
   let pictures: ReadonlyArray<Picture> = []
-  let outgoing = Option.fromNullishOr(keptSend(store.get(outgoingKey) catch () => undefined))
+  let outgoing: Option.Option<Outgoing> = Option.fromNullishOr(keptSend(store.get(outgoingKey) catch () => undefined))
   return {
     effect text(thread: number): string!! {
       return (store.get(draftKey(thread)) catch () => undefined) ?? ""

@@ -49,7 +49,7 @@ const conversationsKey = "alpha/messages/conversations@1"
 
 const conversations = Layer.effect(Conversations, effect {
   const store = try KeyValueStore.KeyValueStore
-  const known = kept(store.get(conversationsKey) catch () => undefined)
+  const known: Conversation[] = kept(store.get(conversationsKey) catch () => undefined)
   const keyOf = (one: Conversation) => (one.id !== "" ? `id:${one.id}` : `to:${[...one.addresses].sort().join(",")}`)
   const numbers = new Map(known.map((one, at) => [keyOf(one), at + 1]))
   return {

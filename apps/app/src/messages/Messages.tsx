@@ -70,7 +70,7 @@ export function Messages({ runtime }: MessagesProps) {
           {state.threads > 0 && (
             <ListGroup aria-label="Conversations">
               {held.threads.map((row) => (
-                <ListRow key={row.id} title={titleOf(row)} detail={"incomplete" in row ? "Open in your messaging app" : row.snippet} trailing={!("incomplete" in row) && row.unread ? <span className="size-2 rounded-full bg-primary" aria-label="Unread" /> : when(row.date)}
+                <ListRow key={row.id} aria-label={titleOf(row)} title={titleOf(row)} detail={"incomplete" in row ? "Open in your messaging app" : row.snippet} trailing={!("incomplete" in row) && row.unread ? <span className="size-2 rounded-full bg-primary" aria-label="Unread" /> : when(row.date)}
                   onClick={() => {
                     const thread = runtime.runSync(Conversations.use((numbering) => numbering.of({ id: row.id, addresses: "incomplete" in row ? [] : row.addresses })));
                     if (can({ type: "openThread", thread })) void send({ type: "openThread", thread });
@@ -250,7 +250,7 @@ function Picker({ runtime }: MessagesProps) {
       {state.choices > 0 && (
         <ListGroup aria-label="Contacts">
           {held.choices.flatMap((contact) => contact.phones.map((phone) => (
-            <ListRow key={`${contact.id}:${phone}`} title={contact.name} detail={phone} onClick={() => open(phone, false)} />
+            <ListRow key={`${contact.id}:${phone}`} aria-label={contact.name} title={contact.name} detail={phone} onClick={() => open(phone, false)} />
           )))}
         </ListGroup>
       )}
