@@ -1,10 +1,12 @@
 // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
 import { type AskScene, askRoutes, askScene } from "./ask.ts";
 import { type CalendarScene, calendarRoutes, calendarScene } from "./calendar.ts";
+import { type ClockScene, clockRoutes, clockScene } from "./clock.ts";
 import { type MapsScene, mapsRoutes, mapsScene } from "./maps.ts";
 import { cloudRoutes } from "./cloud.ts";
 import { type InboxScene, inboxRoutes, inboxScene } from "./inbox.ts";
 import { type PlatformScene, platformRoutes, platformScene } from "./platform.ts";
+import { type RemindersScene, remindersRoutes, remindersScene } from "./reminders.ts";
 import { type Route, answering } from "./routes.ts";
 import { type SampleScene, sampleRoutes, sampleScene } from "./sample.ts";
 import { type LauncherScene, launcherScene } from "./launcher.ts";
@@ -27,6 +29,8 @@ export interface Scene {
   readonly settings: SettingsScene;
   readonly inbox: InboxScene;
   readonly calendar: CalendarScene;
+  readonly clock: ClockScene;
+  readonly reminders: RemindersScene;
   readonly files: FilesScene;
   readonly maps: MapsScene;
   readonly telephony: TelephonyScene;
@@ -44,6 +48,8 @@ export function scene(): Scene {
     settings: settingsScene(),
     inbox: inboxScene(),
     calendar: calendarScene(),
+    clock: clockScene(),
+    reminders: remindersScene(),
     files: filesScene(),
     maps: mapsScene(),
     telephony: telephonyScene(),
@@ -63,6 +69,8 @@ export function services(world: Scene) {
       ...sampleRoutes(world.sample),
       ...askRoutes(world.ask),
       ...calendarRoutes(world.calendar),
+      ...clockRoutes(world.clock, () => world.now),
+      ...remindersRoutes(world.reminders, () => world.now),
       ...platformRoutes(world.platform),
       ...telephonyRoutes(world.telephony),
     ]),

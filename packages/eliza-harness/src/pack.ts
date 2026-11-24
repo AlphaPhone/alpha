@@ -103,12 +103,19 @@ export function packPrepared(plugins: readonly string[]): Pack {
   return { commit, root, packages: workspace(root) };
 }
 
+/** A compiled Alpha product plugin staged inside the pack entry's `node_modules`. */
+export interface ProductPackage {
+  readonly name: string;
+  readonly dir: string;
+}
+
 /**
  * Write the pack's entry package inside the clone: its `package.json`, `entry.js` with `source`, and each `@elizaos`
  * package of the clone linked in its `node_modules`, so the entry's imports resolve to the clone's own packages.
+ * When `product` is given, its compiled JS files are staged as a local package inside `node_modules`.
  * The whole package replaces the last one at once. Returns the entry file.
  */
-export function stagePackEntry(pack: Pack, source: string): string {
+export function stagePackEntry(pack: Pack, source: string, product?: ProductPackage): string {
   const parent = path.join(pack.root, ".alpha");
   fs.mkdirSync(parent, { recursive: true });
   const target = path.join(parent, "pack-entry");
@@ -120,6 +127,17 @@ export function stagePackEntry(pack: Pack, source: string): string {
     fs.mkdirSync(scope, { recursive: true });
     for (const [name, directory] of pack.packages) {
       if (name.startsWith("@elizaos/")) fs.symlinkSync(directory, path.join(scope, name.slice("@elizaos/".length)), "dir");
+    }
+    if (product !== undefined) {
+      const productTarget = path.join(staging, "node_modules", product.name);
+      fs.mkdirSync(productTarget, { recursive: true });
+      for (const entry of fs.readdirSync(product.dir)) {
+        if (entry.endsWith(".js")) fs.copyFileSync(path.join(product.dir, entry), path.join(productTarget, entry));
+      }
+      fs.writeFileSync(
+        path.join(productTarget, "package.json"),
+        `${JSON.stringify({ name: product.name, version: "0.1.0", private: true, type: "module", main: "./index.js" }, null, 2)}\n`,
+      );
     }
     fs.rmSync(target, { recursive: true, force: true });
     fs.renameSync(staging, target);

@@ -1,12 +1,72 @@
 {
   "schema": 1,
   "actions": {
-    "allowed": ["REPLY", "IGNORE", "NONE"],
+    "allowed": [
+      "REPLY",
+      "IGNORE",
+      "NONE",
+      "PROPOSE_DEVICE_ACTION",
+      "VIEWS",
+      "OWNER_REMINDERS",
+      "OWNER_GOALS",
+      "TODO",
+      "OWNER_ROUTINES",
+      "BRIEF",
+      "CALENDAR",
+      "INBOX_READ",
+      "INBOX_COMPOSE_EMAIL",
+      "NOTES_LIST",
+      "NOTES_GET",
+      "NOTES_CREATE",
+      "NOTES_UPDATE",
+      "NOTES_DELETE",
+      "NOTES_RESTORE",
+      "NOTES_MOVE",
+      "WORKFLOW",
+      "MAPS_PLACE",
+      "MAPS_WHERE_AM_I",
+      "MAPS_ROUTE",
+      "MAPS_NAVIGATION_START",
+      "MAPS_NAVIGATION_REROUTE",
+      "MAPS_NAVIGATION_STOP",
+      "MAPS_SELECT",
+      "MAPS_SAVE",
+      "MAPS_SHARE",
+      "MAPS_COVERAGE",
+      "MAPS_SAVED",
+      "BROWSER",
+      "BROWSER_BACK",
+      "BROWSER_FORWARD",
+      "BROWSER_RELOAD",
+      "CLOCK_ALARM",
+      "CLOCK_TIMER",
+      "CLOCK_WORLD",
+      "REMINDERS_MANAGE"
+    ],
     "refused": {
-      "CALCULATE": "No area of the phone asks the agent to calculate.",
-      "VIEWS": "The phone declares no agent views while the bundle carries no plugin (D11).",
-      "PROPOSE_DEVICE_ACTION": "The phone runs no device action of the agent while the bundle carries no plugin (D11)."
+      "CALCULATE": "No area of the phone asks the agent to calculate."
     }
   },
-  "plugins": { "load": [] }
+  "plugins": {
+    "load": [
+      "@elizaos/plugin-personal-assistant",
+      "@elizaos/plugin-calendar",
+      "@elizaos/plugin-inbox",
+      "@elizaos/plugin-notes",
+      "@elizaos/plugin-files",
+      "@elizaos/plugin-workflow",
+      "@elizaos/plugin-maps",
+      "@elizaos/plugin-browser",
+      "@elizaos/agent/device-actions",
+      "@elizaos/agent/reply-draft",
+      "@elizaos/agent/approvals",
+      "@elizaos/agent/notifications",
+      "@elizaos/agent/views",
+      "@elizaos/agent/scheduled-tasks",
+      "@elizaos/agent/tasks",
+      "@elizaos/agent/triggers",
+      "@elizaos/agent/surface"
+    ],
+    "product": "alpha-apps"
+  }
 }

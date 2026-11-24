@@ -9,7 +9,7 @@ import { pinnedCheckout, pinnedPack } from "@repo/eliza-harness/pinned"
 import {
   type Environment, type Manifest, bundledPlugins, calendarEdits, characterAdmitted, cloudModel, corePlugins, entryCarried, gmailChanges, googleAdmitted,
   hostedPlugins, inputAdmitted, localEmbeddings, packAdmitted, packEntry, packedFor, packedPlugins, persistMemory, personalDetailSwap,
-  policyAdmitted, privacyAdmitted, proposalsAdmitted, refusedActions, routeListAdmitted, secretSwap, viewPlugins,
+  policyAdmitted, privacyAdmitted, productPluginName, proposalsAdmitted, refusedActions, routeListAdmitted, secretSwap, viewPlugins,
 } from "../gen/agent.effect.vibe"
 
 module node {
@@ -39,7 +39,7 @@ const environments: Readonly<Record<string, Environment>> = { local: "Local", st
 
 schema RouteLine { method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; path: string; stream?: boolean }
 schema Character { name: string; system: string; bio: string[] }
-schema Policy { schema: 1; actions: { allowed: string[]; refused: Record<string, string> }; plugins: { load: string[] } }
+schema Policy { schema: 1; actions: { allowed: string[]; refused: Record<string, string> }; plugins: { load: string[]; product?: string } }
 schema Service { service: string; notification: { channel: string; title: string; text: string } }
 schema Model { backend: "cloud"; cloudBaseUrl: string; smallModel: string; largeModel: string; imageModel: string }
 schema Host {
@@ -51,22 +51,24 @@ schema Host {
 /** The export each hosted package builds its module with, as `runAgentCli`'s `hostModules` takes it. */
 const hostedExports: Readonly<Record<string, string>> = { "@elizaos/plugin-notes": "notesModule" }
 
-/** Alpha's own packages: the only one the bundle may carry is the pack's entry. */
-const alphaOwned = (name: string) => name.startsWith("@repo/") || name.startsWith("@alphacompute/")
+/** Alpha's own packages: only the pack entry and the Alpha product plugin may be carried. */
+const alphaOwned = (name: string) => name.startsWith("@repo/") || name.startsWith("@alphacompute/") || name === productPluginName
 
-/** The pack's entry: eliza's agent command started with each bundled plugin as its package exports it, and each hosted package's module. */
-export function entrySource(bundled: readonly string[], hosted: readonly { name: string; module: string }[]): string {
+/** The pack's entry: eliza's agent command started with each bundled plugin, each hosted package's module, and the Alpha product plugin. */
+export function entrySource(bundled: readonly string[], hosted: readonly { name: string; module: string }[], product: { name: string; module: string }): string {
+  const allHosted = [...hosted, product]
   return [
     `import { runAgentCli } from "@elizaos/agent/cli"`,
     ...bundled.map((name, index) => `import * as plugin${index} from ${JSON.stringify(name)}`),
-    ...hosted.map(({ name, module }, index) => `import { ${module} as host${index} } from ${JSON.stringify(name)}`),
+    ...allHosted.map(({ name, module }, index) => `import { ${module} as host${index} } from ${JSON.stringify(name)}`),
     "",
     "runAgentCli({",
     "  bundled: [",
     ...bundled.map((name, index) => `    { packageName: ${JSON.stringify(name)}, plugin: plugin${index}.default ?? plugin${index}.plugin },`),
-    ...hosted.map(({ name }) => `    { packageName: ${JSON.stringify(name)}, plugin: undefined },`),
+    ...allHosted.map(({ name }) => `    { packageName: ${JSON.stringify(name)}, plugin: undefined },`),
     "  ],",
-    `  hostModules: new Map([${hosted.map(({ name }, index) => `[${JSON.stringify(name)}, host${index}]`).join(", ")}]),`,
+    `  productPlugin: ${JSON.stringify(product.name)},`,
+    `  hostModules: new Map([${allHosted.map(({ name }, index) => `[${JSON.stringify(name)}, host${index}]`).join(", ")}]),`,
     "})",
     "",
   ].join("\n")
@@ -120,15 +122,15 @@ effect function admittedManifest(bundle: string, pin: string) {
   const manifest = try tryPromise({ try: () => readBundleManifest(bundle), catch: () => new Refused({ reason: `${bundle} holds no manifest readable for its own bytes` }) })
   const facts: Manifest = {
     sourceCommit: manifest.sourceCommit, node: manifest.node, localInference: manifest.localInference,
-    plugins: [...manifest.plugins], workerPinned: manifest.workflowWorkerSha256 !== undefined, actions: manifest.actions.map(({ name }) => name),
+    plugins: [...manifest.plugins], productPlugin: manifest.productPlugin ?? "", workerPinned: manifest.workflowWorkerSha256 !== undefined, actions: manifest.actions.map(({ name }) => name),
   }
   if (!packAdmitted(facts, pin)) {
-    throw new Refused({ reason: `the bundle is not the pinned eliza's (${pin}) for Node 26 with no local inference, the plugins ${packedPlugins.join(", ")}, a pinned workflow worker and every allowed action: ${JSON.stringify(facts)}` })
+    throw new Refused({ reason: `the bundle is not the pinned eliza's (${pin}) for Node 26 with no local inference, the plugins ${packedPlugins.join(", ")}, product plugin ${productPluginName}, a pinned workflow worker and every allowed action: ${JSON.stringify(facts)}` })
   }
   const names = manifest.packages.map(({ name }) => name)
   const foreign = names.filter((name) => !inputAdmitted(name, alphaOwned(name)))
   if (foreign.length > 0 || !entryCarried(names)) {
-    throw new Refused({ reason: `the bundle must carry the pinned eliza's packages and ${packEntry} alone of Alpha's: it carries ${foreign.join(", ") || `no ${packEntry}`}` })
+    throw new Refused({ reason: `the bundle must carry the pinned eliza's packages plus ${packEntry} and ${productPluginName} alone of Alpha's: it carries ${foreign.join(", ") || `missing ${packEntry}/${productPluginName}`}` })
   }
   return manifest
 }
@@ -138,8 +140,8 @@ effect function admittedHost(host: string, registered: readonly string[]) {
   const character = try decoded(`${host}/character.json`, Character)
   if (!characterAdmitted(character.name, character.system.trim())) throw new Refused({ reason: "the character is not Alpha with a system prompt" })
   const policy = try decoded(`${host}/policy.json`, Policy)
-  if (!policyAdmitted(policy.actions.allowed, Object.keys(policy.actions.refused), policy.plugins.load, [...registered])) {
-    throw new Refused({ reason: `the policy must allow exactly the old phone's actions, refuse ${refusedActions([...registered]).join(", ")}, and load the pack's plugins and the agent's modules in order` })
+  if (!policyAdmitted(policy.actions.allowed, Object.keys(policy.actions.refused), policy.plugins.load, policy.plugins.product ?? "", [...registered])) {
+    throw new Refused({ reason: `the policy must allow the spec's actions, refuse ${refusedActions([...registered]).join(", ")}, load the pack's plugins and modules in order, and name product ${productPluginName}` })
   }
   if (!proposalsAdmitted(policy.plugins.load, policy.actions.allowed)) throw new Refused({ reason: "the policy must load eliza's device-action modules and allow a proposal" })
   const written = try decoded(`${host}/host.json`, Host)
@@ -171,13 +173,14 @@ effect function build(name: string) {
   const hosted = hostedPlugins.map((name) => ({ name, module: hostedExports[name] ?? "" }))
   const unbuilt = hosted.filter(({ module }) => module === "")
   if (unbuilt.length > 0) throw new Refused({ reason: `no module export is known for ${unbuilt.map(({ name }) => name).join(", ")}` })
-  const pack = pinnedPack(packedPlugins, entrySource(bundledPlugins, hosted)) catch effect (cause) => {
+  const product = { name: productPluginName, module: "alphaAppsModule" }
+  const pack = pinnedPack(packedPlugins, entrySource(bundledPlugins, hosted, product), { name: productPluginName, dir: `${at.app}/dist/src/plugins` }) catch effect (cause) => {
     throw new Refused({ reason: `the pack's clone of the pinned eliza could not be prepared: ${cause.reason}` })
   }
   const builder = try tryPromise({ try: () => builderOf(pack.dir), catch: () => new Refused({ reason: `${pack.dir} holds no built bundle builder` }) })
   try tryPromise({
     try: () => builder.buildAgentBundle({
-      plugins: packedPlugins, profiles: { core: corePlugins, views: viewPlugins, aospOnly: [], optional: [] },
+      plugins: packedPlugins, productPlugin: productPluginName, profiles: { core: corePlugins, views: viewPlugins, aospOnly: [], optional: [] },
       entry: pack.entry, outDir: at.bundle, sourceCommit: pack.commit, sourceRoot: pack.dir,
     }),
     catch: (cause) => new Refused({ reason: `eliza refused to build the bundle: ${String(cause)} ${cause instanceof Error && "detail" in cause ? String(cause.detail) : ""}` }),
