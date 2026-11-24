@@ -69,7 +69,10 @@ function clockWords(value: string): string {
   return `${numberWords(hour)}${minutes}${suffix}`;
 }
 
-/** Render display dates, clock times and prose pauses for spoken output while preserving likely credentials. */
+/**
+ * Render display dates, clock times and prose pauses for spoken output while preserving likely credentials.
+ * @throws {never}
+ */
 export function formatSpeechText(text: string, standaloneClocks = false): string {
   if (credentialLike.test(text)) return text;
   return text
