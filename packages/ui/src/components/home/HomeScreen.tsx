@@ -7,14 +7,14 @@ import type { HomeNoticeMessage } from "./HomeNotice.tsx";
 import { HomeTileGrid, type HomeTileItem, type HomeTileMove } from "./HomeTileGrid.tsx";
 
 export type HomeScreenProps = {
-  /** The day, as Home's one heading, such as "Tuesday 17". */
-  date?: string;
   /** The cards drawn above the tiles, in order, each with its key; the row is not drawn without one. */
   cards?: readonly ReactNode[];
   /** The tiles shown, in Home's order; left out until what was saved has been read. */
   tiles?: readonly HomeTileItem[];
   /** Home is being edited. */
   editing?: boolean;
+  /** Another launcher surface is over Home. */
+  covered?: boolean;
   /** Opens a tile's app; left out where nothing may be opened. */
   onOpenTile?: (id: string) => void;
   /** Starts editing from a long press on a tile; left out off the phone, before the tiles are read and under a layer. */
@@ -72,23 +72,23 @@ function PullZone({ onPull, className, ...props }: ComponentProps<"div"> & { onP
 }
 
 /**
- * Home: the day, its cards and the owner's tiles; while editing, the edit bar and Add to Home. A pull down on its
+ * Home: the day's cards and the owner's tiles; while editing, the edit bar and Add to Home. A pull down on its
  * empty space asks Android for its notifications.
  * @model spec/app/home/index.md
  */
 export function HomeScreen({
-  date, cards = [], tiles, editing = false, onOpenTile, onBeginEditing, onRemoveTile, onMoveTile, onOpenDrawer, onPullDown,
+  cards = [], tiles, editing = false, covered = false, onOpenTile, onBeginEditing, onRemoveTile, onMoveTile, onOpenDrawer, onPullDown,
   onShowHidden, onDone, notice, adding = false, hidden = [], onAddToHome, onCloseAdding = () => undefined, className,
 }: HomeScreenProps) {
   return (
-    <div className={cn("flex h-full min-h-0 flex-col bg-background text-base text-foreground", className)}>
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto pt-[env(safe-area-inset-top)] pb-[calc(--spacing(26)+env(safe-area-inset-bottom))]">
-        <PullZone onPull={onPullDown} className="px-6 pt-8 pb-4">
-          <h1 className={cn("font-display text-4xl font-light", !date && "sr-only")}>{date ?? "Home"}</h1>
+    <div inert={covered || undefined} className={cn("flex h-full min-h-0 flex-1 flex-col bg-background text-base text-foreground", className)}>
+      <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto pb-[calc(--spacing(27)+env(safe-area-inset-bottom))]">
+        <PullZone onPull={onPullDown} className="min-h-[max(--spacing(16),calc(env(safe-area-inset-top)+--spacing(3)))] shrink-0">
+          <h1 className="sr-only">Home</h1>
         </PullZone>
-        {editing ? <HomeEditBar onShowHidden={onShowHidden} onDone={onDone} notice={notice} className="pb-4" /> : null}
+        {editing ? <HomeEditBar onShowHidden={onShowHidden} onDone={onDone} notice={notice} className="pb-3" /> : null}
         {cards.length > 0 ? <HomeCardRow>{cards}</HomeCardRow> : null}
-        <PullZone onPull={onPullDown} className="min-h-8 flex-1" />
+        <PullZone onPull={onPullDown} className="h-6 shrink-0" />
         {tiles ? (
           <HomeTileGrid
             tiles={tiles}
@@ -98,11 +98,11 @@ export function HomeScreen({
             onRemove={onRemoveTile}
             onMove={onMoveTile}
             onOpenDrawer={onOpenDrawer}
-            className="pt-4"
           />
         ) : (
           <div aria-busy className="min-h-24" />
         )}
+        <PullZone onPull={onPullDown} className="min-h-4 flex-1" />
       </div>
       <AddToHomeSheet open={adding} apps={hidden} onAdd={onAddToHome} onClose={onCloseAdding} />
     </div>

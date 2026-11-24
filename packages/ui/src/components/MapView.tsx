@@ -1,5 +1,6 @@
 import * as maplibregl from "maplibre-gl";
 import type { GeoJSONSource, Map as MapLibre, StyleSpecification } from "maplibre-gl";
+import mapWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { Compass, Minus, Plus } from "lucide-react";
 import { type ReactNode, useCallback, useRef, useState } from "react";
 import { cn } from "../lib/cn.ts";
@@ -71,6 +72,8 @@ export interface MapViewProps {
   compass: (bearing: number, pitch: number) => boolean;
   /** Whether MapLibre draws the map, which needs WebGL and the network; stories show the frame alone. */
   drawn?: boolean;
+  /** Whether to show zoom buttons alongside the compass. */
+  zoomControls?: boolean;
   onReady: (surface: number) => void;
   onTrouble: (surface: number, trouble: MapTrouble) => void;
   onPin: (key: string) => void;
@@ -146,7 +149,7 @@ function paint(map: MapLibre, painted: Painted, props: MapViewProps, onPin: (key
   }
   const route = JSON.stringify(props.line ?? []);
   if (route !== painted.route) {
-    (map.getSource("route") as GeoJSONSource | undefined)?.setData(lineOf(props.line));
+    void map.getSource<GeoJSONSource>("route")?.setData(lineOf(props.line));
     painted.route = route;
   }
   const camera = props.camera;
@@ -171,17 +174,17 @@ const apart = (a: { x: number; y: number }, b: { x: number; y: number }) => Math
  * nothing: whether a trouble breaks the map, whether the compass shows and what a press does are its owner's.
  */
 export function MapView(props: MapViewProps) {
-  const { label, surface, style, drawn = true, children, className } = props;
-  const latest = useRef(props);
+  const { label, surface, style, drawn = true, zoomControls = true, children, className } = props;
+  const latestRef = useRef(props);
   const [map, setMap] = useState<MapLibre>();
   const [turn, setTurn] = useState({ bearing: 0, pitch: 0 });
-  const painted = useRef<Painted>({ markers: [], here: undefined, pins: "", spot: "", route: "", camera: "" });
-  const raster = style.kind === "raster" ? `${style.tileSize}/${style.minZoom}/${style.maxZoom}` : style.url;
+  const paintedRef = useRef<Painted>({ markers: [], here: undefined, pins: "", spot: "", route: "", camera: "" });
+  const styleKey = style.kind === "raster" ? `${style.tileSize}/${style.minZoom}/${style.maxZoom}` : style.url;
 
   const mount = useCallback((node: HTMLDivElement | null) => {
     if (!node || !drawn) return;
     const protocol = `alphamap${++protocols}`;
-    const chosen = latest.current.style;
+    const chosen = latestRef.current.style;
     if (chosen.kind === "raster") {
       maplibregl.addProtocol(protocol, async (params, abort) => {
         const address = /:\/\/tiles\/(\d{1,2})\/(\d{1,7})\/(\d{1,7})$/.exec(params.url);
@@ -194,28 +197,29 @@ export function MapView(props: MapViewProps) {
     let instance: MapLibre;
     let styleLoaded = false;
     try {
+      maplibregl.setWorkerUrl(mapWorkerUrl);
       instance = new maplibregl.Map({
         container: node, style: styleOf(chosen, protocol), center: [0, 20], zoom: 1.5, attributionControl: false,
         ...(chosen.kind === "raster" ? { minZoom: chosen.minZoom, maxZoom: chosen.maxZoom } : {}),
       });
     } catch {
       if (chosen.kind === "raster") maplibregl.removeProtocol(protocol);
-      latest.current.onTrouble(surface, { styleLoaded: false, tileError: false, cancelled: false });
+      latestRef.current.onTrouble(surface, { styleLoaded: false, tileError: false, cancelled: false });
       return;
     }
-    const pin = (key: string) => latest.current.onPin(key);
+    const pin = (key: string) => latestRef.current.onPin(key);
     instance.once("style.load", () => { styleLoaded = true; });
     instance.on("load", () => {
       instance.addSource("route", { type: "geojson", data: lineOf([]) });
       instance.addLayer({ id: "route-line", type: "line", source: "route", paint: { "line-width": 6, "line-color": getComputedStyle(node).getPropertyValue("--primary") || "currentColor" } });
-      painted.current = { markers: [], here: undefined, pins: "", spot: "", route: "", camera: "" };
-      paint(instance, painted.current, latest.current, pin);
+      paintedRef.current = { markers: [], here: undefined, pins: "", spot: "", route: "", camera: "" };
+      paint(instance, paintedRef.current, latestRef.current, pin);
       setMap(instance);
-      latest.current.onReady(surface);
+      latestRef.current.onReady(surface);
     });
     instance.on("error", (event) => {
       const cause: unknown = event.error;
-      latest.current.onTrouble(surface, {
+      latestRef.current.onTrouble(surface, {
         styleLoaded,
         tileError: "tile" in event || "sourceId" in event,
         cancelled: typeof cause === "object" && cause !== null && "name" in cause && cause.name === "AbortError",
@@ -224,15 +228,15 @@ export function MapView(props: MapViewProps) {
     let down: { x: number; y: number } | undefined;
     const press = (at: maplibregl.LngLat, point: { x: number; y: number }) => {
       down = point;
-      latest.current.onPress({ lat: at.lat, lng: at.lng });
+      latestRef.current.onPress({ lat: at.lat, lng: at.lng });
     };
     const end = () => {
       if (down === undefined) return;
       down = undefined;
-      latest.current.onPressEnd();
+      latestRef.current.onPressEnd();
     };
     const moved = (point: { x: number; y: number }) => {
-      if (down !== undefined) latest.current.onPressMove(apart(down, point));
+      if (down !== undefined) latestRef.current.onPressMove(apart(down, point));
     };
     instance.on("touchstart", (event) => (event.originalEvent.touches.length === 1 ? press(event.lngLat, event.point) : end()));
     instance.on("touchmove", (event) => moved(event.point));
@@ -242,26 +246,26 @@ export function MapView(props: MapViewProps) {
     instance.on("mousemove", (event) => moved(event.point));
     instance.on("mouseup", end);
     instance.on("contextmenu", end);
-    instance.on("dragstart", () => latest.current.onDragged?.());
+    instance.on("dragstart", () => latestRef.current.onDragged?.());
     instance.on("moveend", () => {
       const bounds = instance.getBounds();
-      latest.current.onSettled({ north: bounds.getNorth(), south: bounds.getSouth(), east: bounds.getEast(), west: bounds.getWest(), zoom: Math.round(instance.getZoom()) });
+      latestRef.current.onSettled({ north: bounds.getNorth(), south: bounds.getSouth(), east: bounds.getEast(), west: bounds.getWest(), zoom: Math.round(instance.getZoom()) });
     });
     const turned = () => setTurn({ bearing: Math.trunc(instance.getBearing()), pitch: Math.trunc(instance.getPitch()) });
     instance.on("rotate", turned);
     instance.on("pitch", turned);
     return () => {
-      for (const marker of painted.current.markers.splice(0)) marker.remove();
-      painted.current.here?.remove();
+      for (const marker of paintedRef.current.markers.splice(0)) marker.remove();
+      paintedRef.current.here?.remove();
       instance.remove();
       if (chosen.kind === "raster") maplibregl.removeProtocol(protocol);
       setMap(undefined);
     };
-  }, [drawn, surface, raster]);
+  }, [drawn, surface]);
 
   const repaint = (node: HTMLSpanElement | null) => {
-    latest.current = props;
-    if (node && map) paint(map, painted.current, props, (key) => latest.current.onPin(key));
+    latestRef.current = props;
+    if (node && map) paint(map, paintedRef.current, props, (key) => latestRef.current.onPin(key));
   };
 
   const northUp = () => {
@@ -272,11 +276,11 @@ export function MapView(props: MapViewProps) {
   return (
     <div className={cn("relative h-72 w-full overflow-hidden rounded-lg bg-muted", className)}>
       <span ref={repaint} hidden />
-      <div ref={mount} role="application" aria-label={label} className="size-full" />
+      <div key={styleKey} ref={mount} role="application" aria-label={label} className="size-full" />
       {map && (
         <div className="absolute top-2 right-2 flex flex-col gap-1">
-          <Button size="icon" variant="outline" aria-label="Zoom in" onClick={() => map.zoomIn()}><Plus /></Button>
-          <Button size="icon" variant="outline" aria-label="Zoom out" onClick={() => map.zoomOut()}><Minus /></Button>
+          {zoomControls && <Button size="icon" variant="outline" aria-label="Zoom in" onClick={() => map.zoomIn()}><Plus /></Button>}
+          {zoomControls && <Button size="icon" variant="outline" aria-label="Zoom out" onClick={() => map.zoomOut()}><Minus /></Button>}
           {props.compass(turn.bearing, turn.pitch) && (
             <Button size="icon" variant="outline" aria-label="Turn map north up" onClick={northUp}>
               <Compass aria-hidden style={{ transform: `rotate(${-turn.bearing}deg)` }} />

@@ -18,3 +18,8 @@ export const views = {
 } satisfies Record<View, { label: string; icon: LucideIcon }>;
 
 export const viewOrder = Object.keys(views) as View[];
+
+const ownHeader = new Set<View>(["Maps", "Settings"]);
+
+/** Whether an area's own chrome includes Back and the view's title or search. */
+export const viewHasHeader = (view: View) => ownHeader.has(view);

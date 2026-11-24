@@ -82,18 +82,19 @@ describe("Home on a phone", () => {
     ];
     const { alpha } = await open(world);
     const homes = home.runtime(alpha);
-    const agenda = () => [...document.querySelectorAll("button")].find((found) => /^(Next|Overdue)/.test(found.textContent ?? ""));
+    const agenda = () => [...document.querySelectorAll("button")].find((found) => /^Open (calendar event|overdue reminder)/.test(found.getAttribute("aria-label") ?? ""));
 
     // spec/app/home/cards.md, "When Home shows, when Alpha comes back to the front, and when the local day turns while Home shows, Home asks again for every calendar it has not read today"; spec/app/home/cards.md, "The card leads with an overdue reminder, then the item that begins first; of two alike, the first read"
     await until(alpha, homes, Cards.Machine, (c) => c.calendar.source === "Ready" && c.calendar.items.length === 2);
-    expect(agenda()?.textContent).toMatch(/^NextDentist/);
+    expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Dentist/);
 
     // spec/app/home/cards.md, "The agenda draws on both calendars and the reminders saved on the phone, leaving out a calendar Calendar hides and a reminder already done"
     await drawn(() => agendaFrom.hidden([2]));
-    expect(agenda()?.textContent).toMatch(/^NextStandup/);
+    expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Standup/);
     await drawn(() => agendaFrom.reminders([{ due: day + 7 * hour, overdue: true, done: false, title: "Call the bank" }, { due: day, overdue: true, done: true, title: "Paid rent" }]));
     // spec/app/home/cards.md, "Under an overdue reminder the card also names the next item that is not overdue, so the reminder never hides it"
-    expect(agenda()?.textContent).toMatch(/^OverdueCall the bank.*Standup/);
+    expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open overdue reminder: Call the bank/);
+    expect(agenda()?.textContent).toContain("Standup");
 
     // spec/app/home/cards.md, "A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed"
     await drawn(() => agenda()?.click());
@@ -128,7 +129,11 @@ describe("Home on a phone", () => {
     held("Clock");
     await until(alpha, homes, Home.Machine, (h) => Home.menuIsOpen(h.menu));
     // spec/app/home/index.md, "Add to Home adds one of Alpha's own apps it lists, and an app's menu in the drawer adds that app; adding from the menu closes the drawer"
-    await press("Add to Home");
+    await drawn(() => {
+      const add = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => item.textContent === "Add to Home");
+      if (!add) throw new Error("no Add to Home menu item");
+      add.click();
+    });
     await until(alpha, alpha.runtime, Shell, (s) => !s.drawer);
     await until(alpha, homes, Home.Machine, (h) => h.tiles.save.outcome === "Confirmed");
     expect(tiles().at(-1)).toBe("app:org.fixture.clock/org.fixture.clock.Main");

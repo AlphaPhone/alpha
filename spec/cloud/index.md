@@ -281,3 +281,54 @@ pure val cloudTable: List[TableRoute] = List(
   { verb: Get, path: "/api/v1/eliza/google/calendar/events/{eventId}", query: List("grantId", "calendarId") }
 )
 ```
+
+## Story: Come back to Alpha after authorizing a connection in my browser
+
+> As the owner returning from a provider's consent page, I want one plain
+> way back into Alpha that carries only what Alpha needs, and a clear
+> message when the return cannot be used.
+
+The provider sends the browser to Alpha's return page
+(`apps/app/public/delegation-return.html`), which hands the result to the
+app through Alpha's own link, `alphaphone://cloud-delegation`. The app,
+not the page, checks that the state is the one it is waiting for.
+
+### The return page clears the query from its address, and hands back only a well-formed return with exactly one result
+
+A return has exactly one state of 43 URL-safe characters, a code of at most
+4096 characters or an error but never both, a description of at most 2000
+characters only beside an error, no key twice and no other key. A cancelled
+authorization hands back the error alone; a reopened page with an empty
+query asks to go back to Alpha.
+
+```quint
+type ReturnQuery = {
+  given: int, repeated: bool, unknown: bool, stateValid: bool,
+  hasCode: bool, codeFits: bool, hasError: bool, hasDescription: bool, descriptionFits: bool
+}
+type ReturnAnswer = Reopened | InvalidReturn | Cancelled | Continue
+
+pure def returnAnswer(q: ReturnQuery): ReturnAnswer =
+  if (q.given == 0) Reopened
+  else if (q.repeated or q.unknown or not(q.stateValid) or q.hasCode == q.hasError
+    or (q.hasCode and not(q.codeFits))
+    or (q.hasDescription and (not(q.hasError) or not(q.descriptionFits)))) InvalidReturn
+  else if (q.hasError) Cancelled
+  else Continue
+
+pure def lawHandsBackOneResult(q: ReturnQuery): bool =
+  (returnAnswer(q) == Continue or returnAnswer(q) == Cancelled)
+    implies (q.stateValid and not(q.repeated) and not(q.unknown) and q.hasCode != q.hasError)
+```
+
+### The return page runs only its own hashed script, sends no referrer and loads nothing else
+
+The query carries a one-time code; no other script, no referrer and no
+other request may see it.
+
+```quint
+type ReturnPage = { scripts: int, onlyItsHash: bool, sendsReferrer: bool, loads: int }
+
+pure def returnPageSealed(page: ReturnPage): bool =
+  page.scripts == 1 and page.onlyItsHash and not(page.sendsReferrer) and page.loads == 0
+```

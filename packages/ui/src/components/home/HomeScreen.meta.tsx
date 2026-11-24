@@ -10,7 +10,7 @@ const onOpenTile = fn();
 const editing: Partial<HomeScreenProps> = { editing: true, tiles: unbadged, onOpenTile: undefined, onBeginEditing: undefined, onOpenDrawer: undefined, onPullDown: undefined };
 
 export const meta: ComponentMeta<HomeScreenProps> = {
-  args: { date: "Tuesday 17", cards: homeCards, tiles: homeTiles, hidden: hiddenApps, onPullDown, onOpenTile },
+  args: { cards: homeCards, tiles: homeTiles, hidden: hiddenApps, onPullDown, onOpenTile },
   decorator: (story) => <div className="h-dvh">{story()}</div>,
   examples: {
     "Reading saved tiles": { tiles: undefined, cards: [], onBeginEditing: undefined },
@@ -21,14 +21,14 @@ export const meta: ComponentMeta<HomeScreenProps> = {
     "Empty Home": { tiles: [], cards: [] },
     "As an app": { onPullDown: undefined },
     "In a browser": { onOpenDrawer: undefined, onBeginEditing: undefined, onPullDown: undefined },
-    "Assistant only": { tiles: [], cards: [], date: undefined, onOpenDrawer: undefined, onBeginEditing: undefined, onPullDown: undefined },
+    "Assistant only": { tiles: [], cards: [], onOpenDrawer: undefined, onBeginEditing: undefined, onPullDown: undefined },
   },
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onPullDown.mockClear();
       onOpenTile.mockClear();
       const canvas = within(canvasElement);
-      const heading = canvas.getByRole("heading", { level: 1, name: "Tuesday 17" });
+      const heading = canvas.getByRole("heading", { level: 1, name: "Home" });
       const zone = heading.parentElement!;
       await fireEvent.pointerDown(zone, { isPrimary: true, clientX: 100, clientY: 40, pointerId: 1 });
       await fireEvent.pointerUp(zone, { isPrimary: true, clientX: 104, clientY: 140, pointerId: 1 });
