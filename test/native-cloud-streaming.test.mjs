@@ -8,17 +8,22 @@ function fixture(options={}){
  const source=fs.readFileSync('.eliza/client-features/packages/voice/src/native-cloud-speech.ts','utf8').replace(/^import .*;\n/gm,'').replaceAll('export interface','interface').replaceAll('export const','const').replaceAll('export function','function');
  const box={crypto,AbortController,DOMException,Error,Promise,Map,Date,setTimeout,clearTimeout,registerPlugin:()=>({}),Capacitor:{isNativePlatform:()=>true,isPluginAvailable:()=>true}};
  vm.runInNewContext(stripTypeScriptTypes(source)+'\nglobalThis.create=createCloudStreamingSpeech;',box);
- let listener,sessionId,current=true,stops=0,starts=[],mutes=[],speaks=[],cancels=[],removed=0;
+ let listener,sessionId,current=true,stops=0,mutes=[],speaks=[],cancels=[],removed=0,listeners=0;
+ // The native calls in order, each with the transport it named: `start <id> muted|open`, `stop <id>`,
+ // `mute|unmute <id>`, `speaker-off|speaker-on <id>`.
+ const native=[];
  const port={
-  async addListener(_name,fn){listener=fn;return {remove:async()=>{removed++;listener=undefined;}};},
-  async startCloudSpeech(input){starts.push(input);sessionId=input.sessionId;if(options.start)return options.start(input);return {sessionId,sampleRate:16000,echoCancelled:true};},
-  async stopCloudSpeech(){stops++;},async setCloudSpeechMuted(input){mutes.push(input.muted);},
+  async addListener(_name,fn){listeners++;listener=fn;return {remove:async()=>{removed++;listener=undefined;}};},
+  async startCloudSpeech(input){sessionId=input.sessionId;native.push(`start ${input.sessionId} ${input.muted===true?'muted':'open'}`);if(options.start)return options.start(input);return {sessionId,sampleRate:16000,echoCancelled:true};},
+  async stopCloudSpeech(input){stops++;native.push(`stop ${input.sessionId}`);if(options.stop)await options.stop(input);},
+  async setCloudSpeechMuted(input){mutes.push(input.muted);native.push(`${input.muted?'mute':'unmute'} ${input.sessionId}`);},
+  async setCloudSpeechOutputMuted(input){native.push(`${input.muted?'speaker-off':'speaker-on'} ${input.sessionId}`);},
   async speakCloudSpeech(input){speaks.push(input);},async cancelCloudSpeech(input){cancels.push(input);},
  };
  const interim=[],speech=box.create({environment:'production',credentialId:'not-a-secret-revision',assertCurrent(){if(!current)throw Error('Owner changed');},onInterim:t=>interim.push(t)},port);
  const events=[],controller=new AbortController();
  const handlers={signal:controller.signal,onSpeechStart:()=>events.push('start'),onSpeechEnd:()=>events.push('end'),onSegment:t=>events.push(t),onEnd:e=>events.push('failed'),onLevel:p=>events.push(p)};
- return {speech,port,events,interim,handlers,controller,speaks,cancels,starts,mutes,get stops(){return stops},get removed(){return removed},get id(){return sessionId},change(){current=false;},emit(event){listener?.({sessionId,...event});}};
+ return {speech,port,events,interim,handlers,controller,speaks,cancels,mutes,native,get stops(){return stops},get removed(){return removed},get listeners(){return listeners},get id(){return sessionId},change(){current=false;},emit(event){listener?.({sessionId,...event});}};
 }
 
 test('streaming ASR sends one final segment, interims never submit, unrelated sessions are ignored',async()=>{
@@ -73,26 +78,40 @@ for(const ending of ['Stop','abort'])test(`${ending} during old-turn drain never
  assert.equal(f.stops,1);assert.deepEqual(f.events,[]);
 });
 
-test('an acknowledged mute with no final retires the old transport before reopening capture',async t=>{
+// A provider final that never arrives cannot be attributed safely on its socket. After the
+// 2.5 s bound the confirmed-muted transport is stopped and a new one opens already muted, so the
+// microphone is never open on a socket that may still deliver the old turn.
+test('old-turn drain is bounded: a lost final replaces the transport muted and the old one never unmutes',async t=>{
  t.mock.timers.enable({apis:['setTimeout']});
- const f=fixture(),capture=await f.speech.listen(f.handlers);await capture.close();
- const oldId=f.id,stop=f.port.stopCloudSpeech;let finishStop;
- f.port.stopCloudSpeech=async()=>{await new Promise(resolve=>finishStop=resolve);await stop();};
- f.emit({type:'speech-start'});const opening=f.speech.listen(f.handlers);
- for(let i=0;i<20;i++)await Promise.resolve();
- t.mock.timers.tick(2500);
- for(let i=0;i<40&&!finishStop;i++)await Promise.resolve();
- assert.equal(typeof finishStop,'function');
- assert.equal(f.id,oldId);
- assert.deepEqual(f.mutes,[false,true,true],'the old microphone stays muted until retirement is acknowledged');
- finishStop();await opening;
- assert.notEqual(f.id,oldId);assert.equal(f.stops,1);
- assert.equal(f.starts.at(-1).muted,true,'the replacement starts with no live input');
- assert.equal(f.mutes.at(-1),false);
- f.emit({sessionId:oldId,type:'speech-start'});
- f.emit({sessionId:oldId,type:'speech-end',text:'stale final',final:true});
- assert.deepEqual(f.events,[]);
- f.port.stopCloudSpeech=stop;await f.speech.stop();
+ const settle=async()=>{for(let i=0;i<20;i++)await Promise.resolve();};
+ const f=fixture(),capture=await f.speech.listen(f.handlers),A=f.id;
+ await f.speech.setOutputMuted(true);await capture.close();
+ f.emit({type:'speech-start'}); // An old provider turn begins during the reply hold; its final is lost.
+ let opened=false;const opening=f.speech.listen(f.handlers).then(value=>{opened=true;return value;});
+ await settle();assert.equal(opened,false);assert.equal(f.native.at(-1),`mute ${A}`,'the drain holds the old transport muted');
+ t.mock.timers.tick(2499);await settle();assert.equal(opened,false,'the drain waits the whole bound');
+ t.mock.timers.tick(1);await opening;const B=f.id;
+ assert.notEqual(B,A);
+ assert.deepEqual(f.native,[`start ${A} open`,`unmute ${A}`,`speaker-off ${A}`,`mute ${A}`,`mute ${A}`,
+  `stop ${A}`,`start ${B} muted`,`speaker-off ${B}`,`unmute ${B}`],
+  'the old transport is confirmed stopped before a muted replacement starts; the speaker mute carries over; only the new transport unmutes');
+ assert.equal(f.listeners,1,'the event listener is kept across the replacement');
+ f.emit({sessionId:A,type:'speech-end',text:'late old final'});f.emit({sessionId:A,type:'speech-start'});
+ assert.deepEqual(f.events,[],'nothing from the replaced transport reaches the reopened capture');
+ f.emit({type:'speech-start'});f.emit({type:'speech-end',text:'Yes'});
+ assert.deepEqual(f.events,['start','end','Yes'],'the replacement carries the next turn');
+ await f.speech.stop();assert.equal(f.native.at(-1),`stop ${B}`);assert.equal(f.stops,2);assert.equal(f.removed,1);
+
+ // Stop while the old transport's native stop is still pending joins that stop: one native stop,
+ // no replacement start, and the drain's listen ends cancelled.
+ let acknowledge;const g=fixture({stop:()=>new Promise(resolve=>acknowledge=resolve)});
+ const held=await g.speech.listen(g.handlers),C=g.id;await held.close();
+ g.emit({type:'speech-start'});const reopening=g.speech.listen(g.handlers);const cancelled=assert.rejects(reopening,{name:'AbortError'});
+ await settle();t.mock.timers.tick(2500);await settle();
+ assert.equal(typeof acknowledge,'function');assert.equal(g.native.at(-1),`stop ${C}`);
+ const ending=g.speech.stop();acknowledge();await ending;await cancelled;
+ assert.deepEqual(g.native,[`start ${C} open`,`unmute ${C}`,`mute ${C}`,`mute ${C}`,`stop ${C}`],'no second stop, no new transport, no unmute');
+ assert.equal(g.removed,1);g.emit({sessionId:C,type:'speech-end',text:'late'});assert.deepEqual(g.events,[]);
 });
 
 test('first PCM starts playback before completion; unrelated completion cannot settle speech',async()=>{
@@ -167,21 +186,22 @@ test('a closed capture still hears the socket end once, never its speech; a late
  g.emit({type:'error',code:'expired'});await Promise.resolve();assert.deepEqual(g.events,[],'a cancelled capture hears nothing');
 });
 
-test('one 2.5 s bound covers the native mute and the final it releases: an unanswered mute rejects the close',async t=>{
+test('one 2.5 s bound covers the native mute and the final it releases: an unanswered mute rejects the close, a lost final replaces the transport muted',async t=>{
  t.mock.timers.enable({apis:['setTimeout']});
- const settle=async()=>{for(let i=0;i<40;i++)await Promise.resolve();};
+ const settle=async()=>{for(let i=0;i<20;i++)await Promise.resolve();};
  const closeWith=async({answerAt,finalAt})=>{
-  const f=fixture(),capture=await f.speech.listen(f.handlers);let answer;
-  f.port.setCloudSpeechMuted=input=>{f.mutes.push(input.muted);return new Promise(resolve=>answer=resolve);};
+  const f=fixture(),capture=await f.speech.listen(f.handlers),answered=f.port.setCloudSpeechMuted;let answer;
+  f.port.setCloudSpeechMuted=input=>{f.mutes.push(input.muted);f.native.push(`${input.muted?'mute':'unmute'} ${input.sessionId}`);return new Promise(resolve=>answer=resolve);};
+  const restore=()=>{f.port.setCloudSpeechMuted=answered;};
   f.emit({type:'speech-start'});let settled;
   void capture.close().then(()=>settled='closed',error=>settled=error.message);
   for(let at=1;at<=2500;at++){
    t.mock.timers.tick(1);
    if(at===answerAt)answer();
    if(at===finalAt)f.emit({type:'speech-end',text:'turn off the alarm',final:true});
-   await settle();if(settled)return {f,at,settled};
+   await settle();if(settled)return {f,at,settled,restore};
   }
-  return {f,settled};
+  return {f,settled,restore};
  };
  const quick=await closeWith({answerAt:300,finalAt:1800});
  assert.deepEqual([quick.at,quick.settled],[1800,'closed'],'a mute and final in time fulfil the close');
@@ -192,11 +212,21 @@ test('one 2.5 s bound covers the native mute and the final it releases: an unans
  unanswered.f.emit({type:'speech-end',text:'after the failed close',final:true});
  unanswered.f.emit({type:'error',code:'expired'});await settle();
  assert.deepEqual(unanswered.f.events,['start','failed'],'no speech after the failed close; the socket end still arrives');
- const noFinal=await closeWith({answerAt:300});
- assert.deepEqual([noFinal.at,noFinal.settled],[2500,'closed'],'the bound runs from the close, not from the mute answer');
- assert.equal(noFinal.f.stops,1);
- assert.equal(noFinal.f.starts.at(-1).muted,true);
- assert.deepEqual(noFinal.f.mutes,[false,true],'capture stays closed after transport replacement');
+ assert.deepEqual(unanswered.f.native.filter(call=>call.startsWith('start')).length,1,'an unconfirmed microphone mute never opens another transport');
+ const noFinal=await closeWith({answerAt:300}),A=noFinal.f.native[0].split(' ')[1],B=noFinal.f.id;
+ assert.deepEqual([noFinal.at,noFinal.settled],[2500,'closed'],'the bound runs from the close, not from the mute answer; a confirmed mute with a lost final still closes');
+ assert.notEqual(B,A);
+ assert.deepEqual(noFinal.f.native,[`start ${A} open`,`unmute ${A}`,`mute ${A}`,`stop ${A}`,`start ${B} muted`],
+  'the old transport is stopped first and its replacement starts with the microphone closed');
+ assert.deepEqual(noFinal.f.events,['start','end',null],'the stalled turn ends as an empty segment, never as invented text');
+ noFinal.f.emit({sessionId:A,type:'speech-end',text:'turn off the alarm',final:true});
+ assert.deepEqual(noFinal.f.events,['start','end',null],'the lost final arriving late on the old transport is dropped');
+ noFinal.restore();
+ const next=[],reopened={...noFinal.f.handlers,onSpeechStart:()=>next.push('start'),onSpeechEnd:()=>next.push('end'),onSegment:text=>next.push(text)};
+ await noFinal.f.speech.listen(reopened);assert.equal(noFinal.f.native.at(-1),`unmute ${B}`,'only the next listen opens the microphone, on the new transport');
+ noFinal.f.emit({type:'speech-start'});noFinal.f.emit({type:'speech-end',text:'turn off the alarm',final:true});
+ assert.deepEqual(next,['start','end','turn off the alarm']);assert.equal(noFinal.f.events.includes('failed'),false,'recovery is not a failure');
+ await noFinal.f.speech.stop();
 });
 
 test('a speech start inside the close window does not swallow the next capture\'s speech start',async()=>{
