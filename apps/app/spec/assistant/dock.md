@@ -39,7 +39,7 @@ pure val initial: Dock = {
 pure def restOf(view: Surface): Detent = restFor(view == PillView)
 pure def handle(label: Control): bool = label != ToolbarControl
 pure def canDown(d: Dock, label: Control): bool =
-  not(d.drag.active) and not(d.voice) and handle(label)
+  not(d.drag.active) and not(d.voice and isOpen(d.chat)) and handle(label)
   and ((label == FocusControl or label == TypeControl) implies (d.chat == Input or d.chat == Hidden))
   and ((label == OpenControl or label == TalkControl) implies (d.chat == Hidden or d.chat == Input))
   and (label == ResizeControl implies d.chat == Sheet)
@@ -49,7 +49,7 @@ pure def down(d: Dock, label: Control): Dock =
 pure def canMove(d: Dock): bool = d.drag.active
 pure def move(d: Dock): Dock = { ...d, drag: { ...d.drag, moved: true } }
 pure def alwaysADragMatchesTheShell(d: Dock): bool =
-  d.drag.active implies (d.drag.mode == d.chat and d.drag.under == d.view and not(d.voice))
+  d.drag.active implies (d.drag.mode == d.chat and d.drag.under == d.view and not(d.voice and isOpen(d.drag.mode)))
 pure def alwaysTheDetentIsKnown(d: Dock): bool = d.chat == Hidden or d.chat == Input or d.chat == Sheet or d.chat == Full
 ```
 
@@ -169,15 +169,18 @@ Opening the view an action card names keeps the chat where it is: a chat
 that was open stays open, Camera included (#1386). Only `closeChat` and a
 collapse lower it.
 
-### While voice owns the chat no gesture is captured, one under way is let go, and the drag resizes again once voice ends
+### While voice owns the chat its open sheet's drag is not captured, one under way is let go, and the drag resizes again once voice ends
 
 Voice owns the chat while a conversation runs, waits for review or
 retires, and while dictation records, transcribes or holds its clip,
 however it was started. The shell reports when voice takes the chat and
 when it gives it back. Taking it lets go of a gesture under way without
-landing it, so the sheet, the voice controls and the absent composer stay
+landing it, and while it holds the chat a press on the open sheet is not
+captured, so the sheet, the voice controls and the absent composer stay
 where they are through a drag or a swipe; once voice ends the same drag
-resizes the chat.
+resizes the chat. Only the open sheet is held: the size and close buttons
+still work, and a closed chat's bar or pill still opens it, so Stop and a
+held clip stay within reach of an owner who closed the chat.
 
 ```quint
 pure def canVoiceStarts(d: Dock): bool = not(d.voice)
@@ -186,6 +189,10 @@ pure def canVoiceEnds(d: Dock): bool = d.voice
 pure def voiceEnds(d: Dock): Dock = { ...d, voice: false }
 pure def stepVoiceLetsGoOfAGestureWithoutLandingIt(before: Dock, via: str, after: Dock): bool =
   via == "voiceStarts" implies (after.chat == before.chat and after.view == before.view and not(after.drag.active) and after.effects == before.effects)
+pure def alwaysVoiceHoldsTheOpenSheet(d: Dock): bool =
+  (d.voice and isOpen(d.chat)) implies Set(NoControl, FocusControl, OpenControl, TypeControl, TalkControl, ResizeControl, ToolbarControl).forall(label => not(canDown(d, label)))
+pure def alwaysVoiceLeavesAClosedChatsBarOpening(d: Dock): bool =
+  (d.voice and not(d.drag.active) and d.chat == Input) implies canDown(d, OpenControl)
 pure def sometimesVoiceHoldsTheSheet(d: Dock): bool = d.voice and d.chat == Sheet
 ```
 
