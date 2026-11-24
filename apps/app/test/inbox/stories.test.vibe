@@ -501,16 +501,21 @@ it.live("An edit or send too large for the phone says so, and an edit the draft 
     try settle(mailbox.changes, (m) => m.phase === "ListReady")
     try settle(operations.changes, (j) => j.capabilities.known)
     const draft = try writeFriday()
+    const reloads = fork Stream.runCollect(Stream.take(composer.reloads, 2))
+    try sleep("20 millis")
     try composer.edit({ ...draft.fields, body: "x".repeat(9 * 1024 * 1024) }, "")
     const tooLarge = try composer.flush()
     try composer.edit({ ...draft.fields, mode: "ForwardMode" }, "")
     const changed = try composer.flush()
+    try composer.edit({ ...draft.fields, mode: "ForwardMode" }, "")
+    const changedAgain = try composer.flush()
+    const reloaded = try timeout(Fiber.join(reloads), "5 seconds")
     const kept = (try composer.mine()).open
     const big = outgoing("big.pdf", "application/pdf", 6000000, "a".repeat(64), "A".repeat(8000000))
     const send = try operations.sendDraft({ ...kept, fields: { ...kept.fields, files: [big] } }, "r-big")
     try Effect.try(() => assert.deepStrictEqual(
-      { tooLarge, changed, body: kept.fields.body, mode: kept.fields.mode, send, prepared: log.cloud.filter((c) => c.startsWith("prepare")).length },
-      { tooLarge: "draft-too-large", changed: "changed", body: "Noon works.", mode: "ComposeMode", send: "TooLarge", prepared: 0 }))
+      { tooLarge, changed, changedAgain, reloaded: [...reloaded], body: kept.fields.body, mode: kept.fields.mode, send, prepared: log.cloud.filter((c) => c.startsWith("prepare")).length },
+      { tooLarge: "draft-too-large", changed: "changed", changedAgain: "changed", reloaded: [1, 2], body: "Noon works.", mode: "ComposeMode", send: "TooLarge", prepared: 0 }))
   }
 })
 
