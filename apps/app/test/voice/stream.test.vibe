@@ -1,4 +1,4 @@
-// spec/voice/conversation.md, "A Cloud stream listens, speaks the replies and the cue and mutes the speaker on one relay session, and only voice retiring ends it"
+// spec/voice/conversation.md, "A Cloud stream listens, speaks the replies and the cue and mutes the speaker on one relay session, and only voice retiring ends it"; spec/voice/conversation.md, "Out of plan allowance and credits ends voice quietly as Stop does, and the chat gets the one line"
 import { assert, it } from "@effect/vitest"
 import { Build } from "../../src/platform/build.vibe"
 import { Cloud, CloudUnavailable } from "../../src/platform/cloud.vibe"
@@ -8,7 +8,9 @@ import { ResidentControl } from "../../src/platform/resident-control.vibe"
 import { memoryStore } from "../../src/platform/storage.vibe"
 import { ResidentFeeds } from "../../src/platform/view-events.vibe"
 import { voiceAbort } from "../../src/voice/cloud-stream.ts"
+import { VoiceConversation } from "../../src/voice/conversation.vibe"
 import { layer } from "../../src/voice/layer.vibe"
+import { VoiceRoute } from "../../src/voice/route.vibe"
 import { Speech, type StreamSpeaker } from "../../src/voice/speech.vibe"
 import { cloudStreaming } from "../../src/voice/stream.vibe"
 
@@ -142,6 +144,63 @@ it.live(`a bound stream speaks the reply channel, Stop cancels it, and Mute sets
     const synthesized = calls.filter((call) => call.method.startsWith("synthesize") || call.method === "play" || call.method === "setSpeechOutputMuted").length
     try Effect.try(() => assert.deepStrictEqual({ said, stopped, unmuted, muted, synthesized }, {
       said: ["Two meetings today.", "The first is at nine."], stopped: "SpeechInterrupted", unmuted: true, muted: [true], synthesized: 0,
+    }))
+  }
+})
+
+/** A relay bridge whose session start is refused with each code in `refusals` in turn, and opens once they run out. */
+function refusingRelay(calls: Calls, events: Queue.Queue<unknown>, refusals: string[]) {
+  return Layer.succeed(Native, {
+    available: () => Effect.succeed(true),
+    invoke: (plugin: string, method: string, args?: unknown) => effect {
+      const input = (args ?? {}) as { readonly [key: string]: unknown }
+      calls.push({ plugin, method, args: input })
+      if (plugin !== "AlphaCloudSpeechStream") throw new NativeFailed({ plugin, method, message: "absent" })
+      if (method === "startCloudSpeech") {
+        const code = refusals.shift()
+        if (code !== undefined) throw new NativeFailed({ plugin, method, message: "refused", code })
+        return { sessionId: input.sessionId, sampleRate: 16000, echoCancelled: true }
+      }
+      return {}
+    },
+    listen: () => Stream.fromQueue(events),
+  })
+}
+
+it.live(`the relay's funding refusal ends Talk quietly with one chat line, and the next conversation's relay outage keeps its own handling (spec/voice/conversation.md, "Out of plan allowance and credits ends voice quietly as Stop does, and the chat gets the one line")`, () => effect {
+  const calls: Calls = []
+  const events = try Queue.unbounded<unknown>()
+  provide Layer.provide(layer, platform(refusingRelay(calls, events, ["insufficient_credits", "unavailable"]))) {
+    const routes = try VoiceRoute
+    try routes.observeAccount({ kind: "cloud", environment: "production", credentialId: "credential-1" })
+    const conversation = try VoiceConversation
+    let posted = 0
+    const talk = (id: string) => ({ admitted: true, callActive: false, conversationId: id, roomId: id, chatCurrent: () => true, outOfFunds: () => Effect.sync(() => { posted += 1 }) })
+    const settled = effect {
+      for (let wait = 0; wait < 80 && (try conversation.get()).shown !== "Off"; wait += 1) try sleep("50 millis")
+      return try conversation.get()
+    }
+    const run = (id: string) => effect {
+      try conversation.start(talk(id))
+      try sleep("200 millis")
+      const seen = try conversation.get()
+      return { shown: seen.shown, notice: seen.notice, posted }
+    }
+    try conversation.disclose()
+    const funds = try run("c1")
+    const fundsOff = try settled
+    // A relay outage in the next conversation is not funds: it keeps its failure handling, and the earlier refusal never decides it.
+    const outage = try run("c2")
+    try conversation.stop()
+    try settled
+    try Effect.try(() => assert.deepStrictEqual({
+      funds: { ended: funds.shown === "Off" || funds.shown === "Retiring", notice: funds.notice, posted: funds.posted }, fundsOff: [fundsOff.shown, fundsOff.notice],
+      outage: { shown: outage.shown, posted: outage.posted },
+      relayStarts: calls.filter((call) => call.method === "startCloudSpeech").length,
+    }, {
+      funds: { ended: true, notice: "NoNotice", posted: 1 }, fundsOff: ["Off", "NoNotice"],
+      outage: { shown: "Failed", posted: 1 },
+      relayStarts: 2,
     }))
   }
 })
