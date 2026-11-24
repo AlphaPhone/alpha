@@ -2,7 +2,7 @@
 /**
  * Update a provisioned pilot unit in place with a higher-versionCode signed APK.
  *
- *   node scripts/pilot-update.ts --serial <adb serial> --alias <unit-name> \
+ *   node --conditions=eliza-source --import vibelang/register scripts/pilot-update.ts --serial <adb serial> --alias <unit-name> \
  *     --apk-manifest <new build>/apk-manifest.json [--variant launcher] \
  *     [--build release|debug] [--units test-results/pilot-units] [--stock-home <package/activity>]
  *

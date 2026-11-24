@@ -311,7 +311,7 @@ working calls or data, or physical-device acceptance.
 ```sh
 pnpm test:android:instrumentation -- --owned-emulator --avd <avd> --serial emulator-NNNN
 pnpm aosp:stage -- --target cuttlefish --aosp-source <aosp-checkout> --apk artifacts/launcher-debug.apk --development
-node scripts/verify-aosp-listener.ts --serial <serial> --user 0
+node --conditions=eliza-source --import vibelang/register scripts/verify-aosp-listener.ts --serial <serial> --user 0
 ```
 
 Instrumentation uses an owned disposable emulator. Image staging takes
@@ -557,11 +557,11 @@ leave Alpha idle in the foreground. Allow one full 15-minute check interval
 plus download time.
 
 ```sh
-node scripts/verify-wireless-launcher-update.ts before --serial <serial> \
+node --conditions=eliza-source --import vibelang/register scripts/verify-wireless-launcher-update.ts before --serial <serial> \
   --distribution sideload --apk-manifest <baseline>/apk-manifest.json --out <new-before.json>
 # Disconnect USB/ADB, restore the phone's network, and return to idle HOME.
 # Let Alpha discover and install the update. Reconnect after the observed result.
-node scripts/verify-wireless-launcher-update.ts after --serial <serial> \
+node --conditions=eliza-source --import vibelang/register scripts/verify-wireless-launcher-update.ts after --serial <serial> \
   --before <before.json> --apk-manifest <update>/apk-manifest.json --out <new-after.json>
 ```
 
@@ -597,7 +597,7 @@ After both rounds, compare the eight receipts offline. For each distribution
 supply the first before/after pair followed by the second before/after pair.
 
 ```sh
-node scripts/verify-wireless-launcher-update.ts matrix \
+node --conditions=eliza-source --import vibelang/register scripts/verify-wireless-launcher-update.ts matrix \
   --sideload stock-1-before.json --sideload stock-1-after.json \
   --sideload stock-2-before.json --sideload stock-2-after.json \
   --image-preinstalled image-1-before.json --image-preinstalled image-1-after.json \

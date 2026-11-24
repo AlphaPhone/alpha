@@ -73,6 +73,7 @@ test("key files sign the launcher release, replace the unsigned files only after
     "--v4-signing-enabled", "false", "--out", path.join(root, "artifacts/launcher-release.apk.partial"), path.join(root, "artifacts/launcher-release-unsigned.apk")]);
   assert.deepEqual(result.ran.map(args => args.find(arg => arg.startsWith("scripts/"))), ["scripts/verify-apks.ts", "scripts/generate-sbom.ts"]);
   assert.deepEqual(result.ran[0], ["--conditions=eliza-source", "--import", "vibelang/register", "scripts/verify-apks.ts"]);
+  assert.deepEqual(result.ran[1].slice(0, 3), ["--conditions=eliza-source", "--import", "vibelang/register"]);
   assert.ok(result.ran[1].includes("--apks"));
 });
 

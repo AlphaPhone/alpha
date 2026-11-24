@@ -20,8 +20,11 @@ test('release admits the exact platform-protected Power activity', () => {
   assert.deepEqual(assess(), []);
 });
 test('a debuggable APK cannot be recorded as a release', () => {
-  const applicationAttributes = '    A: android:debuggable=(type 0x12)0xffffffff\n';
-  assert.match(assess({applicationAttributes}).join('\n'), /Release manifest must not allow debugging/);
+  for (const value of ['(type 0x12)0xffffffff', '(type 0x12)0x1', '@0x7f050001']) {
+    const applicationAttributes = `    A: android:debuggable(0x0101000f)=${value}\n`;
+    assert.match(assess({applicationAttributes}).join('\n'), /Release manifest must not allow debugging/, value);
+  }
+  assert.deepEqual(assess({applicationAttributes: '    A: android:debuggable(0x0101000f)=(type 0x12)0x0\n'}), []);
 });
 test('release refuses unprotected or incorrectly protected Power entry', () => {
   for (const permission of ['', 'android.permission.INTERNET', 'android.permission.BIND_QUICK_SETTINGS_TILE'])
