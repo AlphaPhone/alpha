@@ -6,13 +6,13 @@ import {
 } from "@repo/ui";
 import type { MailCard, MailMessage } from "@elizaos/cloud/client";
 import { Effect, type ManagedRuntime } from "effect";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useCallback, useMemo, useState } from "react";
 import { type Folder, type Mailbox, accessOf, readable, searchableIn } from "../../gen/app__inbox.ts";
 import type { Machine as List } from "../../gen/app__inbox.effect.vibe";
 import { useMachine as useList } from "../../gen/app__inbox.react.ts";
 import type { Machine as Marks } from "../../gen/app__inbox__marking.effect.vibe";
 import { useMachine as useMarks } from "../../gen/app__inbox__marking.react.ts";
-import type { Fault, MessageView } from "../../gen/app__inbox__message.ts";
+import type { Fault } from "../../gen/app__inbox__message.ts";
 import type { Machine as Shown } from "../../gen/app__inbox__message.effect.vibe";
 import { imagesLoad } from "../../gen/app__inbox__message.ts";
 import { useMachine as useMessage } from "../../gen/app__inbox__message.react.ts";
@@ -23,6 +23,8 @@ import type { Machine as Writing } from "../../gen/app__inbox__drafts.effect.vib
 import { useMachine as useDrafts } from "../../gen/app__inbox__drafts.react.ts";
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
+import type { Machine as Preferences } from "../../gen/app__settings__preferences.effect.vibe";
+import { useMachine as usePreferences } from "../../gen/app__settings__preferences.react.ts";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { Time } from "../runtime/time.vibe";
@@ -33,11 +35,11 @@ import type { Incoming } from "./adding.vibe";
 import type { Machine as Adding } from "../../gen/app__inbox__adding.effect.vibe";
 import { type Beginning, Letters, begin } from "./composer.vibe";
 import { type Letter, Mail, revisionOf } from "./gmail.vibe";
-import { linksOf } from "./links.ts";
+import { connectMailFrame, frameDocument, prepareMessage } from "./mail-html.ts";
 
 export interface InboxProps {
   /** Provides the list, the message open and its marks, the changes, the shell, and Mail, which holds what Gmail said. */
-  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Writing | Adding | Incoming | Offering | Offers | Letters | Shell | Mail | Time, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Writing | Adding | Incoming | Offering | Offers | Letters | Shell | Mail | Time | Preferences, unknown>;
 }
 
 type Runtime = InboxProps["runtime"];
@@ -138,24 +140,28 @@ function toastOf(state: Operations, operation: (typeof operationNames)[Change], 
 }
 
 /** The body of a message with nothing able to run, its remote images only once they may load, and its links each reviewed. */
-function Body({ read, images, view, onReview }: { read: MailMessage; images: boolean; view: MessageView; onReview: (link: number, secure: boolean) => (() => void) | undefined }) {
-  const found = linksOf(read.bodyText);
-  const links = found.length > 0 && (
-    <ul aria-label="Links" className="flex flex-col gap-1">
-      {found.map((link, at) => {
-        const review = onReview(at + 1, link.secure);
-        return <li key={link.url} className="text-sm break-all">{review ? <Button variant="ghost" size="sm" onClick={review}>{link.url}</Button> : link.url}</li>;
-      })}
+function Body({ read, images, onReview }: { read: MailMessage; images: boolean; onReview: (link: number) => void }) {
+  const { formatted, links } = prepareMessage(read);
+  const document = useMemo(() => formatted ? frameDocument(formatted, images) : undefined, [formatted, images]);
+  const frame = useCallback((node: HTMLIFrameElement | null) => node ? connectMailFrame(node, onReview) : undefined, [onReview]);
+  const additional = links.flatMap((link, at) => formatted?.inline.has(link.url) ? [] : [{ ...link, at: at + 1 }]);
+  const list = (
+    <ul aria-label="Links" className="flex flex-col items-start gap-1">
+      {additional.map((link) => (
+        <li key={link.url} className="min-w-0 max-w-full text-sm [overflow-wrap:anywhere]">
+          {link.secure ? <Button variant="ghost" className="h-auto whitespace-normal text-left text-primary" onClick={() => onReview(link.at)}>{link.label}</Button> : link.label}
+        </li>
+      ))}
     </ul>
   );
-  if (read.bodyHtmlStatus !== "available" || read.bodyHtml === null) return <><p className="whitespace-pre-wrap break-words">{read.bodyText}</p>{links}</>;
-  const policy = `default-src 'none'; style-src 'unsafe-inline'; img-src ${images ? "https: data:" : "data:"}`;
-  return (
-    <>
-      <iframe key={`${view.message}/${String(images)}`} title="Message" sandbox="" className="min-h-96 w-full rounded-md bg-background" srcDoc={`<meta http-equiv="Content-Security-Policy" content="${policy}">${read.bodyHtml}`} />
-      {links}
-    </>
-  );
+  return <>
+    {document
+      ? <iframe ref={frame} title="Formatted email" sandbox="allow-same-origin" referrerPolicy="no-referrer" className="block h-96 w-full border-0" srcDoc={document} />
+      : <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{read.bodyText || "(Empty message)"}</p>}
+    {additional.length > 0
+      ? formatted ? <details className="mt-4"><summary className="min-h-11 cursor-pointer content-center text-sm text-muted-foreground">Other links ({additional.length})</summary>{list}</details> : list
+      : null}
+  </>;
 }
 
 /** The message open: its body, links and attachments each reviewed before use, its marks, Archive and Trash, Retry and Ask Alpha. */
@@ -163,17 +169,24 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const { state, can, send } = useMessage(runtime);
   const marking = useMarks(runtime);
   const changes = useTimed(runtime, useChanges);
+  const remote = usePreferences(runtime).state?.images ?? false;
+  const read = state ? mailOf(runtime, (mail) => mail.body(state.body.ticket)) : undefined;
+  const reviewLink = useCallback((at: number) => {
+    const link = read === undefined ? undefined : prepareMessage(read).links.at(at - 1);
+    if (!link || at < 1) return;
+    const event = { type: "reviewLink", link: at, secure: link.secure, mismatch: link.mismatch } as const;
+    if (can(event)) void send(event);
+  }, [can, read, send]);
   if (!state || state.message === 0) return null;
   const access = accessOf(list, state.account);
-  const read = mailOf(runtime, (mail) => mail.body(state.body.ticket));
   const card = mailOf(runtime, (mail) => mail.card(state.message)) ?? read?.message;
   const loaded = state.body.status === "Loaded" && read !== undefined;
   const unread = card?.isUnread ?? false;
   const mark = { type: "mark", access, account: state.account, message: state.message, unread: !unread } as const;
-  const retry = { type: "retry", access, remote: false } as const;
-  const reopen = { type: "reopen", access, thread: 1, remote: false } as const;
-  const earlier = { type: "earlier", access, remote: false } as const;
-  const newer = { type: "newer", access, remote: false } as const;
+  const retry = { type: "retry", access, remote } as const;
+  const reopen = { type: "reopen", access, thread: state.thread, remote } as const;
+  const earlier = { type: "earlier", access, remote } as const;
+  const newer = { type: "newer", access, remote } as const;
   const history = revisionOf(card);
   const changing = (kind: Change) => {
     const event = changeOf(list, kind, [state.message], history);
@@ -191,7 +204,8 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   };
   const file = files.at(state.attachment - 1);
   const outcome = state.file.outcome;
-  const link = loaded ? linksOf(read.bodyText).at(state.link - 1) : undefined;
+  const contents = loaded ? prepareMessage(read) : undefined;
+  const link = state.link > 0 ? contents?.links.at(state.link - 1) : undefined;
   const answered = card === undefined ? undefined : { id: card.id, from: card.from, others: [...card.to, ...card.cc], subject: card.subject, files: files.length };
   return (
     <>
@@ -211,7 +225,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
         fault={fault}
         onFaultAction={faultAction}
         fromPhone={state.fromPhone}
-        imagesHidden={!imagesLoad(state)}
+        imagesHidden={!imagesLoad(state) && (contents?.formatted?.remoteImages ?? 0) > 0}
         onShowImages={can({ type: "showImages" }) ? () => void send({ type: "showImages" }) : undefined}
         notice={notice}
         onNoticeAction={told === "Unconfirmed" && onRefresh ? onRefresh : undefined}
@@ -229,13 +243,10 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
       >
         {state.fromPhone && card ? <p className="whitespace-pre-wrap break-words">{card.snippet}</p> : null}
         {loaded ? (
-          <Body read={read} images={imagesLoad(state)} view={state} onReview={(at, secure) => {
-            const review = { type: "reviewLink", link: at, secure, mismatch: false } as const;
-            return can(review) ? () => void send(review) : undefined;
-          }} />
+          <Body read={read} images={imagesLoad(state)} onReview={reviewLink} />
         ) : null}
       </InboxMessageScreen>
-      <InboxLinkReview open={state.link !== 0} destination={link?.url ?? ""} onOpen={() => void send({ type: "openLink" })} onClose={() => void send({ type: "closeLink" })} />
+      <InboxLinkReview open={link !== undefined} destination={link?.url ?? ""} claimed={state.warning ? link?.label : undefined} onOpen={() => void send({ type: "openLink" })} onClose={() => void send({ type: "closeLink" })} />
       <InboxAttachmentReview
         open={state.attachment !== 0}
         name={file?.name ?? ""}

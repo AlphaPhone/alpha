@@ -2,6 +2,7 @@
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Inbox from "../../gen/app__inbox.effect.vibe"
 import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
+import { Machine as Changes } from "../../gen/app__inbox__sending.effect.vibe"
 import type { Composer, Effect as Out, Event } from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Kind, Policy } from "../../gen/app__inbox__letter.ts"
 import type { Actor } from "../../gen/app__inbox__access.ts"
@@ -24,6 +25,7 @@ module pure {
     readonly to: ReadonlyArray<string>
     readonly cc: ReadonlyArray<string>
     readonly bcc: ReadonlyArray<string>
+    readonly pending?: Readonly<Record<"to" | "cc" | "bcc", string>>
     readonly subject: string
     readonly text: string
     readonly files: ReadonlyArray<Attached>
@@ -218,6 +220,44 @@ export effect function begin(beginning: Beginning): boolean!!(Drafts.Machine | L
     ...nothing, subject, answers: message?.id, mode: kind === "Reply" ? "reply" : kind === "ReplyAll" ? "reply-all" : kind === "Forward" ? "forward" : "compose",
     to: replying ? [sender] : [], cc: kind === "ReplyAll" ? others : [],
   })
+  return true
+}
+
+// spec/app/inbox/drafts.md, "A draft is set aside only once it is wholly kept on the phone, and comes back exactly as it was set aside"; spec/app/inbox/drafts.md, "Leaving Alpha writes the waiting edits at once, or as soon as the write in flight lands"
+/** Take Back from the draft or its review. Keep the draft open if the phone cannot save it. */
+export const backFromDraft = effect {
+  const composer = try Drafts.Machine
+  const state = try composer.get()
+  if (!state.open) return false
+  const changes = try Changes
+  if ((try changes.get()).review.showing) {
+    try ignore(exit(changes.send({ type: "cancel" }, "Owner")))
+    return true
+  }
+  if (state.discarding) {
+    try ignore(exit(composer.send({ type: "keepDraft" }, "Owner")))
+    return true
+  }
+
+  const aside = { type: "setAside" } as const
+  if (Drafts.canSetAside(state)) {
+    try ignore(exit(composer.send(aside, "Owner")))
+    return true
+  }
+  if (!Drafts.ready(state) || state.letter.sending !== 0 || (!state.pending && !state.unkept && state.write.status !== "Loading")) return true
+
+  try ignore(exit(composer.send({ type: "leave" }, "World")))
+  const id = state.letter.id
+  const session = state.session
+  const settled = try Stream.runHead(Stream.filter(composer.changes, (next) =>
+    !next.open || next.letter.id !== id || next.session !== session ||
+      (next.write.status !== "Loading" && !next.leaving && (!next.pending || next.unkept))))
+  if (Option.isSome(settled)) {
+    const kept = settled.value
+    if (kept.open && kept.letter.id === id && kept.session === session && Drafts.canSetAside(kept)) {
+      try ignore(exit(composer.send(aside, "Owner")))
+    }
+  }
   return true
 }
 
