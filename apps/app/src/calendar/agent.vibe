@@ -38,14 +38,14 @@ const replies: Readonly<Record<Reply, string>> = { NoReply: "", Going: "accepted
 function request(change: Out & { tag: "Send" }, row: Row | undefined, key: string) {
   const event = encodeURIComponent(row?.key ?? "")
   const version = row?.version ?? ""
-  const scope = change.series ? "all" : "this"
+  const scoped = row?.recurring === true ? { recurrenceScope: change.series ? "series" : "instance" } : {}
   switch (change.change) {
     case "Create":
       return HttpClientRequest.post(`${base}/events`) |> HttpClientRequest.bodyJsonUnsafe(%, { title: row?.title ?? "", startAt: new Date(row?.begin ?? 0).toISOString(), endAt: new Date(row?.end ?? 0).toISOString(), timeZone: zone(), idempotencyKey: key })
     case "Update":
-      return HttpClientRequest.patch(`${base}/events/${event}`) |> HttpClientRequest.bodyJsonUnsafe(%, { title: row?.title, recurrenceScope: scope, expectedProviderVersion: version, idempotencyKey: key })
+      return HttpClientRequest.patch(`${base}/events/${event}`) |> HttpClientRequest.bodyJsonUnsafe(%, { title: row?.title, ...scoped, expectedProviderVersion: version, idempotencyKey: key })
     case "Delete":
-      return HttpClientRequest.delete(`${base}/events/${event}`, { urlParams: { recurrenceScope: scope, expectedProviderVersion: version, idempotencyKey: key, cancellationMode: row !== undefined && row.answer !== "NotInvited" ? "decline_invitation" : "organizer_cancel" } })
+      return HttpClientRequest.delete(`${base}/events/${event}`, { urlParams: { ...scoped, expectedProviderVersion: version, idempotencyKey: key, cancellationMode: row !== undefined && row.answer !== "NotInvited" ? "decline_invitation" : "organizer_cancel" } })
     case "Respond":
       return HttpClientRequest.post(`${base}/events/${event}/response`) |> HttpClientRequest.bodyJsonUnsafe(%, { responseStatus: replies[change.reply], expectedProviderVersion: version, idempotencyKey: key })
   }

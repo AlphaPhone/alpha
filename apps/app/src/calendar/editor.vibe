@@ -121,7 +121,8 @@ effect function readBackAgent(row: Row, kind: WriteKind, reply: string): Written
 /** A change, a deletion or an answer to an event of the agent's calendar, sent once at the version shown, then read back. */
 effect function sendAgent(attempt: number, kind: "Update" | "Remove" | "Reply", row: Row, scope: Scope, going: boolean): Written!!(Agent | Attempts | KeyValueStore.KeyValueStore | Editor.Machine) {
   const event = `${calendarBase}/events/${encodeURIComponent(row.key)}`
-  const recurrenceScope = scope === "WholeSeries" ? "all" : scope === "ThisAndFollowing" ? "following" : "this"
+  const recurrenceScope = !row.recurring ? undefined : scope === "WholeSeries" ? "series" : scope === "ThisAndFollowing" ? "this_and_following" : "instance"
+  const scoped = recurrenceScope === undefined ? {} : { recurrenceScope }
   const reply = going ? "accepted" : "tentative"
   if (kind === "Reply") {
     if (!row.answerable) return refused
@@ -130,13 +131,13 @@ effect function sendAgent(attempt: number, kind: "Update" | "Remove" | "Reply", 
   }
   if (kind === "Remove") {
     const cancellationMode = row.answer !== "NotInvited" ? "decline_invitation" : "organizer_cancel"
-    const sent = try attemptedWith(Agent, (key) => HttpClientRequest.delete(event, { urlParams: { recurrenceScope, expectedProviderVersion: row.version, idempotencyKey: key, cancellationMode } }), attempt)
+    const sent = try attemptedWith(Agent, (key) => HttpClientRequest.delete(event, { urlParams: { ...scoped, expectedProviderVersion: row.version, idempotencyKey: key, cancellationMode } }), attempt)
     return sent.confirmed ? try readBackAgent(row, "DeleteKind", "") : sent
   }
   const fields = try kept(0, try owner())
   const sent = try attemptedWith(Agent, (key) => HttpClientRequest.patch(event) |> HttpClientRequest.bodyJsonUnsafe(%, {
     title: fields.title.trim(), notes: fields.notes, location: fields.place, startAt: new Date(fields.begin).toISOString(), endAt: new Date(fields.end).toISOString(),
-    isAllDay: fields.allDay, timeZone: zone(), recurrenceScope, expectedProviderVersion: row.version, idempotencyKey: key,
+    isAllDay: fields.allDay, timeZone: zone(), ...scoped, expectedProviderVersion: row.version, idempotencyKey: key,
   }), attempt)
   return sent.confirmed ? try readBackAgent(row, "ChangeKind", "") : sent
 }
@@ -165,9 +166,8 @@ effect function send(attempt: number, kind: "Create" | "Update" | "Remove" | "Re
   return try phone.dispatch(row.key)
 }
 
-// spec/app/calendar/editor.md, "While a create is in doubt its form waits; checking the phone's receipts finds it or not"
-/** Whether the phone's receipts say the create in doubt was made. */
-// spec/app/calendar/editor.md, "Saving sends the form once, as a new numbered write built on the revision its edits began from"
+// spec/app/calendar/editor.md, "While a create is in doubt its form waits; checking the phone's receipts finds it or not"; spec/app/calendar/editor.md, "Saving sends the form once, as a new numbered write built on the revision its edits began from"
+/** Whether the phone's receipts say a create was made: one in doubt, or any not yet acknowledged before a new create; a failed read holds the create. */
 effect function receipts(ticket: number): Event!!(PhoneCalendar | KeyValueStore.KeyValueStore) {
   const phone = try PhoneCalendar
   if (!phone.present) return { type: "receiptsChecked", ticket, found: false }
