@@ -48,8 +48,8 @@ export interface ProposalCard {
 
 /** One row of the transcript. */
 export type Row =
-  | { readonly kind: "user"; readonly id: string; readonly text: string; readonly files: readonly ChatFile[]; readonly status: "pending" | "recorded" | "unconfirmed"; readonly quote?: Quote; readonly clientMessageId?: string }
-  | { readonly kind: "agent"; readonly id: string; readonly text: string; readonly segments: readonly Segment[]; readonly reply: ReplyView; readonly label?: string; readonly notices: readonly string[]; readonly plan?: PlanAction; readonly cutOff: CutOff; readonly recorded: boolean; readonly ordinal?: number }
+  | { readonly kind: "user"; readonly id: string; readonly text: string; readonly files: readonly ChatFile[]; readonly status: "pending" | "recorded" | "unconfirmed" | "local"; readonly quote?: Quote; readonly clientMessageId?: string }
+  | { readonly kind: "agent"; readonly id: string; readonly text: string; readonly segments: readonly Segment[]; readonly reply: ReplyView; readonly label?: string; readonly notices: readonly string[]; readonly plan?: PlanAction; readonly cutOff: CutOff; readonly recorded: boolean; readonly local?: true; readonly ordinal?: number }
   | { readonly kind: "receipt"; readonly id: string; readonly proposalId: string; readonly title: string; readonly summary: string }
   | { readonly kind: "notice"; readonly id: string; readonly text: string; readonly system: boolean }
   | { readonly kind: "card"; readonly id: string; readonly card: ProposalCard }
@@ -78,6 +78,15 @@ export function withReply(row: Row, text: string, reply: ReplyView, checkin: boo
   return row.kind === "agent" ? { ...row, text, reply, segments: classify(text, checkin) } : row
 }
 
+/** A phone navigation turn stays in the visible transcript without becoming an agent message. */
+export function localTurnRows(id: string, text: string, answer: string): readonly Row[] {
+  return [
+    { kind: "user", id: `${id}:user`, text, files: [], status: "local" },
+    { kind: "agent", id: `${id}:reply`, text: answer, segments: [{ line: { tag: "Prose" }, text: answer, payload: { kind: "none" } }],
+      reply: { ...replyStart, status: "Settled" }, notices: [], cutOff: "NotCutOff", recorded: false, local: true },
+  ]
+}
+
 /** The notices a reply may add: non-blank, at most 500 characters, at most five. */
 export function replyNotices(raw: unknown): readonly string[] {
   if (!Array.isArray(raw)) return []
@@ -87,7 +96,7 @@ export function replyNotices(raw: unknown): readonly string[] {
 
 /** Whether a row is an ordinary reply that settles a system notice before it. */
 export function ordinaryReply(row: Row): boolean {
-  return row.kind === "agent" && row.reply.status === "Settled" && row.text.trim() !== ""
+  return row.kind === "agent" && row.local !== true && row.reply.status === "Settled" && row.text.trim() !== ""
 }
 
 /** The transcript with only the latest system notice, and none once a reply follows it. */

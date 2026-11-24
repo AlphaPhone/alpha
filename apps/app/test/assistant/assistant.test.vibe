@@ -1,3 +1,4 @@
+// spec/notes/list.md, "Story: Open a note by saying its title"
 // spec/assistant/send.md, "Story: Send a message and know what happened to it"; spec/assistant/draft.md, "Story: Get my message back when it was not sent"; spec/assistant/review.md, "Story: Let my agent act only with my say-so"; spec/assistant/reply.md, "Story: Read a reply with its cards"; spec/assistant/index.md, "Something handed to the assistant is only ever a draft the owner sends"
 import { assert, it } from "@effect/vitest"
 import { Machine as DraftsMachine, shown } from "../../gen/assistant__draft.effect.vibe"
@@ -32,6 +33,29 @@ it.effect("Send a message and know what happened to it (spec/assistant/send.md, 
     const draft = textOf(shown(try drafts.get()))
     const posted = seen.calls.filter((call) => call.method === "STREAM" || (call.method === "POST" && call.path.endsWith("/messages"))).length
     try Effect.try(() => assert.deepStrictEqual({ said, draft, posted, user: after.rows[0]?.kind }, { said: ["Done."], draft: "", posted: 1, user: "user" }))
+  }
+})
+
+
+it.effect(`A named saved note opens in the current transcript (spec/notes/list.md, "Story: Open a note by saying its title")`, () => effect {
+  const request = "Open the note called Groceries"
+  const answer = "Opened “Groceries” in Notes."
+  const seen: Seen = { calls: [] }
+  const host = fakeHost([], undefined, [], false, (text, active) => succeed(text === request && active() ? answer : undefined))
+  provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "Done." }, proposals: [] }), host, countingExecutors({ count: 0 })) {
+    const composer = try Composer
+    const drafts = try DraftsMachine
+    try composer.edit(request)
+    const took = try composer.send()
+    const after = try transcriptNow()
+    const owner = after.rows[0]
+    const reply = after.rows[1]
+    const sent = seen.calls.some((call) => call.method === "STREAM" || call.method === "POST" && call.path.endsWith("/messages"))
+    try Effect.try(() => assert.deepStrictEqual({
+      took, sent, draft: textOf(shown(runSync(drafts.get()))), count: after.rows.length,
+      owner: owner?.kind === "user" ? [owner.text, owner.status] : undefined,
+      reply: reply?.kind === "agent" ? [reply.text, reply.recorded, reply.reply.status, reply.segments[0]?.line.tag] : undefined,
+    }, { took: true, sent: false, draft: "", count: 2, owner: [request, "local"], reply: [answer, false, "Settled", "Prose"] }))
   }
 })
 

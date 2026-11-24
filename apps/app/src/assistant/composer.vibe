@@ -22,7 +22,7 @@ import { PhoneLocation } from "./location.vibe"
 import { BrowserPages, CameraComposer, MapsChatCards, MapsRelay, MapsViews, ReplyChanges, TurnSources, type MapsShown } from "./ports.vibe"
 import { changeWords, copy, failureKindOf, failureText, liveWaitOf, planActionOf } from "./presentation.vibe"
 import { DeviceReview, type Approval } from "./review.vibe"
-import { collapseSystemNotices, emailDraftOf, emptyTranscript, historyRows, pendingReply, replyNotices, withReply, type ProposalCard, type Quote, type Row, type Transcript } from "./transcript.vibe"
+import { collapseSystemNotices, emailDraftOf, emptyTranscript, historyRows, localTurnRows, pendingReply, replyNotices, withReply, type ProposalCard, type Quote, type Row, type Transcript } from "./transcript.vibe"
 import { moveFirstDraft } from "./first-send.vibe"
 import { initial as emailStart } from "../../gen/assistant__emailCard.effect.vibe"
 import { timerCeilingMs } from "../../gen/assistant__approvals.effect.vibe"
@@ -42,6 +42,8 @@ export service Composer {
   edit(text: string): void!!
   /** Send the composer's text, or a prompt handed over from elsewhere that leaves the composer alone; true when the turn was taken, by the agent or by Camera. */
   send(handed?: string): boolean!!
+  /** Append a local phone turn only to the same conversation and agent session. */
+  localTurn(identity: AgentIdentity, conversation: string | null, id: string, text: string, answer: string): boolean!!
   /** Stop the reply being written. */
   stop(): void!!
   /** Open a conversation the owner chose, or one the phone reopened by itself; null starts a new chat. */
@@ -62,6 +64,10 @@ export service Composer {
 }
 
 const stoppedCheckMs = 2000
+
+function sessionKey(identity: AgentIdentity): string {
+  return JSON.stringify([identity.origin, identity.owner, identity.agent, identity.session])
+}
 
 effect function holdReply() {
   provide replyMachine() {
@@ -97,6 +103,8 @@ export const composerLayer = Layer.effect(Composer, effect {
   const target = try SubscriptionRef.make<Target | undefined>(undefined)
   let session: { readonly key: string; readonly controller: TurnController; records: Map<string, ConversationRecord> } | undefined
   let ordinal = 0
+  let localOrdinal = 0
+  let openingSavedNote = false
   let acting = 0
   let ownKey: string | undefined
   let dictated: { readonly text: string; readonly binding: string } | undefined
@@ -110,7 +118,7 @@ export const composerLayer = Layer.effect(Composer, effect {
     try SubscriptionRef.update(transcript, (t) => ({ ...t, typing: state.typing }))
   }
   effect function controllerFor(identity: AgentIdentity) {
-    const key = JSON.stringify([identity.origin, identity.owner, identity.agent, identity.session])
+    const key = sessionKey(identity)
     if (session?.key === key) return session
     if (session !== undefined) {
       const previous = session.controller
@@ -127,6 +135,12 @@ export const composerLayer = Layer.effect(Composer, effect {
     session = { key, controller: new TurnController(transport), records: new Map() }
     try quiet(client.send({ type: "attach", session: (try client.get()).session + 1 }))
     return session
+  }
+  effect function localTurn(identity: AgentIdentity, conversation: string | null, id: string, text: string, answer: string) {
+    const bound = try host.identity()
+    if (bound === undefined || sessionKey(bound) !== sessionKey(identity) || (try SubscriptionRef.get(transcript)).conversation !== conversation) return false
+    try rows((list) => list.some((row) => row.id === `${id}:user`) ? list : [...list, ...localTurnRows(id, text, answer)])
+    return true
   }
   effect function binding(identity: AgentIdentity, conversation: string | null) {
     return bindingOf(identity.origin, identity.owner, identity.agent, conversation)
@@ -286,11 +300,28 @@ export const composerLayer = Layer.effect(Composer, effect {
     const files = try attachments.pending()
     if (composed.trim() === "" && files.length === 0) return false
     const aimed = try SubscriptionRef.get(target)
-    if (files.length === 0 && aimed === undefined && host.openSavedNote !== undefined) {
-      const said = try host.openSavedNote(composed)
+    if (openingSavedNote) return false
+    if (handed === undefined && files.length === 0 && aimed === undefined && host.openSavedNote !== undefined && !(try sends.get()).typing) {
+      const conversation = (try SubscriptionRef.get(transcript)).conversation
+      const active = () => {
+        const bound = runSync(host.identity())
+        const draft = runSync(drafts.get())
+        return bound !== undefined && sessionKey(bound) === sessionKey(identity) && session === current
+          && runSync(SubscriptionRef.get(transcript)).conversation === conversation && JSON.stringify(draft.active) === JSON.stringify(draftState.active)
+          && textOf(shown(draft)) === composed && runSync(attachments.pending()).length === 0
+          && runSync(SubscriptionRef.get(target)) === undefined
+      }
+      openingSavedNote = true
+      const said = try ensuring(host.openSavedNote(composed, active), sync(() => { openingSavedNote = false }))
+      if (!active()) return false
       if (said !== undefined) {
-        if (handed === undefined) try quiet(drafts.send({ type: "edit", text: [] }))
-        try host.toast(said)
+        localOrdinal += 1
+        if (!(try localTurn(identity, conversation, `typed-note-${localOrdinal}`, composed, said))) return false
+        if (active()) {
+          try quiet(drafts.send({ type: "edit", text: [] }))
+          try quiet(sends.send({ type: "typeText", text: [] }))
+          dictated = undefined
+        }
         return true
       }
     }
@@ -542,6 +573,7 @@ export const composerLayer = Layer.effect(Composer, effect {
   }
   return {
     transcript: SubscriptionRef.changes(transcript),
+    localTurn,
     target: SubscriptionRef.changes(target),
     edit: (text: string) => effect {
       try quiet(drafts.send({ type: "edit", text: unitsOf(text) }))
@@ -577,8 +609,9 @@ export const composerLayer = Layer.effect(Composer, effect {
     older: () => effect {
       const t = try SubscriptionRef.get(transcript)
       if (t.conversation === null || !t.hasMore) return
-      const first = t.rows.find((row) => row.kind === "user" || row.kind === "agent")
-      const page = conversations.history(t.conversation, { before: t.rows.length, ...(first === undefined ? {} : { beforeId: first.id }) }) catch () => undefined
+      const recorded = t.rows.filter((row) => row.kind === "user" ? row.status === "recorded" : row.kind === "agent" && row.recorded)
+      const first = recorded[0]
+      const page = conversations.history(t.conversation, { before: recorded.length, ...(first === undefined ? {} : { beforeId: first.id }) }) catch () => undefined
       if (page === undefined || page.messages.length === 0) return
       try SubscriptionRef.update(transcript, (now) => ({ ...now, rows: [...historyRows(page.messages), ...now.rows], hasMore: page.hasMore }))
     },

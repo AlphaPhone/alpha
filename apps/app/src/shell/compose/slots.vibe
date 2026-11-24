@@ -5,6 +5,7 @@ import { CalendarMaps } from "../../calendar/ports.vibe"
 import { FileShareTargets } from "../../files/share.vibe"
 import { WorkflowClockPort, type AlarmRequest } from "../../workflows/ports.vibe"
 import { DeviceCapabilities } from "../assistantHost.vibe"
+import { VoiceLocalNotes } from "../../voice/conversation.vibe"
 
 /** One port's implementation as it is now: the port's refusing default until the area that provides it is built. */
 export interface Cell<S> {
@@ -30,6 +31,7 @@ export service PortCells {
   readonly mapsViews: Cell<MapsViews.Shape>
   readonly browserViews: Cell<BrowserViews.Shape>
   readonly advertised: Cell<AdvertisedCapabilities.Shape>
+  readonly voiceLocalNotes: Cell<VoiceLocalNotes.Shape>
 }
 
 /** Puts `next` in `cell`, unless `next` is a slot, which would delegate to itself. */
@@ -60,6 +62,7 @@ const cellsLive = Layer.effect(PortCells, effect {
     mapsViews: { current: try MapsViews },
     browserViews: { current: try BrowserViews },
     advertised: { current: try AdvertisedCapabilities },
+    voiceLocalNotes: { current: try VoiceLocalNotes },
   }
 })
 
@@ -198,8 +201,16 @@ const advertised = Layer.effect(AdvertisedCapabilities, effect {
   } satisfies AdvertisedCapabilities.Shape)
 })
 
+const voiceLocalNotes = Layer.effect(VoiceLocalNotes, effect {
+  const cells = try PortCells
+  const cell = cells.voiceLocalNotes
+  return slot(cells, {
+    open: (...args: Parameters<VoiceLocalNotes.Shape["open"]>) => suspend(() => cell.current.open(...args)),
+  } satisfies VoiceLocalNotes.Shape)
+})
+
 /** Every late-filled port as a slot over its cell, placed before the first area that reads one; each answers as its refusing default until filled. */
 export const slotsLive = Layer.provideMerge(
-  Layer.mergeAll(fileShare, pageMail, calendarMaps, workflowClock, assistantEmail, ownNotices, mapsChat, cameraComposer, mapsRelay, replyChanges, deviceCapabilities, browserPages, mapsViews, browserViews, advertised),
+  Layer.mergeAll(fileShare, pageMail, calendarMaps, workflowClock, assistantEmail, ownNotices, mapsChat, cameraComposer, mapsRelay, replyChanges, deviceCapabilities, browserPages, mapsViews, browserViews, advertised, voiceLocalNotes),
   cellsLive,
 )

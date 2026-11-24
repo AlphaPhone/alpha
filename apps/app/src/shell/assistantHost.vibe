@@ -155,16 +155,24 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
       }, () => opened)
       return opened
     },
-    effect openSavedNote(text: string) {
+    effect openSavedNote(text: string, active: () => boolean, spoken = false) {
       const title = namedNoteOpenRequest(text)
-      if (title === undefined) return undefined
+      if (title === undefined || !active()) return undefined
+      const identity = try bindings.identity()
+      if (identity === undefined) return undefined
+      const owner = connectionOf(identity)
+      effect function sameOwner() {
+        const current = try bindings.identity()
+        return current !== undefined && connectionOf(current) === owner
+      }
       const before = try navigation.get()
       const front = try foreground.get()
-      if (before.hidden || front.locked || PRIVATE_APPS.has(before.app)) return undefined
+      if (before.hidden || front.locked || before.layers.length > 0 || PRIVATE_APPS.has(before.app)) return undefined
       if (!canOpenApp(before, "notes")) return "Couldn’t open Notes."
       if (before.app !== "notes" || (try notes.current()) === undefined) try notes.refresh()
       const current = try navigation.get()
-      if (current.revision !== before.revision || current.hidden || (try foreground.get()).locked || !canOpenApp(current, "notes")) return "Couldn’t open Notes."
+      if (!active() || !(try sameOwner())) return undefined
+      if (current.app !== before.app || current.revision !== before.revision || current.hidden || (try foreground.get()).locked || !canOpenApp(current, "notes")) return "Couldn’t open Notes."
       const saved = try notes.current()
       if (saved === undefined) return "I couldn’t read your saved notes. Try again from Notes."
       const { matches, exact } = savedNoteMatch(title, saved.snapshot.notes)
@@ -173,8 +181,22 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
         : `More than one note matches “${title}”. Give me the full title.`
       const note = matches[0]
       if (note === undefined) return `I couldn’t find a note titled “${title}”.`
-      if (!(try editor.openFromAssistant(saved.owner, note.id))) return "Finish the unsaved edits in your note before opening another one."
-      return (try open("notes", note.id)) ? `Opened “${note.title}”.` : "Couldn’t open Notes."
+      if (!(try editor.canOpenFromAssistant(saved.owner, note.id))) return "Finish the unsaved edits in your note before opening another one."
+      let opened = false
+      const show = () => effect {
+        if (!active() || !(try sameOwner())) return false
+        if (!(try editor.openFromAssistant(saved.owner, note.id))) return false
+        if (!active() || !(try sameOwner())) return false
+        opened = spoken ? (try navigation.switchForAgent("notes", note.id)) : (try open("notes", note.id))
+        return opened
+      }
+      if (spoken) try voice.followScreen(show, () => {
+        const nav = runSync(navigation.get())
+        return active() && opened && runSync(sameOwner()) && !runSync(foreground.get()).locked && !nav.hidden && nav.app === "notes"
+          && nav.places.find((place) => place.app === "notes")?.route === note.id
+      })
+      else try show()
+      return opened ? `Opened “${note.title}” in Notes.` : "Couldn’t open Notes."
     },
     toast: (text: string) => notices.show(text),
   }

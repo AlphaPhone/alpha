@@ -149,9 +149,12 @@ pure def lawDefaultTitleIsNew(highest: int): bool = nextDefaultNumber(highest) =
 A request opens a note locally when it names the note with called, named or titled, quotes its title, or
 uses a title in the shorthand open X note. Compare the exact title first, then match full words
 in order. Only one matching saved note may open, and an unsaved editor for a different note stays
-in place. A generic or relative reference such as a new note, the last
-note, my most recent note or the note I just created stays in the conversation, unless it was named or
-quoted, so an old note literally titled Most Recent never answers for the newest one.
+in place. The phone resolves a direct request from the composer or Talk without sending
+an agent turn. Its request and answer appear in the current conversation. Only messages
+recorded by the agent can be quoted or edited. Talk follows the opened editor and speaks
+the phone's answer. A generic or relative reference such as a new note, the last note, my most
+recent note or the note I just created stays in the conversation, unless it was named or quoted,
+so an old note literally titled Most Recent never answers for the newest one.
 
 ```quint
 pure def opensLocally(named: bool, quoted: bool, generic: bool, relative: bool, hasTitle: bool): bool =

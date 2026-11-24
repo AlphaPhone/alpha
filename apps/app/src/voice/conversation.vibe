@@ -28,6 +28,14 @@ import { cloudStreaming } from "./stream.vibe"
 import { transcription } from "./transcription.vibe"
 import { gateRecording } from "./vad.vibe"
 
+/** The phone's saved-note requests, filled after Notes and the assistant transcript are built. */
+export service VoiceLocalNotes {
+  open(conversation: string, id: string, text: string, active: () => boolean): (string | undefined)!!
+  static readonly defaultValue = () => ({
+    open: (_conversation: string, _id: string, _text: string, _active: () => boolean) => succeed(undefined),
+  })
+}
+
 /** What the screen admits when voice starts, and the conversation the voice turns go to. */
 export interface VoiceStart {
   /** An owner is bound, the page is in front and lit, no sensitive surface shows and no reset runs. */
@@ -136,6 +144,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
   const latency = try Latency
   const listener = try Listener
   const dictation = try Dictation
+  const localNotes = try VoiceLocalNotes
   let live: LiveVoiceSession | undefined
   let current: VoiceStart | undefined
   let lastCause: unknown
@@ -442,49 +451,67 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
       if (score.complete) try latency.endpointed("PhoneScored")
       return score.complete ? "ScoredComplete" as const : "ScoredIncomplete" as const
     })
+    let dispatched: AbortSignal | undefined
+    const localReplyPrefix = "local:notes:"
     const turns = {
-      send: (turn: TurnBody, signal: AbortSignal) => runPromise(effect {
-        try latency.endpointed("LongGap")
-        try latency.mark("Request")
-        if (route === "Device") try speech.warmDevice()
-        const ack = try Effect.provideService(acknowledgement(), Speech, speech)
-        cue = ack
-        const microphoneClear = () => liveCapture || !runSync(microphone.get()).open
-        const retireCue = () => { runFork(ack.cancel()) }
-        signal.addEventListener("abort", retireCue, { once: true })
-        if (signal.aborted) try ack.cancel()
-        const body: TurnBody = { text: turn.text, channelType: turn.channelType, metadata: turn.metadata, clientMessageId: turn.clientMessageId }
-        const reply = ensuring(answerOf(start.conversationId, body, ack, microphoneClear, signal), sync(() => signal.removeEventListener("abort", retireCue))) catch effect (error) => {
-          try ack.cancel()
+      send: (turn: TurnBody, signal: AbortSignal) => {
+        dispatched = undefined
+        return runPromise(effect {
+          try latency.endpointed("LongGap")
+          try latency.mark("Request")
+          const active = () => !signal.aborted && current === start && start.chatCurrent()
+          const localId = localReplyPrefix + turn.clientMessageId
+          const localReply = try localNotes.open(start.conversationId, localId, turn.text, active)
+          if (!active()) throw new Error("The voice conversation changed.")
+          if (localReply !== undefined) {
+            try latency.mark("FirstToken")
+            return { messageId: localId, text: localReply } satisfies VoiceReply
+          }
+          if (route === "Device") try speech.warmDevice()
+          const ack = try Effect.provideService(acknowledgement(), Speech, speech)
+          cue = ack
+          const microphoneClear = () => liveCapture || !runSync(microphone.get()).open
+          const retireCue = () => { runFork(ack.cancel()) }
+          signal.addEventListener("abort", retireCue, { once: true })
+          if (signal.aborted) try ack.cancel()
+          const body: TurnBody = { text: turn.text, channelType: turn.channelType, metadata: turn.metadata, clientMessageId: turn.clientMessageId }
+          dispatched = signal
+          const reply = ensuring(answerOf(start.conversationId, body, ack, microphoneClear, signal), sync(() => signal.removeEventListener("abort", retireCue))) catch effect (error) => {
+            try ack.cancel()
+            if (cue === ack) cue = undefined
+            throw error
+          }
+          if (signal.aborted) {
+            try ack.cancel()
+            if (cue === ack) cue = undefined
+            throw new Error("The agent's voice reply was not usable.")
+          }
+          try latency.mark("FirstToken")
+          if (reply.awaitingReview === true) {
+            try ack.cancel()
+            if (cue === ack) cue = undefined
+            try send({ type: "reviewNeeded" })
+            live?.stop()
+            const waiting: VoiceReply = { messageId: reply.messageId, text: "" }
+            return waiting
+          }
+          try ack.idle()
           if (cue === ack) cue = undefined
-          throw error
-        }
-        if (signal.aborted) {
-          try ack.cancel()
-          if (cue === ack) cue = undefined
-          throw new Error("The agent's voice reply was not usable.")
-        }
-        try latency.mark("FirstToken")
-        if (reply.awaitingReview === true) {
-          try ack.cancel()
-          if (cue === ack) cue = undefined
-          try send({ type: "reviewNeeded" })
-          live?.stop()
-          const waiting: VoiceReply = { messageId: reply.messageId, text: "" }
-          return waiting
-        }
-        try ack.idle()
-        if (cue === ack) cue = undefined
-        if (signal.aborted) throw new Error("The agent's voice reply was not usable.")
-        const answered: VoiceReply = { messageId: reply.messageId, text: spokenLineOf(reply.text, replyActionOf(reply.action)), ...(reply.action === undefined ? {} : { action: reply.action }) }
-        return answered
-      }),
-      abort: (roomId: string, reason: string) => runPromise(effect {
-        resident.json("POST", `/api/turns/${encodeURIComponent(roomId)}/abort`, { reason }) catch () => undefined
-        try latency.finish("Abandoned")
-      }),
+          if (signal.aborted) throw new Error("The agent's voice reply was not usable.")
+          const answered: VoiceReply = { messageId: reply.messageId, text: spokenLineOf(reply.text, replyActionOf(reply.action)), ...(reply.action === undefined ? {} : { action: reply.action }) }
+          return answered
+        })
+      },
+      abort: (roomId: string, reason: string) => {
+        const abortAgent = dispatched?.aborted === true
+        return runPromise(effect {
+          if (abortAgent) resident.json("POST", `/api/turns/${encodeURIComponent(roomId)}/abort`, { reason }) catch () => undefined
+          try latency.finish("Abandoned")
+        })
+      },
     }
     const heardPort = (conversationId: string, messageId: string, body: unknown) => runPromise(effect {
+      if (messageId.startsWith(localReplyPrefix)) return { status: 200, body: { ok: true, messageId, changed: false } }
       const answer = resident.json("POST", `/api/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/heard`, body) catch (error) => ({ status: error._tag === "ResidentRefused" ? error.status : 0, data: null })
       return { status: answer.status, body: answer.data }
     })

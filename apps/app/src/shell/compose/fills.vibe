@@ -2,6 +2,9 @@
 import { AccountBindings } from "../../account/bindings.vibe"
 import { DeviceEnrollment } from "../../account/enrollment.vibe"
 import { browserPagesFromBrowser, browserViewsFromBrowser, mapsViewsFromMaps } from "../../assistant/fills.vibe"
+import { Composer } from "../../assistant/composer.vibe"
+import { AssistantHost } from "../../assistant/host.vibe"
+import { VoiceLocalNotes } from "../../voice/conversation.vibe"
 import { askAlphaTarget } from "../../assistant/files-bridge.vibe"
 import { AdvertisedCapabilities, CameraComposer, MapsChatCards, MapsRelay, ReplyChanges } from "../../assistant/ports.vibe"
 import { CameraChat, type ChatMessage } from "../../camera/chat.vibe"
@@ -76,6 +79,19 @@ effect function replyChangesBuilt() {
 export const fillsLive = Layer.effectDiscard(effect {
   const cells = try PortCells
   const navigation = try Navigation
+  const assistant = try AssistantHost
+  const chat = try Composer
+  const localNotes: VoiceLocalNotes.Shape = {
+    effect open(conversation: string, id: string, text: string, active: () => boolean) {
+      const identity = try assistant.identity()
+      if (identity === undefined || assistant.openSavedNote === undefined) return undefined
+      const reply = try assistant.openSavedNote(text, active, true)
+      if (reply === undefined || !active()) return undefined
+      if (!(try chat.localTurn(identity, conversation || null, id, text, reply))) return undefined
+      return reply
+    },
+  }
+  try sync(() => fillCell(cells, cells.voiceLocalNotes, localNotes))
 
   const email = try emailShareTarget
   const messages = try messagesShareTarget

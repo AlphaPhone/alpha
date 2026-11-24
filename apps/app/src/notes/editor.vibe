@@ -46,6 +46,8 @@ export service NotesEditor {
   readonly unsaved: Stream.Stream<string>
   draft(): (DraftContent | undefined)!!
   openNote(id: string): boolean!!
+  /** A saved note may replace the open editor only if it leaves no unsaved draft behind. */
+  canOpenFromAssistant(owner: string, id: string): boolean!!
   /** Open a saved note for its bound owner without closing an edited draft. */
   openFromAssistant(owner: string, id: string): boolean!!
   newNote(kind: "text" | "list", folderId?: string): boolean!!
@@ -293,6 +295,12 @@ const make = effect {
     return next === undefined ? true : try openNote(next)
   }
 
+  effect function canOpenFromAssistant(owner: string, id: string): boolean!! {
+    if ((try collection.current())?.owner !== owner) return false
+    const state = try machine.get()
+    return (state.present && state.draftId === id) || (!dirty(state) && !state.saving && !state.review)
+  }
+
   effect function remove(id: string): DeleteOutcome!! {
     const state = try machine.get()
     if (state.present && state.draftId === "" && id === "") {
@@ -322,11 +330,11 @@ const make = effect {
     unsaved: Stream.fromPubSub(unsaved),
     draft: () => SubscriptionRef.get(content),
     openNote,
+    canOpenFromAssistant,
     effect openFromAssistant(owner: string, id: string) {
-      if ((try collection.current())?.owner !== owner) return false
+      if (!(try canOpenFromAssistant(owner, id))) return false
       const state = try machine.get()
       if (state.present && state.draftId === id) return true
-      if (dirty(state) || state.saving || state.review) return false
       return try leave(id)
     },
     effect newNote(kind: "text" | "list", folderId?: string) {
