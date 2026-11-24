@@ -21,9 +21,10 @@ export const meta: ComponentMeta<InboxFolderBarProps> = {
     },
     "Spam and Trash unavailable": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onChoose.mockClear();
-      const canvas = within(canvasElement);
-      await expect(canvas.getByRole("button", { name: "Spam" })).toBeDisabled();
-      await expect(canvas.getByRole("button", { name: "Trash" })).toBeDisabled();
+      await userEvent.click(within(canvasElement).getByRole("button", { name: "More folders" }));
+      const page = within(canvasElement.ownerDocument.body);
+      await expect(page.getByRole("menuitem", { name: "Spam" })).toHaveAttribute("aria-disabled", "true");
+      await expect(page.getByRole("menuitem", { name: "Trash" })).toHaveAttribute("aria-disabled", "true");
       await expect(onChoose.mock.calls.length).toBe(0);
     },
   },

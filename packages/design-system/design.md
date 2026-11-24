@@ -24,7 +24,8 @@ do next.
   `text-subject` and `text-snippet` line by line; `text-meta` is a status line under a header, and `text-body`
   the text of a message or of a field being typed; `text-2xs` is the time under a text message or a
   keypad key's letters; `text-keypad-number` the number being dialled, `text-keypad-digit` a key's
-  digit and `text-keypad-letters` the letters under it.
+  digit and `text-keypad-letters` the letters under it. `text-lead` is the street of the next turn,
+  `text-title` a document's name over its preview, and `text-figure` and `text-figure-sm` a route's time.
 - **Shape.** `radius` is a card or a row group; `rounded-home-card` is a Home overview card;
   `rounded-drawer-icon` rounds an installed app icon; `rounded-option` is a row of a floating menu and
   `rounded-box` the box of a list row's selection check. `rounded-tile` is an app tile, a menu and a dialog;
@@ -121,6 +122,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.body.leading` | 1.6 |
 | `text.lg.size` | 1.0625rem |
 | `text.lg.leading` | 1.4 |
+| `text.lead.size` | 1.1875rem |
+| `text.lead.leading` | 1.2 |
 | `text.xl.size` | 1.25rem |
 | `text.xl.leading` | 1.25 |
 | `text.2xl.size` | 1.5rem |
@@ -131,8 +134,15 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.4xl.size` | 2.5rem |
 | `text.4xl.leading` | 1.08 |
 | `text.4xl.tracking` | -0.01em |
+| `text.figure.size` | 2.75rem |
+| `text.figure.leading` | 1 |
 | `text.home-display.size` | 1.625rem |
 | `text.home-display.leading` | 1.1 |
+| `text.title.size` | 1.75rem |
+| `text.title.leading` | 1.15 |
+| `text.title.tracking` | -0.01em |
+| `text.figure-sm.size` | 1.875rem |
+| `text.figure-sm.leading` | 1.05 |
 | `text.keypad-letters.size` | 0.59375rem |
 | `text.keypad-letters.leading` | 1.15 |
 | `text.keypad-letters.tracking` | 0.14em |

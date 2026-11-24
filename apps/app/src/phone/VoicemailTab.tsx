@@ -34,15 +34,16 @@ function OpenVoicemail({ runtime, row, label, title, date }: Pick<Props, "runtim
   date: string;
 }) {
   const { state, can, send } = useVoicemail(runtime);
-  const phone = usePhone(runtime).state;
-  if (!state || !phone) return null;
+  const phone = usePhone(runtime);
+  if (!state || !phone.state) return null;
   const held = runtime.runSync(Voicemails.use((store) => store.get()));
   const busy = state.removal.outcome === "Sent";
-  const live = phone.telecom === "OrdinaryCall" || phone.telecom === "MaybeEmergencyCall";
+  const live = phone.state.telecom === "OrdinaryCall" || phone.state.telecom === "MaybeEmergencyCall";
   const play = { type: "play", live } as const;
   const pause = { type: "pause" } as const;
   const message = { type: "reach", how: "Message" } as const;
   const call = { type: "reach", how: "CallBack" } as const;
+  const canCall = phone.can({ type: "dialVoicemail", number: row.number });
   return (
     <section aria-label="Open voicemail" data-alpha-phone-voicemail-open="" className="mx-4 my-2 flex flex-col gap-3.5 rounded-sheet bg-secondary p-3.5">
       <button type="button" aria-label={label} aria-expanded="true" className={cn(focusRing, "flex min-h-11 items-center gap-3 text-left")}
@@ -78,7 +79,7 @@ function OpenVoicemail({ runtime, row, label, title, date }: Pick<Props, "runtim
         </div>
       ) : (
         <div className="flex gap-2">
-          {row.number !== "" && can(call) && <Button variant="ghost" size="icon" className={cn(action, "w-auto")} aria-label="Call back" onClick={() => void send(call)}><Phone className="size-5" /></Button>}
+          {row.number !== "" && can(call) && <Button variant="ghost" size="icon" className={cn(action, "w-auto")} aria-label="Call back" disabled={!canCall} onClick={() => void send(call)}><Phone className="size-5" /></Button>}
           {row.number !== "" && can(message) && <Button variant="ghost" size="icon" className={cn(action, "w-auto")} aria-label="Message" onClick={() => void send(message)}><MessageCircle className="size-5" /></Button>}
           {can({ type: "askDelete" }) && <Button variant="ghost" size="icon" className={cn(action, "w-auto text-destructive")} aria-label="Delete"
             data-alpha-phone-voicemail-delete="" onClick={() => void send({ type: "askDelete" })}><Trash2 className="size-5" /></Button>}
@@ -96,8 +97,7 @@ export function VoicemailTab({ runtime, now }: Props) {
   const rows = state.items > 0 ? held.rows : [];
   const open = async (row: ListedVoicemail) => {
     const opening = { type: "open", carrierText: row.carrierTranscript !== null } as const;
-    if (state.confirming || state.removal.outcome === "Sent") return;
-    if (state.open && can({ type: "close" })) await send({ type: "close" });
+    if (!can(opening)) return;
     runtime.runSync(Voicemails.use((store) => store.set({ open: row.id, audio: "", transcript: "" })));
     await send(opening);
   };
@@ -105,6 +105,7 @@ export function VoicemailTab({ runtime, now }: Props) {
     <div>
       {state.list.status === "Loading" && rows.length === 0 && <div className="flex justify-center p-5"><Spinner label="Reading voicemail" /></div>}
       {state.list.status === "Failed" && <Banner variant="destructive" className="mx-4">Voicemail could not be read</Banner>}
+      {state.removal.outcome === "Sent" && <p role="status" className="px-4 py-2 text-center text-sm text-muted-foreground">Deleting voicemail…</p>}
       {state.removal.outcome === "Unknown" && <Banner variant="warn" className="mx-4">Alpha cannot tell whether the voicemail was deleted</Banner>}
       {state.removal.outcome === "Refused" && state.open && <Banner variant="destructive" className="mx-4">The voicemail was not deleted</Banner>}
       {state.list.status === "Loaded" && state.items === 0 && <p role="status" className="p-5 text-center text-muted-foreground">No voicemail</p>}

@@ -71,7 +71,7 @@ effect function readLog(ticket: number, device: boolean): Event!!(Telephony | Di
   const query = (try store.get()).sought
   const rows = grant === "Granted" ? (source ?? []).filter((entry) =>
     (current.chip === "AllCalls" || missedTypes.has(entry.type)) && matches(query, entry.cachedName ?? "", entry.number)) : []
-  if (Phone.canRecentsRead(current, ticket, rows.length)) try store.set({ source, rows })
+  if (Phone.canRecentsRead(current, ticket, rows.length)) try store.set({ source: ok && grant === "Granted" ? source : undefined, rows })
   return { type: "recentsRead", ticket, ok, grant, count: rows.length }
 }
 
@@ -114,8 +114,10 @@ effect function dialScreen(ticket: number, number: string): Event!!Telephony {
 effect function handoff(ticket: number, typed: boolean, tapped: string): Event!!(Telephony | Dialer) {
   const held = try (try Dialer).get()
   const number = typed ? held.digits : tapped
+  const shape = judge(number)
+  if (shape !== "Dialable" && shape !== "Emergency") return { type: "dialAnswered", ticket, opened: false }
   const status = telephony("status", (c) => c.phone.status()) catch () => undefined
-  if (status?.roles.dialer.held !== true || judge(number) === "Emergency") return try dialScreen(ticket, number)
+  if (status?.roles.dialer.held !== true || shape === "Emergency") return try dialScreen(ticket, number)
   const placed = telephony("placeCall", (c) => c.phone.placeCall(number)) catch (failure) => (lost(failure) ? undefined : null)
   if (placed === undefined) return { type: "dialLost" }
   switch (placed?.placeStatus) {
