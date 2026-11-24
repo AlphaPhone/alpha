@@ -17,7 +17,7 @@ import { client } from held
  * `.eliza/spec/os/android/secureStore.md`), and it opens none to the page until the `android` area lists one here and
  * there: an area that needs one reports it, and never writes a secret anywhere else.
  */
-export type Slot = "notes-draft" | "notes-folders"
+export type Slot = `notes-${"draft" | "folders"}:${number}`
 
 /** The secure store refused, or there is none, as in a browser. `code` is the store's own word for why, such as `denied`. */
 export error VaultFailed { slot: string; code: ElizaSecureStoreError | ElizaSecureStoreReadError | "malformed" | "absent"; cause: unknown }

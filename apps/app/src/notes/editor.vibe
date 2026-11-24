@@ -6,7 +6,7 @@ import type { Actor } from "../../gen/app__notes__note.effect.vibe"
 import { NoteStore } from "../platform/notes.vibe"
 import { type Agent } from "../platform/agent.vibe"
 import { ownerAt } from "../platform/owner.vibe"
-import { type Job, answer, reacting, run, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import { type DraftWords, NoteContent, creationId, formatOf, fromSaved, hasContent, newWords, numberOf, wordsOf } from "./content.vibe"
 
 export type Fields = Pick<DraftWords, "title" | "body" | "items" | "kind">
@@ -37,7 +37,7 @@ effect function oldEditor() {
   const saved = latest.noteByNumber.get(state.note)
   if (saved !== undefined) try content.showDraft(fromSaved(saved, owner, state.draft.base))
   else try content.showDraft(draft)
-  try ignore(content.dropDraft())
+  try ignore(content.dropDraft(owner))
   try ignore(list.send({ type: "storeChanged" }, phone))
 }
 
@@ -45,18 +45,24 @@ effect function saveDraft(by: "Owner" | "Phone") {
   const editor = try Editor.Machine
   const content = try NoteContent
   const draft = try content.draft()
-  if (draft !== undefined && hasContent(draft)) try ignore(editor.send({ type: "save" }, by))
+  const current = try editor.get()
+  if (draft === undefined || !Editor.canSave(current, by) || !hasContent(draft)) return
+  const ticket = current.ticket + 1
+  try content.capture(ticket, draft)
+  const sent = editor.send({ type: "save" }, by) catch () => undefined
+  if (sent === undefined) try ignore(content.take(ticket))
 }
 
 export service NoteEditor {
   newNote(kind: Fields["kind"], available: boolean, folder: number, covered: boolean): void!!
-  typed(fields: Fields): void!!
+  typed(fields: Partial<Fields>): void!!
   save(): void!!
   close(): void!!
   takeSaved(): void!!
   keepMine(): void!!
   keepAsNew(): void!!
   discard(): void!!
+  settled(initial: DraftWords, id: string, revision: number): void!!
 }
 
 const typing = Layer.effect(NoteEditor, effect {
@@ -75,14 +81,15 @@ const typing = Layer.effect(NoteEditor, effect {
 
   return {
     newNote: (kind: Fields["kind"], available: boolean, folder: number, covered: boolean) => turn.withPermit(freshEditor(kind, available, folder, covered)),
-    typed: (fields: Fields) => turn.withPermit(effect {
+    typed: (fields: Partial<Fields>) => turn.withPermit(effect {
       const current = try editor.get()
       const draft = try read.draft()
       if (draft === undefined || !Editor.canEdit(current, "Owner")) return
       const next = { ...draft, ...fields }
       try read.showDraft(next)
       const kept = try read.keepDraft(next)
-      try ignore(editor.send({ type: "edit", kept }, "Owner"))
+      const event: Editor.Event = next.kind === current.kind ? { type: "edit", kept } : { type: "formatNote", kind: next.kind, kept }
+      try ignore(editor.send(event, "Owner"))
     }),
     save: () => turn.withPermit(saveDraft("Owner")),
     close: () => turn.withPermit(close()),
@@ -108,19 +115,28 @@ const typing = Layer.effect(NoteEditor, effect {
     discard: () => turn.withPermit(effect {
       const current = try editor.get()
       if (!Editor.canDiscardDraft(current, "Owner") && !Editor.canDropDraft(current, "Owner")) return
-      if (!(try read.dropDraft())) return
+      const identity = ownerAt() catch () => ""
+      if (identity === "" || numberOf("owner", identity) !== current.owner || !(try read.dropDraft(identity))) return
       try ignore(editor.send({ type: current.unreadable ? "dropDraft" : "discardDraft" }, "Owner"))
       try read.showDraft(undefined)
+    }),
+    settled: (initial: DraftWords, id: string, revision: number) => turn.withPermit(effect {
+      const current = try read.draft()
+      if (current === undefined || current.owner !== initial.owner || current.creation !== initial.creation) return
+      const saved = { ...current, id, base: revision, folder: 0, made: 0 }
+      try read.showDraft(saved)
+      if (current === initial) try ignore(read.dropDraft(initial.owner))
+      else try ignore(read.keepDraft(saved))
     }),
   }
 })
 
-effect function savedRequest(fx: Extract<Editor.Effect, { readonly tag: "Saves" }>): Editor.Event!!(Editor.Machine | NoteContent | NoteStore | List.Machine | Agent) {
+effect function savedRequest(fx: Extract<Editor.Effect, { readonly tag: "Saves" }>): Editor.Event!!(Editor.Machine | NoteContent | NoteStore | List.Machine | NoteEditor | Agent) {
   const { owner, ticket, note, made, base, folder } = fx
   const failed: Editor.Event = { type: "saved", ticket, verdict: "Failed", revision: 0, id: 0 }
   const content = try NoteContent
   const store = try NoteStore
-  const initial = try content.draft()
+  const initial = try content.take(ticket)
   if (initial === undefined || !hasContent(initial) || (note === 0 ? initial.made !== made : numberOf("note", initial.id) !== note)) return failed
   const identity = ownerAt() catch () => ""
   if (identity !== initial.owner || numberOf("owner", identity) !== owner) return failed
@@ -146,18 +162,12 @@ effect function savedRequest(fx: Extract<Editor.Effect, { readonly tag: "Saves" 
   const id = numberOf("note", result.note.id)
   const revision = result.state.revision + 1
   if (revision <= base) return failed
-  const current = try content.draft()
-  if (current !== undefined && current.owner === initial.owner && current.creation === initial.creation) {
-    const kept = { ...current, id: result.note.id, base: revision, folder: 0, made: 0 }
-    try content.showDraft(kept)
-    if (current === initial) try ignore(content.dropDraft())
-    else try ignore(content.keepDraft(kept))
-  }
+  try (try NoteEditor).settled(initial, result.note.id, revision)
   try ignore((try List.Machine).send({ type: "storeChanged" }, phone))
   return { type: "saved", ticket, verdict: "Landed", revision, id }
 }
 
-function carry(fx: Editor.Effect): Job<Editor.Event, Editor.Machine | NoteContent | NoteStore | List.Machine | Agent | Trash.Machine, [Actor]> {
+function carry(fx: Editor.Effect): Job<Editor.Event, Editor.Machine | NoteContent | NoteStore | List.Machine | NoteEditor | Agent | Trash.Machine, [Actor]> {
   return match (fx) {
     when { tag: "Saves" }: answer(`save ${fx.ticket}`, savedRequest(fx), { type: "saved", ticket: fx.ticket, verdict: "Failed", revision: 0, id: 0 }, phone);
     when { tag: "Deletes" }: run(`delete ${fx.ticket}`, effect {
@@ -168,5 +178,13 @@ function carry(fx: Editor.Effect): Job<Editor.Event, Editor.Machine | NoteConten
   }
 }
 
+const saving = started(effect {
+  const editor = try Editor.Machine
+  const ready = (state: Editor.Editor): number => state.showing && !state.failed && Editor.canSave(state, "Phone") ? state.draft.edits : 0
+  try Stream.runForEach(Stream.debounce(Stream.changes(Stream.map(editor.changes, ready)), "700 millis"), effect (edits) => {
+    if (edits > 0 && ready(try editor.get()) === edits) try saveDraft("Phone")
+  })
+}, "save drafts while Notes is open")
+
 /** On leaving or reloading Notes, the saved words live in the phone vault, with only revision metadata in the machine. */
-export const editing = Layer.provideMerge(typing, reacting(Editor, { keep: 1, open: [{ type: "restart", readable: true }, phone], carry }))
+export const editing = together(Layer.provideMerge(typing, reacting(Editor, { keep: 1, open: [{ type: "restart", readable: true }, phone], carry })), saving)

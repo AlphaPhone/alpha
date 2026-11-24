@@ -4,10 +4,11 @@ import * as Voice from "../../gen/app__notes__voice.effect.vibe"
 import type { Actor } from "../../gen/app__notes__note.effect.vibe"
 import { Machine as Notes } from "../../gen/app__notes.effect.vibe"
 import type { Agent } from "../platform/agent.vibe"
+import { NoteDevice } from "../platform/noteDevice.vibe"
 import { NoteStore } from "../platform/notes.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { type Job, answer, reacting, run, together } from "../runtime/reactor.vibe"
-import { NoteContent, formatChanged, numberOf } from "./content.vibe"
+import { NoteContent, audioIdOf, formatChanged, numberOf } from "./content.vibe"
 
 module web {
   /** A linked page must still be its original HTTP(S) address. */
@@ -37,7 +38,7 @@ effect function readPage(number: number): void!!(Agent | NoteContent) {
   if (snapshot.owner === "" || (ownerAt() catch () => "") !== snapshot.owner) return
   const note = [...snapshot.noteByNumber.values()].find((item) => typeof item.format?.data.url === "string" && numberOf("web", item.format.data.url) === number)
   const page = pageOf(note?.format?.data.url)
-  if (page !== "") try ignore(trySync(() => visit(page)))
+  if (page !== "") try ignore(Effect.try(() => visit(page)))
 }
 
 effect function removed(fx: Extract<Link.Effect, { readonly tag: "Removes" }>): Link.Event!!(Agent | Notes | NoteContent | NoteStore) {
@@ -60,14 +61,31 @@ function linkOut(fx: Link.Effect): Job<Link.Event, Agent | Notes | NoteContent |
   }
 }
 
-function voiceOut(fx: Voice.Effect): Job<Voice.Event, never, [Actor]> {
+effect function played(fx: Extract<Voice.Effect, { readonly tag: "Plays" }>): Voice.Event!!(Agent | NoteContent | NoteDevice) {
+  const failed: Voice.Event = { type: "played", ticket: fx.ticket, ok: false }
+  const collection = try (try NoteContent).collection()
+  const identity = ownerAt() catch () => ""
+  const note = collection.noteByNumber.get(fx.note)
+  if (note === undefined || identity === "" || identity !== collection.owner) return failed
+  const audioId = audioIdOf(note)
+  if (audioId === "") return failed
+  const device = try NoteDevice
+  const saved = device.describe(audioId) catch () => undefined
+  if (saved === undefined || saved.audioId !== audioId || saved.noteId !== note.id) return failed
+  const segments = note.format?.data.segments
+  const offset = Array.isArray(segments) ? segments.slice(0, fx.from).reduce((before, row) =>
+    before + (typeof row === "object" && row !== null && "durationMs" in row && typeof row.durationMs === "number" ? row.durationMs : 0), 0) : 0
+  return { ...failed, ok: try device.play(audioId, note.id, offset) }
+}
+
+function voiceOut(fx: Voice.Effect): Job<Voice.Event, Agent | NoteContent | NoteDevice, [Actor]> {
+  if (fx.tag === "Plays") return answer("play", played(fx), { type: "played", ticket: fx.ticket, ok: false }, phone)
+  if (fx.tag === "Halts") return answer("stop", effect { return { type: "halted", ticket: fx.ticket, ok: try (try NoteDevice).halt() } satisfies Voice.Event }, { type: "halted", ticket: fx.ticket, ok: false }, phone)
   const failed: Voice.Event | undefined = match (fx) {
     when { tag: "Transcribes" }: { type: "transcribed", ticket: fx.ticket, ok: false };
     when { tag: "Summarises" }: { type: "summarised", ticket: fx.ticket, ok: false };
     when { tag: "Writes" }: { type: "written", ticket: fx.ticket, ok: false, known: true, latest: 0 };
     when { tag: "AsksAlpha" }: undefined;
-    when { tag: "Plays" }: { type: "played", ticket: fx.ticket, ok: false };
-    when { tag: "Halts" }: { type: "halted", ticket: fx.ticket, ok: true };
   }
   return failed === undefined ? run("ask", Effect.void, phone) : answer(fx.tag, succeed(failed), failed, phone)
 }

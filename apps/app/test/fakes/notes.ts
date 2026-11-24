@@ -1,21 +1,16 @@
 // spec/app/notes/index.md, "Story: See my notes"
+import { parseNoteFormat } from "@elizaos/plugin-notes/format";
+import type { NotesSnapshot, StickyNote } from "@elizaos/plugin-notes/types";
+import { Schema } from "effect";
 import type { Route } from "./routes.ts";
-
-/** One note of the store, as `@elizaos/plugin-notes` serves it at `/api/notes/state`. */
-interface StickyNote {
-  id: string;
-  title: string;
-  body: string;
-  color: "yellow" | "green" | "rose" | "slate";
-  format?: { kind: "text" | "list" | "voice" | "link"; data: Record<string, unknown> };
-  createdAt: string;
-  updatedAt: string;
-}
 
 /** The agent's notes store as the fake agent holds it; a journey changes it between steps. */
 export interface NotesScene {
   notes: StickyNote[];
   revision: number;
+  owner: string;
+  trash: NonNullable<NotesSnapshot["trash"]>;
+  creations: Map<string, string>;
   /** Whether a read of the store fails, as an agent without its notes answers. */
   failing: boolean;
 }
@@ -36,6 +31,9 @@ export function notesScene(now = Date.now()): NotesScene {
   return {
     revision: 6,
     failing: false,
+    owner: "agent-owner",
+    trash: [],
+    creations: new Map(),
     notes: [
       note("enclave", "Enclave launch", "Confirm attestation flow\nShip the keys-on-device doc\nDry run Friday", now - 20 * 60_000, { kind: "text", data: { pinned: true } }),
       note("sync", "Design sync", "", now - hour, {
@@ -74,13 +72,93 @@ export function notesScene(now = Date.now()): NotesScene {
   };
 }
 
-/** The agent's Notes routes: its store's state, as `@elizaos/plugin-notes` serves it. */
+const Interact = Schema.Struct({
+  capability: Schema.Literals(["create-note", "update-note", "delete-note", "restore-note"]),
+  params: Schema.Struct({
+    id: Schema.optionalKey(Schema.String),
+    content: Schema.optionalKey(Schema.String),
+    format: Schema.optionalKey(Schema.Unknown),
+    expectedRevision: Schema.optionalKey(Schema.Int),
+    creationId: Schema.optionalKey(Schema.String),
+  }),
+});
+const decoded = Schema.decodeUnknownOption(Interact);
+
+function snapshot(scene: NotesScene): NotesSnapshot {
+  return { notes: scene.notes, revision: scene.revision, trash: scene.trash };
+}
+
+function result(scene: NotesScene, row: StickyNote) {
+  return Response.json({ requestId: "notes-fake", success: true, result: { success: true, text: row.title, state: snapshot(scene), data: { note: row } } });
+}
+
+function refused(status: number) {
+  return Response.json({ error: "The Notes operation was refused" }, { status });
+}
+
+function contentOf(text: string): Pick<StickyNote, "title" | "body"> {
+  const line = text.indexOf("\n");
+  return line < 0 ? { title: text, body: "" } : { title: text.slice(0, line), body: text.slice(line) };
+}
+
+function interact(scene: NotesScene, input: unknown): Response {
+  const found = decoded(input);
+  if (found._tag === "None") return refused(400);
+  const { capability, params } = found.value;
+  if (scene.failing) return refused(503);
+  if (params.expectedRevision !== undefined && params.expectedRevision !== scene.revision) return refused(409);
+  const at = Date.now();
+  const format = parseNoteFormat(params.format);
+  if (capability === "create-note") {
+    const oldId = params.creationId === undefined ? undefined : scene.creations.get(params.creationId);
+    const old = scene.notes.find((item) => item.id === oldId);
+    if (old !== undefined) return result(scene, old);
+    const words = contentOf(params.content ?? "");
+    const made = note(`fake-note-${scene.revision + 1}`, words.title, words.body, at, format);
+    if (params.creationId !== undefined) scene.creations.set(params.creationId, made.id);
+    scene.notes.unshift(made);
+    scene.revision += 1;
+    return result(scene, made);
+  }
+  const present = scene.notes.find((item) => item.id === params.id);
+  if (capability === "restore-note") {
+    const row = scene.trash.find((entry) => entry.note.id === params.id);
+    if (row === undefined) return refused(404);
+    scene.notes.unshift(row.note);
+    scene.trash = scene.trash.filter((entry) => entry !== row);
+    scene.revision += 1;
+    return result(scene, row.note);
+  }
+  if (present === undefined) return refused(404);
+  if (capability === "delete-note") {
+    scene.notes = scene.notes.filter((item) => item !== present);
+    scene.trash.push({ note: present, deletedAt: iso(at) });
+    scene.revision += 1;
+    return result(scene, present);
+  }
+  const edited: StickyNote = {
+    ...present,
+    ...(params.content === undefined ? {} : contentOf(params.content)),
+    ...(format === undefined ? {} : { format }),
+    updatedAt: iso(at),
+  };
+  scene.notes = scene.notes.map((item) => item === present ? edited : item);
+  scene.revision += 1;
+  return result(scene, edited);
+}
+
+/** The resident agent's Notes and owner routes. */
 export function notesRoutes(scene: NotesScene): Route[] {
   return [
-    (request, url) => {
-      if (request.method !== "GET" || url.pathname !== "/api/notes/state") return;
-      if (scene.failing) return Response.json({ error: "Notes are unavailable" }, { status: 503 });
-      return Response.json({ success: true, data: { notes: scene.notes, revision: scene.revision } });
+    async (request, url) => {
+      if (request.method === "GET" && url.pathname === "/api/auth/me") {
+        return Response.json({ identity: { kind: "owner", id: scene.owner }, access: { role: "OWNER", mode: "local" } });
+      }
+      if (request.method === "GET" && url.pathname === "/api/notes/state") {
+        return scene.failing ? refused(503) : Response.json({ success: true, data: snapshot(scene) });
+      }
+      if (request.method === "POST" && url.pathname === "/api/notes/interact") return interact(scene, await request.json());
+      return undefined;
     },
   ];
 }

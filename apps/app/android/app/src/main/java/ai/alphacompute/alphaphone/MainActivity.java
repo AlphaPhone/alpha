@@ -50,6 +50,9 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(ai.eliza.plugins.system.SystemPlugin.class);
   registerPlugin(AlphaFilesPlugin.class);
   registerPlugin(AlphaSelectedDocumentsPlugin.class);
+  registerPlugin(AlphaNotesPlugin.class);
+  registerPlugin(AlphaNoteDocumentsPlugin.class);
+  AlphaNoteRecordingService.offerFromIntent(this, getIntent());
   registerPlugin(ai.eliza.plugins.camera.CameraPlugin.class);
   registerPlugin(AlphaPhotosPlugin.class);
   registerPlugin(AlphaPhotoLibraryPlugin.class);

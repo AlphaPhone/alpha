@@ -1,6 +1,7 @@
 // spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/trash.md, "Story: Delete a note and get it back"
-import { Alert, AppHeader, Button, Checkbox, Chip, EmptyState, Input, Menu, MenuContent, MenuItem, MenuTrigger, Spinner, Textarea } from "@repo/ui";
-import { ArrowLeft, AudioLines, Ellipsis, Folder, ListChecks, Plus, StickyNote, Trash2, X } from "lucide-react";
+import { Alert, AppHeader, Button, Checkbox, Chip, EmptyState, Input, Menu, MenuContent, MenuItem, MenuTrigger, NoteRow, NotesList as NoteRows, Spinner, Textarea } from "@repo/ui";
+import { ArrowLeft, AudioLines, Ellipsis, FileDown, Folder, ListChecks, Mic, Plus, Trash2, X } from "lucide-react";
+import { Effect } from "effect";
 import { useState, useSyncExternalStore, type FormEvent } from "react";
 import * as Notes from "../../gen/app__notes.ts";
 import * as Editor from "../../gen/app__notes__editor.ts";
@@ -9,36 +10,59 @@ import { useMachine as useNotes } from "../../gen/app__notes.react.ts";
 import { useMachine as useEditor } from "../../gen/app__notes__editor.react.ts";
 import { useMachine as useTrash } from "../../gen/app__notes__trash.react.ts";
 import { useMachine as useLink } from "../../gen/app__notes__linkNote.react.ts";
+import { useMachine as useRecorder } from "../../gen/app__notes__recording.react.ts";
+import { useMachine as usePrevious } from "../../gen/app__notes__previous.react.ts";
+import { useMachine as useTransfer } from "../../gen/app__notes__transfer.react.ts";
 import { useMachine as useVoice } from "../../gen/app__notes__voice.react.ts";
+import { NoteDocuments } from "../platform/noteDocuments.vibe";
+import { NoteDevice } from "../platform/noteDevice.vibe";
+import { unfinished } from "../../gen/app__notes__recording.ts";
 import type { Alpha, Resident } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
 import { useTimed } from "../runtime/react.ts";
 import { AppBack } from "../shell/AppBack.tsx";
-import { type Collection, type DraftWords, NoteContent, hasContent, moment, numberOf } from "./content.vibe";
+import { type Collection, type DraftWords, NoteContent, hasContent, numberOf } from "./content.vibe";
 import { type Fields, NoteEditor } from "./editor.vibe";
+import { enter } from "./notes.vibe";
+import { record } from "./recording.vibe";
+import { Previous } from "./Previous.tsx";
+import { dated, preview } from "./present.ts";
+import { Recording } from "./Recording.tsx";
 import { pageOf } from "./sides.vibe";
 
 type Runtime = Alpha["runtime"];
 type Form = { readonly op: "AddFolder" } | { readonly op: "RenameFolder"; readonly folder: Notes.Folder };
-const dt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
-const time = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
-const titleOf = (note: Collection["noteByNumber"] extends ReadonlyMap<number, infer T> ? T : never) => note.title.trim() || "Untitled note";
+const titleOf = (note: Collection["noteByNumber"] extends ReadonlyMap<number, infer T> ? T : never) => note.title.trim() || "Untitled";
 
-function dateLabel(value: number, today: number) {
-  if (!Number.isFinite(value)) return "";
-  return new Date(value).toDateString() === new Date(today).toDateString() ? time.format(value) : dt.format(value);
+const transferNotices = {
+  Done: "Saved.",
+  NotDone: "The file couldn't be saved.",
+  Unsure: "Alpha couldn't confirm the file. Check it before trying again.",
+  NoAccess: "The selected file couldn't be accessed.",
+  Unread: "This file must contain readable text.",
+} as const;
+
+function TransferNotice({ runtime }: { readonly runtime: Runtime }) {
+  const transfer = useTransfer(runtime);
+  const notice = transfer.state?.notice;
+  if (notice === undefined || notice === "Quiet") return null;
+  const dismiss = { type: "dismiss" } as const;
+  return <Alert variant={notice === "Done" ? "info" : "warn"}>
+    {transferNotices[notice]}
+    {transfer.can(dismiss, "Owner") && <Button size="sm" variant="ghost" onClick={() => void transfer.send(dismiss, "Owner")}>Dismiss</Button>}
+  </Alert>;
 }
 
 function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly saved: DraftWords }) {
   const writing = useEditor(runtime);
   const bin = useTrash(runtime).state;
+  const transfer = useTransfer(runtime);
+  const hasDocuments = runtime.runSync(NoteDocuments.use((device) => Effect.succeed(device.available)));
   const current = writing.state;
   if (!current?.showing) return null;
   const owner = (event: Editor.Event) => writing.can(event, "Owner");
   const send = (event: Editor.Event) => void writing.send(event, "Owner");
-  const edit = (fields: Partial<Fields>) => void runtime.runPromise(NoteEditor.use((editor) => editor.typed({
-    title: saved.title, body: saved.body, items: saved.items, kind: saved.kind, ...fields,
-  })));
+  const edit = (fields: Partial<Fields>) => void runtime.runPromise(NoteEditor.use((editor) => editor.typed(fields)));
   const action = (kind: "close" | "save" | "takeSaved" | "keepMine" | "keepAsNew" | "discard") =>
     void runtime.runPromise(NoteEditor.use((editor) => editor[kind]()));
   const close = () => action("close");
@@ -47,6 +71,8 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
   const folder = saved.kind === "Checklist";
   const deletion: Editor.Event = { type: "deleteNote", ready: bin !== undefined && Trash.ready(bin) };
   const deletable = owner(deletion);
+  const exporting = { type: "exportNote", note: current.note, revision: current.draft.base } as const;
+  const exportable = hasDocuments && current.draft.sync === "Kept" && transfer.can(exporting, "Owner");
   const editable = owner({ type: "edit", kept: true });
   return (
     <section aria-label="Note editor" data-alpha-subview="notes-editor" className="flex min-h-0 flex-1 flex-col">
@@ -54,13 +80,17 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
         {editable && <Button aria-label={folder ? "Switch to text" : "Make a checklist"} aria-pressed={folder} size="icon" variant="ghost"
           onClick={() => edit(folder ? { kind: "Text", body: saved.items.map((row) => row.t).join("\n") }
             : { kind: "Checklist", items: saved.body.split("\n").filter((line) => line.trim() !== "").map((t) => ({ t, done: false })), body: "" })}><ListChecks /></Button>}
-        {deletable && <Menu>
+        {(deletable || exportable) && <Menu>
           <MenuTrigger asChild><Button aria-label="Note actions" size="icon" variant="ghost"><Ellipsis /></Button></MenuTrigger>
-          <MenuContent align="end"><MenuItem onSelect={() => send(deletion)}><Trash2 /> Delete</MenuItem></MenuContent>
+          <MenuContent align="end">
+            {exportable && <MenuItem onSelect={() => void transfer.send(exporting, "Owner")}><FileDown /> Save as text</MenuItem>}
+            {deletable && <MenuItem destructive onSelect={() => send(deletion)}><Trash2 /> Delete</MenuItem>}
+          </MenuContent>
         </Menu>}
         {owner({ type: "close" }) && <Button variant="ghost" onClick={close}>Done</Button>}
       </AppHeader>
       <div className="flex w-full max-w-192 flex-1 flex-col self-center px-6">
+        <TransferNotice runtime={runtime} />
         <div aria-live="polite" className="text-xs text-muted-foreground">
           {current.draft.sync === "Saving" ? "Saving…" : current.failed ? "Couldn't save the note" : current.full ? "There isn't room to keep your draft" : current.told === "WasUnknown" ? "Alpha couldn't confirm the deletion" : current.told === "WasRefused" ? "Couldn't delete the note" : current.told === "WasFull" ? "Recently deleted is full" : ""}
         </div>
@@ -188,6 +218,11 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
   const links = useLink(runtime);
   const voice = useVoice(runtime);
   const bin = useTrash(runtime);
+  const recorder = useRecorder(runtime).state;
+  const previous = usePrevious(runtime);
+  const transfer = useTransfer(runtime);
+  const hasDocuments = runtime.runSync(NoteDocuments.use((device) => Effect.succeed(device.available)));
+  const hasMic = runtime.runSync(NoteDevice.use((device) => Effect.succeed(device.available)));
   const content = runtime.runSync(NoteContent.asEffect());
   const data = useSyncExternalStore(content.subscribe, content.snapshot, content.snapshot);
   const [form, setForm] = useState<Form>();
@@ -198,13 +233,17 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
   const { collection, draft } = data;
   const listEvent = (event: Notes.Event) => void list.send(event, "Owner");
   const can = (event: Notes.Event) => list.can(event, "Owner");
+  if (previous.state?.showing) return <Previous runtime={runtime} />;
   if (bin.state?.showing || bin.state?.question === "AskFull") return <TrashScreen runtime={runtime} collection={collection} />;
   if (links.state?.showing) return <LinkedNote runtime={runtime} collection={collection} />;
   if (voice.state?.showing) return <VoiceNote runtime={runtime} collection={collection} />;
   if (writing.showing && draft !== undefined) return <EditorScreen runtime={runtime} saved={draft} />;
+  if (recorder !== undefined && unfinished(recorder)) return <Recording alpha={alpha} runtime={runtime} />;
   const available = Notes.readyForNew(state);
   const newNote = { type: "newNote", kind: "Text", available, covered: false, folder: state.filter } as const;
   const openTrash = { type: "show", covered: false } as const;
+  const showPrevious = { type: "show", covered: false } as const;
+  const importText = { type: "importText", available: available && !Editor.waiting(writing) } as const;
   const reopen = { type: "reopenDraft", covered: false } as const;
   const row = (entry: Notes.Row) => {
     const note = collection.noteByNumber.get(entry.id);
@@ -212,14 +251,9 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
     const open = { type: "openRow", id: entry.id, covered: Editor.waiting(writing) } as const;
     const pin: Notes.Event = { type: "change", c: { ...Notes.nothing, note: entry.id, base: entry.revision, op: entry.pinned ? "Unpin" : "Pin" }, covered: false };
     return <div key={entry.id} className="group flex items-start border-b border-border">
-      <button type="button" disabled={!can(open)} onClick={() => listEvent(open)} className="flex min-h-12 min-w-0 flex-1 items-start gap-3 px-2 py-3 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-        {entry.kind === "Voice" && <AudioLines aria-hidden className="mt-0.5 size-4.5 shrink-0 text-primary" />}
-        <span className="min-w-0 flex-1"><span className="block truncate text-base font-semibold">{titleOf(note)}</span>
-          <span className="mt-0.5 line-clamp-2 whitespace-pre-line text-sm leading-snug text-muted-foreground">
-            <span className="text-foreground">{dateLabel(moment(note), collection.readAt)}</span>{"  "}{note.body.trim()}
-          </span>
-        </span>
-      </button>
+      <NoteRow className="min-w-0 flex-1 border-0" title={titleOf(note)} aria-label={`Open ${titleOf(note)}`}
+        date={dated(note, collection.readAt)} preview={preview(note)} voice={entry.kind === "Voice"}
+        onClick={can(open) ? () => listEvent(open) : undefined} />
       {can(pin) && <Menu><MenuTrigger asChild><Button aria-label={`${titleOf(note)} options`} size="icon" variant="ghost" className="mt-1"><Ellipsis /></Button></MenuTrigger>
         <MenuContent align="end">
           <MenuItem onSelect={() => listEvent(pin)}>{entry.pinned ? "Unpin" : "Pin"}</MenuItem>
@@ -245,20 +279,22 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
   return (
     <section aria-label="Notes" data-alpha-subview="notes-list" className="flex min-h-0 flex-1 flex-col">
       <AppHeader title="Notes" leading={<AppBack alpha={alpha} />}>
+        {available && hasMic && !Editor.waiting(writing) && <Button size="icon" variant="ghost" aria-label="Record voice note" onClick={() => void runtime.runPromise(record)}><Mic /></Button>}
         {editor.can(newNote, "Owner") && <Button size="icon" variant="ghost" aria-label="New note" onClick={() => void runtime.runPromise(NoteEditor.use((writer) => writer.newNote("Text", available, state.filter, false)))}><Plus /></Button>}
         {bin.can(openTrash, "Owner") && <Menu>
           <MenuTrigger asChild><Button size="icon" variant="ghost" aria-label="Notes options"><Ellipsis /></Button></MenuTrigger>
           <MenuContent align="end">
             <MenuItem onSelect={() => void bin.send(openTrash, "Owner")}><Trash2 /> Recently deleted</MenuItem>
+            {previous.can(showPrevious, "Owner") && <MenuItem onSelect={() => void previous.send(showPrevious, "Owner")}><Folder /> On this phone</MenuItem>}
             {available && <MenuItem onSelect={() => { setForm({ op: "AddFolder" }); setFolderName(""); }}><Folder /> New folder</MenuItem>}
             {folder && <MenuItem onSelect={() => { setForm({ op: "RenameFolder", folder }); setFolderName(folder.name); }}>Rename folder</MenuItem>}
             {folder && can(folderChange("RemoveFolder", folder.id, "")) && <MenuItem onSelect={() => listEvent(folderChange("RemoveFolder", folder.id, ""))}>Delete folder</MenuItem>}
           </MenuContent>
         </Menu>}
       </AppHeader>
-      <div className="flex min-h-0 flex-1 flex-col px-4 pb-12">
+      <div className="flex min-h-0 flex-col px-4">
+        <TransferNotice runtime={runtime} />
         {state.folders.length > 0 && <nav aria-label="Note folders" className="flex flex-wrap gap-2 pb-2">
-          {state.filter !== 0 && <Chip onClick={() => listEvent({ type: "clearFilter" })}>{folder?.name} <X aria-label="Clear filter" /></Chip>}
           {state.folders.filter((item) => item.id !== state.filter).map((item) => <Chip key={item.id} onClick={() => listEvent({ type: "filterBy", folder: item.id })}>{item.name}</Chip>)}
         </nav>}
         {form && <form onSubmit={submit} className="flex flex-wrap items-center gap-2 pb-2">
@@ -271,19 +307,19 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
           {editor.can(reopen, "Owner") && <Button size="sm" onClick={() => void editor.send(reopen, "Owner")}>Reopen</Button>}
           {editor.can({ type: "discardDraft" }, "Owner") && <Button size="sm" variant="secondary" onClick={() => void runtime.runPromise(NoteEditor.use((writer) => writer.discard()))}>Discard</Button>}
         </div>}
-        {state.read.status === "Loading" && state.rows.length === 0 && <Spinner className="self-center py-6" label="Reading your notes" />}
-        {(state.read.status === "Failed" || state.owner === 0) && <EmptyState className="mt-6" icon={<StickyNote />} title="Notes unavailable">
-          {can({ type: "refresh" }) && <Button onClick={() => listEvent({ type: "refresh" })}>Try again</Button>}
-          {can({ type: "connect", unconnected: true }) && <Button variant="secondary" onClick={() => listEvent({ type: "connect", unconnected: true })}>Reconnect</Button>}
-        </EmptyState>}
-        {state.read.status === "Loaded" && shown.length === 0 && !Editor.waiting(writing) && <EmptyState className="mt-6" icon={<StickyNote />} title={state.filter !== 0 ? "No notes in this folder" : "No notes yet"} />}
         {state.writing.outcome === "Unknown" && <Alert variant="warn">Alpha couldn't confirm the last change</Alert>}
         {state.writing.outcome === "Refused" && <Alert variant="warn">The note or folder couldn't be changed</Alert>}
-        {pinned.length > 0 && <h2 className="px-2 pb-0.5 pt-2 text-sm font-semibold text-muted-foreground">Pinned</h2>}
-        {pinned.map(row)}
-        {pinned.length > 0 && rest.length > 0 && <h2 className="px-2 pb-0.5 pt-3 text-sm font-semibold text-muted-foreground">Notes</h2>}
-        {rest.map(row)}
       </div>
+      <NoteRows
+        state={state.read.status === "Failed" || state.owner === 0 ? "unavailable" : state.read.status === "Loaded" || state.rows.length > 0 ? "listed" : "loading"}
+        message="Notes unavailable"
+        pinned={pinned.map(row)}
+        others={rest.map(row)}
+        filter={folder?.name}
+        onClearFilter={can({ type: "clearFilter" }) ? () => listEvent({ type: "clearFilter" }) : undefined}
+        onRetry={() => void runtime.runPromise(enter())}
+      />
+      {hasDocuments && transfer.can(importText, "Owner") && <Button className="mb-5 ml-4 self-start" variant="secondary" onClick={() => void transfer.send(importText, "Owner")}><FileDown /> Import</Button>}
     </section>
   );
 }

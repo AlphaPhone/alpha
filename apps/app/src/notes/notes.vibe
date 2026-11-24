@@ -3,6 +3,9 @@ import * as Notes from "../../gen/app__notes.effect.vibe"
 import * as Editor from "../../gen/app__notes__editor.effect.vibe"
 import * as Link from "../../gen/app__notes__linkNote.effect.vibe"
 import * as Voice from "../../gen/app__notes__voice.effect.vibe"
+import * as Recorder from "../../gen/app__notes__recording.effect.vibe"
+import * as Previous from "../../gen/app__notes__previous.effect.vibe"
+import * as Transfer from "../../gen/app__notes__transfer.effect.vibe"
 import * as Trash from "../../gen/app__notes__trash.effect.vibe"
 import type { Actor } from "../../gen/app__notes__note.effect.vibe"
 import { unlinked } from "../../gen/app__notes__note.effect.vibe"
@@ -14,6 +17,9 @@ import { ownerAt } from "../platform/owner.vibe"
 import { type Job, answer, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { NoteContent, formatChanged, fromSaved, noteContent, numberOf } from "./content.vibe"
 import { NoteEditor, editing } from "./editor.vibe"
+import { ownerRecords, recording } from "./recording.vibe"
+import { ownerEarlier, previous } from "./previous.vibe"
+import { transfers } from "./transfer.vibe"
 import { sides } from "./sides.vibe"
 import { trashing } from "./trash.vibe"
 
@@ -99,7 +105,7 @@ function carry(fx: Notes.Effect): Job<Notes.Event, Agent | Notes.Machine | Edito
   }
 }
 
-effect function enter() {
+export effect function enter() {
   const content = try NoteContent
   const list = try Notes.Machine
   const editor = try Editor.Machine
@@ -114,8 +120,11 @@ effect function enter() {
   try ignore(trash.send({ type: "ownerChanged", owner }, phone))
   try ignore(link.send({ type: "ownerChanged", owner }, phone))
   try ignore(voice.send({ type: "ownerChanged", owner }, phone))
+  try ownerRecords(owner)
+  try ownerEarlier(owner)
+  try ignore((try Transfer.Machine).send({ type: "ownerChanged", owner }, phone))
   if (owner === 0) return
-  const draft = content.readDraft() catch () => undefined
+  const draft = content.readDraft(identity) catch () => undefined
   if (draft !== undefined && draft.owner === identity) {
     const held = try editor.get()
     if (Editor.waiting(held)) try content.showDraft(draft)
@@ -140,14 +149,24 @@ const opening = started(effect {
 }, "enter Notes")
 
 /** The Notes view observes these resident machines. The agent's store is opened only when Notes is requested. */
-export const notes = Layer.provideMerge(together(reacting(Notes, { carry }), editing, trashing, sides, opening), Layer.merge(noteStore, noteContent))
+export const notes = Layer.provideMerge(together(reacting(Notes, { carry }), editing, trashing, sides, recording, previous, transfers, opening), Layer.merge(noteStore, noteContent))
 
 effect function took() {
+  const prior = try Previous.Machine
+  const recorder = try Recorder.Machine
   const link = try Link.Machine
   const voice = try Voice.Machine
   const editor = try Editor.Machine
   const trash = try Trash.Machine
   const list = try Notes.Machine
+  if (Previous.canBack(try prior.get())) {
+    try ignore(prior.send({ type: "back" }, "Owner"))
+    return true
+  }
+  if (Recorder.canBack(try recorder.get())) {
+    try ignore(recorder.send({ type: "back" }, "Owner"))
+    return true
+  }
   if (Link.canBack(try link.get())) {
     try ignore(link.send({ type: "back" }, "Owner"))
     return true
