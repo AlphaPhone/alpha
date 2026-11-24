@@ -29,7 +29,7 @@ import { timerCeilingMs } from "../../gen/assistant__approvals.effect.vibe"
 import { turnTransport } from "./transport.vibe"
 import { bindingOf, textOf, unitsOf } from "./units.vibe"
 import { EmailShelf, type EmailRow } from "./email-shelf.vibe"
-import { AgentViews, type ViewDelivery } from "./views.vibe"
+import { AgentViews, voiceFieldsOf, type ViewDelivery } from "./views.vibe"
 
 /** What the composer is doing to a sent message: quoting it in a reply, or correcting it. */
 export type Target = { readonly kind: "reply"; readonly quote: Quote } | { readonly kind: "edit"; readonly messageId: string; readonly text: string; readonly requestId: string }
@@ -357,12 +357,14 @@ export const composerLayer = Layer.effect(Composer, effect {
     } : undefined
     const page = observation === undefined ? undefined : try pageForTurn(pages, observed, observation, browserTab, peer.optionalFields)
     const browserPage = page === undefined ? undefined : wirePage(page)
-    const voiceUi = statesDirectRequests(asksFirst ? "PreferenceOn" : "PreferenceOff") ? { agentActionMode: "direct-request-v1" as const } : undefined
+    const viewFields = try views.turnFields(observed, screen.observation.view)
+    const direct = statesDirectRequests(asksFirst ? "PreferenceOn" : "PreferenceOff") ? { agentActionMode: "direct-request-v1" as const } : undefined
+    // spec/assistant/views.md: the voice context names the renderer the turn's view fields name, and its saved Notes editor.
+    const voiceUi = direct === undefined && viewFields === undefined ? undefined : { ...direct, ...(viewFields === undefined ? {} : voiceFieldsOf(viewFields)) }
     const context = encodeTurnContext({
       ...(observation === undefined ? {} : { observation, ...(browserPage === undefined ? {} : { browserPage }) }),
       ...(voiceUi === undefined ? {} : { voiceUi }),
     }, { optionalFields: peer.optionalFields })
-    const viewFields = try views.turnFields(observed, screen.observation.view)
     const pageLinks = browserPage === undefined ? [] : (page?.links ?? []).map((link) => link.url)
     const userId = `local-user-${attempt}`
     const replyId = `local-reply-${attempt}`
