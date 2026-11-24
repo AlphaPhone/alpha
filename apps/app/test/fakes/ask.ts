@@ -1,30 +1,20 @@
 // spec/app/ask/index.md, "Story: Talk to my agent"
 import type { Route } from "./routes.ts";
 
-/** What the fake agent holds for Ask Alpha, and how it behaves; a journey changes it between steps. */
 export interface AskScene {
-  /** How many conversations were opened, and every text a turn was asked with. */
   opened: number;
   readonly said: string[];
-  /** Opening a conversation answers 503, as an agent that is starting does. */
   down: boolean;
-  /** A reply writes its first piece and then nothing, until its turn is stopped. */
   stalled: boolean;
-  /** The turns under way, by room: each stops its reply. */
   readonly turns: Map<string, () => void>;
-  /** What the agent keeps of each conversation, by its id, as eliza's history routes show it. */
   readonly kept: Map<string, Kept>;
-  /** Searching answers 500. */
   searchDown: boolean;
-  /** The acknowledgment the agent writes with its first tool call, before its reply. */
   acknowledgment?: string;
-  /** What each turn told the agent beside its text, as it arrived. */
   metadata?: unknown[];
   nextReplyChunks?: readonly string[];
   cloudWarmCalls: number;
 }
 
-/** One conversation as the agent keeps it: its room, title and messages. */
 export interface Kept {
   readonly roomId: string;
   readonly title: string;
@@ -37,10 +27,8 @@ export function askScene(): AskScene {
 
 const encoder = new TextEncoder();
 const frame = (data: unknown) => encoder.encode(`data: ${JSON.stringify(data)}\n\n`);
-/** What ends a turn, as eliza's agent names its messages (`.eliza/packages/agent/src/client/reply-frame.schema.vibe`, `DoneFrame`). */
 const named = (turn: number) => ({ messageId: `m${turn}`, userMessageId: `u${turn}`, agentName: "Alpha", actionResults: [] });
 
-/** A streamed reply as eliza's agent writes one: what was said back in two pieces, custom chunks, or one piece that waits to be stopped. */
 function reply(scene: AskScene, room: string, text: string, keep: (said: string) => void): Response {
   const custom = scene.nextReplyChunks;
   scene.nextReplyChunks = undefined;

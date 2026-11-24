@@ -60,6 +60,21 @@ const getShell = (runtime: VoiceRuntime) =>
 const sendShell = (runtime: VoiceRuntime, event: Shell.Event) =>
   runtime.runPromise(Effect.flatMap(Shell.Machine, (m) => m.send(event)));
 
+async function startListening(world: Scene): Promise<VoiceRuntime> {
+  const runtime = bootVoice(world);
+  await until(runtime, Voice.Machine, (s) => s.warmed);
+  await sendVoice(runtime, { type: "permissionChanged", grant: "Granted" });
+  await sendVoice(runtime, { type: "startTalking", now: untimed });
+  await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
+  return runtime;
+}
+
+async function speakUtterance(runtime: VoiceRuntime, world: Scene, text: string): Promise<void> {
+  world.voice.emitLocal?.("liveCaptureTranscript", { text, final: false });
+  await until(runtime, Voice.Machine, (s) => s.heard);
+  world.voice.emitLocal?.("liveCaptureTranscript", { text, final: true });
+}
+
 afterEach(async () => {
   while (opened.length > 0) {
     const rt = opened.pop();
@@ -132,17 +147,9 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
       "Second sentence follows immediately! ",
       "Final sentence wraps up.",
     ];
-    const runtime = bootVoice(world);
-    await until(runtime, Voice.Machine, (s) => s.warmed);
+    const runtime = await startListening(world);
 
-    await sendVoice(runtime, { type: "permissionChanged", grant: "Granted" });
-    await sendVoice(runtime, { type: "startTalking", now: untimed });
-    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
-
-    world.voice.emitLocal?.("liveCaptureTranscript", { text: "Give me an update", final: false });
-    await until(runtime, Voice.Machine, (s) => s.heard);
-    world.voice.emitLocal?.("liveCaptureTranscript", { text: "Give me an update", final: true });
-
+    await speakUtterance(runtime, world, "Give me an update");
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 1 && s.turn === 2);
 
     expect(world.voice.spoken.map((one) => ({ text: one.text, append: one.append }))).toEqual([
@@ -157,17 +164,9 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
   it("keeps voice active and the microphone open when an agent action needs review in chat, and settling review does not stop voice", async () => {
     const world = { ...scene(), phone: true };
     world.ask.nextReplyChunks = ["[APPROVAL:send_email] Draft ready for your review in chat."];
-    const runtime = bootVoice(world);
-    await until(runtime, Voice.Machine, (s) => s.warmed);
+    const runtime = await startListening(world);
 
-    await sendVoice(runtime, { type: "permissionChanged", grant: "Granted" });
-    await sendVoice(runtime, { type: "startTalking", now: untimed });
-    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
-
-    world.voice.emitLocal?.("liveCaptureTranscript", { text: "Send the draft email", final: false });
-    await until(runtime, Voice.Machine, (s) => s.heard);
-    world.voice.emitLocal?.("liveCaptureTranscript", { text: "Send the draft email", final: true });
-
+    await speakUtterance(runtime, world, "Send the draft email");
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.reviewPending && s.sent === 1);
 
     const duringReview = await getVoice(runtime);
@@ -187,31 +186,20 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
   // spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/voice/index.md, "Voice keeps talking after a navigation only when it is the one the conversation asked for; any other ends it"
   it("keeps voice and mic open across agent navigation to an app, to Home, and same-screen refresh, while owner navigation stops voice", async () => {
     const world = { ...scene(), phone: true };
-    const runtime = bootVoice(world);
-    await until(runtime, Voice.Machine, (s) => s.warmed);
-
-    await sendVoice(runtime, { type: "permissionChanged", grant: "Granted" });
-    await sendVoice(runtime, { type: "startTalking", now: untimed });
-    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
+    const runtime = await startListening(world);
 
     world.ask.nextReplyChunks = ["[NAVIGATE:Calendar] Opening Calendar."];
-    world.voice.emitLocal?.("liveCaptureTranscript", { text: "Open my calendar", final: false });
-    await until(runtime, Voice.Machine, (s) => s.heard);
-    world.voice.emitLocal?.("liveCaptureTranscript", { text: "Open my calendar", final: true });
+    await speakUtterance(runtime, world, "Open my calendar");
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.followed === placeOf("Calendar") && s.claim === 0);
     expect((await getShell(runtime)).trail.at(-1)).toBe("Calendar");
 
     world.ask.nextReplyChunks = ["[NAVIGATE:Home] Back on Home."];
-    world.voice.emitLocal?.("liveCaptureTranscript", { text: "Go home", final: false });
-    await until(runtime, Voice.Machine, (s) => s.heard);
-    world.voice.emitLocal?.("liveCaptureTranscript", { text: "Go home", final: true });
+    await speakUtterance(runtime, world, "Go home");
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.followed === placeOf(undefined) && s.claim === 0);
     expect((await getShell(runtime)).trail).toEqual([]);
 
     world.ask.nextReplyChunks = ["[NAVIGATE:Home] Refreshed Home."];
-    world.voice.emitLocal?.("liveCaptureTranscript", { text: "Refresh home", final: false });
-    await until(runtime, Voice.Machine, (s) => s.heard);
-    world.voice.emitLocal?.("liveCaptureTranscript", { text: "Refresh home", final: true });
+    await speakUtterance(runtime, world, "Refresh home");
     await until(runtime, Voice.Machine, (s) => s.sent === 3 && s.phase === "Listening" && s.mic === "On" && s.claim === 0);
 
     await sendShell(runtime, { type: "openView", view: "Notes" });

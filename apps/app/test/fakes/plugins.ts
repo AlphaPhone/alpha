@@ -10,11 +10,6 @@ import { alphaDevice } from "./update.ts";
 import { alphaConnection } from "./platform.ts";
 import { alphaVoiceCloud, elizaCloudSpeech } from "./voice.ts";
 
-/**
- * The plugins the fake phone's host registers, by the names their `@CapacitorPlugin` gives: one line per plugin, and
- * its import. Lines are only ever added, and git keeps every branch's (`.gitattributes`). An Alpha image's host
- * registers eliza's telephony plugin, and its contacts plugin where the image grants contacts.
- */
 export function plugins(world: Scene, services: { readonly agent: Answering; readonly cloud: Answering }): Record<string, Faked> {
   return {
     ElizaAgent: elizaAgent(services.agent),
