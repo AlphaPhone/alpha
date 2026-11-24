@@ -3,13 +3,14 @@ import * as maplibregl from "maplibre-gl";
 import type { GeoJSONSource, Map as MapLibre, StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Compass } from "lucide-react";
-import { useCallback, useState } from "react";
+import { use, useCallback, useState } from "react";
 import type { Basemap } from "../../../gen/maps__plane.ts";
 import { cameraAim, compassShown, failsThePlane, northUpAfterGuidance, placeZoom, resultsMaxZoom, routeMaxZoom } from "../../../gen/maps__plane.ts";
 import type { Coordinate } from "../../maps/maps.schema.vibe";
 import type { PlaneDrawing } from "../../maps/plane.vibe";
 import { Button } from "../components/ui/index.ts";
 import { tileOf, watch } from "./actions.ts";
+import { MapsDrawn } from "./map-drawing.ts";
 
 const WORLD_STYLE = "https://tiles.openfreemap.org/styles/bright";
 const OPENING: { center: [number, number]; zoom: number } = { center: [-98, 39], zoom: 2.6 };
@@ -145,9 +146,10 @@ export function MapPlane(props: MapPlaneProps) {
   const [map, setMap] = useState<MapLibre>();
   const [turn, setTurn] = useState({ bearing: 0, pitch: 0 });
   const { basemap, tileSize = 256, minZoom = 0, maxZoom = 20, generation } = props;
+  const drawn = use(MapsDrawn);
 
   const mount = useCallback((node: HTMLDivElement | null) => {
-    if (!node || basemap === "NoBasemap") return;
+    if (!node || !drawn || basemap === "NoBasemap") return;
     const protocol = `alphamaps${++protocols}`;
     maplibregl.addProtocol(protocol, async (params, abort) => {
       const match = /:\/\/tiles\/(\d{1,2})\/(\d{1,7})\/(\d{1,7})\.png$/.exec(params.url);
@@ -211,7 +213,7 @@ export function MapPlane(props: MapPlaneProps) {
       maplibregl.removeProtocol(protocol);
       setMap(undefined);
     };
-  }, [basemap, tileSize, minZoom, maxZoom, generation]);
+  }, [drawn, basemap, tileSize, minZoom, maxZoom, generation]);
 
   const northUp = () => {
     if (!map) return;

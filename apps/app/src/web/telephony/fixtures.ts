@@ -5,13 +5,14 @@ import type { Attention } from "../../../gen/telephony__attention.ts";
 import type { CallBar } from "../../../gen/telephony__callBar.ts";
 import type { Comms } from "../../../gen/telephony__comms.ts";
 import type { Contacts, Detail, Editor } from "../../../gen/telephony__contacts.ts";
-import type { Slot } from "../../../gen/telephony__drafts.ts";
+import type { Drafts, Slot } from "../../../gen/telephony__drafts.ts";
 import type { MessageRow, Messages } from "../../../gen/telephony__messages.ts";
 import type { Phone } from "../../../gen/telephony__phone.ts";
 import type { PhoneFacts } from "../../../gen/telephony__phoneInfo.ts";
 import type { Voicemail } from "../../../gen/telephony__voicemail.ts";
 import type { ReviewDetails } from "../../telephony/actions.vibe";
 import type { OpenCard } from "../../telephony/comms.vibe";
+import type { SimChoice } from "../../telephony/drafts.vibe";
 import type { UndoView } from "../../telephony/undo.vibe";
 
 const at = 1_763_800_000_000;
@@ -191,3 +192,134 @@ export const reviewChange: ReviewDetails = {
     },
   },
 };
+
+const PEOPLE = ["Maya Chen", "Sam Okafor", "Priya Natarajan", "Maximiliana Alexandrovna Konstantinopoulou-Whitfield", "Leo Brandt", "Ines Duarte"];
+const KINDS = ["MissedCall", "InboundCall", "OutboundCall"] as const;
+
+/** Recents while the first read is in flight. */
+export const recentsReading: Phone = { ...recents, reading: true, recents: [], access: "LogUnread" };
+/** A call-log read that failed: never "no recent calls". */
+export const recentsFailed: Phone = { ...recents, recents: [], notice: { tag: "ReadFailed" } };
+/** Call history read and empty. */
+export const recentsEmpty: Phone = { ...recents, recents: [] };
+/** Fifty calls, the most Recents reads, with unnamed numbers and a very long name. */
+export const recentsMany: Phone = {
+  ...recents,
+  recents: Array.from({ length: 50 }, (_, i) => ({
+    id: `r${i}`, number: `41555502${String(i).padStart(2, "0")}`, title: i % 4 === 3 ? "" : PEOPLE[i % PEOPLE.length]!, kind: KINDS[i % 3]!,
+    date: at - i * 5_400_000, fresh: i === 0, seconds: i % 3 === 0 ? 0 : 30 + i * 7,
+  })),
+};
+/** Alpha's filter over Recents, with its chip. */
+export const recentsFiltered: Phone = { ...recents, listQuery: { tag: "AlphaQuery", query: "Maya", label: "Maya" } };
+/** A dial in flight from the keypad: every key and Call locked. */
+export const keypadDialing: Phone = { ...keypad, dialing: true, notice: { tag: "Quiet" } };
+/** The Voicemail tab in front. */
+export const phoneVoicemail: Phone = { ...recents, tab: "VoicemailTab" };
+
+/** The bar over Recents with the chat closed. */
+export const commsRecents: Comms = { ...commsThread, app: "PhoneApp", subject: "RecentsSubject", key: "phone:recents:" };
+/** The bar with Alpha addressed over Recents. */
+export const commsRecentsAlpha: Comms = { ...commsRecents, height: "SheetOpen", target: "AlphaTarget" };
+/** The bar over the keypad. */
+export const commsKeypad: Comms = { ...commsRecents, subject: "KeypadSubject" };
+/** The bar over the Messages list. */
+export const commsMessagesList: Comms = { ...commsThread, subject: "ListSubject", key: "messages:list:" };
+/** The bar over the Contacts list. */
+export const commsContacts: Comms = { ...commsThread, app: "ContactsApp", subject: "ListSubject", key: "contacts:list:" };
+/** The bar over one open contact. */
+export const commsContact: Comms = { ...commsContacts, subject: "ContactSubject", key: "contacts:contact:7" };
+
+/** A long request to Alpha, kept in the bar until a turn takes it. */
+export const longRequest = "Who called me most this week, and did any of them leave a voicemail I have not listened to yet? If so, read me the transcript.";
+
+/** Contacts listed with none open. */
+export const contactsList: Contacts = {
+  ...contactOpen,
+  openId: "", detail: { tag: "NoDetail" }, detailTicket: 0,
+  rows: [
+    contactOpen.rows[0]!,
+    { id: "8", title: "Maya Ortiz", phones: ["4155550111"], emails: [], complete: true, lookup: "k8", revision: "r1" },
+    { id: "9", title: "Sam Okafor", phones: ["4155550122"], emails: ["sam@example.com"], complete: true, lookup: "k9", revision: "r1" },
+    { id: "10", title: "", phones: ["4155550133"], emails: [], complete: true, lookup: "k10", revision: "r1" },
+    { id: "11", title: "", phones: [], emails: [], complete: false, lookup: "k11", revision: "r1" },
+  ],
+};
+/** The first read in flight. */
+export const contactsLoading: Contacts = { ...contactsList, loading: true, readable: false, rows: [] };
+/** Contacts access not granted: never "no contacts". */
+export const contactsNeedAccess: Contacts = { ...contactsList, readable: false, writable: false, rows: [] };
+/** A read that failed. */
+export const contactsFailed: Contacts = { ...contactsList, failed: true, rows: [] };
+/** Contacts read and empty. */
+export const contactsEmpty: Contacts = { ...contactsList, rows: [] };
+/** A full first page, letters heading the rows, with more to load. */
+export const contactsMany: Contacts = {
+  ...contactsList,
+  more: true,
+  rows: ["Ada", "Ben", "Chloe", "Dev", "Elena", "Farah", "Gus", "Hana", "Ivan", "Jun"]
+    .flatMap((first) => ["Abara", "Brooks", "Castillo", "Dunn", "Eriksen"].map((last) => `${first} ${last}`))
+    .map((title, i) => ({ id: String(100 + i), title, phones: [`41555503${String(i).padStart(2, "0")}`], emails: [], complete: true, lookup: `k${100 + i}`, revision: "r1" })),
+};
+/** Alpha's filter over Contacts, with its chip and count. */
+export const contactsFiltered: Contacts = { ...contactsList, chip: "Climbing", query: "climbing", rowsQuery: "climbing", rows: contactsList.rows.slice(0, 2) };
+/** A lost write answer over the list: Add is held until an explicit read. */
+export const contactsUnsettled: Contacts = { ...contactsList, gate: "WriteUnsettled", lastWrite: { tag: "Wrote", outcome: "WriteUnknown" }, notice: "OutcomeUnknown" };
+/** The editor open on a contact that changed on the phone since it opened. */
+export const contactEditingStale: Contacts = { ...contactOpen, editor: editingStale, notice: "ChangedSinceShown" };
+
+/** Conversations while the first read is in flight. */
+export const threadsLoading: Messages = { ...threads, busy: true, access: "SmsUnread", threads: [], more: false };
+/** Messages read and empty. */
+export const threadsEmpty: Messages = { ...threads, threads: [], more: false };
+/** A long list: groups, unnamed numbers, a long snippet and a long name. */
+export const threadsMany: Messages = {
+  ...threads,
+  threads: Array.from({ length: 40 }, (_, i) => ({
+    id: `thread:${i + 1}`, title: i % 5 === 4 ? "" : PEOPLE[i % PEOPLE.length]!, addresses: i % 7 === 6 ? ["4155550100", "4155550111", "4155550122"] : [`41555504${String(i).padStart(2, "0")}`],
+    snippet: i === 1 ? "Can you pick up the climbing shoes on the way, and the chalk bag from the front desk? I left both by the lockers near the bouldering wall." : "See you at five",
+    date: at - i * 3_600_000, unread: i < 3, complete: true,
+  })),
+};
+/** A new message: one recipient added, the contact picker open on a query. */
+export const composing: Messages = {
+  ...threads,
+  view: { tag: "Composing" },
+  picker: { tag: "PickerOpen", query: "sa", busy: false, needsAccess: false, more: false, choices: [
+    { key: "9:4155550122", title: "Sam Okafor", number: "4155550122" },
+    { key: "12:4155550144", title: "Sasha Ivanova", number: "4155550144" },
+  ] },
+};
+/** One conversation open, an earlier delete unconfirmed and its menu open, one send still in flight. */
+export const inThread: Messages = {
+  ...threads,
+  view: { tag: "InThread", threadId: "thread:1", addresses: ["4155550100"] },
+  rows: [
+    { ...receivedText, id: "sms:0", date: at - 600_000, body: "Are we still on for the gym tonight? I booked the 6pm slot but can move it if the traffic on the bridge is as bad as yesterday." },
+    receivedText, deliveredText, sentPictures,
+  ],
+  more: true,
+  menu: { tag: "MenuOpen", rowId: "sms:1", confirm: false },
+  uncertain: ["sms:1"],
+  deleteNotice: { tag: "DeleteUncertain" },
+  outgoing: [{ operationId: "op9", toThread: "thread:1", body: "Bringing the ropes", startedAt: at - 5_000, createdAt: 0, progress: "Sending" }],
+};
+/** The same conversation with nothing pending. */
+export const inThreadQuiet: Messages = { ...inThread, menu: { tag: "NoMenu" }, uncertain: [], deleteNotice: { tag: "NoDeleteNotice" }, outgoing: [] };
+
+/** No drafts and no requests to Alpha. */
+export const noDrafts: Drafts = { slots: [], requests: [], ownerSends: 0 };
+/** Alpha's draft waiting in the open conversation. */
+export const draftsAlpha: Drafts = { ...noDrafts, slots: [alphaDraft] };
+/** The new message's slot with one recipient. */
+export const draftsComposing: Drafts = { ...noDrafts, slots: [{ ...alphaDraft, thread: "new", recipients: ["4155550111"], text: "", author: "ByOwner", undo: { tag: "NoUndo" } }] };
+/** The owner's own text with two pictures attached. */
+export const draftsPictures: Drafts = {
+  ...noDrafts,
+  slots: [{
+    ...alphaDraft, text: "Here are the photos from Saturday", author: "ByOwner", undo: { tag: "NoUndo" },
+    pictures: [{ pictureName: "IMG_2041.jpg", contentType: "image/jpeg", bytes: 412_000 }, { pictureName: "IMG_2042.jpg", contentType: "image/jpeg", bytes: 388_000 }],
+  }],
+};
+/** Two SIMs to choose from when no default SMS SIM is set. */
+export const simChoices: readonly SimChoice[] = [{ id: 1, label: "Personal" }, { id: 2, label: "Work" }];

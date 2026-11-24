@@ -87,4 +87,8 @@ public final class AlphaTelephonyAccess {
  /** The "Mark as read" broadcast the shared {@link MmsResultReceiver} answers, and its extras. */
  public static final String ACTION_MARK_READ = MmsResultReceiver.ACTION_MARK_READ, EXTRA_READ_THREAD = MmsResultReceiver.EXTRA_THREAD,
   EXTRA_READ_THROUGH = MmsResultReceiver.EXTRA_THROUGH, EXTRA_READ_NOTICE = MmsResultReceiver.EXTRA_NOTICE;
+
+ // ---- Message deletion (MessageDeletion) ----------------------------------------------------------
+ /** The {@code {status, message}} answer of a selected-message deletion ({@link MessageDeletion#result}). */
+ public static com.getcapacitor.JSObject deletionResult(MessageDeletion.Reference target, String status) { return MessageDeletion.result(target, status); }
 }

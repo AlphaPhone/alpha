@@ -1,6 +1,5 @@
 // spec/assistant/reply.md, "Story: Read a reply with its cards"; spec/assistant/send.md, "Story: Send a message and know what happened to it"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/search.md, "Story: Find something I said in an earlier chat"; spec/assistant/recovery.md, "Restart is offered only while the resident is refused and holds a reviewable recovery, once per tap"; spec/maps/cards.md, "A tap sends one answer while the composer is quiet; a draft or an edit says why it waits; a failed send asks again"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"; spec/assistant/send.md, "A dictated draft sent exactly as inserted is timed as a voice turn, and its reply is never spoken"
 import { Effect } from "effect";
-import { History, MessageSquarePlus, Plus, Search } from "lucide-react";
 import { useState } from "react";
 import { initial as draftsStart } from "../../../gen/assistant__draft.ts";
 import { useMachine as useDrafts } from "../../../gen/assistant__draft.react.ts";
@@ -24,13 +23,11 @@ import { unitsOf } from "../../assistant/units.vibe";
 import { MapsHandoff } from "../../maps/handoff.vibe";
 import { ApprovalReviews } from "../../calendar/approvals.vibe";
 import { newId } from "../../platform/ids.ts";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, Button, ScrollArea } from "../components/ui/index.ts";
 import { DictationControl } from "../voice/DictationControl.tsx";
 import { useVoiceTalk } from "../voice/ConversationControl.tsx";
 import { ReviewRows } from "../telephony/ReviewRows.tsx";
 import { ChatSearchPanel } from "./ChatSearchPanel.tsx";
-import { ComposerBar } from "./ComposerBar.tsx";
-import { Transcript } from "./Transcript.tsx";
+import { ChatPanelView } from "./ChatPanelView.tsx";
 import { dictationTargetNow, emergencyNow, filesStream, inferenceOf, noOffer, ownAddressNow, restartBusyStream, restartStream, targetStream, transcriptStream } from "./services.ts";
 import { act, perform, useServiceStream } from "../shell/services.ts";
 import { runtime } from "./runtime.ts";
@@ -49,7 +46,7 @@ const notices = {
 } as const;
 
 /**
- * The assistant's conversation: transcript, cards and composer, with the chat actions menu and search.
+ * The assistant's conversation over the runtime: transcript, cards and composer, with the chat actions menu and search.
  * @model spec/assistant/send.md
  */
 export function ChatPanel({ open, onTalk }: ChatPanelProps) {
@@ -102,59 +99,42 @@ export function ChatPanel({ open, onTalk }: ChatPanelProps) {
     if (text !== "") act(Effect.flatMap(Effect.service(VoiceConversation), (voice) => voice.readAloud(text)));
   };
   return (
-    <section aria-label="Assistant" className="flex h-full min-h-0 flex-col">
-      <header className="flex items-center justify-between px-3 py-2">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild><Button size="icon" variant="ghost" aria-label="Chat actions" disabled={sends.typing}><Plus className="size-5" /></Button></DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuItem onSelect={pick}><Plus aria-hidden className="size-4" />Attach media</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => act(Effect.flatMap(Effect.service(ChatSearch), (search) => search.start()))}><Search aria-hidden className="size-4" />Search chat</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => composer((c) => c.open(null, false))}><MessageSquarePlus aria-hidden className="size-4" />New chat</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => open("assistant", "activity")}><History aria-hidden className="size-4" />Agent activity</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </header>
-      {searching
-        ? <ChatSearchPanel />
-        : (
-          <ScrollArea className="min-h-0 flex-1 px-4">
-            <Transcript
-              rows={transcript.rows} typing={sends.typing} draftEmpty={text.trim() === ""} canFork={transcript.conversation !== null} cloud={inference.provider}
-              emergency={emergencyNow()} ownAddress={ownAddressNow()} busyCard={busyCard} now={now} emptyText={copy.emptyChat}
-              onQuote={(quote) => composer((c) => c.aim({ kind: "reply", quote }))}
-              onEdit={(row) => { mapsComposer(text.trim() !== "", true); composer((c) => c.aim({ kind: "edit", messageId: row.id, text: row.text, requestId: newId() })); }}
-              onApprove={approve} onDecline={decline}
-              onOpenCard={(card) => open(card.destination ?? "home")}
-              onChoose={choose}
-              onListen={listen}
-              onOpenChange={(row) => open(row.app, row.route)}
-              onPlan={plan}
-              onOpenRun={(workflowId, runId) => open("workflows", `${workflowId}/${runId}`)}
-              onReviewApproval={(requestId) => act(Effect.flatMap(Effect.service(ApprovalReviews), (reviews) => reviews.open(requestId)))}
-              onOpenMap={(card, ordinal) => act(Effect.flatMap(Effect.service(MapsHandoff), (maps) => maps.openCard(card, offerOf(ordinal))))}
-              onEmail={onEmail}
-            />
-            <ReviewRows />
-          </ScrollArea>
-        )}
-      {voice.view}
-      <ComposerBar
-        text={text} files={files} typing={sends.typing} canSend={sendable} unsettled={draftUnsettled(drafts)}
-        notice={notices[drafts.notice]} target={target}
-        disclosure={disclosed(inference.where) ? copy.hostedDisclosure(inference.provider) : undefined}
-        onText={(value) => { mapsComposer(value.trim() !== "", target?.kind === "edit"); composer((c) => c.edit(value)); }}
-        onSend={() => composer((c) => c.send())}
-        onStop={() => composer((c) => c.stop())}
-        onTalk={voice.talk}
-        onAttach={pick}
-        onRemoveFile={(id) => act(Effect.flatMap(Effect.service(ChatAttachments), (attachments) => attachments.remove(id)))}
-        onClearTarget={() => { mapsComposer(text.trim() !== "", false); composer((c) => c.aim(undefined)); }}
-        onReviewUnsettled={(restore) => { void sendDraft({ type: "reviewUnsettled", restore }); }}
-        dictation={<DictationControl target={dictationTargetNow()} />}
-        restartOffer={restartOffer}
-        restartBusy={restartBusy}
-        onRestart={() => act(Effect.flatMap(Effect.service(AgentRestart), (restart) => restart.restart()))}
-      />
-    </section>
+    <ChatPanelView
+      rows={transcript.rows} typing={sends.typing} text={text} files={files} target={target}
+      canSend={sendable} unsettled={draftUnsettled(drafts)} notice={notices[drafts.notice]}
+      disclosure={disclosed(inference.where) ? copy.hostedDisclosure(inference.provider) : undefined}
+      canFork={transcript.conversation !== null} cloud={inference.provider}
+      emergency={emergencyNow()} ownAddress={ownAddressNow()} busyCard={busyCard} now={now}
+      restartOffer={restartOffer} restartBusy={restartBusy}
+      searching={searching}
+      search={<ChatSearchPanel />}
+      reviews={<ReviewRows />}
+      voice={voice.view}
+      dictation={<DictationControl target={dictationTargetNow()} />}
+      onAttach={pick}
+      onSearch={() => act(Effect.flatMap(Effect.service(ChatSearch), (search) => search.start()))}
+      onNewChat={() => composer((c) => c.open(null, false))}
+      onActivity={() => open("assistant", "activity")}
+      onQuote={(quote) => composer((c) => c.aim({ kind: "reply", quote }))}
+      onEdit={(row) => { mapsComposer(text.trim() !== "", true); composer((c) => c.aim({ kind: "edit", messageId: row.id, text: row.text, requestId: newId() })); }}
+      onApprove={approve} onDecline={decline}
+      onOpenCard={(card) => open(card.destination ?? "home")}
+      onChoose={choose}
+      onListen={listen}
+      onOpenChange={(row) => open(row.app, row.route)}
+      onPlan={plan}
+      onOpenRun={(workflowId, runId) => open("workflows", `${workflowId}/${runId}`)}
+      onReviewApproval={(requestId) => act(Effect.flatMap(Effect.service(ApprovalReviews), (reviews) => reviews.open(requestId)))}
+      onOpenMap={(card, ordinal) => act(Effect.flatMap(Effect.service(MapsHandoff), (maps) => maps.openCard(card, offerOf(ordinal))))}
+      onEmail={onEmail}
+      onText={(value) => { mapsComposer(value.trim() !== "", target?.kind === "edit"); composer((c) => c.edit(value)); }}
+      onSend={() => composer((c) => c.send())}
+      onStop={() => composer((c) => c.stop())}
+      onTalk={voice.talk}
+      onRemoveFile={(id) => act(Effect.flatMap(Effect.service(ChatAttachments), (attachments) => attachments.remove(id)))}
+      onClearTarget={() => { mapsComposer(text.trim() !== "", false); composer((c) => c.aim(undefined)); }}
+      onReviewUnsettled={(restore) => { void sendDraft({ type: "reviewUnsettled", restore }); }}
+      onRestart={() => act(Effect.flatMap(Effect.service(AgentRestart), (restart) => restart.restart()))}
+    />
   );
 }

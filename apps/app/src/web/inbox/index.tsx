@@ -10,8 +10,8 @@ import { MailNoticesShell } from "../../inbox/notices.vibe";
 import { inboxBack } from "../../inbox/back.vibe";
 import { Notices } from "../../shell/notices.vibe";
 import type { AppId, AppScreen, AppSurface } from "../app-screen.ts";
-import { Button } from "../components/ui/index.ts";
 import { InboxScreen } from "./InboxScreen.tsx";
+import { MailAttentionView } from "./MailAttentionView.tsx";
 import { NoticeAskSheet } from "./NoticeAskSheet.tsx";
 import { askFailure, composerRefusal } from "./messages.ts";
 import { runtime } from "./runtime.ts";
@@ -33,13 +33,7 @@ function NoticeAskSurface(_: { readonly open: (app: AppId, route?: string) => vo
 /** Home's word about waiting mail: the unread count only, opening the Inbox. */
 function MailAttentionSurface({ open }: { readonly open: (app: AppId, route?: string) => void }) {
   const { state: mailbox = mailboxInitial } = useMailbox(runtime);
-  const attention = attentionOf(mailbox);
-  if (attention.phase !== "AttentionReady" || attention.unread === 0) return null;
-  return (
-    <Button variant="secondary" aria-label={`Open Inbox: ${attention.unread}${attention.more ? "+" : ""} unread emails`} onClick={() => open("inbox")}>
-      <Mail aria-hidden />{attention.unread}{attention.more ? "+" : ""}
-    </Button>
-  );
+  return <MailAttentionView attention={attentionOf(mailbox)} onOpen={() => open("inbox")} />;
 }
 
 /** Android's Back in front of the Inbox: true when the composer, an attachment, a message, a selection or a search took it; a draft that could not be set aside says why. */

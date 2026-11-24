@@ -1,4 +1,4 @@
-// spec/workflows/automations.md, "Allow another releases a held change only after the owner confirms it"; spec/workflows/digests.md, "Run now is offered only for a missed occurrence the agent offers, never for an overlap or an unavailable source"; spec/workflows/digests.md, "Pausing or resuming keeps the saved time, zone and source"; spec/workflows/digestSources.md, "Removing Google access first shows every saved source and digest that reads through it, and a changed list asks again"; spec/workflows/lifecycle.md, "A change is reviewed before it is kept, never while a run is going, and an interrupted run is stopped first"; spec/workflows/deviceSteps.md, "A decision takes two taps on the same choice, and the second rereads the review before acting"; spec/workflows/vocabulary.md, "A run status reads as one of Alpha's run words, and an unknown status reads as unknown"
+// spec/workflows/automations.md, "Allow another releases a held change only after the owner confirms it"; spec/workflows/digests.md, "Run now is offered only for a missed occurrence the agent offers, never for an overlap or an unavailable source"; spec/workflows/digests.md, "Pausing or resuming keeps the saved time, zone and source"; spec/workflows/digestSources.md, "Removing Google access first shows every saved source and digest that reads through it, and a changed list asks again"; spec/workflows/lifecycle.md, "A change is reviewed before it is kept, never while a run is going, and an interrupted run is stopped first"; spec/workflows/deviceSteps.md, "A decision takes two taps on the same choice, and the second rereads the review before acting"; spec/workflows/vocabulary.md, "A run status reads as one of Alpha's run words, and an unknown status reads as unknown"; spec/workflows/agentSchedules.md, "An ended item offers only Reopen; any other offers Run now, Edit schedule, Snooze 10 minutes, Complete and Dismiss"
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
 
@@ -78,3 +78,12 @@ export const workflowsGoogleRemovalShowsItsImpact = always(() => {
   const s = googleReview.current;
   return s === null || s.listed > 0 || s.none;
 });
+
+const endedItems = extract(({ document }) =>
+  Array.from(document.querySelectorAll("article[aria-label]")).every((item) => {
+    const words = Array.from(item.querySelectorAll("button")).map((button) => button.textContent?.trim() ?? "");
+    return !words.includes("Reopen") || !words.some((word) => ["Run now", "Edit schedule", "Snooze 10 minutes", "Complete", "Dismiss"].includes(word));
+  }));
+
+/** An ended item offers Reopen and nothing that would run, reschedule or settle it. */
+export const workflowsEndedItemOffersOnlyReopen = always(() => endedItems.current);

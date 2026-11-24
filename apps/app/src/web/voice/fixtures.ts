@@ -28,6 +28,13 @@ export const retrying: Conversation = { ...listening, shown: "Retrying", retries
 /** A conversation stopped after it could not go on. */
 export const failed: Conversation = { ...listening, shown: "Failed", route: "Direct", cartesiaDisclosed: true };
 
+/** A conversation that stopped for an action card the owner reviews in the chat. */
+export const awaitingReview: Conversation = { ...listening, shown: "AwaitingReview", notice: "ReviewInChat" };
+/** A conversation stopping because a call started. */
+export const retiring: Conversation = { ...listening, shown: "Retiring", notice: "PausedForCall" };
+/** Voice off after a call paused it. */
+export const pausedForCall: Conversation = { ...listening, shown: "Off", notice: "PausedForCall" };
+
 /** What Eliza Cloud receives while voice uses it. */
 export const cloudSends: Sends = sendsOf("Cloud");
 /** What a Cartesia key receives while voice uses it. */
