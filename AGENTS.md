@@ -9,7 +9,7 @@ tests, lint, the production build into `web-dist` and its bundle audit). PR CI r
 locally before finalising a PR, and state in the PR description that they were run and are final;
 CI runs them, with `pnpm check`, only when develop is promoted to main.
 This is one independent product. Do not import the other product's UI or identity.
-`vendor/eliza` is a pinned upstream submodule (elizaOS/eliza `vibestack`). Never edit its checkout
+`vendor/eliza` is a pinned upstream submodule (elizaOS/eliza `develop`). Never edit its checkout
 as a shortcut: make shared changes upstream and advance to a reviewed commit.
 `upstream.lock.json` records the shared source revision and where each upstream source lives
 (`apps/app`, `packages/os`, `packages/agent`, `packages/cloud`). Stay on the latest upstream:

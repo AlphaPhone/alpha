@@ -53,6 +53,6 @@ jobs:
           path: test-results/browser-proof/renderer/
           retention-days: 3
           if-no-files-found: error
-      # Recorded vibestack compare; warns (never networks) when the upstream branch cannot reach the pin.
+      # Recorded upstream compare; warns (never networks) when the upstream branch cannot reach the pin.
       - name: Report upstream reachability
         run: node --conditions=eliza-source --import vibelang/register scripts/verify-upstream.ts --reachability-only
