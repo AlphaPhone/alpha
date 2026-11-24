@@ -1,0 +1,30 @@
+// spec/telephony/actions.md, "A view change that shows the outcome waits for the reply that carries it"
+import type { ExecutorCall } from "@elizaos/agent/client"
+import { assert, it } from "@effect/vitest"
+import { AssistantHost } from "../../src/assistant/host.vibe"
+import { operationPorts } from "../../src/telephony/operations.vibe"
+import { TelephonyCalls } from "../../src/telephony/ports.vibe"
+import { fakePhone } from "./fakes.vibe"
+
+// spec/telephony/actions.md, "A view change that shows the outcome waits for the reply that carries it"
+it.live("a keypad step opens the way the assistant opens a view, so a voice conversation claims it instead of being left", () => effect {
+  const fake = fakePhone()
+  const opened: string[] = []
+  const host = Layer.succeed(AssistantHost, {
+    openView: (app: string, route?: string) => sync(() => { opened.push(`${app}:${route ?? ""}`); return true }),
+  } as unknown as AssistantHost.Shape)
+  const calls = Layer.succeed(TelephonyCalls, { of: () => succeed({ reviewed: true, ownerText: "open the keypad with 415-555-0100" }), settled: () => Effect.void })
+  provide Layer.mergeAll(fake.layer, host, calls) {
+    const ports = try operationPorts
+    const call = { proposalId: "p-keypad", operationId: "op-keypad", attemptId: 1 } as unknown as ExecutorCall
+    const keypad = { type: "phone_keypad", number: "4155550100" }
+    const ran = try promise(() => ports.execute(keypad, call))
+    const before = [...opened]
+    ports.present?.(keypad, call)
+    try sleep("30 millis")
+    try Effect.try(() => assert.deepStrictEqual(
+      { ran: (ran as { readonly kind?: string } | undefined)?.kind, before, opened, plain: fake.calls.filter((c) => c.startsWith("navigation.open:")) },
+      { ran: "applied", before: [], opened: ["phone:keypad:4155550100"], plain: [] },
+    ))
+  }
+})

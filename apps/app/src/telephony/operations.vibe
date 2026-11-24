@@ -4,7 +4,7 @@ import type { Op, Target } from "../../gen/assistant__review.effect.vibe"
 import type { Result } from "../../gen/assistant__receipts.effect.vibe"
 import type { Settled } from "../../gen/telephony__actions.effect.vibe"
 import type { OperationPorts } from "../assistant/review.vibe"
-import { Navigation } from "../shell/navigation.vibe"
+import { AssistantHost } from "../assistant/host.vibe"
 import { AlreadyRan, composeTargetOf, contactNumbersGrounded, contactNumbersOf, grounded, NotATelephonyOperation, telephonyOperationOf, TelephonyActions, type Present, type Refusal, type TelephonyOperation, type TelephonyType } from "./actions.vibe"
 import { TelephonyBridges } from "./bridges.vibe"
 import { TelephonyCalls } from "./ports.vibe"
@@ -190,7 +190,7 @@ export const operationPorts = effect {
   const actions = try TelephonyActions
   const bridges = try TelephonyBridges
   const calls = try TelephonyCalls
-  const navigation = try Navigation
+  const host = try AssistantHost
   const settled = new Map<string, RunOutcome>()
   const shows = new Map<string, Present>()
 
@@ -207,9 +207,10 @@ export const operationPorts = effect {
     if (shows.size > KEPT) shows.delete(shows.keys().next().value!)
   }
 
+  /** Opens the view as the assistant does: a running voice conversation claims it and keeps talking there, and the chat keeps its height. */
   effect function showAfterReply(call: ExecutorCall, present: Present) {
     try calls.settled(call)
-    navigation.open(present.app, present.route) catch () => false
+    host.openView(present.app, present.route) catch () => false
   }
 
   effect function run(operation: unknown, call: ExecutorCall) {
