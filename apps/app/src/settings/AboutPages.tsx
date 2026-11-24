@@ -83,7 +83,7 @@ export function Problems({ runtime, common }: AboutProps) {
     <ConfirmDialog
       open={asking && can(clear)}
       title="Clear the problem log?"
-      confirmLabel="Clear"
+      confirmLabel="Clear log"
       destructive
       onConfirm={() => {
         setAsking(false);

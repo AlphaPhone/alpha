@@ -213,8 +213,12 @@ describe("Settings", () => {
     await press("Developer");
     await press("Problem log");
     await until(alpha, machines, Developer.Machine, (s) => s.log.read.status === "Loaded" && s.problems === 2);
-    // spec/app/settings/developer.md, "Clear is offered only for a log with problems, one at a time; once the startup area answers, the log is read again"
+    // spec/app/settings/developer.md, "Clear is offered only for a log with problems, one at a time; once the startup area answers, the log is read again": Clear asks first, and backing out clears nothing.
     await press("Clear");
+    await press("Cancel");
+    expect(world.settings.crashes.length).toBe(2);
+    await press("Clear");
+    await press("Clear log");
     await until(alpha, machines, Developer.Machine, (s) => s.log.read.status === "Loaded" && s.problems === 0);
     expect([world.settings.crashes, Boolean(button("Clear"))]).toEqual([[], false]);
   });
