@@ -24,12 +24,14 @@ import type { Machine as SearchMachine } from "../../gen/app__assistant__search.
 import { useMachine as useSearch } from "../../gen/app__assistant__search.react.ts";
 import { type Machine as ShellMachine, showing } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
+import type { Machine as VoiceMachine } from "../../gen/app__voice.effect.vibe";
+import { useMachine as useVoice } from "../../gen/app__voice.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { freedom } from "./assistant.vibe";
 import { Talk } from "./talk.vibe";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | Talk, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | VoiceMachine | Talk, unknown>;
 }
 
 function turnOf(talking: Talking, label: string): AssistantTurnNoteProps["status"] | undefined {
@@ -104,6 +106,7 @@ export function Assistant({ runtime }: AssistantProps) {
   const reply = useReply(runtime);
   const shell = useShell(runtime);
   const dock = useDock(runtime);
+  const voice = useVoice(runtime);
   const board = runtime.runSync(Effect.map(Talk, (talk) => talk.board));
   const seen = useSyncExternalStore((listener) => board.subscribe(listener), () => board.snapshot());
   const [listing, setListing] = useState(false);
@@ -121,6 +124,8 @@ export function Assistant({ runtime }: AssistantProps) {
   const status = turnOf(talking, seen.label);
   const notice = noticeOf(writing);
   const check = { type: "checkForReply" } as const;
+  const talk = { type: "startTalking", now: untimed } as const;
+  const stopTalking = { type: "stop", keyboard: false } as const;
   const checkable = conversation.can(check) && (talking.turn.send.outcome === "Unknown" || talking.turn.reply === "Stopped" || talking.check === "LookLater" || writing.unsettled);
   const settledLine = (id: string) => !id.startsWith("sent ") && !inFlight(talking.turn) && !pending(talking);
 
@@ -267,6 +272,8 @@ export function Assistant({ runtime }: AssistantProps) {
           onOpen: !open ? () => openWithFocus(true) : undefined,
           onSend: sendable && !inFlight(talking.turn) ? send : undefined,
           onStop: conversation.can({ type: "stop" }) ? () => void conversation.send({ type: "stop" }) : undefined,
+          onTalk: voice.can(talk) ? () => void voice.send(talk) : undefined,
+          onStopTalking: voice.can(stopTalking) ? () => void voice.send(stopTalking) : undefined,
           stopping: talking.turn.stopping,
           onFocusField: () => openWithFocus(false),
           onClick: !open ? (event) => {

@@ -26,6 +26,7 @@ export const meta: ComponentMeta<AssistantComposerProps> = {
     Writing: { value: "What is on my calendar on Friday?", onSend },
     "Send not offered": { value: "What is on my calendar on Friday?" },
     "Reply in flight": { value: "", onStop },
+    Talking: { value: "", onStopTalking: fn() },
     Stopping: { value: "", stopping: true },
     Bar: { variant: "bar", value: "", onOpen: fn() },
     "Files and a quote": {

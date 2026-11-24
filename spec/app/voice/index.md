@@ -55,7 +55,7 @@ pure val initial: Voice = {
 pure val sessionValues = Set(1, 2, 3, 4, 5)
 pure val turnValues = Set(1, 2, 3, 4, 5)
 pure val placeValues = Set(1, 2)
-pure val keyValues = Set(1, 2)
+pure val keyValues = Set(0, 1, 2)
 pure val nowValues = Set(0, 30, 90, 700)
 pure val waitValues = Set(0, 20, 120)
 pure val weight_micOpened = 15
@@ -694,8 +694,11 @@ pure def sometimesFollowedAgentNavigationWhileListening(v: Voice): bool = v.phas
 
 ### Signing in, out or to another account changes the route, invalidates warmup, and ends a running conversation
 
+An account or provider key is told with its key, and signing out with none.
+
 ```quint
-pure def canAccountChanged(v: Voice, account: R::Account, key: int): bool = key > 0
+pure def canAccountChanged(v: Voice, account: R::Account, key: int): bool =
+  if (account == R::SignedOut) key == 0 else key > 0
 
 pure def accountChanged(v: Voice, account: R::Account, key: int): Change =
   val signedIn = { ...v, warmed: false, route: R::changeAccount(v.route, account, key) }

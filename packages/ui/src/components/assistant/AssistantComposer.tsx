@@ -43,6 +43,8 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
   onAttach?: () => void;
   /** Starts a spoken turn; the voice area owns it. */
   onTalk?: () => void;
+  /** Ends the spoken conversation running; offered in Talk's place while one runs. */
+  onStopTalking?: () => void;
   /** Opens the conversation from the bar. */
   onOpen?: () => void;
   /** Called when the field takes focus: on the bar this opens Ask Alpha as a sheet. */
@@ -66,7 +68,7 @@ const reasons = { away: "Alpha cannot be reached", sensitive: "This screen is pr
  */
 export function AssistantComposer({
   variant = "sheet", value, onValueChange, closed = false, notice, unavailable, attachments = [], limit = 4, quote, editing = false, lift,
-  onSend, onStop, stopping = false, onAttach, onTalk, onOpen, onFocusField, fieldRef, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
+  onSend, onStop, stopping = false, onAttach, onTalk, onStopTalking, onOpen, onFocusField, fieldRef, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
 }: AssistantComposerProps) {
   const written = value.trim() !== "" || attachments.length > 0;
   const bar = variant === "bar";
@@ -93,7 +95,9 @@ export function AssistantComposer({
           onFocus={onFocusField}
           className="max-h-40 min-w-0 flex-1 touch-auto rounded-full border-0 bg-transparent px-2"
         />
-        {onStop || stopping ? (
+        {onStopTalking ? (
+          <Button size="icon" aria-label="Stop talking" aria-pressed className="bg-alpha text-alpha-foreground hover:bg-alpha/90" onClick={onStopTalking}><Mic /></Button>
+        ) : onStop || stopping ? (
           <Button size="icon" aria-label="Stop reply" loading={stopping} className="bg-foreground text-background hover:bg-foreground/90" onClick={onStop}><Square fill="currentColor" /></Button>
         ) : written ? (
           <Button size="icon" aria-label="Send" disabled={!onSend} onClick={onSend}><ArrowUp /></Button>

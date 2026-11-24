@@ -24,6 +24,12 @@ export interface RecordedClip {
   readonly recordingId: string
 }
 
+/** Who the phone's sign-in says holds its Cloud key: an account, by the id of its key, no one, or unknown where it could not be read. */
+export type CloudSignIn =
+  | { readonly kind: "signedIn"; readonly credential: string }
+  | { readonly kind: "signedOut" }
+  | { readonly kind: "unknown" }
+
 module capacitor {
   import { registerPlugin } from "@capacitor/core"
   import type { ElizaCloudSpeechPlugin } from "@elizaos/os/bridges/definitions/voice"
@@ -99,6 +105,8 @@ export service VoiceBridge {
   streamTimings(): unknown!!
   probeStatus(ttsOnly: boolean): SpeechStatus!!
   invalidateCache(): void!!
+  /** Forget the Cloud key read for the account before, and the relay session made under it while none runs. */
+  forgetAccount(): void!!
   holdEngine(): boolean!!
   releaseEngineHold(): void!!
   openMic(session: number, network: boolean): boolean!VoiceBridgeFailed
@@ -107,6 +115,9 @@ export service VoiceBridge {
   hush(turn: number): void!!
   shut(session: number): boolean!!
   readonly events: Stream.Stream<VoiceEvent>
+  account(): CloudSignIn!!
+  /** Each sign-in on the phone that settles on an account. */
+  readonly signIns: Stream.Stream<void>
   startRecording(ticket: number): RecordedClip!VoiceBridgeFailed
   transcribe(ticket: number, network: boolean): string!VoiceBridgeFailed
   abandon(ticket: number): void!!
@@ -114,6 +125,7 @@ export service VoiceBridge {
 
 const LOCAL_PLUGIN = "AlphaVoiceCloud"
 const CLOUD_STREAM_PLUGIN = "ElizaCloudSpeech"
+const SIGN_IN_PLUGIN = "ElizaSignIn"
 /** The cloud the phone signs in to, whose account the relay speaks for. */
 const CLOUD_ENVIRONMENT = "production" as EnvironmentName
 /** How long a background call to the relay, a warm-up or its timing records, may run before it is dropped. */
@@ -187,6 +199,17 @@ effect function signedInKey(accounts: ReturnType<typeof signInAccounts>): Creden
   })
   if (status.account.kind !== "signedIn") throw new VoiceBridgeFailed({ method: "status", cause: "signed-out" })
   return status.account.credentialId
+}
+
+/** Each sign-in the phone settles on an account, as eliza's sign-in client hears it. */
+function settledSignIns(): Stream.Stream<void> {
+  return Stream.callback<void>((queue) => effect {
+    if (!registered(SIGN_IN_PLUGIN)) return
+    const handle = try Effect.orElseSucceed(tryPromise(() => signInAccounts().addListener("signInSettled", (receipt) => {
+      if (receipt.verdict.kind === "SignedInAs") Queue.offerUnsafe(queue, undefined)
+    })), () => undefined)
+    try addFinalizer(() => handle === undefined ? Effect.void : ignore(tryPromise(() => handle.remove())))
+  })
 }
 
 export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
@@ -401,6 +424,10 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       cachedStatus = undefined
       cloudKey = undefined
     }),
+    forgetAccount: () => sync(() => {
+      cloudKey = undefined
+      if (activeSession === 0) cloudStream = undefined
+    }),
     holdEngine: () => registered(LOCAL_PLUGIN)
       ? Effect.orElseSucceed(Effect.map(tryPromise(() => localPlugin().holdSpeechEngine({})), (res) => res.held === true), () => false)
       : succeed(false),
@@ -413,6 +440,13 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     hush,
     shut,
     events: makeNativeEvents(eventSubscribers, () => activeSession),
+    account: () => registered(SIGN_IN_PLUGIN)
+      ? Effect.orElseSucceed(
+        Effect.map(tryPromise(() => signInAccounts().status({ environment: CLOUD_ENVIRONMENT })), (status): CloudSignIn =>
+          status.account.kind === "signedIn" ? { kind: "signedIn", credential: status.account.credentialId } : { kind: "signedOut" }),
+        (): CloudSignIn => ({ kind: "unknown" }))
+      : succeed<CloudSignIn>({ kind: "unknown" }),
+    signIns: settledSignIns(),
     effect startRecording(ticket: number): RecordedClip!VoiceBridgeFailed {
       if (!registered(LOCAL_PLUGIN)) throw new VoiceBridgeFailed({ method: "startRecording", cause: "no-voice-plugin" })
       const started = try tryPromise({
@@ -461,6 +495,7 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
     streamTimings: () => succeed<unknown>(undefined),
     probeStatus: () => succeed<SpeechStatus>({ ready: false, ttsReady: false, liveCapture: false }),
     invalidateCache: () => sync(() => { warmedCloud = false }),
+    forgetAccount: () => sync(() => { warmedCloud = false }),
     holdEngine: () => succeed(false),
     releaseEngineHold: () => Effect.void,
     openMic: () => Effect.fail(new VoiceBridgeFailed({ method: "openMic", cause: "browser-no-native-voice" })),
@@ -469,6 +504,8 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
     hush: () => Effect.void,
     shut: () => succeed(true),
     events: Stream.empty,
+    account: () => succeed<CloudSignIn>({ kind: "unknown" }),
+    signIns: Stream.empty,
     startRecording: () => Effect.fail(new VoiceBridgeFailed({ method: "startRecording", cause: "browser-no-native-voice" })),
     transcribe: () => Effect.fail(new VoiceBridgeFailed({ method: "transcribe", cause: "browser-no-native-voice" })),
     abandon: () => Effect.void,

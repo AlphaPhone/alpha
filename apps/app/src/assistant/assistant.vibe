@@ -10,6 +10,7 @@ import * as Reply from "../../gen/app__assistant__reply.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
 import * as Search from "../../gen/app__assistant__search.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Machine as Voice, talking } from "../../gen/app__voice.effect.vibe"
 import { stepping } from "../shell/shell.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { ask, outcomeOf } from "../platform/remote.vibe"
@@ -489,6 +490,9 @@ function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell, []> {
 }
 
 // spec/app/assistant/dock.md, "Ask Alpha put away forgets the height its sheet was left at"
+// spec/app/assistant/dock.md, "While voice owns Ask Alpha its open sheet is not dragged, a drag under way is let go, and the sheet is dragged again once voice ends"
+const voiced = following(Voice, talking, Dock.Machine, (on): Dock.Event => ({ type: "voicing", on, now: untimed }))
+
 const resting = following(Shell, (shell) => shell.assistant === "Bar", Dock.Machine, (bar): Dock.Event | undefined => (bar ? { type: "putAway", now: untimed } : undefined))
 
 // spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"
@@ -509,7 +513,7 @@ export const assisting = Layer.provideMerge(
     reacting(Reply, {}),
     reacting(Dock, { carry: carryDock }),
     stepping("assistant", Search.Machine, (search) => search.open),
-    reached, looked, left, opening, saving, bound, resting,
+    reached, looked, left, opening, saving, bound, resting, voiced,
   ),
   Layer.merge(Layer.fresh(turns), talk),
 )

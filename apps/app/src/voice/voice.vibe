@@ -8,6 +8,7 @@ import { ask } from "../platform/remote.vibe"
 import { type VoiceEvent, VoiceBridge } from "../platform/voice.vibe"
 import { fresh } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, due, hearing, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
+import { signedIn } from "./account.vibe"
 
 const views: ReadonlyArray<Shell.View> = [
   "Phone", "Messages", "Inbox", "Calendar", "Browser", "Camera", "Photos", "Maps", "Notes", "Contacts", "Files", "Workflows", "Settings",
@@ -357,6 +358,7 @@ export const voicing = Layer.provideMerge(
     visibility,
     navigation,
     bridgeEvents,
+    signedIn,
   ),
   voiceWords,
 )

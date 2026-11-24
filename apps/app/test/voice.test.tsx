@@ -8,6 +8,10 @@ import { VoiceBridge } from "../src/platform/voice.vibe";
 import { together, untimed, whole } from "../src/runtime/reactor.vibe";
 import { shell } from "../src/shell/shell.vibe";
 import { placeOf, type VoiceWords, voicing } from "../src/voice/voice.vibe";
+import { Machine as Dock } from "../gen/app__assistant__dock.effect.vibe";
+import type { Mount } from "../src/areas.ts";
+import assistant from "../src/assistant/index.tsx";
+import { button, closeAll, drawn, open, press, seen, underAct, until as drawnUntil } from "./alpha.tsx";
 import { scene, type Scene } from "./fakes/scene.ts";
 import { fakeWorld } from "./fakes/world.vibe";
 
@@ -75,6 +79,8 @@ async function speakUtterance(runtime: VoiceRuntime, world: Scene, text: string)
   world.voice.emitLocal?.("liveCaptureTranscript", { text, final: true });
 }
 
+underAct();
+afterEach(closeAll);
 afterEach(async () => {
   while (opened.length > 0) {
     const rt = opened.pop();
@@ -251,5 +257,75 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     await sendVoice(runtime, { type: "startTalking", now: untimed });
     await until(runtime, Voice.Machine, (s) => s.phase === "Failed");
     expect([(await getVoice(runtime)).mic, world.voice.cloudStarts.length]).toEqual(["Off", 3]);
+  });
+});
+
+/** Ask Alpha with the voice area's question over it: the screens a spoken conversation from the composer draws. */
+const talkMounts: Mount[] = [
+  { at: "assistant", load: () => import("../src/assistant/index.tsx") },
+  { at: "overlay", load: () => import("../src/voice/index.tsx") },
+];
+
+const asked = () => document.querySelector("[role=alertdialog]") !== null;
+
+describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold a spoken conversation\")", () => {
+  // spec/app/voice/index.md, "Starting asks for the microphone the first time, opens it once it is allowed, and holds the speech engine while talking"; spec/app/voice/index.md, "Before audio first leaves the phone, the owner is shown what is sent and where, and decides"; spec/app/voice/index.md, "Signing in, out or to another account changes the route, invalidates warmup, and ends a running conversation"; spec/app/voice/index.md, "Stop and switch to keyboard shut the conversation down; the keyboard then takes over"; spec/app/assistant/dock.md, "While voice owns Ask Alpha its open sheet is not dragged, a drag under way is let go, and the sheet is dragged again once voice ends"
+  it("a signed-in owner taps Talk, allows Alpha Cloud, talks over the relay under the account's key, and Stop ends it; nothing leaves the phone before, and after signing in to another account the first Talk speaks under the new key", async () => {
+    const world = { ...scene(), phone: true };
+    world.voice.onDevice = false;
+    world.voice.credentialId = "cred-owner-9";
+    const { alpha } = await open(world, talkMounts);
+    const area = assistant.runtime(alpha);
+    await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.route.account === "CloudAccount" && s.route.key > 0 && s.warmed);
+
+    await press("Talk");
+    await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.disclosing);
+    expect([asked(), world.voice.cloudStarts, world.voice.relayWarmups, world.ask.cloudWarmCalls]).toEqual([true, [], [], 0]);
+
+    await press("Allow");
+    await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
+    await drawnUntil(alpha, area, Dock, (s) => s.voice);
+    expect([asked(), world.voice.cloudStarts, world.voice.activeMicSession !== undefined, button("Talk")]).toEqual([
+      false, [{ environment: "production", credentialId: "cred-owner-9" }], true, undefined,
+    ]);
+
+    await press("Stop talking");
+    await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.phase === "Idle" && s.mic === "Off");
+    await drawnUntil(alpha, area, Dock, (s) => !s.voice);
+    expect([world.voice.activeMicSession, world.voice.stopCloudSpeechCalls > 0, button("Talk") !== undefined]).toEqual([undefined, true, true]);
+
+    await seen(false);
+    await seen(true);
+    await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.warmed && world.voice.relayWarmups.length === 1);
+    world.voice.credentialId = "cred-owner-10";
+    await drawn(() => world.voice.signedInHere?.());
+    await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.route.account === "CloudAccount" && !s.route.consent && s.warmed);
+    await press("Talk");
+    await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.disclosing);
+    await press("Allow");
+    await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
+    expect(world.voice.cloudStarts.map((one) => one.credentialId)).toEqual(["cred-owner-9", "cred-owner-10"]);
+    await press("Stop talking");
+    await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.phase === "Idle");
+
+    world.signedIn = false;
+    await seen(false);
+    await seen(true);
+    await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.route.account === "SignedOut" && !s.route.consent);
+  });
+
+  // spec/app/voice/index.md, "Starting asks for the microphone the first time, opens it once it is allowed, and holds the speech engine while talking"; spec/app/voice/index.md, "Audio leaves the phone only on a route the owner agreed to"
+  it("a signed-out owner's Talk ends quietly: nothing is asked, nothing leaves the phone, and Talk is offered again", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    world.voice.onDevice = false;
+    const { alpha } = await open(world, talkMounts);
+    await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.warmed);
+
+    await press("Talk");
+    await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.phase === "Failed" || s.phase === "Idle");
+    const after = await alpha.runtime.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()));
+    expect([after.mic, after.network, after.disclosing, asked(), world.voice.cloudStarts, world.voice.relayWarmups, button("Talk") !== undefined]).toEqual([
+      "Off", false, false, false, [], [], true,
+    ]);
   });
 });

@@ -14,6 +14,7 @@ import { pages } from "../src/settings/pages.vibe";
 import { canvas } from "../src/shell/canvas.vibe";
 import { haptics } from "../src/shell/haptics.vibe";
 import { shell } from "../src/shell/shell.vibe";
+import { voicing } from "../src/voice/voice.vibe";
 
 const closers: (() => Promise<void>)[] = [];
 
@@ -38,7 +39,7 @@ export async function mountDock({ view = "Browser", withToast = false, flush }: 
     }),
   );
   const platform = pagePlatform(Layer.provide(agentAt("http://agent.test"), client), Layer.provide(cloudAt("http://cloud.test"), client));
-  const runtime = ManagedRuntime.make(Layer.provideMerge(whole(together(shell, canvas, haptics, pages, assisting)), platform));
+  const runtime = ManagedRuntime.make(Layer.provideMerge(whole(together(shell, canvas, haptics, pages, voicing, assisting)), platform));
   const host = document.body.appendChild(document.createElement("div"));
   const reactRoot = createRoot(host);
   await run(async () => {
