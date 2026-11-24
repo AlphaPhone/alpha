@@ -53,7 +53,16 @@ public final class BrowserStorageFormatInstrumentedTest {
    SecretKey bookmarkKey=create(BOOKMARKS+"-v1"),sessionKey=create(SESSION+"-v1");
    assertTrue(bookmarks.edit().putString("sealed",encode(bookmarkKey,new JSONArray().put(first).toString())).commit());
    assertEquals(java.util.List.of(first),AlphaBrowserStores.bookmarks(context).read());
-   AlphaBrowserStores.bookmarks(context).change(second,true);
+   String title="Fixture bookmark title";
+   AlphaBrowserStores.bookmarks(context).change(second,true,title);
+   var restoredBookmarks=AlphaBrowserStores.bookmarks(context).entries();
+   assertEquals(second,restoredBookmarks.get(0).url);
+   assertEquals(title,restoredBookmarks.get(0).title);
+   assertEquals(first,restoredBookmarks.get(1).url);
+   assertNull(restoredBookmarks.get(1).title);
+   String sealedTitles=bookmarks.getString("sealed_titles",null);
+   assertNotNull(sealedTitles);
+   assertFalse(sealedTitles.contains(title));
    JSONArray savedBookmarks=new JSONArray(decode(bookmarkKey,bookmarks.getString("sealed",null)));
    assertEquals(second,savedBookmarks.getString(0));assertEquals(first,savedBookmarks.getString(1));
    JSONObject state=new JSONObject().put("history",new JSONArray().put(first)).put("tabs",new JSONArray().put(new JSONObject().put("id","tab-one").put("url",first).put("title","Fixture"))).put("cur","tab-one");
