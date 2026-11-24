@@ -2,15 +2,20 @@
   "schema": 1,
   "repository": "elizaOS/eliza",
   "base": "develop",
-  "baseCommit": "bdc5b6f9112e0f6a59762efeac459cb7c4b57aa3",
-  "head": "bdc5b6f9112e0f6a59762efeac459cb7c4b57aa3",
-  "recordedAt": "2026-11-23",
-  "command": "gh api repos/elizaOS/eliza/compare/develop...bdc5b6f9112e0f6a59762efeac459cb7c4b57aa3",
-  "status": "identical",
-  "aheadBy": 0,
-  "behindBy": 0,
-  "mergeBase": "bdc5b6f9112e0f6a59762efeac459cb7c4b57aa3",
-  "pinOnlyCommits": [],
+  "baseCommit": "8cca9468bc477fc9c9aa6ec6cf9030d36d63b225",
+  "head": "57588dc08a8d561a29fe754e3dadb50a6cd8f04e",
+  "recordedAt": "2026-11-24",
+  "command": "gh api repos/elizaOS/eliza/compare/develop...57588dc08a8d561a29fe754e3dadb50a6cd8f04e",
+  "status": "diverged",
+  "aheadBy": 1,
+  "behindBy": 2,
+  "mergeBase": "d3af0f0f2f2a122c287dc89baa9f2489b7dd6587",
+  "pinOnlyCommits": [
+    {
+      "sha": "57588dc08a8d561a29fe754e3dadb50a6cd8f04e",
+      "subject": "Recognize the current direct Browser handoff as prepared"
+    }
+  ],
   "pullRequests": [
     "https://github.com/elizaOS/eliza/pull/39247",
     "https://github.com/elizaOS/eliza/pull/39244",
