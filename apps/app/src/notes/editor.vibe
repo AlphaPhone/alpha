@@ -98,9 +98,16 @@ const make = effect {
   const writing = try Semaphore.make(1)
   const lastOwner = try Ref.make<{ owner: string; snapshot: NotesSnapshot; digest: string } | undefined>(undefined)
   const unsaved = try PubSub.unbounded<string>()
+  const followed = try SubscriptionRef.make<OwnedSnapshot | undefined>(undefined)
 
   effect function send(event: EditorEvent): (Editor | undefined)!! {
     return (machine.send(event) catch () => undefined)
+  }
+
+  /** Wait until the editor has followed the collection the owner or the agent acts on now, so an action never runs on a snapshot the editor has not taken in. */
+  effect function caughtUp(): void!! {
+    const ticks = Stream.merge(Stream.map(SubscriptionRef.changes(followed), () => undefined), Stream.map(collection.snapshots, () => undefined))
+    try Stream.runHead(Stream.filterEffect(ticks, () => effect { return (try SubscriptionRef.get(followed)) === (try collection.current()) }))
   }
 
   effect function owned(): ({ owner: string; snapshot: NotesSnapshot; digest: string } | undefined)!! {
@@ -195,6 +202,7 @@ const make = effect {
   }
 
   effect function save(): boolean!! {
+    try caughtUp()
     const before = try machine.get()
     const after = try send({ type: "saveDraft" })
     if (after === undefined) return false
@@ -233,7 +241,14 @@ const make = effect {
     if (held !== undefined && after.draftId !== "" && after.version === 0) try adopt(after.draftId, held.token)
   }
 
+  /** Take in one published collection value, in the order the collection published it. */
+  effect function follow(current: OwnedSnapshot | undefined): void!! {
+    try publish(current)
+    try SubscriptionRef.set(followed, current)
+  }
+
   effect function openNote(id: string): boolean!! {
+    try caughtUp()
     const saved = try note(id)
     if (saved === undefined) return false
     const fields = fieldsOf(saved)
@@ -272,6 +287,7 @@ const make = effect {
   }
 
   effect function leave(next?: string): boolean!! {
+    try caughtUp()
     const state = try machine.get()
     const held = try SubscriptionRef.get(content)
     const plan = leavePlan(state.present, dirty(state), state.draftId !== "", held !== undefined && authored(held))
@@ -291,10 +307,14 @@ const make = effect {
     drafts: SubscriptionRef.changes(content),
     keptReviews: SubscriptionRef.changes(keptReview),
     unsaved: Stream.fromPubSub(unsaved),
-    draft: () => SubscriptionRef.get(content),
+    effect draft() {
+      try caughtUp()
+      return try SubscriptionRef.get(content)
+    },
     openNote,
     effect newNote(kind: "text" | "list", folderId?: string) {
       if (!(try leave())) return false
+      try caughtUp()
       const current = try collection.current()
       if (current === undefined) return false
       const title = nextDefaultTitle([...current.snapshot.notes, ...(current.snapshot.trash ?? []).map((entry) => entry.note)].map((row) => row.title), "New note")
@@ -311,6 +331,7 @@ const make = effect {
     save,
     leave,
     effect remove(id: string) {
+      try caughtUp()
       const state = try machine.get()
       if (state.present && state.draftId === "" && id === "") {
         try send({ type: "closeDraft" })
@@ -333,6 +354,7 @@ const make = effect {
       return try runMutation()
     },
     effect restore(id: string) {
+      try caughtUp()
       const after = try send({ type: "restoreNote", id })
       if (after === undefined || after.mutation !== "Restoring") return false
       return (try runMutation()).deleted
@@ -378,10 +400,11 @@ const make = effect {
       return reply.target
     },
     effect selection() {
+      try caughtUp()
       const state = try machine.get()
       return selectionCurrent(state) ? { kind: "canonical-note" as const, id: state.draftId, revision: String(state.revision) } : undefined
     },
-    publish,
+    follow,
   }
 }
 
@@ -389,6 +412,6 @@ const make = effect {
 export const editorLayer = Layer.provideMerge(Layer.effect(NotesEditor, effect {
   const editor = try make
   const collection = try NotesCollection
-  try fork.scoped Stream.runForEach(collection.snapshots, (current) => editor.publish(current))
+  try fork.scoped Stream.runForEach(collection.snapshots, (current) => editor.follow(current))
   return editor
 }), editorMachine())

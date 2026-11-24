@@ -14,10 +14,13 @@ version and the mutation that continues after a save.
 ### A draft opens from a note at the current revision, or starts as a new note
 
 Each draft gets a fresh token. A new note starts with its default title, which alone is not an edit: an
-untouched new note is dropped when the owner leaves it. Published snapshots keep the known notes and
-the Trash apart; a clean draft follows the snapshot, a clean draft of a note that disappeared closes, and
-an edited draft whose base is no longer current goes to review. A new draft has no record to overwrite,
-so it simply follows the current revision.
+untouched new note is dropped when the owner leaves it. Published snapshots keep the known notes and the
+Trash apart; a clean draft follows the snapshot, a clean draft of a note that disappeared closes, and an
+edited draft whose base is no longer current goes to review. A new draft has no record to overwrite, so
+it simply follows the current revision. The editor takes in every snapshot in the order the collection
+published it, and acts only on the collection it has taken in: before it opens, starts, saves, leaves,
+deletes or restores a note, shows its draft or names its selection, it first takes in every snapshot the
+collection already published, so a note the agent or the recorder just saved opens at once.
 
 ```quint
 type Mutation = NoMutation | DeleteAfterSave | Deleting | Restoring
