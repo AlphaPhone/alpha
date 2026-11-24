@@ -1,6 +1,6 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
 import {
-  Alert, AssistantCard, AssistantChatHistorySheet, AssistantConversation, AssistantGrabber, AssistantSearchSheet,
+  Alert, AssistantCard, AssistantChatHistorySheet, AssistantConversation, AssistantGrabber, AssistantPhotoPreview, AssistantSearchSheet,
   type AssistantAttachment, type AssistantDraftNoticeProps, type AssistantMessageProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
@@ -8,6 +8,8 @@ import { useRef, useState, useSyncExternalStore } from "react";
 import type { Conversation as Talking, Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe";
 import { askable, inFlight, pending } from "../../gen/app__assistant.ts";
 import { useMachine as useConversation } from "../../gen/app__assistant.react.ts";
+import type { Machine as AttachmentMachine } from "../../gen/app__assistant__attachments.effect.vibe";
+import { useMachine as useAttachments } from "../../gen/app__assistant__attachments.react.ts";
 import type { Machine as ChatsMachine } from "../../gen/app__assistant__chats.effect.vibe";
 import { copyableText, making, textForEmail, unsure } from "../../gen/app__assistant__chats.ts";
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
@@ -27,12 +29,12 @@ import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { isCommsView } from "../shell/views.tsx";
 import { freedom } from "./assistant.vibe";
-import { acceptedFiles, insertFiles, removeFile, sameBinding } from "./attachments.vibe";
+import { acceptedFiles, insertFiles, previewFile, removeFile, sameBinding } from "./attachments.vibe";
 import type { MessageSelection } from "./message-actions.vibe";
 import { type Attached, Talk } from "./talk.vibe";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | Talk, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | Talk, unknown>;
   messageActions?: { copy: (selection: MessageSelection) => void; useInEmail?: (selection: MessageSelection) => void };
 }
 
@@ -107,6 +109,7 @@ const barHeight = 80;
 /** @model spec/app/assistant/index.md */
 export function Assistant({ runtime, messageActions }: AssistantProps) {
   const conversation = useConversation(runtime);
+  const attachments = useAttachments(runtime);
   const chats = useChats(runtime);
   const composer = useComposer(runtime);
   const search = useSearch(runtime);
@@ -134,6 +137,13 @@ export function Assistant({ runtime, messageActions }: AssistantProps) {
   const check = { type: "checkForReply" } as const;
   const checkable = conversation.can(check) && (talking.turn.send.outcome === "Unknown" || talking.turn.reply === "Stopped" || talking.check === "LookLater" || writing.unsettled);
   const settledLine = (id: string) => !id.startsWith("sent ") && !inFlight(talking.turn) && !pending(talking);
+  const draftFiles = sameBinding(seen.filesBinding, writing.binding) ? seen.files : [];
+  const previewed = seen.preview?.ticket === attachments.state?.preview ? seen.preview?.file : undefined;
+  const canPreview = attachments.can({ type: "preview", attachment: 1 });
+  const preview = (id: string, files: readonly Attached[]) => {
+    const file = files.find((one) => one.id === id);
+    if (file !== undefined) void runtime.runPromise(previewFile(file));
+  };
 
   const type = (text: string) => {
     board.type(text);
@@ -184,7 +194,7 @@ export function Assistant({ runtime, messageActions }: AssistantProps) {
       id: line.id,
       author: line.mine ? "owner" : "alpha",
       text: line.text,
-      ...(line.attachments === undefined ? {} : { attachments: line.attachments.map(chip) }),
+      ...(line.attachments === undefined ? {} : { attachments: line.attachments.map(chip), onPreview: canPreview ? (id) => preview(id, line.attachments ?? []) : undefined }),
       ...(line.quote === undefined ? {} : { quote: line.quote }),
       ...(line.failure === undefined ? {} : { children: failureCard({ kind: line.failure, fix: "NoFix", waitMs: -1 }, false) }),
       onFork: settled && chats.can(fork) ? () => void chats.send(fork) : undefined,
@@ -216,6 +226,12 @@ export function Assistant({ runtime, messageActions }: AssistantProps) {
 
   return (
     <>
+      {previewed !== undefined && <AssistantPhotoPreview
+        open
+        name={previewed.name}
+        src={`data:${previewed.mimeType};base64,${previewed.data}`}
+        onOpenChange={(open) => { if (!open && attachments.can({ type: "closePreview" })) void attachments.send({ type: "closePreview" }); }}
+      />}
       <input ref={fileInput} type="file" accept={acceptedFiles} multiple hidden onChange={(event) => {
         const target = fileTarget.current;
         fileTarget.current = undefined;
@@ -291,8 +307,9 @@ export function Assistant({ runtime, messageActions }: AssistantProps) {
             onCheck: writing.unsettled && conversation.can(check) ? () => void conversation.send(check) : undefined,
           },
           unavailable: !talking.ready ? "away" : talking.context.sensitive ? "sensitive" : undefined,
-          attachments: waiting(writing, sameBinding(seen.filesBinding, writing.binding) ? seen.files : []),
+          attachments: waiting(writing, draftFiles),
           attachmentNotice: seen.attachmentNotice,
+          onPreviewAttachment: canPreview ? (id) => preview(id, draftFiles) : undefined,
           quote: quoted,
           editing: writing.editor.editing > 0,
           onOpen: !open ? () => openWithFocus(true) : undefined,

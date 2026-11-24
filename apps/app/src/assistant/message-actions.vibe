@@ -32,7 +32,7 @@ export function emailDestination(mailbox: Inbox.Mailbox | undefined, composer: D
   return { account, draft: composer.open ? composer.letter.id : 0, session: composer.session }
 }
 
-effect function selected(selection: MessageSelection): Line | undefined!!(Chats.Machine | Talk) {
+effect function selected(selection: MessageSelection): (Line | undefined)!!(Chats.Machine | Talk) {
   const chats = try (try Chats.Machine).get()
   if (chats.chosen !== selection.conversation || chats.page.ticket !== selection.page || chats.page.status !== "Loaded") return undefined
   const { board } = try Talk

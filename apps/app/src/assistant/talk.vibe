@@ -66,6 +66,7 @@ export interface Seen {
   readonly files: readonly Attached[]
   readonly filesBinding: Binding | undefined
   readonly attachmentNotice: string
+  readonly preview: { readonly ticket: number; readonly file: Attached } | undefined
   /** The text of a message the slot marks as sending, under review; or the saved copy of a conflict. */
   readonly saved: string
   /** The hits of each search, by the ticket that asked from the first hit. */
@@ -90,6 +91,7 @@ export interface Board {
   lastSentId: string
   sendWhenMade: boolean
   staged: StagedFiles | undefined
+  previewFile(file: Attached): number
   change(patch: Partial<Seen>): void
   /** The number of the conversation the agent names `record`, given the first time it is seen; its title where one is given. */
   numberOf(record: ConversationRecord, title?: string): number
@@ -139,7 +141,7 @@ export const talk = Layer.effect(Talk, effect {
   const numbers = new Map<string, number>()
   const listeners = new Set<() => void>()
   let seen: Seen = {
-    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, attachmentNotice: "", saved: "", hits: [],
+    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, attachmentNotice: "", preview: undefined, saved: "", hits: [],
     titles: new Map(records.map((one, at) => [at + 1, one.title])),
   }
   const keep = () => runFork(ignore(store.set(key, JSON.stringify({ conversations: records.map((one) => ({ id: one.record.id, roomId: one.record.roomId, title: one.title })) }))))
@@ -155,6 +157,11 @@ export const talk = Layer.effect(Talk, effect {
     lastSentId: "",
     sendWhenMade: false,
     staged: undefined,
+    previewFile: (file) => {
+      const ticket = (seen.preview?.ticket ?? 0) + 1
+      board.change({ preview: { ticket, file } })
+      return ticket
+    },
     change: (patch) => {
       seen = { ...seen, ...patch }
       for (const listener of listeners) listener()
