@@ -1,4 +1,4 @@
-// spec/platform/index.md, "The build is the browser page off the phone, the AOSP image where the image says so, and the launcher otherwise"; spec/platform/index.md, "A capability is offered only on a variant whose build registers its plugin"; spec/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks"
+// spec/platform/index.md, "The build is the browser page off the phone, the AOSP image where the image says so, and the launcher otherwise"; spec/platform/index.md, "A capability is offered only on a variant whose build registers its plugin"; spec/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks"; spec/platform/index.md, "A built page runs only its own scripts"
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
 
@@ -27,3 +27,9 @@ export const platformAospAppsOnlyOnTheImage = always(() => aospAppsOnlyOnTheImag
 
 /** Once the build has marked the page it names one variant and says whether it allows test mocks, so no surface reads a guess. */
 export const platformTheBuildIsMarkedOnce = always(() => buildMarked.current);
+
+const ownScripts = extract(({ document, window }) =>
+  Array.from(document.scripts).every((script) => script.src === "" || new URL(script.src).origin === window.location.origin));
+
+/** The page loads scripts only from its own origin. */
+export const platformThePageRunsOnlyItsOwnScripts = always(() => ownScripts.current);
