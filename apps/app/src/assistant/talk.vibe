@@ -28,6 +28,8 @@ export interface Seen {
   readonly pages: ReadonlyMap<number, ReadonlyArray<Line>>
   /** The reply as it is written, until it ends. */
   readonly reply: string
+  /** What the agent says it is doing until its reply is written: its acknowledgment, its status or the app its tool uses. */
+  readonly label: string
   /** The text in the composer's box, which its slot keeps. */
   readonly typed: string
   /** The text of a message the slot marks as sending, under review; or the saved copy of a conflict. */
@@ -95,7 +97,7 @@ export const talk = Layer.effect(Talk, effect {
   const messages: string[] = []
   const listeners = new Set<() => void>()
   let seen: Seen = {
-    pages: new Map(), reply: "", typed: "", saved: "", hits: [],
+    pages: new Map(), reply: "", label: "", typed: "", saved: "", hits: [],
     titles: new Map(records.map((one, at) => [at + 1, one.title])),
   }
   const keep = () => runFork(ignore(store.set(key, JSON.stringify({ conversations: records.map((one) => ({ id: one.record.id, roomId: one.record.roomId, title: one.title })) }))))

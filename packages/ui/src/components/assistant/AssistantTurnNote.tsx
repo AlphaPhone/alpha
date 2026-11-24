@@ -13,6 +13,8 @@ export type AssistantTurnStatus =
 export type AssistantTurnNoteProps = Omit<ComponentProps<"div">, "children"> & {
   /** Where the turn stands. */
   status: AssistantTurnStatus;
+  /** What the agent says it is doing while the turn is in flight: its brief acknowledgment, or the app its tool uses. */
+  label?: string;
   /** Reads the conversation once for a reply to the last message; offered when no turn is in flight. */
   onCheck?: () => void;
 };
@@ -34,11 +36,11 @@ const notes: Record<AssistantTurnStatus, { status: StatusDotProps["status"]; lab
  * The state of the turn at the foot of the conversation: a shape and a few words, with Check for reply where one read can say more.
  * @model spec/app/assistant/index.md
  */
-export function AssistantTurnNote({ status, onCheck, ...props }: AssistantTurnNoteProps) {
+export function AssistantTurnNote({ status, label, onCheck, ...props }: AssistantTurnNoteProps) {
   const note = notes[status];
   return (
     <div role="status" className="flex min-h-11 items-center gap-3" {...props}>
-      <StatusDot status={note.status} label={note.label} showLabel />
+      <StatusDot status={note.status} label={label ?? note.label} showLabel />
       {onCheck ? <Button variant="secondary" size="sm" onClick={onCheck}>Check for reply</Button> : null}
     </div>
   );
