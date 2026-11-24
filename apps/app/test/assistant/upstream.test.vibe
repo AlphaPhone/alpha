@@ -1,4 +1,4 @@
-// spec/assistant/reply.md, "Story: Understand why a reply did not finish"; spec/assistant/context.md, "Story: Let my agent read the page I have open in Browser"; spec/voice/latency.md, "Story: Know how long a dictated message waits for its answer"; spec/assistant/review.md, "Story: Act only on what I asked for"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/send.md, "Story: Send what I dictated and have it timed like a voice turn"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
+// spec/assistant/reply.md, "Story: Understand why a reply did not finish"; spec/assistant/context.md, "A spoken turn carries the screen context a typed turn sent at that moment would"; spec/assistant/context.md, "Story: Let my agent read the page I have open in Browser"; spec/voice/latency.md, "Story: Know how long a dictated message waits for its answer"; spec/assistant/review.md, "Story: Act only on what I asked for"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/send.md, "Story: Send what I dictated and have it timed like a voice turn"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
 import { assert, it } from "@effect/vitest"
 import { Composer } from "../../src/assistant/composer.vibe"
 import { spokenCue } from "../../src/assistant/cue.vibe"
@@ -6,7 +6,7 @@ import { copy, failureKindOf, failureText, planCardTitle, retryDuration } from "
 import { DeviceExecutors, DeviceReview, type OperationPorts } from "../../src/assistant/review.vibe"
 import { emptyTranscript } from "../../src/assistant/transcript.vibe"
 import {
-  assistantOver, browserScreen, countingExecutors, fakeBrowserPages, fakeHost, fakeLatency, fakePreferences, fakeResident, fakeResidentControl, journalNative, noNative,
+  assistantOver, browserScreen, countingExecutors, privateScreen, fakeBrowserPages, fakeHost, fakeLatency, fakePreferences, fakeResident, fakeResidentControl, journalNative, noNative,
   wireProposal, type Seen,
 } from "./fakes.vibe"
 import type { PageObservation } from "../../src/assistant/ports.vibe"
@@ -144,6 +144,34 @@ it.effect("Let my agent read the page I have open in Browser (spec/assistant/con
       shared: { page, observed: true, asked: ["t1"] },
       off: undefined,
       older: { page: undefined, observed: true, asked: [] },
+    },
+  ))
+})
+
+it.effect("A spoken turn carries what a typed turn sent then would (spec/assistant/context.md, \"A spoken turn carries the screen context a typed turn sent at that moment would\")", () => effect {
+  const read = effect function (screen: typeof browserScreen, asks: boolean) {
+    const seen: Seen = { calls: [] }
+    provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "Here is the summary." }, proposals: [] }), Layer.merge(fakeHost([], screen, [], true), fakeBrowserPages({ on: true }, { id: "t1", revision: "r1" }, page)),
+      countingExecutors({ count: 0 }), noNative, fakePreferences({ asks, shares: false })) {
+      const composer = try Composer
+      const spoken = try composer.turnContext()
+      try composer.edit("Summarize this page")
+      try composer.send()
+      const typed = (turnBodies(seen)[0] as { readonly metadata?: { readonly [key: string]: unknown } } | undefined)?.metadata ?? {}
+      const keys = Object.keys(spoken).sort()
+      return { keys, same: keys.every((key) => JSON.stringify(spoken[key]) === JSON.stringify(typed[key])), page: spoken.browserPage, mode: spoken.voiceUi, tab: JSON.stringify(spoken).includes("\"browser-tab\"") }
+    }
+  }
+  const browser = try read(browserScreen, false)
+  const asking = try read(browserScreen, true)
+  const hidden = try read(privateScreen, false)
+  const direct = { agentActionMode: "direct-request-v1" }
+  try Effect.try(() => assert.deepStrictEqual(
+    { browser, asking, hidden },
+    {
+      browser: { keys: ["browserPage", "observation", "voiceUi"], same: true, page, mode: direct, tab: true },
+      asking: { keys: ["browserPage", "observation"], same: true, page, mode: undefined, tab: true },
+      hidden: { keys: ["voiceUi"], same: true, page: undefined, mode: direct, tab: false },
     },
   ))
 })

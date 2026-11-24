@@ -1,4 +1,4 @@
-// spec/assistant/send.md, "Story: Send a message and know what happened to it"; spec/assistant/draft.md, "Story: Get my message back when it was not sent"; spec/assistant/stoppedReply.md, "Story: Know what became of a reply I stopped"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/conversation.md, "Story: Talk to my agent and approve what it proposes"; spec/assistant/conversation.md, "A changed screen context bumps the revision and drops every proposal; a private screen stops everything"; spec/assistant/recovery.md, "Story: See what still waits for me without the phone polling my agent"; spec/assistant/receipts.md, "A receipt that could not reach the agent keeps its result and says it is not synced yet"; spec/assistant/receipts.md, "A reply's changes are shown once, only for what its action results prove, and each opens its own view"; spec/assistant/context.md, "The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again"; spec/assistant/context.md, "A turn carries the page Browser hands it for the observed tab, beside the observation, only to a peer that declares it"; spec/assistant/context.md, "A turn names the place, route or search Maps shows as its selected object only while Maps is in front"; spec/assistant/views.md, "A prepared view opens once under a returned claim, only while the screen and the session are the ones the turn was sent from, and every claim is settled once"; spec/assistant/emailCard.md, "Cards are kept per message on their conversation's shelf, staged once, edited only at the version shown, and an unedited card goes under its owner turn's identity"; spec/voice/latency.md, "A dictated draft sent unchanged is timed from the recording's end through the send and the first token to the final reply, and its reply is never spoken"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"; spec/assistant/send.md, "A dictated draft sent exactly as inserted is timed as a voice turn, and its reply is never spoken"; spec/assistant/review.md, "A direct effect needs an allow-listed operation of the current message that is not a workflow step, with review-first off"
+// spec/assistant/send.md, "Story: Send a message and know what happened to it"; spec/assistant/draft.md, "Story: Get my message back when it was not sent"; spec/assistant/stoppedReply.md, "Story: Know what became of a reply I stopped"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/conversation.md, "Story: Talk to my agent and approve what it proposes"; spec/assistant/conversation.md, "A changed screen context bumps the revision and drops every proposal; a private screen stops everything"; spec/assistant/recovery.md, "Story: See what still waits for me without the phone polling my agent"; spec/assistant/receipts.md, "A receipt that could not reach the agent keeps its result and says it is not synced yet"; spec/assistant/receipts.md, "A reply's changes are shown once, only for what its action results prove, and each opens its own view"; spec/assistant/context.md, "The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again"; spec/assistant/context.md, "A turn carries the page Browser hands it for the observed tab, beside the observation, only to a peer that declares it"; spec/assistant/context.md, "A turn names the place, route or search Maps shows as its selected object only while Maps is in front"; spec/assistant/views.md, "A prepared view opens once under a returned claim, only while the screen and the session are the ones the turn was sent from, and every claim is settled once"; spec/assistant/emailCard.md, "Cards are kept per message on their conversation's shelf, staged once, edited only at the version shown, and an unedited card goes under its owner turn's identity"; spec/voice/latency.md, "A dictated draft sent unchanged is timed from the recording's end through the send and the first token to the final reply, and its reply is never spoken"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"; spec/assistant/send.md, "A dictated draft sent exactly as inserted is timed as a voice turn, and its reply is never spoken"; spec/assistant/review.md, "A direct effect needs an allow-listed operation of the current message that is not a workflow step, with review-first off"; spec/assistant/context.md, "A spoken turn carries the screen context a typed turn sent at that moment would"
 import { TurnController, encodeTurnContext, findStoppedUserTurn, type ClientMessageId, type ConversationRecord, type ReplyStreamHooks, type TurnResult } from "@elizaos/agent/client"
 import { Machine as DraftsMachine, shown, slotOf } from "../../gen/assistant__draft.effect.vibe"
 import { Machine as SendsMachine, timedAsVoice, type Event as SendsEvent } from "../../gen/assistant__send.effect.vibe"
@@ -17,7 +17,7 @@ import type { DictationTarget } from "../voice/dictation.vibe"
 import { browserTabObject, pageForTurn, wirePage } from "./browser-page.vibe"
 import { ChatAttachments } from "./attachments.vibe"
 import { Conversations } from "./conversations.vibe"
-import { AssistantHost, type AgentIdentity } from "./host.vibe"
+import { AssistantHost, type AgentIdentity, type PeerFacts } from "./host.vibe"
 import { PhoneLocation } from "./location.vibe"
 import { BrowserPages, CameraComposer, MapsChatCards, MapsRelay, MapsViews, ReplyChanges, TurnSources, type MapsShown } from "./ports.vibe"
 import { changeWords, copy, failureKindOf, failureText, liveWaitOf, planActionOf } from "./presentation.vibe"
@@ -58,6 +58,8 @@ export service Composer {
   back(): boolean!!
   /** The open draft as voice dictation fills it: dictated words are appended, and words dictated into an empty draft and sent unchanged time the turn as a voice turn. */
   dictationTarget(): DictationTarget!!
+  /** The screen context a turn sent now carries, for a spoken turn: the observation, the Browser page beside it and the direct-request mode. */
+  turnContext(): { readonly [key: string]: unknown }!!
   static readonly key = "alpha/assistant/Composer"
 }
 
@@ -269,6 +271,39 @@ export const composerLayer = Layer.effect(Composer, effect {
     if (done.status === "delivered") ownKey = (try host.screen()).contextKey
     return done
   }
+  // spec/assistant/context.md, "A spoken turn carries the screen context a typed turn sent at that moment would": typed and
+  // spoken turns read the screen here, once per turn, so both tell the agent the same observation, page and request mode.
+  effect function screenContext(peering: PeerFacts!!) {
+    const screen = try host.screen()
+    const observed = observes(screen.exposure)
+    const asksFirst = try preferences.asksBeforeActions()
+    try sources.preferReview(asksFirst)
+    const notesList = observed && screen.observation.view === "notes" && screen.observation.selectedObject === undefined ? try sources.notesList() : undefined
+    const browserTab = observed && screen.observation.view === "browser" && screen.observation.selectedObject === undefined ? try pages.selected() : undefined
+    const mapsShown = observed && screen.observation.view === "maps" && screen.observation.selectedObject === undefined ? try maps.shown() : undefined
+    const mapsNamed = namesMaps(observed, screen.observation.view === "maps", screen.observation.selectedObject !== undefined, shownKindOf(mapsShown)) ? mapsShown : undefined
+    const peer = try peering
+    const place = try location.forTurn(observed, peer.takesLocation)
+    const day = sendsDay(observed, screen.onCalendar, { compared: peer.optionalFields, declaresLocation: peer.takesLocation }) ? try sources.calendarDay() : undefined
+    const zone = Effect.try(() => Intl.DateTimeFormat().resolvedOptions().timeZone) catch () => undefined
+    const observation = observed ? {
+      ...screen.observation,
+      ...(screen.observation.timeZone === undefined && zone !== undefined && zone !== "" ? { timeZone: zone } : {}),
+      ...(notesList === undefined ? {} : { selectedObject: notesList }),
+      ...(browserTab === undefined ? {} : { selectedObject: browserTabObject(browserTab) }),
+      ...(mapsNamed === undefined ? {} : { selectedObject: { kind: mapsNamed.kind, id: mapsNamed.id, revision: mapsNamed.revision } }),
+      ...(day === undefined ? {} : { calendarDay: day }),
+      ...(place === undefined ? {} : { location: place }),
+    } : undefined
+    const page = observation === undefined ? undefined : try pageForTurn(pages, observed, observation, browserTab, peer.optionalFields)
+    const browserPage = page === undefined ? undefined : wirePage(page)
+    const voiceUi = statesDirectRequests(asksFirst ? "PreferenceOn" : "PreferenceOff") ? { agentActionMode: "direct-request-v1" as const } : undefined
+    const context = encodeTurnContext({
+      ...(observation === undefined ? {} : { observation, ...(browserPage === undefined ? {} : { browserPage }) }),
+      ...(voiceUi === undefined ? {} : { voiceUi }),
+    }, { optionalFields: peer.optionalFields })
+    return { screen, observed, context, browserPage, links: (page?.links ?? []).map((link) => link.url) }
+  }
   effect function send(handed?: string) {
     const identity = try host.identity()
     if (identity === undefined) {
@@ -334,36 +369,9 @@ export const composerLayer = Layer.effect(Composer, effect {
     if (!(try attachments.hold(pendingSlot, composed))) {
       try host.toast(copy.attachmentSaveFailed)
     }
-    const screen = try host.screen()
-    const observed = observes(screen.exposure)
-    const asksFirst = try preferences.asksBeforeActions()
-    try sources.preferReview(asksFirst)
-    const notesList = observed && screen.observation.view === "notes" && screen.observation.selectedObject === undefined ? try sources.notesList() : undefined
-    const browserTab = observed && screen.observation.view === "browser" && screen.observation.selectedObject === undefined ? try pages.selected() : undefined
-    const mapsShown = observed && screen.observation.view === "maps" && screen.observation.selectedObject === undefined ? try maps.shown() : undefined
-    const mapsNamed = namesMaps(observed, screen.observation.view === "maps", screen.observation.selectedObject !== undefined, shownKindOf(mapsShown)) ? mapsShown : undefined
-    const peer = try join peering
-    const place = try location.forTurn(observed, peer.takesLocation)
-    const day = sendsDay(observed, screen.onCalendar, { compared: peer.optionalFields, declaresLocation: peer.takesLocation }) ? try sources.calendarDay() : undefined
-    const zone = Effect.try(() => Intl.DateTimeFormat().resolvedOptions().timeZone) catch () => undefined
-    const observation = observed ? {
-      ...screen.observation,
-      ...(screen.observation.timeZone === undefined && zone !== undefined && zone !== "" ? { timeZone: zone } : {}),
-      ...(notesList === undefined ? {} : { selectedObject: notesList }),
-      ...(browserTab === undefined ? {} : { selectedObject: browserTabObject(browserTab) }),
-      ...(mapsNamed === undefined ? {} : { selectedObject: { kind: mapsNamed.kind, id: mapsNamed.id, revision: mapsNamed.revision } }),
-      ...(day === undefined ? {} : { calendarDay: day }),
-      ...(place === undefined ? {} : { location: place }),
-    } : undefined
-    const page = observation === undefined ? undefined : try pageForTurn(pages, observed, observation, browserTab, peer.optionalFields)
-    const browserPage = page === undefined ? undefined : wirePage(page)
-    const voiceUi = statesDirectRequests(asksFirst ? "PreferenceOn" : "PreferenceOff") ? { agentActionMode: "direct-request-v1" as const } : undefined
-    const context = encodeTurnContext({
-      ...(observation === undefined ? {} : { observation, ...(browserPage === undefined ? {} : { browserPage }) }),
-      ...(voiceUi === undefined ? {} : { voiceUi }),
-    }, { optionalFields: peer.optionalFields })
+    const { screen, observed, context, browserPage, links } = try screenContext(Fiber.join(peering))
     const viewFields = try views.turnFields(observed, screen.observation.view)
-    const pageLinks = browserPage === undefined ? [] : (page?.links ?? []).map((link) => link.url)
+    const pageLinks = browserPage === undefined ? [] : links
     const userId = `local-user-${attempt}`
     const replyId = `local-reply-${attempt}`
     const quote = aimed?.kind === "reply" ? aimed.quote : undefined
@@ -588,6 +596,7 @@ export const composerLayer = Layer.effect(Composer, effect {
       const conversation = (try SubscriptionRef.get(transcript)).conversation
       if (row.kind === "email" && identity !== undefined && conversation !== null) try shelf.keep([identity.origin, identity.owner, identity.agent, conversation], row)
     },
+    turnContext: () => map(screenContext(host.peer()), (read) => read.context as { readonly [key: string]: unknown }),
     dictationTarget: () => effect {
       const identity = try host.identity()
       const binding = JSON.stringify((try drafts.get()).active)

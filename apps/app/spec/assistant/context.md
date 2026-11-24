@@ -145,6 +145,24 @@ pure def lawAnUncomparedPeerGetsNoDay(observed: bool, onCalendar: bool): bool =
   not(sendsDay(observed, onCalendar, { compared: false, declaresLocation: true }))
 ```
 
+### A spoken turn carries the screen context a typed turn sent at that moment would
+
+Each turn of a voice conversation reads the screen again when it is sent
+and tells the agent what a typed message sent then would: the observation
+with its calendar day, location and selected record, the Browser page
+beside it, and the direct-request mode of [Review](./review.md), each by
+the rules of this spec. A private screen sends none of it. The view fields
+of a typed turn's own view claim stay with typed turns; a voice
+conversation follows the agent's screen through its own claim
+(`spec/voice/conversation.md`).
+
+```quint
+type TurnSource = TypedTurn | SpokenTurn
+pure def observesFor(source: TurnSource, observed: bool): bool = sendsObservation(observed)
+pure def lawASpokenTurnSeesWhatATypedTurnSees(observed: bool): bool = observesFor(SpokenTurn, observed) == observesFor(TypedTurn, observed)
+pure def lawASpokenTurnOnAPrivateScreenSendsNothing(source: TurnSource): bool = not(observesFor(source, false))
+```
+
 ## Story: Let my agent read the page I have open in Browser
 
 > As the owner, when I ask about the page I have open in Browser, I want my

@@ -1,4 +1,4 @@
-// spec/voice/conversation.md, "Story: Start talking only when Alpha can listen safely"; spec/voice/conversation.md, "Story: Hear my turn end at the right moment"; spec/voice/conversation.md, "Story: Keep voice going through a passing failure"; spec/voice/conversation.md, "Story: Review what voice is about to do"; spec/voice/conversation.md, "Story: Mute the speaker without ending voice"; spec/voice/conversation.md, "Story: End voice cleanly, and never lose what I type"; spec/voice/conversation.md, "An open microphone ends a turn at the first pause and a 400 ms hold interrupts; Cloud streaming waits 400 ms after its final; Stop sends no heard report"; spec/voice/speech.md, "An email draft is said as one line, by whether its card was validated or the action failed; other action replies drop IDs and asides unless I asked for them word for word"; spec/voice/conversation.md, "Story: Keep talking on a screen the agent opens for me"; spec/voice/conversation.md, "Voice closed by hiding the page says once, when the page returns, that a call paused it if a call was live then or since; a plain app switch says nothing"; spec/voice/speech.md, "A reading the owner starts first retires a running voice conversation and waits for its replies to stop"; spec/voice/acknowledgement.md, "Story: Hear that Alpha is working on it, never over its answer"; spec/voice/conversation.md, "A Cloud stream listens, speaks the replies and the cue and mutes the speaker on one relay session, and only voice retiring ends it"; spec/assistant/context.md, "Every assistant request carries the capabilities this phone advertises of those the agent offered, and none when it offered none"
+// spec/voice/conversation.md, "Story: Start talking only when Alpha can listen safely"; spec/voice/conversation.md, "Story: Hear my turn end at the right moment"; spec/voice/conversation.md, "Story: Keep voice going through a passing failure"; spec/voice/conversation.md, "Story: Review what voice is about to do"; spec/voice/conversation.md, "Story: Mute the speaker without ending voice"; spec/voice/conversation.md, "Story: End voice cleanly, and never lose what I type"; spec/voice/conversation.md, "An open microphone ends a turn at the first pause and a 400 ms hold interrupts; Cloud streaming waits 400 ms after its final; Stop sends no heard report"; spec/voice/speech.md, "An email draft is said as one line, by whether its card was validated or the action failed; other action replies drop IDs and asides unless I asked for them word for word"; spec/voice/conversation.md, "Story: Keep talking on a screen the agent opens for me"; spec/voice/conversation.md, "Voice closed by hiding the page says once, when the page returns, that a call paused it if a call was live then or since; a plain app switch says nothing"; spec/voice/speech.md, "A reading the owner starts first retires a running voice conversation and waits for its replies to stop"; spec/voice/acknowledgement.md, "Story: Hear that Alpha is working on it, never over its answer"; spec/voice/conversation.md, "A Cloud stream listens, speaks the replies and the cue and mutes the speaker on one relay session, and only voice retiring ends it"; spec/assistant/context.md, "Every assistant request carries the capabilities this phone advertises of those the agent offered, and none when it offered none"; spec/assistant/context.md, "A spoken turn carries the screen context a typed turn sent at that moment would"
 import { readReplyStream } from "@elizaos/agent/client"
 import type { AssistantCapture, AssistantListenHandlers, CloudStreamingSpeech } from "@elizaos/os/bridges/voice"
 import { VOICE_TRANSCRIPT_STREAM, createLiveVoiceSession, defaultVoiceProfile, type CaptureEvents, type LiveVoiceSession, type SpeakerEvents, type VoiceProfile, type VoiceReply, type VoiceSessionPorts } from "@elizaos/agent/voice"
@@ -36,8 +36,8 @@ export interface VoiceStart {
   readonly callActive: boolean
   readonly conversationId: string
   readonly roomId: string
-  /** The screen's context for the turn's `metadata.voiceUi`. */
-  readonly voiceUi?: () => { readonly [key: string]: unknown }
+  /** The screen's turn context, read again as each turn is sent: what a typed turn sent then would carry (spec/assistant/context.md). */
+  readonly context?: () => { readonly [key: string]: unknown }!!
   /** Whether the conversation the voice started in is still the one on screen. */
   readonly chatCurrent: () => boolean
 }
@@ -453,7 +453,8 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
         const retireCue = () => { runFork(ack.cancel()) }
         signal.addEventListener("abort", retireCue, { once: true })
         if (signal.aborted) try ack.cancel()
-        const body: TurnBody = { text: turn.text, channelType: turn.channelType, metadata: turn.metadata, clientMessageId: turn.clientMessageId }
+        const metadata = start.context === undefined ? turn.metadata : try start.context()
+        const body: TurnBody = { text: turn.text, channelType: turn.channelType, metadata, clientMessageId: turn.clientMessageId }
         const reply = ensuring(answerOf(start.conversationId, body, ack, microphoneClear, signal), sync(() => signal.removeEventListener("abort", retireCue))) catch effect (error) => {
           try ack.cancel()
           if (cue === ack) cue = undefined
@@ -501,7 +502,6 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
         after: (ms: number, work: () => void) => { run(effect { try sleep(ms); try sync(work) }) },
       },
       clientMessageId: () => newId(),
-      ...(start.voiceUi === undefined ? {} : { voiceUi: start.voiceUi }),
       onPartial: () => { run(latency.mark("LastUserAudio")) },
     }
   }
