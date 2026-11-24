@@ -194,16 +194,20 @@ export const entitlementService = Layer.effect(Entitlement, effect {
       const a = try machine.get()
       if (a.binding !== "CloudBound") continue
       const credential = a.credential
+      const current = try session.current()
+      if (credential === 0 || credential !== ownerOf(current)) continue
       const at = try Clock.currentTimeMillis
-      const signed = signedPlan(at) catch () => undefined
+      const signed = signedPlan(at, current.account) catch () => undefined
+      if (credential !== (try session.owner())) continue
       if (signed === undefined || !admits(admittedKind(signed.signed, "SnapshotUnread"))) {
         try Ref.update(failures, (n) => n + 1)
         continue
       }
+      const end = endOf(signed.planEndsAt, at)
+      const accepted = try send({ type: "refreshVerified", credential, kind: "ActivePlan", reported: end === "PastEnd" ? "NoEnd" : end })
+      if (!accepted) continue
       try Ref.set(failures, 0)
       try Ref.set(expiresAt, signed.expires)
-      const end = endOf(signed.planEndsAt, at)
-      try send({ type: "refreshVerified", credential, kind: "ActivePlan", reported: end === "PastEnd" ? "NoEnd" : end })
     }
   }
 
