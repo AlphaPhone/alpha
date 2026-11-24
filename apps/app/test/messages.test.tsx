@@ -36,7 +36,7 @@ const bubble = (text: string) => act(async () => {
 });
 
 describe("Messages on an Alpha image", () => {
-  it("See my conversations, read one, and send a message once (spec/app/messages/index.md, \"Story: See my conversations\"; spec/app/messages/index.md, \"Story: Read a conversation\"; spec/app/messages/composer.md, \"Story: Send a message\"; spec/app/messages/sending.md, \"Story: Send a message once\"; spec/app/messages/sending.md, \"Story: Know whether it arrived\")", async () => {
+  it("See my conversations, read one, and send a message once (spec/app/messages/index.md, \"Story: See my conversations\"; spec/app/messages/composer.md, \"Story: Let Alpha suggest a draft\"; spec/app/messages/index.md, \"Story: Read a conversation\"; spec/app/messages/composer.md, \"Story: Send a message\"; spec/app/messages/sending.md, \"Story: Send a message once\"; spec/app/messages/sending.md, \"Story: Know whether it arrived\")", async () => {
     const world = image();
     world.telephony.live = [];
     const { alpha } = await open(world);
@@ -53,6 +53,15 @@ describe("Messages on an Alpha image", () => {
 
     // spec/app/messages/composer.md, "Typing changes the draft and makes it the owner's; emptying it leaves no draft"
     await until(alpha, alpha.runtime, Composer, (s) => s.thread > 0 && s.recipients === 1);
+
+    // spec/app/messages/composer.md, "Alpha's suggestion is asked for only when the draft is empty, and lands only if it still is"; spec/app/messages/composer.md, "Undo takes Alpha's draft away"
+    await press("Let Alpha suggest a reply");
+    await until(alpha, alpha.runtime, Composer, (s) => s.slot.author === "AlphaWrote" && s.suggestion.status === "Loaded");
+    expect([world.telephony.asked, (document.querySelector("textarea[aria-label=Message]") as HTMLTextAreaElement).value, world.telephony.sent]).toEqual([
+      [{ participant: "+14155550100", messages: [{ direction: "in", date: 1_700_000_050_000, body: "See you at five" }], truncated: false }], "Five works, see you there", [],
+    ]);
+    await press("Undo Alpha's draft");
+    await until(alpha, alpha.runtime, Composer, (s) => s.slot.author === "Nobody");
     await write("Message", "On my way");
     await until(alpha, alpha.runtime, Composer, (s) => s.slot.author === "OwnerWrote");
     expect(world.telephony.sent).toEqual([]);

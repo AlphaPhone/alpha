@@ -2,7 +2,7 @@
 import { MMS_ATTACHMENT_TYPES, type MessageRow, type ThreadRow } from "@elizaos/os/bridges/messages";
 import { Alert, Banner, Button, Chip, ConfirmDialog, EmptyState, ListGroup, ListRow, SearchField, Spinner, Textarea } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { ArrowLeft, ImagePlus, Phone as Call, Send, X } from "lucide-react";
+import { ArrowLeft, ImagePlus, Phone as Call, Send, Sparkles, X } from "lucide-react";
 import { useState } from "react";
 import type { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe";
 import { clear } from "../../gen/app__phone.ts";
@@ -203,7 +203,8 @@ function Compose({ runtime }: MessagesProps) {
             void runtime.runPromise(attachAll(files));
           }} />
         </label>
-        <Textarea className="flex-1" aria-label="Message" placeholder="Text message" value={text} onChange={(event) => write(event.target.value)} />
+        <Textarea className="flex-1" aria-label="Message" placeholder="Text message" value={state.slot.author === "Nobody" ? "" : text} onChange={(event) => write(event.target.value)} />
+        {can({ type: "suggest" }) && <Button type="button" variant="ghost" size="icon" aria-label="Let Alpha suggest a reply" onClick={() => void send({ type: "suggest" })}><Sparkles /></Button>}
         {can({ type: "undo" }) && <Button type="button" variant="ghost" size="icon" aria-label="Undo Alpha's draft" onClick={() => void send({ type: "undo" })}><X /></Button>}
         {can({ type: "handOff", supported: sendNow.supported }) && <Button type="button" variant="outline" onClick={() => void send({ type: "handOff", supported: sendNow.supported })}>Open in messaging app</Button>}
         <Button type="submit" size="icon" aria-label="Send" disabled={!can(sendNow)}><Send /></Button>

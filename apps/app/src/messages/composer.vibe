@@ -6,12 +6,14 @@ import * as Composer from "../../gen/app__messages__composer.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__messages__composer.effect.vibe"
 import type { Effect as SendOut } from "../../gen/app__messages__sending.effect.vibe"
 import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { ask } from "../platform/remote.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { Telephony, TelephonyRefused, telephony } from "../platform/telephony.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, following, hearing, reacting, run, started, stream, together } from "../runtime/reactor.vibe"
 import { grantOf } from "../phone/phone.vibe"
-import { Conversations, elsewhere } from "./messages.vibe"
+import { Conversations, Inbox, elsewhere } from "./messages.vibe"
 
 /** A picture the owner attached: what the phone says it is, and its bytes. */
 export interface Picture {
@@ -155,11 +157,34 @@ function sending(fx: SendOut): Job<Event, Telephony | Drafts | Attempts, []> {
   }
 }
 
-function carry(fx: Out): Job<Event, Telephony | Drafts | Attempts | Conversations | SystemSettings | Composer.Machine, []> {
+/** What the agent answers to `POST /api/messages/reply-draft`: one short reply for the owner to read, or none. */
+const Drafted = Schema.Struct({ draft: Schema.NullOr(Schema.String) })
+
+/** The open conversation's tail as the agent's drafter reads it, oldest first. */
+const tailLength = 20
+
+// spec/app/messages/composer.md, "Alpha's suggestion is asked for only when the draft is empty, and lands only if it still is"
+/** Alpha's draft for `thread`, asked of the agent from the messages last read: it lands in the conversation's draft only while the owner has written nothing there. */
+effect function suggestion(ticket: number, thread: number): Event!!(Agent | Inbox | Drafts | Conversations | Composer.Machine) {
+  const refused: Event = { type: "suggested", ticket, ok: false }
+  const rows = (try (try Inbox).get()).messages.flatMap((row) => ("incomplete" in row ? [] : [{ direction: row.direction === "incoming" ? "in" : "out", date: row.date, body: row.body }]))
+  const tail = [...rows].sort((a, b) => a.date - b.date).slice(-tailLength)
+  const conversation = try (try Conversations).get(thread)
+  const participant = Option.isSome(conversation) && conversation.value.addresses.length === 1 ? conversation.value.addresses[0] : null
+  if (tail.length === 0 || tail[tail.length - 1].direction !== "in") return refused
+  const answered = ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/messages/reply-draft"), { participant, messages: tail, truncated: rows.length > tail.length }), Drafted) catch () => undefined
+  const draft = answered?.draft ?? ""
+  const state = try (try Composer.Machine).get()
+  if (draft === "" || state.thread !== thread || state.slot.author !== "Nobody") return refused
+  try (try Drafts).write(thread, draft)
+  return { type: "suggested", ticket, ok: true }
+}
+
+function carry(fx: Out): Job<Event, Telephony | Drafts | Attempts | Conversations | Inbox | Agent | SystemSettings | Composer.Machine, []> {
   return match (fx) {
     when { tag: "SaveDraft" }: answer("save", succeed<Event>({ type: "draftSaved" }), { type: "draftSaved" });
     when { tag: "DropDraft", let thread }: run(`drop ${thread}`, effect { try (try Drafts).drop(thread) });
-    when { tag: "Suggest", let ticket }: answer("suggest", succeed<Event>({ type: "suggested", ticket, ok: false }), { type: "suggested", ticket, ok: false });
+    when { tag: "Suggest", let ticket, let thread }: answer("suggest", suggestion(ticket, thread), { type: "suggested", ticket, ok: false });
     when { tag: "Prompt", let need }: answer("prompt", effect {
       const status = telephony("requestAccess", (c) => c.phone.requestAccess(need === "SendAccess" ? "sendSms" : "phoneState")) catch () => undefined
       return { type: "accessReported", need, grant: grantOf(need === "SendAccess" ? status?.permissions.sendSms : status?.permissions.phoneState) } satisfies Event

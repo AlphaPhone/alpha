@@ -6,6 +6,7 @@ import type { MessagesNativePlugin } from "@elizaos/os/bridges/definitions/messa
 import type { PhoneNativePlugin } from "@elizaos/os/bridges/definitions/phone";
 import { smsBindingHash } from "@elizaos/os/bridges/messages";
 import { type Faked, plugin, rejection } from "./phone.ts";
+import type { Route } from "./routes.ts";
 
 /** A call in the phone's log. */
 export interface LoggedCall { id: number; number: string; name: string | null; date: number; type: "incoming" | "outgoing" | "missed" }
@@ -57,6 +58,9 @@ export interface TelephonyScene {
   deliver: (operationId: string) => void;
   /** While set, the radio has not answered a send yet. */
   hold: Promise<void> | undefined;
+  /** What the agent's reply drafter answers: one draft, or none; and every thread it was asked about. */
+  replyDraft: string | null;
+  readonly asked: unknown[];
 }
 
 const versionOf = (id: string, revision: number) => createHash("sha256").update(`${id}:${revision}`).digest("hex");
@@ -94,7 +98,22 @@ export function telephonyScene(): TelephonyScene {
     changed: () => {},
     deliver: () => {},
     hold: undefined,
+    replyDraft: "Five works, see you there",
+    asked: [],
   };
+}
+
+/** The resident agent's reply drafter, over `world`: it answers one draft for the open conversation, and sends nothing. */
+export function telephonyRoutes(world: TelephonyScene): Route[] {
+  return [
+    (request, url) => {
+      if (request.method !== "POST" || url.pathname !== "/api/messages/reply-draft") return undefined;
+      return request.json().then((thread: unknown) => {
+        world.asked.push(thread);
+        return Response.json({ draft: world.replyDraft });
+      });
+    },
+  ];
 }
 
 /** `ElizaTelephony`: eliza's calls, call log, voicemail and SMS provider, over `world`. */

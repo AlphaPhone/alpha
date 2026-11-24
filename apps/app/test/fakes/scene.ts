@@ -11,6 +11,7 @@ import { type LauncherScene, launcherScene } from "./launcher.ts";
 import { type SettingsScene, settingsScene } from "./settings.ts";
 import { type FilesScene, filesScene } from "./files.ts";
 import { type TelephonyScene, telephonyScene } from "./telephony.ts";
+import { telephonyRoutes } from "./telephony.ts";
 
 /** Everything the fake world holds, one field per area; a journey reads and changes it. */
 export interface Scene {
@@ -66,6 +67,7 @@ export function services(world: Scene) {
       ...askRoutes(world.ask),
       ...calendarRoutes(world.calendar),
       ...platformRoutes(world.platform),
+      ...telephonyRoutes(world.telephony),
     ]),
     cloud: answering([
       ...cloudRoutes(),
