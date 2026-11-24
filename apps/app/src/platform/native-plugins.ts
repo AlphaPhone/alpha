@@ -78,7 +78,7 @@ export const nativePlugins = {
   AlphaCloudSpeechStream: {
     reach: "AnyNative",
     methods: [
-      "requestPermissions", "cloudStreamTiming", "startCloudSpeech", "stopCloudSpeech", "setCloudSpeechOutputMuted",
+      "requestPermissions", "cloudStreamTiming", "prewarmCloudSpeech", "startCloudSpeech", "stopCloudSpeech", "setCloudSpeechOutputMuted",
       "setCloudSpeechMuted", "speakCloudSpeech", "cancelCloudSpeech",
     ],
     events: ["cloudSpeechEvent"],

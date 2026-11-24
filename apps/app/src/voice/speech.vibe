@@ -81,6 +81,8 @@ const BUSY_WAIT = "100 millis"
 const PLAYBACK_EVENTS = ["playbackEnded", "playbackFailed", "playbackStopped"] as const
 const STREAM_CLEANUP = "2500 millis"
 const WARM_LIMIT = "10 seconds"
+/** The Cloud speech relay; its prewarm opens the phone's connection to Cloud speech ahead of Talk. */
+const RELAY = "AlphaCloudSpeechStream"
 const CLEANUP_UNCONFIRMED = "speech-cleanup-unconfirmed"
 const decodePrepared = Schema.decodeUnknownOption(PreparedSpeech)
 const decodePlayback = Schema.decodeUnknownOption(PlaybackEvent)
@@ -337,7 +339,11 @@ export const speechService = Layer.effect(Speech, effect {
     effect warmCloud(connection: number, facts: WarmFacts) {
       const now = try Clock.currentTimeMillis
       const sent = held.send({ type: "warmCloud", connection, now, inFront: facts.inFront, online: facts.online }) catch () => undefined
-      if (sent !== undefined) fork.detached effect { timeout(resident.json("POST", "/api/cloud/warm", {}), WARM_LIMIT) catch () => undefined }
+      if (sent === undefined) return
+      const account = try routes.account()
+      const relay = native.available(RELAY) catch () => false
+      if (account.kind === "cloud" && relay) native.invoke(RELAY, "prewarmCloudSpeech", { environment: account.environment }) catch () => undefined
+      fork.detached effect { timeout(resident.json("POST", "/api/cloud/warm", {}), WARM_LIMIT) catch () => undefined }
     },
     effect setMuted(muted: boolean) {
       const through = stream

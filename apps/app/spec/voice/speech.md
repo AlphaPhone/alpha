@@ -118,7 +118,9 @@ pure def lawALatchedReplyChannelRefusesVoice(s: SpeechChains, recorderOpen: bool
 The phone's warm-up is advisory and its failure is ignored. Cloud is warmed when Alpha comes to the
 front, the assistant sheet opens, Talk starts, a connection becomes active or the phone's network
 comes back. It is skipped while Alpha is not in front and while Android confirms the phone is
-offline. A warm-up shows nothing, never holds up what triggered it, and its failure is ignored.
+offline. On a phone with the Cloud speech relay and a Cloud account, a warm-up also has the relay
+open its connection to Cloud speech, so Talk starts on a warm connection. A warm-up shows nothing,
+never holds up what triggered it, and its failure is ignored.
 
 ```quint
 pure val cloudWarmEveryMs = 60000
