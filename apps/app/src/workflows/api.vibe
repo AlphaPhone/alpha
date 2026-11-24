@@ -29,7 +29,6 @@ export const residentOrigin = "https://device.alpha.invalid"
 
 /** The family a path belongs to, by its canonical owner route. */
 export function familyOf(path: string): RouteFamily {
-  if (/^\/api\/automations$/.test(path)) return "AutomationRoutes"
   if (/^\/api\/triggers(\/[A-Za-z0-9][A-Za-z0-9._:-]{0,199}(\/(runs|execute))?)?$/.test(path)) return "TriggerRoutes"
   if (/^\/api\/scheduled-tasks(\?ownerVisibleOnly=1|\/[A-Za-z0-9][A-Za-z0-9._:-]{0,199}(\/(snooze|skip|complete|dismiss|escalate|acknowledge|edit|reopen|fire))?)?$/.test(path)) return "ScheduledTaskRoutes"
   if (/^\/api\/lifeops\/(reminders|definitions(\/[A-Za-z0-9][A-Za-z0-9._:-]{0,199})?|occurrences\/[A-Za-z0-9][A-Za-z0-9._:-]{0,199}\/snooze)$/.test(path)) return "LifeOpsRoutes"

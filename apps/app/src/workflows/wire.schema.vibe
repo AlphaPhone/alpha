@@ -3,27 +3,6 @@
 /** `GET /api/auth/me`: the resident's local owner. */
 export schema AuthMe { identity: { kind: string; id: string } }
 
-/** One row of `GET /api/automations`. */
-export schema AutomationRecord {
-  id: string
-  type: "workflow" | "coordinator_text" | "automation_draft"
-  title: string
-  description?: string
-  status?: string
-  enabled: boolean
-  system?: boolean
-  workflowId?: string
-  triggerId?: string
-}
-
-/** `GET /api/automations`. */
-export schema AutomationList {
-  automations: ReadonlyArray<AutomationRecord>
-  workflowFetchError?: string
-  /** Only how many there are is read; each is a message or a small record. */
-  executionFetchErrors?: ReadonlyArray<string | Record<string, string | number | boolean | null>>
-}
-
 /** A scheduled task's trigger as the agent lists it. */
 export schema TaskTrigger {
   kind: string

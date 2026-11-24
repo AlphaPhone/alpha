@@ -135,7 +135,6 @@
     },
     "automations": {
       "prefixes": [
-        "/api/automations",
         "/api/lifeops",
         "/api/triggers"
       ],
@@ -146,7 +145,7 @@
             "GET"
           ],
           "paths": [
-            "/api/automations",
+            "/api/triggers",
             "/api/lifeops/definitions",
             "/api/lifeops/reminders",
             "/api/lifeops/scheduled-tasks?ownerVisibleOnly=1",

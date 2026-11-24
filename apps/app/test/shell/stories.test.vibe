@@ -7,7 +7,7 @@ import { Machine as ShadeMachine } from "../../gen/shell__shade.effect.vibe"
 import { Machine as HapticsMachine } from "../../gen/shell__haptics.effect.vibe"
 import { Machine as PermissionsMachine, shownCount, skippable } from "../../gen/shell__permissions.effect.vibe"
 import { Machine as RecoveryMachine } from "../../gen/shell__recovery.effect.vibe"
-import { Machine as OverviewMachine, agenda, dateLine } from "../../gen/shell__overview.effect.vibe"
+import { Machine as OverviewMachine, agenda, dateLine, workflowsCard } from "../../gen/shell__overview.effect.vibe"
 import { Machine as FocusMachine } from "../../gen/shell__focus.effect.vibe"
 import { Machine as GeometryMachine, largeText } from "../../gen/shell__geometry.effect.vibe"
 import { Machine as InventoryMachine } from "../../gen/shell__inventory.effect.vibe"
@@ -36,7 +36,7 @@ const journal = Layer.succeed(CrashJournal, {
   read: () => succeed({ entries: [], exitHistory: false }),
   clear: () => succeed(undefined),
 })
-const resident = fakeResident({ "GET /api/automations": { automations: [] } })
+const resident = fakeResident({ "GET /api/workflow/workflows": { workflows: [] }, "GET /api/triggers": { triggers: [] } })
 
 let notificationsGranted = false
 let haptics: string[] = []
@@ -407,6 +407,22 @@ describe("Recovery and Home (spec/shell/recovery.md, \"Story: Get my phone back 
         try overview.reportOverdue([{ id: "rent", title: "Pay rent", at: -86_400_000 }])
         const due = try machine.get()
         try Effect.try(() => assert.deepStrictEqual([quiet, agenda(due).id, dateLine(due)], [true, "rent", false]))
+      }
+    }
+  })
+
+  it.effect("the workflows card counts the workflows and prompts that are on, from their own routes (spec/shell/overview.md, \"Story: See my day on Home\")", () => effect {
+    const listing = fakeResident({
+      "GET /api/workflow/workflows": { workflows: [{ id: "w1", name: "Morning", active: true, steps: [] }, { id: "w2", name: "Evening", active: false, steps: [] }] },
+      "GET /api/triggers": { triggers: [] },
+    })
+    provide memoryStore, Layer.mergeAll(fakeNative({}), buildInfo({ variant: "browser" }), listing, journal) {
+      provide shell {
+        const overview = try Overview
+        const machine = try OverviewMachine
+        try overview.refresh()
+        const read = try machine.get()
+        try Effect.try(() => assert.deepStrictEqual([read.workflows, workflowsCard(read)], [1, true]))
       }
     }
   })

@@ -1,6 +1,6 @@
 # Automations list
 
-The Workflows list: the agent's workflows and prompts (`/api/automations`), its owner-visible
+The Workflows list: the agent's workflows (`/api/workflow/workflows`) and prompts (`/api/triggers`), its owner-visible
 scheduled tasks, its reminders, and its routines and goals, each read on its own so that one
 source failing never hides the others. A change the owner asks for is held, one per owner, until
 the agent's answer or a complete re-read settles it, so a lost answer never lets a second copy go
@@ -145,7 +145,8 @@ pure def stepAFailedReadKeepsTheRows(before: Automations, via: str, after: Autom
 ### The agent's answer releases the change, and a lost answer keeps it held
 
 An applied answer and a refusal both release it, a refused create included, so a refusal never
-locks new prompts. A lost answer leaves the outcome unknown and the change held. A 4xx answer, a
+locks new prompts. A lost answer leaves the outcome unknown and the change held; a complete re-read that
+settles it reads as applied, and Allow another clears the unknown note with the change it releases. A 4xx answer, a
 definite 404 included, is a refusal released before the list is read again; a 5xx or a reply that
 never came is unknown; a request that was never sent is refused (#1209).
 
@@ -160,7 +161,7 @@ pure def lawADefiniteNotFoundIsARefusal(delivered: bool): bool = answerOfStatus(
 pure def releaseHeld(why: Release, a: Automations): Automations = {
   val h = heldFor(a, a.owner)
   { ...a, held: a.held.select(o => o.owner != a.owner), busy: false, released: why, releasedKind: h.kind,
-    answer: if (why == ByReply) AnswerApplied else if (why == ByRefusal) AnswerRefused else a.answer }
+    answer: if (why == ByReply or why == ByList) AnswerApplied else if (why == ByRefusal) AnswerRefused else NoAnswer }
 }
 pure def canAnswered(a: Automations, id: int, answer: Answer): bool = a.busy and heldFor(a, a.owner).id == id and answer != NoAnswer
 pure def answered(a: Automations, id: int, answer: Answer): Automations =

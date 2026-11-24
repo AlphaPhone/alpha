@@ -23,7 +23,7 @@ const journal = Layer.succeed(CrashJournal, {
   read: () => succeed({ entries: [], exitHistory: false }),
   clear: () => succeed(undefined),
 })
-const resident = fakeResident({ "GET /api/automations": { automations: [] } })
+const resident = fakeResident({ "GET /api/workflow/workflows": { workflows: [] }, "GET /api/triggers": { triggers: [] } })
 const signedIn = { account: true, ownKeys: false, signingIn: false, busy: false, residentStarting: false, background: false, created: false }
 
 let closedAssistant = 0

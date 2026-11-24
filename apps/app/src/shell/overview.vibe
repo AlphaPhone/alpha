@@ -1,7 +1,7 @@
 // spec/shell/overview.md, "Story: See my day on Home"
 import { Machine as OverviewMachine, nextChange, type Attention, type BriefOutcome, type Event as OverviewEvent, type FeedState, type Item } from "../../gen/shell__overview.effect.vibe"
 import { Resident } from "../platform/resident.vibe"
-import { AutomationList, CalendarFeed } from "./overview.schema.vibe"
+import { CalendarFeed, PromptList, WorkflowList } from "./overview.schema.vibe"
 import { localDay, nextMidnight, pageEvents, pageHidden } from "./page.ts"
 
 /** What another area reports for Home's overview: the mail it loaded, the newest brief, overdue reminders. */
@@ -53,9 +53,13 @@ effect function readAgenda(machine: OverviewMachine.Shape) {
 effect function readWorkflows(machine: OverviewMachine.Shape) {
   const resident = try Resident
   const at = try Clock.currentTimeMillis
-  const list = effect { return try Schema.decodeUnknownEffect(AutomationList)((try resident.json("GET", "/api/automations")).data) } catch () => undefined
-  if (list === undefined) return
-  const count = list.automations.filter((row) => row.enabled === true || row.status === "active").length
+  // The agent lists workflows and prompts on their own routes; the card counts both, and only once both were read.
+  effect function workflowList() { return try Schema.decodeUnknownEffect(WorkflowList)((try resident.json("GET", "/api/workflow/workflows")).data) }
+  effect function promptList() { return try Schema.decodeUnknownEffect(PromptList)((try resident.json("GET", "/api/triggers")).data) }
+  const workflows = workflowList() catch () => undefined
+  const prompts = promptList() catch () => undefined
+  if (workflows === undefined || prompts === undefined) return
+  const count = workflows.workflows.filter((row) => row.active && row.removed !== true).length + prompts.triggers.filter((row) => row.enabled).length
   try sendTo(machine, { type: "workflowsRead", count, at })
 }
 

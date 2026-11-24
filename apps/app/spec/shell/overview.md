@@ -9,8 +9,10 @@ time. A card is drawn only when it has something to show; with none, Home shows 
 Gmail setup link when no Google account is connected.
 
 Times are milliseconds since the epoch and days are local day numbers, both given by the shell.
-The calendar feed is the resident agent's (`GET /api/lifeops/calendar/feed`); overdue reminders,
-the mail summary and the brief are reported by the areas that own them.
+The calendar feed is the resident agent's (`GET /api/lifeops/calendar/feed`); the workflows card
+counts the agent's workflows that are active and not removed (`GET /api/workflow/workflows`) and its
+prompts that are enabled (`GET /api/triggers`), once both lists were read; overdue reminders, the
+mail summary and the brief are reported by the areas that own them.
 
 ## Story: See my day on Home
 

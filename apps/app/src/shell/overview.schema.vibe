@@ -20,8 +20,14 @@ export schema CalendarFeed {
   readonly state: "complete" | "partial" | "unavailable"
 }
 
-/** One automation of `GET /api/automations`; it counts as on when it says so. */
-export schema AutomationRow { readonly enabled?: boolean; readonly status?: string }
+/** One workflow of `GET /api/workflow/workflows`; it counts as on while it is active and not removed. */
+export schema WorkflowRow { readonly active: boolean; readonly removed?: boolean }
 
-/** `GET /api/automations`. */
-export schema AutomationList { readonly automations: AutomationRow[] }
+/** `GET /api/workflow/workflows`. */
+export schema WorkflowList { readonly workflows: WorkflowRow[] }
+
+/** One prompt of `GET /api/triggers`; it counts as on while it is enabled. */
+export schema PromptRow { readonly enabled: boolean }
+
+/** `GET /api/triggers`. */
+export schema PromptList { readonly triggers: PromptRow[] }
