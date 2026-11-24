@@ -9,7 +9,7 @@ import type { Effect as Out, Event, Need, Page } from "../../gen/app__messages.e
 import { CarrierSetup } from "../platform/carrier.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
-import { type Job, Whole, answer, hearing, reacting, run, together } from "../runtime/reactor.vibe"
+import { type Job, Whole, answer, contained, hearing, reacting, run, together } from "../runtime/reactor.vibe"
 import { Dialer, grantOf, prefilled } from "../phone/phone.vibe"
 import { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
 import { Callers } from "../phone/voicemail.vibe"
@@ -260,8 +260,10 @@ const callers = Layer.effect(Callers, effect {
   effect function handed(number: string): void!!(Conversations | Inbox | Messages.Machine | Shell) {
     const thread = try (try Conversations).of({ id: "", addresses: [number] })
     try (try Inbox).set({ typed: number })
-    try ignore((try Shell).send({ type: "openView", view: "Messages" }))
+    if (!(try contained((try Shell).send({ type: "openView", view: "Messages" }), "the number handed to Messages"))) return
     const machine = try Messages.Machine
+    const front = try Stream.runHead(Stream.filter(machine.changes, (s) => s.front))
+    if (Option.isSome(front) && front.value.pane !== "Threads") try ignore(machine.send({ type: "back" }))
     try ignore(machine.send({ type: "newMessage" }))
     try ignore(machine.send({ type: "choose", thread, typed: true }))
   }

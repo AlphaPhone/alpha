@@ -9,7 +9,7 @@ const ana = { address: "ana.lima@example.com", valid: true };
 export const meta: ComponentMeta<InboxDraftReviewProps> = {
   args: {
     open: true, operation: "send", from: "sam.rivera@gmail.com", to: [ana], cc: [{ address: "bruno@costa.example", valid: true }], bcc: undefined,
-    subject: "Lunch on Friday?", attachments: ["Invoice 2041.pdf"], repeat: false, changed: false, confirming: false, onConfirm, onReviewAgain: undefined, onCancel,
+    subject: "Lunch on Friday?", text: "Hi Ana,\n\nCan we meet at noon?\n\nSam", attachments: ["Invoice 2041.pdf"], repeat: false, changed: false, confirming: false, onConfirm, onReviewAgain: undefined, onCancel,
   },
   examples: {
     "Confirming": { confirming: true },

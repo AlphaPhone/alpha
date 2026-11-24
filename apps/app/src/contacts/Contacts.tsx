@@ -1,14 +1,18 @@
 // spec/app/contacts/index.md, "Story: Browse my contacts"; spec/app/contacts/index.md, "Story: Give Alpha access to my contacts"; spec/app/contacts/index.md, "Story: Look at one contact"; spec/app/contacts/index.md, "Story: Add or change a contact"; spec/app/contacts/index.md, "Story: Delete a contact"; spec/app/contacts/index.md, "Story: Know what happened to my change"
-import { Alert, AppHeader, Avatar, Banner, Button, Chip, ConfirmDialog, Input, ListGroup, ListRow, SearchField, Spinner, Textarea } from "@repo/ui";
+import { Alert, AppHeader, Avatar, Banner, Button, Chip, ConfirmDialog, Input, ListGroup, ListRow, SearchField, Spinner, Tabs, TabsContent, Textarea } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
 import { ArrowLeft, ChevronDown, Mail, MessageSquare, Pencil, Phone as Call, Plus, Search, Star, Trash2 } from "lucide-react";
 import { useState } from "react";
 import type { Machine as ContactsMachine } from "../../gen/app__contacts.effect.vibe";
 import { accessNeeded, listFailed, listedEmpty, noMatches, pending, refused, shown, uncertain } from "../../gen/app__contacts.ts";
 import { useMachine as useContacts } from "../../gen/app__contacts.react.ts";
-import type { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe";
+import type { Machine as PhoneMachine, Tab } from "../../gen/app__phone.effect.vibe";
 import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
+import type { Machine as VoicemailMachine } from "../../gen/app__phone__voicemail.effect.vibe";
+import { useMachine as useVoicemail } from "../../gen/app__phone__voicemail.react.ts";
+import { useMachine as useShell } from "../../gen/app__shell.react.ts";
+import { PhoneTabs } from "../phone/PhoneTabs.tsx";
 import { type Book, type Form, Rows, blankForm, sheetOf } from "./contacts.vibe";
 import { CommsBar, type CommsServices } from "../phone/CommsBar.tsx";
 import type { Alpha } from "../runtime/area.tsx";
@@ -16,7 +20,7 @@ import { AppBack } from "../shell/AppBack.tsx";
 
 export interface ContactsProps {
   /** Provides Contacts' machine, resident, Phone's, for whether a call may be an emergency call, and what Contacts counts. */
-  runtime: ManagedRuntime.ManagedRuntime<ContactsMachine | PhoneMachine | Rows | CommsServices, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ContactsMachine | PhoneMachine | VoicemailMachine | Rows | CommsServices, unknown>;
 }
 
 /**
@@ -26,8 +30,11 @@ export interface ContactsProps {
  */
 export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
   const contacts = useContacts(runtime);
-  const phone = usePhone(runtime).state;
-  const [query, setQuery] = useState("");
+  const dialer = usePhone(runtime);
+  const phone = dialer.state;
+  const voicemail = useVoicemail(runtime).state;
+  const shell = useShell(runtime);
+  const [query, setQuery] = useState(() => runtime.runSync(Effect.flatMap(Rows, (rows) => rows.get())).sought);
   const [searching, setSearching] = useState(false);
   if (contacts.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Contacts</Alert>;
   const { state, can, send } = contacts;
@@ -47,20 +54,35 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
     void send({ type: "openContact", contact: id });
   };
   const groups = Object.groupBy(held.rows, (row) => Array.from(row.name.trim())[0]?.toLocaleUpperCase() ?? "#");
-  return (
+  const canBack = shell.can({ type: "goBack" });
+  const phoneTabs = !state.opened && shell.state?.trail.at(-2) === "Phone";
+  const back = canBack ? () => void alpha.back() : undefined;
+  const select = async (tab: string) => {
+    if (tab === "Contacts" || !canBack) return;
+    const event = { type: "pickTab", tab: tab as Tab } as const;
+    if (dialer.can(event)) await dialer.send(event);
+    await shell.send({ type: "goBack" });
+  };
+  const actions = (
+    <>
+      <Button variant="ghost" size="icon" aria-label="Search contacts" onClick={() => setSearching(true)}><Search className="size-5" /></Button>
+      {can({ type: "compose" }) && <Button variant="ghost" size="icon" aria-label="New contact" onClick={() => { set({ form: blankForm }); void send({ type: "compose" }); }}><Plus className="size-5" /></Button>}
+      {can({ type: "composeElsewhere" }) && <Button variant="ghost" size="icon" aria-label="New contact" onClick={() => void send({ type: "composeElsewhere" })}><Plus className="size-5" /></Button>}
+    </>
+  );
+  const header = searching ? (
+    <form role="search" aria-label="Search contacts" data-host-chrome="" className="flex min-h-14 items-center px-2" onSubmit={(event) => event.preventDefault()}>
+      <Button variant="ghost" size="icon" aria-label="Back to contacts" onClick={() => { search(""); setSearching(false); }}><ArrowLeft className="size-5" /></Button>
+      <SearchField autoFocus className="mr-2 flex-1" aria-label="Search contacts" clearLabel="Clear search" placeholder="Search contacts" value={query} onValueChange={search} />
+    </form>
+  ) : phoneTabs ? (
+    <PhoneTabs title="Contacts" contacts voicemail={phone.voicemail} unheard={(voicemail?.unheard ?? 0) > 0} onBack={back}>{actions}</PhoneTabs>
+  ) : (
+    <AppHeader title="Contacts" leading={<AppBack alpha={alpha} />}>{actions}</AppHeader>
+  );
+  const content = (
     <section aria-label="Contacts" className="flex flex-1 flex-col gap-2">
-      {!state.opened && (searching ? (
-        <form role="search" aria-label="Search contacts" data-host-chrome="" className="flex min-h-14 items-center px-2" onSubmit={(event) => event.preventDefault()}>
-          <Button variant="ghost" size="icon" aria-label="Back to contacts" onClick={() => { search(""); setSearching(false); }}><ArrowLeft className="size-5" /></Button>
-          <SearchField autoFocus className="mr-2 flex-1" aria-label="Search contacts" clearLabel="Clear search" placeholder="Search contacts" value={query} onValueChange={search} />
-        </form>
-      ) : (
-        <AppHeader title="Contacts" leading={<AppBack alpha={alpha} />} className="gap-1.5 px-3 [&_h1]:font-sans [&_h1]:text-xl [&_h1]:font-semibold">
-          <Button variant="ghost" size="icon" aria-label="Search contacts" onClick={() => setSearching(true)}><Search className="size-5" /></Button>
-          {can({ type: "compose" }) && <Button variant="ghost" size="icon" aria-label="New contact" onClick={() => { set({ form: blankForm }); void send({ type: "compose" }); }}><Plus className="size-5" /></Button>}
-          {can({ type: "composeElsewhere" }) && <Button variant="ghost" size="icon" aria-label="New contact" onClick={() => void send({ type: "composeElsewhere" })}><Plus className="size-5" /></Button>}
-        </AppHeader>
-      ))}
+      {!state.opened && !phoneTabs && header}
       {pending(state) && <Banner>Contact change pending</Banner>}
       {uncertain(state) && <Banner variant="warn" action={can({ type: "refresh" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "refresh" })}>Refresh</Button>}>Outcome unknown: refresh</Banner>}
       {accessNeeded(state) && (
@@ -104,6 +126,13 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
       )}
       <div className="px-4"><CommsBar runtime={runtime} /></div>
     </section>
+  );
+  if (!phoneTabs) return content;
+  return (
+    <Tabs value="Contacts" onValueChange={(value) => void select(value)} className="min-h-0 flex-1 gap-0">
+      {header}
+      <TabsContent value="Contacts" className="min-h-0 flex-1 overflow-y-auto">{content}</TabsContent>
+    </Tabs>
   );
 }
 

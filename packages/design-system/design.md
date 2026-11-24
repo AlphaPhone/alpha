@@ -15,14 +15,18 @@ do next.
   focus: both stand at least 3:1 off `background` and `card` in both themes (WCAG 1.4.11).
 - **Meaning.** `primary` is the accent as text and as the main action: Alpha blue on white, a lighter
   blue on black where Alpha blue cannot be read. `destructive`, `ok`, `warn` and `info` are states,
-  `call` a live or answerable call, `record` a running recording. A state color always sits beside a
+  `call` a live or answerable call, `dial` the button that places one, `record` a running recording. A state color always sits beside a
   word or an accessible name, never alone.
 - **Type.** `font-sans` is Public Sans, for everything read or pressed. `font-display` is Denton, with
   Fraunces behind it, at weight `light`: a screen's one title, the date on Home, a large figure. The sizes
   are in rem, so Android's text size scales them: `base` is body text, `3xl` a screen title, `4xl` the
-  Home date. `tracking-caps` with `text-xs` is a small uppercase label.
+  Home date. `tracking-caps` with `text-xs` is a small uppercase label. A list row reads `text-base`,
+  `text-subject` and `text-snippet` line by line; `text-meta` is a status line under a header, and `text-body`
+  the text of a message or of a field being typed; `text-2xs` is the time under a text message or a
+  keypad key's letters.
 - **Shape.** `radius` is a card or a row group; `rounded-home-card` is a Home overview card;
-  `rounded-drawer-icon` rounds an installed app icon. `rounded-tile` is an app tile, a menu and a dialog;
+  `rounded-drawer-icon` rounds an installed app icon; `rounded-option` is a row of a floating menu and
+  `rounded-box` the box of a list row's selection check. `rounded-tile` is an app tile, a menu and a dialog;
   `rounded-sheet` the top of a bottom sheet; `rounded-full` a button, a chip and the Ask Alpha bar.
   Everything pressed is at least 44px in both directions.
 - **Elevation.** `shadow-sm` lifts a control, `shadow-md` a menu or dialog, `shadow-lg` the Ask Alpha
@@ -83,6 +87,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `alpha-foreground` | oklch(1 0 0) | — |
 | `call` | oklch(0.509 0.134 149.4) | oklch(0.614 0.162 149.3) |
 | `record` | oklch(0.578 0.206 29) | oklch(0.663 0.224 28.3) |
+| `dial` | oklch(0.614 0.162 149.3) | — |
+| `dial-foreground` | oklch(1 0 0) | — |
 
 | Token | Value |
 | --- | --- |
@@ -91,15 +97,27 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `rounded.sheet` | 1.75rem |
 | `rounded.home-card` | 1.875rem |
 | `rounded.drawer-icon` | 1.125rem |
+| `rounded.option` | 0.625rem |
+| `rounded.box` | 0.375rem |
 | `font.sans` | "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif |
 | `font.display` | Denton, Fraunces, Georgia, serif |
 | `font.mono` | ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace |
+| `text.2xs.size` | 0.6875rem |
+| `text.2xs.leading` | 1.4 |
 | `text.xs.size` | 0.75rem |
 | `text.xs.leading` | 1.25 |
+| `text.meta.size` | 0.8125rem |
+| `text.meta.leading` | 1.25 |
+| `text.snippet.size` | 0.84375rem |
+| `text.snippet.leading` | 1.2 |
 | `text.sm.size` | 0.875rem |
 | `text.sm.leading` | 1.4 |
+| `text.subject.size` | 0.90625rem |
+| `text.subject.leading` | 1.2 |
 | `text.base.size` | 0.9375rem |
 | `text.base.leading` | 1.4 |
+| `text.body.size` | 1rem |
+| `text.body.leading` | 1.6 |
 | `text.lg.size` | 1.0625rem |
 | `text.lg.leading` | 1.4 |
 | `text.xl.size` | 1.25rem |

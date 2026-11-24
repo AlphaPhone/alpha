@@ -2,12 +2,12 @@
 import type { AddressBookRow } from "@elizaos/os/bridges/contacts"
 import type { TelephonyCallLogEntry, TelephonyPermissionState } from "@elizaos/os/bridges/phone"
 import * as Phone from "../../gen/app__phone.effect.vibe"
-import type { Effect as Out, Event, Filter, Telecom, Typed } from "../../gen/app__phone.effect.vibe"
+import type { Effect as Out, Event, Telecom, Typed } from "../../gen/app__phone.effect.vibe"
 import type { Grant } from "../../gen/kit__permission.ts"
 import { Calls } from "../platform/calls.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
-import { type Job, answer, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { type Job, answer, applying, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { on, visiting } from "./visit.vibe"
 import { judge, matches } from "./words.ts"
 
@@ -17,12 +17,15 @@ export const recentsLimit = 50
 /** What Phone's machine counts, kept beside it: the recent calls last read, the search, and the keypad's digits. */
 export interface Dialing {
   readonly rows: ReadonlyArray<TelephonyCallLogEntry>
+  readonly source: ReadonlyArray<TelephonyCallLogEntry> | undefined
   readonly sought: string
+  readonly filterLabel: string
   readonly digits: string
   readonly matched: string
+  readonly matchedNumber: string
 }
 
-const none: Dialing = { rows: [], sought: "", digits: "", matched: "" }
+const none: Dialing = { rows: [], source: undefined, sought: "", filterLabel: "", digits: "", matched: "", matchedNumber: "" }
 
 /** The numbers and rows behind Phone's counts: what the screens show and what a handoff dials. */
 export service Dialer {
@@ -43,35 +46,52 @@ export function grantOf(state: TelephonyPermissionState | undefined): Grant {
 const missedTypes = new Set(["missed", "rejected", "blocked"])
 
 // spec/app/phone/index.md, "Only the newest read of the log is shown, with what Android says about access"
-effect function readLog(ticket: number): Event!!(Telephony | Dialer | Phone.Machine) {
+effect function readLog(ticket: number, device: boolean): Event!!(Telephony | Dialer | Phone.Machine) {
   const store = try Dialer
-  const chip: Filter = (try (try Phone.Machine).get()).chip
-  const status = telephony("status", (c) => c.phone.status()) catch () => undefined
-  const grant = grantOf(status?.permissions.callLog)
-  if (grant !== "Granted") {
-    try store.set({ rows: [] })
-    return { type: "recentsRead", ticket, ok: status !== undefined, grant, count: 0 }
+  const machine = try Phone.Machine
+  const before = try machine.get()
+  const held = try store.get()
+  let source = device ? undefined : held.source
+  let grant = before.log.grant
+  let ok = true
+  if (source === undefined || grant !== "Granted") {
+    const status = telephony("status", (c) => c.phone.status()) catch () => undefined
+    grant = grantOf(status?.permissions.callLog)
+    ok = status !== undefined
+    if (grant === "Granted") {
+      const page = telephony("recentCalls", (c) => c.phone.recentCalls({ limit: recentsLimit })) catch () => undefined
+      ok = page !== undefined
+      if (page !== undefined) {
+        const names = try namesOf("phone", page.calls.map((entry) => entry.number))
+        source = page.calls.map((entry) => ({ ...entry, cachedName: names.get(entry.number) ?? entry.cachedName }))
+      }
+    }
   }
-  const page = telephony("recentCalls", (c) => c.phone.recentCalls({ limit: recentsLimit })) catch () => undefined
+  const current = try machine.get()
   const query = (try store.get()).sought
-  const calls = page?.calls ?? []
-  const names = try namesOf("phone", calls.map((entry) => entry.number))
-  const rows = calls.map((entry) => ({ ...entry, cachedName: names.get(entry.number) ?? entry.cachedName })).filter((entry) => (chip === "AllCalls" || missedTypes.has(entry.type)) && matches(query, entry.cachedName ?? "", entry.number))
-  try store.set({ rows })
-  return { type: "recentsRead", ticket, ok: page !== undefined, grant, count: rows.length }
+  const rows = grant === "Granted" ? (source ?? []).filter((entry) =>
+    (current.chip === "AllCalls" || missedTypes.has(entry.type)) && matches(query, entry.cachedName ?? "", entry.number)) : []
+  if (Phone.canRecentsRead(current, ticket, rows.length)) try store.set({ source, rows })
+  return { type: "recentsRead", ticket, ok, grant, count: rows.length }
 }
 
 // spec/app/phone/index.md, "Only the newest lookup names a contact"
 effect function matchNumber(ticket: number): Event!!(Telephony | Dialer) {
   const store = try Dialer
   const digits = (try store.get()).digits
-  const named = (row: AddressBookRow) => !("incomplete" in row) && row.phones.some((phone) => phone.replace(/[^\d+]/g, "").endsWith(digits.replace(/[^\d+]/g, "")))
+  const query = digits.replace(/\D/g, "")
+  if (query.length < 3) {
+    try store.set({ matched: "", matchedNumber: "" })
+    return { type: "numberMatched", ticket, found: false }
+  }
   const page = effect {
     try telephony("open", (c) => c.contacts.open())
-    return try telephony("list", (c) => c.contacts.list({ query: digits, limit: 5 }))
+    return try telephony("list", (c) => c.contacts.list({ query, limit: 5 }))
   } catch () => undefined
-  const found = page?.contacts.find(named)
-  try store.set({ matched: found !== undefined && !("incomplete" in found) ? found.name : "" })
+  const found = page?.contacts.flatMap((row: AddressBookRow) => "incomplete" in row ? [] : row.phones
+    .filter((number) => number.replace(/\D/g, "").includes(query))
+    .map((number) => ({ name: row.name, number }))).at(0)
+  if ((try store.get()).digits === digits) try store.set({ matched: found?.name ?? "", matchedNumber: found?.number ?? "" })
   return { type: "numberMatched", ticket, found: found !== undefined }
 }
 
@@ -107,7 +127,7 @@ effect function handoff(ticket: number, typed: boolean, tapped: string): Event!!
 
 function carry(fx: Out): Job<Event, Telephony | Dialer | Phone.Machine | SystemSettings | Calls, []> {
   return match (fx) {
-    when { tag: "ReadLog", let ticket }: answer("log", readLog(ticket), { type: "recentsRead", ticket, ok: false, grant: "Unasked", count: 0 });
+    when { tag: "ReadLog", let ticket, let device }: answer("log", readLog(ticket, device), { type: "recentsRead", ticket, ok: false, grant: "Unasked", count: 0 });
     when { tag: "MatchNumber", let ticket }: answer("match", matchNumber(ticket), { type: "numberMatched", ticket, found: false });
     when { tag: "AskLog" }: answer("ask", askLog(), { type: "logReported", grant: "Unasked" });
     when { tag: "OpenSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", 0) });
@@ -116,9 +136,14 @@ function carry(fx: Out): Job<Event, Telephony | Dialer | Phone.Machine | SystemS
   }
 }
 
+/** Keep the characters the dial keypad can supply. */
+export function keypadDigits(number: string): string {
+  return number.replace(/[^\d+*#]/g, "").slice(0, Phone.maxDigits)
+}
+
 /** A number handed to Phone, judged as the keypad judges it; nothing for a number the keypad cannot hold. */
 export function prefilled(number: string): { readonly digits: string; readonly event: Event } | undefined {
-  const digits = number.replace(/[^\d+*#]/g, "").slice(0, Phone.maxDigits)
+  const digits = keypadDigits(number)
   const typed: Typed = judge(digits)
   return digits === "" || typed === "Blank" ? undefined : { digits, event: { type: "prefill", digits: digits.length, typed } }
 }
@@ -151,7 +176,13 @@ const machine = reacting(Phone, { carry, open: opening })
 
 const shown = visiting(on("Phone"), Phone.Machine, (showing): Event => (showing ? { type: "show" } : { type: "leave" }))
 
+const clearedLog = applying(Phone.Machine, (state) => ({ front: state.front, recents: state.tab === "Recents" }), effect ({ front, recents }) => {
+  const store = try Dialer
+  if (!front) try store.set({ rows: [], source: undefined, sought: "", filterLabel: "" })
+  else if (!recents) try store.set({ rows: [], source: undefined })
+})
+
 const telecom = hearing(Stream.unwrap(effect { return (try Calls).readings }), Phone.Machine, (raw): Event => ({ type: "telecomReported", ...telecomOf(raw) }))
 
 /** Phone: resident, since Contacts, Voicemail, Messages and the agent hand it a number and every area reads whether a call is live; it reads only while its view is in front. */
-export const phone = together(machine, dialer, shown, telecom, ready)
+export const phone = together(machine, dialer, shown, telecom, ready, clearedLog)

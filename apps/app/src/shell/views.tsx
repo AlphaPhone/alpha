@@ -19,7 +19,7 @@ export const views = {
 
 export const viewOrder = Object.keys(views) as View[];
 
-const ownHeader = new Set<View>(["Contacts", "Maps", "Messages", "Phone", "Settings"]);
+const ownHeader = new Set<View>(["Contacts", "Files", "Maps", "Messages", "Phone", "Settings"]);
 
 /** Whether an area's own chrome includes Back and the view's title or search. */
 export const viewHasHeader = (view: View) => ownHeader.has(view);
