@@ -42,7 +42,7 @@ test('explicit execution stages only the reviewed overlay and public key in a di
  for(const [name,digest]of Object.entries(plan.files))assert.equal(sha(fs.readFileSync(path.join(f.destination,name))),digest);
  const config=fs.readFileSync(path.join(f.destination,'overlay/vendor/eliza/system-updater/res/values/config.xml'),'utf8');
  assert(config.includes('<bool name="os_update_enabled">true</bool>'));
- assert(config.includes('<string name="os_update_manifest" translatable="false">https://github.com/alphacompute/alpha/releases/download/os-pilot/alpha-os-update.json</string>'));
+ assert(config.includes('<string name="os_update_manifest" translatable="false">https://github.com/eliza-research/alpha/releases/download/os-pilot/alpha-os-update.json</string>'));
  assert(config.includes(profile.otaCertificateSha256));
  for(const host of profile.hosts)assert(config.includes(`<item>${host}</item>`));
  const second=f.run(['--execute']);assert.notEqual(second.status,0);assert.equal(sha(fs.readFileSync(f.product)),plan.productAfterSha256);
