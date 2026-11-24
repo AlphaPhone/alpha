@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// spec/release/index.md, "Story: Build a candidate"; spec/release/index.md, "Story: Sign a release"; spec/release/index.md, "Story: Qualify and publish a release"; spec/release/index.md, "A build is a candidate only when its verification recorded it distributable: no test mocks, the production bundle audit passed, Alpha's one signer, the runtime packaged with its notices, an on-device voice slot, and for an image its platform certificate"; spec/release/index.md, "An APK is admitted to the channel only as Alpha's launcher, first signed by Alpha's one key, at the candidate's version, not debuggable, of at most 2 GiB, and with only the entries a release may hold"; spec/release/index.md, "Phones read the launcher channel from the stable release of Alpha's repository, eliza-research/alpha, known by its permanent id; APKs kept under the repository's earlier names stay valid"; spec/release/index.md, "The anonymous download must return the exact size and digest before anything else moves"; spec/release/index.md, "The manifest is moved only after the download was verified, with the APK still in the channel's final inventory, the channel unchanged since publishing began, and the version above the floor and the published version as they are then"; spec/release/pilot.md, "Story: Update a pilot phone by cable"
+// spec/release/index.md, "Story: Build a candidate"; spec/release/index.md, "Story: Sign a release"; spec/release/index.md, "Story: Qualify and publish a release"; spec/release/index.md, "A build is a candidate only when its verification recorded it distributable: no test mocks, the production bundle audit passed, Alpha's one signer, the runtime packaged with its notices, an on-device voice slot, and for an image its platform certificate"; spec/release/index.md, "An APK is admitted to the channel only as Alpha's launcher, first signed by Alpha's one key, at the candidate's version, not debuggable, of at most 2 GiB, and with only the entries a release may hold"; spec/release/index.md, "Phones read the launcher channel from the stable release of Alpha's repository, eliza-research/alpha, known by its permanent id; APKs kept under the repository's earlier names stay valid"; spec/release/index.md, "The anonymous download must return the exact size and digest before anything else moves"; spec/release/index.md, "The manifest is moved only after the download was verified, with the APK still in the channel's final inventory, the channel unchanged since publishing began, and the version above the floor and the published version as they are then"; spec/release/pilot.md, "Story: Update a pilot phone by cable"; spec/release/index.md, "Story: Read back a phone that updated itself"
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { constants, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -14,7 +14,8 @@ import {
 import { Data, Effect } from "effect";
 import * as Channel from "../gen/release.ts";
 import {
-  type Apk, type Blockers, admitted, channelManifest, channelRepository, channelRepositoryId, channelTag, clear, distributable, earlierRepositories, maxApkBytes, retiredTag,
+  type Apk, type Blockers, type Readback, admitted, channelManifest, channelRepository, channelRepositoryId, channelTag, clear, distributable, earlierRepositories, maxApkBytes,
+  retiredTag, updatedItself,
 } from "../gen/release.ts";
 import { pilotPassed } from "../gen/app__image.ts";
 import * as Pilot from "../gen/release__pilot.ts";
@@ -46,6 +47,7 @@ const USAGE = [
   "pnpm release record --run FILE --manifest FILE",
   "pnpm release status",
   "pnpm release pilot --serial SERIAL --apk FILE --version N --record NEW_FILE [--stock-home PACKAGE/ACTIVITY]",
+  "pnpm release readback --serial SERIAL --record NEW_FILE [--before FILE]",
 ].join("\n");
 
 /** The manifest phones read, at the release of the channel's tag. */
@@ -416,6 +418,17 @@ const commands = {
     if (!pilotPassed(update.state)) return yield* new ReleaseRefused({ message: `the pilot update did not pass; its record is ${out}` });
     return update;
   }),
+  readback: (argv: readonly string[]) => Effect.gen(function* () {
+    const found = yield* attempt(() => flags(argv, ["serial", "record", "before"]));
+    const [serial = "", out = ""] = yield* attempt(() => found.need("serial", "record"));
+    const adb: Adb = (args) => execFileSync("adb", ["-s", serial, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 120_000 });
+    const offer = yield* publicOffer;
+    const before = found.values.before === undefined ? undefined : yield* attempt(() => (JSON.parse(readFileSync(found.values.before ?? "", "utf8")) as { readonly observed: Observed }).observed);
+    const read = yield* attempt(() => readBack({ adb, offer, before }));
+    yield* attempt(() => writeFileSync(out, `${JSON.stringify(read, null, 2)}\n`, { flag: "wx" }));
+    if (read.readback !== undefined && !read.passed) return yield* new ReleaseRefused({ message: `the phone did not update itself to ${offer.versionCode}; its record is ${out}` });
+    return read;
+  }),
 } as const;
 
 /** The phone's adb shell, for one serial: a command's output, or a thrown failure. */
@@ -574,6 +587,55 @@ export function pilotUpdate({ adb, serial, apk, stockHome, locks = PILOT_LOCKS, 
     release();
   }
   return { state, taken, receipt, failures };
+}
+
+/** The launcher release the channel offers anyone now, its APK's bytes read back as the offer describes them. */
+export interface Offer { readonly versionCode: number; readonly sha256: string; readonly sizeBytes: number; readonly apkUrl: string; readonly signerSha256: string }
+
+const publicOffer = Effect.gen(function* () {
+  const offer = JSON.parse(new TextDecoder().decode(yield* fetched(manifestUrl()))) as Offer;
+  const served = yield* fetched(offer.apkUrl);
+  if (!kept(offer.apkUrl, offer.versionCode) || offer.signerSha256 !== reviewedSigner() || served.length !== offer.sizeBytes || sha256(served) !== offer.sha256)
+    return yield* new ReleaseRefused({ message: `the channel's offer is not an APK of Alpha's one key served exactly as described: ${JSON.stringify(offer)}` });
+  return offer;
+});
+
+/** One read of the phone and the offer, made without changing either. */
+export interface Observed {
+  readonly offer: Offer;
+  readonly versionCode: number;
+  readonly identity: { readonly uid: string; readonly firstInstall: string };
+  readonly initiator: string;
+  readonly sha256: string;
+  readonly home: { readonly holders: readonly string[]; readonly activity: string };
+}
+
+/**
+ * Reads, by cable and without changing anything, what a phone runs and who holds its Home, beside the offer. Given
+ * the read made before the phone took the offer, it also judges whether the phone updated itself.
+ */
+export function readBack({ adb, offer, before }: { readonly adb: Adb; readonly offer: Offer; readonly before?: Observed | undefined }) {
+  const user = adb(["shell", "am", "get-current-user"]).trim();
+  const dump = adb(["shell", "dumpsys", "package", PACKAGE]);
+  const facts = packageFacts(dump);
+  const path = /^package:(\/\S+\.apk)$/m.exec(adb(["shell", "pm", "path", PACKAGE]))?.[1] ?? "";
+  const home = homeOf(adb, user);
+  const observed: Observed = {
+    offer, versionCode: facts.versionCode, identity: facts.identity,
+    initiator: /installInitiatingPackageName=([^\s,}]+)/.exec(dump)?.[1] ?? "",
+    sha256: path === "" ? "" : /^([0-9a-f]{64})\b/.exec(adb(["shell", "sha256sum", path]).trim())?.[1] ?? "",
+    home: { holders: home.holders, activity: home.activity },
+  };
+  if (before === undefined) return { observed, readback: undefined, passed: false };
+  const readback: Readback = {
+    sameInstall: observed.identity.uid === before.identity.uid && observed.identity.firstInstall === before.identity.firstInstall && observed.identity.uid !== "",
+    advanced: before.versionCode < offer.versionCode && observed.versionCode === offer.versionCode,
+    exact: observed.sha256 === offer.sha256,
+    selfInitiated: observed.initiator === PACKAGE,
+    homeKept: home.home === "AlphaHome" && JSON.stringify(observed.home) === JSON.stringify(before.home),
+    offerKept: JSON.stringify(offer) === JSON.stringify(before.offer),
+  };
+  return { observed, readback, passed: updatedItself(readback) };
 }
 
 /** One `pnpm release` command, as an effect over Node's services. */

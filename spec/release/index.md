@@ -363,6 +363,29 @@ pure def sometimesRepaired(s: Channel): bool = s.stage == Verified and s.pointer
 pure def sometimesOvertaken(s: Channel): bool = s.stage == Abandoned and s.pointer > s.number
 ```
 
+## Story: Read back a phone that updated itself
+
+> As the release owner, I want proof that a phone took the published
+> release over the air by itself, in place, without losing Home.
+
+### A phone updated itself only when it kept its install, runs the offered version with the offered APK's exact bytes, Alpha started the install, and Home and the offer did not change
+
+The release owner reads the phone by cable, without changing it, before and
+after it takes the release the channel offers: the same install (its app id
+and first install time), the version advanced to the offer's, the installed
+APK's digest the offer's, Android naming Alpha as the install's initiator,
+Alpha still Home, and the public offer the same at both reads.
+
+```quint
+type Readback = { sameInstall: bool, advanced: bool, exact: bool, selfInitiated: bool, homeKept: bool, offerKept: bool }
+
+pure def updatedItself(r: Readback): bool =
+  r.sameInstall and r.advanced and r.exact and r.selfInitiated and r.homeKept and r.offerKept
+
+pure def lawAnInstallAnotherProgramStartedIsNoSelfUpdate(readback: Readback): bool =
+  not(updatedItself({ ...readback, selfInitiated: false }))
+```
+
 ### What the simulator tries
 
 ```quint
@@ -377,6 +400,8 @@ pure val signersValues = Set(1, 2)
 pure val nowValues = Set(0, 10, 23, 24, 30)
 pure val versionValues = Set(76, 77, 79)
 pure val namedValues = Set(0, 76, 77, 78, 80)
+pure val tookIt: Readback = { sameInstall: true, advanced: true, exact: true, selfInitiated: true, homeKept: true, offerKept: true }
+pure val readbackValues = Set(tookIt).union(Set({ ...tookIt, selfInitiated: false })).union(Set({ ...tookIt, sameInstall: false }))
 pure val weight_build = 3
 pure val weight_mirror = 4
 pure val weight_makePlan = 4

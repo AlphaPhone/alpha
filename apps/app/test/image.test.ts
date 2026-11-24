@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { alphaPrivileged, firstBootGrants } from "../gen/app__image.ts";
 import { aosp, otaArguments, place } from "../scripts/aosp.ts";
 import { inventory, licences } from "../scripts/licences.ts";
-import { type Adb, kept, pilotUpdate, release } from "../scripts/release.ts";
+import { type Adb, type Offer, kept, pilotUpdate, readBack, release } from "../scripts/release.ts";
 
 const scratches: string[] = [];
 afterEach(() => { for (const directory of scratches.splice(0)) rmSync(directory, { recursive: true, force: true }); });
@@ -291,5 +291,34 @@ describe("Update a pilot phone by cable (spec/release/pilot.md, \"Story: Update 
     // spec/release/pilot.md, "An installer that does not return is never taken as installed"; spec/release/pilot.md, "The agent is started only after a verified install, a clean stop and Home restored or never moved"
     expect(update.state).toMatchObject({ leg: "Done", dispatched: true, returned: false, verified: false, agent: "Unstarted", passed: false, restoration: "Restored" });
     expect([update.failures, phone.sent.some((line) => line.startsWith("shell am start"))]).toEqual([["adb: device offline"], false]);
+  });
+});
+
+describe("Read back a phone that updated itself (spec/release/index.md, \"Story: Read back a phone that updated itself\")", () => {
+  it("passes a phone that took the offer in place with Alpha as the installer, and not one another program installed", () => {
+    const offer: Offer = { versionCode: 122, sha256: digest("alpha 122"), sizeBytes: 4096, apkUrl: "https://github.com/eliza-research/alpha/releases/download/app-stable-alphacompute/alpha-phone-122.apk", signerSha256: digest("signer") };
+    const phone = { version: 121, apk: digest("alpha 121"), initiator: "com.android.shell", sent: [] as string[] };
+    const adb: Adb = (args) => {
+      const line = args.join(" ");
+      phone.sent.push(line);
+      const answers: [RegExp, () => string][] = [
+        [/^shell am get-current-user$/, () => "0"],
+        [/^shell dumpsys package /, () => `versionCode=${phone.version} minSdk=35\n  userId=10234\n  firstInstallTime=2026-11-01 10:00:00\n  installInitiatingPackageName=${phone.initiator}`],
+        [/^shell pm path /, () => "package:/data/app/alpha/base.apk"],
+        [/^shell sha256sum /, () => `${phone.apk}  /data/app/alpha/base.apk`],
+        [/^shell cmd role get-role-holders /, () => PACKAGE],
+        [/^shell cmd package resolve-activity /, () => `priority=0\n${PACKAGE}/.MainActivity`],
+      ];
+      const answer = answers.find(([pattern]) => pattern.test(line));
+      if (answer === undefined) throw new Error(`the phone does not answer adb ${line}`);
+      return answer[1]();
+    };
+    const before = readBack({ adb, offer });
+    Object.assign(phone, { version: 122, apk: offer.sha256, initiator: PACKAGE });
+    // spec/release/index.md, "A phone updated itself only when it kept its install, runs the offered version with the offered APK's exact bytes, Alpha started the install, and Home and the offer did not change"
+    expect(readBack({ adb, offer, before: before.observed })).toMatchObject({ passed: true, readback: { sameInstall: true, advanced: true, exact: true, selfInitiated: true, homeKept: true, offerKept: true } });
+    phone.initiator = "com.android.shell";
+    expect(readBack({ adb, offer, before: before.observed })).toMatchObject({ passed: false, readback: { selfInitiated: false } });
+    expect(phone.sent.every((line) => !/install|role add|set-home|am start|force-stop/.test(line))).toBe(true);
   });
 });
