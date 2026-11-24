@@ -1,0 +1,351 @@
+// spec/app/clock/alarms.md, "Syncing from the resident agent admits only valid, unique, bounded alarm lists"; spec/app/clock/timers.md, "Reopening after a restart finishes elapsed running timers and updates live remaining times"; spec/app/clock/world.md, "Syncing from the resident agent admits only valid, unique, bounded city lists"
+import type * as KeyValueStore from "effect/persistence/KeyValueStore"
+import * as ClockView from "../../gen/app__clock.effect.vibe"
+import * as Alarms from "../../gen/app__clock__alarms.effect.vibe"
+import type { Alarm } from "../../gen/app__clock__alarms.effect.vibe"
+import * as Timers from "../../gen/app__clock__timers.effect.vibe"
+import type { Timer } from "../../gen/app__clock__timers.effect.vibe"
+import * as World from "../../gen/app__clock__world.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { Device } from "../platform/device.vibe"
+import { ask } from "../platform/remote.vibe"
+import { contained, started, together } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+import { alarms, persistClockMeta } from "./alarms.vibe"
+import { alert } from "./alert.vibe"
+import { cityById, findCityMatch } from "./cities.ts"
+import { clockView } from "./clock.vibe"
+import { type AlarmMeta, type ClockAlarmRecord, type ClockSnapshot, type ClockTimerRecord, type TimerMeta, type WorldCityRecord, clockRecords, normalizeSound } from "./records.ts"
+import { residentClockTick } from "./ticker.vibe"
+import { nextAlarmFireAt } from "./time.ts"
+import { timers } from "./timers.vibe"
+import { worldClock } from "./world.vibe"
+
+schema AlarmRecordSchema {
+  readonly id: string
+  readonly hour: number
+  readonly minute: number
+  readonly daysMask: number
+  readonly label: string
+  readonly sound: string
+  readonly vibrate: boolean
+  readonly enabled: boolean
+  readonly snoozeMinutes: number
+  readonly phase: "idle" | "ringing" | "snoozed"
+  readonly fireAtMs: number | null
+  readonly snoozeUntilMs: number | null
+  readonly missed: boolean
+  readonly revision: number
+  readonly updatedAtMs: number
+}
+
+schema TimerRecordSchema {
+  readonly id: string
+  readonly label: string
+  readonly durationMs: number
+  readonly remainingMs: number
+  readonly status: "ready" | "running" | "paused" | "ringing"
+  readonly startedAtMs: number | null
+  readonly endAtMs: number | null
+  readonly ringStartedAtMs: number | null
+  readonly revision: number
+  readonly updatedAtMs: number
+}
+
+schema WorldCitySchema {
+  readonly id: string
+  readonly city: string
+  readonly region: string
+  readonly timeZone: string
+  readonly order: number
+}
+
+schema ClockSnapshotSchema {
+  readonly version: number
+  readonly updatedAtMs: number
+  readonly alarms: AlarmRecordSchema[]
+  readonly timers: TimerRecordSchema[]
+  readonly world: WorldCitySchema[]
+  readonly deletedAlarmIds: string[]
+  readonly deletedTimerIds: string[]
+}
+
+let applyingRemote = false
+
+function parseNumericSuffix(remoteId: string, fallback: number): number {
+  const match = /(\d+)$/.exec(remoteId)
+  if (!match) return fallback
+  const parsed = Number(match[1])
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback
+}
+
+function toWireAlarm(item: Alarm): ClockAlarmRecord {
+  const meta = clockRecords.alarm(item.id)
+  return {
+    id: meta.remoteId,
+    hour: item.hour,
+    minute: item.minute,
+    daysMask: item.daysMask,
+    label: meta.label,
+    sound: meta.sound,
+    vibrate: item.vibrate,
+    enabled: item.enabled,
+    snoozeMinutes: item.snoozeMinutes,
+    phase: item.phase === "Ringing" ? "ringing" : item.phase === "Snoozed" ? "snoozed" : "idle",
+    fireAtMs: item.fireAt > 0 ? item.fireAt : null,
+    snoozeUntilMs: item.snoozeUntil > 0 ? item.snoozeUntil : null,
+    missed: item.missed,
+    revision: item.revision,
+    updatedAtMs: meta.updatedAtMs,
+  }
+}
+
+function toWireTimer(item: Timer): ClockTimerRecord {
+  const meta = clockRecords.timer(item.id)
+  return {
+    id: meta.remoteId,
+    label: meta.label,
+    durationMs: item.durationMs,
+    remainingMs: item.remainingMs,
+    status: item.status === "Running" ? "running" : item.status === "Paused" ? "paused" : item.status === "Ringing" ? "ringing" : "ready",
+    startedAtMs: item.startedAt > 0 ? item.startedAt : null,
+    endAtMs: item.endAt > 0 ? item.endAt : null,
+    ringStartedAtMs: item.ringStartedAt > 0 ? item.ringStartedAt : null,
+    revision: item.revision,
+    updatedAtMs: meta.updatedAtMs,
+  }
+}
+
+function toWireWorld(cities: readonly number[]): WorldCityRecord[] {
+  const out: WorldCityRecord[] = []
+  cities.forEach((cityId, index) => {
+    const entry = cityById(cityId)
+    if (entry !== undefined) {
+      out.push({ id: `city-${entry.id}`, city: entry.city, region: entry.region, timeZone: entry.timeZone, order: index })
+    }
+  })
+  return out
+}
+
+function fromWireAlarm(record: AlarmRecordSchema, localId: number, now: number): Alarm {
+  const hour = Math.min(23, Math.max(0, Math.floor(record.hour)))
+  const minute = Math.min(59, Math.max(0, Math.floor(record.minute)))
+  const daysMask = Math.min(127, Math.max(0, Math.floor(record.daysMask)))
+  const snoozeMinutes = Math.min(Alarms.maxSnooze, Math.max(Alarms.minSnooze, Math.floor(record.snoozeMinutes)))
+  const enabled = record.enabled
+  const phase: Alarm["phase"] = !enabled ? "Idle" : record.phase === "ringing" ? "Ringing" : record.phase === "snoozed" ? "Snoozed" : "Idle"
+  const rawFireAt = typeof record.fireAtMs === "number" && record.fireAtMs > 0 ? Math.floor(record.fireAtMs) : 0
+  const fireAt = enabled ? (rawFireAt > 0 ? rawFireAt : nextAlarmFireAt(hour, minute, daysMask, now)) : 0
+  const rawSnooze = typeof record.snoozeUntilMs === "number" && record.snoozeUntilMs > 0 ? Math.floor(record.snoozeUntilMs) : 0
+  const snoozeUntil = phase === "Snoozed" ? (rawSnooze > 0 ? rawSnooze : now + snoozeMinutes * 60_000) : 0
+  return {
+    id: localId,
+    hour,
+    minute,
+    daysMask,
+    enabled,
+    snoozeMinutes,
+    vibrate: record.vibrate,
+    phase,
+    fireAt,
+    snoozeUntil,
+    missed: record.missed,
+    revision: Math.max(0, Math.floor(record.revision)),
+  }
+}
+
+function fromWireTimer(record: TimerRecordSchema, localId: number, now: number): Timer {
+  const durationMs = Math.min(Timers.maxDurationMs, Math.max(1000, Math.floor(record.durationMs)))
+  const status: Timer["status"] = record.status === "running" ? "Running" : record.status === "paused" ? "Paused" : record.status === "ringing" ? "Ringing" : "Ready"
+  if (status === "Ringing") {
+    const ringStartedAt = typeof record.ringStartedAtMs === "number" && record.ringStartedAtMs >= 0 ? Math.floor(record.ringStartedAtMs) : now
+    return { id: localId, durationMs, remainingMs: 0, status: "Ringing", startedAt: 0, endAt: 0, ringStartedAt, revision: Math.max(0, Math.floor(record.revision)) }
+  }
+  if (status === "Running") {
+    const startedAt = typeof record.startedAtMs === "number" && record.startedAtMs >= 0 ? Math.floor(record.startedAtMs) : now
+    const rawEndAt = typeof record.endAtMs === "number" && record.endAtMs >= startedAt ? Math.floor(record.endAtMs) : startedAt + Math.max(1000, Math.floor(record.remainingMs || durationMs))
+    if (now >= rawEndAt) {
+      return { id: localId, durationMs, remainingMs: 0, status: "Ringing", startedAt: 0, endAt: 0, ringStartedAt: now, revision: Math.max(0, Math.floor(record.revision)) }
+    }
+    return { id: localId, durationMs, remainingMs: Math.max(1, rawEndAt - now), status: "Running", startedAt, endAt: rawEndAt, ringStartedAt: 0, revision: Math.max(0, Math.floor(record.revision)) }
+  }
+  if (status === "Paused") {
+    const remainingMs = Math.max(1, Math.floor(record.remainingMs || durationMs))
+    return { id: localId, durationMs, remainingMs, status: "Paused", startedAt: 0, endAt: 0, ringStartedAt: 0, revision: Math.max(0, Math.floor(record.revision)) }
+  }
+  return { id: localId, durationMs, remainingMs: durationMs, status: "Ready", startedAt: 0, endAt: 0, ringStartedAt: 0, revision: Math.max(0, Math.floor(record.revision)) }
+}
+
+/** Pull the canonical Clock snapshot from the resident agent and reconcile it into local Clock machines. */
+export effect function syncClockNow(): boolean!!(Agent | Alarms.Machine | Timers.Machine | World.Machine | Time | KeyValueStore.KeyValueStore) {
+  const remote = ask(Agent, HttpClientRequest.get("/api/alpha/clock"), ClockSnapshotSchema) catch () => undefined
+  if (remote === undefined) return false
+  const metaSnap = clockRecords.snapshot()
+  const remoteEmpty = remote.version === 0 && remote.alarms.length === 0 && remote.timers.length === 0 && remote.world.length === 0
+  if (remoteEmpty && metaSnap.version === 0) return true
+  const now = try (try Time).now()
+  const alarmMachine = try Alarms.Machine
+  const timerMachine = try Timers.Machine
+  const worldMachine = try World.Machine
+  const currentAlarms = try alarmMachine.get()
+  const currentTimers = try timerMachine.get()
+
+  const existingAlarmByRemote = new Map<string, number>()
+  for (const [id, meta] of metaSnap.alarms) existingAlarmByRemote.set(meta.remoteId, id)
+  let nextAlarmIssued = currentAlarms.issued
+  const nextAlarms: Alarm[] = []
+  const usedAlarmIds = new Set<number>()
+  const nextAlarmMeta = new Map<number, AlarmMeta>()
+  const deletedAlarmSet = new Set([...metaSnap.deletedAlarmIds, ...remote.deletedAlarmIds])
+  for (const record of remote.alarms) {
+    if (deletedAlarmSet.has(record.id) && !remote.alarms.some((candidate) => candidate.id === record.id && candidate.updatedAtMs > metaSnap.version)) continue
+    let localId = existingAlarmByRemote.get(record.id) ?? parseNumericSuffix(record.id, nextAlarmIssued + 1)
+    while (usedAlarmIds.has(localId) || localId <= 0) {
+      nextAlarmIssued += 1
+      localId = nextAlarmIssued
+    }
+    usedAlarmIds.add(localId)
+    if (localId > nextAlarmIssued) nextAlarmIssued = localId
+    if (nextAlarms.length < Alarms.maxAlarms) {
+      nextAlarms.push(fromWireAlarm(record, localId, now))
+      nextAlarmMeta.set(localId, {
+        label: record.label,
+        sound: normalizeSound(record.sound),
+        remoteId: record.id,
+        updatedAtMs: record.updatedAtMs,
+      })
+    }
+  }
+
+  const existingTimerByRemote = new Map<string, number>()
+  for (const [id, meta] of metaSnap.timers) existingTimerByRemote.set(meta.remoteId, id)
+  let nextTimerIssued = currentTimers.issued
+  const nextTimers: Timer[] = []
+  const usedTimerIds = new Set<number>()
+  const nextTimerMeta = new Map<number, TimerMeta>()
+  for (const record of remote.timers) {
+    let localId = existingTimerByRemote.get(record.id) ?? parseNumericSuffix(record.id, nextTimerIssued + 1)
+    while (usedTimerIds.has(localId) || localId <= 0) {
+      nextTimerIssued += 1
+      localId = nextTimerIssued
+    }
+    usedTimerIds.add(localId)
+    if (localId > nextTimerIssued) nextTimerIssued = localId
+    if (nextTimers.length < Timers.maxTimers) {
+      nextTimers.push(fromWireTimer(record, localId, now))
+      nextTimerMeta.set(localId, {
+        label: record.label,
+        remoteId: record.id,
+        updatedAtMs: record.updatedAtMs,
+      })
+    }
+  }
+
+  const sortedWorld = [...remote.world].sort((a, b) => a.order - b.order)
+  const nextCities: number[] = []
+  for (const city of sortedWorld) {
+    const matched = findCityMatch(city.timeZone, city.city)
+    if (matched !== undefined && !nextCities.includes(matched.id) && nextCities.length < World.maxCities) {
+      nextCities.push(matched.id)
+    }
+  }
+
+  applyingRemote = true
+  try ensuring(
+    effect {
+      clockRecords.replaceAll({
+        alarms: nextAlarmMeta,
+        timers: nextTimerMeta,
+        deletedAlarmIds: [...new Set(remote.deletedAlarmIds)],
+        deletedTimerIds: [...new Set(remote.deletedTimerIds)],
+        version: Math.max(metaSnap.version, remote.version),
+      })
+      try contained(alarmMachine.send({ type: "applySync", synced: nextAlarms, nextIssued: nextAlarmIssued }), "applying synced alarms")
+      try contained(timerMachine.send({ type: "applySync", synced: nextTimers, nextIssued: nextTimerIssued }), "applying synced timers")
+      try contained(worldMachine.send({ type: "applySync", synced: nextCities }), "applying synced world cities")
+      try persistClockMeta()
+    },
+    sync(() => { applyingRemote = false }),
+  )
+  return true
+}
+
+/** Push the current local Clock snapshot to the resident agent's `/api/alpha/clock` endpoint. */
+export effect function pushClockSnapshot(): boolean!!(Agent | Alarms.Machine | Timers.Machine | World.Machine | Time) {
+  const now = try (try Time).now()
+  const alarmState = try (try Alarms.Machine).get()
+  const timerState = try (try Timers.Machine).get()
+  const worldState = try (try World.Machine).get()
+  const meta = clockRecords.snapshot()
+  const nextVersion = meta.version + 1
+  const payload: ClockSnapshot = {
+    version: nextVersion,
+    updatedAtMs: now,
+    alarms: alarmState.items.map(toWireAlarm),
+    timers: timerState.items.map(toWireTimer),
+    world: toWireWorld(worldState.cities),
+    deletedAlarmIds: [...meta.deletedAlarmIds],
+    deletedTimerIds: [...meta.deletedTimerIds],
+  }
+  const request = HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.put("/api/alpha/clock"), payload)
+  const answered = ask(Agent, request, ClockSnapshotSchema) catch () => undefined
+  if (answered === undefined) return false
+  clockRecords.setVersion(answered.version)
+  return true
+}
+
+const syncOnBootAndForeground = started(effect {
+  try syncClockNow()
+  try Stream.runForEach(Stream.filter((try Device).visible, (shown) => shown), () => syncClockNow())
+}, "syncing Clock from agent on boot and resume")
+
+const pushOnLocalMutation = started(effect {
+  const alarmMachine = try Alarms.Machine
+  const timerMachine = try Timers.Machine
+  const worldMachine = try World.Machine
+  const updates = Stream.mergeAll(
+    [
+      Stream.map(Stream.drop(alarmMachine.changes, 1), () => undefined),
+      Stream.map(Stream.drop(timerMachine.changes, 1), () => undefined),
+      Stream.map(Stream.drop(worldMachine.changes, 1), () => undefined),
+    ],
+    { concurrency: "unbounded" },
+  )
+  try Stream.runForEach(updates, effect () => {
+    if (applyingRemote) return
+    try pushClockSnapshot()
+  })
+}, "pushing Clock mutations to agent")
+
+const clockSync = together(syncOnBootAndForeground, pushOnLocalMutation)
+
+/** Resident Clock machines and services, ready for a single-line mount in `apps/app/src/resident.vibe`. */
+export const clockResident = together(alarms, timers, worldClock, clockView, alert, residentClockTick, clockSync)
+
+/** Reuse the resident Clock machines when already mounted in `resident.vibe`, or build them locally if mounted standalone. */
+export const ensureClockResident = Layer.unwrap(effect {
+  const ctx = try Effect.context<never>()
+  const existingAlarms = Context.getOption(ctx, Alarms.Machine)
+  const existingTimers = Context.getOption(ctx, Timers.Machine)
+  const existingWorld = Context.getOption(ctx, World.Machine)
+  const existingView = Context.getOption(ctx, ClockView.Machine)
+  if (Option.isSome(existingAlarms) && Option.isSome(existingTimers) && Option.isSome(existingWorld) && Option.isSome(existingView)) {
+    return together(
+      Layer.succeed(Alarms.Machine, existingAlarms.value),
+      Layer.succeed(Timers.Machine, existingTimers.value),
+      Layer.succeed(World.Machine, existingWorld.value),
+      Layer.succeed(ClockView.Machine, existingView.value),
+    )
+  }
+  return clockResident
+})
+
+/** Service union provided by `clockResident` for overlays, Home cards, and the Clock view. */
+export type ClockResident =
+  | Alarms.Machine
+  | Timers.Machine
+  | World.Machine
+  | ClockView.Machine
+  | Time
+  | KeyValueStore.KeyValueStore
+  | Agent
