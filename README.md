@@ -20,7 +20,7 @@ on Effect, and the interface in React on one design system.
 |---|---|
 | `spec/` | The one spec tree: the product, and a directory per app or package |
 | `apps/app` | The phone's interface: Home, the built-in apps and Ask Alpha |
-| `apps/site` | Alpha's public page at alphaphone.dev, with the phone demo of [`spec/site/`](spec/site/index.md) |
+| `apps/site` | Alpha's public page at alphaphone.dev, with the phone walkthrough of [`spec/site/`](spec/site/index.md) |
 | `packages/design-system` | Alpha's design tokens, built into Tailwind's theme |
 | `packages/ui` | Alpha's shared React components, with generated stories |
 | `vibestack/` | The toolchain, with [its guide](vibestack/README.md) |
@@ -72,13 +72,18 @@ theme first and writes the page to `dist/` in `apps/site`, the page already
 drawn in its HTML and every image named by its content's hash, plus
 `alpha-home.webp` (the social card) and `alpha-mark.svg` at the root, the
 URLs the earlier page published; `pnpm --filter @repo/site dev` serves it.
-The conversation is staged in the page and asks no service anything. The page
-reads without its script; the script (React and the demo's Effect runtime,
-about 110 KB compressed) only runs the demo. The captures in `apps/site/src`
-are cut from `alpha-screens.png` (Home, Calendar) and
-`alpha-screens-more.png` (the chat's backdrop) in
+The page keeps one phone in view while the visitor scrolls: Home, then a
+passage each for the calendar, a text Alpha asks before sending, a map, the
+inbox and a spoken note, and the phone plays the scene of the passage reached
+([`spec/site/`](spec/site/index.md)). The phone's screen is drawn in the
+page after the app's own Home and conversation, sized from a 360 by 780
+screen, so it is sharp at any width. Every conversation is staged in the page
+and asks no service anything. The page reads without its script, the phone
+resting on Home; the script (React and the demo's Effect runtime) only plays
+the scenes, and under reduced motion shows each whole. `alpha-home.webp` in
+`apps/site/src` is the social card, cut from `alpha-screens.png` in
 [Alpha `develop`'s docs assets](https://github.com/eliza-research/alpha/tree/bd70db55b2b3cab4c6f0ec2f4faa28edfa83979a/docs/assets)
-at 370 by 813 and saved as WebP; a new capture replaces them the same way.
+at 370 by 813 and saved as WebP.
 
 The Alpha site workflow, `.github/workflows/site-deploy.yml`, runs on `main`
 when the site, its spec, the design system, `@repo/ui`, the toolchain or the
