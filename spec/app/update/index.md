@@ -119,7 +119,9 @@ permission. The owner's activity is reported by the shell and the other
 areas; whether Alpha is in front (not behind another app or Ask Alpha's
 own surface), whether a call is up and whether audio is in its normal mode
 are reported by the phone. `asked` says the running check came from Settings; `note` is what
-Settings says after such a check.
+Settings says after such a check. `deferrals` counts the automatic updates
+Android put off in a row, and `retryAt` is when the next may start. Times
+are Alpha's, in milliseconds.
 
 ```quint
 type Permission = Unsupported | Required | Starting | Supported
@@ -131,7 +133,7 @@ type Activity = {
 type Updates = {
   installed: int, signer: int, permission: Permission, visible: bool, activity: Activity,
   check: R::Read, asked: bool, checked: Checked, checkedAt: int,
-  offer: Offer, installing: bool, automatic: bool, note: Note,
+  offer: Offer, installing: bool, automatic: bool, note: Note, deferrals: int, retryAt: int,
 }
 
 pure val unknownActivity: Activity = {
@@ -140,7 +142,7 @@ pure val unknownActivity: Activity = {
 pure val initial: Updates = {
   installed: 0, signer: 0, permission: Unsupported, visible: false, activity: unknownActivity,
   check: R::unread, asked: false, checked: Never, checkedAt: 0,
-  offer: noOffer, installing: false, automatic: false, note: Silent,
+  offer: noOffer, installing: false, automatic: false, note: Silent, deferrals: 0, retryAt: 0,
 }
 ```
 
@@ -187,6 +189,35 @@ pure def alwaysTheOfferIsThisPhones(s: Updates): bool =
 pure def sometimesAnOfferApplies(s: Updates): bool = applies(s)
 ```
 
+## Story: Start again where Alpha left off
+
+> As the owner, I want Alpha, after a restart, to remember the update it
+> found and when it last checked, and never to wait on a check or an install
+> it can no longer finish.
+
+### A restart keeps the installed version, the signing root, the saved offer, the last check and the deferrals, and forgets the permission, the owner's activity, a check or install under way, and the note
+
+The permission and the activity are read again, after a reboot too, when
+Android may be starting once more. A check under way is taken as failed, so
+its late answer is refused; an offer kept from before waits for a check
+that succeeds before an automatic update.
+
+```quint
+pure def restart(s: Updates): Updates =
+  {
+    ...initial, installed: s.installed, signer: s.signer, checked: s.checked, checkedAt: s.checkedAt,
+    offer: { ...s.offer, manifest: 0 }, check: if (s.check.status == R::Loading) R::answer(s.check, false) else s.check,
+    deferrals: s.deferrals, retryAt: s.retryAt,
+  }
+```
+
+### An offer kept across a restart can wait for a check
+
+```quint
+pure def sometimesKeptAcrossARestart(s: Updates): bool =
+  applies(s) and s.offer.manifest == 0 and s.permission == Unsupported and not(s.visible) and s.checked == Fine
+```
+
 ## Story: Check for updates
 
 > As the owner, I want Alpha to look for updates on its own while I use it,
@@ -203,8 +234,8 @@ pure def observeActivity(s: Updates, activity: Activity): Updates = { ...s, acti
 ### A check is due fifteen minutes after one that was answered, a minute after one that failed, and at once before the first or when the clock went back
 
 ```quint
-pure val interval = 900
-pure val retry = 60
+pure val interval = 900000
+pure val retry = 60000
 
 pure def dueAfter(checked: Checked, checkedAt: int, now: int): bool =
   checked == Never or now < checkedAt or now - checkedAt >= (if (checked == Missed) retry else interval)
@@ -330,6 +361,27 @@ pure def ownerIdle(a: Activity): bool =
 pure def phoneQuiet(a: Activity): bool = a.front and not(a.call) and a.audio
 ```
 
+### A signed-out phone resting on its untouched sign-in card is idle; a card touched in any way is an open screen
+
+The required sign-in card of a phone that is signed out rests on Home at
+its first step, with nothing typed and nothing in flight, and focuses its
+own empty field. That is neither an open screen nor typing, so a phone
+handed to someone new still updates on its own; any entry, a later step or
+work in flight blocks.
+
+```quint
+type SignInCard = NoCard | Resting | Touched
+
+pure def withSignIn(activity: Activity, card: SignInCard): Activity =
+  if (card == Touched) { ...activity, open: true } else activity
+
+pure def lawARestingCardIsNoActivity(activity: Activity): bool =
+  withSignIn(activity, Resting) == activity
+
+pure def lawATouchedCardBlocks(activity: Activity): bool =
+  not(ownerIdle(withSignIn(activity, Touched)))
+```
+
 ### Any one activity keeps an automatic update from starting
 
 ```quint
@@ -356,12 +408,14 @@ pure def install(s: Updates): Acted =
 
 ### An automatic update starts only on screen, with the owner idle, the phone quiet, Android's permission, and an offer from a check that succeeded
 
-```quint
-pure def canStartAutomatically(s: Updates): bool =
-  s.visible and ownerIdle(s.activity) and phoneQuiet(s.activity) and s.permission == Supported
-    and applies(s) and s.offer.manifest > 0 and free(s)
+An automatic update Android put off waits for its retry time first.
 
-pure def startAutomatically(s: Updates): Acted =
+```quint
+pure def canStartAutomatically(s: Updates, now: int): bool =
+  s.visible and ownerIdle(s.activity) and phoneQuiet(s.activity) and s.permission == Supported
+    and applies(s) and s.offer.manifest > 0 and free(s) and now >= s.retryAt
+
+pure def startAutomatically(s: Updates, now: int): Acted =
   { state: { ...s, installing: true, automatic: true }, out: List(offered(s, true)) }
 ```
 
@@ -400,9 +454,53 @@ type Ending = Finished | Deferred | OfferChanged | OfferWithdrawn
 
 pure def canEndInstall(s: Updates): bool = s.installing
 
-pure def endInstall(s: Updates, ending: Ending): Updates =
+pure def endInstall(s: Updates, ending: Ending, now: int): Updates =
   val offer = if (ending == OfferWithdrawn) noOffer else if (ending == OfferChanged) { ...s.offer, manifest: 0 } else s.offer
-  { ...s, installing: false, automatic: false, offer: offer }
+  val deferred = s.automatic and ending == Deferred
+  val deferrals = if (not(deferred)) 0 else if (s.deferrals >= maxDeferrals) maxDeferrals else s.deferrals + 1
+  {
+    ...s, installing: false, automatic: false, offer: offer, deferrals: deferrals,
+    retryAt: if (deferred) now + backoff(deferrals) else s.retryAt,
+  }
+```
+
+### An automatic update Android put off is tried again after a minute, then two, four and eight, and then every fifteen
+
+Android puts one off while it is still starting, while its permission is
+missing, or while the phone is busy; trying again at once would only be put
+off again.
+
+```quint
+pure val maxDeferrals = 5
+
+pure def backoff(deferrals: int): int =
+  if (deferrals <= 1) retry else if (deferrals == 2) 2 * retry else if (deferrals == 3) 4 * retry
+  else if (deferrals == 4) 8 * retry else interval
+
+pure def lawTheBackoffIsAMinuteToFifteen(deferrals: int): bool = backoff(deferrals) >= retry and backoff(deferrals) <= interval
+
+pure def alwaysDeferralsAreBounded(s: Updates): bool = s.deferrals >= 0 and s.deferrals <= maxDeferrals
+```
+
+### An automatic update can wait to be tried again
+
+```quint
+pure def sometimesWaitingToRetry(s: Updates): bool = s.deferrals > 0 and not(s.installing)
+```
+
+### Every check and every install ends, so Settings never waits on one for ever
+
+A check that never answers is answered as unreadable, and an install that
+never ends is ended as put off, by the shell's own deadline.
+
+```quint
+pure def leadsToTheCheckEnds(s: Updates, later: Updates): bool =
+  s.check.status == R::Loading implies later.check.status != R::Loading
+
+pure def leadsToTheInstallEnds(s: Updates, later: Updates): bool = s.installing implies not(later.installing)
+
+pure val fair_answer = "weak"
+pure val fair_endInstall = "weak"
 ```
 
 ### An automatic install can start
@@ -497,7 +595,7 @@ pure def good(signer: int, version: int): Release =
 pure val installedValues = Set(0, 1, 2, 3)
 pure val signerValues = Set(1, 2)
 pure val ticketValues = Set(1, 2, 3, 4)
-pure val nowValues = Set(0, 30, 60, 900, 2000)
+pure val nowValues = Set(0, 30000, 60000, 900000, 2000000)
 pure val quiet: Activity = { ...unknownActivity, home: true, front: true, audio: true }
 pure val activityValues =
   Set(quiet)

@@ -1,0 +1,191 @@
+// spec/app/update/index.md, "Story: Read the update channel"; spec/app/update/index.md, "Story: Check for updates"; spec/app/update/index.md, "Story: Install an update"; spec/app/update/index.md, "Story: Start again where Alpha left off"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { Machine as Bar } from "../../gen/app__telephony__callBar.effect.vibe"
+import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import * as Updates from "../../gen/app__update.effect.vibe"
+import type { Activity, Effect as Out, Event, Feed, Release, Reply } from "../../gen/app__update.effect.vibe"
+import { Device } from "../platform/device.vibe"
+import { LauncherUpdates } from "../platform/launcherUpdates.vibe"
+import { type Job, answer, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+import { Names, names } from "./names.vibe"
+
+const hex64 = /^[0-9a-f]{64}$/
+const plainName = /^[^\u0000-\u001f\u007f]*$/
+/** Where the manifest last answered is kept, so that an install finds the address of the release the machine offers. */
+const kept = "alpha/update/manifest@1"
+/** How long a check or an install may take before the shell answers it for the channel. */
+const patience = 60000
+
+const Row = Schema.Struct({
+  schema: Schema.Literal("alpha-update/v1"),
+  versionCode: Schema.Number,
+  versionName: Schema.optional(Schema.String),
+  notes: Schema.optional(Schema.String),
+  variant: Schema.String,
+  signerSha256: Schema.String,
+  apkUrl: Schema.String,
+  sha256: Schema.String,
+  sizeBytes: Schema.Number,
+})
+const Index = Schema.Struct({ schema: Schema.Literal("alpha-update/index-v1"), releases: Schema.Array(Row) })
+type Row = typeof Row.Type
+
+module pure {
+  /** @throws {never} */
+  export function parsed(text: string): unknown {
+    try { return JSON.parse(text) as unknown } catch { return undefined }
+  }
+  /** Whether `url` is HTTPS, and whether it carries a user or a password. @throws {never} */
+  export function address(url: string): { https: boolean; credentials: boolean } {
+    const at = URL.canParse(url) ? new URL(url) : undefined
+    return { https: at?.protocol === "https:", credentials: at !== undefined && (at.username !== "" || at.password !== "") }
+  }
+}
+import { address, parsed } from pure
+
+/** The rows of a manifest's text and whether it is an index, or none where it is neither a release nor an index. */
+function rowsOf(text: string): Option.Option<{ readonly index: boolean; readonly rows: ReadonlyArray<Row> }> {
+  const value = parsed(text)
+  const index = Schema.decodeUnknownOption(Index)(value)
+  if (Option.isSome(index)) return Option.some({ index: true, rows: index.value.releases })
+  return Option.map(Schema.decodeUnknownOption(Row)(value), (row) => ({ index: false, rows: [row] }))
+}
+
+const whole = (value: number) => (Number.isSafeInteger(value) && value > 0 ? value : 0)
+
+// spec/app/update/index.md, "A release names its variant, signer, version, download address, digest, size, version name and notes"
+effect function releaseOf(row: Row): Release!!Names {
+  const named = try Names
+  const { https, credentials } = address(row.apkUrl)
+  return {
+    variant: row.variant === "launcher" ? "Launcher" : "OtherVariant",
+    signer: hex64.test(row.signerSha256) ? try named.number(row.signerSha256) : 0,
+    version: whole(row.versionCode),
+    digest: hex64.test(row.sha256) ? try named.number(row.sha256) : 0,
+    bytes: whole(row.sizeBytes),
+    https, credentials, url: row.apkUrl.length,
+    name: row.versionName !== undefined && plainName.test(row.versionName) ? row.versionName.length : 0,
+    notes: row.notes?.length ?? 0,
+  }
+}
+
+// spec/app/update/index.md, "Only the answer to the newest check is taken: a complete manifest replaces the offer, a withdrawn one removes it, and anything else keeps it"
+effect function checked(ticket: number): Event!!(LauncherUpdates | KeyValueStore.KeyValueStore | Time | Names) {
+  const store = try KeyValueStore.KeyValueStore
+  const reply = try race(
+    Effect.option((try LauncherUpdates).check()),
+    Effect.as((try Time).until((try (try Time).now()) + patience), Option.none()),
+  )
+  const unreadable: Event = { type: "answer", ticket, reply: { tag: "Unreadable" }, now: untimed }
+  if (Option.isNone(reply)) return unreadable
+  const { manifest, digest } = reply.value
+  if (Option.isNone(manifest)) {
+    if (Option.isSome(digest)) return unreadable
+    try ignore(store.remove(kept))
+    return { type: "answer", ticket, reply: { tag: "Withdrawn" }, now: untimed }
+  }
+  const found = rowsOf(manifest.value)
+  if (Option.isNone(found)) return unreadable
+  const releases: Release[] = []
+  for (const row of found.value.rows) releases.push(try releaseOf(row))
+  const signed = Option.isSome(digest) && hex64.test(digest.value) ? try (try Names).number(digest.value) : 0
+  const feed: Feed = { index: found.value.index, releases, manifest: signed }
+  try ignore(store.set(kept, manifest.value))
+  return { type: "answer", ticket, reply: { tag: "Answered", ...feed }, now: untimed }
+}
+
+// spec/app/update/index.md, "An install is only ever of the offer that applies, never while a check or another install is under way"
+effect function installing(fx: { readonly version: number; readonly digest: number; readonly signer: number; readonly manifest: number; readonly automatic: boolean }): Event!!(LauncherUpdates | KeyValueStore.KeyValueStore | Time | Names) {
+  const store = try KeyValueStore.KeyValueStore
+  const named = try Names
+  const [signer, digest, manifest] = [Option.getOrUndefined(try named.name(fx.signer)), Option.getOrUndefined(try named.name(fx.digest)), Option.getOrUndefined(try named.name(fx.manifest))]
+  const text = (store.get(kept) catch () => undefined) ?? ""
+  const row = Option.getOrUndefined(Option.flatMap(rowsOf(text), ({ rows }) => Option.fromNullishOr(rows.find((one) =>
+    one.variant === "launcher" && one.signerSha256 === signer && one.versionCode === fx.version && one.sha256 === digest))))
+  if (row === undefined || (fx.automatic && manifest === undefined)) return { type: "endInstall", ending: "OfferChanged", now: untimed }
+  const release = { apkUrl: row.apkUrl, sha256: row.sha256, sizeBytes: row.sizeBytes, versionCode: row.versionCode }
+  const ending = try race(
+    (try LauncherUpdates).install(release, fx.automatic ? Option.fromNullishOr(manifest) : Option.none()),
+    Effect.as((try Time).until((try (try Time).now()) + patience), "Deferred" as const),
+  )
+  if (ending === "OfferWithdrawn") try ignore(store.remove(kept))
+  return { type: "endInstall", ending, now: untimed }
+}
+
+function carry(fx: Out): Job<Event, LauncherUpdates | KeyValueStore.KeyValueStore | Time | Names, []> {
+  return match (fx) {
+    when { tag: "CheckFeed", let ticket }: answer("check", checked(ticket), { type: "answer", ticket, reply: { tag: "Unreadable" }, now: untimed });
+    when { tag: "StartInstall", let version, let digest, let signer, let manifest, let automatic }:
+      answer("install", installing({ version, digest, signer, manifest, automatic }), { type: "endInstall", ending: "Deferred", now: untimed });
+    when { tag: "OpenInstallSettings" }: run("allow", (try LauncherUpdates).allowAutomatic());
+  }
+}
+
+// spec/app/update/index.md, "A restart keeps the installed version, the signing root, the saved offer, the last check and the deferrals, and forgets the permission, the owner's activity, a check or install under way, and the note"
+const machine = reacting(Updates, { keep: 1, open: [{ type: "restart" }], carry })
+
+// spec/app/update/index.md, "The installed version never goes down, the signing root never changes, and a phone past its first 30 seconds is never starting again"
+effect function observed(): void!!(LauncherUpdates | Names | Updates.Machine) {
+  const mine = Option.getOrUndefined(try Effect.option((try LauncherUpdates).installed()))
+  if (mine === undefined || !hex64.test(mine.signer)) return
+  const signer = try (try Names).number(mine.signer)
+  try ignore((try Updates.Machine).send({ type: "observePhone", installed: whole(mine.version), signer, permission: mine.permission }))
+}
+
+/** What the phone reports, read at launch and each time Alpha comes back to the front. */
+const phone = started(effect {
+  try observed()
+  try Stream.runForEach(Stream.filter((try Device).visible, (shown) => shown), () => observed())
+}, "reading what the phone reports for updates")
+
+// spec/app/update/index.md, "Alpha knows whether it is on screen and what the owner is doing"
+const shown = started(effect {
+  const updates = try Updates.Machine
+  try ignore(updates.send({ type: "show", visible: true }))
+  try Stream.runForEach((try Device).visible, (visible) => ignore(updates.send({ type: "show", visible })))
+}, "following whether Alpha is on screen for updates")
+
+/** The owner's activity as the shell knows it, and whether a call is up: what an automatic update waits on. */
+function activityOf(shell: { readonly trail: ReadonlyArray<unknown>; readonly drawer: boolean; readonly assistant: string }, call: boolean): Activity {
+  return {
+    home: shell.trail.length === 0 && !shell.drawer, open: shell.trail.length > 0 || shell.drawer || shell.assistant !== "Bar",
+    typing: shell.assistant === "Typing", voice: false, dialog: false, busy: false, front: true, call, audio: !call,
+  }
+}
+
+// spec/app/update/index.md, "The owner is idle only on Home with nothing open, not typing, no voice, no dialog and the connection not busy, and the phone is quiet only with Alpha in front, no call and normal audio"; spec/app/update/index.md, "Any one activity keeps an automatic update from starting"
+const activity = started(effect {
+  const updates = try Updates.Machine
+  const facts = Stream.zipLatest((try Shell).changes, Stream.map((try Bar).changes, (bar) => bar.calls.length > 0))
+  try Stream.runForEach(Stream.changesWith(Stream.map(facts, ([shell, call]) => activityOf(shell, call)), (a, b) => JSON.stringify(a) === JSON.stringify(b)),
+    (fact) => ignore(updates.send({ type: "observeActivity", activity: fact })))
+}, "following the owner's activity for updates")
+
+/** The earliest time a check falls due or a put-off automatic update may be tried again, while Alpha is on screen and free. */
+function nextWake(state: Updates.Updates): Option.Option<number> {
+  if (!state.visible || !Updates.free(state)) return Option.none()
+  const check = state.checked === "Never" ? 0 : state.checkedAt + (state.checked === "Missed" ? Updates.retry : Updates.interval)
+  return Option.some(state.deferrals > 0 && state.retryAt < check ? state.retryAt : check)
+}
+
+// spec/app/update/index.md, "Alpha checks on its own only while on screen, when a check is due, and never during another check or an install"; spec/app/update/index.md, "An automatic update starts only on screen, with the owner idle, the phone quiet, Android's permission, and an offer from a check that succeeded"
+const schedule = started(effect {
+  const updates = try Updates.Machine
+  const time = try Time
+  for (;;) {
+    const state = try updates.get()
+    const now = try time.now()
+    const due: Event | undefined = Updates.canStartAutomatically(state, now) ? { type: "startAutomatically", now: untimed }
+      : Updates.canPoll(state, now) ? { type: "poll", now: untimed } : undefined
+    const taken = due !== undefined && (effect { try updates.send(due); return true } catch () => false)
+    if (taken) continue
+    const next = Option.filter(nextWake(state), (at) => at > now)
+    const changed = Stream.runHead(Stream.drop(updates.changes, 1))
+    if (Option.isSome(next)) try race(Effect.asVoid(changed), time.until(next.value))
+    else try changed
+  }
+}, "the update schedule")
+
+/** Alpha's launcher updates, from launch: checks and automatic updates run whether or not Settings was ever opened. */
+export const updating = together(names, machine, phone, shown, activity, schedule)

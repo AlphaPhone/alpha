@@ -40,4 +40,6 @@ export const mounts: readonly Mount[] = [
   at("view:Contacts", () => import("./telephony/addressBook.tsx")),
   at("overlay", () => import("./telephony/ongoing.tsx")),
   at("settings/phone", () => import("./telephony/settingsPhone.tsx")),
+  at("settings/update", () => import("./update/index.tsx")),
+  at("overlay", () => import("./update/overlay.tsx")),
 ];

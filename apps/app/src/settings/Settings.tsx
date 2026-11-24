@@ -13,8 +13,6 @@ import * as PrefsGen from "../../gen/app__settings__preferences.ts";
 import { useMachine as usePrefs } from "../../gen/app__settings__preferences.react.ts";
 import type { Machine as PrefsMachine } from "../../gen/app__settings__preferences.effect.vibe";
 import { useMachine as useReset } from "../../gen/app__settings__reset.react.ts";
-import { useMachine as useUpdates } from "../../gen/app__settings__updates.react.ts";
-import type { Machine as UpdatesMachine } from "../../gen/app__settings__updates.effect.vibe";
 import type { Machine as ResetMachine } from "../../gen/app__settings__reset.effect.vibe";
 import type { Neighbour, Page } from "../../gen/app__settings.ts";
 import { useMachine as usePages } from "../../gen/app__settings.react.ts";
@@ -27,7 +25,7 @@ import { untimed } from "../runtime/reactor.vibe";
 import type { Time } from "../runtime/time.vibe";
 
 /** What every Settings page reads: where the owner is, the phone's facts, the hand-overs to Android, the preferences and the reset. */
-export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | FactsMachine | AndroidMachine | PrefsMachine | ResetMachine | UpdatesMachine | ShellMachine | Time, unknown>;
+export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | FactsMachine | AndroidMachine | PrefsMachine | ResetMachine | ShellMachine | Time, unknown>;
 
 export interface PageProps {
   runtime: SettingsRuntime;
@@ -189,29 +187,6 @@ function Erase({ runtime }: { runtime: SettingsRuntime }) {
   );
 }
 
-const outcomes: Partial<Record<string, string>> = {
-  NoneOffered: "Alpha is up to date", CheckFailed: "Alpha couldn't check for updates", InstallStarted: "The update is installing", InstallRefused: "That update is no longer offered",
-};
-
-// spec/app/settings/updates.md, "Story: Update Alpha when I choose"; spec/app/settings/updates.md, "The owner continues an install only where Android paused it and allows it"
-function UpdateRows({ runtime }: { runtime: SettingsRuntime }) {
-  const { state, can, send } = useTimed(runtime, useUpdates);
-  if (!state || state.installed === 0) return null;
-  const check = { type: "check", at: untimed } as const;
-  const install = { type: "install", at: untimed } as const;
-  const said = outcomes[state.outcome];
-  return (
-    <ListGroup heading="Updates">
-      {said !== undefined && <Alert variant={state.outcome === "CheckFailed" ? "warn" : "info"}>{said}</Alert>}
-      {state.offer > state.installed && <ListRow title={state.offerName === "" ? `Version ${state.offer}` : `Alpha ${state.offerName}`} detail={String(state.offer)} />}
-      <ListRow title="Check for updates" disabled={!can(check)} onClick={() => void send(check)} trailing={state.checking.read.status === "Loading" ? <Spinner size="sm" label="Checking" /> : undefined} />
-      {can(install) && <ListRow title="Install update" onClick={() => void send(install)} />}
-      {state.permission === "PermissionRequired" && <Hands runtime={runtime} target="AppPermissions" />}
-      {can({ type: "continueInstall" }) && <ListRow title="Continue update" onClick={() => void send({ type: "continueInstall" })} />}
-    </ListGroup>
-  );
-}
-
 function General(props: PageProps) {
   const { runtime } = props;
   return (
@@ -231,7 +206,6 @@ function General(props: PageProps) {
         <Hands runtime={runtime} target="ScreenLock" />
         <Hands runtime={runtime} target="DefaultApps" />
       </ListGroup>
-      <UpdateRows runtime={runtime} />
       <Erase runtime={runtime} />
     </>
   );
@@ -372,7 +346,7 @@ const plain: Partial<Record<Page, (props: PageProps) => ReactNode>> = {
   PhotosApp: ({ runtime }) => <ListGroup><Hands runtime={runtime} target="PhotoPermissions" /></ListGroup>,
   MapsApp: ({ runtime }) => <ListGroup><Hands runtime={runtime} target="AppPermissions" /></ListGroup>,
   NotesApp: ({ runtime }) => <ListGroup><Hands runtime={runtime} target="AppPermissions" /></ListGroup>,
-  About: ({ runtime }) => <><ListGroup><Fact runtime={runtime} fact="Versions" /><Fact runtime={runtime} fact="Storage" /></ListGroup><ListGroup>{(children.About ?? []).map((page) => <Opens key={page} runtime={runtime} page={page} />)}<Hands runtime={runtime} target="AboutPhone" /></ListGroup></>,
+  About: ({ runtime, alpha }) => <><ListGroup><Fact runtime={runtime} fact="Versions" /><Fact runtime={runtime} fact="Storage" /></ListGroup><ListGroup>{(children.About ?? []).map((page) => <Opens key={page} runtime={runtime} page={page} />)}<Hands runtime={runtime} target="AboutPhone" /></ListGroup>{alpha.slot("settings/update")}</>,
   Activity: (props) => <ListGroup><Neighbourly {...props} neighbour="Conversations" /><Neighbourly {...props} neighbour="RestartDetails" /></ListGroup>,
   Developer: (props) => <ListGroup><Opens runtime={props.runtime} page="Problems" /><Hands runtime={props.runtime} target="DeveloperOptions" /><Neighbourly {...props} neighbour="CalendarBackups" /></ListGroup>,
 };

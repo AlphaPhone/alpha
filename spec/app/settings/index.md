@@ -16,7 +16,6 @@ The rest of the area:
 - [Network](./network.md): nearby Wi-Fi, a join through Android's approval, and whether the phone is online
 - [Carrier & SIM setup](./carrier.md): the identifiers a carrier asks for, read only when the owner asks
 - [Passwords](./passwords.md): Alpha's password vault, unlocked only by Android
-- [Updates](./updates.md): Alpha's own launcher updates, by hand and hands-off
 
 Rows of other areas sit on these pages and are theirs: the listening rows and the "Microphone may be on" notice
 (the voice area); sign-in, the plan, the AI provider and the agent's

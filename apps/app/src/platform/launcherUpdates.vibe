@@ -1,18 +1,20 @@
-// spec/app/settings/updates.md, "Story: Update Alpha when I choose"; spec/app/settings/updates.md, "Story: Get updates hands-off"
-import type { Activation, InstallAnswer, Permission } from "../../gen/app__settings__updates.ts"
+// spec/app/update/index.md, "Story: Check for updates"; spec/app/update/index.md, "Story: Install an update"; spec/app/update/index.md, "Story: Allow automatic updates"; spec/app/update/page.md, "Story: Open Alpha while an update is pending"
 
 module held {
   import { registerPlugin } from "@capacitor/core"
 
-  /** `AlphaDevicePlugin.java`, Alpha's own updater: it checks the feed, and verifies, stages and installs a release, Android deciding each install. */
+  interface Listening { remove(): Promise<void> }
+
+  /** `AlphaDevicePlugin.java`, Alpha's own updater: it reads the channel, and verifies, stages and installs a release, Android deciding each install. */
   export interface AlphaDevicePlugin {
     snapshot(): Promise<{ appVersionCode?: number; appSigner?: string; appAutomaticUpdates?: "starting" | "permission-required" | "supported" | "unsupported" }>
     checkForUpdate(): Promise<{ manifest?: string; manifestSha256?: string }>
     installUpdate(options: { apkUrl: string; sha256: string; sizeBytes: number; versionCode: number; automatic?: boolean; manifestSha256?: string }): Promise<{ status?: "offer-unavailable" | "offer-withdrawn" | "offer-response-changed" | "starting" | "permission-required" | "unsupported" }>
-    updateState(): Promise<{ pending?: boolean; phase?: "preparing" | "paused"; activationId?: string; bridgeId?: string; canContinue?: boolean; automatic?: boolean; outcome?: string; idle?: boolean }>
+    updateState(): Promise<{ pending?: boolean; phase?: "preparing" | "paused"; activationId?: string; bridgeId?: string; canContinue?: boolean; automatic?: boolean; outcome?: string; resumeEligible?: boolean; idle?: boolean }>
     activateUpdate(options: { activationId: string; bridgeId: string; ready: boolean; resumeEligible?: boolean }): Promise<void>
     continueUpdate(options: { activationId: string; bridgeId: string }): Promise<void>
     openUpdatePermissionSettings(): Promise<{ status: "opened" | "unsupported" }>
+    addListener(event: "alphaUpdateReady" | "alphaUpdateSettled", heard: () => void): Promise<Listening>
   }
 
   let made: AlphaDevicePlugin | undefined
@@ -20,18 +22,28 @@ module held {
   export function plugin(): AlphaDevicePlugin {
     return (made ??= registerPlugin<AlphaDevicePlugin>("AlphaDevice"))
   }
+  /** Each time Android says an update is ready to activate or has settled. @throws {never} */
+  export function listen(heard: () => void): () => void {
+    const handles = (["alphaUpdateReady", "alphaUpdateSettled"] as const).map((event) => plugin().addListener(event, heard).catch(() => undefined))
+    return () => { for (const handle of handles) void handle.then((one) => one?.remove()) }
+  }
 }
-import { plugin } from held
+import { listen, plugin } from held
 
-/** What the launcher installed reports of itself. */
+/** Android's install permission for Alpha's own updates, as the phone reports it. */
+export type Permission = "Unsupported" | "Required" | "Starting" | "Supported"
+
+/** How an install Alpha asked for ended, from the page's side: Android took it, put it off, or found the offer changed or gone. */
+export type Ending = "Finished" | "Deferred" | "OfferChanged" | "OfferWithdrawn"
+
+/** What the launcher installed reports of itself: its version, the digest of its signing certificate and Android's permission. */
 export interface Installed {
-  readonly versionCode: number
+  readonly version: number
   readonly signer: string
-  readonly launcher: boolean
   readonly permission: Permission
 }
 
-/** One release the updater is asked to install: exactly the bytes the feed reviewed. */
+/** One release the updater is asked to install: exactly the bytes the channel described. */
 export interface Release {
   readonly apkUrl: string
   readonly sha256: string
@@ -39,56 +51,81 @@ export interface Release {
   readonly versionCode: number
 }
 
-/** Android's activation of a staged update, and the ids that name it. */
-export interface Activated {
-  readonly activation: Activation
-  readonly canContinue: boolean
-  readonly ids: Option.Option<{ readonly activationId: string; readonly bridgeId: string }>
+/** The ids that name one activation of Android's: what an answer and a Continue are sent under. */
+export interface Ids {
+  readonly activationId: string
+  readonly bridgeId: string
 }
+
+/** Android's activation of a staged update as it stands: pending, preparing or paused, or settled with its outcome. */
+export interface Activation {
+  readonly pending: boolean
+  readonly paused: boolean
+  readonly automatic: boolean
+  readonly canContinue: boolean
+  readonly outcome: Option.Option<string>
+  readonly resume: boolean
+  readonly ids: Option.Option<Ids>
+}
+
+/** The phone could not be asked: no Alpha updater in this build, or it did not answer. */
+export error UpdaterUnreachable { method: string; cause: unknown }
 
 /** Alpha's own launcher updates, through its `AlphaDevice` plugin. */
 export service LauncherUpdates {
-  installed(): Option.Option<Installed>!!
-  /** The raw feed and the digest Android computed over its bytes, or none where the feed could not be read. */
-  check(): Option.Option<{ readonly feed: string | undefined; readonly digest: string | undefined }>!!
-  install(release: Release, automatic: Option.Option<string>): InstallAnswer!!
-  activation(): Activated!!
-  acknowledge(ids: { readonly activationId: string; readonly bridgeId: string }, ready: boolean): void!!
-  continueInstall(ids: { readonly activationId: string; readonly bridgeId: string }): void!!
+  installed(): Installed!UpdaterUnreachable
+  /** The manifest's text and the digest Android computed over its bytes; neither where the channel withdrew it. */
+  check(): { readonly manifest: Option.Option<string>; readonly digest: Option.Option<string> }!UpdaterUnreachable
+  install(release: Release, manifest: Option.Option<string>): Ending!!
+  activation(): Activation!UpdaterUnreachable
+  answer(ids: Ids, ready: boolean): void!UpdaterUnreachable
+  continueInstall(ids: Ids): void!UpdaterUnreachable
   allowAutomatic(): boolean!!
+  /** Each time Android says an update is ready or has settled. */
+  readonly told: Stream.Stream<void>
 }
 
-const permissions = { starting: "AndroidStarting", "permission-required": "PermissionRequired", supported: "AutomaticAllowed", unsupported: "AutomaticUnsupported" } as const
-const installs = { "offer-unavailable": "OfferUnavailable", "offer-withdrawn": "OfferWithdrawn", "offer-response-changed": "OfferChanged", starting: "StillStarting", "permission-required": "NeedsPermission", unsupported: "Unsupported" } as const
+const permissions = { starting: "Starting", "permission-required": "Required", supported: "Supported", unsupported: "Unsupported" } as const
+const endings = { "offer-unavailable": "Deferred", "offer-withdrawn": "OfferWithdrawn", "offer-response-changed": "OfferChanged", starting: "Deferred", "permission-required": "Deferred", unsupported: "Deferred" } as const
+
+function asked<A>(method: string, call: () => Promise<A>): A!UpdaterUnreachable {
+  return tryPromise({ try: call, catch: (cause) => new UpdaterUnreachable({ method, cause }) })
+}
 
 /** On the phone: Alpha's `AlphaDevice` plugin. */
 export const phoneLauncherUpdates = Layer.succeed(LauncherUpdates, {
-  installed: () => Effect.map(Effect.option(tryPromise(() => plugin().snapshot())), Option.flatMap((snapshot) => (snapshot.appVersionCode === undefined
-    ? Option.none()
-    : Option.some({ versionCode: snapshot.appVersionCode, signer: snapshot.appSigner ?? "", launcher: true, permission: snapshot.appAutomaticUpdates === undefined ? "PermissionUnread" as const : permissions[snapshot.appAutomaticUpdates] })))),
-  check: () => Effect.map(Effect.option(tryPromise(() => plugin().checkForUpdate())), Option.map((reply) => ({ feed: reply.manifest, digest: reply.manifestSha256 }))),
-  install: (release: Release, automatic: Option.Option<string>) => effect {
-    const reply = try tryPromise(() => plugin().installUpdate({ ...release, ...(Option.isSome(automatic) ? { automatic: true, manifestSha256: automatic.value } : {}) }))
-    return reply.status === undefined ? "Accepted" as InstallAnswer : installs[reply.status]
-  } catch () => "OfferUnavailable" as InstallAnswer,
+  installed: () => effect {
+    const snapshot = try asked("snapshot", () => plugin().snapshot())
+    if (snapshot.appVersionCode === undefined) throw new UpdaterUnreachable({ method: "snapshot", cause: "no version" })
+    return { version: snapshot.appVersionCode, signer: snapshot.appSigner ?? "", permission: snapshot.appAutomaticUpdates === undefined ? "Unsupported" as const : permissions[snapshot.appAutomaticUpdates] }
+  },
+  check: () => Effect.map(asked("checkForUpdate", () => plugin().checkForUpdate()), (reply) => ({ manifest: Option.fromNullishOr(reply.manifest), digest: Option.fromNullishOr(reply.manifestSha256) })),
+  install: (release: Release, manifest: Option.Option<string>) => effect {
+    const reply = try asked("installUpdate", () => plugin().installUpdate({ ...release, ...(Option.isSome(manifest) ? { automatic: true, manifestSha256: manifest.value } : {}) }))
+    return reply.status === undefined ? "Finished" as Ending : endings[reply.status]
+  } catch () => "Deferred" as Ending,
   activation: () => effect {
-    const state = try tryPromise(() => plugin().updateState())
-    const activation: Activation = state.pending === true ? (state.phase === "paused" ? "Paused" : "Preparing") : state.outcome !== undefined || state.idle === true ? "Ended" : "NoActivation"
-    const ids = state.activationId !== undefined && state.bridgeId !== undefined ? Option.some({ activationId: state.activationId, bridgeId: state.bridgeId }) : Option.none()
-    return { activation, canContinue: state.canContinue === true, ids }
-  } catch () => ({ activation: "NoActivation" as Activation, canContinue: false, ids: Option.none() }),
-  acknowledge: (ids: { readonly activationId: string; readonly bridgeId: string }, ready: boolean) => ignore(tryPromise(() => plugin().activateUpdate({ ...ids, ready, ...(ready ? { resumeEligible: true } : {}) }))),
-  continueInstall: (ids: { readonly activationId: string; readonly bridgeId: string }) => ignore(tryPromise(() => plugin().continueUpdate(ids))),
-  allowAutomatic: () => Effect.map(Effect.option(tryPromise(() => plugin().openUpdatePermissionSettings())), (opened) => Option.isSome(opened) && opened.value.status === "opened"),
+    const state = try asked("updateState", () => plugin().updateState())
+    const ids = state.activationId !== undefined && state.bridgeId !== undefined ? Option.some({ activationId: state.activationId, bridgeId: state.bridgeId }) : Option.none<Ids>()
+    return {
+      pending: state.pending === true, paused: state.phase === "paused", automatic: state.automatic === true, canContinue: state.canContinue === true,
+      outcome: Option.fromNullishOr(state.outcome), resume: state.resumeEligible === true, ids,
+    }
+  },
+  answer: (ids: Ids, ready: boolean) => asked("activateUpdate", () => plugin().activateUpdate({ ...ids, ready, ...(ready ? { resumeEligible: true } : {}) })),
+  continueInstall: (ids: Ids) => asked("continueUpdate", () => plugin().continueUpdate(ids)),
+  allowAutomatic: () => Effect.map(Effect.option(asked("openUpdatePermissionSettings", () => plugin().openUpdatePermissionSettings())), (opened) => Option.isSome(opened) && opened.value.status === "opened"),
+  told: Stream.callback<void>((queue) => Effect.acquireRelease(sync(() => listen(() => Queue.offerUnsafe(queue, undefined))), (stop) => sync(stop))),
 })
 
-/** A browser installs nothing. */
+/** A browser updates nothing: there is no updater to ask. */
 export const browserLauncherUpdates = Layer.succeed(LauncherUpdates, {
-  installed: () => succeed(Option.none<Installed>()),
-  check: () => succeed(Option.none()),
-  install: () => succeed<InstallAnswer>("OfferUnavailable"),
-  activation: () => succeed<Activated>({ activation: "NoActivation", canContinue: false, ids: Option.none() }),
-  acknowledge: () => Effect.void,
-  continueInstall: () => Effect.void,
+  installed: () => Effect.fail(new UpdaterUnreachable({ method: "snapshot", cause: "no updater in a browser" })),
+  check: () => Effect.fail(new UpdaterUnreachable({ method: "checkForUpdate", cause: "no updater in a browser" })),
+  install: () => succeed<Ending>("Deferred"),
+  activation: () => Effect.fail(new UpdaterUnreachable({ method: "updateState", cause: "no updater in a browser" })),
+  answer: () => Effect.fail(new UpdaterUnreachable({ method: "activateUpdate", cause: "no updater in a browser" })),
+  continueInstall: () => Effect.fail(new UpdaterUnreachable({ method: "continueUpdate", cause: "no updater in a browser" })),
   allowAutomatic: () => succeed(false),
+  told: Stream.empty,
 })
