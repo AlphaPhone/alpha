@@ -28,10 +28,27 @@ function readJson(key: string): unknown {
   return JSON.parse(raw);
 }
 
-function stringList(value: unknown): string[] {
+/** A saved bookmark in the native record's format: a bare address, or `{url,title}` when it has a name. */
+type MarkRow = string | { url: string; title?: string };
+const rowUrl = (row: MarkRow) => (typeof row === "string" ? row : row.url);
+/** A page name as the native store keeps it: control characters become spaces, at most 300 characters. */
+const markTitle = (title: unknown) => (typeof title === "string" ? title.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").trim().slice(0, 300) : "");
+
+/** The bookmark document; one written before names holds bare addresses and reads back untitled. A row with no usable name reads as its address alone. */
+function markRows(value: unknown): MarkRow[] {
   if (value === undefined) return [];
-  if (!Array.isArray(value) || value.some((x) => typeof x !== "string")) throw new Error("Saved bookmarks could not be read. Existing bookmarks were not changed.");
-  return value;
+  const row = (x: unknown) => typeof x === "string" || (typeof x === "object" && x !== null && typeof (x as { url?: unknown }).url === "string");
+  if (!Array.isArray(value) || !value.every(row)) throw new Error("Saved bookmarks could not be read. Existing bookmarks were not changed.");
+  return value.map((x: string | { url: string; title?: unknown }) => {
+    if (typeof x === "string") return x;
+    const title = markTitle(x.title);
+    return title ? { url: x.url, title } : { url: x.url };
+  });
+}
+
+/** The tab host's bookmark answer: the addresses, and each with its name when it has one. */
+function markList(rows: readonly MarkRow[]) {
+  return { urls: rows.map(rowUrl), entries: rows.map((row) => (typeof row === "string" || !row.title ? { url: rowUrl(row) } : { url: row.url, title: row.title })) };
 }
 
 function webOnly(raw: unknown): string {
@@ -73,8 +90,8 @@ export class WebTabHost {
       case "command": return this.command(this.tab(args.id), String(args.command));
       case "present": return this.present(args);
       case "close": return this.close(String(args.id));
-      case "bookmarks": return { urls: stringList(readJson(MARKS_KEY)) };
-      case "setBookmark": return this.setBookmark(webOnly(args.url), args.saved === true);
+      case "bookmarks": return markList(markRows(readJson(MARKS_KEY)));
+      case "setBookmark": return this.setBookmark(webOnly(args.url), args.saved === true, args.title);
       case "browsingState": return readJson(SESSION_KEY) ?? { history: [], tabs: [], cur: "" };
       case "saveBrowsingState": {
         globalThis.localStorage.setItem(SESSION_KEY, JSON.stringify({ history: args.history, tabs: args.tabs, cur: args.cur }));
@@ -207,13 +224,18 @@ export class WebTabHost {
     return {};
   }
 
-  private setBookmark(url: string, saved: boolean) {
+  /** As the native store: an absent `title` keeps the saved name, a blank one removes it. */
+  private setBookmark(url: string, saved: boolean, title: unknown) {
     if (!isSecureWebAddress(url)) throw new Error("Only HTTPS addresses without embedded credentials can be bookmarked.");
-    const urls = stringList(readJson(MARKS_KEY)).filter((value) => value !== url);
-    if (saved) urls.unshift(url);
-    if (urls.length > MAX_MARKS) throw new Error("Bookmark could not be saved. The device stores up to 100 bookmarks; existing data was not changed.");
-    globalThis.localStorage.setItem(MARKS_KEY, JSON.stringify(urls));
-    return { urls };
+    if (title !== undefined && title !== null && typeof title !== "string") throw new Error("A bookmark title must be text.");
+    const rows = markRows(readJson(MARKS_KEY));
+    const before = rows.find((row) => rowUrl(row) === url);
+    const name = typeof title === "string" ? markTitle(title) : before !== undefined && typeof before !== "string" ? (before.title ?? "") : "";
+    const next = rows.filter((row) => rowUrl(row) !== url);
+    if (saved) next.unshift(name ? { url, title: name } : url);
+    if (next.length > MAX_MARKS) throw new Error("Bookmark could not be saved. The device stores up to 100 bookmarks; existing data was not changed.");
+    globalThis.localStorage.setItem(MARKS_KEY, JSON.stringify(next));
+    return markList(next);
   }
 
   private clearBrowsingData() {

@@ -1,6 +1,7 @@
 // spec/browser/bookmarks.md, "Story: Keep my bookmarks whole"
-import { type BookmarkEffect, type Bookmarks, type Event, Machine, machine } from "../../gen/browser__bookmarks.effect.vibe"
+import { type BookmarkEffect, type Bookmarks, type Event, type Mark, Machine, machine } from "../../gen/browser__bookmarks.effect.vibe"
 import { Toasts } from "../shell/toasts.vibe"
+import { cleanTitle } from "./address.ts"
 import { refusalText } from "./messages.ts"
 import { BrowserCallFailed, TabHost } from "./tabHost.vibe"
 import { MarkList } from "./tabHost.schema.vibe"
@@ -17,6 +18,11 @@ export service BrowserBookmarks {
   recover(): void!!
 }
 
+/** The store's list in its order, each address with the name sealed with it ("" when it has none). */
+function storedMarks(list: MarkList): Mark[] {
+  return list.urls.map((url) => ({ url, title: cleanTitle(list.entries?.find((e) => e.url === url)?.title, url) }))
+}
+
 /** BrowserBookmarks over its machine in memory. */
 export const bookmarksLayer = Layer.provideMerge(Layer.effect(BrowserBookmarks, effect {
   const marks = try Machine
@@ -30,15 +36,17 @@ export const bookmarksLayer = Layer.provideMerge(Layer.effect(BrowserBookmarks, 
         const read = effect { return try Schema.decodeUnknownEffect(MarkList)(try host.call("bookmarks")) } catch (error) => error
         if (read instanceof BrowserCallFailed || read instanceof Error) {
           try Ref.set(lastFailure, read instanceof BrowserCallFailed ? read.message : "Saved bookmarks could not be read. Existing bookmarks were not changed.")
-          try send({ type: "readSettled", ok: false, urls: [], damaged: !host.onDevice && !(read instanceof BrowserCallFailed && read.unavailable), missing: read instanceof BrowserCallFailed && read.unavailable })
-        } else try send({ type: "readSettled", ok: true, urls: [...read.urls], damaged: false, missing: false })
+          try send({ type: "readSettled", ok: false, entries: [], damaged: !host.onDevice && !(read instanceof BrowserCallFailed && read.unavailable), missing: read instanceof BrowserCallFailed && read.unavailable })
+        } else try send({ type: "readSettled", ok: true, entries: storedMarks(read), damaged: false, missing: false })
       };
-      when { tag: "WriteMark", let url, let saved }: try effect {
-        const wrote = effect { return try Schema.decodeUnknownEffect(MarkList)(try host.call("setBookmark", { url, saved })) } catch (error) => error
+      when { tag: "WriteMark", let url, let title, let saved }: try effect {
+        // A removal, or a page without a name of its own, sends no title: the store keeps the one it has.
+        const name = saved ? cleanTitle(title, url) : ""
+        const wrote = effect { return try Schema.decodeUnknownEffect(MarkList)(try host.call("setBookmark", name === "" ? { url, saved } : { url, saved, title: name })) } catch (error) => error
         if (wrote instanceof BrowserCallFailed || wrote instanceof Error) {
           try Ref.set(lastFailure, wrote instanceof BrowserCallFailed ? wrote.message : "")
-          try send({ type: "writeSettled", ok: false, urls: [] })
-        } else try send({ type: "writeSettled", ok: true, urls: [...wrote.urls] })
+          try send({ type: "writeSettled", ok: false, entries: [] })
+        } else try send({ type: "writeSettled", ok: true, entries: storedMarks(wrote) })
       };
       when { tag: "OfferRecovery" }: try toasts.show("Saved bookmarks need recovery. Open Bookmarks to recover them.");
       when { tag: "ReportMarksFailed" }: try toasts.show(refusalText(try Ref.get(lastFailure), "Bookmarks couldn’t be updated."));
