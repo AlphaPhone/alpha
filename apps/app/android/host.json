@@ -50,10 +50,9 @@
     { "configuration": "implementation", "module": "androidx.appcompat:appcompat", "toolchainVersion": "androidxAppCompatVersion" },
     { "configuration": "implementation", "module": "androidx.core:core-splashscreen", "toolchainVersion": "coreSplashScreenVersion" },
     { "configuration": "implementation", "module": "androidx.webkit:webkit", "toolchainVersion": "androidxWebkitVersion" },
-    { "configuration": "implementation", "coordinate": "androidx.browser:browser:1.8.0" },
-    { "configuration": "testImplementation", "module": "junit:junit", "toolchainVersion": "junitVersion" },
-    { "configuration": "testImplementation", "coordinate": "org.json:json:20250517" }
+    { "configuration": "testImplementation", "module": "junit:junit", "toolchainVersion": "junitVersion" }
   ],
+  "appScripts": [{ "root": "consumer", "path": "android/app/browser.gradle" }],
   "agent": {
     "host": { "root": "consumer", "path": "android/agent/host.json" },
     "character": { "root": "consumer", "path": "android/agent/character.json" },
