@@ -25,7 +25,7 @@ export function HomeAppMenu({ open, label, onHome, onAddToHome, onShowAppInfo, o
   return (
     <div ref={tile} className="relative min-w-0">
       {children}
-      <Menu open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      {open && <Menu open onOpenChange={(next) => { if (!next) onClose(); }}>
         <MenuTrigger aria-hidden tabIndex={-1} className="pointer-events-none invisible absolute inset-x-0 top-18 h-0" />
         <MenuContent
           align="center"
@@ -52,7 +52,7 @@ export function HomeAppMenu({ open, label, onHome, onAddToHome, onShowAppInfo, o
             </MenuItem>
           ) : null}
         </MenuContent>
-      </Menu>
+      </Menu>}
     </div>
   );
 }
