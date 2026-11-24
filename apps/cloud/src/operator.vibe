@@ -32,7 +32,7 @@ const workerSecretSource: Readonly<Record<string, string>> = {
 /** This package's directory, run from `src/` or from `dist/src/`. */
 export effect function packageDirectory() {
   const path = try Path.Path
-  const here = try path.fromFileUrl(new URL("..", import.meta.url))
+  const here = path.fromFileUrl(new URL("..", import.meta.url)) catch effect () => { throw new OperatorFailed({ problem: "this package's directory cannot be found" }) }
   return path.basename(here) === "dist" ? path.dirname(here) : here
 }
 
@@ -52,20 +52,20 @@ export effect function readSecrets(file: string): Record<string, string>!Operato
   const path = try Path.Path
   const resolved = path.resolve(file)
   const checkout = path.resolve(try packageDirectory(), "../..")
-  const exists = try (fs.exists(resolved) catch () => false)
-  const mode = exists ? (try (fs.stat(resolved) catch effect () => { throw new OperatorFailed({ problem: `cannot read ${resolved}` }) })).mode : 0o600
+  const exists = (fs.exists(resolved) catch () => false)
+  const mode = exists ? ((fs.stat(resolved) catch effect () => { throw new OperatorFailed({ problem: `cannot read ${resolved}` }) })).mode : 0o600
   if (!secretsFileAccepted(resolved.startsWith(checkout + path.sep), (mode & 0o077) !== 0))
     throw new OperatorFailed({ problem: `${resolved} must lie outside the checkout and be readable by its owner alone (chmod 600)` })
   if (!exists) return {}
-  return parseSecrets(try (fs.readFileString(resolved) catch effect () => { throw new OperatorFailed({ problem: `cannot read ${resolved}` }) }))
+  return parseSecrets((fs.readFileString(resolved) catch effect () => { throw new OperatorFailed({ problem: `cannot read ${resolved}` }) }))
 }
 
 effect function writeSecrets(file: string, values: Readonly<Record<string, string>>): void!OperatorFailed!FileSystem.FileSystem {
   if (Object.values(values).some((value) => /[\r\n]/.test(value))) throw new OperatorFailed({ problem: "a secret cannot span lines" })
   const fs = try FileSystem.FileSystem
   const text = Object.entries(values).map(([name, value]) => `${name}=${value}`).join("\n") + "\n"
-  try (fs.writeFileString(file, text, { mode: 0o600 }) catch effect () => { throw new OperatorFailed({ problem: `cannot write ${file}` }) })
-  try (fs.chmod(file, 0o600) catch effect () => { throw new OperatorFailed({ problem: `cannot make ${file} private` }) })
+  fs.writeFileString(file, text, { mode: 0o600 }) catch effect () => { throw new OperatorFailed({ problem: `cannot write ${file}` }) }
+  fs.chmod(file, 0o600) catch effect () => { throw new OperatorFailed({ problem: `cannot make ${file} private` }) }
 }
 
 /** Every internal secret that is absent, generated; those present are kept as they are. */
@@ -102,7 +102,7 @@ export effect function settledSecrets(file: string, environment: CloudEnvironmen
   const settled = read.generated ? generated(values) : values
   if (read.generated) try writeSecrets(file, settled)
   const signingKey = settled.CLOUD_ENTITLEMENT_KEY
-  const publicKey = signingKey ? try (Effect.try(() => entitlementPublicKey(signingKey)) catch effect () => { throw new OperatorFailed({ problem: "CLOUD_ENTITLEMENT_KEY is not a PKCS #8 P-256 key" }) }) : undefined
+  const publicKey = signingKey ? (Effect.try(() => entitlementPublicKey(signingKey)) catch effect () => { throw new OperatorFailed({ problem: "CLOUD_ENTITLEMENT_KEY is not a PKCS #8 P-256 key" }) }) : undefined
   if (read.vault !== "Complete") throw new OperatorFailed({ problem: secretProblems(settled, environment).join("\n") })
   return { values: settled, entitlementPublicKey: publicKey }
 }
@@ -110,7 +110,7 @@ export effect function settledSecrets(file: string, environment: CloudEnvironmen
 /** The command's exit, with its output passed through to the operator; a nonzero exit fails as `label`. */
 effect function run(label: string, command: string, args: ReadonlyArray<string>, cwd: string, env: Readonly<Record<string, string>> = {}): void!OperatorFailed!ChildProcessSpawner {
   const spawner = try ChildProcessSpawner
-  const code: number = try (spawner.exitCode(ChildProcess.make(command, [...args], { cwd, env: { ...env }, extendEnv: true, stdin: "ignore", stdout: "inherit", stderr: "inherit" })) catch effect () => {
+  const code: number = (spawner.exitCode(ChildProcess.make(command, [...args], { cwd, env: { ...env }, extendEnv: true, stdin: "ignore", stdout: "inherit", stderr: "inherit" })) catch effect () => {
     throw new OperatorFailed({ problem: `${label} could not start` })
   })
   if (code !== 0) throw new OperatorFailed({ problem: `${label} failed (exit ${code})` })
@@ -173,8 +173,8 @@ const siblingOf = (environment: CloudEnvironment): CloudEnvironment => environme
 /** Checks, and with `creating` completes, an environment's Cloudflare resources against what `resources.json` records. */
 export effect function reconciled(environment: CloudEnvironment, resources: Readonly<Record<CloudEnvironment, CloudResources>>, databaseUrl: string | undefined, creating: boolean) {
   const hosts = (try candidates())[environment]
-  const accountId = try (Config.withDefault(Config.String("CLOUDFLARE_ACCOUNT_ID"), "") catch () => "")
-  const token = try (Config.withDefault(Config.String("CLOUDFLARE_API_TOKEN"), "") catch () => "")
+  const accountId = (Config.withDefault(Config.String("CLOUDFLARE_ACCOUNT_ID"), "") catch () => "")
+  const token = (Config.withDefault(Config.String("CLOUDFLARE_API_TOKEN"), "") catch () => "")
   return try reconcileResources({
     ids: resources[environment], sibling: resources[siblingOf(environment)],
     apiHost: new URL(hosts.cloud).host, webHost: hosts.appLinkHost, databaseUrl, creating,
@@ -189,8 +189,8 @@ export effect function recordResources(file: string, environment: CloudEnvironme
   if (JSON.stringify(current[environment]) === JSON.stringify(verified)) return
   if (JSON.stringify(current[environment]) !== JSON.stringify(expected)) throw new OperatorFailed({ problem: `resources.json changed for ${environment}; run provision again` })
   const staged = `${file}.${environment}.next`
-  try (fs.writeFileString(staged, JSON.stringify({ ...current, [environment]: verified }, null, 2) + "\n") catch effect () => { throw new OperatorFailed({ problem: `cannot write ${staged}` }) })
-  try (fs.rename(staged, file) catch effect () => { throw new OperatorFailed({ problem: `cannot replace ${file}` }) })
+  fs.writeFileString(staged, JSON.stringify({ ...current, [environment]: verified }, null, 2) + "\n") catch effect () => { throw new OperatorFailed({ problem: `cannot write ${staged}` }) }
+  fs.rename(staged, file) catch effect () => { throw new OperatorFailed({ problem: `cannot replace ${file}` }) }
 }
 
 /** Both Workers of one environment, rendered into `out`: their Wrangler files, and the API Worker's assets, eliza's pages and the profile. */
@@ -202,7 +202,7 @@ export effect function renderInto(out: string, profile: CloudProfile, environmen
   const paths = { apiMain: path.join(directory, "dist/src/worker.js"), edgeMain: path.join(directory, "dist/src/edge.js"), assets }
   const rendered = try renderEnvironment({ api: apiTemplate, edge: edgeTemplate }, profile, environment, resources, registrationOn(profile, environment), paths)
   const pages = path.join(directory, "dist/pages")
-  if (!(try (fs.exists(pages) catch () => false))) throw new OperatorFailed({ problem: `${pages} is missing: build @repo/cloud first` })
+  if (!((fs.exists(pages) catch () => false))) throw new OperatorFailed({ problem: `${pages} is missing: build @repo/cloud first` })
   try fs.makeDirectory(out, { recursive: true })
   try fs.remove(assets, { recursive: true, force: true })
   try fs.copy(pages, assets)

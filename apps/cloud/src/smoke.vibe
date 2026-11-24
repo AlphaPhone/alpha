@@ -22,7 +22,7 @@ export interface Origins {
 interface Answer { readonly status: number; readonly type: string; readonly text: string }
 
 effect function fetched(url: string): (Answer | string)!!HttpClient.HttpClient {
-  return try effect {
+  return effect {
     const response = try timeout(Effect.provideService(HttpClient.execute(HttpClientRequest.setHeader(HttpClientRequest.get(url), "cache-control", "no-cache")), FetchHttpClient.RequestInit, { redirect: "manual" }), "15 seconds")
     return { status: response.status, type: response.headers["content-type"] ?? "", text: try response.text }
   } catch (failure) => `unreachable (${failure._tag})`

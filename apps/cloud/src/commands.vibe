@@ -96,9 +96,11 @@ effect function resources(found: Flags, creating: boolean) {
   const path = try Path.Path
   const recorded = found.values.get("resources") ?? path.join(try packageDirectory(), "resources.json")
   const ids = try resourcesOf(recorded)
-  const verified = try Effect.provide(reconciled(environment, ids, values.DATABASE_URL, creating), FetchHttpClient.layer)
-  if (creating && found.on.has("write")) try recordResources(recorded, environment, ids[environment], verified)
-  return { environment, verified, written: creating && found.on.has("write") }
+  provide FetchHttpClient.layer {
+    const verified = try reconciled(environment, ids, values.DATABASE_URL, creating)
+    if (creating && found.on.has("write")) try recordResources(recorded, environment, ids[environment], verified)
+    return { environment, verified, written: creating && found.on.has("write") }
+  }
 }
 
 effect function database(found: Flags, command: "migrate" | "register" | "prices") {
@@ -122,8 +124,10 @@ effect function database(found: Flags, command: "migrate" | "register" | "prices
 effect function smokeOf(found: Flags) {
   const environment = try environmentOf(found)
   const candidate = (try candidates())[environment]
-  const gates = try Effect.provide(smoke(environment, { api: candidate.cloud, web: `https://${candidate.appLinkHost}` }, ownCloudName), FetchHttpClient.layer)
-  return { environment, ready: gates.every((gate) => gate.passed), gates }
+  provide FetchHttpClient.layer {
+    const gates = try smoke(environment, { api: candidate.cloud, web: `https://${candidate.appLinkHost}` }, ownCloudName)
+    return { environment, ready: gates.every((gate) => gate.passed), gates }
+  }
 }
 
 /** One command of Alpha's own cloud on Cloudflare, by its name and flags; what it did, as JSON for the operator. */
@@ -138,7 +142,7 @@ export effect function operate(command: string | undefined, rest: ReadonlyArray<
     case "deploy": {
       const found = try flags(rest, ["environment", "profile", "env-file", "component", "resources"])
       const at = { environment: try environmentOf(found), profile: try required(found, "profile"), secrets: try required(found, "env-file"), component: try componentOf(found), resources: found.values.get("resources") }
-      return try Effect.provide(deploy(at), FetchHttpClient.layer)
+      provide FetchHttpClient.layer { return try deploy(at) }
     }
     case "smoke": {
       const result = try smokeOf(try flags(rest, ["environment"]))
