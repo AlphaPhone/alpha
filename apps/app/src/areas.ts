@@ -28,4 +28,5 @@ export const first = (place: Place, screen: Area): Mount => ({ at: place, load: 
 export const mounts: readonly Mount[] = [
   first("home", home),
   at("assistant", () => import("./ask/index.tsx")),
+  at("view:Calendar", () => import("./calendar/index.tsx")),
 ];

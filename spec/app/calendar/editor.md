@@ -128,6 +128,25 @@ pure def lawTheGivenAnswerIsNotOfferedAgain(offered: bool): bool =
   not(goingOffered(AnsweredGoing, offered)) and not(maybeOffered(AnsweredMaybe, offered))
 ```
 
+### The owner answers Going or Maybe only for a writable one-off invitation that is still as shown
+
+The current invitee, calendar and event version must still match when the
+answer is sent. The answer uses the Calendar response route without
+notifying guests. A managed Google invitation is answered in Google
+Calendar. A reply queued for approval goes to the Calendar
+[approval review](./approvals.md).
+
+```quint
+pure def invitationAnswerAllowed(mode: CancellationMode, writable: bool, managed: bool, recurring: bool, asShown: bool): bool =
+  mode == DeclineInvitation and writable and not(managed) and not(recurring) and asShown
+
+pure def lawAnOrganizerCannotAnswerAnInvitation(writable: bool, managed: bool, recurring: bool, asShown: bool): bool =
+  not(invitationAnswerAllowed(OrganizerCancel, writable, managed, recurring, asShown))
+
+pure def lawAStaleOrRepeatingInvitationCannotBeAnswered(mode: CancellationMode, writable: bool, managed: bool): bool =
+  not(invitationAnswerAllowed(mode, writable, managed, true, true)) and not(invitationAnswerAllowed(mode, writable, managed, false, false))
+```
+
 ### A repeating event changes its repeat only for the entire series
 
 ```quint
