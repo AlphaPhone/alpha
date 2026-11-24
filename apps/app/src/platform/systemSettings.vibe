@@ -1,6 +1,7 @@
 // spec/app/settings/facts.md, "Story: See what the phone says"; spec/app/settings/android.md, "Story: Change what only Android can change"
 import type { AndroidRoleStatus, SettingsHandoff, SystemFacts, SystemSettingsPage } from "@elizaos/os/bridges/definitions/system"
 import type { LocationPermissionStatus } from "@elizaos/os/bridges/definitions/location"
+import type { FilesAccess, StorageVolume } from "@elizaos/os/bridges/definitions/files"
 import type { Opened, Target } from "../../gen/app__settings__android.ts"
 import type { Access, AccessGrant, Holder, Reading } from "../../gen/app__settings__facts.ts"
 import type { Grant } from "../../gen/kit__permission.ts"
@@ -9,10 +10,12 @@ module held {
   import { systemClient } from "@elizaos/os/bridges/system"
   import { locationClient } from "@elizaos/os/bridges/location"
   import { wifiClient } from "@elizaos/os/bridges/wifi"
+  import { filesClient } from "@elizaos/os/bridges/files"
 
   let system: ReturnType<typeof systemClient> | undefined
   let location: ReturnType<typeof locationClient> | undefined
   let wifi: ReturnType<typeof wifiClient> | undefined
+  let files: ReturnType<typeof filesClient> | undefined
   /** eliza's clients of the plugins, each made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
   export function systemOf(): ReturnType<typeof systemClient> {
     return (system ??= systemClient())
@@ -25,8 +28,12 @@ module held {
   export function wifiOf(): ReturnType<typeof wifiClient> {
     return (wifi ??= wifiClient())
   }
+  /** @throws {never} */
+  export function filesOf(): ReturnType<typeof filesClient> {
+    return (files ??= filesClient())
+  }
 }
-import { locationOf, systemOf, wifiOf } from held
+import { filesOf, locationOf, systemOf, wifiOf } from held
 
 module web {
   /** The browser's own answer for `name`, or none where it has no such permission. */
@@ -92,6 +99,18 @@ function grantOf(state: PermissionState | LocationPermissionStatus["location"] |
 
 const settled = <A>(call: () => Promise<A>) => Effect.option(tryPromise(call))
 
+/** The storage the primary volume reports, as used of total, only where Android reported a total and used is never above it. */
+function storageOf(volumes: ReadonlyArray<StorageVolume> | undefined): Reading | undefined {
+  const primary = volumes?.find((volume) => volume.primary)
+  if (primary === undefined || primary.total <= 0 || primary.free < 0 || primary.free > primary.total) return undefined
+  const gigabytes = (bytes: number) => `${Math.round(bytes / 1e8) / 10} GB`
+  return { fact: "Storage", value: `${gigabytes(primary.total - primary.free)} of ${gigabytes(primary.total)}` }
+}
+
+function filesGrantOf(access: FilesAccess | undefined): Grant | undefined {
+  return access === "granted" ? "Granted" : access === "denied" ? "Denied" : undefined
+}
+
 /** What the phone reports, through eliza's clients of `ElizaSystem` and `ElizaLocation`. */
 effect function phoneReport(): PhoneReport!! {
   const system = systemOf()
@@ -99,16 +118,23 @@ effect function phoneReport(): PhoneReport!! {
   const status = try settled(() => system.getStatus())
   const build = try settled(() => system.getBuildInfo())
   const located = try settled(() => locationOf().checkPermissions())
+  const stored = try settled(() => filesOf().storageState())
+  const storage = Option.isSome(stored) ? storageOf(stored.value.volumes) : undefined
+  const filesGrant = Option.isSome(stored) ? filesGrantOf(stored.value.access) : undefined
   const readings = [
     ...(Option.isSome(facts) ? switched(facts.value) : []),
     ...(Option.isSome(status) ? [{ fact: "Roles" as const, value: "" }] : []),
     ...(Option.isSome(build) ? [{ fact: "Versions" as const, value: build.value.version }] : []),
+    ...(storage === undefined ? [] : [storage]),
   ]
   const location = Option.isSome(located) ? grantOf(located.value.location, located.value.accuracy === "approximate") : undefined
   const roles = Option.isSome(status) ? status.value.roles : []
   return {
     readings,
-    grants: location === undefined ? [] : [{ access: "LocationAccess", grant: location }],
+    grants: [
+      ...(location === undefined ? [] : [{ access: "LocationAccess" as const, grant: location }]),
+      ...(filesGrant === undefined ? [] : [{ access: "FilesAccess" as const, grant: filesGrant }]),
+    ],
     home: Option.isSome(status) ? holderOf(roles, "home") : "NotAlpha",
     assistant: Option.isSome(status) ? holderOf(roles, "assistant") : "NotAlpha",
     launcher: Option.isSome(status) && Option.isSome(build) && build.value.launcher,
@@ -156,7 +182,7 @@ effect function opening(target: Target): Opened!! {
     if (page === undefined) return { outcome: "Refused" as const, specific: false }
     return try tryPromise(() => system.openSettingsPage({ page }))
   } catch () => ({ outcome: "Refused" as const, specific: false })
-  return openedOf(target, try handed)
+  return openedOf(target, handed)
 }
 
 /** The phone, through eliza's clients of its plugins. */

@@ -26,8 +26,8 @@ effect function scanned(scan: number): Network.Event!!(WiFi | Found) {
 }
 
 // spec/app/settings/network.md, "Only Android's answer to the newest join settles it, and the phone is then read again; a wrong password is said only of a join that had one"
-effect function joined(join: number, name: string, security: Network.Security, passphrase: string): Network.Event!!WiFi {
-  return { type: "joinAnswered", join, joined: try (try WiFi).join(name, security, Redacted.make(passphrase)), at: untimed }
+effect function joined(ticket: number, name: string, security: Network.Security, passphrase: string): Network.Event!!WiFi {
+  return { type: "joinAnswered", join: ticket, joined: try (try WiFi).join(name, security, Redacted.make(passphrase)), at: untimed }
 }
 
 // spec/app/settings/network.md, "Only the newest read is taken: Android's own flags for the active network, or unknown when it could not say"

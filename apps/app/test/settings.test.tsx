@@ -23,7 +23,7 @@ const shipped = vi.fn(() => Promise.resolve(Response.json(notices)));
 vi.stubGlobal("fetch", ((input: RequestInfo | URL, init?: RequestInit) => (String(input).endsWith("licenses/third-party-notices.json") ? shipped() : fetch(input, init))) as typeof fetch);
 
 /** The row, switch or choice whose title is `title`, as a person reads it: a row's title, never its value beside it. */
-const titled = (title: string) => [...document.querySelectorAll("button, label")].find((found) => found.querySelector("span > span")?.textContent === title);
+const titled = (title: string) => [...document.querySelectorAll<HTMLElement>("button, label")].find((found) => found.querySelector("span > span")?.textContent === title);
 
 /** Press the row titled `title`; a switch's or a choice's row presses its control, as a tap on the row does. */
 const tap = (title: string) => act(async () => {

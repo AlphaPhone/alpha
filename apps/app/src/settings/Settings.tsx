@@ -33,7 +33,7 @@ import {
 } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import type { ReactNode } from "react";
-import * as AndroidGen from "../../gen/app__settings__android.ts";
+import type * as AndroidGen from "../../gen/app__settings__android.ts";
 import { useMachine as useAndroid } from "../../gen/app__settings__android.react.ts";
 import type { Machine as AndroidMachine } from "../../gen/app__settings__android.effect.vibe";
 import * as FactsGen from "../../gen/app__settings__facts.ts";

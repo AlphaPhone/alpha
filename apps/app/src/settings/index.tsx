@@ -16,7 +16,7 @@ import { type Drawn, Settings } from "./Settings.tsx";
 const machines = together(facts, about, phone, resetting);
 
 /** Back inside Settings: an open licence closes to its search; otherwise the page showing closes and its parent shows, until the first page, where Back leaves the app. */
-const back = Effect.flatMap(Licensing.Machine, (licences) =>
+const back = Licensing.Machine.use((licences) =>
   Effect.flatMap(licences.get(), (open) =>
     open.licence >= 0
       ? Effect.as(Effect.orElseSucceed(licences.send({ type: "closeLicence" }), () => undefined), true)

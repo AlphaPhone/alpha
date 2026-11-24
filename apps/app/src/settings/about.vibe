@@ -31,12 +31,9 @@ module web {
     URL.revokeObjectURL(link.href)
     return true
   }
-  /** @throws {never} */
-  export function versions(): { readonly app: string; readonly mode: string } {
-    return { app: import.meta.env.VITE_ALPHA_VERSION ?? "development", mode: import.meta.env.MODE }
-  }
 }
-import { shared, shipped, versions } from web
+import { shared, shipped } from web
+import { versions } from "./build.ts"
 
 /** One licence as the notices file holds it. */
 export schema Notice { name: string; version: string; license: string; text: string; flags?: ReadonlyArray<string> }
