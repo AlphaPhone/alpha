@@ -77,6 +77,9 @@ pure def alwaysAChoiceIsOfTheShownStep(x: Steps): bool = x.choice != NoChoice im
 
 ### The reread refuses a closed run, changed steps or a hidden page, and a moved Calendar anchor asks again
 
+The anchor can move between the tap and the reread; the reread is where that race is caught, so a
+step admitted after it always carries the anchor the owner tapped.
+
 ```quint
 pure def canReadReview(x: Steps): bool = x.inflight == ReadingReview
 pure def readReview(x: Steps): Steps =
@@ -85,6 +88,7 @@ pure def readReview(x: Steps): Steps =
   else if (x.approving) (if (x.expired) cleared(StepRefused, x) else { ...x, inflight: Admitting, readAnchor: x.anchor, choice: NoChoice })
   else if (x.tappedIssue == x.issued and x.proposal == StepPending and not(x.expired)) { ...cleared(StepDeniedStatus, x), proposal: StepDenied, denials: x.denials + 1 }
   else cleared(StepRefused, x)
+/// The read-time anchor race is reachable: the anchor moved after the tap and the reread caught it.
 pure def sometimesAnchorMoved(x: Steps): bool = x.status == AnchorMoved
 ```
 
@@ -97,6 +101,12 @@ what the approval status says. A step the phone performed and confirmed, in fron
 applied; one it ran without confirming, or one interrupted, is unknown; one it never ran, or ran and
 refused, did nothing. A Calendar range the agent reads through the phone's own bridge has no proposal
 to run, so the phone cannot confirm it and journals it unknown.
+
+The steps can still change after the reread while the agent's decision is pending; a change to a
+pending step issues a new proposal, so the agent's admission of the exact issue tapped is what
+catches it. Both races are reachable (`sometimesAnchorMoved`, `sometimesDigestChangedBeforeAdmission`),
+so the rule that an effect was admitted as reviewed is not vacuous: dropping admit's issue check or
+the reread's anchor check breaks it.
 
 ```quint
 type Performed = PhoneApplied | PhoneUnknown | PhoneNothing
@@ -111,6 +121,7 @@ pure def execute(x: Steps, performed: Performed): Steps =
   if (performed == PhoneNothing) { ...cleared(StepNotStarted, x), proposal: StepDone }
   else if (performed == PhoneApplied and x.foreground and x.open) { ...x, inflight: SendingReceipt, journal: JournalApplied, effects: x.effects + 1 }
   else { ...x, inflight: SendingReceipt, journal: JournalUnknown }
+pure def sometimesDigestChangedBeforeAdmission(x: Steps): bool = x.inflight == Admitting and x.digest != x.tappedDigest
 pure def alwaysAtMostOneEffect(x: Steps): bool = x.effects + x.denials <= 1
 pure def alwaysAnEffectWasAdmittedAsReviewed(x: Steps): bool =
   x.effects == 1 implies ((x.proposal == StepExecuting or x.proposal == StepDone) and x.admittedIssue == x.tappedIssue and x.admittedDigest == x.tappedDigest and x.readAnchor == x.tappedAnchor)
