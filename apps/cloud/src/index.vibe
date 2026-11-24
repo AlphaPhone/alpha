@@ -1,0 +1,4 @@
+// spec/cloud/index.md, "Story: Reach my account's services from the app"; spec/cloud/index.md, "Story: Register Alpha's app with the cloud"; spec/cloud/index.md, "Story: Keep Alpha's own cloud ready for the cutover"
+export { elizaCloudRoutes, tableProblems } from "./routes.vibe"
+export { assetLinks, entryOf, profileNamed, profiles, registrationAt } from "./alpha.vibe"
+export { candidateProblems, candidates } from "./candidate.vibe"

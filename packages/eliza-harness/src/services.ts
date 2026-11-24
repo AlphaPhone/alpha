@@ -51,7 +51,7 @@ const base64url = (bytes: Buffer) => bytes.toString("base64url");
 /** The one model the local cloud offers, as the agent's launch and the cloud's profile both name it. */
 const model = "alpha-chat";
 /** Alpha as the cloud's staging registry knows it: the client a device signs in as. */
-const client = { clientId: "ai.alpha.phone", displayName: "Alpha", androidPackage: "ai.alpha.phone", certFingerprints: [Array.from({ length: 32 }, () => "AA").join(":")] };
+const client = { clientId: "ai.alphacompute.alphaphone", displayName: "Alpha", androidPackage: "ai.alphacompute.alphaphone", certFingerprints: [Array.from({ length: 32 }, () => "AA").join(":")] };
 
 /** A directory only this user reads, as the agent demands of its state. */
 function owned(directory: string) {
@@ -65,7 +65,7 @@ export const scratch = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(
 const children = new Set<ChildProcess>();
 process.once("exit", () => { for (const child of children) child.kill("SIGKILL"); });
 
-export function ended(child: ChildProcess) {
+function ended(child: ChildProcess) {
   return new Promise<void>((done) => {
     children.delete(child);
     if (child.exitCode !== null || child.signalCode !== null) return done();
@@ -74,7 +74,7 @@ export function ended(child: ChildProcess) {
   });
 }
 
-export async function freePort() {
+async function freePort() {
   const server = createServer();
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
   const { port } = server.address() as AddressInfo;
@@ -117,8 +117,8 @@ export async function said<A>(url: string, init?: Parameters<typeof exchange>[1]
 interface Message { readonly role: string; readonly content?: unknown }
 
 /** The two plans the cloud sells, as its payment provider's catalog lists them: the cloud checks them before it serves billing. */
-export const plans = { plus_monthly: { priceId: "price_plus", productId: "prod_plus", unitAmount: 3_000 }, pro_monthly: { priceId: "price_pro", productId: "prod_pro", unitAmount: 10_000 } };
-export const paymentKey = "sk_test_local";
+const plans = { plus_monthly: { priceId: "price_plus", productId: "prod_plus", unitAmount: 3_000 }, pro_monthly: { priceId: "price_pro", productId: "prod_pro", unitAmount: 10_000 } };
+const paymentKey = "sk_test_local";
 
 /** The payment provider's catalog, read-only: a price or a product of `plans`, as Stripe's API answers one. */
 function catalogued(route: string, authorization: string | undefined): [number, unknown] {
@@ -140,7 +140,7 @@ function catalogued(route: string, authorization: string | undefined): [number, 
  * scripted, or repeats the owner's last message, and reports the tokens it is paid for. An agent is told apart by
  * its character's system prompt, which begins the system message eliza sends, so journeys share one cloud.
  */
-export async function startProvider(key: string) {
+async function startProvider(key: string) {
   const replies = new Map<string, Reply[]>();
   const asked = new Map<string, Message[][]>();
   const listed = <A>(lists: Map<string, A[]>, system: string) => lists.get(system) ?? lists.set(system, []).get(system)!;
@@ -223,7 +223,7 @@ function cloudCommand(secrets: string, args: readonly string[]) {
   return { child, exited, output: () => output };
 }
 
-export async function served(secrets: string, args: readonly string[], origin: string) {
+async function served(secrets: string, args: readonly string[], origin: string) {
   const running = cloudCommand(secrets, ["serve", ...args]);
   let over = false;
   void running.exited.then(() => { over = true; });
@@ -278,8 +278,8 @@ export async function startCloud(state: string, emails: readonly string[], credi
     },
     inference: { providers: [{ id: "scripted", baseUrl: `${provider.origin}/v1`, apiKeyEnv: "CLOUD_UPSTREAM_KEY" }], models: [{ id: model, provider: "scripted", upstreamModel: model, vision: false, defaultMaxTokens: 1024 }] },
   };
-  const signInReturn = `${web}/apps/alpha/sign-in`;
-  const seed = { clients: [{ ...client, signInReturn, billingReturn: `${web}/apps/alpha/billing`, connectReturn: `${web}/apps/alpha/connect` }], prices: [{ modelId: model, inputPer1K: 150, outputPer1K: 600 }] };
+  const signInReturn = `${web}/alphaphone/auth/callback`;
+  const seed = { clients: [{ ...client, signInReturn, billingReturn: `${web}/alphaphone/billing/return` }], prices: [{ modelId: model, inputPer1K: 150, outputPer1K: 600 }] };
   const secrets = file("secrets.env", `${fixture("secrets.env")}\nCLOUD_UPSTREAM_KEY=${providerKey}\nSTRIPE_SECRET_KEY=${paymentKey}\nSTRIPE_WEBHOOK_SECRET=whsec_local\n`);
   const deployment = ["--profile", file("profile.json", JSON.stringify(profile)), "--environment", "staging", "--store", `pglite:${path.join(home, "cloud.pglite")}`];
   const port = await freePort();

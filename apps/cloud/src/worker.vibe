@@ -1,4 +1,4 @@
-// spec/cloud/index.md, "Story: Serve one reviewed profile"; spec/cloud/index.md, "The API Worker serves only while the profile in its assets is the text its pinned digest names, and otherwise asks the caller to retry"
+// spec/cloud/rollout.md, "Story: Serve one reviewed profile from the API Worker"; spec/cloud/rollout.md, "The API Worker serves only while the profile in its assets is the text its pinned digest names, and otherwise asks the caller to retry"
 import { cloudWorker, type CloudBindings, type WorkerExecution } from "@elizaos/cloud/worker"
 import { profileUnavailable, readProfileAsset, type AssetFetcher } from "./profile-asset.ts"
 
@@ -22,7 +22,7 @@ async function bindingsOf(env: AlphaCloudBindings): Promise<CloudBindings | unde
 }
 
 /** Alpha Cloud's API Worker: eliza's whole Cloud Worker, with its profile from the ASSETS copy that CLOUD_PROFILE_SHA256 names, its return pages from ASSETS and its web-origin requests through the web host's X-Forwarded-Host. */
-export const alphaCloudWorker = {
+const alphaCloudWorker = {
   async scheduled(event: { readonly scheduledTime: number }, env: AlphaCloudBindings): Promise<void> {
     const bound = await bindingsOf(env)
     if (bound === undefined) throw new Error("Alpha Cloud's profile asset is missing or differs from CLOUD_PROFILE_SHA256")

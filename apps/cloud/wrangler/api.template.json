@@ -11,7 +11,7 @@
   "routes": [{ "pattern": "{{apiHost}}", "custom_domain": true }],
   "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "{{hyperdriveId}}" }],
   "ai": { "binding": "AI" },
-  "triggers": { "crons": ["*/5 * * * *"] },
+  "triggers": { "crons": ["* * * * *"] },
   "observability": { "enabled": true },
   "vars": "{{vars}}"
 }
