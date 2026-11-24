@@ -251,7 +251,7 @@ public final class ResidentWorkflowCrashInstrumentedTest {
   if(value==null)return "<unavailable>";
   String nativeRoot=new File(context.getApplicationInfo().nativeLibraryDir).getCanonicalPath();
   String base=new File(value).getName();
-  if(value.length()<=768&&value.matches("[A-Za-z0-9_./=+~-]+")&&value.startsWith(nativeRoot+"/")&&Arrays.asList("libeliza_bun.so","libeliza_ld_musl_aarch64.so","libeliza_ld_musl_aarch64_real.so","libeliza_ld_musl_x86_64.so","libeliza_ld_musl_x86_64_real.so").contains(base))return value;
+  if(value.length()<=768&&value.matches("[A-Za-z0-9_./=+~-]+")&&value.startsWith(nativeRoot+"/")&&ai.eliza.os.agent.PayloadCheck.NODE.equals(base))return value;
   if(Arrays.asList("/apex/com.android.runtime/bin/linker64","/system/bin/linker64","/system/bin/app_process64").contains(value))return value;
   return "<unrecognized executable path; chars="+value.length()+">";
  }
@@ -276,7 +276,8 @@ public final class ResidentWorkflowCrashInstrumentedTest {
  }
  private WorkflowSurvivorInventory.Identity witness(File journal)throws Exception {
   JSONObject record=null;WorkflowSurvivorInventory.Identity worker=null;String expectedHash=null;
-  File bun=new File(context.getApplicationInfo().nativeLibraryDir,"libeliza_bun.so"),loader=new File(context.getApplicationInfo().nativeLibraryDir,Build.SUPPORTED_ABIS[0].equals("arm64-v8a")?"libeliza_ld_musl_aarch64_real.so":"libeliza_ld_musl_x86_64_real.so");
+  // The Node runtime is both the launched file and the process executable; there is no separate loader.
+  File bun=new File(context.getApplicationInfo().nativeLibraryDir,ai.eliza.os.agent.PayloadCheck.NODE),loader=bun;
   try {
    record=new JSONObject(readUtf8(journal));worker=WorkflowSurvivorInventory.processIdentity(record.getInt("pid"));expectedHash=fileHash(loader);
    WorkflowSurvivorInventory.verify(journal,record,worker,context.getFilesDir().getCanonicalFile(),bun.getCanonicalPath(),loader.getCanonicalPath(),expectedHash,SystemClock.elapsedRealtime()+5000);return worker;
@@ -287,7 +288,7 @@ public final class ResidentWorkflowCrashInstrumentedTest {
  private void exactAlive(WorkflowSurvivorInventory.Identity worker)throws Exception {assertEquals(worker.key(),WorkflowSurvivorInventory.processIdentity(worker.pid).key());}
  private void crash(JSONObject resident)throws Exception {
   int pid=resident.getInt("pid");assertTrue(pid!=Process.myPid());assertEquals(Process.myUid(),Os.stat("/proc/"+pid).st_uid);assertEquals(resident.getString("start"),processStart(pid));assertEquals(fixture.getString("processExecutableSha256"),fileHash(new File("/proc/"+pid+"/exe")));
-  String bundle=new File(context.getFilesDir(),"agent/agent-bundle.js").getCanonicalPath();assertTrue(Arrays.asList(new String(Files.readAllBytes(new File("/proc/"+pid+"/cmdline").toPath()),StandardCharsets.UTF_8).split(String.valueOf((char)0))).contains(bundle));
+  String bundle=ResidentTestFixture.extractedEntry(context).getCanonicalPath();assertTrue(Arrays.asList(new String(Files.readAllBytes(new File("/proc/"+pid+"/cmdline").toPath()),StandardCharsets.UTF_8).split(String.valueOf((char)0))).contains(bundle));
   Os.kill(pid,android.system.OsConstants.SIGKILL);
   long end=SystemClock.elapsedRealtime()+10000;while(SystemClock.elapsedRealtime()<end){if(!new File("/proc/"+pid).exists())return;try{if(!resident.getString("start").equals(processStart(pid)))return;}catch(IOException gone){return;}SystemClock.sleep(100);}throw new AssertionError("Owned resident did not die");
  }
@@ -298,7 +299,7 @@ public final class ResidentWorkflowCrashInstrumentedTest {
   context=InstrumentationRegistry.getInstrumentation().getTargetContext();assertTrue(context.getSystemService(android.os.UserManager.class).isUserUnlocked());
   String run=InstrumentationRegistry.getArguments().getString("residentRunId","");assertTrue(run.matches("[0-9a-f-]{36}"));
   File input=new File(context.getFilesDir(),"resident-recovery-input.json");assertEquals(Process.myUid(),Os.stat(input.getPath()).st_uid);assertEquals(0,Os.stat(input.getPath()).st_mode&0077);try(InputStream in=new FileInputStream(input)){fixture=new JSONObject(new String(bounded(in,16384),StandardCharsets.UTF_8));}assertEquals(run,fixture.getString("runId"));assertEquals(Build.SUPPORTED_ABIS[0],fixture.getString("abi"));assertTrue(input.delete());
-  File bun=new File(context.getApplicationInfo().nativeLibraryDir,"libeliza_bun.so");assertEquals(fixture.getString("bunSha256"),fileHash(bun));try(InputStream in=context.getAssets().open("agent/agent-bundle.js")){assertEquals(fixture.getString("bundleSha256"),boundedHash(in,128L*1024*1024));}try(InputStream in=context.getAssets().open("agent/alpha-source.json")){assertEquals(fixture.getString("sourceSha256"),boundedHash(in,8L*1024*1024));}
+  File node=new File(context.getApplicationInfo().nativeLibraryDir,ai.eliza.os.agent.PayloadCheck.NODE);assertEquals(fixture.getString("nodeSha256"),fileHash(node));try(InputStream in=context.getAssets().open("agent/agent.mjs")){assertEquals(fixture.getString("bundleSha256"),boundedHash(in,128L*1024*1024));}try(InputStream in=context.getAssets().open("agent/alpha-source.json")){assertEquals(fixture.getString("sourceSha256"),boundedHash(in,8L*1024*1024));}
   assertNull(new AlphaCredentialStore(context).readCredentialSlot("local-agent-provider:v1"));assertFalse(ElizaAgentService.getLocalAgentBootState(context).optBoolean("socketListening"));
   return run;
  }

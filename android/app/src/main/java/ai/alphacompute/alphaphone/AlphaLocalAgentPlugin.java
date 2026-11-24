@@ -333,11 +333,10 @@ private static final class ResidentAttachDiagnostic {
  private void rejectSuperseded(PluginCall call){synchronized(lifecycleLock){if(pending.remove(call))call.reject("Local agent connection changed. A dispatched operation may still have completed; inspect its receipt before retrying.","LOCAL_AGENT_EPOCH_CHANGED");}}
 
  private boolean runtimePackaged() { return runtimePackaged(getContext()); }
- /** True when this build carries the on-device runtime bundle and its launcher. */
+ /** True when this build carries the staged runtime payload (assets/agent/inventory.json) and its Node runtime (libeliza_node.so). */
  static boolean runtimePackaged(Context context) {
   try {
-   try(var ignored=context.getAssets().open("agent/agent-bundle.js")){}
-   return new File(context.getApplicationInfo().nativeLibraryDir,"libeliza_bun.so").isFile();
+   return ResidentPayload.packaged(context.getAssets()::open,new File(context.getApplicationInfo().nativeLibraryDir));
   } catch(Exception unavailable) { return false; }
  }
  /** Hosted inference stays on Qwen through Cerebras; the model is not selectable. */

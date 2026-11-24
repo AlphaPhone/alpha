@@ -645,10 +645,10 @@ it.effect("Fill passwords with Alpha (spec/settings/passwords.md, \"Story: Fill 
 
 // spec/settings/diagnostics.md, "The report copies only allowlisted fields, so no text, address, key or identifier can reach it"
 it("The report copies only allowlisted fields (spec/settings/diagnostics.md, \"Story: See what went wrong and share it with support\")", () => {
-  const report = buildReport({ at: 0, native: true, testMocks: false, read: { ...unread, version: "1.4.0", home: "HeldElsewhere" }, entries: [], facts: { upstreamPin: "not a pin", account: "ann@example.test", runtimeHashes: { "agent/agent-bundle.js": "e".repeat(64), "/etc/passwd": "f".repeat(64) } } })
+  const report = buildReport({ at: 0, native: true, testMocks: false, read: { ...unread, version: "1.4.0", home: "HeldElsewhere" }, entries: [], facts: { upstreamPin: "not a pin", account: "ann@example.test", runtimeHashes: { "agent/agent.mjs": "e".repeat(64), "agent/agent-bundle.js": "d".repeat(64), "/etc/passwd": "f".repeat(64) } } })
   const text = JSON.stringify(report)
   assert.deepStrictEqual({ pin: report.upstreamPin, hashes: Object.keys(report.runtimeHashes), leaks: [text.includes("ann@"), text.includes("passwd")], roles: report.roles }, {
-    pin: null, hashes: ["agent/agent-bundle.js"], leaks: [false, false], roles: [{ role: "home", held: false, available: true }, { role: "assistant", held: false, available: false }],
+    pin: null, hashes: ["agent/agent.mjs"], leaks: [false, false], roles: [{ role: "home", held: false, available: true }, { role: "assistant", held: false, available: false }],
   })
 })
 

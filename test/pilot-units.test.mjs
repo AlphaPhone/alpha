@@ -143,11 +143,11 @@ test("the packaged agent bundle is hashed whatever its size, and an unreadable b
   const zip = (name, ...entries) => { execFileSync("zip", ["-q", name, ...entries], { cwd: dir }); return path.join(dir, name); };
   // Larger than the 64 MiB a buffered read used to allow.
   const bundle = Buffer.alloc((1 << 26) + 4096, "x");
-  fs.writeFileSync(path.join(dir, "assets/agent/agent-bundle.js"), bundle);
-  assert.deepEqual(apkRuntimeIdentity(zip("big.apk", "assets/agent/alpha-source.json", "assets/agent/agent-bundle.js")),
+  fs.writeFileSync(path.join(dir, "assets/agent/agent.mjs"), bundle);
+  assert.deepEqual(apkRuntimeIdentity(zip("big.apk", "assets/agent/alpha-source.json", "assets/agent/agent.mjs")),
     { runtime: "PACKAGED", base: "b".repeat(40), patches: [], agentBundleSha256: sha(bundle) });
-  assert.throws(() => apkRuntimeIdentity(zip("no-bundle.apk", "assets/agent/alpha-source.json")), /agent-bundle\.js cannot be read/);
-  assert.deepEqual(apkRuntimeIdentity(zip("no-runtime.apk", "assets/agent/agent-bundle.js")), { runtime: "NOT_PACKAGED" });
+  assert.throws(() => apkRuntimeIdentity(zip("no-bundle.apk", "assets/agent/alpha-source.json")), /agent\.mjs cannot be read/);
+  assert.deepEqual(apkRuntimeIdentity(zip("no-runtime.apk", "assets/agent/agent.mjs")), { runtime: "NOT_PACKAGED" });
 });
 
 test("an admitted APK whose own contents contradict its manifest row is refused before any device is touched", t => {

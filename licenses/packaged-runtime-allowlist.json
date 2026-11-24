@@ -2,8 +2,8 @@
   "description": "Recorded reasons for unverified items that exist only when a resident runtime is staged (PACKAGED). Read in addition to unverified-allowlist.json only then. This file gates nothing (owner decision P-09); a reason is a record, not legal sign-off.",
   "entries": [
     {
-      "name": "Bun JavaScript runtime (libeliza_bun.so)",
-      "reason": "Bun is MIT-licensed but statically links JavaScriptCore/WebKit (LGPL-2.0-or-later and LGPL-2.1-or-later, with BSD portions) and other native libraries listed in its LICENSE.md. The LGPL relink obligation for a statically linked library and the written source offer have not been confirmed."
+      "name": "Node.js runtime (libeliza_node.so)",
+      "reason": "Node.js is MIT-licensed, but the Android build statically links the third-party components its LICENSE file lists (V8, libuv, OpenSSL, ICU, llhttp, zlib, brotli, c-ares and others) under their own licences. The per-component notices and any source offer for this pinned build have not been reviewed."
     }
   ]
 }

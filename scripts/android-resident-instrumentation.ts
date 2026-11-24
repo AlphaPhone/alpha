@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { admitResidentEmulator, removeResidentFixtureUser } from './resident-emulator-admission.ts';
-import {APK_AGENT_ENTRY} from './agent-payload.ts';
+import {APK_AGENT_ENTRY, apkNodeRuntime} from './agent-payload.ts';
 const [apk, testApk] = process.argv.slice(2);
 const serial = process.env.ANDROID_SERIAL;
 if (!serial || !apk || !testApk) throw Error('ANDROID_SERIAL, app APK and test APK are required');
@@ -25,8 +25,9 @@ const test = process.env.RESIDENT_TEST || `${pkg}.ResidentEgressRedactionInstrum
 const proofFile = test.includes('ResidentEgressRedaction') ? 'files/resident-redaction-complete.json' : 'files/resident-service-complete.json';
 const keyPath = path.join(os.homedir(), '.config/alphaphone/cerebras-key');
 if ((fs.statSync(keyPath).mode & 0o077) !== 0) throw Error('Provider key must be owner-only');
-const bun = sha(entry('lib/arm64-v8a/libeliza_bun.so'));
-const fixture = {runId, apiKey: fs.readFileSync(keyPath, 'utf8').trim(), bunSha256: bun, processExecutableSha256: bun,
+// The packaged Node runtime is both the launched file and the resident process's executable.
+const node = sha(entry(apkNodeRuntime('arm64-v8a')));
+const fixture = {runId, apiKey: fs.readFileSync(keyPath, 'utf8').trim(), nodeSha256: node, processExecutableSha256: node,
   bundleSha256: sha(entry(APK_AGENT_ENTRY)), sourceSha256: sha(entry('assets/agent/alpha-source.json'))};
 const fixtureName = `alpha-resident-${runId}`;
 const created = adb(['shell', 'pm', 'create-user', fixtureName]);

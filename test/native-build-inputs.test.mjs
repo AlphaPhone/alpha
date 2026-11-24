@@ -156,7 +156,7 @@ test('native refresh clears its owned outputs and preserves unrelated JNI files'
   for(const abi of ['arm64-v8a','x86_64']){
     const directory=path.join(product,'android/app/src/main/jniLibs',abi);fs.mkdirSync(directory,{recursive:true});
     for(const name of ['libelizainference.so','libparadeevoicejni.so','libc++_shared.so']){const file=path.join(directory,name);fs.writeFileSync(file,'old');removed.push(file);}
-    const other=path.join(directory,'libeliza_bun.so');fs.writeFileSync(other,'unrelated');retained.push(other);
+    const other=path.join(directory,'libeliza_node.so');fs.writeFileSync(other,'unrelated');retained.push(other);
   }
   clearStagedNativeInputs(product);
   for(const file of removed)assert.equal(fs.existsSync(file),false);
