@@ -89,6 +89,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Install storage browser and system dependencies
         run: bash scripts/ci/install-playwright-browser.sh ${{ matrix.browser }}
+      - name: Prepare the SDK and generated app sources
+        run: pnpm -s build:upstream && pnpm -s gen
       - name: Start the headless Firefox audio device
         if: matrix.browser == 'firefox'
         # Firefox needs an audio server for real Web Audio capture, even when the
@@ -134,6 +136,8 @@ jobs:
         env:
           ELIZA_DEV_ALLOW_TEST_MOCKS: '1'
         run: |
+          pnpm -s build:upstream
+          pnpm -s gen
           pnpm --filter @alphacompute/alphaphone-app exec vite build --outDir ../../../../test-results/test-mocks-web
           node scripts/write-build-flags.ts test-results/test-mocks-web
           node --conditions=eliza-source --import vibelang/register scripts/audit-production-bundle.ts test-results/test-mocks-web --expect-test-mocks
