@@ -1,0 +1,129 @@
+// spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"; spec/app/inbox/message.md, "An attachment use ends as its own answer says, or unknown"
+import type { MailMessage } from "@elizaos/cloud/client"
+import type { ReviewedMailAttachment } from "@elizaos/plugin-inbox/mailbox"
+import * as Inbox from "../../gen/app__inbox.effect.vibe"
+import * as Message from "../../gen/app__inbox__message.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Cloud } from "../platform/cloud.vibe"
+import { native } from "../platform/device.vibe"
+import { started } from "../runtime/reactor.vibe"
+import { Mail, revisionOf } from "./gmail.vibe"
+import { provider } from "./provider.vibe"
+
+type FilePart = MailMessage["attachments"][number]
+type Request = Extract<Message.Effect, { tag: "HandleAttachment" }>
+type Preview = { readonly text: string; readonly digest: string }
+
+/** A preview lives only for the attachment review that opened it. The bytes are never kept. */
+export service AttachmentPreviews {
+  read(attempt: number): Preview | undefined
+  show(attempt: number, preview: Preview): void
+  forget(attempt: number): void
+}
+
+export const attachmentPreviews = Layer.sync(AttachmentPreviews, () => {
+  let shown: { attempt: number; preview: Preview } | undefined
+  return {
+    read: (attempt: number) => shown?.attempt === attempt ? shown.preview : undefined,
+    show: (attempt: number, preview: Preview) => { shown = { attempt, preview } },
+    forget: (attempt: number) => { if (shown?.attempt === attempt) shown = undefined },
+  }
+})
+
+export const forgetPreview = started(effect {
+  const previews = try AttachmentPreviews
+  const reader = try Message.Machine
+  let before = 0
+  const reviews = Stream.changes(Stream.map(reader.changes, (state) => state.attachment === 0 ? 0 : state.file.id))
+  try Stream.runForEach(reviews, (attempt) => sync(() => {
+    if (before !== attempt) previews.forget(before)
+    before = attempt
+  }))
+}, "clearing an attachment preview")
+
+module web {
+  import type { OpaqueMailAttachment } from "@elizaos/plugin-inbox/mailbox"
+
+  /** Whether this browser has an ordinary link download destination. @throws {never} */
+  export function downloads(): boolean {
+    return typeof document !== "undefined" && "download" in document.createElement("a") && typeof URL.createObjectURL === "function"
+  }
+
+  /** Requests a download of checked opaque bytes. A link does not report its disk outcome. @throws {never} */
+  export function download(file: OpaqueMailAttachment): boolean {
+    try {
+      const bytes = Uint8Array.from(atob(file.dataBase64), (value) => value.charCodeAt(0))
+      const url = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }))
+      try {
+        const link = document.createElement("a")
+        link.href = url
+        link.download = file.name
+        link.click()
+      } finally {
+        if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => URL.revokeObjectURL(url))
+        else URL.revokeObjectURL(url)
+      }
+      return true
+    } catch { return false }
+  }
+}
+import { download, downloads } from web
+
+/** Only bounded plain text is opened in Alpha. Binary parts can be downloaded without opening them. */
+export function canPreviewAttachment(file: FilePart): boolean {
+  return file.partId !== "" && file.mimeType.toLowerCase() === "text/plain" && file.size >= 0 && file.size <= 512 * 1024
+}
+
+/** Opaque downloads are offered only where a browser download destination is available. */
+export function canSaveAttachment(file: FilePart): boolean {
+  return file.partId !== "" && file.size >= 0 && file.size <= 5 * 1024 * 1024 && !native() && downloads()
+}
+
+effect function custody(request: Request) {
+  const reader = try (try Message.Machine).get()
+  const list = try (try Inbox.Machine).get()
+  const ledger = try Mail
+  const { account, message, attachment, attempt, handling } = request
+  if (reader.account !== account || reader.message !== message || reader.attachment !== attachment || reader.handling !== handling ||
+    reader.file.id !== attempt || reader.file.outcome !== "Sent" || reader.body.status !== "Loaded" || reader.fromPhone ||
+    list.selected.account !== account || !Inbox.accessOf(list, account).grant.read || !showing(try (try Shell).get(), "Inbox")) return undefined
+  const body = ledger.body(reader.body.ticket)
+  const id = ledger.gmailId(message, account)
+  const grant = ledger.grant(account)
+  if (!id || body?.message.id !== id || grant === undefined) return undefined
+  const history = body.message.metadata.historyId
+  const part = body.attachments.at(attachment - 1)
+  if (!history || reader.revision <= 0 || reader.revision !== revisionOf(body.message) || !part || attachment <= 0) return undefined
+  return { id, grant, history, ticket: reader.body.ticket, generation: ledger.generation(account), part }
+}
+
+function matches(part: FilePart, fetched: ReviewedMailAttachment): boolean {
+  return part.name === fetched.name && part.size === fetched.size && part.mimeType.toLowerCase() === fetched.mimeType
+}
+
+/** Carries out exactly the use confirmed by the owner, while its account, reader ticket and provider revision agree. */
+export effect function handleAttachment(request: Request): Message.Event!!(Cloud | Mail | Inbox.Machine | Message.Machine | AttachmentPreviews | Shell) {
+  const { attempt, handling } = request
+  const refused = { type: "attachmentHandled", attempt, done: false, known: true } as const
+  const owner = try custody(request)
+  if (owner === undefined) return refused
+  const client = provider(try Cloud)
+  const { grant, id, history, part } = owner
+  const current = effect {
+    const now = try custody(request)
+    return now !== undefined && now.id === id && now.grant === grant && now.history === history && now.ticket === owner.ticket &&
+      now.generation === owner.generation && now.part === part
+  }
+  if (handling === "Opening") {
+    if (!canPreviewAttachment(part)) return refused
+    const opened = client.gmailAttachment(grant, id, part.partId, history) catch () => undefined
+    if (opened?.text === undefined || !matches(part, opened) || !(try current)) return refused
+    const previews = try AttachmentPreviews
+    previews.show(attempt, { text: opened.text, digest: opened.sha256 })
+    return { type: "attachmentHandled", attempt, done: true, known: true }
+  }
+  if (!canSaveAttachment(part)) return refused
+  const saved = client.gmailOpaqueAttachment(grant, id, part.partId, history) catch () => undefined
+  if (saved === undefined || !matches(part, saved) || !(try current) || !download(saved)) return refused
+  return { type: "attachmentHandled", attempt, done: false, known: false }
+}

@@ -1,0 +1,108 @@
+// spec/app/inbox/message.md, "Story: Read a message"
+import type { MailCard, MailMessage } from "@elizaos/cloud/client"
+import { type GmailReadResult, type GmailThreadPage, type MailFailure, protocolFailure } from "@elizaos/plugin-inbox/mailbox"
+import type { Fault } from "../../gen/app__inbox__message.ts"
+import { Cloud } from "../platform/cloud.vibe"
+import { Mail } from "./gmail.vibe"
+import { provider } from "./provider.vibe"
+
+interface Source {
+  readonly account: number
+  readonly generation: number
+  readonly threadId: string
+}
+
+interface Snapshot extends Source {
+  readonly pages: ReadonlyArray<GmailThreadPage>
+}
+
+export service ThreadPages {
+  get(source: Source): Snapshot | undefined
+  keep(source: Source, page: GmailThreadPage): void
+}
+
+const same = (source: Source, saved: Snapshot): boolean =>
+  source.account === saved.account && source.generation === saved.generation && source.threadId === saved.threadId
+
+/** A few pages from the thread on screen, under one account, grant and thread history revision. */
+export const threadPages = Layer.sync(ThreadPages, () => {
+  let snapshot: Snapshot | undefined
+  return {
+    get: (source: Source) => snapshot !== undefined && same(source, snapshot) ? snapshot : undefined,
+    keep(source: Source, page: GmailThreadPage) {
+      const previous = snapshot !== undefined && same(source, snapshot) && snapshot.pages[0]?.historyId === page.historyId ? snapshot.pages : []
+      snapshot = { ...source, pages: [page, ...previous.filter((one) => one.offset !== page.offset)].slice(0, 3) }
+    },
+  }
+})
+
+error RejectedThread { fault: Fault }
+
+type ThreadFault = MailFailure | RejectedThread
+
+export function threadFault(cause: ThreadFault): Fault {
+  if (cause instanceof RejectedThread) return cause.fault
+  const status = protocolFailure(cause)?.status
+  if (status === 401 || status === 403) return "Revoked"
+  if (status === 404) return "Gone"
+  if (status === 409 || status === 412) return "Moved"
+  return status === 413 ? "TooLarge" : "Unreachable"
+}
+
+interface Position {
+  readonly position: number
+  readonly thread: number
+  readonly body: MailMessage
+}
+
+function messageOf(found: GmailReadResult, original: MailCard): MailMessage {
+  const { unread, starred, historyId, ...message } = found.message
+  const anchor = original.id === message.id ? original : undefined
+  const labels = [
+    ...(anchor?.labels ?? []).filter((label) => label !== "STARRED" && label !== "UNREAD"),
+    ...(starred ? ["STARRED"] : []),
+    ...(unread ? ["UNREAD"] : []),
+  ]
+  return {
+    message: {
+      ...message, labels, isUnread: unread,
+      isImportant: anchor?.isImportant ?? false,
+      likelyReplyNeeded: anchor?.likelyReplyNeeded ?? false,
+      triageScore: anchor?.triageScore ?? 0, triageReason: anchor?.triageReason ?? "",
+      metadata: { historyId: found.historyId ?? historyId },
+    },
+    bodyText: found.bodyText,
+    bodyHtml: found.bodyHtml ?? null,
+    bodyHtmlStatus: found.bodyHtml === undefined ? found.bodyHtmlOmitted ? "too_large" : "none" : "available",
+    attachments: found.attachments,
+    authenticationResults: found.authenticationResults,
+  }
+}
+
+const at = (page: GmailThreadPage, position: number) => position < page.offset ? undefined : page.messages[position - page.offset]
+
+/** Resolve a position within the frozen provider revision, or discover the latest position on open. */
+export effect function threadMessage(account: number, anchor: MailCard, position: number, newest: boolean): Position!ThreadFault!(Cloud | Mail | ThreadPages) {
+  const ledger = try Mail
+  const cache = try ThreadPages
+  const grant = ledger.grant(account)
+  if (grant === undefined) throw new RejectedThread({ fault: "Revoked" })
+  const client = provider(try Cloud)
+  const source = { account, generation: ledger.generation(account), threadId: anchor.threadId }
+  const known = newest ? undefined : cache.get(source)
+  const established = known?.pages[0]
+  const initial = established ?? (try client.gmailThread(grant, source.threadId))
+  if (initial.total === 0) throw new RejectedThread({ fault: "Gone" })
+  const target = newest ? initial.total - 1 : position
+  if (target < 0 || target >= initial.total) throw new RejectedThread({ fault: "Moved" })
+  const existing = (known?.pages ?? [initial]).find((page) => at(page, target) !== undefined)
+  const nearby = Math.max(0, target - 8)
+  const page = existing ?? (try client.gmailThread(grant, source.threadId, { offset: nearby, historyId: initial.historyId }))
+  const read = at(page, target) !== undefined ? page : try client.gmailThread(grant, source.threadId, { offset: target, historyId: initial.historyId })
+  if (read.total !== initial.total || read.historyId !== initial.historyId || ledger.generation(account) !== source.generation) throw new RejectedThread({ fault: "Moved" })
+  const found = at(read, target)
+  if (found === undefined) throw new RejectedThread({ fault: "Gone" })
+  if (existing === undefined) cache.keep(source, initial)
+  cache.keep(source, read)
+  return { position: target, thread: initial.total, body: messageOf(found, anchor) }
+}

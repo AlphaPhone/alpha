@@ -105,9 +105,14 @@ export function VoicemailTab({ runtime, now }: Props) {
     <div>
       {state.list.status === "Loading" && rows.length === 0 && <div className="flex justify-center p-5"><Spinner label="Reading voicemail" /></div>}
       {state.list.status === "Failed" && <Banner variant="destructive" className="mx-4">Voicemail could not be read</Banner>}
-      {state.removal.outcome === "Sent" && <p role="status" className="px-4 py-2 text-center text-sm text-muted-foreground">Deleting voicemail…</p>}
+      {state.removal.outcome === "Sent" && (
+        <Banner className="mx-4" action={can({ type: "undoRemoval" }) && <Button size="sm" onClick={() => void send({ type: "undoRemoval" })}>Undo</Button>}>
+          {state.undo === "CanUndo" ? "Voicemail deletion queued" : state.undo === "Undoing" ? "Keeping voicemail…" : state.undo === "KeepUnconfirmed" ? "Couldn’t confirm Undo" : "Deleting voicemail…"}
+        </Banner>
+      )}
+      {state.undo === "Kept" && <Banner className="mx-4">Voicemail kept</Banner>}
       {state.removal.outcome === "Unknown" && <Banner variant="warn" className="mx-4">Alpha cannot tell whether the voicemail was deleted</Banner>}
-      {state.removal.outcome === "Refused" && state.open && <Banner variant="destructive" className="mx-4">The voicemail was not deleted</Banner>}
+      {state.removal.outcome === "Refused" && state.undo !== "Kept" && state.open && <Banner variant="destructive" className="mx-4">The voicemail was not deleted</Banner>}
       {state.list.status === "Loaded" && state.items === 0 && <p role="status" className="p-5 text-center text-muted-foreground">No voicemail</p>}
       {rows.map((row) => {
         const title = callerTitle(row.number, row.cachedName);

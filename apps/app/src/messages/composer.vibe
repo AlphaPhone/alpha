@@ -1,7 +1,7 @@
 // spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/messages/composer.md, "Story: Let Alpha suggest a draft"; spec/app/messages/composer.md, "Story: Send a message"; spec/app/messages/sending.md, "Story: Send a message once"; spec/app/messages/sending.md, "Story: Know whether it arrived"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { MMS_ATTACHMENT_TYPES, MMS_MAX_RECIPIENTS, MMS_MAX_TOTAL_BYTES, SMS_DIRECT_MAX_RECIPIENTS } from "@elizaos/os/bridges/definitions/messages"
-import type { MmsAttachmentType, MmsReview, OperationId, SmsReview, SmsSendStatus } from "@elizaos/os/bridges/messages"
+import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY, MMS_MAX_RECIPIENTS, MMS_MAX_TOTAL_BYTES } from "@elizaos/os/bridges/definitions/messages"
+import type { MmsAttachmentType, MmsReview, OperationId, SmsReview, SmsSendResult, SmsSendStatus } from "@elizaos/os/bridges/messages"
 import type { PhoneNumber } from "@elizaos/os/bridges/phone"
 import * as Composer from "../../gen/app__messages__composer.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__messages__composer.effect.vibe"
@@ -53,13 +53,15 @@ const draftKey = (thread: number) => `alpha/messages/draft/${thread}@1`
 const outgoingKey = "alpha/messages/outgoing@1"
 
 module text {
+  import { type OperationId, operationIdOf } from "@elizaos/os/bridges/definitions/messages"
+
   /** What the store kept for the send in hand, without its pictures' bytes, which are never kept: only that it had some. @throws {never} */
-  export function keptSend(raw: string | undefined): { thread: number; to: string[]; body: string; sim: number | null; pictures: never[]; pictured: boolean; operation: undefined; status: undefined } | undefined {
+  export function keptSend(raw: string | undefined): { thread: number; to: string[]; body: string; sim: number | null; pictures: never[]; pictured: boolean; operation: OperationId | undefined; status: undefined } | undefined {
     if (raw === undefined) return undefined
     try {
       const found = JSON.parse(raw)
       return typeof found?.thread === "number" && Array.isArray(found?.to) && typeof found?.body === "string"
-        ? { ...found, pictures: [], pictured: found.pictured !== false, operation: undefined, status: undefined }
+        ? { ...found, pictures: [], pictured: found.pictured !== false, operation: operationIdOf(found.operation) ?? undefined, status: undefined }
         : undefined
     } catch {
       return undefined
@@ -75,7 +77,7 @@ import { keepSend, keptSend } from text
 const drafts = Layer.effect(Drafts, effect {
   const store = try KeyValueStore.KeyValueStore
   let pictures: ReadonlyArray<Picture> = []
-  let sending = { direct: true, pictures: true }
+  let sending = { direct: false, pictures: false }
   let outgoing: Option.Option<Outgoing> = Option.fromNullishOr(keptSend(store.get(outgoingKey) catch () => undefined))
   return {
     effect text(thread: number): string!! {
@@ -104,7 +106,23 @@ effect function simOf(chosen: number | null): (number | undefined)!!Telephony {
   return sims.find((one) => one.defaultSms)?.id ?? (sims.length === 1 ? sims[0].id : undefined)
 }
 
-const sentStatuses = new Set<SmsSendStatus>(["submitted", "sent", "delivered"])
+const sentStatuses = new Set<SmsSendStatus>(["sent", "delivered"])
+const usingMms = (recipients: number, pictured: boolean) => recipients > 1 || pictured
+
+function mmsReview(send: Outgoing, sim: number): MmsReview {
+  return { recipients: [...send.to] as PhoneNumber[], body: send.body, subscriptionId: sim, attachments: send.pictures.map((one) => ({ name: one.name, contentType: one.contentType, bytes: one.bytes })) }
+}
+
+effect function receiptOf(send: Outgoing, sim: number, operation: OperationId): (SmsSendStatus | undefined)!!Telephony {
+  if (usingMms(send.to.length, send.pictured)) {
+    // Picture bytes are visit-only. A process restart may keep the operation without enough data to bind its result.
+    if (send.pictured && send.pictures.length === 0) return undefined
+    const receipt = telephony("mmsSendResult", (c) => c.messages.mmsSendResult(mmsReview(send, sim), operation)) catch () => undefined
+    return receipt?.status
+  }
+  const receipt = telephony("smsSendResult", (c) => c.messages.smsSendResult({ recipients: [...send.to] as PhoneNumber[], body: send.body, subscriptionId: sim }, operation)) catch () => undefined
+  return receipt?.status
+}
 
 // spec/app/messages/sending.md, "Send journals a new operation, or reads the journal back when the last outcome is unknown"; spec/app/messages/sending.md, "The journal entry lands, or the phone denies the send before any radio is used"
 /** The send under its operation's key: the phone journals it before it uses the radio, and the same key never sends twice. */
@@ -117,22 +135,27 @@ function journaled(id: number, recipients: number): Stream.Stream<Event, never, 
     const operation = (try (try Attempts).key(id)) as OperationId
     const sim = try simOf(send.sim)
     if (sim === undefined) return Stream.succeed<Event>({ type: "journaled", id, allowed: false })
+    try store.setOutgoing(Option.some({ ...send, sim, operation }))
     const to = send.to as PhoneNumber[]
-    const status: SmsSendStatus | undefined = send.pictures.length > 0
-      ? Effect.map(telephony("sendMms", (c) => c.messages.sendMms({ recipients: to, body: send.body, subscriptionId: sim, attachments: send.pictures.map((one) => ({ name: one.name, contentType: one.contentType, bytes: one.bytes })) } satisfies MmsReview, operation)), (result) => result.status) catch (failure) => (failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === "" ? undefined : "denied")
+    const status: SmsSendStatus | undefined = usingMms(to.length, send.pictured)
+      ? Effect.map(telephony("sendMms", (c) => c.messages.sendMms(mmsReview(send, sim), operation)), (result) => result.status) catch (failure) => (failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === "" ? undefined : "denied")
       : Effect.map(telephony("sendSms", (c) => c.messages.sendSms({ recipients: to, body: send.body, subscriptionId: sim } satisfies SmsReview & { subscriptionId: number }, operation)), (result) => result.status) catch (failure) => (failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === "" ? undefined : "denied")
-    try store.setOutgoing(Option.some({ ...send, sim, status, operation }))
-    if (status === undefined) return Stream.succeed<Event>({ type: "lost" })
-    if (status === "denied" || status === "cancelled") return Stream.succeed<Event>({ type: "journaled", id, allowed: false })
+    const latest = try store.outgoing()
+    const resolved = Option.isSome(latest) && latest.value.operation === operation ? latest.value.status ?? status : status
+    try store.setOutgoing(Option.some({ ...send, sim, status: resolved, operation }))
+    if (resolved === undefined) return Stream.succeed<Event>({ type: "lost" })
+    if (resolved === "denied" || resolved === "cancelled") return Stream.succeed<Event>({ type: "journaled", id, allowed: false })
     return Stream.fromIterable<Event>([{ type: "journaled", id, allowed: true }, ...Array.from({ length: recipients }, (): Event => ({ type: "transmit", id }))])
   })
 }
 
 // spec/app/messages/sending.md, "The radio reports each part sent or failed, and the send ends when every recipient has an answer"
-effect function radioed(id: number): Event!!Drafts {
+effect function radioed(id: number): Event!!(Drafts | Telephony) {
   const held = try (try Drafts).outgoing()
-  const status = Option.isSome(held) ? held.value.status : undefined
-  return status === undefined || status === "unknown" ? { type: "lost" } : { type: "partSent", id, ok: sentStatuses.has(status) }
+  if (Option.isNone(held)) return { type: "lost" }
+  const send = held.value
+  const status = send.status === "submitted" && send.sim !== null && send.operation !== undefined ? try receiptOf(send, send.sim, send.operation) : send.status
+  return status === undefined || status === "unknown" || status === "submitted" ? { type: "lost" } : { type: "partSent", id, ok: sentStatuses.has(status) }
 }
 
 // spec/app/messages/sending.md, "The journal read back settles an unknown outcome: sent, or never sent"
@@ -141,12 +164,8 @@ effect function readBack(id: number): Event!!(Telephony | Drafts | Attempts) {
   if (Option.isNone(held)) return { type: "readBack", id, wasSent: false, known: true }
   const operation = (try (try Attempts).key(id)) as OperationId
   const send = held.value
-  const sim = send.sim ?? 0
-  const history = telephony("smsSendHistory", (c) => c.messages.smsSendHistory()) catch () => undefined
-  if (history === undefined) return { type: "readBack", id, wasSent: false, known: false }
-  const found = history.find((one) => one.operationId === operation)
-  if (found === undefined) return { type: "readBack", id, wasSent: false, known: !send.pictured && sim >= 0 }
-  return { type: "readBack", id, wasSent: sentStatuses.has(found.status), known: found.status !== "unknown" }
+  const status = send.sim === null ? undefined : try receiptOf(send, send.sim, operation)
+  return { type: "readBack", id, wasSent: status !== undefined && sentStatuses.has(status), known: status !== undefined && status !== "unknown" && status !== "submitted" }
 }
 
 function sending(fx: SendOut): Job<Event, Telephony | Drafts | Attempts, []> {
@@ -174,9 +193,9 @@ effect function suggestion(ticket: number, thread: number): Event!!(Agent | Inbo
   const participant = Option.isSome(conversation) && conversation.value.addresses.length === 1 ? conversation.value.addresses[0] : null
   if (tail.length === 0 || tail[tail.length - 1].direction !== "in") return refused
   const answered = ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/messages/reply-draft"), { participant, messages: tail, truncated: rows.length > tail.length }), Drafted) catch () => undefined
-  const draft = answered?.draft ?? ""
+  const draft = answered?.draft?.trim() ?? ""
   const state = try (try Composer.Machine).get()
-  if (draft === "" || state.thread !== thread || state.slot.author !== "Nobody") return refused
+  if (draft === "" || draft.length > MMS_MAX_BODY || state.thread !== thread || state.slot.author !== "Nobody") return refused
   try (try Drafts).write(thread, draft)
   return { type: "suggested", ticket, ok: true }
 }
@@ -191,7 +210,10 @@ function carry(fx: Out): Job<Event, Telephony | Drafts | Attempts | Conversation
       return { type: "accessReported", need, grant: grantOf(need === "SendAccess" ? status?.permissions.sendSms : status?.permissions.phoneState) } satisfies Event
     }, { type: "accessReported", need, grant: "Unasked" });
     when { tag: "OpenSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", 0) });
-    when { tag: "OpenMessagingApp" }: run("elsewhere", effect { try elsewhere((try (try Composer.Machine).get()).thread) });
+    when { tag: "OpenMessagingApp" }: run("elsewhere", effect {
+      const thread = (try (try Composer.Machine).get()).thread
+      try elsewhere(thread, try (try Drafts).text(thread))
+    });
     when { tag: "Sending" }: sending(fx.effect);
   }
 }
@@ -229,22 +251,31 @@ const opened = started(effect {
 /** The phone's word that a send's record changed: a delivery report for each recipient every part of which arrived, counted once. */
 const reports: Stream.Stream<Event, never, Telephony | Drafts | Composer.Machine> = Stream.flatMap(
   Stream.callback<OperationId, never, Telephony>((queue) => Effect.asVoid(acquireRelease(
-    Effect.orElseSucceed(telephony("observeMessages", (c) => c.messages.observeMessages(() => {}, (operation) => { Queue.offerUnsafe(queue, operation) })), () => undefined),
+    Effect.orElseSucceed(telephony("observeMessages", (c) => c.messages.observeMessages(() => {}, (operation) => { Queue.offerUnsafe(queue, operation) }, (operation) => { Queue.offerUnsafe(queue, operation) })), () => undefined),
     (unsubscribe) => (unsubscribe === undefined ? Effect.void : ignore(tryPromise(() => unsubscribe()))),
   ))),
   (operation) => Stream.unwrap(effect {
-    const held = try (try Drafts).outgoing()
-    const state = try (try Composer.Machine).get()
+    const store = try Drafts
+    const machine = try Composer.Machine
+    const held = try store.outgoing()
     if (Option.isNone(held) || held.value.operation !== operation || held.value.sim === null) return Stream.empty
     const send = held.value
-    const record = telephony("smsSendResult", (c) => c.messages.smsSendResult({ recipients: send.to as PhoneNumber[], body: send.body, subscriptionId: send.sim ?? 0 }, operation)) catch () => undefined
-    if (record === undefined) return Stream.empty
-    const arrived = send.to.filter((_number, at) => {
+    const sim = held.value.sim
+    const mms = usingMms(send.to.length, send.pictured)
+    const record: SmsSendResult | undefined = mms ? undefined : (telephony("smsSendResult", (c) => c.messages.smsSendResult({ recipients: [...send.to] as PhoneNumber[], body: send.body, subscriptionId: sim }, operation)) catch () => undefined)
+    const status = mms ? try receiptOf(send, sim, operation) : record?.status
+    if (status === undefined || status === "submitted" || status === "unknown") return Stream.empty
+    const current = try store.outgoing()
+    if (Option.isNone(current) || current.value.operation !== operation) return Stream.empty
+    try store.setOutgoing(Option.some({ ...current.value, status }))
+    const state = try machine.get()
+    const id = state.outgoing.op.id
+    const resolved: Event[] = Composer.canReadBack(state, id) ? [{ type: "readBack", id, wasSent: sentStatuses.has(status), known: true }] : []
+    const arrived = record === undefined ? 0 : send.to.filter((_number, at) => {
       const parts = record.parts.filter((part) => part.recipientIndex === at)
       return parts.length > 0 && parts.every((part) => part.delivery === "success")
     }).length
-    const id = state.outgoing.op.id
-    return Stream.fromIterable(Array.from({ length: Math.max(0, arrived - state.outgoing.reported) }, (): Event => ({ type: "reportArrived", id })))
+    return Stream.fromIterable([...resolved, ...Array.from({ length: Math.max(0, arrived - state.outgoing.reported) }, (): Event => ({ type: "reportArrived", id }))])
   }),
 )
 
@@ -252,10 +283,10 @@ const reports: Stream.Stream<Event, never, Telephony | Drafts | Composer.Machine
 const retiring = following(Composer.Machine, (state) => (Composer.canRetire(state, state.outgoing.op.id) ? state.outgoing.op.id : 0), Composer.Machine, (id): Event | undefined => (id === 0 ? undefined : { type: "retire", id }))
 
 // spec/app/messages/composer.md, "What Alpha cannot send is handed to the messaging app"
-/** Whether Alpha can send this message itself, as the phone last said: texts directly, pictures as MMS, and no more recipients than one send takes. */
+/** Single plain texts use SMS. Group messages and pictures need the phone's MMS capability. */
 export effect function supported(recipients: number, pictures: number): boolean!!Drafts {
   const can = try (try Drafts).sending()
-  return can.direct && (pictures === 0 ? recipients <= SMS_DIRECT_MAX_RECIPIENTS : can.pictures && recipients <= MMS_MAX_RECIPIENTS)
+  return can.direct && (usingMms(recipients, pictures > 0) ? can.pictures && recipients <= MMS_MAX_RECIPIENTS : recipients === 1)
 }
 
 /** What the owner's Send carries, put in hand just before it: the draft, the conversation's numbers, the SIM and the pictures; a send whose outcome is unknown keeps what it carried. */

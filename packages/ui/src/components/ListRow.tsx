@@ -35,19 +35,19 @@ const refuse = (event: MouseEvent) => {
 export function ListRow({ title, detail, leading, trailing, selected = false, asChild = false, disabled = false, className, children, ...props }: ListRowProps) {
   const pressable = asChild || Boolean(props.onClick ?? props.onPointerDown ?? props.onKeyDown);
   const row = cn(
-    "flex min-h-13 w-full items-center gap-3 px-4 py-2 text-left text-foreground",
+    "flex min-h-14.5 w-full items-center gap-3.5 py-2 pr-4 pl-4.5 text-left text-foreground",
     pressable && [focusRing, "transition-colors duration-fast ease-standard hover:bg-accent/60 focus-visible:-outline-offset-focus active:bg-accent disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50"],
     selected && "bg-accent",
     className,
   );
   const content = (
     <>
-      {leading ? <span aria-hidden className="flex shrink-0 items-center text-muted-foreground [&_svg:not([class*='size-'])]:size-5.5">{leading}</span> : null}
+      {leading ? <span aria-hidden className="flex shrink-0 items-center [&_svg:not([class*='size-'])]:size-5.5">{leading}</span> : null}
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="line-clamp-2 text-base font-medium break-words">{title}</span>
-        {detail ? <span className="truncate text-sm text-muted-foreground">{detail}</span> : null}
+        <span className="line-clamp-2 text-md break-words">{title}</span>
+        {detail ? <span className="mt-0.5 truncate text-caption text-muted-foreground">{detail}</span> : null}
       </span>
-      {trailing ? <span className="flex shrink-0 items-center gap-2 text-sm text-muted-foreground">{trailing}</span> : null}
+      {trailing ? <span className="flex shrink-0 items-center gap-2 text-sm text-muted-foreground [&_svg:not([class*='size-'])]:size-4">{trailing}</span> : null}
     </>
   );
   if (asChild) {
