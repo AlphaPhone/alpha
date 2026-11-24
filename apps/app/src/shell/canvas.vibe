@@ -3,7 +3,7 @@ import * as Canvas from "../../gen/app__shell__keyboard.effect.vibe"
 import type { Event, Field } from "../../gen/app__shell__keyboard.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { Launcher } from "../platform/launcher.vibe"
-import { applying, contained, reacting, started } from "../runtime/reactor.vibe"
+import { applying, contained, reacting, started, together } from "../runtime/reactor.vibe"
 
 module page {
   /** The window as measured: its width, its height, and the height left to the page above the keyboard. @throws {never} */
@@ -73,4 +73,4 @@ const marked = applying(Canvas.Machine, (c) => ({ landscape: c.landscape, wide: 
 })
 
 /** The canvas, in memory: measured when the shell mounts and at every change of the window, and marked on the page. */
-export const canvas = Layer.mergeAll(reacting(Canvas, {}), followed, backgrounded, marked)
+export const canvas = together(reacting(Canvas, {}), followed, backgrounded, marked)

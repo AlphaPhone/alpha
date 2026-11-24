@@ -3,7 +3,7 @@ import * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__notices__toasts.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import { Device } from "../platform/device.vibe"
-import { type Job, answer, contained, following, reacting, run, started } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, following, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 
 /** What a toast says, which the rules never hold: its sentence, and whether it reports a failure, to be announced at once. */
@@ -113,7 +113,7 @@ const asking = started(effect {
 const covered = following(Layers.Machine, (l) => l.open.filter((layer) => layer.kind === "DialogLayer").length, Toasts.Machine, (top) => ({ type: "cover", top } as const))
 
 /** The toasts and the notices kept, in memory, shown once the shell is up. */
-export const toasts = Layer.mergeAll(
+export const toasts = together(
   reacting(Toasts, { open: [{ type: "started" }], carry }),
   said,
   ticking,

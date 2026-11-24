@@ -8,8 +8,8 @@ import type { Tile } from "../../gen/app__home__tiles.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import type { View } from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
-import { Launcher, type Presentation, type Why, keyOf } from "../platform/launcher.vibe"
-import { type Job, answer, contained, due, following, hearing, reacting, run, started, untimed } from "../runtime/reactor.vibe"
+import { Launcher, type Presentation, type Why } from "../platform/launcher.vibe"
+import { type Job, answer, contained, due, following, hearing, reacting, run, started, untimed, together } from "../runtime/reactor.vibe"
 import type { HomeAsk, HomeNoticeMessage } from "@repo/ui"
 import { Said, say } from "../notices/toasts.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
@@ -55,7 +55,7 @@ effect function readApps(ticket: number): Event!!(Launcher | Device) {
   const visible = try (try Device).showing()
   if (listed === undefined) return { type: "appsRead", ticket, ok: false, listed: [], visible }
   catalog.listed(listed)
-  return { type: "appsRead", ticket, ok: true, listed: [...new Set(listed.map(keyOf))], visible }
+  return { type: "appsRead", ticket, ok: true, listed: [...new Set(listed.map(({ key }) => key))], visible }
 }
 
 // spec/app/home/index.md, "Android's answer ends the wait; a refusal is told with its reason, and the apps are read again"
@@ -158,7 +158,7 @@ const presented = started(effect {
 }, "presenting Home")
 
 /** Home's machine, kept across restarts for its numbers, and what tells it of the phone and the shell. */
-export const home = Layer.mergeAll(
+export const home = together(
   reacting(Home, {
     keep: 1,
     open: [{ type: "restart" }, owner],

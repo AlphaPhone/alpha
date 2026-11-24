@@ -6,6 +6,7 @@ import { Machine as Toasts } from "../gen/app__notices__toasts.effect.vibe";
 import home from "../src/home/index.tsx";
 import { button, closeAll, drawn, fill, hardware, later, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
+import { waiting } from "../src/home/waiting.vibe";
 
 underAct();
 afterEach(closeAll);
@@ -32,9 +33,14 @@ describe("Home on a phone", () => {
     await until(alpha, homes, Home.Machine, (h) => h.host === "AsLauncher" && h.tiles.load.status === "Loaded");
     expect(tiles()).toEqual(alphaApps);
 
+    // spec/app/home/tiles.md, "Only Phone, Messages and Inbox carry a badge, only when something waits there, and no tile does while Home is being edited"
+    await drawn(() => { waiting.tell("Inbox", "3 unread"); waiting.tell("Notes", "1 shared"); });
+    expect([button("Inbox3 unread") !== undefined, button("Notes") !== undefined]).toEqual([true, true]);
+
     // spec/app/home/index.md, "A long press on bare Home starts editing, only on the phone and once the tiles are read"
     held("Notes");
     await until(alpha, homes, Home.Machine, (h) => h.editing);
+    expect(button("Inbox") !== undefined).toBe(true);
 
     // spec/app/home/index.md, "A tile on Home is removed or moved only while Home is being edited"; spec/app/home/index.md, "Every change is sent whole to be saved under its number, and nothing else is ever saved"
     await press("Remove Notes");

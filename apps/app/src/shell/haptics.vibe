@@ -2,7 +2,7 @@
 import * as Haptics from "../../gen/app__shell__haptics.effect.vibe"
 import type { Haptic, Role } from "../../gen/app__shell__haptics.effect.vibe"
 import { Device } from "../platform/device.vibe"
-import { contained, reacting, started, untimed } from "../runtime/reactor.vibe"
+import { contained, reacting, started, untimed, together } from "../runtime/reactor.vibe"
 
 module page {
   /** What a click on the page lands on, read before the control's own handler changes it. */
@@ -56,7 +56,7 @@ const clicks = started(effect {
 }, "touch feedback")
 
 /** Touch feedback, in memory: told once whether the phone plays it, and every click that earns some. */
-export const haptics = Layer.mergeAll(
+export const haptics = together(
   reacting(Haptics, { open: effect { return [{ type: "install", available: try (try Device).feels() }] as const } }),
   clicks,
 )

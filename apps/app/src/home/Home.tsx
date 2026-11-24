@@ -5,7 +5,7 @@ import { useSyncExternalStore } from "react";
 import * as Home from "../../gen/app__home.ts";
 import { useMachine as useHome } from "../../gen/app__home.react.ts";
 import { useMachine as useCards } from "../../gen/app__home__cards.react.ts";
-import type { Tile } from "../../gen/app__home__tiles.ts";
+import { type Tile, badged } from "../../gen/app__home__tiles.ts";
 import type { View } from "../../gen/app__shell.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Resident, Shown } from "../runtime/area.tsx";
@@ -15,6 +15,7 @@ import { views } from "../shell/views.tsx";
 import { Agenda } from "./Agenda.tsx";
 import { catalog, labelOf } from "./catalog.vibe";
 import { told } from "./home.vibe";
+import { waiting } from "./waiting.vibe";
 import type { HomeMachines } from "./index.tsx";
 
 const owner = "Owner" as const;
@@ -32,10 +33,11 @@ const imageOf = (app: InstalledApp | undefined): string | undefined =>
 
 const profiles: Readonly<Record<NonNullable<InstalledApp["profile"]>, string>> = { work: "Work", private: "Private", clone: "Clone", other: "Other profile" };
 
-function tileItem(tile: Tile, known: ReadonlyMap<string, InstalledApp>): HomeTileItem {
+function tileItem(tile: Tile, known: ReadonlyMap<string, InstalledApp>, said?: string, editing = false): HomeTileItem {
   if (tile.tag === "Own") {
     const Glyph = views[tile.view].icon;
-    return { id: idOf(tile), label: views[tile.view].label, icon: <Glyph className="size-6" /> };
+    const badge = badged(tile, said !== undefined, editing) ? said : undefined;
+    return { id: idOf(tile), label: views[tile.view].label, icon: <Glyph className="size-6" />, ...(badge ? { badge } : {}) };
   }
   return { id: idOf(tile), label: labelOf(tile.app), icon: <InstalledAppIcon image={imageOf(known.get(tile.app))} /> };
 }
@@ -47,6 +49,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   const cards = useCards(runtime);
   const known = useSyncExternalStore(catalog.subscribe, catalog.snapshot, catalog.snapshot);
   const inline = useSyncExternalStore(told.subscribe, told.snapshot, told.snapshot);
+  const waits = useSyncExternalStore(waiting.subscribe, waiting.snapshot, waiting.snapshot);
   const h = home.state;
   const s = shell.state;
   if (!h || !s || h.host === "AssistantOnly") return null;
@@ -71,7 +74,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
       <HomeScreen
         date={today ? new Date(today * 86_400_000).toLocaleDateString([], { weekday: "long", day: "numeric" }) : undefined}
         cards={Home.showsCards(h) ? [<Agenda key="agenda" runtime={runtime} />, <div key="others" className="contents">{alpha.slot("home/cards")}</div>] : []}
-        tiles={h.tiles.load.status === "Loaded" ? Home.tilesShown(h, s).map((tile) => tileItem(tile, known.apps)) : undefined}
+        tiles={h.tiles.load.status === "Loaded" ? Home.tilesShown(h, s).map((tile) => tileItem(tile, known.apps, tile.tag === "Own" ? waits.get(tile.view) : undefined, h.editing)) : undefined}
         editing={h.editing}
         onOpenTile={(id) => {
           const tile = tileOf(id);

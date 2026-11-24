@@ -1,7 +1,7 @@
 // spec/app/home/index.md, "Whether an app matches a search is told from its label and package, ignoring case and accents, and an empty search matches every app"
 import type { InstalledApp } from "@elizaos/os/bridges/definitions/system"
 import { opaque } from "../../gen/app__home.effect.vibe"
-import { keyOf } from "../platform/launcher.vibe"
+import type { Listed } from "../platform/launcher.vibe"
 
 module eliza {
   import type { InstalledApp } from "@elizaos/os/bridges/definitions/system"
@@ -35,8 +35,8 @@ export const catalog = {
     return () => { listeners.delete(listener) }
   },
   /** Each app of a reading, which comes before the reading is told to Home. */
-  listed(apps: readonly InstalledApp[]): void {
-    current = { apps: new Map(apps.map((app) => [keyOf(app), app])), details: details(apps) }
+  listed(apps: readonly Listed[]): void {
+    current = { apps: new Map(apps.map(({ key, app }) => [key, app])), details: details(apps.map(({ app }) => app)) }
     for (const listener of [...listeners]) listener()
   },
   app: (key: string): InstalledApp | undefined => current.apps.get(key),
@@ -45,12 +45,6 @@ export const catalog = {
 /** The app's label, or its key where it was never read. */
 export function labelOf(key: string): string {
   return current.apps.get(key)?.label ?? key
-}
-
-/** The keys of `keys` in the order the drawer lists them for `query`: prefix matches first, then by label. */
-export function ordered(keys: Iterable<string>, query: string): string[] {
-  const apps = [...keys].flatMap((key) => current.apps.get(key) ?? [])
-  return found(apps, query).map(keyOf)
 }
 
 opaque.matches = (key: string, query: string) => {

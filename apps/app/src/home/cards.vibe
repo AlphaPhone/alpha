@@ -7,7 +7,7 @@ import type { View } from "../../gen/app__shell.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Device, native, registered } from "../platform/device.vibe"
 import { ask } from "../platform/remote.vibe"
-import { type Job, answer, contained, due, following, hearing, reacting, run, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, due, following, hearing, reacting, run, untimed, together } from "../runtime/reactor.vibe"
 
 module held {
   import { calendarClient } from "@elizaos/os/bridges/calendar"
@@ -106,7 +106,7 @@ function carry(fx: Out, state: () => Cards.Cards!!Cards.Machine): Job<Event, Age
 const current = () => Cards.Machine.use((machine) => machine.get())
 
 /** The cards, kept across restarts for their tickets: looked at when Home shows, when Alpha comes back to the front and when the day turns. */
-export const cards = Layer.mergeAll(
+export const cards = together(
   reacting(Cards, {
     keep: 1,
     open: [{ type: "restart" }],
