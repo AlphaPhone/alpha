@@ -1,7 +1,7 @@
 /**
  * Owner issue 4: a call keeps going when the owner leaves the call screen, so a bar at the top of
- * every other view says what the call is doing and offers Return to call and End call (Decline for
- * a ringing call), like Android's and iOS's call chips. It goes when the call ends.
+ * every other view says what the call is doing and offers Return to call and End call.
+ * Android presents incoming calls in the phone build. The development phone presents its own ring.
  *
  * Two sources, never both:
  * - The Alpha image: Alpha's InCallService holds Telecom's calls and AlphaCallActivity is the call
@@ -176,8 +176,10 @@ export function installOngoingCallBar(Component: any, views: Bag, plugin: Ongoin
 		let bar: Readonly<CallBar> | null = null, clock = false, eligible = false;
 		if (out.isOn && !out.assistantSurface) {
 			if (plugin) {
-				eligible = true;
-				const call = shownCall(calls);
+				// Telecom already presents the incoming call. Leave that alert unobstructed,
+				// including during the short hold for a previously ended call.
+				eligible = !calls.some(call => call.state === 'ringing');
+				const call = eligible ? shownCall(calls) : null;
 				if (call) {
 					clock = call.state === 'active' && !!call.connectedAt;
 					bar = presentCallBar(call, now,
