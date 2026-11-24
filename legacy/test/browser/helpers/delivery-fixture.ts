@@ -33,6 +33,7 @@ function defineDeliveryFixture(gmail:boolean){
   {name:'AlphaConnection',methods:methods(['secureRead','secureWrite','secureCompareExchange','secureRemove','cancel','addListener','removeListener','pauseNotificationCollection'])},
   {name:'AlphaActionJournal',methods:methods(['list'])},
   {name:'ElizaSystem',methods:methods(['getBuildInfo'])},
+  {name:'ElizaSense',methods:methods(['turnOff'])},
   {name:'AlphaHostedResults',methods:methods(['beginBackground','cancelBackground','configureBackground','disableBackground','inboxHistory','syncInbox','status','setBackgroundPolling','enable','pendingResult','withdrawOtherOwnerApprovalNotices','addListener','removeListener'])},
  ],nativeCallback:agent.nativeCallback,nativePromise:async(plugin:string,method:string,input:any)=>{
   if(plugin==='AlphaGmail'){
@@ -43,7 +44,13 @@ function defineDeliveryFixture(gmail:boolean){
   }
   if(plugin==='DailyApps'){
    if(method==='surfaceInfo')return {reminderTapVersion:1};
-   if(method==='pendingReminderTap')return f.reminderTap||{};
+   if(method==='pendingReminderTap'){
+    if(f.holdReminderQuestion&&f.reminderTap?.question){
+     f.reminderPendingReads=(f.reminderPendingReads||0)+1;
+     if(f.reminderPendingReads===3)await new Promise<void>(resolve=>{f.releaseReminderRead=resolve;});
+    }
+    return f.reminderTap||{};
+   }
    if(method==='listReminders')return {reminders:f.reminder?[f.reminder]:[]};
    if(method==='consumeReminderTap'){if(input.token!==f.reminderTap?.token)throw Error('changed');f.consumed=(f.consumed||0)+1;f.reminderTap={};return {};}
    if(method==='releaseReminderQuestion'){f.released=(f.released||0)+1;f.savedTap=f.reminderTap;f.reminderTap={};return {};}
@@ -92,6 +99,7 @@ function defineDeliveryFixture(gmail:boolean){
   }
   if(plugin==='AlphaActionJournal')return {entries:[]};
   if(plugin==='ElizaSystem'&&method==='getBuildInfo')return {launcher:false,version:'fixture'};
+  if(plugin==='ElizaSense'&&method==='turnOff'){f.wakeTurnedOff=(f.wakeTurnedOff||0)+1;return {available:false,reason:'not-installed'};}
   if(plugin==='AlphaHostedResults'){
    if(method==='configureBackground'){f.configured++;f.input=input;f.enabled=true;return {generation:'fixture-generation',scope:'a'.repeat(64)};}
    if(method==='cancelBackground'){f.cancelled++;f.enabled=false;f.events.push('cancel');return {};}

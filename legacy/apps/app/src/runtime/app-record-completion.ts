@@ -3,18 +3,44 @@ import { normalizeEffectReceipts } from '../../../../.eliza/client-features/pack
 export const NOTES_INVALIDATED_EVENT = 'alpha:canonical-notes-invalidated';
 export const CALENDAR_INVALIDATED_EVENT = 'alpha:canonical-calendar-invalidated';
 
-export interface AppRecordInvalidation {
+interface AppRecordInvalidation {
   event: typeof NOTES_INVALIDATED_EVENT | typeof CALENDAR_INVALIDATED_EVENT;
   revision?: number;
 }
 
 const noteMutations = new Set([
-  'notes.note.create', 'notes.note.update', 'notes.note.patch', 'notes.note.delete',
+  'notes.note.create', 'notes.note.update', 'notes.note.patch', 'notes.note.delete', 'notes.note.restore',
   'notes.create-note', 'notes.update-note', 'notes.delete-note', 'notes.restore-note',
 ]);
 const calendarMutations = new Set([
   'calendar.event.create', 'calendar.event.update', 'calendar.event.delete',
 ]);
+
+function receiptsFrom(result: unknown): ReturnType<typeof normalizeEffectReceipts> {
+  if (!result || typeof result !== 'object' || !('effectReceipts' in result)) return [];
+  try { return normalizeEffectReceipts(result.effectReceipts); }
+  catch { return []; }
+}
+
+/** The single new or identically reused note identified by this turn's creation receipt. */
+export function noteCreationTarget(results: readonly unknown[] | undefined): {id:string; reused:boolean}|undefined {
+  const receipts = results?.flatMap(receiptsFrom) ?? [];
+  const reverted = new Set(receipts.flatMap(receipt =>
+    receipt.outcome === 'rolled_back' ? receipt.rollback.revertedReceiptIds : []));
+  const targets = new Map<string, {id:string;reused:boolean}>();
+  for (const receipt of receipts) {
+    if (reverted.has(receipt.receiptId) || receipt.resource.kind !== 'notes.note') continue;
+    const id = receipt.resource.id;
+    const durable = receipt.outcome === 'applied' && receipt.commit.kind === 'durable';
+    if (receipt.operation === 'notes.note.create' || receipt.operation === 'notes.create-note') {
+      if (durable) targets.set(id, {id,reused:false});
+      else if (receipt.outcome === 'noop' && receipt.idempotency.replayed && receipt.idempotency.key === id && !targets.has(id))
+        targets.set(id, {id,reused:true});
+    }
+    if (durable && (receipt.operation === 'notes.note.delete' || receipt.operation === 'notes.delete-note')) targets.delete(id);
+  }
+  return targets.size === 1 ? targets.values().next().value : undefined;
+}
 
 /** Refresh hints from canonical effects, never completion or retry authority.
  * The caller verifies the active session before emitting these local events.
@@ -27,11 +53,7 @@ export function appRecordInvalidations(results: readonly unknown[] | undefined):
   let unknownNotesRevision = false;
   let calendar = false;
   for (const result of results) {
-    if (!result || typeof result !== 'object' || !('effectReceipts' in result)) continue;
-    let receipts: ReturnType<typeof normalizeEffectReceipts>;
-    try { receipts = normalizeEffectReceipts(result.effectReceipts); }
-    catch { continue; }
-    for (const receipt of receipts) {
+    for (const receipt of receiptsFrom(result)) {
       if (receipt.outcome !== 'applied') continue;
       if (receipt.commit.kind === 'durable' && (
         receipt.resource.kind === 'notes.note' && noteMutations.has(receipt.operation) ||

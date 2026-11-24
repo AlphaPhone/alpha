@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 // Agent tools for Notes organisation: reviewed moves, valid folder references and restore.
 // The contract and executor are pure, so a fake host stands in for the shell.
-const contract=await import('../apps/app/src/runtime/notes-organize-contract.ts');
+const contract=await import('../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-organize-contract.ts');
 const {executeNotesOrganize}=await import('../apps/app/src/prototype/notes-organize-executor.ts');
 const view=await import('../apps/app/src/runtime/notes-view.ts');
 
@@ -20,10 +20,10 @@ test('organize operations validate strictly; only the filter is read-only and ne
  assert.deepEqual(contract.validateNotesOrganizeOperation({type:'notes_record',action:'stop'}),{type:'notes_record',action:'stop'});
  assert.deepEqual(contract.describeNotesOrganizeOperation({type:'notes_record',action:'start'}),{title:'Record voice note',description:'In Notes'});
  // Recording runs only with Notes open; the other tools are reviewable from Home too.
- assert.equal(contract.notesOrganizeContextAllowed({view:'home'},'notes_record'),false);
- assert.equal(contract.notesOrganizeContextAllowed({view:'notes'},'notes_record'),true);
- assert.equal(contract.notesOrganizeContextAllowed({view:'notes',sensitive:true},'notes_record'),false);
- assert.equal(contract.notesOrganizeContextAllowed({view:'home'},'notes_move'),true);
+ assert.equal(contract.notesOrganizeContextAllowed({view:'home'},{type:'notes_record'}),false);
+ assert.equal(contract.notesOrganizeContextAllowed({view:'notes'},{type:'notes_record'}),true);
+ assert.equal(contract.notesOrganizeContextAllowed({view:'notes',sensitive:true},{type:'notes_record'}),false);
+ assert.equal(contract.notesOrganizeContextAllowed({view:'home'},{type:'notes_move'}),true);
  assert.deepEqual(contract.describeNotesOrganizeOperation({type:'notes_move',target:target('n'),folder:'Work'}),{title:'Move note',description:'To Work'});
  assert.equal(contract.notesOrganizeContextAllowed({view:'notes'}),true);
  assert.equal(contract.notesOrganizeContextAllowed({view:'photos'}),false);
@@ -104,6 +104,17 @@ test('notes_record starts and saves through the Notes recorder and never touches
  ({state,host:h}=host());
  await assert.rejects(executeNotesOrganize(h,{type:'notes_record',action:'start'},()=>{throw Error('context changed');}));
  assert.deepEqual(state.recorder,[]);
+});
+
+// On the agent's own Notes there is no Previous notes store, so ready() is false; recording still runs
+// through the recorder, while an operation that edits Previous notes is refused before any effect.
+test('notes_record runs on the agent Notes source without the Previous notes store',async()=>{
+ const {state,host:base}=host({notes:[{id:'a',kind:'text',title:'A'}]}),h={...base,ready:()=>false};
+ assert.deepEqual(await executeNotesOrganize(h,{type:'notes_record',action:'start'},()=>{}),{status:'succeeded',summary:'Recording'});
+ assert.deepEqual(await executeNotesOrganize(h,{type:'notes_record',action:'stop'},()=>{}),{status:'succeeded',summary:'Saved the voice note.'});
+ assert.deepEqual(state.recorder,['start','stop']);
+ assert.deepEqual(await executeNotesOrganize(h,{type:'notes_folder_create',name:'Work'},()=>{}),{status:'failed',summary:'Notes unavailable'});
+ assert.deepEqual(state.folders.folders,[]);assert.equal(state.commits,0);
 });
 
 test('content search also matches a saved recording transcript',()=>{

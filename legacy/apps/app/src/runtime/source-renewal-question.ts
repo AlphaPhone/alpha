@@ -1,39 +1,23 @@
-import {reviewContentQuestion} from '../browser/content-question';
-import {sensitiveReadingText} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-reading.ts';
 import {noticeReviewable} from '../prototype/context-selection';
+import {noticeQuestionFile,stageNoticeQuestion,type AttachNoticeQuestion} from '../prototype/own-notice-question';
 import {alphaClient} from './alpha-client';
 import type {HostedNativeSelection} from './hosted-digests';
 export interface SourceRenewalTap {token:string;question:boolean;selection:HostedNativeSelection;expiresAt:number}
 export function renewalMatches(tap:SourceRenewalTap,selection:HostedNativeSelection,expiresAt:string){return tap.expiresAt===Date.parse(expiresAt)&&['provider','ownerId','agentId','installationId','enrollmentId','sourceId','revision'].every(field=>tap.selection[field as keyof HostedNativeSelection]===selection[field as keyof HostedNativeSelection]);}
-export function reviewSourceRenewalQuestion(o:{tap:SourceRenewalTap;signal:AbortSignal;current:()=>boolean;recheck:()=>Promise<Partial<SourceRenewalTap>>;settle:(discard:boolean)=>Promise<void>;canCompose:()=>boolean;compose:(text:string)=>boolean;report:(text:string)=>void;closed:()=>void}){
+export function reviewSourceRenewalQuestion(o:{tap:SourceRenewalTap;signal:AbortSignal;current:()=>boolean;recheck:()=>Promise<Partial<SourceRenewalTap>>;consume:()=>Promise<void>;canCompose:()=>boolean;attach:AttachNoticeQuestion;report:(text:string)=>void;closed:(attached:boolean)=>void}){
  const text='Access for your daily brief expires soon. Renew it to keep your brief updated.';
- const current=()=>o.current()&&!alphaClient.getState().context.sensitive;
- if(!o.tap.question||!current()||!noticeReviewable({source:'own',id:o.tap.selection.sourceId,revision:o.tap.selection.revision,title:'Scheduled source renewal',text})||sensitiveReadingText(text))return;
- let composing=false,ended=false,interrupted=false;
- const done=()=>{if(ended)return;ended=true;window.removeEventListener('blur',abort);window.removeEventListener('launcher-home',abort);o.closed();};let abort=()=>{};
- const close=reviewContentQuestion({
-  signal:o.signal,name:'Scheduled source renewal notification',text,
-  question:'Help me understand this source renewal.',current,validate:value=>!sensitiveReadingText(value),
-  closed:dismissed=>queueMicrotask(()=>{
-   if(composing)return;
-   if(dismissed&&!interrupted)void o.settle(true).catch(()=>{});
-   interrupted=true;done();
-  }),
-  compose:draft=>{
-   composing=true;
-   void(async()=>{
-    try{
-     if(interrupted||!current())throw Error();
-     const next=await o.recheck();
-     if(interrupted||!current()||next.token!==o.tap.token||!next.question||!next.selection||
-      !renewalMatches(next as SourceRenewalTap,o.tap.selection,new Date(o.tap.expiresAt).toISOString())||
-      !o.canCompose())throw Error();
-     await o.settle(false);
-     if(interrupted||!current()||!o.compose(draft))throw Error();
-    }catch{o.report('The source or account changed. Nothing was added to your conversation.');}
-    finally{done();}
-   })();
+ const current=()=>!o.signal.aborted&&o.current()&&!alphaClient.getState().context.sensitive;
+ const file=o.tap.question&&current()&&noticeReviewable({source:'own',id:o.tap.selection.sourceId,revision:o.tap.selection.revision,title:'Scheduled source renewal',text})&&noticeQuestionFile('Source renewal.txt',text);
+ if(!file)return;
+ return stageNoticeQuestion({
+  file,prompt:'Help me understand this source renewal.',current,signal:o.signal,attach:o.attach,closed:o.closed,
+  prepare:async admitted=>{
+   const next=await o.recheck();
+   if(!admitted()||next.token!==o.tap.token||!next.question||!next.selection||
+    !renewalMatches(next as SourceRenewalTap,o.tap.selection,new Date(o.tap.expiresAt).toISOString())||!o.canCompose())return false;
+   await o.consume();
+   return true;
   },
+  failed:()=>o.report('The source or account changed. Nothing was added to your conversation.'),
  });
- abort=()=>{interrupted=true;close();done();};window.addEventListener('blur',abort);window.addEventListener('launcher-home',abort);return abort;
 }

@@ -32,12 +32,16 @@ export function alphaNavigation(available: (hostKey: string) => boolean) {
       const target = views.target(viewId);
       return !target ? undefined : target.kind === 'home' ? 'home' : views.hostKey(target.view);
     },
+    /** The name the owner sees for the view an accepted id lands on; the id itself when unknown. */
+    viewLabel(viewId: string): string {
+      const target = views.target(viewId);
+      return target?.kind === 'home' ? 'Home' : (target?.view ?? views.find(viewId))?.label ?? viewId;
+    },
     /** Canonical id of a renderer key, as the agent's view metadata names it. */
     canonicalViewId: (view: string): string => views.canonicalId(view) ?? view,
     /** Route paths a navigation handoff may name for a view id; none for an unknown id. A
-     * recognized older or served id (workflows, home, reminders) keeps accepting the paths it
-     * was accepted with before the shared registry, `/<id>` and `/apps/<id>`, beside the
-     * canonical paths, which stay the emitted form. */
+     * recognized older or served id (workflows, home, reminders) also accepts `/<id>` and
+     * `/apps/<id>` beside the canonical paths, which stay the emitted form. */
     viewPaths(viewId: string): string[] {
       const id = views.canonicalId(viewId);
       return id ? [...new Set([...mobileShellViewPaths(id), `/${viewId}`, `/apps/${viewId}`])] : [];
@@ -54,16 +58,10 @@ export function alphaNavigation(available: (hostKey: string) => boolean) {
 const navigation = alphaNavigation(isMvpView);
 export const alphaViews = navigation.views;
 export const alphaViewKey = navigation.viewKey;
+export const alphaViewLabel = navigation.viewLabel;
 export const alphaCanonicalViewId = navigation.canonicalViewId;
 export const alphaViewPaths = navigation.viewPaths;
 export const alphaViewPath = navigation.viewPath;
-
-/** A fixed product colour of the record's palette, for the few reads that are not CSS (a
- * comparison with stored data). Everything drawn uses var(<name>) instead. */
-export function alphaPaletteColor(name: string): string | undefined {
-  const color = ALPHA_PRODUCT.theme.palette?.[name];
-  return typeof color === 'string' ? color : color?.light;
-}
 
 /** CSS custom properties of Alpha's theme: canonical shell properties, the stylesheet aliases
  * (--s2, --acct, ...) and the palette (--alpha-...) the record declares. */

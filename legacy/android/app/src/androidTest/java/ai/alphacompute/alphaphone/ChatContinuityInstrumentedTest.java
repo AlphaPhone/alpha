@@ -3,6 +3,7 @@ package ai.alphacompute.alphaphone;
 import android.content.Context;
 import android.content.Intent;
 import android.os.SystemClock;
+import android.provider.Settings;
 import android.view.InputDevice;
 import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
@@ -10,11 +11,13 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
+import androidx.test.uiautomator.UiDevice;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.json.JSONObject;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import static org.junit.Assert.*;
+import static org.junit.Assume.assumeTrue;
 
 /** An unsent chat draft with the real soft keyboard: typed with the IME shown, it survives sheet and
  * full, real KEYCODE_BACK presses (the IME is dismissed, then full -> sheet -> rest), the HOME key
@@ -66,7 +69,7 @@ public class ChatContinuityInstrumentedTest {
   fail(message);
  }
  /** Focus the visible composer and ask Android for the real soft keyboard. */
- static void showKeyboard() throws Exception {
+ private static void showKeyboard() throws Exception {
   eval("(" + AppNavigation.composer() + ")?.focus()");
   SystemClock.sleep(200);
   WebViewTestDriver.withActivity(MainActivity.class, activity -> {
@@ -75,8 +78,12 @@ public class ChatContinuityInstrumentedTest {
   });
   awaitIme(true, "The real soft keyboard must be visible");
  }
+ private static void writeDraft() throws Exception {
+  until(AppNavigation.composer(), "The conversation sheet shows its composer");
+  eval("(()=>{const e=(" + AppNavigation.composer() + ");e.focus();Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(e," + JSONObject.quote(DRAFT) + ");e.dispatchEvent(new Event('input',{bubbles:true}));})()");
+ }
  /** The visible composer holds the draft and it, with Send when shown, fits inside innerHeight. */
- static void assertComposer(String text, String when) throws Exception {
+ private static void assertComposer(String text, String when) throws Exception {
   String composer = AppNavigation.composer();
   until(composer + "&&(" + composer + ").value===" + JSONObject.quote(text), "Composer keeps the draft " + when);
   String layout = eval("(()=>{const e=(" + composer + ");const r=e.getBoundingClientRect();const s=e.parentElement.querySelector('button[aria-label=Send]')?.getBoundingClientRect();"
@@ -85,16 +92,14 @@ public class ChatContinuityInstrumentedTest {
   assertTrue("Composer within innerHeight " + when + ": " + parsed, parsed.getBoolean("fits"));
  }
  /** No message bubble shows the draft: it was never sent. */
- static void assertNotPosted(String text) throws Exception {
+ private static void assertNotPosted(String text) throws Exception {
   assertEquals("The draft was never posted", "false", eval("[...document.querySelectorAll('[data-screen] *')].some(e=>!e.childElementCount&&e.tagName!=='TEXTAREA'&&e.closest('[data-alpha-layer=\"conversation\"]')&&(e.textContent||'').includes(" + JSONObject.quote(text) + "))"));
  }
  /**
   * Whether Alpha holds the HOME role, as Android's RoleManager answers for this package. Resolving the
   * HOME intent is not that answer: package visibility hides the stock launcher from Alpha (system_server
   * logs the AppsFilter interaction alphaphone -> nexuslauncher as BLOCKED on the API 36 emulator), so
-  * the resolver named Alpha while the stock launcher held the role. In the emulator campaign of
-  * 2026-10-14 the launcher run then took the HOME branch, HOME opened the stock launcher, and
-  * recreate() ran with Alpha in the background (the recreated activity stopped, never resumed).
+  * the resolver can name Alpha while the stock launcher holds the role.
   */
  static boolean alphaIsHome(Context context) {
   android.app.role.RoleManager roles = context.getSystemService(android.app.role.RoleManager.class);
@@ -110,8 +115,7 @@ public class ChatContinuityInstrumentedTest {
    AppNavigation.declineStartupAccess();
    click("Open conversation");
    awaitChat("sheet");
-   until(AppNavigation.composer(), "The conversation sheet shows its composer");
-   eval("(()=>{const e=(" + AppNavigation.composer() + ");e.focus();Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(e," + JSONObject.quote(DRAFT) + ");e.dispatchEvent(new Event('input',{bubbles:true}));})()");
+   writeDraft();
    showKeyboard();
    assertComposer(DRAFT, "in the sheet with the keyboard shown");
    click("Expand chat");
@@ -167,6 +171,37 @@ public class ChatContinuityInstrumentedTest {
    until(AppNavigation.selected("Home") + "&&!document.querySelector('.os')?.inert", "Home ready after recreation");
    if (!"true".equals(eval("!!(" + AppNavigation.composer() + ")"))) click("Open conversation");
    assertComposer(DRAFT, "after recreation (persisted draft)");
+   assertNotPosted(DRAFT);
+  }
+ }
+
+ @Test public void bottomHomeGestureWithKeyboardKeepsUnsentDraft() throws Exception {
+  var instrumentation = InstrumentationRegistry.getInstrumentation();
+  Context context = instrumentation.getTargetContext();
+  assumeTrue("This gesture needs Alpha to hold the Android HOME role", alphaIsHome(context));
+  assumeTrue("This gesture needs Android gesture navigation",
+    Settings.Secure.getInt(context.getContentResolver(), "navigation_mode", -1) == 2);
+  AppNavigation.assumeNoRequiredSignIn("Home gesture with a chat draft");
+  try (BoundedActivityScenario<MainActivity> scenario = BoundedActivityScenario.launch(MainActivity.class)) {
+   AppNavigation.liveMode();
+   AppNavigation.open("Home");
+   AppNavigation.declineStartupAccess();
+   AppNavigation.open("Notes");
+   until(AppNavigation.SETTLED, "Notes navigation has settled");
+   click("Open conversation");
+   awaitChat("sheet");
+   writeDraft();
+   showKeyboard();
+   assertComposer(DRAFT, "before the Home gesture");
+   assertEquals("Notes is still under the composer", "true", eval(AppNavigation.selected("Notes")));
+
+   UiDevice device = UiDevice.getInstance(instrumentation);
+   int x = device.getDisplayWidth() / 2;
+   int bottom = device.getDisplayHeight();
+   assertTrue("Android accepted the bottom-edge swipe", device.swipe(x, bottom - 4, x, bottom * 2 / 3, 55));
+   until(AppNavigation.selected("Home"), "The bottom-edge gesture opens Alpha Home");
+   if (!"true".equals(eval("!!(" + AppNavigation.composer() + ")"))) click("Open conversation");
+   assertComposer(DRAFT, "after the Home gesture");
    assertNotPosted(DRAFT);
   }
  }

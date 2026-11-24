@@ -2,30 +2,30 @@
  * types, times and opaque selection identifiers. Authority stays with Android
  * grants (or the browser file store); a stored row never grants access. A row
  * whose grant has ended is shown as "Select again", never reopened silently. */
-export type RecentKind='selected'|'tree'|'scan-pdf';
+export type RecentKind='selected'|'scan-pdf';
 export type RecentFile={
   key:string;kind:RecentKind;name:string;mimeType:string;openedAt:number;
-  /** Opaque picker or tree capability; absent for exported scan PDFs. */
-  selectionId?:string;treeId?:string;
+  /** Opaque picker capability; absent for exported scan PDFs. */
+  selectionId?:string;
   status:'ready'|'revoked'|'saved';
 };
 type Store=Pick<Storage,'getItem'|'setItem'|'removeItem'>;
 export const filesIndexKey='alpha.files.recent.v1';
-export const filesOpenKey='alpha.files.open.v1';
+const filesOpenKey='alpha.files.open.v1';
 /** Native SelectedDocumentAccess retains at most 32 grants; Recent stays below it. */
 export const RECENT_LIMIT=24;
-const kinds=new Set<RecentKind>(['selected','tree','scan-pdf']);
+const kinds=new Set<RecentKind>(['selected','scan-pdf']);
 const statuses=new Set(['ready','revoked','saved']);
 function clean(value:unknown):RecentFile|undefined{
   const row=value as Partial<RecentFile>|null;
   if(!row||typeof row!=='object'||typeof row.key!=='string'||!row.key||row.key.length>200||!kinds.has(row.kind as RecentKind))return undefined;
   if(typeof row.name!=='string'||!row.name||row.name.length>255||typeof row.mimeType!=='string'||row.mimeType.length>200)return undefined;
   if(!Number.isFinite(row.openedAt)||!statuses.has(String(row.status)))return undefined;
-  for(const id of [row.selectionId,row.treeId])if(id!==undefined&&(typeof id!=='string'||!/^[A-Za-z0-9:_-]{1,100}$/.test(id)))return undefined;
-  return {key:row.key,kind:row.kind as RecentKind,name:row.name,mimeType:row.mimeType,openedAt:Number(row.openedAt),status:row.status as RecentFile['status'],...(row.selectionId?{selectionId:row.selectionId}:{}),...(row.treeId?{treeId:row.treeId}:{})};
+  if(row.selectionId!==undefined&&(typeof row.selectionId!=='string'||!/^[A-Za-z0-9:_-]{1,100}$/.test(row.selectionId)))return undefined;
+  return {key:row.key,kind:row.kind as RecentKind,name:row.name,mimeType:row.mimeType,openedAt:Number(row.openedAt),status:row.status as RecentFile['status'],...(row.selectionId?{selectionId:row.selectionId}:{})};
 }
 function defaultStore():Store|undefined{try{return typeof localStorage==='undefined'?undefined:localStorage;}catch{return undefined;}}
-export function recentKey(input:{kind:RecentKind;name:string;selectionId?:string;treeId?:string}){return input.kind==='tree'&&input.treeId?'tree:'+input.treeId:input.kind==='selected'&&input.selectionId?'selected:'+input.selectionId:input.kind+':'+input.name;}
+export function recentKey(input:{kind:RecentKind;name:string;selectionId?:string}){return input.kind==='selected'&&input.selectionId?'selected:'+input.selectionId:input.kind+':'+input.name;}
 export function createFilesIndex(store:Store|undefined=defaultStore(),now:()=>number=()=>Date.now()){
   let memory:RecentFile[]=[],openMemory:string|null=null;
   const read=():RecentFile[]=>{
@@ -42,57 +42,24 @@ export function createFilesIndex(store:Store|undefined=defaultStore(),now:()=>nu
     record(input:Omit<RecentFile,'key'|'openedAt'|'status'>&{status?:RecentFile['status']}):string[]{
       const row=clean({...input,key:recentKey(input),openedAt:now(),status:input.status??(input.kind==='scan-pdf'?'saved':'ready')});
       if(!row)return [];
-      // The same row (a reopened folder file mints a new selection) replaces its older
-      // grant. Picked files match only by selection: two files may share a name.
-      const previous=read(),same=(old:RecentFile)=>old.key===row.key||row.kind==='tree'&&old.kind==='tree'&&old.status==='revoked'&&old.name===row.name&&old.mimeType===row.mimeType;
+      // The same row replaces its older grant. Picked files match only by selection: two
+      // files may share a name.
+      const previous=read(),same=(old:RecentFile)=>old.key===row.key;
       const rows=[row,...previous.filter(old=>!same(old))],replaced=previous.filter(same);
       const kept=rows.slice(0,RECENT_LIMIT),evicted=[...replaced,...rows.slice(RECENT_LIMIT)];
       write(kept);
       return evicted.flatMap(old=>old.selectionId&&!kept.some(k=>k.selectionId===old.selectionId)?[old.selectionId]:[]);
     },
-    /** Refresh display metadata from a confirmed provider listing, never access. */
-    renameTree(treeId:string,name:string){
-      write(read().map(row=>row.kind==='tree'&&row.treeId===treeId?(clean({...row,name})??row):row));
-    },
-    revoke(key:string){write(read().map(row=>row.key===key?{...row,status:'revoked' as const}:row));},
     remove(key:string){const rows=read(),gone=rows.find(row=>row.key===key);write(rows.filter(row=>row.key!==key));return gone;},
     /** The selection showing when the app last closed, so a restart restores only that one. */
     open():string|null{if(!store)return openMemory;try{const value=store.getItem(filesOpenKey);return value&&/^[A-Za-z0-9:_-]{1,100}$/.test(value)?value:null;}catch{return null;}},
     setOpen(selectionId:string|null){openMemory=selectionId;if(!store)return;try{if(selectionId)store.setItem(filesOpenKey,selectionId);else store.removeItem(filesOpenKey);}catch{/* Restore is a convenience. */}},
-    /** Tree capabilities last only for one Android session. Returns the selection
-     * IDs the revoked rows held so the caller can release their grants. */
-    revokeTree():string[]{
-      const rows=read(),ended=rows.filter(row=>row.kind==='tree'&&row.status==='ready');
-      write(rows.map(row=>ended.includes(row)?{key:row.key,kind:row.kind,name:row.name,mimeType:row.mimeType,openedAt:row.openedAt,status:'revoked' as const,...(row.treeId?{treeId:row.treeId}:{})}:row));
-      return ended.flatMap(row=>row.selectionId?[row.selectionId]:[]);
-    },
   };
 }
 export const filesIndex=createFilesIndex();
 
-const words=(value:string)=>value.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g,'').split(/[^a-z0-9]+/).filter(Boolean);
-export function typeLabel(mimeType:string,directory=false){
-  if(directory)return 'Folder';
-  if(mimeType==='application/pdf')return 'PDF';
-  if(mimeType.startsWith('image/'))return 'Image';
-  if(mimeType.startsWith('audio/'))return 'Audio';
-  if(mimeType.startsWith('video/'))return 'Video';
-  if(mimeType.startsWith('text/'))return 'Text';
-  if(/word|document|opendocument\.text|rtf/.test(mimeType))return 'Document';
-  if(/sheet|excel|csv/.test(mimeType))return 'Spreadsheet';
-  if(/presentation|powerpoint/.test(mimeType))return 'Presentation';
-  if(/zip|tar|compressed|archive/.test(mimeType))return 'Archive';
-  return 'File';
-}
-/** Every query word must prefix a word of the name or the type label. */
-export function matchesFileQuery(entry:{name:string;mimeType:string;directory?:boolean},query:string){
-  const wanted=words(query);if(!wanted.length)return false;
-  const bag=[...words(entry.name),...words(typeLabel(entry.mimeType,entry.directory))];
-  return wanted.every(word=>bag.some(term=>term.startsWith(word)));
-}
-
-export type SortMode='recent'|'name';
-export type SortableEntry={name:string;directory:boolean;modified?:number};
+type SortMode='recent'|'name';
+type SortableEntry={name:string;directory:boolean;modified?:number};
 const collator=typeof Intl!=='undefined'?new Intl.Collator(undefined,{numeric:true,sensitivity:'base'}):undefined;
 /** Folders first in both modes. Recent: newest modified first, unknown times
  * last, then name. Name: natural, case-insensitive order. */
@@ -107,4 +74,3 @@ export function compareFilesEntries(mode:SortMode){
     return byName(a,b);
   };
 }
-export const sortLabel=(mode:SortMode)=>mode==='name'?'Sorted by name':'Sorted by newest';

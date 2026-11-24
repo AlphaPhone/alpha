@@ -9,16 +9,16 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {localAgentStorage} from '../../scripts/local-agent-dev-storage';
 import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
+import {scopedViteCacheDir} from './helpers/vite-cache';
 
 export type HostedServer={origin:string;close():Promise<void>};
 export async function startHostedServer({privatePreview=false}:{privatePreview?:boolean}={}):Promise<HostedServer>{
- const cache=await mkdtemp(path.join(tmpdir(),'alpha-hosted-vite-'));
- const server:ViteDevServer=await createServer({cacheDir:cache,define:{
+ const server:ViteDevServer=await createServer({configLoader:'native',cacheDir:scopedViteCacheDir(`test-results/hosted-harness/vite-cache${privatePreview?'-private':''}`),define:{
   'import.meta.env.VITE_LOCAL_AGENT':JSON.stringify('1'),
   ...(privatePreview?{'import.meta.env.VITE_ALPHA_PRIVATE_LOCAL_PREVIEW':JSON.stringify('1')}:{}),
  },server:{host:'127.0.0.1',port:0,hmr:false,watch:null}});
  await server.listen();
- return {origin:`http://127.0.0.1:${(server.httpServer!.address() as any).port}`,close:async()=>{await server.close();await rm(cache,{recursive:true,force:true});}};
+ return {origin:`http://127.0.0.1:${(server.httpServer!.address() as any).port}`,close:async()=>{await server.close();}};
 }
 export function hostedResult(cursor:number,runId:string,output:string,now=new Date().toISOString()){
  return {cursor,runId,workflowId:'workflow',workflowVersionId:'version',templateVersion:'template',scheduledAt:now,source:{observedAt:now,expiresAt:now},status:'completed',startedAt:now,completedAt:now,output,error:null as string|null};

@@ -7,7 +7,7 @@ import { playwright } from './fixtures/playwright.ts';
 
 declare global {
  interface Window {
-  fixture: { requests: ReturnType<typeof phoneContextMessage>[]; delayed: boolean; aborts: number; closes: number; releases: (() => void)[]; controller: Pick<typeof import('../apps/app/src/runtime/connection-ui.tsx').connectionController, 'open' | 'close'> };
+  fixture: { requests: ReturnType<typeof phoneContextMessage>[]; delayed: boolean; aborts: number; releases: (() => void)[]; controller: Pick<typeof import('../apps/app/src/runtime/connection-ui.tsx').connectionController, 'open' | 'close'> };
   rateFixture: { mode: string; posts: number; creates: number; successes: number; paths: string[]; accountReads: number };
  }
 }
@@ -54,7 +54,7 @@ try {
   const { alphaClient } = await import('/src/runtime/alpha-client.ts');
   const { phoneContextMessage } = await import('/src/runtime/phone-context.ts');
   const {connectionController}=await import('/src/runtime/connection-ui.tsx');
-  window.fixture = { requests: [], delayed: false, aborts: 0, closes: 0, releases: [], controller:connectionController };
+  window.fixture = { requests: [], delayed: false, aborts: 0, releases: [], controller:connectionController };
   alphaClient.attachVerifiedTransport({
    session: { ownerId: 'fixture-owner', agentId: 'fixture-agent', sessionId: 'fixture-session', origin: 'https://fixture.invalid' },
    send: async ({ text, context, signal }) => {
@@ -62,7 +62,7 @@ try {
     const reply = { text: window.fixture.delayed ? 'STALE_REPLY_CANARY' : 'VIDEO_CONTEXT_ACCEPTED', proposals: [{ id: 'proposal-' + context.revision, title: 'Fixture proposal', description: 'Synthetic review only', expiresAt: Date.now() + 60000, contextRevision: context.revision }] };
     if (window.fixture.delayed) { signal.addEventListener('abort', () => window.fixture.aborts++); await new Promise<void>(resolve => window.fixture.releases.push(resolve)); }
     return reply;
-   }, execute: async () => { throw Error('Unexpected execution'); }, close: () => window.fixture.closes++,
+   }, execute: async () => { throw Error('Unexpected execution'); },
   });
  });
  const send = async (text: string) => { const box = page.getByRole('textbox', { name: /^Message / }).first(); await box.fill(text); await box.press('Enter'); };
@@ -73,7 +73,8 @@ try {
  // revision string (added time and size on Android) never reaches the agent.
  assert.ok(wire.context.selectedObject);
  const { revision: selectedRevision, ...selectedItem } = wire.context.selectedObject;
- assert.deepEqual(selectedItem, { kind: 'video', id: 'native-camera-video-fixture-71' });
+ // The id is the library's own id, the one Photos operations name, without the view's row prefix.
+ assert.deepEqual(selectedItem, { kind: 'video', id: 'video-fixture-71' });
  assert.match(selectedRevision ?? '', /^capture-[0-9a-f]{12}-1$/);
  assert.ok(!JSON.stringify(wire).includes('revision-2'));
  assert.equal(wire.context.view, 'photos');
@@ -92,9 +93,9 @@ try {
    const { alphaClient, AlphaClientError } = await import('/src/runtime/alpha-client.ts');
    let approval; try { await alphaClient.approve('proposal-' + window.fixture.requests[0].context.revision); } catch (e) { if (!(e instanceof AlphaClientError)) throw e; approval = e.code; }
    let blocked; try { await alphaClient.send('MUST_NOT_SEND_WHILE_SUSPENDED'); } catch (e) { if (!(e instanceof AlphaClientError)) throw e; blocked = e.code; }
-   return { state: alphaClient.getState(), approval, blocked, closes: window.fixture.closes, aborts: window.fixture.aborts };
+   return { state: alphaClient.getState(), approval, blocked, aborts: window.fixture.aborts };
   });
-  assert.equal(suspended.state.context.sensitive, true, mode + JSON.stringify(suspended)); assert.equal(suspended.state.session?.sessionId, 'fixture-session'); assert.equal(suspended.closes, 0);
+  assert.equal(suspended.state.context.sensitive, true, mode + JSON.stringify(suspended)); assert.equal(suspended.state.session?.sessionId, 'fixture-session');
   assert.ok(suspended.aborts > 0); assert.equal(suspended.approval, 'proposal-unavailable'); assert.equal(suspended.blocked, 'sensitive');
   await page.evaluate(mode => {
    window.fixture.releases.splice(0).forEach(resolve => resolve()); window.fixture.delayed = false;

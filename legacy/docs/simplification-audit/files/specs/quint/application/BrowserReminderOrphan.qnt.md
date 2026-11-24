@@ -1,0 +1,14 @@
+# specs/quint/application/BrowserReminderOrphan.qnt
+- Lines: 193 | Kind: Quint model (live, 8 runs, `stateMapping`, `bounds`) | Verdict: REWRITE (drop the legacy-import dimension; owner question on the orphan state itself)
+- Covers: browser Reminder rows carrying a `pendingDeletion` marker without an own journal entry ("orphans") cannot be restaged, undone or dismissed, ordinary changes keep the marker until an explicit replacement, and a genuinely staged alarm cannot take the ringing lock. Duplicates: Playwright `durable-delete-undo.spec.ts`, `journey-c-alarms.spec.ts`; Quint `browser-deletion-poll`. Callers/importers: manifest (7 sources in `apps/app/src/browser/`); harness `browser-reminder-orphan.mjs` (346 lines, + `.md`) imports the real stores via `test/fixtures/browser-daily-stores.mjs` (esbuild + JSDOM) and `test/fixtures/browser-reminder-clock.mjs`; `test/quint-browser-reminder-orphan-refinement.test.mjs` **and** aggregate (index.mjs:78).
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 6-7, 20-31, 56, 145, 171-173 | A1 | `legacy`/`canonical` fields, the `load` action, the `not(canonical) implies legacy` conjunct and `orphanImportsWithoutCreatingDeletionAuthorityTest` model importing a pre-document `localStorage` reminder record (harness:45-49, 279-282, 310: "Exact legacy orphan shape", `localStorage.setItem(key, raw)`). The legacy localStorage reader in `reminder-store.ts` is deleted under D1 (product report reminder-store.ts #2). | Remove the dimension: `canonical` is always true, delete `legacy`, `load`, the conjunct and that run; delete the two legacy harness traces and the `previousLegacy` save/restore (harness:269-324). | Low |
+| 2 | 1-193 | A1 (open) | The harness comment ties the orphan shape itself to legacy data. If no current path writes a `pendingDeletion` marker without its journal entry (stage writes both in one CAS; `trimDeletionJournal` removes only settled entries), the orphan cases model unreachable data. | Owner/implementer question. If unreachable: keep only `aPendingAlarmCannotAcquireSoundOnLockGrantTest`, `aGenuinePairBlocksReplacementTest` and the clock-lock invariant, and fold them into the Reminder/Clock deletion model; delete the rest. | Medium (needs a code read of every marker writer) |
+| 3 | 72-74 | — | `dismiss`, `directCancel`, `createSame` are `all { false, … }`: they never fire in the model; the harness uses them as labels for refused calls (`reject('dismiss')`). | Keep while the harness names them; drop if #2 deletes those traces. | — |
+| 4 | wrappers | T4 | Per-model + aggregate. | Per-model only. | None |
+
+## Proposed end state
+~165 lines without legacy import (step 1, now). After the owner answers #2, either the same model without legacy, or a ~60-line clock-lock/paired-staging invariant merged into the Reminder deletion model and this file deleted.

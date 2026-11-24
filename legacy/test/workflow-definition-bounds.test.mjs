@@ -155,7 +155,7 @@ const checks=[...new Set([...source.matchAll(/(?:fail\\(|record\\([^,()]+,|messa
 const clientSource=(await import('node:fs')).readFileSync(${JSON.stringify(resolve(root,'.eliza/client-features/packages/contracts/src/workflow-client.ts'))},'utf8');
 const clientChecks=[...new Set([...clientSource.matchAll(/new Error\\(\\s*"([^"]+)"/g)].map(match=>match[1]))];
 const unknownPlain=M.workflowErrorText(new Error('A check a later client adds'),'');
-const refusals=['WorkflowAdmissionRejected','WorkflowTypedRejected','WorkflowMetadataRejected','WorkflowLifecycleRejected','WorkflowActivationRejected'];
+const refusals=['WorkflowAdmissionRejected','WorkflowTypedRejected','WorkflowMetadataRejected','WorkflowLifecycleRejected','WorkflowActivationRejected','WorkflowPauseRejected'];
 console.log(JSON.stringify({
  checks:checks.length,
  unworded:checks.filter(text=>M.workflowErrorText(new W.PhoneWorkflowSpecError(text),'')!==text),
@@ -191,16 +191,14 @@ const T=await import(${JSON.stringify(resolve(root,'apps/app/src/runtime/workflo
 const fs=await import('node:fs');
 const thrown=run=>{try{run();return null;}catch(error){return error;}};
 // The phone's own refusals, read from their sources so a reworded refusal fails here.
-const nativeCalendar=fs.readFileSync(${JSON.stringify(resolve(root,'vendor/eliza/plugins/plugin-native-calendar/android/src/main/java/ai/eliza/plugins/calendar/CalendarPlugin.java'))},'utf8');
+const nativeCalendar=fs.readFileSync(${JSON.stringify(resolve(root,'android/app/src/main/java/ai/alphacompute/alphaphone/CalendarProviderPlugin.java'))},'utf8');
 const listing=nativeCalendar.slice(nativeCalendar.indexOf('public void workflowCalendars('),nativeCalendar.indexOf('public void readWorkflowRange('));
 const lateLaunch=fs.readFileSync(${JSON.stringify(resolve(root,'android/app/src/main/java/ai/alphacompute/alphaphone/LateLaunch.java'))},'utf8');
 const notesDocument=fs.readFileSync(${JSON.stringify(resolve(root,'vendor/eliza/plugins/plugin-notes/src/client/notes-document-store.ts'))},'utf8');
-const browserNotes=fs.readFileSync(${JSON.stringify(resolve(root,'apps/app/src/runtime/browser-notes-document.ts'))},'utf8');
 const phone=[
  ...[...listing.matchAll(/reject\\("([^"]+)"/g)].map(match=>match[1]),
  /CLOSED="([^"]+)"/.exec(lateLaunch)[1],
  ...new Set([...notesDocument.matchAll(/new NotesDocumentConflict\\(\\s*"([^"]+)"/g)].map(match=>match[1])),
- /throw Error\\('(Older Notes changed[^']+)'\\)/.exec(browserNotes)[1],
 ];
 const local='Invalid time';
 console.log(JSON.stringify({
@@ -220,14 +218,12 @@ console.log(JSON.stringify({
   'Selected calendar sources could not be read',
   'Android could not show this request; Alpha may have closed. Reopen Alpha and try again.',
   'Notes changed in another view. Reopen before editing.',
-  'Older Notes changed. Close older tabs and review recovery before editing.',
  ],'the phone refusals the editor reaches were read from their sources');
  assert.deepEqual(Object.fromEntries(out.phone),{
   'Open Workflows before reading calendar sources':'Open Workflows before reading calendar sources.',
   'Selected calendar sources could not be read':'The calendars on this phone could not be read. Try again.',
   'Android could not show this request; Alpha may have closed. Reopen Alpha and try again.':'Android could not show this request; Alpha may have closed. Reopen Alpha and try again.',
   'Notes changed in another view. Reopen before editing.':'Notes changed in another view. Reopen Notes before selecting.',
-  'Older Notes changed. Close older tabs and review recovery before editing.':'Older Notes changed. Close older tabs and review recovery before selecting.',
  });
  assert.equal(out.unknownLocal,'Invalid time','an unknown local failure reads as a local sentence');
  assert.equal(out.unknownRemote,'Workflow request unavailable. Check execution history before repeating a run.');

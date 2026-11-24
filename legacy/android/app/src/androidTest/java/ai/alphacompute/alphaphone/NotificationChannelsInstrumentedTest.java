@@ -8,7 +8,7 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import org.json.JSONObject;
 import org.junit.Test;
 import static org.junit.Assert.*;
-/** Real channel Settings mutation; isolated channel only, never a user's reminder channel. */
+/** Real channel Settings mutation on an isolated channel only, never a user's reminder channel; and the real grouping of Alpha's workflow channels. */
 public final class NotificationChannelsInstrumentedTest {
  private String fixtureChannel;
  private String nativeDiagnostic(){Context c=InstrumentationRegistry.getInstrumentation().getTargetContext();NotificationManager m=c.getSystemService(NotificationManager.class);NotificationChannel row=fixtureChannel==null?null:m.getNotificationChannel(fixtureChannel);AccessibilityNodeInfo root=InstrumentationRegistry.getInstrumentation().getUiAutomation().getRootInActiveWindow();return "appEnabled="+m.areNotificationsEnabled()+",importance="+(row==null?"missing":row.getImportance())+",foreground="+(root==null?"none":root.getPackageName());}
@@ -41,6 +41,16 @@ public final class NotificationChannelsInstrumentedTest {
   for(int i=0;i<150;i++){NotificationChannel channel=manager.getNotificationChannel(id);if(channel!=null&&(channel.getImportance()!=NotificationManager.IMPORTANCE_NONE)==enabled){assertTrue("Global app setting must remain allowed",manager.areNotificationsEnabled());return;}SystemClock.sleep(100);}
   NotificationChannel channel=manager.getNotificationChannel(id);fail("Exact fixture channel write not observed: appEnabled="+manager.areNotificationsEnabled()+", importance="+(channel==null?"missing":channel.getImportance()));
  }
+ /** Android's own channel store: Alpha's workflow channels join the Workflows group, and the group is not moved by a repeat. */
+ @Test public void workflowChannelsJoinTheirGroup(){
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();NotificationManager manager=context.getSystemService(NotificationManager.class);
+  new WorkflowNoticePoster(context);AlphaNotificationChannels.describe(context);AlphaNotificationChannels.describe(context);
+  for(String id:new String[]{WorkflowNoticePoster.CHANNEL,WorkflowNoticePoster.APPROVAL_CHANNEL}){NotificationChannel channel=manager.getNotificationChannel(id);assertNotNull(id,channel);assertEquals(id,AlphaNotificationChannels.WORKFLOWS,channel.getGroup());}
+  NotificationChannelGroup group=manager.getNotificationChannelGroup(AlphaNotificationChannels.WORKFLOWS);assertNotNull("Workflows group installed",group);
+  assertEquals(context.getString(R.string.alpha_channel_group_workflows),group.getName().toString());
+  // A poster that creates its channel again leaves the group in place.
+  new WorkflowNoticePoster(context);assertEquals(AlphaNotificationChannels.WORKFLOWS,manager.getNotificationChannel(WorkflowNoticePoster.CHANNEL).getGroup());
+ }
  @Test public void blockedChannelReadbackUserRecoveryAndRealNotification()throws Exception{
   org.junit.Assume.assumeTrue("Permission-restoring runner required","1".equals(InstrumentationRegistry.getArguments().getString("notificationChannels")));
   Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();NotificationManager manager=context.getSystemService(NotificationManager.class);String token=java.util.UUID.randomUUID().toString(),id="alpha-channel-fixture-"+token,name="Fixture channel "+token,title="Channel recovery "+token;
@@ -54,11 +64,11 @@ public final class NotificationChannelsInstrumentedTest {
    until("document.body.textContent.includes('Channel blocked')&&document.body.textContent.includes('Some channels blocked')");assertTrue("Global app permission still allowed",manager.areNotificationsEnabled());assertEquals(NotificationManager.IMPORTANCE_NONE,manager.getNotificationChannel(id).getImportance());
    click("Manage "+name);toggle(true,name);channelState(manager,id,true);back();until("document.body.textContent.includes("+JSONObject.quote(name)+")&&document.body.textContent.includes('Channel allowed')");assertEquals(NotificationManager.IMPORTANCE_DEFAULT,manager.getNotificationChannel(id).getImportance());
    manager.notify(id,1,new Notification.Builder(context,id).setSmallIcon(android.R.drawable.ic_popup_reminder).setContentTitle(title).setContentText("Synthetic channel recovery body").setContentIntent(tap).setAutoCancel(true).build());
-   // The notice is shown and tapped in Android's own shade; Alpha draws none (#416).
+   // The notice is shown and tapped in Android's own shade; Alpha draws none.
    WebViewTestDriver.evaluate(AppNavigation.request("Home"));until(AppNavigation.selected("Home"));until(AndroidShade.ALPHA_SHADE_ABSENT);
    // Android's own action on both flavors: channel recovery does not depend on a pull on launcher Home.
    assertTrue("Android's own action opens its shade",AndroidShade.openWithoutAlpha());
-   android.view.accessibility.AccessibilityNodeInfo notice=AndroidShade.waitText(title,10000);assertNotNull("Android's shade shows the recovered channel's notice",notice);assertTrue("The notice row is tappable",AndroidShade.tap(notice));
+   AccessibilityNodeInfo notice=AndroidShade.waitText(title,10000);assertNotNull("Android's shade shows the recovered channel's notice",notice);assertTrue("The notice row is tappable",AndroidShade.tap(notice));
    for(int i=0;i<100&&java.util.Arrays.stream(manager.getActiveNotifications()).anyMatch(n->id.equals(n.getTag()));i++)SystemClock.sleep(100);
    for(int i=0;i<100&&!delivered.get();i++)SystemClock.sleep(100);assertTrue("Exact owned synthetic notification target received real tap",delivered.get());
    assertFalse("Actual auto-cancel",java.util.Arrays.stream(manager.getActiveNotifications()).anyMatch(n->id.equals(n.getTag())));

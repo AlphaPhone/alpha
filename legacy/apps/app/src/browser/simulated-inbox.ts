@@ -1,6 +1,7 @@
 import {DailyApps} from '../daily';
 import {devSurfacesEnabled} from '../build-flags';
 import {registerPlugin} from '../platform-plugins';
+import type {AlphaMailAttachmentsPlugin} from '../native/alpha-mail-attachments';
 import {reviewMailAttachment} from '../runtime/inbox-attachment';
 type Bag=Record<string,any>;
 type MailAction='archive'|'restoreArchive'|'trash'|'restoreTrash'|'read'|'unread'|'discard';
@@ -11,12 +12,12 @@ const rowKey=(row:Bag,index:number,drafts:boolean)=>drafts
  ? (row.localDraftId?'draft:'+row.localDraftId:'legacy-draft:'+index)
  : (row.sent?'sent:':'received:')+String(row.id);
 const selectionScope=(state:Bag)=>JSON.stringify([state.localMailFolder,state.acct,state.q,state.open,!!state.compose]);
-const attachments=registerPlugin<any>('AlphaMailAttachments');
+const attachments=registerPlugin<Pick<AlphaMailAttachmentsPlugin,'readSelected'|'openReviewed'|'cancel'>>('AlphaMailAttachments');
 const address=(value:unknown):value is string=>typeof value==='string'&&value.length<=254&&/^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$/.test(value);
 /** Local development messages never enter a provider transport. */
 export function installSimulatedInbox(view:Bag){
  if(!devSurfacesEnabled)return;
- const render=view.render,leave=view.onLeave,back=view.back,ongoing=view.ongoing;let busy=false,epoch=0,status='',confirm=false;
+ const render=view.render,leave=view.onLeave,back=view.back,ongoing=view.ongoing;let busy=false,epoch=0,status='';
  let selecting=false,scope='',selectionStatus='';
  let savedOnBack:unknown=null;
  const selected=new Set<string>();
@@ -48,19 +49,18 @@ export function installSimulatedInbox(view:Bag){
     if(at<0)rows.push(draft);else rows[at]=draft;
     patch.localDrafts=rows;
    }
-   api.set(patch);status='';confirm=false;return true;
+   api.set(patch);status='';return true;
   }catch(error){api.toast(error instanceof Error?error.message:'The draft could not be saved. Keep it open.');return false;}
  };
  view.ongoing=(state:Bag,api:Bag)=>state.compose?{label:'Inbox draft',icon:'mail'}:ongoing?.(state,api);
  view.onLeave=(api:Bag)=>{
   if(api.get('inbox').compose!==savedOnBack)keepDraft(api);
-  savedOnBack=null;epoch++;busy=false;confirm=false;resetSelection();return leave?.(api);
+  savedOnBack=null;epoch++;busy=false;resetSelection();return leave?.(api);
  };
  view.back=(state:Bag,api:Bag)=>{
   if(review){review=null;repaint(api);return true;}
   if(selecting){resetSelection();repaint(api);return true;}
   if(state.compose){
-   if(confirm){confirm=false;repaint(api);return true;}
    if(!keepDraft(api)||state.composeLocal)return true;
    // Shell Back calls onLeave before the already saved composer's close commits.
    savedOnBack=state.compose;
@@ -167,7 +167,7 @@ export function installSimulatedInbox(view:Bag){
    if(folder==='trash')add('Restore','rotate-cw','restoreTrash');
    else if(folder==='archive')add('Move to Inbox','rotate-cw','restoreArchive');
    else add('Archive','archive','archive');
-   add('Mark as read','check','read');add('Mark as unread','mail','unread');
+   add('Mark as read','mail-open','read');add('Mark as unread','mail','unread');
    if(folder!=='trash')add('Move to Trash','trash-2','trash');
   }
  }
@@ -178,9 +178,9 @@ export function installSimulatedInbox(view:Bag){
  }}));
  out.mailMenuKey=(event:KeyboardEvent)=>{if(event.key==='Escape'){event.stopPropagation();closeMenu(event.currentTarget as HTMLDetailsElement);}};
  const otherDrafts=(draft:Bag)=>(api.get('inbox').localDrafts||[]).filter((saved:Bag)=>!draft.localDraftId||saved.localDraftId!==draft.localDraftId);
- const compose=out.compose;out.compose=()=>{if(api.get('inbox').compose&&!keepDraft(api))return;status='Unsaved local draft';confirm=false;compose();};
+ const compose=out.compose;out.compose=()=>{if(api.get('inbox').compose&&!keepDraft(api))return;status='Unsaved local draft';compose();};
  const validRecipient=(value:unknown)=>!!recipientAddress(api,value);
- if(out.c){const base=out.c;out.c={...base,toPh:'Email address',local:true,busy,status,confirm,sendDisabled:busy,heading:'New message',showRecipientDetails:!!state.compose.recipientsExpanded||!!state.compose.cc||!!state.compose.bcc,toggleRecipientDetails:()=>setDraft({recipientsExpanded:!state.compose.recipientsExpanded}),attachmentHint:'PDF, images or text · one file up to 5 MiB',cc:state.compose.cc||'',bcc:state.compose.bcc||'',onCc:(e:Bag)=>setDraft({cc:e.target.value}),onBcc:(e:Bag)=>setDraft({bcc:e.target.value}),
+ if(out.c){const base=out.c;out.c={...base,toPh:'Email address',local:true,busy,status,sendDisabled:busy,heading:'New email',showRecipientDetails:!!state.compose.recipientsExpanded||!!state.compose.cc||!!state.compose.bcc,toggleRecipientDetails:()=>setDraft({recipientsExpanded:!state.compose.recipientsExpanded}),attachmentHint:'PDF, images or text · one file up to 5 MiB',cc:state.compose.cc||'',bcc:state.compose.bcc||'',onCc:(e:Bag)=>setDraft({cc:e.target.value}),onBcc:(e:Bag)=>setDraft({bcc:e.target.value}),
  save:()=>{
   try{
    const current=api.get('inbox'),draft=structuredClone(current.compose),raw=String(current.toQ||'').trim();
@@ -192,7 +192,6 @@ export function installSimulatedInbox(view:Bag){
    api.set({localDrafts:[...otherDrafts(draft),draft],compose:draft,toQ:''});status='Saved locally';repaint();
   }catch{}
  },
- discard:()=>{confirm=true;repaint();},cancelDiscard:()=>{confirm=false;repaint();},confirmDiscard:()=>{try{api.set({localDrafts:otherDrafts(api.get('inbox').compose),compose:null,toQ:''});confirm=false;status='';}catch{}},
  attach:async()=>{if(busy)return;busy=true;const ticket=epoch,draft=api.get('inbox').compose;repaint();let selectionId:string|undefined;try{const selection=await DailyApps.perform({action:'files'});selectionId=selection.selectionId;if(ticket!==epoch||api.get('inbox').compose!==draft||selection.status==='cancelled')return;if(!selectionId)throw Error('Choose a file.');const file=await attachments.readSelected({selectionId});await reviewMailAttachment(file);if(ticket!==epoch||api.get('inbox').compose!==draft)return;setDraft({atts:[{name:file.name,mimeType:file.mimeType,dataBase64:file.dataBase64,sha256:file.sha256,size:file.size+' bytes',browserAttachment:true}],attach:[]});status='Attachment ready';}catch(error){if(ticket===epoch)api.toast(error instanceof Error?error.message:'Could not attach file.');}finally{if(selectionId)await DailyApps.forgetSelected({selectionId}).catch(()=>{});if(ticket===epoch){busy=false;repaint();}}},
  send:()=>{if(busy)return;const current=api.get('inbox'),draft=current.compose,raw=String(current.toQ||'').trim(),to=recipients(api,draft,raw);const cc=String(draft.cc||'').split(',').map(v=>v.trim()).filter(Boolean),bcc=String(draft.bcc||'').split(',').map(v=>v.trim()).filter(Boolean);if(!to.length||to.some((value:unknown)=>!validRecipient(value))||raw&&!address(raw)||[...cc,...bcc].some(v=>!/^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$/.test(v))){api.toast('Add valid recipients.');return;}const message={id:crypto.randomUUID(),sent:true,sentAt:Date.now(),to,cc,bcc,acct:draft.acct||'personal',subj:draft.subject||'(no subject)',body:draft.body||'',time:'Now',k:Date.now(),atts:draft.atts||[]};try{api.set({sent:[message,...current.sent],localDrafts:otherDrafts(draft),compose:null,toQ:'',mails:current.mails.map((m:Bag)=>m.id===draft.replyTo?{...m,unread:false,replied:true}:m)});status='';api.toast('Sent locally');}catch{}}
  };for(const key of ['onTo','toKey','onSubj','onBody','addRaw'])out.c[key]=(...args:any[])=>{status='Unsaved local draft';return base[key]?.(...args);};out.c.atts=base.atts.map((item:Bag)=>({...item,rm:()=>{status='Unsaved local draft';item.rm();}}));}

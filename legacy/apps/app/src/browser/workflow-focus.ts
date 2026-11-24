@@ -1,15 +1,19 @@
+import {readWorkflowAppState} from './workflow-app-state';
 import {notificationState} from './notification-store';
 import {focusOwner,focusChanged} from './focus-state';
 import {registerPlugin} from '../platform-plugins';
+import {abortError} from '../lib/abort';
+import {triggerDefinition} from './workflow-triggers';
+import type {AlphaNotificationsBrowserMethods} from '../native/alpha-notifications';
 type Bag=Record<string,any>;
 export type FocusBlock={dnd?:boolean;flowId?:string;definition?:string;notificationEpoch?:string;owner:string;phase:'active'|'ended'|'cancelled';eventId:string;begin:number;end:number;eventSignature:string;seen:string[];arrivals:Bag[]};
 export const isFocusWorkflow=(flow:Bag)=>flow.trig?.kind==='event'&&flow.trig.ev==='A deep-work event starts'&&flow.steps.some((step:Bag)=>step.k==='If'&&step.t.toLowerCase()==='a message is from maya, let it through');
 const signature=(event:Bag)=>JSON.stringify([String(event.id),event.begin,event.end,event.title]);
 async function sources(api:Bag){
- const app=(name:string)=>({...api.get(name),...JSON.parse(localStorage.getItem('alpha.dev.app.'+name)||'{}')});const rows:Bag[]=[],contacts=app('contacts').list||[];
- for(const [person,messages] of Object.entries(app('messages').threads||{}) as [string,Bag[]][])for(const message of messages)if(!message.me){const id=message.id??message.k;if(id===undefined)throw Error('An incoming message has no stable identity.');rows.push({key:JSON.stringify(['message',person,id]),kind:'message',person,title:contacts.find((p:Bag)=>p.id===person)?.name||person,text:message.text||message.file||'',at:message.receivedAt??Date.now(),allowed:person==='maya'});}
- for(const mail of app('inbox').mails||[])if(!mail.sent&&!mail.del&&!mail.arch)rows.push({key:JSON.stringify(['email',mail.id]),kind:'email',title:mail.subj||'Email',text:mail.body||'',at:mail.receivedAt??Date.now(),allowed:false});
- for(const notice of (await registerPlugin<any>('AlphaNotifications').focusSnapshot()).items)rows.push({key:JSON.stringify(['notification',notice.id,notice.revision]),kind:'notification',title:notice.source==='external'?(notice.appLabel||'Notification'):notice.title,text:notice.source==='external'?'Notification received':notice.text,at:notice.at,allowed:false});
+ const rows:Bag[]=[],contacts=readWorkflowAppState(api,'contacts').list||[];
+ for(const [person,messages] of Object.entries(readWorkflowAppState(api,'messages').threads||{}) as [string,Bag[]][])for(const message of messages)if(!message.me){const id=message.id??message.k;if(id===undefined)throw Error('An incoming message has no stable identity.');rows.push({key:JSON.stringify(['message',person,id]),kind:'message',person,title:contacts.find((p:Bag)=>p.id===person)?.name||person,text:message.text||message.file||'',at:message.receivedAt??Date.now(),allowed:person==='maya'});}
+ for(const mail of readWorkflowAppState(api,'inbox').mails||[])if(!mail.sent&&!mail.del&&!mail.arch)rows.push({key:JSON.stringify(['email',mail.id]),kind:'email',title:mail.subj||'Email',text:mail.body||'',at:mail.receivedAt??Date.now(),allowed:false});
+ for(const notice of (await registerPlugin<AlphaNotificationsBrowserMethods>('AlphaNotifications').focusSnapshot()).items)rows.push({key:JSON.stringify(['notification',notice.id,notice.revision]),kind:'notification',title:notice.source==='external'?(notice.appLabel||'Notification'):notice.title,text:notice.source==='external'?'Notification received':notice.text,at:notice.at,allowed:false});
  return rows;
 }
 export async function prepareFocus(api:Bag,event:Bag|undefined,signal:AbortSignal):Promise<FocusBlock>{
@@ -21,9 +25,9 @@ export async function prepareFocus(api:Bag,event:Bag|undefined,signal:AbortSigna
 export function waitForFocusEnd(focus:FocusBlock,api:Bag,signal:AbortSignal,progress:(message:string)=>void):Promise<string>{
  return new Promise((resolve,reject)=>{
  let settled=false,busy=false;const finish=(error?:unknown,value?:string)=>{if(settled)return;settled=true;clearInterval(timer);window.removeEventListener('alpha:dev-app-change',tick);window.removeEventListener('focus',tick);signal.removeEventListener('abort',cancel);error?reject(error):resolve(value!);};
- const cancel=()=>finish(new DOMException('Focus cancelled','AbortError'));
+ const cancel=()=>finish(abortError('Focus cancelled'));
  const tick=async()=>{if(busy||settled)return;busy=true;try{
-  signal.throwIfAborted();const state={...api.get('workflows'),...JSON.parse(localStorage.getItem('alpha.dev.app.workflows')||'{}')},flow=state.flows.find((row:Bag)=>String(row.id)===focus.flowId);if(!flow?.on||JSON.stringify({name:flow.name,trig:flow.trig,steps:flow.steps})!==focus.definition)throw Error('The focus workflow changed. Focus was released.');const result=await registerPlugin<any>('AlphaCalendar').list({begin:focus.begin,end:focus.end});signal.throwIfAborted();if(settled)return;
+  signal.throwIfAborted();const state=readWorkflowAppState(api,'workflows'),flow=state.flows.find((row:Bag)=>String(row.id)===focus.flowId);if(!flow?.on||triggerDefinition(flow)!==focus.definition)throw Error('The focus workflow changed. Focus was released.');const result=await registerPlugin<any>('AlphaCalendar').list({begin:focus.begin,end:focus.end});signal.throwIfAborted();if(settled)return;
   if(result.truncated||!result.events.some((event:Bag)=>signature(event)===focus.eventSignature))throw Error('The focus Calendar block changed. Focus was released.');
   const sourceSnapshot=['messages','inbox'].map(name=>localStorage.getItem('alpha.dev.app.'+name));const notificationEpoch=(await notificationState(signal)).epoch,policyChanged=notificationEpoch!==focus.notificationEpoch;let rows:Bag[];
   // A settings edit during the notice read invalidates only that snapshot. The block stays active and the next tick reads again.
@@ -38,5 +42,5 @@ export function waitForFocusEnd(focus:FocusBlock,api:Bag,signal:AbortSignal,prog
  });
 }
 export function waitForFocusReview(api:Bag,flowId:string|number,signal:AbortSignal,definition?:string):Promise<void>{
- return new Promise((resolve,reject)=>{const finish=(error?:Error)=>{clearInterval(timer);signal.removeEventListener('abort',cancel);error?reject(error):resolve();},cancel=()=>finish(new DOMException('Focus cancelled','AbortError'));const check=()=>{try{const state={...api.get('workflows'),...JSON.parse(localStorage.getItem('alpha.dev.app.workflows')||'{}')},flow=state.flows.find((row:Bag)=>String(row.id)===String(flowId));if(!flow?.on||definition&&JSON.stringify({name:flow.name,trig:flow.trig,steps:flow.steps})!==definition){finish(Error('The focus workflow changed.'));return;}if(signal.aborted){cancel();return;}const foreground=!document.hidden&&document.documentElement.dataset.devBackground!=='true'&&!Array.from(document.querySelectorAll('[aria-label="Unlock with fingerprint"], [aria-label="Wake"]')).some(element=>element.getClientRects().length);if(foreground&&(api.localWorkflowReady?.()||api.isActive()&&String(api.get('workflows').open)===String(flowId)&&!document.querySelector('dialog[open]')))finish();}catch(error){finish(error instanceof Error?error:Error('Focus state could not be read.'));}};const timer=setInterval(check,250);signal.addEventListener('abort',cancel,{once:true});check();});
+ return new Promise((resolve,reject)=>{const finish=(error?:Error)=>{clearInterval(timer);signal.removeEventListener('abort',cancel);error?reject(error):resolve();},cancel=()=>finish(abortError('Focus cancelled'));const check=()=>{try{const state=readWorkflowAppState(api,'workflows'),flow=state.flows.find((row:Bag)=>String(row.id)===String(flowId));if(!flow?.on||definition&&triggerDefinition(flow)!==definition){finish(Error('The focus workflow changed.'));return;}if(signal.aborted){cancel();return;}const foreground=!document.hidden&&document.documentElement.dataset.devBackground!=='true'&&!Array.from(document.querySelectorAll('[aria-label="Unlock with fingerprint"], [aria-label="Wake"]')).some(element=>element.getClientRects().length);if(foreground&&(api.localWorkflowReady?.()||api.isActive()&&String(api.get('workflows').open)===String(flowId)&&!document.querySelector('dialog[open]')))finish();}catch(error){finish(error instanceof Error?error:Error('Focus state could not be read.'));}};const timer=setInterval(check,250);signal.addEventListener('abort',cancel,{once:true});check();});
 }

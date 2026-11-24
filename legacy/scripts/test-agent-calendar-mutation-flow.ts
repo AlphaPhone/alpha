@@ -1,62 +1,30 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {AgentCalendar,calendarSourceKey,type CalendarPreservation} from '../apps/app/src/runtime/agent-calendar';
+import {AgentCalendar,calendarSourceKey} from '../apps/app/src/runtime/agent-calendar';
 import {assertAppRecordRequestAllowed} from '../apps/app/src/runtime/app-record-route-policy';
-import type {AppRecordPort} from '../apps/app/src/runtime/agent-calendar-client';
+import type {AppRecordPort} from '../apps/app/src/runtime/app-record-route-policy';
 import {canonicalCalendarRow,canonicalCalendarEditorTiming,calendarFormMinutes,calendarFormPatch,type CanonicalCalendarForm} from '../apps/app/src/runtime/agent-calendar-view';
 
-function deferred<T>(){
- let resolve!:(value:T)=>void, reject!:(error:Error)=>void;
- const promise=new Promise<T>((ok,fail)=>{resolve=ok;reject=fail;});
- return {promise,resolve,reject};
-}
-async function fixture(){
- const snapshot={fingerprint:'unchanged',present:false,readable:true,pending:false,records:[]};
- let capture:CalendarPreservation['capture']=async()=>snapshot;
- const preservation:CalendarPreservation={capture:signal=>capture(signal),retainedReadOnly:async()=>true};
+test('a pending write refuses a concurrent write until it settles',async()=>{
  const source={provider:'google',side:'owner',grantId:'test-grant',connectorAccountId:'test-account',calendarId:'primary',selectionVersion:1};
  const port={identity:{origin:'https://calendar.example',ownerId:'test-owner',agentId:'test-agent'},sessionId:'test-session',scope:'owner',current:()=>true} as unknown as AppRecordPort;
- const writes:string[]=[];
+ const writes:string[]=[];let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});
  const api={
   getLifeOpsCalendarFeed:async()=>({state:'complete',events:[]}),
   getLifeOpsCalendars:async()=>({calendars:[source]}),
   getLifeOpsNextCalendarEventContext:async()=>({event:null}),
-  createLifeOpsCalendarEvent:async(request:{idempotencyKey:string})=>{writes.push(request.idempotencyKey);return {outcome:'accepted_without_readback'};},
+  createLifeOpsCalendarEvent:async(request:{idempotencyKey:string})=>{writes.push(request.idempotencyKey);await held;return {outcome:'accepted_without_readback'};},
  };
- const calendar=new AgentCalendar(()=>port,preservation,()=>api as never);
+ const calendar=new AgentCalendar(()=>port,()=>api as never);
  await calendar.refresh({});
  const create=(key:string)=>calendar.create(calendarSourceKey(source as never),{idempotencyKey:key,title:'Synthetic test',startAt:'2026-10-25T09:00:00Z',endAt:'2026-10-25T10:00:00Z'} as Parameters<AgentCalendar['create']>[1]);
- return {calendar,snapshot,writes,create,setCapture:(next:CalendarPreservation['capture'])=>{capture=next;}};
-}
-
-test('pending reservation covers the first await and refuses a concurrent write',async()=>{
- const f=await fixture(),held=deferred<typeof f.snapshot>();let captures=0;
- f.setCapture(()=>{captures++;return held.promise;});
- const first=f.create('first');
- assert.equal(f.calendar.state.mutating,true,'disable writes while preservation is unresolved');
- await assert.rejects(f.create('overlap'),/Wait for the current Calendar source/);
- assert.equal(captures,1,'the refused request must not enter preservation');
- assert.deepEqual(f.writes,[],'preservation must precede the accepted write');
- held.resolve(f.snapshot);await first;
- assert.deepEqual(f.writes,['first']);
- assert.equal(f.calendar.state.mutating,false);
- f.calendar.retire();
-});
-
-test('preservation rejection releases pending and permits a later explicit write',async()=>{
- const f=await fixture(),held=deferred<typeof f.snapshot>();
- f.setCapture(()=>held.promise);
- const failed=f.create('failed');
- const rejected=assert.rejects(failed,/Synthetic preservation failure/);
- assert.equal(f.calendar.state.mutating,true);
- held.reject(new Error('Synthetic preservation failure'));await rejected;
- assert.equal(f.calendar.state.mutating,false);
- assert.deepEqual(f.writes,[],'failed preservation must not send a write');
- f.setCapture(async()=>f.snapshot);
- await f.create('later-explicit-request');
- assert.deepEqual(f.writes,['later-explicit-request']);
- assert.equal(f.calendar.state.mutating,false);
- f.calendar.retire();
+ const first=create('first');
+ assert.equal(calendar.state.mutating,true);
+ await assert.rejects(create('overlap'),/Wait for the current Calendar source/);
+ release();await first;
+ assert.deepEqual(writes,['first']);
+ assert.equal(calendar.state.mutating,false);
+ calendar.retire();
 });
 
 async function syncFixture(){
@@ -73,13 +41,12 @@ async function syncFixture(){
   if(method==='POST'){const request=body as any;assert.equal(request.expectedRevision,revision);revision++;if(request.operation==='select')destination=request.destination;if(request.operation==='resume')paused=false;if(request.operation==='pause')paused=true;}
   return {revision,paused,destination,pendingDispatch:null};
  }};
- const preservation:CalendarPreservation={capture:async()=>({fingerprint:'same',present:true,readable:true,pending:false,records:[{id:'legacy-only',revision:'legacy-v1'}]}),retainedReadOnly:async()=>true};
- const calendar=new AgentCalendar(()=>port,preservation);await calendar.refresh({});
+ const calendar=new AgentCalendar(()=>port);await calendar.refresh({});
  return {calendar,source,local,calls,port,setGrant:(patch:any)=>{currentGrant={...currentGrant,...patch};},retire:()=>{active=false;},changeDuringRead:()=>{changedDuringRead=true;}};
 }
 test('canonical sync review uses the active Calendar event IDs and explicit canonical select then resume routes',async()=>{
  const f=await syncFixture();const review=await f.calendar.reviewSync();
- assert.deepEqual(review.visibleLocalEventIds,[f.local.id]);assert(!review.visibleLocalEventIds.includes('legacy-only'));
+ assert.deepEqual(review.visibleLocalEventIds,[f.local.id]);
  assert.equal(f.calls.filter(c=>c.method==='POST').length,0,'review must not enable or backfill');
  await f.calendar.changeSync(review,'select','select-operation',()=>true,calendarSourceKey(f.source as never));
  let writes=f.calls.filter(c=>c.method==='POST');assert.deepEqual(writes[0].body,{operation:'select',expectedRevision:0,idempotencyKey:'select-operation',destination:{connectorAccountId:f.source.connectorAccountId,providerCalendarId:'primary'}});

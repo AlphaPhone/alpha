@@ -7,6 +7,7 @@ import android.view.ViewGroup;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import androidx.activity.BackEventCompat;
 import androidx.activity.OnBackPressedCallback;
 import androidx.core.splashscreen.SplashScreen;
 import androidx.core.graphics.Insets;
@@ -16,9 +17,7 @@ import androidx.core.view.WindowInsetsCompat;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.WebViewListener;
 
-/** Derived from packages/app/scripts/mobile/android/templates/main-activity.ts.
- * Product shell: local assets, Eliza's system bridge, no cloud-auth or implicit kiosk policy.
- */
+/** Product shell: local assets, Eliza's system bridge, no cloud-auth or implicit kiosk policy. */
 public class MainActivity extends BridgeActivity {
  private volatile String rendererStartupFailure;
  @Override public void setContentView(int layout){
@@ -60,6 +59,18 @@ public class MainActivity extends BridgeActivity {
  private void signalNavigationOpen() {
   if (getBridge() != null && getBridge().getWebView() != null && !isAssistantSurface())
    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha:maps-open'))", null);
+ }
+ /** A tap on the Notes recording notification: the renderer opens Notes once it can show it. */
+ private boolean captureNoteRecordingOpen(Intent intent) {
+  if (isAssistantSurface() || intent == null || hasFrontMarker(intent)) return false;
+  if (AlphaNoteRecordingService.ACTION_SHOW_NOTES.equals(intent.getAction())) {
+   AlphaNoteRecordingService.offerShowNotes();
+   // As for Maps: never replay an already captured tap when the Activity is recreated.
+   intent.setAction(Intent.ACTION_MAIN);
+   return true;
+  }
+  if (isHomeIntent(intent)) AlphaNoteRecordingService.clearShowNotes();
+  return false;
  }
  private boolean captureSmsNoticeOpen(Intent intent) {
   if (isAssistantSurface() || intent == null || hasFrontMarker(intent)) return false;
@@ -196,9 +207,8 @@ public class MainActivity extends BridgeActivity {
   * lookup for singleTask only matches a task of a compatible type, so each kind of start finds or
   * creates its own task. Granting the HOME role to a running Alpha, or tapping an Alpha notice while
   * Alpha is the home activity, therefore created a second MainActivity with a second page, while
-  * the draft, open conversation and pending approvals stayed in the first. (The second instance on
-  * role grant was measured on the API 36 emulator in round 7; the activity-type rule is AOSP's
-  * implementation, not a public API contract.)
+  * the draft, open conversation and pending approvals stayed in the first. (The activity-type rule
+  * is AOSP's implementation, not a public API contract.)
   *
   * The first live instance is kept, whichever kind it is. A second instance never creates a bridge
   * or loads the page: it gives its intent to the live instance (the same onNewIntent path Android
@@ -207,12 +217,11 @@ public class MainActivity extends BridgeActivity {
   * (ActivityManager.AppTask). A home-type live instance is reached with the implicit HOME intent,
   * the kind of start Android resolves to the home task. An explicit-component start is only the
   * fallback for a standard task Android does not list: made from the instance in the home task it
-  * is matched to that home task first and comes back to the instance that asked (measured on the
-  * API 36 emulator in round 8). If a front start ever produced another instance instead, it
+  * is matched to that home task first and comes back to the instance that asked. If a front start
+  * ever produced another instance instead, it
   * finishes without starting anything, and this process stops handing starts off: the home task
   * would then be left empty, Android would start HOME again and the hand-off would repeat for as
-  * long as the live instance kept not coming forward. Two instances (what round 7 measured) are
-  * the stable fallback. The live instance resuming is what shows a hand-off reached it.
+  * long as the live instance kept not coming forward. Two instances are the stable fallback. The live instance resuming is what shows a hand-off reached it.
   *
   * The kind belongs to the task, not to whatever intent the instance holds later. Android hands a
   * relaunched activity (renderer recovery, a system font-size change) the last intent given to
@@ -371,6 +380,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaContactsPlugin.class);
   registerPlugin(DailyAppsPlugin.class);
   registerPlugin(AlphaMapsTransportPlugin.class);
+  registerPlugin(AlphaNetworkLocationPlugin.class);
   registerPlugin(ai.eliza.plugins.camera.CameraPlugin.class);
   registerPlugin(ai.eliza.plugins.location.LocationPlugin.class);
   registerPlugin(AlphaBrowserPlugin.class);
@@ -381,6 +391,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaFilesPlugin.class);
   registerPlugin(AlphaMailAttachmentsPlugin.class);
   registerPlugin(AlphaDevicePlugin.class);
+  registerPlugin(AlphaCarrierSetupPlugin.class);
   // AP-16 AC-19: Telecom's call state, read-only.
   registerPlugin(AlphaCallStatePlugin.class);
   registerPlugin(AlphaConnectionPlugin.class);
@@ -396,15 +407,17 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaNotificationsPlugin.class);
   registerPlugin(AlphaHostedResultsPlugin.class);
   registerPlugin(AlphaGmailPlugin.class);
-  registerPlugin(AlphaListenerPlugin.class);
   registerPlugin(ai.eliza.plugins.system.SensePlugin.class);
-  registerPlugin(ai.eliza.plugins.passwords.PasswordsPlugin.class);
+  registerPlugin(AlphaPasswordsPlugin.class);
   // The native image gate is checked again by every telephony operation.
   // Reconcile the role components with the verified image before registering telephony.
   AlphaTelephonyRoles.sync(this);
   telephonyAdmitted = AlphaImageCapability.verified(this);
   if (telephonyAdmitted) registerPlugin(AlphaTelephonyPlugin.class);
+  // Owner issue 4: the live calls Alpha's InCallService holds, for the WebView's ongoing-call bar.
+  if (telephonyAdmitted) registerPlugin(AlphaOngoingCallPlugin.class);
   captureNavigationOpen(getIntent());
+  captureNoteRecordingOpen(getIntent());
   captureSmsNoticeOpen(getIntent());
   AlphaCanonicalNotifications.captureTap(this,getIntent());
   rendererDeathsAtCreate = recoveryBudget.deaths();
@@ -470,10 +483,25 @@ public class MainActivity extends BridgeActivity {
      if (!isAssistantSurface()) moveTaskToBack(true); else finish();
     });
    }
+   // Predictive Back (android:enableOnBackInvokedCallback): the renderer previews the layer this
+   // Back would close while the gesture is held. The committed gesture still arrives above.
+   @Override public void handleOnBackStarted(BackEventCompat event) { previewBack("start", event); }
+   @Override public void handleOnBackProgressed(BackEventCompat event) { previewBack("progress", event); }
+   @Override public void handleOnBackCancelled() { previewBack("cancel", null); }
   });
+ }
+ /** Visible for tests: the preview event the renderer receives for a held Back gesture. */
+ static String backPreviewScript(String phase, float progress, boolean rightEdge) {
+  float bounded = Math.max(0f, Math.min(1f, progress));
+  return "window.dispatchEvent(new CustomEvent('alpha-back-preview',{detail:{phase:'" + phase + "',progress:" + bounded + ",edge:'" + (rightEdge ? "right" : "left") + "'}}))";
+ }
+ private void previewBack(String phase, BackEventCompat event) {
+  if (getBridge() == null || getBridge().getWebView() == null) return;
+  getBridge().getWebView().evaluateJavascript(backPreviewScript(phase, event == null ? 0f : event.getProgress(), event != null && event.getSwipeEdge() == BackEventCompat.EDGE_RIGHT), null);
  }
  @Override public void onNewIntent(Intent intent) {
   boolean showMaps = captureNavigationOpen(intent);
+  boolean showNotesRecording = captureNoteRecordingOpen(intent);
   boolean showSmsNotice = captureSmsNoticeOpen(intent);
   AlphaCanonicalNotifications.captureTap(this,intent);
   super.onNewIntent(intent);
@@ -485,6 +513,8 @@ public class MainActivity extends BridgeActivity {
    return;
   }
   if (showMaps) signalNavigationOpen();
+  if (showNotesRecording && getBridge() != null && getBridge().getWebView() != null)
+   getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha:note-recording-open'))", null);
   if (showSmsNotice && getBridge() != null && getBridge().getWebView() != null)
    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha:sms-notice-open'))", null);
   if (getBridge() != null && !isAssistantSurface() && isHomeIntent(intent))
@@ -496,7 +526,24 @@ public class MainActivity extends BridgeActivity {
  }
  @Override public void onStop() {
   keyboardReturnPending = false;
+  // Camera turns the volume shutter on again when it is ready on screen.
+  volumeShutter = false;
   super.onStop();
+ }
+ /** Set by AlphaDevice.setVolumeShutter on the UI thread while Camera is ready on screen. */
+ private boolean volumeShutter;
+ void setVolumeShutter(boolean enabled) { volumeShutter = enabled; }
+ /** While Camera holds them, a volume key press is one shutter press (repeats while held are not);
+  * otherwise the volume keys keep Android's own handling. */
+ @Override public boolean dispatchKeyEvent(android.view.KeyEvent event) {
+  int key = event.getKeyCode();
+  if (volumeShutter && (key == android.view.KeyEvent.KEYCODE_VOLUME_UP || key == android.view.KeyEvent.KEYCODE_VOLUME_DOWN)
+    && getBridge() != null && getBridge().getWebView() != null) {
+   if (event.getAction() == android.view.KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0)
+    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha:volume-shutter'))", null);
+   return true;
+  }
+  return super.dispatchKeyEvent(event);
  }
  @Override public void onDestroy() {
   if (liveInstance.get() == this) liveInstance = new java.lang.ref.WeakReference<>(null);

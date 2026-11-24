@@ -45,6 +45,15 @@ test('expired, foreign, terminal and aborted reads never admit a decision',async
  }
  const {f,client}=fixture(),abort=new AbortController(),row=await client.read(id,abort.signal);abort.abort();await assert.rejects(client.resolve(row,'approve',new AbortController().signal));assert.equal(f.calls.length,1);
 });
+test('a retryable request admits one reviewed approval and no decline; other settled states admit nothing',async()=>{
+ const {f,client,signal}=fixture();f.row=dto({state:'retryable',updatedAt:'2026-11-10T12:05:00.000Z'});const row=await client.read(id,signal);
+ assert.equal((await client.resolve(row,'approve',signal)).kind,'succeeded');
+ assert.deepEqual(f.calls[1],{path:calendarApprovalResolvePath(id),body:{decision:'approve',revision:row.revision},headers:{},method:'POST'});
+ await assert.rejects(client.resolve(row,'approve',signal),/Check this Calendar request again/);assert.equal(f.calls.length,2);
+ {const {f,client,signal}=fixture();f.row=dto({state:'retryable'});const row=await client.read(id,signal);await assert.rejects(client.resolve(row,'reject',signal),/Check this Calendar request again/);assert.equal(f.calls.length,1);}
+ for(const state of ['approved','executing','reconciliation_required','done','rejected','expired'])for(const decision of ['approve','reject']){const {f,client,signal}=fixture();f.row=dto({state});const row=await client.read(id,signal);await assert.rejects(client.resolve(row,decision,signal),/Check this Calendar request again/);assert.equal(f.calls.length,1,state);}
+ {const {f,client,signal}=fixture(),row=await client.read(id,signal);await assert.rejects(client.resolve(row,'postpone',signal),/Check this Calendar request again/);assert.equal(f.calls.length,1);}
+});
 test('resolution receipts must match the exact request and selected decision',()=>{
  const reply={requestId:id,decision:'reject',kind:'rejected',text:'Nothing was changed.'};
  assert.equal(parseCalendarApprovalResolution(reply,id,'reject').kind,'rejected');

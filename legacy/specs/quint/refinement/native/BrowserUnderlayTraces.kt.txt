@@ -72,14 +72,14 @@ fun main() {
     }
     fun step(f: Fixture, steps: MutableList<String>, actions: String) { steps.add("{\"action\":$actions,\"expect\":${f.observe()}}") }
     val present = "{\"name\":\"present\",\"args\":[true]}"
-    val down = "{\"name\":\"down\",\"args\":[false,true]}"
+    val down = "{\"name\":\"down\",\"args\":[\"\",true]}"
     scenario("missing geometry refuses page input") { f, s -> f.down(); step(f,s,down) }
     scenario("outside page stays on host") { f, s ->
-        f.present(true); step(f,s,present); f.down(inside = false); step(f,s,"{\"name\":\"down\",\"args\":[false,false]}")
+        f.present(true); step(f,s,present); f.down(inside = false); step(f,s,"{\"name\":\"down\",\"args\":[\"\",false]}")
     }
     scenario("host split finger stays on host") { f, s ->
         f.present(true); step(f,s,present)
-        f.down(true); step(f,s,"{\"name\":\"down\",\"args\":[true,true]}")
+        f.down(true); step(f,s,"{\"name\":\"down\",\"args\":[\"toolbar\",true]}")
         f.secondFinger(); step(f,s,"{\"name\":\"secondFinger\"}")
         f.move(); step(f,s,"{\"name\":\"move\"}")
     }

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "description": "Private v78 fixes resident agent startup. Keep the retained app identity and current signer lineage.",
+  "description": "Private canonical Alpha signing input for retained installations. Use the existing signer, package and update channel.",
   "signerSha256": "edbfcacb1da689008bf4e7d675176c302decf83161a877eb8b1de4ffae0445ed",
   "lastRelease": {
     "versionCode": null,
@@ -8,21 +8,22 @@
     "recordedAt": null
   },
   "privateProducerApproval": {
-    "alphaCommit": "778fcdaa8ce31dce1ae4cd285af2b6c8425192cc",
-    "sdkCommit": "5b2070469895b3c4ff6623f576d8de53810fafa5",
-    "versionCode": 78,
-    "archiveSHA256": "98c46ab473582edfc9bc05ea311979af8c5ca8fd7ec20585f42f126e45d6ac70",
-    "archiveBytes": 634001375,
-    "producerManifestSHA256": "15779da1deba9109282e6d89c555db1b8d84636cbd7940cc45f92c929ac087ee",
-    "privateProducerReceiptSHA256": "c360cd2985ae6db1eb464dc80105555cb47285557c62f763999d0a8ba9f6b9b4",
-    "unsignedApkSHA256": {
-      "standalone": "b208da32bedebb2cf4a9ea67982cac0ada621388a912e6c21c86bf5f7cf9c950",
-      "launcher": "ee9e474fa6ca671648783c677fb28a1a927002eb9cdcc81f2c008e73b19217bc"
-    },
+    "approval": "approved",
+    "alphaCommit": "45f6bed3067cf7d0fab099b0b299121ab4535363",
+    "sdkCommit": "a1119d28b5dba1362860e161158c4d93c7f26075",
+    "versionCode": 119,
     "updateChannel": {
       "kind": "public",
-      "manifestUrlSha256": "8e54b15a945c0fe1fd18bca9b4f4389249c5260bd72c912bccb6cd98e10308db"
+      "manifestUrlSha256": "b56b3eb2b60e62e105a66de55a15519ff0ac1c3162eb55d61f511b05c0b1e3ca"
     },
-    "approval": "approved"
+    "archiveBytes": 1258017434,
+    "archiveSHA256": "f87e2abfaa66693e9de58191c165352674b271a7b3c4e29bd396b07dbe407ef9",
+    "producerManifestSHA256": "f71a7fc5004b550ca2556e2f30651dc9e7227c9f13347b60baf82257b92b64ba",
+    "privateProducerReceiptSHA256": "1f0331d1b8fab974c811a6708d9ddb41d76ac5b970646305889ea7f254b808b3",
+    "unsignedApkSHA256": {
+      "launcher": "7aa1357df9a7ceeeb2f2e5623ed48ce87f1b4a507cfa95227457abd603d60a69"
+    },
+    "applicationId": "ai.alphacompute.alphaphone",
+    "purpose": "retained-installation-update"
   }
 }

@@ -65,7 +65,58 @@ class OSAdmission(unittest.TestCase):
 
     def test_bound_plan_and_preserved_signer_target(self):
         ota.validate(self.plan)
-        ota.inspect_target(self.reviewed_target, self.plan, self.pin)
+        self.assertEqual(ota.inspect_target(self.reviewed_target, self.plan, self.pin), self.plan["buildTimestamp"])
+
+    def test_preserving_ota_binds_distinct_product_and_system_timestamps(self):
+        target = self.target("distinct-timestamps.zip", {"SYSTEM/build.prop": "ro.build.date.utc=997\n"})
+        plan = copy.deepcopy(self.plan)
+        self.bind_target(plan, target)
+        row = {**self.pin["reviewedTargets"][0], "targetFilesSha256": plan["targetFiles"]["sha256"],
+               "otaPostTimestamp": 997}
+        self.pin["reviewedTargets"].append(row)
+        pin_file = self.root / "android/signing/ota-tools.json"
+        pin_file.write_text(json.dumps(self.pin))
+        ota.validate(plan)
+        timestamp = ota.inspect_target(target, plan, self.pin)
+        self.assertEqual(timestamp, 997)
+        properties = f"ota-type=AB\npre-device={plan['device']}\npost-build={plan['targetFingerprint']}\n"
+        for case, extra, accepted in [
+                ("system", "post-timestamp=997\n", True),
+                ("product", "post-timestamp=1000\n", False),
+                ("wipe", "post-timestamp=997\nota-wipe=yes\n", False),
+                ("downgrade", "post-timestamp=997\nota-downgrade=yes\n", False)]:
+            output = self.root / f"ota-{case}.zip"
+            with zipfile.ZipFile(output, "w") as archive:
+                archive.writestr("META-INF/com/android/metadata", properties + extra)
+            with self.subTest(case=case):
+                if accepted:
+                    ota.verify_ota_metadata(output, plan, timestamp)
+                else:
+                    with self.assertRaisesRegex(ValueError, "preserving target"):
+                        ota.verify_ota_metadata(output, plan, timestamp)
+        row["otaPostTimestamp"] = 998
+        with self.assertRaisesRegex(ValueError, "system timestamp"):
+            ota.inspect_target(target, plan, self.pin)
+        row["otaPostTimestamp"] = True
+        pin_file.write_text(json.dumps(self.pin))
+        with self.assertRaisesRegex(ValueError, "Invalid reviewed target"):
+            ota.validate(plan)
+
+    def test_new_target_sdk_requires_its_own_exact_review_without_rebinding_tools(self):
+        newer = {**self.plan, "sdkCommit": "f" * 40}
+        with self.assertRaisesRegex(ValueError, "lineage"):
+            ota.validate(newer)
+        row = {**self.pin["reviewedTargets"][0], "sdkCommit": newer["sdkCommit"]}
+        self.pin["reviewedTargets"].append(row)
+        pin_file = self.root / "android/signing/ota-tools.json"
+        pin_file.write_text(json.dumps(self.pin))
+        ota.validate(newer)
+        ota.inspect_target(self.reviewed_target, newer, self.pin)
+        ota.validate(self.plan)
+        changed_tools = copy.deepcopy(newer)
+        changed_tools["otaTools"]["sha256"] = "e" * 64
+        with self.assertRaisesRegex(ValueError, "Unreviewed"):
+            ota.validate(changed_tools)
 
     def test_target_specific_signer_map_preserves_legacy_admission_and_exact_binding(self):
         original = copy.deepcopy(self.plan)

@@ -52,7 +52,7 @@ for(const rollback of [false,true])test(`revoked saved Inbox stays hidden after 
   assert.equal((await disk.get('gmail:mailbox')).value.lists[0].messages[0].subject,fresh.subject);
   mounted.render().refresh();await f.settle();pages.at(-1).reject(new TypeError('Offline'));await f.settle();
   await reenter();assert.deepEqual(subjects(),[fresh.subject],'successfully saved fresh mail remains available after restoration');
-  assert.match(mounted.render().cachedListNotice,/Saved mail/);
+  assert.equal(mounted.render().cachedListNotice,'','cached mail opens quietly while Gmail access is checked');
   assert.equal(mounted.views.inbox.emailTarget().ready,false);
   mounted.render().rows[0].open();await f.settle();
   assert.equal(mounted.render().d.body,'Fresh body');assert.equal(mounted.render().d.actionsAvailable,false);

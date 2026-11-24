@@ -50,10 +50,10 @@ export function describePhotosViewOperation(op: PhotosViewOperation): {
   if (op.type === "photos_album_create")
     return {
       title: `Create album ${quoted(op.name)}`,
-      description: items(op.ids.length),
+      description: op.selected ? "The open item" : items(op.ids.length),
     };
   return {
-    title: `Share ${items(op.ids.length)}`,
+    title: op.selected ? "Share the open item" : `Share ${items(op.ids.length)}`,
     description: "Android share sheet",
   };
 }

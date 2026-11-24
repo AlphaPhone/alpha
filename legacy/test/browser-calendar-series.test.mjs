@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {modules,resetDocuments} from './fixtures/browser-daily-stores.mjs';
-const {BrowserCalendar,calendarDocument,syncRecurrence}=modules;
+const {BrowserCalendar,calendarDocument}=modules;
 const HOUR=3600000,DAY=86400000,start=Date.UTC(2030,0,7,9);
 const read=async()=>JSON.parse(await calendarDocument.readRaw());
 const clock=t=>{const state={now:1000};t.mock.method(performance,'now',()=>state.now);return state;};
@@ -49,7 +49,4 @@ test('a weekly series changed to Once keeps its edited date as its own event and
  assert.equal(once.repeat,'none');assert.equal(once.excluded,undefined);
  assert.equal(moved.title,'Moved review');assert.equal(moved.seriesId,undefined);assert.equal(moved.occurrenceBegin,undefined);
  assert.deepEqual((await calendar.list({begin:start,end:start+5*7*DAY})).events.map(row=>row.title),['Weekly review','Moved review']);
- assert.deepEqual(syncRecurrence(once),[]);assert.deepEqual(syncRecurrence(moved),[]);
- // Older documents may still hold deleted dates on an event that no longer repeats.
- assert.deepEqual(syncRecurrence({...once,excluded:[second.begin]}),[]);
 });

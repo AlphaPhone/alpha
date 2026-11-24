@@ -100,29 +100,67 @@ test('removing an earlier bookmark preserves the focused link and its destinatio
   await expect(page.frameLocator('[data-browser-surface] iframe').getByRole('heading',{name:'/two',exact:true})).toBeVisible();
 });
 
+test('a bookmark from a private tab keeps the page title without a history visit', async ({page}) => {
+  const url = 'https://focus.example/private-reference';
+  const title = 'Private reference';
+  await page.addInitScript(() => localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({kind: 'offline'})));
+  await page.route(url, route => route.fulfill({contentType: 'text/html', body: '<h1>Private reference</h1>'}));
+  await page.goto('/');
+  await page.evaluate(async ({url, title}) => {
+    const {BrowserSurface} = await import('/src/browser/browser-surface.ts');
+    const prototype = BrowserSurface.prototype as any;
+    const notify = prototype.notifyListeners;
+    prototype.notifyListeners = function (event: string, data: {url?: string}, ...rest: unknown[]) {
+      return notify.call(this, event, event === 'stateChanged' && data?.url === url ? {...data, title} : data, ...rest);
+    };
+    (window as any).Capacitor.isNativePlatform = () => true;
+  }, {url, title});
+  await page.getByRole('button', {name: 'Browser', exact: true}).click();
+  await page.getByRole('button', {name: 'Menu', exact: true}).click();
+  await page.getByRole('button', {name: 'New private tab', exact: true}).click();
+  const address = page.getByRole('textbox', {name: 'Address', exact: true});
+  await address.fill(url);
+  await address.press('Enter');
+  await expect(page.frameLocator('[data-browser-surface]:visible iframe').getByRole('heading', {name: title, exact: true})).toBeVisible();
+
+  await page.getByRole('button', {name: 'Menu', exact: true}).click();
+  await page.getByRole('button', {name: 'Bookmark', exact: true}).click();
+  await page.getByRole('button', {name: 'Menu', exact: true}).click();
+  await page.getByRole('button', {name: 'Bookmarks and history', exact: true}).click();
+  const library = page.locator('[data-alpha-subview="browser-library"]');
+  const row = library.getByRole('button', {name: url, exact: true});
+  await expect(row).toContainText(title);
+  await library.getByRole('button', {name: 'History', exact: true}).click();
+  await expect(row).toHaveCount(0);
+});
+
 for (const viewport of [{width:390,height:844},{width:1280,height:900}]) {
   test.describe(`delayed saved session at ${viewport.width}px`, () => {
     test.use({viewport});
 
     for (const savedId of ['saved-normal','b0']) {
       test(`restoring saved tabs preserves the focused new tab and its activation (${savedId})`, async ({page}) => {
-        await page.addInitScript((savedId: string) => {
-          localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({kind:'offline'}));
-          localStorage.setItem('alpha.browser.session.v1', JSON.stringify({
-            history:['https://focus.example/saved'],
-            tabs:[{id:savedId,url:'https://focus.example/saved',title:'Saved page'}],
-            cur:savedId,
-          }));
-          // Hold the real document migration while the owner opens the tab chooser.
-          const w = window as any;
-        void navigator.locks.request(
-            JSON.stringify(['browser-document','alpha.browser.documents.v1','alpha.browser.session.v1']),
-            async () => {
-              w.browserRestoreHeld = true;
-              await new Promise<void>(release => {w.releaseBrowserRestore = release;});
-            },
-          );
-        }, savedId);
+        await page.addInitScript(() => localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({kind:'offline'})));
+        // Seed through the same IndexedDB-backed host that owns today's session.
+        // Hold only the completion of the startup read as the owner opens the chooser.
+        await page.route('**/src/browser/browser-surface.ts', async route => {
+          const response = await route.fetch();
+          const source = await response.text();
+          await route.fulfill({response, body: source + `
+            const readSavedBrowsing = BrowserSurface.prototype.browsingState;
+            const setupSavedBrowsing = new BrowserSurface().saveBrowsingState(${JSON.stringify({
+              history:['https://focus.example/saved'],
+              tabs:[{id:savedId,url:'https://focus.example/saved',title:'Saved page'}],
+              cur:savedId,
+            })});
+            BrowserSurface.prototype.browsingState = async function(...args) {
+              await setupSavedBrowsing;
+              window.browserRestoreHeld = true;
+              await new Promise(release => {window.releaseBrowserRestore = release;});
+              return readSavedBrowsing.apply(this,args);
+            };`
+          });
+        });
         await page.goto('/');
         await expect.poll(() => page.evaluate(() => !!(window as any).browserRestoreHeld)).toBe(true);
         await page.getByRole('button',{name:'Browser',exact:true}).click();

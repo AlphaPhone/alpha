@@ -1,0 +1,3 @@
+# apps/app/public/icons/lucide/LICENSE.txt
+- Lines: 43 | Role: Lucide ISC + Feather MIT licence text shipped beside the 143 vendored Lucide SVGs (written by `scripts/vendor-lucide-icons.ts` from the published lucide-react 1.18.0 package). | Verdict: KEEP
+- Referenced by: `source.json` `licenseSha256` (b495047b…, matches), checked by `test/canonical-icons.test.mjs`; every SVG header comment "See LICENSE.txt and source.json". Required for redistribution; nothing to simplify. Note: `apps/app/public/licenses/THIRD_PARTY_NOTICES.txt:7039-7046` lists lucide-react 1.0.0 (the npm dependency, `package.json:91`, used only by upstream `.eliza/client-features`), not the 1.18.0 icons — see owner question in the chunk summary.

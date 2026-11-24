@@ -5,7 +5,7 @@ module MapsNavigationGuidanceReadback {
     owner: int, epoch: int, requestEpoch: int, generation: int, requestGeneration: int,
     phase: str, route: int, previousRoute: int, routeOwner: int,
     locationGranted: bool, fixFresh: bool, guidance: bool, assistant: bool,
-    foreground: bool, directStart: bool, failure: str, rerouting: bool,
+    foreground: bool, failure: str, rerouting: bool,
     // Guidance: whether its own watch holds a usable fix, and whether the native
     // screen-off session is running for it.
     located: bool, screenOff: bool,
@@ -30,7 +30,7 @@ module MapsNavigationGuidanceReadback {
     owner: 1, epoch: 0, requestEpoch: 0, generation: 0, requestGeneration: 0,
     phase: "idle", route: 0, previousRoute: 0, routeOwner: 0,
     locationGranted: false, fixFresh: false, guidance: false, assistant: false,
-    foreground: true, directStart: false, failure: "none", rerouting: false,
+    foreground: true, failure: "none", rerouting: false,
     located: false, screenOff: false, inMaps: true }
   action grantLocation = s' = { ...s, locationGranted: true }
   action receiveFix(fresh: bool): bool = all {
@@ -62,14 +62,9 @@ module MapsNavigationGuidanceReadback {
     else s' = s
   }
   /// The screen's Start needs a ready route only; guidance then waits for its first fix.
+  /// An agent request never starts guidance: it shows the route and leaves Start to the user.
   action start = all {
     s.phase == "ready", s.route != 0, s.foreground, s.inMaps, s' = started(s)
-  }
-  /// Agent direct start uses a separately read owner preference, defaulting to false.
-  action allowDirectStart = s' = { ...s, directStart: true }
-  action agentStart = all {
-    s.directStart, s.phase == "ready", s.route != 0, s.foreground, s.inMaps, s.locationGranted, s.fixFresh,
-    s' = started(s)
   }
   /// The guidance watch could not start or failed: permission refused, location off.
   action locationFails = all {
@@ -123,7 +118,7 @@ module MapsNavigationGuidanceReadback {
       grantLocation, receiveFix(true), receiveFix(false), requestRoute, resumeWithFix, chooseOrigin,
       routeReply(s.generation, s.epoch, true), routeReply(s.generation, s.epoch, false),
       routeReply(0, s.epoch, true), routeReply(s.generation, 3, true), start,
-      allowDirectStart, agentStart, screenOffStarted, screenOffLost,
+      screenOffStarted, screenOffLost,
       beginReroute, rerouteReply(true), rerouteReply(false),
       showAssistant, dismissAssistant, background, foreground, openMaps,
       all { draw == 0, any { locationFails, leaveMaps, staleFix, stop, switchOwner } },

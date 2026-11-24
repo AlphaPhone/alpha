@@ -21,7 +21,7 @@ public final class HostedNoticeWithdrawTest {
   notices.showing(null);
 
   // A tap on the morning notice is captured, then the panel shows every run.
-  notices.capture(morning);String token=notices.peek().getString("token");
+  notices.capture(morning,false);String token=notices.peek().getString("token");
   require(notices.withdraw(scope,List.of("run-morning","run-evening","run-unknown"))==2,"shown runs withdraw");
   require(cancelled.containsAll(List.of(morning,evening))&&!active.contains(morning)&&!active.contains(evening)&&active.contains(night),"withdraw cancels by key only the shown runs");
   JSONObject ledger=new JSONObject(slots.get(HostedResultNotices.LEDGER));

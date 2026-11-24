@@ -12,14 +12,6 @@ import static org.junit.Assert.*;
 
 /** Phone-step approval notices: builders always; OS posting and the tap route only in a dedicated, runner-owned campaign. */
 public final class WorkflowApprovalNoticeInstrumentedTest {
- private static void returnedTapDiagnostic(String phase, AlphaCredentialStore store, PendingIntent tap, JSONObject pending){
-  StringBuilder out=new StringBuilder("phase="+phase+" pid="+android.os.Process.myPid()+" pending="+pending+" pendingIntent="+tap+"\n");
-  try{for(String slot:new String[]{WorkflowNoticeTaps.OWNER_SLOT,WorkflowNoticeTaps.SLOT,WorkflowNoticeDelivery.APPROVAL_SLOT}){String raw=store.readCredentialSlot(slot);out.append(slot).append("=").append(raw==null?"null":raw.substring(0,Math.min(raw.length(),16384))).append("\n");}}catch(Exception error){out.append("ledgerDiagnostic=").append(error).append("\n");}
-  try{WebViewTestDriver.withActivity(MainActivity.class,a->{Intent intent=a.getIntent();out.append("activityIdentity=").append(System.identityHashCode(a)).append(" finishing=").append(a.isFinishing()).append(" destroyed=").append(a.isDestroyed()).append(" windowFocus=").append(a.hasWindowFocus()).append(" stage=").append(androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance().getLifecycleStageOf(a)).append(" intent=").append(intent==null?"null":intent.toUri(0)).append("\n");});}catch(Exception error){out.append("activityDiagnostic=").append(error).append("\n");}
-  try{for(android.view.accessibility.AccessibilityWindowInfo window:InstrumentationRegistry.getInstrumentation().getUiAutomation().getWindows()){android.view.accessibility.AccessibilityNodeInfo root=window.getRoot();try{out.append("window id=").append(window.getId()).append(" type=").append(window.getType()).append(" focused=").append(window.isFocused()).append(" active=").append(window.isActive()).append(" package=").append(root==null?"null":root.getPackageName()).append(" rootClass=").append(root==null?"null":root.getClassName()).append("\n");}finally{if(root!=null)root.recycle();window.recycle();}}}catch(Exception error){out.append("windowDiagnostic=").append(error).append("\n");}
-  try(java.io.InputStream input=new android.os.ParcelFileDescriptor.AutoCloseInputStream(InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand("dumpsys activity intents "+InstrumentationRegistry.getInstrumentation().getTargetContext().getPackageName()))){java.io.ByteArrayOutputStream bytes=new java.io.ByteArrayOutputStream();byte[] buffer=new byte[4096];int count;while(bytes.size()<65536&&(count=input.read(buffer,0,Math.min(buffer.length,65536-bytes.size())))!=-1)bytes.write(buffer,0,count);out.append(new String(bytes.toByteArray(),java.nio.charset.StandardCharsets.UTF_8));}catch(Exception error){out.append("intentDiagnostic=").append(error);}
-  android.os.Bundle result=new android.os.Bundle();result.putString("workflowReturnedTapDiagnostic_"+phase,out.toString());InstrumentationRegistry.getInstrumentation().addResults(result);
- }
  private static String approvalId(char fill){return "approval-"+String.valueOf(fill).repeat(64);}
  /** Builders only: no OS notification is posted. */
  @Test public void approvalAndStepBuildersAreRedactedAndExpire()throws Exception{
@@ -43,6 +35,12 @@ public final class WorkflowApprovalNoticeInstrumentedTest {
   long end=SystemClock.elapsedRealtime()+15000;
   while(SystemClock.elapsedRealtime()<end){String raw=WebViewTestDriver.evaluate("window.__approvalNotice");if(!"null".equals(raw)&&!"undefined".equals(raw))return new JSONObject((String)new JSONTokener(raw).nextValue());SystemClock.sleep(50);}throw new AssertionError("Approval notice bridge timed out");
  }
+ /** Polls pendingWorkflowTap() until done accepts the answer or the timeout passes; returns the last answer. */
+ private JSONObject awaitPendingTap(java.util.function.Predicate<JSONObject> done,long timeout,long interval)throws Exception{
+  long end=SystemClock.elapsedRealtime()+timeout;JSONObject pending=new JSONObject();
+  while(SystemClock.elapsedRealtime()<end){pending=call("Capacitor.Plugins.AlphaNotifications.pendingWorkflowTap()");if(done.test(pending))break;SystemClock.sleep(interval);}
+  return pending;
+ }
  /** DOM readiness precedes asynchronous session restoration and its signed-out owner fence. */
  private static void awaitSignedOutStartup(AlphaCredentialStore store)throws Exception{
   long end=SystemClock.elapsedRealtime()+15000;
@@ -56,8 +54,7 @@ public final class WorkflowApprovalNoticeInstrumentedTest {
   Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();NotificationManager manager=context.getSystemService(NotificationManager.class);AlphaCredentialStore store=new AlphaCredentialStore(context);
   assertNull("Fresh approval fixture required",store.readCredentialSlot(WorkflowNoticeDelivery.APPROVAL_SLOT));
   String id=approvalId('d'),run="fixture-run-"+java.util.UUID.randomUUID();long expiresAt=System.currentTimeMillis()+10*60000L;
-  JSONObject route=new JSONObject().put("scope","a".repeat(64)).put("origin","https://workflow-fixture.invalid").put("ownerId","fixture-owner").put("agentId","fixture-agent").put("workflowId","fixture-flow").put("runId",run).put("versionId","fixture-version");
-  JSONObject input=new JSONObject().put("id",id).put("bindingHash","b".repeat(64)).put("expiresAt",expiresAt).put("route",route);
+  JSONObject input=new JSONObject().put("id",id).put("bindingHash","b".repeat(64)).put("expiresAt",expiresAt).put("route",route("fixture-owner",run));
   try(BoundedActivityScenario<MainActivity> activity=BoundedActivityScenario.launch(MainActivity.class)){
    AppNavigation.liveMode();awaitSignedOutStartup(store);
    assertFalse(call("Capacitor.Plugins.AlphaHostedResults.withdrawOtherOwnerApprovalNotices({owner:{origin:\"https://workflow-fixture.invalid\",ownerId:\"fixture-owner\",agentId:\"fixture-agent\"}})").has("error"));
@@ -69,8 +66,7 @@ public final class WorkflowApprovalNoticeInstrumentedTest {
    String token=WorkflowNoticeTapsFactory.create(context).token(id);assertNotNull(token);
    assertEquals(1,notice.actions.length);assertEquals("Ask Alpha",notice.actions[0].title);
    notice.actions[0].actionIntent.send();
-   long questionEnd=SystemClock.elapsedRealtime()+15000;JSONObject question=new JSONObject();
-   while(SystemClock.elapsedRealtime()<questionEnd){question=call("Capacitor.Plugins.AlphaNotifications.pendingWorkflowTap()");if(question.optBoolean("question"))break;SystemClock.sleep(100);}
+   JSONObject question=awaitPendingTap(tap->tap.optBoolean("question"),15000,100);
    assertEquals(run,question.optString("runId"));assertTrue(question.optBoolean("question"));assertTrue(question.optBoolean("retained"));
    assertEquals(WorkflowNoticeDelivery.APPROVAL_TITLE,question.getJSONObject("notice").getString("title"));
    assertEquals(WorkflowNoticeDelivery.APPROVAL_BODY,question.getJSONObject("notice").getString("text"));
@@ -78,16 +74,14 @@ public final class WorkflowApprovalNoticeInstrumentedTest {
    assertNotNull("Cancel retains approval notice",active(manager,id));
    assertEquals("succeeded",new JSONObject(store.readCredentialSlot(WorkflowNoticeDelivery.APPROVAL_SLOT)).getJSONObject(id).getString("status"));
    notice.actions[0].actionIntent.send();
-   long askedEnd=SystemClock.elapsedRealtime()+15000;JSONObject asked=new JSONObject();
-   while(SystemClock.elapsedRealtime()<askedEnd){asked=call("Capacitor.Plugins.AlphaNotifications.pendingWorkflowTap()");if(asked.optBoolean("question"))break;SystemClock.sleep(100);}
+   JSONObject asked=awaitPendingTap(tap->tap.optBoolean("question"),15000,100);
    assertTrue(asked.optBoolean("question"));
    assertFalse("Use in conversation settles only the question",call("Capacitor.Plugins.AlphaNotifications.consumeWorkflowTap({token:"+JSONObject.quote(token)+",noticeRevision:"+JSONObject.quote(asked.getJSONObject("notice").getString("revision"))+"})").has("error"));
    assertNotNull("A completed Ask keeps the waiting approval's notice",active(manager,id));assertEquals(0,WorkflowNoticeTapsFactory.create(context).pending().length());
    assertEquals(token,WorkflowNoticeTapsFactory.create(context).token(id));
    assertEquals("succeeded",new JSONObject(store.readCredentialSlot(WorkflowNoticeDelivery.APPROVAL_SLOT)).getJSONObject(id).getString("status"));
    notice.contentIntent.send();
-   long end=SystemClock.elapsedRealtime()+15000;JSONObject pending=new JSONObject();
-   while(SystemClock.elapsedRealtime()<end){pending=call("Capacitor.Plugins.AlphaNotifications.pendingWorkflowTap()");if(token.equals(pending.optString("token")))break;SystemClock.sleep(100);}
+   JSONObject pending=awaitPendingTap(tap->token.equals(tap.optString("token")),15000,100);
    assertEquals("Tap resolves to its exact run",run,pending.optString("runId"));assertTrue(pending.optBoolean("retained"));
    // The durable route is readable without the plugin instance (the process-death path reads the same ledgers).
    assertEquals(token,WorkflowNoticeTapsFactory.create(context).pending().getString("token"));
@@ -176,7 +170,7 @@ public final class WorkflowApprovalNoticeInstrumentedTest {
    assertEquals("succeeded",call("Capacitor.Plugins.AlphaHostedResults.resumeWorkflowApprovalNotice("+input+")").getString("status"));
    Notification resumed=row(manager,id).getNotification();assertEquals(Notification.GROUP_ALERT_SUMMARY,resumed.getGroupAlertBehavior());assertEquals("alpha_quiet_approvals",resumed.getGroup());assertEquals(Notification.VISIBILITY_PRIVATE,resumed.visibility);assertNotNull(resumed.publicVersion);
    String fresh=WorkflowNoticeTapsFactory.create(context).token(id);assertNotEquals(token,fresh);assertThrows(PendingIntent.CanceledException.class,()->stale.send());
-   resumed.contentIntent.send();long end=SystemClock.elapsedRealtime()+10000;JSONObject pending=new JSONObject();while(SystemClock.elapsedRealtime()<end){pending=call("Capacitor.Plugins.AlphaNotifications.pendingWorkflowTap()");if(fresh.equals(pending.optString("token")))break;SystemClock.sleep(50);}if(!fresh.equals(pending.optString("token")))returnedTapDiagnostic("failure",store,resumed.contentIntent,pending);assertEquals("Returned tap response: "+pending,fresh,pending.optString("token"));assertEquals(run,pending.optString("runId"));
+   resumed.contentIntent.send();JSONObject pending=awaitPendingTap(tap->fresh.equals(tap.optString("token")),10000,50);assertEquals("Returned tap response: "+pending,fresh,pending.optString("token"));assertEquals(run,pending.optString("runId"));
    call("Capacitor.Plugins.AlphaHostedResults.withdrawWorkflowApprovalNotice({id:"+JSONObject.quote(id)+"})");awaitGone(manager,id,"Decision withdraws returned notice");assertEquals("not-suspended",call("Capacitor.Plugins.AlphaHostedResults.resumeWorkflowApprovalNotice("+input+")").getString("status"));
   }finally{manager.cancel("alpha-workflow-"+id,0);store.removeCredentialSlot(WorkflowNoticeDelivery.APPROVAL_SLOT);store.removeCredentialSlot(WorkflowNoticeTaps.SLOT);store.removeCredentialSlot(WorkflowNoticeTaps.OWNER_SLOT);}
  }

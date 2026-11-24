@@ -220,14 +220,17 @@ test('actual pinned client features retain shared voice source unchanged and exc
  const scan='plugins/plugin-native-camera/src/scan-document.ts';
  assert.equal(stamp.sourceFiles[scan],stamp.files[scan],'Scan state is copied from the pinned shared owner without a product patch');
  assert.deepEqual(fs.readFileSync(path.join(source,scan)),fs.readFileSync(path.join('vendor/eliza',scan)));
-assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','utf8')).commit);assert.equal(stamp.projectionVersion,16);
- // The browser parser stays byte-exact except its one Node-compatible value import.
+assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','utf8')).commit);assert.equal(stamp.projectionVersion,18);
+ // Alpha inherits the history validator verbatim. Server policy and its
+ // dependencies stay exclusively in the SDK.
  const browserCommand='plugins/plugin-browser/src/native-client-command.ts';
  const browserOriginal=fs.readFileSync(path.join('vendor/eliza',browserCommand),'utf8');
  const browserProjected=fs.readFileSync(path.join(source,browserCommand),'utf8');
  assert.equal(browserProjected,browserOriginal.replace(
-  'import { readClientTurnObservation } from "@elizaos/contracts/client-turn-observation";',
-  'import { readClientTurnObservation } from "../../../packages/contracts/src/client-turn-observation.ts";'));
+  'from "@elizaos/contracts/client-turn-observation";',
+  'from "../../../packages/contracts/src/client-turn-observation.ts";',
+ ));
+ assert.doesNotMatch(browserProjected, /@elizaos\/core|withheldPageReloadRefusal/);
  assert.notEqual(stamp.sourceFiles[browserCommand],stamp.files[browserCommand]);
  // Run plain Node without tsx, aliases or a custom loader and exercise the imported
  // observation parser, rather than only checking the spelling of its specifier.
@@ -332,7 +335,7 @@ assert.equal(stamp.baseCommit,JSON.parse(fs.readFileSync('upstream.lock.json','u
  assert.deepEqual(Object.keys(stamp).sort(), ['baseCommit','files','projectionVersion','sourceFiles']);
  const googlePath='packages/app/src/runtime/managed-google-agent/managed-google-agent-host.ts';
  assert.equal(stamp.managedGoogleBodyLimitPatch,undefined);
- assert.equal(stamp.files[googlePath],'e848c0e814caebd58eac087684a6020825aeda81e8af7c2cc66530c584003214');
+ assert.equal(stamp.files[googlePath],'0e1e9b51bc40e07925d3a7d1ea07b0d4b10c6ad1563dd9f786d846357846eac5');
  for(const name of Object.keys(stamp.sourceFiles).filter(name=>name.startsWith('packages/app/src/runtime/managed-google-agent/'))){
   assert.equal(stamp.sourceFiles[name],stamp.files[name],name+' is copied directly from upstream');
   assert.deepEqual(fs.readFileSync(path.join(source,name)),fs.readFileSync(path.join('vendor/eliza',name)),name+' has exact raw upstream bytes');

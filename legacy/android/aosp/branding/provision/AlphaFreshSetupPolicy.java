@@ -9,6 +9,19 @@ final class AlphaFreshSetupPolicy {
     static boolean roleVerified(boolean accepted, boolean alphaHoldsRole) {
         return accepted && alphaHoldsRole;
     }
+    enum NavigationResult { SKIPPED, EXISTING_CHOICE, READY, FAILED }
+    interface NavigationPort {
+        boolean eligible();
+        boolean hasEnabledMode();
+        boolean selectGesturesIfUnchosen();
+    }
+    static NavigationResult ensureNavigation(NavigationPort port) {
+        if (!port.eligible()) return NavigationResult.SKIPPED;
+        if (port.hasEnabledMode()) return NavigationResult.EXISTING_CHOICE;
+        if (port.selectGesturesIfUnchosen()) return NavigationResult.READY;
+        if (!port.eligible()) return NavigationResult.SKIPPED;
+        return port.hasEnabledMode() ? NavigationResult.EXISTING_CHOICE : NavigationResult.FAILED;
+    }
     enum ImeResult { SKIPPED, EXISTING_CHOICE, READY, FAILED }
     interface ImePort {
         boolean eligible();
@@ -22,7 +35,7 @@ final class AlphaFreshSetupPolicy {
         if (!port.eligible()) return ImeResult.SKIPPED;
         String selected = port.selected();
         // A nonempty value may be an explicit choice. Never guess how it was selected.
-        if (selected != null && !selected.isEmpty()) return ImeResult.EXISTING_CHOICE;
+        if (nonempty(selected)) return ImeResult.EXISTING_CHOICE;
         String target = port.target();
         if (target == null || target.isEmpty()) return ImeResult.FAILED;
         String enabled = port.enabled();
@@ -31,17 +44,16 @@ final class AlphaFreshSetupPolicy {
             if (target.equals(item.split(";", 2)[0])) contains = true;
         }
         if (!port.eligible()) return ImeResult.SKIPPED;
-        selected = port.selected();
-        if (selected != null && !selected.isEmpty()) return ImeResult.EXISTING_CHOICE;
+        if (nonempty(port.selected())) return ImeResult.EXISTING_CHOICE;
         if (!contains) {
             String next = enabled == null || enabled.isEmpty() ? target : enabled + ":" + target;
             if (!port.enableIfUnchanged(enabled, next)) return ImeResult.FAILED;
         }
         if (!port.eligible()) return ImeResult.SKIPPED;
         if (!port.selectIfEmpty(target)) {
-            selected = port.selected();
-            return selected != null && !selected.isEmpty() ? ImeResult.EXISTING_CHOICE : ImeResult.FAILED;
+            return nonempty(port.selected()) ? ImeResult.EXISTING_CHOICE : ImeResult.FAILED;
         }
         return target.equals(port.selected()) ? ImeResult.READY : ImeResult.FAILED;
     }
+    static boolean nonempty(String value) { return value != null && !value.isEmpty(); }
 }

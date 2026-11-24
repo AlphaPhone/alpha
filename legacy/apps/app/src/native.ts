@@ -1,18 +1,9 @@
 import { registerPlugin } from './platform-plugins';
-import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
-import type { System as UpstreamSystem } from "../../../vendor/eliza/plugins/plugin-native-system/src/index";
+import { Capacitor } from '@capacitor/core';
+import type { AppInfoTarget, ElizaSystemPlugin } from './native/eliza-system';
 import { createSystemLauncherBridge, type LauncherBridge } from '@elizaos/capacitor-system/launcher';
-import type { NativeNetworkStatus } from './runtime/native-network';
-const System = registerPlugin<typeof UpstreamSystem & {
-  /** The app's active Android network. Omitted facts mean Android could not answer. */
-  getNetworkStatus(): Promise<NativeNetworkStatus>;
-  addListener(event: 'networkStatusChanged', listener: () => void): Promise<PluginListenerHandle>;
-}>("ElizaSystem");
-/** Alpha's product-only native reads. Installed apps, default handlers and the build, launch and
- * locale facts are the shared ElizaSystem plugin (@elizaos/capacitor-system). */
-export const DeviceApps = registerPlugin<{
-  platformCapabilities(): Promise<{aospImage: boolean; phone: boolean; contacts: boolean; sms: boolean; sense?: boolean; startupPermissionDefaults?: boolean}>;
-}>("DeviceApps");
+export const System = registerPlugin<ElizaSystemPlugin>("ElizaSystem");
+export { deviceApps as DeviceApps } from './native/device-apps';
 export const isAndroid = Capacitor.getPlatform() === "android";
 /** The one launcher bridge over ElizaSystem, on Android and in the browser development device. */
 export const launcherBridge: LauncherBridge = createSystemLauncherBridge(System);
@@ -24,6 +15,4 @@ export const launcherListens = (() => {
   return isAndroid ? !!header?.methods?.some(method => method.name === "addListener") : !header || !!header.methods?.some(method => method.name === "addListener");
 })();
 /** Android's App info for exactly one listed entry and profile (AlphaSystemPlugin.openAppInfo). */
-export const openAppInfo = (target: { packageName: string; activityName?: string; user?: string }): Promise<void> =>
-  (System as unknown as { openAppInfo(options: typeof target): Promise<void> }).openAppInfo(target);
-export { System };
+export const openAppInfo = (target: AppInfoTarget): Promise<void> => System.openAppInfo(target);

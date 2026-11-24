@@ -25,17 +25,17 @@ const reviewedDatabaseReceipts={
 };
 const legalDocument=title=>({title,revision:'synthetic-1',sections:[{title:'Fixture',paragraphs:['Only synthetic text.']}]});
 
-test('the committed Alpha Cloud policy is ai.alphacompute.alphaphone on alphacompute.ai',()=>{
+test('the committed Alpha Cloud policy is ai.alphacompute.alphaphone on alphacompute.cc',()=>{
  validateCloudDeployment(alpha.policy);
  assert.equal(identity.appId,'ai.alphacompute.alphaphone');
  for(const environment of ['production','staging']){
   const row=alpha.policy[environment];
-  for(const origin of [row.api,row.web,row.services])assert.match(new URL(origin).hostname,/(^|\.)alphacompute\.ai$/);
+  for(const origin of [row.api,row.web,row.services])assert.match(new URL(origin).hostname,/(^|\.)alphacompute\.cc$/);
   assert.equal(row.entitlementAudience,identity.appId);
   assert.match(row.tenant,/^alphacompute/);
   const ids=alpha.resources[environment];
-  assert.equal(ids.zone,'alphacompute.ai');
-  for(const host of [ids.blobHost,new URL(ids.loginApiUrl).hostname])assert.match(host,/\.alphacompute\.ai$/);
+  assert.equal(ids.zone,'alphacompute.cc');
+  for(const host of [ids.blobHost,new URL(ids.loginApiUrl).hostname])assert.match(host,/\.alphacompute\.cc$/);
  }
  assert.equal(leakedElizaHost(alpha),null);
 });
@@ -299,13 +299,13 @@ test('the secrets file must be private and outside the checkout',()=>{
 
 test('the edge Worker forwards only asset links and the registered native returns',()=>{
  const at=url=>edgeRoute(new URL(url));
- assert.equal(at('https://cloud.alphacompute.ai/.well-known/assetlinks.json'),'assetlinks');
- assert.equal(at('https://cloud.alphacompute.ai/alphaphone/auth/callback?code=x&state=y'),'hosted');
- assert.equal(at('https://cloud.alphacompute.ai/alphaphone/billing/return?session=x'),'hosted');
- assert.equal(at('https://cloud.alphacompute.ai/alphaphone/auth/browser-start'),'hosted');
- assert.equal(at('https://cloud.alphacompute.ai/health'),'health');
- for(const url of ['https://cloud.alphacompute.ai/','https://cloud.alphacompute.ai/cloud/billing','https://cloud.alphacompute.ai/api/v1/user',
-  'https://cloud.alphacompute.ai/a/b/auth/callback','http://cloud.alphacompute.ai/alphaphone/auth/callback','https://cloud.alphacompute.ai/ALPHA/auth/callback'])assert.equal(at(url),null,url);
+ assert.equal(at('https://cloud.alphacompute.cc/.well-known/assetlinks.json'),'assetlinks');
+ assert.equal(at('https://cloud.alphacompute.cc/alphaphone/auth/callback?code=x&state=y'),'hosted');
+ assert.equal(at('https://cloud.alphacompute.cc/alphaphone/billing/return?session=x'),'hosted');
+ assert.equal(at('https://cloud.alphacompute.cc/alphaphone/auth/browser-start'),'hosted');
+ assert.equal(at('https://cloud.alphacompute.cc/health'),'health');
+ for(const url of ['https://cloud.alphacompute.cc/','https://cloud.alphacompute.cc/cloud/billing','https://cloud.alphacompute.cc/api/v1/user',
+  'https://cloud.alphacompute.cc/a/b/auth/callback','http://cloud.alphacompute.cc/alphaphone/auth/callback','https://cloud.alphacompute.cc/ALPHA/auth/callback'])assert.equal(at(url),null,url);
 });
 
 function smokeFixture(environment){

@@ -18,18 +18,18 @@
       sideloaded launcher never holds it and shows no identifiers; without it a live call's kind is
       unknown, so AC-19 treats any live call as possibly an emergency call. -->
  <uses-permission android:name="android.permission.READ_PRIVILEGED_PHONE_STATE" tools:ignore="ProtectedPermissions" />
- <!-- SMS/MMS provider reads and reviewed native sends (#421), on the verified image only. Both are
+ <!-- SMS/MMS provider reads and reviewed native sends, on the verified image only. Both are
       hard-restricted: Android grants them to the preinstalled image app or the SMS role holder, never
       to a sideloaded launcher APK. AlphaTelephonyPlugin requests them only on the verified image. -->
  <uses-permission android:name="android.permission.READ_SMS" />
  <uses-permission android:name="android.permission.SEND_SMS" />
- <!-- SMS role (#421): Android grants these hard-restricted permissions to the SMS role holder, and Alpha
+ <!-- SMS role: Android grants these hard-restricted permissions to the SMS role holder, and Alpha
       can be offered the role only on the verified image, where AlphaTelephonyRoles enables the
       SMS-role components below. -->
  <uses-permission android:name="android.permission.RECEIVE_SMS" tools:ignore="PermissionImpliesUnsupportedChromeOsHardware" />
  <uses-permission android:name="android.permission.RECEIVE_MMS" tools:ignore="PermissionImpliesUnsupportedChromeOsHardware" />
  <uses-permission android:name="android.permission.RECEIVE_WAP_PUSH" tools:ignore="PermissionImpliesUnsupportedChromeOsHardware" />
- <!-- Dialer role (#420): the role grants CALL_PHONE to its holder, and Alpha can hold the role only on
+ <!-- Dialer role: the role grants CALL_PHONE to its holder, and Alpha can hold the role only on
       the verified image, where AlphaTelephonyRoles enables the components below. Alpha never asks for
       CALL_PHONE at runtime. The shared phone module's call-log writes and self-managed-call
       permissions are not used. -->
@@ -41,9 +41,9 @@
  <uses-permission android:name="android.permission.WRITE_CALL_LOG" tools:node="remove" />
  <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" tools:node="remove" />
  <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" tools:node="remove" />
- <!-- The dialer role's ringing-call notice opens the shared call screen over the lock screen and wakes
-      the display. Android drops a full-screen intent without this install-time permission. Only the
-      shared call service (AlphaInCallService) posts one. -->
+ <!-- The dialer role's ringing-call notice opens Alpha's call screen over the lock screen and wakes
+      the display. Android drops a full-screen intent without this install-time permission. Only
+      Alpha's call service (AlphaInCallService) posts one. -->
  <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
  <!-- SMS permissions imply telephony hardware; keep it optional so no install is filtered by it. -->
  <uses-feature android:name="android.hardware.telephony" android:required="false" />
@@ -51,7 +51,7 @@
   <intent><action android:name="android.intent.action.SENDTO"/><data android:scheme="smsto"/></intent>
   <package android:name="com.android.systemui" />
  </queries>
- <!-- Launcher flavor only (#417): a downward pull on empty Home
+ <!-- Launcher flavor only: a downward pull on empty Home
       asks Android to expand its own notification shade, as stock launchers do. Install-time
       permission; see SystemShade.java. -->
  <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
@@ -89,11 +89,11 @@
    <meta-data android:name="android.telecom.IN_CALL_SERVICE_RINGING" android:value="false" />
    <intent-filter><action android:name="android.telecom.InCallService" /></intent-filter>
   </service>
-  <activity android:name=".AlphaCallActivity" android:enabled="false" android:exported="false" android:launchMode="singleTop" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+  <activity android:name=".AlphaCallActivity" android:enabled="false" android:exported="false" android:launchMode="singleTop" android:screenOrientation="portrait" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
   <activity android:name=".AlphaSmsNoticeActivity" android:exported="false" android:excludeFromRecents="true" android:theme="@android:style/Theme.NoDisplay" />
-  <!-- SMS role surfaces (shared plugin-native-messages), declared disabled and enabled only on the
-       verified image. Incoming texts and MMS are stored before their notice; quick replies and SENDTO
-       open the compose review, whose Send press is the only send. -->
+  <!-- SMS role surfaces (Alpha's forks; MmsWapPushReceiver and MmsFileProvider stay shared), declared
+       disabled and enabled only on the verified image. Incoming texts and MMS are stored before their
+       notice; quick replies and SENDTO open the compose review, whose Send press is the only send. -->
   <receiver android:name=".AlphaSmsDeliverReceiver" android:enabled="false" android:exported="true" android:permission="android.permission.BROADCAST_SMS">
    <intent-filter><action android:name="android.provider.Telephony.SMS_DELIVER" /></intent-filter>
   </receiver>
@@ -104,11 +104,11 @@
   <service android:name=".AlphaRespondViaMessageService" android:enabled="false" android:exported="true" android:permission="android.permission.SEND_RESPOND_VIA_MESSAGE">
    <intent-filter><action android:name="android.intent.action.RESPOND_VIA_MESSAGE" /><category android:name="android.intent.category.DEFAULT" /><data android:scheme="sms" /><data android:scheme="smsto" /></intent-filter>
   </service>
-  <activity android:name=".AlphaSmsComposeActivity" android:enabled="false" android:exported="true" android:theme="@android:style/Theme.DeviceDefault.DayNight" android:label="Messages" android:windowSoftInputMode="adjustResize">
+  <activity android:name=".AlphaSmsComposeActivity" android:enabled="false" android:exported="true" android:theme="@android:style/Theme.DeviceDefault.DayNight" android:label="@string/alpha_messages_label" android:windowSoftInputMode="adjustResize">
    <intent-filter><action android:name="android.intent.action.SENDTO" /><category android:name="android.intent.category.DEFAULT" /><data android:scheme="sms" /><data android:scheme="smsto" /></intent-filter>
   </activity>
   <provider android:name="ai.eliza.plugins.messages.MmsFileProvider" android:authorities="${applicationId}.mms" android:enabled="false" android:exported="false" android:grantUriPermissions="true" />
-  <activity android:name=".AlphaDialPadActivity" android:enabled="false" android:exported="true" android:theme="@android:style/Theme.DeviceDefault.DayNight" android:label="Phone">
+  <activity android:name=".AlphaDialPadActivity" android:enabled="false" android:exported="true" android:theme="@android:style/Theme.DeviceDefault.DayNight" android:label="@string/alpha_phone_label">
    <intent-filter><action android:name="android.intent.action.DIAL" /><category android:name="android.intent.category.DEFAULT" /></intent-filter>
    <intent-filter><action android:name="android.intent.action.DIAL" /><category android:name="android.intent.category.DEFAULT" /><data android:scheme="tel" /></intent-filter>
   </activity>

@@ -8,7 +8,16 @@ test('compaction frees capacity and preserves exact replay and conflicts after r
 });
 test('history controls export exact text and compact only after confirmation',async({page})=>{
  await page.evaluate(async()=>{const m=await import('/src/browser/workflow-notices.ts');const row=await m.publishWorkflowNotice('ui','Private <text>',new AbortController().signal);await m.actOnWorkflowNotice(row,false);});
- await page.getByRole('button',{name:'Workflows',exact:true}).click();await page.getByText('Notice history flow',{exact:true}).click();await page.getByRole('button',{name:'Workflow history',exact:true}).click();const dialog=page.getByRole('dialog',{name:'Workflow history',exact:true});
+ await page.getByRole('button',{name:'Workflows',exact:true}).click();await page.getByText('Notice history flow',{exact:true}).click();
+ const run=page.getByRole('button',{name:'Run now',exact:true});
+ await expect(run).toBeVisible();
+ await expect(run.locator('.workflow-run-label')).toBeHidden();
+ await expect(page.getByRole('button',{name:'Change',exact:true})).toHaveCount(0);
+ await page.getByLabel('Workflow actions',{exact:true}).click();
+ await expect(page.getByRole('button',{name:'Change',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Workflow history',exact:true})).toHaveCount(0);
+ await page.evaluate(async()=>{const {openWorkflowHistory}=await import('/src/browser/workflow-history.ts');openWorkflowHistory(()=>({flows:[],localRuns:{}}),()=>{},()=>false);});
+ const dialog=page.getByRole('dialog',{name:'Workflow history',exact:true});
  await expect(dialog.getByRole('link',{name:'Download notification history',exact:true})).toHaveAttribute('href',/^blob:/);
  const exported=await dialog.getByRole('link',{name:'Download notification history',exact:true}).evaluate(async(a:HTMLAnchorElement)=>JSON.parse(await (await fetch(a.href)).text()));expect(exported.rows[0].text).toBe('Private <text>');
  await dialog.getByRole('button',{name:'Free notification space',exact:true}).click();expect(await page.evaluate(async()=>JSON.parse((await (await import('/src/browser/workflow-notices.ts')).workflowNoticesDocument.readRaw())!).rows.length)).toBe(1);
@@ -31,10 +40,13 @@ test('compacted receipts distinguish exact JavaScript text including lone surrog
  const conflict=await page.evaluate(async()=>{const m=await import('/src/browser/workflow-notices.ts');const s=new AbortController().signal;const row=await m.publishWorkflowNotice('unicode','Output \ud800',s);await m.actOnWorkflowNotice(row,false);await m.compactWorkflowNotices((await m.workflowNoticeHistory()).recovery,s);try{await m.publishWorkflowNotice('unicode','Output \ud801',s);return false;}catch{return true;}});expect(conflict).toBe(true);
 });
 
-test('notification recovery remains reachable with no saved workflows',async({page})=>{
+test('the empty Workflows header stays clean and stored notifications remain recoverable',async({page})=>{
  await page.evaluate(()=>localStorage.setItem('alpha.dev.app.workflows',JSON.stringify({flows:[],localRuns:{}})));
  // Override the fixture seed on this reload to exercise the empty list.
- await page.addInitScript(()=>localStorage.setItem('alpha.dev.app.workflows',JSON.stringify({flows:[],localRuns:{}})));await page.reload();await page.getByRole('button',{name:'Workflows',exact:true}).click();await page.getByRole('button',{name:'Manage workflow history',exact:true}).click();await expect(page.getByRole('dialog',{name:'Workflow history',exact:true}).getByRole('link',{name:'Download notification history',exact:true})).toBeVisible();
+ await page.addInitScript(()=>localStorage.setItem('alpha.dev.app.workflows',JSON.stringify({flows:[],localRuns:{}})));await page.reload();await page.getByRole('button',{name:'Workflows',exact:true}).click();await expect(page.getByRole('button',{name:'New automation',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Manage workflow history',exact:true})).toHaveCount(0);
+ await page.evaluate(async()=>{const {openWorkflowHistory}=await import('/src/browser/workflow-history.ts');openWorkflowHistory(()=>({flows:[],localRuns:{}}),()=>{},()=>false);});
+ await expect(page.getByRole('dialog',{name:'Workflow history',exact:true}).getByRole('link',{name:'Download notification history',exact:true})).toBeVisible();
 });
 
 test('abort during receipt hashing commits no partial archive',async({page})=>{
@@ -69,18 +81,4 @@ test('closing history during loading creates no late download URLs',async({page}
  await expect(page.getByRole('dialog',{name:'Workflow history',exact:true})).toHaveCount(0);
  await page.evaluate(()=>new Promise(resolve=>setTimeout(resolve,50)));
  expect(await page.evaluate(()=>(window as any).noticeUrlsCreated())).toBe(before);
-});
-
-test('changed older data exposes both exact backups and disables compaction',async({page})=>{
- await page.evaluate(async()=>{
-  const n=await import('/src/browser/workflow-notices.ts'),{openWorkflowHistory}=await import('/src/browser/workflow-history.ts');
-  const row=await n.publishWorkflowNotice('backup','Canonical text',new AbortController().signal);await n.actOnWorkflowNotice(row,false);
-  localStorage.setItem('alpha.browser.workflow-notices.v1','{broken older data');
-  openWorkflowHistory(()=>({flows:[],localRuns:{}}),()=>{},()=>false);
- });
- const dialog=page.getByRole('dialog',{name:'Workflow history',exact:true}),active=dialog.getByRole('link',{name:'Download notification history',exact:true}),older=dialog.getByRole('link',{name:'Download older notification history',exact:true});
- await expect(active).toHaveAttribute('href',/^blob:/);await expect(older).toBeVisible();
- expect(await active.evaluate(async(a:HTMLAnchorElement)=>JSON.parse(await(await fetch(a.href)).text()).rows[0].text)).toBe('Canonical text');
- expect(await older.evaluate(async(a:HTMLAnchorElement)=>(await fetch(a.href)).text())).toBe('{broken older data');
- await expect(dialog.getByRole('button',{name:'Free notification space',exact:true})).toBeDisabled();
 });

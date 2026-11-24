@@ -7,12 +7,13 @@ export {workflowIntentText} from "../ui/workflows/workflow-intent-messages";
 export {automationStatusLabel} from "../ui/workflows/automation-status-labels";
 export {automationRequestText} from "../ui/workflows/workflow-messages";
 import {workflowDeviceTimeZone,workflowLocalInstant,workflowCronLabel,automationLocalDateInput,localDate,workflowNextClockOccurrence,workflowSnoozeTime} from './workflow-local-time';
-export {workflowDeviceTimeZone,automationLocalDateInput,localDate,workflowNextClockOccurrence,workflowSnoozeTime} from './workflow-local-time';
+export {workflowDeviceTimeZone,automationLocalDateInput,workflowSnoozeTime} from './workflow-local-time';
+import {expectRecord} from '../lib/parse.ts';
 /** Alpha presentation over OG's canonical automation, ScheduledTask and LifeOps contracts.
  * No runner, mirroring, task storage or automatic execution lives in this client. */
 import type {AutomationsMethod} from './automations-route-policy.ts';
 export type AutomationRequest = (path:string,method:AutomationsMethod,body:unknown|undefined,signal:AbortSignal)=>Promise<unknown>;
-export type AutomationKind = 'workflow'|'prompt'|'schedule'|'reminder'|'routine'|'device-reminder';
+type AutomationKind = 'workflow'|'prompt'|'schedule'|'reminder'|'routine'|'device-reminder';
 /** Effect receipt resource kinds whose applied, durable commit changes a record the unified list shows. */
 export const AUTOMATION_RESOURCE_KINDS=['lifeops.definition','lifeops.occurrence','lifeops.scheduled_task','trigger.task','workflow.definition'] as const;
 type ObjectValue = Record<string,any>;
@@ -21,20 +22,20 @@ export interface AutomationRow {
  source:string;schedule:string;record:ObjectValue;workflowId?:string;triggerId?:string;occurrenceId?:string;
 }
 export interface AutomationIssue {source:'automations'|'schedules'|'reminders'|'definitions'|'device';message:string;unavailable:boolean}
-export interface AutomationSnapshot {rows:AutomationRow[];issues:AutomationIssue[]}
+interface AutomationSnapshot {rows:AutomationRow[];issues:AutomationIssue[]}
 export interface PromptDraft {title:string;instructions:string;triggerType:'once'|'cron'|'event';scheduledAt:string;cron:string;eventKind:string;timezone:string;originalScheduledAt?:string;originalEnabled?:boolean}
 export interface ReminderDraft {message:string;due:string;timezone:string;idempotencyKey:string}
-export type ScheduledVerb = 'snooze'|'skip'|'complete'|'dismiss'|'escalate'|'acknowledge'|'edit'|'reopen'|'fire';
+type ScheduledVerb = 'snooze'|'skip'|'complete'|'dismiss'|'escalate'|'acknowledge'|'edit'|'reopen'|'fire';
 export const scheduledTaskEnded = (status:string) => ['completed','dismissed','skipped','expired','failed'].includes(status);
-const object=(value:unknown):ObjectValue=>{if(!value||typeof value!=='object'||Array.isArray(value))throw Error('Invalid automation response.');return value as ObjectValue;};
+const object=(value:unknown):ObjectValue=>expectRecord(value,()=>Error('Invalid automation response.'));
 const text=(value:unknown):string=>typeof value==='string'?value:'';
 export function automationId(value:unknown):string {const id=text(value);if(!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(id)||id.includes('..'))throw Error('Automation identity is unavailable.');return id;}
 const list=(value:unknown):unknown[]=>{if(!Array.isArray(value))throw Error('Invalid automation list.');return value;};
 export class AutomationOutcomeError extends Error {readonly outcomeKnown=true;}
-// Since elizaOS/eliza #trigger-routes (pin 4557621650) the agent refuses PUT that enables a paused
-// trigger with 429 once its active-trigger limit is reached, before changing anything. A 429 alone
-// stays an unknown outcome (a proxy may answer 429 after the agent applied the write), so enable
-// re-reads the trigger: still paused means a known refusal, enabled means the write landed.
+// The agent refuses a PUT that enables a paused trigger with 429 once its active-trigger limit is
+// reached, before changing anything. A 429 alone stays an unknown outcome (a proxy may answer 429
+// after the agent applied the write), so enable re-reads the trigger: still paused means a known
+// refusal, enabled means the write landed.
 export const AUTOMATION_LIMIT_MESSAGE='This automation was not enabled. The agent is at its limit of active automations or is busy; pause another automation or try again later.';
 /** One instant label for every list row ("Oct 29, 2026, 6:00 PM"), in the current device zone. */
 export function automationWhen(stamp:string|number,_zone?:string,locale?:string):string{return workflowLocalInstant(stamp,locale);}

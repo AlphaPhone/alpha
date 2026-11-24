@@ -1,18 +1,20 @@
 import {startRecordingMeter,recordingMetrics} from './audio-levels';
 import {BrowserMicrophone} from './sensor-policy';
-type Clip = {recordingId:string;durationMs:number};
+import {abortError} from '../lib/abort';
+import type {VoiceClip} from '../native/alpha-voice-cloud';
 /** One finished part of a segmented recording: a standalone file of `durationMs` recorded time. */
-export type CaptureSegment = {index:number;blob:Blob;durationMs:number};
+type CaptureSegment = {index:number;blob:Blob;durationMs:number};
 /** The recorder writing the current segment, alongside the whole-recording recorder. */
 type SegmentPart = {recorder:MediaRecorder;started:number;pausedAt?:number;pausedTotal:number;flushed:Promise<void>};
 type Session = {
  id:string;generation:number;stream:MediaStream;recorder:MediaRecorder;started:number;stopped?:number;
  done:Promise<Blob>;reject:(error:Error)=>void;timer?:ReturnType<typeof setTimeout>;pausedAt?:number;pausedTotal:number;
- releaseMeter?:()=>void;finishing?:Promise<Clip>;settled:boolean;failed?:boolean;
+ releaseMeter?:()=>void;finishing?:Promise<VoiceClip>;settled:boolean;failed?:boolean;
  segment?:SegmentPart;rollover?:ReturnType<typeof setInterval>;
 };
-const partMs=(part:SegmentPart,now=Date.now())=>Math.max(0,now-part.started-part.pausedTotal-(part.pausedAt!==undefined?now-part.pausedAt:0));
-const cancelled=()=>new DOMException('Recording cancelled','AbortError');
+/** Recorded time of a session or segment, without paused time. */
+const recordedMs=(clock:{started:number;pausedTotal:number;pausedAt?:number},now=Date.now())=>Math.max(0,now-clock.started-clock.pausedTotal-(clock.pausedAt!==undefined?now-clock.pausedAt:0));
+const cancelled=()=>abortError('Recording cancelled');
 /** Own each microphone stream, timer and stop promise independently of later sessions. */
 export class BrowserAudioCapture {
  private microphone?:BrowserMicrophone;
@@ -28,8 +30,8 @@ export class BrowserAudioCapture {
   ++this.generation;const session=this.current;this.current=undefined;
   if(!session)return;
   session.releaseMeter?.();clearTimeout(session.timer);clearInterval(session.rollover);session.settled=true;session.reject(cancelled());
-  try{if(session.recorder.state!=='inactive')session.recorder.stop();}catch{}
-  const part=session.segment;session.segment=undefined;try{if(part&&part.recorder.state!=='inactive')part.recorder.stop();}catch{}
+  if(session.recorder.state!=='inactive')session.recorder.stop();
+  const part=session.segment;session.segment=undefined;if(part&&part.recorder.state!=='inactive')part.recorder.stop();
   session.stream.getTracks().forEach(track=>track.stop());
  }
  /**
@@ -75,13 +77,13 @@ export class BrowserAudioCapture {
      const part:SegmentPart={recorder:new MediaRecorder(stream,mimeType?{mimeType}:undefined),started:Date.now(),pausedTotal:0,flushed:Promise.resolve()};
      const parts:Blob[]=[];
      part.recorder.ondataavailable=event=>{if(event.data.size)parts.push(event.data);};
-     part.flushed=new Promise<void>(done=>{part.recorder.onstop=()=>{const durationMs=Math.max(1,partMs(part,session.stopped??Date.now()));if(parts.length&&!session.failed&&this.current===session)onSegment({index:index++,blob:new Blob(parts,{type:part.recorder.mimeType}),durationMs});done();};});
+     part.flushed=new Promise<void>(done=>{part.recorder.onstop=()=>{const durationMs=Math.max(1,recordedMs(part,session.stopped??Date.now()));if(parts.length&&!session.failed&&this.current===session)onSegment({index:index++,blob:new Blob(parts,{type:part.recorder.mimeType}),durationMs});done();};});
      part.recorder.start(1000);
      if(session.pausedAt!==undefined){part.recorder.pause();part.pausedAt=Date.now();}
      session.segment=part;
     };
     open();
-    session.rollover=setInterval(()=>{const part=session.segment;if(!part||session.stopped!==undefined||session.settled||partMs(part)<segmentMs)return;try{part.recorder.stop();}catch{}open();},250);
+    session.rollover=setInterval(()=>{const part=session.segment;if(!part||session.stopped!==undefined||session.settled||recordedMs(part)<segmentMs)return;try{part.recorder.stop();}catch{}open();},250);
    }
    session.releaseMeter=startRecordingMeter(id,stream);
    if(Number.isFinite(duration))session.timer=setTimeout(automatic,duration);
@@ -101,13 +103,13 @@ export class BrowserAudioCapture {
   const part=session.segment;if(part&&part.recorder.state==='paused'){part.recorder.resume();part.pausedTotal+=Date.now()-(part.pausedAt??Date.now());part.pausedAt=undefined;}
  }
  /** Recorded time of the current session, without paused time. */
- elapsed(id:string){const session=this.current;if(!session||session.id!==id)return 0;const now=session.stopped??Date.now();return Math.max(0,now-session.started-session.pausedTotal-(session.pausedAt!==undefined?now-session.pausedAt:0));}
- async stop():Promise<Clip> {
+ elapsed(id:string){const session=this.current;if(!session||session.id!==id)return 0;return recordedMs(session,session.stopped??Date.now());}
+ async stop():Promise<VoiceClip> {
   const session=this.current;if(!session)throw Error('Start a recording first.');
   if(session.finishing)return session.finishing;
   session.stopped=Date.now();clearTimeout(session.timer);clearInterval(session.rollover);if(session.pausedAt!==undefined){session.pausedTotal+=session.stopped-session.pausedAt;session.pausedAt=undefined;}
   const part=session.segment;session.segment=undefined;
-  if(part){if(part.pausedAt!==undefined){part.pausedTotal+=session.stopped-part.pausedAt;part.pausedAt=undefined;}try{if(part.recorder.state!=='inactive')part.recorder.stop();}catch{}}
+  if(part){if(part.pausedAt!==undefined){part.pausedTotal+=session.stopped-part.pausedAt;part.pausedAt=undefined;}if(part.recorder.state!=='inactive')part.recorder.stop();}
   session.finishing=(async()=>{
    try {
     if(session.recorder.state!=='inactive')session.recorder.stop();

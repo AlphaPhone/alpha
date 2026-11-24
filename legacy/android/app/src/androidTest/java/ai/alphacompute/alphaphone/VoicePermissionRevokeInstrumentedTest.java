@@ -33,7 +33,7 @@ import static org.junit.Assert.*;
  */
 @RunWith(AndroidJUnit4.class)
 public final class VoicePermissionRevokeInstrumentedTest {
- static final String MARKER = "voice-revoke/recording.json";
+ private static final String MARKER = "voice-revoke/recording.json";
  private static final String VOICE = "Capacitor.Plugins.AlphaVoiceCloud";
 
  private static JSONObject call(String expression) throws Exception {

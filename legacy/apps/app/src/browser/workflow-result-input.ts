@@ -1,10 +1,11 @@
 import {layoutBrowserDialog} from './dialog-layout';
-import {browserScreenLocked} from './screen-locked';
-const cancelled=()=>new DOMException('Result input cancelled','AbortError');
+import {noticeActionBlocked} from './notice-action';
+import {abortError} from '../lib/abort';
+const cancelled=()=>abortError('Result input cancelled');
 /** Explicit local test data for an unconstrained Write instruction; never represented as model output. */
 export function requestWorkflowResult(instruction:string,input:string,signal:AbortSignal):Promise<string>{
  signal.throwIfAborted();
- if(document.hidden||document.documentElement.dataset.devBackground==='true'||browserScreenLocked())return Promise.reject(cancelled());
+ if(noticeActionBlocked())return Promise.reject(cancelled());
  return new Promise((resolve,reject)=>{
   let settled=false;const previous=document.activeElement as HTMLElement|null;
   const dialog=document.createElement('dialog');dialog.setAttribute('aria-label','Workflow step result');dialog.style.cssText='box-sizing:border-box;width:min(380px,92vw);max-height:85dvh;overflow:auto;border:0;border-radius:20px;padding:24px;background:var(--bg,#fff);color:var(--fg,#111);font:16px/1.5 system-ui';
@@ -20,7 +21,7 @@ export function requestWorkflowResult(instruction:string,input:string,signal:Abo
   for(const button of [use,cancel])button.style.cssText='min-height:44px;padding:10px 14px;margin:4px;border:1px solid #ccc;border-radius:10px;font:inherit;color:inherit;background:var(--s2,#f3f3f3)';
   const finish=(value?:string)=>{if(settled)return;settled=true;signal.removeEventListener('abort',close);window.removeEventListener('alpha-back',back,true);for(const name of ['pagehide','alpha:device-state','launcher-home','alpha:dev-incoming-call'])window.removeEventListener(name,close);document.removeEventListener('visibilitychange',hidden);dialog.close();dialog.remove();if(previous?.isConnected)previous.focus();value===undefined?reject(cancelled()):resolve(value);};
   const close=()=>finish();const hidden=()=>{if(document.hidden)close();};const back=(event:Event)=>{event.preventDefault();event.stopImmediatePropagation();close();};
-  result.oninput=()=>{use.disabled=!result.value.trim()||result.value.length>16000;};use.onclick=()=>{if(result.value.trim()&&result.value.length<=16000)finish(result.value);};cancel.onclick=close;dialog.onclose=close;
+  result.oninput=()=>{use.disabled=!result.value.trim()||result.value.length>16000;};use.onclick=()=>finish(result.value);cancel.onclick=close;dialog.onclose=close;
   dialog.append(title,prompt,sourceLabel,resultLabel,use,cancel);layoutBrowserDialog(dialog,[use,cancel]);document.body.append(dialog);
   signal.addEventListener('abort',close,{once:true});window.addEventListener('alpha-back',back,true);for(const name of ['pagehide','alpha:device-state','launcher-home','alpha:dev-incoming-call'])window.addEventListener(name,close);document.addEventListener('visibilitychange',hidden);
   if(signal.aborted){close();return;}try{dialog.showModal();result.focus();}catch{close();}

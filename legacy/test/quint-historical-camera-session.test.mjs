@@ -70,7 +70,8 @@ async function checkHistoricalCameraSession(extraSources = []) {
         assert.ok(actual.zoom === 1 || actual.zoom === 2);
         if (actual.phase === 'ready') assert.equal(actual.preview, true, 'Ready Camera displays the actual synthetic stream');
         return {'s.view': actual.view, 's.phase': actual.phase, 's.capture': actual.capture, 's.lens': actual.lens,
-          's.flash': actual.flash, 's.zoom': actual.zoom === 1 ? 'one' : 'half',
+          // The adapter holds Off, Auto or On; the historical model has the browser torch, off or on.
+          's.flash': actual.flash !== 'off', 's.zoom': actual.zoom === 1 ? 'one' : 'half',
           's.chat': actual.view === 'camera' && actual.chat ? 'open' : 'closed',
           Ready: actual.view === 'camera' && actual.phase === 'ready' && actual.preview};
       }
@@ -143,14 +144,16 @@ async function checkHistoricalCameraSession(extraSources = []) {
     });
     await schedule('conversation covers Camera through grace and a fresh first frame', async c => {
       await c.open();await c.firstFrame();
+      // Portrait Camera lays itself out above the open sheet, so only a full conversation covers it now.
       await c.f.button('Open conversation').click();
+      await c.f.page.evaluate(() => window.quintMountedCalendar.setState({chat: 'full'}));
       await c.f.page.waitForFunction(() => window.quintMountedCamera().chat);
       await c.mark('The actual conversation cover leaves preview alive during grace', call('ChatOpen'));
       await c.off();await c.ended();
       await c.mark('The actual grace expiry releases the covered preview', call('ChatGraceEnds'));
       await c.f.page.evaluate(() => window.dispatchEvent(new Event('alpha-back', {cancelable: true})));
       await c.pending();
-      await c.mark('Back closes the conversation and starts a new preview', call('ChatClose'));
+      await c.mark('Back lowers the conversation off the viewfinder and starts a new preview', call('ChatClose'));
       await c.firstFrame(false);await c.leave();
     });
   } finally {await browser.close();}
@@ -160,6 +163,7 @@ async function checkHistoricalCameraSession(extraSources = []) {
       'A granted synthetic stream and its visible preview are grouped into the historical Grant and FirstFrame steps. Only the selected back zoom and lens reset are projected.',
       'Scan review uses the real dialog and local OCR with a generated image. Its open and close are stutters for the historical Camera state.',
       'Raw preview request interleavings are separate from committed camera state. The fixture can deliver multiple already-retired synthetic requests before fresh reentry.',
+      'The historical chat cover is the full conversation: the current portrait Camera is laid out above an open sheet, which leaves its preview uncovered, and Back lowers full to that sheet.',
       'Photo and video save, permission denial and OS resume, focus and flash hardware, agent queue settlement and historical ablations remain separate.']});
   return {receipts: [receipt], obligations: [
     {model, obligation: 'Compare historical capture settlement and native resume',

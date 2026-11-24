@@ -8,7 +8,8 @@ import {checkTraces, qmap} from '../specs/quint/refinement/check-traces.mjs';
 import {boundInputs, call, captureSources, checkpoint, deferred, sourceContext, trace} from '../specs/quint/refinement/application/support.mjs';
 
 const driver = fileURLToPath(import.meta.url);
-const sources = ['apps/app/src/browser/domain-document.ts', 'apps/app/src/browser/revision.ts',
+const sources = ['apps/app/src/lib/hash.ts', 'apps/app/src/lib/json.ts', 'apps/app/src/lib/session-key.ts',
+  'apps/app/src/browser/domain-document.ts', 'apps/app/src/browser/revision.ts',
   'apps/app/src/browser/screen-locked.ts', 'apps/app/src/browser/notice-action.ts',
   'apps/app/src/browser/hosted-results.ts', 'apps/app/src/runtime/hosted-result-notices.ts'];
 const model = 'BrowserHostedResultNotice';
@@ -59,13 +60,13 @@ async function scenario(name, drive) {
       this.notifications++;
     }
   }
-  const actual = sourceContext(sources, ['browserHostedResults', 'hostedResultsDocument', 'resolveHostedResultTap', 'canonical'],
+  const actual = sourceContext(sources, ['browserHostedResults', 'hostedResultsDocument', 'resolveHostedResultTap', 'canonicalJson'],
     {window, document: window.document, localStorage: window.localStorage, Event: window.Event, crypto,
       WebPlugin, browserDocuments: documents, BroadcastChannel: undefined, registerPlugin: () => ({})});
   const port = actual.browserHostedResults, store = actual.hostedResultsDocument;
   const read = async () => await store.read(() => ({enabled: true, polling: true, rows: []}));
   function digestClass(id, digest) {
-    const match = [1, 2].find(version => hash(actual.canonical(payload(id, version))) === digest);
+    const match = [1, 2].find(version => hash(actual.canonicalJson(payload(id, version))) === digest);
     assert.ok(match, 'Only exact retained bytes may become a notice digest');
     return match;
   }

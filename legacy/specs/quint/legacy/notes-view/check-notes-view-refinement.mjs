@@ -124,16 +124,20 @@ async function remove(page, title) {
   await button(page, 'Open '+title).click();
   await expect(editor(page)).toBeVisible();
   await button(page, 'More').click();
-  await page.getByRole('dialog', {name: 'Note actions'}).getByRole('button', {name: 'Delete', exact: true}).click();
+  await page.getByRole('menu', {name: 'Note actions'}).getByRole('menuitem', {name: 'Delete', exact: true}).click();
   await expect(editor(page)).toHaveCount(0);
   await expect(button(page, 'Open '+title)).toHaveCount(0);
-  await expect(button(page, 'Recently deleted')).toBeVisible();
+  await expect(button(page, 'Recently deleted')).toHaveCount(0);
+  await button(page, 'Notes options').click();
+  await expect(page.getByRole('dialog', {name: 'Notes options', exact: true}).getByRole('button', {name: 'Recently deleted', exact: true})).toBeEnabled();
+  await page.keyboard.press('Escape');
   await expect(toast(page)).toContainText('Deleted');
 }
 
 async function recover(page, title, legacy = false) {
   await expect(toast(page)).toHaveCount(0);
-  await button(page, 'Recently deleted').click();
+  await button(page, 'Notes options').click();
+  await page.getByRole('dialog', {name: 'Notes options', exact: true}).getByRole('button', {name: 'Recently deleted', exact: true}).click();
   await expect(trash(page)).toBeVisible();
   if (!legacy) await expect(button(page, 'Empty Recently deleted')).toHaveCount(0);
   await trash(page).getByRole('button', {name: legacy ? new RegExp('^'+title+', ') : title, exact: !legacy}).click();

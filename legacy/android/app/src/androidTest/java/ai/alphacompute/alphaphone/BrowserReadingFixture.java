@@ -41,9 +41,9 @@ final class BrowserReadingFixture {
   BoundedActivityScenario.main(()->{
    try{
     Object plugin=resumedActivity().getBridge().getPlugin("AlphaBrowser").getInstance();
-    java.lang.reflect.Field reading=ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class.getDeclaredField("reading");
+    java.lang.reflect.Field reading=AlphaBrowserPlugin.class.getDeclaredField("reading");
     reading.setAccessible(true);
-    java.lang.reflect.Field field=ai.eliza.plugins.browsersurface.BrowserReviewedReading.class.getDeclaredField("dialog");
+    java.lang.reflect.Field field=ai.alphacompute.alphaphone.browser.AlphaReviewedReading.class.getDeclaredField("dialog");
     field.setAccessible(true);
     AlertDialog dialog=(AlertDialog)field.get(reading.get(plugin));
     if(dialog!=null&&dialog.isShowing())result.set(dialog);

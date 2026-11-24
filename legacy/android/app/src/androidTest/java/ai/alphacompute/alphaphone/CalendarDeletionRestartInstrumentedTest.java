@@ -76,6 +76,5 @@ public final class CalendarDeletionRestartInstrumentedTest {
     assertEquals("Remove only the owned synthetic calendar",1,context.getContentResolver().delete(owned,null,null));assertTrue(file.delete());
    }
   }
-  Bundle result=new Bundle();result.putString("calendarRestartRun",run);result.putString("calendarRestartPhase",phase);result.putInt("calendarRestartPid",Process.myPid());InstrumentationRegistry.getInstrumentation().addResults(result);
  }
 }

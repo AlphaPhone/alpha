@@ -21,7 +21,7 @@ export const BUILD_TOOLCHAIN = 'android/embedding-host/build-toolchain.json';
 export const WORKSPACE = '.eliza/embedding-host';
 
 type LibraryManifest = Pick<EmbeddingManifest, 'abi' | 'libraries' | 'additionalAbis'>;
-type Toolchain = {ndk:string;cmake:string;engineRepository:string;remapBuildPath:boolean};
+type Toolchain = {ndk:string;cmake:string;engineRepository:string};
 const readJson = <T>(file:string):T => JSON.parse(fs.readFileSync(file,'utf8'));
 
 /** Report staged library integrity; the generated producer receipt supplies current output hashes. */

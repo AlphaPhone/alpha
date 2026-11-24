@@ -8,7 +8,6 @@ const imports=new Map([
  ['./file-email-review','export const reviewFileEmail=()=>{throw Error("Email outside fixture")};'],
  ['../platform-plugins','export const registerPlugin=__ports.plugin;'],
  ['../runtime/inbox-attachment','export const reviewMailAttachment=__ports.reviewAttachment;'],
- ['../browser/content-question','export const reviewContentQuestion=__ports.review; export class SourceUnavailableError extends Error {}'],
  ['../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-reading.ts','export const sensitiveReadingText=()=>false;'],
  ['../ui/files/files-browser-adapter.ts','export const installFilesBrowserAdapter=()=>({});'],
  ['@capacitor/core','export const Capacitor=__ports.capacitor;'],
@@ -24,73 +23,77 @@ const compiled=await build({
  }}],
 });
 function fixture({read=async()=>({status:'read',text:'Readable excerpt'}),pdf=async()=>({status:'rendered',page:0,pageCount:1,imageUri:'blob:pdf-page'}),native=false,
-  sourceRead=async()=>{throw Error('Source read outside fixture');},sourceRetain=async()=>({reference:'fixture-source'}),
+  sourceRead=async()=>{throw Error('Source read outside fixture');},
   index={record:()=>[],setOpen(){},list:()=>[],open:()=>null,has:()=>true},
-  describe=async()=>({status:'unavailable'}),rename=async()=>({status:'unavailable'})}={}){
- const state={open:null},document={hidden:false,querySelector:()=>null},reviews=[],forgotten=[],retained=[];
+  describe=async()=>({status:'unavailable'}),rename=async()=>({status:'unavailable'}),messages}={}){
+ const state={open:null},document={hidden:false,querySelector:()=>null},attachments=[],forgotten=[];
  let active=true;
  const api={active:true,isActive:()=>active,get:()=>state,set:patch=>Object.assign(state,patch),setView(){},
-  open:(_module,patch)=>Object.assign(state,patch),ic:{},toast(){}};
+  open:(_module,patch)=>Object.assign(state,patch),attachSelectedFile:async selection=>{attachments.push(selection);return true;},ic:{},toast(){}};
  const ports={
-  review(input){const reviewed={input,closed:false};reviews.push(reviewed);return ()=>{reviewed.closed=true;};},
   capacitor:{isNativePlatform:()=>native,convertFileSrc:value=>value},
   daily:{readSelected:read,pdfSelected:pdf,describeSelected:describe,renameSelected:rename,forgetSelected:async input=>forgotten.push(input.selectionId)},
   index,
-  plugin:name=>name==='AlphaMailAttachments'?{readSelected:sourceRead,retainSourceReference:input=>{retained.push(input);return sourceRetain(input);}}:{},
+  plugin:name=>name==='AlphaMailAttachments'?{readSelected:sourceRead}:{},
   reviewAttachment:async file=>file,
  };
  const module={exports:{}};
  new Function('require','module','exports','__ports','window','document','navigator',compiled.outputFiles[0].text)(
   createRequire(import.meta.url),module,module.exports,ports,new EventTarget(),document,{});
- const views={files:{render:()=>({})},inbox:{}},Component=class {};
+ const views={files:{render:()=>({})},inbox:{},...(messages?{messages}:{})},Component=class {};
  const accept=module.exports.installSelectedDocumentAdapter(Component,views);
- return {accept:(result,recent)=>accept('files',result,api,recent),render:()=>views.files.render(state,api),api,state,document,reviews,forgotten,retained,
+ return {accept:(result,recent)=>accept('files',result,api,recent),render:()=>views.files.render(state,api),api,state,document,attachments,forgotten,
   active(value){active=value;},leave:()=>views.files.onLeave?.(api),close:()=>views.files.back(state,api)};
 }
 const selected=(id='one',mimeType='text/plain')=>({status:'selected',selectionId:id,name:id+'.file',mimeType,uri:'blob:'+id});
 
-test('Ask waits for nonblank selected text and stale loading callbacks cannot open review',async()=>{
- const pending=Promise.withResolvers(),f=fixture({read:()=>pending.promise});
+function textReceipt(text) {
+ return {name:'one.file',mimeType:'text/plain',sha256:'a'.repeat(64),size:Buffer.byteLength(text),text,dataBase64:Buffer.from(text).toString('base64')};
+}
+
+test('Files waits for readable text and stages the exact file without an excerpt editor',async()=>{
+ const pending=Promise.withResolvers(),f=fixture({read:()=>pending.promise,sourceRead:async()=>textReceipt('Current excerpt')});
  const accepting=f.accept(selected()),loading=f.render().pv;
  assert.equal(loading.canAsk,false);
- loading.ask();assert.equal(f.reviews.length,0);
+ loading.ask();assert.equal(f.attachments.length,0);
  pending.resolve({status:'read',text:'Current excerpt'});await accepting;
  const ready=f.render().pv;
  assert.equal(ready.canAsk,true);
- loading.ask();assert.equal(f.reviews.length,0);
- ready.ask();assert.equal(f.reviews.length,1);assert.equal(f.reviews[0].input.text,'Current excerpt');
+ loading.ask();assert.equal(f.attachments.length,0);
+ assert.equal(await ready.ask(),true);
+ const [attachment]=f.attachments;
+ const file=await attachment.read(attachment.current);
+ assert.equal(file.name,'one.file');assert.equal(file.type.split(';')[0],'text/plain');assert.equal(await file.text(),'Current excerpt');
  for(const response of [{status:'read',text:' \n '},{status:'binary'},{status:'failed'}]){
   const empty=fixture({read:async()=>response});await empty.accept(selected());
-  assert.equal(empty.render().pv.canAsk,false);empty.render().pv.ask();assert.equal(empty.reviews.length,0);
+  assert.equal(empty.render().pv.canAsk,false);empty.render().pv.ask();assert.equal(empty.attachments.length,0);
  }
 });
 
-test('real selected image and rendered PDF paths keep image review while a PDF is pending',async()=>{
+test('selected images and PDFs stage attachments when their preview is ready',async()=>{
  for(const native of [false,true]){
   const image=fixture({native,read:async()=>({status:'binary'})}),input=selected('image','image/png');
   input.uri=native?'content://fixture/image':'blob:image';
   await image.accept(input);const preview=image.render().pv;
-  assert.equal(preview.canAsk,true);preview.ask();
-  assert.equal(image.reviews.length,1);assert.equal(typeof image.reviews[0].input.image,'function');
+  assert.equal(preview.canAsk,true);await preview.ask();assert.equal(image.attachments.length,1);
   const pending=Promise.withResolvers(),pdf=fixture({native,pdf:()=>pending.promise}),accepting=pdf.accept(selected('pdf','application/pdf'));
-  assert.equal(pdf.render().pv.canAsk,false);pdf.render().pv.ask();assert.equal(pdf.reviews.length,0);
+  assert.equal(pdf.render().pv.canAsk,false);pdf.render().pv.ask();assert.equal(pdf.attachments.length,0);
   pending.resolve({status:'rendered',page:0,pageCount:1,imageUri:native?'file://fixture/page.jpg':'blob:pdf-page'});
-  await accepting;assert.equal(pdf.render().pv.canAsk,true);pdf.render().pv.ask();
-  assert.equal(typeof pdf.reviews[0].input.image,'function');
+  await accepting;assert.equal(pdf.render().pv.canAsk,true);await pdf.render().pv.ask();assert.equal(pdf.attachments.length,1);
  }
 });
 
-test('Ask and its admitted review retire with the selected identity, view or page visibility',async()=>{
+test('Ask retires with the selected identity, view or page visibility',async()=>{
  for(const change of ['selection','view','hidden','closed']){
   const f=fixture();await f.accept(selected());const preview=f.render().pv;
-  preview.ask();assert.equal(f.reviews.length,1);const review=f.reviews[0];
-  assert.equal(review.input.current(),true);
+  await preview.ask();assert.equal(f.attachments.length,1);
+  assert.equal(f.attachments[0].current(),true);
   if(change==='selection')await f.accept(selected('two'));
   if(change==='view')f.active(false);
   if(change==='hidden')f.document.hidden=true;
   if(change==='closed')f.close();
-  assert.equal(review.input.current(),false,change);
-  preview.ask();assert.equal(f.reviews.length,1,change);
+  assert.equal(f.attachments[0].current(),false,change);
+  preview.ask();assert.equal(f.attachments.length,1,change);
  }
 });
 
@@ -98,25 +101,22 @@ test('leaving a pending selected read preserves the retired selection fence',asy
  const pending=Promise.withResolvers(),f=fixture({read:()=>pending.promise});
  const accepting=f.accept(selected());f.close();
  pending.resolve({status:'read',text:'Late excerpt'});await accepting;
- assert.equal(f.render().pv,undefined);assert.equal(f.reviews.length,0);
+ assert.equal(f.render().pv,undefined);assert.equal(f.attachments.length,0);
 });
 
-test('source verification rechecks the current view after file read and source retention',async()=>{
- const file={name:'one.file',mimeType:'text/plain',sha256:'a'.repeat(64),size:16,text:'Readable excerpt',sourceReferenceVersion:1};
- for(const boundary of ['read','retain']){
-  const pending=Promise.withResolvers();
-  const f=fixture({sourceRead:async()=>boundary==='read'?pending.promise:file,
-   sourceRetain:()=>pending.promise});
-  await f.accept(selected());f.render().pv.ask();
-  const result=f.reviews[0].input.source();
-  if(boundary==='retain'){
-   for(let turn=0;turn<4;turn++)await Promise.resolve();
-   assert.equal(f.retained.length,1);
-  }
-  f.active(false);pending.resolve(boundary==='read'?file:{reference:'late-source'});
-  await assert.rejects(result,/Source changed|Selection changed/);
-  assert.equal(f.retained.length,boundary==='read'?0:1);
- }
+test('an exact file read rechecks the current view before returning bytes',async()=>{
+ const pending=Promise.withResolvers(),f=fixture({sourceRead:()=>pending.promise});
+ await f.accept(selected());await f.render().pv.ask();
+ const [attachment]=f.attachments,result=attachment.read(attachment.current);
+ f.active(false);pending.resolve(textReceipt('Readable excerpt'));
+ await assert.rejects(result,/file changed/i);
+});
+
+test('a verified size refusal stages only a bounded text excerpt',async()=>{
+ const f=fixture({read:async()=>({status:'read',text:'a'.repeat(13000)}),sourceRead:async()=>{throw Object.assign(Error('Too large'),{code:'too-large'});}});
+ await f.accept(selected());await f.render().pv.ask();
+ const [attachment]=f.attachments,file=await attachment.read(attachment.current);
+ assert.equal(file.name,'one.file (excerpt).txt');assert.equal(file.type.split(';')[0],'text/plain');assert.equal(await file.text(),'a'.repeat(12000));
 });
 
 function rendererStorage(){
@@ -174,4 +174,30 @@ test('an exact remembered picker grant survives rename and restores only while F
   assert.equal(restored.render().pv.canForget,true);
   assert.equal(index().open(),'picker-renamed');
  }
+});
+
+test('a picked file shows its type, size and date, never a MIME type, and only what the provider reported (FILE-13)',async()=>{
+ const f=fixture();
+ await f.accept({...selected('report','application/vnd.openxmlformats-officedocument.wordprocessingml.document'),size:1536,modified:Date.UTC(2020,0,15)});
+ const pv=f.render().pv;
+ assert.match(pv.meta,/^Document · 1\.5 KB · .*2020$/);
+ assert.equal(pv.metaType,'Document');assert.equal(pv.size,1536);
+ const g=fixture();
+ await g.accept(selected('plain'));
+ assert.equal(g.render().pv.meta,'Text');
+});
+
+test('Files offers Messages only for a PNG or JPEG whose known size Messages accepts, and a rename keeps that size',async()=>{
+ // Messages publishes its limit as pictureFits; this stand-in has sms-adapter's rule (mmsPictureFits).
+ const messages={sharePicture:async()=>{},pictureFits:(type,size)=>['image/png','image/jpeg','image/gif'].includes(type)&&Number.isInteger(size)&&size>0&&size<=1024*1024};
+ const offered=async(result,renamed)=>{
+  const f=fixture({messages,rename:async()=>renamed});await f.accept(result,false);
+  if(renamed){f.api.set({rn:renamed.name});await f.render().pv.saveRn();}
+  return f.render().pv.canMessage;
+ };
+ assert.equal(await offered({...selected('small','image/png'),size:68}),true);
+ assert.equal(await offered(selected('unknown','image/png')),false,'an unknown size is never assumed small');
+ assert.equal(await offered({...selected('large','image/jpeg'),size:1024*1024+1}),false);
+ assert.equal(await offered({...selected('text','text/plain'),size:68}),false);
+ assert.equal(await offered({...selected('small','image/png'),size:68},{...selected('renamed','image/png'),name:'renamed.png'}),true);
 });

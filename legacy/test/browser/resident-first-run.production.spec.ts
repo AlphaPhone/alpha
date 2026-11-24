@@ -1,7 +1,7 @@
 // Flag-off Android renderer: explicit native email sign-in, permission setup, resident binding,
 // cancellation, expiry and refusal. Synthetic native outcomes do not establish real authentication.
 import { test, expect, type Page } from '@playwright/test';
-import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface, openYourAgent } from './flag-off-android';
+import { flagOffAndroid, harness, button, fenceNetwork, expectNoDevelopmentSurface } from './flag-off-android';
 import { residentStub, stub, setStub, enterNativeEmailCode, type StubAccount } from './resident-stub';
 import { recordStartupFrames, expectNoHomeBeforePrompt, startupLoading } from './helpers/startup-frames';
 
@@ -43,7 +43,9 @@ async function firstRun(page: Page, overrides: Partial<StubAccount> = {}, ownedL
   if (ownedLifecycle) await page.addInitScript(({ownerId}) => {
     const w=window as any, previous=w.Capacitor.nativePromise;
     w.firstRunLifecycle=[] as Array<{path:string;method:string;ownerId:string;credentialId:string|null}>;
+    w.firstRunNetworkReads=[] as boolean[];
     w.Capacitor.nativePromise=async(plugin:string,method:string,input:any)=>{
+      if(plugin==='ElizaSystem'&&method==='getNetworkStatus')w.firstRunNetworkReads.push(navigator.onLine);
       if(plugin==='Agent'&&method==='request'&&['/api/status','/api/cloud/warm'].includes(input.path)){
         const expectedMethod=input.path==='/api/status'?'GET':'POST';
         const validBody=expectedMethod==='GET'?input.body===undefined:input.body==='{}';
@@ -172,9 +174,8 @@ test('first run: native email sign-in, credits, provider binding, then the resid
   await ask.fill('First request after sign-in'); await ask.press('Enter');
   await expect(page.getByRole('button', { name: 'Message actions: Resident reply 1', exact: true })).toHaveCount(1);
   expect(await harness(page, f => f.streams)).toBe(1);
-  const settings=await openYourAgent(page);
-  await expect(settings.getByRole('button',{name:'Reconnect agent',exact:true})).toHaveCount(0);
-  await expect(settings.getByRole('button',{name:'New conversation',exact:true})).toBeVisible();
+  await page.getByRole('button', { name: 'Chat actions', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Search chat', exact: true })).toBeVisible();
   expect(await page.locator('body').innerText()).not.toContain(account.token);
   await expectNoDevelopmentSurface(page);
   const lifecycle=await page.evaluate(()=>(window as any).firstRunLifecycle) as Array<{path:string;method:string;ownerId:string;credentialId:string|null}>;
@@ -182,6 +183,15 @@ test('first run: native email sign-in, credits, provider binding, then the resid
   expect(lifecycle.filter(row=>row.path==='/api/cloud/warm')).toEqual([{path:'/api/cloud/warm',method:'POST',ownerId:id,credentialId:stored.credentialId}]);
   expect(lifecycle.every(row=>row.ownerId===id)).toBe(true);
   expect(lifecycle.every(row=>row.credentialId===null||row.credentialId===stored.credentialId)).toBe(true);
+  await page.clock.install();
+  await page.context().setOffline(true);
+  await expect.poll(()=>page.evaluate(()=>(window as any).firstRunNetworkReads.at(-1))).toBe(false);
+  const warmCount=()=>page.evaluate(()=>(window as any).firstRunLifecycle.filter((row:any)=>row.path==='/api/cloud/warm').length);
+  expect(await warmCount()).toBe(1);
+  const afterCooldown=await page.evaluate(()=>Date.now()+60_001);
+  await page.clock.setSystemTime(afterCooldown);
+  await page.context().setOffline(false);
+  await expect.poll(warmCount).toBe(2);
   expect(await harness(page, f => f.unexpected)).toEqual([]);
   expect(foreign).toEqual([]);
 });

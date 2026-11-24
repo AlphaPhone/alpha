@@ -21,6 +21,8 @@ async function canonicalNotesSource(page: Page) {
         w.flagOff.calls.push('Agent.request notes state');
         return { status: 200, body: JSON.stringify({ success: true, data: { notes: [], trash: [], revision: 0 } }) };
       }
+      // Trash retention is off on this agent, as in the product, so the recording-cleanup read is refused.
+      if (plugin === 'Agent' && method === 'request' && String(input.path) === '/api/notes/trash/recordings') return { status: 404, body: JSON.stringify({ success: false, error: { code: 'NOTES_TRASH_RETENTION_DISABLED' } }) };
       return base(plugin, method, input);
     };
   });
@@ -44,7 +46,8 @@ for (const offered of [true, false]) {
     // The registered offer reached the real resident negotiation: the stream header and the
     // enrolled credential (read by canonicalNotesFilterAvailable) carry the same list.
     const advertised = (await stub(page, s => s.capabilities) as string).split(',');
-    expect(advertised.includes('notes.query.v1')).toBe(true);
+    // No earlier notes are saved on this phone, so their query is not advertised.
+    expect(advertised.includes('notes.query.v1')).toBe(false);
     expect(advertised.includes(CAPABILITY)).toBe(offered);
     const context = (await stub(page, s => s.bodies) as any[])[0].metadata.clientDevice.context;
     expect(context).toMatchObject({ view: 'notes', sensitive: false });

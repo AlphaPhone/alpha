@@ -47,3 +47,8 @@ and state in the PR description that they were run and are final. PR CI runs onl
 `bun run verify` and, when build inputs change, the Android build; the browser tests run in CI
 only when `develop` is promoted to `main`. The CI lanes are listed in
 [docs/development.md](docs/development.md).
+Locally both lanes use 4 workers (`ALPHA_BROWSER_WORKERS` overrides). Projected (not yet measured
+as full runs): roughly 75 minutes for `test:browser` and 10 for `test:browser:production` on a quiet machine; on a shared
+workstation run them under `systemd-run --user -p MemoryMax=10G`. Failure traces omit DOM
+snapshots and the network log unless `ALPHA_TRACE=1`.
+See [Browser test runs](docs/development.md#browser-test-runs).

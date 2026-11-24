@@ -7,6 +7,9 @@ for (const mode of ['pending', 'unknown-receipt', 'wrong-owner', 'expired', 'wro
   test(`interrupted reply recovers only reviewable proposals: ${mode}`, async ({ page }) => {
     await page.addInitScript((mode) => {
       const w = window as any, store = new Map();
+      // notes_query reads only notes saved before canonical Notes, so the phone negotiates
+      // notes.query.v1 only when it has some (selectDeviceCapabilities, #1330).
+      if (mode === 'notes-from-calendar') localStorage.setItem('alphaphone:daily:v1', JSON.stringify({ notes: [{ id: 'previous-note', title: 'Owned synthetic title', body: 'Saved before canonical Notes', updatedAt: '2026-01-01T00:00:00.000Z' }] }));
       const agentId = '12345678-1234-4234-8234-123456789abc';
       const fixture = w.recoveryFixture = { posts: 0, lists: 0, decisions: 0, claims: 0, receipts: 0, effects: 0, unknown:mode==='unknown-receipt', journal: [] as string[], proposal: null as any };
       const methods = (names: string[]) => names.map(name => ({ name, rtype: 'promise' }));
@@ -109,7 +112,7 @@ for (const mode of ['pending', 'unknown-receipt', 'wrong-owner', 'expired', 'wro
       await expect(page.getByText('Review Notes on Home',{exact:true})).toBeVisible();
     } else {
       const failure = mode === 'rate-limit-empty' ? /The AI request rate limit was reached/
-        : /Partly done · Check first/;
+        : /Couldn’t finish/;
       await expect(page.getByText(failure).first()).toBeVisible();
       await expect(page.getByRole('button', { name: /^Check saved conversation/ })).toHaveCount(0);
     }
@@ -129,7 +132,7 @@ for (const mode of ['pending', 'unknown-receipt', 'wrong-owner', 'expired', 'wro
       await page.getByText('Create note', { exact: true }).click();
       await expect.poll(counts).toEqual({ posts: 1, decisions: 1, claims: 1, receipts: 1, effects: 1, journal: ['get', 'reserve', 'markApplying', 'finish'] });
       if(mode==='unknown-receipt'){
-        await expect(page.locator('[data-alpha-layer="conversation"]').getByText('I couldn’t confirm the result. Check the app before trying again.',{exact:true})).toHaveCount(1);
+        await expect(page.locator('[data-alpha-layer="conversation"]').getByText('I couldn’t confirm the result.',{exact:true})).toHaveCount(1);
         await expect(page.getByText('The action could not reach a confirmed result.',{exact:true})).toHaveCount(0);
         await expect(page.getByText('Action did not reach a confirmed result. Check action history before requesting it again.',{exact:true})).toHaveCount(0);
         await expect(page.getByText('Create note',{exact:true})).toHaveCount(0);

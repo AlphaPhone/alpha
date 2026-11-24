@@ -1,5 +1,5 @@
 /**
- * What Settings shows after asking for the native data reset (`reset.DataResetPlugin` on
+ * What Settings shows after asking for the native data reset (`AlphaResetPlugin` on
  * Android, through the shared `@elizaos/capacitor-system/reset` bridge shape).
  *
  * The renderer only asks for the native review. It carries no reset authority: the native
@@ -9,7 +9,7 @@
  * recorded. A reset that could not be prepared after the owner confirmed it may still go ahead
  * (the plugin dispatches a recorded reset in that branch), so that notice says so.
  *
- * The native plugin answers with the shared `DataResetCopy` sentences (built for the product
+ * The native plugin answers with Alpha's `AlphaDataResetCopy` sentences (built for the product
  * name "Alpha"). Each one is worded by Alpha below; the native text is never shown.
  */
 import type { DataResetPlugin } from "@elizaos/capacitor-system/reset";
@@ -30,7 +30,7 @@ interface DataResetReviewResult {
 export const DATA_RESET_UNCONFIRMED = "Reset isn’t available right now.";
 
 /**
- * Keyed by every `DataResetCopy` result sentence `DataResetPlugin.review` resolves with, for the
+ * Keyed by every `AlphaDataResetCopy` result sentence `AlphaResetPlugin.review` resolves with, for the
  * product name "Alpha". A null value is a cancel the owner chose, which needs no notice.
  */
 export const DATA_RESET_OUTCOMES: ReadonlyMap<string, string | null> = new Map([

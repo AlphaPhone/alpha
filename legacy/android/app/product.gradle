@@ -64,7 +64,7 @@ android {
   // The shared voice loader configures Phonon-2's in-tree ggml backend.
   // Empty decode threads means one per big core.
   buildConfigField 'String', 'ELIZA_ASR_THREADS', '""'
-  // The source commit each voice latency trial records (issue #395, shared VoiceLatencyProbe via AlphaApplication).
+  // The source commit each voice latency trial records (shared VoiceLatencyProbe via AlphaApplication).
   // A tree with tracked changes is recorded as dirty; the aggregator never accepts dirty trials.
   def sourceGit = { List<String> command ->
    try { providers.exec { commandLine(['git', '-C', rootProject.projectDir.parentFile.absolutePath] + command) }.standardOutput.asText.get().trim() }
@@ -105,3 +105,26 @@ def verifyVoiceHost = tasks.register('verifyVoiceHost', Exec) {
  commandLine(['bun', 'scripts/voice-host.ts', '--verify'] + paradeeAbiArgs)
 }
 tasks.named('preBuild').configure { dependsOn verifyParadeeAppLinkage, verifyVoiceHost }
+
+// Alpha-owned copies of shared classes that present UI but must keep their shared names
+// (android/shared-ui-overrides.json): a package-private class the shared module reaches, or an
+// installed component name. Each copy replaces exactly that one file in the shared module's own
+// compile; every other shared file compiles unchanged. test/shared-ui-overrides.test.mjs keeps each
+// copy the pinned upstream source apart from Alpha's listed changes.
+def sharedUiOverrides = new groovy.json.JsonSlurper().parse(file('../shared-ui-overrides.json'))
+if (sharedUiOverrides.schema != 1) throw new GradleException('android/shared-ui-overrides.json schema must be 1')
+sharedUiOverrides.overrides.each { entry ->
+ def module = rootProject.project(":${entry.module}")
+ def relative = entry['class'].replace('.', '/') + '.java'
+ def copy = new File(rootProject.projectDir.parentFile, "${entry.source}/${relative}")
+ if (!copy.isFile()) throw new GradleException("Alpha's copy of ${entry['class']} is missing: ${copy}")
+ if (module.state.executed) throw new GradleException("${module.path} was configured before Alpha's copy of ${entry['class']} could replace the shared one")
+ module.pluginManager.withPlugin('com.android.library') {
+  def replaced = new File(module.projectDir, "src/main/java/${relative}").canonicalFile
+  if (!replaced.isFile()) throw new GradleException("Shared ${entry['class']} is not at ${replaced}")
+  def overrideRoot = copy.parentFile
+  for (int depth = entry['class'].count('.'); depth > 0; depth--) overrideRoot = overrideRoot.parentFile
+  module.android.sourceSets.main.java.srcDir(overrideRoot)
+  module.android.sourceSets.main.java.filter.exclude { element -> element.file.canonicalFile == replaced }
+ }
+}

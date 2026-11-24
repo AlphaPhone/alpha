@@ -1,0 +1,18 @@
+# scripts/test-inbox-attention-flow.ts
+- Lines: 338 | Kind: source transplant (T2): `scripts/inbox-adapter-fixture.ts` reads `apps/app/src/prototype/*.ts` (inbox-cloud-adapter and siblings) through `scripts/fixtures/prototype-script.ts`, strips imports/exports and types by regex and evaluates them in a `vm` realm with hand-injected bindings | Verdict: REWRITE as cases in `test/browser/journeys/inbox.spec.ts`
+- Covers: Home's one bounded header read and badge, not-connected without a grant, link review (mismatch warning, Browser only), opaque attachment Save to Files, forwarded attachments, multiple attachments and old single-attachment servers, Archive/Trash/Drafts folders, provider draft edit via review, "Use in email" reviewed-destination binding (MVP-14, sections 7-7e), preparation cancelled when hidden, revoked preparation clears metadata, notice taps, saved account choice, Ask Alpha attachment validation. Duplicates: `test/browser/home-inbox.spec.ts` (header read, badge, owner change), `inbox-folders-drafts.spec.ts` (folders, old servers, provider draft through review), `use-in-email.spec.ts` + `use-in-email.production.spec.ts` (Use in email), `inbox-hostile-attachment.spec.ts` + `inbox-save-attachment.spec.ts` (opaque save, Ask Alpha staging), `gmail-notice-question.spec.ts` (explicit Ask), `journey-f-reviewed-send.spec.ts` (forward). Callers: `test/inbox.test.mjs:8` (child-suite shim).
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 6 | T2 | Executes regex-stripped product source in a VM; every rename, import change or formatter run in `prototype/inbox-*.ts` breaks it. | Delete once the journey cases exist. | M |
+| 2 | 38-46 | T5 | `linkifyMailText` hostile-body linear-time check tests upstream `.eliza/.../plugin-inbox/src/mailbox/links.ts`. | Upstream follow-up (D14); not carried here. | L |
+| 3 | 85-87 | T3 | `checkOutgoingAttachments` limits (11 files, same name, total size) are pure checks in `inbox-operation.ts`. | Carry into `test/integration/inbox-provider.test.ts` (real import). | L |
+| 4 | 119-242 | — | Reviewed destination binding (stale token after message change, account switch, edit, sign-out, append-only, capacity, aside draft): compare with `use-in-email.spec.ts`; carry what that spec lacks (account switch refusal, edited-draft stale token, aside/elsewhere draft, over-long refused not shortened). | Add to `journeys/inbox.spec.ts` "Use in email" group. | M |
+| 5 | 245-260 | — | Hidden page cancels prepared body reads; observed 409 clears cached metadata. No Playwright case found (grep `visibilitychange` in inbox specs: none). | Carry as a journey case (emulate `document.hidden` via page visibility). | M |
+| 6 | 262-297 | — | Native notice tap clears folder/search, retried after cold hydration; paused lookup is retained. Needs the native notice bridge fake. | Carry the tap → Inbox case; drop retry counting. | M |
+| 7 | 72-89 | — | Multiple attachments add/remove and "one attachment per email" for old servers: no Playwright string hit. | Carry one case. | L |
+| 8 | 20-21 | T1-ish | Row time regex `/9:41|09:41/` locale guess. | Drop. | L |
+
+## Proposed end state
+Deleted together with `scripts/inbox-adapter-fixture.ts` once no transplant importer remains. `journeys/inbox.spec.ts` gains: link review, multiple attachments + old-server limit, forward attachment removal, hidden-page cancel, notice tap reset, saved account choice, and the missing Use-in-email binding cases. `checkOutgoingAttachments` limits move to the inbox integration file. Shim row in `test/inbox.test.mjs` deleted.

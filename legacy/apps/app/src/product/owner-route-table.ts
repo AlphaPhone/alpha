@@ -8,17 +8,22 @@ export const OWNER_ROUTE_TABLE = {
   unsafe: "[\\\\#\\t\\n\\u000B\\f\\r \\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]",
   groups: {
     records: {
-      prefixes: ["/api/notes/state", "/api/views/notes/interact", "/api/lifeops/calendar"],
+      prefixes: ["/api/notes/state", "/api/notes/trash", "/api/views/notes/interact", "/api/lifeops/calendar"],
       id: "^[A-Za-z0-9][A-Za-z0-9._:@+_-]{0,511}$",
       routes: [
         {methods: ["GET"], paths: ["/api/notes/state"]},
         {methods: ["POST"], paths: ["/api/views/notes/interact"]},
+        // Recordings of voice notes the agent erased from its Trash, and this phone's confirmation of each erase.
+        {methods: ["GET"], paths: ["/api/notes/trash/recordings"]},
+        {methods: ["POST"], paths: ["/api/notes/trash/recordings/complete"]},
         {methods: ["POST"], paths: ["/api/lifeops/calendar/events"], query: []},
         {methods: ["GET", "POST"], paths: ["/api/lifeops/calendar/sync-control"], query: []},
         {methods: ["GET"], paths: ["/api/lifeops/calendar/links"], query: ["view"]},
         {methods: ["GET"], paths: ["/api/lifeops/calendar/feed", "/api/lifeops/calendar/calendars", "/api/lifeops/calendar/next-context"],
          query: ["mode", "side", "grantId", "calendarId", "includeHiddenCalendars", "timeMin", "timeMax", "timeZone", "forceSync"]},
         {methods: ["PATCH"], paths: ["/api/lifeops/calendar/events/{id}"], query: ["mode", "side", "grantId", "calendarId"]},
+        // The owner's invitation answer (elizaOS/eliza#39947); its fields are in the body.
+        {methods: ["POST"], paths: ["/api/lifeops/calendar/events/{id}/response"], query: []},
         {methods: ["DELETE"], paths: ["/api/lifeops/calendar/events/{id}"],
          query: ["mode", "side", "grantId", "calendarId", "recurrenceScope", "notifyAttendees", "expectedProviderVersion", "idempotencyKey", "cancellationMode"]}
       ]

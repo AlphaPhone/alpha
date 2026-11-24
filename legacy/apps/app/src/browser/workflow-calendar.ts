@@ -1,5 +1,5 @@
+import {civilDay} from '../lib/civil-date';
 type Calendar={list:(range:{begin:number;end:number})=>Promise<{events:any[];truncated?:boolean}>};
-const civil=(date:Date)=>Date.UTC(date.getFullYear(),date.getMonth(),date.getDate());
 /** Calendar day ranges use local civil midnights; all-day records use UTC civil dates. */
 export function workflowCalendarRange(label:string,now=new Date()){
  const text=label.toLowerCase().replaceAll('’',"'");const begin=new Date(now);begin.setHours(0,0,0,0);let days=1;
@@ -9,7 +9,7 @@ export function workflowCalendarRange(label:string,now=new Date()){
  else if(text==="this week's calendar"){begin.setDate(begin.getDate()-(begin.getDay()+6)%7);days=7;}
  else return undefined;
  const end=new Date(begin);end.setDate(end.getDate()+days);
- return {begin:begin.getTime(),end:end.getTime(),civilBegin:civil(begin),civilEnd:civil(end)};
+ return {begin:begin.getTime(),end:end.getTime(),civilBegin:civilDay(begin),civilEnd:civilDay(end)};
 }
 export async function readWorkflowCalendar(calendar:Calendar,range:NonNullable<ReturnType<typeof workflowCalendarRange>>,signal:AbortSignal){
  signal.throwIfAborted();const result=await calendar.list({begin:Math.min(range.begin,range.civilBegin),end:Math.max(range.end,range.civilEnd)});signal.throwIfAborted();

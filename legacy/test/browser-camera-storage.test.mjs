@@ -62,7 +62,7 @@ function fakeIndexedDB(){
  return {indexedDB:{open},IDBKeyRange,reads,databases,rows:(store)=>databases.get('alpha.browser.photos.v1').stores.get(store).rows};
 }
 
-// '../browser/edit-receipt' is not stubbed: the receipt removal rules under test are bundled from source.
+// '../browser/edit-receipt' and './photo-crop' are not stubbed: the receipt removal and crop rules are bundled from source.
 const stubs={
  './scan-dialog.css':'',
  '../browser/file-archive':'export const fileArchive = () => new Blob([]);',
@@ -75,7 +75,7 @@ const stubs={
  '../browser/preference-documents':'export const albumDocument = { read: async initial => initial(), edit: async (initial, change) => change(initial()) };',
 };
 const bundled=(await build({entryPoints:[resolve('apps/app/src/prototype/browser-camera.ts')],bundle:true,write:false,format:'iife',globalName:'Photos',platform:'browser',plugins:[{name:'ports',setup(builder){
- builder.onResolve({filter:/.*/},args=>{if(args.kind==='entry-point'||args.path==='../browser/edit-receipt')return;if(!(args.path in stubs))throw new Error(`Unreviewed dependency ${args.path}`);return {path:args.path,namespace:'port'};});
+ builder.onResolve({filter:/.*/},args=>{if(args.kind==='entry-point'||args.path==='../browser/edit-receipt'||args.path==='./photo-crop')return;if(!(args.path in stubs))throw new Error(`Unreviewed dependency ${args.path}`);return {path:args.path,namespace:'port'};});
  builder.onLoad({filter:/.*/,namespace:'port'},args=>({contents:stubs[args.path],loader:'ts'}));
 }}]})).outputFiles[0].text;
 const VIDEO='data:video/webm;base64,'+'QUJD'.repeat(64);
@@ -126,21 +126,6 @@ test('a recording\'s bytes are stored apart from its row and joined only by read
  const row=await env.library.read({id});
  assert.equal(row.path,VIDEO);assert.equal(row.favorite,true);assert.equal(env.reads['video-data'],1);
  assert.equal(env.rows('video-data').get(id).path,VIDEO,'changing the row leaves its bytes in place');
-});
-
-test('recordings stored inside their rows by an earlier version are moved on upgrade',async()=>{
- const legacy={id:'v:0000000000001000000000001',kind:'video',path:VIDEO,duration:3,image:'data:image/jpeg;base64,QQ==',width:4,height:3,date:5,revision:'a',mutationRevision:'b',favorite:false,trashed:false};
- const photo={id:'0000000000002000000000002',kind:'image',image:'data:image/jpeg;base64,QQ==',width:4,height:3,date:6,revision:'a',mutationRevision:'c',favorite:true,trashed:false};
- const receipt={id:'edit:11111111-1111-4111-8111-111111111111',kind:'edit-receipt',operationId:'11111111-1111-4111-8111-111111111111',sourceId:photo.id,sourceRevision:'c',copyId:'9',status:'saved'};
- const env=environment(idb=>{idb.databases.set('alpha.browser.photos.v1',{version:2,stores:new Map([['photos',{keyPath:'id',indexes:new Map([['chronological',['date','id']]]),rows:new Map([legacy,photo,receipt].map(row=>[row.id,row]))}]])});});
- const listed=(await env.library.list()).items;
- assert.deepEqual(Array.from(listed,row=>row.id),[photo.id,legacy.id]);
- assert.equal('path' in env.rows('photos').get(legacy.id),false);assert.equal(env.rows('video-data').get(legacy.id).path,VIDEO);assert.equal(env.rows('video-data').size,1);
- assert.equal(env.rows('photos').get(legacy.id).mimeType,'video/webm');assert.equal(env.rows('photos').get(legacy.id).size,192);
- assert.equal((await env.api.browserPhotoFileEntries()).find(file=>file.path.startsWith('Photos/Videos/')).size,192,'a moved recording is still listed as a video file');
- assert.deepEqual({...env.rows('photos').get(photo.id)},photo,'photos are untouched');assert.deepEqual({...env.rows('photos').get(receipt.id)},receipt,'receipts are untouched');
- assert.equal((await env.library.read({id:legacy.id})).path,VIDEO,'the moved recording still plays');
- assert.equal(env.databases.get('alpha.browser.photos.v1').version,3);
 });
 
 test('a saved video copy and permanent deletion keep rows and bytes together',async()=>{

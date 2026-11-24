@@ -1,3 +1,4 @@
+import {openNotesTrash as openDeleted} from './helpers/notes-menu';
 import {toastObservation,finishUndoWindow} from './helpers/undo-feedback';
 import {openLegacyNotes} from './helpers/legacy-notes';
 import { returnToApps } from './app-navigation';
@@ -16,17 +17,16 @@ async function createNote(page:Page,title:string,body:string){
 /** Editor ⋯ menu → Delete. */
 async function deleteOpenNote(page:Page){
  await page.getByRole('button',{name:'More',exact:true}).click();
- await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
+ await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Delete',exact:true}).click();
 }
-/** The "Recently deleted" folder chip, shown while it has notes. */
-async function openDeleted(page:Page){await page.getByRole('button',{name:'Recently deleted',exact:true}).click();}
 /** Row → Recover in the action sheet. */
 async function recover(page:Page,title:string,left:string){
  await page.getByRole('button',{name:`${title}, ${left}`,exact:true}).click();
  await page.getByRole('dialog',{name:title}).getByRole('button',{name:'Recover',exact:true}).click();
 }
 async function deleteNote(page:Page,title:string){
- await page.getByRole('button',{name:`Open ${title}`,exact:true}).click();
+ // Keep any queued Undo offer visible while using the exposed part of the note row.
+ await page.getByRole('button',{name:`Open ${title}`,exact:true}).click({position:{x:12,y:24}});
  await deleteOpenNote(page);
  await expect(page.getByText('Deleted',{exact:true}).last()).toBeVisible();
  await expect(page.getByRole('button',{name:`Open ${title}`,exact:true})).toHaveCount(0);
@@ -57,9 +57,20 @@ test('deleted notes survive a restart in Recently deleted, restore with the same
  await expect(trash.getByText('30d',{exact:true})).toBeVisible();
  await expect(trash.getByText(/Deleted notes stay here/)).toHaveCount(0);
  await page.screenshot({path:test.info().outputPath('notes-trash.png')});
- await recover(page,'Trash audit','30 days left');
+ await page.evaluate(()=>document.querySelector<HTMLElement>('.alpha-phone')!.style.setProperty('--native-bottom-inset','24px'));
+ await page.getByRole('button',{name:'Trash audit, 30 days left',exact:true}).click();
+ const recovery=page.locator('[data-alpha-notes-recovery]').getByRole('dialog',{name:/Trash audit/});
+ await expect(recovery).toBeVisible();
+ const sheet=await recovery.evaluate(dialog=>{
+  const phone=dialog.closest('.alpha-phone')!;
+  const navBar=getComputedStyle(phone,'::after');
+  return {sheet:getComputedStyle(dialog).backgroundColor,bar:navBar.backgroundColor,inset:parseFloat(navBar.height)};
+ });
+ expect(sheet.inset).toBeGreaterThan(0);
+ expect(sheet.bar).toBe(sheet.sheet);
+ await recovery.getByRole('button',{name:'Recover',exact:true}).click();
  await expect(page.getByText('Trash audit restored',{exact:true})).toBeVisible();
- // The last note left: Recently deleted closes and its chip disappears.
+ // Recovering the last deleted note closes Recently deleted.
  await expect(trash).toHaveCount(0);
  await expect(page.getByRole('button',{name:'Recently deleted',exact:true})).toHaveCount(0);
  await page.getByRole('button',{name:'Open Trash audit',exact:true}).click();
@@ -97,12 +108,15 @@ test('Delete now and Empty ask first, and checklists use the same Recently delet
  expect((await trashEntries(page)).map((entry:any)=>entry.note.title).sort()).toEqual(['Second','Third']);
  expect(await savedRecords(page)).toEqual([]);
  await expect.poll(async()=>{const state=await toastObservation(page);return Number(state.undo)+state.queued.filter(notice=>notice.undo).length;}).toBe(3);
- for(let offer=0;offer<3;offer++)await finishUndoWindow(page);
+ for(let offer=0;offer<3;offer++)await finishUndoWindow(page,4_000);
  await expect(page.getByRole('button',{name:'Undo',exact:true})).toHaveCount(0,{timeout:10000});await expect(page.getByText('Deleted',{exact:true})).toBeVisible();
  await expect(trash.getByText('First',{exact:true})).toHaveCount(0);
  expect((await trashEntries(page)).map((e:any)=>e.note.title).sort()).toEqual(['Second','Third']);
  await trash.getByRole('button',{name:'Empty Recently deleted',exact:true}).click();
  await page.getByRole('dialog',{name:'Delete all?'}).getByRole('button',{name:'Delete all',exact:true}).click();
+ // The paused clock stands still: a newer passive notice waits for the 1.9 s reading time of the
+ // passive "Deleted" notice still on screen.
+ await page.clock.runFor(1_900);
  await expect(page.getByText('Recently deleted emptied',{exact:true})).toBeVisible();
  await expect(trash).toHaveCount(0);
  await expect(page.getByRole('button',{name:'Recently deleted',exact:true})).toHaveCount(0);

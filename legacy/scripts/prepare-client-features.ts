@@ -55,6 +55,7 @@ export const CLIENT_FEATURE_PATHS = [
   // Import-free leaf of browser-request-grounding.
   'packages/contracts/src/strip-trailing-punctuation.ts',
   'packages/contracts/src/phone-dial.ts',
+  'packages/contracts/src/spoken-phone-number.ts',
   'packages/contracts/src/device-action-execution.ts',
   'packages/contracts/src/client-turn-observation.ts',
   'packages/contracts/src/contracts/remote-agent-pairing.ts',
@@ -132,6 +133,7 @@ export const CLIENT_FEATURE_PATHS = [
   'plugins/plugin-notes/src/capabilities.ts',
   'plugins/plugin-notes/src/client/notes-api.ts',
   'plugins/plugin-notes/src/note-authored.ts',
+  'plugins/plugin-notes/src/note-folders.ts',
   'plugins/plugin-notes/src/note-format.ts',
   'plugins/plugin-notes/src/note-id.ts',
   'plugins/plugin-notes/src/types.ts',
@@ -176,12 +178,14 @@ export const CLIENT_FEATURE_PATHS = [
   'packages/contracts/src/native-notes-query.ts',
   'packages/contracts/src/device-reviews.ts',
   'plugins/plugin-assistant/src/services/device-actions/contract.ts',
+  'plugins/plugin-assistant/src/services/device-actions/browser-contract.ts',
   'plugins/plugin-assistant/src/services/device-actions/phone-dial-contract.ts',
   'plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts',
   'plugins/plugin-assistant/src/services/device-actions/files-browser-contract.ts',
   'plugins/plugin-assistant/src/services/device-actions/maps-contract.ts',
   'plugins/plugin-assistant/src/services/device-actions/workflow-contract.ts',
   'plugins/plugin-assistant/src/services/device-actions/camera-contract.ts',
+  'plugins/plugin-assistant/src/services/device-actions/camera-request.ts',
   'plugins/plugin-assistant/src/services/device-actions/photo-library-contract.ts',
   'plugins/plugin-assistant/src/services/device-actions/photos-view-contract.ts',
   'plugins/plugin-native-camera/src/definitions.ts',
@@ -194,6 +198,7 @@ export const CLIENT_FEATURE_PATHS = [
   'packages/contracts/src/mms-send.ts',
   'packages/contracts/src/native-telephony.ts',
   'packages/contracts/src/telephony-actions.ts',
+  'packages/contracts/src/spoken-phone-number.ts',
   'plugins/plugin-assistant/src/services/device-actions/telephony-actions-contract.ts',
   'packages/contracts/src/native-address-book.ts',
   'plugins/plugin-assistant/src/services/device-actions/clock-contract.ts',
@@ -245,6 +250,7 @@ export const CLIENT_FEATURE_PATHS = [
   'plugins/plugin-maps/src/client/route-distance.ts',
   'plugins/plugin-maps/src/client/runtime.ts',
   'plugins/plugin-maps/src/client/saved-places.ts',
+  'plugins/plugin-maps/src/client/selection-handle.ts',
   'plugins/plugin-maps/src/client/state.ts',
   'plugins/plugin-maps/test/navigation-client.test.mjs',
   // Notes client stores, trash, recording and query logic. The Notes controller, editor and
@@ -279,8 +285,6 @@ export const CLIENT_FEATURE_PATHS = [
   // Framework-free resident Cloud binding controller (AP-04/P-22).
   'packages/auth/src/auth/cloud-resident-binding.ts',
 ];
-// Shared behavior is consumed from the reviewed upstream pin; there are no product patches.
-export const CLIENT_FEATURE_PATCHES = [];
 /** Copy authenticated upstream source outside the immutable vendor checkout. With check, only
  * confirm the prepared copy is current and throw instead of rebuilding it. */
 export function prepareClientFeatures({ root = projectRoot, projectVoice = true, check = false }: PrepareOptions = {}) {
@@ -308,14 +312,14 @@ export function prepareClientFeatures({ root = projectRoot, projectVoice = true,
     if (content.split(before).length !== 2) throw Error('Review changed browser address re-export: ' + name);
     project(name, content.replace(before, 'from "../../../packages/contracts/src/browser-address-input.ts";'));
   }
-  // The browser command parser reads the turn observation through the contracts
-  // package. Plain Node has no package alias, so bind that one reviewed value
-  // import to the exact authenticated leaf in this prepared tree.
+  // The shared history parser is a client-only entry. Resolve its one value
+  // import within the copied source graph for plain Node consumers.
   {
     const name = 'plugins/plugin-browser/src/native-client-command.ts';
     const before = 'import { readClientTurnObservation } from "@elizaos/contracts/client-turn-observation";';
     const content = text(name);
-    if (content.split(before).length !== 2) throw Error('Review changed browser observation import: ' + name);
+    if (content.split(before).length !== 2 || (content.match(/^import /gm) ?? []).length !== 1)
+      throw Error('Review changed browser history imports: ' + name);
     project(name, content.replace(before, 'import { readClientTurnObservation } from "../../../packages/contracts/src/client-turn-observation.ts";'));
   }
   // Upstream voice sessions import the shared random-id helper by its emitted .js name. Plain
@@ -448,7 +452,7 @@ export function prepareClientFeatures({ root = projectRoot, projectVoice = true,
   }
   const files = Object.fromEntries([...source].map(([name, file]) => [name, file.sha256]));
   const provenance = {
-    baseCommit: upstream.pin, sourceFiles, projectionVersion:projectVoice?16:0, files,
+    baseCommit: upstream.pin, sourceFiles, projectionVersion:projectVoice?18:0, files,
   };
   const parent = path.join(root, '.eliza'), destination = path.join(parent, 'client-features');
   regularPath(parent, true);

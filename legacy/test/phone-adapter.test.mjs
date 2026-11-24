@@ -4,7 +4,7 @@ import test from 'node:test';import assert from 'node:assert/strict';import {bui
 const dir=mkdtempSync(join(tmpdir(),'phone-adapter-'));
 const output=await build({entryPoints:[resolve('apps/app/src/prototype/phone-adapter.ts')],bundle:true,format:'esm',platform:'node',write:false,external:['@capacitor/core'],plugins:[{name:'stubs',setup(b){b.onResolve({filter:/^(\.\.\/runtime\/aosp-image|\.\.\/runtime\/comms-bar|\.\/native-adapter|\.\/mvp-features|\.\.\/platform-plugins)$/},a=>({path:a.path,namespace:'stub'}));b.onLoad({filter:/.*/,namespace:'stub'},a=>({contents:a.path.includes('aosp-image')?'export const aospImage=false;':a.path.includes('native-adapter')?'export function watchReturnToApp(){return ()=>{};}':a.path.includes('mvp-features')?'export function isMvpView(view){return (globalThis.mvpViews||[]).includes(view);}':a.path.includes('comms-bar')?'export function setListFilterHandler(view,handler){(globalThis.listFilters||={})[view]=handler;}export function clearListFilter(view){globalThis.listFilters?.[view]?.clear();}':'export function registerPlugin(){return {};}',loader:'js'}));}}]});
 writeFileSync(join(dir,'adapter.mjs'),output.outputFiles[0].text);process.on('exit',()=>rmSync(dir,{recursive:true,force:true}));
-const {installPhoneAdapter,phoneRows,openVoicemailRead,deleteOpenVoicemail}=await import(pathToFileURL(join(dir,'adapter.mjs')));
+const {installPhoneAdapter,phoneRows,openVoicemailRead,deleteOpenVoicemail,openKeypadStep}=await import(pathToFileURL(join(dir,'adapter.mjs')));
 const {createAospTelephony}=await import('../apps/app/src/runtime/aosp-telephony.ts');
 globalThis.document={hidden:false,addEventListener(){},removeEventListener(){}};
 const status=callLog=>({version:2,voiceCapable:true,smsCapable:true,permissions:{contacts:'granted',phoneState:'denied',sms:'denied',sendSms:'denied',...(callLog?{callLog}:{})},sendMode:'handoff',roles:{dialer:{available:true,held:false,eligible:true},sms:{available:true,held:false,eligible:true}},defaultDialer:'com.android.dialer',defaultSms:null,subscriptions:null,defaultSmsSubscriptionId:null});
@@ -129,18 +129,13 @@ test('voicemail deletion rechecks approval and dispatches once even if the list 
  rows=[];model().nativeRefresh();await settle();assert.equal(model().vm.open,false);
  complete({status:'deleted'});assert.equal(await accepted,'deleted');
 });
-test('Contacts opens only where Contacts is admitted',async()=>{
- const {views}=mount({status:status()});await settle();const opened=[],toasts=[];const api={open:view=>opened.push(view),toast:text=>toasts.push(text)};
- globalThis.mvpViews=[];views.phone.render({},api).nativeContacts();assert.deepEqual(opened,[]);assert.deepEqual(toasts,['Unavailable']);
- globalThis.mvpViews=['contacts'];views.phone.render({},api).nativeContacts();assert.deepEqual(opened,['contacts']);globalThis.mvpViews=[];
-});
 test('rows without a dialable number cannot dial',()=>{const rows=phoneRows([{...call,number:'',cachedName:null}],()=>{throw Error('dialed');});assert.equal(rows[0].noDial,true);rows[0].dial();assert.match(rows[0].label,/Unknown caller/);});
 test('the image bar filters Recents in memory, keeps an Alpha filter as a clearable chip and briefs from new rows only',async()=>{
  const other={...call,id:'5',number:'+16465550100',cachedName:'Ben Ode',type:'outgoing',isNew:false};
  const {views,calls}=mount({status:status('granted'),listRecentCalls:{calls:[call,other]}});await settle();
  const shown=()=>views.phone.render({},{}).recents.map(row=>row.name),reads=calls.length;
  const spec=views.phone.bar();
- assert.deepEqual([spec.target.kind,spec.closed.kind,spec.closed.placeholder,spec.left.label,spec.contextKey,spec.end,spec.incoming],['recents','filter','Call or ask','Back to the keypad','phone:recents:',null,null]);
+ assert.deepEqual([spec.target.kind,spec.closed.kind,spec.closed.placeholder,spec.left,spec.contextKey,spec.end,spec.incoming],['recents','filter','Call or ask',null,'phone:recents:',null,null],'no keypad slot beside the open chat field');
  assert.match(spec.briefing,/^Ada called .* and you missed it\.$/);
  spec.closed.onText('ben');assert.deepEqual(shown(),['Ben Ode']);assert.equal(views.phone.bar().closed.value,'ben');
  views.phone.bar().closed.onText('646');assert.deepEqual(shown(),['Ben Ode'],'digits match numbers');
@@ -150,7 +145,6 @@ test('the image bar filters Recents in memory, keeps an Alpha filter as a cleara
  assert.deepEqual(views.phone.render({},{}).filterChip,{label:'Ada',clearLabel:'Clear filter Ada'});assert.deepEqual(shown(),['Ada']);
  views.phone.bar().closed.onText('');assert.deepEqual(shown(),['Ada'],'clearing the sent text keeps the Alpha filter');
  views.phone.render({},{}).clearFilter();assert.deepEqual(shown(),['Ada','Ben Ode']);
- views.phone.bar().left.run();assert.equal(views.phone.render({},{}).isKeypad,true);
  assert.equal(calls.length,reads,'filtering reads nothing from the device');
 });
 
@@ -181,3 +175,45 @@ test('an unconfirmed voicemail observer retirement refuses a replacement enable'
  assert.deepEqual(calls.filter(([m])=>m==='observeVoicemail').map(([,o])=>o.enabled),[true],'unconfirmed cleanup never enables a second listener');
  shell.componentWillUnmount();
 });
+test('the agent opens the keypad, filled in at most, after its receipt; it never calls',async()=>{
+ const {views,shell,calls}=mount({status:status('granted'),listRecentCalls:{calls:[]},placeCall:placed});await settle();
+ const opened=[];shell.openView=(view,patch,chat)=>opened.push([view,patch,chat]);
+ globalThis.mvpViews=['phone'];
+ try{
+  for(const [number,patch] of [[undefined,{tab:'keypad'}],['4155550100',{tab:'keypad',prefill:'4155550100'}]]){
+   opened.length=0;const step=openKeypadStep(number);assert.equal(typeof step,'function');assert.deepEqual(opened,[],'nothing opens before the receipt');
+   step();assert.deepEqual(opened,[['phone',patch,undefined]]);
+  }
+  const sets=[];const api={set:patch=>sets.push(patch)};
+  let model=views.phone.render({tab:'keypad'},api);await settle();
+  assert.equal(model.isKeypad,true);assert.equal(model.nativeNumber,'');assert.deepEqual(sets,[{tab:null}]);
+  model=views.phone.render({tab:'keypad',prefill:'4155550100'},api);await settle();
+  assert.equal(model.isKeypad,true);assert.equal(model.nativeNumber,'4155550100');
+  assert.ok(!calls.some(([m])=>m==='placeCall'||m==='dial'),'opening the keypad never calls or dials');
+  globalThis.mvpViews=[];assert.equal(openKeypadStep('4155550100'),null,'no keypad where Phone is not admitted');
+ }finally{delete globalThis.mvpViews;}
+});
+test('an agent keypad open leaves Voicemail as the owner tab tap does, and waits out a busy read',async()=>{
+ const item={id:'7',number:'+15555550100',cachedName:null,date:1700000000000,durationSeconds:24,isNew:true,hasAudio:true,carrierTranscript:'Call me back.'};
+ for(const st of [{tab:'keypad'},{tab:'keypad',prefill:'4155550100'}]){
+  const {views}=mount({status:status('granted'),listRecentCalls:{calls:[]},listVoicemail:{state:'ready',voicemails:[item]},observeVoicemail:{},voicemailPcm:()=>{throw Error('No decoder');}});await settle();
+  views.phone.render({},{}).tabs[2].pick();views.phone.render({},{}).voicemails[0].toggle();await settle();
+  assert.equal(views.phone.render({},{}).vm.open,true);
+  const answer=deleteOpenVoicemail(()=>{},new AbortController().signal);
+  assert.equal(views.phone.render({},{}).vm.confirming,true);
+  const model=views.phone.render(st,{set(){}});
+  assert.equal(model.isKeypad,true);assert.equal(model.vm.open,false,'the voicemail closes with its audio');
+  assert.equal(openVoicemailRead(),null);assert.equal(await answer,'cancelled','the hidden delete confirmation is not left armed');
+ }
+ let finish;
+ const {views}=mount({status:status('granted'),listRecentCalls:()=>new Promise(resolve=>{finish=resolve;})});await settle();
+ const sets=[];const api={set:patch=>sets.push(patch)};
+ const st={tab:'keypad',prefill:'4155550100'};
+ let model=views.phone.render(st,api);await settle();
+ assert.equal(model.isKeypad,false,'a busy recents read holds the request');assert.deepEqual(sets,[],'and does not discard it');
+ finish({calls:[]});await settle();
+ model=views.phone.render(st,api);await settle();
+ assert.equal(model.isKeypad,true);assert.equal(model.nativeNumber,'4155550100','the number lands once the read clears');
+ assert.deepEqual(sets,[{prefill:null},{tab:null}]);
+});
+

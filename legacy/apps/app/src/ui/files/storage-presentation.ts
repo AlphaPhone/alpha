@@ -55,6 +55,46 @@ export function formatSize(bytes: number): string {
     units[unit]
   );
 }
+/** A listing date: the time for today, month and day this year, the full date before that. */
+export function shortDate(time: number): string {
+  if (!Number.isFinite(time) || time <= 0) return "";
+  const date = new Date(time),
+    now = new Date();
+  return date.toDateString() === now.toDateString()
+    ? date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+    : date.toLocaleDateString(
+        undefined,
+        date.getFullYear() === now.getFullYear()
+          ? { month: "short", day: "numeric" }
+          : { year: "numeric", month: "short", day: "numeric" },
+      );
+}
+/** The date and time in a file's details. */
+export function fullDate(time: number): string {
+  if (!Number.isFinite(time) || time <= 0) return "";
+  return new Date(time).toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+/** The kind of file an owner recognises, never a raw MIME type. */
+export function typeLabel(mimeType: string, directory = false): string {
+  if (directory) return "Folder";
+  if (mimeType === "application/pdf") return "PDF";
+  if (mimeType.startsWith("image/")) return "Image";
+  if (mimeType.startsWith("audio/")) return "Audio";
+  if (mimeType.startsWith("video/")) return "Video";
+  if (mimeType.startsWith("text/")) return "Text";
+  // Office types all say "officedocument": test the specific kinds first.
+  if (/sheet|excel|csv/.test(mimeType)) return "Spreadsheet";
+  if (/presentation|powerpoint/.test(mimeType)) return "Presentation";
+  if (/word|document|opendocument\.text|rtf/.test(mimeType)) return "Document";
+  if (/zip|tar|compressed|archive/.test(mimeType)) return "Archive";
+  return "File";
+}
 export function formatFree(
   volume: Pick<StorageVolume, "free" | "total" | "usage">,
 ): string {
@@ -147,6 +187,7 @@ export const STORAGE_OUTCOMES: ReadonlyMap<string, string> = new Map([
   ["Select files to share.", "Select files to share."],
   ["Sharing is unavailable in this browser.", "Sharing is unavailable in this browser."],
   ["Unsupported file operation.", "Files cannot do that here."],
+  ["The trash could not be read.", "Trash couldn’t be read."],
   ["Nothing selected", "Nothing is selected."],
 ]);
 

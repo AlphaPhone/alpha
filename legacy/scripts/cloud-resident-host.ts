@@ -104,7 +104,7 @@ export async function createCloudResidentHost({source,profile,port,environment='
  async function stop(){
   clearTimeout(expiry);retiring=true;const old=running,oldGoogle=googleHost;
   const failures: unknown[] = [];
-  // Revoke the read broker even when child retirement fails. Never let an old
+  // Revoke the Google broker even when child retirement fails. Never let an old
   // binding resolve a replacement account through the shared host port.
   if(oldGoogle)try{await oldGoogle.close();if(googleHost===oldGoogle)googleHost=null;}catch(error){failures.push(error);}
   if(old)try{await old.stop();if(running===old){running=null;bound=null;runningDirectRevision=null;}}catch(error){failures.push(error);}
@@ -132,7 +132,8 @@ export async function createCloudResidentHost({source,profile,port,environment='
   let log;
   try{
   if(googleHost&&(!Number.isInteger(googleHost.port)||googleHost.port<1024||googleHost.port>65535||typeof googleHost.close!=='function'))throw Error('Invalid private Google host');
-  const env=runtimeEnvironment({inherited:preparedSourceEnv(inherited),allow:['PATH','TMPDIR','LANG','SHELL','USER','LOGNAME','HOME'],settings,owned:{...nativeHostEnvironment,ELIZA_MANAGED_CALENDAR_READ_BROKER:googleHost?`http://127.0.0.1:${googleHost.port}/__alpha-owner-gmail`:'',ELIZA_MANAGED_GMAIL_READ_BROKER:googleHost?`http://127.0.0.1:${googleHost.port}/__alpha-owner-gmail`:'',ELIZA_HEADLESS:'1',ELIZA_DISTRIBUTION_PROFILE:'store',ELIZA_PLUGIN_SET:'lean-chat',ELIZA_LEAN_CHAT_WORKFLOWS:'1',ELIZA_REQUIRE_LOCAL_AUTH:'1',ELIZA_API_BIND:'127.0.0.1',ELIZA_API_PORT:String(port),ELIZA_API_EXPOSE_PORT:'1',ELIZA_STATE_DIR:profile,ELIZA_CONFIG_PATH:launchConfigPath,ELIZA_API_TOKEN:privateProfile.token,ELIZA_HOST_CONTEXT_REVISION:'cloud:'+randomUUID(),ELIZA_NATIVE_VIEW_DECLARATIONS:nativeViewDeclarationsJson,ELIZA_NATIVE_BROWSER_COMMANDS:'back,forward,reload',ELIZA_BROWSER_NATIVE_TARGET:'off'}});
+  const googleEndpoint=googleHost?`http://127.0.0.1:${googleHost.port}/__alpha-owner-gmail`:'';
+  const env=runtimeEnvironment({inherited:preparedSourceEnv(inherited),allow:['PATH','TMPDIR','LANG','SHELL','USER','LOGNAME','HOME'],settings,owned:{...nativeHostEnvironment,ELIZA_MANAGED_CALENDAR_READ_BROKER:googleEndpoint,ELIZA_MANAGED_GMAIL_READ_BROKER:googleEndpoint,ELIZA_MANAGED_GMAIL_SEND_BROKER:googleEndpoint,ELIZA_HEADLESS:'1',ELIZA_DISTRIBUTION_PROFILE:'store',ELIZA_PLUGIN_SET:'lean-chat',ELIZA_LEAN_CHAT_WORKFLOWS:'1',ELIZA_REQUIRE_LOCAL_AUTH:'1',ELIZA_API_BIND:'127.0.0.1',ELIZA_API_PORT:String(port),ELIZA_API_EXPOSE_PORT:'1',ELIZA_STATE_DIR:profile,ELIZA_CONFIG_PATH:launchConfigPath,ELIZA_API_TOKEN:privateProfile.token,ELIZA_HOST_CONTEXT_REVISION:'cloud:'+randomUUID(),ELIZA_NATIVE_VIEW_DECLARATIONS:nativeViewDeclarationsJson,ELIZA_NATIVE_BROWSER_COMMANDS:'back,forward,reload'}});
   log=fs.openSync(path.join(profile,'server.log'),fs.constants.O_WRONLY|fs.constants.O_APPEND|fs.constants.O_CREAT|fs.constants.O_NOFOLLOW,0o600);fs.fchmodSync(log,0o600);
   running=await launch({command:inherited.ALPHA_BUN||'bun',args:coreRuntimeArguments(root,source,['--no-install','--conditions=eliza-source',path.join(source,'packages/app/src/runtime/dev-server.ts')]),cwd:profile,env:{...env,ALPHA_CORE_STATE_SOURCE:source},stdio:['ignore',log,log]});
   }catch(error){const failedGoogle=googleHost;if(failedGoogle){try{await failedGoogle.close();if(googleHost===failedGoogle)googleHost=null;}catch(cleanup){retiring=true;throw new AggregateError([error,cleanup],'Resident startup and private Google cleanup failed');}}throw error;}finally{if(log!==undefined)fs.closeSync(log);}

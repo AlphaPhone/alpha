@@ -1,6 +1,10 @@
 import {openSharePanel,setShareEmailComposer,unchangedSince} from '../runtime/share-panel';
 import {shareSelectedText,selectedText,copySelectedText} from '../runtime/text-share';
+import {isAbortError} from '../lib/abort';
+import {errorNotice,ERROR_TOAST} from '../runtime/error-notice';
 type Bag=Record<string,any>;
+/** Opens Inbox composing the shared text. */
+const composeEmail=(api:Bag,snapshot:{title:string;text:string})=>api.open('inbox',{compose:{subject:snapshot.title,body:snapshot.text}});
 /** A view state without its top-level refresh counters (*Revision), which change while the shared selection does not. */
 const shareContent=(state:Bag|undefined)=>state&&Object.fromEntries(Object.entries(state).filter(([key])=>!key.endsWith('Revision')));
 /** Wrap the completed app adapters, preserving their native revision/attachment admission. */
@@ -9,27 +13,27 @@ export function installSharePanelAdapter(Component:any,views:Record<string,Bag>)
  let owner:Bag|undefined;
  /** The open event's text as last rendered: the calendar revision is stripped, so an edit made elsewhere is caught here. */
  let calendarText='';
- prototype.componentDidMount=function(){mount.call(this);owner=this;if(views.inbox)setShareEmailComposer((title,text)=>{if(owner!==this||document.hidden)throw Error('Email view changed.');const snapshot=selectedText({title,text});this.api(this.S().view).open('inbox',{compose:{subject:snapshot.title,body:snapshot.text}});});};
+ prototype.componentDidMount=function(){mount.call(this);owner=this;if(views.inbox)setShareEmailComposer((title,text)=>{if(owner!==this||document.hidden)throw Error('Email view changed.');const snapshot=selectedText({title,text});composeEmail(this.api(this.S().view),snapshot);});};
  prototype.componentWillUnmount=function(){if(owner===this){owner=undefined;setShareEmailComposer(undefined);}unmount.call(this);};
  prototype.renderVals=function(){
   const values=render.call(this),shell=this;
-  const bind=(module:string,target:Bag,key:string,options:{title:string;email?:()=>unknown;copy?:()=>unknown;copyLabel?:string;save?:()=>unknown;emailUnavailable?:null})=>{
+  const bind=(module:string,target:Bag,key:string,options:{title:string;email?:()=>unknown;messages?:()=>unknown;copy?:()=>unknown;copyLabel?:string;save?:()=>unknown})=>{
    const external=target?.[key];if(typeof external!=='function')return;
    target[key]=()=>{
     // The shell replaces a view's state object on every write, so its identity stands in for the content between writes.
     const same=[unchangedSince(()=>shell.S().vs?.[module],()=>shareContent(shell.vget(module))),...(module==='browser'?[unchangedSince(()=>shell.browserSelection?.())]:[])];
     const current=()=>!document.hidden&&shell.S().view===module&&same.every(check=>check());
-    const api=shell.api(module),safe=(run:()=>unknown)=>async()=>{try{if(!current())throw Error('The selection changed. Choose it again.');await run();}catch(error){if(!(error instanceof DOMException&&error.name==='AbortError'))api.toast(error instanceof Error?error.message:'Sharing is unavailable.');}};
-    void openSharePanel({title:options.title,current,external:target.shareAvailable===false?undefined:safe(()=>external()),email:options.email?safe(options.email):undefined,emailUnavailable:null,copy:options.copy?safe(options.copy):undefined,copyLabel:options.copyLabel,save:options.save?safe(options.save):undefined});
+    const api=shell.api(module),safe=(run:()=>unknown)=>async()=>{try{if(!current())throw Error('The selection changed. Choose it again.');await run();}catch(error){if(!isAbortError(error))api.toast(errorNotice(error,'Sharing is unavailable.'),ERROR_TOAST);}};
+    void openSharePanel({title:options.title,current,external:target.shareAvailable===false?undefined:safe(()=>external()),email:options.email?safe(options.email):undefined,messages:options.messages?safe(options.messages):undefined,copy:options.copy?safe(options.copy):undefined,copyLabel:options.copyLabel,save:options.save?safe(options.save):undefined});
    };
   };
   if(values.browser){const view=values.browser;bind('browser',view,'openShare',{title:'Current page',email:typeof view.shareEmail==='function'?view.shareEmail:undefined,copy:typeof view.copyLink==='function'?view.copyLink:undefined,copyLabel:'Copy link'});}
-  if(values.photos){const view=values.photos;if(view.v)bind('photos',view.v,'share',{title:view.v.shareLabel||'Selected photo',email:view.v.canEmail?view.v.email:undefined,save:view.v.saveLocally});bind('photos',view,'selShare',{title:'Selected photos',save:view.selSaveLocally});}
+  if(values.photos){const view=values.photos;if(view.v)bind('photos',view.v,'share',{title:view.v.shareLabel||'Selected photo',email:view.v.canEmail?view.v.email:undefined,messages:view.v.canMessage?view.v.message:undefined,save:view.v.saveLocally});bind('photos',view,'selShare',{title:'Selected photos',save:view.selSaveLocally});}
   // Files shows no unavailable-email row: the Android share sheet reaches mail apps.
-  if(values.files){const view=values.files;if(view.pv)bind('files',view.pv,'share',{title:view.pv.name||'Selected file',email:view.pv.canEmail?view.pv.email:undefined,emailUnavailable:null});bind('files',view,'selShare',{title:'Selected files',save:view.selSaveLocally,emailUnavailable:null});}
+  if(values.files){const view=values.files;if(view.pv)bind('files',view.pv,'share',{title:view.pv.name||'Selected file',email:view.pv.canEmail?view.pv.email:undefined,messages:view.pv.canMessage?view.pv.message:undefined});bind('files',view,'selShare',{title:'Selected files',save:view.selSaveLocally});}
   if(values.calendar?.ev){const event=values.calendar.ev;const text=[event.title,event.day,event.when,event.where,event.notes].filter(value=>typeof value==='string'&&value).join('\n\n');calendarText=text;
    event.share=()=>{const api=shell.api('calendar'),same=unchangedSince(()=>shell.S().vs?.calendar,()=>shareContent(shell.vget('calendar'))),current=()=>shell.S().view==='calendar'&&calendarText===text&&same();
-    const snapshot=selectedText({title:String(event.title||'Calendar event'),text});void openSharePanel({title:snapshot.title,current,external:()=>shareSelectedText(snapshot).catch(()=>api.toast('Share unavailable')),email:views.inbox?()=>api.open('inbox',{compose:{subject:snapshot.title,body:snapshot.text}}):undefined,copy:()=>copySelectedText(snapshot.text).then(()=>api.toast('Event text copied.'))});};
+    const snapshot=selectedText({title:String(event.title||'Calendar event'),text});void openSharePanel({title:snapshot.title,current,external:()=>shareSelectedText(snapshot).catch(()=>api.toast('Share unavailable')),email:views.inbox?()=>composeEmail(api,snapshot):undefined,copy:()=>copySelectedText(snapshot.text).then(()=>api.toast('Event text copied.'))});};
   }
   return values;
  };

@@ -15,7 +15,7 @@ async function trashTextNote(page:Page,title:string){
  await page.getByRole('textbox',{name:'Note',exact:true}).fill('Erase me on time');
  await page.getByRole('button',{name:'Back to notes',exact:true}).click();
  await page.getByRole('button',{name:`Open ${title}`,exact:true}).click();
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Delete',exact:true}).click();
  await expect(page.getByText('Deleted',{exact:true})).toBeVisible();
 }
 async function seedVoice(page:Page){
@@ -33,7 +33,7 @@ test('a resume on Home erases expired text and voice Trash entries without openi
  await page.reload();await openNotes(page);
  await trashTextNote(page,'Resume text');
  await page.getByRole('button',{name:'Open Resume memo',exact:true}).click();
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Delete',exact:true}).click();
  await expect(page.getByText('Deleted',{exact:true})).toBeVisible();
  await expect.poll(async()=>(await describe(page)).deletedAt).toBeGreaterThan(0);
  const entries=await trashEntries(page);
@@ -41,7 +41,7 @@ test('a resume on Home erases expired text and voice Trash entries without openi
  const last=Math.max(...entries.map((e:any)=>e.deletedAt));
  await home(page);
 
- // One minute short of three days, a resume keeps both entries restorable.
+ // One minute short of the 30-day retention, a resume keeps both entries restorable.
  await page.clock.setSystemTime(last+30*DAY-60_000);
  await page.evaluate(()=>{document.dispatchEvent(new Event('visibilitychange'));window.dispatchEvent(new Event('focus'));});
  await page.waitForTimeout(300);

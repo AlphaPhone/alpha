@@ -1,4 +1,4 @@
-import {openBrowserCalendar} from './helpers/browser-calendar';
+import {openBrowserCalendar,seedBrowserCalendar} from './helpers/browser-calendar';
 import { returnToApps } from './app-navigation';
 import {test,expect,type Page} from '@playwright/test';
 /** Saves an event, holds every browser calendar read until the test calls releaseCalendarOpen, and starts opening that event. */
@@ -8,8 +8,10 @@ async function pendDelayedOpen(page:Page){
 /** Which Calendar header controls are the element at their own centre, so a tap there reaches them. */
 const headerReach=(page:Page)=>page.evaluate(()=>Object.fromEntries([...document.querySelectorAll<HTMLElement>('[data-alpha-subview="calendar-list"] [data-alpha-app-header="main"] button')].map(item=>{const box=item.getBoundingClientRect();return [item.getAttribute('aria-label'),item.contains(document.elementFromPoint(box.x+box.width/2,box.y+box.height/2))];})));
 for(const mode of ['future','all-day','hidden'] as const)test(`browser Calendar opens the exact ${mode} event`,async({page})=>{
- await page.addInitScript(mode=>{localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));(localStorage.getItem('alpha.browser.calendar.v1')===null&&localStorage.setItem('alpha.browser.calendar.v1',JSON.stringify({sourceRevision:'a'.repeat(64),preferences:{visible:mode!=='hidden',color:'fg'},events:[{id:'destination',calendarId:'local',title:'Distant destination',body:'Exact event details',location:'Desk',begin:Date.parse('2028-04-02T00:00:00Z'),end:Date.parse('2028-04-03T00:00:00Z'),allDay:mode==='all-day',revision:'b'.repeat(64)}]})));},mode);
- await page.goto('/?mode=dev');await openBrowserCalendar(page);await returnToApps(page);const opened=await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');return registerPlugin<any>('AlphaCalendar').open({id:'destination'});});expect(opened).toEqual({status:'opened'});await expect(page.getByRole('button',{name:'Back to calendar',exact:true})).toBeVisible();await expect(page.getByText('Exact event details',{exact:true})).toBeVisible();expect(await page.evaluate(async ()=>JSON.parse((await (await import('/src/browser/calendar-store.ts')).calendarDocument.readRaw())!).preferences.visible)).toBe(mode!=='hidden');await page.getByRole('button',{name:'Back to calendar',exact:true}).click();if(mode==='hidden')await expect(page.getByRole('button',{name:/^Distant destination,/})).toHaveCount(0);
+ await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
+ await page.goto('/?mode=dev');
+ await seedBrowserCalendar(page,{sourceRevision:'a'.repeat(64),preferences:{visible:mode!=='hidden',color:'fg'},events:[{id:'destination',calendarId:'local',title:'Distant destination',body:'Exact event details',location:'Desk',begin:Date.parse('2028-04-02T00:00:00Z'),end:Date.parse('2028-04-03T00:00:00Z'),allDay:mode==='all-day',revision:'b'.repeat(64)}]});
+ await openBrowserCalendar(page);await returnToApps(page);const opened=await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');return registerPlugin<any>('AlphaCalendar').open({id:'destination'});});expect(opened).toEqual({status:'opened'});await expect(page.getByRole('button',{name:'Back to calendar',exact:true})).toBeVisible();await expect(page.getByText('Exact event details',{exact:true})).toBeVisible();expect(await page.evaluate(async ()=>JSON.parse((await (await import('/src/browser/calendar-store.ts')).calendarDocument.readRaw())!).preferences.visible)).toBe(mode!=='hidden');await page.getByRole('button',{name:'Back to calendar',exact:true}).click();if(mode==='hidden')await expect(page.getByRole('button',{name:/^Distant destination,/})).toHaveCount(0);
 });
 test('missing Calendar event cannot report a successful open',async({page})=>{await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));await page.goto('/?mode=dev');await openBrowserCalendar(page);await returnToApps(page);expect(await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');try{await registerPlugin<any>('AlphaCalendar').open({id:'missing'});return false;}catch{return true;}})).toBe(true);});
 test('a delayed event open cannot take over after navigation away',async({page})=>{
@@ -22,7 +24,7 @@ test('a delayed event open cannot take over after navigation away',async({page})
 test('a delayed event open keeps the other header actions covered and lands in view',async({page})=>{
  await pendDelayedOpen(page);
  // Only Back to apps sits above the cover; a tap on New event meets the cover and starts no draft.
- await expect.poll(()=>headerReach(page)).toEqual({'Back to apps':true,'Month view':false,'Today':false,'New event':false});
+ await expect.poll(()=>headerReach(page)).toEqual({'Back to apps':true,'Choose date':false,'Today':false,'New event':false});
  const newEvent=await page.getByRole('button',{name:'New event',exact:true}).filter({visible:true}).first().boundingBox();expect(newEvent).not.toBeNull();await page.mouse.click(newEvent!.x+newEvent!.width/2,newEvent!.y+newEvent!.height/2);
  await page.evaluate(()=>(window as any).releaseCalendarOpen());expect(await page.evaluate(()=>(window as any).pendingCalendarOpen)).toEqual({status:'opened'});
  const detail=page.locator('[data-alpha-subview="calendar-detail"]');await expect(detail).toContainText('Delayed event');await expect(page.getByRole('button',{name:'Back to calendar',exact:true})).toBeVisible();await expect(page.locator('[data-alpha-subview="calendar-form"]')).toHaveCount(0);
@@ -30,6 +32,6 @@ test('a delayed event open keeps the other header actions covered and lands in v
  expect(await detail.evaluate(event=>{const cover=event.previousElementSibling!,header=document.querySelector('[data-alpha-subview="calendar-list"] [data-alpha-app-header="main"]')!,back=header.querySelector('.app-header-back')!.getBoundingClientRect(),c=cover.getBoundingClientRect(),h=header.getBoundingClientRect();return {cover:cover.getAttribute('aria-hidden')==='true'&&cover.childElementCount===0,spansHeader:c.top<=h.top&&c.bottom>=h.bottom,backUnderEvent:event.contains(document.elementFromPoint(back.x+back.width/2,back.y+back.height/2))};})).toEqual({cover:true,spansHeader:true,backUnderEvent:true});
  // Once the event is closed, the header works as usual: New event starts a draft.
  await page.getByRole('button',{name:'Back to calendar',exact:true}).click();await expect(detail).toHaveCount(0);
- await expect.poll(()=>headerReach(page)).toEqual({'Back to apps':true,'Month view':true,'Today':true,'New event':true});
+ await expect.poll(()=>headerReach(page)).toEqual({'Back to apps':true,'Choose date':true,'Today':true,'New event':true});
  await page.getByRole('button',{name:'New event',exact:true}).filter({visible:true}).first().click();await expect(page.locator('[data-alpha-subview="calendar-form"]')).toHaveCount(1);
 });

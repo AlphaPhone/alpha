@@ -103,12 +103,16 @@ test('APK path: a verified email code goes straight to the seven access steps wh
   for (const text of STARTING_SLOP) expect(await setup.innerText()).not.toContain(text);
   await setup.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(setup).toHaveCount(0);
-  await expect(button(page,'Notes')).toBeVisible();
+  await expect(startupLoading(page)).toBeVisible();
+  await expect(page.locator('[data-alpha-startup-shell]')).toHaveAttribute('inert', '');
+  await expect(button(page, 'Notes')).toHaveCount(0);
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Restart Alpha',exact:true})).toHaveCount(0);
   expect(await harness(page,f=>f.streams)).toBe(0);
   const requestsBefore=await harness(page,f=>f.calls.filter((call:string)=>call==='Agent.request').length);
   await page.evaluate(() => (window as any).postSignIn.release());
+  await expect(startupLoading(page)).toHaveCount(0);
+  await expect(button(page, 'Notes')).toBeVisible();
   await expect.poll(()=>harness(page,f=>f.calls.filter((call:string)=>call==='Agent.request').length)).toBeGreaterThan(requestsBefore);
   expect(await starts(page)).toBe(2);
   expect(await harness(page,f=>f.streams)).toBe(0);
@@ -165,17 +169,21 @@ test('APK path: a saved sign-in that cannot reach Cloud at startup shows Home wi
 });
 
 
-test('AOSP image: granted startup access reaches Home without a walkthrough or tap', async ({page}, info) => {
+test('AOSP image: granted startup access reaches Home after the agent is ready without a walkthrough or tap', async ({page}, info) => {
   test.setTimeout(150_000);
   const {foreign, welcome} = await freshPhone(page, {image: true});
   await verifyHeld(page, welcome, info);
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('alpha:startup-permission-walkthrough:v1') || 'null'))).toEqual({version: 4, status: 'completed', step: 7});
-  await expect(button(page, 'Notes')).toBeVisible();
+  await expect(startupLoading(page)).toBeVisible();
+  await expect(page.locator('[data-alpha-startup-shell]')).toHaveAttribute('inert', '');
+  await expect(button(page, 'Notes')).toHaveCount(0);
   await expect(page.locator('dialog.alpha-startup-permissions')).toHaveCount(0);
   const {requests, sawWalkthrough} = await page.evaluate(() => (window as any).imageAccess);
   expect(requests).toEqual([]);
   expect(sawWalkthrough).toBe(false);
   await page.evaluate(() => (window as any).postSignIn.release());
+  await expect(startupLoading(page)).toHaveCount(0);
+  await expect(button(page, 'Notes')).toBeVisible();
   expect(foreign).toEqual([]);
 });
 

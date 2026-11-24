@@ -2,8 +2,8 @@ import {guardPendingReminderChanges,type ReminderDeletionState} from './reminder
 import {browserDocuments} from './documents';
 import {BrowserDomainDocument,type DomainRecovery} from './domain-document';
 
-export const reminderStorageKey='alpha.browser.reminders.v1';
-const domain=new BrowserDomainDocument(browserDocuments,reminderStorageKey,()=>localStorage.getItem(reminderStorageKey));
+const reminderStorageKey='alpha.browser.reminders.v1';
+const domain=new BrowserDomainDocument(browserDocuments,reminderStorageKey);
 const channel=typeof BroadcastChannel==='undefined'?null:new BroadcastChannel('alpha.browser.documents.v1');
 const refresh=()=>window.dispatchEvent(new Event('alpha:reminders-document-changed'));
 if(channel)channel.onmessage=event=>{if(event.data?.key===reminderStorageKey)refresh();};

@@ -451,7 +451,6 @@ private static final class ResidentAttachDiagnostic {
   }catch(Exception error){call.reject("Conditional provider removal could not be confirmed.");}},()->call.reject("Local agent bridge is closed."));
  }
  static final String CLOUD_PROVIDER_MODEL=LocalAgentProviderAdmission.CLOUD_PROVIDER_MODEL;
- static final String CLOUD_PROVIDER_BASE=LocalAgentProviderAdmission.CLOUD_PROVIDER_BASE;
  /** Binds an existing account credential; no bearer value crosses this method's renderer API. */
  @PluginMethod public void configureCloudProvider(PluginCall call) {
   if(!runtimePackaged()){call.reject("On-device agent is unavailable in this version.");return;}
@@ -499,21 +498,7 @@ private static final class ResidentAttachDiagnostic {
  }
  // The provider rules live in LocalAgentProviderAdmission (host-JVM tested); these names stay for callers.
  static boolean validProviderToken(String token,int maximumLength){return LocalAgentProviderAdmission.validProviderToken(token,maximumLength);}
- static String cloudProviderToken(String saved,String credentialId,long now) throws Exception {return LocalAgentProviderAdmission.cloudProviderToken(saved,credentialId,now);}
  static void applyProviderEnvironment(JSONObject provider,String cloudSaved,java.util.Map<String,String> env,long now) throws Exception {LocalAgentProviderAdmission.applyProviderEnvironment(provider,cloudSaved,env,now);}
- static final String PROVIDER_MODEL_PATTERN=LocalAgentProviderAdmission.PROVIDER_MODEL_PATTERN;
- /**
-  * No admitted plan, Cloud unreachable without a recent plan, or signed out: the agent runs with no
-  * hosted inference. Every provider credential and selector is removed, so no request can reach a
-  * model provider; the pinned upstream runtime answers chat turns as provider-less (no_provider).
-  */
- static void applyUnboundEnvironment(java.util.Map<String,String> env){
-  // The verified product module is credential-independent; shared cleanup
-  // predates that contract and removes the same module for other hosts.
-  String productModule=env.get("ELIZA_NATIVE_GOOGLE_HOST_MODULE");
-  NativeProviderSlot.applyUnboundEnvironment(env);
-  if(productModule!=null)env.put("ELIZA_NATIVE_GOOGLE_HOST_MODULE",productModule);
- }
  static JSObject providerIdentity(String saved) {
   try{return new JSObject(LocalAgentProviderAdmission.providerIdentity(saved).toString());}
   catch(org.json.JSONException impossible){throw new IllegalStateException(impossible);}
@@ -602,7 +587,7 @@ private static final class ResidentAttachDiagnostic {
     closeProviderReveal();
     final long revealAuthority=credentialAuthorityEpoch();
     providerRevealRequestId=requestId;
-    providerReveal=ai.eliza.plugins.passwords.SecretSurfaces.revealOwned(getActivity(),"text".equals(key)?"Text key":"Voice key",value,()->{
+    providerReveal=SecretSurfaces.revealOwned(getActivity(),"text".equals(key)?"Text key":"Voice key",value,()->{
      try{requireProviderOwner(false);requireCredentialIntent(intent);return surface==providerSurfaceGeneration&&revealAuthority==credentialAuthorityEpoch();}
      catch(Exception retired){return false;}
     });
@@ -622,9 +607,11 @@ private static final class ResidentAttachDiagnostic {
     output.write(buffer,0,count);
    }
    env.put("ELIZA_NATIVE_VIEW_DECLARATIONS",output.toString(java.nio.charset.StandardCharsets.UTF_8.name()));
-   // Alpha's mounted browser handles back, forward and reload only, and serves no Chromium target.
+   // The agent's own BROWSER tool is offered only what Alpha's mounted Browser runs for it: back,
+   // forward and reload. The reviewed way to do the same from chat is the browser_history device
+   // action (browser.history.v1). The list cannot be emptied yet: the pinned plugin registers
+   // the tool even with no commands.
    env.put("ELIZA_NATIVE_BROWSER_COMMANDS","back,forward,reload");
-   env.put("ELIZA_BROWSER_NATIVE_TARGET","off");
   }
  }
  static void configureEnvironment(Context context,java.util.Map<String,String> env) throws java.io.IOException {
@@ -633,7 +620,8 @@ private static final class ResidentAttachDiagnostic {
   else env.remove("ELIZA_MOBILE_SMS_REPLY_DRAFT");
   final long epoch;
   synchronized(lifecycleLock){launchedGeneration=null;if(!accepting||stopping||credentialMutationEpoch>=0)throw new java.io.IOException("Local provider is retiring");epoch=lifecycleEpoch;}
-  configureNativeViews(context.getAssets().open("agent/native-view-declarations.json"),env);
+  // Phone, Messages and Contacts are destinations only where Alpha draws them: its verified image.
+  configureNativeViews(context.getAssets().open(AlphaImageCapability.verified(context)?"agent/image-native-view-declarations.json":"agent/native-view-declarations.json"),env);
   for(String key:new String[]{"ELIZA_NATIVE_GOOGLE_HOST_MODULE","ELIZA_NATIVE_GOOGLE_BINDING_JSON","ELIZA_NATIVE_GOOGLE_API_KEY","ELIZA_MANAGED_GMAIL_READ_BROKER","ELIZA_MANAGED_GMAIL_SEND_BROKER","ELIZA_MANAGED_GMAIL_OPERATION_BROKER","ELIZA_MANAGED_CALENDAR_READ_BROKER","ELIZA_MANAGED_CALENDAR_DELETE_ENABLED","ELIZA_NATIVE_GOOGLE_GMAIL_SEND_ENABLED","ELIZA_MANAGED_GMAIL_MAILBOX_CHANGES_ENABLED"})env.remove(key);
   env.remove("ELIZA_MOBILE_WORKFLOWS");
   java.io.File nativeHostResources=null;
@@ -699,6 +687,9 @@ private static final class ResidentAttachDiagnostic {
   // Pseudonymize secrets and PII using the pinned upstream runtime.
   env.put("ELIZA_SECRET_SWAP_ENABLED","true");
   env.put("ELIZA_PII_SWAP_ENABLED","true");
+  // The pinned runtime keeps a contact's or credential's reference stable within a conversation,
+  // sends no output cap on any call, and on an own Cerebras key holds a refused model for at most
+  // 4 s, before its 5 s re-send. None of these needs a launch setting.
   java.util.function.Function<JSONObject,java.util.Map<String,String>> fixture=instrumentationLaunchEnvironment;
   if(fixture!=null){
    if(!BuildConfig.DEBUG||android.os.Process.myUid()/100000<=0)throw new java.io.IOException("Invalid instrumentation launch environment");
@@ -1137,7 +1128,7 @@ private static final class ResidentAttachDiagnostic {
     try{captureReminderOwnerSession();return true;}
     catch(SecurityException changed){
      // A new process bearer retires old calls, not the existing owner's NMS receipts.
-     invalidateCalls();++lifecycleEpoch;AlphaCanonicalNotifications.suspendForRestart();rootToken=null;ownerToken=null;ownerIdentity=null;notificationAgent=null;expiresAt=0;
+     invalidateCalls();++lifecycleEpoch;clearEnrollment();
     }
    }
    epoch=lifecycleEpoch;
@@ -1254,15 +1245,18 @@ private static final class ResidentAttachDiagnostic {
   }
  }
  private static void logRequestFailure(String category,String method,int status,String reason) {
+  logRequestFailure(category,method,status,reason,"");
+ }
+ private static void logRequestFailure(String category,String method,int status,String reason,String hint) {
   String safeMethod=java.util.Arrays.asList("GET","POST","PATCH","DELETE").contains(method)?method:"OTHER";
-  android.util.Log.w("AlphaAgentRequest","category="+category+" method="+safeMethod+" status="+status+" reason="+reason);
+  android.util.Log.w("AlphaAgentRequest","category="+category+" method="+safeMethod+" status="+status+" reason="+reason+hint);
  }
  private static final int LOCAL_REQUEST_TIMEOUT_LIMIT_MS=120_000;
  private static final int RESIDENT_MINIMUM_TIMEOUT_MS=1_000;
  private static final String REQUEST_DEADLINE_MESSAGE="Local agent request timed out before dispatch.";
  private static final class RequestDeadlineExpired extends Exception {}
 
- /** Omission preserves the legacy per-dispatch timeout. Explicit budgets include time on the worker queue. */
+ /** Null without timeoutMs (the per-dispatch timeout applies). Explicit budgets include time on the worker queue. */
  private static Long localRequestDeadline(JSONObject input,long entered) {
   if(!input.has("timeoutMs"))return null;
   Object value=input.opt("timeoutMs");
@@ -1333,7 +1327,7 @@ private static final class ResidentAttachDiagnostic {
    }
    JSONObject result=raw(path,method,body,token,headers,remainingLocalRequestTimeout(deadline));
    int status=result.getInt("status");
-   if(status>=400)logRequestFailure(group==null?"other":group,method,status,"http");
+   if(status>=400)logRequestFailure(group==null?"other":group,method,status,"http",ViewRequestDiagnostic.failedPostSuffix(method,path,body));
    synchronized(lifecycleLock){
     requireCurrent(epoch);
     if(startupRead){

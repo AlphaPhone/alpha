@@ -7,8 +7,6 @@ import http from 'node:http';
 import type {CloudCredential, CloudCredentialStore, CloudEnvironment, CloudNativeRequest} from '../apps/app/src/runtime/cloud-protocol.ts';
 import type {CloudSignInPort} from '../apps/app/src/runtime/cloud-sign-in.ts';
 const { CloudProtocol, CloudProtocolError } = await import('../apps/app/src/runtime/cloud-protocol.ts');
-// Hosted agents are development infrastructure (#406): the product adapter has no agent route.
-const { DevelopmentCloudAgentProtocol } = await import('../apps/app/src/runtime/development-cloud-agents.ts');
 // The browser hand-off survives only as a test-mocks diagnostic fallback for one release.
 const { CloudSignInError } = await import('../apps/app/src/runtime/cloud-sign-in.ts');
 assert.equal(typeof CloudProtocol.prototype.login, 'function', 'the Cloud sign-in hand-off stays on the shipped class until the in-app readiness probe passes');
@@ -17,7 +15,7 @@ for (const method of ['listAgents', 'agentDetail', 'personal', 'phoneRequest', '
 const id = '72475cd0-e135-4c42-a9e2-fb5fe0820ada';
 const sessionId = 'd32f7f34-962b-47b7-8f0d-f2fe7f12610a';
 const token = 'synthetic-cloud-session';
-let mode = 'ok', agentReads = 0, polls = 0;
+let mode = 'ok', polls = 0;
 const memory: {saved: CloudCredential | null} = {saved: null};
 function savedCredential() {
   const credential = memory.saved;
@@ -28,16 +26,12 @@ const hasCode = (error: unknown, code: string) => error instanceof Error && 'cod
 const isAbort = (error: unknown) => error instanceof Error && error.name === 'AbortError';
 // Order of the replaced key's revocation and the new key's storage.
 const replacement: string[] = [];
-const runtimeTargets: string[] = [];
 const mapsRequests: {path: string; method?: string; key?: string | string[]; body: unknown}[] = [];
 const mail = { externalId: 'mail/id', threadId: 'thread', subject: 'Synthetic subject', from: 'Fixture sender', fromEmail: 'sender@example.invalid', to: ['owner@example.invalid'], snippet: 'Synthetic preview', receivedAt: '2026-09-29T12:00:00Z', isUnread: true };
 const grant = 'grant/one';
 const formattedMail = '<table><tr><td><img src="https://images.example.invalid/logo.png">Formatted mail</td></tr></table>';
 const htmlBody = () => mode === 'bad-html' ? 7 : mode === 'large-html' ? '😀'.repeat(131073) : formattedMail;
-const conversationId = 'ed694c7a-d9a7-4a8c-a547-533040bc1c79';
 let pendingObserved: (() => void) | undefined;
-const agent = () => ({ id, agentName: 'Synthetic agent', status: 'running', executionTier: mode === 'shared' ? 'shared' : 'dedicated-lazy',
-  webUiUrl: mode === 'shared' ? null : mode === 'foreign-runtime' ? 'https://attacker.invalid/' : `https://${id}.cloud.eliza.app` });
 const server = http.createServer(async (req, res) => {
   try {
     const requestUrl = req.url ?? '';
@@ -59,7 +53,6 @@ const server = http.createServer(async (req, res) => {
       data = mode === 'revoke-fails' ? {} : { success: true, status: 'revoked', credentialId: 'previous-credential', revokedAt: '2026-10-11T00:00:00Z' };
     } else {
       assert.equal(req.headers.authorization, `Bearer ${token}`);
-      if (requestUrl === '/api/v1/eliza/agents') agentReads++;
       if (mode === 'outage') { status = 503; data = {}; }
       else if (requestUrl.startsWith('/api/v1/maps/')) {
        mapsRequests.push({ path:requestUrl,method:req.method,key:req.headers['idempotency-key'],body });
@@ -71,23 +64,7 @@ const server = http.createServer(async (req, res) => {
        status=mode==='maps-unknown'?503:200;data=mode==='maps-unknown'?{code:'maps_admission_unknown'}:/^\/api\/v1\/maps\/tiles\/\d+\//.test(requestUrl)?{encoding:'base64',contentType:'image/png',data:mode==='tile-invalid'?'not base64':Buffer.from([137,80,78,71]).toString('base64')}:{};
       }
       else if (requestUrl === '/api/v1/user') data = { success: true, data: { id, organization_id: sessionId } };
-      else if (requestUrl.endsWith('/api/conversations') && req.method === 'POST') data = { conversation: { id: conversationId, title: body.title } };
-      else if (requestUrl.endsWith('/api/conversations')) data = { conversations: [{ id: conversationId, title: 'Fixture' }] };
-      else if (requestUrl.endsWith(`/api/conversations/${conversationId}/messages`) && req.method === 'GET') data = { messages: [{ id: 'history-user', role: 'user', text: 'Earlier question', timestamp: 1 }, { id: 'history-agent', role: 'assistant', text: 'Earlier answer', timestamp: 2 }] };
-      else if (requestUrl.endsWith(`/api/conversations/${conversationId}/messages`)) {
-        assert.equal(body.text, 'Hello'); assert.equal(body.channelType, 'DM');
-        assert.equal(body.clientMessageId, 'synthetic-message');
-        data = { text: 'Synthetic response', agentName: 'Fixture' };
-      }
-      else if (requestUrl === '/api/v1/eliza/agents') { assert.equal(req.method, 'GET'); data = { success: true, data: [agent()] }; }
-      else if (requestUrl === `/api/v1/eliza/agents/${id}`) { assert.equal(req.method, 'GET'); data = { success: true, data: agent() }; }
-      else if (requestUrl === '/api/v1/eliza/google/connect/initiate') {
-        // Authorizing on an account that already holds send asks for what it holds too: Cloud grants exactly what is named.
-        assert.deepEqual(body, { side: 'owner', capabilities: mode === 'gmail-modify'
-          ? ['google.basic_identity', 'google.gmail.triage', 'google.gmail.send', 'google.gmail.drafts', 'google.gmail.mailbox']
-          : mode === 'cumulative' ? ['google.basic_identity', 'google.gmail.triage', 'google.gmail.send', 'google.gmail.drafts'] : ['google.basic_identity', 'google.gmail.triage'] });
-        data = { authUrl: mode === 'foreign-oauth' ? 'https://attacker.invalid/' : 'https://accounts.google.com/o/oauth2/v2/auth?state=synthetic' };
-      } else if (requestUrl === '/api/v1/eliza/google/accounts?side=owner') data = [{ configured: true, connected: true, reason: 'connected', connectionId: grant, grantedCapabilities: ['google.gmail.triage'], identity: { email: 'owner@example.invalid' } }];
+      else if (requestUrl === '/api/v1/eliza/google/accounts?side=owner') data = [{ configured: true, connected: true, reason: 'connected', connectionId: grant, grantedCapabilities: ['google.gmail.triage'], identity: { email: 'owner@example.invalid' } }];
       else if (requestUrl.startsWith('/api/v1/eliza/google/gmail/')) {
         const url = new URL(requestUrl, 'http://localhost'); assert.equal(url.searchParams.get('grantId'), grant); assert.equal(req.method, 'GET');
         if (url.pathname.endsWith('/search')) {
@@ -104,7 +81,6 @@ const server = http.createServer(async (req, res) => {
         else { assert.equal(url.searchParams.get('messageId'), mail.externalId); data = { message: mail, bodyText: '<script>plain untrusted email text</script>', bodyHtml: htmlBody() }; }
       }
       else if (requestUrl === '/api/v1/eliza/google/disconnect') { assert.equal(req.method, 'POST'); assert.deepEqual(body, { side: 'owner', connectionId: grant }); data = mode === 'bad-disconnect' ? {} : { ok: true }; }
-      else if (requestUrl === '/api/v1/eliza/google/status?side=owner') data = { configured: true, connected: false, reason: 'disconnected', connectionId: null, grantedCapabilities: [] };
       else throw new Error('Unexpected synthetic route');
     }
     res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(data));
@@ -113,8 +89,7 @@ const server = http.createServer(async (req, res) => {
 const loopback = await startLoopback(server);
 const request: CloudNativeRequest = async ({ url, method, headers, body, signal, redirect }) => {
   const target = new URL(url);
-  assert.ok(['https://api.eliza.app', 'https://api-staging.eliza.app', `https://${id}.cloud.eliza.app`].includes(target.origin));
-  if (target.pathname.includes('/api/conversations')) runtimeTargets.push(target.origin + target.pathname);
+  assert.ok(['https://api.eliza.app', 'https://api-staging.eliza.app'].includes(target.origin));
   assert.equal(redirect, 'error');
   const response = await fetch(loopback + target.pathname + target.search, {
     method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal, redirect });
@@ -153,15 +128,12 @@ const host: CloudSignInPort = {
     return { status: 'authenticated', environment: 'production', expiresAt: Date.now() + 60000, accountCreated: null }; },
   async cancel() { hostCalls.push(['cancel']); releaseGoogle?.(Object.assign(new Error('cancelled'), { code: 'cancelled' })); releaseGoogle = null; },
 };
-// Managed services (login, identity, Gmail, revocation) run on the CloudProtocol that product builds ship;
-// only the hosted-agent routes use the development subclass, over the same credential store.
+// Managed services (login, identity, Gmail, revocation) run on the CloudProtocol that product builds ship.
 const make = (environment: CloudEnvironment = 'production', signIn: CloudSignInPort | null = host) => new CloudProtocol(environment, request, store, browser, {signIn: signIn ?? undefined});
-const makeAgents = (environment: CloudEnvironment = 'production') => new DevelopmentCloudAgentProtocol(environment, request, store, browser);
 const signal = () => new AbortController().signal;
 try {
   const client = make();
   assert.equal(Object.getPrototypeOf(client), CloudProtocol.prototype, 'managed services are tested on the shipped class');
-  const agents = makeAgents();
   // In-app email sign-in: the host stores the key; no web page is opened and no Cloud route is called here.
   const started = await client.startEmailSignIn('  owner@example.invalid ', signal());
   assert.equal(started.attemptId, sessionId);
@@ -182,22 +154,6 @@ try {
   const tileCalls=mapsRequests.length;await assert.rejects(client.mapsTile(2,4,0,signal()),error => hasCode(error, 'invalid-response'));assert.equal(mapsRequests.length,tileCalls);
   mode='tile-invalid';await assert.rejects(client.mapsTile(2,1,3,signal()),error => hasCode(error, 'invalid-response'));mode='ok';
   assert.equal((await client.identity(signal())).userId, id);
-  assert.equal((await agents.listAgents(signal()))[0].id, id);
-  assert.equal((await agents.listConversations(id, signal()))[0].id, conversationId);
-  assert.equal((await agents.createConversation(id, 'Fixture', signal())).id, conversationId);
-  assert.equal((await agents.send(id, conversationId, 'Hello', { clientMessageId: 'synthetic-message', signal: signal() })).text, 'Synthetic response');
-  assert.ok(runtimeTargets.every(target => target.startsWith(`https://${id}.cloud.eliza.app/`)));
-  assert.equal((await agents.messages(id, conversationId, signal())).messages[1].text, 'Earlier answer');
-  mode = 'shared';
-  assert.equal((await agents.messages(id, conversationId, signal())).messages[0].role, 'user');
-  await agents.send(id, conversationId, 'Hello', { clientMessageId: 'synthetic-message', signal: signal() });
-  assert.equal(runtimeTargets.at(-1), `https://api.eliza.app/api/v1/eliza/agents/${id}/api/conversations/${conversationId}/messages`);
-  mode = 'ok';
-  assert.equal((await makeAgents().agentDetail(id, signal())).id, id, 'new client restores injected credentials');
-  assert.match(await client.initiateGmail(signal()), /^https:\/\/accounts.google.com\//);
-  // Incremental grant (P-37): the modify step is one consent that keeps read and adds every change capability.
-  mode = 'gmail-modify'; assert.match(await client.initiateGmail(signal(), 'modify'), /^https:\/\/accounts.google.com\//); mode = 'ok';
-  assert.equal((await client.gmailStatus(signal())).connected, false);
   assert.equal((await client.gmailAccounts(signal()))[0].connectionId, grant);
   assert.equal((await client.gmailSearch(grant, 'in:inbox', signal())).messages[0].id, mail.externalId);
   assert.equal((await client.gmailSearch(grant, 'in:inbox', signal(), 50)).messages[0].id, mail.externalId);
@@ -232,16 +188,10 @@ try {
   mode = 'ok'; await client.disconnectGmail(grant, signal());
   mode = 'bad-disconnect'; await assert.rejects(client.disconnectGmail(grant, signal()), error => hasCode(error, 'invalid-response'));
   mode = 'ok';
-  mode = 'foreign-runtime'; await assert.rejects(agents.listAgents(signal()), error => hasCode(error, 'invalid-response'));
-  mode = 'cumulative';
-  assert.match(await client.initiateGmail(signal(), 'drafts', ['google.gmail.triage', 'google.gmail.send', 'google.unknown.scope']), /^https:\/\/accounts.google.com\//);
-  mode = 'ok';
-  mode = 'foreign-oauth'; await assert.rejects(client.initiateGmail(signal()), error => hasCode(error, 'invalid-response'));
-  const readsBeforeOutage = agentReads;
-  mode = 'outage'; await assert.rejects(agents.listAgents(signal()), error => error instanceof CloudProtocolError && error.status === 503);
-  assert.equal(agentReads, readsBeforeOutage + 1); assert.ok(memory.saved);
+  mode = 'outage'; await assert.rejects(client.identity(signal()), error => error instanceof CloudProtocolError && error.status === 503);
+  assert.ok(memory.saved); mode = 'ok';
   await client.disconnect(); assert.equal(memory.saved, null);
-  await assert.rejects(agents.listAgents(signal()), error => hasCode(error, 'credentials-missing'));
+  await assert.rejects(client.identity(signal()), error => hasCode(error, 'credentials-missing'));
   // Google through the host: one sign-in at a time, cancellation burns the host's attempt.
   hostMode = 'created';
   const created = await client.signInWithGoogle(signal());
@@ -318,7 +268,7 @@ try {
   assert.equal(opened.at(-1), `https://staging.eliza.app/auth/cli-login?session=${sessionId}&app=alpha`);
   assert.ok(!opened.at(-1)?.includes(token) && !opened.at(-1)?.includes('synthetic-legacy-key'), 'the browser URL carries neither the session token nor the legacy API key');
   await client.disconnect();
-  process.stdout.write('PASS: synthetic in-app Cloud sign-in (email, MFA, Google, cancellation, one at a time, refused foreign/extra/unstored outcomes, previous-key revocation outcome), synthetic HTTP Cloud sign-in hand-off, credential preference/storage, restart, revocation of a replaced key before the new one is stored (failed revocation does not block), agent list/detail, dedicated/shared conversation routing and send, Gmail scopes (cumulative grants)/status/account/search/read/thread, complete HTML preservation and malformed/oversized HTML handling, search paging, read-state capability, disconnect, URL rejection, outage without retry, consumed claim, expiry, cancellation and staging routing. No live account acceptance.\n');
+  process.stdout.write('PASS: synthetic in-app Cloud sign-in (email, MFA, Google, cancellation, one at a time, refused foreign/extra/unstored outcomes, previous-key revocation outcome), synthetic HTTP Cloud sign-in hand-off, credential preference/storage, restart, revocation of a replaced key before the new one is stored (failed revocation does not block), Gmail account/search/read/thread, complete HTML preservation and malformed/oversized HTML handling, search paging, read-state capability, disconnect, outage without retry, consumed claim, expiry, cancellation and staging routing. No live account acceptance.\n');
 } finally {
   server.closeAllConnections(); await stopLoopback(server);
 }

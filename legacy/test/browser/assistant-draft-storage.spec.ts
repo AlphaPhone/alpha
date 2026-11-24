@@ -41,22 +41,12 @@ for(const scenario of ['reset','competing-write','abort','unreadable'] as const)
  else if(scenario==='competing-write')expect(result).toMatchObject({refused:true,exact:true,newer:true,writes:1});
  else expect(result).toMatchObject({refused:true,unchanged:true,writes:0});
 });
-test('explicit development fixture native recovery backup passes exact UTF-8 bytes to reviewed document export',async({page})=>{
- expect(await page.evaluate(async()=>{
-  const {saveNativeRecoveryBackup}=await import('/src/runtime/native-recovery-backup.ts');let input:any;
-  const raw=JSON.stringify({saved:' { "text": "🙂 draft" }\n',currentDraft:'Current\nline'});
-  const message=await saveNativeRecoveryBackup(raw,'Alpha-assistant-draft-recovery.txt',new AbortController().signal,{saveReviewed:async value=>{input=value;return {status:'saved',message:'unused'};}});
-  const bytes=Uint8Array.from(atob(input.dataBase64),n=>n.charCodeAt(0)),digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),n=>n.toString(16).padStart(2,'0')).join('');
-  const cancel=new AbortController();cancel.abort();let cancelled=false;try{await saveNativeRecoveryBackup(raw,'backup.txt',cancel.signal,{saveReviewed:async()=>{throw Error('Must not dispatch');}});}catch(e){cancelled=(e as Error).name==='AbortError';}
-  return {text:new TextDecoder().decode(bytes)===raw,hash:input.sha256===digest,reviewed:input.reviewed,mime:input.mimeType,message,cancelled};
- })).toEqual({text:true,hash:true,reviewed:true,mime:'text/plain',message:'Backup saved.',cancelled:true});
-});
 test('device draft recovery requires a separate reset confirmation and keeps saved text on close',async({page})=>{
  await page.evaluate(async()=>{
   const {nativeAssistantDraftRecovery}=await import('/src/runtime/native-assistant-draft-recovery.ts');const {openDomainRecovery}=await import('/src/browser/domain-recovery.ts');
   sessionStorage.setItem('native-draft-fixture',' {"text":"Retained","version":19} ');
   const recovery=nativeAssistantDraftRecovery('dialog-native-binding',{read:async()=>sessionStorage.getItem('native-draft-fixture'),compareExchange:async(expected,value)=>{if(sessionStorage.getItem('native-draft-fixture')!==expected)return {status:'conflict'};sessionStorage.setItem('native-draft-fixture',value);return {status:'saved'};}});
-  (window as any).openNativeDraftRecovery=()=>openDomainRecovery(recovery,'assistant draft','Assistant draft recovery','Save a backup before resetting.',undefined,undefined,'device');(window as any).openNativeDraftRecovery();
+  (window as any).openNativeDraftRecovery=()=>openDomainRecovery(recovery,'assistant draft','Assistant draft recovery','Save a backup before resetting.',undefined,'device');(window as any).openNativeDraftRecovery();
  });
  const dialog=page.getByRole('dialog',{name:'Assistant draft recovery'});await dialog.getByRole('button',{name:'Reset device assistant draft',exact:true}).click();
  expect(await page.evaluate(()=>sessionStorage.getItem('native-draft-fixture'))).toContain('Retained');

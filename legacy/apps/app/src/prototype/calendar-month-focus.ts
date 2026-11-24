@@ -1,10 +1,13 @@
 import {createInlineModal} from '../runtime/inline-modal';
-type Bag=Record<string,any>;
+import type {ShellPrototype,ViewOutput,ViewRegistry,ViewState} from './shell-types';
+type MonthState=ViewState&{day?:number;month?:number|null};
+type MonthOutput=ViewOutput&{closeMonth:()=>void;monthOpen?:boolean};
 /** Month selection owns focus without allowing covered day controls to act. */
-export function installCalendarMonthFocus(Component:any,views:Bag){
+export function installCalendarMonthFocus(Component:{prototype:ShellPrototype},views:ViewRegistry){
  const render=views.calendar.render;let close=()=>{},container:HTMLElement|null=null;
- const modal=createInlineModal(()=>close(),()=>document.querySelector<HTMLElement>('button[aria-label="Month view"]'));
- views.calendar.render=(state:Bag,api:Bag)=>{const out=render(state,api);close=out.closeMonth;
+ const modal=createInlineModal(()=>close(),()=>document.querySelector<HTMLElement>('button[aria-label="Choose date"]'));
+ const ref=(element:HTMLElement|null)=>{container=element;modal.ref(element);};
+ views.calendar.render=(state:MonthState,api)=>{const out=render(state,api) as MonthOutput;close=out.closeMonth;
   if(out.monthOpen){
    const selected=new Date(api.now);selected.setDate(selected.getDate()+Number(state.day||0));selected.setDate(1);
    const shown=new Date(selected);shown.setMonth(shown.getMonth()+Number(state.month||0));
@@ -17,7 +20,6 @@ export function installCalendarMonthFocus(Component:any,views:Bag){
    out.chooseYear=(event:Event)=>choose(Number((event.target as HTMLSelectElement).value),shown.getMonth());
   }
   return {...out,monthModalRef:ref};};
- const ref=(element:HTMLElement|null)=>{container=element;modal.ref(element);};
  const p=Component.prototype,mount=p.componentDidMount,unmount=p.componentWillUnmount;
  const back=(event:Event)=>{if(!container?.isConnected||container.closest('[inert]'))return;event.preventDefault();event.stopImmediatePropagation();close();};
  p.componentDidMount=function(){mount.call(this);window.addEventListener('alpha-back',back,true);};

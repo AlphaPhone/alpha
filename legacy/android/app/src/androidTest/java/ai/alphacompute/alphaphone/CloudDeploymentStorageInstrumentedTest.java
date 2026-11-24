@@ -22,10 +22,10 @@ public final class CloudDeploymentStorageInstrumentedTest {
    @Override public File getNoBackupFilesDir(){return directory;}
   };
   JsonCredentialSlots raw=new JsonCredentialSlots(new File(directory,"connection-credentials"),"alpha.connection.aes.v1",name->256*1024);
-  String credential="cloud:production",pending="cloud-signin:v1:pending";
+  String credential=Slots.CLOUD_PRODUCTION,pending="cloud-signin:v1:pending";
   String foreign="cloud-deployment:other:"+credential;
   try {
-   raw.write(credential,"{\"token\":\"synthetic-legacy\"}");
+   raw.write(credential,"{\"token\":\"synthetic-unnamespaced\"}");
    raw.write(foreign,"{\"token\":\"synthetic-other\"}");
    AlphaCredentialStore store=new AlphaCredentialStore(isolated);
    assertNull(store.readCredentialSlot(credential));
@@ -43,7 +43,7 @@ public final class CloudDeploymentStorageInstrumentedTest {
    assertFalse(reopened.compareExchangeCredentialSlot(pending,"stale",null));
    assertTrue(reopened.compareExchangeCredentialSlot(pending,attempt,null));
    assertNull(new AlphaCredentialStore(isolated).readCredentialSlot(pending));
-   assertEquals("{\"token\":\"synthetic-legacy\"}",raw.read(credential));
+   assertEquals("{\"token\":\"synthetic-unnamespaced\"}",raw.read(credential));
    assertEquals("{\"token\":\"synthetic-other\"}",raw.read(foreign));
   } finally {remove(directory);}
  }

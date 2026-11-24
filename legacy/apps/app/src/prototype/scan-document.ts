@@ -1,7 +1,7 @@
 import {anyAbortSignal} from '../runtime/abort-signal';
 import {mediaToolIcon} from './media-review-controls';
 import './scan-dialog.css';
-import type {ScanTextLine} from './scan-text-layer';
+import type {ScanTextLine} from '../../../../.eliza/client-features/plugins/plugin-files/src/documents/scan-text-layer.ts';
 import {reviewSearchableScan} from './scan-searchable-review';
 import {reviewScanCorrection} from './scan-correction-review';
 import {readScanDraft,saveScanDraft,deleteScanDraft} from '../browser/scan-draft';

@@ -1,0 +1,380 @@
+// The Maps screen as the launcher mounts it (installPrototypeMapsAdapter over the real
+// MapsScreenController and MapsController, native plugins as controlled ports): the position
+// shown on open when location is already allowed, the place sheet's category subtitle and phone row, a long press dropping a pin, the route's step list,
+// swapping a route's ends, recent searches, the compass, guidance copy without
+// a screen-off session, and the arrival notice when guidance ends with Maps off screen.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {bundleMapsAdapter, mountMapsAdapter, tick, providerId, connectionId, providerConfig, attribution} from '../specs/quint/refinement/application/maps-adapter-harness.mjs';
+
+const code = await bundleMapsAdapter();
+const image = [{name: 'AlphaTelephony', methods: [{name: 'imageCapability'}]}];
+const from = {latitude: 1, longitude: 1};
+
+async function mount(options = {}) {
+  const now = Date.now(), routes = [];
+  const cafe = {providerId, id: 'cafe-1', name: 'Cafe', coordinate: {latitude: 1.01, longitude: 1.01}, phone: '+1 555 123 4567', attribution, fetchedAt: now, ...options.place};
+  const provider = {
+    providerId, connectionId,
+    async search() { return [cafe]; },
+    async detail() { return cafe; },
+    route(origin, target, mode) {
+      const route = {providerId, id: `route_fixture_${routes.length + 1}_0123456789`, from: origin, to: target, mode, geometry: [origin, target],
+        distanceMeters: 1500, durationSeconds: 600, attribution, fetchedAt: now, traffic: 'none',
+        steps: [{instruction: 'Head north on Main St', coordinate: origin, distanceMeters: 1500, maneuver: 'depart'},
+          {instruction: 'Arrive at Cafe', coordinate: target, distanceMeters: 0, maneuver: 'arrive'}]};
+      routes.push(route);
+      return Promise.resolve(route);
+    },
+  };
+  const {granted = true, place: _place, ...rest} = options;
+  const m = await mountMapsAdapter(code, {...rest, configure: (app, harness) => { harness.locationGranted = granted; app.configureMapsProvider(providerConfig, provider); }});
+  const toasts = [], opened = [];
+  m.api.toast = text => toasts.push(text);
+  m.api.open = (...args) => opened.push(args);
+  m.render(); await tick();
+  return {m, cafe, routes, toasts, opened};
+}
+async function settle() { for (let i = 0; i < 4; i++) await tick(); }
+async function openCafe(m) {
+  m.render().onQ({target: {value: 'cafe'}});
+  m.harness.flushInputTimers(); await settle();
+  m.render().results[0].go(); await settle();
+  return m.render();
+}
+async function routeToCafe(m) {
+  m.harness.locationGranted = false;
+  (await openCafe(m)).pc.dirs(); await settle();
+  m.render().onOrigin({target: {value: '1, 1'}});
+  m.harness.flushInputTimers(); await settle();
+  return m.render();
+}
+
+test('a place with a phone number shows it with Copy; Call appears only where Phone exists', async () => {
+  const {m, toasts, opened} = await mount();
+  try {
+    const {pc} = await openCafe(m);
+    assert.equal(pc.hasPhone, true);
+    assert.equal(pc.phone, '+1 555 123 4567');
+    assert.equal(pc.call, undefined, 'no Phone app outside the Alpha image');
+    pc.copyPhone(); await settle();
+    assert.deepEqual(m.harness.copied, ['+1 555 123 4567']);
+    assert.deepEqual(toasts, ['Number copied']);
+    assert.equal(opened.length, 0);
+  } finally { m.restore(); }
+});
+
+test('a provider place is subtitled with its most specific category, else "Place"', async () => {
+  const {m} = await mount({place: {categories: ['Pharmacy', 'Health']}});
+  try {
+    const {pc} = await openCafe(m);
+    assert.equal(pc.meta, 'Pharmacy');
+  } finally { m.restore(); }
+  const plain = await mount();
+  try {
+    const {pc} = await openCafe(plain.m);
+    assert.equal(pc.meta, 'Place');
+  } finally { plain.m.restore(); }
+});
+
+test('a category is shown as sent: it never reads as a dropped pin or offers Rename', async () => {
+  const {m} = await mount({place: {categories: ['Coordinates']}});
+  try {
+    const {pc} = await openCafe(m);
+    assert.equal(pc.meta, 'Coordinates');
+    assert.equal(pc.canRename, false);
+  } finally { m.restore(); }
+});
+
+test('Call opens Phone with the number filled in, and dials nothing itself', async () => {
+  const {m, opened} = await mount({pluginHeaders: image});
+  try {
+    const {pc} = await openCafe(m);
+    pc.call();
+    assert.deepEqual(opened, [['phone', {prefill: '+15551234567'}]]);
+  } finally { m.restore(); }
+});
+
+test('a long press on the map drops a pin at the pressed point', async () => {
+  const saved = globalThis.MutationObserver;
+  globalThis.MutationObserver = class { observe() {} disconnect() {} };
+  const {m} = await mount();
+  try {
+    m.render().mapRef({dataset: {}, isConnected: true, replaceChildren() {}});
+    const onLongPress = m.harness.plane?.[8];
+    assert.equal(typeof onLongPress, 'function', 'the adapter hands the plane a long-press callback');
+    onLongPress({latitude: 2, longitude: 3}); await settle();
+    const data = m.render();
+    assert.equal(data.mode, 'place');
+    assert.equal(data.pc.name, 'Dropped pin');
+    assert.equal(data.pc.meta, 'Selected location');
+    assert.equal(data.pc.canRename, true);
+    assert.deepEqual(m.harness.screen.selected.coordinate, {latitude: 2, longitude: 3});
+  } finally { m.restore(); globalThis.MutationObserver = saved; }
+});
+
+test('directions list the selected route step by step', async () => {
+  const {m, routes} = await mount();
+  try {
+    const data = await routeToCafe(m);
+    assert.equal(routes.length, 1);
+    assert.equal(data.dr.hasSteps, true);
+    assert.deepEqual(data.dr.steps.map(step => step.text), ['Head north on Main St', 'Arrive at Cafe']);
+    assert.notEqual(data.dr.steps[0].distance, '');
+    assert.equal(data.dr.steps[1].distance, '', 'no distance on the arrival step');
+    // A long press while directions are open keeps the route.
+    m.harness.screen.dropPin({latitude: 2, longitude: 3}); await settle();
+    assert.equal(m.render().mode, 'dir');
+  } finally { m.restore(); }
+});
+
+test('guidance without a screen-off session says to keep Maps open, in plain words', async () => {
+  const {m} = await mount();
+  try {
+    (await routeToCafe(m)).dr.start(); await settle();
+    let data = m.render();
+    assert.equal(data.nativeStatus, 'Waiting for your location.');
+    m.harness.bridge.starts.at(-1).reject(Error('refused')); await settle();
+    data = m.render();
+    assert.equal(data.dr.nav.meta, 'Keep Maps open');
+    assert.doesNotMatch(`${data.nativeStatus} ${data.dr.nav.meta}`, /foreground|fix/i);
+  } finally { m.restore(); }
+});
+
+test('arriving with Maps off screen posts one arrival notice, then ends the screen-off session', async () => {
+  const {m, cafe} = await mount();
+  try {
+    (await routeToCafe(m)).dr.start(); await settle();
+    const start = m.harness.bridge.starts.at(-1);
+    start.resolve(); await settle();
+    m.visibility(true); await settle();
+    const watch = m.harness.locations[0].run;
+    assert.equal(typeof watch?.onFix, 'function', 'guidance holds its location watch');
+    watch.onFix({coordinate: from, accuracyMeters: 5, timestamp: Date.now(), precision: 'precise'}); await settle();
+    assert.deepEqual(m.harness.bridge.arrivals, []);
+    watch.onFix({coordinate: cafe.coordinate, accuracyMeters: 5, timestamp: Date.now(), precision: 'precise'}); await settle();
+    assert.deepEqual(m.harness.bridge.arrivals, [{title: 'Arrived at Cafe', text: 'Navigation ended.'}]);
+    assert.deepEqual(m.harness.bridge.stops, [start.sessionId]);
+  } finally { m.restore(); }
+});
+
+test('arriving with Maps on screen ends the session without a notice', async () => {
+  const {m, cafe} = await mount();
+  try {
+    (await routeToCafe(m)).dr.start(); await settle();
+    const start = m.harness.bridge.starts.at(-1);
+    start.resolve(); await settle();
+    m.harness.locations[0].run.onFix({coordinate: cafe.coordinate, accuracyMeters: 5, timestamp: Date.now(), precision: 'precise'}); await settle();
+    assert.equal(m.render().dr.nav.arrived, true);
+    assert.deepEqual(m.harness.bridge.arrivals, []);
+    assert.deepEqual(m.harness.bridge.stops, [start.sessionId]);
+  } finally { m.restore(); }
+});
+
+/** The location requests the screen made with a one-fix watch (not guidance's continuous one). */
+const oneFix = m => m.harness.locations.filter(location => location.run?.oneShot);
+
+test('opening Maps with location already allowed shows where the phone is, selecting nothing', async () => {
+  const {m} = await mount();
+  try {
+    await settle();
+    const [request] = oneFix(m);
+    assert.ok(request, 'Maps asks for one fix on open');
+    assert.equal(m.harness.locationStarts, 1);
+    request.run.onFix({coordinate: from, accuracyMeters: 20, timestamp: Date.now(), precision: 'precise'}); await settle();
+    const view = m.harness.screen.view();
+    assert.deepEqual(view.map.overlay.position?.coordinate, from);
+    assert.deepEqual(view.map.selected, from, 'the map centres on the position');
+    assert.equal(view.place, undefined, 'the position is shown, not chosen');
+    assert.equal(m.render().mode, 'base');
+    // Further renders in the same visit ask nothing more.
+    m.render(); await settle();
+    assert.equal(m.harness.locationStarts, 1);
+  } finally { m.restore(); }
+});
+
+test('opening Maps without location allowed makes no location request', async () => {
+  const {m} = await mount({granted: false});
+  try {
+    await settle();
+    assert.equal(m.harness.locationStarts, 0);
+    assert.equal(m.harness.screen.view().map.overlay.position, null);
+  } finally { m.restore(); }
+});
+
+test('a place chosen before the position arrives keeps the map on that place', async () => {
+  const {m, cafe} = await mount();
+  try {
+    await settle();
+    const [request] = oneFix(m);
+    await openCafe(m);
+    request.run?.onFix({coordinate: from, accuracyMeters: 20, timestamp: Date.now(), precision: 'precise'}); await settle();
+    const view = m.harness.screen.view();
+    assert.equal(view.place?.name, 'Cafe');
+    assert.deepEqual(view.map.selected, cafe.coordinate);
+  } finally { m.restore(); }
+});
+
+test('a failed position on open shows no message', async () => {
+  const {m} = await mount();
+  try {
+    await settle();
+    const [request] = oneFix(m);
+    request.run.onError({code: 'unavailable', message: 'No fix'}); await settle();
+    const view = m.harness.screen.view();
+    assert.equal(view.map.overlay.position, null);
+    assert.doesNotMatch(view.status.text, /could not|location/i);
+    // The owner's own request afterwards shows its outcome as before.
+    m.harness.screen.locate(); await settle();
+    oneFix(m).at(-1).run.onError({code: 'unavailable', message: 'No fix'}); await settle();
+    assert.notEqual(m.harness.screen.view().status.text, view.status.text);
+  } finally { m.restore(); }
+});
+
+test('a fix that arrives while the owner types a search leaves the map where it is', async () => {
+  const {m} = await mount();
+  try {
+    await settle();
+    const [request] = oneFix(m);
+    m.render().onQ({target: {value: 'caf'}});
+    m.harness.flushInputTimers(); await settle();
+    assert.equal(m.render().results.length, 1, 'the typed search has its results listed');
+    request.run?.onFix({coordinate: from, accuracyMeters: 20, timestamp: Date.now(), precision: 'precise'}); await settle();
+    assert.equal(m.harness.screen.view().map.selected, undefined);
+  } finally { m.restore(); }
+});
+
+test('a planned route swaps its ends: the chosen place becomes the start and the typed point the destination', async () => {
+  const {m, cafe, routes} = await mount();
+  try {
+    let data = await routeToCafe(m);
+    assert.equal(routes.length, 1);
+    assert.equal(data.dr.canSwap, true);
+    data.dr.swap(); await settle();
+    data = m.render();
+    assert.equal(data.mode, 'dir');
+    assert.equal(data.dr.name, 'Dropped pin');
+    assert.equal(data.originText, 'Cafe');
+    assert.equal(routes.length, 2, 'the swapped route is planned once');
+    assert.deepEqual(routes[1].from, cafe.coordinate);
+    assert.deepEqual(routes[1].to, from);
+    // Swapping back keeps the provider place as the destination, read again by its id.
+    m.render().dr.swap(); await settle();
+    data = m.render();
+    assert.equal(data.dr.name, 'Cafe');
+    assert.equal(m.harness.screen.selected.origin, 'provider');
+    assert.equal(m.harness.screen.selected.providerPlaceId, 'cafe-1');
+    assert.equal(data.originText, 'Dropped pin');
+    assert.deepEqual(routes[2].from, from);
+    assert.deepEqual(routes[2].to, cafe.coordinate);
+  } finally { m.restore(); }
+});
+
+test('swapping a route from the located position makes that position the destination', async () => {
+  const {m, cafe, routes} = await mount({granted: false});
+  try {
+    (await openCafe(m)).pc.dirs(); await settle();
+    m.render().originLocation(); await settle();
+    oneFix(m).at(-1).run.onFix({coordinate: from, accuracyMeters: 5, timestamp: Date.now(), precision: 'precise'}); await settle();
+    assert.equal(m.render().originText, 'My location');
+    assert.equal(routes.length, 1);
+    m.render().dr.swap(); await settle();
+    const data = m.render();
+    assert.equal(data.dr.name, 'Current location');
+    assert.equal(m.harness.screen.selected.origin, 'location');
+    assert.equal(data.originText, 'Cafe');
+    assert.deepEqual(routes.at(-1).from, cafe.coordinate);
+    assert.deepEqual(routes.at(-1).to, from);
+  } finally { m.restore(); }
+});
+
+test('swap is offered only for a planned route, and not during guidance', async () => {
+  const {m} = await mount({granted: false});
+  try {
+    (await openCafe(m)).pc.dirs(); await settle();
+    assert.equal(m.render().dr.canSwap, false, 'no starting point yet');
+    m.harness.screen.swapEnds(); await settle();
+    assert.equal(m.render().dr.name, 'Cafe');
+    m.render().onOrigin({target: {value: '1, 1'}});
+    m.harness.flushInputTimers(); await settle();
+    assert.equal(m.render().dr.canSwap, true);
+    m.render().dr.start(); await settle();
+    assert.equal(m.harness.screen.view().directions.canSwap, false);
+    m.harness.screen.swapEnds(); await settle();
+    assert.equal(m.render().mode, 'nav');
+    assert.equal(m.harness.screen.selected.label, 'Cafe');
+  } finally { m.restore(); }
+});
+
+const enter = {key: 'Enter', preventDefault() {}, target: {blur() {}}};
+async function searchEnter(m, text) {
+  m.render().onQ({target: {value: text}});
+  m.render().qKey(enter); await settle();
+}
+
+test('recent searches list what the owner searched, newest first, kept in memory only', async () => {
+  const {m} = await mount({granted: false});
+  try {
+    await searchEnter(m, 'tea');
+    m.render().clearQ(); await settle();
+    // A typeahead search the owner picks a result from counts; its partial text does not.
+    m.render().onQ({target: {value: 'cafe'}});
+    m.harness.flushInputTimers(); await settle();
+    m.render().results[0].go(); await settle();
+    m.render().pc.close(); m.render().clearQ(); await settle();
+    // Coordinates drop a pin; they are not a search to repeat.
+    await searchEnter(m, '1, 1');
+    m.render().pc.close(); m.render().clearQ(); await settle();
+    let data = m.render();
+    assert.equal(data.emptyQ, true);
+    assert.equal(data.hasRecent, true);
+    assert.deepEqual(data.recentRows.map(row => row.text), ['cafe', 'tea']);
+    data.recentRows[1].go(); await settle();
+    data = m.render();
+    assert.equal(m.harness.screen.view().query, 'tea');
+    assert.equal(data.mode, 'results');
+    m.render().clearQ(); await settle();
+    assert.deepEqual(m.render().recentRows.map(row => row.text), ['tea', 'cafe']);
+    m.render().clearRecent(); await settle();
+    data = m.render();
+    assert.equal(data.hasRecent, false);
+    assert.deepEqual(data.recentRows, []);
+  } finally { m.restore(); }
+});
+
+test('a Maps provider change drops the recent searches', async () => {
+  const {m} = await mount({granted: false});
+  try {
+    await searchEnter(m, 'tea');
+    m.render().clearQ(); await settle();
+    assert.equal(m.render().hasRecent, true);
+    m.app.configureMapsProvider({...providerConfig, revision: 'replacement'}, {providerId, connectionId, search: async () => [], detail: async () => null, route: async () => { throw Error('none'); }});
+    await settle();
+    m.render().clearQ(); await settle();
+    assert.equal(m.render().hasRecent, false);
+  } finally { m.restore(); }
+});
+
+test('the compass shows while the map is turned and puts north back up', async () => {
+  const saved = globalThis.MutationObserver;
+  globalThis.MutationObserver = class { observe() {} disconnect() {} };
+  const {m} = await mount({granted: false});
+  try {
+    m.render().mapRef({dataset: {}, isConnected: true, replaceChildren() {}});
+    const onRotate = m.harness.plane?.[9];
+    assert.equal(typeof onRotate, 'function', 'the adapter hands the plane a rotation callback');
+    assert.equal(m.render().compass, false, 'north up shows no compass');
+    const style = new Map();
+    m.render().compassRef({style: {setProperty: (name, value) => style.set(name, value)}});
+    onRotate(true, 30); await settle();
+    let data = m.render();
+    assert.equal(data.compass, true);
+    assert.equal(style.get('--alpha-map-bearing'), '-30deg', 'the needle turns against the map');
+    data.northUp();
+    assert.equal(m.harness.northUps, 1);
+    onRotate(false, 0); await settle();
+    data = m.render();
+    assert.equal(data.compass, false);
+    assert.equal(style.get('--alpha-map-bearing'), '0deg');
+  } finally { m.restore(); globalThis.MutationObserver = saved; }
+});

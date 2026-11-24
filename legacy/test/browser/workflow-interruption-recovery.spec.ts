@@ -181,7 +181,7 @@ test('a new-workflow save that never reached the agent can be sent again once an
  // The draft stays locked across a reload; the resend is offered only after the agent reports no record.
  await page.reload();await setup(page);await returnToApps(page);await page.getByRole('button',{name:'Workflows',exact:true}).click();await newWorkflow(page);
  await expect(builder).toContainText('Pending');await expect(page.getByRole('button',{name:'Resend',exact:true})).toHaveCount(0);
- await page.getByRole('button',{name:'Refresh save receipt',exact:true}).click();await expect(builder).toContainText('Not received · Resend');expect(await posts(page,'/api/workflow/phone/workflows')).toHaveLength(0);
+ await page.getByRole('button',{name:'Refresh to check if it saved',exact:true}).click();await expect(builder).toContainText('Not received · Resend');expect(await posts(page,'/api/workflow/phone/workflows')).toHaveLength(0);
  await page.getByRole('button',{name:'Resend',exact:true}).click();await expect(builder).toContainText('Resend once');expect(await posts(page,'/api/workflow/phone/workflows')).toHaveLength(0);
  await page.getByRole('button',{name:'Confirm resend',exact:true}).click();await expect(page.getByRole('heading',{name:'Recovered save',exact:true})).toBeVisible();await expect(runNow(page)).toBeVisible();
  const sent=await posts(page,'/api/workflow/phone/workflows');expect(sent).toHaveLength(1);const data=await stored(page);expect(data.workflows.map(row=>row.name)).toEqual(['Recovered save']);expect(data.receipts).toHaveLength(1);expect(data.receipts[0].mutationId??data.receipts[0].id??sent[0].mutationId).toBe(sent[0].mutationId);expect(data.workflows[0].active).toBe(false);
@@ -190,22 +190,22 @@ test('a new-workflow save that never reached the agent can be sent again once an
 });
 
 test('an edit the agent refused because the workflow changed saves nothing and unlocks the draft',async({page})=>{
- await setup(page);await seed(page);await openFixture(page);await page.getByRole('button',{name:'Change',exact:true}).click();await expect(page.getByRole('button',{name:'Add Read step',exact:true})).toBeVisible();
+ await setup(page);await seed(page);await openFixture(page);await page.getByLabel('Workflow actions',{exact:true}).click();await page.getByRole('button',{name:'Change',exact:true}).click();await expect(page.getByRole('button',{name:'Add Read step',exact:true})).toBeVisible();
  await page.getByRole('textbox',{name:'Workflow name',exact:true}).fill('Edited too late');await rule(page,{method:'POST',suffix:'/phone-spec',kind:'refuse-typed',times:1});
  await page.getByRole('button',{name:'Save workflow',exact:true}).click();await expect(page.getByLabel('Workflow save review',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Save workflow',exact:true}).click();
  await expect(page.locator('[role=status]').filter({hasText:'Changed on agent'})).toBeVisible();
  // A known refusal is not an unknown outcome: no receipt to wait for, and the draft can be edited or discarded.
- await expect(page.getByRole('button',{name:'Refresh save receipt',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Resend',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Discard local draft',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Refresh to check if it saved',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Resend',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Discard local draft',exact:true})).toBeVisible();
  await expect(page.getByRole('textbox',{name:'Workflow name',exact:true})).toHaveValue('Edited too late');expect(await posts(page,'/phone-spec')).toHaveLength(1);
  expect((await stored(page)).workflows.map(row=>row.name)).toEqual(['Execution fixture']);
  await page.getByRole('button',{name:'Discard local draft',exact:true}).click();await page.getByRole('button',{name:'Confirm discard local draft',exact:true}).click();
- await page.getByRole('button',{name:'Change',exact:true}).click();await expect(page.getByRole('textbox',{name:'Workflow name',exact:true})).toHaveValue('Execution fixture');
+ await page.getByLabel('Workflow actions',{exact:true}).click();await page.getByRole('button',{name:'Change',exact:true}).click();await expect(page.getByRole('textbox',{name:'Workflow name',exact:true})).toHaveValue('Execution fixture');
 });
 
 test('a typed workflow is presented as manual-trigger only: no schedule is offered, implied or enabled',async({page})=>{
  await setup(page);await seed(page);await returnToApps(page);await page.getByRole('button',{name:'Workflows',exact:true}).click();
  // Creation: the workflow entry says it runs when started; the editor's only trigger is the explicit Run.
- await page.getByRole('button',{name:'New automation',exact:true}).click();await page.getByRole('region',{name:'Add to Workflows',exact:true}).getByRole('button',{name:'More options',exact:true}).click();await expect(page.getByRole('region',{name:'Add to Workflows',exact:true}).getByRole('button',{name:/^Steps/})).toBeEnabled();
+ await page.getByRole('button',{name:'Add to Workflows',exact:true}).click();await page.getByRole('region',{name:'Add to Workflows',exact:true}).getByRole('button',{name:'More options',exact:true}).click();await expect(page.getByRole('region',{name:'Add to Workflows',exact:true}).getByRole('button',{name:/^Steps/})).toBeEnabled();
  await page.getByRole('region',{name:'Add to Workflows',exact:true}).getByRole('button',{name:/^Steps/}).click();await expect(page.getByRole('textbox',{name:'Workflow name',exact:true})).toBeEditable();
  await expect(page.getByText('Manual',{exact:true})).toBeVisible();
  await page.getByRole('button',{name:'Edit When step',exact:true}).click();await expect(page.getByText('Manual',{exact:true}).first()).toBeVisible();
@@ -217,8 +217,8 @@ test('a typed workflow is presented as manual-trigger only: no schedule is offer
  // Enabling: a manual workflow has no schedule. The switch says to use Run now and sends nothing to the agent.
  await page.evaluate(()=>window.dispatchEvent(new Event('alpha-back')));await returnToApps(page);await page.getByRole('button',{name:'Workflows',exact:true}).click();await workflowCard(page,'Execution fixture').click();await expect(runNow(page)).toBeVisible();
  // The switch stays visible and greyed (aria-disabled, still tappable); a tap says why.
- const toggle=page.getByRole('button',{name:'Turn Execution fixture on or off',exact:true});await expect(toggle).toHaveAttribute('aria-disabled','true');await toggle.click({force:true});
- await expect(status(page)).toHaveText('Manual');await expect(toggle).toHaveAttribute('aria-disabled','true');await toggle.click({force:true});await expect(toggle).toHaveAttribute('aria-pressed','false');expect(await posts(page,'/activate')).toHaveLength(0);
+ const toggle=page.getByRole('switch',{name:'Turn Execution fixture on or off',exact:true});await expect(toggle).toHaveAttribute('aria-disabled','true');await toggle.click({force:true});
+ await expect(status(page)).toHaveText('Manual');await expect(toggle).toHaveAttribute('aria-disabled','true');await toggle.click({force:true});await expect(toggle).toHaveAttribute('aria-checked','false');expect(await posts(page,'/activate')).toHaveLength(0);
  await expect(page.getByText(/scheduled runs/)).toHaveCount(0);
  // Nothing runs until Run now is reviewed and confirmed.
  await page.waitForTimeout(1500);expect(await posts(page,'/run')).toHaveLength(0);expect((await stored(page)).runs).toHaveLength(0);
@@ -228,19 +228,19 @@ test('editing while a run awaits approval leaves that run on its reviewed versio
  await setup(page);const saved=await seed(page,'phone');await openFixture(page);await runNow(page).click();await runNow(page).click();
  await expect(page.getByRole('button',{name:'Cancel run',exact:true})).toBeVisible();await expect(page.getByText('Waiting for approval',{exact:true}).first()).toBeVisible();
  await page.getByRole('button',{name:'Back to Execution fixture',exact:true}).click();
- await page.getByRole('button',{name:'Change',exact:true}).click();await expect(page.getByText('Run in progress',{exact:true}).first()).toBeVisible();
+ await page.getByLabel('Workflow actions',{exact:true}).click();await page.getByRole('button',{name:'Change',exact:true}).click();await expect(page.getByText('Run in progress',{exact:true}).first()).toBeVisible();
  await page.locator('[data-alpha-subview="workflows-builder"] summary').filter({hasText:'More options'}).click();await page.getByRole('textbox',{name:'Workflow description',exact:true}).fill('Edited during a pending run');await page.getByRole('button',{name:'Save workflow',exact:true}).click();await expect(page.getByLabel('Workflow save review',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Save workflow',exact:true}).click();
  await expect(page.getByText('Edited during a pending run',{exact:true})).toBeVisible();await expect(runNow(page)).toBeVisible();
  // One workflow at a new version; the waiting run is untouched and nothing new was started by the edit.
  const data=await stored(page);expect(data.workflows).toHaveLength(1);expect(data.workflows[0].versionId).not.toBe(saved.versionId);expect(data.runs.map(run=>[run.workflowVersionId,run.finished])).toEqual([[saved.versionId,false]]);expect(await posts(page,'/run')).toHaveLength(1);
  await page.getByRole('button',{name:'Waiting for approval execution',exact:true}).click();await expect(page.getByText('Older version',{exact:true})).toBeVisible();await page.locator('.workflow-run-details[aria-label="Workflow execution details"] > summary').click();await expect(page.getByText(saved.versionId,{exact:true})).toBeVisible();
  // Removal is refused while it is unfinished; the explicit disposition is cancelling that exact run.
- await page.getByRole('button',{name:'Back to Execution fixture',exact:true}).click();await page.getByRole('button',{name:'Remove workflow',exact:true}).click();
+ await page.getByRole('button',{name:'Back to Execution fixture',exact:true}).click();await page.getByLabel('Workflow actions',{exact:true}).click();await page.getByRole('button',{name:'Remove workflow',exact:true}).click();
  await expect(page.getByText('Cancel runs first',{exact:true}).first()).toBeVisible();expect(await posts(page,'/lifecycle')).toHaveLength(0);
  await page.getByRole('button',{name:'Waiting for approval execution',exact:true}).click();await page.getByRole('button',{name:'Cancel run',exact:true}).click();await page.getByRole('button',{name:'Confirm cancel',exact:true}).click();
  await expect.poll(async()=>(await stored(page)).runs.map(run=>run.finished)).toEqual([true]);
  const notes=await page.evaluate(async()=>(await (await import('/src/runtime/browser-notes-document.ts')).browserNotesPort.read())?.raw||'');expect(notes).not.toContain('Pending workflow note');
- await page.getByRole('button',{name:'Back to Execution fixture',exact:true}).click();await page.getByRole('button',{name:'Remove workflow',exact:true}).click();
+ await page.getByRole('button',{name:'Back to Execution fixture',exact:true}).click();await page.getByLabel('Workflow actions',{exact:true}).click();await page.getByRole('button',{name:'Remove workflow',exact:true}).click();
  await expect(page.getByText('Keeps history; stops future runs.',{exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'Remove',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Cancel',exact:true})).toBeVisible();
  expect(await posts(page,'/lifecycle')).toHaveLength(0);expect(await posts(page,'/run')).toHaveLength(1);

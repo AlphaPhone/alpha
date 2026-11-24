@@ -57,7 +57,8 @@ test('Files offers the exact Office file as a download when it cannot preview it
  await expect(preview.getByRole('status')).toContainText(/preview|open|read/i);
  await expect(preview.getByText('Status',{exact:true})).toHaveCount(0);
  const downloading=page.waitForEvent('download');
- await preview.getByRole('button',{name:'Download file',exact:true}).click();
+ await preview.getByRole('button',{name:'File actions',exact:true}).click();
+ await page.getByRole('dialog',{name:'File actions',exact:true}).getByRole('button',{name:'Download file',exact:true}).click();
  const download=await downloading;
  expect(download.suggestedFilename()).toBe('fixture.docx');
  expect(Array.from(await readFile((await download.path())!))).toEqual([80,75,3,4,0,31]);

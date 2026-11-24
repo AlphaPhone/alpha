@@ -58,11 +58,10 @@ const INBOX_STATES = new Set(['not-connected', 'idle', 'loading', 'ready', 'stal
  */
 export function homeAttentionCard(out: Bag): ReactElement | null {
   if (out.homeShowInbox === false || out.homeGoogleConnected === false || out.homeInboxHasRows !== true || !Array.isArray(out.homeInboxRows) || out.homeInboxRows.length === 0) return null;
-  const rows = Array.isArray(out.homeInboxRows) && out.homeInboxHasRows !== false
-    ? out.homeInboxRows.map((row: Bag) => ({title: String(row?.subject ?? ''), detail: String(row?.from ?? '')})) : [];
+  const rows = out.homeInboxRows.map((row: Bag) => ({title: String(row?.subject ?? ''), detail: String(row?.from ?? '')}));
   const people = Array.isArray(out.homeAttentionPeople) ? out.homeAttentionPeople.map((person: Bag) => String(person?.ini ?? '')) : [];
   return createElement(OverviewAttentionCard, {
-    count: String(out.homeInboxCount ?? ''), rows, title: String(out.homeInboxTitle || (rows.length ? '' : 'Inbox')), status: String(out.homeInboxStatus || (rows.length ? '' : out.homeInboxState === 'not-connected' ? 'Connect email' : out.homeInboxState === 'pending' || out.homeInboxState === 'loading' ? 'Loading…' : out.homeInboxState === 'ready' ? 'No unread email' : 'Open to view')), people,
+    count: String(out.homeInboxCount ?? ''), rows, title: String(out.homeInboxTitle || ''), status: String(out.homeInboxStatus || ''), people,
     ...(INBOX_STATES.has(out.homeInboxState) ? {state: out.homeInboxState} : {}),
     label: String(out.homeAttentionLabel ?? 'Open Inbox'), description: String(out.homeInboxDescription ?? ''),
     onActivate: typeof out.goTriage === 'function' ? out.goTriage : undefined,
@@ -97,10 +96,10 @@ export function homeTelephonyCard(kind: 'messages' | 'phone', card: {count: stri
 /** A brief widget appears only when a retained result exists. */
 export function homeBriefCard(out: Bag): ReactElement | null {
   if(out.homeBriefHas!==true)return null;
-  const retained=out.homeBriefHas===true,failed=retained&&out.homeBriefFailed===true;
+  const failed=out.homeBriefFailed===true;
   return createElement(OverviewBriefCard, {
-    title: retained?String(out.homeBriefTitle || 'Your brief'):'Your brief', status: retained?String(out.homeBriefStatus || 'No brief yet'):'No brief yet', failed,
-    label: retained?String(out.homeBriefLabel || 'Open your brief'):'Open your brief', onActivate: typeof out.goBrief === 'function' ? out.goBrief : undefined,
+    title: String(out.homeBriefTitle || 'Your brief'), status: String(out.homeBriefStatus || 'No brief yet'), failed,
+    label: String(out.homeBriefLabel || 'Open your brief'), onActivate: typeof out.goBrief === 'function' ? out.goBrief : undefined,
     icon: maskIcon('file-text', 'var(--acct)'),
     classNames: {card: 'home-brief-card', head: 'home-brief-head', title: 'home-brief-title', status: 'home-brief-status'},
     dataAttributes: {'data-alpha-home-brief': '', 'data-alpha-home-brief-failed': flag(failed)},

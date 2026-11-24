@@ -44,6 +44,7 @@ class AlphaDevicePlugin {static final class UpdatePause {
 class NativeDigestHost {NativeDigestHost(android.content.Context c){NativeSourceHost.started++;}void read(){}}
 class NativeOwnerReminderHost {NativeOwnerReminderHost(android.content.Context c){NativeSourceHost.started++;}void read(){}}
 class NativeSourceHost {static int started;static void configure(Runnable r){started++;}static void configureOwnerReminderContext(Runnable r){started++;}}
+class AlphaNotificationChannels {static void registerGroups(){}}
 class NativeDeletionCoordinator {static NativeDeletionCoordinator get(android.content.Context c){return new NativeDeletionCoordinator();}void start(){NativeSourceHost.started++;}}
 class ResetBeforeDispatch {static final ai.eliza.plugins.system.reset.DataReset.BeforeDispatch STEP=ai.eliza.auth.cloud.CloudKeyRevocation.<android.content.Context>resetStep(()->null,(c,slot)->{throw new AssertionError("the stand-in step reads no slot");})::run;}
 class AlphaNoteAudioPlugin {static void scheduleTrashBackstop(android.content.Context c){NativeSourceHost.started++;}}

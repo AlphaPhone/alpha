@@ -32,16 +32,11 @@ public final class AccessibilityHomeRoleInstrumentedTest {
   return false;
  }
  private static final String SCALE = "Number(getComputedStyle(document.documentElement).getPropertyValue('--alpha-text-scale'))";
- // The test's open-view helper polls after the view first renders. Let it finish before HOME
- // changes the view, or its next poll can reopen the app we just asked Android to leave.
- private static final String TEST_NAVIGATION_SETTLED = "window.__alphaTestNavigation?.status==='complete'";
  private static final String HOME_READY = AppNavigation.selected("Home") + "&&!document.querySelector('[data-alpha-layer=\"drawer\"]')&&!document.querySelector('.os')?.inert";
 
- /** P-43: the views need a phone its owner signed in. */
- private static void assumeViews(String journey) throws Exception { AppNavigation.assumeNoRequiredSignIn(journey); }
-
  @Test public void homeKeyFromEveryViewLandsOnAnAccessibleAlphaHome() throws Exception {
-  assumeViews("Repeated HOME with Alpha as HOME");
+  // P-43: the views need a phone its owner signed in.
+  AppNavigation.assumeNoRequiredSignIn("Repeated HOME with Alpha as HOME");
   Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
   Assume.assumeTrue("Alpha must already be the selected HOME app; this test never changes roles", ChatContinuityInstrumentedTest.alphaIsHome(context));
   String previous = AccessibilityViewsInstrumentedTest.fontScale(null);
@@ -51,12 +46,12 @@ public final class AccessibilityHomeRoleInstrumentedTest {
    AccessibilityViewsInstrumentedTest.fontScale("2.0");
    try (BoundedActivityScenario<MainActivity> scenario = BoundedActivityScenario.launch(MainActivity.class)) {
     AppNavigation.liveMode();
-    js(AppNavigation.request("Home")); assertTrue("Home ready", until(HOME_READY + "&&" + TEST_NAVIGATION_SETTLED, 200));
+    js(AppNavigation.request("Home")); assertTrue("Home ready", until(HOME_READY + "&&" + AppNavigation.SETTLED, 200));
     AppNavigation.declineStartupAccess();
     assertTrue("The page measures the 200% text it is drawn at", until("Math.abs(" + SCALE + "-2)<0.2", 100));
     for (String view : AccessibilityViewsInstrumentedTest.VIEWS) {
      js(AppNavigation.request(view));
-     if (!until(AppNavigation.selected(view) + "&&" + TEST_NAVIGATION_SETTLED, 200)) { problems.add(view + ": did not finish opening"); continue; }
+     if (!until(AppNavigation.selected(view) + "&&" + AppNavigation.SETTLED, 200)) { problems.add(view + ": did not finish opening"); continue; }
      for (int press = 1; press <= 3; press++) {
       AccessibilityLifecycleInstrumentedTest.pressHome();
       if (!until(HOME_READY, 100)) { problems.add(view + ": HOME " + press + " did not land on Alpha Home (" + js("document.documentElement.dataset.activeView") + ")"); break; }

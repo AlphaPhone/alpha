@@ -38,7 +38,7 @@ public final class BrowserContinuityInstrumentedTest {
   int count=0;for(int i=0;i<100;i++){count=AlphaBrowserStores.session(context).read().getJSONArray("tabs").length();if(count==expected)break;SystemClock.sleep(100);}return count;
  }
  /** The persistent normal-tab profile is retained by decision; only ephemeral ones retire. */
- private static java.util.HashSet<String> ephemeralOnly(java.util.Collection<String> names){java.util.HashSet<String> out=new java.util.HashSet<>();for(String name:names)if(AlphaBrowserPlugin.ephemeralProfile(name))out.add(name);return out;}
+ private static java.util.HashSet<String> ephemeralOnly(java.util.Collection<String> names){java.util.HashSet<String> out=new java.util.HashSet<>();for(String name:names)if(AlphaBrowserStores.IDENTITY.ephemeral(name))out.add(name);return out;}
  private void saved(BrowserBookmarkStore store,String url,boolean expected)throws Exception{for(int i=0;i<150;i++){if(store.read().contains(url)==expected)return;SystemClock.sleep(100);}fail("Native encrypted bookmark commit did not match UI action");}
  @Test public void tabsSurviveAppNavigationAndBookmarksSurviveActivityRecreation()throws Exception{
   AppNavigation.assumeNoRequiredSignIn("Browser continuity");
@@ -79,7 +79,7 @@ public final class BrowserContinuityInstrumentedTest {
   BrowserSnapshot result=new BrowserSnapshot();java.util.concurrent.atomic.AtomicReference<Exception> error=new java.util.concurrent.atomic.AtomicReference<>();
   WebViewTestDriver.withActivity(MainActivity.class,activity->{try{
    result.activity=activity;Object plugin=activity.getBridge().getPlugin("AlphaBrowser").getInstance();
-   java.lang.reflect.Field namespace=ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class.getDeclaredField("namespace"),tabs=ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class.getDeclaredField("tabs");namespace.setAccessible(true);tabs.setAccessible(true);result.namespace=(String)namespace.get(plugin);
+   java.lang.reflect.Field namespace=AlphaBrowserPlugin.class.getDeclaredField("namespace"),tabs=AlphaBrowserPlugin.class.getDeclaredField("tabs");namespace.setAccessible(true);tabs.setAccessible(true);result.namespace=(String)namespace.get(plugin);
    for(Object tab:((java.util.Map<?,?>)tabs.get(plugin)).values()){
     java.lang.reflect.Field profile=tab.getClass().getDeclaredField("profile"),frame=tab.getClass().getDeclaredField("frame");profile.setAccessible(true);frame.setAccessible(true);result.profiles.add((String)profile.get(tab));result.frames.add((android.view.View)frame.get(tab));
    }
@@ -107,7 +107,7 @@ public final class BrowserContinuityInstrumentedTest {
     boolean privateSupported=androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DELETE_BROWSING_DATA);
     click("Menu");click("New private tab");address(url);
     if(privateSupported)page(url);else ready("document.body.innerText.includes('Private tabs need an Android System WebView')");
-    java.util.HashSet<String> ephemeral=new java.util.HashSet<>();for(String name:snapshot().profiles)if(AlphaBrowserPlugin.ephemeralProfile(name))ephemeral.add(name);
+    java.util.HashSet<String> ephemeral=ephemeralOnly(snapshot().profiles);
     assertEquals("Private tab uses an ephemeral profile exactly when supported",privateSupported,!ephemeral.isEmpty());
     assertTrue(fixture.edit().putStringSet("profiles",ephemeral).putBoolean("privateSupported",privateSupported).commit());
     assertEquals("Only the normal tab is saved",1,savedTabs(context,1));
@@ -123,7 +123,7 @@ public final class BrowserContinuityInstrumentedTest {
    WebViewTestDriver.withActivity(MainActivity.class,activity->{
     java.util.List<String> names=androidx.webkit.ProfileStore.getInstance().getAllProfileNames();
     for(String name:retired)assertFalse("Old private profile deleted after real process restart",names.contains(name));
-    assertTrue("Persistent sign-in profile retained across process restart",names.contains(AlphaBrowserPlugin.PERSISTENT_PROFILE));
+    assertTrue("Persistent sign-in profile retained across process restart",names.contains(AlphaBrowserStores.PERSISTENT_PROFILE));
    });
    app("Browser");
    if("verify".equals(phase)){

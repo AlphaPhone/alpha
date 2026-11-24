@@ -28,7 +28,22 @@ test('unrelated old Daily edits do not invalidate Notes but changed old Notes do
  expect(await page.evaluate(async()=>{const m=await import('/src/runtime/browser-notes-document.ts');localStorage.setItem('alphaphone:daily:v1',JSON.stringify({notes:[],receipts:['one','two']}));await(await m.openBrowserNotes()).assertCurrent();localStorage.setItem('alphaphone:daily:v1',JSON.stringify({notes:[{id:'late'}],receipts:[]}));let refused=false;try{await m.openBrowserNotes();}catch{refused=true;}return refused;})).toBe(true);
 });
 test('malformed legacy data stays exact and reset cannot import it again',async({page})=>{
- await page.addInitScript(key=>localStorage.setItem(key,' broken Notes bytes '),legacyKey);await ready(page);await selectLegacyNotes(page);await page.getByRole('button',{name:'Recover browser Notes',exact:true}).click();const dialog=page.getByRole('dialog',{name:'Browser Notes recovery'});const download=page.waitForEvent('download');await dialog.getByRole('button',{name:'Download Notes backup'}).click();const stream=await(await download).createReadStream(),chunks:Buffer[]=[];for await(const chunk of stream!)chunks.push(Buffer.from(chunk));expect(JSON.parse(JSON.parse(Buffer.concat(chunks).toString()).saved).v2).toBe(' broken Notes bytes ');await dialog.getByRole('button',{name:'Reset app Notes',exact:true}).click();await dialog.getByRole('button',{name:'Confirm Notes reset',exact:true}).click();await expect(dialog).toHaveCount(0);await expect.poll(()=>page.evaluate(async()=>!!(await(await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw()))).toBe(true);expect(await page.evaluate(async key=>({records:JSON.parse(await(await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw()).records,legacy:localStorage.getItem(key)}),legacyKey)).toEqual({records:[],legacy:' broken Notes bytes '});
+ await page.addInitScript(key=>localStorage.setItem(key,' broken Notes bytes '),legacyKey);await ready(page);await selectLegacyNotes(page);await page.getByRole('button',{name:'Recover Notes',exact:true}).click();const dialog=page.getByRole('dialog',{name:'Browser Notes recovery'});const download=page.waitForEvent('download');await dialog.getByRole('button',{name:'Download Notes backup'}).click();const stream=await(await download).createReadStream(),chunks:Buffer[]=[];for await(const chunk of stream!)chunks.push(Buffer.from(chunk));expect(JSON.parse(JSON.parse(Buffer.concat(chunks).toString()).saved).v2).toBe(' broken Notes bytes ');await dialog.getByRole('button',{name:'Reset app Notes',exact:true}).click();await dialog.getByRole('button',{name:'Confirm Notes reset',exact:true}).click();await expect(dialog).toHaveCount(0);await expect.poll(()=>page.evaluate(async()=>!!(await(await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw()))).toBe(true);expect(await page.evaluate(async key=>({records:JSON.parse(await(await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw()).records,legacy:localStorage.getItem(key)}),legacyKey)).toEqual({records:[],legacy:' broken Notes bytes '});
+});
+test('the recovery download preserves the older Notes bytes without resetting them',async({page})=>{
+ const previous=' malformed retained note bytes ';
+ await page.addInitScript(({key,previous})=>localStorage.setItem(key,previous),{key:legacyKey,previous});
+ await ready(page);
+ await selectLegacyNotes(page);
+ await page.getByRole('button',{name:'Recover Notes',exact:true}).click();
+ const dialog=page.getByRole('dialog',{name:'Browser Notes recovery'});
+ const download=page.waitForEvent('download');
+ await dialog.getByRole('button',{name:'Download old copy',exact:true}).click();
+ const stream=await(await download).createReadStream();
+ const chunks:Buffer[]=[];
+ for await(const chunk of stream!)chunks.push(Buffer.from(chunk));
+ expect(JSON.parse(Buffer.concat(chunks).toString()).v2).toBe(previous);
+ expect(await page.evaluate(key=>localStorage.getItem(key),legacyKey)).toBe(previous);
 });
 test('stale reset cannot erase another editor and a valid reset changes collection identity',async({page})=>{
  await ready(page);expect(await page.evaluate(async note=>{const m=await import('/src/runtime/browser-notes-document.ts'),old=await m.browserNotesRecovery.capture(),store=await m.openBrowserNotes(),before=JSON.parse(store.raw).collectionId;await store.replace([note]);let refused=false;try{await m.browserNotesRecovery.reset(old);}catch{refused=true;}const capture=await m.browserNotesRecovery.capture();await m.browserNotesRecovery.reset(capture);const next=await m.openBrowserNotes();return {refused,empty:next.list.length===0,newIdentity:JSON.parse(next.raw).collectionId!==before};},note)).toEqual({refused:true,empty:true,newIdentity:true});

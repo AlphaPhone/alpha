@@ -29,7 +29,7 @@ public class WorkspaceFallbackTest {
   System.out.println("PASS Workspace fallback "+checks);
  }
 }`);
-  const out=runJvm([nativeSource('GoogleWorkspaceReturn.java'),nativeSource('GoogleWorkspaceReturnFlow.java'),upstreamAgentRuntime('NativeProviderAdmission.java'),file],'ai.alphacompute.alphaphone.WorkspaceFallbackTest',{json:true});
+  const out=runJvm([nativeSource('GoogleWorkspaceReturn.java'),nativeSource('GoogleWorkspaceReturnFlow.java'),nativeSource('AlphaUtil.java'),upstreamAgentRuntime('NativeProviderAdmission.java'),file],'ai.alphacompute.alphaphone.WorkspaceFallbackTest',{json:true});
   assert.match(out,/^PASS Workspace fallback 15/);
  }finally{rmSync(root,{recursive:true,force:true});}
 });

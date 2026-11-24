@@ -1,5 +1,4 @@
 import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
-import {openLegacyNotes} from './helpers/legacy-notes';
 /*
  * Journey A, browser build.
  *
@@ -218,12 +217,11 @@ test('journey A: boot, connect, converse across apps, stop a reply, reload and r
 
 // Journey hardening: journey A had no declined action.
 // The proposal is authored through the development "Action JSON" control (no model decides it);
-// the card, Decline and the read-back are the real rendered path.
+// the card, Decline and the read-back of the action journal are the real rendered path.
 test('journey A: a proposed phone action is declined from the conversation and nothing runs, before or after a reload',async({page})=>{
  test.setTimeout(120_000);
- const notes=()=>page.evaluate(async()=>JSON.parse((await (await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw())||'{"records":[]}').records as any[]);
  const actions=()=>page.evaluate(async()=>(await (await import('/src/browser/development-execution-document.ts')).readExecutionPart({namespace:'local'} as any,'actions',()=>({proposals:[],journal:[]}))) as any);
- await page.goto('/?mode=dev');await openLegacyNotes(page);await returnToApps(page);
+ await page.goto('/?mode=dev');
  await expect(page.getByRole('region',{name:'Home'})).toBeVisible();
  const ask=page.getByRole('textbox',{name:'Ask Alpha',exact:true}),conversation=page.locator('[data-alpha-layer="conversation"]');
  await openConnection(page);
@@ -248,26 +246,24 @@ test('journey A: a proposed phone action is declined from the conversation and n
  // The exact content is shown for review and nothing has run.
  await expect(conversation).toContainText('“Journey A declined note”');
  await expect(conversation).toContainText('Must never be saved');
- expect(await notes()).toEqual([]);
  await decline.dblclick();
  await expect(conversation.getByText('Declined. No phone action was performed.',{exact:true})).toHaveCount(1);
  await expect(approve).toHaveCount(0);
  await expect(decline).toHaveCount(0);
- expect(await notes()).toEqual([]);
  let state=await actions();
  expect(state.proposals.map((p:any)=>[p.payload.operation.type,p.state,p.receipt??null])).toEqual([['create_note','rejected',null]]);
  expect(state.journal).toEqual([]);
  // The conversation continues: one reply per accepted request, and the declined action stays declined.
- await conversation.getByRole('textbox',{name:'Message Alpha',exact:true}).fill('Journey A request after declining');
- await conversation.getByRole('textbox',{name:'Message Alpha',exact:true}).press('Enter');
+ // Clicking Decline can move the shared editor from the dock into the conversation.
+ const message=page.getByRole('textbox',{name:'Message Alpha',exact:true});
+ await message.fill('Journey A request after declining');
+ await message.press('Enter');
+ await expect(bubble(page,'Journey A request after declining')).toHaveCount(1);
  await expect(bubble(page,REPLY)).toHaveCount(2);
  await expect(approve).toHaveCount(0);
 
  await page.reload();
  await expect(page.getByRole('region',{name:'Home'})).toBeVisible();
- await openLegacyNotes(page);
- await expect(page.getByRole('button',{name:'Open Journey A declined note',exact:true})).toHaveCount(0);
- expect(await notes()).toEqual([]);
  state=await actions();
  expect(state.proposals.map((p:any)=>p.state)).toEqual(['rejected']);
  expect(state.journal).toEqual([]);

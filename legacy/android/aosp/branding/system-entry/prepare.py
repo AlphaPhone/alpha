@@ -349,27 +349,20 @@ add(PREFIX + 'res/drawable/ic_alpha_system_mark.xml', '''<?xml version="1.0" enc
 </vector>
 ''')
 
-if OUT.exists():
-    # Regenerate only previously recorded task outputs, never an external tree.
-    assert OUT.parent == DATA and OUT.name == 'staged'
-else: OUT.mkdir(parents=True)
+OUT.mkdir(parents=True, exist_ok=True)
 for row in INPUTS['files']:
     target = OUT / row['path']; target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes((BASE / row['path']).read_bytes())
 patch = []
-manifest = []
 for path, (before, after) in sorted(changes.items()):
     target = OUT / path; target.parent.mkdir(parents=True, exist_ok=True); target.write_text(after)
     patch.extend(difflib.unified_diff((before or '').splitlines(True), after.splitlines(True),
         fromfile='a/'+path if before is not None else '/dev/null', tofile='b/'+path))
-    manifest.append({'path':path,'beforeSha256':sha(before.encode()) if before is not None else None,
-                     'afterSha256':sha(after.encode()),'new':before is None})
 # Unified patches need explicit markers for upstream XML that intentionally lacks an EOF newline.
 patch_bytes=''.join(line if line.endswith('\n') else line+'\n\\ No newline at end of file\n'
                     for line in patch).encode()
 reviewed = json.loads((ROOT/'manifest.json').read_text())
 assert sha(patch_bytes) == reviewed['patchSha256'], 'Generated patch differs from reviewed manifest'
-(DATA/'alpha-native-system-entry.patch').write_bytes(patch_bytes)
 overlay=DATA/'product-overlay/values/alpha-system-entry.xml';overlay.parent.mkdir(parents=True,exist_ok=True)
 overlay.write_text('''<?xml version="1.0" encoding="utf-8"?>
 <resources>
@@ -381,14 +374,4 @@ overlay.write_text('''<?xml version="1.0" encoding="utf-8"?>
     </string-array>
 </resources>
 ''')
-record={'schema':1,'project':'frameworks/base','revision':INPUTS['revision'],
-    'patch':'alpha-native-system-entry.patch','patchSha256':sha(patch_bytes),'files':manifest,
-    'identity':{'source':str(logo.relative_to(REPO)),'sourceSha256':sha(logo.read_bytes()),'exactSvgPathPreserved':True,
-                'font':'Android serif system family; no new font payload','header':'Text-only wordmark in native foreground; keyguard icon uses existing native product tint','existingProductBlue':'#0000FF','existingProductDarkBlue':'#B8C0FF'},
-    'productOverlay':{'path':'product-overlay/values/alpha-system-entry.xml','sha256':sha(overlay.read_bytes()),
-        'resources':{'config_alpha_system_entry_enabled':True,'custom_lockscreen_shortcuts_enabled':True,
-            'config_keyguardQuickAffordanceDefaults':['bottom_start:alpha_assistant','bottom_end:camera']},
-        'destination':'Existing AlphaSystemUIOverlay resource directory; do not add another competing overlay package'},
-    'selectionDefaultsChanged':True,'savedSelectionsChanged':False,'compilation':'pending','imageBuilt':False,'deviceQualified':False}
-(DATA/'manifest.json').write_text(json.dumps(record,indent=2)+'\n')
-print(json.dumps({'files':len(manifest),'patchSHA256':record['patchSha256'],'compilation':'pending'}))
+print(json.dumps({'files':len(changes),'patchSHA256':sha(patch_bytes),'compilation':'pending'}))

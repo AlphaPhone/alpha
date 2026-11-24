@@ -23,13 +23,17 @@ test('a selected text file offers Ask only after its readable excerpt arrives',a
    return new Promise(resolve=>{fixture.finish=()=>resolve({status:'read',text:'Actual file text'});});
   };
  });
- const preview=await openStoredFile(page,'pending-excerpt.txt'),ask=preview.getByRole('button').filter({hasText:/^Ask Alpha$/});
+ const preview=await openStoredFile(page,'pending-excerpt.txt');
+ await expect(preview.getByText('text/plain · selected on this device',{exact:true})).toBeVisible();
+ await preview.getByRole('button',{name:'File actions',exact:true}).click();
+ const ask=page.getByRole('dialog',{name:'File actions',exact:true}).getByRole('button',{name:'Ask Alpha',exact:true});
  await expect.poll(()=>page.evaluate(()=>(window as any).excerptRead.started)).toBe(true);
  await expect(ask).toHaveCount(0);
  await page.evaluate(()=>(window as any).excerptRead.finish());
  await expect(ask).toBeVisible();await ask.click();
- const review=page.getByRole('dialog',{name:'Ask about selected content',exact:true});
- await expect(review.getByRole('textbox',{name:'Content excerpt',exact:true})).toHaveValue('Actual file text');
+ await expect(page.getByRole('button',{name:'Remove pending-excerpt.txt',exact:true})).toBeVisible();
+ await expect(page.getByRole('textbox',{name:'Message Alpha',exact:true})).toHaveValue('Explain this file');
+ await expect(page.getByRole('dialog',{name:'Ask about selected content',exact:true})).toHaveCount(0);
 });
 
 test('a selected unsupported file has no empty Ask review',async({page})=>{
@@ -39,19 +43,21 @@ test('a selected unsupported file has no empty Ask review',async({page})=>{
  });
  const preview=await openStoredFile(page,'unsupported.bin');
  await expect(preview.getByText('Open or download this file.',{exact:true})).toBeVisible();
- await expect(preview.getByRole('button').filter({hasText:/^Ask Alpha$/})).toHaveCount(0);
+ await preview.getByRole('button',{name:'File actions',exact:true}).click();
+ await expect(page.getByRole('dialog',{name:'File actions',exact:true}).getByRole('button',{name:'Ask Alpha',exact:true})).toHaveCount(0);
  await expect(page.getByRole('dialog',{name:'Ask about selected content',exact:true})).toHaveCount(0);
 });
 
-test('a selected image keeps the local text and description review',async({page})=>{
+test('a selected image appears as a removable photo preview in chat',async({page})=>{
  await page.evaluate(async()=>{
   const {registerPlugin}=await import('/src/platform-plugins.ts');
   const bytes=Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aE1kAAAAASUVORK5CYII='),char=>char.charCodeAt(0));
   await registerPlugin<any>('AlphaFiles').importFile(new File([bytes],'review-image.png',{type:'image/png'}));
  });
  const preview=await openStoredFile(page,'review-image.png');
- await preview.getByRole('button').filter({hasText:/^Ask Alpha$/}).click();
- const review=page.getByRole('dialog',{name:'Ask about selected content',exact:true});
- await expect(review.getByRole('button',{name:'Extract text locally',exact:true})).toBeEnabled();
- await expect(review.getByRole('img',{name:'Image for question review',exact:true})).toBeVisible();
+ await preview.getByRole('button',{name:'File actions',exact:true}).click();
+ await page.getByRole('dialog',{name:'File actions',exact:true}).getByRole('button',{name:'Ask Alpha',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Preview attached review-image.png',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Remove review-image.png',exact:true})).toBeVisible();
+ await expect(page.getByRole('dialog',{name:'Ask about selected content',exact:true})).toHaveCount(0);
 });

@@ -10,7 +10,7 @@ const offered=['reminders.create.v1','reminders.local-record.v2','calendar.creat
 // The production selection with a platform profile; capability and client-boundary proof, not
 // Android or model acceptance.
 async function capabilities(platform,offers=offered,plugins=[]){
- return selectDeviceCapabilities(offers,{android:platform==='android',native:platform!=='web',camera:false,foregroundReview:false,photoLibrary:platform!=='web'&&plugins.includes('AlphaPhotoLibrary'),clockRepeatDays:false,aospImage:false});
+ return selectDeviceCapabilities(offers,{android:platform==='android',native:platform!=='web',camera:false,foregroundReview:false,previousNotes:true,photoLibrary:platform!=='web'&&plugins.includes('AlphaPhotoLibrary'),clockRepeatDays:false,aospImage:false});
 }
 
 test('normal browser declines device reminder creation and retains existing record capabilities',async()=>{

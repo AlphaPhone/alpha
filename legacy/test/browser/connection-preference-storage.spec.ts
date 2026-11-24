@@ -7,14 +7,11 @@ async function identity(page:Page,held=false){await page.evaluate(held=>{
  // Keep the fixture's async setup rooted while CDP awaits its promise.
  w.preferenceFixtureSetup=(async()=>{
  const {CloudProtocol}=await import('/src/runtime/cloud-protocol.ts');
- // Personal setup is development-only hosted-agent code (#406) and lives on the development subclass.
- const {DevelopmentCloudAgentProtocol}=await import('/src/runtime/development-cloud-agents.ts');
  const {cloudCredentialStore}=await import('/src/runtime/native-connection.ts');
  const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');
  w.preferenceFixture={calls:0};
  cloudCredentialStore.read=async()=>({credentialId:'fixture-generation',token:'synthetic-noncredential'});
  CloudProtocol.prototype.identity=async function(signal:AbortSignal){w.preferenceFixture.calls++;w.preferenceFixture.signal=signal;if(held)await new Promise<void>(resolve=>w.preferenceFixture.release=resolve);return {userId:'fixture-owner'};};
- DevelopmentCloudAgentProtocol.prototype.personal=async()=>{throw Error('Fixture does not authorize personal setup');};
  w.preferenceFixture.pending=c.cloudList('production');
  })();
  return w.preferenceFixtureSetup;

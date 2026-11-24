@@ -1,0 +1,3 @@
+# specs/quint/native/SavedSignInRecovery.qnt
+- Lines: 0 (file deleted in the working tree) | Kind: Quint model (removed) | Verdict: DELETE (already done)
+- The file no longer exists: `git status` shows ` D specs/quint/native/SavedSignInRecovery.qnt` and its entry was removed from `native/manifest.json` in the same working-tree change, consistent with Stage A5 (legacy Cloud sign-in recovery, C5/D1). A whole-repo grep outside `vendor/` and this audit folder finds no remaining reference (no harness, test, README or manifest mention), so `scripts/quint-lib.ts:249` ("Model absent from manifest") stays consistent.

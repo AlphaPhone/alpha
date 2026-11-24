@@ -5,6 +5,7 @@ import { speechCleanupNotice } from '../runtime/voice-states';
 import { speakLocalText } from '../local-speech-playback';
 import { markVoiceTiming, abandonVoiceTurn, finishVoiceTurn } from '../runtime/voice-timing';
 import { connectionController } from '../runtime/connection-ui';
+import { formatSpeechText } from '../ui/voice/speech-format';
 import { planLocalSpeech, screenSpeechText } from '../runtime/local-speech-text';
 import { createOnDeviceVoice } from '../runtime/local-voice';
 import { createCloudVoice, cloudVoiceFailure } from '../runtime/cloud-voice';
@@ -43,7 +44,7 @@ async function speakOnDevice(text: string, signal: AbortSignal, onStarted?: () =
 /* ---- Note read-aloud ---- */
 type NoteReading = { noteId?: string; text: string; controller: AbortController; pending?:Promise<void>; state: 'preparing' | 'reading' };
 let noteReading: NoteReading | undefined;
-const noteReadingChanged = () => { try { window.dispatchEvent(new Event('alpha:note-reading')); } catch { /* No renderer. */ } };
+const noteReadingChanged = () => { window.dispatchEvent(new Event('alpha:note-reading')); };
 /** The note being read aloud, if any. Text is the exact passage being read. */
 export function currentNoteReading() { return noteReading ? { noteId: noteReading.noteId, text: noteReading.text, state: noteReading.state } : null; }
 /** Stop note read-aloud. Safe to call at any time. */
@@ -87,7 +88,7 @@ export async function readNoteAloud(text: string, owner: { noteId?: string } = {
     const assertCurrent=() => { if (noteReading !== reading) throw new DOMException('Speech cancelled', 'AbortError'); };
     if (cloud) {
       // Cloud reads in provider-sized pieces, one owned request at a time.
-      try { const pending=reading.pending=speakCloudSpeechChunks({ text: passage, signal, assertCurrent, onStarted: started, speak: (piece, pieceSignal, onStarted) => cloud.speak(piece, pieceSignal, onStarted) });await pending; return done(noteReading === reading && !signal.aborted ? 'finished' : 'stopped'); }
+      try { const pending=reading.pending=speakCloudSpeechChunks({ text: formatSpeechText(passage), signal, assertCurrent, onStarted: started, speak: (piece, pieceSignal, onStarted) => cloud.speak(piece, pieceSignal, onStarted) });await pending; return done(noteReading === reading && !signal.aborted ? 'finished' : 'stopped'); }
       catch (error) {
         // Nothing was heard and the network route failed: read on this phone instead.
         if (noteReading !== reading || signal.aborted || reading.state === 'reading' || !noteNetworkSpeechFailure(error)) throw error;
@@ -156,7 +157,7 @@ export function installLocalSpeechPlayback(Component: Shell) {
   function openMenu(shell: Shell, id: string, text: string, event: Event) {
     event.preventDefault(); event.stopPropagation();
     if(event.type!=='contextmenu'&&menus.get(shell)?.id===id){closeMenu(shell);return;}
-    menus.set(shell, { id, text, trigger: event.currentTarget as HTMLElement, notice: '', focus: event.type==='keydown', binding: JSON.stringify(connectionController.getSnapshot().session) }); refresh(shell);
+    menus.set(shell, { id, text, trigger: event.currentTarget as HTMLElement, notice: '', focus: event.type==='keydown', binding: agentBinding() }); refresh(shell);
   }
   function menuKey(shell: Shell, event: KeyboardEvent) {
     if (event.key === 'Tab') { closeMenu(shell, true); return; }
@@ -168,6 +169,8 @@ export function installLocalSpeechPlayback(Component: Shell) {
     const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (at + (['ArrowLeft', 'ArrowUp'].includes(event.key) ? -1 : 1) + items.length) % items.length;
     items[next]?.focus();
   }
+  const chatOpen = (shell: Shell) => ['sheet', 'full'].includes(shell.S().chat);
+  const agentBinding = () => JSON.stringify(connectionController.getSnapshot().session);
   const refresh = (shell: Shell) => { if (shell.live !== false) shell.setState({ localSpeechRevision: Date.now() }); };
   const stop = (shell: Shell) => { const old = states.get(shell); old?.controller?.abort(); if(old?.pending)retainSpeechRetirement(old.pending);states.delete(shell); if (cancelOwner === shell) { cancelCurrent = undefined; cancelOwner = undefined; } };
   async function listen(shell: Shell, id: string, text: string, spokenText = text) {
@@ -182,7 +185,7 @@ export function installLocalSpeechPlayback(Component: Shell) {
     const cloud = selectVoiceRoute() === 'cloud'||directReadAloud;
     const controller = new AbortController(), state: Reading = { id, text, controller, message: 'Waiting…' };
     let reached = false;
-    const current=()=>!(shell.S().msgs||[]).some((row:Shell)=>row.from==='user'&&!knownUsers.has(row.id))&&states.get(shell)===state&&!controller.signal.aborted&&shell.live!==false&&!document.hidden&&!connectionController.getSnapshot().open&&selection()===binding&&shell.S().view===view&&['sheet','full'].includes(shell.S().chat)&&(shell.S().msgs||[]).some((row:Shell)=>row.id===id&&row.text===text&&JSON.stringify(row.messageBinding)===messageBinding);
+    const current=()=>!(shell.S().msgs||[]).some((row:Shell)=>row.from==='user'&&!knownUsers.has(row.id))&&states.get(shell)===state&&!controller.signal.aborted&&shell.live!==false&&!document.hidden&&!connectionController.getSnapshot().open&&selection()===binding&&shell.S().view===view&&chatOpen(shell)&&(shell.S().msgs||[]).some((row:Shell)=>row.id===id&&row.text===text&&JSON.stringify(row.messageBinding)===messageBinding);
     state.current=current;states.set(shell,state);cancelOwner=shell;cancelCurrent=()=>{stop(shell);refresh(shell);return state.pending;};refresh(shell);
     try {
       if(retiring){await retiring;if(!current())return;}
@@ -207,7 +210,7 @@ export function installLocalSpeechPlayback(Component: Shell) {
           if(!current())return;
           // Cloud reads in provider-sized pieces, one owned request at a time.
           const assertCurrent=()=>{if(!current())throw new DOMException('Speech cancelled','AbortError');};
-          const pending=state.pending=(network ? speakCloudSpeechChunks({ text: spokenText, signal: controller.signal, assertCurrent, onStarted: () => { audible = true; }, speak: (piece, signal, onStarted) => voice.speak(piece, signal, onStarted) }) : speakOnDevice(spokenText, controller.signal, () => { audible = true; }));await pending;
+          const pending=state.pending=(network ? speakCloudSpeechChunks({ text: formatSpeechText(spokenText), signal: controller.signal, assertCurrent, onStarted: () => { audible = true; }, speak: (piece, signal, onStarted) => voice.speak(piece, signal, onStarted) }) : speakOnDevice(spokenText, controller.signal, () => { audible = true; }));await pending;
           break;
         } catch (error) {
           if ((error as {code?:string})?.code==='speech-cleanup-unconfirmed' || !current()) throw error;
@@ -272,10 +275,10 @@ export function installLocalSpeechPlayback(Component: Shell) {
           suppressedClicks.delete(this);cancelHold(this);
           if(event.pointerType==='mouse'){holds.set(this,{x:event.clientX,y:event.clientY});return;}
           if (event.pointerType !== 'touch' && event.pointerType !== 'pen') return;
-          const target = event.currentTarget as HTMLElement, binding = JSON.stringify(connectionController.getSnapshot().session);
+          const target = event.currentTarget as HTMLElement, binding = agentBinding();
           holds.set(this, { x: event.clientX, y: event.clientY,start:caret(event.clientX,event.clientY), timer: setTimeout(() => {
             const hold=holds.get(this);if(!hold)return;hold.timer=undefined;
-            if (this.live === false || window.getSelection()?.isCollapsed===false || binding !== JSON.stringify(connectionController.getSnapshot().session) || !['sheet', 'full'].includes(this.S().chat) || !this.S().msgs?.some((m: Shell) => m.id === entry.id && m.text === entry.text)) {cancelHold(this);return;}hold.opened=true;suppressedClicks.set(this,entry.id);menus.set(this, { id: entry.id, text: entry.text, trigger: target, notice: '', focus: false, binding: JSON.stringify(connectionController.getSnapshot().session) }); refresh(this);
+            if (this.live === false || window.getSelection()?.isCollapsed===false || binding !== agentBinding() || !chatOpen(this) || !this.S().msgs?.some((m: Shell) => m.id === entry.id && m.text === entry.text)) {cancelHold(this);return;}hold.opened=true;suppressedClicks.set(this,entry.id);menus.set(this, { id: entry.id, text: entry.text, trigger: target, notice: '', focus: false, binding: agentBinding() }); refresh(this);
           }, 500) });
         },
         messageActionsMove: (event: PointerEvent) => {
@@ -288,7 +291,7 @@ export function installLocalSpeechPlayback(Component: Shell) {
         replyMessage: () => { closeMenu(this); this.replyToMessage?.(entry); }, editMessage: () => { closeMenu(this); this.editMessage?.(entry); },
         closeMessageActions: (event: MouseEvent) => closeMenu(this, event.detail===0), menuKey: (event: KeyboardEvent) => menuKey(this, event),
         copyMessage: async () => {
-          if (!menu || menus.get(this) !== menu || menu.binding !== JSON.stringify(connectionController.getSnapshot().session)) return;
+          if (!menu || menus.get(this) !== menu || menu.binding !== agentBinding()) return;
           try { await navigator.clipboard.writeText(visibleText); if (menus.get(this) === menu) { menu.notice = ''; menu.announcement = 'Copied.'; menu.copied=true; refresh(this);setTimeout(()=>{if(menus.get(this)===menu){menu.copied=false;refresh(this);}},1400); } }
           catch { if (menus.get(this) === menu) { menu.copied=false; menu.announcement = ''; menu.notice = 'Copy failed'; refresh(this); } }
         },
@@ -314,11 +317,11 @@ export function installLocalSpeechPlayback(Component: Shell) {
     const result=mount?.apply(this, args);syncTranscriptFade(this);return result;
   };
   p.componentDidUpdate = function (...args: unknown[]) {
-    const state = states.get(this), value = this.S(), menu = menus.get(this);
-    if (!['sheet', 'full'].includes(value.chat)) cancelHold(this);
-    if (menu && (menu.binding !== JSON.stringify(connectionController.getSnapshot().session) || !['sheet', 'full'].includes(value.chat) || !(value.msgs || []).some((m: Shell) => m.id === menu.id && m.text === menu.text))) { cancelHold(this); closeMenu(this); }
+    const state = states.get(this), value = this.S(), menu = menus.get(this), open = chatOpen(this);
+    if (!open) cancelHold(this);
+    if (menu && (menu.binding !== agentBinding() || !open || !(value.msgs || []).some((m: Shell) => m.id === menu.id && m.text === menu.text))) { cancelHold(this); closeMenu(this); }
     else if (menu?.focus) { menu.focus = false; document.querySelector<HTMLElement>('[data-alpha-message-actions] [role="menuitem"]')?.focus(); }
-    if (state && (state.current&&!state.current()||!['sheet', 'full'].includes(value.chat) || !(value.msgs || []).some((m: Shell) => m.id === state.id && m.text === state.text))) { stop(this); refresh(this); }
+    if (state && (state.current&&!state.current()||!open || !(value.msgs || []).some((m: Shell) => m.id === state.id && m.text === state.text))) { stop(this); refresh(this); }
     followVoiceTurn(this);
     const result=update?.apply(this, args);syncTranscriptFade(this);return result;
   };

@@ -1,3 +1,4 @@
+import {openNotesTrash} from './helpers/notes-menu';
 import {test,expect,type Page} from '@playwright/test';
 import {canonicalNotesFixture,openCanonicalNotes} from './helpers/canonical-notes';
 const snapshot=(page:import('@playwright/test').Page)=>page.evaluate(()=>(window as any).canonicalNotesFixture.state);
@@ -17,7 +18,7 @@ async function replaceTrashEntry(page:Page,deletedAt:string){
 
 test('canonical Trash dates the deletion and requires a fresh review after its selected entry changes',async({page})=>{
  await canonicalNotesFixture(page,{trash:[{note:trashedNote,deletedAt:'2026-11-08T12:00:00Z'}]});await openCanonicalNotes(page);
- await page.getByRole('button',{name:'Recently deleted',exact:true}).click();
+ await openNotesTrash(page);
  const trash=page.locator('[data-alpha-subview="notes-trash"]'),row=trash.getByRole('button',{name:'A trashed note',exact:true});
  await row.click();const review=page.getByRole('dialog',{name:'Recover “A trashed note”?',exact:true});await expect(review).toBeVisible();
  const revision=await replaceTrashEntry(page,'2026-11-09T12:00:00Z');
@@ -30,11 +31,42 @@ test('canonical Trash dates the deletion and requires a fresh review after its s
  expect(restores.map((request:any)=>request.body.params)).toEqual([{id:trashedNote.id,expectedRevision:revision}]);
 });
 
+// The agent permanently erased a voice note from its Trash: this phone erases the recording that note owned,
+// and only then acknowledges the agent's receipt. A recording another note owns is left alone and stays pending.
+test('an erased agent voice note has its recording erased on this phone before the receipt is acknowledged',async({page})=>{
+ const voice={id:'erased-voice',title:'Erased memo',body:'\nErased words',color:'yellow',createdAt:'2026-11-01T12:00:00Z',updatedAt:'2026-11-02T12:00:00Z',
+  format:{kind:'voice',data:{recordingId:'erased-audio',audio:{audioId:'erased-audio',durationMs:1000},lines:[],summary:[],actions:[],dur:1}}};
+ await canonicalNotesFixture(page,{trash:[{note:voice,deletedAt:'2026-11-08T12:00:00Z'}]});
+ const erased={operationId:'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',noteId:'erased-voice',audioId:'erased-audio',deletedAt:'2026-11-08T12:00:00Z'};
+ const foreign={operationId:'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff',noteId:'erased-other',audioId:'kept-audio',deletedAt:'2026-11-08T12:00:00Z'};
+ await page.evaluate(async()=>{
+  const {retainAudio}=await import('/src/browser/note-audio-store.ts');
+  await retainAudio('erased-audio','erased-voice','Erased words',{blob:new Blob(['synthetic'],{type:'audio/wav'}),durationMs:1000});
+  await retainAudio('kept-audio','live-voice','Kept words',{blob:new Blob(['synthetic'],{type:'audio/wav'}),durationMs:1000});
+ });
+ await openCanonicalNotes(page);
+ // The agent erases the entry (Delete forever or expiry) and keeps a cleanup receipt for each recording.
+ await page.evaluate(receipts=>{
+  const f=(window as any).canonicalNotesFixture;
+  f.state.trash=[];f.recordingCleanup=receipts;const revision=++f.state.revision;
+  window.dispatchEvent(new CustomEvent('alpha:canonical-notes-invalidated',{detail:{sessionId:'canonical-fixture-session',revision}}));
+ },[erased,foreign]);
+ await expect.poll(()=>page.evaluate(()=>(window as any).canonicalNotesFixture.completions?.length??0)).toBe(1);
+ const fixture=await page.evaluate(()=>{const f=(window as any).canonicalNotesFixture;return {completions:f.completions,pending:f.recordingCleanup};});
+ expect(fixture.completions).toEqual([{receipt:erased,status:'purged'}]);
+ expect(fixture.pending).toEqual([foreign]);
+ const recording=(audioId:string)=>page.evaluate(async audioId=>{const {registerPlugin}=await import('/src/platform-plugins.ts');return registerPlugin<any>('AlphaNoteAudio').describe({audioId});},audioId);
+ const gone=await recording('erased-audio');
+ expect(gone.deletionOperations[erased.operationId]).toBe('purged');expect(gone.transcript).toBe('');
+ const kept=await recording('kept-audio');
+ expect(kept.noteId).toBe('live-voice');expect(kept.deletedAt).toBeUndefined();expect(kept.transcript).toBe('Kept words');
+});
+
 test('Undo for a canonical deletion cannot restore a replacement trash entry',async({page})=>{
  await canonicalNotesFixture(page,{notes:[trashedNote]});await openCanonicalNotes(page);
  await page.getByRole('button',{name:'Open A trashed note',exact:true}).click();
  await page.getByRole('button',{name:'More',exact:true}).click();
- await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
+ await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Delete',exact:true}).click();
  const undo=page.getByRole('button',{name:'Undo',exact:true});await expect(undo).toBeVisible();
  await replaceTrashEntry(page,'2026-11-09T12:00:00Z');await undo.click();
  await expect(page.getByText('Review deletion again',{exact:true})).toBeVisible();
@@ -54,8 +86,23 @@ test('canonical Notes use last-edit order and local date labels without writing 
  const updated=(await snapshot(page)).notes.find((note:any)=>note.id==='newer-created');for(const key of ['createdAt','updatedAt','modifiedAt'])expect(updated.format?.data?.[key]).toBeUndefined();
 });
 
-test('empty canonical Notes explains the first action',async({page})=>{
- await canonicalNotesFixture(page);await openCanonicalNotes(page);await expect(page.getByRole('heading',{name:'No notes',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Record voice note',exact:true})).toBeEnabled();await expect(page.getByRole('button',{name:'New note',exact:true})).toBeEnabled();
+test('Done saves a new note and returns to the Notes list',async({page},info)=>{
+ await canonicalNotesFixture(page);await openCanonicalNotes(page);
+ await expect(page.getByRole('heading',{name:'No notes',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Record voice note',exact:true})).toBeEnabled();
+ await page.getByRole('button',{name:'New note',exact:true}).click();
+ const editor=page.locator('[data-alpha-subview="notes-editor"]');
+ await editor.getByRole('textbox',{name:'Title',exact:true}).fill('Tripod checklist');
+ await editor.getByRole('textbox',{name:'Note',exact:true}).fill('Bring the tripod plate.');
+ const done=editor.locator('[data-alpha-app-header="detail"]').getByRole('button',{name:'Done',exact:true});
+ await expect(done).toBeVisible();
+ await page.screenshot({path:info.outputPath('new-note-done.png'),animations:'disabled'});
+ await done.click();
+ await expect(editor).toHaveCount(0);
+ const row=page.getByRole('button',{name:'Open Tripod checklist',exact:true});
+ await expect(row).toHaveCount(1);
+ await row.click();
+ await expect(editor.getByRole('textbox',{name:'Note',exact:true})).toHaveValue('Bring the tripod plate.');
 });
 
 test('a lost canonical recording save reply is reconciled without another create',async({page})=>{
@@ -104,11 +151,11 @@ test('canonical Notes UI creates, edits, trashes and restores the same committed
  await page.getByRole('button',{name:'Back to notes',exact:true}).click();
  await expect.poll(()=>snapshot(page).then((s:any)=>s.notes.find((n:any)=>n.id===before.id)?.body)).toBe('\nUpdated exact text.');
  await page.getByRole('button',{name:'Open Canonical browser note',exact:true}).click();
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Delete',exact:true}).click();
  await expect.poll(()=>snapshot(page).then((s:any)=>s.notes.length)).toBe(0);
  await expect(page.getByText('Deleted',{exact:true})).toBeVisible();
  // The agent's restore-only Trash is the Recently deleted folder: no retention line, no Empty, no Delete now.
- await page.getByRole('button',{name:'Recently deleted',exact:true}).click();
+ await openNotesTrash(page);
  const trash=page.locator('[data-alpha-subview="notes-trash"]');
  await expect(trash.getByRole('button',{name:'Empty Recently deleted',exact:true})).toHaveCount(0);
  await trash.getByRole('button',{name:'Canonical browser note',exact:true}).click();
@@ -125,7 +172,7 @@ test('canonical Notes UI creates, edits, trashes and restores the same committed
  for(const capability of ['create-note','update-note','delete-note','restore-note'])expect(requests.some((r:any)=>r.path==='/api/views/notes/interact'&&r.body.capability===capability)).toBe(true);
  // Every edit of an existing record names the revision it was made against.
  for(const update of requests.filter((r:any)=>r.body?.capability==='update-note'))expect(Number.isSafeInteger(update.body.params.expectedRevision)).toBe(true);
- expect(requests.every((r:any)=>['/api/notes/state','/api/views/notes/interact'].includes(r.path))).toBe(true);expect(requests.filter((r:any)=>r.path==='/api/notes/state').length).toBeGreaterThanOrEqual(2);
+ expect(requests.every((r:any)=>['/api/notes/state','/api/views/notes/interact'].includes(r.path)||r.path==='/api/notes/trash/recordings'&&r.method==='GET')).toBe(true);expect(requests.filter((r:any)=>r.path==='/api/notes/state').length).toBeGreaterThanOrEqual(2);
  expect(foreign).toEqual([]);expect(errors).toEqual([]);
 });
 
@@ -145,7 +192,7 @@ test('Stop saves canonical audio locally and Generate transcript later uses its 
  });
  await page.bringToFront();
  const header=page.locator('[data-alpha-subview="notes-list"] [data-alpha-app-header="main"]');
- expect(await header.getByRole('button').evaluateAll(list=>list.map(el=>el.getAttribute('aria-label')))).toEqual(['Back to apps','Record voice note','New note']);
+ expect(await header.getByRole('button').evaluateAll(list=>list.map(el=>el.getAttribute('aria-label')))).toEqual(['Back to apps','Record voice note','New note','Notes options']);
  await page.evaluate(async()=>{
   const {connectionController}=await import('/src/runtime/connection-ui.tsx');
   connectionController.getCloudEnvironment=()=> 'production';
@@ -235,7 +282,7 @@ test('a checklist, pin and Back leave Alpha cards in the same canonical record',
  await page.getByRole('textbox',{name:'Note',exact:true}).fill('Oat milk\nLemons');
  await page.getByRole('button',{name:'Turn into checklist',exact:true}).click();
  await page.getByRole('button',{name:'Check Oat milk',exact:true}).click();
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Pin',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Pin',exact:true}).click();
  await page.getByRole('button',{name:'Back to notes',exact:true}).click();
  await expect.poll(()=>snapshot(page).then((s:any)=>s.notes[0]?.format)).toEqual({kind:'list',data:{items:[{t:'Oat milk',done:true},{t:'Lemons',done:false}],pinned:true}});
  const card=page.getByRole('button',{name:'Open Groceries',exact:true});
@@ -246,12 +293,32 @@ test('a checklist, pin and Back leave Alpha cards in the same canonical record',
  expect(foreign).toEqual([]);expect(errors).toEqual([]);
 });
 
+test('removing a checklist item keeps each remaining item in its own row',async({page})=>{
+ const {foreign,errors}=await canonicalNotesFixture(page);await openCanonicalNotes(page);
+ await page.getByRole('button',{name:'New note',exact:true}).click();
+ await page.getByRole('textbox',{name:'Title',exact:true}).fill('Errands');
+ await page.getByRole('textbox',{name:'Note',exact:true}).fill('Post office\nBank\nPharmacy');
+ await page.getByRole('button',{name:'Turn into checklist',exact:true}).click();
+ const items=page.getByRole('textbox',{name:'Item',exact:true});
+ await expect(items).toHaveCount(3);
+ // Mark the row elements, then remove the first item: each remaining item keeps its own row.
+ await items.nth(1).evaluate((el:any)=>{el.dataset.testRow='bank';});
+ await items.nth(2).evaluate((el:any)=>{el.dataset.testRow='pharmacy';});
+ await page.getByRole('button',{name:'Remove Post office',exact:true}).click();
+ await expect(items).toHaveCount(2);
+ await expect(items.nth(0)).toHaveValue('Bank');await expect(items.nth(0)).toHaveAttribute('data-test-row','bank');
+ await expect(items.nth(1)).toHaveValue('Pharmacy');await expect(items.nth(1)).toHaveAttribute('data-test-row','pharmacy');
+ await page.getByRole('button',{name:'Back to notes',exact:true}).click();
+ await expect.poll(()=>snapshot(page).then((s:any)=>s.notes[0]?.format?.data?.items)).toEqual([{t:'Bank',done:false},{t:'Pharmacy',done:false}]);
+ expect(foreign).toEqual([]);expect(errors).toEqual([]);
+});
+
 test('Delete on a new note that was never saved closes it without a Notes request',async({page})=>{
  const {foreign,errors}=await canonicalNotesFixture(page);await openCanonicalNotes(page);
  const before=await page.evaluate(()=>(window as any).canonicalNotesFixture.requests.filter((r:any)=>r.method==='POST').length);
  await page.getByRole('button',{name:'New note',exact:true}).click();
  await expect(page.getByRole('textbox',{name:'Title',exact:true})).toBeVisible();
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Delete',exact:true}).click();
  await expect(page.getByRole('textbox',{name:'Title',exact:true})).toHaveCount(0);
  await expect(page.getByRole('button',{name:'New note',exact:true})).toBeVisible();
  expect(await page.evaluate(()=>(window as any).canonicalNotesFixture.requests.filter((r:any)=>r.method==='POST').length)).toBe(before);
@@ -272,7 +339,7 @@ test('slow saves: typing during a new note\'s first save makes one record, and D
  // Delete while the first save of a new note is still in flight: it waits, then trashes that record.
  await page.getByRole('button',{name:'New note',exact:true}).click();
  await title.fill('Fresh');
- await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('dialog',{name:'Note actions'}).getByRole('button',{name:'Delete',exact:true}).click();
+ await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Delete',exact:true}).click();
  await expect.poll(()=>snapshot(page).then((s:any)=>s.trash.map((entry:any)=>entry.note.title)),{timeout:10_000}).toEqual(['Fresh']);
  await expect(title).toHaveCount(0);
  await expect(review).toHaveCount(0);
@@ -449,7 +516,7 @@ test('read recovery cannot replace a no-draft uncertain interaction with a read-
   f.state.trash=[{note:{id:'restore-uncertain',title:'Uncertain restore',body:'\nExact recoverable body',color:'yellow',createdAt:'2026-10-31T10:00:00.000Z',updatedAt:'2026-10-31T10:00:00.000Z'},deletedAt:'2026-10-31T10:01:00.000Z'}];
  });
  await refreshCanonicalRead(page);
- await page.getByRole('button',{name:'Recently deleted',exact:true}).click();
+ await openNotesTrash(page);
  const restore=page.locator('[data-alpha-subview="notes-trash"]').getByRole('button',{name:'Uncertain restore',exact:true});
  await expect(restore).toBeVisible();
  await page.evaluate(()=>(window as any).canonicalNotesFixture.failAfterApplied=true);
@@ -547,4 +614,38 @@ for(const stale of [false,true])test(`recording summary uses canonical update an
   const sent=await writes();expect(sent).toHaveLength(1);expect(sent[0].body.capability).toBe('update-note');expect(sent[0].body.params).toMatchObject({id,expectedRevision:1});
  }
  expect(foreign).toEqual([]);expect(errors).toEqual([]);
+});
+
+test('typing a unique shorthand on Home opens the saved editor without writing the note',async({page})=>{
+ await canonicalNotesFixture(page,{notes:[
+  {...trashedNote,id:'different-list',title:'Browser Preview'},
+  {...trashedNote,id:'dinner-list',title:'Browser Grocery Rehearsal',body:'\nLimes and cheese.'},
+ ]});
+ const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});
+ await input.fill('open browser grocery note');
+ await input.press('Enter');
+ const editor=page.locator('[data-alpha-subview="notes-editor"]');
+ await expect(editor.getByRole('textbox',{name:'Title',exact:true})).toHaveValue('Browser Grocery Rehearsal');
+ await expect(editor.getByRole('textbox',{name:'Note',exact:true})).toHaveValue('Limes and cheese.');
+ expect(await page.evaluate(()=>(window as any).canonicalNotesFixture.requests.some((request:any)=>request.method==='POST'))).toBe(false);
+});
+
+test('opening a saved title can replace a clean editor and preserves a dirty draft',async({page})=>{
+ await canonicalNotesFixture(page,{notes:[
+  {...trashedNote,id:'first-note',title:'First note'},
+  {...trashedNote,id:'second-note',title:'Second note',body:'\nSecond body.'},
+ ]});
+ const result=await page.evaluate(async()=>{
+  const {connectionController}=await import('/src/runtime/connection-ui.tsx');
+  const {CanonicalNotesUi}=await import('/src/prototype/canonical-notes-ui.ts');
+  const notes=new CanonicalNotesUi(connectionController.getAppRecordClient()!,{paint(){},review(){}});
+  try{
+   await notes.refresh();
+   const first=notes.openSaved('first-note'),second=notes.openSaved('second-note');
+   notes.editor.edit({body:'Unsaved edits'});
+   const dirtySwitch=notes.openSaved('first-note');
+   return {first,second,dirtySwitch,open:notes.open,body:notes.editor.draft?.body};
+  }finally{notes.retire();}
+ });
+ expect(result).toEqual({first:true,second:true,dirtySwitch:false,open:'second-note',body:'Unsaved edits'});
 });

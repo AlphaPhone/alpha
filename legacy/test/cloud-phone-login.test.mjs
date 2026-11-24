@@ -1,5 +1,5 @@
 import test from 'node:test';
-import {signInReadiness} from '../apps/app/src/runtime/cloud-sign-in.ts';
+import {normalizeSignInPhone, signInReadiness, validSignInPhone} from '../apps/app/src/runtime/cloud-sign-in.ts';
 import assert from 'node:assert/strict';
 import {buildSync} from 'esbuild';
 import {createRequire} from 'node:module';
@@ -59,4 +59,13 @@ test('method discovery accepts independent methods and never guesses SMS from ol
  assert.equal(signInReadiness({inApp:true,email:true,phone:'true'}).phone,false);
  assert.equal(signInReadiness(null),null);
  assert.deepEqual(signInReadiness({inApp:false,methodsKnown:true,email:false,phone:false,google:false}),{email:false,phone:false,google:false});
+});
+
+test('typed phone numbers normalise separators, 00 prefix and 10/11-digit US numbers to E.164',()=>{
+ assert.equal(normalizeSignInPhone(' (415) 555-0100 '),'+14155550100');
+ assert.equal(normalizeSignInPhone('1-415-555-0100'),'+14155550100');
+ assert.equal(normalizeSignInPhone('0044 20 7946 0958'),'+442079460958');
+ assert.equal(normalizeSignInPhone('+44 (20) 7946-0958'),'+442079460958');
+ assert.equal(validSignInPhone(normalizeSignInPhone('(415) 555-0100')),true);
+ assert.equal(validSignInPhone(normalizeSignInPhone('+1 (415) 555-010a')),false);
 });

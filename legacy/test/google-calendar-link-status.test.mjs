@@ -31,7 +31,7 @@ async function linked({dispatches=[null],links=[],linksFail=false}={}){
   const pendingDispatch=dispatches[Math.min(f.controlReads++,dispatches.length-1)];
   return {revision:3,paused:false,destination,pendingDispatch};
  }};
- const calendar=new AgentCalendar(()=>port,{capture:async()=>({fingerprint:'same',present:false,readable:true,pending:false,records:[]}),retainedReadOnly:async()=>true});
+ const calendar=new AgentCalendar(()=>port);
  await calendar.refresh({});assert.equal(calendar.state.status,'ready');
  try{return {f,result:await linkGoogleCalendar({calendar,current:()=>true,canChange:()=>true},[account],new AbortController().signal)};}
  finally{calendar.retire();}

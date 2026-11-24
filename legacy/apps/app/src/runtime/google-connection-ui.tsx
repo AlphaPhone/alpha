@@ -6,15 +6,13 @@ import {gmailGrantTier,googleAccountAccessLabel} from './gmail-grants';
 import {useEffect,useRef,useState,useSyncExternalStore} from 'react';
 import {holdPhoneInert} from './modal-inert';
 import {connectionController} from './connection-ui';
-import {createGoogleAccounts,notifyGoogleAccountsChanged,GOOGLE_ACCOUNTS_CHANGED,googleDisconnectConfirmation,googleDisconnectMessage,googleCalendarDisconnectLifecycle,linkGoogleCalendar,type GoogleDisconnectContext} from './google-accounts';
-import {clearGoogleCalendarSelectionForConnection} from './google-calendar-selection';
+import {createGoogleAccounts,notifyGoogleAccountsChanged,GOOGLE_ACCOUNTS_CHANGED,googleDisconnectConfirmation,googleDisconnectMessage,googleCalendarDisconnectLifecycle,linkGoogleCalendar,type GoogleDisconnectContext,type CanonicalCalendarSyncSettings} from './google-accounts';
 import {openConnectionBrowser,googleWorkspaceReturnPort} from './native-connection';
 import {prepareGoogleWorkspaceReturn,watchGoogleWorkspaceReturn,sameGoogleWorkspaceBinding,type GoogleWorkspaceBinding} from './google-workspace-return';
-import {cloudServiceName,type GmailAccount} from './cloud-protocol';
+import type {GmailAccount} from './cloud-protocol';
 import {googleAgentAccess,publishGoogleAgentAccess,captureGoogleCalendarAccess,setGoogleAgentAccess} from './google-agent-access';
 import {browserCloudResidentEnabled,browserResidentCall} from './browser-cloud-resident';
 import type {AgentCalendarSyncReview} from './agent-calendar';
-import type {CanonicalCalendarSyncSettings} from './calendar-sync-settings';
 /** Presentation: a published icon, a status dot beside its word, a spinner whose name stays readable. */
 const lucide=(name:string,size=20)=>({display:'inline-block',flex:'none',width:size,height:size,verticalAlign:'middle',background:'currentColor',mask:`url(/icons/lucide/${name}.svg) center / contain no-repeat`,WebkitMask:`url(/icons/lucide/${name}.svg) center / contain no-repeat`});
 const srOnly={position:'absolute',width:1,height:1,overflow:'hidden',clip:'rect(0 0 0 0)',whiteSpace:'nowrap'} as const;
@@ -34,7 +32,7 @@ let returnToAccount=false;
 let opened=false,calendarIntent:GoogleCalendarIntent|null=null;const listeners=new Set<()=>void>();
 /** openCalendar opens this same panel to link the same Eliza Calendar with Google; closing cancels it. */
 export const googleConnectionController={openFromAccount(){returnToAccount=true;googleConnectionController.open();},open(){opened=true;for(const listener of listeners)listener();},openCalendar(scope:CanonicalCalendarSyncSettings){calendarIntent={...scope,authorizing:false,retained:new Map()};googleConnectionController.open();},close(){opened=false;calendarIntent=null;for(const listener of listeners)listener();if(returnToAccount){returnToAccount=false;connectionController.openPlan();}},calendar:()=>calendarIntent,subscribe(listener:()=>void){listeners.add(listener);return()=>{listeners.delete(listener);};},getSnapshot:()=>opened};
-export function googleCalendarAccountKey(){const account=connectionController.getSnapshot().cloudAccount;return account?.organizationId?{environment:account.environment,userId:account.userId,organizationId:account.organizationId}:null;}
+function googleCalendarAccountKey(){const account=connectionController.getSnapshot().cloudAccount;return account?.organizationId?{environment:account.environment,userId:account.userId,organizationId:account.organizationId}:null;}
 function currentGoogleConnectionReturnBinding():GoogleConnectionReturnBinding|null {
  const cloud=connectionController.getCloudClient(),key=googleCalendarAccountKey();
  return cloud&&key?{client:cloud.client,...key,sessionId:cloud.sessionId,credentialId:cloud.credentialId}:null;
@@ -67,8 +65,6 @@ export function GoogleConnectionsPanel(){
  const [access,setAccess]=useState(googleAgentAccess);
  // The Calendar intent waiting on the owner's Allow Calendar changes tap; rows are the readback to link, if any.
  const [choice,setChoice]=useState<GoogleCalendarAccessChoice|null>(null);
- // The agent host reads the owner's Google switches; republish whenever device settings load or change.
- useEffect(()=>{const sync=()=>{setAccess(googleAgentAccess());void publishGoogleAgentAccess();};sync();window.addEventListener('alpha:device-settings',sync);return()=>window.removeEventListener('alpha:device-settings',sync);},[]);
  const browserReturned=useRef(false),browserReturnPending=useRef(false);
  const returnedWorkspaceOwner=useRef<GoogleWorkspaceBinding|null>(null);
  const returnedWorkspace=useRef<{result:'connected'|'denied'|'failed';connectionId?:string}|null>(null);
@@ -77,7 +73,10 @@ export function GoogleConnectionsPanel(){
  const returnWatch=useRef<ReturnType<typeof watchGoogleConnectionReturn>|null>(null);
  const active=useRef<AbortController|null>(null),panel=useRef<HTMLDivElement>(null);
  const cloud=connectionController.getCloudClient(),key=googleCalendarAccountKey();
- const serviceName=cloudServiceName(cloud?.client.environment ?? connection.cloudAccount?.environment ?? 'production');
+ // Republish on preference changes and after the browser owner or provider is rebound.
+ const gmailHostBinding=browserCloudResidentEnabled?cloud?.credentialId:undefined;
+ const gmailHostProvider=browserCloudResidentEnabled?connection.providerStatus?.revision:undefined;
+ useEffect(()=>{const sync=()=>{setAccess(googleAgentAccess());void publishGoogleAgentAccess().catch(()=>{});};sync();window.addEventListener('alpha:device-settings',sync);return()=>window.removeEventListener('alpha:device-settings',sync);},[gmailHostBinding,gmailHostProvider]);
  const identity=JSON.stringify([connection.cloudAccount,cloud?.sessionId,cloud?.credentialId]);
  const binding:GoogleConnectionReturnBinding|null=cloud&&key?{client:cloud.client,...key,sessionId:cloud.sessionId,credentialId:cloud.credentialId}:null;
  const calendarIntent=useSyncExternalStore(googleConnectionController.subscribe,googleConnectionController.calendar),linking=useRef<AbortController|null>(null);
@@ -237,7 +236,6 @@ export function GoogleConnectionsPanel(){
   try{
    const result=await createGoogleAccounts(cloud,()=>connectionController.getCloudClient(),undefined,lifecycle).disconnect(account.connectionId,abort.signal),pause=result.calendarLifecycle.calendarPause;
    if(!current())return;
-   if(result.outcome==='disconnected')clearGoogleCalendarSelectionForConnection(key,account.connectionId);
    // Only an unknown pause stays retained for review.
    // An earlier attempt's unknown pause stays reviewable unless this one confirmed the pause.
    if(calendar&&pause!=='unknown')for(const [pauseKey,context] of calendar.retained)if(context.connectionId===account.connectionId&&(pause==='confirmed'||!before.has(pauseKey)))calendar.retained.delete(pauseKey);
@@ -342,7 +340,7 @@ export function GoogleConnectionsPanel(){
    <p>Sends and edits always ask first</p>
   </section>}
   {choice&&calendarReadCurrent(choice.calendar,choice.read)&&<section aria-label="Calendar changes"><button disabled={busy} onClick={()=>void allowCalendarChanges(choice)}>Allow Calendar changes</button></section>}
-  {confirm&&<section role="alert"><p>{googleDisconnectConfirmation(confirm.label,serviceName)}</p><button aria-label="Confirm disconnect Google account" disabled={busy} onClick={()=>void disconnect(confirm)}>Disconnect</button><button disabled={busy} onClick={()=>setConfirm(null)}>Cancel</button></section>}
+  {confirm&&<section role="alert"><p>{googleDisconnectConfirmation(confirm.label)}</p><button aria-label="Confirm disconnect Google account" disabled={busy} onClick={()=>void disconnect(confirm)}>Disconnect</button><button disabled={busy} onClick={()=>setConfirm(null)}>Cancel</button></section>}
   <div className="alpha-connection-actions">{calendarIntent&&cloud?<button className="alpha-btn alpha-btn--primary" aria-label={calendarGranted?'Sync Calendar with Google':'Connect Google Calendar'} disabled={busy} onClick={()=>void connectCalendar(calendarIntent)}><span aria-hidden="true" className="alpha-google-icon" style={{marginRight:8,verticalAlign:'middle'}}/>{calendarGranted?'Sync':'Connect'}</button>:<button className="alpha-btn alpha-btn--primary" aria-label={cloud&&!accounts.some(account=>account.connected)?'Connect Google account':undefined} disabled={busy} onClick={()=>void connect()}>{cloud?(accounts.some(account=>account.connected)?<><span aria-hidden="true" style={{...lucide('plus',18),marginRight:6}}/>Add account</>:<><span aria-hidden="true" className="alpha-google-icon" style={{marginRight:8,verticalAlign:'middle'}}/>Connect</>):'Sign in'}</button>}</div>
  </div></div>;
 }

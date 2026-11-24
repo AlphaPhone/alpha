@@ -1,7 +1,12 @@
 import {connectionController} from '../runtime/connection-ui';
 import {createInlineModal} from '../runtime/inline-modal';
+import {Capacitor} from '@capacitor/core';
+import {testMocksEnabled} from '../build-flags';
 
 type Shell = Record<string, any>;
+/** This app's own replies and review cards that end by sending the owner to history ("… Check
+ * history before sending again."). Agent prose that merely mentions history is left alone. */
+const HISTORY_HINT = /(?:^|\s)(?:[Cc]heck|Use)(?: phone| connection and| conversation and)? (?:action )?history(?: before (?:trying again|sending again|speaking again|retrying|starting again|requesting it again|sending another request))?\.$/;
 
 /** The composer uses the same file intake and message search as the main Eliza UI. */
 export function installChatTools(Component: {prototype: Shell}) {
@@ -55,7 +60,6 @@ export function installChatTools(Component: {prototype: Shell}) {
     };
     this.chatToolsModal ??= createInlineModal(closeMenu);
     this.chatSearchModal ??= createInlineModal(closeSearch);
-    const upload=()=>{closeMenu();output.attachFiles();};
     const search = (append = false) => {
       shell.chatSearchAbort?.abort();
       const query = String(shell.chatSearchQuery || '').trim();
@@ -110,21 +114,55 @@ export function installChatTools(Component: {prototype: Shell}) {
         if (target) {target.classList.add('alpha-search-hit');setTimeout(() => target.classList.remove('alpha-search-hit'), 1800);}
       }));
     };
+    // New chat and History are reachable from the chat itself, not only from Settings. History opens
+    // where conversations live on this build: Settings › About › Agent activity on the phone, the
+    // agent connection panel in test builds; no other build has a history surface.
+    const connection = connectionController.getSnapshot();
+    const historyPage = Capacitor.isNativePlatform() && !testMocksEnabled;
+    const attached = () => !!(shell.fileAttachments?.length || shell.cameraAttachment || shell.transcriptAttachment || shell.mailAttachment);
+    const newChat = () => {
+      closeMenu();
+      if (attached()) {shell.toast('Send or remove the attachment before starting a new chat.');return;}
+      void connectionController.newConversation();
+    };
+    const history = () => {
+      closeMenu();
+      if (historyPage) shell.openView('settings', {page:'agent-activity'});
+      else connectionController.open();
+    };
+    // A reply or review card that tells the owner to check history carries the way there.
+    const hasHistory = !!connection.session && (historyPage || testMocksEnabled);
+    if (hasHistory && Array.isArray(output.msgs)) output.msgs = output.msgs.map((message: Shell) =>
+      message.isAgent && (HISTORY_HINT.test(String(message.displayText || '')) || HISTORY_HINT.test(String(message.c?.sub || '')))
+        ? {...message, historyLink: history} : message);
     const turning=!!this.S().typing||!!this.draftSendPending||!!this.composerDraft?.holding;
-    if(turning)this.chatToolsOpen=false;
+    const messages=output.messages;
+    const attachments=output.showComposer&&output.barTarget==='person'&&(!messages?.nativeManaged||messages.showComposer)?messages?.attachmentMenu:null;
+    if((turning&&this.chatToolsOpen==='chat')||(!attachments&&this.chatToolsOpen==='messages'))this.chatToolsOpen=false;
+    const inMessages=this.chatToolsOpen==='messages';
+    const toggle=(menu:'chat'|'messages')=>{shell.chatToolsOpen=shell.chatToolsOpen===menu?false:menu;shell.setState({});};
     output.chatTools = {
       ...output.chatTools,
-      label:'Chat actions',searchable:true,
+      label:inMessages?'Message attachments':'Chat actions',searchable:!inMessages,
       visible:!turning,
       open: !!this.chatToolsOpen,
-      disabled: !!output.attachFilesDisabled || !!this.chatAttachmentAbort,
+      disabled:typeof output.attachFiles!=='function'||!!output.attachFilesDisabled||!!this.chatAttachmentAbort,
       fileBusy:!!this.chatAttachmentAbort,
-      toggle: () => {shell.chatToolsOpen = !shell.chatToolsOpen;shell.setState({});},
+      messageAttachments:!!attachments,
+      messageOpen:inMessages,
+      messageBusy:!!attachments?.busy,
+      toggle:()=>toggle('chat'),
+      toggleMessages:()=>toggle('messages'),
       close: closeMenu,
       pointer:(event:Event)=>event.stopPropagation(),
       inside:(event:Event)=>event.stopPropagation(),
       ref: this.chatToolsModal.ref,
-      upload: () => void upload(),
+      camera:()=>{closeMenu();void attachments?.camera();},
+      upload:()=>{closeMenu();if(inMessages){void attachments?.media();}else{output.attachFiles?.();}},
+      canNewChat: !!connection.session && !connection.busy,
+      newChat,
+      hasHistory,
+      history,
       search: () => {closeMenu();shell.chatSearchOpen = true;shell.chatSearchQuery = '';shell.chatSearchResults = [];shell.chatSearchMore = false;shell.chatSearchBusy = false;shell.chatSearchError = '';shell.setState({chat:'full'});},
     };
     output.chatSearch = {

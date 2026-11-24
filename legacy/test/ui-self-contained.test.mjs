@@ -100,14 +100,12 @@ const VENDOR_RUNTIME = new Map([
   ['vendor/eliza/packages/core/src/utils/uuid.ts', 'UUID validation'],
   ['vendor/eliza/plugins/plugin-native-passwords/src/bindings.ts', 'password website normalization'],
   ['vendor/eliza/plugins/plugin-native-passwords/src/client.ts', 'native passwords bridge client and failure codes'],
-  ['vendor/eliza/plugins/plugin-native-passwords/src/transfer.ts', 'password transfer bridge client'],
 ]);
 // Upstream submodule files the TypeScript program reaches from app modules only through type-only
 // imports (erased from the bundle). Each is reviewed framework-free declarations or logic.
 const VENDOR_TYPES = new Map([
-  ...['index', 'definitions', 'sense', 'sense-bridge', 'sense-web', 'web'].map(name =>
-    [`vendor/eliza/plugins/plugin-native-system/src/${name}.ts`, 'System plugin type (apps/app/src/native.ts)']),
   ['vendor/eliza/plugins/plugin-native-passwords/src/definitions.ts', 'password plugin declarations'],
+  ['vendor/eliza/plugins/plugin-native-calendar/src/android-definitions.ts', 'Android calendar plugin declarations (apps/app/src/native/alpha-calendar.ts)'],
   ...['types/primitives', 'types/interactions', 'types/json', 'types/reminder-presentation', 'types/system-notice', 'ambient-context', 'errors', 'utils/errors'].map(name =>
     [`vendor/eliza/packages/core/src/${name}.ts`, 'UUID type behind the UUID validation helper']),
 ]);
@@ -274,6 +272,8 @@ const TEXT_EXEMPT = new Map([
   ['test/client-feature-preparation.test.mjs', {reason: 'negative assertion', file: true}],
   ['test/ui-self-contained.test.mjs', {reason: 'this guard', file: true}],
 ]);
+// The simplification audit is a dated record of each file as it was, so it quotes upstream paths.
+const AUDIT_RECORD = /^docs\/simplification-audit\/.+\.md$/;
 const scanned = () => listed('apps', 'scripts', 'specs', 'test', 'android', 'docs', 'cloud', '.github',
   'README.md', 'CONTRIBUTING.md', 'AGENTS.md', 'vite.config.ts', 'tsconfig.json', 'playwright.config.ts', 'capacitor.config.ts',
   'lemmascript.json', 'LemmaScript-files.txt', 'package.json');
@@ -285,7 +285,7 @@ test('no source, script, spec, test or document refers to upstream UI', () => {
   const offenders = [];
   for (const file of files) {
     const exempt = TEXT_EXEMPT.get(file);
-    if (exempt?.file) continue;
+    if (exempt?.file || AUDIT_RECORD.test(file)) continue;
     let text = fs.readFileSync(file, 'latin1');
     for (const allowed of exempt?.text ?? []) text = text.split(allowed).join('');
     if (references(text)) offenders.push(file);

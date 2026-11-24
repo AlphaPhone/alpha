@@ -142,6 +142,12 @@ globalThis.hostedDigestRefreshPorts = {
 
 const root = createRoot(document.getElementById('root'));
 const perform = run => act(async () => {run(); await new Promise(resolve => setTimeout(resolve, 0));});
+let renewalAdmission;
+function settleAdmission(accepted) {
+  const pending=renewalAdmission;
+  renewalAdmission=undefined;
+  pending?.(accepted);
+}
 function press(label) {
   const button = [...document.querySelectorAll('button')].find(node => node.textContent.trim() === label);
   if (!button || button.disabled) throw Error('Missing available action '+label);
@@ -151,14 +157,18 @@ globalThis.hostedDigestRefresh = {
   mount: (nativeMode = false) => perform(() => {
     native = nativeMode;
     root.render(<HostedDigestPanel canComposeQuestion={session => canCompose && session === 'session-'+owner}
-      composeQuestion={(draft, session) => {
-        if (!canCompose || session !== 'session-'+owner) return false;
-        compositions.push({draft, session});
+      attachQuestion={async (selection, session) => {
+        const current=()=>canCompose&&session==='session-'+owner&&selection.current();
+        const file=await selection.read(current);
+        if(!file||!current())return false;
+        if(!await new Promise(resolve=>{renewalAdmission=resolve;})||!current()||!await selection.commit(current)||!current())return false;
+        compositions.push({prompt:selection.prompt,name:file.name,text:await file.text(),session});
         return true;
       }} />);
   }),
   unmount: () => perform(() => root.unmount()),
   select: id => perform(() => {
+    settleAdmission(false);
     if (id) visited.push(id);
     owner = id;
     selection = id ? {kind: 'resident', name: 'Fixture agent '+id,
@@ -208,10 +218,10 @@ globalThis.hostedDigestRefresh = {
   }),
   acceptRenewal: () => perform(() => {
     holdRenewalRead = true;
-    document.querySelector('dialog[open] [aria-label="Use in conversation"]').click();
+    settleAdmission(true);
   }),
-  dismissRenewal: () => perform(() => document.querySelector('dialog[open] button:last-child').click()),
-  interruptRenewal: () => perform(() => window.dispatchEvent(new Event('launcher-home'))),
+  dismissRenewal: () => perform(() => settleAdmission(false)),
+  interruptRenewal: () => perform(() => {window.dispatchEvent(new Event('launcher-home'));settleAdmission(false);}),
   renewalRead: (id, match = true) => perform(() => {
     const tap = tapFor(id);
     if (!match) tap.token = 'replaced';
@@ -221,7 +231,7 @@ globalThis.hostedDigestRefresh = {
   conversation: allowed => perform(() => {canCompose = allowed;}),
   sensitivity: blocked => perform(() => {sensitive = blocked;}),
   observe: () => ({...globalThis.inspectHostedDigestRefresh(),
-    renewalDialog: !!document.querySelector('dialog[open] [aria-label="Use in conversation"]'),
+    renewalQueued:!!renewalAdmission,
     renewalTap: renewalTap?.token ?? '',
     renewalExact: !!renewalTap && renewalTap.selection.revision === tapFor(Number(renewalTap.token.at(-1))).selection.revision,
     sensitive, canCompose, settlements: [...settlements], compositions: [...compositions],

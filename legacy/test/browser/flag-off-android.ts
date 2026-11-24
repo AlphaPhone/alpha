@@ -20,6 +20,7 @@ export interface FlagOffEvent { id: string; calendarId: string; title: string; b
 /** A file the Android document picker offers, as the bytes the selected provider holds. */
 export interface FlagOffDocument { name: string; mimeType: string; text: string }
 export interface FlagOffOptions {
+  emailDraft?: { to: string[]; subject: string; body: string };
   /** Fresh onboarding owns real permission ports; other feature fixtures represent completed setup only. */
   freshAccess?: boolean;
   /** The launcher update advertised by Android, held until the test releases the read. */
@@ -58,7 +59,7 @@ export async function flagOffAndroid(page: Page, options: FlagOffOptions = {}) {
   await page.addInitScript(installNativeNavigationFixture);
   await page.addInitScript(({ options, agentName }) => {
     const w = window as any; w.androidBridge = {};
-    if(!options.freshAccess)localStorage.setItem('alpha:startup-permission-walkthrough:v1',JSON.stringify({version:1,status:'completed',step:4}));
+    if(!options.freshAccess)localStorage.setItem('alpha:startup-permission-walkthrough:v1',JSON.stringify({version:4,status:'completed',step:7}));
     const id = '9f1dc45a-4011-4e44-947a-30d999d24fa5', agentId = '6f1d3c3e-8c55-4c1b-9d1f-2b6f0b0d3a11';
     const kept = (key: string, initial: unknown) => { try { return JSON.parse(sessionStorage.getItem(key) || 'null') ?? initial; } catch { return initial; } };
     // Keystore-backed slots and the resident agent's own store survive a reload of the page.
@@ -73,7 +74,7 @@ export async function flagOffAndroid(page: Page, options: FlagOffOptions = {}) {
     const f = w.flagOff = {
       calls: [] as string[], unexpected: [] as string[], installationId: '', posts: [] as string[], replies: [] as string[], streams: 0,
       appUpdate: { releaseOffer: updateOffer.resolve, installs: [] as unknown[] },
-      mail: { accounts: structuredClone(options.accounts ?? null) as any[] | null, accountReads: 0, searches: 0, reads: [] as string[], prepares: [] as any[], dispatches: [] as any[], operations: {} as Record<string, any>, sent: [] as string[] },
+      mail: { sendOutcome:'succeeded' as 'succeeded'|'rejected'|'outcome-unknown', accounts: structuredClone(options.accounts ?? null) as any[] | null, accountReads: 0, searches: 0, reads: [] as string[], prepares: [] as any[], dispatches: [] as any[], operations: {} as Record<string, any>, sent: [] as string[] },
       // Results the resident agent has produced, in cursor order. `acked` is the agent's cursor for
       // the renderer route; `inbox` is what the Android result inbox has committed for the native one.
       digests: { ...produced, pages: 0, syncs: 0, histories: 0, configured: [] as any[], runs: 0, refused: [] as string[],
@@ -90,12 +91,13 @@ export async function flagOffAndroid(page: Page, options: FlagOffOptions = {}) {
     };
     const listeners: Array<{ plugin: string; event: string; callback: (value: unknown) => void }> = [];
     const emitStream = (streamId: string, event: unknown) => f.emit('Agent', 'alphaAgentStream', { streamId, event });
-    const data = (streamId: string, value: unknown) => emitStream(streamId, { type: 'chunk', dataBase64: btoa('data: ' + JSON.stringify(value) + '\n\n') });
+    const data = (streamId: string, value: unknown) => emitStream(streamId, { type: 'chunk', dataBase64: btoa(Array.from(new TextEncoder().encode('data: ' + JSON.stringify(value) + '\n\n'), byte=>String.fromCharCode(byte)).join('')) });
     const ok = (value: unknown) => ({ status: 200, data: value });
     let fixtureNavigation: any;
     const navigation=()=>fixtureNavigation??=(window as any).createNativeNavigationFixture(id,agentId,f);
     const request = async (method: string, path: string, body: any, headers: Record<string, string>, owner?: unknown): Promise<{ status: number; data: unknown }> => {
       const navigationResult=navigation().request(method,path,body,headers,owner);if(navigationResult)return navigationResult;
+      if (path === '/api/notes/trash/recordings' && method === 'GET') return ok({success:true,data:[]});
       // Mounted canonical views probe these sources; this native fixture provides none.
       if (method === 'GET' && ['/api/notes/state', '/api/lifeops/calendar/feed', '/api/lifeops/calendar/calendars', '/api/lifeops/calendar/next-context'].includes(path.split('?')[0])) return { status: 503, data: { error: 'Canonical records unavailable in this fixture' } };
       if (path === '/api/auth/me') return ok({ identity: { id, kind: 'owner' }, access: { role: 'OWNER', mode: 'local' } });
@@ -223,7 +225,7 @@ export async function flagOffAndroid(page: Page, options: FlagOffOptions = {}) {
       if (path === '/api/v1/billing/limits') return { status: 200, data: { success: true, data: { v2: { subscription: { status: 'available', value: { planKey: 'plus_monthly', state: 'active', currentPeriodEnd: '2099-01-01T00:00:00.000Z' } } } } } }; // Synthetic active plan from the billing snapshot.
       if (!m.accounts) return { status: 404, data: {} };
       const grant = () => m.accounts!.find(a => a.connectionId === (url.searchParams.get('grantId') ?? body?.grantId) && a.connected);
-      if (path === google + '/accounts') { m.accountReads++; return { status: 200, data: m.accounts.map(a => ({ configured: true, connected: a.connected, reason: a.connected ? 'connected' : 'needs_reauth', connectionId: a.connectionId, grantedCapabilities: a.connected ? ['google.gmail.triage'] : [], identity: { email: a.email } })) }; }
+      if (path === google + '/accounts') { m.accountReads++; return { status: 200, data: m.accounts.map(a => ({ configured: true, connected: a.connected, reason: a.connected ? 'connected' : 'needs_reauth', connectionId: a.connectionId, grantedCapabilities: a.connected ? ['google.gmail.triage', ...(options.emailDraft?['google.gmail.send']:[])] : [], identity: { email: a.email } })) }; }
       if (!grant()) return { status: 403, data: { error: 'Grant is not connected' } };
       const account = grant()!;
       if (path === google + '/gmail/inbox-v1/capabilities') return { status: 200, data: { version: 1, from: account.email, threads: true, send: true, providerDrafts: false, mailboxMutations: false, attachments: false, providerExactlyOnce: false, atomicDraftReplacement: false } };
@@ -235,18 +237,25 @@ export async function flagOffAndroid(page: Page, options: FlagOffOptions = {}) {
       }
       const reply = (receipt: unknown, extra: Record<string, unknown> = {}) => ({ status: 200, data: { version: 1, providerExactlyOnce: false, receipt, ...extra } });
       if (path === google + '/gmail/inbox-v1/operations' && input.method === 'POST') {
+        if (options.emailDraft && !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(body.requestId))
+          return { status: 400, data: { error: 'A UUID identity is required' } };
         // The server's review echoes the proposal (including the message a reply answers) and names the From account.
         const p = body.proposal, review = { ...p, from: account.email, attachments: [] };
         const receipt = { requestId: body.requestId, kind: p.kind, state: 'prepared', reviewDigest: await sha(JSON.stringify(review)), providerResult: null, rejectionCode: null };
-        m.prepares.push({ requestId: body.requestId, grantId: body.grantId, digest: receipt.reviewDigest, bodyText: p.bodyText }); m.operations[body.requestId] = receipt;
+        m.prepares.push({ requestId: body.requestId, grantId: body.grantId, digest: receipt.reviewDigest, bodyText: p.bodyText, ...(options.emailDraft?{to:p.to,subject:p.subject}:{}) }); m.operations[body.requestId] = receipt;
         return reply(receipt, { review });
       }
       const operation = /^\/api\/v1\/eliza\/google\/gmail\/inbox-v1\/operations\/([^/]+)(\/dispatch)?$/.exec(path);
       if (operation && operation[2] && input.method === 'POST') {
         const request = decodeURIComponent(operation[1]);
-        m.dispatches.push({ requestId: request, grantId: body.grantId, digest: body.reviewDigest, bodyText: body.proposal.bodyText });
+        m.dispatches.push({ requestId: request, grantId: body.grantId, digest: body.reviewDigest, bodyText: body.proposal.bodyText, ...(options.emailDraft?{to:body.proposal.to,subject:body.proposal.subject}:{}) });
         if (m.operations[request]?.reviewDigest !== body.reviewDigest) return { status: 409, data: { error: 'Review digest changed' } };
-        if (m.operations[request].state !== 'succeeded') { m.sent.push(body.proposal.subject + ' | ' + body.proposal.bodyText); m.operations[request] = { ...m.operations[request], state: 'succeeded', providerResult: { messageId: 'sent-' + m.sent.length, threadId: 'thread-sent' } }; }
+        if (options.emailDraft && m.sendOutcome !== 'succeeded') {
+          m.operations[request]={...m.operations[request],state:m.sendOutcome,providerResult:null,rejectionCode:m.sendOutcome==='rejected'?'provider_rejected':null};
+          return reply(m.operations[request]);
+        }
+        if (m.operations[request].state !== 'succeeded') { m.sent.push(body.proposal.subject + ' | ' + body.proposal.bodyText);
+          if(options.emailDraft&&body.proposal.to.includes(account.email))account.messages.unshift({externalId:'sent-'+m.sent.length,threadId:'thread-sent',subject:body.proposal.subject,bodyText:body.proposal.bodyText,from:account.email,fromEmail:account.email,to:body.proposal.to,snippet:body.proposal.bodyText,historyId:'sent-history-'+m.sent.length}); m.operations[request] = { ...m.operations[request], state: 'succeeded', providerResult: { messageId: 'sent-' + m.sent.length, threadId: 'thread-sent' } }; }
         return reply(m.operations[request]);
       }
       if (operation && !operation[2]) return m.operations[decodeURIComponent(operation[1])] ? reply(m.operations[decodeURIComponent(operation[1])]) : { status: 404, data: {} };
@@ -307,7 +316,7 @@ export async function flagOffAndroid(page: Page, options: FlagOffOptions = {}) {
             const entry = { path: 'Documents/' + doc.name, name: doc.name, directory: false, mimeType: doc.mimeType, size: bytes.length, modified: 1_790_000_000_000 };
             if (method === 'storageState' || method === 'storageRequestAccess') return { status: 'ready', access: 'granted', volumes: [{ id: 'primary', name: 'Internal storage', primary: true, free: 8e9, total: 64e9 }] };
             if (method === 'storageCategory') return { status: 'ready', entries: input.category === 'documents' ? [entry] : [] };
-            if (method === 'storageQuery') return { status: 'ready', entries: [entry] };
+            if (method === 'storageQuery') return { status: 'ready', entries: [entry], truncated: false };
             if (method === 'storageList') return { status: 'ready', entries: input.path === 'Documents' ? [entry] : input.path ? [] : [{ path: 'Documents', name: 'Documents', directory: true, mimeType: '', size: 0, modified: entry.modified, children: 1 }] };
             if (method === 'storageTrashList') return { status: 'ready', items: [] };
             if (method === 'storageSelect') { d.picks.push({ action: 'files', path: input.path }); return input.path === entry.path ? selected : { status: 'missing', message: 'This item is no longer there.' }; }
@@ -390,12 +399,24 @@ export async function flagOffAndroid(page: Page, options: FlagOffOptions = {}) {
             // The resident agent records the user turn, then streams its reply over native IPC.
             const conversation = /^\/api\/conversations\/([^/]+)\/messages\/stream$/.exec(input.path)![1], body = JSON.parse(input.body), streamId = input.streamId as string;
             f.streams++; f.posts.push(String(body.text));
-            agent.history[conversation].push({ id: crypto.randomUUID(), role: 'user', text: body.text, timestamp: Date.now() }); persist();
+            const messageUuid=crypto.randomUUID();
+            // The actual resident derives a version-zero ID for the owner's turn.
+            const userMessageId=options.emailDraft?messageUuid.slice(0,14)+'0'+messageUuid.slice(15):messageUuid,messageId=crypto.randomUUID();
+            agent.history[conversation].push({ id: userMessageId, role: 'user', text: body.text, timestamp: Date.now() }); persist();
             const reply = f.replies.shift() ?? 'Resident reply ' + f.streams;
+            let emailActions:unknown[]=[];
+            if(options.emailDraft){
+              if(String(body.text).endsWith('Open Inbox.')){
+                const handoff=crypto.randomUUID();
+                const prepared=navigation().request('POST','/api/views/inbox/navigate',{clientId:body.metadata.viewClientId,delivery:'completed-action',prepareOnly:true,viewType:'gui',completedActionHandoffId:handoff},{},id);
+                if(prepared.status!==200)throw Error('Invalid fixture navigation preparation');
+                emailActions=[{actionName:'VIEWS_SHOW',success:true,values:{mode:'show',viewId:'inbox',viewPath:'/inbox',viewType:'gui',label:'Inbox',navigationPrepared:true,completedActionHandoffId:handoff,navigationBinding:prepared.data.navigationBinding}}];
+              }else emailActions=[{actionName:'MESSAGE_DRAFT_FOLLOWUP',success:true,values:{mode:'local-compose',targetId:'inbox',emailDraft:{version:1,requestMessageId:userMessageId,...options.emailDraft}}}];
+            }
             setTimeout(() => {
               emitStream(streamId, { type: 'response', status: 200, headers: { 'content-type': 'text/event-stream' } });
-              agent.history[conversation].push({ id: crypto.randomUUID(), role: 'assistant', text: reply, timestamp: Date.now() + 1 }); persist();
-              data(streamId, { type: 'token', text: reply }); data(streamId, { type: 'done', fullText: reply, agentName }); emitStream(streamId, { type: 'complete' });
+              agent.history[conversation].push({ id: messageId, role: 'assistant', text: reply, timestamp: Date.now() + 1 }); persist();
+              data(streamId, { type: 'token', text: reply }); data(streamId, { type: 'done', fullText: reply, agentName, ...(options.emailDraft?{userMessageId,messageId,actionResults:emailActions}:{}) }); emitStream(streamId, { type: 'complete' });
             }, 0);
             return { streamId };
           }
@@ -453,9 +474,20 @@ export async function expectNoDevelopmentSurface(page: Page) {
   await expect(button(page, 'Device controls')).toHaveCount(0);
   await expect(page.getByText(/Development (connections|device actions|reply|provider|inbox)/)).toHaveCount(0);
 }
-/** Existing-installation fixtures seed UI progress only. OS/plugin grants remain independent. */
-export async function seedCompletedAccessSetup(page: Page) {
-  await page.addInitScript(()=>localStorage.setItem('alpha:startup-permission-walkthrough:v1',JSON.stringify({version:1,status:'completed',step:4})));
+/** Existing-installation fixtures seed UI progress only. OS/plugin grants remain independent.
+ * The record's format follows the platform: the browser reads version 1 (four steps), Android
+ * reads version 4 (seven steps). Specs often install `androidBridge` in a later init script, so
+ * the native record is written when the bridge is installed. Android compositions without
+ * a bridge specify the platform explicitly. */
+export async function seedCompletedAccessSetup(page: Page, platform?: 'android') {
+  await page.addInitScript(platform=>{
+    const w=window as any;
+    const seed=(native:boolean)=>localStorage.setItem('alpha:startup-permission-walkthrough:v1',JSON.stringify(native?{version:4,status:'completed',step:7}:{version:1,status:'completed',step:4}));
+    if(platform==='android'||w.androidBridge){seed(true);return;}
+    seed(false);
+    let bridge:unknown;
+    Object.defineProperty(w,'androidBridge',{configurable:true,enumerable:true,get:()=>bridge,set:(value:unknown)=>{bridge=value;seed(Boolean(value));}});
+  },platform);
 }
 /** Dismiss the explicit post-auth Ready card; quiet restoration of completed setup opens no card.
  * Waits for one of the two outcomes: the Ready card is showing, or no panel and completed setup is stored. */

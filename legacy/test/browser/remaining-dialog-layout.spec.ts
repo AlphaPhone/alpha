@@ -8,7 +8,7 @@ for(const theme of ['light','dark'])for(const kind of Object.keys(cases) as (key
  await page.evaluate(async kind=>{
   const {BrowserDevice}=await import('/src/browser/device.ts');await BrowserDevice.prototype.setTextScale({percent:150});
   if(kind==='reading'){const {reviewBrowserReading}=await import('/src/browser/reading-review.ts');void reviewBrowserReading('https://example.com/article',new AbortController().signal,()=>{});}
-  if(kind==='receipt'){const {requestWorkflowReceipt}=await import('/src/browser/workflow-receipts.ts');void requestWorkflowReceipt({get:(name:string)=>name==='wallet'?{cards:[]}:{mails:[],sent:[]}},false,new AbortController().signal).catch(()=>{});}
+  if(kind==='receipt'){const {requestWorkflowReceipt}=await import('/src/browser/workflow-receipts.ts');void requestWorkflowReceipt({get:()=>({mails:[],sent:[]})},new AbortController().signal).catch(()=>{});}
   if(kind==='incoming'){const {openIncomingSimulation}=await import('/src/browser/incoming-simulation.ts');openIncomingSimulation('email',{get:()=>({list:[{id:'sample',name:'Sample sender'}]}),setView:()=>{throw Error('Layout fixture cannot deliver');}});}
   if(kind==='location'){const {openLocationControls}=await import('/src/browser/location-simulation.ts');openLocationControls();}
   if(kind==='recovery'){const {loadSimulatedState,showSimulatorRecovery}=await import('/src/browser/simulator-recovery.ts');for(const name of ['inbox','contacts','workflows']){localStorage.setItem('alpha.dev.app.'+name,'{broken original');loadSimulatedState(name,{title:name,persist:[],state:{}});}showSimulatorRecovery();}

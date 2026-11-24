@@ -9,6 +9,8 @@ import {browserDevProfile} from './dev-profile';
 import {showSimulatorRecovery} from './simulator-recovery';
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { registerPlugin } from '../platform-plugins';
+import { System } from '../native';
+import type { AlphaNotificationsBrowserMethods } from '../native/alpha-notifications';
 type Command='home'|'back'|'power'|'unlock'|'boot'|'assistant'|'shade'|'background'|'resume';
 type Props={command:(command:Command)=>void};
 // Development-server-only surface (devSurfacesEnabled). Flag-off builds fold the
@@ -43,8 +45,8 @@ function DevelopmentDeviceControls({command}:Props) {
  <button onClick={()=>{dialog.current?.close();openAlertSoundRecovery();}}>Notification sound recovery</button>
  {browserDevProfile&&<button onClick={()=>{dialog.current?.close();openPasswordProviderRecovery();}}>Password provider recovery</button>}
  {browserDevProfile&&<button onClick={()=>{dialog.current?.close();showSimulatorRecovery();}}>Saved app recovery</button>}
- <button onClick={()=>{dialog.current?.close();void registerPlugin<{compose():Promise<void>}>('AlphaNotifications').compose();}}>Post notification</button>
- {['home','assistant','dialer','sms'].map(value=><button key={value} disabled={savingRole} onClick={()=>{setSavingRole(true);void registerPlugin<{requestRole(input:{role:string}):Promise<unknown>}>('ElizaSystem').requestRole({role:value}).then(()=>setRole(`${value} selected`)).catch(()=>setRole('Role could not be saved. Try again.')).finally(()=>setSavingRole(false));}}>Use as {value}</button>)}
+ <button onClick={()=>{dialog.current?.close();void registerPlugin<AlphaNotificationsBrowserMethods>('AlphaNotifications').compose();}}>Post notification</button>
+ {(['home','assistant','dialer','sms'] as const).map(value=><button key={value} disabled={savingRole} onClick={()=>{setSavingRole(true);void System.requestRole({role:value}).then(()=>setRole(`${value} selected`)).catch(()=>setRole('Role could not be saved. Try again.')).finally(()=>setSavingRole(false));}}>Use as {value}</button>)}
  </div><p role="status">{role}</p><button onClick={changeProfile}>{browserDevProfile?'Use app profile':'Use development profile'}</button><button onClick={()=>dialog.current?.close()}>Done</button>
  </dialog></>;
 }

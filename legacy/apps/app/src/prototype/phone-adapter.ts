@@ -1,17 +1,16 @@
 import {createElement} from 'react';
-import {registerPlugin} from '../platform-plugins';
+import {alphaTelephony} from '../native/alpha-telephony';
 import {aospImage} from '../runtime/aosp-image';
-import {createAospTelephony,normalizePhoneNumber,type AlphaTelephonyPlugin,type AospTelephony} from '../runtime/aosp-telephony';
-import type {TelephonyCallLogEntry} from '../../../../.eliza/client-features/packages/contracts/src/native-telephony.ts';
+import {createAospTelephony,normalizePhoneNumber,type AospTelephony} from '../runtime/aosp-telephony';
+import type {TelephonyCallLogEntry,VoicemailCarrierState,VoicemailEntry} from '../../../../.eliza/client-features/packages/contracts/src/native-telephony.ts';
 import {audioReplied,audioRequested,callStarted,closed,closedVoicemail,deleteAsked,deleteCancelled,deleteFinished,ended,opened,paused,played,readinessLost,transcriptReplied,transcriptRequested,type OpenVoicemail,type TranscriptEngine} from '../runtime/voicemail-state';
 import {watchReturnToApp} from './native-adapter';
 import {isMvpView} from './mvp-features';
 import {formatDateTime} from './locale-time';
 import {callKind,callRow,callsBriefing,clockLength,displayNumber,initials,matchesCallQuery,numberKey,shortWhen} from './telephony-presenters';
-import {callResultText,handoffResultText} from '../ui/telephony/telephony-messages';
+import {placeOwnerCall} from './place-owner-call';
 import {clearListFilter,setListFilterHandler,type CommsBarSpec,type CommsListFilter} from '../runtime/comms-bar';
 type Bag=Record<string,any>;
-type Voicemail={id:string;number:string;cachedName:string|null;date:number;durationSeconds:number;isNew:boolean;hasAudio:boolean;carrierTranscript:string|null};
 const CALL_TYPE:Record<TelephonyCallLogEntry['type'],string>={incoming:'Incoming',outgoing:'Outgoing',missed:'Missed',voicemail:'Voicemail',rejected:'Declined',blocked:'Blocked',answered_externally:'Other device',unknown:'Call'};
 /** Plain rows of recent calls (label, detail and whether the number can be called). */
 export function phoneRows(calls:readonly TelephonyCallLogEntry[],dial:(number:string)=>void){
@@ -76,6 +75,10 @@ export function wavWindows(wav:Uint8Array,seconds=WINDOW_SECONDS):Uint8Array[]{
   chunk.set(wav.subarray(data+start,data+start+length),44);out.push(chunk);}
  return out;
 }
+let keypadOpener:((number?:string)=>((detent?:string)=>void)|null)|null=null;
+/** The step that brings the Phone keypad in front, `number` filled in when given; null when Phone
+ * is not mounted or not admitted. It never dials: only the owner's Call tap there calls. */
+export const openKeypadStep=(number?:string)=>keypadOpener?.(number)??null;
 /**
  * Phone on the verified Alpha image only (P-36, AP-08), through the shared telephony profile.
  * Recents and voicemail are its bounded, unlocked, foreground-only reads, kept in memory for the
@@ -85,19 +88,29 @@ export function wavWindows(wav:Uint8Array,seconds=WINDOW_SECONDS):Uint8Array[]{
  * transcribed under the owner's speech setting (Voicemail.qnt). Off the image this adapter returns
  * before registering anything, and the Phone view is not admitted.
  */
-export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony|null=aospImage?createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true):null){
+export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony|null=aospImage?createAospTelephony(alphaTelephony,true):null){
  if(!client)return;
  const p=Component.prototype,mount=p.componentDidMount,update=p.componentDidUpdate,unmount=p.componentWillUnmount;
  let owner:any,api:Bag|null=null,calls:TelephonyCallLogEntry[]=[],number='',status='',notice='',reading=false,dialing=false,session=0,needsAccess=false,retryRecents=false,active=false,epoch=0,tab:PhoneTab='recents';
  /* AC-22: the bar's query over Recents, held for the visit only; an Alpha filter also shows a chip. */
  let filter:CommsListFilter|null=null;
- let voicemails:Voicemail[]=[],carrier:'ready'|'unconfigured'|'unsupported'|null=null,vm:OpenVoicemail=closedVoicemail();
+ let voicemails:VoicemailEntry[]=[],carrier:VoicemailCarrierState|null=null,vm:OpenVoicemail=closedVoicemail();
  type Observation={session:number;stop:(()=>Promise<void>)|null;ready:Promise<void>};
  let observation:Observation|null=null,observationTail:Promise<void>=Promise.resolve();
  let audio:HTMLAudioElement|null=null,audioUrl='',wav:Uint8Array|null=null,position=0,work:AbortController|null=null,inCall=false;
  let pendingDelete:{current:()=>void;answer:(result:DeleteResult)=>void;detach:()=>void}|null=null,deleting=false;
  const names=new Map<string,string>(),people:{name:string;number:string}[]=[];
  const busy=()=>reading||dialing;
+ keypadOpener=keypadNumber=>{
+  const shell=owner;
+  if(!shell||!isMvpView('phone'))return null;
+  // `detent` is the chat detent a voice turn carries its conversation to Phone with.
+  return (detent?:string)=>{
+   if(owner!==shell||document.hidden)return;
+   const chat=shell.S().chat;
+   shell.openView('phone',{tab:'keypad',...(keypadNumber?{prefill:keypadNumber}:{})},detent??(chat==='sheet'||chat==='full'?chat:undefined));
+  };
+ };
  const changed=()=>owner?.setState({phoneNativeRevision:Date.now()});
  const available=()=>!!owner&&owner.S().view==='phone'&&!document.hidden;
  // The native observer is one switch. Its replacement waits until the prior lease retires.
@@ -154,16 +167,18 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
   if(busy()||!available())return;const target=normalizePhoneNumber(raw);
   if(!target){notice='Invalid number';changed();return;}
   const token=session;dialing=true;notice='';changed();
-  try{const result=await client!.placeCall(target);if(token!==session)return;if(result.status==='placed'){number='';inCall=true;vm=callStarted(vm);audio?.pause();}else notice=callResultText(result);}
-  catch(error){if(token!==session)return;const code=(error as {code?:string})?.code;
-   if(code==='role-required'||code==='permission-required'){try{const handoff=await client!.dial(target);if(token===session)notice=handoffResultText(handoff);}catch{if(token===session)notice='Couldn’t open';}}
-   else notice='Call unconfirmed';}
+  try{
+   const result=await placeOwnerCall(client!,target,()=>token===session&&available());
+   if(token!==session)return;
+   if(result.placed){number='';inCall=true;vm=callStarted(vm);audio?.pause();}
+   else notice=result.notice;
+  }
   finally{if(token===session){dialing=false;changed();}}
  }
  const ready=()=>active&&available();
- const open=(row:Voicemail)=>{if(vm.id===row.id){closeVoicemail();changed();return;}cancelDelete();releaseAudio();vm=opened(vm,row.id,!row.isNew,row.carrierTranscript);void loadAudio(row);changed();};
+ const open=(row:VoicemailEntry)=>{if(vm.id===row.id){closeVoicemail();changed();return;}cancelDelete();releaseAudio();vm=opened(vm,row.id,!row.isNew,row.carrierTranscript);void loadAudio(row);changed();};
  /* The decoded audio serves both playback and transcription; it stays in memory for the open voicemail only. */
- async function loadAudio(row:Voicemail){
+ async function loadAudio(row:VoicemailEntry){
   const before=vm;vm=audioRequested(vm,ready());if(vm===before)return;const ticket=vm.ticket,controller=new AbortController();work?.abort();work=controller;changed();
   try{
    if(!row.hasAudio){const fetched=await client!.fetchVoicemailAudio(row.id);if(ticket!==vm.ticket)return;if(fetched!=='ready')throw Error(fetched);}
@@ -233,7 +248,7 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
   return {target:{kind:'recents',app:'Phone',name:null,first:null,initials:null},
    closed:{kind:'filter',placeholder:'Call or ask',value:filter?.by==='owner'?filter.query:'',submit:null,canSubmit:false,maxLength:null,suggestion:null,acceptSuggestion:null,
     onText:text=>{if(!text&&filter?.by==='alpha')return;filter=text?{query:text,label:'',by:'owner'}:null;changed();}},
-   left:{icon:'keypad',label:'Back to the keypad',initials:null,run:()=>selectPhoneTab('keypad')},
+   left:null,
    context:'Phone',contextKey:'phone:recents:',strip:{title:'Phone',subtitle:'',initials:null,live:false,actions:[]},
    end:null,incoming:null,emergency:false,fit:null,
    briefing:callsBriefing(missed,voicemails.filter(row=>row.isNew).map(row=>({name:who(row)})),now)};
@@ -265,8 +280,13 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
  };
  views.phone.render=(st:Bag,viewApi:Bag)=>{
  api=viewApi;
- /* A number handed over from Contacts or Messages fills the keypad once; only the owner's Call tap calls. */
- if(typeof st?.prefill==='string'&&st.prefill){if(!busy()){number=st.prefill.slice(0,40);notice='';tab='keypad';}queueMicrotask(()=>viewApi.set?.({prefill:null}));}
+ /* A number handed over from Contacts fills the keypad once; only the owner's Call tap calls.
+    While a read or a dial handoff is busy the request stays pending and lands when it clears.
+    Leaving Voicemail closes the open one, as the owner's own tab tap does: its audio and an
+    armed delete confirmation never carry on behind the keypad. */
+ if(typeof st?.prefill==='string'&&st.prefill&&!busy()){number=st.prefill.slice(0,40);notice='';if(tab==='voicemail')closeVoicemail();tab='keypad';queueMicrotask(()=>viewApi.set?.({prefill:null}));}
+ /* The agent's phone_keypad opens the keypad, with or without a number (prefill above); it never calls. */
+ if(st?.tab==='keypad'&&!busy()){if(tab==='voicemail')closeVoicemail();tab='keypad';queueMicrotask(()=>viewApi.set?.({tab:null}));}
  /* Home's Phone card names the tab it leads to. */
  if(st?.tab==='recents'||st?.tab==='voicemail'){if(st.tab==='recents'||carrier==='ready')tab=st.tab;if(carrier!==null||st.tab==='recents')queueMicrotask(()=>viewApi.set?.({tab:null}));}
  const now=Date.now(),hasVoicemail=carrier==='ready',digits=number.replace(/\D/g,'');
@@ -286,7 +306,7 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
   nativeRows:phoneRows(calls,value=>void call(value)),
   nativeOnNumber:(event:Event)=>{if(busy())return;number=(event.target as HTMLInputElement).value;notice='';changed();},
   nativeDial:()=>void call(number),nativeRefresh:()=>void refresh(),nativeRequest:()=>void refresh(true),
-  nativeContacts:openContacts, tabs, phoneTabSelector:phoneTabSelector(tabs),
+  nativeContacts:openContacts, title:TAB_LABEL[tab], tabs, phoneTabSelector:phoneTabSelector(tabs),
   isRecents:tab==='recents',isKeypad:tab==='keypad',isVoicemail:tab==='voicemail'&&hasVoicemail,
   filterChip:chip?{label:chip,clearLabel:`Clear filter ${chip}`}:null,clearFilter:()=>clearListFilter('phone'),
   recents:rows.map(({entry,row},index)=>{return {...row,last:index===0||undefined,color:row.missed?'var(--alpha-call-red)':'var(--fg)',d:ARROW[row.kind],noCall:!row.canCall||busy(),call:()=>{if(entry.number)void call(entry.number);}};}),

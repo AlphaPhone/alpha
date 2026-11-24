@@ -2,23 +2,21 @@ import React,{useEffect,useId,useRef,useState} from 'react';
 import './cloud-membership-ui.css';
 import {Busy,StatusDot} from './status-ui';
 import {iconStyle} from '../icon-style';
+import {alphaSubscriptionCopy,type ServiceLimit,type SubscriptionView} from './subscription-entitlement';
+import {useCloudSubscriptionSummary} from '../ui/components/settings/cloud-subscription-summary.tsx';
 export type MembershipBalance='checking'|'zero'|'funded'|'member'|'unavailable';
 /** A plan is needed before the account can use Cloud inference. */
 export const FUNDING_NEEDED='Plan needed';
-/** Cloud declined a turn for this account's billing: the chat's one answer, beside this sheet. */
-export function fundingRefusedReply(serviceName:string):string {void serviceName;return 'Billing declined';}
-import {alphaSubscriptionCopy,type ServiceLimit,type SubscriptionView} from './subscription-entitlement';
-import {useCloudSubscriptionSummary} from '../ui/components/settings/cloud-subscription-summary.tsx';
 function endLabel(endsAt:number):string {
  const date=new Date(endsAt).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});
  const days=Math.ceil((endsAt-Date.now())/86400000);
  return days>0?`${days}d left`:`Ended ${date}`;
 }
 /**
- * Shared Account presentation (owner consolidation, 2026-11-09). Plan and
+ * Shared Account presentation. Plan and
  * actions remain bound to the current Cloud account. The shared subscription summary
  * (Alpha's `ui/cloud/subscription-presentation`, through the `useCloudSubscriptionSummary` hook) adds, read-only, the plan allowance Cloud reports and
- * the latest Cloud limit with its retry time (#410). Plan management opens Cloud's
+ * the latest Cloud limit with its retry time. Plan management opens Cloud's
  * billing page after the account review; Enter membership code reveals the code field.
  * A grant's access window is never presented as a paid renewal date.
  *
@@ -34,7 +32,7 @@ export function CloudMembershipControls({balance,busy,error,connectionError,noti
  const [codeVisible,setCodeVisible]=useState(Boolean(error)),[submitting,setSubmitting]=useState(false),[submissionError,setSubmissionError]=useState(''),[codeValue,setCodeValue]=useState('');
  const codeToggle=useRef<HTMLButtonElement>(null);
  const active=plan?.kind==='active',disabled=busy||submitting,showCode=codeVisible||codeEntry,explicitEntry=useRef(codeEntry);
- // The shared hook (elizaOS/eliza#38105) renders again only when the shown limit's wait ends or its
+ // The shared hook renders again only when the shown limit's wait ends or its
  // reset passes, so a lapsed retry time is not left on screen; it is not a per-second countdown.
  const summary=useCloudSubscriptionSummary(plan,{planEndsAt:endsAt??null,lastLimit:lastLimit??null,copy:alphaSubscriptionCopy(serviceName)});
  const noPlan=plan?.kind==='inactive'||plan?.kind==='credits';

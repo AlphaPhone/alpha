@@ -16,7 +16,7 @@ const template = 'apps/app/src/prototype/template.html';
 const shared = 'vendor/eliza/plugins/plugin-assistant/src/services/device-actions/';
 const dependencyPaths = ['apps/app/src/runtime/clock-contract.ts', 'apps/app/src/runtime/clock-handoff-history.ts',
   'apps/app/src/runtime/inline-modal.ts', 'apps/app/src/runtime/modal-inert.ts', 'apps/app/src/ui/clock/clock-handoff-presentation.ts',
-  ...['clock-contract.ts', 'clock-handoff.ts', 'clock-handoff-history.ts'].map(path => shared+path)];
+  ...['clock-contract.ts', 'clock-handoff.ts', 'clock-handoff-history.ts'].map(path => shared+path), 'apps/app/src/lib/civil-date.ts'];
 export const workflowClockSources = [clock, agent, shellSource, template, 'apps/app/src/main.tsx',
   'scripts/test-clock-handoff-flow.ts', 'test/support/strip-types.mjs', ...dependencyPaths];
 const read = path => readFileSync(resolve(root, path), 'utf8');
@@ -25,8 +25,9 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
 
 export async function loadWorkflowClockFixture() {
   const bundle = await build({absWorkingDir: root, stdin: {resolveDir: root, contents: `
-    export {currentClockTimeZone,buildClockRequest,describeClockDays} from './${dependencyPaths[0]}';
-    export {createClockHandoffHistory,clockHandoffLegacyKey,clockHandoffSlot} from './${dependencyPaths[1]}';
+    export {currentClockTimeZone,buildClockRequest,describeClockDays,CLOCK_DAY_NAMES} from './${dependencyPaths[0]}';
+    export {deviceTimeZone} from './${dependencyPaths.at(-1)}';
+    export {createClockHandoffHistory,clockHandoffSlot} from './${dependencyPaths[1]}';
     export {createInlineModal} from './${dependencyPaths[2]}';
     export {clockResultText} from './${dependencyPaths[4]}';`}, bundle: true, write: false, metafile: true,
   format: 'esm', platform: 'node', plugins: [{name: 'authenticated-clock-source', setup(build) {
@@ -83,12 +84,12 @@ export async function loadWorkflowClockFixture() {
     approve: binding(page, 'button[aria-label="Confirm Clock request"]'), close: binding(page, 'button[aria-label="Close Clock"]'),
   };
   dom.window.close();
-  return (browser, testMocksEnabled) => fixture({bindings, installer, context, leave, routes, browser, testMocksEnabled});
+  return (browser, testMocksEnabled, seed = null) => fixture({bindings, installer, context, leave, routes, browser, testMocksEnabled, seed});
 }
 
-function fixture({bindings, installer, context, leave, routes, browser, testMocksEnabled}) {
+function fixture({bindings, installer, context, leave, routes, browser, testMocksEnabled, seed = null}) {
   const state = {view: 'workflows', screen: 'home'};
-  let hidden = false, selected, slot = null, saveOpening, finishHandoff, reviewRun, oldOpener, clockDraftId;
+  let hidden = false, selected, slot = structuredClone(seed), saveOpening, finishHandoff, reviewRun, oldOpener, clockDraftId;
   const requests = [], shows = [], updates = [];
   const document = Object.assign(new EventTarget(), {documentElement: {dataset: {connectionMode: 'live'}}, querySelector: () => null});
   Object.defineProperty(document, 'hidden', {get: () => hidden});
@@ -134,6 +135,7 @@ function fixture({bindings, installer, context, leave, routes, browser, testMock
     mod(view) {return views[view] ?? {};}
     api() {return api;}
     workflowSelection() {return {kind: 'workflow', id: 'synthetic-workflow', revision: 'version-1'};}
+    cancelReadReplyCompletions() {}
   }
   vm.runInNewContext(`${installer}\ninstallClockAdapter(Shell,views,{browser,simulated:false});`, {
     ...bindings, Shell, views, browser, testMocksEnabled, DailyApps, secureConnectionStore,

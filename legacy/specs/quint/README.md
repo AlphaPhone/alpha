@@ -40,14 +40,12 @@ when its corresponding command is selected. `bounds.maxVerifyDepth` sets the
 default symbolic depth for that model; explicit `--steps` overrides it.
 `verifyBackend: "tlc-bounded"` selects exhaustive safety checking through that
 transition bound. BrowserSession, PhotosWindow, LauncherFavorites, HomeGesture,
-NavigationProgress, AgentCalendarRefresh and TaskSchedulerRuntime use it with their unchanged
-six-transition defaults. TaskSchedulerRuntime retains its canonical 500-sample,
+NavigationProgress, AgentCalendarRefresh, PhoneCall and TaskSchedulerRuntime use it
+with their unchanged six-transition defaults. TaskSchedulerRuntime retains its canonical 500-sample,
 40-transition simulation with seed 123. NativeNavigationOwnership and the historical
 PhotosLibrary, NotesView, FilesBrowser and CoreServiceLifecycleDesign models also
 retain their six-transition defaults with this backend. Their temporal properties
-and historical comparisons continue to use full `tlc` exploration.
-PreviousNotesSourceOpening retains its
-eight-transition default. These backend
+and historical comparisons continue to use full `tlc` exploration. These backend
 selections have separate exhaustive bounded qualifications; the original symbolic
 checker deadline receipts remain distinct from the passing bounded results.
 The checker appends a depth counter to the translated model, checks every state

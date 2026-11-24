@@ -97,7 +97,8 @@ export const EXPORTED_COMPONENTS = Object.freeze({
   "ai.alphacompute.alphaphone.AlphaNotificationListener": "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE",
   "ai.alphacompute.alphaphone.AlphaQuickSettingsTile": "android.permission.BIND_QUICK_SETTINGS_TILE",
   "ai.alphacompute.alphaphone.AlphaKeyboardDictationService": "android.permission.BIND_INPUT_METHOD",
-  // Alpha's password vault as an Android Autofill provider (shared plugin-native-passwords).
+  // Alpha's password vault as an Android Autofill provider: the shared plugin-native-passwords service under
+  // its installed component name (Android keeps the selected provider by name), opening Alpha's screens.
   "ai.eliza.plugins.passwords.ElizaPasswordAutofillService": "android.permission.BIND_AUTOFILL_SERVICE",
   // Google Play services alone may notify this native sign-in revocation service.
   "com.google.android.gms.auth.api.signin.RevocationBoundService": "com.google.android.gms.auth.api.signin.permission.REVOCATION_NOTIFICATION",
@@ -119,6 +120,38 @@ export const EXPORTED_COMPONENTS = Object.freeze({
   // The privileged image Provision app can prepare, but cannot assign roles through this receiver.
   [`${CANONICAL_APP_ID}.${TELEPHONY_SETUP_RECEIVER}`]: MANAGE_ROLE_HOLDERS,
 });
+// Shared elizaOS component names the APK may declare, by tag. Alpha's native screens, dialogs, tiles
+// and notices are its own classes (test/native-ui-self-contained.test.mjs checks the sources); a
+// shared name stays only where an installed identifier binds to it, and a shared activity name is
+// only an alias of Alpha's own screen.
+export const SHARED_COMPONENTS = Object.freeze({
+  // Android keeps the selected Autofill provider by this name; it opens Alpha's screens below.
+  "ai.eliza.plugins.passwords.ElizaPasswordAutofillService": "service",
+  "ai.eliza.plugins.passwords.PasswordFillActivity": "activity-alias",
+  "ai.eliza.plugins.passwords.PasswordSaveActivity": "activity-alias",
+  "ai.eliza.plugins.messages.MmsFileProvider": "provider",
+  "ai.eliza.plugins.filesystem.browser.ReadOnlyStorageFileProvider": "provider",
+});
+const SHARED_NAMESPACE = "ai.eliza.";
+
+/** A shared component name outside SHARED_COMPONENTS, or a shared alias that opens a shared class. */
+export function sharedComponentProblems(xml: string, components: readonly {tag: string; name: string}[], appId: string) {
+  const problems: string[] = [];
+  for (const component of components) {
+    if (!component.name?.startsWith(SHARED_NAMESPACE)) continue;
+    if (SHARED_COMPONENTS[component.name as keyof typeof SHARED_COMPONENTS] !== component.tag)
+      problems.push(`Shared ${component.tag} ${component.name} is declared; Alpha declares its own class`);
+  }
+  const application = parseXmlTree(xml).children.find(node => node.name === "manifest")
+    ?.children.find(node => node.name === "application");
+  for (const alias of application?.children.filter(node => node.name === "activity-alias") ?? []) {
+    const target = alias.attrs.targetActivity ?? "";
+    const qualified = target.startsWith(".") ? appId + target : target;
+    if (alias.attrs.name?.startsWith(SHARED_NAMESPACE) && !qualified.startsWith(appId + "."))
+      problems.push(`Shared alias ${alias.attrs.name} must open Alpha's screen, not ${target || "nothing"}`);
+  }
+  return problems;
+}
 // On-device speech is the fused libelizainference engine only. Entries and classes of the removed
 // speech runtimes (Open Neural Network Exchange models and runtimes, sherpa, ORT-Web, the former
 // in-browser model directory public/browser-speech/) never ship.
@@ -157,6 +190,7 @@ export function distributionProblems(apk: DistributionInput, { mode, appId = CAN
   if (facts.packageName && facts.packageName !== appId)
     problems.push("APK package differs from selected application identity");
   problems.push(...legacyStorageProblems(apk.xml));
+  problems.push(...sharedComponentProblems(apk.xml, facts.components, appId));
   const powerName = `${appId}.AlphaPowerVoiceActivity`;
   if (facts.exported.some(component => component.name === powerName && component.tag !== "activity"))
     problems.push("AlphaPowerVoiceActivity must be an activity");

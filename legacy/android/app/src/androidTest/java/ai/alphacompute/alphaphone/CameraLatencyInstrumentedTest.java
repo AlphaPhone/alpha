@@ -22,9 +22,9 @@ import java.util.concurrent.atomic.AtomicLong;
 import static org.junit.Assert.*;
 
 /**
- * Camera start and shutter latency on a real device (view refresh PLAN section 1; targets measured
- * on the Pixel 10a). Not part of the default run: pass {@code -e cameraLatency 1}. With
- * {@code -e cameraLatencyAssert 1} the run also fails when a median misses its target.
+ * Camera start and shutter latency on a real device (targets measured on the Pixel 10a). Not part
+ * of the default run: pass {@code -e cameraLatency 1}. With {@code -e cameraLatencyAssert 1} the
+ * run also fails when a median misses its target.
  *
  * <ul>
  *   <li>First frame: from the navigation request until CameraX's PreviewView reports STREAMING,
@@ -46,6 +46,8 @@ import static org.junit.Assert.*;
 public class CameraLatencyInstrumentedTest {
  static final long COLD_FIRST_FRAME_MS = 400, WARM_FIRST_FRAME_MS = 200, SHUTTER_TO_THUMBNAIL_MS = 250;
  static final int WARM_OPENS = 5, SHOTS = 5;
+ static final long DIAGNOSTIC_MS=30000;
+ private volatile String lastState="no PreviewView";
  private Context context(){return InstrumentationRegistry.getInstrumentation().getTargetContext();}
  private String eval(String js)throws Exception{return WebViewTestDriver.evaluate(js);}
  private void until(String js,long millis)throws Exception{
@@ -76,8 +78,6 @@ public class CameraLatencyInstrumentedTest {
   }
   return seen;
  }
- static final long DIAGNOSTIC_MS=30000;
- private volatile String lastState="no PreviewView";
  private long sampleStreaming(long end)throws Exception{
   AtomicLong seen=new AtomicLong(-1);
   while(seen.get()<0&&SystemClock.uptimeMillis()<end){

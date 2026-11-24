@@ -3,17 +3,9 @@ package ai.alphacompute.alphaphone;
 import android.os.SystemClock;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
-import java.io.BufferedReader;
 import java.io.File;
-import java.io.InputStreamReader;
-import java.net.InetAddress;
-import java.net.ServerSocket;
-import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.json.JSONObject;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -22,11 +14,6 @@ import static org.junit.Assert.*;
 /** Encrypted recovery slots in an explicitly selected, owned secondary test user. */
 @RunWith(AndroidJUnit4.class)
 public class ReminderDeletionStorageInstrumentedTest {
- private String slotHash(String slot) throws Exception {
-  StringBuilder text = new StringBuilder();
-  for (byte b : java.security.MessageDigest.getInstance("SHA-256").digest(slot.getBytes(StandardCharsets.UTF_8))) text.append(String.format(java.util.Locale.ROOT, "%02x", b & 255));
-  return text.toString();
- }
  private void until(String expression) throws Exception {
   long deadline = SystemClock.elapsedRealtime() + 15000;
   while (SystemClock.elapsedRealtime() < deadline) {
@@ -61,7 +48,7 @@ public class ReminderDeletionStorageInstrumentedTest {
   assertTrue(value.length()<bytes);new JSONObject(value);return value;
  }
  private void verifySlot(String slot) throws Exception {
-  File stored=new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getNoBackupFilesDir(),"connection-credentials/"+slotHash(slot));
+  File stored=new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getNoBackupFilesDir(),"connection-credentials/"+AlphaUtil.sha256Hex(slot));
   assertFalse("Preserve preexisting reminder recovery",stored.exists());
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
    AppNavigation.liveMode();ready();

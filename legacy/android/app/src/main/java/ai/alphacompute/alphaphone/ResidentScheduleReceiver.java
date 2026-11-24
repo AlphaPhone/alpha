@@ -7,7 +7,7 @@ import android.os.UserManager;
 import android.util.Log;
 
 /**
- * Brings the resident agent back after boot, app update, or a clock/time-zone change (#394) when it
+ * Brings the resident agent back after boot, app update, or a clock/time-zone change when it
  * is not running; a running resident is untouched. Reminders keep their own AlarmManager receiver;
  * digests and other agent schedules run in the resident runtime and its own timers. Nothing is
  * replayed here: a missed digest runs again only through its explicit, reviewed Run now. An owner

@@ -29,10 +29,10 @@ Color follows Alpha accent. Phase motion is not an audio-amplitude meter.
 */
 import {useEffect,useLayoutEffect,useRef,useState} from 'react';
 
-export const voiceBarHeights = [8, 13, 18, 13, 8] as const;
+const voiceBarHeights = [8, 13, 18, 13, 8] as const;
 const composerBarHeights = Array.from({length:35},(_,index)=>voiceBarHeights[index%voiceBarHeights.length]);
 
-export const voiceVisuals: Record<string,{scaleY:number[];opacity:number[];duration:number}> = {
+const voiceVisuals: Record<string,{scaleY:number[];opacity:number[];duration:number}> = {
   idle: { scaleY: [0.28], opacity: [0.42], duration: 0 },
   connecting: {
     scaleY: [0.26, 0.48, 0.26],

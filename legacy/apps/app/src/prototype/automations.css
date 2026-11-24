@@ -17,6 +17,8 @@
 .automation-detail-header{display:flex;align-items:center;min-height:56px;margin-top:44px;padding:0 12px}
 .automation-power{position:relative;width:52px;height:32px;border-radius:16px;margin-left:12px;flex-shrink:0;transition:background .25s}
 .automation-power[aria-disabled=true]{opacity:.55}
+/* The 32px track keeps a 48px touch target. */
+.workflow-switch::before{content:"";position:absolute;inset:-8px 0}
 .automation-power span{position:absolute;top:3px;left:3px;width:26px;height:26px;border-radius:13px;background:var(--alpha-white);box-shadow:0 1px 3px rgba(0,0,0,.2);transition:transform .25s cubic-bezier(.19,1,.22,1)}
 .automation-detail-body{padding:8px 24px 130px;overflow-y:auto;touch-action:pan-y;flex:1;min-height:0}
 .automation-detail-header h2{flex:1;min-width:0;font-size:26px;line-height:1.2;letter-spacing:-.01em;margin:0;overflow-wrap:anywhere}
@@ -37,7 +39,7 @@
 .automation-new{display:flex;flex-direction:column;gap:2px}
 .automation-new button{min-height:64px;text-align:left;border-bottom:1px solid var(--line);font-size:17px}
 .automation-new span{display:block;color:var(--mut);font-size:14px;margin-top:5px}
-/* flex-shrink:0: the list is a flex column, and with a large system font (#701) a row squeezed to its
+/* flex-shrink:0: the list is a flex column, and with a large system font a row squeezed to its
    64px minimum left its label printed below it. The row grows with its text instead. */
 .automation-management{position:relative;display:flex;flex-direction:column;flex-shrink:0;gap:5px;padding:16px 32px 16px 4px;min-height:64px;text-align:left;border-bottom:1px solid var(--line)}
 .automation-management span+span{font-size:14px;color:var(--mut)}
@@ -60,7 +62,6 @@
 
 .workflow-run-actions{flex-wrap:wrap}
 
-/* Workflows A: one quiet filter and a linear list. Existing detail/editor styles stay above. */
 .workflow-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:4px 24px 12px;flex-shrink:0}
 .workflow-filter-trigger{display:flex;align-items:center;gap:6px;min-height:48px;min-width:0;font-size:14px;text-align:left;border-radius:8px}
 .workflow-filter-trigger span{min-width:0;overflow-wrap:anywhere}
@@ -85,7 +86,6 @@
 .workflow-filter-sheet button:focus-visible{outline:2px solid var(--acct);outline-offset:2px}
 @media(prefers-reduced-motion:reduce){.workflow-list *{scroll-behavior:auto}}
 
-/* Simple automation authoring uses the existing Alpha type, spacing and surfaces. */
 .automation-more{display:block;min-height:44px;padding:10px 0;color:var(--mut);font:inherit;font-size:14px;text-align:left}
 .automation-more:focus-visible,.automation-schedule-options button:focus-visible,.workflow-builder-name:focus-visible{outline:2px solid var(--acct);outline-offset:3px}
 .automation-when{margin-top:24px}

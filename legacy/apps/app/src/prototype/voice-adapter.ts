@@ -27,10 +27,10 @@ import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import { createOnDeviceVoice } from '../runtime/local-voice';
 import { screenConversationSpeech } from '../runtime/local-speech-text';
 import { voiceFailure, transcriptProvenance, deniedSettingsChoice, DENIED_SETTINGS_LABEL, MEDIA_UNCONFIRMED_NOTICE, speechCleanupNotice, type VoiceFailure, type TranscriptProvenance } from '../runtime/voice-states';
-import { createPairedVoice } from '../runtime/paired-voice';
-import { createCloudVoice, cloudVoiceFailure, cloudVoiceServiceLimit, createCloudStreamingSpeech, nativeCloudStreamingAvailable, type VoiceRecordingStopped } from '../runtime/cloud-voice';
+import {markTtsPlaybackStarted,markTtsPlaybackEnded} from '../ui/voice/tts-playback-activity.ts';
+import { createCloudVoice, cloudVoiceFailure, cloudVoiceServiceLimit, createCloudStreamingSpeech, nativeCloudStreamingAvailable } from '../runtime/cloud-voice';
 import { speakCloudSpeechChunks } from '../../../../.eliza/client-features/packages/voice/src/cloud-speech-chunks.ts';
-import { clefEndpointStage, selectVoiceRoute, speechRoute, noteNetworkSpeechFailure, clearNetworkSpeechHold, voicePreferenceKeys, voiceSendPolicy, type VoicePreference } from '../runtime/voice-selection';
+import { clefEndpointStage, selectVoiceRoute, speechRoute, noteNetworkSpeechFailure, clearNetworkSpeechHold, voicePreferenceKeys, type VoicePreference } from '../runtime/voice-selection';
 import { beginVoiceTurn, markVoiceTiming, abandonVoiceTurn, finishVoiceTurn, sendVoiceEntry, recordLiveVoiceTiming, recordEndpointVoiceTiming, recordHeardVoiceTiming, activeVoiceTurn, observeVoiceStartup, runVoiceStartupPreparation } from '../runtime/voice-timing';
 import { residentEndpoint, createHeardReporter, createEndpointChain } from '../runtime/voice-turn-routes';
 import { createLocalReplySpeaker, openMicrophoneAvailable } from '../runtime/local-reply-speech';
@@ -38,12 +38,20 @@ import { createNativeLiveDictation, nativeAssistantListener, nativeLiveVoiceRead
 import { installNativeVoiceTurnMarks } from '../runtime/native-voice-turn';
 import { VoiceAssistantSession, type AssistantState, type AssistantTextFrame } from '../runtime/voice-assistant';
 import { shouldRespondToVoiceTurn, buildVoiceTurnSignal } from '@elizaos/voice/turn';
+import { formatSpeechText } from '../ui/voice/speech-format';
 import { toSpeakableText } from '../ui/voice/voice-chat-playback.ts';
 import { connectionController } from '../runtime/connection-ui';
 import { workflowReplyText } from '../runtime/action-message-presentation';
-import { NoteRecorderSession, addSavedNoteTranscript, formatRecordingClock, type CanonicalNoteSaveIntent, type SavedNoteAudio } from './note-recorder';
-import { createNoteRecorderDriver } from '../runtime/note-recorder-driver';
+import { NoteRecorderSession, addSavedNoteTranscript, formatRecordingClock, type CanonicalNoteSaveIntent } from './note-recorder';
+import type { AlphaNoteAudioPlugin, SavedNoteAudio } from '../native/alpha-note-audio';
+import type { VoiceClip, VoiceRecordingStopped } from '../native/alpha-voice-cloud';
+import type { AlphaDevicePlugin } from '../native/alpha-device';
+import { createNoteRecorderDriver, noteRecordingNotificationOpen } from '../runtime/note-recorder-driver';
+import { createMapsNotificationOpen } from '../runtime/maps-notification-open';
 import { setNotesRecorderControl, type NotesRecordStart } from './notes-recorder-control';
+import { callSeenSince, currentCallState } from '../runtime/call-state';
+import { VOICE_CALL_ACTIVE, VOICE_CALL_ENDED, createCallReturnNotice, voiceEndedForCall } from '../runtime/voice-call-pause';
+import { outOfFundsNotice, outOfFundsRefusal, outOfFundsResetsAt, subscriptionOfferCard } from '../runtime/out-of-funds-notice';
 const voiceServiceName = () => connectionController.getSnapshot().residentInference==='direct'?'Cartesia':cloudServiceName(connectionController.getCloudEnvironment() ?? connectionController.getSnapshot().cloudAccount?.environment ?? connectionController.getSnapshot().signIn?.environment ?? 'production');
 // Reading a note aloud sends only that note's text, never recordings or replies, so Notes names it.
 // Data leaving the phone stays named at the Read action, in four words or fewer.
@@ -52,8 +60,7 @@ const noteSpeechDisclosure = () => { const route = speechRoute(); return route==
 const noteReadLabel = () => speechRoute()==='cloud' ? `Read with ${voiceServiceName()}` : 'Read aloud';
 const noteReadUnavailable = () => speechRoute()==='device' ? 'On-device speech is unavailable. The note is unchanged.' : `${voiceServiceName()} speech and on-device speech are unavailable. Check your account and connection. The note is unchanged.`;
 type Bag = Record<string, any>;
-type Clip = { recordingId: string; durationMs: number };
-const CALL_PAUSED = 'Voice paused for a phone call.';
+const CALL_PAUSED = VOICE_CALL_ENDED;
 /**
  * Open-microphone turn taking on the on-device route. The VAD closes a segment after 256 ms of
  * silence and the turn is sent at once (no further gap). Resumed speech must be held 400 ms, longer
@@ -62,30 +69,22 @@ const CALL_PAUSED = 'Voice paused for a phone call.';
  */
 const OPEN_MIC_HANGOVER_MS = 256;
 const OPEN_MIC_TIMING = { shortGapMs: 0, longGapMs: 0, bargeInConfirmMs: 400, playbackBargeInMs: 400 };
-const completeClip = (value: VoiceRecordingStopped): value is Clip =>
+const completeClip = (value: VoiceRecordingStopped): value is VoiceClip =>
   !value.interrupted && Number.isFinite(value.durationMs);
 const deviceVoice = registerPlugin<{
   startRecording(input?: { maxDurationMs: 29000 | 59000 }): Promise<{ recordingId: string; maxDurationMs: number }>;
-  stopRecording(): Promise<Clip>;
+  stopRecording(): Promise<VoiceClip>;
   transcribeRecording(options: { recordingId: string; requestId: string }): Promise<{ text: string; local: boolean }>;
   cancelRecording(): Promise<unknown>;
   cancel(options: { requestId: string }): Promise<unknown>;
   addListener(event: 'recordingStopped', callback: (clip: VoiceRecordingStopped) => void): Promise<PluginListenerHandle>;
   warmSpeechOutput(): Promise<void>;
+  setSpeechOutputMuted(input:{muted:boolean}):Promise<void>;
   getRecordingMetrics(input: { recordingId: string }): Promise<{ recordingId: string; peak: number; rms?: number }>;
 }>('AlphaVoiceCloud');
-const appSettings = registerPlugin<{ openSettings(input: { page: 'privacy' }): Promise<unknown> }>('AlphaDevice');
+const appSettings = registerPlugin<Pick<AlphaDevicePlugin, 'openSettings'>>('AlphaDevice');
 
-type SavedAudio = { audioId: string; noteId: string; durationMs: number; transcript: string };
-const noteAudio = registerPlugin<{
-  play(input: { audioId: string }): Promise<void>; stop(): Promise<void>;
-  state(): Promise<{ playing: boolean; audioId?: string; positionMs: number }>;
-  describe(input:{audioId:string}):Promise<SavedAudio & {deletedAt?:number}>;
-  remove(input: { audioId: string; noteId: string; operationId:string }): Promise<unknown>;
-  deletionStatus(input:{audioId:string;noteId:string;operationId:string}):Promise<{audioId:string;noteId:string;operationId:string;status:string}>;
-  restore(input: { audioId: string; noteId: string; operationId:string }): Promise<unknown>;
-  purge(input: { audioId: string; noteId: string; operationId:string }): Promise<{audioId:string;noteId:string;operationId:string;status:string}>;
-}>('AlphaNoteAudio');
+const noteAudio = registerPlugin<AlphaNoteAudioPlugin>('AlphaNoteAudio');
 
 /** The passage Read aloud speaks: title, then body or checklist items. */
 function noteSpeechText(note: Bag | undefined): string {
@@ -146,7 +145,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   /** The reviewed voice note a full Trash refused. Memory only; a restart simply asks again. */
   let refusedVoice:Bag|null=null;
   let api: Bag | undefined, stage = 'closed', generation = 0, busy = false;
-  let clip: Clip | undefined, recordingId: string | undefined, started = 0;
+  let clip: VoiceClip | undefined, recordingId: string | undefined, started = 0;
   let error = '', draft = '', requestId: string | undefined;
   // Distinct failure kinds keep their own guidance.
   let failure: VoiceFailure | '' = '';
@@ -180,8 +179,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   type Driver = typeof deviceVoice | ReturnType<typeof createCloudVoice> | NativeLiveDictation;
   let startingCapture:ReturnType<Driver['startRecording']>|undefined;
   let driver: Driver = deviceVoice, cloudMode = false, cloudConnectRequired = false, deviceOnly = false;
-  let pairedVoice: ReturnType<typeof createPairedVoice> = null, pairedReady = false, pairedAsrReady = false;
-  let selectedRoute: 'device' | 'agent' | 'manual' = 'device', preparingPaired = false;
+  let selectedRoute: 'device' | 'agent' | 'manual' = 'device';
   let onDeviceVoice: ReturnType<typeof createOnDeviceVoice> = null, onDeviceReady = false, preparingLocal = false;
   // Transcribe over the native live capture: Stop finalizes exactly the audio up to Stop.
   let liveDictation: NativeLiveDictation | undefined;
@@ -192,13 +190,15 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   // list question that is sent to Alpha when the owner confirms the transcript.
   type ChatDestination={mode?:'dictation';comms?:'person'|'filter';commsKey?:string;commsValue?:string;shell:any;view:string|null;chat:string;draft:string;reply:unknown;edit:unknown;binding:string;opener?:HTMLElement};
   let chatDestination:ChatDestination|undefined;
-  let ownedNavigation:{chat:ChatDestination;view:string;detent:string;applying:boolean;turnId:string;context?:import('../runtime/alpha-client').ContextEnvelope}|undefined;
-  let conversationVoice:Pick<BatchVoiceConversation<Clip>,'start'|'stop'|'recheck'|'resume'>|Awaited<ReturnType<typeof developmentCartesiaConversation>>|undefined;
+  let ownedNavigation:{chat:ChatDestination;view:string;detent:string;applying:boolean;placing:boolean;turnId:string;expectedSelection?:{kind:string;id:string};context?:import('../runtime/alpha-client').ContextEnvelope}|undefined;
+  let conversationVoice:Pick<BatchVoiceConversation<VoiceClip>,'start'|'stop'|'recheck'|'resume'>|Awaited<ReturnType<typeof developmentCartesiaConversation>>|undefined;
   let conversationState:BatchVoiceState & {progressText?:string}={phase:'idle'};
   let conversationReviewRequired=false;
   /** The conversation stopped on a refused microphone: on the phone its recovery opens Android's app settings. */
   let conversationDenied=false;
   let conversationSpeech:Promise<void>|undefined;
+  let conversationSpeaker:{muted:boolean;set(muted:boolean):Promise<void>;reset?():Promise<void>;pending?:Promise<void>}|undefined;
+  let keepReplyOnVoiceStop:(()=>void)|undefined;
   let notesSpeech:Promise<void>|undefined;
   let conversationPrepared:{binding:import('../runtime/alpha-client').VoiceConversationBinding;context:import('../runtime/alpha-client').ContextEnvelope}|undefined;
   let conversationLevels:number[]=[];
@@ -223,17 +223,16 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   /** The conversation whose fallback found no on-device speech: it stays on the network route, with that route's own waits and errors. */
   let conversationLocalMissing:ChatDestination|undefined;
   /** Review policy only: the finished transcript held for an explicit Send or Discard. */
-  let conversationReview:{text:string;settle:(text:string|null)=>void}|undefined;
   /** Message ids present before a conversation send; the first new agent text is the first token. */
   let conversationReplyWatch:Set<string>|undefined;
   // Voice latency (voice-timing.ts). A turn starts when its recording stops; the first turn on a
   // route in this page is cold. Marks are diagnostic only and never gate a voice turn.
   const warmRoutes=new Set<string>();let timedRecording:string|undefined;
-  const timingRoute=()=>conversationLive?(cloudMode?'eliza-cloud':'local-agent'):cloudMode?'eliza-cloud':onDeviceReady?(Capacitor.isNativePlatform()?'on-device':'browser'):pairedAsrReady?'paired-agent':'manual';
+  const timingRoute=()=>conversationLive?(cloudMode?'eliza-cloud':'local-agent'):cloudMode?'eliza-cloud':onDeviceReady?(Capacitor.isNativePlatform()?'on-device':'browser'):'manual';
   const recordingEnded=(id:string|undefined,entry:'conversation'|'notes')=>{
     if(!id||timedRecording===id)return;timedRecording=id;
     const route=timingRoute(),cold=!warmRoutes.has(route);warmRoutes.add(route);
-    beginVoiceTurn({route,cold,entry,...(entry==='conversation'?{policy:voiceSendPolicy()}:{})});
+    beginVoiceTurn({route,cold,entry,...(entry==='conversation'?{policy:'auto-send' as const}:{})});
   };
   // A recorded-clip (batch) conversation turn: its path is recorded as live mode 'batch' with no
   // partials, so timing and the diagnostics export tell it from the live assistant ('stream').
@@ -247,27 +246,33 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     try{previous.recordCancellationCause(cause);}catch{/* Diagnostic-only metadata cannot change cleanup. */}
   }
   function cleanup(close = true,publish=true,cause?:RealtimeCancellationCause) {
-    const previousConversation=conversationVoice;
+    const previousConversation=conversationVoice,previousSpeaker=conversationSpeaker;
+    keepReplyOnVoiceStop=undefined;
     noteRealtimeCancellation(previousConversation,cause);
     conversationState={...conversationState,progressText:''};
     ownedNavigation=undefined;
     // Discard, cancel, keyboard, navigation and account changes all end here: an unsent turn is abandoned.
-    abandonVoiceTurn();conversationReview=undefined;conversationReplyWatch=undefined;
+    abandonVoiceTurn();conversationReplyWatch=undefined;
     const hadCapture=!!recordingId||!!startingCapture||!!clip;
     const previousChat=chatDestination;const chatShell=previousChat?.shell,previousSpeech=conversationSpeech,previousNotesSpeech=notesSpeech;conversationVoice=undefined;conversationPrepared=undefined;
+    if(chatShell)chatShell.pendingVoiceSmsReview=undefined;
     chatShell?.cancelVoiceScrollFollow?.();
     conversationLive=undefined;conversationInterim='';assistantState={phase:'idle'};conversationDenied=false;
     // Stopping the assistant cancels its capture, request and playback and releases its agent session.
     const conversationStopped=previousConversation?.stop();
+    // Cleared only after stop(): its synchronous heard report still needs the muted state.
+    conversationSpeaker=undefined;
 
-    ++generation; readiness?.abort(); readiness = undefined; transcription?.abort(); transcription = undefined; pairedVoice = null; onDeviceVoice = null; onDeviceReady = false; liveDictation = undefined; preparingLocal = false; preparingPaired = false; pairedReady = false; pairedAsrReady = false; busy = false; stopClock(); stopSaved(); if (quietRetry) clearTimeout(quietRetry); quietRetry = undefined;
+    ++generation; readiness?.abort(); readiness = undefined; transcription?.abort(); transcription = undefined; onDeviceVoice = null; onDeviceReady = false; liveDictation = undefined; preparingLocal = false; busy = false; stopClock(); stopSaved(); if (quietRetry) clearTimeout(quietRetry); quietRetry = undefined;
     if (requestId) void driver.cancel({ requestId }).catch(() => {});
     playback?.abort(); playback = undefined; playing = false;
     requestId = undefined;
     if (listener) void listener.remove(); listener = undefined;
     const previous = driver;
     const pendingStart=startingCapture;
-    stopping = stopping.then(async () => { await conversationStopped;await previousSpeech?.catch(error=>{if(error?.code==='speech-cleanup-unconfirmed')throw error;});await previousNotesSpeech?.catch(error=>{if(error?.code==='speech-cleanup-unconfirmed')throw error;});if(pendingStart)try{await pendingStart;}catch{}if(hadCapture)await previous.cancelRecording(); });
+    stopping = stopping.then(async () => { await conversationStopped;await previousSpeech?.catch(error=>{if(error?.code==='speech-cleanup-unconfirmed')throw error;});await previousNotesSpeech?.catch(error=>{if(error?.code==='speech-cleanup-unconfirmed')throw error;});if(pendingStart)try{await pendingStart;}catch{}if(hadCapture)await previous.cancelRecording();
+      // Speaker gain is not capture or playback: a failed reset never reads as an unconfirmed media stop.
+      try{await previousSpeaker?.pending;if(previousSpeaker?.muted)await previousSpeaker.reset?.();}catch{} });
     stopping=stopping.catch(failure=>{mediaUnconfirmed=failure;throw failure;});void stopping.catch(()=>{});
     if(chatShell&&(previousConversation||previousSpeech||hadCapture)){
       const held:NonNullable<typeof retirement>={shell:chatShell,phase:'stopping',returnChat:previousChat!.chat,view:previousChat!.view,binding:previousChat!.binding,panelChat:chatShell.S().chat,promise:stopping,approval:chatShell.pendingActionApproval,proposalId:chatShell.pendingActionApprovalProposalId};retirement=held;
@@ -309,24 +314,8 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         if (!ready || stage !== 'ready') { if (!ready) {if(chatDestination?.comms==='person'){const shell=chatDestination.shell;cleanup();shell.toast('Dictation is unavailable here. You can still type your message.');return;}error = Capacitor.isNativePlatform() ? 'Speech unavailable' : 'Agent needed';} refresh(); return; }
         onDeviceReady = true; cloudMode = false; deviceOnly = true; driver = deviceVoice;
         if (live) { liveDictation = createNativeLiveDictation({ onLatency: recordLiveVoiceTiming }); driver = liveDictation; }
-        pairedReady = false; pairedAsrReady = false; refresh();maybeStartDictation();
+        refresh();maybeStartDictation();
       }).catch(() => { if (token === generation) { preparingLocal = false;if(chatDestination?.comms==='person'){const shell=chatDestination.shell;cleanup();shell.toast('Dictation is unavailable here. You can still type your message.');return;} error = 'Speech unavailable'; refresh(); } });
-    }
-    if (route === 'agent' && !browserDevProfile && !cloudMode && deviceOnly) {
-      pairedVoice = createPairedVoice();
-      if (pairedVoice) {
-        preparingPaired = true;
-        const token = generation, controller = new AbortController(); readiness = controller;
-        const selected = pairedVoice;
-        void (async () => {
-          await stopping;
-          if (token !== generation || controller.signal.aborted) return;
-          try { const ready = await selected.ready(controller.signal); if (token === generation && !controller.signal.aborted) { pairedReady = ready; refresh(); } } catch { /* TTS and ASR are separate capabilities. */ }
-          if (token !== generation || controller.signal.aborted) return;
-          try { const ready = await selected.transcriptionReady(controller.signal); if (token === generation && !controller.signal.aborted) { pairedAsrReady = ready; refresh(); } } catch { /* Manual recording remains available. */ }
-          if (token === generation && !controller.signal.aborted) { preparingPaired = false; refresh(); }
-        })();
-      }
     }
     refresh();
   }
@@ -343,7 +332,10 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     catch (reason) { if (token === generation) {
       const kind = voiceFailure(reason, { transcribing: stage === 'transcribing', browser: !Capacitor.isNativePlatform(), cloud: cloudMode, serviceName: voiceServiceName() });
       if (kind) { failure = kind.kind; error = kind.message; stage = stage === 'review' ? 'review' : clip ? 'recorded' : 'ready'; stopClock(); return; }
-      error = (cloudMode && cloudVoiceFailure(reason,{recording:!!clip})) || (onDeviceReady ? 'Speech unavailable · saved' : pairedAsrReady ? 'Transcription unavailable · saved' : cloudMode ? 'Voice unavailable' : 'Voice unavailable'); stage = stage === 'review' ? 'review' : clip ? 'recorded' : 'ready'; stopClock(); } }
+      // A call holds the microphone: that is neither a speech fault nor something saved. Telecom's
+      // reading explains a failed recording; a finished clip that fails to transcribe keeps its own reason.
+      if (voiceEndedForCall(reason, callLive() && ['starting', 'recording', 'ready'].includes(stage))) { error = clip ? CALL_PAUSED : VOICE_CALL_ACTIVE; stage = stage === 'review' ? 'review' : clip ? 'recorded' : 'ready'; stopClock(); return; }
+      error = (cloudMode && cloudVoiceFailure(reason,{recording:!!clip})) || (onDeviceReady ? 'Speech unavailable · saved' : 'Voice unavailable'); stage = stage === 'review' ? 'review' : clip ? 'recorded' : 'ready'; stopClock(); } }
     finally { if (token === generation) { busy = false; refresh(); } }
   }
   async function start(token: number) {
@@ -360,7 +352,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       if (!ownedId) { earlyStops.set(value.recordingId, value); return; }
       if (value.recordingId !== ownedId) return;
       stopClock();
-      if (!completeClip(value)) { clip = undefined; stage = 'ready'; error = value.interrupted === 'call-active' ? CALL_PAUSED : 'Recording ended without usable audio.'; }
+      if (!completeClip(value)) { clip = undefined; stage = 'ready'; error = voiceEndedForCall(value, callLive()) ? CALL_PAUSED : 'Recording ended without usable audio.'; }
       else { clip = value; stage = 'recorded'; recordingEnded(value.recordingId, 'notes'); }
       refresh();if(chatDestination?.mode==='dictation'&&stage==='recorded'&&!busy)void primary();
     };
@@ -416,12 +408,12 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         clip = value; stage = 'recorded'; stopClock(); recordingEnded(value.recordingId, 'notes');if(chatDestination?.mode==='dictation')await transcribeClip(token);return;
       }
       // Manual review settles in this task (no extra await): an immediate Save is not lost to a busy act.
-      if (stage === 'recorded' && clip) { if (deviceOnly && !pairedAsrReady && !onDeviceReady) { draft = ''; stage = 'review'; return; } await transcribeClip(token); }
+      if (stage === 'recorded' && clip) { if (deviceOnly && !onDeviceReady) { draft = ''; stage = 'review'; return; } await transcribeClip(token); }
     });
   }
   async function transcribeClip(token:number){
     if(!clip||token!==generation||chatDestination&&!chatCurrent())return;
-    if(deviceOnly && !pairedAsrReady && !onDeviceReady) {draft = ''; stage = 'review'; return;}
+    if(deviceOnly && !onDeviceReady) {draft = ''; stage = 'review'; return;}
     stage = 'transcribing'; requestId = crypto.randomUUID(); recognized = undefined; refresh();
     const owned = transcription = new AbortController(), held = clip, network = cloudMode && speechRoute() !== 'device';
     // A Cloud or provider transcription that fails (offline, sign-in, plan, 5xx) is not the end of
@@ -436,19 +428,19 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       onDeviceVoice = local; onDeviceReady = true; cloudMode = false; deviceOnly = true; driver = deviceVoice;
       return text;
     };
-    const result = liveDictation ? await liveDictation.transcribe(clip.recordingId, transcription.signal) : onDeviceReady && onDeviceVoice ? await onDeviceVoice.transcribe(clip.recordingId, transcription.signal) : pairedAsrReady && pairedVoice ? await pairedVoice.transcribe(clip.recordingId, transcription.signal) : await (driver as typeof deviceVoice).transcribeRecording({ recordingId: clip.recordingId, requestId }).catch(onThisPhone);
+    const result = liveDictation ? await liveDictation.transcribe(clip.recordingId, transcription.signal) : onDeviceReady && onDeviceVoice ? await onDeviceVoice.transcribe(clip.recordingId, transcription.signal) : await (driver as typeof deviceVoice).transcribeRecording({ recordingId: clip.recordingId, requestId }).catch(onThisPhone);
     transcription = undefined;
     if (token !== generation || chatDestination&&!chatCurrent()) return;
     requestId = undefined;
     if (typeof result.text !== 'string' || !result.text.trim() || result.local !== !cloudMode) throw new Error('Invalid transcript');
     draft = result.text; stage = 'review'; markVoiceTiming('transcript-ready');
-    recognized = { text: result.text, provenance: transcriptProvenance(result, { onDevice: onDeviceReady, native: Capacitor.isNativePlatform(), paired: pairedAsrReady, cloud: cloudMode }) };
+    recognized = { text: result.text, provenance: transcriptProvenance(result, { onDevice: onDeviceReady, native: Capacitor.isNativePlatform(), cloud: cloudMode }) };
     // Messages dictation fills the reviewed recipient's editable draft; it never submits a turn.
     if(chatDestination?.comms==='person')await primary();
   }
   async function listen() {
     if (playing) { playback?.abort(); return; }
-    const speaker = onDeviceReady ? onDeviceVoice : cloudMode && 'speak' in driver ? driver : pairedReady ? pairedVoice : null;
+    const speaker = onDeviceReady ? onDeviceVoice : cloudMode && 'speak' in driver ? driver : null;
     if (!speaker || !draft.trim()) return;
     const token = generation, controller = new AbortController();
     playback = controller; playing = true; error = ''; refresh();
@@ -468,7 +460,15 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     const chat=chatDestination;if(!chat)return false;const state=chat.shell.S(),view=state.view||'home',owned=ownedNavigation?.chat===chat?ownedNavigation:undefined;
     let contextCurrent=!conversationPrepared||chat.shell.voiceConversationCurrent(conversationPrepared);
     // Only the claimed destination may transition before its React callback pins the exact ACK context.
-    if(!contextCurrent&&owned&&view===owned.view&&conversationPrepared){try{const actual=chat.shell.voiceConversationContext(conversationPrepared.binding);contextCurrent=actual.view===owned.view&&(owned.context?JSON.stringify(actual)===JSON.stringify(owned.context):owned.view!==(chat.view||'home'));}catch{contextCurrent=false;}}
+    // While its commit is still placing the view (a held step that opens the draft's conversation in
+    // Messages, which may be the view the conversation is already on), its own changes there are the
+    // navigation's, not the owner leaving; the pin then checks the context it finished on.
+    if(!contextCurrent&&owned&&view===owned.view&&conversationPrepared){try{
+      const actual=chat.shell.voiceConversationContext(conversationPrepared.binding);
+      contextCurrent=actual.view===owned.view&&(owned.context
+        ?chat.shell.voiceConversationCurrent({...conversationPrepared,context:owned.context})
+        :owned.placing||(owned.expectedSelection?actual.selectedObject?.kind===owned.expectedSelection.kind&&actual.selectedObject.id===owned.expectedSelection.id:owned.view!==(chat.view||'home')));
+    }catch{contextCurrent=false;}}
     return chat.shell.live!==false&&!document.hidden&&!connectionController.getSnapshot().open
       &&(['sheet','full'].includes(state.chat)||chat.chat==='hidden'&&state.chat==='hidden'||!!chat.comms&&['input','hidden'].includes(state.chat))&&((state.view||null)===chat.view||!!owned&&view===owned.view)&&String(state.draft||'')===chat.draft
       &&chat.shell.messageReplyTarget===chat.reply&&chat.shell.messageEditTarget===chat.edit&&composerBinding()===chat.binding&&contextCurrent
@@ -477,12 +477,18 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   function navigationContinuation(chat:ChatDestination,token:number,turnId:string):import('../runtime/alpha-client').VoiceNavigationContinuation{
     let held:typeof ownedNavigation,attempted=false;
     return {
-      async apply(view,check,commit){
+      async apply(view,check,commit,expectedSelection){
         attempted=true;check();if(chat.shell.voiceSendTurnId!==turnId||token!==generation||chatDestination!==chat||!chatCurrent()||ownedNavigation)throw Error('Voice navigation changed.');
-        held={chat,view,detent:chat.shell.S().chat,applying:true,turnId};ownedNavigation=held;
-        let pending:Promise<boolean>;try{pending=commit(held.detent,value=>{if(chat.shell.voiceSendTurnId!==turnId||ownedNavigation!==held||token!==generation||chatDestination!==chat)throw Error('Voice navigation changed.');const actual=chat.shell.voiceConversationContext(conversationPrepared!.binding);if(value.view!==held!.view||JSON.stringify(actual)!==JSON.stringify(value))throw Error('Voice navigation changed.');held!.context=value;});}finally{held.applying=false;}
-        const switched=await pending;
+        // A conversation held in the pill needs a pill where it lands. Home and the comms views (Phone,
+        // Messages, Contacts) rest the chat on a bar instead, which cannot hold a conversation: there
+        // it continues in the sheet, as a conversation started from the bar does.
+        const from=chat.shell.S().chat,toSheet=from==='hidden'&&(view==='home'||chat.shell.defaultChat?.(view)==='input');
+        held={chat,view,detent:toSheet?'sheet':from,applying:true,placing:true,turnId,expectedSelection};ownedNavigation=held;
+        let pending:Promise<boolean>;try{pending=commit(held.detent,value=>{if(chat.shell.voiceSendTurnId!==turnId||ownedNavigation!==held||token!==generation||chatDestination!==chat)throw Error('Voice navigation changed.');const actual=chat.shell.voiceConversationContext(conversationPrepared!.binding);if(value.view!==held!.view||JSON.stringify(actual)!==JSON.stringify(value)||expectedSelection&&(actual.selectedObject?.kind!==expectedSelection.kind||actual.selectedObject.id!==expectedSelection.id))throw Error('Voice navigation changed.');held!.context=value;});}finally{held.applying=false;}
+        let switched:boolean;try{switched=await pending;}finally{held.placing=false;}
         if(!switched||ownedNavigation!==held||token!==generation||chatDestination!==chat||!chatCurrent())return false;
+        // When the conversation ends, the chat returns to that view's bar.
+        if(toSheet)chat.chat='input';
         return !!held.context;
       },
       finish(delivered){
@@ -490,7 +496,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         attempted=false;
         if(!held||chat.shell.voiceSendTurnId!==turnId||ownedNavigation!==held||token!==generation||chatDestination!==chat)return;
         if(!delivered||!held.context||!chatCurrent()||(chat.shell.S().view||'home')!==held.view){cleanup(true,true,'owned-navigation-unconfirmed');return;}
-        try{const next=chat.shell.voiceConversationContext(conversationPrepared!.binding);if(next.view!==held.view||JSON.stringify(next)!==JSON.stringify(held.context))throw Error('Voice navigation changed.');chat.view=held.view==='home'?null:held.view;conversationPrepared={...conversationPrepared!,context:next};ownedNavigation=undefined;return next;}catch{cleanup(true,true,'owned-navigation-unconfirmed');return;}
+        try{const next=chat.shell.voiceConversationContext(conversationPrepared!.binding);if(next.view!==held.view||!chat.shell.voiceConversationCurrent({...conversationPrepared!,context:held.context}))throw Error('Voice navigation changed.');chat.view=held.view==='home'?null:held.view;conversationPrepared={...conversationPrepared!,context:next};ownedNavigation=undefined;return next;}catch{cleanup(true,true,'owned-navigation-unconfirmed');return;}
       },
     };
   }
@@ -507,6 +513,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       if(opener&&!opener.closest('[inert]'))opener.focus({preventScroll:true});
     });
   }
+  function stopConversationAudio(){keepReplyOnVoiceStop?.();cancelChat(false,true);}
   /**
    * A retirement whose media stop was never confirmed can be put away: its panel closes and the chat
    * returns, but no new capture starts (mediaUnconfirmed stays) and the notice is said again.
@@ -528,7 +535,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     };
   }
   async function captureConversationAudio(selected:Pick<ReturnType<typeof createCloudVoice>,'startRecording'|'stopRecording'|'getRecordingMetrics'|'cancelRecording'|'addListener'>,current:()=>void,input:{signal:AbortSignal;onActivity:(value:{peak:number;rms?:number})=>void;onEnd:(error?:unknown)=>void}){
-    let active=true,recording=false,id:string|undefined,ended:Clip|undefined,problem:unknown,stopSeen=false,handle:PluginListenerHandle|undefined,poll:ReturnType<typeof setTimeout>|undefined,cancelling:Promise<void>|undefined;
+    let active=true,recording=false,id:string|undefined,ended:VoiceClip|undefined,problem:unknown,stopSeen=false,handle:PluginListenerHandle|undefined,poll:ReturnType<typeof setTimeout>|undefined,cancelling:Promise<void>|undefined;
     const check=()=>{input.signal.throwIfAborted();current();};
     const detach=async()=>{if(poll)clearTimeout(poll);poll=undefined;if(handle){const previous=handle;handle=undefined;await previous.remove();}};
     const cancel=()=>{if(cancelling)return cancelling;active=false;recording=false;input.signal.removeEventListener('abort',aborted);cancelling=(async()=>{try{await detach();}finally{try{await selected.cancelRecording();}catch(failure){mediaUnconfirmed=failure;stopping=Promise.reject(failure);void stopping.catch(()=>{});throw failure;}}})();return cancelling;};
@@ -564,14 +571,34 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       };
     }catch(error){await cancel();throw error;}
   }
-  /** Holds a finished transcript until the user sends (possibly edited) text or discards it. */
-  function reviewConversationTurn(text:string,signal:AbortSignal,current:()=>void){
-    return new Promise<string|null>((resolve,reject)=>{
-      const done=()=>{signal.removeEventListener('abort',aborted);if(conversationReview===held){conversationReview=undefined;refresh();}};
-      const aborted=()=>{done();reject(signal.reason??new DOMException('Voice review changed','AbortError'));};
-      const held={text,settle:(value:string|null)=>{try{current();}catch(error){done();reject(error);return;}done();resolve(value);}};
-      conversationReview=held;signal.addEventListener('abort',aborted,{once:true});if(signal.aborted)aborted();else refresh();
-    });
+  // A phone call owns the microphone and the earpiece. Telecom's reading says a call is live on the
+  // Alpha image; the native speech bridge's call-active code says so everywhere else.
+  const callLive=()=>currentCallState().inCall===true;
+  // Voice closed by the page hiding (the call screen is another activity) owes one line on return.
+  const callReturn=createCallReturnNotice(callSeenSince);
+  // A conversation that a call stopped or refused closes with one line. It is not a voice failure:
+  // no error panel, no Try again that the call would refuse, no retry or route change into the call.
+  // The microphone stays closed until the owner starts voice again.
+  function callPause(failure:unknown,chat:ChatDestination,token:number){
+    if(token!==generation||chatDestination!==chat||mediaUnconfirmed||!voiceEndedForCall(failure,callLive()))return false;
+    const shell=chat.shell;cleanup();if(shell.live!==false)shell.toast(CALL_PAUSED);
+    return true;
+  }
+  // Out of plan allowance and credits: Cloud refused this Talk's start or its next minute, or the
+  // agent's turn. The agent has no funds to say so, so Talk ends as at its Stop control and the chat
+  // gets the one fixed line (out-of-funds-notice.ts) with the Subscription offer, as a refused text
+  // chat turn does. A speech refusal also opens the Subscription sheet the way a refused chat turn
+  // does; an agent turn's refusal already went through the chat's own handling (replyFailure). The
+  // ended session reports nothing more (generation), so a retry or reconnect cannot add a second
+  // line. Every other failure keeps its own handling.
+  function outOfFundsStop(failure:unknown,chat:ChatDestination,token:number){
+    if(token!==generation||chatDestination!==chat||mediaUnconfirmed||!outOfFundsRefusal(failure))return false;
+    const shell=chat.shell,held=connectionController.getSnapshot();
+    const text=outOfFundsNotice('talk',outOfFundsResetsAt(Date.now(),held.residentSubscription,held.membershipPlan));
+    cancelChat(false,true);
+    if((failure as {outOfFunds?:unknown}).outOfFunds!==true)connectionController.noteFundsRefusal();
+    if(shell.live!==false)shell.setState((previous:Bag)=>({chat:previous.chat==='full'?'full':'sheet',msgs:[...(previous.msgs||[]),{id:crypto.randomUUID(),from:'agent',text,card:subscriptionOfferCard()}]}));
+    return true;
   }
   // A Cloud voice 429 rate limit or 503 warm-up is transient, not the owner's problem: voice stays
   // calm, waits out the server's Retry-After, then listens again with a fresh capture. The refused
@@ -615,6 +642,8 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     const provider=connectionController.getSnapshot();
     if(testMocksEnabled&&!deviceOnly&&provider.residentInference==='direct'&&!provider.providerStatus?.voiceConfigured){conversationState={phase:'error'};error='Add Cartesia key';refresh();return;}
     const token=generation;
+    let keepReply=false;
+    keepReplyOnVoiceStop=()=>{keepReply=true;};
     if(cloudConnectRequired&&!developmentCartesiaVoiceEnabled&&!developmentCloudRealtimeVoiceEnabled&&!developmentCloudVoiceEnabled){conversationState={phase:'error'};error='Sign in';refresh();return;}
     // The route for this attempt. A conversation that fell back stays on this phone until it ends.
     const fellBack=conversationLocal?.chat===chat,route=deviceOnly||fellBack?'device':speechRoute();conversationNetwork=false;
@@ -668,6 +697,23 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         environment:connectionController.getCloudEnvironment()!,credentialId:connectionController.getCloudClient()!.credentialId!,assertCurrent:current,
         onInterim:text=>{if(token!==generation||chatDestination!==chat)return;conversationInterim=text;refresh();},
       }):null;
+      // Each attempt binds its own speaker: a restart or a fallback to this phone never keeps the last one.
+      conversationSpeaker=undefined;
+      if(Capacitor.isNativePlatform()){
+        if(streamingCloud){
+          // The streaming bridge must bind gain to the same native speech session.
+          const mute='setOutputMuted' in streamingCloud?streamingCloud.setOutputMuted:undefined;
+          if(typeof mute==='function')conversationSpeaker={muted:false,set:async muted=>{await mute.call(streamingCloud,muted);}};
+        }else{
+          // A native build without speaker gain keeps Stop speaking; the control appears only
+          // after the plugin accepts the call.
+          void deviceVoice.setSpeechOutputMuted({muted:false}).then(()=>{
+            if(token!==generation||chatDestination!==chat||conversationSpeaker)return;
+            conversationSpeaker={muted:false,set:muted=>deviceVoice.setSpeechOutputMuted({muted}),reset:()=>deviceVoice.setSpeechOutputMuted({muted:false})};
+            refresh();
+          }).catch(()=>{});
+        }
+      }
       const selected = cloudDriver ?? {
         startRecording:()=>deviceVoice.startRecording({maxDurationMs:29000}),
         stopRecording:()=>deviceVoice.stopRecording(),
@@ -687,31 +733,53 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       // session first, as at Mute, unless the reply pauses for owner review: the session then drops
       // what it heard, and the held start with it.
       type CueTurn={signal:AbortSignal;settled?:boolean};
-      let cueSpeech:{captureRetired:(()=>boolean)|null;speak(text:string,signal:AbortSignal,turn:CueTurn):Promise<void>}|undefined;
+      let cueSpeech:{captureRetired:(()=>boolean)|null;speak(text:string,signal:AbortSignal,turn:CueTurn,onStarted:()=>void):Promise<void>}|undefined;
+      let shortenedReplyId:string|undefined;
       const sendTurn=async(input:{turnId:string;text:string;voiceTurnSignal:any;signal:AbortSignal;onText?:(text:string,frame?:AssistantTextFrame)=>void;supersedes?:string})=>{
         const cueTurn:CueTurn={signal:input.signal};try{
         input.signal.throwIfAborted();current();
-        // VOICE_SEND_POLICY: 'auto-send' sends this transcript now; 'review' waits for Send or Discard.
-        const sent=await sendVoiceEntry({policy:voiceSendPolicy(),transcript:input.text,review:text=>reviewConversationTurn(text,input.signal,current),send:async text=>{
+        const sent=await sendVoiceEntry({policy:'auto-send',transcript:input.text,review:async text=>text,send:async text=>{
           current();
           if(local&&!streamingCloud)try{void Promise.resolve(deviceVoice.warmSpeechOutput()).catch(()=>{});}catch{/* Advisory warm-up never gates a turn. */}
-          const turn={...conversationPrepared!};conversationReplyWatch=new Set((chat.shell.S().msgs||[]).map((m:Bag)=>String(m.id)));
-          const cue=cueSpeech;const ack=cue?createBatchProgressAcknowledgment({turnId:input.turnId,conversationId:turn.binding.conversationId,ownerId:turn.binding.session.ownerId,signal:input.signal,assertCurrent:current,captureRetired:cue.captureRetired,speak:async(label,signal)=>{const pending=Promise.resolve().then(()=>cue.speak(label,signal,cueTurn));const owned=pending.catch(failure=>{if((failure as {code?:string})?.code!=='speech-cleanup-unconfirmed')return;mediaUnconfirmed=failure;stopping=Promise.reject(failure);void stopping.catch(()=>{});throw failure;});conversationSpeech=owned;try{await owned;}finally{if(conversationSpeech===owned)conversationSpeech=undefined;}}}):undefined;
+          const prepared=conversationPrepared!;
+          const turn=conversationPrepared={...prepared,context:chat.shell.voiceConversationContext(prepared.binding)};
+          conversationReplyWatch=new Set((chat.shell.S().msgs||[]).map((m:Bag)=>String(m.id)));
+          const cue=cueSpeech;const ack=cue?createBatchProgressAcknowledgment({turnId:input.turnId,conversationId:turn.binding.conversationId,ownerId:turn.binding.session.ownerId,signal:input.signal,assertCurrent:current,captureRetired:cue.captureRetired,speak:async(label,signal,onStarted)=>{const pending=Promise.resolve().then(()=>cue.speak(label,signal,cueTurn,onStarted));const owned=pending.catch(failure=>{if((failure as {code?:string})?.code!=='speech-cleanup-unconfirmed')return;mediaUnconfirmed=failure;stopping=Promise.reject(failure);void stopping.catch(()=>{});throw failure;});conversationSpeech=owned;try{await owned;}finally{if(conversationSpeech===owned)conversationSpeech=undefined;}}}):undefined;
           const retireAck=()=>{try{current();}catch{void ack?.stop().catch(()=>{});}};
           const unsubscribeAck=ack?connectionController.subscribe(retireAck):()=>{};
           if(ack)document.addEventListener('visibilitychange',retireAck);
           // Streamed reply speech starts after the same turn's acknowledgment releases playback.
           const early=input.onText;let earlyChain:Promise<void>=Promise.resolve();
-          const onText=early&&((value:string,frame:AssistantTextFrame)=>{if(!ack){early(value,frame);return;}earlyChain=earlyChain.then(()=>ack.idle()).then(()=>{if(!input.signal.aborted)early(value,frame);}).catch(()=>{});});
+          const onText=early&&((value:string,frame:AssistantTextFrame)=>{
+            if(input.signal.aborted)return;
+            if(!ack){early(value,frame);return;}
+            earlyChain=earlyChain.then(()=>ack.idle()).then(()=>{if(!input.signal.aborted)early(value,frame);}).catch(()=>{});
+          });
+          // An explicit Stop retires capture and playback. An accepted reply can still finish in
+          // the same visible conversation. All other voice cancellations abort the request.
+          const replyController=new AbortController();
+          const cancelReply=()=>{if(!keepReply)replyController.abort(input.signal.reason);};
+          const assertReplyCurrent=()=>{
+            if(!keepReply){current();return;}
+            if(chat.shell.live===false||document.hidden||(chat.shell.S().view||null)!==chat.view||composerBinding()!==chat.binding||!connectionController.voiceConversationCurrent(turn.binding)){
+              replyController.abort(new DOMException('Voice conversation changed','AbortError'));
+              replyController.signal.throwIfAborted();
+            }
+          };
+          input.signal.addEventListener('abort',cancelReply,{once:true});
+          if(input.signal.aborted)cancelReply();
           try{
-            const reply=await chat.shell.sendVoiceTurn({...input,text,...turn,onText,assertCurrent:current,onProgress:ack?.progress,onReplyStarted:ack?.replyStarted,navigation:navigationContinuation(chat,token,input.turnId)});
-            await ack?.finish();return reply;
-          }finally{unsubscribeAck();document.removeEventListener('visibilitychange',retireAck);try{await ack?.stop();}finally{conversationReplyWatch=undefined;}}
+            const reply=await chat.shell.sendVoiceTurn({...input,text,...turn,talkGeneration:token,signal:replyController.signal,approvalSignal:input.signal,onText,assertCurrent:assertReplyCurrent,onProgress:ack?.progress,onReplyStarted:ack?.replyStarted,navigation:navigationContinuation(chat,token,input.turnId)});
+            if(!input.signal.aborted)await ack?.finish();
+            return reply;
+          }finally{input.signal.removeEventListener('abort',cancelReply);unsubscribeAck();document.removeEventListener('visibilitychange',retireAck);try{await ack?.stop();}finally{conversationReplyWatch=undefined;}}
         }});
         if(!sent){if(token===generation&&chatDestination===chat)cancelChat();throw new DOMException('Voice message discarded','AbortError');}
         const result=sent.result;input.signal.throwIfAborted();current();
         if(result.complete){markVoiceTiming('first-token');markVoiceTiming('final-reply');}
-        const spoken=typeof result.text==='string'?workflowReplyText(result.text).text:result.text;
+        const speech=result.speechText??result.text;
+        shortenedReplyId=result.localVoiceReply||speech!==result.text?result.assistantMessageId:undefined;
+        const spoken=typeof speech==='string'?workflowReplyText(speech).text:speech;
         conversationLastTranscript=sent.text;conversationLastReply=spoken;conversationReviewRequired=result.reviewRequired===true&&!result.awaitingUserInput;if(result.awaitingUserInput!==undefined)liveCapture?.release(true);
         return spoken===result.text?result:{...result,text:spoken};
         }finally{cueTurn.settled=true;liveCapture?.release();}
@@ -721,7 +789,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         const denied=voiceFailure(value.error,{transcribing:false,browser:!Capacitor.isNativePlatform()});
         return cloudVoiceFailure(value.error,{conversation:true})
           ||(code==='capture-call-active'?CALL_PAUSED
-          :failure?.reason==='call-active'||code==='call-active'?'Voice paused for a phone call.'
+          :failure?.reason==='call-active'||code==='call-active'?CALL_PAUSED
           :code==='audio-focus-lost'?'Audio taken'
           :code==='expired'?'Voice session ended. Start again.'
           :denied?.kind==='denied'?(conversationDenied=true,denied.message)
@@ -741,8 +809,8 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         // conversation's binding: owner session, connection epoch and conversation.
         const binding=prepared.binding;
         const residentRequest=()=>{const resident=connectionController.getResidentLiveVoice();return resident&&connectionController.voiceConversationCurrent(binding,false)?resident.request:null;};
-        // The end-of-turn chain: the resident's fused scorer, then Clef only when it is admitted
-        // (clefEndpointStage, off: #663), then the session's long gap. Each answer names its path.
+        // The end-of-turn chain: the resident's fused scorer, then Clef only when
+        // clefEndpointStage admits it, then the session's long gap. Each answer names its path.
         const semanticEndpoint=streamingCloud?undefined:createEndpointChain({local:residentEndpoint(residentRequest),clef:clefEndpointStage()})!;
         const recordedReplies=new Set<string>();
         const heardReporter=createHeardReporter({
@@ -776,10 +844,10 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         let cueHeard:{text:string;settledAt?:number;turn:CueTurn}|undefined;
         const cueAge=(heard:{settledAt?:number})=>heard.settledAt===undefined?0:Math.max(0,Date.now()-heard.settledAt);
         const pending=(turn:CueTurn)=>!turn.settled&&!turn.signal.aborted;
-        cueSpeech={captureRetired:null,speak:async(text,signal,turn)=>{
+        cueSpeech={captureRetired:null,speak:async(text,signal,turn,onStarted)=>{
           if(liveCapture?.speaking)return;
           const heard:{text:string;settledAt?:number;turn:CueTurn}={text,turn};let audible=false;
-          const started=()=>{audible=true;cueHeard=heard;};
+          const started=()=>{audible=true;cueHeard=heard;onStarted();};
           try{await (streamingCloud?streamingCloud.speak(text,signal,started):local!.speak(text,signal,started,true,{conversation:true}));}
           finally{if(audible)heard.settledAt=Date.now();}
         }};
@@ -819,7 +887,11 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
             // native streaming route, until the bridge reports a failure bound to the session and to
             // the cue's own request. A refused speak call fails only that call: the cue is silence
             // and the turn goes on.
+            // Cloud's funds refusal ends Talk with its one line wherever the capture is: the session
+            // keeps a capture end under Mute to itself, and the shared transport reports a socket's
+            // end only through the last listen's onEnd, open or closed.
             const opened=await listen({...handlers,
+              onEnd:error=>{if(conversationVoice!==assistant||!outOfFundsStop(error,chat,token))handlers.onEnd(error);},
               onSpeechStart:at=>{own.speaking=true;const heard=cueHeard&&pending(cueHeard.turn)&&cueAge(cueHeard)<=CUE_TAIL_MS?cueHeard:undefined;if(!heard)handlers.onSpeechStart(at);else if(heard.settledAt===undefined&&!own.fullDuplex)ignoring=true;else heldAt=at;},
               onSpeechEnd:at=>{own.speaking=false;if(ignoring){ignoring=false;results.push(false);}else{own.release();results.push(true);handlers.onSpeechEnd(at);}handed=false;},
               onSegment:text=>{if(results.shift()!==false)handlers.onSegment(text);},
@@ -828,7 +900,13 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
           },
           // After the short gap: the chain. Unavailable, slow or failing: the long gap decides.
           ...(streamingCloud||openMic?{}:{endpoint:(text:string,signal:AbortSignal)=>{current();return semanticEndpoint!(text,signal);}}),
-          shouldRespond:(text,context)=>shouldRespondToVoiceTurn(text,context)&&(!cueHeard||shouldRespondToVoiceTurn(text,{recentAgentReply:cueHeard.text,replyAgeMs:cueAge(cueHeard),agentSpeaking:cueHeard.settledAt===undefined})),
+          shouldRespond:(text,context)=>{
+            if(!shouldRespondToVoiceTurn(text,context))return false;
+            // Playback spells out display dates and clocks. An ASR echo can contain either form.
+            const spoken=context.recentAgentReply&&formatSpeechText(context.recentAgentReply,!streamingCloud);
+            if(spoken&&spoken!==context.recentAgentReply&&!shouldRespondToVoiceTurn(formatSpeechText(text),{...context,recentAgentReply:spoken}))return false;
+            return !cueHeard||shouldRespondToVoiceTurn(text,{recentAgentReply:cueHeard.text,replyAgeMs:cueAge(cueHeard),agentSpeaking:cueHeard.settledAt===undefined});
+          },
           // The session asks for the signal only after the endpointer or the long gap committed the
           // turn, so a low text end-of-turn score must not hold it back: the server vetoes a turn on
           // nextSpeaker 'user' or a score below 0.4. A committed turn carries no score (none is made
@@ -837,18 +915,22 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
           send:sendTurn,
           // On-device speech refuses a likely secret over the whole reply, before any sentence plays.
           speakable:text=>{const spoken=toSpeakableText(workflowReplyText(text).text);if(!streamingCloud)screenConversationSpeech(spoken);return spoken;},
-          speak:async input=>{input.signal.throwIfAborted();current();const started=()=>{current();input.onStarted();};const pending=streamingCloud?streamingCloud.speak(input.text,input.signal,started):replySpeech?replySpeech.speak(input.text,input.signal,started):local!.speak(input.text,input.signal,started,true,{conversation:true});conversationSpeech=pending;try{await pending;input.signal.throwIfAborted();current();}catch(failure){if((failure as {code?:string})?.code==='speech-cleanup-unconfirmed'){mediaUnconfirmed=failure;stopping=Promise.reject(failure);void stopping.catch(()=>{});}throw failure;}finally{if(conversationSpeech===pending)conversationSpeech=undefined;}},
+          speak:async input=>{input.signal.throwIfAborted();current();const started=()=>{current();input.onStarted();};const pending=streamingCloud?streamingCloud.speak(formatSpeechText(input.text),input.signal,started):replySpeech?replySpeech.speak(input.text,input.signal,started):local!.speak(input.text,input.signal,started,true,{conversation:true});conversationSpeech=pending;try{await pending;input.signal.throwIfAborted();current();}catch(failure){if((failure as {code?:string})?.code==='speech-cleanup-unconfirmed'){mediaUnconfirmed=failure;stopping=Promise.reject(failure);void stopping.catch(()=>{});}throw failure;}finally{if(conversationSpeech===pending)conversationSpeech=undefined;}},
           // After an interruption only what was played stays in this conversation's reply; the rest is
           // marked unheard, and the agent is asked to keep only the played prefix (nothing when it was
           // fully heard).
           onHeard:heard=>{
-            if(token!==generation||chatDestination!==chat)return;
+            if(token!==generation||chatDestination!==chat||keepReply||conversationSpeaker?.muted)return;
             if(!heard.interrupted)return;
             const timing=timingTurns.get(heard.turnId);timingTurns.delete(heard.turnId);
             // A playback failure is not a barge-in: the agent and this view keep the whole reply,
             // and nothing is reported. When a sentence was already read, the owner is told the rest was not.
             if(heard.playbackFailed===true){recordHeardVoiceTiming(timing,'nothing-heard');if(heard.heard)chat.shell.toast('Couldn’t read the rest aloud. The full reply is above.');return;}
             if(heard.replyFailed&&!heard.heard){recordHeardVoiceTiming(timing,'nothing-heard');return;}
+            // A spoken action summary has no verbatim heard prefix in the saved message.
+            if(heard.replyId && heard.replyId===shortenedReplyId){
+              conversationLastReply=heard.heard;recordHeardVoiceTiming(timing,'not-needed');return;
+            }
             const reply=heard.replyId?Promise.resolve({id:heard.replyId,text:''}):recordedReply(heard.turnId);
             void reply.then(found=>found?heardReporter.report({conversationId:binding.conversationId,replyId:found.id,heard:heard.heard,unheard:heard.unheard||found.text,interrupted:true}):'not-found' as const).then(outcome=>{recordHeardVoiceTiming(timing,outcome);},()=>{});
             conversationLastReply=heard.heard;
@@ -860,7 +942,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
           onState:value=>{
             if(value.phase==='idle'||value.phase==='error')replySpeech?.release();
             if(token!==generation||chatDestination!==chat||conversationVoice!==assistant)return;
-            if(value.phase==='error'&&quietVoiceRetry((value as BatchVoiceState).error,chat,token))return;
+            if(value.phase==='error'&&(callPause((value as BatchVoiceState).error,chat,token)||quietVoiceRetry((value as BatchVoiceState).error,chat,token)||outOfFundsStop((value as BatchVoiceState).error,chat,token)))return;
             if(value.phase==='speaking')quietRetries=0;
             assistantState=value;conversationState=value as BatchVoiceState;
             if(value.phase==='thinking'&&value.transcript){conversationLastTranscript=value.transcript;conversationLastReply='';}
@@ -886,8 +968,9 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       }
       // The live assistant is not ready, or this is the owner's provider or a development route: the recorded-clip loop listens only between replies.
       // Its cue plays through the reply's own speaker (Cloud or provider speech, or on-device speech) on every platform.
-      cueSpeech={captureRetired:()=>batchCaptureRetired,speak:(text,signal)=>local?local.speak(text,signal,undefined,true,{conversation:true}):cloudDriver!.speak(text,signal)};
-      const conversation:BatchVoiceConversation<Clip>=new BatchVoiceConversation<Clip>({
+      // A Cloud cue that reports its own start keeps the playback-activity mark Cloud speech sets without one.
+      cueSpeech={captureRetired:()=>batchCaptureRetired,speak:async(text,signal,_turn,onStarted)=>{if(local)return local.speak(text,signal,onStarted,true,{conversation:true});let marked=false;try{await cloudDriver!.speak(text,signal,()=>{marked=true;markTtsPlaybackStarted();onStarted();});}finally{if(marked)markTtsPlaybackEnded();}}};
+      const conversation:BatchVoiceConversation<VoiceClip>=new BatchVoiceConversation<VoiceClip>({
         conversationId:prepared.binding.conversationId,assertCurrent:current,
         capture:async input=>{current();batchCaptureRetired=false;conversationPrepared={...conversationPrepared!,context:chat.shell.voiceConversationContext(prepared.binding)};current();const capture=await captureConversationAudio(selected,current,input);return {stop:async()=>{const value=await capture.stop();current();batchCaptureRetired=true;return value;},cancel:async()=>{await capture.cancel();batchCaptureRetired=true;}};},
         transcribe:async(value,signal)=>{
@@ -900,15 +983,17 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         },
         send:sendTurn,
         speak:async input=>{input.signal.throwIfAborted();current();const started=()=>{current();markVoiceTiming('first-audio');input.onStarted();};const pending=local?local.speak(input.text,input.signal,started,true,{conversation:true}):speakCloudSpeechChunks({text:input.text,signal:input.signal,assertCurrent:current,onStarted:started,speak:(text,signal,onStarted)=>cloudDriver!.speak(text,signal,onStarted)});conversationSpeech=pending;try{await pending;input.signal.throwIfAborted();current();}catch(failure){if((failure as {code?:string})?.code==='speech-cleanup-unconfirmed'){mediaUnconfirmed=failure;stopping=Promise.reject(failure);void stopping.catch(()=>{});}throw failure;}finally{if(conversationSpeech===pending)conversationSpeech=undefined;finishVoiceTurn();}},
-        onState:value=>{if(token!==generation||chatDestination!==chat||conversationVoice!==conversation)return;if(value.phase==='error'&&quietVoiceRetry(value.error,chat,token))return;
+        onState:value=>{if(token!==generation||chatDestination!==chat||conversationVoice!==conversation)return;if(value.phase==='error'&&(callPause(value.error,chat,token)||quietVoiceRetry(value.error,chat,token)||outOfFundsStop(value.error,chat,token)))return;
           // The loop retires itself (idle) before it reports a failure: keep this frame until the retire
           // settles, so a quiet wait never flashes "Voice conversation stopped." and Start Cloud voice.
           if(value.phase==='idle'&&conversationState.phase!=='idle'){const held=conversationState;void conversation.stop().catch(()=>{}).then(()=>{if(token===generation&&chatDestination===chat&&conversationVoice===conversation&&conversationState===held){conversationState=value;stopClock();refresh();}});return;}if(value.phase==='speaking')quietRetries=0;conversationState=value;if(value.phase==='error')error=voiceStopped(value);if(value.phase==='listening'){stopClock();tick=setInterval(refresh,250);}else stopClock();refresh();},
       });
       conversationVoice=conversation;await conversation.start();current();
-    }catch(failure){if(token!==generation||controller.signal.aborted)return;if(quietVoiceRetry(failure,chat,token))return;conversationState={phase:'error',error:failure};browserStartup?.finish('failed');const classified=voiceFailure(failure,{transcribing:false,browser:!Capacitor.isNativePlatform()});conversationDenied=classified?.kind==='denied';error=cloudVoiceFailure(failure,{conversation:true})||(classified&&(classified.kind==='denied'||classified.kind==='no-microphone')?classified.message:null)||'Voice could not start. Try again, or use the keyboard.';refresh();}
+    }catch(failure){if(token!==generation||controller.signal.aborted)return;if(callPause(failure,chat,token)||quietVoiceRetry(failure,chat,token)||outOfFundsStop(failure,chat,token))return;conversationState={phase:'error',error:failure};browserStartup?.finish('failed');const classified=voiceFailure(failure,{transcribing:false,browser:!Capacitor.isNativePlatform()});conversationDenied=classified?.kind==='denied';error=cloudVoiceFailure(failure,{conversation:true})||(classified&&(classified.kind==='denied'||classified.kind==='no-microphone')?classified.message:null)||'Voice could not start. Try again, or use the keyboard.';refresh();}
   }
-  Component.prototype.stopVoiceConversation = function(){if(chatDestination?.shell===this){cancelChat(false,true);return stopping;}if(retirement&&retirement.shell===this)return retirement.promise;if(mediaUnconfirmed)return stopping;};
+  // Only the owner's Stop keeps an accepted reply. A typed send or a read-aloud that retires voice
+  // still aborts the pending voice request, so the chat is free for what replaces it.
+  Component.prototype.stopVoiceConversation = function(keepReply=false){if(chatDestination?.shell===this){if(keepReply)stopConversationAudio();else cancelChat(false,true);return stopping;}if(retirement&&retirement.shell===this)return retirement.promise;if(mediaUnconfirmed)return stopping;};
   Component.prototype.resumeReadReplyVoice=function(hint:import('../runtime/alpha-client').NativeNotesReadReplyHint,reply:import('../runtime/alpha-client').NativeNotesReadReply){
     if(chatDestination?.shell!==this||!chatCurrent()||document.querySelector('dialog[open]')||conversationState.phase!=='awaiting-user-input'||!conversationState.awaitingUserInput)return false;
     const pause=conversationState.awaitingUserInput;
@@ -935,6 +1020,8 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   function maybeStartDictation(){if(chatDestination?.mode==='dictation'&&chatCurrent()&&stage==='ready'&&onDeviceReady&&!busy)void primary();}
   Component.prototype.startTranscription = function(options?:{commsTarget?:string}){
     if(this.live===false||document.hidden||connectionController.getSnapshot().open||chatDestination?.shell===this)return;
+    // The phone gives the microphone to a live call, so a recorder opened now could not record.
+    if(callLive()){this.toast(VOICE_CALL_ACTIVE);return;}
     if(this.pendingActionApproval||document.querySelector('dialog[open]')){this.toast('Finish or cancel the current review before transcribing.');return;}
     // While the retirement panel is shown it already says so; once it was put away, say it again.
     if(mediaUnconfirmed&&!retirement){this.toast(MEDIA_UNCONFIRMED_NOTICE);return;}
@@ -953,6 +1040,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     if(callKind==='call'||callKind==='incoming')return this.startTranscription();
     cancelSavedTranscription();
     if(this.live===false||document.hidden||connectionController.getSnapshot().open||chatDestination?.shell===this)return;
+    if(callLive()){this.toast(VOICE_CALL_ACTIVE);return;}
     if(this.pendingActionApproval||document.querySelector('dialog[open]')){this.toast('Finish or cancel the current review before starting voice.');return;}
     if(retirement)return;
     if(mediaUnconfirmed){this.toast(MEDIA_UNCONFIRMED_NOTICE);return;}
@@ -985,20 +1073,29 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     const visibleError=mediaUnconfirmed?MEDIA_UNCONFIRMED_NOTICE:unavailable?'Voice unavailable':error;
     const awaiting=phase==='awaiting-user-input'||conversationReviewRequired;
     const progressText=!awaiting&&!error&&(phase==='thinking'||phase==='speaking')?(conversationState.progressText||''):'';
-    const reviewing=conversationReview,reviewOwned=()=>owned()&&conversationReview===reviewing;
-    if(reviewing&&!mediaUnconfirmed)return {regionLabel:'Voice conversation',closeLabel:'Close voice conversation',state:'review',flex:'1',clockSize:28,clock:'Review',live:false,levels:[],lines:[],
-      review:true,transcript:reviewing.text,transcriptDisabled:false,onTranscript:(event:Event)=>{if(!reviewOwned())return;reviewing.text=(event.target as HTMLTextAreaElement).value;refresh();},
-      typeChoice:false,lastTranscript:'',lastReply:'',primaryLabel:'Send voice message',primaryIcon:icons.check,primaryDisabled:!reviewing.text.trim(),stop:()=>{if(reviewOwned()&&reviewing.text.trim())reviewing.settle(reviewing.text);},
-      pauseLabel:'Discard voice message',pauseIcon:icons.x,toggle:()=>{if(reviewOwned())reviewing.settle(null);},discard:()=>{if(owned())cancelChat();},keyboard:()=>{if(owned())cancelChat(true);}};
     const direct=(ownBrowserVoiceActive()||developmentCartesiaVoiceEnabled||developmentCloudRealtimeVoiceEnabled)&&conversationVoice&&'setMicrophoneMuted' in conversationVoice?conversationVoice:undefined;
-    // Voice assistant: the capture is held while Alpha replies and Stop speaking interrupts the reply; Mute turns the microphone off.
+    // Input mute and speaker gain are independent of each other and of the active reply.
     const assistant=conversationLive&&conversationVoice===conversationLive?conversationLive:undefined;
     if(assistant)messages.speaking='Alpha is speaking.';
     if(assistant?assistantState.muted:direct?.microphoneMuted)messages.listening='Microphone off.';
     const held=assistantState.inputHeld===true&&!assistant?.muted;
-    const assistantControls=assistant&&phase!=='error'?{canMute:phase!=='awaiting-user-input',muteAutomatically:held,muted:assistant.muted||held?'true':'false',muteLabel:held?'Microphone paused while Alpha responds':assistant.muted?'Unmute microphone':'Mute microphone',toggleMute:()=>{if(owned()){liveCapture?.release();void assistant.setMuted(!assistant.muted).finally(refresh);}},canInterrupt:phase==='speaking',interrupt:()=>{if(owned()&&assistant.interruptSpeech())refresh();}}:{};
+    const assistantControls=assistant&&phase!=='error'?{canMute:phase!=='awaiting-user-input',muteAutomatically:held,muted:assistant.muted||held?'true':'false',muteLabel:held?'Microphone paused while Alpha responds':assistant.muted?'Unmute microphone':'Mute microphone',toggleMute:()=>{if(owned()){liveCapture?.release();void assistant.setMuted(!assistant.muted).finally(refresh);}},canInterrupt:phase==='speaking'&&!conversationSpeaker,interrupt:()=>{if(owned()&&assistant.interruptSpeech())refresh();}}:{};
     const extra=assistant?assistantControls:direct?{canMute:true,muteAutomatically:direct.microphoneAutomaticallyMuted,muteLabel:direct.microphoneAutomaticallyMuted?'Microphone paused while Alpha responds':direct.microphoneMuted?'Unmute microphone':'Mute microphone',muted:direct.microphoneMuted||direct.microphoneAutomaticallyMuted?'true':'false',toggleMute:()=>{if(owned()){direct.setMicrophoneMuted(!direct.microphoneMuted);refresh();}},needsPlaybackUnlock:direct.needsPlaybackUnlock,unlockPlayback:()=>{if(owned())void direct.unlockPlayback().then(refresh).catch(failure=>{error=failure instanceof Error?failure.message:'Playback could not unlock.';refresh();});}}:{};
-    return {...extra,regionLabel:'Voice conversation',closeLabel:'Close voice conversation',state:phase,flex:awaiting?'0 0 auto':'1',clockSize:awaiting?28:48,clock:awaiting?'Review':`${Math.floor(seconds/60)}:${String(Math.floor(seconds%60)).padStart(2,'0')}`,live,levels:conversationLevels.map(peak=>({h:4+Math.round(44*peak)})),progressText,errorDetail:unavailable?'Voice service returned HTTP 503.':'',lines:[{t:conversationReviewRequired?'Mic off · use keyboard':visibleError||messages[phase]}],review:false,typeChoice:false,lastTranscript:awaiting?'':conversationLastTranscript,interimTranscript:awaiting||(!direct&&!['listening','transcribing'].includes(phase))?'':conversationInterim,lastReply:awaiting?'':conversationLastReply,primaryLabel:'Stop voice conversation',primaryIcon:icons.stop,primaryDisabled:false,stop:()=>{if(owned())cancelChat(false,true);},recoveryLabel:mediaUnconfirmed?'':settings?DENIED_SETTINGS_LABEL:cloudMode&&speechRoute()==='cloud'&&phase==='idle'&&!cloudConnectRequired?'Start Cloud voice':cloudConnectRequired?`Connect ${voiceServiceName()}`:!connectionController.getSnapshot().session?'Connect agent':phase==='error'&&!conversationReviewRequired?'Try voice again':'',recover,discard:()=>{if(owned())cancelChat();},keyboard:()=>{if(owned())cancelChat(true);}};
+    const speaker=conversationSpeaker;
+    const speakerControls=speaker&&phase!=='error'&&phase!=='idle'?{
+      canMuteSpeaker:true,speakerMuted:speaker.muted?'true':'false',speakerMuteDisabled:phase==='starting'||!!speaker.pending,
+      speakerLabel:speaker.muted?'Unmute speaker':'Mute speaker',
+      speakerAsset:speaker.muted?'/icons/lucide/volume-x.svg':'/icons/lucide/volume-2.svg',
+      toggleSpeakerMute:()=>{
+        if(!owned()||speaker.pending||phase==='starting')return;
+        const muted=!speaker.muted;
+        speaker.pending=speaker.set(muted).then(()=>{speaker.muted=muted;}).catch(()=>{
+          if(owned())chat?.shell.toast('Could not change the speaker volume.');
+        }).finally(()=>{speaker.pending=undefined;if(owned())refresh();});
+        refresh();
+      },
+    }:{};
+    return {...extra,...speakerControls,regionLabel:'Voice conversation',closeLabel:'Close voice conversation',state:phase,flex:awaiting?'0 0 auto':'1',clockSize:awaiting?28:48,clock:awaiting?'Review':`${Math.floor(seconds/60)}:${String(Math.floor(seconds%60)).padStart(2,'0')}`,live,levels:conversationLevels.map(peak=>({h:4+Math.round(44*peak)})),progressText,errorDetail:unavailable?'Voice service returned HTTP 503.':'',lines:[{t:conversationReviewRequired?'Mic off · use keyboard':visibleError||messages[phase]}],reviewHold:phase==='error'&&conversationReviewRequired&&!mediaUnconfirmed,review:false,typeChoice:false,lastTranscript:awaiting?'':conversationLastTranscript,interimTranscript:awaiting||(!direct&&!['listening','transcribing'].includes(phase))?'':conversationInterim,lastReply:awaiting?'':conversationLastReply,primaryLabel:'Stop voice conversation',primaryIcon:icons.stop,primaryDisabled:false,stop:()=>{if(owned())stopConversationAudio();},recoveryLabel:mediaUnconfirmed?'':settings?DENIED_SETTINGS_LABEL:cloudMode&&speechRoute()==='cloud'&&phase==='idle'&&!cloudConnectRequired?'Start Cloud voice':cloudConnectRequired?`Connect ${voiceServiceName()}`:!connectionController.getSnapshot().session?'Connect agent':phase==='error'&&!conversationReviewRequired?'Try voice again':'',recover,discard:()=>{if(owned())stopConversationAudio();},keyboard:()=>{if(owned())cancelChat(true);}};
   }
   /**
    * The recording side of voice-note deletion (receipts, erase, Trash purge, approved agent
@@ -1187,7 +1284,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     const identity = JSON.stringify([
       canonical ? ['agent', port!.identity.origin, port!.identity.ownerId, port!.identity.agentId] : ['device'],
       cloud && [cloud.environment, cloud.organizationId, cloud.userId],
-      route, state.providerStatus?.provider, route==='agent' ? state.providerStatus?.revision : undefined,
+      route, state.providerStatus?.provider, null,
     ]);
     const connection = composerBinding(), providerRevision = state.providerStatus?.revision;
     const current = () => {
@@ -1207,7 +1304,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   }
   // A voice note records audio only. Transcription is a separate explicit action;
   // opening or saving this recorder never starts a speech provider or local model.
-  const noteRemoteTranscription = () => noteDestination?.route === 'cloud' || noteDestination?.route === 'agent' && !browserDevProfile;
+  const noteRemoteTranscription = () => noteDestination?.route === 'cloud';
   const prepareNoteCapture = async () => {
     cancelSavedTranscription();
     if (stage !== 'closed') cleanup();
@@ -1260,7 +1357,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     const r = noteRecorder, finishing = r.phase === 'finishing' || r.phase === 'starting', recording = r.phase === 'recording';
     const save = () => { if (r.phase !== 'finishing' && r.phase !== 'starting') void finishNoteRecording(); };
     const canDiscard = () => r.phase !== 'finishing' && !r.canonicalSavePending;
-    const peaks = r.levels.length ? r.levels : [];
+    const peaks = r.levels;
     const levels = Array.from({ length: 44 }, (_, i) => { const peak = peaks[peaks.length - 44 + i]; return { h: peak === undefined ? 4 : Math.max(4, Math.round(Math.sqrt(peak) * 92)), o: recording ? 1 : 0.35 }; });
     return {
       phase: r.phase,
@@ -1446,10 +1543,9 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     const token=generation,chat=chatDestination;
     const owned=()=>token===generation&&chatDestination===chat&&(!chat||chatCurrent());
     const seconds = stage === 'recording' ? (Date.now() - started) / 1000 : (clip?.durationMs || 0) / 1000;
-    const labels: Bag = { ready: 'Start recording', starting: 'Starting microphone', recording: 'Stop recording', recorded: onDeviceReady ? 'Transcribe on this phone' : pairedAsrReady ? 'Transcribe with agent Whisper' : cloudMode ? `Transcribe with ${voiceServiceName()}` : 'Review recording', transcribing: 'Cancel transcription', review: 'Use in conversation' };
+    const labels: Bag = { ready: 'Start recording', starting: 'Starting microphone', recording: 'Stop recording', recorded: onDeviceReady ? 'Transcribe on this phone' : cloudMode ? `Transcribe with ${voiceServiceName()}` : 'Review recording', transcribing: 'Cancel transcription', review: 'Use in conversation' };
     // No status or privacy narration: the recorder shows one short line, only for an error.
     if (selectedRoute === 'device' && !onDeviceReady && !preparingLocal && stage === 'ready') labels.ready = 'On-device speech unavailable';
-    if (preparingPaired && stage === 'ready') labels.ready = 'Checking selected agent voice';
     if (preparingLocal && stage === 'ready') labels.ready = 'Preparing on-device speech';
     if (!Capacitor.isNativePlatform() && !cloudMode && !onDeviceReady) labels.recorded = 'Review transcript';
     if (browserDevProfile && selectedRoute === 'agent' && !cloudMode && !onDeviceReady) labels.recorded = 'Review transcript';
@@ -1467,17 +1563,17 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       typeInstead: () => { if (!owned()||stage !== 'recorded' || !clip || busy) return; draft = ''; recognized = undefined; error = ''; failure = ''; stage = 'review'; refresh(); },
       manualChoice: testMocksEnabled && !cloudMode && stage === 'ready' && !busy && !preparingLocal && selectedRoute !== 'manual',
       recordOnly: () => { if(!owned())return;const chat = chatDestination; enter(undefined, 'manual',chat); refresh(); },
-      routeChoice: settingsChoice || testMocksEnabled && (!cloudMode && stage === 'ready' && !busy && document.documentElement.dataset.connectionMode !== 'mock' && (!!connectionController.getPairedVoiceBinding() || connectionController.getCloudEnvironment() !== null)),
-      routeLabel: settingsChoice ? DENIED_SETTINGS_LABEL : browserDevProfile ? (selectedRoute === 'device' ? 'Use development voice' : 'Use browser voice') : selectedRoute === 'device' ? (connectionController.getCloudEnvironment() !== null ? `Use ${voiceServiceName()} voice` : 'Use selected agent voice') : 'Use on-device voice',
+      routeChoice: settingsChoice || testMocksEnabled && (!cloudMode && stage === 'ready' && !busy && document.documentElement.dataset.connectionMode !== 'mock' && connectionController.getCloudEnvironment() !== null),
+      routeLabel: settingsChoice ? DENIED_SETTINGS_LABEL : browserDevProfile ? (selectedRoute === 'device' ? 'Use development voice' : 'Use browser voice') : selectedRoute === 'device' ? `Use ${voiceServiceName()} voice` : 'Use on-device voice',
       changeRoute: () => { if (!owned()||stage !== 'ready' || busy) return; if (settingsChoice) { openSettings(); return; } const chat = chatDestination; enter(undefined, selectedRoute === 'device' ? 'agent' : 'device',chat); refresh(); },
       clock: `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`, clockCss: '', live: stage === 'recording', paused: stage !== 'recording', dotCss: `background:${stage === 'recording' ? '#E53935' : 'var(--mut)'}`,
       levels: !Capacitor.isNativePlatform()&&stage==='recording'?recordingLevels(recordingId):Array.from({ length: 44 }, () => ({ h: 4 })),
       lines: error ? [{ ini: '', statusIcon:icons.info, t: error, chip: 'background:var(--s2);color:var(--fg)', css: '' }] : [],
       review: stage === 'review', transcript: draft, transcriptDisabled: busy, onTranscript: (e: Event) => { if (!owned()||busy) return; draft = (e.target as HTMLTextAreaElement).value; refresh(); },
       primaryLabel: cloudConnectRequired ? `Connect ${voiceServiceName()}` : labels[stage], primaryIcon: cloudConnectRequired ? icons.user : stage === 'review' ? icons.check : stage === 'recording' || stage === 'transcribing' ? icons.stop : icons.mic,
-      primaryDisabled: (selectedRoute === 'device' && !onDeviceReady) || preparingLocal || preparingPaired || stage === 'starting' || (busy && stage !== 'transcribing') || (stage === 'review' && !draft.trim()),
-      pauseLabel: (onDeviceReady || cloudMode || pairedReady) && stage === 'review' ? playing ? 'Stop audio' : 'Listen to transcript' : ['recorded', 'review'].includes(stage) ? 'Record again' : 'Cancel recording', pauseIcon: (onDeviceReady || cloudMode || pairedReady) && stage === 'review' ? playing ? icons.stop : icons.play : ['recorded', 'review'].includes(stage) ? icons.mic : icons.x,
-      stop: () => { if(owned())void primary(); }, discard: () => {if(owned())chatDestination?cancelChat():cleanup();}, keyboard:()=>{if(owned())cancelChat(true);}, toggle: () => { if(!owned())return;if ((onDeviceReady || cloudMode || pairedReady) && stage === 'review') { void listen(); } else if (['recorded', 'review'].includes(stage)) { const chat = chatDestination; enter(undefined, selectedRoute,chat); } else if(chatDestination)cancelChat();else cleanup(); },
+      primaryDisabled: (selectedRoute === 'device' && !onDeviceReady) || preparingLocal || stage === 'starting' || (busy && stage !== 'transcribing') || (stage === 'review' && !draft.trim()),
+      pauseLabel: (onDeviceReady || cloudMode) && stage === 'review' ? playing ? 'Stop audio' : 'Listen to transcript' : ['recorded', 'review'].includes(stage) ? 'Record again' : 'Cancel recording', pauseIcon: (onDeviceReady || cloudMode) && stage === 'review' ? playing ? icons.stop : icons.play : ['recorded', 'review'].includes(stage) ? icons.mic : icons.x,
+      stop: () => { if(owned())void primary(); }, discard: () => {if(owned())chatDestination?cancelChat():cleanup();}, keyboard:()=>{if(owned())cancelChat(true);}, toggle: () => { if(!owned())return;if ((onDeviceReady || cloudMode) && stage === 'review') { void listen(); } else if (['recorded', 'review'].includes(stage)) { const chat = chatDestination; enter(undefined, selectedRoute,chat); } else if(chatDestination)cancelChat();else cleanup(); },
     };
   }
   const originalVals=Component.prototype.renderVals;
@@ -1498,7 +1594,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         // A missing capture must never look like an enabled microphone control.
         const controllable=!!recorder.canMute&&!retiring&&!recorder.review&&!awaiting&&['listening','transcribing','thinking','preparing-speech','speaking'].includes(recorder.state);
         recorder.muteDisabled=!controllable||!!recorder.muteAutomatically;
-        if(!controllable){const capturing=!retiring&&recorder.state==='listening',unconfirmed=retiring||!!conversationVoice&&['error','starting','connecting','idle'].includes(recorder.state);recorder.canMute=true;recorder.muted=unconfirmed?'mixed':capturing?'false':'true';recorder.muteLabel=unconfirmed?'Microphone status unconfirmed':capturing?'Microphone control unavailable':'Microphone off';recorder.toggleMute=()=>{};}
+        if(!controllable){const capturing=!retiring&&recorder.state==='listening',unconfirmed=retiring||!recorder.reviewHold&&!!conversationVoice&&['error','starting','connecting','idle'].includes(recorder.state);recorder.canMute=true;recorder.muted=unconfirmed?'mixed':capturing?'false':'true';recorder.muteLabel=unconfirmed?'Microphone status unconfirmed':capturing?'Microphone control unavailable':'Microphone off';recorder.toggleMute=()=>{};}
       }
     }
     // A comms bar's dictation shows its recorder on the bar itself, not in the sheet.
@@ -1509,11 +1605,13 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     out.voiceInterim=recorder?.interimTranscript&&!out.msgs?.some((message:Bag)=>message.isUser&&message.text===recorder.interimTranscript&&(!(ownBrowserVoiceActive()||developmentCloudRealtimeVoiceEnabled||(developmentCartesiaVoiceEnabled&&!developmentCloudVoiceEnabled))||!conversationInterimKnownMessages.has(String(message.id))))?recorder.interimTranscript:'';
     if(recorder){recorder.connecting=['starting','connecting'].includes(recorder.state);// A voice planning label shares the transcript's shimmer line above the composer, as typed chat does.
       if(recorder.progressText)out.turnStatus=recorder.progressText;
-      const phase=recorder.muted==='true'&&!recorder.muteAutomatically?'paused':recorder.state==='starting'?'connecting':recorder.state==='preparing-speech'?'thinking':recorder.state==='awaiting-user-input'?'paused':recorder.state==='listening'&&recorder.muteAutomatically?'thinking':recorder.state==='stopping'?'interrupting':recorder.state;recorder.problem=recorder.state==='error'||recorder.failed===true;recorder.readinessLabel=recorder.problem?'Voice stopped':recorder.connecting?'Connecting…':phase==='listening'&&recorder.muted!=='mixed'?'Listening':phase==='paused'?'Muted':phase==='speaking'?'Speaking':phase==='thinking'?(recorder.state==='listening'?'Finishing…':'Thinking…'):phase==='transcribing'?'Transcribing…':'';recorder.statusClass=recorder.problem||recorder.readinessLabel?'alpha-voice-startup-status':'alpha-voice-status-hidden';recorder.statusLines=recorder.problem?[{t:'Voice stopped'}]:recorder.readinessLabel?[{t:recorder.readinessLabel}]:recorder.lines;if(recorder.problem){if(recorder.recoveryLabel&&recorder.recoveryLabel!==DENIED_SETTINGS_LABEL)recorder.recoveryLabel='Try again';recorder.progressText='';}recorder.activity=recorder.problem||recorder.connecting?null:React.createElement(VoiceActivity,{phase,theme:this.S().theme==='dark'?'dark':'light'});
+      // A reply whose phone action needs the owner's review (a call, a text) ends the turn with the
+      // microphone off on purpose (VoiceTurnReview). That is said as it is, not as a voice failure.
+      const phase=recorder.muted==='true'&&!recorder.muteAutomatically?'paused':recorder.state==='starting'?'connecting':recorder.state==='preparing-speech'?'thinking':recorder.state==='awaiting-user-input'?'paused':recorder.state==='listening'&&recorder.muteAutomatically?'thinking':recorder.state==='stopping'?'interrupting':recorder.state;recorder.problem=!recorder.reviewHold&&(recorder.state==='error'||recorder.failed===true);recorder.readinessLabel=recorder.reviewHold?recorder.lines[0].t:recorder.problem?'Voice stopped':recorder.connecting?'Connecting…':phase==='listening'&&recorder.muted!=='mixed'?'Listening':phase==='paused'?'Muted':phase==='speaking'?'Speaking':phase==='thinking'?(recorder.state==='listening'?'Finishing…':'Thinking…'):phase==='transcribing'?'Transcribing…':'';recorder.statusClass=recorder.problem||recorder.readinessLabel?'alpha-voice-startup-status':'alpha-voice-status-hidden';recorder.statusLines=recorder.problem?[{t:'Voice stopped'}]:recorder.readinessLabel?[{t:recorder.readinessLabel}]:recorder.lines;if(recorder.problem){if(recorder.recoveryLabel&&recorder.recoveryLabel!==DENIED_SETTINGS_LABEL)recorder.recoveryLabel='Try again';recorder.progressText='';}recorder.activity=recorder.problem||recorder.connecting||recorder.reviewHold?null:React.createElement(VoiceActivity,{phase,theme:this.S().theme==='dark'?'dark':'light'});
       recorder.voiceDetails=false; // Voice failures stay internal; Settings owns service diagnostics.
       recorder.muteAsset=recorder.muted==='true'?'/icons/lucide/mic-off.svg':'/icons/lucide/mic.svg';}
     const pillVoice=active&&this.S().chat==='hidden'&&(retiring?retirement?.panelChat==='hidden':chatDestination?.chat==='hidden')&&!out.legacyChatRecorder&&!onBar;
-    out.pillVoiceInactive=!pillVoice;out.pillVoice=pillVoice?{...recorder,activity:recorder.problem||recorder.connecting?null:React.createElement(VoiceActivity,{phase:recorder.connecting?'connecting':recorder.muted==='true'&&!recorder.muteAutomatically?'paused':recorder.state,theme:this.S().theme==='dark'?'dark':'light',compact:true}),controlDown:(event:PointerEvent)=>event.stopPropagation(),stop:()=>retiring?hold():cancelChat()}:null;
+    out.pillVoiceInactive=!pillVoice;out.pillVoice=pillVoice?{...recorder,activity:recorder.problem||recorder.connecting||recorder.reviewHold?null:React.createElement(VoiceActivity,{phase:recorder.connecting?'connecting':recorder.muted==='true'&&!recorder.muteAutomatically?'paused':recorder.state,theme:this.S().theme==='dark'?'dark':'light',compact:true}),controlDown:(event:PointerEvent)=>event.stopPropagation(),stop:()=>retiring?hold():cancelChat()}:null;
     if(retiring&&!pillVoice){out.conversationHidden=false;out.panelOp=1;out.panelPE='auto';if(!out.panelH)out.panelH=560;}
     if(active){
       out.panelComposer=false;out.showComposer=onBar;out.showPill=!!pillVoice;out.canStopReply=false;
@@ -1535,31 +1633,57 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   const noteReadingChanged=()=>{if(api)api.setView('notes',{noteReadingRevision:Date.now()});};
   window.addEventListener('alpha:note-reading',noteReadingChanged);
   notes.onLeave = (current: Bag) => { cancelSavedTranscription();if(!ownedNavigation?.applying)noteRealtimeCancellation(conversationVoice,'notes-left-unowned');stopSpeaking();noteRecorder.leave(!Capacitor.isNativePlatform());noteRecorderAdopted=false;if(!ownedNavigation?.applying)cleanup(); leave?.(current); };
+  let callReturnShell: any;
   const visibility = () => {
     // Speech preparation is foreground-only; returning prepares the same route again.
-    if (!document.hidden) { if (reprepare && stage === 'ready' && !busy) { reprepare = false; reopen(error); } return; }
+    if (!document.hidden) {
+      // A notification tap that arrived while the launcher was hidden is taken once it is shown.
+      void recordingNotificationOpen.flush();
+      // The call screen covered Alpha and closed voice: say why once, now that the owner can read it.
+      const shell = callReturnShell; callReturnShell = undefined;
+      if (callReturn.returned() && shell && shell.live !== false) shell.toast(CALL_PAUSED);
+      if (reprepare && stage === 'ready' && !busy) { reprepare = false; reopen(error); } return; }
     if(chatDestination||['recording','transcribing'].includes(stage))noteRealtimeCancellation(conversationVoice,'document-hidden');
     stopSaved();
     if (playing) { playback?.abort(); playing = false; refresh(); }
-    if(chatDestination){cleanup();return;}
+    if(chatDestination){callReturnShell=chatDestination.shell;callReturn.closedByHide(callLive());cleanup();return;}
     if (preparingLocal) { readiness?.abort(); readiness = undefined; reprepare = true; error = ''; refresh(); return; }
     if (['recording', 'transcribing'].includes(stage)) { cleanup(false); stage = 'ready'; error = 'Stopped'; reprepare = true; refresh(); }
   };
   const pagehide = () => { if (stage !== 'closed') cleanup(true,true,'page-hidden'); };
-  const binding = composerBinding;
-  let account = binding();
+  let account = composerBinding();
   const unsubscribe = connectionController.subscribe(() => {
     noteRecorder.recheckOwner();
-    const next = binding();
+    const next = composerBinding();
     if (connectionController.getSnapshot().open) { if(stage!=='closed')noteRealtimeCancellation(conversationVoice,'connection-opened'); if (stage !== 'closed') cleanup(); }
     if (next !== account) { if(stage!=='closed')noteRealtimeCancellation(conversationVoice,'account-changed'); account = next; stopSaved(); if (stage !== 'closed') cleanup(); }
   });
   const noteRouteChanged = () => noteRecorder.recheckOwner();
   window.addEventListener(voicePreferenceKeys().event, noteRouteChanged);
+  // A tap on Android's recording notification opens Notes, which adopts the open recording again.
+  // The tap waits natively, as a Maps notification tap does, until the launcher can show Notes.
+  let recordingShell: Bag | undefined;
+  const recordingNotificationOpen = createMapsNotificationOpen({
+    ready: () => {
+      const state = recordingShell?.S?.();
+      return Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('AlphaVoiceCloud') && !!recordingShell?.live && !document.hidden &&
+        !recordingShell.pageSuspended && !recordingShell.props?.assistantSurface && !connectionController.getSnapshot().open &&
+        state?.screen === 'home' && !state.secure && !state.shade;
+    },
+    consume: noteRecordingNotificationOpen.consume,
+    clear: noteRecordingNotificationOpen.clear,
+    open: () => { if (recordingShell!.S().view !== 'notes') recordingShell!.openView('notes'); },
+  });
+  const renderVals = Component.prototype.renderVals;
+  Component.prototype.renderVals = function (this: Bag, ...args: unknown[]) { recordingShell = this; queueMicrotask(() => void recordingNotificationOpen.flush()); return renderVals.apply(this, args); };
+  const requestRecordingOpen = () => recordingNotificationOpen.request();
+  const cancelRecordingOpen = () => recordingNotificationOpen.cancel();
+  window.addEventListener('alpha:note-recording-open', requestRecordingOpen);
+  window.addEventListener('launcher-home', cancelRecordingOpen);
   document.addEventListener('visibilitychange', visibility);
   window.addEventListener('pagehide', pagehide);
   const unmount = Component.prototype.componentWillUnmount;
-  Component.prototype.componentWillUnmount = function () { cancelSavedTranscription();noteRealtimeCancellation(conversationVoice,'component-unmounted');window.removeEventListener('alpha:note-reading',noteReadingChanged);window.removeEventListener(voicePreferenceKeys().event,noteRouteChanged);document.removeEventListener('visibilitychange', noteRecorderVisibility);noteRecorder.leave(!Capacitor.isNativePlatform());noteRecorderAdopted=false;stopSpeaking();api = undefined; chatDestination=undefined;cleanup(); unsubscribe(); document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', pagehide); unmount?.call(this); };
+  Component.prototype.componentWillUnmount = function () { cancelSavedTranscription();noteRealtimeCancellation(conversationVoice,'component-unmounted');window.removeEventListener('alpha:note-reading',noteReadingChanged);window.removeEventListener(voicePreferenceKeys().event,noteRouteChanged);document.removeEventListener('visibilitychange', noteRecorderVisibility);noteRecorder.leave(!Capacitor.isNativePlatform());noteRecorderAdopted=false;stopSpeaking();api = undefined; chatDestination=undefined;if(recordingShell===this)recordingShell=undefined;window.removeEventListener('alpha:note-recording-open',requestRecordingOpen);window.removeEventListener('launcher-home',cancelRecordingOpen);cleanup(); unsubscribe(); document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', pagehide); unmount?.call(this); };
 }
 
 function ownBrowserVoiceActive(){return !Capacitor.isNativePlatform()&&speechRoute()==='direct';}

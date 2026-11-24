@@ -14,7 +14,7 @@ import java.nio.file.attribute.PosixFilePermissions;
 /**
  * The owner's Settings switches for agent Gmail changes and Calendar edits, where the on-device
  * shared Eliza managed Google host reads them before every agent write. A missing
- * or malformed file means both are off. Capacitor-free so the host JVM tests can run it.
+ * or malformed file means both are off.
  */
 final class GoogleAgentAccessFile {
  static final String NAME="alpha-google-agent-access.json";

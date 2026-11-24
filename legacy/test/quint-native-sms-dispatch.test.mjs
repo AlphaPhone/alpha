@@ -3,11 +3,11 @@ import test from 'node:test';
 import {verifyRefinementReceiptInputs} from '../specs/quint/refinement/check-traces.mjs';
 import {checkNativeSmsDispatch, historicalSmsSourceTraces} from '../specs/quint/refinement/native/sms-dispatch.mjs';
 
-test('partial source contract: native SMS review, radio admission and callback readback refine authenticated staged source', async () => {
+test('partial source contract: card-approved SMS admission, radio dispatch and callback readback refine authenticated staged source', async () => {
   const {receipt} = await checkNativeSmsDispatch();
   assert.equal(receipt.passed, true);
-  assert.equal(receipt.traces, 27);
-  assert.equal(receipt.observedFields.length, 30);
+  assert.equal(receipt.traces, 31);
+  assert.equal(receipt.observedFields.length, 31);
   assert.equal(verifyRefinementReceiptInputs(receipt), true);
 });
 

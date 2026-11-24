@@ -19,6 +19,7 @@ import vm from 'node:vm';
 import {stripTypeScriptTypes} from '../../../../test/support/strip-types.mjs';
 import {parseBrowserAddressInput} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/address-input.ts';
 import {BrowserTabSession} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/tab-host.ts';
+import {BrowserOpenRefused, searchAddress, tabLimitRefusal} from '../../../../apps/app/src/browser/browser-poll.ts';
 import {modelTraces, plain, repositoryRoot} from './browser-model-traces.mjs';
 import {scaledTimeout} from '../timeouts.mjs';
 
@@ -62,13 +63,13 @@ export function addressInputHarness() {
     const state = {cur: 'owned', tabs: [{id: 'owned'}], editing: true}, navigations = [], reports = [];
     const tabs = new BrowserTabSession({session: 'session'});
     await tabs.ensure('owned', false, async () => undefined);
-    const context = {URL, Error, MAX_TABS: 8, parseBrowserAddressInput, session: 'session', disposed: false, state: () => state, isPrivate: () => false,
-      newTabId: () => 'new', restored: new Map(), tabs, restoreAttempts: new Map(), ensure: id => tabs.creation(id) ?? tabs.ensure(id, false, async () => undefined),
+    const context = {URL, Error, BrowserOpenRefused, searchAddress, tabLimitRefusal, MAX_TABS: 8, parseBrowserAddressInput, session: 'session', disposed: false, state: () => state, isPrivate: () => false,
+      newTabId: () => 'new', agentTab: undefined, restored: new Map(), restoringTabs: new Set(), tabs, restoreAttempts: new Map(), ensure: id => tabs.creation(id) ?? tabs.ensure(id, false, async () => undefined),
       shell: {vset(_key, patch) { Object.assign(state, patch); }}, Browser: {async navigate(input) { navigations.push(input); }, async close() {}},
       refresh() {}, report(error) { reports.push(error.message); }};
     const navigate = vm.runInNewContext(region + ';navigate', context);
     try { await navigate(raw, false, approved ? new AbortController().signal : undefined); }
-    catch (error) { assert.match(error.message, /Invalid approved browser destination/); assert.ok(approved); assert.equal(navigations.length + reports.length, 0); return 'throw'; }
+    catch (error) { assert.ok(error instanceof BrowserOpenRefused, error.message); assert.match(error.message, /Invalid approved browser destination/); assert.ok(approved); assert.equal(navigations.length + reports.length, 0); return 'throw'; }
     if (reports.length) { assert.deepEqual(reports, ['Enter search words or a valid HTTP or HTTPS address without credentials.']); assert.equal(navigations.length, 0); return 'toast'; }
     assert.equal(navigations.length, 1, raw);
     const url = new URL(navigations[0].url);

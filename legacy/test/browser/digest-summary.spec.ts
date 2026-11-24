@@ -3,7 +3,21 @@ import {test,expect} from '@playwright/test';
 for(const theme of ['light','dark'])for(const kind of ['snapshot','native'])test(`${kind} digest presents final summary with private details handled in ${theme}`,async({page})=>{
  await page.addInitScript(()=>{if(!localStorage.getItem('alpha.connection.selection.v1'))localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));});
  await page.goto('/?mode=dev&theme='+theme);await page.getByRole('button',{name:'Settings',exact:true}).click();await openConnectionDiagnostics(page);await page.getByRole('button',{name:'Connect development profile'}).click();
- const times=await page.evaluate(async kind=>{const now=new Date().toISOString(),expiresAt=new Date(Date.now()+3600000).toISOString(),key='alpha.browser.digests.local.v1',state=JSON.parse(localStorage.getItem(key)||'{"sources":[],"loops":[],"receipts":[],"results":[],"cursor":0,"acks":{}}');state.results.push({cursor:++state.cursor,runId:'summary-run',workflowId:'workflow',workflowVersionId:'version',templateVersion:'hosted-digest-1',scheduledAt:now,source:{observedAt:now,expiresAt,...(kind==='native'?{type:'live_selected_native_read'}:{})},status:'finished',startedAt:now,completedAt:now,output:[{nodeId:'typed-steps',runId:'summary-run',text:'A readable summary.\nOne task is open.',steps:[{id:'source',text:'SYNTHETIC_RAW_SOURCE_123'}]}],error:null});localStorage.setItem(key,JSON.stringify(state));window.dispatchEvent(new Event('alpha:hosted-digests'));return {observedAt:now,expiresAt,expiryDisplay:(await import('/src/prototype/locale-time.ts')).formatDateTime(new Date(expiresAt))};},kind);
+ const times=await page.evaluate(async kind=>{
+  const {developmentDigestDocument,initialDevelopmentDigests}=await import('/src/browser/development-digest-document.ts');
+  const {developmentIdentity}=await import('/src/browser/development-identity.ts');
+  const now=new Date().toISOString(),expiresAt=new Date(Date.now()+3600000).toISOString();
+  await developmentDigestDocument(developmentIdentity('local')).edit(initialDevelopmentDigests,state=>{
+   state.results.push({
+    cursor:++state.cursor,runId:'summary-run',workflowId:'workflow',workflowVersionId:'version',templateVersion:'hosted-digest-1',
+    scheduledAt:now,source:{observedAt:now,expiresAt,...(kind==='native'?{type:'live_selected_native_read'}:{})},
+    status:'finished',startedAt:now,completedAt:now,
+    output:[{nodeId:'typed-steps',runId:'summary-run',text:'A readable summary.\nOne task is open.',steps:[{id:'source',text:'SYNTHETIC_RAW_SOURCE_123'}]}],error:null,
+   });
+  });
+  window.dispatchEvent(new Event('alpha:hosted-digests'));
+  return {observedAt:now,expiresAt,expiryDisplay:(await import('/src/prototype/locale-time.ts')).formatDateTime(new Date(expiresAt))};
+ },kind);
  const panel=page.getByRole('dialog',{name:'Scheduled digests',exact:true}),article=panel.locator('#hosted-result-summary-run'),summary=article.getByText('A readable summary.\nOne task is open.',{exact:true});
  await expect(summary).toBeVisible();
  if(kind==='native'){
@@ -19,4 +33,4 @@ for(const theme of ['light','dark'])for(const kind of ['snapshot','native'])test
  if(kind==='native'){await expect(article.locator('details')).toHaveCount(0);await expect(article).toContainText(times.expiryDisplay);await expect(article.getByText(/SYNTHETIC_RAW_SOURCE_123/)).toHaveCount(0);expect(await article.innerText()).not.toContain(times.expiresAt);}
  else await expect(article.locator('details')).not.toHaveAttribute('open');
 });
-test('digest text formatting checks typed run identity, retains full text and renders errors first',async({page})=>{await page.goto('/');const result=await page.evaluate(async()=>{const {digestSummaryText:f}=await import('/src/runtime/hosted-digests.ts'),long='Full summary. '.repeat(800),base={runId:'run',error:null};return {long:f({...base,output:[{nodeId:'typed-steps',runId:'run',text:long}]}),other:f({...base,output:[{nodeId:'typed-steps',runId:'other',text:'Wrong run'}]}),many:f({...base,output:[{text:'First'},{text:'Second'}]}),error:f({...base,error:'Source revoked',output:'Do not show success'}),legacy:f({...base,output:{summary:'Legacy summary',source:'private input'}}),plain:f({...base,output:'Plain summary'})};});expect(result.long).toBe('Full summary. '.repeat(800));expect(result.other).toContain('No readable summary');expect(result.many).toContain('No readable summary');expect(result.error).toBe('Source revoked');expect(result.legacy).toBe('Legacy summary');expect(result.plain).toBe('Plain summary');});
+test('digest text formatting checks typed run identity, retains full text and renders errors first',async({page})=>{await page.goto('/');const result=await page.evaluate(async()=>{const {digestSummaryText:f}=await import('/src/runtime/hosted-digests.ts'),long='Full summary. '.repeat(800),base={runId:'run',error:null};return {long:f({...base,output:[{nodeId:'typed-steps',runId:'run',text:long}]}),other:f({...base,output:[{nodeId:'typed-steps',runId:'other',text:'Wrong run'}]}),many:f({...base,output:[{text:'First'},{text:'Second'}]}),error:f({...base,error:'Source revoked',output:'Do not show success'}),legacy:f({...base,output:{summary:'Legacy summary',source:'private input'}}),plain:f({...base,output:'Plain summary'})};});expect(result.long).toBe('Full summary. '.repeat(800));expect(result.other).toContain('No readable summary');expect(result.many).toContain('No readable summary');expect(result.error).toBe('This digest stopped with an error on your agent. Open execution details to see what ran.');expect(result.legacy).toBe('Legacy summary');expect(result.plain).toBe('Plain summary');});

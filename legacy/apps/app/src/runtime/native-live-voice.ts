@@ -1,19 +1,14 @@
-import { Capacitor } from '@capacitor/core';
 import { registerPlugin } from '../platform-plugins';
+import { voiceCloudAvailable as available } from '../native/alpha-voice-cloud.ts';
 import { connectionController } from './connection-ui';
 import { createNativeLiveVoice, type NativeLiveCapturePort, type NativeResidentBinding } from '../../../../.eliza/client-features/packages/voice/src/native-live-voice.ts';
 import type { LiveVoiceLatency } from './live-voice';
 
 /**
- * Alpha's binding of the shared native live transport (`@elizaos/voice/native-live`, projected
- * from the reviewed pin) to the AlphaVoiceCloud bridge: continuous app-process capture with
- * Silero VAD feeding the resident agent's on-device streaming ASR. The shared transport owns the
- * capture ids, owner fences, interim gating, stop reconciliation and both routes; Alpha supplies
- * only the bridge name and its resident binding (the live route of the current resident session
- * and the owner the bridge binds its native segment transport to).
+ * Binds the shared native live transport (`@elizaos/voice/native-live`) to the AlphaVoiceCloud
+ * bridge and the current resident session; the shared transport owns capture, fences and routes.
  */
 const plugin = registerPlugin<NativeLiveCapturePort>('AlphaVoiceCloud');
-const available = () => Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('AlphaVoiceCloud');
 /** The resident session's live route, with its owner only while both name the same session. */
 function resident(): NativeResidentBinding | null {
   const live = connectionController.getResidentLiveVoice();

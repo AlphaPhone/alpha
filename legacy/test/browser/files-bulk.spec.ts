@@ -24,6 +24,35 @@ test('select, move together into a folder, delete to Trash, restore, and Empty o
  await page.getByRole('button',{name:'Empty',exact:true}).click();await page.getByRole('dialog',{name:'Empty Trash?',exact:true}).getByRole('button',{name:'Empty',exact:true}).click();await expect(page.getByRole('button',{name:'two.txt',exact:true})).toHaveCount(0);
  await page.reload();expect(await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');const f=registerPlugin<any>('AlphaFiles');const all=await f.storageList({path:'Destination'});return all.entries.map((e:any)=>e.name);})).toEqual(['one.txt']);
 });
+test('Move starts at the root from a folder and omits the primary storage breadcrumb', async ({page}) => {
+  await page.evaluate(async () => {
+    const {registerPlugin} = await import('/src/platform-plugins.ts');
+    const files = registerPlugin<any>('AlphaFiles');
+    await files.storageCreateFolder({parent: '', name: 'Source'});
+    await files.storageCreateFolder({parent: '', name: 'Target'});
+    const source = (await files.list({})).entries.find((entry: {name: string}) => entry.name === 'Source');
+    await files.importFile(new File(['note'], 'move.txt', {type: 'text/plain'}), source.id);
+  });
+  await openStorage(page);
+  const path = page.getByRole('navigation', {name: 'Folder path'});
+  await expect(path).toHaveCount(0);
+  await page.getByRole('button', {name: 'Open Source', exact: true}).click();
+  await expect(path).toHaveText('Source');
+  await startSelect(page);
+  await page.getByRole('button', {name: 'Select move.txt', exact: true}).click();
+  await page.getByRole('toolbar', {name: 'Selection actions'}).getByRole('button', {name: 'Move', exact: true}).click();
+
+  const picker = page.getByRole('dialog', {name: 'Move to', exact: true});
+  const target = picker.getByRole('button', {name: 'Open Target', exact: true});
+  const parent = picker.getByRole('button', {name: 'Parent folder', exact: true});
+  await expect(target).toBeVisible();
+  await expect(picker.getByText('Internal storage', {exact: true})).toHaveCount(0);
+  await expect(parent).toHaveCount(0);
+  await target.click();
+  await expect(picker.getByText('Target', {exact: true})).toBeVisible();
+  await parent.click();
+  await expect(target).toBeVisible();
+});
 test('a move into a folder that already has the name keeps both files',async({page})=>{
  await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');const f=registerPlugin<any>('AlphaFiles');await f.importFile(new File(['outer'],'a.txt',{type:'text/plain'}));await f.storageCreateFolder({parent:'',name:'Target'});const target=(await f.list({})).entries.find((r:any)=>r.name==='Target');await f.importFile(new File(['inner'],'a.txt',{type:'text/plain'}),target.id);});
  await openStorage(page);await startSelect(page);await page.getByRole('button',{name:'Select a.txt',exact:true}).click();await page.getByRole('toolbar',{name:'Selection actions'}).getByRole('button',{name:'Move',exact:true}).click();
@@ -81,4 +110,36 @@ test('a pending share chooser keeps the selection busy and dispatches only once'
  const bar=page.getByRole('toolbar',{name:'Selection actions'});await bar.getByRole('button',{name:'Share',exact:true}).click();await page.getByRole('dialog',{name:'Share',exact:true}).getByRole('button',{name:'Share',exact:true}).click();await expect.poll(()=>page.evaluate(()=>(window as any).bulkShareCalls)).toBe(1);
  await expect(bar.getByRole('button',{name:'Share',exact:true})).toBeDisabled();await expect(bar.getByRole('button',{name:'Move',exact:true})).toBeDisabled();
  await page.evaluate(()=>(window as any).finishBulkShare());await expect(bar.getByRole('button',{name:'Share',exact:true})).toBeEnabled();expect(await page.evaluate(()=>(window as any).bulkShareCalls)).toBe(1);expect(downloads).toBe(0);await expect(page.getByRole('button',{name:'Deselect one.txt',exact:true})).toBeVisible();
+});
+test('Trash selects several items, restores them together, and deletes the rest only after confirming (FILE-16)',async({page})=>{
+ await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');const f=registerPlugin<any>('AlphaFiles');for(const name of ['a.txt','b.txt','c.txt'])await f.importFile(new File([name],name,{type:'text/plain'}));await f.storageTrash({paths:['a.txt','b.txt','c.txt']});});
+ await page.getByRole('button',{name:'Files',exact:true}).click();await page.getByRole('button',{name:'Trash',exact:true}).click();
+ await page.getByRole('button',{name:'Select items',exact:true}).click();await expect(page.getByRole('button',{name:'Cancel selection',exact:true})).toBeFocused();
+ for(const name of ['a.txt','c.txt'])await page.getByRole('button',{name:'Select '+name,exact:true}).click();
+ await expect(page.getByText('2 selected',{exact:true})).toBeVisible();
+ const bar=page.getByRole('toolbar',{name:'Selection actions'});
+ await expect(bar.getByRole('button',{name:'Share',exact:true})).toHaveCount(0);
+ await bar.getByRole('button',{name:'Restore',exact:true}).click();
+ for(const name of ['a.txt','c.txt'])await expect(page.getByRole('button',{name,exact:true})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'b.txt',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Select items',exact:true}).click();await page.getByRole('button',{name:'Select all',exact:true}).click();
+ await bar.getByRole('button',{name:'Delete forever',exact:true}).click();
+ const confirm=page.getByRole('dialog',{name:'Delete permanently?',exact:true});await expect(confirm).toContainText('1 item will be deleted permanently.');
+ await page.screenshot({path:'test-results/files-trash-selection.png'});
+ await confirm.getByRole('button',{name:'Delete',exact:true}).click();
+ await expect(page.getByText('Trash is empty. Items in Trash are deleted after 30 days.')).toBeVisible();
+ expect(await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');return (await registerPlugin<any>('AlphaFiles').storageList({path:''})).entries.map((e:any)=>e.name).sort();})).toEqual(['a.txt','c.txt']);
+});
+test('File details show what a file is, how big, when it changed and where it is (FILE-16)',async({page})=>{
+ await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');await registerPlugin<any>('AlphaFiles').importFile(new File(['x'.repeat(3000)],'notes.txt',{type:'text/plain'}));});
+ await openStorage(page);await startSelect(page);await page.getByRole('button',{name:'Select notes.txt',exact:true}).click();
+ await page.getByRole('button',{name:'Details',exact:true}).click();
+ const details=page.getByRole('dialog',{name:'notes.txt',exact:true});
+ for(const text of ['Type','Text','Size','2.9 KB (3,000 bytes)','Modified','Location','Internal storage'])await expect(details).toContainText(text);
+ await page.screenshot({path:'test-results/files-details.png'});
+ await details.getByRole('button',{name:'Close',exact:true}).click();await expect(details).toHaveCount(0);
+ await page.getByRole('button',{name:'Cancel selection',exact:true}).click();
+ await page.getByRole('button',{name:'Open notes.txt',exact:true}).click();
+ await page.getByRole('button',{name:'File actions',exact:true}).click();await page.getByRole('button',{name:'File details',exact:true}).click();
+ await expect(page.getByRole('dialog',{name:'notes.txt',exact:true})).toContainText('3,000 bytes');
 });

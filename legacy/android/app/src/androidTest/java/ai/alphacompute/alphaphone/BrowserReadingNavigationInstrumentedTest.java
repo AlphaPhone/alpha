@@ -2,7 +2,7 @@ package ai.alphacompute.alphaphone;
 
 import ai.eliza.plugins.browsersurface.BrowserPageReading;
 import ai.eliza.plugins.browsersurface.BrowserReadingWorld;
-import ai.eliza.plugins.browsersurface.BrowserReviewedReading;
+import ai.alphacompute.alphaphone.browser.AlphaReviewedReading;
 
 import android.os.SystemClock;
 import android.webkit.*;
@@ -85,11 +85,10 @@ public final class BrowserReadingNavigationInstrumentedTest {
      world.evaluate(BrowserPageReading.EXTRACT,value->extracted.set("RESULT:"+value),()->extracted.set("REFUSED"));
      assertEquals("Extraction is refused at once, without running any script","REFUSED",extracted.get());
      // The native review of this loaded, non-sensitive HTTPS document: refused as unavailable, nothing shown.
-     // The shared reviewed reading (plugin-native-browser-surface); reviewQuestion is package-private there.
-     BrowserReviewedReading reading=new BrowserReviewedReading(web.getContext() instanceof android.app.Activity?(android.app.Activity)web.getContext():null,id->{},false);
-     java.lang.reflect.Method review=BrowserReviewedReading.class.getDeclaredMethod("reviewQuestion",com.getcapacitor.PluginCall.class,WebView.class,BrowserReadingWorld.class,java.util.function.BooleanSupplier.class);review.setAccessible(true);
-     review.invoke(reading,call,web,world,(java.util.function.BooleanSupplier)()->true);
-     java.lang.reflect.Field dialog=BrowserReviewedReading.class.getDeclaredField("dialog");dialog.setAccessible(true);assertNull("No review dialog is shown",dialog.get(reading));
+     // Alpha's reviewed reading (browser/AlphaReviewedReading), the review the Browser opens.
+     AlphaReviewedReading reading=new AlphaReviewedReading(web.getContext() instanceof android.app.Activity?(android.app.Activity)web.getContext():null,id->{},false);
+     reading.reviewQuestion(call,"tab",web,world,()->true);
+     java.lang.reflect.Field dialog=AlphaReviewedReading.class.getDeclaredField("dialog");dialog.setAccessible(true);assertNull("No review dialog is shown",dialog.get(reading));
     }catch(Throwable failure){error.set(failure);}});
     if(error.get()!=null)throw new AssertionError(error.get());
     assertFalse("The review never resolves",call.resolved.get());

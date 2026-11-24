@@ -33,6 +33,7 @@ const card = [
 async function residentAgent(page: Page, operation: unknown, capabilities: string[]) {
   await installResidentAgentPlugin(page);
   await page.addInitScript(({ agentId, operation, capabilities }) => {
+    localStorage.setItem('alpha.browser.device.v1', JSON.stringify({ askBeforeAgentActions: true }));
     const w = window as any;
     w.androidBridge = {};
     const store = new Map<string, string>();

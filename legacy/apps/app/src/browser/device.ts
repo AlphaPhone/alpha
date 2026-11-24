@@ -10,6 +10,7 @@ import {deviceRolesDocument} from './preference-documents';
 import {initialDevicePreferences,cachedDevicePreferences,devicePreferencesStatus,readDevicePreferences,editDevicePreferences,initializeDevicePreferences} from './device-preferences';
 import {beginNoticeAction,noticeActionBlocked} from './notice-action';
 import {devSurfacesEnabled,testMocksEnabled} from '../build-flags';
+import {isRecord} from '../lib/parse';
 declare const __APP_VERSION__:string;
 const appVersion=typeof __APP_VERSION__==='string'&&__APP_VERSION__?__APP_VERSION__:'Unavailable';
 /** Browsers do not report the device's Wi-Fi, Bluetooth or cellular transport, uptime or roles. */
@@ -20,7 +21,7 @@ type BrowserBattery={level:number;charging:boolean};
  * navigator.onLine. Seeded battery and network values exist only in test-mocks builds,
  * where development device controls simulate them.
  */
-export async function browserDeviceFacts():Promise<Record<string,unknown>>{
+async function browserDeviceFacts():Promise<Record<string,unknown>>{
  const facts:Record<string,unknown>={online:navigator.onLine};
  try{
   const getBattery=(navigator as Navigator&{getBattery?:()=>Promise<BrowserBattery>}).getBattery;
@@ -35,7 +36,7 @@ const settingsRecoveryMessage=devSurfacesEnabled?'Device settings need recovery.
 const openSettingsRecovery=()=>void import('./preference-recovery').then(m=>m.openDevicePreferencesRecovery());
 const initial=initialDevicePreferences;
 let settingsEpoch=0;
-const validateRoles=(roles:Record<string,boolean>)=>{if(!roles||typeof roles!=='object'||Array.isArray(roles)||Object.values(roles).some(value=>typeof value!=='boolean'))throw Error('Device roles need recovery.');return roles;};
+const validateRoles=(roles:Record<string,boolean>)=>{if(!isRecord(roles)||Object.values(roles).some(value=>typeof value!=='boolean'))throw Error('Device roles need recovery.');return roles;};
 export const browserDeviceState=()=>{const state=cachedDevicePreferences()??{...initial(),wifiActive:false,bluetoothActive:false,cellularActive:false,microphoneEnabled:false,locationEnabled:false,doNotDisturb:true,music:0,ring:0,alarm:0};return {...state,doNotDisturb:state.doNotDisturb||focusActive(),deviceSettingsStatus:devicePreferencesStatus()};};
 export class BrowserDevice extends WebPlugin {
  constructor(){super();initializeDevicePreferences();installBrowserAudioSettings();installBrowserDisplay();const apply=()=>{applyBrowserDisplay(cachedDevicePreferences()??initial());};apply();window.addEventListener('alpha:device-settings',apply);}
@@ -97,6 +98,5 @@ export class BrowserDevice extends WebPlugin {
   * launcher bridge (createSystemLauncherBridge). */
  async listLauncherApps(){return this.list();}
  async launchApp(input:{packageName:string}){return this.launch(input);}
- async buildInfo(){return {launcher:false,version:appVersion};}
- async getBuildInfo(){return this.buildInfo();}
+ async getBuildInfo(){return {launcher:false,version:appVersion};}
 }

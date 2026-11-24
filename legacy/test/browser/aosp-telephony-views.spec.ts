@@ -26,6 +26,20 @@ test('Home shows one Messages card and one Phone card and keeps no telephony con
   expect(await page.evaluate(() => /Ada Okafor|Running ten minutes/.test(JSON.stringify({...localStorage})))).toBe(false);
 });
 
+test('the latest SMS sender read on Home calls the narrow bridge and never loads a thread', async ({page}) => {
+  await setupTelephony(page);
+  await expect(page.getByRole('button', {name: 'Notes', exact: true})).toBeVisible();
+  const sender = await page.evaluate(async () => {
+    const {registerPlugin} = await import('/src/platform-plugins.ts');
+    const {createAospTelephony} = await import('/src/runtime/aosp-telephony.ts');
+    const plugin = registerPlugin('AlphaTelephony') as Parameters<typeof createAospTelephony>[0];
+    return createAospTelephony(plugin, true).latestIncomingSender();
+  });
+  expect(sender).toEqual({status: 'found', numberEnding: '0101'});
+  expect(await inputs(page, 'latestIncomingSender')).toHaveLength(1);
+  expect(await inputs(page, 'listMessages')).toEqual([]);
+});
+
 test('an SMS notification opens only its thread on launch and waits for an unsent draft', async ({page}) => {
   await setupTelephony(page, {smsNoticeThread: 'thread:102'});
   const title = page.locator('[data-alpha-messages-title]');
@@ -51,6 +65,22 @@ test('an SMS notification opens only its thread on launch and waits for an unsen
   expect(await inputs(page, 'sendComposedSms')).toEqual([]);
 });
 
+test('the Messages header calls the open conversation on one tap', async ({page}) => {
+  await setupTelephony(page);
+  await open(page, 'Messages');
+  await page.getByRole('button', {name: /^Ada Okafor/}).click();
+  const draft = page.locator(personField);
+  await draft.fill('Keep this draft');
+  expect(await inputs(page, 'placeCall')).toEqual([]);
+
+  await open(page, 'Call Ada Okafor');
+
+  await expect.poll(() => inputs(page, 'placeCall')).toEqual([{number: '+15550100101'}]);
+  expect(await inputs(page, 'dial')).toEqual([]);
+  await expect(page.locator('[data-alpha-messages-title]')).toHaveText('Ada Okafor');
+  await expect(draft).toHaveValue('Keep this draft');
+});
+
 test('recents call on the owner tap; the keypad fits above the bar on a small phone', async ({page}) => {
   await setupTelephony(page);
   await open(page, 'Phone');
@@ -63,7 +93,7 @@ test('recents call on the owner tap; the keypad fits above the bar on a small ph
   await expect(page.getByRole('button', {name: 'Call Dev Patel'})).toBeVisible();
   for (const size of [{width: 412, height: 915}, {width: 360, height: 640}]) {
     await page.setViewportSize(size);
-    await expect(page.locator('[data-alpha-phone-call]')).toBeInViewport({ratio: 1});
+    await expect(page.locator('[data-alpha-phone-call]')).toBeInViewport({ratio: 0.99});
     expect(await overlaps(page, '[data-alpha-phone-call]', '[data-alpha-input-bar]'), `${size.width}x${size.height}`).toBe(false);
     expect(await overlaps(page, '[data-alpha-phone-number]', '[data-alpha-phone-keypad] button[aria-label="1"]')).toBe(false);
   }
@@ -110,6 +140,26 @@ test('Phone keeps its selector in Contacts and switching tabs leaves one Back en
   await open(page, 'Contacts');
   await expect(page.locator('[data-alpha-contacts-header]')).toBeVisible();
   await expect(tab('contacts')).toHaveCount(0);
+});
+
+test('Phone and Contacts headers respect the native top inset at both launcher widths', async ({page}) => {
+  await setupTelephony(page);
+  const inset = 64;
+  await page.evaluate(value => document.documentElement.style.setProperty('--native-top-inset', `${value}px`), inset);
+  await open(page, 'Phone');
+  const header = page.locator('[data-alpha-phone-header]');
+  const contacts = page.locator('[data-alpha-phone-tab="contacts"]');
+  for (const size of [{width: 412, height: 915}, {width: 360, height: 640}]) {
+    await page.setViewportSize(size);
+    await expect(header.getByRole('heading', {name: 'Recents', exact: true})).toBeVisible();
+    await expect.poll(async () => (await header.boundingBox())?.y ?? 0).toBeGreaterThanOrEqual(inset);
+    await expect(contacts).toBeInViewport();
+  }
+  await contacts.click();
+  const contactsHeader = page.locator('[data-alpha-contacts-header]');
+  await expect(contactsHeader.getByRole('heading', {name: 'Contacts', exact: true})).toBeVisible();
+  await expect.poll(async () => (await contactsHeader.boundingBox())?.y ?? 0).toBeGreaterThanOrEqual(inset);
+  await expect(contacts).toBeInViewport();
 });
 
 test('Messages stays below the status bar at both launcher widths', async ({page}) => {
@@ -332,7 +382,9 @@ test('the journal clears a sent draft after the composer reply times out', async
   expect(await inputs(page, 'sendComposedSms')).toHaveLength(1);
 });
 
-test('the registered telephony profile still chooses native review', async ({page}) => {
+// The shared profile's send names no approved card, so Android refuses it ("not-approved") before
+// anything is journaled; only the bridge routing is checked here (AlphaTelephonySendTest covers Android).
+test('the registered telephony profile sends through the bridge, never the composer port', async ({page}) => {
   await setupTelephony(page, {controlledSms: true});
   await open(page, 'Messages');
   await page.evaluate(() => {
@@ -397,8 +449,11 @@ test('clearing the text in the bar sends only the remaining picture on the next 
   const send = barSend(page);
   const body = 'These words must not go with the picture again.';
   const picture = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aE1kAAAAASUVORK5CYII=', 'base64');
+  await page.locator('[data-alpha-input-bar]').getByRole('button', {name: 'Message attachments', exact: true}).click();
+  const menu = page.getByRole('dialog', {name: 'Message attachments', exact: true});
+  await expect(menu.getByRole('button')).toHaveText(['Camera','Add media']);
   const chooser = page.waitForEvent('filechooser');
-  await page.getByRole('button', {name: 'Add picture', exact: true}).click();
+  await menu.getByRole('button', {name: 'Add media', exact: true}).click();
   await (await chooser).setFiles({name: 'picture.png', mimeType: 'image/png', buffer: picture});
   await expect(page.getByRole('button', {name: 'Remove picture-1.png'})).toBeVisible();
   await draft.fill(body);

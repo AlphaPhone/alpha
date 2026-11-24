@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import {spawnSync} from 'node:child_process';
 import {stripTypeScriptTypes} from './support/strip-types.mjs';
 const {workflowRendererFixture}=await import('../scripts/workflow-renderer-fixture.ts');
-const {WorkflowProtocol,WorkflowAdmissionRejected,WorkflowMetadataRejected,WorkflowLifecycleRejected}=await import('../apps/app/src/runtime/workflow-protocol.ts');
+const {WorkflowProtocol,WorkflowAdmissionRejected,WorkflowMetadataRejected,WorkflowLifecycleRejected,WorkflowPauseRejected}=await import('../apps/app/src/runtime/workflow-protocol.ts');
 const {resolveWorkflowTap,readyTapStep,tapRecheck}=await import('../apps/app/src/runtime/workflow-device-contract.ts');
 const {runIntentReconcilable}=await import('../apps/app/src/runtime/workflow-intents.ts');
 
@@ -23,7 +23,9 @@ function adapterFixture(options={}){
  const client={
   lifecycleSupported:async()=>false,supportsSubmissionReconciliation:async()=>!!options.reconciliation,
   list:async()=>{calls.list++;await gate?.list;return [workflow];},removedWorkflows:async()=>[],
-  detail:async()=>{calls.detail++;return {...workflow};},executions:async()=>[],
+  detail:async()=>{calls.detail++;return {...workflow,...(options.inactive?{active:false}:{})};},executions:async()=>[],
+  activate:async()=>{calls.activate=(calls.activate||0)+1;return {...workflow,active:true};},
+  pause:async(id,signal,version)=>{(calls.pause||=[]).push(version);if(options.pauseRefused)throw new WorkflowPauseRejected();return {...workflow,active:false};},
   receipt:async()=>{calls.receipt++;await gate?.receipt;return {...execution};},approvals:async()=>null,
   phoneReview:async()=>({steps:[]}),reconcile:async()=>null,
   run:async(id,version,signal,beforeSubmit)=>{await beforeSubmit?.(undefined);calls.run++;return {...execution,id:'run-'+calls.run};},
@@ -32,6 +34,7 @@ function adapterFixture(options={}){
   pendingWorkflowTap:async()=>pendingTap?{...pendingTap}:{},
   consumeWorkflowTap:async()=>{calls.consume++;if(consumeFailures>0){consumeFailures--;throw Error('Native consume failed');}pendingTap=null;},
   addListener:async(_event,listener)=>{tapListeners.add(listener);return {remove(){tapListeners.delete(listener);}};},
+  status:async()=>options.notifications??{permissionGranted:true,appEnabled:true},
  };
  const localStorage=new Proxy({getItem:key=>storage[key]??null,setItem:(key,value)=>{storage[key]=value;},removeItem:key=>{delete storage[key];}},{ownKeys:()=>Object.keys(storage),getOwnPropertyDescriptor:()=>({configurable:true,enumerable:true})});
  class Shell{live=true;renderVals(){return {};}componentDidMount(){}componentWillUnmount(){}componentDidUpdate(){}S(){return {view};}vset(){}vget(){return {};}api(){return api;}openView(next){view=next;}toast(message){toasts.push(message);}}
@@ -41,10 +44,11 @@ function adapterFixture(options={}){
  const context=workflowRendererFixture({WorkflowAdmissionRejected,WorkflowMetadataRejected,WorkflowLifecycleRejected,resolveWorkflowTap,readyTapStep,tapRecheck,
   Capacitor:{isNativePlatform:()=>true,getPlatform:()=>'android'},connectionController:controller,localStorage,queueMicrotask,AbortController,Date,console});
  // Every other native plugin stays inert: approval notices are not part of these cases.
- context.registerPlugin=name=>name==='AlphaNotifications'?native:new Proxy({},{get:()=>async()=>({})});
+ const settingsOpened=[];
+ context.registerPlugin=name=>name==='AlphaNotifications'?native:name==='AlphaDevice'?{openSettings:async input=>{settingsOpened.push(input);return {status:'opened'};}}:new Proxy({},{get:()=>async()=>({})});
  vm.runInNewContext(stripTypeScriptTypes(source,{mode:'strip'}),context);
  context.install(Shell,views);const shell=new Shell();shell.componentDidMount();
- return {render:()=>views.workflows.render({},api),toasts,calls,storage,context,close:()=>shell.componentWillUnmount(),tapEvent:()=>{for(const listener of tapListeners)listener();},get view(){return view;},get pendingTap(){return pendingTap;}};
+ return {render:()=>views.workflows.render({},api),toasts,calls,settingsOpened,storage,context,close:()=>shell.componentWillUnmount(),tapEvent:()=>{for(const listener of tapListeners)listener();},get view(){return view;},get pendingTap(){return pendingTap;}};
 }
 const wait=async(fn,label='Workflow adapter did not settle.')=>{for(let count=0;count<400;count++){if(fn())return;await new Promise(resolve=>setTimeout(resolve,5));}throw Error(label);};
 const key=()=>'alpha.workflow.pending.v1:'+JSON.stringify([session.origin,session.ownerId,session.agentId,'flow']);
@@ -145,4 +149,37 @@ for(const reconciliation of [false,true])test(`a run of a version other than the
  ran='v2';
  await assert.rejects(client.run('flow','v1',signal),/reviewed version changed/);
  assert.equal(posts,2);
+});
+
+for(const [name,notifications,off] of [['off',{permissionGranted:false,appEnabled:true},true],['on',{permissionGranted:true,appEnabled:true},false]])test(`turning a workflow on checks notifications and offers settings only when they are off: ${name}`,async()=>{
+ const app=adapterFixture({view:'workflows',inactive:true,notifications});
+ try{
+  app.render().openWorkflow('flow');await wait(()=>app.render().detail);
+  assert.equal(app.render().fd.notificationsOff,false);
+  app.render().fd.toggle();assert.equal(app.calls.activate,undefined,'the first tap only reviews');
+  app.render().fd.toggle();await wait(()=>app.calls.activate===1&&app.render().fd.on);
+  await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal(app.render().fd.notificationsOff,off);
+  if(off){app.render().fd.openNotificationSettings();assert.equal(JSON.stringify(app.settingsOpened),JSON.stringify([{page:'notifications'}]));}
+ }finally{app.close();}
+});
+test('pausing names the version on screen, and a refused pause shows the current workflow',async()=>{
+ for(const refused of [false,true]){
+  const app=adapterFixture({view:'workflows',pauseRefused:refused});
+  try{
+   app.render().openWorkflow('flow');await wait(()=>app.render().detail&&app.render().fd.on);
+   const reads=app.calls.detail;app.render().fd.toggle();
+   await wait(()=>app.calls.pause?.length===1&&(refused?app.calls.detail>reads:!app.render().fd.on));
+   assert.deepEqual(app.calls.pause,['v1']);
+   if(refused){await wait(()=>app.toasts.includes('This workflow changed before it was paused. Nothing was changed. Review the current version, then pause it again.'));assert.equal(app.render().fd.on,true);}
+   else assert.equal(app.toasts.at(-1),'Paused');
+  }finally{app.close();}
+ }
+});
+test('opening a workflow that is already on says when notifications are off, so the notice survives leaving for settings',async()=>{
+ const app=adapterFixture({view:'workflows',notifications:{permissionGranted:true,appEnabled:false}});
+ try{
+  app.render().openWorkflow('flow');await wait(()=>app.render().detail&&app.render().fd.notificationsOff,'An enabled workflow did not report notifications off.');
+  assert.equal(app.calls.activate,undefined,'checking sends nothing');
+ }finally{app.close();}
 });

@@ -1,0 +1,1 @@
+tsconfig.scripts.json

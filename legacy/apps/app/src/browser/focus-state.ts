@@ -1,15 +1,16 @@
 import {browserDevProfile} from './dev-profile';
+import {isRecord} from '../lib/parse';
 type Bag=Record<string,any>;
 export const focusOwner=crypto.randomUUID();
 const retired=new Set<string>();
 export function focusChanged(){window.dispatchEvent(new Event('alpha:device-settings'));window.dispatchEvent(new Event('focus'));}
 export function retireFocusRun(id:string){retired.add(id);focusChanged();}
-export function activeFocusBlocks(){
+function activeFocusBlocks(){
  if(!browserDevProfile)return [];
  // An unreadable workflow store cannot own a device policy; preserve it for recovery.
  try{
   const state=JSON.parse(localStorage.getItem('alpha.dev.app.workflows')||'{}');
-  if(!state||!Array.isArray(state.flows)||!state.localRuns||typeof state.localRuns!=='object'||Array.isArray(state.localRuns))return [];
+  if(!state||!Array.isArray(state.flows)||!isRecord(state.localRuns))return [];
   return (Object.values(state.localRuns) as Bag[]).filter(run=>{
    if(!run||typeof run!=='object')return false;
    const f=run.context?.focus,flow=state.flows.find((item:Bag)=>item&&String(item.id)===String(run.flowId));

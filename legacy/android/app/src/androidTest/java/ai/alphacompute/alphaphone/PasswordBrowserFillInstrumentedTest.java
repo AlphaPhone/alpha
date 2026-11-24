@@ -35,7 +35,7 @@ import static org.junit.Assert.*;
  * Run only on the owned disposable emulator admitted by the acceptance runner. */
 @RunWith(AndroidJUnit4.class)
 public final class PasswordBrowserFillInstrumentedTest {
- private static final String OFFER="Fill with a saved password";
+ private static final String OFFER=PasswordVaultFixture.text(R.string.alpha_passwords_fill_offer);
  private final BrowserFlowInstrumentedTest browser=new BrowserFlowInstrumentedTest();
  private final String token=UUID.randomUUID().toString().replace("-","").substring(0,16);
  private final String username="alpha-fill-"+token;
@@ -72,8 +72,7 @@ public final class PasswordBrowserFillInstrumentedTest {
   AccessibilityNodeInfo active=automation().getRootInActiveWindow();if(active!=null)roots.add(active);
   return roots;
  }
- private interface Match{boolean test(AccessibilityNodeInfo node);}
- private AccessibilityNodeInfo find(Match match){
+ private AccessibilityNodeInfo find(java.util.function.Predicate<AccessibilityNodeInfo> match){
   for(AccessibilityNodeInfo root:roots()){
    ArrayDeque<AccessibilityNodeInfo> queue=new ArrayDeque<>();queue.add(root);int visited=0;
    while(!queue.isEmpty()&&visited++<1024){AccessibilityNodeInfo node=queue.remove();if(node.isVisibleToUser()&&match.test(node))return node;for(int i=0;i<node.getChildCount();i++){AccessibilityNodeInfo child=node.getChild(i);if(child!=null)queue.add(child);}}
@@ -89,7 +88,6 @@ public final class PasswordBrowserFillInstrumentedTest {
   WebViewTestDriver.withActivity(MainActivity.class,main->{List<WebView> children=new ArrayList<>();collect(main.getWindow().getDecorView(),children,main.getBridge().getWebView());for(WebView child:children)if(child.isShown())found.set(child);});
   assertNotNull("Actual native child must be visible",found.get());return found.get();
  }
- private interface DocumentPoint{double[] read()throws Exception;}
  /**
   * Screen position of a point in the child document, or null while the native child and its
   * document disagree about the viewport. They disagree for a while after the keyboard opens: the
@@ -118,10 +116,10 @@ public final class PasswordBrowserFillInstrumentedTest {
   return settled[0]?point:null;
  }
  /** Waits until the same settled screen position is read twice, then sends one real touch there. */
- private void tapSettled(String what,DocumentPoint source)throws Exception{
+ private void tapSettled(String what,java.util.concurrent.Callable<double[]> source)throws Exception{
   float[] point=null,previous=null;StringBuilder seen=new StringBuilder("never sampled");
   for(int i=0;i<300&&point==null;i++){
-   double[] css=source.read();float[] next=css==null?null:screenPoint(css[0],css[1],seen);
+   double[] css=source.call();float[] next=css==null?null:screenPoint(css[0],css[1],seen);
    if(next!=null&&previous!=null&&Math.abs(next[0]-previous[0])<=1&&Math.abs(next[1]-previous[1])<=1)point=next;
    else{previous=next;SystemClock.sleep(100);}
   }
@@ -193,7 +191,7 @@ public final class PasswordBrowserFillInstrumentedTest {
   assertTrue("Foreground Android user must be numeric",user.matches("[0-9]{1,6}"));
   String prior=shell("settings --user "+user+" get secure autofill_service");
   assertTrue("Existing provider setting must be safely restorable",prior.isEmpty()||prior.equals("null")||prior.matches("[A-Za-z0-9_.$]+/[A-Za-z0-9_.$]+"));
-  String component=context.getPackageName()+"/ai.eliza.plugins.passwords.ElizaPasswordAutofillService";
+  String component=PasswordVaultFixture.autofillService(context);
   String priorAugmented=shell("cmd autofill get default-augmented-service-enabled "+user);
   assertTrue("Augmented provider setting must be safely restorable",priorAugmented.equals("true")||priorAugmented.equals("false"));
   ScriptHandler frameScript=null;
@@ -212,7 +210,7 @@ public final class PasswordBrowserFillInstrumentedTest {
    shell("cmd autofill set default-augmented-service-enabled "+user+" false");
    assertEquals("Augmented fallback disabled for this test", "false",shell("cmd autofill get default-augmented-service-enabled "+user));
    shell("settings --user "+user+" put secure autofill_service "+component);
-   assertEquals("Eliza password provider selected",component,shell("settings --user "+user+" get secure autofill_service"));
+   assertEquals("Alpha's password provider selected",component,shell("settings --user "+user+" get secure autofill_service"));
    for(int i=0;i<150&&!android.content.ComponentName.unflattenFromString(component).equals(manager.getAutofillServiceComponentName());i++)SystemClock.sleep(100);
    assertEquals("Framework observed the selected provider",android.content.ComponentName.unflattenFromString(component),manager.getAutofillServiceComponentName());
    try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
@@ -224,7 +222,7 @@ public final class PasswordBrowserFillInstrumentedTest {
     observedChild.set(visibleChild());
     WebViewTestDriver.withActivity(MainActivity.class,activity->{try{
      Object plugin=activity.getBridge().getPlugin("AlphaBrowser").getInstance();
-     java.lang.reflect.Field field=ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class.getDeclaredField("autofillCallback");field.setAccessible(true);
+     java.lang.reflect.Field field=AlphaBrowserPlugin.class.getDeclaredField("autofillCallback");field.setAccessible(true);
      original.set((android.view.autofill.AutofillManager.AutofillCallback)field.get(plugin));
      android.view.autofill.AutofillManager actual=observedChild.get().getContext().getSystemService(android.view.autofill.AutofillManager.class);
      observationManager.set(actual);actual.registerCallback(callback);
@@ -247,8 +245,8 @@ public final class PasswordBrowserFillInstrumentedTest {
     browser.child("document.getElementById('alpha-login').requestSubmit()");
     childReady("location.search==="+JSONObject.quote("?alpha_password_signed_in="+token)+" && document.readyState==='complete'");
     SystemClock.sleep(2500);
-    assertNull("No Save offer without native field origins",withText("Alpha Phone passwords",false));
-    assertNull("No provider Save sheet",withText("Save password?",false));
+    assertNull("No Save offer without native field origins",withText(PasswordVaultFixture.text(R.string.alpha_passwords_service_label),false));
+    assertNull("No provider Save sheet",withText(PasswordVaultFixture.text(R.string.alpha_passwords_save_title),false));
     }
 
     int beforeFrame=unavailable.get();

@@ -10,16 +10,10 @@ import type {FilesStoragePort} from '../ui/files/files-browser-adapter.ts';
 import {parentOf,type StorageEntry,type StorageVolume} from '../../../../.eliza/client-features/plugins/plugin-files/src/browser/storage-model.ts';
 import {formatSize,storageResultText} from '../ui/files/storage-presentation.ts';
 import {photosErrorText} from '../ui/photos/photos-messages.ts';
-import {
-  CHAT_IMAGE_MIME_TYPE_SET,CHAT_UPLOAD_MIME_TYPES,MAX_CHAT_ATTACHMENT_NAME_LENGTH,
-  MAX_CHAT_IMAGE_INTAKE_BYTES,MAX_CHAT_MEDIA_RAW_BYTES,
-} from '../../../../.eliza/client-features/packages/core/src/chat-upload-limits';
+import { acceptsChatAttachment, chatAttachmentAccept, chatAttachmentFileLimit, decodedFile, type AttachmentBytes } from './chat-attachment-files';
 
-const uploadTypes=new Set<string>(CHAT_UPLOAD_MIME_TYPES.filter(type=>!/^(audio|video)\//.test(type)));
-const uploadAccept=[...uploadTypes].join(',');
-const fileLimit=(mime:string)=>CHAT_IMAGE_MIME_TYPE_SET.has(mime)?MAX_CHAT_IMAGE_INTAKE_BYTES:MAX_CHAT_MEDIA_RAW_BYTES;
 export async function encodeChatAttachments(files:File[]):Promise<Array<{data:string;mimeType:string;name:string}>> {
-  if(files.some(file=>!accepts(file.name,file.type)||!file.size||file.size>fileLimit(file.type)))
+  if(files.some(file=>!acceptsChatAttachment(file.name,file.type)||!file.size||file.size>chatAttachmentFileLimit(file.type)))
     throw Error('Choose a smaller supported photo or document.');
   const result=await intakeAttachmentFiles(files);
   if(result.droppedTooLarge.length||result.droppedOverCount.length||result.attachments.length!==files.length)
@@ -27,7 +21,6 @@ export async function encodeChatAttachments(files:File[]):Promise<Array<{data:st
   return result.attachments.map(({data,mimeType,name})=>({data,mimeType,name}));
 }
 
-type AttachmentBytes={name:string;mimeType:string;dataBase64:string};
 type PickerFiles=Pick<FilesStoragePort<NativeResult>,'storageState'|'storageRequestAccess'|'storageList'|'storageQuery'> & {
   storageReviewedIdentities(input:{paths:string[];volume?:string;attachment:true}):Promise<{status:string;reviewed?:string[]}>;
   storageReadAttachment(input:{path:string;volume?:string;reviewed:string}):Promise<AttachmentBytes|{status:string;message?:string}>;
@@ -38,14 +31,7 @@ type PickerRow=
   | {key:string;kind:'file';name:string;mimeType:string;size:number;image?:undefined;entry:StorageEntry;volume?:string;reviewed?:string}
   | {key:string;kind:'local';name:string;mimeType:string;size:number;image?:undefined;file:File};
 
-const accepts=(name:string,mime:string)=>name.length>0&&name.length<=MAX_CHAT_ATTACHMENT_NAME_LENGTH&&uploadTypes.has(mime);
 const revision=(photo:SavedPhoto)=>photo.mutationRevision||photo.revision;
-function decodedFile(value:AttachmentBytes):File {
-  if(!accepts(value.name,value.mimeType)||value.dataBase64.length>Math.ceil(fileLimit(value.mimeType)/3)*4)
-    throw Error('Choose a supported photo or document.');
-  const raw=atob(value.dataBase64),bytes=Uint8Array.from(raw,c=>c.charCodeAt(0));
-  return new File([bytes],value.name,{type:value.mimeType});
-}
 
 /** The picker owns local selection only. The composer still owns intake and sending. */
 export class ChatAttachmentPicker {
@@ -73,15 +59,17 @@ export class ChatAttachmentPicker {
   private removeAbort?:()=>void;
   private resolve?:((files:File[])=>void);
   private current:()=>boolean=()=>false;
+  private returnFocus='button[aria-label="Chat actions"]';
   private readonly modal;
 
   constructor(private readonly changed:()=>void,private readonly storage:PickerFiles=files) {
-    this.modal=createInlineModal(()=>this.finish([]),()=>document.querySelector('button[aria-label="Chat actions"]'),{coverAssistant:true});
+    this.modal=createInlineModal(()=>this.finish([]),()=>document.querySelector(this.returnFocus),{coverAssistant:true});
   }
-  choose(signal:AbortSignal,maximum:number,current:()=>boolean):Promise<File[]> {
+  choose(signal:AbortSignal,maximum:number,current:()=>boolean,returnFocus='button[aria-label="Chat actions"]'):Promise<File[]> {
     this.finish([],false);
     if(signal.aborted||document.hidden||!current())return Promise.resolve([]);
     this.opened=true;this.signal=signal;this.current=current;this.maximum=maximum;
+    this.returnFocus=returnFocus;
     this.tab='photos';this.volume=undefined;this.query='';this.path='';this.rows=[];this.next='';this.selected.clear();this.error='';
     const abort=()=>this.finish([]);
     const hide=()=>{if(document.hidden)abort();};
@@ -169,7 +157,7 @@ export class ChatAttachmentPicker {
   private async toggle(row:PickerRow):Promise<void> {
     if(!this.active()||this.reading||this.loading)return;
     if(row.kind==='file'&&row.entry.directory){this.path=row.entry.path;this.query='';this.rows=[];void this.load();return;}
-    if(!accepts(row.name,row.mimeType))return;
+    if(!acceptsChatAttachment(row.name,row.mimeType))return;
     if(this.selected.has(row.key))this.selected.delete(row.key);
     else if(this.selected.size>=this.maximum)this.error='You can attach up to '+this.maximum+' more files.';
     else if(row.kind==='file'){
@@ -228,7 +216,7 @@ export class ChatAttachmentPicker {
         if(!this.active(epoch))return;
         const file=await this.bytes(row);
         if(!this.active(epoch))return;
-        if(!file.size||file.size>fileLimit(file.type))throw Error('Choose a nonempty photo or document within the size limit.');
+        if(!file.size||file.size>chatAttachmentFileLimit(file.type))throw Error('Choose a nonempty photo or document within the size limit.');
         chosen.push(file);
       }
       (document.activeElement as HTMLElement|null)?.blur();this.finish(chosen);
@@ -240,11 +228,11 @@ export class ChatAttachmentPicker {
     if(Capacitor.isNativePlatform()||!this.active()||this.reading||this.computerChooser)return;
     const epoch=this.epoch,chooser=this.computerChooser=new AbortController();
     try {
-      const chosen=await inputFiles(chooser.signal,{multiple:true,accept:uploadAccept});
+      const chosen=await inputFiles(chooser.signal,{multiple:true,accept:chatAttachmentAccept});
       if(!this.active(epoch)||!chosen.length)return;
       this.tab='files';this.query='';this.rows=[];this.request++;this.loading=false;this.next='';
       for(const file of chosen) {
-        if(!accepts(file.name,file.type)){this.error='Choose a supported photo or document.';continue;}
+        if(!acceptsChatAttachment(file.name,file.type)){this.error='Choose a supported photo or document.';continue;}
         if(this.selected.size>=this.maximum){this.error='You can attach up to '+this.maximum+' more files.';break;}
         const row:PickerRow={key:'local:'+crypto.randomUUID(),kind:'local',name:file.name,mimeType:file.type,size:file.size,file};
         this.rows=[row,...this.rows];this.selected.set(row.key,row);
@@ -269,8 +257,8 @@ export class ChatAttachmentPicker {
       locations:this.tab==='files'&&this.volumes.length>1?this.volumes.map(volume=>({id:volume.id,label:volume.name,selected:(this.volume||'primary')===volume.id,choose:()=>{if(this.reading)return;this.volume=volume.id;this.path='';this.query='';void this.load();}})):[],
       rows:this.rows.map(row=>({key:row.key,name:row.name,image:row.image||'',hasImage:!!row.image,imageMissing:!row.image,photo:row.kind==='photo',folder:row.kind==='file'&&row.entry.directory,selectable:!(row.kind==='file'&&row.entry.directory),
         icon:row.kind==='file'&&row.entry.directory?icons.folder:icons.filesDoc,
-        selected:this.selected.has(row.key),pressed:row.kind==='file'&&row.entry.directory?undefined:this.selected.has(row.key),disabled:this.reading||(!(row.kind==='file'&&row.entry.directory)&&!accepts(row.name,row.mimeType)),
-        detail:row.kind==='file'&&row.entry.directory?'Folder':accepts(row.name,row.mimeType)?formatSize(row.size):'Unsupported file type',
+        selected:this.selected.has(row.key),pressed:row.kind==='file'&&row.entry.directory?undefined:this.selected.has(row.key),disabled:this.reading||(!(row.kind==='file'&&row.entry.directory)&&!acceptsChatAttachment(row.name,row.mimeType)),
+        detail:row.kind==='file'&&row.entry.directory?'Folder':acceptsChatAttachment(row.name,row.mimeType)?formatSize(row.size):'Unsupported file type',
         choose:()=>void this.toggle(row)})),
       more:!!this.next,loadMore:()=>void this.load(true),truncated:this.truncated,
       selectionLabel:this.selected.size?this.selected.size+' selected':'',canAttach:!!this.selected.size&&!this.reading&&!this.loading,attachDisabled:!this.selected.size||this.reading||this.loading,

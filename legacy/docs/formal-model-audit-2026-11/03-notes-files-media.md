@@ -97,7 +97,7 @@ Each row was re-derived from the code by a second reader told to refute it.
 | `notesDraftChanges`, `applyNotesDraft`, `notesDraftConflicts`, `mergeNotesDrafts` | `R/notes-secure-store.ts:46-94` | `apply(saved, changes(list, saved))` equals `list` as a set; no conflicts when unchanged; next wins on touched ids |
 | `deletionWindow`, `claimDeletion` | `R/deletion-window.ts:12-24` | dispatch only when expired with same continuity; undo and dispatch mutually exclusive |
 | `LibraryCatalog.*`, `LibrarySelection`, `LibraryRevisions`, `prepareReview`, `reviewCurrent`, `validateLibraryOperation` | `R/photo-library.ts:103-323` | id set matches items; at most 2000 rows and 240 thumbnails; `native(id, model(id, n)) == n`; superseded revision gives undefined |
-| `createFilesIndex.record`, `compareFilesEntries`, `matchesFileQuery`, `recentKey` | `P/files-index.ts:28-100` | at most 24 rows; evicted ids not in kept; strict weak order |
+| `createFilesIndex.record`, `compareFilesEntries`, `recentKey` | `P/files-index.ts:28-100` | at most 24 rows; evicted ids not in kept; strict weak order |
 | `scanPdfRetryable`, `scanPdfFailure` | `P/scan-pdf.ts:15-29` | agree with the model's `retryable` |
 | `proposedRecordingSummary`, `sourceOf`, `webSourceOf`, `recordingSourceOf` | `P/recording-summary.ts:2`, `P/note-source-adapter.ts:31`, `P/summary-source.ts:6-18` | idempotent normalisation |
 | `noteShareText`, `describeLibraryChange`, `verifiedDeletedNoteOrigins` | `R/note-share-text.ts:3`, `P/photo-library-adapter.ts:31`, `R/deleted-note-origin.ts:4` | total; never claims more than verified |

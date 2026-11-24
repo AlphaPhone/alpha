@@ -127,7 +127,7 @@ body:has([data-alpha-layer="conversation"][aria-hidden="false"]) .alpha-plan-not
 .alpha-provider-panel form>button[type="button"]{background:var(--connection-s2,#f1f1f1);color:var(--connection-fg,#111)}
 
 .alpha-large-text .alpha-auth-brand{margin-bottom:16px}
-@media(max-height:620px){.alpha-auth-page .alpha-auth-content{justify-content:flex-start;padding-top:calc(max(var(--native-top-inset,0px),env(safe-area-inset-top,0px)) + 24px)}.alpha-auth-body{margin-block:0}.alpha-auth-brand{margin-bottom:16px}.alpha-auth-page h1{margin-bottom:20px}}
+@media(max-height:620px){.alpha-auth-page .alpha-auth-content{justify-content:flex-start;padding-top:calc(max(var(--native-top-inset,0px),env(safe-area-inset-top,0px)) + 24px)}.alpha-auth-brand{margin-bottom:16px}.alpha-auth-page h1{margin-bottom:20px}}
 
 /* Settings › AI provider: a two-segment choice; the selected segment is filled. */
 .alpha-provider-dialog header h1{margin:0;min-width:0;overflow-wrap:anywhere}
@@ -143,8 +143,6 @@ body:has([data-alpha-layer="conversation"][aria-hidden="false"]) .alpha-plan-not
 .alpha-segmented{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;border-radius:var(--alpha-btn-radius,14px);background:var(--connection-s2,#f3f3f3)}
 .alpha-connection .alpha-segmented button{min-height:max(48px,calc(48px / var(--phone-scale,1)));border-radius:10px;padding:8px 12px;text-align:center;color:var(--connection-fg,#000);background:transparent;line-height:1.25}
 .alpha-connection .alpha-segmented button[aria-pressed=true]{background:var(--connection-fg,#000);color:var(--connection-bg,#fff)}
-.alpha-provider-confirm{display:flex;flex-direction:column;gap:0}
-.alpha-provider-confirm .alpha-form-actions{margin-top:12px}
 .alpha-provider .alpha-form-actions{margin-top:4px}
 .alpha-provider-own{display:flex;flex-direction:column;gap:12px}
 .alpha-own-keys>section{display:flex;flex-direction:column;gap:12px}

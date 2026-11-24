@@ -45,7 +45,7 @@ export interface CloudDeploymentPolicyRow {
 }
 export type CloudDeploymentPolicy = Readonly<Record<'production' | 'staging', CloudDeploymentPolicyRow>>;
 
-/** Alpha's own Cloud (alphacompute.ai), deployed by scripts/cloud-worker.ts; dormant in shipped builds. */
+/** Alpha's own Cloud (alphacompute.cc), deployed by scripts/cloud-worker.ts; dormant in shipped builds. */
 export const ALPHA_CLOUD_POLICY_FILE = fileURLToPath(new URL('../cloud/policy.json', import.meta.url));
 
 /**

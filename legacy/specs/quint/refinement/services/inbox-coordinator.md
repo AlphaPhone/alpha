@@ -48,21 +48,35 @@ explicit UI action that only opens this restored composer is a stuttering step.
 
 ## Checked schedules
 
-- Fresh negative and unavailable capability readbacks disable a prepared Send
-  review. A delayed positive readback cannot replace a newer negative result or
-  cross the captured account and binding epoch.
-- Confirmation cannot move an old account's request into a new account, either
-  before confirmation or while its local CAS is held. A new Cloud owner cannot
-  adopt a review under a repeated Google connection ID.
-- Failed local confirmation persistence leaves the review and copies intact.
-  An explicit retry keeps the request identity. A failed old-account CAS leaves
-  its review recoverable after another account binds.
-- Withdrawal before confirmation discards the unsent review. Regrant requires a
-  fresh review. Read withdrawal through the full adapter preserves local text.
-- Withdrawal during admitted confirmation can leave an unknown dispatched
-  request. Regrant preserves its ID and checks its receipt without redispatch.
-- A native attachment result arriving after account change is released. Changed
-  bytes under the same filename invalidate the reviewed email.
+The composer's Send is one tap: it prepares the exact email, binds it in the
+journal and dispatches it once. The driver records that tap as the model
+sequence `prepare("send")`, `reviewed(true)`, `reserve`, `persisted`,
+`dispatched`, and holds the provider prepare, the dispatching journal CAS or the
+provider dispatch when a schedule needs a change to land in between. An unsent
+review is no longer a resting state of the composer; it remains reachable as a
+saved operation restored on bind, and through the review sheet's own controls.
+
+- Fresh negative and unavailable capability readbacks refuse Send before any
+  prepare. A delayed positive readback cannot replace a newer negative result or
+  cross the captured account and binding epoch. A capability read that lands
+  during prepare discards the prepared email without dispatch.
+- Dispatch cannot move an old account's request into a new account, whether the
+  account changes during prepare or while the dispatching CAS is held. A new
+  Cloud owner cannot adopt an operation under a repeated Google connection ID.
+- A failed dispatching CAS leaves the prepared email and copies intact. Tapping
+  Send again reuses the same request identity. A failed old-account CAS leaves
+  its review recoverable, and returning to that account reopens the review sheet.
+- Withdrawal during prepare discards the undispatched send. Regrant cannot revive
+  it. Read withdrawal through the full adapter preserves local text.
+- Withdrawal during an admitted dispatch can leave an unknown dispatched request.
+  The review sheet reopens; Send over the unresolved delivery never prepares or
+  dispatches again. Regrant preserves its ID and checks its receipt without
+  redispatch.
+- An earlier unsent non-send operation (an archive review) blocks Send: the tap
+  opens the review sheet and nothing is prepared or dispatched over it.
+- A selected attachment arriving after account change is dropped by the
+  product's own fence. Removing an attachment while Send prepares discards the
+  prepared email; only the current bytes are dispatched afterwards.
 - Confirmed matching sends remove exact local copies. Edited copies and older
   saved versions remain. Lost responses and restart preserve copies until a
   fresh matching receipt permits cleanup.
@@ -91,8 +105,9 @@ that this runner establishes their implementation refinement.
 
 ## Source validation
 
-The 2026-11-07 source run checks 18 schedules and 131 observed checkpoints,
-including 25 generated scenario and rejected-action checks. Input hashes are
+The 2026-11-17 one-tap Send run checks 20 schedules and 137 observed
+checkpoints, including 32 generated scenario and rejected-action checks. The
+2026-11-07 review-then-confirm run checked 18 schedules and 131 checkpoints. Input hashes are
 captured before the driver executes. The 9 focused Inbox/Gmail tests, 26 existing
 sent-cleanup tests, grant-withdrawal fixture and full Inbox cloud-flow fixture
 also pass against the confirmation capability fix.
@@ -133,7 +148,9 @@ source parts and provider-draft editing remain additional obligations.
 bun test test/quint-inbox-cleanup.test.mjs
 ```
 
-The cleanup follow-up passes all 19 current model scenarios, 1,000 sampled runs
+With one-tap Send the nine cleanup schedules record 101 checkpoints. An emptied
+Drafts shelf is now removed from storage, so the shelf cleanup write is a
+deletion. The cleanup follow-up passes all 19 current model scenarios, 1,000 sampled runs
 of 80 steps with seed 123, and Apalache 0.62.4 safety checking through four
 transitions. Both source runners pass together, with 27 schedules and 241
 observed checkpoints. The existing 26 cleanup tests and 2 saved/multiple-draft

@@ -1,13 +1,16 @@
+import {acceptsChatAttachment,chatAttachmentFileLimit,decodedFile,type SelectedChatFile} from './chat-attachment-files';
 import {reviewFileEmail} from './file-email-review';
 import {AttachmentNotice} from '../ui/mailbox/drafts-controller';
 import {registerPlugin} from '../platform-plugins';
-import {reviewMailAttachment,type MailAttachment} from '../runtime/inbox-attachment';
-import type {Source} from './note-source-adapter';
-const sourceFiles=registerPlugin<{readSelected(input:{selectionId:string}):Promise<MailAttachment & {sha256:string;size:number;sourceReferenceVersion?:1}>;retainSourceReference(input:{selectionId:string;sha256:string}):Promise<{reference?:string}>}>('AlphaMailAttachments');
-import {reviewContentQuestion,SourceUnavailableError} from '../browser/content-question';
+import {reviewMailAttachment} from '../runtime/inbox-attachment';
+import {MAX_CHAT_ATTACHMENT_NAME_LENGTH} from '../../../../.eliza/client-features/packages/core/src/chat-upload-limits.ts';
+import type {ViewContext} from '../runtime/alpha-client';
+import type {AlphaMailAttachmentsPlugin} from '../native/alpha-mail-attachments';
+import type {AlphaFilesPlugin,AlphaFilesBrowserMethods} from '../native/alpha-files';
+const sourceFiles=registerPlugin<Pick<AlphaMailAttachmentsPlugin,'readSelected'>>('AlphaMailAttachments');
 import {sensitiveReadingText} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-reading.ts';
-import { installFilesBrowserAdapter, type FilesStoragePort } from '../ui/files/files-browser-adapter.ts';
-import { selectedPreviewText } from '../ui/files/storage-presentation.ts';
+import { installFilesBrowserAdapter } from '../ui/files/files-browser-adapter.ts';
+import { formatSize, selectedPreviewText, shortDate, typeLabel } from '../ui/files/storage-presentation.ts';
 import { selectedDocumentText } from '../ui/files/selected-document-messages.ts';
 import { Capacitor } from '@capacitor/core';
 import { DailyApps, type NativeResult } from '../daily';
@@ -16,7 +19,7 @@ import { createInlineModal } from '../runtime/inline-modal';
 import {ERROR_TOAST} from '../runtime/error-notice';
 
 type Bag = Record<string, any>;
-type Selection = { result: NativeResult; status: string; text?: string; pdf?: {page:number;count:number;image:string}; epoch: number; renames?: number; mediaFailed?:boolean };
+type Selection = { result: NativeResult; status: string; text?: string; pdf?: {page:number;count:number;image:string}; epoch: number; renames?: number; mediaFailed?:boolean; sensitive?: boolean };
 
 function previewMedia(result:NativeResult) {
   const native=Capacitor.isNativePlatform(),uri=result.uri,mime=result.mimeType||'';
@@ -24,6 +27,16 @@ function previewMedia(result:NativeResult) {
   const kind=mime.split('/')[0];
   if(!['image','video','audio'].includes(kind)||mime==='image/svg+xml')return undefined;
   return {kind,url:native?Capacitor.convertFileSrc(uri):uri};
+}
+
+/** The preview's subtitle: type, then size and date when the provider reported them. The parts
+ * stay separate so the Files browser can add the place the file is in. */
+function previewMeta(result:NativeResult,mime:string) {
+  const metaType=typeLabel(mime);
+  const metaSize=typeof result.size==='number'?formatSize(result.size):'';
+  const metaDate=typeof result.modified==='number'?shortDate(result.modified):'';
+  return {meta:[metaType,metaSize,metaDate].filter(Boolean).join(' · '),metaType,metaSize,metaDate,mimeType:mime,
+    ...(typeof result.size==='number'?{size:result.size}:{}),...(typeof result.modified==='number'?{modified:result.modified}:{})};
 }
 
 /** Install after installPrototypeNativeAdapters so real previews override fixture
@@ -46,12 +59,12 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
   };
   const marker = '__native_selected_document';
   const rememberedPicker = (id:string) => filesIndex.list().some(row=>row.selectionId===id&&row.kind==='selected'&&row.status==='ready');
-  let closeQuestion:(()=>void)|undefined;
+  let closeEmail:(()=>void)|undefined;
   const release = (id: string) => { void DailyApps.forgetSelected({ selectionId: id }).catch(() => selectedApi?.toast('Reopen Files')); };
   /** Closing keeps a Recent selection's grant so Recent can reopen it; Forget
    * (or eviction from Recent) is what releases it. */
   const clear = (forget = false) => {
-    closeQuestion?.();closeQuestion=undefined;
+    closeEmail?.();closeEmail=undefined;
     mediaRef(null);
     epoch++;
     const id = current?.result.selectionId;
@@ -64,7 +77,32 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
   };
   const refresh = () => selectedApi?.setView('files', { nativeSelectionEpoch: epoch });
   /** The open selection's exact identity: its picker capability, the epoch it was accepted at and its rename count. */
-  const publish = () => window.dispatchEvent(new CustomEvent('alpha-selected-context', { detail: current?.result.selectionId && current.result.status === 'selected' ? { kind: 'document', id: current.result.selectionId, revision: String(current.epoch) + (current.renames ? '.' + current.renames : '') } : null }));
+  const selectionContext = (selection: Selection | undefined) => selection?.result.selectionId && selection.result.status === 'selected'
+    ? {kind:'document',id:selection.result.selectionId,revision:String(selection.epoch)+(selection.renames ? '.'+selection.renames : '')}
+    : null;
+  const publish = () => window.dispatchEvent(new CustomEvent('alpha-selected-context', {detail:selectionContext(current)}));
+
+  async function readSelected(selected:Selection,stillCurrent:()=>boolean) {
+    const file=await sourceFiles.readSelected({selectionId:selected.result.selectionId!});
+    const checked=await reviewMailAttachment(file);
+    if(!stillCurrent()||checked.sha256!==file.sha256||checked.size!==file.size||
+       file.name!==(selected.result.name||'Selected document')||file.mimeType!==(selected.result.mimeType||'application/octet-stream')||
+       (file.mimeType==='text/plain'&&selected.text!==undefined&&checked.text?.replace(/^\uFEFF/,'')!==selected.text))
+      throw Error('The file changed. Reopen it before attaching.');
+    return file;
+  }
+
+  views.files.readOpenTextForVoice = async (expected:ViewContext['selectedObject'],assertCurrent:()=>void):Promise<File|undefined> => {
+    const selected=current,identity=selectionContext(selected);
+    if(!selected||!identity||expected?.kind!==identity.kind||expected.id!==identity.id||expected.revision!==identity.revision||
+       selected.result.mimeType!=='text/plain'||!selected.text?.trim()||selected.sensitive)return;
+    const stillOpen=()=>selected===current&&selectedApi?.get('files').open===marker&&!document.hidden;
+    assertCurrent();
+    if(!stillOpen())return;
+    const file=await readSelected(selected,stillOpen);
+    assertCurrent();
+    return decodedFile(file);
+  };
   const open = async (api: Bag, selection:Selection, download=false) => {
     const selectionId = selection.result.selectionId;
     const active=()=>current===selection&&api.isActive()&&!document.hidden;
@@ -93,7 +131,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
       const response = await DailyApps.pdfSelected({selectionId: selected.result.selectionId!, page});
       if (current !== selected) return;
       if (response.status === 'rendered' && (response.imageUri?.startsWith('file://') || (!Capacitor.isNativePlatform() && response.imageUri?.startsWith('blob:'))) && Number.isInteger(response.pageCount) && Number.isInteger(response.page)) {
-        current = {...selected, text:response.text, pdf: {page:response.page!, count:response.pageCount!, image:response.imageUri!.startsWith('blob:') ? response.imageUri! : Capacitor.convertFileSrc(response.imageUri!) + '?page=' + page + '&v=' + Date.now()}, status: selectedDocumentText(response, 'PDF loaded')};
+        current = {...selected, text:response.text, sensitive:selected.sensitive || sensitiveReadingText(response.text??''), pdf: {page:response.page!, count:response.pageCount!, image:response.imageUri!.startsWith('blob:') ? response.imageUri! : Capacitor.convertFileSrc(response.imageUri!) + '?page=' + page + '&v=' + Date.now()}, status: selectedDocumentText(response, 'PDF loaded')};
       } else { current = {...selected, pdf: undefined, status: response.status === 'rendered' ? 'PDF preview unavailable' : selectedDocumentText(response, 'PDF preview unavailable')}; }
       refresh();
     } catch { if(current === selected){current={...selected,pdf:undefined,status:'No preview'};refresh();} }
@@ -120,10 +158,11 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
       // approval prepared for the old name cannot be dispatched against the renamed file.
       // Keep Recent on the new name: same row, or the replacement capability when the provider issued one.
       const old=filesIndex.list().find(row=>row.selectionId===selected.result.selectionId);
-      if(old&&response.selectionId){if(old.selectionId!==response.selectionId)filesIndex.remove(old.key);for(const evicted of filesIndex.record({kind:old.kind,...(old.treeId?{treeId:old.treeId}:{}),name:response.name||'Selected document',mimeType:response.mimeType||'application/octet-stream',selectionId:response.selectionId}))if(evicted!==response.selectionId)release(evicted);}
+      if(old&&response.selectionId){if(old.selectionId!==response.selectionId)filesIndex.remove(old.key);for(const evicted of filesIndex.record({kind:old.kind,name:response.name||'Selected document',mimeType:response.mimeType||'application/octet-stream',selectionId:response.selectionId}))if(evicted!==response.selectionId)release(evicted);}
       if(response.selectionId&&old?.kind==='selected'&&rememberedPicker(response.selectionId))filesIndex.setOpen(response.selectionId);
       else if(filesIndex.open()===selected.result.selectionId)filesIndex.setOpen(null);
-      current={...selected,result:response,pdf:undefined,renames:(selected.renames||0)+1};api.set({renaming:false});publish();refresh();
+      // A rename keeps the bytes, so the known size still holds when the rename reports none.
+      current={...selected,result:{...response,size:response.size??selected.result.size},pdf:undefined,renames:(selected.renames||0)+1};api.set({renaming:false});publish();refresh();
       if(response.mimeType==='application/pdf')await pdfPage(selected.pdf?.page || 0,api);
     } catch {if(current === selected)api.toast('Unconfirmed');}
     finally {renameBusy=false;}
@@ -165,42 +204,97 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
       const image = mime.startsWith('image/') && (uri?.startsWith('content://') || (!Capacitor.isNativePlatform() && uri?.startsWith('blob:'))) ? Capacitor.convertFileSrc(uri) : undefined;
       const close = () => { clear(); api.set({ open: null }); };
       const forget = () => { clear(true); api.set({ open: null }); };
-      const canAsk=selected.result.status==='selected'&&(!!selected.text?.trim()||!!image||!!selected.pdf?.image);
-      const questionCurrent=()=>sameSelection()&&api.isActive()&&api.get(module).open===marker&&!document.hidden;
-      const ask=()=>{
-        if(!canAsk||!questionCurrent())return;
-        closeQuestion?.();
-        closeQuestion=reviewContentQuestion({name:selected.pdf?name+' · page '+(selected.pdf.page+1):name,text:selected.text??'',current:questionCurrent,validate:text=>!sensitiveReadingText(text),compose:(draft,source)=>api.composeContentQuestion(draft,source),...(selected.result.selectionId&&['text/plain','application/pdf','image/png','image/jpeg','image/webp'].includes(mime)?{source:async():Promise<Source>=>{const file=await sourceFiles.readSelected({selectionId:selected.result.selectionId!}).catch(error=>{throw error?.code==='too-large'?new SourceUnavailableError('This file is too large to link as a source. Turn off the source link to ask without one.'):error;}),checked=await reviewMailAttachment(file);if(!questionCurrent()||checked.sha256!==file.sha256||checked.size!==file.size||file.name!==selected.result.name||file.mimeType!==mime||mime==='text/plain'&&selected.text!==undefined&&checked.text?.replace(/^\uFEFF/,'')!==selected.text)throw Error('Source changed');const reference=file.sourceReferenceVersion===1?(await sourceFiles.retainSourceReference({selectionId:selected.result.selectionId!,sha256:checked.sha256})).reference:undefined;if(!questionCurrent())throw Error('Selection changed');return {version:1,name:file.name,mimeType:file.mimeType,sha256:checked.sha256,size:checked.size,...(reference?{reference}:{})};}}:{}),...(image||selected.pdf?{image:async(signal:AbortSignal)=>(await fetch(image||selected.pdf!.image,{signal})).blob()}: {})});
+      const questionCurrent=()=>sameSelection()&&api.isActive()&&api.get(module).open===marker&&!document.hidden&&!renameBusy;
+      const fullFile = !!selected.result.selectionId && ['text/plain','application/pdf','image/png','image/jpeg','image/webp'].includes(mime);
+      const imagePreview = selected.mediaFailed ? undefined : selected.pdf?.image || (acceptsChatAttachment(name,mime) ? image : undefined);
+      const canAsk = selected.result.status==='selected' && !selected.sensitive && (!!selected.text?.trim() || !!imagePreview);
+      const ask = () => {
+        if (!canAsk || !questionCurrent()) return;
+        closeEmail?.();
+        closeEmail=undefined;
+        return api.attachSelectedFile({
+          current: questionCurrent,
+          read: async stillCurrent => {
+            if (!stillCurrent()) return;
+            if (fullFile) {
+              try {
+                const file = await readSelected(selected,stillCurrent);
+                return decodedFile(file);
+              } catch (error) {
+                if ((error as {code?:string})?.code!=='too-large') throw error;
+              }
+            }
+            if (!stillCurrent()) return;
+            // Use only the bounded, already loaded preview after the full read hits its size cap.
+            const excerpt = selected.text?.slice(0,12000).trim();
+            if (excerpt && sensitiveReadingText(excerpt)) throw Error('This preview contains sensitive text.');
+            const suffix = selected.pdf ? ` (page ${selected.pdf.page+1})` : '';
+            if (excerpt) {
+              const label = `${suffix} (excerpt).txt`;
+              return new File([excerpt],name.slice(0,MAX_CHAT_ATTACHMENT_NAME_LENGTH-label.length)+label,{type:'text/plain'});
+            }
+            if (imagePreview) {
+              const response = await fetch(imagePreview);
+              const type = response.headers.get('content-type')?.split(';',1)[0] || '';
+              const limit = chatAttachmentFileLimit(type);
+              const body = response.body;
+              if (!stillCurrent() || !response.ok || !body || !type.startsWith('image/') || !acceptsChatAttachment(name,type) || Number(response.headers.get('content-length'))>limit) {
+                await body?.cancel();
+                if (!stillCurrent()) return;
+                throw Error('This file has no attachable preview.');
+              }
+              const reader = body.getReader();
+              const chunks: Uint8Array<ArrayBuffer>[] = [];
+              let size = 0;
+              try {
+                while (stillCurrent()) {
+                  const part = await reader.read();
+                  if (!stillCurrent()) return;
+                  if (part.done) break;
+                  size += part.value.byteLength;
+                  if (size>limit) throw Error('This preview is too large to attach.');
+                  chunks.push(part.value);
+                }
+                if (!stillCurrent()) return;
+                if (size) {
+                  const label = `${suffix} (preview)`;
+                  return new File(chunks,name.slice(0,MAX_CHAT_ATTACHMENT_NAME_LENGTH-label.length)+label,{type});
+                }
+              } finally {
+                await reader.cancel();
+                reader.releaseLock();
+              }
+            }
+            throw Error('This file has no attachable preview.');
+          },
+          ...(module==='photos' ? {prompt:'Explain this photo'} : {}),
+        } satisfies SelectedChatFile);
       };
       const email=()=>{
-        closeQuestion?.();
-        closeQuestion=reviewFileEmail({
+        closeEmail?.();
+        closeEmail=reviewFileEmail({
           read:async()=>{const file=await sourceFiles.readSelected({selectionId:selected.result.selectionId!});if(file.name!==name||file.mimeType!==mime)throw new AttachmentNotice('Selected file changed. Select it again.');return file;},
           current:()=>sameSelection()&&api.isActive()&&api.get(module).open===marker&&!renameBusy,
-          target:()=>views.inbox.fileEmailTarget(),insert:(file,token)=>views.inbox.attachReviewedFile(file,token),
-          inserted:()=>api.open('inbox'),
+          target:()=>views.inbox.fileEmailTarget(),insert:(file,token,live)=>views.inbox.attachReviewedFile(file,token,live),
+          inserted:()=>api.open('inbox'),notify:message=>api.toast(message),
         });
       };
       if (module === 'files') {
         const media=selected.mediaFailed?undefined:previewMedia(selected.result);
-        const rows = selected.text?.split('\n').map((v, i) => ({ k: String(i + 1), v })) || [];
-        // Fixed prototype page geometry: chunk rows into successive pages so long
-        // text is scrollable rather than silently clipped to the first page.
-        const pages = [];
-        for (let i = 0; i < rows.length; i += 8) pages.push({ first: true, rest: false, heading: i ? name + ' (continued)' : name, rows: rows.slice(i, i + 8), lines: [], num: '' });
         data.isPreview = true;
         data.pv = {
           needsReselect:selected.result.status === 'renamed-reselect', reselect:async()=>{try{const result=await DailyApps.perform({action:'files'});if(sameSelection()&&result.status==='selected')await accept('files',result,api);}catch{api.toast('Picker failed');}},
           canEmail:typeof views.inbox.fileEmailTarget==='function'&&selected.result.status==='selected'&&['text/plain','application/pdf','image/png','image/jpeg','image/webp'].includes(mime),email,
-          name, nativeSelectionId:selected.result.selectionId, base: name, ext: '', canForget:true, forget, meta: mime + ' · selected on this device', d: '',
-          isPages: !!selected.pdf||rows.length>0, pages: selected.pdf ? [] : pages, isPdf: !!selected.pdf, pdfImage: selected.pdf?.image || '', pdfLabel: selected.pdf ? 'Page ' + (selected.pdf.page+1) + ' of ' + selected.pdf.count : '', pdfPrevious: () => selected.pdf && selected.pdf.page > 0 ? pdfPage(selected.pdf.page-1,api) : undefined, pdfNext: () => selected.pdf && selected.pdf.page+1 < selected.pdf.count ? pdfPage(selected.pdf.page+1,api) : undefined, pdfHasPrevious: !!selected.pdf && selected.pdf.page > 0, pdfHasNext: !!selected.pdf && selected.pdf.page+1 < selected.pdf.count, paper: '#FFFFFF', isPhoto: false,
+          // Offered only when Messages can take this picture: a PNG or JPEG whose known size is within its limit. readPicture rechecks the bytes.
+          canMessage:typeof views.messages?.sharePicture==='function'&&selected.result.status==='selected'&&(mime==='image/png'||mime==='image/jpeg')&&views.messages.pictureFits?.(mime,selected.result.size)===true,
+          message:()=>views.messages.sharePicture(async()=>decodedFile(await readSelected(selected,questionCurrent)),questionCurrent),
+          name, nativeSelectionId:selected.result.selectionId, base: name, ext: '', canForget:true, forget, ...previewMeta(selected.result,mime), d: '',
+          textBody: selected.pdf ? '' : selected.text || '', isPdf: !!selected.pdf, pdfImage: selected.pdf?.image || '', pdfLabel: selected.pdf ? 'Page ' + (selected.pdf.page+1) + ' of ' + selected.pdf.count : '', pdfPrevious: () => selected.pdf && selected.pdf.page > 0 ? pdfPage(selected.pdf.page-1,api) : undefined, pdfNext: () => selected.pdf && selected.pdf.page+1 < selected.pdf.count ? pdfPage(selected.pdf.page+1,api) : undefined, pdfHasPrevious: !!selected.pdf && selected.pdf.page > 0, pdfHasNext: !!selected.pdf && selected.pdf.page+1 < selected.pdf.count, paper: '#FFFFFF', isPhoto: false,
           mediaImage:media?.kind==='image',mediaVideo:media?.kind==='video',mediaAudio:media?.kind==='audio',mediaUrl:media?.url,mediaRef,
           mediaError:()=>{if(!sameSelection()||!current)return;current={...current,mediaFailed:true,status:'Preview unavailable for this file.'};refresh();},
           previewStatus:!media&&!selected.pdf&&selected.text===undefined?selected.status:'',
           canOpenElsewhere:selected.result.status==='selected'&&!!selected.result.selectionId,
           openElsewhereLabel:Capacitor.isNativePlatform()?'Open in Android':'Download file',openElsewhere:()=>void open(api,selected,!Capacitor.isNativePlatform()),
-          photoBg: image ? `url(${JSON.stringify(image)}) center / contain no-repeat` : '', photoSun: 'none',
-          isReceipt: false, isAudio: false, isArchive: false, receipt: null, contents: [],
           renaming: !!st.renaming, notRenaming: !st.renaming, rn: typeof st.rn === 'string' ? st.rn : name, onRn: (event: Event) => api.set({rn:(event.target as HTMLInputElement).value}), saveRn: () => rename(api), rnKey: (event: KeyboardEvent) => {if(event.key === 'Enter'){event.preventDefault();void rename(api);}if(event.key === 'Escape')api.set({renaming:false});}, asking: false, asked: false, canAsk,
           askLabel: 'Ask Alpha', ask, close,
           startRename: () => selected.result.status === 'renamed-reselect' ? api.toast('Reselect file') : api.set({renaming:true,rn:name}),
@@ -220,7 +314,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
     const back = definition.back;
     definition.back = (st: Bag, api: Bag) => { if (st.open === marker) { clear(); api.set({ open: null }); return true; } return back?.(st, api); };
   }
-  async function accept(module: string, result: NativeResult, api: Bag, recent: {kind:'selected'}|{kind:'tree';treeId:string}|false = {kind:'selected'}) {
+  async function accept(module: string, result: NativeResult, api: Bag, recent: {kind:'selected'}|false = {kind:'selected'}) {
     if (!Capacitor.isNativePlatform()&&result.status==='selected'&&result.action==='photos'&&result.selectionId?.startsWith('browser-photo:')) { clear();api.open('photos',{open:'native-camera-'+result.selectionId.slice(14)});return; }
     if (result.status !== 'selected' || !result.selectionId) return;
     clear();
@@ -238,7 +332,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
     try {
       const response = await DailyApps.readSelected({ selectionId: result.selectionId });
       if (epoch !== requestEpoch || current?.result.selectionId !== result.selectionId) return;
-      current = { ...current, text: response.status === 'read' ? response.text : undefined, status: selectedPreviewText(response) };
+      current = { ...current, text: response.status === 'read' ? response.text : undefined, status: selectedPreviewText(response), sensitive:response.status==='read'&&sensitiveReadingText(response.text??'') };
       // Native currently returns status "read"; use only a successful text result.
       refresh();
     } catch {
@@ -247,7 +341,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
     }
   }
   Component.prototype.filesAgent=installFilesBrowserAdapter(views.files as Parameters<typeof installFilesBrowserAdapter>[0],accept,clear,{
-    storage:registerPlugin<FilesStoragePort<NativeResult>>('AlphaFiles'),
+    storage:registerPlugin<AlphaFilesPlugin>('AlphaFiles'),
     createInlineModal,
     menuFocus:()=>document.querySelector<HTMLElement>('[data-alpha-subview="files-folder"] button[aria-label="Files options"]'),
     forgetSelected:selectionId=>DailyApps.forgetSelected({selectionId}),
@@ -265,7 +359,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
     out.fileReadNotice=storageAccessible&&!out.browse?.loading?(out.nativeTreeStatus||out.fd?.note):'';
     if(!Capacitor.isNativePlatform()&&Array.isArray(items)&&items.length&&items.every((row:Bag)=>{try{return /^Photos\/(Images|Videos)\//.test(JSON.parse(row.id)[1]);}catch{return false;}})){
       out.mediaCollection=true;out.filePlacement=false;out.canRename=false;
-      out.selSaveLocally=()=>registerPlugin<{storageSaveMedia(input:{paths:string[]}):Promise<unknown>}>('AlphaFiles').storageSaveMedia({paths:items.filter((row:Bag)=>row.selOn).map((row:Bag)=>JSON.parse(row.id)[1])});
+      out.selSaveLocally=()=>registerPlugin<AlphaFilesBrowserMethods>('AlphaFiles').storageSaveMedia({paths:items.filter((row:Bag)=>row.selOn).map((row:Bag)=>JSON.parse(row.id)[1])});
     }
     return out;
   };

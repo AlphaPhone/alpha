@@ -9,6 +9,8 @@ export interface CanonicalCalendarFixtureOptions {
   launcher?: boolean;
   organizerSelf?: boolean;
   guestEmails?: string[];
+  /** The owner is an invited guest who has not answered; someone else organizes. */
+  invitedSelf?: boolean;
 }
 /** Closed read-only CalendarService transport. Install before navigation when another
  * native fixture adds event handoffs. The current client, controller and UI run unchanged. */
@@ -61,7 +63,7 @@ export async function installCanonicalCalendarFixture(page: Page, options: Canon
       connectorAccountId:calendar.connectorAccountId,calendarId:calendar.calendarId,
       title:options.eventTitle,description:'',location:options.location??'',status:'confirmed',
       startAt:new Date(begin).toISOString(),endAt:new Date(end).toISOString(),isAllDay:false,
-      timezone:'UTC',htmlLink:null,conferenceLink:null,organizer:options.organizerSelf?{email:'owner@example.org',displayName:'Owner',self:true}:null,attendees:(options.guestEmails??[]).map(email=>({email,displayName:null,responseStatus:'accepted',self:false,organizer:false,optional:false})),
+      timezone:'UTC',htmlLink:null,conferenceLink:null,organizer:options.organizerSelf?{email:'owner@example.org',displayName:'Owner',self:true}:null,attendees:[...(options.guestEmails??[]).map(email=>({email,displayName:null,responseStatus:'accepted',self:false,organizer:false,optional:false})),...(options.invitedSelf?[{email:'owner@example.org',displayName:null,responseStatus:'needsAction',self:true,organizer:false,optional:false}]:[])],
       metadata:{etag:'"fixture-event-v1"'},syncedAt:new Date().toISOString(),updatedAt:new Date().toISOString(),
     }:null;
     const client = {
@@ -127,6 +129,8 @@ export async function installCanonicalCalendarFixture(page: Page, options: Canon
           const data=await client.request(input.path,input.method,input.body,new AbortController().signal);
           return {status:200,body:JSON.stringify(data)};
         }
+        // Trash retention is off on this agent, as in the product, so the recording-cleanup read is refused.
+        if(plugin==='Agent'&&method==='request'&&input.path==='/api/notes/trash/recordings')return { status: 404, body: JSON.stringify({ success: false, error: { code: 'NOTES_TRASH_RETENTION_DISABLED' } }) };
         return base(plugin,method,input);
       };
     }else{

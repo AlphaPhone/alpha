@@ -10,7 +10,7 @@ export function noteBridgePlatform() {
  files['android/os/Handler.java']=files['android/os/Handler.java'].replace('public boolean post(Runnable task){ai.alphacompute.alphaphone.NoteRecordingPorts.post(task);return true;}','public boolean post(Runnable task){ai.alphacompute.alphaphone.NoteBridgePorts.post(task);return true;}');
  files['android/media/MediaRecorder.java']=files['android/media/MediaRecorder.java'].replace('    bytes();','    bytes();ai.alphacompute.alphaphone.NoteBridgePorts.starts++;');
  Object.assign(files,{
-  'ai/eliza/plugins/passwords/PasswordSurfaces.java':`package ai.eliza.plugins.passwords;
+  'ai/alphacompute/alphaphone/PasswordSurfaces.java':`package ai.alphacompute.alphaphone;
 public final class PasswordSurfaces {public interface Listener {void onSecretSurfaceChanged(boolean visible);}public static void addListener(Listener value){}public static void removeListener(Listener value){}public static boolean visible(){return false;}}`,
   'ai/eliza/plugins/agent/runtime/NativeProviderSlot.java':`package ai.eliza.plugins.agent.runtime;
 public final class NativeProviderSlot {public static String managementRevision(String value,long epoch){throw new AssertionError("Unexercised provider revision");}}`,
@@ -42,6 +42,7 @@ public class PluginCall {
  public PluginCall(JSObject data){this.data=data;}
  public String getString(String key){return data.getString(key);}
  public String getString(String key,String fallback){return data.getString(key,fallback);}
+ public Boolean getBoolean(String key){return getBoolean(key,null);}
  public Boolean getBoolean(String key,Boolean fallback){return data.getBoolean(key,fallback);}
  public JSObject getData(){return data;}
  public Long getLong(String key){return data.has(key)?data.optLong(key):null;}

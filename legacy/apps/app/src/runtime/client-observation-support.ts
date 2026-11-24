@@ -1,8 +1,10 @@
-import {readClientTurnObservationPeerSupport,type ClientTurnObservationSupport} from '../../../../.eliza/client-features/packages/contracts/src/client-turn-observation.ts';
+import {readClientTurnObservationPeerSupport,type ClientBrowserPageObservation,type ClientTurnObservationOptionalField,type ClientTurnObservationSupport} from '../../../../.eliza/client-features/packages/contracts/src/client-turn-observation.ts';
 import {normalizeRemoteAgentPairingInstanceId} from '../../../../.eliza/client-features/packages/contracts/src/contracts/remote-agent-pairing.ts';
 import type {VerifiedSession,ContextEnvelope} from './alpha-client';
+import {isRecord} from '../lib/parse.ts';
+import {sessionKey} from '../lib/session-key.ts';
 
-export interface ClientObservationBinding extends VerifiedSession {
+interface ClientObservationBinding extends VerifiedSession {
  connectionEpoch:number;
  /** Existing API-process pairing instance, learned through the authenticated handshake. */
  serverInstanceId:string;
@@ -15,7 +17,7 @@ export class ClientObservationSupportCache {
  private key(binding:ClientObservationBinding):string|undefined {
   const instance=normalizeRemoteAgentPairingInstanceId(binding.serverInstanceId);
   if(!instance||!Number.isSafeInteger(binding.connectionEpoch)||binding.connectionEpoch<0||![binding.origin,binding.ownerId,binding.agentId,binding.sessionId].every(value=>typeof value==='string'&&value.length>0))return;
-  return JSON.stringify([binding.origin,binding.ownerId,binding.agentId,binding.sessionId,binding.connectionEpoch,instance]);
+  return sessionKey(binding.origin,binding.ownerId,binding.agentId,binding.sessionId,binding.connectionEpoch,instance);
  }
  admit(status:unknown,binding:ClientObservationBinding):boolean {
   this.clear();const key=this.key(binding);
@@ -24,14 +26,18 @@ export class ClientObservationSupportCache {
   if(!support)return false;
   this.binding=key;this.support=support;return true;
  }
- calendarDaySupported(binding:ClientObservationBinding):boolean {
-  const key=this.key(binding);return key!==undefined&&key===this.binding&&this.support?.optionalFields.includes('calendarDay')===true;
+ supports(binding:ClientObservationBinding,field:ClientTurnObservationOptionalField):boolean {
+  const key=this.key(binding);return key!==undefined&&key===this.binding&&this.support?.optionalFields.includes(field)===true;
  }
+ calendarDaySupported(binding:ClientObservationBinding):boolean {return this.supports(binding,'calendarDay');}
 }
-/** Strip an unsupported optional field without changing the ordinary observation. */
+const OPTIONAL_FIELDS=['calendarDay','location'] as const;
+/** Strip each unsupported optional field without changing the ordinary observation. */
 export function contextForObservationSupport(context:ContextEnvelope,cache:ClientObservationSupportCache,binding:ClientObservationBinding|undefined):ContextEnvelope {
- const {calendarDay,...ordinary}=context;
- return calendarDay&&binding&&cache.calendarDaySupported(binding)?{...ordinary,calendarDay:{...calendarDay}}:ordinary;
+ const {calendarDay,location,...ordinary}=context;
+ return {...ordinary,
+  ...(calendarDay&&binding&&cache.supports(binding,'calendarDay')?{calendarDay:{...calendarDay}}:{}),
+  ...(location&&binding&&cache.supports(binding,'location')?{location:{...location}}:{})};
 }
 
 /** One verified session handshake, followed by a fresh comparison before optional-field use. */
@@ -68,23 +74,30 @@ export class ClientObservationSupportSession {
   this.check(signal);
   try{
    const status=await this.status(signal);this.check(signal);
-   const instance=status&&typeof status==='object'&&!Array.isArray(status)?normalizeRemoteAgentPairingInstanceId(Reflect.get(status,'serverInstanceId')):null;
+   const instance=isRecord(status)?normalizeRemoteAgentPairingInstanceId(status.serverInstanceId):null;
    if(!instance)return;
    const binding={...this.session,serverInstanceId:instance};
    if(this.cache.admit(status,binding))this.known=Object.freeze(binding);
   }catch{this.known=undefined;this.cache.clear();this.check(signal);}
  }
- /** An old/unreadable peer omits only the optional field; ordinary context remains intact. */
- async context(context:ContextEnvelope,signal:AbortSignal):Promise<ContextEnvelope>{
-  const ordinary=contextForObservationSupport(context,this.cache,undefined);
-  this.check(signal);if(!context.calendarDay)return ordinary;
+ /** An old/unreadable peer omits only the optional fields; ordinary context remains intact. */
+ async context(context:ContextEnvelope,signal:AbortSignal):Promise<ContextEnvelope>{return (await this.turn(context,undefined,signal)).context;}
+ /** The observation and the open Browser page (sent beside it), each optional field only to a
+  * peer whose fresh status still declares it. */
+ /** This turn's fresh status read, started by the caller beside its other reads so it adds no
+  * wait of its own; `turn` compares it as it would one it fetched itself. */
+ freshStatus(signal:AbortSignal):Promise<unknown>{const pending=this.status(signal);pending.catch(()=>{});return pending;}
+ async turn(context:ContextEnvelope,browserPage:ClientBrowserPageObservation|undefined,signal:AbortSignal,fresh?:Promise<unknown>):Promise<{context:ContextEnvelope;browserPage?:ClientBrowserPageObservation}>{
+  const ordinary={context:contextForObservationSupport(context,this.cache,undefined)};
+  const wanted:ClientTurnObservationOptionalField[]=[...OPTIONAL_FIELDS.filter(field=>context[field]!==undefined),...(browserPage?['browserPage' as const]:[])];
+  this.check(signal);if(!wanted.length)return ordinary;
   await this.joined(signal);this.check(signal);
   const binding=this.known;
-  if(!binding||!this.cache.calendarDaySupported(binding))return ordinary;
+  if(!binding||!wanted.some(field=>this.cache.supports(binding,field)))return ordinary;
   try{
-   const status=await this.status(signal);this.check(signal);
+   const status=await (fresh??this.status(signal));this.check(signal);
    if(!this.cache.admit(status,binding)){this.known=undefined;return ordinary;}
-   return contextForObservationSupport(context,this.cache,binding);
+   return {context:contextForObservationSupport(context,this.cache,binding),...(browserPage&&this.cache.supports(binding,'browserPage')?{browserPage}:{})};
   }catch{this.known=undefined;this.cache.clear();this.check(signal);return ordinary;}
  }
 }

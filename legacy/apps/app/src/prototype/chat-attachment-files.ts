@@ -1,4 +1,29 @@
-import {MAX_CHAT_UPLOAD_ATTACHMENTS} from '../../../../.eliza/client-features/packages/core/src/chat-upload-limits.ts';
+import {
+  CHAT_IMAGE_MIME_TYPE_SET, CHAT_UPLOAD_MIME_TYPES, MAX_CHAT_ATTACHMENT_NAME_LENGTH,
+  MAX_CHAT_IMAGE_INTAKE_BYTES, MAX_CHAT_MEDIA_RAW_BYTES, MAX_CHAT_UPLOAD_ATTACHMENTS,
+} from '../../../../.eliza/client-features/packages/core/src/chat-upload-limits.ts';
+
+export type AttachmentBytes = { name: string; mimeType: string; dataBase64: string };
+const uploadTypes = new Set<string>(CHAT_UPLOAD_MIME_TYPES.filter(type => !/^(audio|video)\//.test(type)));
+export const chatAttachmentAccept = [...uploadTypes].join(',');
+export const chatAttachmentFileLimit = (mime: string) => CHAT_IMAGE_MIME_TYPE_SET.has(mime) ? MAX_CHAT_IMAGE_INTAKE_BYTES : MAX_CHAT_MEDIA_RAW_BYTES;
+export const acceptsChatAttachment = (name: string, mime: string) => name.length > 0 && name.length <= MAX_CHAT_ATTACHMENT_NAME_LENGTH && uploadTypes.has(mime);
+
+export function decodedFile(value: AttachmentBytes): File {
+  if (!acceptsChatAttachment(value.name, value.mimeType) || value.dataBase64.length > Math.ceil(chatAttachmentFileLimit(value.mimeType) / 3) * 4) {
+    throw Error('Choose a supported photo or document.');
+  }
+  const raw = atob(value.dataBase64);
+  const bytes = Uint8Array.from(raw, character => character.charCodeAt(0));
+  return new File([bytes], value.name, { type: value.mimeType });
+}
+
+export type SelectedChatFile = {
+  current(): boolean;
+  read(current: () => boolean): Promise<File | undefined>;
+  prompt?: string;
+  commit?(current: () => boolean): Promise<boolean>;
+};
 
 export type ChatFile = {id:string;data:string;mimeType:string;name:string};
 export function storedChatFiles(value:unknown):ChatFile[] {

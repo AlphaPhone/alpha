@@ -94,9 +94,9 @@ test('the product palette reaches the document root and dialogs outside the phon
   await expect(page.getByRole('button', { name: 'Apps', exact: true })).toBeVisible();
   const colours = await page.evaluate(() => {
     const button = document.createElement('button');
-    button.className = 'content-question-primary';
+    button.className = 'attachment-picker-confirm';
     const dialog = document.createElement('div');
-    dialog.className = 'note-source-dialog';
+    dialog.className = 'attachment-picker-sheet';
     dialog.append(button);
     document.body.append(dialog);
     const result = {

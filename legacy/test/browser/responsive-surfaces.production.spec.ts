@@ -1,5 +1,4 @@
 import {openCanonicalCalendar} from './helpers/canonical-calendar';
-import { openLegacyNotes } from './helpers/legacy-notes';
 import { test, expect, type Page, type Locator } from '@playwright/test';
 
 // Issue #411, responsive-surface matrix. Production renderer in a
@@ -21,8 +20,7 @@ async function open(page: Page, app: string) {
   }
   await page.addInitScript(() => localStorage.setItem('alpha.connection.selection.v1', JSON.stringify({ kind: 'offline', localApps: true })));
   await page.goto('/');
-  if(app==='Notes')await openLegacyNotes(page);
-  else await page.getByRole('button', { name: app, exact: true }).click();
+  await page.getByRole('button', { name: app, exact: true }).click();
 }
 const geometry = (page: Page) => page.evaluate(() => {
   const root = document.documentElement;
@@ -50,36 +48,6 @@ async function expectTarget(page: Page, control: Locator) {
   expect(bounds.x).toBeGreaterThanOrEqual(-0.5); expect(bounds.x + bounds.width).toBeLessThanOrEqual(view.width + 0.5);
 }
 
-test('the canvas keeps its own density and takes its arrangement from measured size, not the keyboard', async ({ page }) => {
-  await open(page, 'Settings');
-  expect(await geometry(page)).toEqual({ scale: 1, landscape: false, wide: false });
-  await resize(page, SMALL_LANDSCAPE);
-  // A small phone turned sideways is not shrunk: 44px controls stay 44px.
-  await expect.poll(() => geometry(page)).toEqual({ scale: 1, landscape: true, wide: false });
-  await expectTarget(page, page.getByRole('button', { name: 'Back to apps', exact: true }));
-  await expectTarget(page, page.getByRole('button', { name: 'About', exact: true }));
-  // A tablet is never drawn as a magnified phone, in either orientation.
-  await resize(page, TABLET_LANDSCAPE);
-  await expect.poll(() => geometry(page)).toEqual({ scale: 1, landscape: true, wide: true });
-  await resize(page, TABLET_PORTRAIT);
-  await expect.poll(() => geometry(page)).toEqual({ scale: 1, landscape: false, wide: true });
-  expect((await box(page.getByRole('button', { name: 'Back to apps', exact: true }))).height).toBeLessThan(60);
-
-  // Typing in portrait: the keyboard shortens the window below its width, which is not a rotation.
-  await resize(page, PORTRAIT);
-  await page.getByRole('button', { name: 'Back to apps', exact: true }).click();
-  await openLegacyNotes(page);
-  await page.getByRole('button', { name: 'New note', exact: true }).click();
-  const body = page.getByRole('textbox', { name: 'Note', exact: true });
-  await body.fill('Typed with the keyboard open');
-  await resize(page, { width: 412, height: 380 });
-  await expect.poll(() => geometry(page)).toEqual({ scale: 1, landscape: false, wide: false });
-  await expect(body).toBeFocused();
-  // A real rotation changes the width; the arrangement follows it even while typing.
-  await resize(page, LANDSCAPE);
-  await expect.poll(() => geometry(page)).toMatchObject({ scale: 1, landscape: true });
-  await expect(body).toHaveValue('Typed with the keyboard open');
-});
 
 test('Settings keeps a readable column, 44px rows and the focused row through every size', async ({ page }) => {
   await open(page, 'Settings');
@@ -117,7 +85,7 @@ test('a Calendar event draft keeps its text, caret and field through resizing, i
 
 test('the Calendar month picker is a bounded sheet on a wide screen and scrolls on a short one', async ({ page }) => {
   await open(page, 'Calendar');
-  await page.getByRole('button', { name: 'Month view', exact: true }).click();
+  await page.getByRole('button', { name: 'Choose date', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Choose calendar date', exact: true });
   await expect(dialog).toBeVisible();
   await resize(page, TABLET_LANDSCAPE);
@@ -275,73 +243,7 @@ test('the Settings Theme choice is a 44px target at every size', async ({ page }
   }
 });
 
-test('Notes opens beside its list on a wide canvas and keeps each draft through switching and collapsing', async ({ page }) => {
-  await open(page, 'Notes');
-  await resize(page, TABLET_LANDSCAPE);
-  const title = page.getByRole('textbox', { name: 'Title', exact: true }), body = page.getByRole('textbox', { name: 'Note', exact: true });
-  const list = page.locator('[data-alpha-subview="notes-list"]'), editor = page.locator('[data-alpha-subview="notes-editor"]');
-  await page.getByRole('button', { name: 'New note', exact: true }).click();
-  await title.fill('First draft'); await body.fill('Words for the first note that must not be lost.');
-  // The list stays usable beside the open note, and marks it.
-  await expect(list).toBeVisible();
-  await expect.poll(() => inert(list)).toBe(false);
-  const listBox = await box(list), editorBox = await box(editor);
-  expect(listBox.x + listBox.width).toBeLessThanOrEqual(editorBox.x + 1);
-  await expect(page.getByRole('button', { name: 'Open First draft', exact: true })).toHaveAttribute('aria-current', 'true');
-  await page.getByRole('button', { name: 'New note', exact: true }).click();
-  await title.fill('Second draft'); await body.fill('The second note, typed beside the list.');
-  await page.getByRole('button', { name: 'Open First draft', exact: true }).click();
-  await expect(body).toHaveValue('Words for the first note that must not be lost.');
-  await page.getByRole('button', { name: 'Open Second draft', exact: true }).click();
-  await expect(body).toHaveValue('The second note, typed beside the list.');
-  await body.evaluate((element: HTMLTextAreaElement) => { element.focus(); element.setSelectionRange(4, 10); });
-  const original = await body.elementHandle();
-  // Collapsing to one column keeps the open note, its element and caret; the list leaves the order.
-  for (const viewport of [PORTRAIT, LANDSCAPE, TABLET_LANDSCAPE, SMALL_LANDSCAPE]) {
-    await resize(page, viewport);
-    await expect(body).toHaveValue('The second note, typed beside the list.');
-    expect(await body.evaluate((element, previous) => element === previous, original)).toBe(true);
-    expect(await body.evaluate((element: HTMLTextAreaElement) => [element.selectionStart, element.selectionEnd])).toEqual([4, 10]);
-    await expect.poll(() => inert(list)).toBe(viewport.width < 1000);
-    await page.screenshot({ animations: 'disabled', path: test.info().outputPath(`notes-split-${viewport.width}x${viewport.height}.png`) });
-  }
-  // Large text returns to one pane on a wide canvas, with the same editor and draft.
-  const probe = (size: string) => page.evaluate(value => { document.querySelector<HTMLElement>('[data-alpha-text-probe]')!.style.fontSize = value; }, size);
-  await resize(page, TABLET_LANDSCAPE);
-  await expect.poll(() => inert(list)).toBe(false);
-  await probe('150px');
-  await expect.poll(() => inert(list)).toBe(true);
-  expect(await body.evaluate((element, previous) => element === previous, original)).toBe(true);
-  await expect(body).toHaveValue('The second note, typed beside the list.');
-  await probe('100px');
-  await expect.poll(() => inert(list)).toBe(false);
-  // Focus left on the list when it is covered moves to the open note's controls.
-  await page.getByRole('button', { name: 'Open First draft', exact: true }).focus();
-  await resize(page, PORTRAIT);
-  await expect(page.getByRole('button', { name: 'Back to notes', exact: true })).toBeFocused();
-});
 
-test('switching notes beside the list leaves the previous one as Back does', async ({ page }) => {
-  await open(page, 'Notes');
-  await resize(page, TABLET_LANDSCAPE);
-  const title = page.getByRole('textbox', { name: 'Title', exact: true }), newItem = page.getByRole('textbox', { name: 'New item', exact: true });
-  await page.getByRole('button', { name: 'New note', exact: true }).click();
-  await title.fill('List A');
-  await page.getByRole('button', { name: 'Turn into checklist', exact: true }).click();
-  await newItem.fill('Half-typed item for list A');
-  // The unsent item belongs to List A; it is not carried into the next note.
-  await page.getByRole('button', { name: 'New note', exact: true }).click();
-  await title.fill('List B');
-  await page.getByRole('button', { name: 'Turn into checklist', exact: true }).click();
-  await expect(newItem).toHaveValue('');
-  // An untouched new note is dropped when another note is opened beside the list, as Back drops it.
-  await page.getByRole('button', { name: 'New note', exact: true }).click();
-  await expect(title).toHaveValue('New note');
-  await page.getByRole('button', { name: 'Open List A', exact: true }).click();
-  await expect(title).toHaveValue('List A');
-  await expect(page.getByRole('button', { name: 'Open Untitled', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Open List B', exact: true })).toHaveCount(1);
-});
 
 test('Calendar shows readable day columns on wide screens, a single-day agenda at large text, and keeps the opened event', async ({ page }) => {
   await open(page, 'Calendar');

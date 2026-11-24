@@ -78,7 +78,8 @@ test('managed read broker is bound before launch and revoked even when resident 
   await host.bind({token:'synthetic-cloud-key',credentialId:'read-owner',reference:'read-ref'});
   assert.deepEqual(events,['broker-start','launch']);assert.equal(launches[0].env.ELIZA_MANAGED_CALENDAR_READ_BROKER,'http://127.0.0.1:47871/__alpha-owner-gmail');
   assert.equal(launches[0].env.ELIZA_MANAGED_GMAIL_READ_BROKER,launches[0].env.ELIZA_MANAGED_CALENDAR_READ_BROKER);
-  for(const key of ['ELIZA_MANAGED_GMAIL_SEND_BROKER','ELIZA_MANAGED_GMAIL_OPERATION_BROKER'])assert.equal(launches[0].env[key],undefined,key);
+  assert.equal(launches[0].env.ELIZA_MANAGED_GMAIL_SEND_BROKER,launches[0].env.ELIZA_MANAGED_GMAIL_READ_BROKER);
+  assert.equal(launches[0].env.ELIZA_MANAGED_GMAIL_OPERATION_BROKER,undefined);
   rejectStop=true;await assert.rejects(host.clear(),error=>error.name==='AggregateError');
   assert.deepEqual(events,['broker-start','launch','broker-close','stop']);assert.equal(host.status('read-owner').attachable,false);assert.equal(launches.length,1);
   rejectStop=false;await host.clear();assert.equal(launches.length,2);assert.equal(launches[1].env.ELIZA_MANAGED_CALENDAR_READ_BROKER,'');assert.equal(launches[1].env.ELIZA_MANAGED_GMAIL_READ_BROKER,'');
@@ -155,7 +156,8 @@ test('Gmail and embeddings keep their Cloud owner while Direct owns text and med
  const assertRead=(entry,port)=>{
   assert.equal(entry.env.ELIZA_MANAGED_GMAIL_READ_BROKER,`http://127.0.0.1:${port}/__alpha-owner-gmail`);
   assert.equal(entry.env.ELIZA_MANAGED_GMAIL_READ_BROKER,entry.env.ELIZA_MANAGED_CALENDAR_READ_BROKER);
-  for(const key of ['ELIZA_MANAGED_GMAIL_SEND_BROKER','ELIZA_MANAGED_GMAIL_OPERATION_BROKER'])assert.equal(entry.env[key],undefined,key);
+  assert.equal(entry.env.ELIZA_MANAGED_GMAIL_SEND_BROKER,entry.env.ELIZA_MANAGED_GMAIL_READ_BROKER);
+  assert.equal(entry.env.ELIZA_MANAGED_GMAIL_OPERATION_BROKER,undefined);
  };
  try{
   await host.bind({token:'synthetic-cloud-a',credentialId:'owner-a',reference:'ref-a'});assertRead(launches.at(-1),47871);
@@ -182,6 +184,7 @@ test('Gmail and embeddings keep their Cloud owner while Direct owns text and med
   assert.equal(launches.at(-1).env.ELIZAOS_CLOUD_EMBEDDING_API_KEY,undefined);
   assert.equal(launches.at(-1).env.ELIZAOS_CLOUD_USE_EMBEDDINGS,'false');
   assert.equal(JSON.parse(await fs.readFile(join(profile,'provider-launch.json'),'utf8')).linkedAccounts.elizacloud.status,'unlinked');
-  for(const key of ['ELIZA_MANAGED_GMAIL_SEND_BROKER','ELIZA_MANAGED_GMAIL_OPERATION_BROKER'])assert.equal(launches.at(-1).env[key],undefined,key);
+  assert.equal(launches.at(-1).env.ELIZA_MANAGED_GMAIL_SEND_BROKER,'');
+  assert.equal(launches.at(-1).env.ELIZA_MANAGED_GMAIL_OPERATION_BROKER,undefined);
  }finally{await host.close();await fs.rm(profile,{recursive:true,force:true});}
 });

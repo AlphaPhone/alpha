@@ -7,42 +7,35 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import java.util.ArrayDeque;
 
 /**
- * Android's own notification shade, as instrumented tests observe it (#416, #417). Alpha draws no
+ * Android's own notification shade, as instrumented tests observe it. Alpha draws no
  * shade: its notices are Android notifications and are opened, tapped and cleared in SystemUI.
  * The shade counts as open while SystemUI holds the active window, the same signal
  * RealClockInstrumentedTest uses for an expanded shade (measured on API 35/36 emulators only).
  */
 final class AndroidShade {
  private AndroidShade() {}
- static final String SYSTEM_UI = "com.android.systemui";
+ private static final String SYSTEM_UI = "com.android.systemui";
  /** The page draws no Alpha notification shade at all (no stand-in outside a browser). */
  static final String ALPHA_SHADE_ABSENT = "document.querySelector('[data-alpha-layer=\"shade\"]')===null";
 
  /**
-  * The flags of the caller's UiAutomation connection. Instrumentation.getUiAutomation(flags) drops and
-  * reconnects the shared connection whenever the flags differ, and a connection without
-  * FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES suspends every accessibility service. A test that holds
-  * a flagged connection (AccessibilityInstrumentedTest) sets its flags
-  * here for as long as it holds it, so observing the shade never unbinds a service.
+  * The connection with the flags the caller gave UiDevice through Configurator.
+  * Instrumentation.getUiAutomation(flags) drops and reconnects the shared connection whenever the
+  * flags differ, and a connection without FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES suspends every
+  * accessibility service, so observing the shade never unbinds a service a test kept bound.
   */
- private static volatile int automationFlags = 0;
- static void useAutomationFlags(int flags) { automationFlags = flags; }
- private static UiAutomation ui() { return InstrumentationRegistry.getInstrumentation().getUiAutomation(automationFlags); }
+ private static UiAutomation ui() { return InstrumentationRegistry.getInstrumentation().getUiAutomation(androidx.test.uiautomator.Configurator.getInstance().getUiAutomationFlags()); }
  private static boolean systemUi(AccessibilityNodeInfo node) { return node != null && SYSTEM_UI.contentEquals(node.getPackageName() == null ? "" : node.getPackageName()); }
 
  static boolean isOpen() { return systemUi(ui().getRootInActiveWindow()); }
 
  /** Polls for the expanded shade; false when it did not open within the time given. */
- static boolean waitOpen(long millis) {
-  long end = SystemClock.uptimeMillis() + millis;
-  do { if (isOpen()) return true; SystemClock.sleep(100); } while (SystemClock.uptimeMillis() < end);
-  return false;
- }
+ static boolean waitOpen(long millis) { return waitShade(true, millis); }
 
- /** Polls until SystemUI no longer holds the active window. */
- static boolean waitClosed(long millis) {
+ /** Polls until SystemUI holds the active window (open) or no longer holds it. */
+ private static boolean waitShade(boolean open, long millis) {
   long end = SystemClock.uptimeMillis() + millis;
-  do { if (!isOpen()) return true; SystemClock.sleep(100); } while (SystemClock.uptimeMillis() < end);
+  do { if (isOpen() == open) return true; SystemClock.sleep(100); } while (SystemClock.uptimeMillis() < end);
   return false;
  }
 
@@ -61,9 +54,9 @@ final class AndroidShade {
  static void collapse() throws Exception {
   if (!isOpen()) return;
   ui().performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK);
-  if (waitClosed(3000)) return;
+  if (waitShade(false, 3000)) return;
   try (java.io.InputStream done = new android.os.ParcelFileDescriptor.AutoCloseInputStream(ui().executeShellCommand("cmd statusbar collapse"))) { done.readAllBytes(); }
-  if (!waitClosed(5000)) throw new AssertionError("Android's notification shade did not close");
+  if (!waitShade(false, 5000)) throw new AssertionError("Android's notification shade did not close");
  }
 
  /**
@@ -92,7 +85,7 @@ final class AndroidShade {
  }
 
  /** The first visible SystemUI node whose text is exactly this, or null. */
- static AccessibilityNodeInfo text(String value) {
+ private static AccessibilityNodeInfo text(String value) {
   AccessibilityNodeInfo root = ui().getRootInActiveWindow();
   if (!systemUi(root)) return null;
   ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
@@ -111,10 +104,10 @@ final class AndroidShade {
   return null;
  }
 
- static final String ROW_ID = SYSTEM_UI + ":id/expandableNotificationRow";
+ private static final String ROW_ID = SYSTEM_UI + ":id/expandableNotificationRow";
 
  /** The notification row that owns this node (SystemUI's ExpandableNotificationRow), or null. */
- static AccessibilityNodeInfo ownRow(AccessibilityNodeInfo node) {
+ private static AccessibilityNodeInfo ownRow(AccessibilityNodeInfo node) {
   for (int i = 0; node != null && i < 12; i++, node = node.getParent())
    if (ROW_ID.equals(node.getViewIdResourceName())) return node;
   return null;
@@ -130,7 +123,7 @@ final class AndroidShade {
   * Whether this row holds other notification rows, which makes it a group's summary row and never
   * one notice's own row. Clicking it is a tap on the whole group.
   */
- static boolean holdsRows(AccessibilityNodeInfo row) {
+ private static boolean holdsRows(AccessibilityNodeInfo row) {
   ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
   for (int i = 0; i < row.getChildCount(); i++) { AccessibilityNodeInfo child = row.getChild(i); if (child != null) queue.add(child); }
   for (int seen = 0; !queue.isEmpty() && seen < 1000; seen++) {

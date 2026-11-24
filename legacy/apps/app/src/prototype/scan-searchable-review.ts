@@ -6,7 +6,7 @@ import {localOcrErrorText} from '../ui/documents/local-ocr-messages';
 import {scanPdfErrorText,scanTextLayerErrorText} from '../ui/documents/scan-pdf-messages';
 import {scanExportTitle,exportScanPdf,ScanPdfExportError,scanPdfRetryable,systemPickerActive} from './scan-pdf';
 import {Capacitor} from '@capacitor/core';
-import type {ScanTextLine} from './scan-text-layer';
+import type {ScanTextLine} from '../../../../.eliza/client-features/plugins/plugin-files/src/documents/scan-text-layer.ts';
 /** Saved lines are presented for review; persistence and export both require explicit actions. */
 type ReviewResult={status:string;message:string;textLayers?:ScanTextLine[][]};
 export function reviewSearchableScan(input:Blob[],parent:AbortSignal,saved?:(ScanTextLine[]|null)[]):Promise<ReviewResult|undefined>{

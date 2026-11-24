@@ -1,34 +1,33 @@
 import {googleWorkspaceRedirectAllowed} from './google-workspace-return.ts';
-import {productionCloud, stagingCloud} from './cloud-deployment.generated.ts';
+import {productionCloud, stagingCloud as stagingAuthority} from './cloud-deployment.generated.ts';
 import {browserCloudResidentEnabled,browserCloudResidentEnvironment} from './browser-cloud-resident.ts';
-import {calendarSyncHttp,type CalendarSyncRequest} from './calendar-linked-provider.ts';
 import type {AutomationsMethod} from './automations-route-policy.ts';
 import { reviewMailAttachment } from './inbox-attachment.ts';
 import type { OpaqueMailAttachment } from './inbox-operation.ts';
-import { gmailCapabilitiesFor, gmailConsentCapabilities, type GmailGrantRequest } from './gmail-grants.ts';
+import { gmailCapabilitiesFor } from './gmail-grants.ts';
 import { ManagedGmailMailboxClient } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/managed-gmail-client.ts';
 import { withGmailAccountLabel } from '../ui/mailbox/grants.ts';
-import type { GmailAccount, GmailDraftContent, GmailDraftSummary, GmailInboxCapabilities, GmailInboxReceipt, GmailReadResult, GmailSearchPage, GmailThreadPage, GoogleConnection } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/types.ts';
+import type { GmailAccount, GmailDraftContent, GmailDraftSummary, GmailInboxCapabilities, GmailInboxReceipt, GmailReadResult, GmailSearchPage, GmailThreadPage } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/types.ts';
 import type { CloudMapsRoute } from '../maps/cloud-provider.ts';
 import {mapsTilePath} from './managed-service-routes.ts';
 import {parseCheckout,parsePlans,parseReferral,parseSubscription,type CheckoutStart,type PlanKey,type PlanOffer,type ReferralState,type SubscriptionState} from './cloud-plans.ts';
-import { authenticated as signInAuthenticated, googleOutcome, type CloudSignInGoogleOutcome, CloudSignInError, emailStarted, verified as signInVerified, type CloudSignInAuthenticated, type CloudSignInEmailStarted, type CloudSignInMfaRequired, type CloudSignInPort } from './cloud-sign-in.ts';
+import { authenticated as signInAuthenticated, googleOutcome, type CloudSignInGoogleOutcome, CloudSignInError, emailStarted, verified as signInVerified, type CloudSignInAuthenticated, type CloudSignInEmailStarted, type CloudSignInMfaRequired } from './cloud-sign-in.ts';
+import type { AlphaCloudSignInPlugin } from '../native/alpha-cloud-sign-in.ts';
 import type { EntitlementSource, FallbackPlan, OrganizationCreditBalance, RedeemResult } from './subscription-entitlement.ts';
-import { parseManagedGoogleCalendars, parseManagedGoogleCalendarFeed } from "../../../../.eliza/client-features/packages/app/src/runtime/managed-google-agent/managed-google-calendar-read.ts";
 import { CloudAccountBillingClient, CloudBillingError, type CloudBillingRequest, type CloudBillingResponse } from '../../../../.eliza/client-features/packages/cloud/sdk/src/cloud-account-billing.ts';
+import { expectRecord, expectString, expectTimestamp, expectUuidRfc } from '../lib/parse.ts';
+import { delay } from '../lib/abort.ts';
 /** Narrow Alpha adapter for Eliza Cloud managed services: sign-in, identity, subscription plan and
  * the connected Google services. Sign-in is in-app (cloud-sign-in.ts) once the native host reports
  * Cloud ready for this phone: the host signs in with Steward and mints an `eliza_mobile_` key through
  * Cloud's mobile App Auth routes, so no Eliza Cloud web page is opened. That is the only product
  * sign-in. The Cloud sign-in hand-off (`login()`, v3's cloud/api/auth/cli-session) is a development
  * surface: it exists only in ELIZA_DEV_ALLOW_TEST_MOCKS=1 builds and the loopback browser Cloud host
- * (`cloudSignInHandOffAvailable`); product bundles fold it away. Contracts inspected
- * in cloud/api/v1/app-auth, cloud/api/auth/cli-session, cloud/api/v1/eliza/google and the
- * upstream Cloud client. Native composition owns HTTP and secure storage. This module never
+ * (`cloudSignInHandOffAvailable`); product bundles fold it away. Native composition owns HTTP and
+ * secure storage. This module never
  * stores credentials in renderer persistence or logs them.
  * The agent always runs on the phone: this adapter has no hosted-agent discovery, runtime or
- * pairing route. The development-only hosted-agent fixture extends it in
- * development-cloud-agents.ts and is constructed only in ELIZA_DEV_ALLOW_TEST_MOCKS=1 builds. */
+ * pairing route. */
 export type CloudEnvironment = "production" | "staging";
 export type CloudAuthority = { readonly name: string; readonly api: string; readonly web: string; readonly agents: string; readonly entitlementAudience: string };
 // Staging is admitted in test mocks or the explicitly selected real browser Cloud QA host. QA builds reach
@@ -36,9 +35,13 @@ export type CloudAuthority = { readonly name: string; readonly api: string; read
 // Vite replaces import.meta.env at build time, so flag-off bundles fold the staging
 // authority away. Node contract tests import this source without Vite and keep both.
 const stagingAvailable: boolean = import.meta.env === undefined || import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS === '1' || (browserCloudResidentEnabled && browserCloudResidentEnvironment === 'staging');
+// Staging exists only in test-mocks builds, development serving and Node contract tests (no Vite).
+// The condition is written out here, not imported: Vite replaces import.meta.env before the bundler
+// links modules, so a product build drops this module's staging import whichever chunk holds it.
+const stagingCloud = import.meta.env===undefined||import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS==='1'||import.meta.env.DEV===true ? stagingAuthority : undefined;
 const authorities: Partial<Record<CloudEnvironment, CloudAuthority>> = {
   production: productionCloud,
-  ...(stagingAvailable ? { staging: stagingCloud } : {}),
+  ...(stagingAvailable && stagingCloud ? { staging: stagingCloud } : {}),
 };
 /**
  * Whether this build carries the Cloud sign-in hand-off (cli-session, the hosted cli-login page, then
@@ -93,63 +96,31 @@ export interface CloudNativeRequest {
  * credential self-revocation (DELETE) is reported unsupported unless the host opts in. */
 export interface CloudProtocolOptions { deleteRequests?: boolean;
   /** In-app sign-in host. Absent where this build has no sign-in (the production web build). */
-  signIn?: CloudSignInPort }
+  signIn?: AlphaCloudSignInPlugin }
 /** Server-side revocation of the CLI-issued credential. `supported:false` means nothing was sent
  * or the deployed Cloud has no self-revocation route; the local credential is cleared either way. */
-export type CloudSessionRevocation =
+type CloudSessionRevocation =
   | { supported: true; revoked: true; credentialId: string | null; revokedAt: string | null }
   | { supported: false; reason: "transport" | "server" | "no-credential" };
-export interface CloudLoginAttempt { sessionId: string; expiresAt: number; browserUrl: string }
+interface CloudLoginAttempt { sessionId: string; expiresAt: number; browserUrl: string }
 /** What happened to a sign-in this login replaced: absent when none was saved. Only a confirmed
  * server-side revocation is `revoked`; anything else is reported as unconfirmed. */
-export interface CloudLoginResult { previousSignIn?: "revoked" | "unconfirmed" }
-export interface CloudAgent {
-  id: string; name: string | null; status: string; executionTier: string | null;
-  /** Only validated REST targets, never internal bridge URLs. Null until available. */
-  runtimeUrl: string | null;
-}
-export type { GoogleConnection } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/types.ts';
-/** Managed Google Calendar wire data (@elizaos/plugin-calendar/linked-sync). Cloud enforces ownership of each
- * grant and exhausts provider pages before returning; no client cursor exists. */
-import type { GoogleCalendarEvent, GoogleCalendarFeed, GoogleCalendarRange, GoogleCalendarSummary } from '../../../../.eliza/client-features/plugins/plugin-calendar/src/linked-sync/google-reader.ts';
-export type { GoogleCalendarEvent, GoogleCalendarFeed, GoogleCalendarRange, GoogleCalendarSummary };
+interface CloudLoginResult { previousSignIn?: "revoked" | "unconfirmed" }
 export type { GmailAccount, GmailDraftContent, GmailDraftSummary, GmailInboxCapabilities, GmailInboxReceipt, GmailLink, GmailMessage } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/types.ts';
 /** Only absolute http(s) links without credentials are kept; anything else is dropped as untrusted. */
 export { safeMailLink } from '../../../../.eliza/client-features/plugins/plugin-inbox/src/mailbox/links.ts';
+type CloudCallOptions = { body?: unknown; method?: AutomationsMethod | 'PATCH'; authenticated?: boolean; timeoutMs?: number; headers?: Record<string,string>; credentialId?: string; expiresAt?: number };
 export class CloudProtocolError extends Error {
   constructor(readonly code: "invalid-response" | "http" | "expired" | "credentials-missing" | "credential-consumed" | "login-active" | "account-changed", readonly status?: number, readonly data?: unknown, readonly retryAfter?: string) {
     super(`Cloud ${code}${status ? ` (${status})` : ""}`);
     this.name = "CloudProtocolError";
   }
 }
-export type ObjectValue = Record<string, unknown>;
-export function object(value: unknown): ObjectValue {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new CloudProtocolError("invalid-response");
-  return value as ObjectValue;
-}
-export function string(value: unknown): string {
-  if (typeof value !== "string" || !value.trim()) throw new CloudProtocolError("invalid-response");
-  return value;
-}
-export function optionalString(value: unknown): string | null { return value == null ? null : string(value); }
-export function uuid(value: unknown): string {
-  const id = string(value);
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) throw new CloudProtocolError("invalid-response");
-  return id;
-}
-export function timestamp(value: unknown): number {
-  const parsed = Date.parse(string(value));
-  if (!Number.isFinite(parsed)) throw new CloudProtocolError("invalid-response");
-  return parsed;
-}
-export function delay(ms: number, signal: AbortSignal): Promise<void> {
-  signal.throwIfAborted();
-  return new Promise((resolve, reject) => {
-    const abort = () => { clearTimeout(timer); reject(signal.reason); };
-    const timer = setTimeout(() => { signal.removeEventListener("abort", abort); resolve(); }, ms);
-    signal.addEventListener("abort", abort, { once: true });
-  });
-}
+const invalidResponse = () => new CloudProtocolError("invalid-response");
+export function object(value: unknown): Record<string, unknown> { return expectRecord(value, invalidResponse); }
+const string = (value: unknown): string => expectString(value, invalidResponse);
+const uuid = (value: unknown): string => expectUuidRfc(value, invalidResponse);
+const timestamp = (value: unknown): number => expectTimestamp(value, invalidResponse);
 
 export class CloudProtocol {
   protected activeLogin: AbortController | null = null;
@@ -164,7 +135,7 @@ export class CloudProtocol {
     if (!authority) throw new Error("This Cloud environment is unavailable in this build.");
     return authority;
   }
-  protected async requestData(path: string, signal: AbortSignal, options: { credentialReference?: string; body?: unknown; method?: AutomationsMethod | 'PATCH'; authenticated?: boolean; runtimeBase?: string; timeoutMs?: number; headers?: Record<string,string>; credentialId?: string; expiresAt?: number; onStatus?: (status:number)=>void; /** Answer every HTTP status; the caller interprets it. */ anyStatus?: boolean } = {}): Promise<unknown> {
+  protected async requestData(path: string, signal: AbortSignal, options: CloudCallOptions & { credentialReference?: string; /** Answer every HTTP status; the caller interprets it. */ anyStatus?: boolean } = {}): Promise<unknown> {
     signal.throwIfAborted();
     let credentialReference: string | undefined;
     const headers: Record<string, string> = { Accept: "application/json", ...options.headers };
@@ -182,13 +153,12 @@ export class CloudProtocol {
       else throw new CloudProtocolError("credentials-missing");
     }
     if (options.body !== undefined) headers["Content-Type"] = "application/json";
-    const response = await this.request({ url: (options.runtimeBase ?? this.authority.api) + path,
+    const response = await this.request({ url: this.authority.api + path,
       method: options.method ?? (options.body === undefined ? "GET" : "POST"), headers, body: options.body,
       signal, credentialReference, timeoutMs: options.timeoutMs ?? 30_000, redirect: "error", ...(options.expiresAt === undefined ? {} : {expiresAt:options.expiresAt}) });
     signal.throwIfAborted();
     if (options.anyStatus) return response;
     if (response.status < 200 || response.status >= 300) throw new CloudProtocolError("http", response.status, response.data, response.retryAfter);
-    options.onStatus?.(response.status);
     return response.data;
   }
   /**
@@ -220,17 +190,13 @@ export class CloudProtocol {
       throw error;
     }
   }
-  protected async call(path: string, signal: AbortSignal, options: { body?: unknown; method?: AutomationsMethod | 'PATCH'; authenticated?: boolean; runtimeBase?: string; timeoutMs?: number; headers?: Record<string,string>; credentialId?: string; expiresAt?: number } = {}) {
+  protected async call(path: string, signal: AbortSignal, options: CloudCallOptions = {}) {
     return object(await this.requestData(path, signal, options));
   }
   /** Plan state from the read-only billing snapshot, used only while the entitlement route is
    * absent. `null` when the snapshot route is absent too or does not report a known plan state. */
   async billingFallbackPlan(signal: AbortSignal): Promise<FallbackPlan | null> {
     return this.billingRead(() => this.billing.fallbackPlan(signal));
-  }
-  /** Read-only UI eligibility, bound to the current credential. Never grants spending authority. */
-  async membershipBalance(signal: AbortSignal): Promise<'zero' | 'funded' | 'unavailable'> {
-    return (await this.membershipCredits(signal)).state;
   }
   async membershipCredits(signal: AbortSignal): Promise<OrganizationCreditBalance> {
     return this.billingRead(() => this.billing.credits(signal));
@@ -246,7 +212,7 @@ export class CloudProtocol {
   }
   /** Cloud API origin, used as the entitlement issuer. */
   get entitlementIssuer(): string { return this.authority.api; }
-  /** Short-lived signed subscription entitlement (proposed Cloud contract, issue #410). Read at
+  /** Short-lived signed subscription entitlement. Read at
    * admission and by the background refresher, never per assistant turn. `null` means the
    * deployed Cloud does not offer the route yet (404/405/501). */
   async subscriptionEntitlement(signal: AbortSignal): Promise<string | null> {
@@ -335,7 +301,7 @@ export class CloudProtocol {
    * One sign-in step at a time (`login-active`). Cancelling the signal cancels the host's attempt,
    * which burns a pending Google record. Host failures arrive as CloudSignInError codes only.
    */
-  private async signInStep<T>(signal: AbortSignal, run: (port: CloudSignInPort) => Promise<unknown>, parse: (value: unknown) => T, onCommittedCancellation?: () => void): Promise<T> {
+  private async signInStep<T>(signal: AbortSignal, run: (port: AlphaCloudSignInPlugin) => Promise<unknown>, parse: (value: unknown) => T, onCommittedCancellation?: () => void): Promise<T> {
     void this.authority; // A flag-off build has no staging authority: refuse before any host call.
     const port = this.options.signIn;
     if (!port) throw new CloudSignInError("unavailable");
@@ -419,7 +385,7 @@ export class CloudProtocol {
       while (true) {
         controller.signal.throwIfAborted();
         if (Date.now() >= expiresAt) throw new CloudProtocolError("expired");
-        let response: ObjectValue;
+        let response: Record<string, unknown>;
         try { response = await this.call(`/api/auth/cli-session/${sessionId}`, controller.signal, {expiresAt}); }
         catch (error) {
           if (Date.now() >= expiresAt) throw new CloudProtocolError("expired");
@@ -470,7 +436,7 @@ export class CloudProtocol {
     if (credential.expiresAt !== undefined && credential.expiresAt <= Date.now()) throw new CloudProtocolError("expired");
     return outcome;
   }
-  /** Google through the native account picker: request native MFA, or finish after the key is stored. */
+  /** Google in the owner's browser (native mode "browser"), returning by App Link: request native MFA, or finish after the key is stored. */
   async signInWithGoogle(signal: AbortSignal): Promise<CloudSignInGoogleOutcome & {committedCredential?:{credentialId:string;credentialReference?:string;userId?:string;organizationId?:string}}> {
     this.googleSignInCommitted=false;
     const outcome=await this.signInStep(signal,port=>port.startGoogle({environment:this.environment}),value=>googleOutcome(value,this.environment),()=>{});
@@ -543,7 +509,7 @@ export class CloudProtocol {
       }
     }
   }
-  protected success(response: ObjectValue): unknown {
+  protected success(response: Record<string, unknown>): unknown {
     if (response.success !== true) throw new CloudProtocolError("invalid-response");
     return response.data;
   }
@@ -585,7 +551,7 @@ export class CloudProtocol {
       if(!current||JSON.stringify([current.credentialId,current.credentialReference,current.token,current.userId,current.organizationId])!==binding)throw new CloudProtocolError('account-changed');
     }
   }
-  /** Eliza Cloud Maps data (#412) on the exact reviewed routes. Queries and coordinates
+  /** Eliza Cloud Maps data on the exact reviewed routes. Queries and coordinates
    * travel only in the JSON body; capabilities is a bare read. GPS and navigation stay on the phone. */
   async mapsRequest(route:CloudMapsRoute,signal:AbortSignal,body?:Record<string,unknown>):Promise<Record<string,unknown>> {
     if(!['capabilities','geocode','reverse','places/search','places/details','routes','tiles/viewport'].includes(route)||(route==='capabilities')!==(body===undefined))throw new CloudProtocolError('invalid-response');
@@ -602,34 +568,6 @@ export class CloudProtocol {
     let binary:string;try{binary=atob(response.data);}catch{throw new CloudProtocolError('invalid-response');}if(binary.length>1024*1024||btoa(binary)!==response.data)throw new CloudProtocolError('invalid-response');
     return Uint8Array.from(binary,char=>char.charCodeAt(0)).buffer;
   }
-  async googleCalendarSync(input:CalendarSyncRequest,signal:AbortSignal):Promise<unknown> {
-    const request=calendarSyncHttp(input);
-    return this.accountRequest(request.path,signal,'body' in request?request.body:undefined,{method:request.method});
-  }
-  async googleCalendars(grantId:string,signal:AbortSignal):Promise<GoogleCalendarSummary[]> {
-    const params=new URLSearchParams({side:'owner',grantId:uuid(grantId)});
-    const data=await this.accountRequest(`/api/v1/eliza/google/calendar/calendars?${params}`,signal);
-    return parseManagedGoogleCalendars(data, () => new CloudProtocolError('invalid-response'));
-  }
-  async googleCalendarFeed(grantId:string,calendarId:string,range:GoogleCalendarRange,signal:AbortSignal):Promise<GoogleCalendarFeed> {
-    uuid(grantId);string(calendarId);
-    if(timestamp(range.timeMax)<=timestamp(range.timeMin))throw new TypeError('Calendar range must end after it starts');
-    try{new Intl.DateTimeFormat('en-US',{timeZone:range.timeZone}).format();}catch{throw new TypeError('Invalid Calendar time zone');}
-    const params=new URLSearchParams({side:'owner',grantId,calendarId,timeMin:range.timeMin,timeMax:range.timeMax,timeZone:range.timeZone});
-    const data=await this.accountRequest(`/api/v1/eliza/google/calendar/feed?${params}`,signal);
-    return parseManagedGoogleCalendarFeed(data, calendarId, () => new CloudProtocolError('invalid-response'));
-  }
-  /** Starts Google consent. `read` asks for read access only; `modify` is the one incremental step
-   * for approved mailbox changes (gmail-grants.ts). The single-capability values remain for callers
-   * that ask for one change capability. Cloud maps exactly the requested capabilities to Google
-   * scopes, so the request also names what the selected account already holds
-   * (`grantedCapabilities`); otherwise a reconnect could drop an earlier grant. Only known Gmail
-   * capabilities are carried over. Callers that pass no grants keep the plain request. */
-  async initiateGmail(signal: AbortSignal, permission: GmailGrantRequest = 'read', grantedCapabilities: readonly string[] = []): Promise<string> {
-    const response = await this.call("/api/v1/eliza/google/connect/initiate", signal, { authenticated: true,
-      body: { side: "owner", capabilities: gmailConsentCapabilities(permission, grantedCapabilities) } });
-    return this.googleAuthUrl(response.authUrl);
-  }
   /** The shared managed Gmail client (@elizaos/plugin-inbox/mailbox) on this Cloud credential and transport. */
   private gmailClient?: ManagedGmailMailboxClient;
   private get gmail(): ManagedGmailMailboxClient {
@@ -642,8 +580,8 @@ export class CloudProtocol {
   }
   /** A connection with no email or name is labelled by Alpha, never by the shared client's fallback. */
   async gmailAccounts(signal: AbortSignal): Promise<GmailAccount[]> { return (await this.gmail.gmailAccounts(signal)).map(withGmailAccountLabel); }
-  /** One search page. `mailboxHistoryId` is the Gmail mailbox revision read before the page was listed
-   * (elizaOS/eliza#35908); two pages of one search with different values came from a changed mailbox.
+  /** One search page. `mailboxHistoryId` is the Gmail mailbox revision read before the page was listed;
+   * two pages of one search with different values came from a changed mailbox.
    * Older Cloud servers omit it. */
   gmailSearch(grantId: string, query: string, signal: AbortSignal, maxResults: 10 | 25 | 50 = 25, pageToken?: string): Promise<GmailSearchPage> {
     return this.gmail.gmailSearch(grantId, query, signal, maxResults, pageToken);
@@ -680,5 +618,4 @@ export class CloudProtocol {
     return this.gmail.gmailDispatchOperation(grantId, requestId, reviewDigest, proposal, signal);
   }
   gmailOperation(grantId: string, requestId: string, signal: AbortSignal): Promise<GmailInboxReceipt> { return this.gmail.gmailOperation(grantId, requestId, signal); }
-  gmailStatus(signal: AbortSignal): Promise<GoogleConnection> { return this.gmail.gmailStatus(signal); }
 }

@@ -20,28 +20,28 @@ public class NoMockProductInstrumentedTest {
  private static void until(String expression,long timeoutMs)throws Exception{
   long deadline=SystemClock.elapsedRealtime()+timeoutMs;
   while(SystemClock.elapsedRealtime()<deadline){
-   if("true".equals(NotesSecureFixture.evaluate("Boolean("+expression+")")))return;
+   if("true".equals(WebViewTestDriver.evaluate("Boolean("+expression+")")))return;
    SystemClock.sleep(80);
   }
   fail("Renderer did not reach expected state: "+expression);
  }
  private static void assertNoMockEntry()throws Exception{
   for(String label:new String[]{"Enter mock mode","Try mock mode"})
-   assertEquals("Product build must not offer '"+label+"'","false",NotesSecureFixture.evaluate("document.documentElement.textContent.includes("+JSONObject.quote(label)+")"));
-  assertEquals("No mock banner","false",NotesSecureFixture.evaluate("!!document.querySelector('.mock-mode-banner')"));
-  assertNotEquals("Renderer never runs in mock mode","\"mock\"",NotesSecureFixture.evaluate("document.documentElement.dataset.connectionMode||null"));
+   assertEquals("Product build must not offer '"+label+"'","false",WebViewTestDriver.evaluate("document.documentElement.textContent.includes("+JSONObject.quote(label)+")"));
+  assertEquals("No mock banner","false",WebViewTestDriver.evaluate("!!document.querySelector('.mock-mode-banner')"));
+  assertNotEquals("Renderer never runs in mock mode","\"mock\"",WebViewTestDriver.evaluate("document.documentElement.dataset.connectionMode||null"));
  }
  @Test public void productBuildOffersNoMockEntryPoint()throws Exception{
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
    until("document.querySelector('[data-screen]')");
-   String saved=NotesSecureFixture.evaluate("localStorage.getItem('"+SELECTION+"')");
+   String saved=WebViewTestDriver.evaluate("localStorage.getItem('"+SELECTION+"')");
    try{
     // A signed-out production install must render the required sign-in page.
-    String previousDocument=NotesSecureFixture.evaluate("performance.timeOrigin");
+    String previousDocument=WebViewTestDriver.evaluate("performance.timeOrigin");
     WebViewTestDriver.navigateHostDocument("localStorage.removeItem('"+SELECTION+"');location.replace(location.origin+location.pathname)");
     until("performance.timeOrigin!=="+previousDocument+"&&document.querySelector('.alpha-auth-page [role=main]')",SIGN_IN_PAGE_MS);
-    NotesSecureFixture.evaluate("document.querySelectorAll('.alpha-connection details').forEach(d=>d.open=true)");
-    assertEquals("Required sign-in cannot be dismissed","false",NotesSecureFixture.evaluate("!!document.querySelector('.alpha-auth-page button[aria-label=\"Close connection settings\"]')"));
+    WebViewTestDriver.evaluate("document.querySelectorAll('.alpha-connection details').forEach(d=>d.open=true)");
+    assertEquals("Required sign-in cannot be dismissed","false",WebViewTestDriver.evaluate("!!document.querySelector('.alpha-auth-page button[aria-label=\"Close connection settings\"]')"));
     assertNoMockEntry();
    }finally{
     WebViewTestDriver.navigateHostDocument("localStorage."+("null".equals(saved)?"removeItem('"+SELECTION+"')":"setItem('"+SELECTION+"',"+saved+")")+";location.replace(location.origin+location.pathname)");
@@ -51,14 +51,14 @@ public class NoMockProductInstrumentedTest {
  @Test public void legacyMockSelectionRequiresSignIn()throws Exception{
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
    until("document.querySelector('[data-screen]')");
-   String saved=NotesSecureFixture.evaluate("localStorage.getItem('"+SELECTION+"')");
+   String saved=WebViewTestDriver.evaluate("localStorage.getItem('"+SELECTION+"')");
    try{
-    String previousDocument=NotesSecureFixture.evaluate("performance.timeOrigin");
+    String previousDocument=WebViewTestDriver.evaluate("performance.timeOrigin");
     WebViewTestDriver.navigateHostDocument("localStorage.setItem('"+SELECTION+"',JSON.stringify({kind:'mock'}));location.replace(location.origin+location.pathname)");
     until("performance.timeOrigin!=="+previousDocument+"&&document.querySelector('.alpha-auth-page [role=main]')",SIGN_IN_PAGE_MS);
-    assertEquals("Underlying phone is inert while sign-in is required","true",NotesSecureFixture.evaluate("document.querySelector('.os').inert"));
-    assertNotEquals("Legacy mock selection is retired","\"mock\"",NotesSecureFixture.evaluate("JSON.parse(localStorage.getItem('"+SELECTION+"')||'null')?.kind??null"));
-    assertEquals("Required sign-in cannot be dismissed","false",NotesSecureFixture.evaluate("!!document.querySelector('.alpha-auth-page button[aria-label=\"Close connection settings\"]')"));
+    assertEquals("Underlying phone is inert while sign-in is required","true",WebViewTestDriver.evaluate("document.querySelector('.os').inert"));
+    assertNotEquals("Legacy mock selection is retired","\"mock\"",WebViewTestDriver.evaluate("JSON.parse(localStorage.getItem('"+SELECTION+"')||'null')?.kind??null"));
+    assertEquals("Required sign-in cannot be dismissed","false",WebViewTestDriver.evaluate("!!document.querySelector('.alpha-auth-page button[aria-label=\"Close connection settings\"]')"));
     assertNoMockEntry();
    }finally{
     WebViewTestDriver.navigateHostDocument("localStorage."+("null".equals(saved)?"removeItem('"+SELECTION+"')":"setItem('"+SELECTION+"',"+saved+")")+";location.replace(location.origin+location.pathname)");

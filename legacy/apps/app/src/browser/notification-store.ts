@@ -1,27 +1,27 @@
 import {browserDocuments} from './documents';
 import {BrowserDomainDocument,type DomainRecovery} from './domain-document';
 import {revision} from './revision';
+import {isRecord} from '../lib/parse';
 
-type Selection={packageName:string;preview:boolean};
+export type NotificationSelection={packageName:string;preview:boolean};
 type History={id:string;appLabel:string;packageName:string;at:number;state:string};
-type DeviceEvent={id:string;revision:string;source:'external';appLabel:string;title:string;text:string;at:number;clearable:boolean;canOpen:boolean;packageName:string;sourceKey:string;autoCancel:boolean;secret:boolean};
-export type NotificationState={revision:string;epoch:string;enabled:boolean;paused:boolean;history:boolean;accessGranted:boolean;apps:Selection[];events:History[];dismissed:string[];appEnabled:boolean;channels:Record<string,boolean>;deviceEvents:DeviceEvent[]};
-export const notificationStorageKey='alpha.browser.notifications.v2';
-// v2 superseded the old partial policy. Preserve whichever legacy source was active.
-const legacy=()=>localStorage.getItem(notificationStorageKey)??localStorage.getItem('alpha.browser.notification-policy.v1');
-const domain=new BrowserDomainDocument(browserDocuments,notificationStorageKey,legacy);
+export type Notice={id:string;revision:string;source:'own'|'external'|'hosted';appLabel:string;title:string;text:string;at:number;clearable:boolean;canOpen:boolean;packageName?:string;epoch?:string;occurrenceId?:string};
+export type DeviceEvent=Notice&{source:'external';packageName:string;sourceKey:string;autoCancel:boolean;secret:boolean};
+export type NotificationState={revision:string;epoch:string;enabled:boolean;paused:boolean;history:boolean;accessGranted:boolean;apps:NotificationSelection[];events:History[];dismissed:string[];appEnabled:boolean;channels:Record<string,boolean>;deviceEvents:DeviceEvent[]};
+const notificationStorageKey='alpha.browser.notifications.v2';
+const domain=new BrowserDomainDocument(browserDocuments,notificationStorageKey);
 const channel=typeof BroadcastChannel==='undefined'?null:new BroadcastChannel('alpha.browser.documents.v1');
 if(channel)channel.onmessage=event=>{if(event.data?.key===notificationStorageKey)window.dispatchEvent(new Event('alpha:notifications-document-changed'));};
 const changed=()=>channel?.postMessage({key:notificationStorageKey});
 // Startup polling shares one initialization owner across tabs. Re-read inside
-// this lock before importing legacy bytes or filling missing policy authority.
+// this lock before filling missing policy authority.
 const initialize=<T>(read:()=>Promise<T>,signal?:AbortSignal)=>navigator.locks?navigator.locks.request(
  JSON.stringify(['alpha.browser.documents.v1',notificationStorageKey,'initialize']),
  {mode:'exclusive',...(signal?{signal}:{})},read):read();
 const initial=():NotificationState=>({revision:revision(),epoch:revision(),enabled:false,paused:false,history:false,accessGranted:true,apps:[],events:[],dismissed:[],appEnabled:true,channels:{reminders:true,calendar:true},deviceEvents:[]});
 function normalize(value:NotificationState):NotificationState{
- if(!value||typeof value!=='object'||Array.isArray(value))throw Error('Notification data needs recovery.');
- if(value.channels!==undefined&&(!value.channels||typeof value.channels!=='object'||Array.isArray(value.channels)))throw Error('Notification channels need recovery.');
+ if(!isRecord(value))throw Error('Notification data needs recovery.');
+ if(value.channels!==undefined&&!isRecord(value.channels))throw Error('Notification channels need recovery.');
  const state={...initial(),...value,channels:{reminders:true,calendar:true,...value.channels},deviceEvents:value.deviceEvents??[]};
  for(const flag of ['enabled','paused','history','accessGranted','appEnabled'] as const)if(typeof state[flag]!=='boolean')throw Error('Notification policy needs recovery.');
  if(typeof state.revision!=='string'||typeof state.epoch!=='string'||!Array.isArray(state.apps)||!Array.isArray(state.events)||!Array.isArray(state.dismissed)||!Array.isArray(state.deviceEvents)||!state.channels||typeof state.channels!=='object'||Object.values(state.channels).some(value=>typeof value!=='boolean'))throw Error('Notification data needs recovery.');

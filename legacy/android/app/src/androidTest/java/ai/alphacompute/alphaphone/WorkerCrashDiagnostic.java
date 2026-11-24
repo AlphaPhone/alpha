@@ -8,6 +8,7 @@ import java.io.InputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.*;
 
 /** Test-only fixed projection. Never retains native trace bytes, descriptions, paths or memory. */
@@ -18,7 +19,7 @@ final class WorkerCrashDiagnostic {
   Future<JSONObject> pending=executor.submit(()->observe(context,identity));
   try{return pending.get(2,TimeUnit.SECONDS);}catch(Exception unavailable){pending.cancel(true);return safeUnavailable();}finally{executor.shutdownNow();}
  }
- private static JSONObject safeUnavailable(){try{return new JSONObject().put("available",false);}catch(Exception impossible){return new JSONObject();}}
+ private static JSONObject safeUnavailable(){return new JSONObject(Map.of("available",false));}
  private static JSONObject observe(Context context,JSONObject identity)throws Exception{
   int pid=identity.getInt("pid"),uid=identity.getInt("uid");long started=identity.getLong("startedAt"),now=System.currentTimeMillis();
   if(pid<=0||uid!=android.os.Process.myUid()||started<=0||started>now)return safeUnavailable();

@@ -4,10 +4,11 @@ import {connectionController} from './connection-ui';
 import {DeferredDeletionNotice} from '../ui/components/composites/deferred-deletion-notice';
 import {createDeletionNoticePolicy,deletions,refreshDeletionViews} from './deletions';
 import {browserScreenLocked} from '../browser/screen-locked';
+import {agentSessionKey} from '../lib/session-key.ts';
 import './deletion-undo.css';
 /** Owner/session identity: a change clears every row before the new owner's are read. */
 const identity={
- read(){const session=connectionController.getSnapshot().session;return session?JSON.stringify([session.origin,session.ownerId,session.agentId,session.sessionId]):'';},
+ read(){const session=connectionController.getSnapshot().session;return session?agentSessionKey(session):'';},
  subscribe:(listener:()=>void)=>connectionController.subscribe(listener),
 };
 const refreshEvents=['alpha:deletions-changed','alpha:device-state'];

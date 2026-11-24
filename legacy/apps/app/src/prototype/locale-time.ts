@@ -3,7 +3,7 @@
  * locale and, when the platform reports it, the device's 12/24-hour choice (Android's
  * "Use 24-hour format" is not visible to a WebView's Intl, so the host passes it in). */
 
-export type HourCycle = 'h12' | 'h23';
+type HourCycle = 'h12' | 'h23';
 let prefs: {locale: string | undefined; hourCycle: HourCycle | undefined} = {locale: undefined, hourCycle: undefined};
 const cache = new Map<string, Intl.DateTimeFormat>();
 
@@ -67,7 +67,6 @@ export function formatHoursRange(start: number, end: number) {
 /** Hour label: "9 AM" / "09". */
 export function formatHour(hour: number) { return clean(format({hour: 'numeric'}).format(new Date(2000, 0, 1, hour))); }
 export function weekdayName(date: Date, width: 'long' | 'short' | 'narrow' = 'long') { return format({weekday: width}).format(date); }
-export function monthName(date: Date, width: 'long' | 'short' | 'narrow' = 'long') { return format({month: width}).format(date); }
 /** "Wed, Oct 8". */
 export function formatShortDate(date: Date) { return clean(format({weekday: 'short', month: 'short', day: 'numeric'}).format(date)); }
 /** "Wednesday, Oct 8". */
@@ -86,10 +85,8 @@ export function formatFullDateTime(date: Date) {
 /** "October" or "October 2027". */
 export function formatMonthTitle(date: Date, withYear = false) { return clean(format(withYear ? {month: 'long', year: 'numeric'} : {month: 'long'}).format(date)); }
 /** Weekday names Sunday-first, as Date#getDay indexes them (2000-01-02 was a Sunday). */
-export function weekdayNames(width: 'long' | 'short' = 'long') { return Array.from({length: 7}, (_, i) => weekdayName(new Date(2000, 0, 2 + i), width)); }
-export function monthNames(width: 'long' | 'short' = 'long') { return Array.from({length: 12}, (_, i) => monthName(new Date(2000, i, 1), width)); }
 function refreshNames() {
-  WEEKDAYS.splice(0, WEEKDAYS.length, ...weekdayNames());
-  MONTHS.splice(0, MONTHS.length, ...monthNames());
+  WEEKDAYS.splice(0, WEEKDAYS.length, ...Array.from({length: 7}, (_, i) => weekdayName(new Date(2000, 0, 2 + i))));
+  MONTHS.splice(0, MONTHS.length, ...Array.from({length: 12}, (_, i) => format({month: 'long'}).format(new Date(2000, i, 1))));
 }
 refreshNames();

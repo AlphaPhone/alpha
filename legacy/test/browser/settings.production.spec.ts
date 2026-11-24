@@ -66,7 +66,7 @@ test('production Google account entry opens and dismisses its owned dialog',asyn
 test('production About exposes licenses without fabricated device facts or diagnostic controls',async({page})=>{
  await openSettings(page,'About');
  const about=(await current(page).innerText()).replace(/\s+/g,' ');
- expect(about).not.toMatch(/\bNPU\b|Uptime|Inference model|Not reported by agent|Problem log|Export diagnostics|Security patch/);
+ expect(about).not.toMatch(/\bNPU\b|Uptime|AI model|Not reported by agent|Problem log|Export diagnostics|Security patch/);
  await current(page).getByRole('button',{name:'Licenses',exact:true}).click();
  await expect(current(page).getByRole('heading',{name:'Licenses',exact:true})).toBeVisible();
  await expect(current(page).getByRole('button',{name:'Back to About',exact:true})).toBeVisible();

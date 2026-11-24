@@ -94,8 +94,8 @@ public final class BrowserPageQuestionInstrumentedTest {
   BoundedActivityScenario.main(() -> {
    try {
     Object plugin = resumedActivity().getBridge().getPlugin("AlphaBrowser").getInstance();
-    java.lang.reflect.Field reading = ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class.getDeclaredField("reading"); reading.setAccessible(true);
-    java.lang.reflect.Field dialog = ai.eliza.plugins.browsersurface.BrowserReviewedReading.class.getDeclaredField("dialog"); dialog.setAccessible(true);
+    java.lang.reflect.Field reading = AlphaBrowserPlugin.class.getDeclaredField("reading"); reading.setAccessible(true);
+    java.lang.reflect.Field dialog = ai.alphacompute.alphaphone.browser.AlphaReviewedReading.class.getDeclaredField("dialog"); dialog.setAccessible(true);
     AlertDialog value = (AlertDialog) dialog.get(reading.get(plugin));
     found.set(value != null && value.isShowing() ? value : null);
    } catch (Exception error) { throw new AssertionError(error); }
@@ -120,7 +120,7 @@ public final class BrowserPageQuestionInstrumentedTest {
   final AtomicInteger requests = new AtomicInteger();
   Pages(String tabId) throws Exception {
    Object plugin = resumedActivity().getBridge().getPlugin("AlphaBrowser").getInstance();
-   java.lang.reflect.Field tabs = ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class.getDeclaredField("tabs"); tabs.setAccessible(true);
+   java.lang.reflect.Field tabs = AlphaBrowserPlugin.class.getDeclaredField("tabs"); tabs.setAccessible(true);
    Object tab = ((Map<?, ?>) tabs.get(plugin)).get(tabId); assertNotNull("The visible tab exists", tab);
    java.lang.reflect.Field field = tab.getClass().getDeclaredField("web"); field.setAccessible(true);
    web = (android.webkit.WebView) field.get(tab); original = web.getWebViewClient(); assertNotNull(original);
@@ -164,7 +164,7 @@ public final class BrowserPageQuestionInstrumentedTest {
  /** Opens the Browser view, creates its first tab on an address that cannot resolve, then serves
   * that tab from memory: the fixture's start page is committed before this returns. */
  Pages openBrowser() throws Exception {
-  AppNavigation.liveMode(); js(AppNavigation.request("Browser")); waitFor(AppNavigation.selected("Browser")); waitFor("window.__alphaTestNavigation?.status==='complete'");
+  AppNavigation.liveMode(); js(AppNavigation.request("Browser")); waitFor(AppNavigation.selected("Browser")); waitFor(AppNavigation.SETTLED);
     // The native page is withdrawn while the modal first-run access panel is open; answer it first, as an owner does.
     AppNavigation.declineStartupAccess();
   recordNativeCalls();
@@ -380,7 +380,7 @@ public final class BrowserPageQuestionInstrumentedTest {
     assertEquals("Nothing reaches an agent before Send: " + leaks(reviewed), 0, leaks(reviewed).length());
     assertEquals(0, leaks(ARTICLE).length());
     // Send while inference is unavailable (the resident is running with no network): no
-    // line or toast says so (owner, 2026-11-03), no chooser opens, nothing is dispatched and the draft
+    // line or toast says so, no chooser opens, nothing is dispatched and the draft
     // is kept. The send is seen settling in the composer's own saved copy: marked as sending, then unmarked.
     waitFor("document.querySelector('button[aria-label=Send]')&&!document.querySelector('button[aria-label=Send]').disabled");
     int before = Integer.parseInt(js("window.__pageCalls.length"));
@@ -393,50 +393,6 @@ public final class BrowserPageQuestionInstrumentedTest {
     assertEquals("No reply or summary card can exist without inference", "false", js("document.body.innerText.includes('Review summary note')"));
     waitFor("[...document.querySelectorAll('textarea[data-alpha-composer]')].some(e=>e.value.includes(" + JSONObject.quote(reviewed) + "))");
     return reviewed;
- }
-
- /** The note shape the summary save writes, stored through the real encrypted Notes bridge. */
- @Test public void noteWithAWebSourceKeepsItAcrossRecreationAndReopensThatAddress() throws Exception {
-  gate();
-  String id = "page-question-" + UUID.randomUUID();
-  try (BoundedActivityScenario<MainActivity> scenario = BoundedActivityScenario.launch(MainActivity.class)) {
-   Throwable primary = null;
-   try {
-    sourceNoteSurvivesRecreationAndReopens(scenario, id, BASE + "/garden");
-   } catch (Exception | AssertionError failure) { primary = failure; throw failure; } finally {
-    try {
-     restoreNativeCalls();
-     NotesSecureFixture.replaceRecords("records=>records.filter(n=>n.id!==" + JSONObject.quote(id) + ")");
-    } catch (Exception | AssertionError failure) { if (primary != null) primary.addSuppressed(failure); else throw failure; }
-   }
-  }
- }
-
- /** Stores a note with this web source through the encrypted Notes bridge, recreates the Activity and
-  * reopens the source from the note. Shared with JourneyJ05InstrumentedTest; the caller removes `id`. */
- void sourceNoteSurvivesRecreationAndReopens(BoundedActivityScenario<MainActivity> scenario, String id, String url) throws Exception {
-    String title = "Orchard summary " + letters(UUID.randomUUID()).substring(0, 8);
-    AppNavigation.liveMode(); js(AppNavigation.request("Notes")); waitFor(AppNavigation.selected("Notes")); waitFor("window.__alphaTestNavigation?.status==='complete'");
-    String note = new JSONObject().put("id", id).put("kind", "text").put("title", title).put("body", "The orchard has twelve raised beds.")
-     .put("webSource", new JSONObject().put("kind", "web-page").put("version", 1).put("name", "Orchard report").put("url", url))
-     .put("pinned", false).put("when", "Now").put("createdAt", System.currentTimeMillis()).put("modifiedAt", System.currentTimeMillis()).toString();
-    NotesSecureFixture.replaceRecords("records=>[" + note + ",...records.filter(n=>n.id!==" + JSONObject.quote(id) + ")]");
-    scenario.recreate();
-    AppNavigation.liveMode(); js(AppNavigation.request("Notes")); waitFor(AppNavigation.selected("Notes"));
-    String open = "document.querySelector('button[aria-label=" + JSONObject.quote("Open " + title).replace("'", "\\'") + "]')";
-    waitFor(open); js(open + ".click()");
-    // The note still offers its source after the process rebuilt its state from encrypted storage.
-    tap("Web source linked");
-    String source = "document.querySelector('dialog[aria-label=\"Note web source\"]')";
-    waitFor(source);
-    assertEquals("The source dialog shows the exact saved address", "true", js(source + ".textContent.includes(" + JSONObject.quote(url) + ")"));
-    assertEquals("true", NotesSecureFixture.evaluate("__notesEnvelope.records.find(n=>n.id===" + JSONObject.quote(id) + ")?.webSource?.url===" + JSONObject.quote(url)));
-    // Open source page asks the native browser for exactly that address.
-    recordNativeCalls();
-    String openSource = "[..." + source + ".querySelectorAll('button')].find(b=>b.textContent.trim()==='Open source page'&&!b.disabled)";
-    waitFor(openSource); js("(" + openSource + ").click()");
-    waitFor(AppNavigation.selected("Browser"));AppNavigation.declineStartupAccess();
-    waitFor("window.__pageCalls.some(c=>c.plugin==='AlphaBrowser'&&c.method==='navigate'&&JSON.parse(c.body).url===" + JSONObject.quote(url) + ")");
  }
 
  void cleanup(Pages pages, Throwable primary) throws Exception {

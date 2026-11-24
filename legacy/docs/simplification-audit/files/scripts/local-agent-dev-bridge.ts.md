@@ -1,0 +1,24 @@
+# scripts/local-agent-dev-bridge.ts
+- Lines: 309 | Kind: Vite dev-server plugin + HTTP/WebSocket proxy (development-only host bridge to the local agent) | Verdict: KEEP + MOVE + SIMPLIFY (to `scripts/dev-server/local-agent-bridge.ts` or `apps/app/dev/`)
+- Covers: owner pairing against a 127.0.0.1 agent, route allowlist for renderer requests, speech (ASR/TTS direct/cloud/paradee) proxying with response validation, realtime voice ticket minting and WebSocket relay, Google-access switch endpoint and Gmail broker mount. Duplicates: route-allowlist logic partly overlaps `apps/app/src/runtime/owner-route-policy.ts` (already imported); WS ticket/relay pattern is re-implemented in `scripts/browser-cloud-dev-bridge.ts` (C4). Callers/importers: `vite.config.ts:11`; `scripts/fixtures/speech-bridge.ts`, `scripts/test-local-agent.ts`, `scripts/test-local-agent-stream.ts`; tests `test/local-agent-voice-bridge.test.mjs`, `cloud-prewarm`, `development-cloud-voice`, `development-conversation-stream`, `direct-transcription-proxy`, `enabled-view-transport`, `automations-transport`, `llama-cpp-only`; Playwright `test/browser/browser-cloud-dev.spec.ts`, `cloud-tts-streaming.spec.ts`; listed in `scripts/quint-lib.ts:18` (`runtimeScriptPaths`, text-pinned input set); comment refs in `apps/app/src/browser/voice.ts:393`, `runtime/google-agent-access.ts:8`.
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 106-257 | D9, D8 | `handler` is one 150-line closure with ~40 early `fail(...)` guards and 300-char lines; route classification (renderer / voice / direct / cloud / paradee speech / stream / plain) is recomputed with booleans and then re-tested. | Split into `classify(input)` returning one route kind, then one function per kind (`proxyJson`, `proxyStream`, `proxyCloudTts`, `mintVoice`, `rendererTicket`). | Medium: many tests drive this through `createLocalAgentDevHandler`; keep the exported factory signature. |
+| 2 | 47-62 | D8, B3 | `voiceControlResponse` validates upstream JSON in a single 600-char line per kind. Validation at this trust boundary (upstream agent) is legitimate, but unreadable. | Rewrite as per-kind key lists + small predicates. Keep the checks. | Low. |
+| 3 | 56-57 | A1/A8 | Comment "Preserve the legacy shape" - mint response without `stopIntentVersion` is accepted. Upstream is pinned (`upstream.lock.json`); if the pinned agent always sends the paired attestation, the legacy branch is dead. | Check the pinned upstream voice-session route; if it always emits `stopIntentVersion`, require it and drop the comment. Otherwise keep. | Low-medium; needs upstream check. |
+| 4 | 172-176, 211, 247, 264-266 | C3 | Token-file read + mode check + hex check is repeated four times (handler, `owned()`, voice branch, upgrade). `scripts/gmail-agent-dev-broker.ts` has a fifth copy (lstat + uid + mode + hex). | One `readPrivateToken(file)` in `scripts/lib/` used by both. | None. |
+| 5 | 109, 263, 301 | C3 | Loopback host + same-origin check `/^(?:127\.0\.0\.1|localhost):\d+$/ && origin===http://host` repeated three times here and again in `browser-cloud-dev-bridge.ts`. | One `sameOriginLoopback(req)` helper. | None. |
+| 6 | 237-238 | D8 | Per-route response size limits encoded as a nested ternary (`16*1024`, `8 MiB`, `1440044`, `128 KiB`, `LIMIT`). | Named constants in a lookup by route kind. | None. |
+| 7 | 4, 296-307 | C5 | `gmail-agent-dev-broker.ts` (13 lines, one caller) only exists to be mounted here. | Merge it into this file (research `scripts.md` agrees). | None. |
+| 8 | 255 | B1 | Outer `catch{}` maps every error to 503 "Check the private host log" but logs nothing to that log. | Log `error` to stderr before failing (dev-only surface; the specified behaviour is the opaque response to the page, not silence on the host). | None. |
+| 9 | whole | D6 | It is a Vite dev-server middleware, not a script; research proposes a `dev-server/` folder. Its rename is pinned by `quint-lib.ts:18` (path list) and comments. | Move with the stage-F `dev/` boundary; update `vite.config.ts`, `quint-lib.ts`, tests' import paths. | Low (path pins). |
+| 10 | 23-24 | C3 | UUID regexes (`VOICE_AGENT_ID`, `VOICE_UUID`) duplicated across scripts and renderer. | Import from the shared `scripts/lib`/`apps/app/src/lib` id helper. | None. |
+
+## Proposed end state
+A `dev-server/local-agent-bridge.ts` (~220 lines) with the exported `createLocalAgentDevHandler` and `localAgentDevBridge`
+unchanged in behaviour, internally split into a route classifier and per-route proxy functions, named size limits,
+one private-token reader and one loopback-origin check shared with `browser-cloud-dev-bridge.ts`, and the Gmail broker
+folded in. The many host tests that drive this handler (listed above) should be consolidated into one
+`test/dev-local-agent-bridge.test.mjs` integration file (out of scope for this chunk; flagged in cross-file actions).

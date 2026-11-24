@@ -4,22 +4,23 @@
  *
  * Selection identities are opaque. Provider revisions, names and paths stay
  * local. Sharing content requires the owner's review. */
+import { randomHex } from '../lib/hash.ts';
 type Bag = Record<string, any>;
 // LemmaScript (specs/lemma) has no model for a RegExp; no proved function reads it.
 //@ skip
 const OPAQUE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 /** Random per app session, so a later session can never repeat a revision for other content. */
-const sessionMarker = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), byte => byte.toString(16).padStart(2, '0')).join('');
+const sessionMarker = () => randomHex(6);
 
 //@ skip
 const SETTINGS_SECTION = /^[a-z][a-z0-9-]{0,63}$/;
 //@ skip
 const SETTINGS_CATEGORIES = new Set(['settings-account','settings-general','settings-privacy','settings-apps','settings-help']);
 //@ skip
-const SENSITIVE_SETTINGS = /pass|credential|vault|secret|token|key|unlock|pin|biometric/;
+const SENSITIVE_SETTINGS = /pass|credential|vault|secret|token|key|unlock|pin|biometric|carrier/;
 /** The open Settings page as an identity: its section slug only, never a value shown on it.
- * Credential and unlock pages have no identity (the screen is also paused as sensitive). */
+ * Credential, unlock and carrier pages have no identity (also paused as sensitive). */
 export function settingsSelection(state: Bag | undefined): { kind: 'settings'; id: string } | undefined {
   const page = state?.page ?? (SETTINGS_CATEGORIES.has(state?.settingsCategory) ? state?.settingsCategory : undefined);
   if (typeof page !== 'string' || !SETTINGS_SECTION.test(page) || SENSITIVE_SETTINGS.test(page)) return undefined;
@@ -128,20 +129,29 @@ const CAPTURE_REVISIONS_KEPT = 256;
  * contract would refuse once the item was favorited, trashed or restored. The counter changes
  * exactly when that item's library revision or mutation revision changes, so an edited,
  * trashed, restored or replaced capture is never the identity that was shared before. An item
- * without an opaque id or a library revision has no identity. */
+ * without an opaque id or a library revision has no identity. The published id is the library's
+ * own id (the Photos view's 'native-camera-' row prefix removed), the id Photos operations name. */
 export function createCaptureRevisions() {
   const seen = new Map<string, { signature: string; revision: number }>();
   const session = sessionMarker();
   let counter = 0;
   return (row: { kind?: string; id?: unknown; revision?: unknown; mutationRevision?: unknown; contentRevision?: unknown } | undefined): CaptureSelection | null => {
-    if (!row || typeof row.id !== 'string' || !OPAQUE.test(row.id) || typeof row.revision !== 'string' || !row.revision) return null;
+    if (!row || typeof row.id !== 'string' || typeof row.revision !== 'string' || !row.revision) return null;
+    const id = row.id.slice(row.id.startsWith(CAPTURE_ROW) ? CAPTURE_ROW.length : 0);
+    if (!OPAQUE.test(id)) return null;
     const signature = JSON.stringify([row.revision, typeof row.mutationRevision === 'string' ? row.mutationRevision : null, typeof row.contentRevision === 'string' ? row.contentRevision : null]), previous = seen.get(row.id);
     const revision = previous?.signature === signature ? previous.revision : ++counter;
     // Most recently used last. A forgotten item simply gets a new revision when opened again.
     seen.delete(row.id); seen.set(row.id, { signature, revision });
     if (seen.size > CAPTURE_REVISIONS_KEPT) seen.delete(seen.keys().next().value as string);
-    return { kind: row.kind === 'video' ? 'video' : 'photo', id: row.id, revision: 'capture-' + session + '-' + revision };
+    return { kind: row.kind === 'video' ? 'video' : 'photo', id, revision: 'capture-' + session + '-' + revision };
   };
+}
+/** The Photos view's row id for a saved capture: its library id with this prefix. */
+const CAPTURE_ROW = 'native-camera-';
+/** Whether a published capture selection names the item open in the Photos viewer. */
+export function captureSelectionOpen(open: unknown, selection: CaptureSelection | null | undefined): boolean {
+  return !!selection && typeof open === 'string' && open === CAPTURE_ROW + selection.id;
 }
 
 /** A saved photo or video as the library reports it. contentRevision (Android: modified time,
@@ -185,25 +195,20 @@ export function captureQuestion(module: string, key: string, path: string, state
   return path === 'v.ask' && typeof open === 'string' && open ? { kind: 'item', id: open } : { kind: 'none' };
 }
 
-//@ skip
-const MIME_TYPE = /^[a-z]+\/([a-z0-9][a-z0-9.+-]{0,126}|\*)$/;
 /** Document types for a Files location tile, as the list the native picker accepts
  * (DailyAppsPlugin.mimeTypes). Undefined means any document. */
 export function locationMimeTypes(name: string): string[] | undefined {
   const key = name.toLowerCase();
-  const types = /(picture|image|photo)/.test(key) ? ['image/*']
+  return /(picture|image|photo)/.test(key) ? ['image/*']
     : /(music|audio|recording)/.test(key) ? ['audio/*']
     : /video|movie/.test(key) ? ['video/*']
     : /doc|pdf/.test(key) ? ['application/pdf', 'text/*', 'application/*']
     : undefined;
-  return types?.every(type => MIME_TYPE.test(type)) ? types : undefined;
 }
 
-/** Publishes the folder and Settings identities the agent context reads from the shell.
- * The folder identity exists only while its folder is the visible Files subview. */
+/** Publishes the Settings identity the agent context reads from the shell. */
 export function installContextSelection(Component: any) {
-  const p = Component.prototype;
-  p.settingsSelection = function () {
+  Component.prototype.settingsSelection = function () {
     return document.hidden || this.S().view !== 'settings' ? undefined : settingsSelection(this.vget('settings'));
   };
 }

@@ -61,7 +61,7 @@ public final class AlphaConnectionPlugin extends Plugin {
   * (BuildConfig.ELIZAOS_APP_LINK_HOST, the sign-in return host). */
  private GoogleWorkspaceReturnFlow workspaceFlow(){
   return new GoogleWorkspaceReturnFlow(BuildConfig.ELIZAOS_APP_LINK_HOST,new GoogleWorkspaceReturnFlow.Store(){
-   public String credential()throws Exception{return storage().readCredentialSlot("cloud:production");}
+   public String credential()throws Exception{return storage().readCredentialSlot(Slots.CLOUD_PRODUCTION);}
    public String pending()throws Exception{return storage().readCredentialSlot(GoogleWorkspaceReturn.SLOT);}
    public boolean comparePending(String expected,String value)throws Exception{return storage().compareExchangeCredentialSlot(GoogleWorkspaceReturn.SLOT,expected,value);}
   });
@@ -87,7 +87,7 @@ public final class AlphaConnectionPlugin extends Plugin {
    String association=workspaceAppLinkAssociation();
    if(association==null||!"production".equals(call.getString("environment"))){call.resolve(new JSObject().put("supported",false));return;}
    final long owner=AlphaLocalAgentPlugin.credentialAuthorityEpoch();
-   String raw=storage().readCredentialSlot("cloud:production");
+   String raw=storage().readCredentialSlot(Slots.CLOUD_PRODUCTION);
    GoogleWorkspaceReturn.Binding binding=workspaceBinding(call,raw);
    JSONObject saved=new JSONObject(raw);if(saved.has("expiresAt")&&saved.getLong("expiresAt")<=System.currentTimeMillis())throw new IllegalArgumentException();
    // The identity read is an optional pre-check: a failure that says nothing about the account falls back to the manual return.
@@ -112,7 +112,7 @@ public final class AlphaConnectionPlugin extends Plugin {
   submitStorage(call,()->{try{
    final String url=workspaceCallback;
    if(workspaceAppLinkAssociation()==null){call.resolve(new JSObject().put("result","none"));return;}
-   GoogleWorkspaceReturn.Callback result=workspaceFlow().consume(workspaceBinding(call,storage().readCredentialSlot("cloud:production")),url,System.currentTimeMillis());
+   GoogleWorkspaceReturn.Callback result=workspaceFlow().consume(workspaceBinding(call,storage().readCredentialSlot(Slots.CLOUD_PRODUCTION)),url,System.currentTimeMillis());
    if(result==null){call.resolve(new JSObject().put("result","none"));return;}
    if(java.util.Objects.equals(workspaceCallback,url))workspaceCallback=null;
    getActivity().runOnUiThread(()->{Intent current=getActivity().getIntent();if(current!=null&&current.getData()!=null&&url.equals(current.getData().toString()))current.setData(null);});
@@ -123,7 +123,6 @@ public final class AlphaConnectionPlugin extends Plugin {
   submitStorage(call,()->{try{workspaceFlow().cancel(call.getString("state"));call.resolve();}catch(Exception invalid){call.reject("Google return could not be cancelled");}});
  }
 
- private static final int RESPONSE_LIMIT = ConnectionTransport.RESPONSE_LIMIT;
  /** A map view asks for about 15 tiles at once (MapLibre sends up to 16 in parallel); four workers queued
   * them four deep behind one another, so a screen of one-second tile reads took over four seconds. */
  private final ExecutorService workers = Executors.newFixedThreadPool(16);
@@ -140,8 +139,6 @@ public final class AlphaConnectionPlugin extends Plugin {
  }
  /** The renderer call a browser handoff settles exactly once. */
  private static PendingRequests.Call settles(PluginCall call){return new PendingRequests.Call(){public void resolve(){call.resolve();}public void reject(String message){call.reject(message);}};}
- private static String required(String value, int max) { return ConnectionTransport.required(value,max); }
- private static Object parseJson(String value) throws Exception { return ConnectionTransport.parseJson(value); }
  /** Stable error code for a definite refusal above a slot's byte cap; nothing was written. */
  static final String STORAGE_FULL="storage-full";
  static final String STORAGE_FULL_MESSAGE="Secure storage is full. Nothing was written.";
@@ -209,7 +206,6 @@ public final class AlphaConnectionPlugin extends Plugin {
  private static URI validatedUrl(String text, boolean allowDevelopment) throws Exception {
   return ConnectionTransport.validatedUrl(text, allowDevelopment, false);
  }
- private static byte[] readBounded(InputStream input, int limit) throws Exception { return ConnectionTransport.readBounded(input, limit); }
  /** Native-owned read routes; URLs and credentials never come from Calendar renderer calls. */
  static JSONObject readCloudIdentity(String token)throws Exception {return readCloudIdentity(token,20000);}
  static JSONObject readCloudIdentity(String token,int timeoutMs)throws Exception {
@@ -219,21 +215,19 @@ public final class AlphaConnectionPlugin extends Plugin {
  }
  static JSONObject readCalendarSyncCapabilities(String token,String grant,String calendar)throws Exception {
   if(!java.util.UUID.fromString(grant).toString().equalsIgnoreCase(grant)||calendar==null||calendar.isEmpty()||calendar.length()>1024||calendar.chars().anyMatch(c->c<32||c==127))throw new IllegalArgumentException();
-  JSONObject response=readCloudObject(token,"/api/v1/eliza/google/calendar/sync-v1/capabilities?grantId="+java.net.URLEncoder.encode(grant,"UTF-8")+"&calendarId="+java.net.URLEncoder.encode(calendar,"UTF-8"));
-  return response;
+  return readCloudObject(token,"/api/v1/eliza/google/calendar/sync-v1/capabilities?grantId="+java.net.URLEncoder.encode(grant,"UTF-8")+"&calendarId="+java.net.URLEncoder.encode(calendar,"UTF-8"));
  }
  private static JSONObject readCloudObject(String token,String path)throws Exception {return readCloudObject(token,path,20000);}
  private static JSONObject readCloudObject(String token,String path,int timeoutMs)throws Exception {
   if(!AlphaLocalAgentPlugin.validProviderToken(token,16384))throw new IllegalArgumentException();
-  HttpURLConnection connection=(HttpURLConnection)validatedUrl(CloudDeployment.PRODUCTION_API+path,false).toURL().openConnection();
+  HttpURLConnection connection=AlphaUtil.noCache((HttpURLConnection)validatedUrl(CloudDeployment.PRODUCTION_API+path,false).toURL().openConnection(),timeoutMs,timeoutMs);
   try{
-   connection.setInstanceFollowRedirects(false);connection.setUseCaches(false);
-   connection.setConnectTimeout(timeoutMs);connection.setReadTimeout(timeoutMs);connection.setRequestMethod("GET");
+   connection.setRequestMethod("GET");
    connection.setRequestProperty("Accept","application/json");connection.setRequestProperty("Authorization","Bearer "+token);
-   int status=connection.getResponseCode();if(status!=200)throw new LocalAgentProviderAdmission.CloudReadFailure(status);if(connection.getContentLengthLong()>RESPONSE_LIMIT)throw new SecurityException("Cloud read unavailable");
-   byte[] bytes;try(InputStream input=connection.getInputStream()){bytes=readBounded(input,RESPONSE_LIMIT);}
+   int status=connection.getResponseCode();if(status!=200)throw new LocalAgentProviderAdmission.CloudReadFailure(status);if(connection.getContentLengthLong()>ConnectionTransport.RESPONSE_LIMIT)throw new SecurityException("Cloud read unavailable");
+   byte[] bytes;try(InputStream input=connection.getInputStream()){bytes=ConnectionTransport.readBounded(input,ConnectionTransport.RESPONSE_LIMIT);}
    // A body that is not one JSON object (an HTML error page, trailing text) is unreadable, not an answer about the account.
-   Object parsed;try{parsed=parseJson(new String(bytes,StandardCharsets.UTF_8));}catch(IllegalArgumentException unreadable){parsed=null;}
+   Object parsed;try{parsed=ConnectionTransport.parseJson(new String(bytes,StandardCharsets.UTF_8));}catch(IllegalArgumentException unreadable){parsed=null;}
    if(!(parsed instanceof JSONObject))throw new org.json.JSONException("Cloud read unreadable");
    return (JSONObject)parsed;
   }finally{connection.disconnect();}
@@ -249,7 +243,7 @@ public final class AlphaConnectionPlugin extends Plugin {
  }
  @PluginMethod public void request(PluginCall call) {
   final String id;
-  try { id = required(call.getString("requestId"), 256); }
+  try { id = ConnectionTransport.required(call.getString("requestId"), 256); }
   catch (Exception error) { call.reject("Invalid request"); return; }
   PendingRequests.Pending pending = requests.register(id);
   if (pending == null) { call.reject("Request already active"); return; }
@@ -273,7 +267,7 @@ public final class AlphaConnectionPlugin extends Plugin {
      else if("/api/v1/subscription/entitlement-keys".equals(path))operation=RequestOperation.ENTITLEMENT_KEYS;
      else if("/api/v1/subscription/redeem".equals(path))operation=RequestOperation.REDEEM;
     }
-    int responseLimit=url.getPath().startsWith("/api/v1/eliza/google/gmail/inbox-v1/")?8*1024*1024:RESPONSE_LIMIT;
+    int responseLimit=url.getPath().startsWith("/api/v1/eliza/google/gmail/inbox-v1/")?8*1024*1024:ConnectionTransport.RESPONSE_LIMIT;
     String method = call.getString("method", "GET");
     if(!ConnectionRoutes.managedService(url.getRawPath(),url.getRawQuery(),method,call.getString("body")!=null))throw new IllegalArgumentException();
     // Google Calendar writes need the native sync consent; the renderer's preference alone is not enough.
@@ -294,8 +288,7 @@ public final class AlphaConnectionPlugin extends Plugin {
     }
     stage=RequestStage.CONNECT;
     connection = (HttpURLConnection) url.toURL().openConnection(); pending.connection(connection::disconnect);
-    connection.setInstanceFollowRedirects(false); connection.setConnectTimeout(20000); connection.setReadTimeout(operation==RequestOperation.CLI_POLL?30000:120000);
-    connection.setUseCaches(false); connection.setRequestMethod(method);
+    AlphaUtil.noCache(connection,20000,operation==RequestOperation.CLI_POLL?30000:120000); connection.setRequestMethod(method);
     stage=RequestStage.VALIDATE;
     JSObject headers = call.getObject("headers", new JSObject());
     Iterator<String> names = headers.keys();
@@ -314,7 +307,7 @@ public final class AlphaConnectionPlugin extends Plugin {
      if (!("POST".equals(method)||"PUT".equals(method)&&routes.allowed("automations",route,method)||"PATCH".equals(method)&&ConnectionRoutes.calendarSync(url.getPath(),url.getRawQuery(),method,true))) throw new IllegalArgumentException();
      byte[] encoded = body.getBytes(StandardCharsets.UTF_8);
      if (encoded.length > responseLimit) throw new IllegalArgumentException();
-     parseJson(body); connection.setDoOutput(true); connection.setFixedLengthStreamingMode(encoded.length);
+     ConnectionTransport.parseJson(body); connection.setDoOutput(true); connection.setFixedLengthStreamingMode(encoded.length);
      if (pending.cancelled()) throw new IllegalStateException();
      stage=RequestStage.WRITE;
      try (java.io.OutputStream output = connection.getOutputStream()) { output.write(encoded); }
@@ -328,12 +321,12 @@ public final class AlphaConnectionPlugin extends Plugin {
     if (connection.getContentLengthLong() > responseLimit) throw new IllegalArgumentException();
     stage=RequestStage.READ;
     byte[] bytes;
-    try (InputStream input = status >= 400 ? connection.getErrorStream() : connection.getInputStream()) { bytes = readBounded(input, responseLimit); }
+    try (InputStream input = status >= 400 ? connection.getErrorStream() : connection.getInputStream()) { bytes = ConnectionTransport.readBounded(input, responseLimit); }
     if (pending.cancelled()) throw new IllegalStateException();
     Object data = JSONObject.NULL;
     if (bytes.length > 0) {
      stage=RequestStage.PARSE;
-     try { data = parseJson(new String(bytes, StandardCharsets.UTF_8)); }
+     try { data = ConnectionTransport.parseJson(new String(bytes, StandardCharsets.UTF_8)); }
      catch (Exception error) { if (status < 400) throw error; }
     }
     stage=RequestStage.RESOLVE;
@@ -360,7 +353,7 @@ public final class AlphaConnectionPlugin extends Plugin {
    Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url.toASCIIString())); intent.addCategory(Intent.CATEGORY_BROWSABLE);
    boolean cliLogin=ConnectionRoutes.externalCliLogin(url.getHost(),url.getPath());
    if(cliLogin){
-    String id=required(call.getString("requestId"),256);
+    String id=ConnectionTransport.required(call.getString("requestId"),256);
     if(destroyed){call.reject("Connection closed");return;}
     PendingRequests.Pending pending=requests.registerBrowser(id,settles(call));
     if(pending==null){call.reject("Request already active");return;}

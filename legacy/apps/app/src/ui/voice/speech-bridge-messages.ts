@@ -11,6 +11,8 @@ import { isNativeRejection } from "../utils/native-refusal";
 export const SPEECH_BRIDGE_REFUSALS: ReadonlyMap<string, string> = new Map([
   ["Speaker is in use", "Another app is using the speaker."],
   ["Another app is using the speaker", "Another app is using the speaker."],
+  ["Speaker mute was missing", "Could not change the speaker volume."],
+  ["Voice is closed", "Voice stopped."],
   ["Voice request already active or unavailable", "Voice is busy or unavailable."],
   ["Voice request cancelled", "Voice stopped."],
   ["Voice cancelled", "Voice stopped."],
@@ -26,6 +28,9 @@ export const SPEECH_BRIDGE_REFUSALS: ReadonlyMap<string, string> = new Map([
   ["Playback unavailable", "Voice playback is unavailable."],
   ["Close the protected credential surface before using speech.", "Close the password screen to use voice."],
   ["Invalid request", "Voice couldn’t take this request."],
+  // The speaker mute control (setSpeechOutputMuted).
+  ["Speaker mute was missing", "Voice couldn’t change the speaker."],
+  ["Voice is closed", "Voice is unavailable."],
   [
     "Android could not show this request; the app may have closed. Reopen it and try again.",
     "Android could not show this request; Alpha may have closed. Reopen Alpha and try again.",

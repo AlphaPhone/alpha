@@ -3,6 +3,7 @@ package ai.alphacompute.alphaphone;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.util.Log;
 
 /**
  * The dialer- and SMS-role components (and the MMS file provider) exist in the launcher manifest
@@ -14,8 +15,9 @@ import android.content.pm.PackageManager;
  */
 final class AlphaTelephonyRoles {
  private AlphaTelephonyRoles() {}
- static final Class<?>[] DIALER = { AlphaInCallService.class, AlphaCallActivity.class, AlphaDialPadActivity.class };
- static final Class<?>[] SMS = { AlphaSmsDeliverReceiver.class, AlphaMmsWapPushReceiver.class, AlphaMmsResultReceiver.class, AlphaRespondViaMessageService.class, AlphaSmsComposeActivity.class, ai.eliza.plugins.messages.MmsFileProvider.class };
+ /** Dialer-role components, then SMS-role components and the MMS file provider. */
+ private static final Class<?>[] COMPONENTS = { AlphaInCallService.class, AlphaCallActivity.class, AlphaDialPadActivity.class,
+  AlphaSmsDeliverReceiver.class, AlphaMmsWapPushReceiver.class, AlphaMmsResultReceiver.class, AlphaRespondViaMessageService.class, AlphaSmsComposeActivity.class, ai.eliza.plugins.messages.MmsFileProvider.class };
  static void sync(Context context) {
   boolean image = AlphaImageCapability.verified(context);
   // An image may enable the manifest default through SystemConfig. A failed image admission must
@@ -31,10 +33,8 @@ final class AlphaTelephonyRoles {
 
  private static boolean syncComponents(Context context, int wanted) {
   PackageManager packages = context.getPackageManager();
-  java.util.List<Class<?>> components = new java.util.ArrayList<>(java.util.Arrays.asList(DIALER));
-  components.addAll(java.util.Arrays.asList(SMS));
   boolean ready = true;
-  for (Class<?> component : components) {
+  for (Class<?> component : COMPONENTS) {
    ComponentName name = new ComponentName(context, component);
    try {
     if (packages.getComponentEnabledSetting(name) != wanted) {
@@ -43,7 +43,7 @@ final class AlphaTelephonyRoles {
     }
    } catch (RuntimeException refused) {
     ready = false;
-    android.util.Log.w("AlphaTelephonyRoles", "Role component state unchanged for " + component.getSimpleName());
+    Log.w("AlphaTelephonyRoles", "Role component state unchanged for " + component.getSimpleName());
    }
   }
   return ready;

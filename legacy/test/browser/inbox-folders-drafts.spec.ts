@@ -1,18 +1,20 @@
 import {test,expect,type Page} from '@playwright/test';
 import {seedCompletedAccessSetup} from './flag-off-android';
 import {preloadPageModules} from './helpers/page-modules';
+import type {GmailInboxReceipt} from '../../apps/app/src/runtime/cloud-protocol';
 
 // Rendered Inbox against a synthetic managed provider: Drafts/Archive/Trash folders, provider draft
 // editing and the rule that nothing is sent or saved remotely without the explicit review.
-async function install(page:Page,caps:Record<string,unknown>){
+async function install(page:Page,caps:Record<string,unknown>,restored?:{slots:Record<string,unknown>;receipt:GmailInboxReceipt|null}){
  await seedCompletedAccessSetup(page);
  await page.goto('/');
- await preloadPageModules(page,['/src/runtime/connection-ui.tsx']);
+ await preloadPageModules(page,['/src/runtime/connection-ui.tsx','/src/runtime/inbox-local-store.ts']);
  await page.waitForFunction(()=>{const state=(window as any).__alphaModules['/src/runtime/connection-ui.tsx'].connectionController.getSnapshot();return state.startupResolved&&!state.busy;});
- await page.evaluate(async caps=>{
-  const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');
-  const {inboxLocalStore:s}=await import('/src/runtime/inbox-local-store.ts');
-  const f=(window as any).folderFixture={slots:{} as Record<string,unknown>,searches:[] as string[],drafts:0,draftReads:[] as string[],prepared:[] as any[],dispatches:0};
+ await page.evaluate(({caps,restored})=>{
+  const loaded=(window as any).__alphaModules;
+  const {connectionController:c}=loaded['/src/runtime/connection-ui.tsx'];
+  const {inboxLocalStore:s}=loaded['/src/runtime/inbox-local-store.ts'];
+  const f=(window as any).folderFixture={slots:restored?.slots??{},receipt:restored?.receipt??null,searches:[] as string[],drafts:0,draftReads:[] as string[],prepared:[] as any[],dispatches:0,confirmSend:false};
   s.read=async(key:string)=>structuredClone(f.slots[key]??null);
   s.compareExchange=async(key:string,prior:unknown,next:unknown)=>{if(JSON.stringify(f.slots[key]??null)!==JSON.stringify(prior))return {status:'conflict'};f.slots[key]=structuredClone(next);return {status:'saved'};};
   const message=(id:string,subject:string)=>({id,threadId:'t-'+id,from:'Synthetic sender',fromEmail:'sender@example.invalid',to:['owner@example.invalid'],subject,snippet:'Synthetic',receivedAt:'2026-10-01T12:00:00Z',unread:false});
@@ -26,13 +28,21 @@ async function install(page:Page,caps:Record<string,unknown>){
    gmailDrafts:async()=>{f.drafts++;return {drafts:[{draftId:'draft-1',messageId:'dm-1',subject:'Quarterly plan',to:['friend@example.invalid'],snippet:'Draft text',updatedAt:'2026-10-07T10:00:00Z'},{draftId:'draft-2',messageId:'dm-2',subject:'Re: Thread reply',to:['friend@example.invalid'],snippet:'',updatedAt:null}],nextPageToken:null};},
    gmailDraftContent:async(_g:string,draftId:string)=>{f.draftReads.push(draftId);return {draftId,messageId:'dm',providerDigest:(draftId==='draft-1'?'a':'b').repeat(64),to:['friend@example.invalid'],cc:[],bcc:[],subject:draftId==='draft-1'?'Quarterly plan':'Re: Thread reply',bodyText:'Draft text',threaded:draftId!=='draft-1',attachmentCount:0,plainText:true};},
    gmailPrepareOperation:async(_g:string,requestId:string,proposal:any)=>{f.prepared.push(structuredClone(proposal));const review={...proposal,from:'owner@example.invalid',attachments:[]};return {receipt:{requestId,kind:proposal.kind,state:'prepared',reviewDigest:await digest(JSON.stringify(review)),providerResult:null,rejectionCode:null},review};},
-   gmailDispatchOperation:async()=>{f.dispatches++;throw Error('No dispatch expected');},
-   gmailOperation:async()=>{throw Error('No receipt');},
+   gmailDispatchOperation:async(_g:string,requestId:string,reviewDigest:string)=>{
+    f.dispatches++;
+    if(!f.confirmSend)throw Error('No dispatch expected');
+    f.receipt={requestId,kind:'send',state:'succeeded',reviewDigest,providerResult:{messageId:'sent-fixture'},rejectionCode:null};
+    return f.receipt;
+   },
+   gmailOperation:async(_g:string,requestId:string)=>{
+    if(!f.receipt||f.receipt.requestId!==requestId)throw Error('No receipt');
+    return f.receipt;
+   },
   };
   c.getCloudClient=()=>({client,sessionId:'fixture-session',credentialId:'fixture'} as any);
   const snapshot={...c.getSnapshot(),cloudAccount:{environment:'production',userId:'fixture-owner',sessionId:'fixture-session',credentialId:'fixture'}} as any;c.getSnapshot=()=>snapshot;
   c.close();
- },caps);
+ },{caps,restored});
  await page.getByRole('button',{name:'Inbox',exact:true}).click();
  await expect(page.getByRole('button',{name:'Refresh inbox',exact:true})).toBeVisible();
 }
@@ -74,7 +84,31 @@ test('Drafts, Archive and Trash load their lists; edited Gmail draft stays local
  expect(state.dispatches).toBe(0);
 });
 
-test('Send opens the exact review and nothing is sent until it is confirmed',async({page})=>{
+test('a confirmed send from a Gmail draft keeps the receipt available without reopening it',async({page})=>{
+ await install(page,{draftsList:true});
+ await page.getByRole('button',{name:'Other mail folders',exact:true}).click();
+ await page.getByRole('menuitemradio',{name:'Drafts',exact:true}).click();
+ await page.getByRole('button',{name:/^Gmail draft, Draft to friend@example\.invalid, Quarterly plan/}).click();
+ await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Draft text');
+ await page.evaluate(()=>{(window as any).folderFixture.confirmSend=true;});
+ await page.getByRole('button',{name:'Send email',exact:true}).click();
+ const review=page.getByRole('dialog',{name:'Review mail operation'});
+ await expect(page.locator('[data-alpha-toast]').getByText('Sent.',{exact:true})).toBeVisible();
+ await expect(review).toHaveCount(0);
+ const sent=await fixture(page);
+ expect(sent.dispatches).toBe(1);
+
+ await install(page,{draftsList:true},{slots:sent.slots,receipt:sent.receipt});
+ const choice=page.getByRole('button',{name:'Mail review / receipt',exact:true});
+ await expect(choice).toBeVisible();
+ await expect(review).toHaveCount(0);
+ await choice.click();
+ await expect(review.getByRole('status')).toHaveText('Saved mail operation. Check its exact review and receipt before continuing.');
+ await expect(review.getByRole('button',{name:'Send this email',exact:true})).toHaveCount(0);
+ expect((await fixture(page)).dispatches).toBe(0);
+});
+
+test('a failed dispatch keeps the exact draft available for receipt recovery',async({page})=>{
  await install(page,{});
  await page.getByRole('button',{name:'Compose',exact:true}).click();
  await page.getByRole('textbox',{name:'To',exact:true}).fill('friend@example.invalid');
@@ -83,14 +117,14 @@ test('Send opens the exact review and nothing is sent until it is confirmed',asy
  await page.getByRole('textbox',{name:'Message',exact:true}).fill('Reviewed body');
  await page.getByRole('button',{name:'Send email',exact:true}).click();
  const review=page.getByRole('dialog',{name:'Review mail operation'});
- await expect(review.getByRole('button',{name:'Send this email',exact:true})).toBeVisible();
+ await expect(review.getByRole('button',{name:'Send this email',exact:true})).toHaveCount(0);
  await expect(review.getByText('Reviewed body',{exact:true})).toBeVisible();
  expect((await fixture(page)).prepared.map((p:any)=>p.kind)).toEqual(['send']);
- expect((await fixture(page)).dispatches).toBe(0);
+ expect((await fixture(page)).dispatches).toBe(1);
  await review.getByRole('button',{name:'Close mail review',exact:true}).click();
  await expect(review).toHaveCount(0);
- await page.waitForTimeout(200);
- expect((await fixture(page)).dispatches).toBe(0);
+ await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Reviewed body');
+ expect((await fixture(page)).dispatches).toBe(1);
 });
 
 test.describe('wide Cloud Inbox layout',()=>{

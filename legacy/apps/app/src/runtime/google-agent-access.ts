@@ -2,11 +2,13 @@ import type {DomainRecovery} from '../browser/domain-document';
 import {captureDevicePreferences,cachedDevicePreferences,editDevicePreferences,initializeDevicePreferences,readDevicePreferences} from '../browser/device-preferences';
 import {Capacitor} from '@capacitor/core';
 import {browserLocalAgentEnabled,saveNativeGoogleAgentAccess} from './local-agent';
+import {BROWSER_RESIDENT_LAUNCHED,browserCloudResidentEnabled,browserCloudResidentEnvironment,browserResidentCall} from './browser-cloud-resident';
+import {cloudCredentialStore} from './native-connection';
 
 /** Owner switches for agent writes through Google. Off never disconnects or revokes Google; reads keep working. */
 export type GoogleAgentAccess={gmailChanges:boolean;calendarEdits:boolean};
 /** Development host route that hands the switches to the private Google tool host (scripts/local-agent-dev-bridge.ts). */
-export const GOOGLE_AGENT_ACCESS_PATH='/__alpha-agent-google-access';
+const GOOGLE_AGENT_ACCESS_PATH='/__alpha-agent-google-access';
 export function googleAgentAccess():GoogleAgentAccess{
  const saved=cachedDevicePreferences();
  return {gmailChanges:saved?.agentGmailChanges!==false,calendarEdits:saved?.agentCalendarEdits!==false};
@@ -17,7 +19,6 @@ export async function captureGoogleCalendarAccess(){
 }
 /** Keep a save, its host publication and any rollback together across same-origin views. */
 function withGoogleAccessLock<T>(operation:()=>Promise<T>):Promise<T>{
- if(!navigator.locks?.request)throw Error('Safe Google access changes require Web Locks.');
  return navigator.locks.request('alpha.google-agent-access.v1',{mode:'exclusive'},operation);
 }
 /** Hands the saved switches to the agent's Google host. On the phone a failed save throws, so Settings never shows a state the host does not enforce. */
@@ -30,11 +31,20 @@ async function publishSavedGoogleAgentAccess(){
  const saved=await readDevicePreferences();
  const access={gmailChanges:saved.agentGmailChanges,calendarEdits:saved.agentCalendarEdits};
  if(native){await saveNativeGoogleAgentAccess(access);return;}
+ if(browserCloudResidentEnabled){
+  const credential=await cloudCredentialStore.read(browserCloudResidentEnvironment);
+  if(!credential?.credentialId)return;
+  const applied=await browserResidentCall('residentGoogleGmailAccess',credential.credentialId,access.gmailChanges);
+  if(applied?.gmailChanges!==access.gmailChanges)throw Error('Gmail access was not confirmed.');
+  return;
+ }
  await fetch(GOOGLE_AGENT_ACCESS_PATH,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(access)}).catch(()=>{});
 }
 export function publishGoogleAgentAccess(){
  return withGoogleAccessLock(publishSavedGoogleAgentAccess);
 }
+// A relaunched development resident forgets the owner's Gmail switch; hand it the saved one again.
+if(browserCloudResidentEnabled&&typeof window!=='undefined')window.addEventListener(BROWSER_RESIDENT_LAUNCHED,()=>{void publishGoogleAgentAccess().catch(()=>{});});
 export async function setGoogleAgentAccess(change:Partial<GoogleAgentAccess>,guard?:{current():boolean;expectedCalendarEdits:boolean;receipt:DomainRecovery}){
  return withGoogleAccessLock(async()=>{
   let before:GoogleAgentAccess|undefined;

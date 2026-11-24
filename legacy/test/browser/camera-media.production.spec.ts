@@ -2,7 +2,7 @@ import {test,expect,type Page} from '@playwright/test';
 // Runs in the `production` project: a flag-off build without mocks, fixtures or the
 // browser development profile. A synthetic canvas stream stands in for the camera
 // permission boundary only; capture, IndexedDB storage, search, the file picker and
-// the reviewed question flow are the shipped code. Nothing is uploaded or sent.
+// the question attachment flow are the shipped code. Nothing is uploaded or sent.
 
 const offline=()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));
 // Records CSP violations in each loaded document, so a blocked fetch or image is caught.
@@ -20,18 +20,22 @@ test('a camera capture persists and Ask Alpha attaches it locally without the de
  await page.goto('/');await expect(page.locator('html')).toHaveAttribute('data-connection-mode','live');
  await page.getByRole('button',{name:'Camera',exact:true}).click();
  await expect.poll(()=>page.locator('[data-alpha-camera="viewfinder"] video').evaluate((v:HTMLVideoElement)=>v.readyState)).toBeGreaterThanOrEqual(2);
- // Document capture has a direct entry; Ask remains a camera mode.
- for(const name of ['Ask Alpha about this','Choose image','Scan mode'])await expect(page.getByRole('button',{name,exact:true})).toHaveCount(0);
- await expect(page.getByRole('button',{name:'Scan document',exact:true})).toBeVisible();
+ // Camera is Video and Photo only: scanning and questions are asked in chat.
+ for(const name of ['Ask Alpha about this','Choose image','Scan mode','Scan document','Ask mode'])await expect(page.getByRole('button',{name,exact:true})).toHaveCount(0);
+ await expect(page.locator('[data-alpha-camera="modes"]').getByRole('button')).toHaveText(['Video','Photo']);
  await expect(page.locator('[data-alpha-camera-root] [data-alpha-app-title]')).toHaveCount(0);
- // Camera frame question (mainline #815's check, reached by asking in chat): an unsaved frame, reviewed text only.
+ // Asking about the live viewfinder stages one unsaved frame in the composer.
  await page.getByRole('button',{name:'Type',exact:true}).click();
  const ask=page.locator('[data-alpha-layer="composer"][aria-hidden="false"], [data-alpha-layer="conversation"][aria-hidden="false"]').getByRole('textbox').first();
  await ask.fill('What am I looking at?');await ask.press('Enter');
- const frame=page.getByRole('dialog',{name:'Ask about selected content'});
- await expect(frame.getByRole('img',{name:'Image for question review'})).toBeVisible();
- await expect(frame.getByRole('button',{name:'Extract text locally'})).toBeEnabled();
- await frame.getByRole('button',{name:'Cancel',exact:true}).click();await expect(frame).toHaveCount(0);
+ const frame=page.getByRole('button',{name:'Preview attached Camera frame.jpg',exact:true}).locator('img');
+ await expect(frame).toBeVisible();
+ await expect.poll(()=>frame.evaluate((image:HTMLImageElement)=>image.naturalWidth)).toBeGreaterThan(0);
+ await expect(page.getByRole('dialog',{name:'Ask about selected content'})).toHaveCount(0);
+ await expect(page.getByRole('textbox',{name:'Message Alpha',exact:true})).toHaveValue('What am I looking at?');
+ await expect(page.getByRole('button',{name:'Message actions: What am I looking at?',exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'Remove Camera frame.jpg',exact:true}).click();
+ await page.getByRole('button',{name:'Minimize chat',exact:true}).click();
  await page.getByRole('button',{name:'Take photo',exact:true}).click();
  await expect(page.getByRole('button',{name:'Open last photo',exact:true})).toBeVisible();
 
@@ -49,7 +53,7 @@ test('a camera capture persists and Ask Alpha attaches it locally without the de
  const savedPreview=page.getByRole('button',{name:'Preview attached photo',exact:true}).getByRole('img',{name:'Captured photo',exact:true});
  await expect(savedPreview).toBeVisible();
  await expect.poll(()=>savedPreview.evaluate((image:HTMLImageElement)=>image.naturalWidth)).toBeGreaterThan(0);
- await expect(page.getByRole('textbox',{name:'Message Alpha',exact:true})).toHaveValue('');
+ await expect(page.getByRole('textbox',{name:'Message Alpha',exact:true})).toHaveValue('What am I looking at?');
  await expect(page.getByRole('button',{name:'Remove photo',exact:true})).toBeVisible();
  expect(errors).toEqual([]);
  expect(await violations(page)).toEqual([]);

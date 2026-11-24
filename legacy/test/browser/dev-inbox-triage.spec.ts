@@ -16,13 +16,17 @@ test('search, archive, undo and delete preserve their local state through reload
  await page.getByRole('button',{name:'Search email',exact:true}).click();await page.getByRole('searchbox',{name:'Search mail',exact:true}).fill('Train times');
  await expect(page.getByRole('button',{name:/Sender Two, Travel details/})).toBeVisible();await expect(page.getByRole('button',{name:/Sender One, Planning notes/})).toHaveCount(0);
  await page.getByRole('button',{name:'Back to inbox',exact:true}).click();await page.getByRole('button',{name:/Sender One, Planning notes/}).click();
+ const email=page.getByRole('region',{name:'Email message'});
+ const sender=await email.getByLabel('Show message details').boundingBox();
+ const subject=await email.getByRole('heading',{name:'Planning notes',exact:true}).boundingBox();
+ expect(sender!.y+sender!.height).toBeLessThanOrEqual(subject!.y);
  await chooseMailAction(page, 'Archive');expect((await stored(page)).mails[0].arch).toBe(true);
  await page.getByRole('button',{name:'Undo',exact:true}).click();expect((await stored(page)).mails[0].arch).not.toBe(true);
  await chooseMailAction(page, 'Move to Trash');expect((await stored(page)).mails[0].del).toBe(true);
  await page.reload();await page.getByRole('button',{name:'Inbox',exact:true}).click();await expect(page.getByRole('button',{name:/Sender One, Planning notes/})).toHaveCount(0);await expect(page.getByRole('button',{name:/Sender Two, Travel details/})).toBeVisible();
 });
 test('reply saves its source identity and sending marks only that source as replied',async({page})=>{
- await page.getByRole('button',{name:/Sender One, Planning notes/}).click();await chooseMailAction(page, 'Reply');await expect(page.getByRole('textbox',{name:'Subject',exact:true})).toHaveValue('Re: Planning notes');await page.getByRole('textbox',{name:'Message',exact:true}).fill('Local reply');await page.getByRole('button',{name:'Save draft',exact:true}).click();
+ await page.getByRole('button',{name:/Sender One, Planning notes/}).click();await chooseMailAction(page, 'Reply');await expect(page.getByRole('textbox',{name:'Subject',exact:true})).toHaveValue('Re: Planning notes');await page.getByRole('textbox',{name:'Message',exact:true}).fill('Local reply');await page.getByRole('button',{name:'Back from draft',exact:true}).click();
  await page.reload();await page.getByRole('button',{name:'Inbox',exact:true}).click();await page.getByRole('button',{name:'Restore local draft',exact:true}).click();await page.getByRole('button',{name:'Send email',exact:true}).click();
  const data=await stored(page);expect(data.sent[0]).toMatchObject({to:['one@example.test'],subj:'Re: Planning notes',body:'Local reply'});expect(data.mails[0]).toMatchObject({unread:false,replied:true});expect(data.mails[1].replied).toBeUndefined();
 });
@@ -32,19 +36,19 @@ test('forward retains reviewed attachment bytes and requires a chosen recipient'
 });
 
 test('sending a separate message preserves an earlier saved draft',async({page})=>{
- await page.getByRole('button',{name:'Compose',exact:true}).click();await page.getByRole('textbox',{name:'To',exact:true}).fill('saved@example.test');await page.getByRole('textbox',{name:'Subject',exact:true}).fill('Retain this draft');await page.getByRole('button',{name:'Save draft',exact:true}).click();await page.getByRole('button',{name:'Back from draft',exact:true}).click();
+ await page.getByRole('button',{name:'Compose',exact:true}).click();await page.getByRole('textbox',{name:'To',exact:true}).fill('saved@example.test');await page.getByRole('textbox',{name:'Subject',exact:true}).fill('Retain this draft');await page.getByRole('button',{name:'Back from draft',exact:true}).click();
  await page.getByRole('button',{name:'Compose',exact:true}).click();await page.getByRole('textbox',{name:'To',exact:true}).fill('other@example.test');await page.getByRole('textbox',{name:'Subject',exact:true}).fill('Separate message');await page.getByRole('button',{name:'Send email',exact:true}).click();
  expect((await stored(page)).localDrafts.map((d:any)=>d.subject)).toEqual(['Retain this draft']);await page.reload();await page.getByRole('button',{name:'Inbox',exact:true}).click();await page.getByRole('button',{name:'Restore local draft',exact:true}).click();await expect(page.getByRole('textbox',{name:'Subject',exact:true})).toHaveValue('Retain this draft');
 });
 
 test('multiple drafts retain identity and discarding one keeps the other',async({page})=>{
- for(const subject of ['First draft','Second draft']){await page.getByRole('button',{name:'Compose',exact:true}).click();await page.getByRole('textbox',{name:'Subject',exact:true}).fill(subject);await page.getByRole('button',{name:'Save draft',exact:true}).click();await page.getByRole('button',{name:'Back from draft',exact:true}).click();}
+ for(const subject of ['First draft','Second draft']){await page.getByRole('button',{name:'Compose',exact:true}).click();await page.getByRole('textbox',{name:'Subject',exact:true}).fill(subject);await page.getByRole('button',{name:'Back from draft',exact:true}).click();}
  const before=await stored(page);expect(before.localDrafts).toHaveLength(2);expect(new Set(before.localDrafts.map((d:any)=>d.localDraftId)).size).toBe(2);
- await page.reload();await page.getByRole('button',{name:'Inbox',exact:true}).click();await page.getByRole('button',{name:'Restore draft 1: First draft',exact:true}).click();await page.getByRole('button',{name:'Discard draft',exact:true}).click();await page.getByRole('dialog',{name:'Discard draft?',exact:true}).getByRole('button',{name:'Discard draft',exact:true}).click();
- expect((await stored(page)).localDrafts.map((d:any)=>d.subject)).toEqual(['Second draft']);await page.getByRole('button',{name:'Restore local draft',exact:true}).click();await expect(page.getByRole('textbox',{name:'Subject',exact:true})).toHaveValue('Second draft');
+ await page.reload();await page.getByRole('button',{name:'Inbox',exact:true}).click();await page.getByRole('button',{name:'Drafts',exact:true}).click();await mailMenu(page,'Select drafts');await page.getByRole('checkbox',{name:'Draft, First draft',exact:true}).click();await mailMenu(page,'Delete drafts');await page.getByRole('dialog',{name:'Delete 1 draft?',exact:true}).getByRole('button',{name:'Yes',exact:true}).click();
+ expect((await stored(page)).localDrafts.map((d:any)=>d.subject)).toEqual(['Second draft']);await page.getByRole('button',{name:'Draft, Second draft',exact:true}).click();await expect(page.getByRole('textbox',{name:'Subject',exact:true})).toHaveValue('Second draft');
 });
 test('an older draft receives an identity on restore and saving it does not create a duplicate',async({page})=>{
- await page.evaluate(()=>{const key='alpha.dev.app.inbox',data=JSON.parse(localStorage.getItem(key)!);data.localDrafts=[{to:['legacy@example.test'],subject:'Legacy draft',body:'Before identities'}];localStorage.setItem(key,JSON.stringify(data));});await page.reload();await page.getByRole('button',{name:'Inbox',exact:true}).click();await page.getByRole('button',{name:'Restore local draft',exact:true}).click();const id=(await stored(page)).localDrafts[0].localDraftId;expect(typeof id).toBe('string');await page.getByRole('textbox',{name:'Message',exact:true}).fill('Updated legacy');await page.getByRole('button',{name:'Save draft',exact:true}).click();const drafts=(await stored(page)).localDrafts;expect(drafts).toHaveLength(1);expect(drafts[0]).toMatchObject({localDraftId:id,body:'Updated legacy'});
+ await page.evaluate(()=>{const key='alpha.dev.app.inbox',data=JSON.parse(localStorage.getItem(key)!);data.localDrafts=[{to:['legacy@example.test'],subject:'Legacy draft',body:'Before identities'}];localStorage.setItem(key,JSON.stringify(data));});await page.reload();await page.getByRole('button',{name:'Inbox',exact:true}).click();await page.getByRole('button',{name:'Restore local draft',exact:true}).click();const id=(await stored(page)).localDrafts[0].localDraftId;expect(typeof id).toBe('string');await page.getByRole('textbox',{name:'Message',exact:true}).fill('Updated legacy');await page.getByRole('button',{name:'Back from draft',exact:true}).click();const drafts=(await stored(page)).localDrafts;expect(drafts).toHaveLength(1);expect(drafts[0]).toMatchObject({localDraftId:id,body:'Updated legacy'});
 });
 
 test('Inbox options visibly opens and Refresh preserves the local mailbox',async({page})=>{
@@ -71,12 +75,18 @@ test('preview selection confirms only selected email changes and survives reload
 });
 test('preview select all marks read then finishes selection without deleting peers',async({page})=>{
  await mailMenu(page,'Select emails');await mailMenu(page,'Select all');await expect(page.getByRole('heading',{name:'2 selected',exact:true})).toBeVisible();
- await mailMenu(page,'Mark as read');await page.getByRole('dialog',{name:'Mark as read 2 emails?',exact:true}).getByRole('button',{name:'Yes',exact:true}).click();
+ await page.getByLabel('Mail options',{exact:true}).click();
+ const markRead=page.getByRole('menuitem',{name:'Mark as read',exact:true});
+ await expect(markRead.locator('.mail-toolbar-icon')).toHaveCSS('mask-image',/\/icons\/lucide\/mail-open\.svg/);
+ const icon=await page.request.get('/icons/lucide/mail-open.svg');
+ expect(icon.headers()['content-type']).toContain('image/svg+xml');
+ await markRead.click();
+ await page.getByRole('dialog',{name:'Mark as read 2 emails?',exact:true}).getByRole('button',{name:'Yes',exact:true}).click();
  expect((await stored(page)).mails.map((row:any)=>row.unread)).toEqual([false,false]);
  await mailMenu(page,'Select emails');await mailMenu(page,'Finish selection');await expect(page.getByRole('checkbox')).toHaveCount(0);await expect(page.getByRole('button',{name:/Sender One, Planning notes/})).toBeVisible();
 });
 test('preview draft selection deletes only the confirmed saved draft',async({page})=>{
- for(const subject of ['Keep draft peer','Delete draft target']){await page.getByRole('button',{name:'Compose',exact:true}).click();await page.getByRole('textbox',{name:'Subject',exact:true}).fill(subject);await page.getByRole('button',{name:'Save draft',exact:true}).click();await page.getByRole('button',{name:'Back from draft',exact:true}).click();}
+ for(const subject of ['Keep draft peer','Delete draft target']){await page.getByRole('button',{name:'Compose',exact:true}).click();await page.getByRole('textbox',{name:'Subject',exact:true}).fill(subject);await page.getByRole('button',{name:'Back from draft',exact:true}).click();}
  await page.getByRole('button',{name:'Drafts',exact:true}).click();await mailMenu(page,'Select drafts');await page.getByRole('checkbox',{name:'Draft, Delete draft target',exact:true}).click();await mailMenu(page,'Delete drafts');
  const review=page.getByRole('dialog',{name:'Delete 1 draft?',exact:true});await review.getByRole('button',{name:'No',exact:true}).click();expect((await stored(page)).localDrafts).toHaveLength(2);
  await mailMenu(page,'Delete drafts');await review.getByRole('button',{name:'Yes',exact:true}).click();

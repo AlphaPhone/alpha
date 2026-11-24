@@ -42,7 +42,8 @@ async function sendRefused(page: Page, text: string) {
 }
 
 const KINDS = {
-  // Cloud's billing refusal of a signed-in account: one answer naming both ways back (cloud-membership-ui.tsx).
+  // Cloud's billing refusal of a signed-in account without Cloud's own code (a hold reads the same):
+  // one answer naming both ways back (cloud-membership-ui.tsx).
   insufficient_credits: 'Billing declined',
   provider_issue: 'Reply failed',
   generation_timeout: 'Reply failed',
@@ -63,7 +64,7 @@ for (const [kind, text] of Object.entries(KINDS)) for (const frame of ['done', '
     await expect(page.getByText(UNKNOWN, { exact: true })).toHaveCount(0);
     await expect(bubble(page, `Failing ${kind}`)).toHaveCount(1);
     if (kind === 'insufficient_credits') {
-      // One answer in the chat, and Subscription opens with plan selection and code entry.
+      // One answer in the chat, and Manage plan opens Account with plan selection and code entry.
       // The fixture confirms zero cash and no active plan; neither is inferred from the other.
       const account = page.getByRole('dialog', { name: 'Account', exact: true });
       await expect(account).toBeVisible();
@@ -79,7 +80,7 @@ for (const [kind, text] of Object.entries(KINDS)) for (const frame of ['done', '
       await button(page, 'Expand chat').click();
       // No second billing message; the answer carries the one offer, which reopens the same popup.
       await expect(page.getByRole('button', { name: /^Manage billing in Eliza Cloud/ })).toHaveCount(0);
-      const offer = page.getByRole('button', { name: /^Subscription/ });
+      const offer = page.getByRole('button', { name: /^Manage plan/ });
       await expect(offer).toHaveCount(1);
       await offer.click();
       await expect(account).toBeVisible();
@@ -122,6 +123,35 @@ for (const [kind, text] of Object.entries(KINDS)) for (const frame of ['done', '
   });
 }
 
+// Cloud's own out-of-funds code on the agent's terminal failure: the chat's one out-of-funds line
+// (out-of-funds-notice.ts) in place of Billing declined, with the same Subscription sheet and offer.
+const OUT_OF_FUNDS = 'You’re out of plan allowance and credits, so I couldn’t reply.';
+for (const code of ['insufficient_credits', 'allowance_exhausted'] as const) test(`a resident reply Cloud refuses with ${code} answers with the out-of-funds line once`, async ({ page }) => {
+  test.setTimeout(120_000);
+  const foreign = await connected(page);
+  await setStub(page, { stream: { failure: 'insufficient_credits', frame: 'done', code } });
+  await stub(page, s => { s.accounts[0].balance = 0; s.accounts[0].plan = 'none'; s.persist(); });
+  await send(page, `Failing ${code}`);
+  const account = page.getByRole('dialog', { name: 'Account', exact: true });
+  if (code === 'insufficient_credits') {
+    // A Cloud 402 code is a billing refusal: the Subscription sheet opens as for any billing refusal.
+    await expect(account).toBeVisible();
+    await account.getByRole('button', { name: 'Close Account', exact: true }).click();
+    await expect(account).toHaveCount(0);
+  }
+  await button(page, 'Expand chat').click();
+  await expect(conversation(page).getByText(OUT_OF_FUNDS, { exact: true })).toHaveCount(1);
+  await expect(conversation(page).getByText('Billing declined', { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/PRIVATE_PROVIDER_ERROR_CANARY/)).toHaveCount(0);
+  await expect(bubble(page, `Failing ${code}`)).toHaveCount(1);
+  await page.waitForTimeout(1500);
+  await expect(conversation(page).getByText(OUT_OF_FUNDS, { exact: true })).toHaveCount(1);
+  expect(await harness(page, f => f.streams)).toBe(1);
+  expect(await stub(page, s => s.recoveries)).toEqual([]);
+  expect(await harness(page, f => f.unexpected)).toEqual([]);
+  expect(foreign).toEqual([]);
+});
+
 // The on-device agent runs without Eliza Cloud inference when the account has no plan (P-43). A chat
 // turn gets the agent's honest answer in the conversation with the plan actions, never "Set up AI".
 for (const frame of ['done', 'error'] as const) test(`a provider-less turn without a plan (${frame} frame) answers honestly and offers Redeem code or choose a plan`, async ({ page }) => {
@@ -142,9 +172,17 @@ for (const frame of ['done', 'error'] as const) test(`a provider-less turn witho
   await expect(page.getByText(/PRIVATE_PROVIDER_ERROR_CANARY/)).toHaveCount(0);
   const plan = page.getByRole('button', { name: /^Choose plan/ });
   await expect(plan).toHaveCount(1);
+  // The reply opens the conversation sheet, and its opening motion can start after the card is
+  // already laid out and still. Tap the card once the open sheet shows it whole: pressed during
+  // the opening, the press blurs the composer, and the re-render's follow-to-newest scroll moves
+  // the card out from under the pointer before release, so the tap lands on the transcript.
+  await expect.poll(() => plan.evaluate(card => {
+    const list = card.closest('[data-alpha-transcript]')!.getBoundingClientRect(), box = card.getBoundingClientRect();
+    return box.top >= list.top && box.bottom <= list.bottom;
+  })).toBe(true);
   await plan.click();
   // On the phone's own agent the plan action opens the resident account & plan panel (plan headline,
-  // Recheck, Renew); it carries the Subscription controls.
+  // Recheck, Renew); it carries the plan controls.
   const account = page.getByRole('dialog', { name: 'Account', exact: true });
   await expect(account).toBeVisible();
   await expect(account.getByRole('region', { name: 'Balance and membership', exact: true })).toBeVisible();
@@ -199,9 +237,18 @@ for (const mode of ['reject', 'busy'] as const) {
     test.setTimeout(120_000);
     await connected(page);
     await setStub(page, { stream: mode });
+    // The refusal notice is a short toast (about 2 s) that can be gone by the time the draft has
+    // settled on a loaded host, so every toast shown from the send on is recorded.
+    await page.evaluate(() => {
+      const w = window as any; w.shownToasts = [];
+      new MutationObserver(() => {
+        const toast = document.querySelector('[data-alpha-toast] .drop > span'), text = toast?.textContent?.trim();
+        if (text && toast!.checkVisibility() && w.shownToasts.at(-1) !== text) w.shownToasts.push(text);
+      }).observe(document.body, { subtree: true, childList: true, characterData: true });
+    });
     await sendRefused(page, `Refused by ${mode}`);
     // A 429 refusal names its own reason; a refusal with none says nothing, the text simply comes back.
-    if (mode === 'busy') await expect(page.getByText('Not sent. Busy · not sent', { exact: true })).toBeVisible();
+    if (mode === 'busy') await expect.poll(() => page.evaluate(() => (window as any).shownToasts)).toContain('Not sent. Busy · not sent');
     await expect(page.getByText(NOT_SENT)).toHaveCount(0);
     await expect(bubble(page, `Refused by ${mode}`)).toHaveCount(0);
     await expect(page.getByText(UNKNOWN, { exact: true })).toHaveCount(0);

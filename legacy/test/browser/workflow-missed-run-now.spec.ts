@@ -61,7 +61,7 @@ test('a missed scheduled time says nothing ran and offers Run now only through t
  const sent=await page.evaluate(()=>(window as any).agentRequests.find((r:any)=>r.path.endsWith('/run')).body);expect(sent.expectedVersionId).toBe('morning-v1');
  await expect(page.getByText('Synthetic digest text',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Back to Morning notes digest',exact:true}).click();
  // The missed record stays in history as not run; the new run is separate.
- await expect(page.getByRole('button',{name:'Missed execution',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'finished execution',exact:true})).toBeVisible();expect(await posts(page,'/run')).toBe(1);
+ await expect(page.getByRole('button',{name:'Missed execution',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Finished execution',exact:true})).toBeVisible();expect(await posts(page,'/run')).toBe(1);
 });
 
 
@@ -69,7 +69,7 @@ test('the typed schedule enable review states the delay window without enabling'
  await setup(page,{active:false});
  const workflows=page.getByRole('region',{name:'Workflows',exact:true});
  await workflows.getByText('Morning notes digest',{exact:true}).first().click();
- await workflows.getByRole('button',{name:'Turn Morning notes digest on or off',exact:true}).click();
+ await workflows.getByRole('switch',{name:'Turn Morning notes digest on or off',exact:true}).click();
  await expect(workflows).toContainText('Android may delay scheduled runs. Runs more than 30 minutes late are marked missed.');
  expect(await posts(page,'/activate')).toBe(0);
 });

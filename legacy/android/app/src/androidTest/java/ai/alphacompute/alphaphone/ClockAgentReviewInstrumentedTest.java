@@ -11,8 +11,10 @@ import android.view.accessibility.AccessibilityNodeInfo;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
+import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -30,7 +32,7 @@ public final class ClockAgentReviewInstrumentedTest {
  private void begin(String method,JSONObject input)throws Exception{js("window.__clockAgentResult=null;Capacitor.nativePromise('AlphaActionJournal',"+JSONObject.quote(method)+","+input+").then(value=>window.__clockAgentResult=value,()=>window.__clockAgentResult={rejected:true})");}
  private JSONObject result()throws Exception{waitFor("window.__clockAgentResult!==null");return new JSONObject(js("window.__clockAgentResult"));}
  private JSONObject bridge(String method,JSONObject input)throws Exception{begin(method,input);return result();}
- private JSONObject operation(String action)throws Exception{JSONObject op=new JSONObject().put("type","clock_handoff").put("action",action);if("set".equals(action))op.put("hour",7).put("minute",0).put("label","Synthetic intercepted alarm").put("timeZone",java.util.TimeZone.getDefault().getID());if("snooze".equals(action))op.put("snoozeMinutes",10);return op;}
+ private JSONObject operation(String action)throws Exception{JSONObject op=new JSONObject().put("type","clock_handoff").put("action",action);if("set".equals(action))op.put("hour",7).put("minute",0).put("label","Synthetic intercepted alarm").put("timeZone",java.util.TimeZone.getDefault().getID()).put("days",new JSONArray().put(2).put(6));if("snooze".equals(action))op.put("snoozeMinutes",10);return op;}
  private JSONObject reserve(JSONObject op)throws Exception{
   String id=UUID.randomUUID().toString();proposals.add(id);JSONObject identity=new JSONObject().put("scope",scope).put("proposalId",id).put("operationId",UUID.randomUUID().toString());
   JSONObject record=new JSONObject().put("operation",op).put("context",new JSONObject().put("view","home").put("sensitive",false)).put("expiresAt",System.currentTimeMillis()+120000).put("ownerId","fixture-owner").put("sessionId","fixture-session").put("agentId","fixture-agent").put("origin","https://fixture.invalid").put("installationId","fixture-installation").put("enrollmentId","fixture-enrollment");
@@ -44,7 +46,7 @@ public final class ClockAgentReviewInstrumentedTest {
   org.junit.Assume.assumeTrue("Owned intercepted Clock review opt in","1".equals(InstrumentationRegistry.getArguments().getString("clockAgentReview")));
   assertTrue("Fresh secondary user required",android.os.Process.myUid()/100000>0);
   Instrumentation instrumentation=InstrumentationRegistry.getInstrumentation();Context context=instrumentation.getTargetContext();List<Intent> sent=new java.util.concurrent.CopyOnWriteArrayList<>();java.util.concurrent.atomic.AtomicReference<String> deliveryFailure=new java.util.concurrent.atomic.AtomicReference<>("");
-  Instrumentation.ActivityMonitor monitor=new Instrumentation.ActivityMonitor(){@Override public Instrumentation.ActivityResult onStartActivity(Intent intent){String action=intent.getAction();if(action!=null&&SetActions(action)){if("denied".equals(deliveryFailure.get()))throw new SecurityException("Synthetic intercepted denial");if("unavailable".equals(deliveryFailure.get()))throw new android.content.ActivityNotFoundException("Synthetic intercepted removal");sent.add(new Intent(intent));return new Instrumentation.ActivityResult(Activity.RESULT_CANCELED,null);}return null;}};
+  Instrumentation.ActivityMonitor monitor=new Instrumentation.ActivityMonitor(){@Override public Instrumentation.ActivityResult onStartActivity(Intent intent){String action=intent.getAction();if(action!=null&&isClockAction(action)){if("denied".equals(deliveryFailure.get()))throw new SecurityException("Synthetic intercepted denial");if("unavailable".equals(deliveryFailure.get()))throw new android.content.ActivityNotFoundException("Synthetic intercepted removal");sent.add(new Intent(intent));return new Instrumentation.ActivityResult(Activity.RESULT_CANCELED,null);}return null;}};
   instrumentation.addMonitor(monitor);
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
    AppNavigation.liveMode();
@@ -59,6 +61,7 @@ public final class ClockAgentReviewInstrumentedTest {
     assertTrue(approved.has("reviewToken"));assertEquals(before,sent.size());
     JSONObject confirmation=new JSONObject(key.toString()).put("reviewToken",approved.getString("reviewToken"));assertEquals("opened",bridge("confirmClock",confirmation).getJSONObject("result").getString("status"));assertEquals(before+1,sent.size());
     assertEquals("set".equals(action)?AlarmClock.ACTION_SET_ALARM:AlarmClock.ACTION_SHOW_ALARMS,sent.get(before).getAction());assertFalse(sent.get(before).hasExtra(AlarmClock.EXTRA_ALARM_SNOOZE_DURATION));
+    if("set".equals(action))assertEquals("Reviewed repeat days reach AlarmClock",new ArrayList<>(Arrays.asList(2,6)),sent.get(before).getIntegerArrayListExtra(AlarmClock.EXTRA_DAYS));
     assertEquals("opened",bridge("confirmClock",confirmation).getJSONObject("result").getString("status"));assertEquals(before+1,sent.size());
    }
    for(String outcome:new String[]{"denied","unavailable"}){
@@ -74,5 +77,5 @@ public final class ClockAgentReviewInstrumentedTest {
    instrumentation.removeMonitor(monitor);AlphaCredentialStore store=new AlphaCredentialStore(context);for(String id:proposals)store.removeCredentialSlot("action-journal:v1:"+scope+":entry:"+id);store.removeCredentialSlot("action-journal:v1:"+scope+":index");
   }
  }
- private static boolean SetActions(String action){return AlarmClock.ACTION_SET_ALARM.equals(action)||AlarmClock.ACTION_SHOW_ALARMS.equals(action)||AlarmClock.ACTION_SNOOZE_ALARM.equals(action)||AlarmClock.ACTION_DISMISS_ALARM.equals(action);}
+ private static boolean isClockAction(String action){return AlarmClock.ACTION_SET_ALARM.equals(action)||AlarmClock.ACTION_SHOW_ALARMS.equals(action)||AlarmClock.ACTION_SNOOZE_ALARM.equals(action)||AlarmClock.ACTION_DISMISS_ALARM.equals(action);}
 }

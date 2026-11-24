@@ -8,7 +8,6 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.provider.CalendarContract;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -22,6 +21,8 @@ final class CalendarSyncSnapshot {
  private static final String[] REMINDER={"_id","event_id","minutes","method"};
  private static final String[] PROPERTY={"_id","event_id","name","value"};
  private static final int MAX_ROWS=2048,MAX_BYTES=1024*1024;
+ /** A guest address CalendarProvider and the linked-event contract both accept. */
+ static final String EMAIL="[^\\s@,;<>]+@[^\\s@,;<>]+\\.[^\\s@,;<>]+";
  final long calendarId,eventId;
  final String generation,sourceRevision,revision;
  final boolean missing,deleted;
@@ -31,13 +32,13 @@ final class CalendarSyncSnapshot {
  private final String[] familyArgs,childArgs;
 
  private CalendarSyncSnapshot(ContentResolver resolver,long calendarId,long eventId,String account,String name,String generation,boolean preparing)throws Exception{
-  if(calendarId<=0||eventId<=0||account==null||account.isEmpty()||name==null||name.isEmpty()||generation==null||!generation.matches("[a-f0-9-]{36}"))throw new IllegalArgumentException("Invalid Calendar sync source");
+  if(calendarId<=0||eventId<=0||account==null||account.isEmpty()||name==null||name.isEmpty()||!AlphaUtil.isOpaque36(generation))throw new IllegalArgumentException("Invalid Calendar sync source");
   this.calendarId=calendarId;this.eventId=eventId;this.generation=generation;
   List<ContentValues> sources=rows(resolver,ContentUris.withAppendedId(CalendarContract.Calendars.CONTENT_URI,calendarId),SOURCE,null,null,1);
   if(sources.size()!=1)throw new IllegalStateException("Owned Calendar source is unavailable");
   source=sources.get(0);
   if(number(source,"_id")!=calendarId||!account.equals(source.getAsString("account_name"))||!CalendarContract.ACCOUNT_TYPE_LOCAL.equals(source.getAsString("account_type"))||!name.equals(source.getAsString("name"))||!(generation.equals(source.getAsString("cal_sync1"))||preparing&&empty(source,"cal_sync1"))||number(source,"calendar_access_level")<CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR)throw new SecurityException("Calendar sync source changed");
-  sourceRevision=digest(canonical(SOURCE,List.of(source)));
+  sourceRevision=AlphaUtil.sha256Hex(canonical(SOURCE,List.of(source)));
   List<ContentValues> exact=rows(resolver,ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI,eventId),EVENT,null,null,1);
   if(!exact.isEmpty()&&number(exact.get(0),"calendar_id")!=calendarId)throw new SecurityException("Calendar event moved to another source");
   familyWhere="calendar_id=? AND (_id=? OR original_id=?)";
@@ -60,7 +61,7 @@ final class CalendarSyncSnapshot {
   if(missing&&(!attendees.isEmpty()||!reminders.isEmpty()||!properties.isEmpty()))throw new IllegalStateException("Orphan Calendar child rows need recovery");
   String value=sourceRevision+":"+eventId+":"+canonical(EVENT,family)+canonical(ATTENDEE,attendees)+canonical(REMINDER,reminders)+canonical(PROPERTY,properties);
   if(value.getBytes(StandardCharsets.UTF_8).length>MAX_BYTES)throw new IllegalStateException("Calendar sync snapshot is too large");
-  revision=digest(value);
+  revision=AlphaUtil.sha256Hex(value);
  }
  static CalendarSyncSnapshot read(ContentResolver resolver,long calendarId,long eventId,String account,String localName,String generation)throws Exception{
   return new CalendarSyncSnapshot(resolver,calendarId,eventId,account,localName,generation,false);
@@ -85,7 +86,7 @@ final class CalendarSyncSnapshot {
   org.json.JSONArray recurrence=new org.json.JSONArray();
   for(String field:new String[]{"rrule","rdate","exrule","exdate"}){String raw=row.getAsString(field);if(raw!=null&&!raw.isEmpty()){if(raw.contains("\r")||raw.contains("\n"))throw new UnsupportedOperationException("Review multiline recurrence before syncing");recurrence.put((allDay&&field.equals("exdate")?"EXDATE;VALUE=DATE":field.toUpperCase(java.util.Locale.ROOT))+":"+raw);}}
   org.json.JSONArray guests=new org.json.JSONArray();java.util.HashSet<String> emails=new java.util.HashSet<>();
-  for(ContentValues guest:attendees){long relationship=number(guest,"attendeeRelationship");if(number(guest,"attendeeType")>2)throw new UnsupportedOperationException("Review unsupported Calendar guest types");if(relationship==2)continue;if(relationship!=0&&relationship!=1)throw new UnsupportedOperationException("Review Calendar guest roles before syncing");String email=guest.getAsString("attendeeEmail");if(email==null||!email.matches("[^\\s@,;<>]+@[^\\s@,;<>]+\\.[^\\s@,;<>]+")||!emails.add(email.toLowerCase(java.util.Locale.ROOT)))throw new UnsupportedOperationException("Review Calendar guest email addresses before syncing");guests.put(new org.json.JSONObject().put("email",email.toLowerCase(java.util.Locale.ROOT)).put("optional",number(guest,"attendeeType")==2));}
+  for(ContentValues guest:attendees){long relationship=number(guest,"attendeeRelationship");if(number(guest,"attendeeType")>2)throw new UnsupportedOperationException("Review unsupported Calendar guest types");if(relationship==2)continue;if(relationship!=0&&relationship!=1)throw new UnsupportedOperationException("Review Calendar guest roles before syncing");String email=guest.getAsString("attendeeEmail");if(email==null||!email.matches(EMAIL)||!emails.add(email.toLowerCase(java.util.Locale.ROOT)))throw new UnsupportedOperationException("Review Calendar guest email addresses before syncing");guests.put(new org.json.JSONObject().put("email",email.toLowerCase(java.util.Locale.ROOT)).put("optional",number(guest,"attendeeType")==2));}
   // Fixed milliseconds: Instant.toString drops ".000", so whole seconds would digest differently from the provider form.
   java.util.function.LongFunction<String> instant=value->UTC.format(java.time.Instant.ofEpochMilli(value));
   return new org.json.JSONObject().put("title",text(row,"title")).put("description",text(row,"description")).put("location",text(row,"eventLocation")).put("startAt",allDay?instant.apply(begin).substring(0,10):instant.apply(begin)).put("endAt",allDay?instant.apply(end).substring(0,10):instant.apply(end)).put("timeZone",allDay?org.json.JSONObject.NULL:zone).put("isAllDay",allDay).put("attendees",guests).put("recurrence",recurrence);
@@ -137,5 +138,4 @@ final class CalendarSyncSnapshot {
  private static long number(ContentValues row,String field){Long value=row.getAsLong(field);return value==null?0:value;}
  private static boolean empty(ContentValues row,String field){String value=row.getAsString(field);return value==null||value.isEmpty();}
  private static String canonical(String[] fields,List<ContentValues> rows){StringBuilder value=new StringBuilder();value.append(rows.size()).append(';');for(ContentValues row:rows)for(String field:fields){String text=row.getAsString(field);value.append(field.length()).append(':').append(field).append(text==null?"N":"V"+text.length()+":"+text).append(';');}return value.toString();}
- private static String digest(String input)throws Exception{byte[] bytes=MessageDigest.getInstance("SHA-256").digest(input.getBytes(StandardCharsets.UTF_8));StringBuilder value=new StringBuilder();for(byte b:bytes)value.append(String.format(java.util.Locale.ROOT,"%02x",b&255));return value.toString();}
 }

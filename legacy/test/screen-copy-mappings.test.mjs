@@ -28,8 +28,8 @@ test('every Calendar approval outcome is keyed on its kind and code, never shown
   CALENDAR_MANAGED_TARGET_CHANGED:'Nothing changed in Calendar: the event changed after you reviewed it.',
   CALENDAR_SYNC_PRECONDITION:'Nothing changed in Calendar: the event changed after you reviewed it.',
   CALENDAR_MANAGED_ACCOUNT_CHANGED:'Nothing changed in Calendar: the Calendar account changed.',
-  CALENDAR_MANAGED_EDITOR_REQUIRED:'Nothing changed in Calendar. Review this event in Calendar instead.',
-  CALENDAR_SYNC_REVIEW_REQUIRED:'Nothing changed in Calendar. Review this event in Calendar instead.',
+  CALENDAR_MANAGED_EDITOR_REQUIRED:'Nothing changed in Calendar: this event needs review in Calendar.',
+  CALENDAR_SYNC_REVIEW_REQUIRED:'Nothing changed in Calendar: this event needs review in Calendar.',
   CALENDAR_MANAGED_WRITE_UNAVAILABLE:'Nothing changed in Calendar: Alpha couldn’t confirm it may edit this calendar.',
  };
  for(const [code,reason] of Object.entries(reasons)){
@@ -43,10 +43,10 @@ test('every Calendar approval outcome is keyed on its kind and code, never shown
  const fixed=[...RESOLVE.slice(RESOLVE.indexOf('export function calendarApprovalOutcome'),RESOLVE.indexOf('export async function resolveCalendarApproval')).matchAll(/text: "([^"]+)"/g)].map(m=>m[1]);
  assert.equal(fixed.length,4,fixed.join(' | '));
  const replies=[
-  [{kind:'rejected',decision:'reject'},'Declined. Nothing changed in Calendar.'],
-  [{kind:'retryable',failure:{code:'ANY',retryable:true,acceptance:'not_accepted'}},'Nothing changed in Calendar. You can try again.'],
-  [{kind:'blocked',failure:{code:'CALENDAR_REVIEW_IN_PROGRESS',retryable:false,acceptance:'unknown'}},'This Calendar change is still being made. Check Calendar again shortly.'],
-  [{kind:'blocked',failure:{code:'CALENDAR_REVIEW_UNCONFIRMED',retryable:false,acceptance:'unknown'}},'Calendar change is not confirmed. Check its saved status before trying again.'],
+  [{kind:'rejected',decision:'reject'},'Declined, so nothing changed in Calendar.'],
+  [{kind:'retryable',failure:{code:'ANY',retryable:true,acceptance:'not_accepted'}},'Nothing changed in Calendar.'],
+  [{kind:'blocked',failure:{code:'CALENDAR_REVIEW_IN_PROGRESS',retryable:false,acceptance:'unknown'}},'This Calendar change is still being made.'],
+  [{kind:'blocked',failure:{code:'CALENDAR_REVIEW_UNCONFIRMED',retryable:false,acceptance:'unknown'}},'The Calendar change is not confirmed.'],
  ];
  for(const text of fixed)for(const [reply,alpha] of replies){
   const shown=parseCalendarApprovalResolution({requestId:id,decision:'approve',text,...reply},id,reply.decision??'approve').text;
@@ -63,6 +63,8 @@ test('a completed Calendar change reads its operation, title and duplicate flag 
  assert.equal(done('Completed Calendar schedule event: Lunch.'),'Added “Lunch” to Calendar.');
  assert.equal(done('Already completed Calendar schedule event: Lunch.'),'Already added “Lunch” to Calendar.');
  assert.equal(done('Completed Calendar modify event: the reviewed event.'),'Changed this event in Calendar.');
+ assert.equal(done('Completed Calendar modify event: Lunch.',{invitationResponse:'accepted'}),'Accepted “Lunch”.');
+ assert.equal(done('Already completed Calendar modify event: Lunch.',{invitationResponse:'tentative'}),'Already answered maybe to “Lunch”.');
  assert.equal(done('Completed Calendar cancel event: Standup.',{cancellationMode:'organizer_cancel'}),'Cancelled “Standup”.');
  assert.equal(done('Completed Calendar cancel event: Standup.',{cancellationMode:'decline_invitation'}),'Declined “Standup”.');
  assert.equal(done('Already completed Calendar cancel event: Standup.',{cancellationMode:'remove_private_copy'}),'Already removed “Standup” from your calendar.');
@@ -83,6 +85,8 @@ test('a queued Calendar change is described in Alpha’s words; only the event t
   ['modify_event',{recurrenceScope:'series'},`Modify every occurrence of the recurring series "Standup" (not only ${at}) without sending attendee notifications.`,'Standup','Change every occurrence of “Standup”, not only the one shown.'],
   ['modify_event',{recurrenceScope:'instance'},`Modify "Standup" on ${at} and notify attendees.`,'Standup','Change only this occurrence of “Standup”.'],
   ['modify_event',{},`Modify "Lunch" on ${at} without sending attendee notifications.`,'Lunch','Change “Lunch”.'],
+  ['modify_event',{invitationResponse:'accepted'},'Accept the invitation "Lunch" from the authenticated owner calendar editor.','Lunch','Accept the invitation to “Lunch”.'],
+  ['modify_event',{invitationResponse:'tentative'},'Tentatively accept the invitation "Lunch" from the authenticated owner calendar editor.','Lunch','Answer maybe to “Lunch”.'],
   ['cancel_event',{cancellationMode:'organizer_cancel',recurrenceScope:'this_and_following'},`Cancel "Standup" from ${at} forward by truncating the recurring series; every later occurrence and exception will be removed, and attendees will be notified.`,'Standup','Cancel “Standup” from this occurrence on. Every later occurrence and its changes are removed.'],
   ['cancel_event',{cancellationMode:'decline_invitation',recurrenceScope:'series'},`Decline the invitation for every occurrence of the recurring series "Standup" (not only ${at}); every occurrence and exception will be removed.`,'Standup','Decline every occurrence of “Standup”. Every occurrence and its changes are removed.'],
   ['cancel_event',{cancellationMode:'remove_private_copy'},`Decline the invitation for "Party" on ${at} without sending attendee notifications.`,'Party','Remove “Party” from your calendar.'],
@@ -104,7 +108,10 @@ test('a queued Calendar change is described in Alpha’s words; only the event t
  assert.doesNotMatch(fields,/reason:reasonText|row\.reason\.replace/);
 });
 
-// --- Chat attachment picker and Photos reviews: PhotosPlugin / PermittedPhotosPlugin / PermittedMediaReview ---
+// --- Chat attachment picker and Photos reviews: AlphaPhotosPlugin / PermittedPhotosPlugin / AlphaMediaReview ---
+// Alpha's Photos bridge and review dialog are forked from the shared PhotosPlugin and
+// PermittedMediaReview; PermittedPhotosPlugin stays shared.
+const ALPHA='android/app/src/main/java/ai/alphacompute/alphaphone/';
 const {PHOTOS_MESSAGES,photosErrorText}=await import('../apps/app/src/ui/photos/photos-messages.ts');
 const MEDIA='plugins/plugin-native-media/android/src/main/java/ai/eliza/plugins/media/';
 test('the attachment picker words a Photos bridge rejection through Alpha’s Photos table',()=>{
@@ -112,7 +119,7 @@ test('the attachment picker words a Photos bridge rejection through Alpha’s Ph
  assert.match(picker,/this\.error=this\.tab==='photos'\?photosErrorText\(error,'Photos could not load\. Try again\.'\)/);
  assert.match(picker,/this\.error=photosErrorText\(error,'The selection could not be read\. Try again\.'\)/);
  assert.doesNotMatch(picker,/this\.error=error instanceof Error\?error\.message:'The selection could not be read/);
- const permitted=vendor(MEDIA+'PermittedPhotosPlugin.java'),photos=vendor(MEDIA+'PhotosPlugin.java');
+ const permitted=vendor(MEDIA+'PermittedPhotosPlugin.java'),photos=source(ALPHA+'AlphaPhotosPlugin.java');
  const PINNED=[
   ['Unlock and reopen Photos before reading the library.','Unlock the phone, then reopen Photos.',permitted],
   ['Photo library changed or is unavailable. Refresh Photos and check its access.','Photos changed or isn’t available. Refresh Photos and check its access.',permitted],
@@ -128,8 +135,8 @@ test('the attachment picker words a Photos bridge rejection through Alpha’s Ph
  assert.equal(photosErrorText(new Error('This photo changed. Select it again.'),'F'),'This photo changed. Select it again.');
 });
 
-test('every PermittedMediaReview refusal reaches Photos in Alpha’s words',()=>{
- const java=vendor(MEDIA+'PermittedMediaReview.java');
+test('every AlphaMediaReview refusal reaches Photos in Alpha’s words',()=>{
+ const java=source(ALPHA+'AlphaMediaReview.java');
  const limits=/REVIEWED = (\d+);[\s\S]*REVIEWED_BATCH = (\d+);/.exec(vendor(MEDIA+'PhotoLibraryAccess.java')).slice(1);
  const sentences=new Set([
   ...[...java.matchAll(/reject\(\s*"([^"]+)"/g)].map(m=>m[1]).filter(s=>!s.startsWith('Android could not show')&&s!=='Select 1–'),
@@ -230,20 +237,6 @@ test('a Google connection without an email or name shows Alpha’s account label
  const inbox=source('apps/app/src/prototype/inbox-cloud-adapter.ts');
  assert.match(inbox,/accounts=value\.accounts\.map\(withGmailAccountLabel\);/);
  assert.match(inbox,/account:withGmailAccountLabel\(value\.account\)/);
-});
-
-// --- Calendar sync settings: a failed pause --------------------------------------------------------
-test('a failed Calendar sync pause is worded by Alpha’s sync table, never shown raw',async()=>{
- const host=staged('plugins/plugin-calendar/src/linked-sync/sync-host.ts');
- const {calendarSyncFailureMessage}=await import('../apps/app/src/ui/calendar/sync-host.ts');
- const sentences=[...host.matchAll(/throw Error\(\s*"([^"]+)",?\s*\)/g)].map(m=>m[1]);
- for(const sentence of ['Calendar sync settings changed. Review them again.','Calendar sync settings need recovery. Saved events are retained.'])assert.ok(sentences.includes(sentence),sentence);
- for(const sentence of sentences)assert.notEqual(calendarSyncFailureMessage(new Error(sentence),'FALLBACK'),'FALLBACK',sentence);
- assert.equal(calendarSyncFailureMessage(new Error('Calendar sync settings need recovery. Saved events are retained.'),'F'),'Calendar sync settings need recovery. Saved events are kept.');
- assert.equal(calendarSyncFailureMessage(new Error('A newer storage refusal'),'Couldn’t pause sync. Try again.'),'Couldn’t pause sync. Try again.');
- const settings=source('apps/app/src/runtime/calendar-sync-settings.ts');
- assert.match(settings,/say\(calendarSyncFailureMessage\(error, "Couldn’t pause sync\. Try again\."\)\)/);
- assert.doesNotMatch(settings,/"Couldn’t pause"\)/);
 });
 
 // --- Note read-aloud over Cloud: the staged chunk planner ------------------------------------------

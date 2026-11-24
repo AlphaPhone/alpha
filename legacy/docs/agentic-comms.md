@@ -44,7 +44,7 @@ only on Alpha AOSP and stay hidden and capability-gated elsewhere.
 
 | ID | Requirement | Acceptance |
 | --- | --- | --- |
-| AC-08 | The left slot always holds the target the bar is not addressing. Closed: the Alpha button. Open: the person's avatar (thread, contact), a call icon (call), a search icon (lists) or a keypad icon (Recents). One tap swaps the target. | Matches the table in "Bar by screen" below. |
+| AC-08 | The left slot always holds the target the bar is not addressing. Closed: the Alpha button. Open: the person's avatar (thread, contact) or a call icon (call). Lists, Recents and the keypad leave it empty: their search is a header control beside the app's + button (the Inbox pattern), not a slot beside the chat field. One tap swaps the target. | Matches the table in "Bar by screen" below. |
 | AC-09 | The target is always visible in three ways: place (the sheet is Alpha, the stage is the person), the left slot (AC-08) and the field. The Alpha field has a 1.5 dp `--acct` outline and reads "Ask Alpha"; the person field is plain and reads "Text <first name>". The sheet header shows the context, for example "Maya Chen · Messages". | Screenshot review of every state; TalkBack announces the target (AC-29). |
 | AC-10 | Two separate drafts per thread: the owner's text to the person and the request to Alpha (`runtime/message-draft.ts`). Swapping targets never clears or merges them. Both survive layout changes and process death (AP-05). | Type to Maya, open Alpha, type to Alpha, kill the process: both drafts return. |
 | AC-11 | The bar grows with its text up to the existing composer limit, `min(168px, 28dvh)`, then scrolls inside. The stage and sheet re-fit so the bar is never clipped. | A 1,600-character draft in the bar keeps both bar buttons visible and the text scrollable. |
@@ -55,7 +55,7 @@ only on Alpha AOSP and stay hidden and capability-gated elsewhere.
 | ID | Requirement | Acceptance |
 | --- | --- | --- |
 | AC-13 | A draft is never cut off and never scrolls inside its bubble. While a draft is waiting, the open height fits the draft: the stage shows the header, the last incoming message and the whole draft; the sheet shrinks to no less than Alpha's latest line plus the bar, and older chat history scrolls. Only a draft taller than that scrolls inside the stage, starting at its first line, with Edit and Send pinned to the bottom of the bubble. When the draft changes length, the stage re-fits with the AC-05 motion. | For drafts of 1 to 1,600 characters at default and largest text size, every line of the draft is visible or reachable by scrolling the stage, and Edit and Send stay on screen. |
-| AC-14 | Text Alpha writes for a thread goes into that thread's single draft slot. It shows as a dashed bubble labeled "Alpha's draft · not sent", with Edit and Send. While the chat is open, the owner's own unsent text shows as a grey dashed bubble labeled "Your draft". Alpha may read and rewrite the draft; it may never send it. A new Alpha draft replaces the old one, and the previous text is kept for one Undo. | No send happens without the owner's tap on Send; the SMS provider receives nothing while a draft is pending. |
+| AC-14 | Text Alpha writes for a thread goes into that thread's single draft slot. It shows as a dashed bubble labeled "Alpha's draft · not sent", with Edit and Send. While the chat is open, the owner's own unsent text shows as a grey dashed bubble labeled "Your draft". Alpha may read and rewrite the draft. In Talk, an addressed draft can stay on its review card until the owner confirms by voice, which sends that exact text once without opening Messages. A new Alpha draft replaces the old one, and the previous text is kept for one Undo. | The SMS provider receives nothing while a draft is pending. The owner's Send tap or spoken confirmation on an addressed review sends exactly once. |
 | AC-15 | Send on the bubble uses the same send path and approval journal as the composer (`SmsSend`, AP-04). The bubble turns solid and Alpha logs "Sent to <name>" quietly in the chat. | One send, one journal entry, no duplicate on retry. |
 | AC-16 | Edit closes the chat and loads the draft into the person target with the keyboard up. The draft becomes ordinary owner text. Tapping the avatar without Edit also closes the chat, with the draft in the field. | After Edit, the bar reads the draft text and addresses the person. |
 
@@ -82,7 +82,7 @@ only on Alpha AOSP and stay hidden and capability-gated elsewhere.
 | AC-23 | Remove the suggestion chip row (`data-alpha-chat-suggestions`, `template.html` around line 4426) from the conversation sheet. Automatic suggestions are deferred under AC-24. | No chip row renders in any state. |
 | AC-24 | Automatic suggestions are deferred by owner request. Do not generate suggested replies, show suggestion chips or faint text, or expose a suggestion setting. Explicit requests for draft help remain available. | Opening a thread or chat makes no suggestion request and leaves the input editable. |
 | AC-25 | The briefing is one or two sentences of facts from actual sources about the current screen, shown as Alpha's first line when the chat opens on a new context. It isn't repeated when nothing has changed. With nothing known (production builds have no fixtures), it is absent. | Reopening the chat on an unchanged thread adds no new briefing. |
-| AC-26 | At most one open proposal at a time, with one button, executed through the existing approval path (AP-04, AP-11). An ignored proposal stays in history and is never executed later. | A second proposal replaces the first; neither executes without a tap. |
+| AC-26 | At most one open proposal at a time, with one button, executed through the existing approval path (AP-04, AP-11). An addressed SMS send review can also accept “Send this text” as the next utterance in the same Talk session when the full review is visible. An ignored proposal stays in history. | A second proposal replaces the first. One explicit tap or eligible spoken confirmation consumes its exact approval. A repeated or stale confirmation sends nothing. |
 | AC-27 | No attention ring or badge on the Alpha button. | The Alpha button looks the same in every state. |
 
 ### Visual and accessibility
@@ -104,11 +104,11 @@ only on Alpha AOSP and stay hidden and capability-gated elsewhere.
 
 | Screen | Closed: left / field / right | Open: left / field / right |
 | --- | --- | --- |
-| Messages list | Alpha / "Search or ask" / mic | Search icon / "Ask Alpha" / mic |
+| Messages list | Alpha / "Search or ask" / mic | none / "Ask Alpha" / mic; search in the header |
 | Thread | Alpha / attach picture / "Text <name>" / send and dictate | Avatar / "Ask Alpha" / send or voice |
-| Recents and keypad | Alpha / "Call or ask" / mic | Keypad icon / "Ask Alpha" / mic |
+| Recents and keypad | Alpha / "Call or ask" / mic | none / "Ask Alpha" / mic |
 | In call | Alpha / "Ask during call" / mic, with End beside the bar | Call icon / "Ask Alpha" / mic; End in the call card |
-| Contacts list | Alpha / "Search or ask" / mic | Search icon / "Ask Alpha" / mic |
+| Contacts list | Alpha / "Search or ask" / mic | none / "Ask Alpha" / mic; search in the header |
 | Contact card | Alpha / "Ask about <name>" / mic | Avatar / "Ask Alpha" / mic |
 
 ## Where the work lands

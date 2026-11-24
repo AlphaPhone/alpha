@@ -1,9 +1,12 @@
 import {DailyApps} from '../daily';
 import {devSurfacesEnabled} from '../build-flags';
 import {registerPlugin} from '../platform-plugins';
+import type {AlphaMailAttachmentsPlugin} from '../native/alpha-mail-attachments';
 import {reviewMailAttachment} from '../runtime/inbox-attachment';
+import {inputFiles,runFilePicker} from './file-picker';
 type Bag=Record<string,any>;
-const attachments=registerPlugin<any>('AlphaMailAttachments');
+const attachments=registerPlugin<Pick<AlphaMailAttachmentsPlugin,'readSelected'|'openReviewed'|'cancel'>>('AlphaMailAttachments');
+const files=registerPlugin<{importFile(file:File,parentId:string,signal:AbortSignal):Promise<{selectionId:string}>}>('AlphaFiles');
 const recipient=(state:Bag)=>state.thread||(typeof state.compose==='string'?state.compose:null);
 /** Local message copies never enter the SMS/provider transport. */
 export function installSimulatedMessages(view:Bag){
@@ -15,7 +18,7 @@ export function installSimulatedMessages(view:Bag){
  const picked=(state:Bag,pid:string)=>state.browserAttachment?.pid===pid?state.browserAttachment.file:null;
  const fail=(api:Bag,error:unknown)=>api.toast(error instanceof Error?error.message:'Could not save. Your draft is still here.');
  view.onLeave=(api:Bag)=>{retire(api);return leave?.(api);};
- view.back=(state:Bag,api:Bag)=>{if(!state.tray)retire(api);return back?.(state,api);};
+ view.back=(state:Bag,api:Bag)=>{retire(api);return back?.(state,api);};
  /* The thread's one Send (the bar, and the draft bubble through it): a picked file goes with the
   * draft slot's text in one write with the cleared slot; otherwise the view's own Send. */
  view.submit=(api:Bag,pid:string)=>{
@@ -23,7 +26,7 @@ export function installSimulatedMessages(view:Bag){
   const text=String(s.drafts?.[pid]?.text||'').trim(),threads={...s.threads},drafts={...s.drafts};delete drafts[pid];
   const k=Math.max(api.now.getHours()*60+api.now.getMinutes()-1,...Object.values(s.threads as Bag).flatMap((rows:any)=>rows.map((m:Bag)=>Number(m.k)||0)))+1;
   const messages=[{id:crypto.randomUUID(),k,me:true,file:selected.name,size:selected.size+' bytes',browserAttachment:selected},...(text?[{id:crypto.randomUUID(),k,me:true,text}]:[])];threads[pid]=[...(threads[pid]||[]),...messages];
-  const patch={threads,drafts,browserAttachment:null,tray:false},stored=Object.fromEntries(view.persist.map((key:string)=>[key,{...s,...patch}[key]]));
+  const patch={threads,drafts,browserAttachment:null},stored=Object.fromEntries(view.persist.map((key:string)=>[key,{...s,...patch}[key]]));
   try{if(JSON.stringify(stored).length>12_000_000)throw Error('Messages storage is full. Remove older conversations before saving.');api.set(patch);return messages[messages.length-1].id;}catch(error){fail(api,error);return null;}
  };
  view.bar=(state:Bag,api:Bag)=>{const spec=bar(state,api),pid=recipient(state);return pid&&spec?.target?.kind==='thread'&&picked(state,pid)?{...spec,closed:{...spec.closed,canSubmit:true}}:spec;};
@@ -32,13 +35,29 @@ export function installSimulatedMessages(view:Bag){
   const current=()=>api.get('messages'),file=picked(state,pid);
   const repaint=()=>api.set({browserAttachmentRevision:crypto.randomUUID()});
   const base=out.t;
-  out.t={...base,local:true,busy,
-   attachFile:async()=>{if(busy)return;busy=true;const ticket=epoch;repaint();let selectionId:string|undefined;
-    const valid=()=>ticket===epoch&&api.isActive()&&recipient(current())===pid;
-    try{const selection=await DailyApps.perform({action:'files'});selectionId=selection.selectionId;if(!valid()||selection.status==='cancelled')return;if(!selectionId)throw Error('Choose a file.');const selected=await attachments.readSelected({selectionId});const checked=await reviewMailAttachment(selected);if(!valid())return;api.set({browserAttachment:{pid,file:{...checked,dataBase64:selected.dataBase64}}});}
-    catch(error){if(valid())fail(api,error);}finally{if(selectionId)await DailyApps.forgetSelected({selectionId}).catch(()=>{});if(ticket===epoch){busy=false;repaint();}}
+  const chooseAttachment=async(camera:boolean)=>{
+   if(busy)return;
+   busy=true;const ticket=epoch;repaint();let selectionId:string|undefined;
+   const valid=()=>ticket===epoch&&api.isActive()&&recipient(current())===pid;
+   try{
+    const selection=camera?await runFilePicker(async signal=>{
+     const [file]=await inputFiles(signal,{accept:'image/*',capture:'environment'});
+     return file?files.importFile(file,'root',signal):null;
+    },null):await DailyApps.perform({action:'files'});
+    selectionId=selection?.selectionId;
+    if(!valid()||!selection||('status' in selection&&selection.status==='cancelled'))return;
+    if(!selectionId)throw Error('Choose a file.');
+    const selected=await attachments.readSelected({selectionId});
+    const checked=await reviewMailAttachment(selected);
+    if(valid())api.set({browserAttachment:{pid,file:{...checked,dataBase64:selected.dataBase64}}});
+   }catch(error){if(valid())fail(api,error);}
+   finally{
+    if(selectionId)await DailyApps.forgetSelected({selectionId}).catch(()=>{});
+    if(ticket===epoch){busy=false;repaint();}
    }
   };
+  out.attachmentMenu={busy,media:()=>chooseAttachment(false),camera:()=>chooseAttachment(true)};
+  out.t={...base};
   if(file){out.t.hasAtts=true;out.t.atts=[...base.atts,{name:file.name,rm:()=>api.set({browserAttachment:null})}];}
   out.t.bubbles=base.bubbles.map((bubble:Bag,index:number)=>{const stored=state.threads[pid]?.[index]?.browserAttachment;return stored?{...bubble,openFile:()=>void attachments.openReviewed({...stored,reviewed:true}).catch((error:unknown)=>fail(api,error))}:bubble;});
   return out;

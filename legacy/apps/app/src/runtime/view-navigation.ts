@@ -24,6 +24,58 @@ const object = (value: unknown): Record<string, unknown> => {
 		throw Error("Navigation reply was not verified");
 	return value as Record<string, unknown>;
 };
+/** The only values a completed-action handoff carries: navigation takes no record parameters. */
+const HANDOFF_VALUE_KEYS = new Set([
+	"mode",
+	"viewId",
+	"viewPath",
+	"viewType",
+	"label",
+	"completedActionDelivered",
+	"completedActionHandoffId",
+	"navigationPrepared",
+	"navigationBinding",
+	"noteId",
+]);
+/** A view command refused before anything ran, with a reason the agent can pass on. Its result is
+ * reported as `<code>: <reason>`; any other executor failure stays "failed or unknown". */
+export class ViewInteractionRefused extends Error {
+	constructor(readonly code: "UNSUPPORTED" | "UNAVAILABLE", message: string) {
+		super(message);
+	}
+}
+/** Alpha's agent-facing view commands: Browser back, forward and reload on the page the owner is
+ * viewing. `browser.active` is whether Browser is the view on screen; `browser.command` is the
+ * mounted Browser's history command. Everything else is refused at once, by type, so the agent is
+ * never left waiting for a renderer that will not answer. */
+export async function executeViewInteraction(
+	view: string,
+	capability: string,
+	params: unknown,
+	browser: {
+		active: boolean;
+		command?: (command: unknown, selection: unknown, signal: AbortSignal, current: () => void) => Promise<unknown>;
+	},
+	signal: AbortSignal,
+	current: () => void,
+): Promise<unknown> {
+	current();
+	if (view !== "browser")
+		throw new ViewInteractionRefused("UNSUPPORTED", "This phone has no agent command for that view.");
+	// There is no separate read: the open page rides each turn as clientDevice.browserPage
+	// while Browser is on screen and the owner's setting is on.
+	if (capability === "get-text")
+		throw new ViewInteractionRefused("UNSUPPORTED", 'There is no separate page read. While Browser is on screen, the open page comes with each message as browserPage, unless the owner turned off Browser page for Alpha in Settings, Privacy. Without it, the owner can choose "Ask about page" in the Browser menu to share a reviewed excerpt.');
+	if (capability !== "browser-command")
+		throw new ViewInteractionRefused("UNSUPPORTED", "Browser supports back, forward and reload from chat.");
+	// History commands answer in the Browser plugin's result envelope, which the agent decodes by code.
+	if (!browser.active)
+		return { ok: false, code: "UNAVAILABLE", message: "Open Browser first. Back, forward and reload act on the page the owner is viewing." };
+	if (!browser.command)
+		return { ok: false, code: "UNAVAILABLE", message: "Native view capability is unavailable" };
+	const frame = params && typeof params === "object" && !Array.isArray(params) ? (params as Record<string, unknown>) : {};
+	return browser.command(frame.command, frame.selection, signal, current);
+}
 export class ViewNavigationClient {
 	readonly clientId = crypto.randomUUID();
 	private disposed = false;
@@ -58,6 +110,7 @@ export class ViewNavigationClient {
 			? {
 					viewClientId: this.clientId,
 					viewDelivery: "completed-action",
+					notesEditorNavigation: 1,
 					uiView: alphaCanonicalViewId(context.view),
 				}
 			: {};
@@ -227,8 +280,8 @@ export class ViewNavigationClient {
   async ready(){await this.renderer?.ready;}
   private async receiveInteraction(value:unknown){
     if(!this.executeView||this.disposed||!this.currentSession()||document.hidden||!value||typeof value!=='object'||Array.isArray(value))return;
-    const frame=value as Record<string,any>,context=this.context();
-    if(frame.type!=='view:interact'||frame.viewType!=='gui'||!context||frame.viewId!==context.view||context.sensitive||typeof frame.requestId!=='string'||typeof frame.installationId!=='string'||typeof frame.capability!=='string'||this.interactions.has(frame.requestId))return;
+    const frame=value as Record<string,unknown>,context=this.context();
+    if(frame.type!=='view:interact'||frame.viewType!=='gui'||!context||context.sensitive||typeof frame.viewId!=='string'||typeof frame.requestId!=='string'||typeof frame.installationId!=='string'||typeof frame.capability!=='string'||this.interactions.has(frame.requestId))return;
     this.interactions.add(frame.requestId);
     const controller=new AbortController();this.executing.add(controller);let claimId:string|undefined;
     const deadline=setTimeout(()=>controller.abort(),4500);
@@ -241,7 +294,7 @@ export class ViewNavigationClient {
       // 'Ask before Alpha acts' covers agent commands in a view; an unreadable choice counts as on.
       if(this.reviewFirst){const review=await this.reviewFirst(controller.signal).catch(()=>true);current();if(review){error='review-required: the owner reviews phone actions first';return;}}
       result=await this.executeView(frame.viewId,frame.capability,frame.params,controller.signal,current);success=true;
-    }catch{error='Native view command failed or its outcome is unknown; it was not repeated';}
+    }catch(refusal){error=refusal instanceof ViewInteractionRefused?`${refusal.code}: ${refusal.message}`:'Native view command failed or its outcome is unknown; it was not repeated';}
     finally{
       if(claimId&&!this.disposed&&this.currentSession()&&!controller.signal.aborted){
         try{await this.request('/api/views/interact-result',{...identity,claimId,success,...(success?{result}:{error})},controller.signal);}catch{/* Lost acknowledgment is unknown; never replay an effect. */}
@@ -252,7 +305,7 @@ export class ViewNavigationClient {
 	async deliver(
 		results: readonly unknown[] | undefined,
 		attempt: NavigationAttempt,
-		navigate: (view: string, current: () => void) => Promise<boolean>,
+		navigate: (view: string, current: () => void, noteId?: string) => Promise<boolean>,
 	): Promise<{ status: "none" | "delivered" | "unknown" | "unavailable"; label?: string; parentView?: string }> {
 		const views = results?.filter(
 			(result) => findViewActionHandoff([result])?.navigationPrepared === true,
@@ -292,29 +345,20 @@ export class ViewNavigationClient {
 						binding.requestId,
 				),
 			values = object(object(selected).values);
-		if (
-			Object.keys(values).some(
-				(key) =>
-					![
-						"mode",
-						"viewId",
-						"viewPath",
-						"viewType",
-						"label",
-						"completedActionDelivered",
-						"completedActionHandoffId",
-						"navigationPrepared",
-						"navigationBinding",
-					].includes(key),
-			)
-		)
+		const noteId=values.noteId;
+		if(noteId!==undefined&&(target!=='notes'||typeof noteId!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(noteId)))
+			throw Error("Invalid saved note navigation target");
+		if (Object.keys(values).some((key) => !HANDOFF_VALUE_KEYS.has(key)))
 			throw Error("Navigation does not accept record parameters");
-		attempt.current();
-		if (!attempt.fence())
-			throw new AlphaClientError(
-				"stale",
-				"Navigation cancelled because the screen changed.",
-			);
+		const assertFresh = () => {
+			attempt.current();
+			if (!attempt.fence())
+				throw new AlphaClientError(
+					"stale",
+					"Navigation cancelled because the screen changed.",
+				);
+		};
+		assertFresh();
 		const claimed = object(
 			await this.request(
 				"/api/views/interact-claim",
@@ -328,12 +372,7 @@ export class ViewNavigationClient {
 		// navigation slot (409) until its two-minute preparation timeout.
 		let acknowledged = false;
 		try {
-		attempt.current();
-		if (!attempt.fence())
-			throw new AlphaClientError(
-				"stale",
-				"Navigation cancelled because the screen changed.",
-			);
+		assertFresh();
     this.delivering = true;
     try {
 		let switched = false;
@@ -354,7 +393,7 @@ export class ViewNavigationClient {
 			)
 				return { status: "none" };
 			// The existing shell executor waits for its React commit, not just setState dispatch.
-			switched = await navigate(target, attempt.current);
+			switched = await navigate(target, attempt.current, noteId);
 		} catch {
 			switched = false;
 		} finally {
@@ -366,15 +405,14 @@ export class ViewNavigationClient {
 			this.disposed ||
 			!this.currentSession() ||
 			attempt.controller.signal.aborted
-		) {
-
+		)
 			return { status: "unknown" };
-    }
-		switched =
-			switched &&
-			this.context()?.view === target &&
-			!this.context()?.sensitive &&
-			!document.hidden;
+		const targetVisible=()=>{
+			const observed=this.context();
+			return observed?.view===target&&!observed.sensitive&&!document.hidden&&
+				(!noteId||(observed.selectedObject?.kind==='canonical-note'&&observed.selectedObject.id===noteId));
+		};
+		switched = switched && targetVisible();
 		acknowledged = true;
 		const accepted = object(
 			await this.request(
@@ -394,14 +432,11 @@ export class ViewNavigationClient {
 			!this.disposed &&
 			this.currentSession() &&
 			!attempt.controller.signal.aborted &&
-			this.context()?.view === target &&
-			!this.context()?.sensitive &&
-			!document.hidden
+			targetVisible()
 		) {
 			this.deliveredContexts.set(attempt.controller, structuredClone(this.context()!));
       this.observationView = target;
       this.observationAccepted = true;
-
 			return {
 				status: "delivered",
 				label:

@@ -11,16 +11,19 @@ import { captureQuestion, locationMimeTypes } from './context-selection';
 
 type Bag = Record<string, any>;
 type Callback = (...args: any[]) => any;
-export type PrototypeNativeOptions = {
+type PrototypeNativeOptions = {
   /** A picker capability is process-scoped. Do not persist its URI as read authority. */
   onSelection?: (module: string, result: NativeResult, api: Bag) => void;
 };
-const installed = new WeakSet<object>();
+/** Marks a handler whose only effect is to say the feature is unavailable. dc-lite.js drops any
+ * element bound to one, so such a control is not shown. A wrapper that calls it is unmarked and
+ * still shows; the marked handler itself keeps the toast as a fallback. */
+export const UNAVAILABLE_CONTROL = Symbol.for('alpha.unavailableControl');
 const systemPages = new Set(['wifi', 'bluetooth', 'mobile', 'sound', 'notifications', 'battery', 'models', 'developer', 'privacy']);
 /** Session whose phone action history this view read successfully; an unread history is never shown as empty. */
 let actionHistoryRead: string | null = null;
 
-export type EgressPrivacy = { big: string; sub: string };
+type EgressPrivacy = { big: string; sub: string };
 type EgressConnection = Pick<ConnectionSnapshot, 'kind' | 'session' | 'cloudAccount' | 'residentInference' | 'providerStatus'>;
 /** Who a native resident session sends AI content to, from the inference binding it already reports.
  * Names a provider, never a key. Null when the agent is not a native resident session. */
@@ -54,7 +57,120 @@ export function egressPrivacy(connection: EgressConnection, native = Capacitor.i
   // Only a build without the resident (the production web preview, test mocks) gets here.
   return { big: 'Offline', sub: 'AI off' };
 }
-const externalModules = new Set(['phone', 'messages', 'inbox', 'browser', 'camera', 'photos', 'maps', 'calendar', 'contacts', 'files', 'settings', 'wallet', 'workflows']);
+const externalModules = new Set(['phone', 'messages', 'inbox', 'browser', 'camera', 'photos', 'maps', 'calendar', 'contacts', 'files', 'settings', 'workflows']);
+/** PROD-09: the handlers each reference view may keep unchanged in a product build. A handler key
+ * that no rule in replacement() covers and that is not listed here is treated as unavailable: its
+ * control is not shown. A new control in template.html fails test/reviewed-handlers.test.mjs until
+ * it is listed here (local navigation or state) or replaced in replacement(). Seeded from the
+ * template's bindings on 19 Nov 2026, so it keeps the controls shown then. */
+const REVIEWED_HANDLERS: Readonly<Record<string, readonly string[]>> = {
+  phone: [
+    'accept add alphaAnswer askDelete call callMatch cancelDelete clearFilter closeReply',
+    'confirmDelete decline del delKey dialCall endCall endLive endScreen erase info message',
+    'msg nativeDial nativeOnNumber nativeRefresh nativeRequest openReply pick play press',
+    'replyModal restore retry seek send toggle toggleNotes writeReply',
+  ],
+  messages: [
+    'allow askDelete call clear clearSearch click close closeNew',
+    'closeSearch compose context copy discard down edit focus go goNum key loadMore menuKey',
+    'move nativeBack nativeHandoff nativeLoadMore nativeRead nativeRefresh',
+    'nativeSendAccess nativeSimAccess newMsg onKey onQ onRecipientInput onSearch onText open',
+    'openFile openPhoto openSearch pick remove rm send submitSearch toggleContacts',
+    'undo up who',
+  ],
+  inbox: [
+    'addAcct addRaw allowContacts archive ask askQ attach attachmentModal captureSubviewFocus',
+    'check clear clearSearch close closeMenu closeSearch compose composeFocus confirm del',
+    'deleteDraft detailFocus down editDraft formattedMailRef forward hideSenderImage',
+    'htmlLoaded loadMore loadMoreContacts mailMenuKey mailSelectionModal menuKey nextThread',
+    'onBcc onBody onCc onFrom onQ onSubj onTo open openContacts openSearch openSendSettings',
+    'pick previousThread providerModal recoverEdits refresh reload replaceEdits reply',
+    'replyAll restoreEdits retry retryEdits rm save send showImages submitSearch toKey',
+    'toggleRead toggleRecipientDetails undo up useLatest who',
+  ],
+  browser: [
+    'allow askPage bookNow cancelEdit captureSubviewFocus cfNo cfOk clearAddress clearData',
+    'clearHist clearSite close closeLib closeMenu closeShare closeTabs copyLink deny focusRef',
+    'go goBack goFwd libHist libMarks libraryFocus menuModal newTab next onAddr onAddrKey',
+    'onInput onKey onLibQuery onName onPhone openBook openDownloads openEnc',
+    'openExternalBrowser openFind openLib openNews openPasswordProvider openPrivate openShare',
+    'openTabs partyDown partyUp pick prev readAloud rebook reload remove rootRef shareModal',
+    'startEdit stopAg stopLoading tabsFocus toggleMark toggleMenu',
+  ],
+  camera: [
+    'clearSaid cycleTimer flip openLast pick shutter toggleFlash vfCancel vfClick vfDown',
+    'vfMove vfUp',
+    'toggleGrid',
+    'cycleAspect',
+  ],
+  photos: [
+    'addFavorite addToAlbum albumFocus albumsRecover ask askDelete cancel captureSubviewFocus',
+    'choose clearFilter close closeActions closeSheet confirm create crop del delete',
+    'deleteAlbum deleteForever down edit editFocus email emptyFocus emptyModal emptyNow',
+    'emptyTrash fav frame go gridRef importImage info infoModal key libraryAccessChoose',
+    'libraryRetry loadMore manage modalRef move mute newAlbum onName open openCopyRecovery',
+    'openPlace openTrash pause pd pick play pm pu recover replace rotate save seek selAlbum',
+    'selAll selCancel selDel selDeleteForever selFav selRecover selShare selStart select send',
+    'share shareModal tap up viewerFocus viewerRef',
+    'apply ne nw reset se sw',
+  ],
+  maps: [
+    'backToEvent call clearQ close copyPhone dirs end focusQ go mapRef nativeApplyName',
+    'nativeEdit nativeLocation nativeLocationSettings nativeRename',
+    'onOrigin onQ openInMapsApp originFocus originKey originLocation qKey recenter',
+    'retryNativeMap rootRef save searchLead share shareEta start web',
+    'clearRecent compassRef northUp swap',
+  ],
+  calendar: [
+    'accept addEmail cancel captureSubviewFocus checkCreations checkReminderCreations',
+    'checkReminderDeletions checkReminderTap checkUncertain chooseMonth chooseYear close',
+    'closeMonth closePick decline del deleteSeries detailFocus discardEditDraft',
+    'discardFormDraft dismissReminderTap eMinus ePlus edit editSeries formFocus go goToday',
+    'goWhere insertHandoff join mNext mPrev monthModalRef nativeStatusRetry newEvent onDate',
+    'onEndDate onEndTime onNotes onPq onStartTime onTitle onWhere open openBrowserRecovery',
+    'openCalendarSettings openOrigin openPick openProvider openReminderActionRecovery',
+    'openReminderCreationRecovery openReminderRecovery pick pqKey recoverEditDraft',
+    'recoverFormDraft reminderDone reminderReopen reminderSnooze remove replaceEditDraft',
+    'replaceFormDraft response restoreEditDraft restoreFormDraft resumeEditDraft',
+    'resumeFormDraft retryEditDraft retryFormDraft sMinus sPlus save separateCreation tlDown',
+    'tlUp toggleAllDay toggleMonth toggleVideo',
+    'closeSearch inviteAccept inviteDecline inviteMaybe onSearch openSearch',
+  ],
+  contacts: [
+    'addEmail addNew addPhone ask cancel cancelDelete cancelEdit change clear clearSearch',
+    'close closeSearch confirmDelete del edit go nativeLoadMore nativeRequest onChange',
+    'onFamilyName onGivenName onNotes onSearch open openSearch remove save submitSearch',
+    'toggleFav',
+  ],
+  files: [
+    'allFiles ask cancel captureSubviewFocus clear close closeMenu confirm context del',
+    'deleteNow down email empty_ exitSel folderFocus forget go grant mediaError mediaRef',
+    'menuModal modalRef move newFolder onFocus onKey onRn onValue openElsewhere openMenu',
+    'openTrash pdfNext pdfPrevious previewFocus reselect restore restoreAll retry rnKey',
+    'saveRn selAll selCopy selDel selMove selRename selShare share sort startRename tap',
+    'toggleView up',
+    'details selDeleteForever selDetails selRestore selectTrash',
+  ],
+  settings: [
+    'action back change close go ok onKey onName onPw openAccount pick rootRef set',
+    'sheetModal toggle togglePreview',
+  ],
+  workflows: [
+    'add again allowAnother approve ask builderFocus cancel cancelGeneration cancelReview',
+    'cancelRun captureSubviewFocus change changeDays changeScheduleHour',
+    'changeScheduleInstructions changeScheduleMinute close closeSheet confirm',
+    'connectCalendars createDeviceReminder createDigest createPrompt createReminder',
+    'createWorkflow del deny describe detailFocus digestLink discard down edit generateDraft',
+    'lifecycleCancel lifecycleConfirm modalRef newFlow onDescription',
+    'onGenerationPrompt onLabel onMatch onName onSnooze onText onTime open openClock',
+    'openFilters openNotificationSettings phoneReview phoneStopSpeech phoneSync pick prepare',
+    'refresh resend run runFocus save saveScheduleEdit stepModal tMinus tPlus tap toggle',
+    'toggleCase toggleNewMore togglePower togglePromptMore up useGenerated',
+  ],
+};
+const reviewedHandlers = new Map(Object.entries(REVIEWED_HANDLERS).map(([module, lines]) => [module, new Set(lines.join(' ').split(' '))]));
+/** For test/reviewed-handlers.test.mjs. */
+export const reviewedHandlerKeys = (module: string): ReadonlySet<string> => reviewedHandlers.get(module) ?? new Set();
 const text = (value: unknown) => typeof value === 'string' ? value : '';
 
 /** Only directly observed native facts. A missing key means unknown: no on/off is shown. */
@@ -66,7 +182,7 @@ export const tileKeys: Record<string, TileKey> = { 'Wi-Fi': 'wifi', 'Bluetooth':
 export const tileSettingsPages: Partial<Record<TileKey, string>> = SYSTEM_TILE_SETTINGS_PAGES;
 /** Android system switches as AlphaDevice.snapshot() read them (the shared SystemFacts keys). */
 export const tileFactsFromSnapshot: (snapshot: unknown, torch?: boolean) => TileFacts = tileFactsFromSystemFacts;
-export { broaderPageNotice, handoffGate, switchValue, tileAccessibleName, tileStateText };
+export { broaderPageNotice, handoffGate, switchValue };
 /** `on` colours the tile; `aria` is its accessible name and `pressed` its toggle state (toggles only). */
 export type ShadeTile = { label: string; on?: boolean; aria?: string; pressed?: boolean; css?: string; toggle?: () => void; stateText?: string; [key: string]: unknown };
 /** Present tiles with state only from native facts. Hide the flashlight without a native control.
@@ -111,24 +227,23 @@ export function installPrototypeNativeAdapters(
   _Component: unknown,
   views: Record<string, Bag>,
   options: PrototypeNativeOptions = {},
-): () => void {
-  if (installed.has(views)) return () => {};
-  installed.add(views);
-  const restore: Array<() => void> = [];
+): void {
   const busy = new Set<string>();
   const notify = (api: Bag, message: string) => api.toast(message);
-  const unavailable = (api: Bag, message = 'Unavailable') => () => notify(api, message);
+  const unavailable = (api: Bag, message = 'Unavailable'): Callback => Object.assign(() => notify(api, message), { [UNAVAILABLE_CONTROL]: true });
+  /** A bar control that only says Unavailable. Unmarked: the bar keeps its shape (see below). */
+  const unavailableNotice = (api: Bag, message = 'Unavailable') => () => notify(api, message);
   /** Every control of a bar spec only says Unavailable; absent controls stay absent. */
   const unavailableBar = (spec: Bag | null, api: Bag): Bag | null => {
     if (!spec) return spec;
-    const off = (fn: unknown) => typeof fn === 'function' ? unavailable(api) : fn ?? null;
+    const off = (fn: unknown) => typeof fn === 'function' ? unavailableNotice(api) : fn ?? null;
     return {
       ...spec,
       closed: spec.closed && { ...spec.closed, onText: off(spec.closed.onText), submit: off(spec.closed.submit), acceptSuggestion: off(spec.closed.acceptSuggestion) },
       left: spec.left && { ...spec.left, run: off(spec.left.run) },
-      strip: spec.strip && { ...spec.strip, actions: (spec.strip.actions || []).map((action: Bag) => ({ ...action, run: unavailable(api) })) },
+      strip: spec.strip && { ...spec.strip, actions: (spec.strip.actions || []).map((action: Bag) => ({ ...action, run: unavailableNotice(api) })) },
       end: off(spec.end),
-      incoming: spec.incoming && { id: spec.incoming.id, answer: unavailable(api), decline: unavailable(api), screen: off(spec.incoming.screen) },
+      incoming: spec.incoming && { id: spec.incoming.id, answer: unavailableNotice(api), decline: unavailableNotice(api), screen: off(spec.incoming.screen) },
     };
   };
   async function perform(module: string, api: Bag, action: Action, payload: Bag = {}) {
@@ -207,11 +322,14 @@ export function installPrototypeNativeAdapters(
       if (key === 'call') return native('phone');
       if (key === 'camera') return native('camera');
       if (key === 'pick' && path.includes('.photos.')) return native('photos');
+      // The prototype's reply draft only says it is not available (agent-adapter api.say).
+      if (key === 'ask') return unavailable(api);
     }
     if (module === 'inbox') {
       if (key === 'send') return () => perform(module, api, 'email', mailPayload(api.get(module)));
       if (['archive', 'del'].includes(key)) return native('inbox');
       if (key === 'addAcct') return native('settings');
+      if (key === 'ask') return unavailable(api);
     }
     if (module === 'calendar') {
       if (key === 'save') return () => { if (api.get(module).form?.id) { void perform(module, api, 'calendar'); return; } const payload = calendarPayload(api.get(module)); if (payload) void perform(module, api, 'calendar-create', payload); else notify(api, 'Title and time needed'); };
@@ -255,14 +373,8 @@ export function installPrototypeNativeAdapters(
       if (key === 'go' && path.startsWith('locs.')) return row.name === 'Photos' ? () => api.open('photos') : native('files', (types => types ? { mime: types } : {})(locationMimeTypes(text(row.name))));
       if (key === 'tap' && row.isFile) return native('files');
       if (key === 'rnKey') return (e: KeyboardEvent) => { if (e.key === 'Enter') { e.preventDefault(); void perform(module, api, 'files'); } };
-      if (key === 'go' && path.startsWith('moveTo.')) return native('files');
-      if (['play', 'del', 'saveRn', 'selDel', 'move', 'selMove', 'transcribe'].includes(key)) return native('files');
-      if (['shareMsg', 'shareMail', 'selShare'].includes(key)) return unavailable(api, 'Use Files app');
-    }
-    if (module === 'wallet') {
-      if (key === 'addCal') return native('calendar');
-      if (['onNum', 'onCvv', 'onExp', 'onCode', 'onName'].includes(key)) return unavailable(api, 'Not connected');
-      if (['pay', 'auth', 'verify', 'next', 'scan', 'reload', 'remove', 'setDef', 'startPay'].includes(key)) return unavailable(api, 'Not connected');
+      if (['del', 'saveRn', 'selDel', 'move', 'selMove'].includes(key)) return native('files');
+      if (key === 'selShare') return unavailable(api, 'Use Files app');
     }
     if (module === 'settings') {
       // Opening Activity only shows what is already known; reading history is a separate explicit step.
@@ -279,13 +391,19 @@ export function installPrototypeNativeAdapters(
     }
     return undefined;
   }
+  /** PROD-09: in a product build no control is bound to a handler nobody reviewed, since it could
+   * be a simulated effect: the handler is marked, so dc-lite.js does not show its control. Code that
+   * reads it (a list filter's apply/current, say) still reaches the original. */
+  const reviewed = (module: string, key: string, handler: Callback): Callback =>
+    browserDevProfile || reviewedHandlers.get(module)?.has(key) ? handler : Object.assign((...args: unknown[]) => handler(...args), { [UNAVAILABLE_CONTROL]: true });
   function walk(value: any, module: string, st: Bag, api: Bag, path = ''): any {
-    if (!value || typeof value !== 'object') return value;
+    // A React element is rendered as given; its props are not this view's handlers.
+    if (!value || typeof value !== 'object' || '$$typeof' in value) return value;
     if (Array.isArray(value)) return value.map((v, i) => walk(v, module, st, api, path + i + '.'));
     const result: Bag = {};
     for (const [key, child] of Object.entries(value)) {
       result[key] = typeof child === 'function'
-        ? replacement(module, key, path + key, value, st, api, child as Callback) || child
+        ? replacement(module, key, path + key, value, st, api, child as Callback) || reviewed(module, key, child as Callback)
         : walk(child, module, st, api, path + key + '.');
     }
     // A typed Photos or Files search names no content to analyze; product builds offer no Ask chip for it.
@@ -324,6 +442,7 @@ export function installPrototypeNativeAdapters(
     const connection = connectionController.getSnapshot();
     const info = (label: string, val: string): Bag => ({ kInfo: true, label, val, hasVal: !!val, noAB: true });
     const nav = (label: string, go: () => void, aria = label, lucide = ''): Bag => ({ kNav: true, label, lbl: aria, chev: true, noAB: true, go, ...(lucide ? { lucide } : {}) });
+    const repaint = (patch: Bag) => { try { api.set(patch); } catch { /* view closed */ } };
     for (const page of out.stack) {
       if (!page || !Array.isArray(page.groups)) continue;
       if (st.page === 'privacy' && st.log && page.title === 'Activity') {
@@ -335,7 +454,7 @@ export function installPrototypeNativeAdapters(
           void connectionController.actionHistory().then(() => {
             const after = connectionController.getSnapshot();
             if (sessionId && after.session?.sessionId === sessionId && !after.error && after.actionHistory !== before) actionHistoryRead = sessionId;
-            try { api.set({ actionHistoryReadAt: Date.now() }); } catch { /* view closed */ }
+            repaint({ actionHistoryReadAt: Date.now() });
           });
         }, aria, 'rotate-cw');
         // A decision clears the read history; show it as unread rather than as empty.
@@ -344,7 +463,7 @@ export function installPrototypeNativeAdapters(
           const busyKey = 'activity:' + id;
           if (busy.has(busyKey)) return;
           busy.add(busyKey);
-          void run().catch(() => notify(api, 'Not recorded')).finally(() => { busy.delete(busyKey); actionHistoryRead = null; try { api.set({ actionHistoryReadAt: Date.now() }); } catch { /* view closed */ } });
+          void run().catch(() => notify(api, 'Not recorded')).finally(() => { busy.delete(busyKey); actionHistoryRead = null; repaint({ actionHistoryReadAt: Date.now() }); });
         }, label, lucide);
         const entryRows = (entry: ConnectionSnapshot['actionHistory'][number]): Bag[] => [
           info(entry.description, activityState(entry.state)),
@@ -373,28 +492,26 @@ export function installPrototypeNativeAdapters(
   }
   for (const [module, definition] of Object.entries(views)) {
     if (!externalModules.has(module) || typeof definition.render !== 'function') continue;
-    const render = definition.render, actions = definition.actions, leave = definition.onLeave, ongoing = definition.ongoing, bar = definition.bar;
+    const render = definition.render, actions = definition.actions, leave = definition.onLeave, bar = definition.bar, callBar = definition.callBar;
     definition.render = (state: Bag, api: Bag) => {
       // Rendering cannot start a fake phone call, navigation timer, capture or booking.
       const renderingApi = ['phone', 'browser', 'camera', 'maps'].includes(module)
         ? { ...api, later: () => {}, laterBg: () => {}, every: () => {}, everyBg: () => {} } : api;
       return walk(render(state, renderingApi), module, state, api);
     };
-    if (actions) definition.actions = Object.fromEntries(Object.keys(actions).map(key => [key, (_card: Bag, api: Bag) => notify(api, 'Unavailable')]));
+    // A chat card's action here could only say it is unavailable; marked, its card offers no control (model.js).
+    if (actions) definition.actions = Object.fromEntries(Object.keys(actions).map(key => [key, Object.assign((_card: Bag, api: Bag) => notify(api, 'Unavailable'), { [UNAVAILABLE_CONTROL]: true })]));
     // AP-16: a reference view's bar (runtime/comms-bar.ts) keeps its shape, but every control it
     // offers only says it is unavailable. fit() only measures, so it stays.
     if (typeof bar === 'function') definition.bar = (state: Bag, api: Bag) => unavailableBar(bar(state, api), api);
     if (['phone', 'camera', 'maps', 'workflows'].includes(module)) definition.ongoing = () => null;
+    // The reference phone never has a call here; the image's calls come from Telecom (runtime/ongoing-call.ts).
+    if (callBar) definition.callBar = () => null;
     if (leave && ['phone', 'camera', 'maps'].includes(module)) definition.onLeave = () => {};
-    restore.push(() => { definition.render = render; definition.actions = actions; definition.onLeave = leave; definition.ongoing = ongoing; definition.bar = bar; });
   }
   const settings = views.settings;
-  if (settings && typeof settings.render === 'function') {
-    // Later adapters replace settings.render; keep this honesty pass outermost.
-    const finalize = (next: any) => typeof next === 'function' ? (state: Bag, api: Bag) => honestSettings(next(state, api), state, api) : next;
-    let exposed = finalize(settings.render);
-    Object.defineProperty(settings, 'render', { configurable: true, enumerable: true, get: () => exposed, set: next => { exposed = finalize(next); } });
-    restore.unshift(() => { delete settings.render; settings.render = exposed; });
-  }
-  return () => { for (const reset of restore) reset(); installed.delete(views); };
+  // Later adapters replace settings.render; keep this honesty pass outermost.
+  const finalize = (next: any) => typeof next === 'function' ? (state: Bag, api: Bag) => honestSettings(next(state, api), state, api) : next;
+  let exposed = finalize(settings.render);
+  Object.defineProperty(settings, 'render', { configurable: true, enumerable: true, get: () => exposed, set: next => { exposed = finalize(next); } });
 }

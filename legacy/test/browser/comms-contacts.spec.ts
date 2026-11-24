@@ -78,6 +78,37 @@ test.describe('dev Contacts (?mode=dev&fixture=1 dev build with ELIZA_DEV_ALLOW_
 });
 
 test.describe('AOSP Contacts (stubbed Alpha image bridge, as aosp-telephony-views.spec.ts)', () => {
+  // v610: a change or deletion for a name nobody in Contacts has was carded anyway. The installed
+  // review lookup reads the stubbed address book; the proposals are a stubbed agent list.
+  test('a contact change or deletion is carded only for contacts in the address book, and only approval runs it', async ({page}) => {
+    await setupTelephony(page);
+    const review = (operation: Record<string, unknown>) => page.evaluate(async operation => {
+      const {DeviceActions} = await import('/src/runtime/device-actions.ts' as string);
+      const posts: string[] = [];
+      const proposal = {id: '5d1f0d2a-7f0e-4c8a-9a51-0e6c1c1f9b20', digest: 'd'.repeat(64), state: 'pending', subjectUserId: 'owner', requestedBy: 'agent', action: 'device_action',
+        expiresAt: new Date(Date.now() + 600000).toISOString(), execution: null,
+        payload: {action: 'device_action', version: 1, installationId: 'device', enrollmentId: 'enrollment', operation}};
+      const request = async (path: string, body: unknown) => { if (body !== undefined) posts.push(path); return {proposals: [proposal]}; };
+      const journal = {reserve: async () => { throw Error('no journal'); }, markApplying: async () => {}, finish: async () => {}, get: async () => ({}), list: async () => ({entries: []})};
+      let effects = 0;
+      const client = new DeviceActions({ownerId: 'owner', agentId: 'agent', origin: 'https://agent.example', sessionId: 'session'},
+        {installationId: 'device', enrollmentId: 'enrollment', key: 'a'.repeat(64), capabilities: ['contacts.write.v1', 'contacts.write.v2']}, 'c'.repeat(64), request, journal, async () => { effects++; return {status: 'succeeded', summary: 'done'}; });
+      const items = await client.pendingReview({view: 'home', revision: 1, sensitive: false}, new AbortController().signal);
+      return {items: items.map((item: any) => item.proposal ? `${item.proposal.title}\n${item.proposal.description}` : `notice ${item.notice}`), posts, effects};
+    }, operation);
+    const missing = await review({type: 'contact_delete', query: 'Test Alpha'});
+    // The owner was told nothing was changed, so the only post is the refusal the agent records.
+    expect(missing).toEqual({items: ['notice Delete contact: No contact matching “Test Alpha” is on this phone. Nothing was changed.'], posts: [expect.stringMatching(/\/decision$/)], effects: 0});
+    expect((await review({type: 'contact_update', query: 'Test Alpha', set: {phoneNumbers: ['+14155550101']}})).items).toEqual(['notice Change contact: No contact matching “Test Alpha” is on this phone. Nothing was changed.']);
+    const one = await review({type: 'contact_update', query: 'Ada', add: {phoneNumbers: ['+14155550101']}});
+    expect(one.items).toHaveLength(1);
+    expect(one.items[0]).toMatch(/^Change contact\nContact: Ada Okafor\nAdd: \+14155550101\n/);
+    expect(one).toMatchObject({posts: [], effects: 0});
+    // "ra" matches two people: the card names both and the owner picks one on the phone.
+    const several = await review({type: 'contact_delete', query: 'Ra'});
+    expect(several.items).toEqual(['Delete contact\n2 contacts match “Ra”: Bao Tran, Grace Lindqvist\n\nAfter you confirm, you choose which one to delete on your phone.']);
+    expect(await page.evaluate(() => ((window as any).telephonyInputs as [string, any][]).map(([method]) => method).filter(method => ['contacts.save', 'contacts.remove'].includes(method)))).toEqual([]);
+  });
   test('immediate fields save structured names and Notes while unrelated provider rows stay unchanged', async ({page}) => {
     await setupTelephony(page);
     await page.evaluate(()=>{
@@ -153,6 +184,54 @@ test.describe('AOSP Contacts (stubbed Alpha image bridge, as aosp-telephony-view
     await expect.poll(()=>page.evaluate(()=>(window as any).telephonyInputs.filter(([method]:any)=>method==='contacts.save').length)).toBe(1);
     expect(await page.evaluate(()=>(window as any).telephonyInputs.find(([method]:any)=>method==='contacts.save')[1])).toEqual({displayName:'Review Person',givenName:'Review',familyName:'Person',notes:'Entered by owner',phoneNumbers:[{number:'+15550100888',type:'mobile'}],emailAddresses:[{address:'review@example.invalid',type:'home'}]});
   });
+  test('a contact saved in the in-app editor joins the open list without leaving Contacts', async ({page}) => {
+    await setupTelephony(page, {preview: true});
+    await page.getByRole('button', {name: 'Contacts', exact: true}).first().click();
+    await expect(page.getByRole('button', {name: /Carmen Ruiz/}).first()).toBeVisible();
+    await page.getByRole('button', {name: 'New contact', exact: true}).click();
+    await page.getByRole('textbox', {name: 'First name', exact: true}).fill('Nia');
+    await page.getByRole('textbox', {name: 'Last name', exact: true}).fill('Brooks');
+    await page.getByRole('textbox', {name: 'Phone', exact: true}).fill('+15550100199');
+    await page.locator('[data-alpha-contact-save]').click();
+    await expect.poll(() => page.evaluate(() => (window as any).telephonyInputs.filter(([method]: any) => method === 'contacts.save').length)).toBe(1);
+    // Back from the new contact's detail lands on the list, which already holds it.
+    await page.locator('[data-alpha-contact-back]').click();
+    await expect(row(page, 'Nia Brooks')).toBeVisible();
+  });
+
+  test('a contact an approved Alpha action adds appears in the open list without leaving Contacts', async ({page}) => {
+    await page.route(/\/src\/runtime\/connection-ui\.tsx/, async route => {
+      const response = await route.fetch();
+      const body = (await response.text()).replace(/setDeviceExecutor\(executor\)\s*\{\s*deviceExecutor = executor;/, match => `${match} globalThis.__installedDeviceExecutor = executor;`);
+      if (!body.includes('__installedDeviceExecutor')) throw Error('setDeviceExecutor not found in connection-ui');
+      await route.fulfill({response, body});
+    });
+    await setupTelephony(page, {preview: true});
+    await page.getByRole('button', {name: 'Contacts', exact: true}).first().click();
+    await expect(page.getByRole('button', {name: /Carmen Ruiz/}).first()).toBeVisible();
+    await expect.poll(() => page.evaluate(() => typeof (window as any).__installedDeviceExecutor)).toBe('function');
+    const reads = () => page.evaluate(() => (window as any).telephonyInputs.filter(([method]: any) => method === 'contacts.list').length);
+    const before = await reads();
+    // The review fence compares the agent session and screen context; hold both steady as a live review would.
+    const status = await page.evaluate(async () => {
+      const {connectionController} = await import('/src/runtime/connection-ui.tsx' as string);
+      const {alphaClient} = await import('/src/runtime/alpha-client.ts' as string);
+      const session = {ownerId: 'owner', agentId: 'agent', origin: 'https://agent.example', sessionId: 'session'};
+      const snapshot = connectionController.getSnapshot.bind(connectionController);
+      connectionController.getSnapshot = () => ({...snapshot(), session});
+      const target = {installationId: 'device'};
+      connectionController.getWorkflowDeviceTarget = () => target;
+      const state = alphaClient.getState.bind(alphaClient), context = {...state().context, view: 'contacts', sensitive: false};
+      alphaClient.getState = () => ({...state(), context});
+      const result = await (window as any).__installedDeviceExecutor({type: 'contact_create', contact: {displayName: 'Nia Brooks', phoneNumbers: ['+15550100199'], emailAddresses: []}}, crypto.randomUUID(), context, new AbortController().signal);
+      return result.status;
+    });
+    expect(status).toBe('succeeded');
+    await expect(row(page, 'Nia Brooks')).toBeVisible();
+    // One provider read answers the write; nothing polls.
+    expect(await reads()).toBe(before + 1);
+  });
+
   test('typing reads the device address book with the query and nothing else', async ({page}) => {
     await setupTelephony(page);
     await page.getByRole('button', {name: 'Contacts', exact: true}).first().click();

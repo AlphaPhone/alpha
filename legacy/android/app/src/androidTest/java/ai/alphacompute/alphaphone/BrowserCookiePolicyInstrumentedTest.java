@@ -1,6 +1,8 @@
 package ai.alphacompute.alphaphone;
 
 import android.webkit.*;
+import android.view.View;
+import android.widget.FrameLayout;
 import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.webkit.*;
 import java.io.ByteArrayInputStream;
@@ -17,7 +19,7 @@ import static org.junit.Assert.*;
 public final class BrowserCookiePolicyInstrumentedTest {
  private static WebView build(MainActivity activity,String id,boolean priv,String profile)throws Exception{
   Object plugin=activity.getBridge().getPlugin("AlphaBrowser").getInstance();
-  java.lang.reflect.Method build=ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class.getDeclaredMethod("build",String.class,boolean.class,String.class);build.setAccessible(true);
+  java.lang.reflect.Method build=AlphaBrowserPlugin.class.getDeclaredMethod("build",String.class,boolean.class,String.class);build.setAccessible(true);
   Object tab=build.invoke(plugin,id,priv,profile);java.lang.reflect.Field web=tab.getClass().getDeclaredField("web");web.setAccessible(true);return (WebView)web.get(tab);
  }
  /** Exercise the real product popup callback with a controlled committed opener.
@@ -25,7 +27,7 @@ public final class BrowserCookiePolicyInstrumentedTest {
   * committed/selected state; the product constructs and profiles the child. */
  private static WebView popup(MainActivity activity,WebView opener)throws Exception{
   AlphaBrowserPlugin plugin=(AlphaBrowserPlugin)activity.getBridge().getPlugin("AlphaBrowser").getInstance();
-  java.lang.reflect.Field tabs=ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class.getDeclaredField("tabs");tabs.setAccessible(true);
+  java.lang.reflect.Field tabs=AlphaBrowserPlugin.class.getDeclaredField("tabs");tabs.setAccessible(true);
   Object selected=null;String id=null;
   for(Object tab:((java.util.Map<?,?>)tabs.get(plugin)).values()){
    java.lang.reflect.Field web=tab.getClass().getDeclaredField("web");web.setAccessible(true);
@@ -33,7 +35,7 @@ public final class BrowserCookiePolicyInstrumentedTest {
   }
   assertNotNull("Owned fixture opener exists",selected);
   java.lang.reflect.Field committed=selected.getClass().getDeclaredField("committed");committed.setAccessible(true);committed.setBoolean(selected,true);
-  java.lang.reflect.Field presented=ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class.getDeclaredField("presentedId");presented.setAccessible(true);presented.set(plugin,id);
+  java.lang.reflect.Field presented=AlphaBrowserPlugin.class.getDeclaredField("presentedId");presented.setAccessible(true);presented.set(plugin,id);
   WebView.WebViewTransport transport=opener.new WebViewTransport();
   android.os.Message message=android.os.Message.obtain(new android.os.Handler(android.os.Looper.getMainLooper()),()->{});message.obj=transport;
   assertTrue("Product popup callback accepts a reviewed user gesture",opener.getWebChromeClient().onCreateWindow(opener,false,true,message));
@@ -62,6 +64,39 @@ public final class BrowserCookiePolicyInstrumentedTest {
   fail("Cross-site iframe did not report its cookie result");
  }
  @Test public void normalEmbeddedCookiesShareOnlyNormalProfileAndHostPolicyStaysUnchanged()throws Exception{exercise(false);}
+ /** Exercise the product's native commit callback directly. The active app account is outside this fixture. */
+ @Test public void nativeBrowserShowsAddressRewrittenBeforeFirstPaint()throws Exception{
+  AtomicReference<WebView> child=new AtomicReference<>();
+  try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
+   // The host's initial navigation disposes any tabs owned by its previous document.
+   // Wait for the product shell or its sign-in screen before creating the fixture tab.
+   String ready="document.readyState==='complete' && !!document.querySelector('[data-active-view], .alpha-google-icon')";
+   boolean hostReady=false;
+   for(int attempt=0;attempt<150;attempt++){
+    if("true".equals(WebViewTestDriver.evaluate(ready))){hostReady=true;break;}
+    android.os.SystemClock.sleep(100);
+   }
+   assertTrue("The product host finished startup navigation",hostReady);
+   WebViewTestDriver.withActivity(MainActivity.class,activity->{try{
+    WebView web=build(activity,"rewrite_probe",false,AlphaBrowserStores.PERSISTENT_PROFILE);
+    BrowserFlowInstrumentedTest.installSameDocumentFixture(web);
+    View frame=(View)web.getParent();
+    frame.setLayoutParams(new FrameLayout.LayoutParams(-1,-1));
+    frame.bringToFront();
+    frame.setVisibility(View.VISIBLE);
+    child.set(web);
+    web.loadUrl(BrowserFlowInstrumentedTest.SAME+"head");
+   }catch(Exception failure){throw new AssertionError(failure);}});
+   AtomicReference<String> observed=new AtomicReference<>();
+   for(int attempt=0;attempt<150;attempt++){
+    WebView web=child.get();
+    BoundedActivityScenario.main(()->observed.set(web.getUrl()+"|"+web.getTitle()+"|"+web.isShown()));
+    if((BrowserFlowInstrumentedTest.SAME+"replaced|Replaced fixture|true").equals(observed.get()))return;
+    android.os.SystemClock.sleep(100);
+   }
+   fail("Rewritten document must be committed and shown by the Browser host: "+observed.get());
+  }
+ }
  @Test public void privateEmbeddedCookiesRemainBlockedAndIsolated()throws Exception{
   org.junit.Assume.assumeTrue("Private tabs require secure scoped deletion",WebViewFeature.isFeatureSupported(WebViewFeature.DELETE_BROWSING_DATA));exercise(true);
  }
@@ -72,7 +107,7 @@ public final class BrowserCookiePolicyInstrumentedTest {
    WebViewTestDriver.withActivity(MainActivity.class,activity->{try{
     hostPolicy[0]=CookieManager.getInstance().acceptThirdPartyCookies(activity.getBridge().getWebView());
     assertFalse("Privileged host refuses third-party cookies",hostPolicy[0]);
-    String profile=priv?AlphaBrowserPlugin.PRIVATE_PREFIX+token:AlphaBrowserPlugin.PERSISTENT_PROFILE;
+    String profile=priv?AlphaBrowserStores.PRIVATE_PREFIX+token:AlphaBrowserStores.PERSISTENT_PROFILE;
     first.set(build(activity,"cookies_a",priv,profile));second.set(build(activity,"cookies_b",priv,profile));
     if(WebViewFeature.isFeatureSupported(WebViewFeature.WEB_AUTHENTICATION))assertEquals("Passkeys stay disabled in both profiles",WebSettingsCompat.WEB_AUTHENTICATION_SUPPORT_NONE,WebSettingsCompat.getWebAuthenticationSupport(first.get().getSettings()));
     assertEquals("Per-tab policy",!priv,WebViewCompat.getProfile(first.get()).getCookieManager().acceptThirdPartyCookies(first.get()));

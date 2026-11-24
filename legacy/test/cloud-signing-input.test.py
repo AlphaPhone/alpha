@@ -135,7 +135,9 @@ class CloudSigningInputTest(unittest.TestCase):
         def git(base, *args):
             return subprocess.check_output(["git", "-C", str(base), *args], stderr=subprocess.PIPE).decode().strip()
         def commit(base):
-            git(base, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Synthetic reviewed source")
+            # These short-lived repos must finish their writes before TemporaryDirectory cleanup.
+            git(base, "-c", "maintenance.auto=false", "-c", "user.name=fixture", "-c",
+                "user.email=fixture@example.invalid", "commit", "-qm", "Synthetic reviewed source")
             return git(base, "rev-parse", "HEAD")
         git(sdk, "init", "-q")
         directories = {"packages/app/scripts", "plugins/plugin-native-inference/src/model-catalog"}
@@ -754,8 +756,51 @@ class CloudSigningInputTest(unittest.TestCase):
 
 
 class PrivateProducerSourceReviewTest(unittest.TestCase):
+    def test_owner_verification_exceptions_are_bound_to_exact_producers(self):
+        v81 = {
+            "alphaCommit": "573bc2c25ec09e6bf40ca5b18a1ebb1e3afb4dc4",
+            "sdkCommit": "1803ea88c9460f2e3cb779abe31cd77cfc6f64c5",
+            "versionCode": 81,
+            "applicationId": "ai.alphacompute.alphaphone",
+        }
+        v82 = {
+            "alphaCommit": "c80fdf12344d448086e6f1b08f46614bba94bcfb",
+            "sdkCommit": "95532fce36ab4d253c0d848d127704d9b9ace2ac",
+            "versionCode": 82,
+            "applicationId": "ai.alphacompute.alphaphone",
+        }
+        checks = {"combinedVerification": "waived-by-owner"}
+        for pin, other in ((v81, v82), (v82, v81)):
+            with self.subTest(version=pin["versionCode"]):
+                private = {**pin, "checks": checks}
+                self.assertTrue(ADMISSION.private_verification_admitted(private, pin))
+                for key, value in (
+                    ("alphaCommit", other["alphaCommit"]),
+                    ("sdkCommit", other["sdkCommit"]),
+                    ("versionCode", other["versionCode"]),
+                    ("versionCode", 83),
+                    ("applicationId", "ai.elizaresearch.alphaphone"),
+                ):
+                    changed = {**pin, key: value}
+                    changed_private = {**changed, "checks": checks}
+                    with self.subTest(field=key, value=value):
+                        self.assertFalse(ADMISSION.private_verification_admitted(private, changed))
+                        self.assertFalse(ADMISSION.private_verification_admitted(changed_private, pin))
+                        self.assertFalse(ADMISSION.private_verification_admitted(changed_private, changed))
+                self.assertFalse(ADMISSION.private_verification_admitted(private, other))
+                self.assertFalse(ADMISSION.private_verification_admitted(
+                    {**other, "checks": checks}, pin))
+                for value in ("failed", "skipped", None):
+                    self.assertFalse(ADMISSION.private_verification_admitted(
+                        {**private, "checks": {"combinedVerification": value}}, pin))
+        superseded_v82 = {**v82, "alphaCommit": "6c04ce32e1f305921abc83309f830c076dd52daa"}
+        self.assertFalse(ADMISSION.private_verification_admitted(
+            {**superseded_v82, "checks": checks}, superseded_v82))
+        self.assertTrue(ADMISSION.private_verification_admitted(
+            {"checks": {"combinedVerification": "passed"}}, {}))
+
     def test_isolated_source_requires_exact_committed_approval(self):
-        self.assertEqual(PRODUCER.REPOSITORY, "alphacompute/alpha")
+        self.assertEqual(PRODUCER.REPOSITORY, "eliza-research/alpha")
         with tempfile.TemporaryDirectory(prefix="alpha-source-review-") as directory:
             root = Path(directory)
             (root / "scripts/ci").mkdir(parents=True)

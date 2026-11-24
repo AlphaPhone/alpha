@@ -27,8 +27,6 @@ public final class CloudSignInCallbackInstrumentedTest {
  private static void gate() { org.junit.Assume.assumeTrue("Explicit synthetic Cloud sign-in campaign", "1".equals(InstrumentationRegistry.getArguments().getString("cloudSignInNative"))); }
  private static AlphaCredentialStore store() { return new AlphaCredentialStore(context()); }
 
- private static void holdFor(long millis) { SystemClock.sleep(millis); }
-
  /** The return resolves to MainActivity only, at one exact path, on the build's App Link host (production.web). */
  @Test public void returnLinkResolvesOnlyToMainActivity() {
   PackageManager packages = context().getPackageManager();
@@ -43,55 +41,46 @@ public final class CloudSignInCallbackInstrumentedTest {
   assertFalse("Alpha registers no staging return", staging);
  }
 
+ /** Launches MainActivity with uri over a fresh pending record and asserts the record and the Cloud credential are unchanged. */
+ private static void assertPendingRecordKept(String uri) throws Exception {
+  String cloudBefore = store().readCredentialSlot(Slots.CLOUD_PRODUCTION);
+  CloudSignInFlow.Pending pending = CloudSignInFlow.Pending.create(AlphaCloudSignInPlugin.REGISTRATION.defaultEnvironment(), System.currentTimeMillis());
+  store().writeCredentialSlot(AlphaCloudSignInPlugin.PENDING_SLOT, pending.serialize());
+  try (BoundedActivityScenario<MainActivity> scenario = BoundedActivityScenario.launch(intent(uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK))) {
+   SystemClock.sleep(3000);
+   assertEquals("The return cannot cancel a sign-in", pending.serialize(), store().readCredentialSlot(AlphaCloudSignInPlugin.PENDING_SLOT));
+   assertEquals("No key is written for the return", cloudBefore, store().readCredentialSlot(Slots.CLOUD_PRODUCTION));
+  } finally { store().removeCredentialSlot(AlphaCloudSignInPlugin.PENDING_SLOT); }
+ }
+
  /** A return whose state does not match is ignored: the pending record stays and nothing is stored (shared callback contract). */
  @Test public void mismatchingReturnLeavesPendingRecordAndStoresNothing() throws Exception {
   gate();
-  String cloudBefore = store().readCredentialSlot("cloud:production");
-  CloudSignInFlow.Pending pending = CloudSignInFlow.Pending.create(AlphaCloudSignInPlugin.REGISTRATION.defaultEnvironment(), System.currentTimeMillis());
-  store().writeCredentialSlot(AlphaCloudSignInPlugin.PENDING_SLOT, pending.serialize());
-  try (BoundedActivityScenario<MainActivity> scenario = BoundedActivityScenario.launch(intent(callback(CloudSignInFlow.newState())).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK))) {
-   holdFor(3000);
-   assertEquals("A foreign return cannot cancel a sign-in", pending.serialize(), store().readCredentialSlot(AlphaCloudSignInPlugin.PENDING_SLOT));
-   assertEquals("No key is written for a mismatching return", cloudBefore, store().readCredentialSlot("cloud:production"));
-  } finally { store().removeCredentialSlot(AlphaCloudSignInPlugin.PENDING_SLOT); }
+  assertPendingRecordKept(callback(CloudSignInFlow.newState()));
  }
 
  /** The fallback page's parameterless hand-off carries no result: the pending record stays until expiry or a retry. */
  @Test public void parameterlessReturnKeepsPendingRecord() throws Exception {
   gate();
-  String cloudBefore = store().readCredentialSlot("cloud:production");
-  CloudSignInFlow.Pending pending = CloudSignInFlow.Pending.create(AlphaCloudSignInPlugin.REGISTRATION.defaultEnvironment(), System.currentTimeMillis());
-  store().writeCredentialSlot(AlphaCloudSignInPlugin.PENDING_SLOT, pending.serialize());
-  try (BoundedActivityScenario<MainActivity> scenario = BoundedActivityScenario.launch(intent("https://" + HOST + "/alphaphone/auth/callback").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK))) {
-   holdFor(3000);
-   assertEquals(pending.serialize(), store().readCredentialSlot(AlphaCloudSignInPlugin.PENDING_SLOT));
-   assertEquals(cloudBefore, store().readCredentialSlot("cloud:production"));
-  } finally { store().removeCredentialSlot(AlphaCloudSignInPlugin.PENDING_SLOT); }
+  assertPendingRecordKept("https://" + HOST + "/alphaphone/auth/callback");
  }
 
  /**
   * An expired record with the matching state is never used. A return that starts Alpha has no live
   * sign-in attempt, so the shared client consumes nothing and writes no credential; the record stays
-  * for the next sign-in to replace (CloudSignInPlugin.captureCallback).
+  * for the next sign-in to replace (AlphaCloudSignInClient.captureCallback).
   */
  @Test public void expiredPendingRecordIsNeverUsed() throws Exception {
   gate();
-  String cloudBefore = store().readCredentialSlot("cloud:production");
+  String cloudBefore = store().readCredentialSlot(Slots.CLOUD_PRODUCTION);
   CloudSignInFlow.Pending expired = new CloudSignInFlow.Pending(AlphaCloudSignInPlugin.REGISTRATION.defaultEnvironment(), CloudSignInFlow.newState(), CloudSignInFlow.newVerifier(), System.currentTimeMillis() - 1);
   store().writeCredentialSlot(AlphaCloudSignInPlugin.PENDING_SLOT, expired.serialize());
   try (BoundedActivityScenario<MainActivity> scenario = BoundedActivityScenario.launch(intent(callback(expired.state)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK))) {
-   holdFor(5000);
-   assertEquals("An expired return writes no credential", cloudBefore, store().readCredentialSlot("cloud:production"));
+   SystemClock.sleep(5000);
+   assertEquals("An expired return writes no credential", cloudBefore, store().readCredentialSlot(Slots.CLOUD_PRODUCTION));
    scenario.recreate();
-   holdFor(2000);
-   assertEquals("A recreated activity does not replay the return", cloudBefore, store().readCredentialSlot("cloud:production"));
+   SystemClock.sleep(2000);
+   assertEquals("A recreated activity does not replay the return", cloudBefore, store().readCredentialSlot(Slots.CLOUD_PRODUCTION));
   } finally { store().removeCredentialSlot(AlphaCloudSignInPlugin.PENDING_SLOT); }
- }
-
- /** The renderer cannot read or write the native pending and receipt slots. */
- @Test public void signInSlotsAreNativeOnly() {
-  for (String slot : new String[]{AlphaCloudSignInPlugin.PENDING_SLOT, AlphaCloudSignInPlugin.receiptSlot(AlphaCloudSignInPlugin.REGISTRATION.defaultEnvironment())}) {
-   try { RendererCredentialSlots.requireAllowed(slot); fail(slot); } catch (SecurityException expected) { /* Native only. */ }
-  }
  }
 }

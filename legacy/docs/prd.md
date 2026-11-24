@@ -37,11 +37,11 @@ Keep prototype styling and identity separate from real data/capability claims.
 | AP-09 | Gmail, Calendar and reviewed cross-app mail attachments | P1; incremental Gmail scopes, real delivery, optional Google Calendar connection and explicit local-first sync, availability semantics, durable deletion Undo and source/account isolation; Cloud Calendar remains separate from native Calendar access |
 | AP-10 | Browser, camera, full permitted Photos, Cloud Maps on Google Maps Platform (P-64), Notes and Files | P1; normal third-party cookies allowed, ephemeral private tabs, eligible autofill, native secure camera, agent Maps controls with Google attribution and caching terms (P-64), local speech always available (P-60), canonical Notes records (P-59) with three-day Trash; no app-data import/export |
 | AP-11 | Resident workflows, approvals and run history | P1; bounded permissions, durable receipts, missed recovery, owner-return notices and no powered-off execution |
-| AP-12 | Settings, subscriptions, permissions, runtime speech route and availability (P-60), system shade and reset | P0; truthful state, responsive controls, no backup/import/export, confirmed private-data reset |
+| AP-12 | Settings, subscriptions, permissions, runtime speech route and availability (P-60), system shade, on-demand carrier/SIM activation details and reset | P0; truthful state, responsive controls, no backup/import/export, confirmed private-data reset |
 | AP-13 | Wallet | Deferred: removed from MVP; views, native adapters and agent actions remain disabled on stock Android and the Alpha image |
 | AP-14 | Pixel 10a Android 17 image, signing, listening and unattended update/recovery (P-75) | Release gate; exact input/signer lock; release keys as GitHub Actions secrets for a CI signing job, certificates for Alpha Compute, first versionName 0.1.0 (P-58); Cuttlefish boot and physical hardware/OTA/user qualification separate; unlocked pilot units are not production-representative (P-70); Shaw release owner |
 | AP-15 | Accessibility and resilience across intentional responsive layouts | P0; large text, TalkBack, keyboard, rotation, process death, permission loss, offline and repeated HOME |
-| AP-16 | Agentic Phone, Contacts and Messages: one bottom bar addresses the person or Alpha; opening Alpha moves the app into a stage above the sheet instead of covering it ([requirements](agentic-comms.md)) | P0 AOSP; AC-01 to AC-32: one input per screen, nothing acted on is covered, End never covered, drafts shown in full and never sent without a tap, automatic suggestions deferred, call screens follow the theme |
+| AP-16 | Agentic Phone, Contacts and Messages: one bottom bar addresses the person or Alpha; opening Alpha moves the app into a stage above the sheet instead of covering it ([requirements](agentic-comms.md)) | P0 AOSP; AC-01 to AC-32: one input per screen, nothing acted on is covered, End never covered, drafts shown in full, sends require explicit confirmation, automatic suggestions deferred, call screens follow the theme |
 
 ## Explicit limits and decisions
 
@@ -53,12 +53,25 @@ a Cartesia key is installed; local speech is used otherwise and as the fallback 
 Cloud speech fails (owner decision 2026-11-10, replacing "never an automatic fallback").
 Clef end-of-turn runs in Eliza Cloud (P-60). Production Maps uses Google Maps Platform through Eliza Cloud (P-64).
 Local speech does not imply an offline language model. Hosted inference receives disclosed selected context.
+Location for Alpha is on by default. When Android allows access, ordinary chats
+include the phone's last known location. Hosted inference can receive this
+location. The owner can turn off Location for Alpha under Settings → Privacy.
+Browser page for Alpha is on by default (owner request 2026-11-22). While
+Browser is on screen, an ordinary chat includes the open page's address, title,
+visible text (at most 6,000 characters), selection and up to 20 links. Private
+tabs never do; sign-in, account and one-time-code pages send only their address
+and title. Hosted inference can receive the page. The owner can turn it off under
+Settings → Privacy.
 Full photo access is local permission scope, not bulk Cloud upload authorization.
 
 Passkeys, Telegram, Discord and Wallet are outside MVP. The Alpha Compute
 package starts with its own private data on devices with the former
 Alpha Phone package. No app-data migration, backup or import/export
-workflow is planned. Ordinary Files and attachment operations
+workflow between packages is planned. Updates to the current package must keep
+existing notes accessible, including notes saved on the phone before canonical
+Notes became the default. Keep the existing recovery path for unreadable notes.
+Retire an older source reader only after verifying that the affected records can
+be recovered through an upgrade or export. Ordinary Files and attachment operations
 remain. Secure camera, Clock, shade and emergency facilities remain native/system
 surfaces. Always-on listening is an AOSP MVP gate and never implicitly enabled.
 
@@ -70,6 +83,17 @@ routing amendment supersedes its earlier Settings switches; qualification of the
 packaged models and device audio remains separate. The approval itself changes no
 runtime or qualification record. Track implementation gaps and execution results
 against the current source.
+The app is English only today: the renderer declares `lang="en"`, Android has no
+translated resources, right-to-left layout is off (`supportsRtl="false"`) and most
+native notice copy is still in Java. Which languages launch is not yet decided.
 APK builds, native emulator/HOME checks, full AOSP boot, real services, physical
 hardware and user acceptance remain distinct. No existing failure is retired by
 changing the prose.
+
+Carrier setup must read actual device IMEIs independently of SIM activation when
+Android permits access, show per-field denial/unavailable states and provide
+Android Settings recovery. Identifier reads require an explicit foreground,
+unlocked action; values are cleared on leaving/backgrounding and never become
+routine snapshots, diagnostics, saved shell state or agent context. EID is an
+optional separate read. These surfaces do not establish hardware/carrier or
+activation acceptance.

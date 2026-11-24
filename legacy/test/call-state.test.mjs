@@ -78,7 +78,7 @@ test('every image side-effect port is behind the guard, read right before it', a
   let allow = false;
   const guarded = C.guardTelephonyPorts(ports, async () => allow);
   assert.deepEqual([await guarded.placeCall('+1'), await guarded.sendSms('+1', 'x', 'op', new AbortController().signal), await guarded.saveContact({}), await guarded.removeContact('1', 'v')],
-    [{status: 'busy'}, 'cancelled', {status: 'failed'}, {status: 'failed'}]);
+    [{status: 'unavailable'}, 'unavailable', {status: 'failed'}, {status: 'failed'}], 'a refusal is the phone\'s: not another call in progress, not the owner\'s dismissal');
   assert.deepEqual(done, []);
   allow = true;
   await guarded.placeCall('+1'); await guarded.sendSms('+1', 'x', 'op', new AbortController().signal); await guarded.saveContact({}); await guarded.removeContact('1', 'v');

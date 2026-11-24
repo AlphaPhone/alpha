@@ -1,0 +1,3 @@
+# android/app/src/androidTest/assets/photo-filter-goldens.json
+- Data (23 KB, one-line JSON): browser reference pixel samples per photo filter, plus a `sourceSha256` for `photo-filter-source.png`. Its only reader is `PhotoFilterInstrumentedTest.java:28-32` (campaign `PhotoFilter`, `scripts/android-instrumentation.ts:274`). | Verdict: KEEP
+- Note (T9): the generator it names, `scripts/test-photo-filter-png-reference.ts`, writes to `test-results/photo-filter-png-reference` and no script, workflow or test invokes it (grep shows 0 references), so this asset is a copy someone refreshed by hand. Document the refresh command in the generator header, or have the generator write this path.

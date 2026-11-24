@@ -7,6 +7,7 @@ import {encodeInboxUnsaved,readInboxUnsaved,inboxUnsavedLimit,type InboxUnsaved}
 import {editCoalescer} from '../runtime/inbox-edit-coalescer';
 import {openDomainRecovery} from '../browser/domain-recovery';
 import {browserDevProfile} from '../browser/dev-profile';
+import {sha256Hex} from '../lib/hash';
 /** Status copy for retained email edits; the shared defaults are written for chat messages. */
 const retainedMessages={
  unsettled:'May have sent',
@@ -32,8 +33,7 @@ export function inboxUnsaved(owner:string,publish:()=>void,restore:(value:InboxU
  let parsed:{raw:string;value:InboxUnsaved|null}|null=null;
  const binding=JSON.stringify(['inbox-unsaved',browserDevProfile?'development':'app',owner]);
  const controller=new AssistantDraftController(async()=>{
-  const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(binding))),n=>n.toString(16).padStart(2,'0')).join('');
-  const slot='inbox-drafts:v1:unsaved:'+hash,native=Capacitor.getPlatform()==='android';
+  const slot='inbox-drafts:v1:unsaved:'+await sha256Hex(binding),native=Capacitor.getPlatform()==='android';
   const domain=native?null:new (await import('../browser/json-domain-document')).BrowserJsonDomainDocument('alpha.browser.'+slot);
   const check=(row:any):AssistantDraft|null=>{if(row===null)return null;if(!row||Object.keys(row).sort().join(',')!=='binding,revision,text,version'||row.version!==1||row.binding!==binding||typeof row.revision!=='string'||!row.revision||typeof row.text!=='string'||new TextEncoder().encode(row.text).length>inboxUnsavedLimit)throw Error('Retained email edits need recovery.');if(row.text)readInboxUnsaved(row.text,owner);return row;};
   const read=readStored=async()=>check(native?await secureConnectionStore.read(slot):await domain!.readJson());
@@ -73,7 +73,7 @@ export function inboxUnsaved(owner:string,publish:()=>void,restore:(value:InboxU
   replace(){controller.keepCurrent();},
   retry(){return controller.retry();},
   async clear(){queue.flush();const expected=text;if(expected)await controller.consume(expected,()=>alive&&!queue.pending);},
-  recover(current:unknown){const recovery=controller.recovery();if(!recovery)return;recoveryAbort?.abort();recoveryAbort=new AbortController();openDomainRecovery({capture:async signal=>{const captured=await recovery.capture(signal);return {...captured,raw:JSON.stringify({saved:captured.raw,current})};},reset:recovery.reset},'email edits','Email edit recovery','Resets recovery copy only.',recoveryAbort.signal,undefined,Capacitor.getPlatform()==='android'?'device':'browser');},
+  recover(current:unknown){const recovery=controller.recovery();if(!recovery)return;recoveryAbort?.abort();recoveryAbort=new AbortController();openDomainRecovery({capture:async signal=>{const captured=await recovery.capture(signal);return {...captured,raw:JSON.stringify({saved:captured.raw,current})};},reset:recovery.reset},'email edits','Email edit recovery','Resets recovery copy only.',recoveryAbort.signal,Capacitor.getPlatform()==='android'?'device':'browser');},
   retire(){
    if(!alive)return;
    // The waiting edit is written before the account changes, without publishing to the view that

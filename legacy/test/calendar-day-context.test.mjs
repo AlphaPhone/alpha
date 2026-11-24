@@ -18,7 +18,7 @@ test('only the ordinary ready owner Calendar produces a visible day',()=>{
  assert.deepEqual(calendarDayObservation({...surface(),chat:'full'},zone,now),day);
  for(const patch of [{live:false},{view:'notes'},{screen:'lock'},{screen:'off'},{hidden:true},{pageSuspended:true},{secure:true},{shade:true},{connectionOpen:true},{recovery:true},{clockDraft:true},{ownerCurrent:false},{ownerKey:'previous-owner'},{status:'loading'},{status:'partial'},{status:'legacy-recovery'},{mutating:true}])
   assert.equal(calendarDayObservation({...surface(),...patch},zone,now),undefined,JSON.stringify(patch));
- for(const patch of [{month:0},{month:1},{form:{}},{open:'event'},{day:1.5},{day:'1'},{calendarAuthority:'legacy'},{calendarAuthority:'android-native'},{calendarAuthority:'browser-local'}])
+ for(const patch of [{month:0},{month:1},{form:{}},{open:'event'},{day:1.5},{day:'1'},{calendarAuthority:'android-native'},{calendarAuthority:'browser-local'}])
   assert.equal(calendarDayObservation({...surface(),calendar:{...surface().calendar,...patch}},zone,now),undefined,JSON.stringify(patch));
  assert.equal(calendarDayObservation(surface(),'Not/AZone',now),undefined);
 });
@@ -130,8 +130,10 @@ test('committed-view and navigation metadata never serialize the day hint',async
    if(path.endsWith('/interact-claim'))return {claimId:'claim'};
    return {accepted:true};
   },()=>true,context);
-  assert.deepEqual(Object.keys(navigation.metadata(context())).sort(),['uiView','viewClientId','viewDelivery']);
-  assert.equal(JSON.stringify(navigation.metadata(context())).includes('calendarDay'),false);
+  const metadata=navigation.metadata(context());
+  assert.deepEqual(Object.keys(metadata).sort(),['notesEditorNavigation','uiView','viewClientId','viewDelivery']);
+  assert.equal(metadata.notesEditorNavigation,1);
+  assert.equal(JSON.stringify(metadata).includes('calendarDay'),false);
   assert.equal(await navigation.observeCommittedView(),true);
   assert.equal(JSON.stringify(wires).includes('calendarDay'),false);
   navigation.dispose();
@@ -161,7 +163,7 @@ test('a Calendar re-read during a pending turn keeps the turn and its proposal',
  const event={id:'event',externalId:'event',agentId:'agent',provider:'google',side:'owner',grantId:'grant',connectorAccountId:'account',calendarId:'primary',title:'Dentist',startAt:'2999-01-01T15:00:00Z',endAt:'2999-01-01T16:00:00Z',isAllDay:false,metadata:{etag:'v1'}};
  let reads=0;const api={getLifeOpsCalendarFeed:async()=>{reads++;return {state:'complete',events:[{...event}]};},getLifeOpsCalendars:async()=>({calendars:[source]}),getLifeOpsNextCalendarEventContext:async()=>({event:null,calendarFeedState:'complete',readScope:{timeMin:'2026-01-01',timeMax:'2999-01-02'}})};
  const port={identity:{origin:'https://agent.example',ownerId:'owner',agentId:'agent'},sessionId:'session',scope:'owner',current:()=>true};
- const calendar=new AgentCalendar(()=>port,{capture:async()=>({fingerprint:'same',present:false,readable:true,pending:false,records:[]}),retainedReadOnly:async()=>true},()=>api);
+ const calendar=new AgentCalendar(()=>port,()=>api);
  await calendar.refresh({});
  const now=Date.parse('2026-10-28T12:00:00.000Z'),key=calendarEventKey(event),alpha=new AlphaClient();
  // The same inputs the shell's view context reads: the visible day and the selected canonical event.

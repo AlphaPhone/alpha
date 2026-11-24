@@ -24,7 +24,11 @@
 import { NOTES_LIST_FILTER_CAPABILITY } from "@elizaos/contracts";
 import {
   browserDestinationMatches,
+  browserSearchQueryMatches,
   directBrowserDestination,
+  directBrowserSearchQuery,
+  groundBrowserDestination,
+  groundBrowserSearchQuery,
 } from "@elizaos/contracts/browser-request-grounding";
 import { createDeviceActionExecution } from "@elizaos/contracts/device-action-execution";
 import {
@@ -42,6 +46,7 @@ import {
   isPhoneDial,
   type PhoneDialResult,
   phoneDialCapabilityAvailable,
+  phoneDialNumber,
   validatePhoneDialResult,
 } from "@elizaos/contracts/phone-dial";
 import {
@@ -60,11 +65,20 @@ import {
   validateCalendarResult,
 } from "@elizaos/plugin-assistant/device-calendar-contract";
 import {
-  CAMERA_CAPTURE_CAPABILITY,
   type CameraCaptureResult,
+  cameraCaptureCapabilityAvailable,
   isCameraCapture,
   validateCameraCaptureResult,
 } from "@elizaos/plugin-assistant/device-actions/camera-contract";
+import { authoredCameraCapture } from "@elizaos/plugin-assistant/device-actions/camera-request";
+import {
+  BROWSER_CONTROL_DIRECT_TYPES,
+  BROWSER_OPEN_NEW_TAB_CAPABILITY,
+  type BrowserTabLine,
+  browserControlFormAvailable,
+  describeBrowserControl,
+  isBrowserControl,
+} from "@elizaos/plugin-assistant/device-actions/browser-contract";
 import type {
   ClockHandoffResult,
 } from "@elizaos/plugin-assistant/device-actions/clock-contract";
@@ -76,10 +90,12 @@ import {
 import {
   FILES_CAPABILITY,
   FILES_DIRECT_TYPES,
+  FILES_SHOWN_TARGET_CAPABILITY,
   type FilesAgentOperation,
   type FilesIdentity,
   filesContextAllowed,
   filesNeedsIdentity,
+  filesShownTarget,
   isFilesOperation,
   validateFilesOperation,
 } from "@elizaos/plugin-assistant/device-actions/files-browser-contract";
@@ -107,6 +123,7 @@ import {
   NOTES_ORGANIZE_CAPABILITY,
   NOTES_ORGANIZE_DIRECT_TYPES,
   notesOrganizeContextAllowed,
+  notesRecordCapabilityAvailable,
 } from "@elizaos/plugin-assistant/device-actions/notes-organize-contract";
 import {
   type NotesQueryResult,
@@ -122,8 +139,8 @@ import {
   isPhotosViewOperation,
   PHOTOS_VIEW_DIRECT_TYPES,
   type PhotosViewResult,
-  photosViewCapabilityAvailable,
   photosViewContextAllowed,
+  photosViewFormSupported,
   validatePhotosViewResult,
 } from "@elizaos/plugin-assistant/device-actions/photos-view-contract";
 import {
@@ -138,13 +155,17 @@ import {
   validateReminderCreateResult,
 } from "@elizaos/plugin-assistant/device-actions/reminder-create-contract";
 import {
+  directSmsRequest,
   isSmsCompose,
   isTelephonyAction,
   isTelephonyRead,
   selectedTelephonyView,
+  type SmsComposeOperation,
   type TelephonyActionOperation,
   type TelephonyActionResult,
+  smsComposeTarget,
   telephonyActionCapabilityAvailable,
+  telephonyActionFormAvailable,
   validateTelephonyActionResult,
 } from "@elizaos/plugin-assistant/device-actions/telephony-actions-contract";
 import type {
@@ -179,12 +200,17 @@ import {
   validateReviewableDeviceOperation,
 } from "@elizaos/plugin-assistant/device-actions/client-coordinator";
 import { describeClockHandoff } from "../clock/clock-handoff-presentation.ts";
-import { describeFilesOperation } from "../files/files-operation-presentation.ts";
+import {
+  describeFilesOperation,
+} from "../files/files-operation-presentation.ts";
 import { describeNotesOrganizeOperation } from "../notes/notes-organize-presentation.ts";
 import { describeLibraryOperation } from "../photos/library-presentation.ts";
 import { describePhotosViewOperation } from "../photos/photos-view-presentation.ts";
 import { formatDeviceRecordDateTime } from "./device-record-presentation.ts";
 import { sharedValidatorRefusal } from "./device-action-messages.ts";
+import { UNNAMED_CONTACT, type ContactMatch } from "../telephony/telephony-messages.ts";
+import { smsReviewCopy, smsSendFacts, type SmsReviewPreview } from "../telephony/sms-card-facts.ts";
+import { callOwnerRecipient, directOwnerAction, samePhoneRecipient } from "./owner-request.ts";
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value))
@@ -210,7 +236,124 @@ function id(value: unknown): string {
 
 // ── Screen binding ──────────────────────────────────────────────────────────
 
+/** The current request with the links of the Browser page it carried, if any. */
+type BrowserPageRequest = CurrentDeviceActionRequest & {
+  readonly pageLinks?: readonly string[];
+};
+
 export const CAMERA_CONTEXT_NOTICE = "Open Camera to take the requested photo.";
+/** Closing every tab without a card listing them is never offered. */
+export const TABS_UNLISTED_NOTICE =
+  "Browser couldn't list its open tabs for this request, or they changed after they were listed. Nothing was closed. Ask again.";
+export const NO_TABS_TO_CLOSE_NOTICE =
+  "No tabs are open to close. Nothing was closed.";
+/** What a close-every-tab card lists, read on this phone: the tabs that close, and how many
+ * private tabs stay open (a request made outside a private tab never closes one). */
+export type BrowserTabsClosing = {
+  readonly tabs: readonly BrowserTabLine[];
+  readonly privateKept: number;
+};
+/** The private tabs closing every tab leaves open, counted and never named. */
+function privateTabsKeptText(count: number): string {
+  return count === 1
+    ? "1 private tab stays open. Ask from a private tab to close it."
+    : `${count} private tabs stay open. Ask from a private tab to close them.`;
+}
+/** The owner's notice for a close-every-tab request with no card: Browser could not list its
+ * tabs (null), or none would close. Private tabs it may not close are counted, so the owner is
+ * never told that no tab is open while one is. */
+export function closeAllTabsNotice(closing: BrowserTabsClosing | null): string {
+  if (!closing) return `Close all tabs: ${TABS_UNLISTED_NOTICE}`;
+  if (!closing.privateKept) return `Close all tabs: ${NO_TABS_TO_CLOSE_NOTICE}`;
+  return `Close all tabs: No other tabs are open to close. ${privateTabsKeptText(closing.privateKept)} Nothing was closed.`;
+}
+/**
+ * A review item with the request binding the agent recorded. A camera capture that only needs
+ * Camera open is marked, and names the message that asked for it when the agent bound one
+ * (direct mode). A reviewable card names its bound message the same way.
+ */
+type AlphaProposalCard = DeviceActionProposalCard & {
+  smsReview?: "draft" | "addressed-draft" | "send" | "recipient" | "reply-draft";
+  smsPreview?: SmsReviewPreview;
+};
+export type ReviewItem = Omit<PendingReviewItem, "proposal"> & {
+  proposal: AlphaProposalCard | null;
+  cameraCapture?: true;
+  cameraRequestMessageId?: string;
+  requestMessageId?: string;
+};
+const DEVICE_APPROVAL_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+/**
+ * The device proposals one agent reply created or reused, read from its action results'
+ * `device.approval` effect receipts. It names which pending items belong to that reply; it is
+ * never approval or execution authority.
+ */
+export function replyDeviceProposalIds(
+  actionResults: readonly unknown[],
+): Set<string> {
+  const ids = new Set<string>();
+  for (const result of actionResults) {
+    const receipts =
+      result && typeof result === "object" && !Array.isArray(result)
+        ? (result as { effectReceipts?: unknown }).effectReceipts
+        : undefined;
+    if (!Array.isArray(receipts)) continue;
+    for (const receipt of receipts) {
+      if (!receipt || typeof receipt !== "object") continue;
+      const { operation, resource } = receipt as {
+        operation?: unknown;
+        resource?: { kind?: unknown; id?: unknown } | null;
+      };
+      if (
+        typeof operation === "string" &&
+        operation.startsWith("device.") &&
+        resource &&
+        typeof resource === "object" &&
+        resource.kind === "device.approval" &&
+        typeof resource.id === "string" &&
+        DEVICE_APPROVAL_ID.test(resource.id)
+      )
+        ids.add(resource.id);
+    }
+  }
+  return ids;
+}
+/**
+ * Whether a reply must open Camera on this phone for the photo its own message asked for.
+ * A photo is only ever taken on the visible Camera viewfinder, so a photo waiting only on
+ * Camera is shown there first: taken at once in direct mode, or waiting as its review card
+ * on an ask-first phone. Camera is not opened when the agent already navigates
+ * (`viewHandoff`), when the photo is not this reply's, or when another action of this reply
+ * is reviewable on the current screen and leaving it would drop that review.
+ *
+ * `replyProposals` are the proposal ids this reply created or reused
+ * (`replyDeviceProposalIds`). With them, a photo the agent proposed in this reply qualifies
+ * even when it carries no message binding (review mode), and pending reviews from other
+ * turns never keep the current screen. Without them, only a photo bound to `messageId`
+ * qualifies and every reviewable item keeps the current screen.
+ */
+export function requestedCameraNeedsCameraView(
+  items: readonly ReviewItem[],
+  messageId: string | undefined,
+  viewHandoff: boolean,
+  replyProposals?: ReadonlySet<string>,
+): boolean {
+  if (!messageId || viewHandoff) return false;
+  const ofReply = (item: ReviewItem) =>
+    item.requestMessageId === messageId ||
+    (!!item.proposalId && !!replyProposals?.has(item.proposalId));
+  const photo = items.some(
+    (item) =>
+      item.cameraCapture &&
+      (item.cameraRequestMessageId
+        ? item.cameraRequestMessageId === messageId
+        : !!item.proposalId && !!replyProposals?.has(item.proposalId)),
+  );
+  return (
+    photo &&
+    !items.some((item) => item.proposal && (!replyProposals || ofReply(item)))
+  );
+}
 /** A pending proposal that does not fit the current screen. Its message is shown to the owner. */
 export class ContextNotice extends Error {
   override readonly name = "ContextNotice";
@@ -446,6 +589,8 @@ function assertProposalContext<C extends DeviceContextEnvelope>(
         ? "Unlock the phone to review this action."
         : "Open Photos to review this action.",
     );
+  if (isBrowserControl(operation) && context.sensitive)
+    throw new ContextNotice("Unlock the phone to review this action.");
   if (isReminderOperation(operation)) assertReminderContext(operation, context);
   if (isNativeNotesQuery(operation)) assertNotesQueryContext(context);
   if (isNotesOperation(operation)) assertNotesContext(operation, context);
@@ -547,8 +692,26 @@ function describeForegroundReview(
 
 // ── Coordinator ─────────────────────────────────────────────────────────────
 
+type PresentedDeviceReceipt = DeviceOperationReceipt;
+
+type RequestedAction = CurrentDeviceActionRequest & {
+  projectView?: ((view: string, signal: AbortSignal) => Promise<boolean>) | "canonical";
+};
+
 type ExecutionResult = DeviceExecutionResult & {
   foregroundResult?: ForegroundReviewResult;
+  cancelledBeforeCapture?: true;
+  /**
+   * The view change that shows a successful telephony outcome (the drafted
+   * conversation, the filtered Contacts list). Like `presentBrowser`, it ends
+   * the review it ran under, so it runs after the receipt attempt.
+   */
+  present?: () => void;
+  /**
+   * Told when `presentBrowser` cannot run (the request it ran under is no
+   * longer current), so a change the receipt reported can be corrected.
+   */
+  presentBrowserSkipped?: () => void;
 };
 type CommittedReceiptResult = { result: unknown } | Record<string, never>;
 
@@ -564,8 +727,9 @@ export class DeviceActionCoordinator<
   private reviewSequence = 0;
   private readonly filesReviews = new Map<
     string,
-    { digest: string; identities: FilesIdentity[] }
+    { digest: string; paths?: string[]; identities?: FilesIdentity[] }
   >();
+  private readonly smsReviews = new Map<string, { digest: string; recipient: ContactMatch | null }>();
   private proposals = new Map<
     string,
     {
@@ -573,7 +737,9 @@ export class DeviceActionCoordinator<
       context: C;
       workflowReview?: R;
       requestKey?: string;
-      currentRequest?: CurrentDeviceActionRequest;
+      currentRequest?: RequestedAction;
+      smsRecipient?: ContactMatch;
+      directContactDelete?: true;
     }
   >();
   private readReplies = new Map<
@@ -590,16 +756,55 @@ export class DeviceActionCoordinator<
   private executing: string | undefined;
   private readonly ports: DeviceActionCoordinatorPorts<C, R>;
   private browserAttempts = new Map<string, CurrentDeviceActionRequest>();
-  private browserPolicy = new Map<string, { key: string; allowed: boolean }>();
+  /** Request keys whose one direct photo has been started. */
+  private cameraAttempts = new Set<string>();
+  private browserPolicy = new Map<
+    string,
+    { key: string; allowed: boolean; grounded: boolean }
+  >();
   private selectedTelephonyRequests = new Map<
     string,
     { context: string; expiresAt: number }
   >();
+  /**
+   * Pending call and text proposals whose number is not the one the owner
+   * wrote, and whether the agent has recorded the refusal. Until it has, the
+   * refusal lives only here and would not survive a reload.
+   */
+  private contradictedNumbers = new Map<string, boolean>();
+  /**
+   * Pending contact changes and deletions whose name matched no contact when
+   * they were reviewed, and whether the agent has recorded the refusal. The
+   * owner was told nothing was changed, so a contact saved later under that
+   * name never turns the old request into a card.
+   */
+  private missingContacts = new Map<string, boolean>();
   constructor(
     ports: DeviceActionCoordinatorPorts<C, R>,
     private readonly options: {
       currentRequestBrowserPolicy?: boolean;
       currentRequestTelephonyPolicy?: boolean;
+      /** Whether a tab switch's words match several open tabs on this phone. */
+      browserTabNeedsChoice?: (target: string) => boolean;
+      /**
+       * The open tabs the close-every-tab card for this proposal lists, read
+       * on this phone. Once listed for a proposal the list does not change:
+       * the executor closes exactly those tabs for it or nothing. null when
+       * Browser cannot say, or its tabs changed after the list was shown. The
+       * agent never receives them.
+       */
+      browserTabsClosing?: (proposalId: string) => BrowserTabsClosing | null;
+      /**
+       * The names of the phone contacts a contact change or deletion would be
+       * offered for, looked up exactly as its executor will; null or a throw
+       * when Contacts cannot be read. Without it no such card is offered.
+       */
+      contactMatches?: (
+        query: string,
+        signal: AbortSignal,
+      ) => Promise<ContactMatchNames | null>;
+      smsRecipient?: (query: string, signal: AbortSignal) => Promise<ContactMatch | null>;
+      chooseSmsRecipient?: (query: string, body: string, signal: AbortSignal) => Promise<ContactMatch | null | "not-found">;
     } = {},
   ) {
     this.ports = ports;
@@ -623,12 +828,25 @@ export class DeviceActionCoordinator<
     proposal: DeviceProposal,
     proof?: CurrentDeviceActionRequest,
   ): boolean {
+    return this.browserRequest(proposal, proof).allowed;
+  }
+  /** How the owner's current message asks for a proposed destination or web
+   * search: `allowed` when it is a direct request that may run without review,
+   * `grounded` when the owner at least typed that address without refusing it,
+   * or typed those search words. */
+  private browserRequest(
+    proposal: DeviceProposal,
+    proof?: CurrentDeviceActionRequest,
+  ): { allowed: boolean; grounded: boolean } {
+    const operation = proposal.operation;
     if (
       !this.options.currentRequestBrowserPolicy ||
-      proposal.operation.type !== "browser_navigate"
+      (operation.type !== "browser_navigate" &&
+        operation.type !== "browser_search")
     )
-      return true;
-    if (!proof || proof.messageId !== proposal.requestMessageId) return false;
+      return { allowed: true, grounded: true };
+    if (!proof || proof.messageId !== proposal.requestMessageId)
+      return { allowed: false, grounded: false };
     proof.current();
     const key = JSON.stringify([
       this.requestKey(proof.messageId),
@@ -637,15 +855,42 @@ export class DeviceActionCoordinator<
       proof.text,
     ]);
     const cached = this.browserPolicy.get(proposal.id);
-    if (cached?.key === key) return cached.allowed;
-    // Automatic client effects need direct intent, not merely a URL mentioned in prose.
-    const allowed = browserDestinationMatches(
-      proposal.operation,
-      directBrowserDestination(proof.text),
-    );
+    if (cached?.key === key) return cached;
+    // Automatic client effects need direct intent, not merely a URL or search
+    // words mentioned in prose. The server reads the same grammar with the same
+    // assistant name, so both agree on what a direct request is.
+    const name = this.profile.assistantName;
+    const allowed =
+      operation.type === "browser_search"
+        ? // The same match the server and the shared coordinator use: quotes
+          // the model kept around the owner's words are not part of them.
+          browserSearchQueryMatches(
+            operation.query,
+            directBrowserSearchQuery(proof.text, name),
+          )
+        : browserDestinationMatches(
+            operation,
+            directBrowserDestination(proof.text, name),
+          );
+    const policy = {
+      key,
+      allowed,
+      grounded:
+        allowed ||
+        (operation.type === "browser_search"
+          ? groundBrowserSearchQuery(proof.text, operation.query) !== undefined
+          : browserDestinationMatches(
+              operation,
+              groundBrowserDestination(proof.text, operation.url, name),
+            ) ||
+            // A link of the Browser page this message carried, exactly as the
+            // page gave it: never direct, so it keeps its review card.
+            (proof as BrowserPageRequest).pageLinks?.includes(operation.url) ===
+              true),
+    };
     if (this.browserPolicy.has(proposal.id) || this.browserPolicy.size < 128)
-      this.browserPolicy.set(proposal.id, { key, allowed });
-    return allowed;
+      this.browserPolicy.set(proposal.id, policy);
+    return policy;
   }
   private consumeBrowserRequest(proof: CurrentDeviceActionRequest): boolean {
     for (const [key, previous] of this.browserAttempts) {
@@ -660,6 +905,28 @@ export class DeviceActionCoordinator<
       return false;
     proof.current();
     this.browserAttempts.set(key, proof);
+    return true;
+  }
+  /** A photo runs without its card only when this very message, as the owner
+   * typed it, asks for one now; a capture the model proposed for any other
+   * words ("summarize this page", "don't take a photo") keeps its card. */
+  private cameraAllowed(
+    messageId: string,
+    proof?: CurrentDeviceActionRequest,
+  ): boolean {
+    if (!proof || proof.messageId !== messageId) return false;
+    proof.current();
+    return requestedCameraCapture(proof.text, this.profile.assistantName);
+  }
+  /** One requested photo is one shot, however many captures were proposed. */
+  private consumeCameraRequest(messageId: string): boolean {
+    const key = this.requestKey(messageId);
+    if (this.cameraAttempts.has(key)) return false;
+    if (this.cameraAttempts.size >= 128) {
+      const oldest = this.cameraAttempts.values().next().value;
+      if (oldest !== undefined) this.cameraAttempts.delete(oldest);
+    }
+    this.cameraAttempts.add(key);
     return true;
   }
   get supportsCalendarAgenda(): boolean {
@@ -747,7 +1014,10 @@ export class DeviceActionCoordinator<
         payload.operation,
         this.profile.operations,
       );
-    if (isCameraCapture(op) && !this.capability(CAMERA_CAPTURE_CAPABILITY))
+    if (
+      isCameraCapture(op) &&
+      !cameraCaptureCapabilityAvailable(op, this.credential.capabilities)
+    )
       throw Error("Camera capture was not negotiated with this agent");
     if (
       isPhoneDial(op) &&
@@ -756,7 +1026,11 @@ export class DeviceActionCoordinator<
       throw Error("Dialing was not negotiated with this phone");
     if (
       isTelephonyAction(op) &&
-      !telephonyActionCapabilityAvailable(op.type, this.credential.capabilities)
+      (!telephonyActionCapabilityAvailable(
+        op.type,
+        this.credential.capabilities,
+      ) ||
+        !telephonyActionFormAvailable(op, this.credential.capabilities))
     )
       throw Error("This telephony action was not negotiated with this phone");
     if (isSmsSend(op) && !this.capability(SMS_SEND_CAPABILITY))
@@ -776,20 +1050,47 @@ export class DeviceActionCoordinator<
       throw Error("Device library access was not negotiated with this agent");
     if (isFilesOperation(op) && !this.capability(FILES_CAPABILITY))
       throw Error("Files access was not negotiated with this agent");
+    // The pinned Files contract also accepts files named by their shown
+    // positions; such an operation needs its own capability, as the shared
+    // coordinator checks.
+    if (
+      isFilesOperation(op) &&
+      filesShownTarget(op) &&
+      !this.capability(FILES_SHOWN_TARGET_CAPABILITY)
+    )
+      throw Error("Files shown items were not negotiated with this agent");
     if (
       isNotesOrganizeOperation(op) &&
-      !this.capability(
-        op.type === "notes_list_filter"
-          ? NOTES_LIST_FILTER_CAPABILITY
-          : NOTES_ORGANIZE_CAPABILITY,
-      )
+      !(op.type === "notes_record"
+        ? notesRecordCapabilityAvailable(this.credential.capabilities)
+        : this.capability(
+            op.type === "notes_list_filter"
+              ? NOTES_LIST_FILTER_CAPABILITY
+              : NOTES_ORGANIZE_CAPABILITY,
+          ))
     )
       throw Error("Notes folders were not negotiated with this agent");
+    // An album or share of the open Photos item needs its own capability.
     if (
       isPhotosViewOperation(op) &&
-      !photosViewCapabilityAvailable(this.credential.capabilities)
+      !photosViewFormSupported(op, this.credential.capabilities)
     )
       throw Error("Photos actions were not negotiated with this agent");
+    if (
+      isBrowserControl(op) &&
+      !browserControlFormAvailable(op, this.credential.capabilities)
+    )
+      throw Error("This Browser action was not negotiated with this agent");
+    // An address opened in a tab of its own only when this phone negotiated
+    // it, as the shared coordinator checks.
+    if (
+      op.type === "browser_navigate" &&
+      (op as { newTab?: unknown }).newTab === true &&
+      !this.capability(BROWSER_OPEN_NEW_TAB_CAPABILITY)
+    )
+      throw Error(
+        "Opening an address in a new tab was not negotiated with this agent",
+      );
     if (
       isForegroundReviewOperation(op) &&
       (!foregroundReviewOperationAvailable(op, this.credential.capabilities) ||
@@ -908,7 +1209,26 @@ export class DeviceActionCoordinator<
   private notice(operation: ReviewableDeviceOperation, context: C) {
     return proposalContextNotice(operation, context, this.profile);
   }
-  private card(proposal: DeviceProposal, context: C): DeviceActionProposalCard {
+  /** The tabs a close-every-tab proposal's card lists; undefined for any other
+   * proposal, null when the phone cannot list them for it. */
+  private tabsClosing(
+    proposal: DeviceProposal,
+    list = true,
+  ): BrowserTabsClosing | null | undefined {
+    const op = proposal.operation;
+    if (!isBrowserControl(op) || op.type !== "browser_tab_close" || !op.all)
+      return undefined;
+    if (!list) return null;
+    return this.options.browserTabsClosing?.(proposal.id) ?? null;
+  }
+  /** Close-all proposals whose card listed their tabs in the latest review. */
+  private listedTabCards = new Set<string>();
+  private card(
+    proposal: DeviceProposal,
+    context: C,
+    contacts?: ContactMatchNames,
+    smsRecipient?: ContactMatch,
+  ): AlphaProposalCard {
     const op = proposal.operation;
     const readReply = proposal.readReplyOrigin
       ? {
@@ -951,21 +1271,28 @@ export class DeviceActionCoordinator<
         description: `${op.target.kind === "number" ? `Number: ${op.target.number}` : `Contact: ${op.target.query}`}\n\nOpens your phone app with this number. You place the call there.`,
       };
     if (isTelephonyAction(op))
-      return { ...base, ...describeTelephonyAction(op), ...readReply };
-    if (isSmsSend(op)) {
-      const sim = this.profile.simLabel?.(op.subscriptionId);
+      return {
+        ...base,
+        ...describeTelephonyAction(op, contacts, smsRecipient),
+        ...readReply,
+        ...(isSmsCompose(op) ? {
+          smsReview: "draft" in op ?
+            smsRecipient || smsComposeTarget(op).kind === "number" ? "addressed-draft" as const : "draft" as const :
+            smsRecipient || smsComposeTarget(op).kind === "number" ? "send" as const : "recipient" as const,
+        } : op.type === "sms_reply_selected" ? { smsReview: "reply-draft" as const } : {}),
+      };
+    if (isSmsSend(op))
       return {
         ...base,
         title: "Review SMS",
-        description: `To: ${op.recipients.join(", ")}${sim ? `\nFrom: ${sim}` : ""}\n\n${op.body}\n\nConfirm again in Android.`,
+        smsReview: "send",
+        ...smsReviewCopy(`To: ${op.recipients.join(", ")}`, op.body, smsSendFacts(op.recipients.length, op.body)),
       };
-    }
     if (isCameraCapture(op))
       return {
         ...base,
         title: "Take photo",
-        description:
-          "Use the current camera and save one photo in Photos. The photo stays on this device.",
+        description: `Use the ${op.lens ?? "current"} camera and save one photo in Photos. The photo stays on this device.`,
       };
     if (isLibraryOperation(op))
       return { ...base, ...describeLibraryOperation(op, this.profile.appName) };
@@ -974,6 +1301,19 @@ export class DeviceActionCoordinator<
     if (isFilesOperation(op)) return { ...base, ...describeFilesOperation(op) };
     if (isPhotosViewOperation(op))
       return { ...base, ...describePhotosViewOperation(op) };
+    if (isBrowserControl(op)) {
+      const closing = this.tabsClosing(proposal) ?? undefined;
+      const card = describeBrowserControl(op, closing?.tabs);
+      return {
+        ...base,
+        ...card,
+        ...(closing?.privateKept
+          ? {
+              description: `${card.description}\n\n${privateTabsKeptText(closing.privateKept)}`,
+            }
+          : {}),
+      };
+    }
     const notesDestination =
       (op.type === "notes_delete" || op.type === "notes_update") &&
       !context.sensitive &&
@@ -990,7 +1330,8 @@ export class DeviceActionCoordinator<
       isNotesOperation(op) ||
       isCalendarOperation(op) ||
       op.type === "create_note" ||
-      op.type === "create_reminder"
+      op.type === "create_reminder" ||
+      op.type === "open_view"
         ? this.profile.presentRecord(op, context.timeZone)
         : undefined;
     const agenda = op.type === "read_calendar_range" && !proposal.workflow;
@@ -1008,7 +1349,7 @@ export class DeviceActionCoordinator<
               : op.type === "open_view"
                 ? `Open ${op.view} on this phone`
                 : op.type === "browser_navigate"
-                  ? `Open browser destination ${op.url}`
+                  ? `Open browser destination ${op.url}${(op as { newTab?: unknown }).newTab === true ? " in a new tab" : ""}`
                   : "Workflow phone read"));
     return {
       ...base,
@@ -1030,7 +1371,7 @@ export class DeviceActionCoordinator<
     context: C,
     signal: AbortSignal,
     proof?: CurrentDeviceActionRequest,
-  ): Promise<{ items: PendingReviewItem[]; failures: Error[] }> {
+  ): Promise<{ items: ReviewItem[]; failures: Error[] }> {
     const sequence = ++this.reviewSequence;
     const assertCurrentReview = () => {
       signal.throwIfAborted();
@@ -1055,15 +1396,22 @@ export class DeviceActionCoordinator<
         throw Error("The current device action request changed");
     }
     this.proposals.clear();
+    this.listedTabCards.clear();
     for (const [id, binding] of this.selectedTelephonyRequests)
       if (binding.expiresAt <= Date.now())
         this.selectedTelephonyRequests.delete(id);
     const pendingIds = new Set(valid.map((proposal) => proposal.id));
     for (const id of this.filesReviews.keys())
       if (!pendingIds.has(id)) this.filesReviews.delete(id);
+    for (const id of this.smsReviews.keys())
+      if (!pendingIds.has(id)) this.smsReviews.delete(id);
     for (const id of this.browserPolicy.keys())
       if (!pendingIds.has(id)) this.browserPolicy.delete(id);
-    const items: PendingReviewItem[] = [];
+    for (const id of this.contradictedNumbers.keys())
+      if (!pendingIds.has(id)) this.contradictedNumbers.delete(id);
+    for (const id of this.missingContacts.keys())
+      if (!pendingIds.has(id)) this.missingContacts.delete(id);
+    const items: ReviewItem[] = [];
     for (const proposal of valid) {
       // An approval whose claim never arrived is shown again: deciding is
       // idempotent for it, so a second tap reaches the claim.
@@ -1080,18 +1428,20 @@ export class DeviceActionCoordinator<
         this.options.currentRequestBrowserPolicy &&
         proof &&
         proposal.requestMessageId === proof.messageId &&
-        !this.browserAllowed(proposal, proof)
+        // An address the owner typed without directly asking for it is not opened
+        // automatically, but it keeps its ordinary review card below.
+        !this.browserRequest(proposal, proof).grounded
       ) {
         items.push({
           proposalId: proposal.id,
           proposal: null,
           notice:
-            "Browser action blocked: a matching current user request is required.",
+            'I only open a site or search you ask for yourself, for example "open nytimes.com" or "search for weather in Paris".',
         });
         continue;
       }
-      const card = this.card(proposal, context),
-        notice =
+      let card = this.card(proposal, context);
+      const notice =
           (isNativeNotesQuery(proposal.operation) && !context.sensitive) ||
           card.reviewDestination === "notes" ||
           card.reviewDestination === "calendar"
@@ -1102,6 +1452,66 @@ export class DeviceActionCoordinator<
           proposalId: proposal.id,
           proposal: null,
           notice: `${card.title}: ${notice}`,
+          ...(notice === CAMERA_CONTEXT_NOTICE && !context.sensitive
+            ? {
+                cameraCapture: true as const,
+                ...(proposal.requestMessageId
+                  ? { cameraRequestMessageId: proposal.requestMessageId }
+                  : {}),
+              }
+            : {}),
+        });
+        continue;
+      }
+      // Closing every tab is offered only as a card listing what will close.
+      const closing = this.tabsClosing(proposal);
+      if (closing?.tabs.length) this.listedTabCards.add(proposal.id);
+      if (closing !== undefined && !closing?.tabs.length) {
+        items.push({
+          proposalId: proposal.id,
+          proposal: null,
+          notice: closeAllTabsNotice(closing),
+        });
+        continue;
+      }
+      // The owner wrote a number and the model proposed another one: that is
+      // the model's mistake, not a request, so there is no card to approve by
+      // habit. It stays refused on later reviews, which carry no request text.
+      if (
+        this.options.currentRequestTelephonyPolicy &&
+        proof &&
+        proposal.requestMessageId === proof.messageId &&
+        !this.contradictedNumbers.has(proposal.id) &&
+        numberContradictsRequest(proposal.operation, proof.text)
+      )
+        this.contradictedNumbers.set(proposal.id, false);
+      if (this.contradictedNumbers.has(proposal.id)) {
+        // The agent records the refusal, so the proposal cannot come back as a
+        // card after a reload, when this memory and the request text are gone.
+        // A refusal the agent could not take is asked again on the next review.
+        if (!this.contradictedNumbers.get(proposal.id)) {
+          try {
+            await this.mutation(
+              proposal,
+              "decision",
+              { decision: "reject" },
+              signal,
+            );
+            this.contradictedNumbers.set(proposal.id, true);
+          } catch (error) {
+            if (signal.aborted) throw error;
+          }
+          assertCurrentReview();
+        }
+        items.push({
+          proposalId: proposal.id,
+          proposal: null,
+          notice: `${card.title}: ${
+            proposal.operation.type === "contact_create" ||
+            proposal.operation.type === "contact_update"
+              ? CONTACT_NUMBER_MISMATCH_NOTICE
+              : NUMBER_MISMATCH_NOTICE
+          }`,
         });
         continue;
       }
@@ -1125,7 +1535,7 @@ export class DeviceActionCoordinator<
           items.push({
             proposalId: proposal.id,
             proposal: null,
-            notice: `${card.title}: Ask again from the open ${selectedView === "messages" ? "conversation" : "voicemail"}.`,
+            notice: `${card.title}: Ask again from the open ${selectedView === "messages" ? "conversation" : selectedView === "contacts" ? "contact" : "voicemail"}.`,
           });
           continue;
         }
@@ -1134,40 +1544,142 @@ export class DeviceActionCoordinator<
           expiresAt: Math.max(binding?.expiresAt ?? 0, proposal.expiresAt),
         });
       }
-      // A Files move or trash binds the identity of each file as the card shows
-      // it; whatever identity the agent sent is replaced.
-      let reviewed = proposal;
+      // A contact change or deletion is offered only for contacts the phone
+      // holds: the card names them, and a name nothing matches gets a notice
+      // instead of a card that could not apply. The executor looks the name up
+      // again after approval and shows the owner the exact contact.
+      const contactOp = proposal.operation;
       if (
-        isFilesOperation(proposal.operation) &&
-        filesNeedsIdentity(proposal.operation)
+        contactOp.type === "contact_update" ||
+        contactOp.type === "contact_delete"
       ) {
-        const op = proposal.operation;
+        let names: ContactMatchNames | null = null;
+        if (!this.missingContacts.has(proposal.id)) {
+          try {
+            names =
+              (await this.options.contactMatches?.(contactOp.query, signal)) ??
+              null;
+          } catch {
+            names = null;
+          }
+          assertCurrentReview();
+          // An address book that answered with no match is final for this
+          // request; one that could not be read is asked again next time.
+          if (names && !names.names.length)
+            this.missingContacts.set(proposal.id, false);
+        }
+        if (this.missingContacts.has(proposal.id)) {
+          // The agent records the refusal, so the request cannot come back as
+          // a card after a reload. One it could not take is retried next review.
+          if (!this.missingContacts.get(proposal.id)) {
+            try {
+              await this.mutation(
+                proposal,
+                "decision",
+                { decision: "reject" },
+                signal,
+              );
+              this.missingContacts.set(proposal.id, true);
+            } catch (error) {
+              if (signal.aborted) throw error;
+            }
+            assertCurrentReview();
+          }
+          names = { names: [], more: false };
+        }
+        if (!names?.names.length) {
+          items.push({
+            proposalId: proposal.id,
+            proposal: null,
+            notice: `${card.title}: ${
+              names
+                ? `No contact matching “${contactOp.query}” is on this phone. Nothing was changed.`
+                : "Contacts can't be read on this phone right now. Nothing was changed."
+            }`,
+          });
+          continue;
+        }
+        card = this.card(proposal, context, names);
+      }
+      // Shown positions resolve to the paths the card then shows. A Files move
+      // or trash binds the identity of each file as the card shows it; whatever
+      // identity the agent sent is replaced.
+      let reviewed = proposal;
+      const files = proposal.operation;
+      let smsRecipient: ContactMatch | undefined;
+      if (isSmsCompose(proposal.operation) && this.options.smsRecipient) {
+        const target = smsComposeTarget(proposal.operation);
+        if (target.kind === "contact") {
+          let observed = this.smsReviews.get(proposal.id);
+          if (!observed || observed.digest !== proposal.digest) {
+            const recipient = await this.options.smsRecipient(target.query, signal).catch(() => null);
+            assertCurrentReview();
+            observed = { digest: proposal.digest, recipient };
+            this.smsReviews.set(proposal.id, observed);
+          }
+          smsRecipient = observed.recipient ?? undefined;
+          if (smsRecipient) card = this.card(proposal, context, undefined, smsRecipient);
+        }
+      }
+      if (
+        isFilesOperation(files) &&
+        (filesShownTarget(files) || filesNeedsIdentity(files))
+      ) {
         let operation: FilesAgentOperation | undefined;
         try {
           const before = this.filesReviews.get(proposal.id);
-          const identities =
-            before?.identities ??
-            (await this.ports.filesIdentity?.(op.paths, signal));
-          assertCurrentReview();
+          // The operation on the resolved paths; a missing path or identity refuses the card.
+          const resolve = (paths?: string[]) => {
+            // One path for each position, or the card would name other files.
+            if (filesShownTarget(files) && paths?.length !== files.shown.length)
+              throw Error("Shown files were not resolved");
+            const target = validateFilesOperation(
+              filesShownTarget(files)
+                ? {
+                    ...Object.fromEntries(
+                      Object.entries(files).filter(([key]) => key !== "shown"),
+                    ),
+                    paths,
+                  }
+                : files,
+            );
+            if (filesShownTarget(target))
+              throw Error("Shown files were not resolved");
+            return target;
+          };
+          const bind = (paths?: string[], identities?: FilesIdentity[]) => {
+            const target = resolve(paths);
+            if (!filesNeedsIdentity(target)) return target;
+            if (!identities) throw Error("Files identities were not read");
+            return validateFilesOperation({ ...target, reviewed: identities });
+          };
+          let paths = before?.paths;
+          if (filesShownTarget(files) && !paths) {
+            paths = await this.ports.filesShownPaths?.(files.shown, signal);
+            assertCurrentReview();
+          }
+          let identities = before?.identities;
+          const unbound = resolve(paths);
+          if (filesNeedsIdentity(unbound) && !identities) {
+            identities = await this.ports.filesIdentity?.(
+              unbound.paths,
+              signal,
+            );
+            assertCurrentReview();
+          }
           // Once a card has been shown, a refresh must not bind its approval to replacement files.
           const recorded = this.filesReviews.get(proposal.id);
-          if (
-            identities &&
-            (!recorded || recorded.digest === proposal.digest)
-          ) {
-            operation = validateFilesOperation({
-              ...op,
-              reviewed: recorded?.identities ?? identities,
-            });
-            if (
-              !recorded &&
-              isFilesOperation(operation) &&
-              filesNeedsIdentity(operation) &&
-              operation.reviewed
-            )
+          if (!recorded || recorded.digest === proposal.digest) {
+            operation = recorded
+              ? bind(recorded.paths, recorded.identities)
+              : bind(paths, identities);
+            if (!recorded)
               this.filesReviews.set(proposal.id, {
                 digest: proposal.digest,
-                identities: operation.reviewed,
+                ...(filesShownTarget(files) ? { paths } : {}),
+                ...(filesNeedsIdentity(operation) && operation.reviewed
+                  ? { identities: operation.reviewed }
+                  : {}),
               });
           }
         } catch {
@@ -1183,18 +1695,27 @@ export class DeviceActionCoordinator<
           continue;
         }
         reviewed = { ...proposal, operation };
+        // A card for shown items names the files they resolved to.
+        if (filesShownTarget(files)) card = this.card(reviewed, context);
       }
       this.proposals.set(proposal.id, {
         proposal: reviewed,
         context: structuredClone(context),
         requestKey: browserRequestKey,
+        smsRecipient,
       });
       if (proposal.readReplyOrigin && !this.readReplies.has(proposal.id))
         this.readReplies.set(proposal.id, {
           digest: proposal.digest,
           origin: proposal.readReplyOrigin,
         });
-      items.push({ proposalId: proposal.id, proposal: card });
+      items.push({
+        proposalId: proposal.id,
+        proposal: card,
+        ...(proposal.requestMessageId
+          ? { requestMessageId: proposal.requestMessageId }
+          : {}),
+      });
     }
     const failures = invalid
       .filter((item) => item.pending)
@@ -1213,14 +1734,14 @@ export class DeviceActionCoordinator<
     context: C,
     signal: AbortSignal,
     proof?: CurrentDeviceActionRequest,
-  ): Promise<PendingReviewItem[]> {
+  ): Promise<ReviewItem[]> {
     return (await this.review(context, signal, proof)).items;
   }
   /** Reviewable proposals only. An invalid proposal fails the call only when nothing else is reviewable. */
   async pending(
     context: C,
     signal: AbortSignal,
-  ): Promise<DeviceActionProposalCard[]> {
+  ): Promise<AlphaProposalCard[]> {
     const { items, failures } = await this.review(context, signal);
     const proposals = items.flatMap((item) =>
       item.proposal ? [item.proposal] : [],
@@ -1230,48 +1751,130 @@ export class DeviceActionCoordinator<
       throw sharedValidatorRefusal(failures[0]);
     return proposals;
   }
+  /** A spoken name must identify the same resolved recipient shown on the live review. */
+  matchesSmsReviewRecipient(proposalId:string,spoken:string):boolean {
+    const entry=this.proposals.get(proposalId);
+    const operation=entry?.proposal.operation;
+    if(!entry||!operation)return false;
+    if(isSmsSend(operation))
+      return operation.recipients.length===1&&samePhoneRecipient(spoken,operation.recipients[0],true);
+    if(!isSmsCompose(operation))return false;
+    const target=smsComposeTarget(operation);
+    if(target.kind==="number")return samePhoneRecipient(spoken,target.number,true);
+    const recipient=entry.smsRecipient;
+    const name=spoken.trim().toLowerCase();
+    return !!recipient&&(samePhoneRecipient(name,recipient.name,false)||
+      samePhoneRecipient(name,target.query,false)||samePhoneRecipient(spoken,recipient.number,true));
+  }
   /** Only proposals bound by the host to this exact freshly sent user message may run.
-   * Only reversible local actions bypass the optional review. Sends, deletes, private
-   * reads and Calendar/reminder writes retain their recorded separate review policy.
-   * A reply draft is such a local action: it lands in the open conversation's text
-   * field, visible and editable, and only the owner's own Send tap sends it.
-   * Recovery, workflows and old hosts remain review-only; ordinary OS permissions still apply. */
+   * With "Ask before Alpha acts" off (the default), reversible local actions skip the
+   * optional review. A reply drafted into the open conversation (sms_reply_selected) is such a
+   * local action: it lands in that conversation's text field, visible and editable, and only
+   * the owner's own Send tap sends it.
+   * Two text actions also skip it when directSmsRequest admits them for this message (owner
+   * decision): reading the latest texter's number (sms_latest_sender with includeAddress), and
+   * a draft-only sms_compose addressed either to a number written in this message or, as a
+   * reply, to the latest texter's thread (replyThreadId: the number and thread that read
+   * returned; the phone drafts only into the thread with that id holding exactly that number).
+   * Either draft opens visible and editable in that conversation, and only the owner's Send tap
+   * sends it. A request for a card keeps the card, and a number that contradicts one written in
+   * the message is never direct and stays refused at review (contradictedNumbers). Sends,
+   * deletes, other private reads and Calendar/reminder writes retain their recorded separate
+   * review policy. Recovery, workflows and old hosts remain review-only; ordinary OS
+   * An explicit send or other data-changing request must also match the proposed effect.
+   * permissions still apply. */
   async performRequested(
     messageId: string,
     context: C,
     signal: AbortSignal,
     allowed: () => Promise<boolean>,
     operationType?: ReviewableDeviceOperation["type"],
-    proof?: CurrentDeviceActionRequest,
-  ): Promise<DeviceOperationReceipt[]> {
+    proof?: RequestedAction,
+  ): Promise<PresentedDeviceReceipt[]> {
     const directTypes: readonly ReviewableDeviceOperation["type"][] = [
       "create_note",
       "open_view",
       "browser_navigate",
       "camera_capture_photo",
       "photo_library_select",
-      "sms_reply_selected",
+      // The keypad in front, filled in at most: only the owner's Call tap there calls.
+      "phone_keypad",
       ...NOTES_ORGANIZE_DIRECT_TYPES,
       ...FILES_DIRECT_TYPES,
       ...PHOTOS_VIEW_DIRECT_TYPES,
+      ...BROWSER_CONTROL_DIRECT_TYPES,
     ];
-    const results: DeviceOperationReceipt[] = [];
+    const results: PresentedDeviceReceipt[] = [];
+    // Every direct Browser action shows its effect only after the chat request
+    // settles, each one checked against the tab and page the request was made
+    // from. A later Browser action of the same message was asked of the page the
+    // first one leaves: after the first has run it would be checked against the
+    // page about to be replaced and skipped while still reporting success, and
+    // while the first waits on its card (for review or for the owner's pick of a
+    // tab) it would run on the page showing now. So only a message's first
+    // Browser action may run directly; every later one keeps its review card.
+    let browserSeen = false;
     for (const [proposalId, entry] of [...this.proposals]) {
+      const operation=entry.proposal.operation;
+      const owner=proof?.messageId===messageId?proof:undefined;
+      let callRecipient:ContactMatch|undefined;
+      let directCall=false;
+      const browserEffect =
+        entry.proposal.operation.type === "browser_navigate" ||
+        isBrowserControl(entry.proposal.operation);
       if (
-        results.length >= 4 ||
-        !directTypes.includes(entry.proposal.operation.type) ||
-        entry.proposal.workflow ||
-        entry.proposal.requestMessageId !== messageId ||
-        (operationType !== undefined &&
-          entry.proposal.operation.type !== operationType)
+        browserEffect &&
+        entry.proposal.requestMessageId === messageId &&
+        !entry.proposal.workflow &&
+        (operationType === undefined ||
+          entry.proposal.operation.type === operationType)
+      ) {
+        if (browserSeen) continue;
+        browserSeen = true;
+      }
+      if (
+        results.length>=4 || entry.proposal.workflow || entry.proposal.requestMessageId!==messageId ||
+        (operationType!==undefined && operation.type!==operationType)
+      ) continue;
+      // Outgoing text actions always require the same visible review and confirmation.
+      // Outgoing text actions always require the same visible review and confirmation.
+      if (isSmsCompose(operation) || isSmsSend(operation) || operation.type === "sms_reply_selected") continue;
+      if (owner && operation.type==="phone_call") {
+        const recipient=callOwnerRecipient(owner.text);
+        const target=operation.target;
+        if (recipient && target.kind==="number") directCall=samePhoneRecipient(recipient,target.number,true);
+        else if (recipient && target.kind==="contact" && samePhoneRecipient(recipient,target.query,false)) {
+          callRecipient=(await this.options.smsRecipient?.(target.query,signal).catch(()=>null))??undefined;
+          owner.current();
+          directCall=!!callRecipient;
+        }
+      }
+      let directOther=!!owner && directOwnerAction(operation,owner.text,context);
+      if(directOther&&operation.type==="contact_delete"){
+        const matches=await this.options.contactMatches?.(operation.query,signal).catch(()=>null);
+        owner?.current();
+        directOther=matches?.names.length===1&&!matches.more&&samePhoneRecipient(operation.query.trim().toLowerCase(),matches.names[0],false);
+      }
+      if (
+        !directTypes.includes(operation.type) && !directCall && !directOther &&
+        !(owner && directSmsRequest(operation,owner.text))
       )
         continue;
       // A navigation-only card is not an executable read/write, even in direct-request mode.
       if (this.card(entry.proposal, context).reviewDestination) continue;
+      // Words that match several tabs need the owner's pick, and only the
+      // action's review card can show it.
+      if (
+        entry.proposal.operation.type === "browser_tab_switch" &&
+        this.options.browserTabNeedsChoice?.(entry.proposal.operation.target)
+      )
+        continue;
       const browser =
         this.options.currentRequestBrowserPolicy &&
-        entry.proposal.operation.type === "browser_navigate";
+        (entry.proposal.operation.type === "browser_navigate" ||
+          entry.proposal.operation.type === "browser_search");
       const requestKey = this.requestKey(messageId);
+      if (entry.proposal.operation.type === "open_view" && proof?.projectView === "canonical") continue;
       if (
         browser &&
         proof?.messageId === messageId &&
@@ -1286,8 +1889,26 @@ export class DeviceActionCoordinator<
           !this.browserAllowed(entry.proposal, proof))
       )
         continue;
+      // A filled-in keypad runs without review only for a number the owner
+      // typed in this very message; one the model took from an email, a page
+      // or an earlier read stays on its "Open keypad" card.
+      if (
+        entry.proposal.operation.type === "phone_keypad" &&
+        !keypadGrounded(entry.proposal.operation, messageId, proof)
+      )
+        continue;
+      const camera = entry.proposal.operation.type === "camera_capture_photo";
+      if (camera && !this.cameraAllowed(messageId, proof)) continue;
       if (!(await allowed())) break;
       signal.throwIfAborted();
+      if (directCall || directOther) {
+        owner?.current();
+        if (this.proposals.get(proposalId)!==entry) continue;
+        entry.currentRequest=owner;
+        if (callRecipient) entry.smsRecipient=callRecipient;
+        if (operation.type==="contact_delete") entry.directContactDelete=true;
+      }
+      if (entry.proposal.operation.type === "sms_latest_sender") proof?.current();
       if (browser) {
         if (
           this.proposals.get(proposalId) !== entry ||
@@ -1299,9 +1920,24 @@ export class DeviceActionCoordinator<
           continue;
         entry.currentRequest = proof;
       }
+      if (
+        camera &&
+        (this.proposals.get(proposalId) !== entry ||
+          !this.cameraAllowed(messageId, proof) ||
+          !this.consumeCameraRequest(messageId))
+      )
+        continue;
+      if (entry.proposal.operation.type === "open_view" && typeof proof?.projectView === "function") {
+        if (proof.messageId !== messageId || entry.requestKey !== requestKey || this.proposals.get(proposalId) !== entry)
+          continue;
+        proof.current();
+        entry.currentRequest = proof;
+      }
       const result = await this.approve(proposalId, context, signal);
       results.push(result);
-      if (result.status !== "succeeded" || signal.aborted) break;
+      // One clear outbound or destructive command authorizes one matching effect.
+      if (directCall || directOther || result.status !== "succeeded" || signal.aborted ||
+          (entry.proposal.operation.type === "open_view" && typeof proof?.projectView === "function")) break;
     }
     return results;
   }
@@ -1354,6 +1990,7 @@ export class DeviceActionCoordinator<
     );
     signal.throwIfAborted();
     this.proposals.clear();
+    this.listedTabCards.clear();
     return pending.map((p) => {
       this.assertWorkflow(review, p);
       this.proposals.set(p.id, {
@@ -1592,7 +2229,9 @@ export class DeviceActionCoordinator<
     proposalId: string,
     context: C,
     signal: AbortSignal,
-  ): Promise<DeviceOperationReceipt> {
+    approval?: "send-draft",
+    approvedDescription?: string,
+  ): Promise<PresentedDeviceReceipt> {
     if (this.busy) throw new Error("Another device action is being reviewed");
     const reviewed = this.proposals.get(proposalId);
     if (
@@ -1606,26 +2245,65 @@ export class DeviceActionCoordinator<
       assertClockHandoffTimeZone(reviewed.proposal.operation, context.timeZone);
     if (isNativeNotesQuery(reviewed.proposal.operation))
       assertNotesQueryContext(context);
+    // Files named only by shown positions were never resolved to the files a
+    // card names, so they are never approved.
     if (
       isFilesOperation(reviewed.proposal.operation) &&
-      filesNeedsIdentity(reviewed.proposal.operation) &&
-      !reviewed.proposal.operation.reviewed
+      (filesShownTarget(reviewed.proposal.operation) ||
+        (filesNeedsIdentity(reviewed.proposal.operation) &&
+          !reviewed.proposal.operation.reviewed))
     )
       throw Error("Review these files again before making changes");
-    const p = reviewed.proposal,
+    // Only a close-all card that listed its tabs may be approved. The list is
+    // not read again here: reading it binds a list, and only a card may do that.
+    if (
+      this.tabsClosing(reviewed.proposal, false) !== undefined &&
+      !this.listedTabCards.has(proposalId)
+    )
+      throw Error("Review these tabs again before closing them");
+    const p = reviewed.proposal;
+    const sendDraft = approval === "send-draft";
+    if (sendDraft && approvedDescription !== undefined &&
+      this.card(p, context, undefined, reviewed.smsRecipient).description !== approvedDescription)
+      throw Error("The text draft changed. Review it again before sending.");
+    let promoted: SmsComposeOperation | undefined;
+    let journalOperation = p.operation;
+    if (sendDraft && (!isSmsCompose(p.operation) || !("draft" in p.operation) || p.workflow))
+      throw Error("This draft is no longer available to send");
+    const minted =
       // Minted before `busy` is taken: a context without randomUUID refuses
       // this approval instead of leaving the coordinator busy for good.
       // Both SMS operations use the proposal as the native journal identity.
-      minted =
-        isSmsSend(p.operation) || isSmsCompose(p.operation)
-          ? p.id
-          : crypto.randomUUID();
+      isSmsSend(p.operation) || isSmsCompose(p.operation) ? p.id : crypto.randomUUID();
     this.busy = true;
     this.executing = proposalId;
     this.proposals.delete(proposalId);
     let execution: ReturnType<typeof createDeviceActionExecution> | undefined;
     try {
-      const operationHash = await actionScope(JSON.stringify(p.operation));
+      if (sendDraft && isSmsCompose(p.operation)) {
+        const draft = p.operation, target = smsComposeTarget(draft);
+        let number = target.kind === "number" ? target.number : reviewed.smsRecipient?.number;
+        let sendTarget = target;
+        if (!number && target.kind === "contact") {
+          // Choosing a row is provisional. Only the picker's Send resolves the exact number
+          // and lets the local journal reserve a carrier send.
+          const chosen = await this.options.chooseSmsRecipient?.(target.query, draft.body, signal);
+          signal.throwIfAborted();
+          if (chosen === "not-found")
+            return { proposalId, status: "failed", summary: "No matching contact. Nothing was sent." };
+          if (!chosen)
+            return { proposalId, status: "cancelled", summary: "Message cancelled." };
+          number = chosen.number;
+          sendTarget = { kind: "number", number };
+        }
+        if (!number) throw Error("Choose a recipient before sending this draft");
+        if (p.expiresAt <= Date.now())
+          return { proposalId, status: "failed", summary: "This review expired. Nothing was sent." };
+        // A recipient already resolved on the card is still checked by the executor.
+        promoted = { type: "sms_compose", target: sendTarget, body: draft.body };
+        journalOperation = { type: "sms_compose", target: { kind: "number", number }, body: draft.body };
+      }
+      const operationHash = await actionScope(JSON.stringify(journalOperation));
       // A reservation left by an approval that never reached its claim is
       // adopted: nothing was dispatched under it, so this is the same attempt.
       const { entry: earlier } = await this.journal.get({
@@ -1672,7 +2350,7 @@ export class DeviceActionCoordinator<
         operationHash,
         record: {
           digest: p.digest,
-          operation: p.operation,
+          operation: journalOperation,
           context: deviceJournalContext(context),
           expiresAt: p.expiresAt,
           installationId: this.credential.installationId,
@@ -1702,22 +2380,25 @@ export class DeviceActionCoordinator<
         };
       execution.assertIdentity(reserved.entry);
       execution.assertPrepared();
-      await this.mutation(p, "decision", { decision: "approve" }, signal);
+      let attemptId: string;
+      if (sendDraft) {
+        // The agent's draft only authorizes opening an editor. Retire it before applying
+        // the owner's distinct on-device send, which has its own local journal claim.
+        const retired = await this.mutation(p, "decision", { decision: "reject" }, signal);
+        if (retired.state !== "rejected") throw Error("The draft could not be retired");
+        attemptId = crypto.randomUUID();
+      } else {
+        await this.mutation(p, "decision", { decision: "approve" }, signal);
+        execution.assertPrepared();
+        const claimed = await this.mutation(p, "claim", {}, signal);
+        if ((isSmsSend(p.operation) || isSmsCompose(p.operation)) && claimed.providerIdempotencyKey !== operationId)
+          throw Error("SMS execution claim identity changed");
+        if (!claimed.attemptId || claimed.state !== "executing")
+          throw Error("The server did not grant an execution claim");
+        attemptId = claimed.attemptId;
+      }
       execution.assertPrepared();
-      const claimed = await this.mutation(p, "claim", {}, signal);
-      if (
-        (isSmsSend(p.operation) || isSmsCompose(p.operation)) &&
-        claimed.providerIdempotencyKey !== operationId
-      )
-        throw Error("SMS execution claim identity changed");
-      if (!claimed.attemptId || claimed.state !== "executing")
-        throw new Error("The server did not grant an execution claim");
-      execution.assertPrepared();
-      await this.journal.markApplying({
-        scope: this.scope,
-        proposalId,
-        attemptId: claimed.attemptId,
-      });
+      await this.journal.markApplying({ scope: this.scope, proposalId, attemptId });
       let result: ExecutionResult;
       let notDispatched = false;
       try {
@@ -1730,8 +2411,15 @@ export class DeviceActionCoordinator<
         if (p.expiresAt <= Date.now())
           throw new DeviceActionNotStarted("This action expired.");
         execution.markDispatched(reserved.entry);
-        const journalIdentity = { scope: this.scope, proposalId: p.id };
-        if (isForegroundReviewOperation(p.operation)) {
+        const journalIdentity = { scope: this.scope, proposalId: p.id, ...(reviewed.smsRecipient ? { smsRecipient: reviewed.smsRecipient } : {}), ...(reviewed.directContactDelete?{directContactDelete:true as const}:{}) };
+        if (p.operation.type === "open_view" && typeof reviewed.currentRequest?.projectView === "function") {
+          assertCurrent();
+          const opened = await reviewed.currentRequest.projectView(p.operation.view, signal);
+          const view = this.profile.presentRecord(p.operation, context.timeZone)?.title.replace(/^Open /, "") ?? p.operation.view;
+          result = opened
+            ? { status: "succeeded", summary: `Opened ${view} on this phone.` }
+            : { status: "failed", summary: "This view is unavailable." };
+        } else if (isForegroundReviewOperation(p.operation)) {
           if (!this.ports.executeForeground)
             throw Error("Foreground review is unavailable");
           result = await this.ports.executeForeground(
@@ -1745,7 +2433,7 @@ export class DeviceActionCoordinator<
           );
         } else
           result = await this.ports.execute(
-            p.operation,
+            promoted ?? p.operation,
             operationId,
             context,
             signal,
@@ -1776,14 +2464,14 @@ export class DeviceActionCoordinator<
               status: "failed",
               summary:
                 refused && error.message
-                  ? `${NOT_DISPATCHED_SUMMARY} ${error.message}`
+                  ? `Not started: ${error.message.replace(/[.!]\s*$/, "")}.`
                   : NOT_DISPATCHED_SUMMARY,
             }
           : { status: "unknown", summary: UNKNOWN_SUMMARY };
       }
       const typed: TypedResults = notDispatched
         ? {}
-        : await this.typedResults(p, result, operationId, context);
+        : await this.typedResults(promoted ? { ...p, operation: promoted } : p, result, operationId, context);
       await this.journal.finish({
         scope: this.scope,
         proposalId,
@@ -1798,6 +2486,9 @@ export class DeviceActionCoordinator<
         },
       });
       if (execution.dispatched) execution.settle(reserved.entry);
+      // The original draft cannot report a carrier send. Its server record is closed,
+      // and the local journal owns the send result and its at-most-once identity.
+      if (sendDraft) return { proposalId, status: result.status, summary: result.summary };
       // A completed device effect is journaled even if the UI epoch was cancelled.
       // Receipt upload is retried only by the explicit history control.
       const committedChanges: DeviceCommittedChange[] = [];
@@ -1838,16 +2529,23 @@ export class DeviceActionCoordinator<
       // Presentation changes the foreground context and cancels its approval.
       // Run it only after this exact action's receipt attempt, never as a retry.
       const presentBrowser = () => {
-        if (
-          p.operation.type === "browser_navigate" &&
-          result.status === "succeeded"
-        ) {
-          try {
+        if (result.status !== "succeeded") return;
+        const browser =
+          p.operation.type === "browser_navigate" || isBrowserControl(p.operation);
+        try {
+          if (browser) {
             if (reviewed.currentRequest) assertCurrent();
             result.presentBrowser?.();
-          } catch {
-            /* A retired foreground must not replace a journaled outcome. */
-          }
+          } else if (isTelephonyAction(p.operation)) result.present?.();
+        } catch {
+          /* A retired foreground must not replace a journaled outcome; what
+           * it would have changed is said instead. */
+          if (browser)
+            try {
+              result.presentBrowserSkipped?.();
+            } catch {
+              /* The journaled outcome stands. */
+            }
         }
       };
       let confirmed: DeviceProposal;
@@ -1858,7 +2556,7 @@ export class DeviceActionCoordinator<
           p,
           "receipt",
           {
-            attemptId: claimed.attemptId,
+            attemptId,
             receipt: notDispatched
               ? { outcome: "failed", operationId, code: NOT_DISPATCHED_CODE }
               : {
@@ -1874,7 +2572,10 @@ export class DeviceActionCoordinator<
         return {
           proposalId,
           status: result.status,
-          summary: `${result.summary} Not synced yet; open action history to retry.`,
+          summary:
+            isCameraCapture(p.operation) && result.status === "failed" && result.cancelledBeforeCapture
+              ? result.summary
+              : unsyncedSummary(result.summary),
           committedChanges,
         };
       }
@@ -1894,7 +2595,7 @@ export class DeviceActionCoordinator<
           (fg?.kind === "calendar_named" && fg.action === "read")) &&
         p.readReplyOrigin &&
         confirmed.state === "done" &&
-        confirmed.attemptId === claimed.attemptId &&
+        confirmed.attemptId === attemptId &&
         retained &&
         !retained.consumed &&
         retained.digest === p.digest &&
@@ -1903,7 +2604,7 @@ export class DeviceActionCoordinator<
               ...p.readReplyOrigin,
               proposalId,
               digest: p.digest,
-              attemptId: claimed.attemptId,
+              attemptId,
             })
           : undefined;
       if (readReply && retained) retained.hint = readReply;
@@ -1915,6 +2616,15 @@ export class DeviceActionCoordinator<
         ...(readReply ? { readReply } : {}),
       };
     } catch {
+      // A failure before `markDispatched` (journal lookup, reservation,
+      // identity, decision or claim) reached no device port, so it closes as
+      // not started. Only an attempt that entered the executor stays uncertain.
+      if (!execution?.dispatched)
+        return {
+          proposalId,
+          status: "failed",
+          summary: NOT_DISPATCHED_SUMMARY,
+        };
       return {
         proposalId,
         status: "unknown",
@@ -3027,10 +3737,263 @@ function handoffOperation(operation: ReviewableDeviceOperation): boolean {
     isClockHandoffOperation(operation)
   );
 }
+export const NUMBER_MISMATCH_NOTICE =
+  "That is not the number in your message, so nothing was called or sent. Ask again with the number.";
+/** The same refusal for a contact change, which saves a number rather than calling it. */
+export const CONTACT_NUMBER_MISMATCH_NOTICE =
+  "That is not the number in your message, so nothing was saved. Ask again with the number.";
+/** The phone numbers a new contact or a contact change writes, adds or removes. */
+function contactChangeNumbers(op: {
+  type: string;
+  contact?: { phoneNumbers?: unknown };
+  set?: { phoneNumbers?: unknown };
+  add?: { phoneNumbers?: unknown };
+  remove?: { phoneNumbers?: unknown };
+}): string[] {
+  const lists =
+    op.type === "contact_create"
+      ? [op.contact?.phoneNumbers]
+      : op.type === "contact_update"
+        ? [op.set?.phoneNumbers, op.add?.phoneNumbers, op.remove?.phoneNumbers]
+        : [];
+  return lists.flatMap((list) =>
+    Array.isArray(list)
+      ? list.filter((item): item is string => typeof item === "string")
+      : [],
+  );
+}
+/** The digits of a dial number, or "" for text that is not one. */
+function dialDigits(written: string): string {
+  try {
+    return phoneDialNumber(written).replace(/\D/g, "");
+  } catch {
+    return "";
+  }
+}
+/**
+ * Whether two dial numbers are the same line: the same digits, or the same last
+ * ten when a country code or trunk prefix is written on one side only.
+ */
+function sameLine(a: string, b: string): boolean {
+  return (
+    a === b || (a.length >= 10 && b.length >= 10 && a.slice(-10) === b.slice(-10))
+  );
+}
+/** Lower-case words, apostrophes and a possessive "'s" aside ("Maya's cell" names Maya). */
+function requestWords(text: string): string {
+  return ` ${text
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[\u2019\u2018]/g, "'")
+    .replace(/'s(?![\p{L}\p{N}])/gu, "")
+    .replace(/[^\p{L}\p{N}']+/gu, " ")
+    .trim()} `;
+}
+/**
+ * A call or text for a number other than the one the owner wrote in the
+ * message that asked for it. The model sometimes returns a different number
+ * than the message says (seen on a Pixel: "call 415-555-0100" produced a card
+ * for another number), and a card only protects an owner who reads it. A
+ * contact the model chose in place of the written number contradicts it too,
+ * unless the owner also wrote that name. A message that writes no number (a
+ * contact name, "the number in that email") is not judged here and keeps its
+ * ordinary card; a number that is part of the text being sent is the
+ * message's content, not its addressee. A new contact or a contact change is
+ * judged the same way by the numbers it saves: a number saved under a name is
+ * the recipient of every later call or text to that name.
+ */
+export function numberContradictsRequest(
+  operation: ReviewableDeviceOperation,
+  request: string,
+): boolean {
+  const op = operation as {
+    type: string;
+    target?: { kind?: string; number?: string; query?: string };
+    query?: string;
+    recipients?: string[];
+    body?: string;
+  };
+  const contactNumbers = contactChangeNumbers(op);
+  if (
+    op.type !== "phone_call" &&
+    op.type !== "phone_dial" &&
+    op.type !== "sms_compose" &&
+    op.type !== "sms_send" &&
+    !contactNumbers.length
+  )
+    return false;
+  const proposed = contactNumbers.length
+    ? contactNumbers
+    : op.type === "sms_send"
+      ? (op.recipients ?? [])
+      : op.target?.kind === "number" && op.target.number
+        ? [op.target.number]
+        : [];
+  const contact =
+    op.target?.kind === "contact"
+      ? op.target.query
+      : op.type === "sms_compose" && typeof op.query === "string"
+        ? op.query
+        : undefined;
+  if (!proposed.length && contact === undefined) return false;
+  // The body as the owner wrote it is taken out of the request, so its numbers
+  // are never the addressee and a body that repeats the addressee does not
+  // hide it. It is cut only as whole words ("hi" is not the "hi" in "Phil",
+  // "55" not the "55" in "555"), preferring its last occurrence and one whose
+  // cut leaves the proposed recipient. A body the model reworded can only keep
+  // its own numbers out.
+  const body = typeof op.body === "string" ? op.body.trim() : "";
+  const occurrences = body ? wholeWordOccurrences(request, body) : [];
+  const bodyDigits = occurrences.length ? "" : body.replace(/\D/g, "");
+  const contradicts = (addressed: string) => {
+    const written = [...addressed.matchAll(/\+?[\d(][\d ().-]*\d/g)]
+      .map(([text]) => dialDigits(text))
+      .filter(
+        (digits) =>
+          digits.length >= 7 && !(bodyDigits && bodyDigits.includes(digits)),
+      );
+    if (!written.length) return false;
+    if (contact !== undefined) {
+      const name = requestWords(contact).trim();
+      return !name || !requestWords(addressed).includes(` ${name} `);
+    }
+    return proposed.some((number) => {
+      const digits = dialDigits(number);
+      return !written.some((wrote) => sameLine(wrote, digits));
+    });
+  };
+  if (!occurrences.length) return contradicts(request);
+  const cuts = occurrences
+    .map((at) => `${request.slice(0, at)} ${request.slice(at + body.length)}`)
+    .reverse();
+  return cuts.every(contradicts);
+}
+/**
+ * Where `part` occurs in `text` as whole words, case aside: an edge that is a
+ * letter or digit never matches inside a longer word or number.
+ */
+function wholeWordOccurrences(text: string, part: string): number[] {
+  const haystack = text.toLowerCase(),
+    needle = part.toLowerCase();
+  const word = /[\p{L}\p{N}]/u;
+  const found: number[] = [];
+  for (
+    let at = haystack.indexOf(needle);
+    at >= 0;
+    at = haystack.indexOf(needle, at + 1)
+  )
+    if (
+      !(word.test(needle[0] ?? "") && word.test(haystack[at - 1] ?? "")) &&
+      !(
+        word.test(needle.at(-1) ?? "") &&
+        word.test(haystack[at + needle.length] ?? "")
+      )
+    )
+      found.push(at);
+  return found;
+}
 /** Review-card copy. The phone's own review shows the resolved name, number and before/after. */
-function describeTelephonyAction(operation: TelephonyActionOperation): {
+/** An empty keypad, or a number written in the owner's own current message. */
+/**
+ * The owner's message asks for one photo now: the whole-message command
+ * ("take a picture", "Eliza, snap a selfie please") or the same command asked
+ * as "(can|could|would|will) you (please) take a picture ...?". This is the
+ * agent's own reading (plugin-assistant camera-request requestedCameraCapture),
+ * built on the shared strict command: negations ("don't take a photo"),
+ * questions about the past, deferrals and compound requests never match.
+ */
+export function requestedCameraCapture(
+  text: string,
+  assistantName?: string,
+): boolean {
+  if (authoredCameraCapture(text, assistantName) !== undefined) return true;
+  // The agent refuses control characters anywhere in the message, so the
+  // question form is never read past one either ("can you<TAB>take a photo?").
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: Reject controls before matching.
+  if (typeof text !== "string" || /[\u0000-\u001f\u007f]/.test(text))
+    return false;
+  const asked =
+    /^(.{0,80}?)(?:can|could|would|will)\s+you\s+(?:please\s+)?(.+?)[?.!]*$/i.exec(
+      typeof text === "string" && text.length <= 512 ? text.trim() : "",
+    );
+  return (
+    !!asked &&
+    !/[?]/.test(asked[1]) &&
+    authoredCameraCapture(`${asked[1]}${asked[2]}`, assistantName) !== undefined
+  );
+}
+
+function keypadGrounded(
+  operation: { number?: string },
+  messageId: string,
+  proof?: CurrentDeviceActionRequest,
+): boolean {
+  if (!operation.number) return true;
+  if (!proof || proof.messageId !== messageId) return false;
+  proof.current();
+  let wanted: string;
+  try {
+    wanted = phoneDialNumber(operation.number);
+  } catch {
+    return false;
+  }
+  for (const [written] of proof.text.matchAll(/\+?[\d(][\d ().-]*\d/g)) {
+    try {
+      if (phoneDialNumber(written) === wanted) return true;
+    } catch {
+      // Not a dial number as written; keep looking.
+    }
+  }
+  return false;
+}
+/**
+ * The phone contacts a contact change or deletion would be offered for, as
+ * its executor looks them up. `more`: further contacts match than the lookup
+ * lists, so `names` is not every match.
+ */
+export type ContactMatchNames = { names: string[]; more: boolean };
+/**
+ * The contact a change or deletion applies to, as the phone's lookup named it.
+ * Several matches: the owner picks one in the phone's own review after approval.
+ */
+function contactTarget(
+  query: string,
+  matches: ContactMatchNames | undefined,
+): { line: string; choice: string } {
+  const found = matches?.names;
+  if (!found?.length) return { line: `Contact: ${query}`, choice: "" };
+  // A provider name is only length-checked. Line breaks, other controls and
+  // bidi overrides in it must not add or reorder lines on the card the owner
+  // approves, as the contract keeps them out of every other review text.
+  const contacts = found.map(
+    (name) =>
+      name
+        // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to remove control characters.
+        .replace(/[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩\s]+/gu, " ")
+        .trim() || UNNAMED_CONTACT,
+  );
+  // The lookup lists a bounded number of matches: when more exist, the card
+  // never presents the listed ones as every contact that matches.
+  if (matches?.more)
+    return {
+      line: `More than ${contacts.length} ${contacts.length === 1 ? "contact matches" : "contacts match"} “${query}”, including: ${contacts.join(", ")}. For one not listed, ask again with the full name.`,
+      choice: " You choose which one on your phone after you confirm.",
+    };
+  if (contacts.length === 1)
+    return { line: `Contact: ${contacts[0]}`, choice: "" };
+  return {
+    line: `${contacts.length} contacts match “${query}”: ${contacts.join(", ")}`,
+    choice: " You choose which one on your phone after you confirm.",
+  };
+}
+function describeTelephonyAction(
+  operation: TelephonyActionOperation,
+  contacts?: ContactMatchNames,
+  smsRecipient?: ContactMatch,
+): {
   title: string;
   description: string;
+  smsPreview?: SmsReviewPreview;
 } {
   const fields = (set: {
     displayName?: string;
@@ -3059,20 +4022,65 @@ function describeTelephonyAction(operation: TelephonyActionOperation): {
         title: "Add contact",
         description: `${fields(operation.contact)}\n\nSaves this contact on your phone after you confirm.`,
       };
-    case "contact_update":
+    case "contact_update": {
+      const values = (
+        label: string,
+        change: { phoneNumbers?: string[]; emailAddresses?: string[] } = {},
+      ) =>
+        [...(change.phoneNumbers ?? []), ...(change.emailAddresses ?? [])].map(
+          (value) => `${label}: ${value}`,
+        );
+      const lines = [
+        ...(operation.set ? [fields(operation.set)] : []),
+        ...values("Add", operation.add),
+        ...values("Remove", operation.remove),
+      ].join("\n");
+      const target = contactTarget(operation.query, contacts);
       return {
         title: "Change contact",
-        description: `Contact: ${operation.query}\n${fields(operation.set)}\n\nReplaces these details after you confirm. Nothing else is shared with the agent.`,
+        description: `${target.line}\n${lines}\n\n${
+          operation.add || operation.remove
+            ? operation.set
+              ? "Replaces the details listed whole and adds or removes only the values marked, after you confirm."
+              : "Adds or removes only these values after you confirm. The contact's other details stay."
+            : "Replaces these details after you confirm."
+        }${target.choice} Nothing else is shared with the agent.`,
       };
-    case "contact_delete":
+    }
+    case "contact_delete": {
+      const target = contactTarget(operation.query, contacts);
       return {
         title: "Delete contact",
-        description: `Contact: ${operation.query}\n\nDeletes this contact from your phone after you confirm.`,
+        description: `${target.line}\n\n${target.choice ? "After you confirm, you choose which one to delete on your phone." : "Deletes this contact from your phone after you confirm."}`,
       };
-    case "sms_compose":
+    }
+    case "contact_show":
       return {
-        title: "Review SMS",
-        description: `To contact: ${operation.query}\n\n${operation.body}\n\nConfirm the recipient again in Android.`,
+        title: "Show contact",
+        description: `Search: ${operation.query}\n\nOpens Contacts on your phone with the matches. The agent learns only whether one was found.`,
+      };
+    case "contact_read_selected":
+      return {
+        title: "Share open contact",
+        description:
+          "Share the name, numbers and email addresses of the open contact with the agent. Other contacts stay private.",
+      };
+    case "sms_compose": {
+      const target = smsComposeTarget(operation);
+      const to = smsRecipient ? `To: ${smsRecipient.name} (${smsRecipient.number})`
+        : target.kind === "number" ? `To: ${target.number}` : `To contact: ${target.query}`;
+      const note = target.kind === "number" || smsRecipient
+        ? smsSendFacts(1, operation.body)
+        : "Choose a recipient before sending.";
+      return {
+        title: "draft" in operation ? "Draft SMS" : "Review SMS",
+        ...smsReviewCopy(to, operation.body, note),
+      };
+    }
+    case "phone_keypad":
+      return {
+        title: "Open keypad",
+        description: `${operation.number ? `Number: ${operation.number}\n\n` : ""}Opens the Phone keypad${operation.number ? " with this number filled in" : ""}. Nothing is dialed until you tap Call.`,
       };
     case "sms_reply_selected":
       return {
@@ -3084,6 +4092,11 @@ function describeTelephonyAction(operation: TelephonyActionOperation): {
         title: "Share open messages",
         description:
           "Share the messages showing in the open thread with the agent. Other threads and phone numbers stay private.",
+      };
+    case "sms_latest_sender":
+      return {
+        title: "Read latest text sender",
+        description: operation.includeAddress ? "Read the phone number of your latest incoming text." : "Share the last four digits of the newest incoming SMS sender.",
       };
     case "voicemail_read_selected":
       return {
@@ -3099,8 +4112,14 @@ function describeTelephonyAction(operation: TelephonyActionOperation): {
   }
 }
 const UNKNOWN_SUMMARY =
-  "Action outcome needs review. It will not be repeated automatically.";
-const NOT_DISPATCHED_SUMMARY = "Not started. Nothing was sent.";
+  "The outcome needs review and won't be repeated automatically.";
+const NOT_DISPATCHED_SUMMARY = "Not started, so nothing was sent.";
+/** The fixed summary older coordinators wrote for a no-call failure; matched only to read those records. */
+const LEGACY_NOT_DISPATCHED_SUMMARY = "Not started. Nothing was sent.";
+/** One sentence: a completed result whose server receipt has not synced yet. */
+export function unsyncedSummary(summary: string): string {
+  return `${summary.replace(/[.!]\s*$/, "")}, but it isn't synced yet.`;
+}
 const NOT_DISPATCHED_CODE = "DEVICE_NOT_DISPATCHED";
 /** A journal entry this device finished with no effect: failed, with no typed result. */
 function notDispatchedEntry(entry: DeviceJournalEntry): boolean {
@@ -3119,7 +4138,8 @@ function notDispatchedEntry(entry: DeviceJournalEntry): boolean {
   // always carry a marker; executor display copy cannot acquire this authority.
   return (
     result.dispatch === undefined &&
-    entry.summary === NOT_DISPATCHED_SUMMARY &&
+    (entry.summary === LEGACY_NOT_DISPATCHED_SUMMARY ||
+      entry.summary === NOT_DISPATCHED_SUMMARY) &&
     Object.keys(result).every((key) => key === "operationId")
   );
 }

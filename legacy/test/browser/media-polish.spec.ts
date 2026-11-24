@@ -70,22 +70,13 @@ test('Photos tabs stay aligned in Albums and selection opens the real media libr
  await page.goto('/');await page.getByRole('button',{name:'Photos',exact:true}).click();
  const select=page.getByRole('button',{name:'Select photos',exact:true}),library=page.getByRole('button',{name:'Library',exact:true});
  const settle=()=>library.evaluate(async el=>{await document.fonts.ready;const animations=new Set(el.getAnimations({subtree:true}));for(let parent=el.parentElement;parent;parent=parent.parentElement)for(const animation of parent.getAnimations())animations.add(animation);await Promise.all([...animations].filter(animation=>animation.effect?.getComputedTiming().endTime!==Infinity).map(animation=>animation.finished));await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));});
+ // Library and Albums have their own icons, set by the shared Photos view (the same in fixture builds).
+ expect(await page.locator('.photos-section-icon').evaluateAll(icons=>icons.map(icon=>getComputedStyle(icon).maskImage))).toEqual([expect.stringContaining('/icons/lucide/images.svg'),expect.stringContaining('/icons/lucide/folder.svg')]);
  await settle();const before=await library.boundingBox();await page.getByRole('button',{name:'Albums',exact:true}).click();
  await settle();const after=await library.boundingBox();expect(after!.x).toBe(before!.x);expect(after!.y).toBe(before!.y);
  // Select belongs to grids (the Library and each album), not the album list.
  await expect(select).toHaveCount(0);await library.click();
  await page.getByLabel('Photos tools',{exact:true}).click();await select.click();await expect(page.getByRole('button',{name:'Cancel selection',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Delete selected',exact:true})).toBeVisible();
-});
-
-test('image question review is compact and only stages explicitly reviewed text',async({page},info)=>{
- await page.goto('/');await page.evaluate(async()=>{
-  const canvas=document.createElement('canvas');canvas.width=320;canvas.height=180;const c=canvas.getContext('2d')!;c.fillStyle='#d6a667';c.fillRect(0,0,320,180);const blob=await new Promise<Blob>(resolve=>canvas.toBlob(b=>resolve(b!)));
-  (window as any).questionDraft=null;(await import('/src/browser/content-question.ts')).reviewContentQuestion({name:'Video preview frame',text:'',current:()=>true,compose:text=>(window as any).questionDraft=text,image:async()=>blob});
- });
- const review=page.getByRole('dialog',{name:'Ask about selected content'});await expect(review.getByRole('img')).toBeVisible();
- const proceed=review.getByRole('button',{name:'Use in conversation',exact:true});await expect(proceed).toBeDisabled();await review.getByRole('textbox',{name:'Content excerpt'}).fill('A synthetic tan frame.');
- await expect(proceed).toBeEnabled();expect(await review.evaluate(el=>el.getBoundingClientRect().width)).toBeLessThanOrEqual(388);await page.screenshot({path:info.outputPath('image-question-review.png')});
- await proceed.click();await expect(review).toHaveCount(0);expect(await page.evaluate(()=>(window as any).questionDraft)).toContain('A synthetic tan frame.');
 });
 
 for(const endpoint of ['start','end'] as const)test(`trim ${endpoint} handle can save its minimum span`,async({page})=>{

@@ -1,6 +1,7 @@
 import {test,expect,type Page} from '@playwright/test';
 // The closing sheet keeps an inert composer briefly; interact with the one exposed to users.
 import {preloadPageModules} from './helpers/page-modules';
+import {settled} from './helpers/settled';
 
 const voice=(page:Page)=>page.getByRole('region',{name:'Voice conversation',exact:true});
 async function setup(page:Page,signed=true,theme='light'){
@@ -46,6 +47,63 @@ async function startWithRetainedDraft(page:Page){
  await page.evaluate(()=>(window as any).chatVoiceFixture.shell.startVoice());
 }
 async function utterance(page:Page){await page.evaluate(()=>(window as any).chatVoiceFixture.peak=.25);await page.waitForTimeout(950);await page.evaluate(()=>(window as any).chatVoiceFixture.peak=0);}
+test('stopping voice releases capture and lets the accepted reply finish in chat',async({page})=>{
+ await setup(page);
+ await page.evaluate(async()=>{
+  const {Component}=await import('/src/prototype/model.js');
+  const {connectionController}=await import('/src/runtime/connection-ui.tsx');
+  const f=(window as any).chatVoiceFixture;
+  connectionController.voiceConversationCurrent=()=>true;
+  Component.prototype.sendVoiceTurn=async function(input:any){
+   f.sends++;f.replySignal=input.signal;
+   await new Promise<void>(resolve=>f.releaseReply=resolve);
+   input.signal.throwIfAborted();input.assertCurrent();
+   const text='The full reply arrives after voice stops.';
+   this.setState((state:any)=>({msgs:[...state.msgs,{id:'finished-reply',from:'agent',text}]}));
+   return {requestId:input.turnId,conversationId:'synthetic-room',userMessageId:'voice-user',assistantMessageId:'finished-reply',text,complete:true};
+  };
+ });
+ await page.getByRole('button',{name:'Open conversation',exact:true}).click();
+ await page.getByRole('button',{name:'Talk',exact:true}).click();
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ await utterance(page);
+ await expect.poll(()=>page.evaluate(()=>(window as any).chatVoiceFixture.sends)).toBe(1);
+ await voice(page).getByRole('button',{name:'Stop voice conversation',exact:true}).click();
+ await expect(voice(page)).toHaveCount(0);
+ expect(await page.evaluate(()=>(window as any).chatVoiceFixture.replySignal.aborted)).toBe(false);
+ await page.evaluate(()=>(window as any).chatVoiceFixture.releaseReply());
+ await expect(page.locator('[data-alpha-layer="conversation"]')).toContainText('The full reply arrives after voice stops.');
+ await expect(page.getByText(/Interrupted before this reply/)).toHaveCount(0);
+ expect(await page.evaluate(()=>(window as any).chatVoiceFixture.speech)).toBe(0);
+ await noMedia(page);
+});
+
+// Only the owner's Stop keeps a pending voice reply. A send that retires voice aborts it, so the
+// message is never held behind the reply. This fixture has no agent, so delivery is not shown here.
+test('a send while a voice reply is pending aborts that reply',async({page})=>{
+ await setup(page);
+ await page.evaluate(async()=>{
+  const {Component}=await import('/src/prototype/model.js');
+  const {connectionController}=await import('/src/runtime/connection-ui.tsx');
+  const f=(window as any).chatVoiceFixture;
+  connectionController.voiceConversationCurrent=()=>true;
+  Component.prototype.sendVoiceTurn=async function(input:any){
+   f.sends++;f.replySignal=input.signal;
+   await new Promise<void>(resolve=>input.signal.addEventListener('abort',()=>resolve(),{once:true}));
+   input.signal.throwIfAborted();throw Error('unreachable');
+  };
+ });
+ await page.getByRole('button',{name:'Open conversation',exact:true}).click();
+ await page.getByRole('button',{name:'Talk',exact:true}).click();
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ await utterance(page);
+ await expect.poll(()=>page.evaluate(()=>(window as any).chatVoiceFixture.sends)).toBe(1);
+ await page.evaluate(()=>{void (window as any).chatVoiceFixture.shell.send('Typed while voice replies');});
+ await expect.poll(()=>page.evaluate(()=>(window as any).chatVoiceFixture.replySignal.aborted)).toBe(true);
+ await expect(voice(page)).toHaveCount(0);
+ await noMedia(page);
+});
+
 // The Home pill is the hidden-chat voice surface off the Cloud route; Cloud speech opens the sheet
 // (voice-adapter startVoice). A refused Cloud request holds this account on on-device speech
 // (voice-selection noteNetworkSpeechFailure): the account stays signed in and the fixture's
@@ -86,29 +144,13 @@ test('the recorded-clip conversation shows no interruption notice and records it
  await noMedia(page);
 });
 test('explicit voice API with a retained draft uses auto-send without a review step',async({page})=>{
- await setup(page);expect(await page.evaluate(async()=>(await import('/src/runtime/voice-selection.ts')).voiceSendPolicy())).toBe('auto-send');
+ await setup(page);
  await page.evaluate(()=>new Promise<void>(resolve=>(window as any).chatVoiceFixture.shell.setState({draft:'Existing unsent draft'},resolve)));
  await startWithRetainedDraft(page);await expect(voice(page)).toHaveAttribute('data-voice-state','listening');await expect(voice(page)).toContainText('Listening');expect(await page.evaluate(()=>(window as any).chatVoiceFixture.sends)).toBe(0);
  await utterance(page);await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
  await expect(voice(page).getByRole('button',{name:'Send voice message',exact:true})).toHaveCount(0);await expect(voice(page).getByRole('textbox',{name:'Review transcript',exact:true})).toHaveCount(0);
  expect(await page.evaluate(()=>{const f=(window as any).chatVoiceFixture;return {sends:f.sends,sent:f.sent};})).toEqual({sends:1,sent:'Synthetic Cloud transcript'});
  await voice(page).getByRole('button',{name:'Stop voice conversation',exact:true}).click();expect(await page.evaluate(()=>(window as any).chatVoiceFixture.shell.S().draft)).toBe('Existing unsent draft');await noMedia(page);
-});
-test('explicit voice API with a retained draft holds review for edited Send or zero-send Discard',async({page})=>{
- await setup(page);expect(await page.evaluate(async()=>(await import('/src/runtime/voice-selection.ts')).setVoiceSendPolicyForTests('review'))).toBe(true);
- await page.evaluate(()=>new Promise<void>(resolve=>(window as any).chatVoiceFixture.shell.setState({draft:'Existing unsent draft'},resolve)));
- await startWithRetainedDraft(page);await expect(voice(page)).toHaveAttribute('data-voice-state','listening');await expect(voice(page)).toContainText('Listening');expect(await page.evaluate(()=>(window as any).chatVoiceFixture.sends)).toBe(0);
- await utterance(page);await expect(voice(page)).toHaveAttribute('data-voice-state','review');
- await expect(voice(page).getByRole('button',{name:'Stop voice conversation',exact:true})).toBeEnabled();await expect(voice(page).getByRole('button',{name:'Microphone off',exact:true})).toBeDisabled();
- const review=voice(page).getByRole('textbox',{name:'Review transcript',exact:true});await expect(review).toHaveValue('Synthetic Cloud transcript');await expect(voice(page).getByText('Review',{exact:true})).toBeVisible();
- expect(await page.evaluate(()=>(window as any).chatVoiceFixture.sends)).toBe(0);
- await review.fill('   ');await expect(voice(page).getByRole('button',{name:'Send voice message',exact:true})).toBeDisabled();
- await review.fill('Edited Cloud words');await voice(page).getByRole('button',{name:'Send voice message',exact:true}).click();await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
- expect(await page.evaluate(()=>{const f=(window as any).chatVoiceFixture;return {sends:f.sends,sent:f.sent};})).toEqual({sends:1,sent:'Edited Cloud words'});
- await page.evaluate(()=>(window as any).chatVoiceFixture.finishPlayback());await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
- await utterance(page);await expect(voice(page)).toHaveAttribute('data-voice-state','review');await voice(page).getByRole('button',{name:'Discard voice message',exact:true}).click();
- await expect(voice(page)).toHaveCount(0);await expect(page.getByRole('textbox',{name:/^(Ask|Message) Alpha$/})).toBeVisible();
- expect(await page.evaluate(()=>{const f=(window as any).chatVoiceFixture;return {sends:f.sends,uploads:f.uploads,active:f.active,draft:f.shell.S().draft};})).toEqual({sends:1,uploads:2,active:null,draft:'Existing unsent draft'});await noMedia(page);
 });
 test('minimize returns the same owned capture to compact pill; explicit Stop retires media',async({page})=>{await setup(page);await onDeviceRoute(page);await page.evaluate(()=>(window as any).chatVoiceFixture.shell.setState({chat:'hidden',draft:'Keep this draft'}));await page.getByRole('button',{name:'Talk',exact:true}).click();await expect(page.locator('[data-alpha-pill-voice]')).toBeVisible();expect(await page.evaluate(()=>(window as any).chatVoiceFixture.shell.S().chat)).toBe('hidden');await expect.poll(()=>page.evaluate(()=>(window as any).chatVoiceFixture.shell.swallowed())).toBe(false);await page.locator('[data-alpha-pill-voice]').getByRole('button',{name:'Open conversation',exact:true}).click();await expect(voice(page)).toHaveAttribute('data-voice-state','listening');await page.getByRole('button',{name:'Minimize chat',exact:true}).click();await expect(page.locator('[data-alpha-pill-voice]')).toBeVisible();expect(await page.evaluate(()=>{const f=(window as any).chatVoiceFixture;return {chat:f.shell.S().chat,draft:f.shell.S().draft,active:f.active,starts:f.starts,sends:f.sends};})).toEqual({chat:'hidden',draft:'Keep this draft',active:'synthetic-clip-1',starts:1,sends:0});await page.locator('[data-alpha-pill-voice]').getByRole('button',{name:'Stop voice conversation',exact:true}).click();await expect.poll(()=>page.evaluate(()=>(window as any).chatVoiceFixture.active)).toBe(null);await expect(page.locator('[data-alpha-pill-voice]')).toHaveCount(0);expect(await page.evaluate(()=>(window as any).chatVoiceFixture.starts)).toBe(1);await noMedia(page);});
 test('account change discards held ASR and never resumes it',async({page})=>{await setup(page);await page.evaluate(()=>(window as any).chatVoiceFixture.holdTranscript=true);await page.getByRole('button',{name:'Talk',exact:true}).click();await expect(voice(page)).toHaveAttribute('data-voice-state','listening');await utterance(page);await expect(voice(page)).toHaveAttribute('data-voice-state','transcribing');await page.evaluate(async()=>{const f=(window as any).chatVoiceFixture;f.owner='b';(await import('/src/runtime/connection-ui.tsx')).connectionController.close();});await expect(voice(page)).toHaveCount(0);await page.evaluate(()=>(window as any).chatVoiceFixture.releaseTranscript());expect(await page.evaluate(()=>(window as any).chatVoiceFixture.sends)).toBe(0);await noMedia(page);});
@@ -123,6 +165,43 @@ for(const theme of ['light','dark'])test(`compact chat header and voice controls
   await page.screenshot({path:info.outputPath('chat-voice-'+theme+'-'+detent+'.png'),animations:'disabled'});
  }
  await page.getByRole('button',{name:'Minimize chat',exact:true}).click();await noMedia(page);
+});
+
+// Voice owns the open sheet, a Talk conversation and dictation alike: dragging its handle up or down
+// neither moves the voice controls nor draws the text composer or the bar under them, and voice
+// outlives the release. Once voice stops, the same drag resizes the chat.
+const sheetVoice={
+ Talk:{region:'Voice conversation',state:'listening',stop:'Stop voice conversation',start:(page:Page)=>page.getByRole('button',{name:'Talk',exact:true}).click()},
+ // Dictation records in the open sheet through the component API (there is no chat dictation
+ // button); the synthetic port reports this browser's speech ready, so the recording runs.
+ dictation:{region:'Voice transcription',state:'recording',stop:'Discard transcription',start:async(page:Page)=>{
+  await page.getByRole('button',{name:'Open conversation',exact:true}).click();await expect.poll(()=>page.evaluate(()=>(window as any).chatVoiceFixture.shell.S().chat)).toBe('sheet');
+  await page.evaluate(async()=>{const {BrowserVoice}=await import('/src/browser/voice.ts');BrowserVoice.prototype.localSpeechStatus=async()=>({ready:true,execution:'browser'}) as any;(window as any).chatVoiceFixture.shell.startTranscription();});
+ }},
+};
+for(const [mode,owner] of Object.entries(sheetVoice))test(`dragging the chat during ${mode} keeps the voice controls in place; after it the drag resizes the chat`,async({page},info)=>{
+ const recorder=page.getByRole('region',{name:owner.region,exact:true});
+ await setup(page);await owner.start(page);await expect(recorder).toHaveAttribute('data-voice-state',owner.state);await settled(page);
+ const shown=()=>page.evaluate(()=>{const panel=document.querySelector('[data-alpha-layer="conversation"]')!,recorder=panel.querySelector('[data-alpha-chat-recorder]')?.getBoundingClientRect();
+  return {chat:(window as any).chatVoiceFixture.shell.S().chat,height:Math.round(panel.getBoundingClientRect().height),voiceTop:recorder?Math.round(recorder.top):null,voiceBottom:recorder?Math.round(recorder.bottom):null,
+   textComposers:document.querySelectorAll('textarea[data-alpha-composer]').length,bars:document.querySelectorAll('[data-alpha-input-bar]').length,pills:document.querySelectorAll('[data-alpha-layer="pill"]').length};});
+ const capture=()=>page.evaluate(()=>{const f=(window as any).chatVoiceFixture;return {active:f.active,starts:f.starts,cancels:f.cancels};});
+ const frames=()=>page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))));
+ const handle=async()=>{const box=(await page.getByRole('button',{name:'Resize chat',exact:true}).boundingBox())!;return {x:box.x+box.width/2,y:box.y+box.height/2};};
+ const pinned=await shown(),recording=await capture();expect(pinned).toMatchObject({chat:'sheet',textComposers:0,bars:0,pills:0});expect(pinned.voiceTop).not.toBeNull();expect(recording.active).not.toBeNull();
+ let {x,y}=await handle();await page.mouse.move(x,y);await page.mouse.down();
+ for(const dy of [-160,160]){await page.mouse.move(x,y+dy,{steps:8});await frames();expect(await shown(),`${mode} held through a drag to ${dy}px`).toEqual(pinned);}
+ await page.screenshot({path:info.outputPath(`${mode}-drag-held.png`),animations:'disabled'});
+ // Released over the transcript, away from the handle, so no click on the handle follows.
+ await page.waitForTimeout(160);await page.mouse.up();await settled(page);
+ expect(await shown()).toEqual(pinned);await expect(recorder).toHaveAttribute('data-voice-state',owner.state);expect(await capture()).toEqual(recording);
+ await recorder.getByRole('button',{name:owner.stop,exact:true}).click();await expect(page.locator('[data-alpha-chat-recorder]')).toHaveCount(0);await settled(page);
+ const text=await shown();expect(text).toMatchObject({chat:'sheet',voiceTop:null,textComposers:1});
+ ({x,y}=await handle());await page.mouse.move(x,y);await page.mouse.down();await page.mouse.move(x,y-160,{steps:8});await frames();
+ const dragging=await shown();expect(dragging.height).toBeGreaterThan(text.height+100);expect(dragging.textComposers).toBe(1);
+ await page.waitForTimeout(160);await page.mouse.up();await settled(page);
+ const released=await shown();expect(['sheet','full']).toContain(released.chat);expect(released.height).toBeGreaterThan(text.height+100);
+ await noMedia(page);
 });
 
 for(const theme of ['light','dark'])test(`paused Notes voice keeps real review and Stop controls visible at compact height: ${theme}`,async({page},info)=>{

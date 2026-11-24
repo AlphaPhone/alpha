@@ -3,8 +3,8 @@
  * MessageThreads.qnt, docs/agentic-comms.md AC-10/13-16/24). The slot holds one pending text with
  * its provenance. An automatic suggestion is only ever offered (faint text in the bar): it is held
  * here but is not the field's text until the owner accepts it. A draft the owner asked Alpha for
- * replaces the slot and keeps the previous text for one Undo. Sending is the owner's tap and the
- * native review, outside this file.
+ * replaces the slot and keeps the previous text for one Undo. Sending is the owner's tap on Send,
+ * outside this file.
  */
 export type DraftState = {
   /** Who wrote the composer text: the owner, an automatic suggestion, or a draft the owner asked Alpha for. */
@@ -76,6 +76,11 @@ export function draftUndone(state: DraftState): DraftState {
   if (!undo) return state;
   if (undo.draft === 'agent') return {...state, draft: 'agent', text: undo.text, base: undo.base ?? null, declined: undo.declined ?? null, suggest: 'idle', ticket: null, undo: null};
   return {...state, draft: undo.draft, text: undo.text, base: null, suggest: 'idle', ticket: null, undo: null};
+}
+/** Discarding an addressed Alpha draft restores any text it displaced and never dispatches it. */
+export function discardAskedDraft(state: DraftState): DraftState {
+  if (state.draft !== 'asked') return state;
+  return state.undo ? draftUndone(state) : {...emptyDraft(), declined:state.declined};
 }
 /**
  * After a confirmed review. Accepted by the phone: the composer clears. `failed`: the draft stays for

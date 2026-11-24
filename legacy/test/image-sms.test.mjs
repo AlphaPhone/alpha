@@ -12,7 +12,7 @@ const status={permissions:{sms:'granted'},subscriptions:[]};
 function fake(overrides={}){let reads=0,stops=0;return {client:{smsSendHistory:async()=>[],status:async()=>status,threadPage:async()=>{reads++;return {rows:[],next:null};},messagePage:async()=>({rows:[],next:null}),requestAccess:async()=>{},observeMessages:async()=>async()=>{stops++;},...overrides},get reads(){return reads;},get stops(){return stops;}};}
 test('off-image no provider call; background clears memory and stops observer',async()=>{const f=fake(),s=createSmsSession(f.client,false,()=>{});s.setActive(true);await tick();assert.equal(f.reads,0);const a=createSmsSession(f.client,true,()=>{});a.setActive(true);await tick();assert.equal(f.reads,1);a.setActive(false);await tick();assert.equal(f.stops,1);assert.equal(a.state.status,null);assert.deepEqual(a.state.threads,[]);});
 test('old visit rejection cannot erase fresh provider rows',async()=>{let reject,read=0;const f=fake({threadPage:()=>++read===1?new Promise((_,r)=>reject=r):Promise.resolve({rows:[{id:'thread:2'}],next:null})}),s=createSmsSession(f.client,true,()=>{});s.setActive(true);await tick();s.setActive(false);s.setActive(true);await tick();reject(Error('permission revoked in old visit'));await tick();assert.deepEqual(s.state.threads,[{id:'thread:2'}]);s.setActive(false);});
-test('permission denial and provider unavailability are distinct from empty; next cursor is forwarded',async()=>{let cursors=[];const f=fake({threadPage:async cursor=>{cursors.push(cursor);return {rows:[{id:'thread:3'}],next:cursor?null:'10:thread:3'};}}),s=createSmsSession(f.client,true,()=>{});s.setActive(true);await tick();await s.refresh(true);assert.deepEqual(cursors,[undefined,'10:thread:3']);s.setActive(false);const denied=createSmsSession(fake({status:async()=>({permissions:{sms:'denied'}})}).client,true,()=>{});denied.setActive(true);await tick();assert.match(denied.state.message,/not been granted/);denied.setActive(false);const broken=createSmsSession(fake({threadPage:async()=>{throw Error('null provider');}}).client,true,()=>{});broken.setActive(true);await tick();assert.match(broken.state.message,/could not be read completely/);assert.notEqual(broken.state.message,'No messages found.');broken.setActive(false);assert.match(receiptLabel('submitted'),/not confirmed/);assert.match(receiptLabel('unknown'),/Check the recipient/);});
+test('permission denial and provider unavailability are distinct from empty; next cursor is forwarded',async()=>{let cursors=[];const f=fake({threadPage:async cursor=>{cursors.push(cursor);return {rows:[{id:'thread:3'}],next:cursor?null:'10:thread:3'};}}),s=createSmsSession(f.client,true,()=>{});s.setActive(true);await tick();await s.refresh(true);assert.deepEqual(cursors,[undefined,'10:thread:3']);s.setActive(false);const denied=createSmsSession(fake({status:async()=>({permissions:{sms:'denied'}})}).client,true,()=>{});denied.setActive(true);await tick();assert.match(denied.state.message,/not been granted/);denied.setActive(false);const broken=createSmsSession(fake({threadPage:async()=>{throw Error('null provider');}}).client,true,()=>{});broken.setActive(true);await tick();assert.match(broken.state.message,/could not be read completely/);assert.notEqual(broken.state.message,'No messages found.');broken.setActive(false);assert.match(receiptLabel('submitted'),/not confirmed/);assert.match(receiptLabel('unknown'),/check before sending again/i);});
 test('thread switches reject delayed prior thread reads',async()=>{let resolve;const f=fake({messagePage:async id=>id==='thread:1'?new Promise(r=>resolve=r):{rows:[{id:'sms:2'}],next:null}}),s=createSmsSession(f.client,true,()=>{});s.setActive(true);await tick();s.openThread('thread:1');await tick();s.openThread('thread:2');await tick();resolve({rows:[{id:'sms:1'}],next:null});await tick();assert.deepEqual(s.state.rows,[{id:'sms:2'}]);s.setActive(false);});
 
 test('a native sent receipt refreshes the open provider thread without a content notification',async()=>{
@@ -103,7 +103,7 @@ test('Cancel, denial and native refusals let Send review again; Back and the pic
   assert.equal(views.messages.back({},{}),true,'Back in a conversation stays in Messages');assert.equal(shellBack,1);
   assert.equal(model().nativeInThread,false);assert.equal(model().nativeBody,'hello');assert.equal(model().nativeRecipients,'+15555550100');
 
-  model().nativeAttach();globalThis.document.hidden=true;visibility();
+  model().attachmentMenu.media();globalThis.document.hidden=true;visibility();
   assert.equal(model().nativeBody,'hello','the chooser hiding the page keeps the draft');
   inputs[0].files=[{type:'image/jpeg',size:3,arrayBuffer:async()=>new Uint8Array([1,2,3]).buffer}];await inputs[0].onchange();
   globalThis.document.hidden=false;visibility();
@@ -137,11 +137,11 @@ test('a reviewed MMS carries the picked pictures, keeps its operation ID when un
   const views={messages:{}};installSmsAdapter(Component,views);const owner=new Component();owner.componentDidMount();await tick();await tick();
   assert.deepEqual(globalThis.__mmsFixture.profiles,[globalThis.__mmsFixture.port],'the image client the adapter uses is the shared Messages and Phone profile');
   const model=()=>views.messages.render();model().nativeSims[0].pick();
-  assert.equal(model().nativeMmsAvailable,true);
+  assert.equal(typeof model().attachmentMenu?.media,'function');
   model().nativeSendMms();await tick();await tick();assert.equal(calls.length,0,'an invalid draft is refused before native review');assert.match(model().nativeNotice,/at least one phone number/);
-  model().nativeAttach();inputs[0].files=[file('image/webp',[1])];await inputs[0].onchange();assert.match(model().nativeNotice,/JPEG, PNG and GIF/);assert.equal(model().nativeAttachments.length,0);
+  model().attachmentMenu.media();inputs[0].files=[file('image/webp',[1])];await inputs[0].onchange();assert.match(model().nativeNotice,/JPEG, PNG and GIF/);assert.equal(model().nativeAttachments.length,0);
   model().nativeOnRecipients({target:{value:'+15555550100, +15555550101'}});model().nativeOnBody({target:{value:'hi all'}});
-  model().nativeAttach();inputs[1].files=[file('image/jpeg',[1,2,3]),file('image/png',[4,5])];await inputs[1].onchange();
+  model().attachmentMenu.media();inputs[1].files=[file('image/jpeg',[1,2,3]),file('image/png',[4,5])];await inputs[1].onchange();
   assert.deepEqual(model().nativeAttachments.map(row=>row.label),['picture-1.jpg · 1 KB','picture-2.png · 1 KB']);
   model().nativeSendMms();await tick();await tick();assert.equal(calls.length,1);
   assert.deepEqual(calls[0].review.recipients,['+15555550100','+15555550101']);assert.deepEqual(calls[0].review.attachments.map(a=>[a.name,a.contentType,[...a.bytes]]),[['picture-1.jpg','image/jpeg',[1,2,3]],['picture-2.png','image/png',[4,5]]]);
@@ -158,7 +158,7 @@ test('a reviewed MMS carries the picked pictures, keeps its operation ID when un
   assert.equal(reads[1].review,calls[0].review,'the result is bound to the reviewed content');
   assert.equal(model().nativeNotice,'','successful read-back shows no status text');
   assert.equal(model().nativeAttachments.length,0,'a sent MMS clears the composer and its pictures');assert.equal(model().nativeBody,'');
-  model().nativeOnBody({target:{value:'one more'}});model().nativeAttach();inputs[2].files=[file('image/png',[4,5])];await inputs[2].onchange();assert.deepEqual(model().nativeAttachments.map(row=>row.label),['picture-1.png · 1 KB']);model().nativeSendMms();await tick();await tick();assert.notEqual(calls[2].operationId,calls[0].operationId,'a changed draft is a new review');
+  model().nativeOnBody({target:{value:'one more'}});model().attachmentMenu.media();inputs[2].files=[file('image/png',[4,5])];await inputs[2].onchange();assert.deepEqual(model().nativeAttachments.map(row=>row.label),['picture-1.png · 1 KB']);model().nativeSendMms();await tick();await tick();assert.notEqual(calls[2].operationId,calls[0].operationId,'a changed draft is a new review');
   pending[2].resolve({status:'cancelled'});await tick();await tick();assert.equal(model().nativeNotice,'','cancellation shows no status text');
   assert.equal(model().nativeBody,'one more','cancellation preserves the draft');
   model().nativeClear();assert.equal(model().nativeAttachments.length,0);
@@ -252,7 +252,7 @@ test('durable native drafts survive remount and settle a late receipt for the ex
   let owner=await mount();
   await open(0);type('first draft');await flush(owner);
   model().nativeBack();await settle();await open(1);type('picture draft');
-  model().nativeAttach();inputs[0].files=[{type:'image/png',size:3,arrayBuffer:async()=>new Uint8Array([1,2,3]).buffer}];
+  model().attachmentMenu.media();inputs[0].files=[{type:'image/png',size:3,arrayBuffer:async()=>new Uint8Array([1,2,3]).buffer}];
   await inputs[0].onchange();await flush(owner);
   owner.componentWillUnmount();
 

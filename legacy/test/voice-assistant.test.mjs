@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 
 // Voice assistant controller (apps/app/src/runtime/voice-assistant.ts, #423): endpointing,
 // generations, closed-input busy holds, explicit interruption, heard-content accounting, account change, and the live segment stream
-// it listens through (live-segment-stream.ts). Fake clock, capture, agent and speaker.
+// it listens through (live-voice-session.ts). Fake clock, capture, agent and speaker.
 const {VoiceAssistantSession, splitSpokenSentences, ASSISTANT_TIMING_DEFAULTS} = await import('../apps/app/src/runtime/voice-assistant.ts');
-const {createLiveSegmentStream} = await import('../apps/app/src/runtime/live-segment-stream.ts');
+const {createLiveSegmentStream} = await import('../.eliza/client-features/packages/voice/src/live-voice-session.ts');
 
 function fakeClock() {
   let now = 0, id = 0;

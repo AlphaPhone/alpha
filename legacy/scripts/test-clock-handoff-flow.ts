@@ -4,11 +4,12 @@ import vm from 'node:vm';
 import {prototypeScript} from './fixtures/prototype-script.ts';
 import {randomUUID} from 'node:crypto';
 import {createInlineModal} from '../apps/app/src/runtime/inline-modal.ts';
-import {currentClockTimeZone,buildClockRequest,describeClockDays} from '../apps/app/src/runtime/clock-contract.ts';
+import {currentClockTimeZone,buildClockRequest,describeClockDays,CLOCK_DAY_NAMES} from '../apps/app/src/runtime/clock-contract.ts';
+import {deviceTimeZone} from '../apps/app/src/lib/civil-date.ts';
 import {clockResultText} from '../apps/app/src/ui/clock/clock-handoff-presentation.ts';
 import type {ClockRequest,ClockResult} from '../apps/app/src/daily.ts';
 import type {ClockHandoffEnvelope} from '../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/clock-handoff-history.ts';
-import {createClockHandoffHistory,clockHandoffLegacyKey,clockHandoffSlot} from '../apps/app/src/runtime/clock-handoff-history.ts';
+import {createClockHandoffHistory,clockHandoffSlot} from '../apps/app/src/runtime/clock-handoff-history.ts';
 const source=await prototypeScript('clock-adapter.ts','installClockAdapter');
 type Review = {text: string; label: string; confirm(): Promise<void>};
 type FieldChange = {target: {value: string}};
@@ -64,7 +65,7 @@ async function fixture(simulated=false){
  }
  let active=true;
  const views: {workflows: WorkflowView}={workflows:{render:()=>({})}};
- vm.runInNewContext(source+'\ninstallClockAdapter(Shell,views,{simulated});',{testMocksEnabled,devSurfacesEnabled:testMocksEnabled,createClockHandoffHistory,clockHandoffLegacyKey,secureConnectionStore,createInlineModal,currentClockTimeZone,buildClockRequest,describeClockDays,clockResultText,DailyApps,Shell,views,simulated,document,window:{addEventListener(){},removeEventListener(){}},queueMicrotask,localStorage,crypto:{randomUUID},Date,Intl,console});
+ vm.runInNewContext(source+'\ninstallClockAdapter(Shell,views,{simulated});',{testMocksEnabled,devSurfacesEnabled:testMocksEnabled,createClockHandoffHistory,secureConnectionStore,createInlineModal,currentClockTimeZone,buildClockRequest,describeClockDays,CLOCK_DAY_NAMES,deviceTimeZone,clockResultText,DailyApps,Shell,views,simulated,document,window:{addEventListener(){},removeEventListener(){}},queueMicrotask,localStorage,crypto:{randomUUID},Date,Intl,console});
  const shell=new Shell();
  shell.componentDidMount();
  const render=()=>views.workflows.render({},{isActive:()=>active});
@@ -110,19 +111,13 @@ response=new Error('lost response');f.clock().prepare();await f.review().confirm
 f.shell.componentWillUnmount();f=await fixture();assert.match(f.clock().message,/Unknown/);assert.equal(writes.length,count,'recreation must not dispatch or retry');
 failStorage=true;f.clock().prepare();await f.review().confirm();assert.equal(writes.length,count);assert.equal(f.clock().message,"Can’t reach Clock");failStorage=false;
 hidden=true;f.clock().prepare();await f.review().confirm();assert.equal(writes.length,count);hidden=false;
-// A mode change during the opening write must also prevent the synthetic handoff.
-f.clock().close();f.open();await settle();f.clock().prepare();
-const blockedOpening=Promise.withResolvers<void>();openingGate=blockedOpening;
-const awaitingOpening=f.review().confirm();await settle();
-document.documentElement.dataset.connectionMode='mock';blockedOpening.resolve();openingGate=undefined;
-await awaitingOpening;document.documentElement.dataset.connectionMode='live';assert.equal(writes.length,count,'a mock request cannot dispatch after its opening write');
 // Leaving the view invalidates even a retained confirmation callback.
 f.clock().prepare();const departed=f.review(),staleOpener=required(f.render().openClock);f.leave();await departed.confirm();assert.equal(writes.length,count);assert.equal(f.render().clock,null);assert.equal(f.shell.clockSelection(),undefined);
 staleOpener();assert.equal(f.render().clock,null,'an opener from a departed Workflows visit cannot create a Clock draft');
 f.enter();staleOpener();assert.equal(f.render().clock,null,'returning to Workflows cannot revive an old opener');
 f.open();assert.equal(f.clock().review,null);
-// Both startup mock and a mode switch during review prevent the native call.
-// Without ELIZA_DEV_ALLOW_TEST_MOCKS there is no simulation: a mock request fails closed.
-for(const startupMock of [true,false]){const mock=await fixture(startupMock);mock.clock().prepare();document.documentElement.dataset.connectionMode='mock';const review=mock.review();assert.equal(review.label,testMocksEnabled?'Simulate Clock request':'Open Clock');await review.confirm();assert.equal(writes.length,count);assert.match(mock.clock().message,testMocksEnabled?/simulated/i:/Offline/);mock.shell.componentWillUnmount();document.documentElement.dataset.connectionMode='live';}
+// Both startup mock and mock mode during review prevent the native call. Mock mode is fixed at load and
+// admitted only with ELIZA_DEV_ALLOW_TEST_MOCKS (main.tsx), so a build without test mocks never reaches it.
+if(mockBuild)for(const startupMock of [true,false]){const mock=await fixture(startupMock);mock.clock().prepare();document.documentElement.dataset.connectionMode='mock';const review=mock.review();assert.equal(review.label,'Simulate Clock request');await review.confirm();assert.equal(writes.length,count);assert.match(mock.clock().message,/simulated/i);mock.shell.componentWillUnmount();document.documentElement.dataset.connectionMode='live';}
 }
-console.log('PASS actual Clock adapter flow: review/snapshot, invalid input, duplicate taps, all four operations, no handler, response loss/recreation, storage failure, foreground and mock isolation, with and without ELIZA_DEV_ALLOW_TEST_MOCKS. Native boundary is synthetic.');
+console.log('PASS actual Clock adapter flow: review/snapshot, invalid input, duplicate taps, all four operations, no handler, response loss/recreation, storage failure, foreground and mock isolation, with and without ELIZA_DEV_ALLOW_TEST_MOCKS (mock mode only with it). Native boundary is synthetic.');

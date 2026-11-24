@@ -3,16 +3,24 @@ package com.android.provision;
 import android.app.Activity;
 import android.app.admin.DevicePolicyManager;
 import android.content.Context;
+import android.content.om.OverlayInfo;
+import android.content.om.OverlayManager;
 import android.content.pm.ApplicationInfo;
 import android.os.Process;
+import android.os.UserHandle;
 import android.os.UserManager;
 import android.provider.Settings;
+import android.util.Log;
 import android.view.inputmethod.InputMethodInfo;
 import android.view.inputmethod.InputMethodManager;
 import java.util.Objects;
 
+import static com.android.provision.AlphaFreshSetupPolicy.nonempty;
+
 /** Privileged Provision adapter; never invoked for a completed or enterprise provisioning branch. */
 final class AlphaFreshPresets {
+    private static final String GESTURE_OVERLAY = "com.android.internal.systemui.navbar.gestural";
+    private static final String NAVIGATION_CATEGORY = "com.android.internal.navigation_bar_mode";
     private AlphaFreshPresets() {}
     static boolean shouldRunWelcome(Context context) {
         try {
@@ -38,6 +46,50 @@ final class AlphaFreshPresets {
                     policy.getDeviceOwnerComponentOnCallingUser() != null || users.isManagedProfile(),
                     Process.myUserHandle().isSystem());
         } catch (IllegalStateException | SecurityException unavailable) { return false; }
+    }
+
+    static boolean applyPalette(Context context) {
+        // Android's existing theme engine owns colors, contrast, light/dark and control states.
+        return Settings.Secure.putString(context.getContentResolver(),
+                Settings.Secure.THEME_CUSTOMIZATION_OVERLAY_PACKAGES,
+                "{\"android.theme.customization.system_palette\":\"0000FF\","
+                + "\"android.theme.customization.accent_color\":\"0000FF\","
+                + "\"android.theme.customization.theme_style\":\"TONAL_SPOT\","
+                + "\"android.theme.customization.color_source\":\"preset\"}");
+    }
+
+    static void defaultToGestureNavigation(Activity activity) {
+        final OverlayManager overlays = activity.getSystemService(OverlayManager.class);
+        if (overlays == null) return;
+        final UserHandle user = Process.myUserHandle();
+        try {
+            AlphaFreshSetupPolicy.NavigationResult result = AlphaFreshSetupPolicy.ensureNavigation(
+                    new AlphaFreshSetupPolicy.NavigationPort() {
+                        public boolean eligible() { return AlphaFreshPresets.eligible(activity); }
+                        public boolean hasEnabledMode() {
+                            for (OverlayInfo info : overlays.getOverlayInfosForTarget("android", user)) {
+                                if (NAVIGATION_CATEGORY.equals(info.category) && info.isEnabled()) return true;
+                            }
+                            return false;
+                        }
+                        public boolean selectGesturesIfUnchosen() {
+                            final OverlayInfo gestures = overlays.getOverlayInfo(GESTURE_OVERLAY, user);
+                            if (gestures == null || !"android".equals(gestures.targetPackageName)
+                                    || !NAVIGATION_CATEGORY.equals(gestures.category)
+                                    || !eligible() || hasEnabledMode()) return false;
+                            // Select the stock overlay so Android owns the gesture zones and dimensions.
+                            overlays.setEnabledExclusiveInCategory(GESTURE_OVERLAY, user);
+                            final OverlayInfo selected = overlays.getOverlayInfo(GESTURE_OVERLAY, user);
+                            return selected != null && selected.isEnabled();
+                        }
+                    });
+            if (result == AlphaFreshSetupPolicy.NavigationResult.FAILED) {
+                Log.w("AlphaFreshPresets", "Gesture navigation default was not applied.");
+            }
+        } catch (IllegalStateException | SecurityException failure) {
+            // The system's button navigation remains available if this image cannot select gestures.
+            Log.w("AlphaFreshPresets", "Gesture navigation default was unavailable.", failure);
+        }
     }
 
     static AlphaFreshSetupPolicy.ImeResult ensureKeyboard(Activity activity) {
@@ -74,5 +126,4 @@ final class AlphaFreshPresets {
             return AlphaFreshSetupPolicy.ImeResult.FAILED;
         }
     }
-    private static boolean nonempty(String value) { return value != null && !value.isEmpty(); }
 }

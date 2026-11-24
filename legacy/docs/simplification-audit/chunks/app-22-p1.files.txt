@@ -1,0 +1,1 @@
+apps/app/src/runtime/connection-ui.tsx  (ONLY lines 1-2103; write your report to docs/simplification-audit/files/apps/app/src/runtime/connection-ui.tsx.part1.md)

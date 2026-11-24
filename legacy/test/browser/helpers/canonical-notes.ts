@@ -5,7 +5,11 @@ import {expect,type Page} from '@playwright/test';
  * Setting `canonicalNotesFixture.delay` (ms) holds every later response that long, like a slow link.
  * Setting `canonicalNotesFixture.dictation` to a list of transcripts answers the platform speech
  * recognition (DailyApps voice) with them in order, counted in `heard`; unset, the browser build's
- * own answer (no recognition) stands. */
+ * own answer (no recognition) stands.
+ * Unset, `canonicalNotesFixture.recordingCleanup` makes the recording-cleanup routes fail, as an agent
+ * whose Trash keeps notes until restored does. Set to a list of receipts, they are served, and a
+ * completion is accepted only once this phone's recording store holds a `purged` receipt for it (an
+ * agent whose host verifies the erase); each completion is logged in `completions` with that status. */
 export async function canonicalNotesFixture(page:Page,{path='/',notes=[],trash=[],failReads=false}:{path?:string;notes?:unknown[];trash?:unknown[];failReads?:boolean}={}){
  const foreign:string[]=[],errors:string[]=[];
  page.on('pageerror',error=>errors.push(error.message));
@@ -13,12 +17,17 @@ export async function canonicalNotesFixture(page:Page,{path='/',notes=[],trash=[
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.goto(path);
  await preloadPageModules(page,['/src/runtime/connection-ui.tsx','/src/prototype/canonical-notes-controller.ts','/src/browser/daily.ts']);
+ await page.waitForFunction(()=>{
+  const state=(window as any).__alphaModules['/src/runtime/connection-ui.tsx'].connectionController.getSnapshot();
+  return state.startupResolved&&!state.busy;
+ });
  await page.evaluate(async({notes,trash,failReads})=>{
-  const {connectionController:c}=await import('/src/runtime/connection-ui.tsx');
+  const loaded=(window as any).__alphaModules;
+  const {connectionController:c}=loaded['/src/runtime/connection-ui.tsx'];
   const f=(window as any).canonicalNotesFixture={state:{notes,trash,revision:notes.length||trash.length?1:0},requests:[],otherRequests:[],fail:false,failReads,failAfterApplied:false};
   f.acceptedReads=[];
   // Observe the SAME canonical class used by the real UI; never replace its controller.
-  const {CanonicalNotesController}=await import('/src/prototype/canonical-notes-controller.ts');
+  const {CanonicalNotesController}=loaded['/src/prototype/canonical-notes-controller.ts'] as typeof import('/src/prototype/canonical-notes-controller.ts');
   const refresh=CanonicalNotesController.prototype.refresh;
   CanonicalNotesController.prototype.refresh=async function(this:InstanceType<typeof CanonicalNotesController>){
    const result=await refresh.call(this);
@@ -28,7 +37,7 @@ export async function canonicalNotesFixture(page:Page,{path='/',notes=[],trash=[
    }
    return result;
   };
-  const {BrowserDaily}=await import('/src/browser/daily.ts'),perform=BrowserDaily.prototype.perform;
+  const {BrowserDaily}=loaded['/src/browser/daily.ts'],perform=BrowserDaily.prototype.perform;
   BrowserDaily.prototype.perform=async function(input:any){if(input?.action!=='voice'||!f.dictation)return perform.call(this,input);f.heard=(f.heard??0)+1;return {status:'selected',action:'voice',transcript:f.dictation.shift()??''};};
   const identity={ownerId:'canonical-fixture-owner',agentId:'canonical-fixture-agent',sessionId:'canonical-fixture-session',origin:location.origin};
   c.getAppRecordClient=()=>({sessionId:identity.sessionId,identity,current:()=>true,request:async(path:string,method:string,body:any,signal:AbortSignal)=>{
@@ -36,6 +45,17 @@ export async function canonicalNotesFixture(page:Page,{path='/',notes=[],trash=[
    if(path.startsWith('/api/lifeops/calendar')){f.otherRequests.push({path,method});throw Error('Calendar is outside this closed Notes fixture');}
    f.requests.push({path,method,body:structuredClone(body)});
    if(path==='/api/notes/state'&&method==='GET'){if(f.failReads)throw Error('Closed canonical fixture read failure');return {success:true,data:structuredClone(f.state)};}
+   if(path.startsWith('/api/notes/trash/')&&!f.recordingCleanup)throw Error('Closed canonical fixture keeps Trash until restored');
+   if(path==='/api/notes/trash/recordings'&&method==='GET')return {success:true,data:structuredClone(f.recordingCleanup)};
+   if(path==='/api/notes/trash/recordings/complete'&&method==='POST'){
+    const {registerPlugin}=await import('/src/platform-plugins.ts');
+    const status=await registerPlugin<any>('AlphaNoteAudio').deletionStatus({audioId:body.audioId,noteId:body.noteId,operationId:body.operationId}).then((receipt:any)=>receipt.status,()=>'unavailable');
+    (f.completions??=[]).push({receipt:structuredClone(body),status});
+    if(status!=='purged')throw Error('The device has not confirmed recording erase.');
+    const index=f.recordingCleanup.findIndex((pending:any)=>JSON.stringify(pending)===JSON.stringify(body));
+    if(index>=0)f.recordingCleanup.splice(index,1);
+    return {success:true,data:{acknowledged:index>=0}};
+   }
    if(path!=='/api/views/notes/interact'||method!=='POST')throw Error('Unexpected canonical Notes fixture request');
    if(f.fail)throw Error('Closed canonical fixture save failure');
    const {capability,params={}}=body;let note:any;const now=new Date().toISOString();

@@ -62,9 +62,10 @@ export function createImagePreview(close:()=>void){
    else if(event.key==='-'){event.preventDefault();zoom(scale/1.5);}
    else if(event.key==='0'){event.preventDefault();reset();}
   };
-  container.addEventListener('pointerdown',down);container.addEventListener('pointermove',move);container.addEventListener('pointerup',up);container.addEventListener('pointercancel',cancel);
-  container.addEventListener('click',click);container.addEventListener('dblclick',doubleClick);container.addEventListener('wheel',wheel,{passive:false});container.addEventListener('keydown',key);image.addEventListener('load',reset);
+  const listeners=new AbortController(),signal=listeners.signal;
+  container.addEventListener('pointerdown',down,{signal});container.addEventListener('pointermove',move,{signal});container.addEventListener('pointerup',up,{signal});container.addEventListener('pointercancel',cancel,{signal});
+  container.addEventListener('click',click,{signal});container.addEventListener('dblclick',doubleClick,{signal});container.addEventListener('wheel',wheel,{passive:false,signal});container.addEventListener('keydown',key,{signal});image.addEventListener('load',reset,{signal});
   const resize=new ResizeObserver(apply);resize.observe(viewport);apply();
-  dispose=()=>{resize.disconnect();container.removeEventListener('pointerdown',down);container.removeEventListener('pointermove',move);container.removeEventListener('pointerup',up);container.removeEventListener('pointercancel',cancel);container.removeEventListener('click',click);container.removeEventListener('dblclick',doubleClick);container.removeEventListener('wheel',wheel);container.removeEventListener('keydown',key);image.removeEventListener('load',reset);pointers.clear();};
+  dispose=()=>{resize.disconnect();listeners.abort();pointers.clear();};
  }};
 }

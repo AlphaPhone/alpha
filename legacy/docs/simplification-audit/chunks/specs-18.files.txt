@@ -1,0 +1,2 @@
+specs/quint/legacy/sign-in/check-sign-in-refinement.mjs
+specs/quint/legacy/view-refresh-configurations.json

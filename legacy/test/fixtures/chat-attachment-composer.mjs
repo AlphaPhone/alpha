@@ -4,11 +4,14 @@ import {fileURLToPath} from 'node:url';
 import {runInNewContext} from 'node:vm';
 import {stripTypeScriptTypes} from '../support/strip-types.mjs';
 import {storedChatFiles} from '../../apps/app/src/prototype/chat-attachment-files.ts';
+import {residentDraftOwner,residentRestartDraftScope} from '../../apps/app/src/prototype/assistant-draft-controller.ts';
 import {recordingRevision,summarySourceOf} from '../../.eliza/client-features/plugins/plugin-files/src/documents/source-links.ts';
 
 const adapter = new URL('../../apps/app/src/prototype/agent-adapter.ts', import.meta.url);
 export const chatAttachmentComposerSources = [import.meta.url, adapter,
   new URL('../../apps/app/src/prototype/chat-attachment-files.ts', import.meta.url),
+  new URL('../../apps/app/src/prototype/assistant-draft-controller.ts', import.meta.url),
+  new URL('../../apps/app/src/ui/state/durable-draft-controller.ts', import.meta.url),
   new URL('../../.eliza/client-features/packages/core/src/chat-upload-limits.ts', import.meta.url),
   new URL('../support/strip-types.mjs', import.meta.url),new URL('../../.eliza/client-features/plugins/plugin-files/src/documents/source-links.ts', import.meta.url)].map(fileURLToPath);
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -25,7 +28,6 @@ export function chatAttachmentComposerFixture() {
   const source = readFileSync(adapter, 'utf8');
   const code = stripTypeScriptTypes([
     between(source, 'class NotDispatched extends Error', '\n'),
-    between(source, 'function residentDraftOwner(', '/** One composer send.'),
     between(source, 'function createdFromSlot(', 'function selectedCloudName('),
     'const p = {};', between(source, '  p.send = async function', '  p.agentSay = function'),
     'function installSubscription(){' + between(source, '    this.connectionUnsubscribe = connectionController.subscribe', '    // Canonical is the default;') + '}',
@@ -44,7 +46,7 @@ export function chatAttachmentComposerFixture() {
     conversationId: `conversation-${room}`, automatic: false, messages});
   let session = sessionFor(owner), history = historyFor(session, conversation);
   const key = () => JSON.stringify([session.origin, session.ownerId, session.agentId, history.conversationId]);
-  const snapshot = () => ({session, history, busy: false, open: false, startupResolved: true});
+  const snapshot = () => ({kind:'resident', session, history, busy: false, open: false, startupResolved: true});
   let held, lastHeld = {owner: 0, conversation: 0, generation: 0}, task;
   let holdStorage = false, storageGate, attemptedWrites = 0, sendCalls = 0, acceptNext = false;
   const forbidden = () => assert.fail('Unexpected operation in the closed composer campaign');
@@ -84,7 +86,7 @@ export function chatAttachmentComposerFixture() {
   shell.refreshDraftBinding = () => {shell.composerDraft.binding = key();};
   const ports = {
     storedChatFiles,
-    Error, queueMicrotask, document: {hidden: false, querySelector: () => null},
+    AbortController, Error, queueMicrotask, document: {hidden: false, querySelector: () => null},
     crypto: {randomUUID: () => `request-${++request}`},
     browserDocuments: {
       async edit(name, update) {
@@ -114,6 +116,7 @@ export function chatAttachmentComposerFixture() {
     },
     context() {}, sourceOf: summarySourceOf, recordingRevision, cancelMessageContext() {}, clearMapsSelection() {},
     syncStoppedReplyNotice() {}, syncCanonicalNotes() {}, collapseSystemNotices: rows => rows,
+    residentDraftOwner, residentRestartDraftScope,
     mergeConversationDelivery: rows => rows, settleFirstSendSlot: forbidden,
     NO_AGENT_SEND: 'No agent', RESIDENT_STARTING_NOTICE: 'Starting', RESIDENT_RECOVERING_NOTICE: 'Recovering',
     residentAlwaysPresent: true, agentPendingText: () => 'Starting',

@@ -11,7 +11,6 @@
  * turns never read billing.
  */
 import {
-  allowanceText as sharedAllowanceText,
   describeSubscription as sharedDescribeSubscription,
   redeemFailureMessage as sharedRedeemFailureMessage,
   retryDuration,
@@ -23,7 +22,6 @@ import {
 } from '../ui/cloud/subscription-presentation.ts';
 import {
   isEntitlementSignInFailure,
-  type PlanAllowance,
   type ServiceLimit,
   type SubscriptionView,
 } from '../../../../.eliza/client-features/packages/cloud/sdk/src/subscription-entitlement.ts';
@@ -65,9 +63,6 @@ export function describeSubscription(view: SubscriptionView | null | undefined, 
   };
   return sharedDescribeSubscription(view, alphaSubscriptionCopy(serviceName));
 }
-export function allowanceText(allowance: PlanAllowance | null, now: number = Date.now(), serviceName = 'Cloud'): string {
-  return sharedAllowanceText(allowance, now, alphaSubscriptionCopy(serviceName));
-}
 /** The shared reset time format (month, day, hour, minute). */
 function clock(at: number): string {
   // Device locale and 12/24-hour choice, as every displayed time in Alpha.
@@ -83,7 +78,6 @@ function clock(at: number): string {
  * in the Settings plan detail, beside the plan action; plan, sign-in and Cloud stay distinct (P-43).
  */
 export function serviceLimitMessage(limit: ServiceLimit | null, now: number = Date.now(), serviceName = 'Cloud'): string {
-  const copy = alphaSubscriptionCopy(serviceName);
   if (limit?.kind === 'allowance-exhausted') {
     const reset = limit.resetsAt != null && limit.resetsAt > now
       ? ` · resets ${clock(limit.resetsAt)}`
@@ -91,8 +85,8 @@ export function serviceLimitMessage(limit: ServiceLimit | null, now: number = Da
     return `Limit reached${reset}`;
   }
   if (limit?.kind === 'subscription-required') return 'Plan needed';
-  if (limit?.kind === 'billing-refused') { void copy; return 'Billing declined'; }
-  return sharedServiceLimitMessage(limit, now, copy);
+  if (limit?.kind === 'billing-refused') return 'Billing declined';
+  return sharedServiceLimitMessage(limit, now, alphaSubscriptionCopy(serviceName));
 }
 export function redeemFailureMessage(error: unknown, serviceName = 'Cloud'): string {
   return sharedRedeemFailureMessage(error, alphaSubscriptionCopy(serviceName));
@@ -131,7 +125,7 @@ export function identityReadRefused(error: unknown): boolean {
  * owner asked to sign in. Never whether the agent runs. `attached`: a Cloud connection is held;
  * `verified`: it is the account this admission verified.
  */
-export type ResidentAdmissionOutcome = {
+type ResidentAdmissionOutcome = {
   binding: ResidentAdmission['binding'];
   view: { residentPlanNotice: 'offline' | 'needs-plan' | null; residentSubscription: SubscriptionView | null; planEndsAt: number | null; residentSavedCredential?: false };
   signIn?: 'required' | 'rejected' | 'account-changed';

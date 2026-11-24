@@ -3,14 +3,14 @@ package ai.alphacompute.alphaphone;
 import ai.eliza.auth.cloud.CloudCredentialSlots;
 import ai.eliza.auth.cloud.CloudSignInConfig;
 import ai.eliza.auth.cloud.CloudSignInEnvironment;
-import ai.eliza.auth.cloud.CloudSignInPlugin;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 /**
- * Alpha's registration of the shared native Eliza Cloud sign-in client (elizaOS/eliza
- * packages/auth/android, {@link CloudSignInPlugin}). The client owns email/SMS codes, native Google,
- * MFA, the mobile App Auth tail, acknowledgement resume, replaced-key revocation and readiness. Alpha
- * supplies only its registration: the `ai.alphacompute.alphaphone` App Auth client and its
+ * Alpha's registration of its native Cloud sign-in client ({@link AlphaCloudSignInClient}, Alpha's
+ * fork of elizaOS/eliza packages/auth/android CloudSignInPlugin, so the authorization dialog and
+ * browser launch are Alpha's own). The client owns email/SMS codes, native Google, MFA, the mobile
+ * App Auth tail, acknowledgement resume, replaced-key revocation and readiness. This class supplies
+ * the registration: the `ai.alphacompute.alphaphone` App Auth client and its
  * `/alphaphone/auth/callback` return, the production deployment, its product name, the installed storage names below and its
  * Keystore credential store. The minted key follows the resident's credential-intent rule.
  *
@@ -18,7 +18,7 @@ import com.getcapacitor.annotation.CapacitorPlugin;
  * was; the pending and receipt slots are native-only (RendererCredentialSlots).
  */
 @CapacitorPlugin(name = "AlphaCloudSignIn")
-public final class AlphaCloudSignInPlugin extends CloudSignInPlugin {
+public final class AlphaCloudSignInPlugin extends AlphaCloudSignInClient {
  /** Installed names: compatibility identifiers of existing sign-ins on this phone. */
  static final String PENDING_SLOT = "cloud-signin:v1:pending";
  static final String CALLBACK_PATH = "/alphaphone/auth/callback";

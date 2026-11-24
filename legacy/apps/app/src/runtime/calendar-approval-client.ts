@@ -1,6 +1,6 @@
-import {CALENDAR_APPROVAL_READ_PATH,calendarApprovalFromList,calendarApprovalId,calendarApprovalPending,calendarApprovalResolvePath,parseCalendarApprovalResolution,type CalendarApproval,type CalendarApprovalDecision} from './calendar-approval.ts';
+import {CALENDAR_APPROVAL_READ_PATH,calendarApprovalFromList,calendarApprovalId,calendarApprovalActionable,calendarApprovalPending,calendarApprovalResolvePath,parseCalendarApprovalResolution,type CalendarApproval,type CalendarApprovalDecision} from './calendar-approval.ts';
 
-export interface CalendarApprovalConnection {
+interface CalendarApprovalConnection {
  ownerId:string;
  /** Captured connection, authenticated owner, conversation and foreground admission. */
  current():void;
@@ -23,7 +23,7 @@ export class CalendarApprovalClient {
  }
  async resolve(row:CalendarApproval,decision:CalendarApprovalDecision,signal:AbortSignal){
   const read=this.reads.get(row);
-  if(!read||!calendarApprovalPending(row)||!['approve','reject'].includes(decision))throw Error('Check this Calendar request again before choosing.');
+  if(!read||!(decision==='approve'?calendarApprovalActionable(row):decision==='reject'&&calendarApprovalPending(row)))throw Error('Check this Calendar request again before choosing.');
   signal.throwIfAborted();read.connection.current();
   if(JSON.stringify(row)!==read.bytes)throw Error('This Calendar request changed. Check it again before choosing.');
   // Consume before the first await: a second tap, a lost reply or a cancelled read cannot resend.

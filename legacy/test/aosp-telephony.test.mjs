@@ -26,7 +26,7 @@ test("off the verified image no client method reaches native code", async () => 
   const calls = {
     imageCapability: [], status: [], requestAccess: ["sms"], requestRole: ["sms"], searchContacts: ["Ada"], recentCalls: [],
     dial: ["+15555550100"], composeSms: [{ ...sms, subscriptionId: null }], listThreads: [], listMessages: ["thread:1"],
-    threadPage: [], messagePage: ["thread:1"], observeMessages: [() => {}], markThreadRead: ["thread:1", 1], sendSms: [sms, "op-1"],
+    latestIncomingSender: [], threadPage: [], messagePage: ["thread:1"], observeMessages: [() => {}], markThreadRead: ["thread:1", 1], sendSms: [sms, "op-1"],
     sendMms: [mms, "op-1"], mmsSendResult: [mms, "op-1"], cancelSmsReview: ["op-1"], smsSendHistory: [], smsSendResult: [sms, "op-1"],
     // Calls placed on the owner's tap and carrier voicemail (AP-08): the same refusal off the image.
     placeCall: ["+15555550100"], voicemailStatus: [], listVoicemail: [], fetchVoicemailAudio: ["1"], voicemailAudio: ["1"], voicemailPcm: ["1"],

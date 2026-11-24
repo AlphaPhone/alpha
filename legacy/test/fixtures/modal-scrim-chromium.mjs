@@ -53,7 +53,7 @@ export async function observeModalScrim({onInputs} = {}) {
       await page.clock.pauseAt(new Date('2026-11-08T12:00:01Z'));
       await page.setContent(`<style>${css}</style><div class="os" style="position:fixed;inset:0"><div data-screen style="position:absolute;inset:0">
           <div data-alpha-layer="app" style="position:absolute;inset:0;z-index:10">
-              <button aria-label="Month view" style="position:absolute;top:64px;left:18px">Month view</button>
+              <button aria-label="Choose date" style="position:absolute;top:64px;left:18px">Choose date</button>
               <button id="underlay" style="position:absolute;left:185px;top:278px;width:80px;height:44px">Underlay</button>
           </div>
           <div data-alpha-layer="conversation" style="display:none"></div>
@@ -64,7 +64,7 @@ export async function observeModalScrim({onInputs} = {}) {
       await page.addScriptTag({content:built.outputFiles[0].text});
       await page.evaluate(()=>{
         const phone=document.querySelector('.os'),app=document.querySelector('[data-alpha-layer=app]');
-        const month=app.querySelector('[aria-label="Month view"]'),composer=document.querySelector('[data-alpha-layer=composer]');
+        const month=app.querySelector('[aria-label="Choose date"]'),composer=document.querySelector('[data-alpha-layer=composer]');
         const textbox=composer.querySelector('textarea');
         const seen=[]; let modal,releasePhone,lastPointer,scrim;
         const update=()=>{
@@ -196,7 +196,7 @@ export async function observeModalScrim({onInputs} = {}) {
         result.opened=await read();
       }else if(!ordinary){
         if(name.startsWith('native'))await page.evaluate(kind=>window.boundary.open(kind),name.startsWith('native-only')?'native-only':'native');
-        else{await page.getByRole('button',{name:'Month view',exact:true}).focus();await page.keyboard.press('Enter');}
+        else{await page.getByRole('button',{name:'Choose date',exact:true}).focus();await page.keyboard.press('Enter');}
         result.opened=await read();
       }
       if(samePointer||name==='inline-close-before-release'||name==='inline-closed-before-timeout'){

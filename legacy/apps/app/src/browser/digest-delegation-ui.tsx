@@ -3,18 +3,18 @@ import {useEffect,useRef,useState} from 'react';
 import {digestAuthorizationDocument,type DigestAuthorization as Pending} from './digest-authorization-document';
 import {openDomainRecovery} from './domain-recovery';
 import type {HostedDigestProtocol} from '../runtime/hosted-digests';
-type Binding={client:HostedDigestProtocol;signal:AbortSignal;valid:()=>boolean;store:ReturnType<typeof digestAuthorizationDocument>;readEpoch:number;refresh:(resume:boolean)=>Promise<void>};
+type DigestDelegationRun={client:HostedDigestProtocol;signal:AbortSignal;valid:()=>boolean;store:ReturnType<typeof digestAuthorizationDocument>;readEpoch:number;refresh:(resume:boolean)=>Promise<void>};
 export function BrowserDigestDelegation({client,scope,signal,current,onConnected,onReviewRemoval,removalBusy,revocation}:{client:HostedDigestProtocol;scope:string;signal:AbortSignal;current:()=>boolean;onConnected:()=>void;onReviewRemoval:(grantId:string)=>void;removalBusy:boolean;revocation:{grantId:string;removed:boolean}|null}){
  const [pending,setPending]=useState<Pending|null>(null),[email,setEmail]=useState(true),[calendar,setCalendar]=useState(false),[busy,setBusy]=useState(false),[ready,setReady]=useState(false),[active,setActive]=useState(true),[message,setMessage]=useState('Reading saved authorization…'),[grantId,setGrantId]=useState(''),[expanded,setExpanded]=useState(false);
- const binding=useRef<Binding|null>(null),locked=useRef<Binding|null>(null);
- const save=async(b:Binding,expected:Pending|null,next:Pending|null)=>{b.readEpoch++;await b.store.save(expected,next);b.readEpoch++;if(b.valid()){setPending(next);if(next)setExpanded(true);}};
- const run=async(b:Binding,work:()=>Promise<void>)=>{
+ const binding=useRef<DigestDelegationRun|null>(null),locked=useRef<DigestDelegationRun|null>(null);
+ const save=async(b:DigestDelegationRun,expected:Pending|null,next:Pending|null)=>{b.readEpoch++;await b.store.save(expected,next);b.readEpoch++;if(b.valid()){setPending(next);if(next)setExpanded(true);}};
+ const run=async(b:DigestDelegationRun,work:()=>Promise<void>)=>{
   if(locked.current===b||!b.valid())return;locked.current=b;setBusy(true);
   try{await work();}catch{
    if(b.valid())try{const saved=await b.store.read();if(b.valid()){setPending(saved);setMessage(saved?'The request is saved. Retry it to recover the exact authorization.':'Authorization was not saved. Try again.');}}catch{if(b.valid()){setReady(false);setMessage('Saved authorization could not be read. Use authorization recovery.');}}
   }finally{if(locked.current===b)locked.current=null;if(b.valid()){setBusy(false);void b.refresh(false);}}
  };
- const finish=async(b:Binding,record:Pending)=>{
+ const finish=async(b:DigestDelegationRun,record:Pending)=>{
   let response=await b.client.delegation('status',{state:record.state},b.signal);if(!b.valid())return;
   if(response.status==='waiting'&&record.phase==='complete')response=await b.client.delegation('complete',{state:record.state,confirmed:true},b.signal);
   if(!b.valid())return;
@@ -22,14 +22,14 @@ export function BrowserDigestDelegation({client,scope,signal,current,onConnected
   else if(response.status==='failed'){await save(b,record,null);if(b.valid())setMessage('Authorization expired or was cancelled. Start a new review.');}
   else setMessage('Review the requested read access to continue.');
  };
- const resume=async(b:Binding,record:Pending)=>{
+ const resume=async(b:DigestDelegationRun,record:Pending)=>{
   if(record.phase!=='start'){await finish(b,record);return;}
   const result=await b.client.delegation('start',{mutationId:record.mutationId,kinds:record.kinds,confirmed:true},b.signal);if(!b.valid())return;
   await save(b,record,{...record,phase:'review',state:String(result.state),expiresAt:String(result.expiresAt)});
  };
  useEffect(()=>{
   const owner=new AbortController(),ownedSignal=anyAbortSignal([signal,owner.signal]);
-  const b:Binding={client,signal:ownedSignal,valid:()=>binding.current===b&&!ownedSignal.aborted&&current(),store:null as any,readEpoch:0,refresh:async()=>{}};
+  const b:DigestDelegationRun={client,signal:ownedSignal,valid:()=>binding.current===b&&!ownedSignal.aborted&&current(),store:null as any,readEpoch:0,refresh:async()=>{}};
   b.store=digestAuthorizationDocument(scope,b.valid,ownedSignal);binding.current=b;setReady(false);setActive(true);setBusy(false);setPending(null);setGrantId('');setMessage('Reading saved authorization…');
   b.refresh=async(autoResume)=>{
    if(!b.valid()||locked.current===b)return;const epoch=++b.readEpoch;
@@ -42,7 +42,7 @@ export function BrowserDigestDelegation({client,scope,signal,current,onConnected
   void b.refresh(true);
   return()=>{owner.abort();release();if(binding.current===b)binding.current=null;if(locked.current===b)locked.current=null;for(const event of events)window.removeEventListener(event,retire);document.removeEventListener('visibilitychange',hidden);};
  },[scope,client,signal]);
- const act=(work:(b:Binding)=>Promise<void>)=>{const b=binding.current;if(b)void run(b,()=>work(b));};
+ const act=(work:(b:DigestDelegationRun)=>Promise<void>)=>{const b=binding.current;if(b)void run(b,()=>work(b));};
  useEffect(()=>{
   if(!revocation||!binding.current?.valid()||grantId!==revocation.grantId)return;
   if(revocation.removed)setGrantId('');

@@ -1,4 +1,4 @@
-// Alpha Cloud's web host (the policy's `web` origin, for example cloud.alphacompute.ai).
+// Alpha Cloud's web host (the policy's `web` origin, for example cloud.alphacompute.cc).
 //
 // The phone never browses this host. It exists for three things Android and Google need on the
 // app-link host, and all of them are answered by the Cloud API Worker from the database

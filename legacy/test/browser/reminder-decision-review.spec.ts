@@ -2,11 +2,13 @@ import { returnToApps } from './app-navigation';
 import {test,expect} from '@playwright/test';
 test.use({timezoneId:'UTC'});
 // Storage tests launch Calendar from the keyboard; a delayed pointer release is a Home long press.
+// A local reminder edit announces itself only to other tabs; the fixture sends the same
+// reminders-document change signal so this tab re-reads the seeded reminder without a reload.
 for(const action of ['done','snooze'] as const)for(const mode of ['fresh','stale','duplicate','response-loss','reload-loss','late-stale','navigate','unknown-same-target','navigate-after-dispatch'] as const)test(`reviewed reminder ${action}: ${mode}`,async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.clock.setFixedTime(new Date('2027-03-13T00:00Z'));await page.goto('/');await page.getByRole('button',{name:'Calendar',exact:true}).waitFor();
- await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');await registerPlugin<any>('DailyApps').scheduleReminder({id:'decision-boundary',title:'Decision boundary reminder',at:Date.parse('2027-03-13T14:00Z')});});
- await page.reload();await page.getByRole('button',{name:'Calendar',exact:true}).press('Enter');await page.getByRole('button',{name:/^Decision boundary reminder,/}).click();
+ await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');await registerPlugin<any>('DailyApps').scheduleReminder({id:'decision-boundary',title:'Decision boundary reminder',at:Date.parse('2027-03-13T14:00Z')});window.dispatchEvent(new Event('alpha:reminders-document-changed'));});
+ await page.getByRole('button',{name:'Calendar',exact:true}).press('Enter');await page.getByRole('button',{name:/^Decision boundary reminder,/}).click();
  const original=await page.evaluate(async ()=>JSON.parse((await (await import('/src/browser/reminder-store.ts')).reminderDocument.readRaw())!).reminders[0]);
  await page.evaluate(async({mode,action})=>{
   const {BrowserDaily}=await import('/src/browser/daily.ts');const operate=BrowserDaily.prototype.operateReminder,receipt=BrowserDaily.prototype.reminderOperationReceipt;(window as any).dispatches=0;
@@ -47,7 +49,7 @@ for(const action of ['done','snooze'] as const)for(const mode of ['fresh','stale
 // behavior itself remains native acceptance. No permission or alarm is changed.
 for(const status of ['permission-denied','scheduling-failed','completed'] as const)test(`reviewed snooze provider result ${status}`,async({page})=>{
  await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));await page.clock.setFixedTime(new Date('2027-03-13T00:00Z'));await page.goto('/');await page.getByRole('button',{name:'Calendar',exact:true}).waitFor();
- await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');await registerPlugin<any>('DailyApps').scheduleReminder({id:'outcome',title:'Outcome reminder',at:Date.parse('2027-03-13T14:00Z')});});await page.reload();await page.getByRole('button',{name:'Calendar',exact:true}).press('Enter');await page.getByRole('button',{name:/^Outcome reminder,/}).click();
+ await page.evaluate(async()=>{const {registerPlugin}=await import('/src/platform-plugins.ts');await registerPlugin<any>('DailyApps').scheduleReminder({id:'outcome',title:'Outcome reminder',at:Date.parse('2027-03-13T14:00Z')});window.dispatchEvent(new Event('alpha:reminders-document-changed'));});await page.getByRole('button',{name:'Calendar',exact:true}).press('Enter');await page.getByRole('button',{name:/^Outcome reminder,/}).click();
  await page.evaluate(async status=>{const {BrowserDaily}=await import('/src/browser/daily.ts'),operate=BrowserDaily.prototype.operateReminder;BrowserDaily.prototype.operateReminder=async function(input){const result=await operate.call(this,input);return {...result,result:{...result.result,status}};};},status);
  await page.getByRole('button',{name:'Snooze reminder 10 minutes',exact:true}).click();
  await expect(page.getByText(status==='permission-denied'?'Saved · Alerts off':status==='scheduling-failed'?'Saved · Alert not set':'Unconfirmed',{exact:true})).toBeVisible();

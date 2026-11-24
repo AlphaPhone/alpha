@@ -1,6 +1,6 @@
 import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import {openCloudPlanFromSettings} from './helpers/cloud-plan-settings';
-import {fenceNetwork,openYourAgent,seedCompletedAccessSetup} from './flag-off-android';
+import {fenceNetwork,seedCompletedAccessSetup} from './flag-off-android';
 import {observeCloudNotices} from './helpers/cloud-connection-notices';
 import {test,expect,type Page} from '@playwright/test';
 import {CREDENTIAL,entitlements,installNativeCloudPlanPorts,USER,type NativePlanFixture} from './helpers/native-cloud-plan-fixture';
@@ -25,7 +25,9 @@ function alphaCloudBuild(){
 async function composition(alphaCloud:boolean){
  let server!:ViteDevServer;
  const previous=process.env.ELIZA_DEV_ALLOW_TEST_MOCKS;process.env.ELIZA_DEV_ALLOW_TEST_MOCKS='';
- try{server=await createServer({configFile:resolve('vite.config.ts'),configLoader:'native',cacheDir:resolve(alphaCloud?'test-results/native-cloud-subscription/vite-cache-alpha-cloud':'test-results/native-cloud-subscription/vite-cache'),server:{host:'127.0.0.1',port:0},define:{'import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS':JSON.stringify('')},plugins:[...(alphaCloud?[alphaCloudBuild()]:[]),{name:'native-subscription-composition',resolveId(id){if(id==='/subscription-entry.tsx')return '\0subscription-entry';},load(id){if(id==='\0subscription-entry')return `
+ // Parallel workers keep their optimized modules separate and do not hot-reload the fixture.
+ const cacheDir=resolve('test-results/native-cloud-subscription',`vite-cache-${process.pid}-${alphaCloud?'alpha':'eliza'}`);
+ try{server=await createServer({configFile:resolve('vite.config.ts'),configLoader:'native',cacheDir,server:{host:'127.0.0.1',port:0,hmr:false,watch:null},define:{'import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS':JSON.stringify('')},plugins:[...(alphaCloud?[alphaCloudBuild()]:[]),{name:'native-subscription-composition',resolveId(id){if(id==='/subscription-entry.tsx')return '\0subscription-entry';},load(id){if(id==='\0subscription-entry')return `
  import React,{useSyncExternalStore} from 'react';
  import {createRoot} from 'react-dom/client';
  import '/src/prototype/prototype.css';
@@ -60,10 +62,13 @@ async function boot(page:Page,initial:NativePlanFixture&{alphaCloud?:boolean}={}
  await installNativeCloudPlanPorts(page,initial);
  const base=initial.alphaCloud?(await (alphaServer??=composition(true))).origin:origin;
  await page.goto(base+(initial.fullApp?'/':'/subscription-composition'),{waitUntil:'commit'});
- if(initial.fullApp)await page.evaluate(async()=>{
-  const w=window as any;w.planController=(await import('/src/runtime/connection-ui.tsx')).connectionController;
-  w.planFlags={native:(await import('/src/native.ts')).isAndroid?'android':'web',mocks:(await import('/src/build-flags.ts')).testMocksEnabled};
- });
+ if(initial.fullApp){
+  await expect(page.locator('.alpha-phone')).toBeVisible({timeout:90_000});
+  await page.evaluate(async()=>{
+   const w=window as any;w.planController=(await import('/src/runtime/connection-ui.tsx')).connectionController;
+   w.planFlags={native:(await import('/src/native.ts')).isAndroid?'android':'web',mocks:(await import('/src/build-flags.ts')).testMocksEnabled};
+  });
+ }
  // A cold isolated Vite composition must finish its module graph before product assertions.
  await expect.poll(()=>page.evaluate(()=>(window as any).planFlags),{timeout:90_000}).toEqual({native:'android',mocks:false});
 }
@@ -672,14 +677,17 @@ test.describe('account, plan and sign-in expiry',()=>{
  });
 });
 
-test('failed native provider binding reports unconfirmed inference and exposes the error before history',async({page})=>{
+test('failed native provider binding keeps inference unconfirmed and keeps the low-level error out of About',async({page})=>{
  const pageErrors:string[]=[];page.on('pageerror',error=>pageErrors.push(error.message));
  await boot(page,{...await entitlements(),holdProvider:false,providerFailure:'Synthetic account verification failure',fullApp:true});await started(page);await idle(page);
- const settings=await openYourAgent(page);
- const error=settings.getByText(/Synthetic account verification failure/);await expect(error).toBeVisible();
- await expect(error).toContainText('AI state unknown');
- const history=settings.getByRole('button',{name:'New conversation',exact:true});await expect(history).toBeVisible();
- expect(await error.evaluate((node,other)=>(node.compareDocumentPosition(other!)&Node.DOCUMENT_POSITION_FOLLOWING)!==0,await history.elementHandle())).toBe(true);
+ const snapshot=await page.evaluate(()=>(window as any).planController.getSnapshot());
+ expect(snapshot.error).toContain('Synthetic account verification failure');
+ expect(snapshot.error).toContain('AI state unknown');
+ await page.getByRole('button',{name:'Settings',exact:true}).click();
+ await page.getByRole('button',{name:'About',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'About',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Agent activity',exact:true})).toBeVisible();
+ await expect(page.getByText(/Synthetic account verification failure/)).toHaveCount(0);
  expect(await configured(page)).toBe(1);
  // The configure call failed before returning a binding guard. The client cannot claim the
  // old provider was removed, and must not clear it with a fresh, unscoped mutation.
@@ -690,7 +698,7 @@ test('failed native provider binding reports unconfirmed inference and exposes t
 });
 
 // UI progress only: this feature fixture does not manufacture OS/provider grants.
-test.beforeEach(async({page})=>seedCompletedAccessSetup(page));
+test.beforeEach(async({page})=>seedCompletedAccessSetup(page,'android'));
 
 
 test('Code can close and reopen without closing the account or sending its text',async({page})=>{
@@ -791,7 +799,7 @@ test.describe('Alpha Cloud cutover flag',()=>{
   expect(sent).toEqual({amountUsd:10,success_url:'https://eliza.app/alphaphone/billing/return',cancel_url:'https://eliza.app/alphaphone/billing/return?cancelled=1'});
  });
 
- const alpha=async(extra:Record<string,unknown>={})=>({...await entitlements({iss:'https://api.alphacompute.ai',aud:'ai.alphacompute.alphaphone',...extra}),alphaCloud:true});
+ const alpha=async(extra:Record<string,unknown>={})=>({...await entitlements({iss:'https://api.alphacompute.cc',aud:'ai.alphacompute.alphaphone',...extra}),alphaCloud:true});
  /** The in-app plan manager opens with the catalogue; nothing opens in a browser until the owner subscribes. */
  async function openPlans(page:Page){
   await expect(page.getByRole('dialog',{name:'Review billing account',exact:true})).toHaveCount(0);
@@ -814,8 +822,8 @@ test.describe('Alpha Cloud cutover flag',()=>{
   await page.getByRole('button',{name:'Choose a plan',exact:true}).click();await subscribePlus(page);
   expect(await configured(page)).toBe(0);
   const requests=(await calls(page)).filter(c=>c.plugin==='AlphaConnection'&&c.method==='request').map(c=>c.url??'');
-  expect(requests.filter(url=>!url.startsWith('https://api.alphacompute.ai/'))).toEqual([]);
-  expect(requests).toContain('https://api.alphacompute.ai/api/v1/subscriptions/checkout');
+  expect(requests.filter(url=>!url.startsWith('https://api.alphacompute.cc/'))).toEqual([]);
+  expect(requests).toContain('https://api.alphacompute.cc/api/v1/subscriptions/checkout');
  });
 
  test('on: a past-due plan manages payment in the in-app plans',async({page})=>{

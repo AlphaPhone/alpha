@@ -1,8 +1,6 @@
 package ai.alphacompute.alphaphone;
 
 import ai.eliza.plugins.agent.runtime.NativeProviderAdmission;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.Set;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -30,10 +28,7 @@ final class GoogleWorkspaceReturnFlow {
    // expiry, formatting and unrelated metadata do not change credential ownership.
    JSONObject saved=object(raw);
    String canonical=new JSONArray().put("production").put(saved.getString("credentialId")).put(saved.opt("userId")).put(saved.opt("organizationId")).put(saved.getString("token")).toString();
-   byte[] hash=MessageDigest.getInstance("SHA-256").digest(canonical.getBytes(StandardCharsets.UTF_8));
-   StringBuilder result=new StringBuilder(64);
-   for(byte value:hash)result.append(Character.forDigit((value>>>4)&15,16)).append(Character.forDigit(value&15,16));
-   return result.toString();
+   return AlphaUtil.sha256Hex(canonical);
   }catch(Exception invalid){throw new IllegalArgumentException("Invalid Workspace credential");}
  }
  /** Whether a failed identity pre-check falls back to the manual return: a transient HTTP status, a network failure
@@ -109,7 +104,7 @@ final class GoogleWorkspaceReturnFlow {
   return callback;
  }
  void cancel(String state) throws Exception {
-  if(state==null||!state.matches("[A-Za-z0-9_-]{43}"))return;
+  if(!GoogleWorkspaceReturn.isNonce(state))return;
   String raw=store.pending();GoogleWorkspaceReturn.Pending retained=pending(raw);
   if(retained!=null&&retained.nonce.equals(state))store.comparePending(raw,null);
  }

@@ -70,7 +70,6 @@
       "apps/app/src/runtime/native-live-voice.ts",
       "apps/app/src/runtime/voice-states.ts",
       "apps/app/src/runtime/cloud-voice.ts",
-      "apps/app/src/runtime/live-segment-stream.ts",
       "apps/app/src/runtime/voice-turn-routes.ts",
       "apps/app/src/runtime/app-speech.ts",
       "android/app/src/main/java/ai/alphacompute/alphaphone/NativeVoiceBinding.java",
@@ -215,8 +214,7 @@
       "apps/app/src/ui/voice/sense-invocation.ts",
       "android/sense/src/main/java/ai/alphacompute/alphaphone/sense/ListeningService.java",
       "android/sense/src/main/java/ai/alphacompute/alphaphone/sense/ConsentActivity.java",
-      "android/sense/src/main/java/ai/alphacompute/alphaphone/sense/ListenerControlProvider.java",
-      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaListenerPlugin.java"
+      "android/sense/src/main/java/ai/alphacompute/alphaphone/sense/ListenerControlProvider.java"
     ],
     "tests": [
       "consentAndLeaseTest",
@@ -257,8 +255,7 @@
       "apps/app/src/ui/voice/sense-invocation.ts",
       "android/sense/src/main/java/ai/alphacompute/alphaphone/sense/ListeningService.java",
       "android/sense/src/main/java/ai/alphacompute/alphaphone/sense/ConsentActivity.java",
-      "android/sense/src/main/java/ai/alphacompute/alphaphone/sense/ListenerControlProvider.java",
-      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaListenerPlugin.java"
+      "android/sense/src/main/java/ai/alphacompute/alphaphone/sense/ListenerControlProvider.java"
     ],
     "tests": [
       "consentAndLeaseTest",
@@ -544,8 +541,6 @@
       "apps/app/src/runtime/cloud-protocol.ts",
       "apps/app/src/runtime/voice-assistant.ts",
       "apps/app/src/runtime/local-agent.ts",
-      "apps/app/src/runtime/calendar-sync-host.ts",
-      "apps/app/src/ui/calendar/sync-host.ts",
       "apps/app/src/runtime/inbox-operation.ts",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaDataReset.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/LocalAgentProviderAdmission.java"
@@ -1371,44 +1366,30 @@
     "sources": [
       "apps/app/src/runtime/connection-ui.tsx",
       "apps/app/src/runtime/cloud-protocol.ts",
-      "apps/app/src/runtime/calendar-sync-host.ts",
-      "apps/app/src/ui/calendar/sync-host.ts",
-      "apps/app/src/runtime/native-calendar-sync.ts",
-      "apps/app/src/runtime/calendar-linked-storage.ts",
-      "apps/app/src/runtime/google-calendar-selection.ts",
       "apps/app/src/runtime/voice-assistant.ts",
       "apps/app/src/prototype/voice-adapter.ts"
     ],
     "components": [
       "specs/quint/services/IdentitySession.qnt",
-      "specs/quint/services/CalendarLinkedSync.qnt",
       "specs/quint/native/VoiceSession.qnt"
     ],
     "invariants": [
       "RendererHasActivatedCredential",
       "VoiceBindingCurrent",
-      "CalendarBindingCurrent",
-      "LiveCalendarBinding",
       "Identity::safety",
-      "Calendar::safety",
       "Voice::safety"
     ],
     "tests": [
       "signInAndVoiceTest",
       "nativeCommitPrecedesRendererPublicationTest",
-      "accountReplacementRetiresCalendarReviewTest",
-      "alreadyDispatchedEffectCanFinishAfterReplacementTest",
-      "signOutKeepsUnknownCalendarIntentTest",
-      "foregroundLossRejectsNewCalendarDispatchTest",
       "cancelledReplacementKeepsOldBindingTest",
       "lateVoiceReplyCannotUseReplacementTest",
       "uncoordinatedIdentityChangeDetectedTest"
     ],
     "abstractions": [
       "Two native credential attempts and two renderer owners. Native commit, acknowledgement and renderer publication are separate transitions.",
-      "One durable Calendar link retains the old owner binding across account changes. New-account link collections require a separate instance and are not represented by resetting the old link.",
       "Initial restored authentication and native authentication completion are explicit contract macros in renderer traces. Intermediate native storage/ack state is checked by the separate native sign-in campaign.",
-      "This bounded renderer composition imports IdentitySession, CalendarLinkedSync and VoiceSession. ApplicationComposition retains the separate Inbox, Resident and Reset coordination contracts."
+      "This bounded renderer composition imports IdentitySession and VoiceSession. Client Calendar linked sync is retired (agent-side Calendar sync is CalendarLinkedSync). ApplicationComposition retains the separate Inbox, Resident and Reset coordination contracts."
     ]
   },
   {
@@ -1955,7 +1936,7 @@
     "step": "step",
     "invariant": "safety",
     "sources": [
-      "vendor/eliza/packages/auth/android/src/main/java/ai/eliza/auth/cloud/CloudSignInPlugin.java",
+      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCloudSignInClient.java",
       "vendor/eliza/packages/auth/android/src/main/java/ai/eliza/auth/cloud/CloudSignInFlow.java",
       "vendor/eliza/packages/auth/android/src/main/java/ai/eliza/auth/cloud/CloudCredentialSlots.java",
       "vendor/eliza/packages/auth/android/build.gradle",
@@ -1971,14 +1952,16 @@
       "unconsumableResultReleasesElapsedHintTest",
       "cancelFencesQueuedResultTest",
       "coldReturnHasNoCredentialAuthorityTest",
-      "staleCredentialCannotConsumeTest"
+      "staleCredentialCannotConsumeTest",
+      "homeHostResumeKeepsAttemptTest"
     ],
     "invariants": [
       "TypeOK",
       "ClaimHasWorker",
       "ExchangeUsesConsumedRecord",
       "ClaimedResultSurvivesGrace",
-      "GraceAndRetirement"
+      "GraceAndRetirement",
+      "HomeHostNeverPauses"
     ],
     "abstractions": [
       "One prepared Google browser attempt or a pending record after process loss, a fixed production environment, four FIFO worker entries and four main grace timers.",
@@ -2541,15 +2524,19 @@
     "step": "step",
     "invariant": "safety",
     "tests": [
-      "conflictingReviewCannotClaimAnotherReceiptTest",
-      "lateReviewUsesTombstoneBindingTest",
-      "exactSecondReviewUsesFirstReceiptWithoutRadioTest",
+      "conflictingCardCannotClaimAnotherReceiptTest",
+      "exactReplayUsesFirstReceiptWithoutClaimTest",
+      "unapprovedOrMismatchedTextSendsNothingTest",
+      "expiredApprovalSendsNothingTest",
+      "claimIsSingleUseWhenNothingWasJournaledTest",
+      "queuedCancellationClosesTheClaimTest",
+      "lateCardUsesTombstoneBindingTest",
       "simChangeAfterFirstRecipientIsUnknownTest",
       "callbackMemoryDoesNotImplyDurableEvidenceTest",
       "dispatchMarkerRefusalRecoversUnknownTest",
       "providerReadbackRequiresReportAndUniqueRowTest",
       "multipartReportDoesNotProveDeliveryTest",
-      "emptyDivisionCannotReviveReviewedIdTest",
+      "emptyDivisionCannotReviveClaimedIdTest",
       "bothBridgesReceiveTheSameCallbackTest",
       "pausedAndDestroyedBridgesRetireOnlyTheirDeliveryTest",
       "eightCallbackPublicationsReachBothBridgesTest"
@@ -2561,37 +2548,47 @@
       "DeliveryNeedsSentAndReport",
       "ProviderRowsHaveOnePhase",
       "LiveBridgeListeners",
-      "PerBridgeNoticeCapacity"
+      "PerBridgeNoticeCapacity",
+      "RadioNeedsClaimedApproval",
+      "OneClaimPerOperation"
     ],
     "sources": [
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaTelephony.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaTelephonyPlugin.java",
+      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaTelephonyBase.java",
+      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaApprovedSms.java",
+      "android/app/src/main/java/ai/alphacompute/alphaphone/SmsNoticeOpenRequest.java",
+      "android/app/src/main/java/ai/eliza/plugins/messages/AlphaTelephonyAccess.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaSmsSendReceiver.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaImageCapability.java",
       "android/app/src/launcher/AndroidManifest.xml",
       "android/consumer-host.json",
       "android/upstream-native-sources.json",
-      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/TelephonyPlugin.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsTelephony.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsTelephonyConfiguration.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsSendJournal.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/MmsStore.java",
-      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsProviderReader.java"
+      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsProviderReader.java",
+      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/MmsPdu.java",
+      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsRoleConfiguration.java",
+      "vendor/eliza/plugins/plugin-native-action-journal/android/src/main/java/ai/eliza/plugins/actionjournal/ActionJournal.java",
+      "vendor/eliza/plugins/plugin-native-action-journal/android/src/main/java/ai/eliza/plugins/actionjournal/ActionJournalConfiguration.java"
     ],
     "stateMapping": {
-      "reviews/foreground/closed/listeners/events": "Exact review calls, saved SIM/tuple, Activity lifecycle, registered bridge identities and each bridge's actual opaque notification count",
-      "recipients/parts/attempts/accepted": "Synthetic exact reviewed radio handoff prefix and per-part PendingIntent identity",
+      "cards": "Each approval card's action-journal entry: the approved text, open or claimed by AlphaApprovedSms, and expired against its expiresAt",
+      "foreground/closed/listeners/events": "Activity lifecycle, registered bridge identities and each bridge's actual opaque notification count",
+      "recipients/parts/attempts/accepted": "Synthetic exact approved radio handoff prefix and per-part PendingIntent identity",
       "memory/disk/tombstoneBinding/boot/process": "Real live and durable SmsSendJournal records, pruned binding tombstone and reconstruction after process or boot boundaries",
       "role/outbox/sentRows/failedRows/candidate/providerStatus": "Actual outgoing provider inserts/updates and controlled unique provider readback",
       "image/send/phone/read/locked/sim/refuseOutbox/old": "Controlled platform admission, permission, SIM and time classes",
       "reply/replyBinding": "Actual native send/read/decision response and retained tuple equality class"
     },
     "abstractions": [
-      "One operation ID, two reviewed payloads and bridge actors, one or two recipients with one or two parts each. The existing journal model covers wider ID retirement and capacity.",
+      "One operation ID, two approved payloads held by cards in two chat scopes, two bridge actors, one or two recipients with one or two parts each. Foreign requests stand for any other recipients or SIM. The existing journal model covers wider ID retirement and capacity.",
       "Successful pruning of the fixed ID retains its binding. Wider tombstone compaction, pruning write faults and capacity are separate from this retained-receipt boundary.",
-      "Controlled AOSP admission, radio, provider, storage and Activity ports. Installed carrier or permission behavior, legacy journal file migration, MMS and larger interleavings remain separate.",
+      "Controlled AOSP admission, radio, provider, storage, approval-journal storage and Activity ports. Cards are sms_send entries written as the chat writes them; sms_compose targets, sensitive-screen records, the chat settling a card, the Messages composer path, installed carrier or permission behavior, legacy journal file migration, MMS and larger interleavings remain separate.",
       "Eight callback publications per bridge retain the original callback depth with at most sixteen deliveries across two recipients. Only a candidate transition that would overflow a recipient's count is refused; stopped bridges do not consume another bridge's capacity.",
-      "Handler.post executes immediately within each controlled JVM macrostep. Registration, foreground/lock filtering and exact destruction are observed; arbitrary held UI-queue retirement races remain outside this schedule."
+      "Handler.post executes immediately within each controlled JVM macrostep. A queued cancellation or pause holds the send worker until the cancel lands. Registration, foreground/lock filtering and exact destruction are observed; arbitrary held UI-queue retirement races remain outside this schedule."
     ],
     "bounds": {
       "maxSamples": 1000,
@@ -2606,13 +2603,14 @@
     "step": "step",
     "invariant": "safety",
     "tests": [
+      "agentBridgeRefusesMmsTest",
       "conflictingAttachmentCannotClaimAnotherReceiptTest",
       "mmsCannotClaimSmsWireReceiptTest",
       "retiredMmsRetainsExactBindingTest",
       "retainedIdRejectsDifferentBodyRecipientsAndSimTest",
       "stagedSmsRejectsMmsReceiptTest",
-      "exactMmsReviewRetriesOnceTest",
-      "invalidAttachmentDoesNotOpenReviewTest",
+      "exactComposerRetryUsesFirstReceiptTest",
+      "invalidAttachmentIsNeverJournaledTest",
       "carrierFailureOverridesAndroidSuccessTest",
       "providerChildRefusalKeepsRadioAndDeletesPartialRowTest",
       "failedCallbackWriteDeletesPduButLosesEvidenceOnRestartTest",
@@ -2627,38 +2625,45 @@
       "MmsNeverClaimsDelivery",
       "OutboxOnlyForMms",
       "TombstoneRetiresRecord",
-      "ApprovedReceiptMatchesReview",
+      "ComposedReceiptMatchesSend",
+      "AgentBridgeRefusesMms",
       "LiveBridgeListeners",
       "PerBridgeNoticeCapacity"
     ],
     "sources": [
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaTelephony.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaTelephonyPlugin.java",
+      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaTelephonyBase.java",
+      "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaApprovedSms.java",
+      "android/app/src/main/java/ai/alphacompute/alphaphone/SmsNoticeOpenRequest.java",
+      "android/app/src/main/java/ai/eliza/plugins/messages/AlphaTelephonyAccess.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaSmsSendReceiver.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaImageCapability.java",
       "android/app/src/launcher/AndroidManifest.xml",
       "android/consumer-host.json",
       "android/upstream-native-sources.json",
-      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/TelephonyPlugin.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsTelephony.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsTelephonyConfiguration.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsSendJournal.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/MmsStore.java",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsProviderReader.java",
-      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/MmsPdu.java"
+      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/MmsPdu.java",
+      "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsRoleConfiguration.java",
+      "vendor/eliza/plugins/plugin-native-action-journal/android/src/main/java/ai/eliza/plugins/actionjournal/ActionJournal.java",
+      "vendor/eliza/plugins/plugin-native-action-journal/android/src/main/java/ai/eliza/plugins/actionjournal/ActionJournalConfiguration.java"
     ],
     "stateMapping": {
-      "reviewA/reviewB/groupRecipients": "Two exact native review calls, captured SIM class and reviewed recipient count",
-      "reply/replyKind/replyBinding/positiveBinding": "Wire status, typed SMS/MMS result and exact retained and approved binding classes",
+      "groupRecipients/source": "Composed recipient count and whether the last step was the agent bridge sendMms or the Messages composer send",
+      "reply/replyKind/replyBinding/composedBinding": "Wire status, typed SMS/MMS result and exact retained and composed binding classes",
       "memory/disk/tombstoneBinding/boot/process": "Actual shared live/durable journal, capacity tombstone and process or boot reconstruction",
       "smsAttempts/mmsAttempts/mmsAccepted/files": "Controlled radio boundary and actual temporary PDU retention",
       "mmsBox/deletedMms/events": "Outgoing MMS provider state, partial-row rollback, registered bridge identities and exact per-bridge opaque notification counts",
-      "role/carrier/size/sim/provider/locked": "Controlled device admission and failure classes"
+      "role/carrier/size/provider/locked": "Controlled device admission and failure classes"
     },
     "abstractions": [
-      "One ID shared across SMS and MMS, two bridge instances and two exact MMS attachment variants. The SMS competitor is a one-part message.",
+      "One ID shared across SMS and MMS, two bridge instances and two exact MMS attachment variants. The agent bridge sendMms is refused before anything is read; every send goes through the Messages composer (AlphaTelephonyPlugin.sendComposed) with its window guard. Two composer sends with one ID are interleaved by holding the send worker. The SMS competitor is a one-part composer text.",
       "Successful capacity pruning is observed for a settled MMS. Tombstone compaction and pruning write faults are outside this retained-receipt boundary.",
-      "PDU encoding, staged file and journal execute real code with synthetic Android radio, provider and preview ports. Installed URI grants, provider semantics, platform scheduling, and carrier behavior remain separate.",
+      "PDU encoding, staged file and journal execute real code with synthetic Android radio, provider and composer-window ports. Installed URI grants, provider semantics, platform scheduling, composer focus loss and carrier behavior remain separate.",
       "Four callback publications per bridge retain the original depth with at most eight deliveries across the two live bridges. Process restart clears every old listener and loads both current bridge identities with zero counters.",
       "Handler.post executes immediately within each controlled JVM macrostep. Arbitrary held UI-queue retirement races and additional bridge lifecycle interleavings remain separate."
     ],
@@ -3026,16 +3031,21 @@
       "hostFingerStaysHostTest",
       "pageGestureStaysPageTest",
       "hiddenGestureIsConsumedTest",
-      "resumeRequiresNewGeometryTest"
+      "resumeRequiresNewGeometryTest",
+      "newFindBarBlocksPageUntilMeasuredTest",
+      "closedFindBarReturnsItsAreaAfterMeasureTest",
+      "unpublishedControlWouldReachPageTest"
     ],
     "invariants": [
       "TypeOK",
       "NoHostGestureBecomesPage",
+      "NoHostControlTouchReachesPage",
       "NoPageStartWithoutHostRects",
       "DisposedPageCannotBeShown"
     ],
     "abstractions": [
       "Coordinates, rounded hit tests, shadows and event dispatch stay native-library/Pixel evidence.",
+      "Host controls are two names: toolbar (chat, pill, toast and Home) and find (the find-in-page bar). The router's page decision reads only the published host rects. A control the renderer's selector names retires page input when it is mounted or removed (blockPageInput) until the next frame measures it; that this block reaches the router before the new control is painted is assumed, not modelled. The JVM trace replays the production router with the toolbar published; mount, unmount and publish are not replayed there.",
       "Pause represents Android cancellation; exact activity lifecycle sequencing requires signed-device qualification.",
       "Session, profile and sensitive-overlay authority remain BrowserSession/BrowserSiteState."
     ]
@@ -3082,6 +3092,7 @@
     "sources": [
       "android/app/src/main/java/ai/alphacompute/alphaphone/GmailBackground.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/GmailDeliveryWorker.java",
+      "android/app/src/main/java/ai/alphacompute/alphaphone/GmailNoticePoster.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaGmailPlugin.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/CloudDeployment.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/PluginWorkers.java",
@@ -3638,6 +3649,7 @@
       "leavingDuringWatchSetupClearsItTest",
       "deniedPermissionReportsOnceTest",
       "staleListenerHearsNothingTest",
+      "freshFixAfterClockSkewTest",
       "unconfirmedCleanupRejectsNextStartTest",
       "restartWaitsForCleanupTest",
       "stopDuringRestartSupersedesTest",
@@ -3706,7 +3718,7 @@
     },
     "abstractions": [
       "Three sessions and eight generations. One owner object; the Maps screen holds three (route origin, guidance, agent), each an instance of this model.",
-      "Fix validation is one boolean: a stale, future or malformed fix is reported as an error and stops the session.",
+      "A malformed fix reports an error and stops the session. A stale or future-dated fix is skipped without stopping the watch.",
       "The browser permission-request cancel and heading or speed fields are not modeled. The native plugin's own permission and provider state is external.",
       "The native event carries no watch identity, so every registered listener hears every fix; only the session in place delivers it.",
       "A session that registered no listener has nothing to clean up: its stop settles at once and a start that replaces it puts the new session in place in the same step. A stop between start() and that step is not modeled.",

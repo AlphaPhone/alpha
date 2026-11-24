@@ -1,0 +1,7 @@
+test/fixtures/google-browser-auth/ai/eliza/auth/cloud/CloudSignInBrowserTest.java.txt
+test/fixtures/google-browser-auth/ai/eliza/auth/cloud/CloudSignInChainTest.java.txt
+test/fixtures/google-browser-auth/ai/eliza/auth/cloud/CloudSignInFlowTest.java
+test/fixtures/google-browser-auth/ai/eliza/auth/cloud/CloudSignInReadinessTest.java.txt
+test/fixtures/google-browser-auth/chain-methods.mjs
+test/fixtures/google-browser-auth/native-sign-in.test.mjs
+test/fixtures/google-browser-auth/upstream-base.json

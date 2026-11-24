@@ -28,7 +28,7 @@ export interface RemoteCredentialStore {
   write(record: RemoteCredential): Promise<void>;
   remove(origin: string): Promise<void>;
 }
-export interface RemoteIdentity {
+interface RemoteIdentity {
   identityId: string;
   displayName: string;
   sessionId: string;
@@ -36,7 +36,7 @@ export interface RemoteIdentity {
   role: "OWNER";
   origin: string;
 }
-export interface RemoteAuthStatus {
+interface RemoteAuthStatus {
   required: boolean;
   authenticated: boolean;
   pairingEnabled: boolean;
@@ -74,7 +74,6 @@ function boolean(value: unknown): boolean {
   if (typeof value !== "boolean") throw new RemoteProtocolError("invalid_response");
   return value;
 }
-function abort(signal?: AbortSignal): void { signal?.throwIfAborted(); }
 // Plain-HTTP loopback agents are a test-mocks surface (ELIZA_DEV_ALLOW_TEST_MOCKS=1).
 // Vite replaces import.meta.env at build time, so flag-off bundles fold this to
 // false and accept HTTPS only. Node contract tests import this source without Vite.
@@ -109,13 +108,13 @@ export class RemoteProtocol {
   private readonly now: () => number;
   get session(): RemoteIdentity | null { return this.identity ? { ...this.identity } : null; }
   private async json(path: string, method: "GET" | "POST", body?: unknown, token?: string, signal?: AbortSignal, headers: Record<string,string> = {}): Promise<unknown> {
-    abort(signal);
+    signal?.throwIfAborted();
     const result = await this.request({
       url: this.origin + path, method,
       headers: { Accept: "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal,
     });
-    abort(signal);
+    signal?.throwIfAborted();
     if (result.status < 200 || result.status >= 300) throw new RemoteProtocolError("remote_request_failed", result.status);
     return result.body;
   }
@@ -144,13 +143,13 @@ export class RemoteProtocol {
     try { return await operation(); } finally { this.authBusy = false; }
   }
   private async persist(record: RemoteCredential, signal?: AbortSignal): Promise<void> {
-    abort(signal);
+    signal?.throwIfAborted();
     await this.store.write(record);
     // A native storage operation cannot necessarily be interrupted. Authentication
     // remains serialized until its newly written credential has been removed.
     if (signal?.aborted) {
       await this.store.remove(this.origin);
-      abort(signal);
+      signal?.throwIfAborted();
     }
   }
   async pair(code: string, signal?: AbortSignal): Promise<RemoteIdentity> {
@@ -161,7 +160,7 @@ export class RemoteProtocol {
       if (paired.instanceId !== current.instanceId || paired.access !== "owner") throw new RemoteProtocolError("pairing_identity_mismatch");
       const token = string(paired.token);
       const identity = await this.verify(token, string(paired.identityId), signal);
-      abort(signal);
+      signal?.throwIfAborted();
       const record = { origin: this.origin, token, identityId: identity.identityId, sessionId: identity.sessionId, expiresAt: identity.expiresAt };
       await this.persist(record, signal);
       this.generation++;
@@ -174,7 +173,7 @@ export class RemoteProtocol {
     let restored: RemoteIdentity | null = null;
     await this.authenticate(async () => {
       const saved = await this.store.read(this.origin);
-      abort(signal);
+      signal?.throwIfAborted();
       if (!saved) throw new RemoteProtocolError("not_connected");
       if (saved.origin !== this.origin || saved.sessionId !== saved.token || !saved.identityId || !saved.token || !Number.isFinite(saved.expiresAt) || saved.expiresAt <= this.now()) {
         await this.store.remove(this.origin);
@@ -331,7 +330,7 @@ export function messagePageQuery(page?: MessagePage): string {
   return "?" + query.toString();
 }
 /** The request may have reached the agent but its reply did not reach this phone. */
-export function droppedResponse(error: unknown): boolean {
+function droppedResponse(error: unknown): boolean {
   if (error instanceof DOMException && error.name === "AbortError") return false;
   if (error instanceof RemoteProtocolError) return error.status === 502 || error.status === 504;
   return true;

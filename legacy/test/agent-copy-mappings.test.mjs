@@ -203,8 +203,8 @@ test('a digest result, its status and the panel’s source refusals read in Alph
  assert.match(ui,/setMessage\(sourceRejected\?HOSTED_SOURCE_REJECTED_TEXT:/);
  assert.match(ui,/setMessage\(digestCalendarErrorText\(error\)\)/);
  assert.doesNotMatch(ui,/setMessage\(\(error as Error\)\.message\)|sourceRejected\?error\.message/);
- // The native Calendar plugin's workflowCalendars refusals (CalendarPlugin.java, inherited by AlphaCalendarPlugin).
- const plugin=vendor('plugins/plugin-native-calendar/android/src/main/java/ai/eliza/plugins/calendar/CalendarPlugin.java');
+ // The native Calendar plugin's workflowCalendars refusals (CalendarProviderPlugin.java, inherited by AlphaCalendarPlugin).
+ const plugin=source('android/app/src/main/java/ai/alphacompute/alphaphone/CalendarProviderPlugin.java');
  const body=plugin.slice(plugin.indexOf('public void workflowCalendars('),plugin.indexOf('public void readWorkflowRange('));
  const refusals=literals(body,/c\.reject\("([^"]+)"\)/g);
  assert.deepEqual(refusals,['Open Workflows before reading calendar sources','Selected calendar sources could not be read']);
@@ -245,6 +245,50 @@ test('every fixed error a hosted digest run records keeps its reason in Alpha’
  assert.equal(digests.digestSummaryText({runId:'run',status:'failed',output:null,error:'constructor'}),digests.DIGEST_RUN_FAILED);
 });
 
+// --- Chat: a workflow the agent saved, changed or started (plugin-workflow WORKFLOW action) -----
+const chat=await import('../apps/app/src/runtime/action-message-presentation.ts');
+
+test('a phone approval instruction requires a real review on the reply',()=>{
+  const seen='Already prepped that for you, Carson, saying test. Just tap approve on your phone and it sends.';
+  assert.equal(chat.isPhoneReviewInstruction(seen),true);
+  assert.equal(chat.phoneReviewReply(seen,false),'I couldn’t open a review card for this request.');
+  assert.equal(chat.phoneReviewReply(seen,true),seen);
+  assert.equal(chat.phoneReviewReply('Review this request on your phone before it can run.',false),'I couldn’t open a review card for this request.');
+  const instructions='If you see an approval card, tap Approve on your phone.';
+  assert.equal(chat.phoneReviewReply(instructions,false),instructions);
+});
+
+test('every WORKFLOW action sentence the agent delivers unparaphrased reads in Alpha’s words',()=>{
+ // Text bound to effect receipts is the action's canonical reply: core delivers it exactly as written.
+ assert.match(vendor('packages/core/src/runtime/action-handler-settlement.ts'),/callbackText !== expectedText/);
+ // A removal and its undo share one result, so their two sentences are the arms of one conditional.
+ const bound=[...vendor('plugins/plugin-workflow/src/actions/workflow.ts').matchAll(/text:\s*(?:op === 'remove'\s*\?\s*)?`([^`]+)`(?:\s*:\s*`([^`]+)`)?,\s*effectReceipts: (?!\[\])/g)].flatMap(m=>m.slice(1).filter(Boolean));
+ const paused=' It was on, so it is now off. Review the change, then turn it on again.',schedulePaused=' Its schedule is now paused. Turn it on again in Workflows.';
+ // A chat-created workflow cannot notify; upstream says so when the owner asked to be reminded.
+ // Upstream names it NO_NOTIFICATION and appends it to both the create and the modify result.
+ const noNotification=' It can’t send you a notification: when it is on, each run’s output appears only in its run history. For a reminder that notifies you, use a phone reminder instead.';
+ assert.ok(vendor('plugins/plugin-workflow/src/actions/workflow.ts').includes("const NO_NOTIFICATION =\n  '"+noNotification+"';"),'NO_NOTIFICATION: '+noNotification);
+ const values={'workflow.name':'Morning digest',label:'“Daily notes”',[`current.active ? '${paused}' : ''`]:paused,[`current.active && !workflow.active ? '${schedulePaused}' : ''`]:schedulePaused,"workflow.active ? 'active' : 'inactive'":'inactive','asksToNotify(instruction, message.content.text) ? NO_NOTIFICATION : \'\'':noNotification,marker:'{"workflowId":"wf-1","runId":"run-1","title":"Morning digest"}'};
+ const sentence=template=>template.replaceAll('\\n','\n').replace(/\$\{([^}]+)\}/g,(_whole,name)=>{assert.ok(name in values,'template value: '+name);return values[name];});
+ // Upstream words these for the owner, so Alpha shows each as written; only the run marker block becomes a card.
+ const PINNED=[
+  ["Created “${workflow.name}”. It is off until you turn it on.${asksToNotify(instruction, message.content.text) ? NO_NOTIFICATION : ''}",'Created “Morning digest”. It is off until you turn it on.'+noNotification],
+  ["Updated “${workflow.name}”.${current.active ? '"+paused+"' : ''}${asksToNotify(instruction, message.content.text) ? NO_NOTIFICATION : ''}",'Updated “Morning digest”.'+paused+noNotification],
+  ["Renamed ${label} to “${workflow.name}”.${current.active && !workflow.active ? '"+schedulePaused+"' : ''}",'Renamed “Daily notes” to “Morning digest”.'+schedulePaused],
+  ["${workflow.name} is now ${workflow.active ? 'active' : 'inactive'}.",'Morning digest is now inactive.'],
+  ['Removed ${label}. It no longer runs. You can restore it later.','Removed “Daily notes”. It no longer runs. You can restore it later.'],
+  ['Restored ${label}. It is off until you turn it on.','Restored “Daily notes”. It is off until you turn it on.'],
+  ['Submitted a run of ${label}.\\n\\n[WORKFLOW]\\n${marker}\\n[/WORKFLOW]','Submitted a run of “Daily notes”.'],
+  ['Restored “${workflow.name}”.','Restored “Morning digest”.'],
+ ];
+ assert.deepEqual(bound,PINNED.map(([upstream])=>upstream));
+ for(const [upstream,alpha] of PINNED){
+  assert.equal(chat.workflowReplyText(sentence(upstream)).text,alpha,upstream);
+  // The same sentence inside a longer reply is reworded in place.
+  assert.equal(chat.workflowReplyText('Done.\n\n'+sentence(upstream)).text,'Done.\n\n'+alpha,upstream);
+ }
+});
+
 // --- Chat: an approved Notes change (staged plugin-notes) --------------------------------------
 const notes=await import('../apps/app/src/ui/notes/notes-action-messages.ts');
 test('every shared Notes refusal on the approved change path is worded by Alpha',()=>{
@@ -261,21 +305,28 @@ test('every shared Notes refusal on the approved change path is worded by Alpha'
  for(const sentence of sentences){const text=notes.notesActionFailureText(new Error(sentence));assert.notEqual(text,sentence,sentence);assert.notEqual(text,notes.NOTES_ACTION_FAILED,'unmapped: '+sentence);}
  for(const key of notes.NOTES_ACTION_REFUSALS.keys())assert.ok(sentences.includes(key),'not upstream: '+key);
  const PINNED={
-  'Selected note revision changed':'That note was edited after you reviewed it. Nothing was changed.',
-  'Selected note changed':'That note changed after you reviewed it. Nothing was changed.',
-  'Notes changed before the approved operation':'Notes changed before your approved change could run. Nothing was changed.',
-  'Selected note is missing':'That note is no longer in Notes. Nothing was changed.',
-  'readback mismatch':'Notes couldn’t confirm the saved change. Reopen Notes to check it.',
-  'Deletion already recorded':'This deletion is already in Recently deleted. Nothing more was changed.',
-  'A note with this identity already exists':'A note with the same identity is already in Notes. Nothing was changed.',
+  'Selected note revision changed':'Nothing was changed because the note was edited after you reviewed it.',
+  'Selected note changed':'Nothing was changed because the note changed after you reviewed it.',
+  'Notes changed before the approved operation':'Nothing was changed because Notes changed before your approved change could run.',
+  'Selected note is missing':'That note is no longer in Notes.',
+  'readback mismatch':'Notes couldn’t confirm the saved change.',
+  'Deletion already recorded':'This deletion is already in Recently deleted.',
+  'A note with this identity already exists':'Nothing was changed because a note with the same identity is already in Notes.',
  };
  for(const [upstream,alpha] of Object.entries(PINNED))assert.equal(notes.notesActionFailureText(new Error(upstream)),alpha);
- assert.equal(notes.notesActionFailureText(new Error('Previous notes isn’t ready. Nothing was changed.')),'Previous notes isn’t ready. Nothing was changed.');
+ assert.equal(notes.notesActionFailureText(new Error('Previous notes isn’t ready, so nothing was changed.')),'Previous notes isn’t ready, so nothing was changed.');
  assert.equal(notes.notesActionFailureText(new DOMException('This operation was aborted','AbortError')),notes.NOTES_ACTION_FAILED);
  assert.equal(notes.notesActionFailureText(new Error('Invalid Notes envelope')),notes.NOTES_ACTION_FAILED);
- const adapter=source('apps/app/src/prototype/agent-adapter.ts');
- assert.match(adapter,/:notesActionFailureText\(error\)\};/);
- assert.doesNotMatch(adapter,/'Notes outcome is uncertain\. Review history; do not repeat automatically\.':\(error as Error\)\.message/);
+});
+
+// An agent request for Previous notes that cannot run: the phone says there are none only when the
+// presence read proved it. A request reviewed on Home, before Notes read it, is not told so.
+test('a refused Previous notes request claims no earlier notes only when their absence is proven',()=>{
+ assert.equal(notes.previousNotesRefusal('canonical','absent','shared'),'There are no earlier notes on this phone, so nothing was shared.');
+ for(const availability of [null,'present','unavailable'])assert.equal(notes.previousNotesRefusal('canonical',availability,'shared'),'Nothing was shared because Notes is not set to On this phone.',String(availability));
+ for(const availability of [null,'present','absent','unavailable'])assert.equal(notes.previousNotesRefusal('legacy',availability,'saved'),'Previous notes isn’t ready, so nothing was saved.',String(availability));
+ // The approved-change path shows each of these as written.
+ for(const [source,availability] of [['legacy',null],['canonical','absent'],['canonical',null]]){const text=notes.previousNotesRefusal(source,availability,'changed');assert.equal(notes.notesActionFailureText(new Error(text)),text);}
 });
 
 // --- Chat approval and action history: Clock review, validators, native journal -----------------

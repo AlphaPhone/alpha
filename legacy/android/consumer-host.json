@@ -62,7 +62,9 @@
       { "configuration": "androidTestImplementation", "coordinate": "androidx.test.ext:junit:1.3.0" },
       { "configuration": "androidTestImplementation", "coordinate": "androidx.test.espresso:espresso-core:3.7.0" },
       { "configuration": "androidTestImplementation", "coordinate": "androidx.test.espresso:espresso-accessibility:3.7.0" },
-      { "configuration": "androidTestImplementation", "coordinate": "androidx.test.uiautomator:uiautomator:2.3.0" }
+      { "configuration": "androidTestImplementation", "coordinate": "androidx.test.uiautomator:uiautomator:2.3.0" },
+      { "configuration": "testImplementation", "coordinate": "junit:junit:4.13.2" },
+      { "configuration": "testImplementation", "coordinate": "org.robolectric:robolectric:4.16.1" }
     ],
     "androidResources": { "noCompress": ["gguf", "lex"] },
     "buildConfigFields": [

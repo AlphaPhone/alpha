@@ -46,6 +46,7 @@ async function installProvider(page: Page) {
     const {inboxLocalStore: s} = await import('/src/runtime/inbox-local-store.ts');
     const load = () => JSON.parse(localStorage.getItem(KEY) || '{"slots":{},"receipts":{},"sent":[],"dispatches":0,"prepares":0,"loseNextReply":false,"unsure":false}');
     const save = (value: unknown) => localStorage.setItem(KEY, JSON.stringify(value));
+    save(load());
     s.read = async (key: string) => structuredClone(load().slots[key] ?? null);
     s.compareExchange = async (key: string, prior: unknown, next: unknown) => {
       const value = load();
@@ -136,8 +137,7 @@ test('development mailbox: load, open a message, local draft survives reload, on
   await button(page, 'Back to inbox').click();
 
   await compose(page, 'Journey local draft', 'Draft body kept on this device');
-  await button(page, 'Save draft').click();
-  await expect(page.getByText('Saved locally', {exact: true})).toBeVisible();
+  await button(page, 'Back from draft').click();
   expect((await stored()).localDrafts).toHaveLength(1);
   expect((await stored()).sent || []).toEqual([]);
 
@@ -162,7 +162,7 @@ test('development mailbox: load, open a message, local draft survives reload, on
   expect(external).toEqual([]);
 });
 
-test('synthetic provider: reviewed send leaves exactly one receipt and one message after reload', async ({page}) => {
+test('synthetic provider: one-tap send leaves exactly one receipt and one message after reload', async ({page}) => {
   test.setTimeout(35_000);
   page.setDefaultTimeout(5_000);
   const review = page.getByRole('dialog', {name: 'Review mail operation'});
@@ -188,8 +188,8 @@ test('synthetic provider: reviewed send leaves exactly one receipt and one messa
 
   await test.step('Save local draft', async () => {
     await compose(page, 'Journey reviewed send', 'Reviewed body');
-    await button(page, 'Save draft').click();
-    await expect(page.getByRole('status').filter({hasText: 'Saved locally on this device'})).toBeVisible();
+    await button(page, 'Back from draft').click();
+    await expect(page.getByRole('textbox', {name: 'Message', exact: true})).toHaveCount(0);
     expect(await provider(page)).toMatchObject({prepares: 0, dispatches: 0, sent: []});
   });
 
@@ -200,34 +200,16 @@ test('synthetic provider: reviewed send leaves exactly one receipt and one messa
     await expect(page.getByRole('textbox', {name: 'Message', exact: true})).toHaveValue('Reviewed body');
   });
 
-  await test.step('Review without dispatch', async () => {
+  await test.step('Send once and retain the receipt', async () => {
     await button(page, 'Send email').click();
-    await expect(review.getByRole('status')).toHaveText('Review every field before confirming. No mail has been sent.');
-    await expect(review).toContainText('From: owner@example.invalid');
-    await expect(review).toContainText('To: friend@example.invalid');
-    await expect(review).toContainText('Subject: Journey reviewed send');
-    await expect(review.getByText('Reviewed body', {exact: true})).toBeVisible();
-    expect(await provider(page)).toMatchObject({prepares: 1, dispatches: 0, sent: []});
-  });
-
-  await test.step('Confirm receipt', async () => {
-    await review.getByRole('button', {name: 'Send this email', exact: true}).click();
-    await expect(review.getByRole('status')).toHaveText('Provider confirmed this operation.');
-    await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toHaveCount(0);
-    await expect(review).toContainText('"messageId":"sent-1"');
-    // The confirmed send removes the saved local draft and the composer copy it came from.
+    await expect(page.getByText('Sent.', {exact: true})).toBeVisible();
+    await expect(review).toHaveCount(0);
+    expect(await provider(page)).toMatchObject({prepares: 1, dispatches: 1, receipts: ['succeeded']});
     await expect.poll(() => page.evaluate(KEY => Object.keys(JSON.parse(localStorage.getItem(KEY)!).slots).filter(key => key.startsWith('inbox-drafts:')), PROVIDER)).toEqual([]);
   });
 
   await test.step('Reload receipt without replay', async () => {
-    // Reload: the saved receipt is shown again; nothing is prepared or dispatched a second time.
     await openProviderInbox(page, true);
-    await expect(review.getByRole('status')).toHaveText('Saved mail operation. Check its exact review and receipt before continuing.');
-    await expect(review).toContainText('"messageId":"sent-1"');
-    await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toHaveCount(0);
-    await review.getByRole('button', {name: 'Check saved receipt', exact: true}).click();
-    await expect(review.getByRole('status')).toHaveText('Provider confirmed this operation.');
-    await review.getByRole('button', {name: 'Close receipt', exact: true}).click();
     await expect(review).toHaveCount(0);
     await expect(button(page, 'Mail review / receipt')).toHaveCount(0);
     // The sent email is not offered again in any form.
@@ -248,13 +230,12 @@ test('synthetic provider: a lost send reply is an unknown outcome and is never s
   test.setTimeout(180_000);
   await openProviderInbox(page);
   await compose(page, 'Journey lost reply', 'Body whose reply is lost');
+  await setProvider(page, {loseNextReply: true, unsure: true});
   await button(page, 'Send email').click();
   const review = page.getByRole('dialog', {name: 'Review mail operation'});
-  await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toBeVisible();
-  await setProvider(page, {loseNextReply: true, unsure: true});
-  await review.getByRole('button', {name: 'Send this email', exact: true}).click();
   await expect(review.getByRole('status')).toContainText('Gmail may not have received this change');
   await expect(review.getByRole('status')).toContainText('check the saved receipt before trying again');
+  await expect(page.locator('[data-alpha-toast]').getByText('Gmail may not have received this change')).toHaveCount(0);
   await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toHaveCount(0);
   await expect(review.getByRole('button', {name: 'Close receipt', exact: true})).toHaveCount(0);
   await expect(review.getByRole('button', {name: 'Cancel unsent review', exact: true})).toHaveCount(0);
@@ -268,7 +249,7 @@ test('synthetic provider: a lost send reply is an unknown outcome and is never s
   await openProviderInbox(page, true);
   await expect(review.getByRole('status')).toHaveText('Saved mail operation. Check its exact review and receipt before continuing.');
   await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toHaveCount(0);
-  await review.getByRole('button', {name: 'Check saved receipt', exact: true}).click();
+  await review.getByRole('button', {name: 'Check if this change went through', exact: true}).click();
   await expect(review.getByRole('status')).toHaveText('Delivery outcome is unknown. Check the saved receipt; do not send this message again.');
   await expect(review.getByRole('button', {name: 'Close receipt', exact: true})).toHaveCount(0);
   await review.getByRole('button', {name: 'Close mail review', exact: true}).click();
@@ -277,20 +258,19 @@ test('synthetic provider: a lost send reply is an unknown outcome and is never s
   await (await localDraftRow(page)).click();
   await expect(page.getByRole('textbox', {name: 'Subject', exact: true})).toHaveValue('Journey lost reply');
   await button(page, 'Send email').click();
-  await expect(review.getByRole('status')).toHaveText('Review the saved operation before starting another.');
+  await expect(review.getByRole('status')).toHaveText('Review the saved email action before starting another.');
   await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toHaveCount(0);
   expect(await provider(page)).toMatchObject({prepares: 1, dispatches: 1});
 
   // The provider later resolves the receipt; an explicit check reconciles to exactly one message.
   await setProvider(page, {unsure: false});
-  await review.getByRole('button', {name: 'Check saved receipt', exact: true}).click();
-  await expect(review.getByRole('status')).toHaveText('Provider confirmed this operation.');
-  await expect(review).toContainText('"messageId":"sent-1"');
+  await review.getByRole('button', {name: 'Check if this change went through', exact: true}).click();
+  await expect(review).toHaveCount(0);
+  await expect(page.getByText('Sent.', {exact: true})).toBeVisible();
   // Only now, with the provider's confirmation, is the retained copy of that email removed.
   await expect.poll(() => page.evaluate(KEY => Object.keys(JSON.parse(localStorage.getItem(KEY)!).slots).filter(key => key.startsWith('inbox-drafts:')), PROVIDER)).toEqual([]);
   await openProviderInbox(page, true);
-  await expect(review).toContainText('"messageId":"sent-1"');
-  await review.getByRole('button', {name: 'Close receipt', exact: true}).click();
+  await expect(review).toHaveCount(0);
   for (const name of ['Restore local draft', 'Resume unsaved email', 'Continue draft']) await expect(button(page, name)).toHaveCount(0);
   await button(page, 'Sent').click();
   await expect(page.getByRole('button', {name: /Journey lost reply/})).toHaveCount(1);
@@ -301,13 +281,11 @@ test('synthetic provider: a send reply that names another operation is not shown
   test.setTimeout(180_000);
   await openProviderInbox(page);
   await compose(page, 'Journey wrong receipt', 'Body whose reply names another operation');
+  await setProvider(page, {wrongReceipt: true});
   await button(page, 'Send email').click();
   const review = page.getByRole('dialog', {name: 'Review mail operation'});
-  await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toBeVisible();
-  await setProvider(page, {wrongReceipt: true});
-  await review.getByRole('button', {name: 'Send this email', exact: true}).click();
   // The reply is refused: no confirmation, no provider message ID from the foreign receipt, no second Send.
-  await expect(review.getByRole('status')).toHaveText('Gmail answered for a different request, so nothing was confirmed. Check the saved receipt before trying again; do not send this message again.');
+  await expect(review.getByRole('status')).toHaveText('Gmail answered for a different request, so nothing was confirmed. Check the saved receipt before trying again; don’t send this email again.');
   await expect(review).not.toContainText('"messageId"');
   await expect(review.getByRole('button', {name: 'Send this email', exact: true})).toHaveCount(0);
   expect(await provider(page)).toMatchObject({prepares: 1, dispatches: 1});
@@ -318,9 +296,9 @@ test('synthetic provider: a send reply that names another operation is not shown
   expect(await provider(page)).toMatchObject({prepares: 1, dispatches: 1});
   // Its own receipt, read back by request ID, reconciles to exactly one message.
   await setProvider(page, {wrongReceipt: false});
-  await review.getByRole('button', {name: 'Check saved receipt', exact: true}).click();
-  await expect(review.getByRole('status')).toHaveText('Provider confirmed this operation.');
-  await expect(review).toContainText('"messageId":"sent-1"');
+  await review.getByRole('button', {name: 'Check if this change went through', exact: true}).click();
+  await expect(review).toHaveCount(0);
+  await expect(page.getByText('Sent.', {exact: true})).toBeVisible();
   expect(await provider(page)).toEqual({prepares: 1, dispatches: 1, sent: ['Journey wrong receipt'], receipts: ['succeeded']});
 });
 

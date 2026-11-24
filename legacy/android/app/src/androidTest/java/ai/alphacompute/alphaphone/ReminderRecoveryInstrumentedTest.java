@@ -18,7 +18,7 @@ public class ReminderRecoveryInstrumentedTest {
  private static void until(String condition)throws Exception {for(int i=0;i<150;i++){if("true".equals(WebViewTestDriver.evaluate("Boolean("+condition+")")))return;SystemClock.sleep(100);}fail("Reminder UI condition missing: "+condition);}
  private static void click(String label)throws Exception {String target="document.querySelector('button[aria-label='+"+JSONObject.quote(JSONObject.quote(label))+"+']')";until(target);WebViewTestDriver.evaluate(target+".click()");}
  private static JSONObject awaitStatus(Context c,String id,String status)throws Exception {for(int i=0;i<140;i++){JSONObject value=ReminderTestAccess.read(c,id);if(value!=null&&status.equals(value.optString("status")))return value;SystemClock.sleep(500);}throw new AssertionError("Reminder did not reach "+status);}
- private static void open(Context c,String id){c.startActivity(new Intent(c,MainActivity.class).setAction("ai.alphacompute.alphaphone.OPEN_REMINDER").putExtra(ReminderTestAccess.OPEN_ID,id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP));}
+ private static void open(Context c,String id){c.startActivity(new Intent(c,MainActivity.class).setAction(AlphaReminders.CONFIGURATION.openAction).putExtra(ReminderTestAccess.OPEN_ID,id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP));}
  @Test public void permissionAndRebootPhase()throws Exception {
   Context c=InstrumentationRegistry.getInstrumentation().getTargetContext();
   android.content.SharedPreferences state=c.getSharedPreferences(PREFS,Context.MODE_PRIVATE);
@@ -49,8 +49,6 @@ public class ReminderRecoveryInstrumentedTest {
    ReminderTestAccess.schedule(c,id,"Reboot reminder "+id,"Disposable reboot fixture",at,null,new JSONObject().put("dueAt",at).put("alertMinutes",0));
    // Damaged unrelated data must not prevent recovery/listing of the actual fixture.
    assertTrue(new ReminderTestAccess.Envelope(c).records().edit().putString(id+"_damaged","invalid-json").commit());
-  }else if(phase.equals("verify-reboot")){
-   fail("Verify reboot externally: starting instrumentation force-stops the target and can cancel restored alarms");
   }else if(phase.equals("cleanup")){
    if(id!=null){ReminderTestAccess.cancel(c,id);assertTrue(new ReminderTestAccess.Envelope(c).records().edit().remove(id).remove(id+"_damaged").commit());}assertTrue(state.edit().clear().commit());
   }else fail("Unknown phase");

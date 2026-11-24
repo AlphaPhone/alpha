@@ -10,7 +10,8 @@ import {tsImport} from './support/ts-import.mjs';
 
 const {attachmentRefusalText, outgoingAttachmentRefusal, createMailDraftsController} = await tsImport('../apps/app/src/ui/mailbox/drafts-controller.ts', import.meta.url);
 const {checkOutgoingAttachments} = await tsImport('../apps/app/src/runtime/inbox-operation.ts', import.meta.url);
-const {AttachmentRefusedError, reviewMailAttachment} = await tsImport('../apps/app/src/runtime/inbox-attachment.ts', import.meta.url);
+const {reviewMailAttachment} = await tsImport('../apps/app/src/runtime/inbox-attachment.ts', import.meta.url);
+const {AttachmentRefusedError} = await tsImport('../.eliza/client-features/plugins/plugin-inbox/src/mailbox/failures.ts', import.meta.url);
 
 const MiB = 1024 * 1024;
 const TOO_LARGE = 'This file is larger than 5 MiB. Choose a file up to 5 MiB.';
@@ -90,12 +91,12 @@ test('the shared limits are classified in Alpha words, and the shared check agre
 
 const settle = async () => { for (let turn = 0; turn < 8; turn++) await new Promise(resolve => setImmediate(resolve)); };
 
-async function composer({maximumOutgoing = 10, picks = []} = {}) {
+async function composer({maximumOutgoing = 10, maximumTotalBytes = 5 * MiB, picks = []} = {}) {
   const rows = new Map(), toasts = [];
   const identity = {sessionId: 'session', account: {environment: 'test', userId: 'owner', sessionId: 'session'}};
   const drafts = createMailDraftsController({
     publish() {}, toast: text => toasts.push(text), identity: () => identity, confirm: () => true,
-    provider: {prepare: async () => { throw Error('Unexpected provider operation'); }, capabilities: () => ({send: true, providerDrafts: true, from: 'owner@example.invalid', attachmentPolicy: policy(maximumOutgoing)})},
+    provider: {prepare: async () => { throw Error('Unexpected provider operation'); }, capabilities: () => ({send: true, providerDrafts: true, from: 'owner@example.invalid', attachmentPolicy: policy(maximumOutgoing, maximumTotalBytes)})},
     store: {read: async key => structuredClone(rows.get(key) ?? null), compareExchange: async (key, before, next) => { if (JSON.stringify(rows.get(key) ?? null) !== JSON.stringify(before)) return {status: 'conflict'}; if (next === null) rows.delete(key); else rows.set(key, structuredClone(next)); return {status: 'saved'}; }},
     retained: () => ({ready: Promise.resolve(), available: false, peek: () => null, conflict: false, error: false, status: '', edit() {}, resume() {}, replace() {}, retry() {}, clear: async () => {}, recover() {}, retire() {}}),
     attachments: {
@@ -108,7 +109,8 @@ async function composer({maximumOutgoing = 10, picks = []} = {}) {
   await drafts.bind('grant', 'owner@example.invalid'); await settle();
   assert.equal(drafts.begin(), true);
   const attached = () => (drafts.email()?.proposal?.attachments || []).map(file => file.name);
-  return {drafts, toasts, picks, attached};
+  const shelved = () => [...rows].find(([key]) => key.startsWith('inbox-drafts:v1:shelf:'))?.[1]?.items.map(row => row.draft) ?? [];
+  return {drafts, toasts, picks, attached, shelved};
 }
 const pdf = (name, bytes = 3) => ({name, mimeType: 'application/pdf', dataBase64: b64(bytes), size: bytes});
 
@@ -130,20 +132,85 @@ test('Attach in the composer shows Alpha sentences for a repeated name, the tota
   assert.deepEqual(c.toasts.filter(text => KNOWN.some(([raw]) => raw === text)), [], 'no picker or review text is shown as is');
 });
 
-test('a reviewed Files attachment is refused in Alpha words for a repeated name, the total size and the account limit', async () => {
-  const c = await composer();
-  const add = file => c.drafts.attachReviewed(file, c.drafts.suggestionTarget().token);
-  assert.equal(add(pdf('notes.pdf')), true);
-  assert.equal(add({...pdf('NOTES.pdf'), dataBase64: b64(3, 1)}), false);
-  assert.equal(c.toasts.at(-1), 'Two attachments have the same name. Rename one to attach both.');
-  assert.equal(add({...pdf('large.pdf', 5 * MiB), dataBase64: b64(5 * MiB, 2)}), false);
-  assert.equal(c.toasts.at(-1), 'Attachments exceed 5 MiB in total. Remove one or choose a smaller file.');
-  assert.equal(add(pdf('notes.pdf')), false);
-  assert.equal(c.toasts.at(-1), 'This file is already attached. Nothing was added.');
+test('a reviewed Files attachment starts its own draft, keeps the unfinished one as it was and returns one refusal', async () => {
+  const c = await composer({maximumTotalBytes: 2 * MiB});
+  // The unfinished email the owner typed before leaving Inbox: its composer closes and the draft stays.
+  c.drafts.render().c.onBody({target: {value: 'Earlier text'}});
+  const earlier = c.drafts.email().draftId;
+  c.drafts.close();
+  const add = file => c.drafts.attachReviewed(file, c.drafts.newDraftTarget().token);
+  assert.equal(await add(pdf('notes.pdf')), null);
+  const first = c.drafts.email();
+  assert.notEqual(first.draftId, earlier, 'a new draft, never the unfinished one');
+  assert.equal(first.proposal.bodyText, '');
   assert.deepEqual(c.attached(), ['notes.pdf']);
+  assert.equal(c.drafts.render().composing, true, 'the new draft opens in the composer');
+  assert.deepEqual(c.shelved().map(draft => [draft.id, draft.body, draft.attachments ?? []]), [[earlier, 'Earlier text', []]]);
+  // The duplicate refusal: the same bytes again add nothing, and the email holding them stays where it is.
+  const holding = c.drafts.email(), before = c.shelved();
+  assert.equal(await add(pdf('notes.pdf')), 'This file is already attached to your unfinished email in Inbox. Nothing was added.');
+  assert.deepEqual(c.drafts.email(), holding);
+  assert.deepEqual(c.shelved(), before);
+  // Other bytes start another draft; the one holding notes.pdf is set aside as it was.
+  assert.equal(await add({...pdf('other.pdf'), dataBase64: b64(3, 1)}), null);
+  assert.deepEqual(c.attached(), ['other.pdf']);
+  assert.deepEqual(c.shelved().map(draft => (draft.attachments ?? []).map(file => file.name)), [[], ['notes.pdf']]);
+  assert.equal(c.shelved()[0].body, 'Earlier text');
+  // The account's size policy is the one reason, returned to the Email action: no toast, nothing changes.
+  const shown = c.drafts.email(), shelf = c.shelved();
+  assert.equal(await add({...pdf('large.pdf', 3 * MiB), dataBase64: b64(3 * MiB, 2)}), 'Attachments exceed 2 MiB in total. Remove one or choose a smaller file.');
+  assert.equal(await c.drafts.attachReviewed(pdf('third.pdf'), 'stale'), 'The email account changed. Nothing was added.');
+  assert.deepEqual(c.drafts.email(), shown);
+  assert.deepEqual(c.shelved(), shelf);
+  assert.deepEqual(c.toasts, []);
+  // An account that takes one attachment per email still gets each shared file in its own draft.
   const single = await composer({maximumOutgoing: 1});
-  const one = file => single.drafts.attachReviewed(file, single.drafts.suggestionTarget().token);
-  assert.equal(one(pdf('a.pdf')), true);
-  assert.equal(one({...pdf('b.pdf'), dataBase64: b64(3, 1)}), false);
-  assert.equal(single.toasts.at(-1), 'This account accepts one attachment per email. Remove it to choose another.');
+  const one = file => single.drafts.attachReviewed(file, single.drafts.newDraftTarget().token);
+  assert.equal(await one(pdf('a.pdf')), null);
+  assert.equal(await one({...pdf('b.pdf'), dataBase64: b64(3, 1)}), null);
+  assert.deepEqual(single.attached(), ['b.pdf']);
+  assert.deepEqual(single.shelved().map(draft => (draft.attachments ?? []).map(file => file.name)), [['a.pdf']]);
+  assert.deepEqual(single.toasts, []);
+});
+
+const FULL = 'Local drafts are full. Delete one in Inbox, then share again. Nothing was added.';
+test('a share the Drafts shelf has no room for is refused in words for Files and Photos, before any read when it can be', async () => {
+  // Two 3.5 MiB shares: setting the second aside would overfill Drafts, and the target says so up front.
+  const c = await composer();
+  const add = file => c.drafts.attachReviewed(file, c.drafts.newDraftTarget().token);
+  const large = (name, fill, bytes = 3.5 * MiB) => ({...pdf(name, bytes), dataBase64: b64(bytes, fill)});
+  assert.equal(await add(large('one.pdf', 1)), null);
+  assert.equal(await add(large('two.pdf', 2)), null);
+  const target = c.drafts.newDraftTarget();
+  assert.deepEqual([target.ready, target.reason], [false, FULL]);
+  assert.equal(await c.drafts.attachReviewed(pdf('three.pdf'), target.token), FULL);
+  assert.deepEqual(c.attached(), ['two.pdf']);
+  assert.deepEqual(c.shelved().map(draft => draft.attachments.map(file => file.name)), [['one.pdf']]);
+  assert.deepEqual(c.toasts, []);
+  // The bytes alone fit exactly, so only the set-aside's exact check refuses: the same words, still no toast.
+  const exact = await composer();
+  const put = file => exact.drafts.attachReviewed(file, exact.drafts.newDraftTarget().token);
+  assert.equal(await put(large('a.pdf', 1, 3 * MiB)), null);
+  assert.equal(await put(large('b.pdf', 2, 3 * MiB)), null);
+  assert.equal(exact.drafts.newDraftTarget().ready, true);
+  assert.equal(await put(pdf('c.pdf')), FULL);
+  assert.deepEqual(exact.attached(), ['b.pdf']);
+  assert.deepEqual(exact.shelved().map(draft => draft.attachments.map(file => file.name)), [['a.pdf']]);
+  assert.deepEqual(exact.toasts, []);
+});
+
+test('a share that stops gives its own reason, never an account change, and says when the unfinished email went to Drafts', async () => {
+  const c = await composer();
+  c.drafts.render().c.onBody({target: {value: 'Earlier text'}});
+  c.drafts.close();
+  const target = c.drafts.newDraftTarget();
+  // The caller's destination is blocked from the start: nothing moves.
+  assert.equal(await c.drafts.attachReviewed(pdf('a.pdf'), target.token, () => true, () => 'Review open'), 'Review open');
+  assert.deepEqual(c.shelved(), []);
+  // It becomes blocked once the earlier email is in Drafts: the owner hears both.
+  const blocked = () => c.shelved().length ? 'Finish selecting mail first' : null;
+  assert.equal(await c.drafts.attachReviewed(pdf('a.pdf'), target.token, () => true, blocked), 'Your unfinished email is in Drafts. Finish selecting mail first.');
+  assert.deepEqual(c.shelved().map(draft => [draft.body, draft.attachments ?? []]), [['Earlier text', []]]);
+  assert.equal(c.drafts.email(), null, 'no new email started');
+  assert.deepEqual(c.toasts, []);
 });

@@ -22,6 +22,9 @@ const CLOSE_MS = 400;
 const CLOSE_FADE_MS = 120;
 /** Android may deliver the click in a later gesture task after pointerup. */
 const SCRIM_CLICK_WAIT_MS = 350;
+/** The chat sheet: its transcript, composer and suggestion rows. */
+const conversationPanel = () =>
+	document.querySelector<HTMLElement>('[data-alpha-layer="conversation"]');
 type Shell = any;
 type ScrimPress = {
 	id: number;
@@ -232,6 +235,7 @@ export function chatRelease(options: ReleaseOptions): { chat: "hidden" | "input"
 	return flick || nearFloor ? { chat: "sheet" } : { chat: "sheet", height };
 }
 // chat-release:end
+const isOpen = (mode: unknown) => mode === "sheet" || mode === "full";
 type Drag = {
 	id: number;
 	owner: HTMLElement;
@@ -266,7 +270,7 @@ function paintedHeight(d: Drag): number {
  * runs across the release's snap zone, so any visible bar or pill means release collapses.
  */
 function collapseShare(d: Drag): number {
-	if (d.mode !== "sheet" && d.mode !== "full") return 0;
+	if (!isOpen(d.mode)) return 0;
 	const zone = Math.min(CHAT_SNAP_ZONE, (d.full - d.floor) / 3);
 	return clamp01((d.floor + zone - d.height) / Math.max(1, zone));
 }
@@ -311,9 +315,7 @@ function revealWhileResizing(shell: Shell, scale: number) {
 	const token = (shell.chatRevealToken = (shell.chatRevealToken || 0) + 1);
 	const end = performance.now() + 480;
 	const frame = () => {
-		const panel = document.querySelector<HTMLElement>(
-			'[data-alpha-layer="conversation"]',
-		);
+		const panel = conversationPanel();
 		if (!panel || shell.chatRevealToken !== token || shell.chatMotion) return;
 		if (performance.now() < end) {
 			revealRows(panel, scale);
@@ -321,13 +323,11 @@ function revealWhileResizing(shell: Shell, scale: number) {
 			return;
 		}
 		const mode = shell.S().chat;
-		if (mode === "sheet" || mode === "full")
+		if (isOpen(mode))
 			for (const row of panel.querySelectorAll<HTMLElement>(SHEET_ROWS))
 				row.style.removeProperty("opacity");
 	};
-	const panel = document.querySelector<HTMLElement>(
-		'[data-alpha-layer="conversation"]',
-	);
+	const panel = conversationPanel();
 	if (panel) revealRows(panel, scale);
 	requestAnimationFrame(frame);
 }
@@ -436,27 +436,20 @@ export function installChatOverlayMotion(Component: Shell) {
 	function bounds() {
 		const screen = document.querySelector<HTMLElement>("[data-screen]");
 		const viewportH = screen?.clientHeight || window.innerHeight;
-		// Shared layout supplies the viewport ceiling; retain its 200px short-panel preference.
-		const full = resolveChatPanelLayout({
-			viewportH,
-			bottomPad: 0,
-			keyboardInset: 0,
-			effectiveKeyboardInset: 0,
-			safeAreaTopPx: 0,
-			fullBleed: true,
-		}).panelMaxH;
-		const inset = resolveChatPanelLayout({
-			viewportH,
-			bottomPad: 0,
-			keyboardInset: 0,
-			effectiveKeyboardInset: 0,
-			safeAreaTopPx: 0,
-			fullBleed: false,
-		}).panelMaxH;
+		// Shared layout supplies the viewport ceiling; retain its short-panel preference.
+		const maxHeight = (fullBleed: boolean) =>
+			resolveChatPanelLayout({
+				viewportH,
+				bottomPad: 0,
+				keyboardInset: 0,
+				effectiveKeyboardInset: 0,
+				safeAreaTopPx: 0,
+				fullBleed,
+			}).panelMaxH;
 		return {
-			full,
+			full: maxHeight(true),
 			viewport: viewportH,
-			half: Math.min(inset, Math.max(200, Math.round(viewportH * 0.6))),
+			half: Math.min(maxHeight(false), Math.max(SHEET_MIN_HEIGHT, Math.round(viewportH * 0.6))),
 			scale: screen ? screen.getBoundingClientRect().height / viewportH : 1,
 		};
 	}
@@ -508,12 +501,9 @@ export function installChatOverlayMotion(Component: Shell) {
 		// Navigation can pass through the pill before reopening. Every mode change
 		// retires the previous resize, including changes that do not animate the bar.
 		const token = (shell.chatResizeToken = (shell.chatResizeToken || 0) + 1);
-		const panel = document.querySelector<HTMLElement>(
-			'[data-alpha-layer="conversation"]',
-		);
+		const panel = conversationPanel();
 		const scale = bounds().scale || 1;
-		const open = (mode: Mode) => mode === "sheet" || mode === "full";
-		if (panel && change.tap && change.from === "input" && open(change.to)) {
+		if (panel && change.tap && change.from === "input" && isOpen(change.to)) {
 			const target = panel.style.height;
 			panel.style.transition = "none";
 			panel.style.opacity = "1";
@@ -527,7 +517,7 @@ export function installChatOverlayMotion(Component: Shell) {
 					panel.style.transition = PANEL_TRANSITION;
 			}, 460);
 		}
-		if (panel && change.tap && open(change.from) && change.to === "input") {
+		if (panel && change.tap && isOpen(change.from) && change.to === "input") {
 			panel.style.transition = RESIZE_TRANSITION;
 			panel.style.opacity = "1";
 			panel.style.height = `${composerBlock(panel, scale)}px`;
@@ -620,9 +610,7 @@ export function installChatOverlayMotion(Component: Shell) {
 			shell.swallow = Date.now();
 			// Cancellation can precede React's first preview commit; restore direct
 			// paints explicitly instead of relying on an unchanged virtual style diff.
-			const panel = document.querySelector<HTMLElement>(
-					'[data-alpha-layer="conversation"]',
-				),
+			const panel = conversationPanel(),
 				geometry = bounds(),
 				mode = shell.S().chat;
 			const resting = mode === "full" ? geometry.full : mode === "sheet" ? sheetHeight(shell, geometry) : 0;
@@ -729,7 +717,7 @@ export function installChatOverlayMotion(Component: Shell) {
 				s.screen !== drag.screen ||
 				// A comms view's hidden chat rests on its bar (D2), the mode the drag started from.
 				(s.chat === "hidden" && this.isCommsView(s.view) ? "input" : s.chat) !== drag.mode ||
-				s.voice !== "off")
+				this.chatOwnedByVoice)
 		)
 			retire(this);
 		const change = this.chatChange;
@@ -805,9 +793,7 @@ export function installChatOverlayMotion(Component: Shell) {
 				: clamp01((d.start - delta) / Math.max(1, d.full)) * d.full;
 		// The shared hook coalesces these direct paints once per frame; rebuilding the app
 		// per movement would put React work between the finger and the sheet.
-		const panel = document.querySelector<HTMLElement>(
-			'[data-alpha-layer="conversation"]',
-		);
+		const panel = conversationPanel();
 		const share = collapseShare(d);
 		if (firstMove) clearTimeout(d.hold);
 		// While a finger moves the sheet, this paint is the stage's only writer (AC-02).
@@ -818,7 +804,7 @@ export function installChatOverlayMotion(Component: Shell) {
 		if (panel) {
 			panel.style.transition = "none";
 			panel.style.height = `${paintedHeight(d)}px`;
-			if (d.mode === "sheet" || d.mode === "full")
+			if (isOpen(d.mode))
 				panel.style.opacity = String(1 - share);
 			revealRows(panel, d.scale);
 		}
@@ -875,13 +861,18 @@ export function installChatOverlayMotion(Component: Shell) {
 			s = this.S(),
 			geometry = bounds(),
 			drag: Drag | undefined = this.chatMotion;
-		out.panelH =
-			(drag && paintedHeight(drag)) ??
-			(s.chat === "full"
+		// Voice owns the chat while its controls hold it: the shell's voice overlay (S().voice), or the
+		// voice adapter's recorder (a Talk conversation, dictation, or the panel retiring either), which
+		// leaves S().voice off. No chat drag starts or survives under it (ChatDock DragMatchesShell), so
+		// a drag never redraws the text composer or the collapsed form beneath the voice controls.
+		shell.chatOwnedByVoice = s.voice !== "off" || !!out.chatRecorder;
+		out.panelH = drag
+			? paintedHeight(drag)
+			: s.chat === "full"
 				? geometry.full
 				: s.chat === "sheet"
 					? sheetHeight(shell, geometry)
-					: 0);
+					: 0;
 		out.panelTransition = drag?.moved ? "none" : PANEL_TRANSITION;
 		if (s.chat === "sheet" && !drag) shell.renderedSheetHeight = out.panelH;
 		out.chatDragging = !!drag?.moved;
@@ -896,7 +887,7 @@ export function installChatOverlayMotion(Component: Shell) {
 			out.barOnText = out.onDraft;
 			out.barOnKey = out.onKey;
 		}
-		// As in OG's scroll clearance, reserve the resting sheet's footprint and
+		// Reserve the resting sheet's footprint and
 		// reveal focused app controls without changing the sheet or focus owner.
 		// The same holds for the floating dock (composer bar or pill): a control
 		// that takes focus while part of it is under the dock is scrolled wholly
@@ -905,7 +896,7 @@ export function installChatOverlayMotion(Component: Shell) {
 			const target = event.target;
 			if (
 				!(target instanceof HTMLElement) ||
-				target.closest('[inert],[role="dialog"]') ||
+				target.closest('[inert],[role="dialog"],[role="menu"]') ||
 				document.querySelector("dialog[open]")
 			)
 				return;
@@ -940,7 +931,6 @@ export function installChatOverlayMotion(Component: Shell) {
 			}
 			if (hidden > 0) scroll.scrollTop += hidden / geometry.scale;
 		};
-		const isOpen = (mode: unknown) => mode === "sheet" || mode === "full";
 		if (shell.chatRenderedMode !== s.chat) {
 			const from = shell.chatRenderedMode;
 			shell.chatRenderedMode = s.chat;
@@ -984,7 +974,7 @@ export function installChatOverlayMotion(Component: Shell) {
 			out.panelR = drag.height >= drag.full ? "0px" : "30px 30px 0 0";
 		}
 		// An open chat dragged down hands over to the form it collapses to, drawn under it in place.
-		if (drag?.moved && (drag.mode === "sheet" || drag.mode === "full") && s.voice === "off") {
+		if (drag?.moved && isOpen(drag.mode) && !shell.chatOwnedByVoice) {
 			const rest = shell.rest();
 			if (rest === "input") out.showComposer = true;
 			if (rest === "hidden") out.showPill = true;
@@ -1019,14 +1009,11 @@ export function installChatOverlayMotion(Component: Shell) {
 						))
 				)
 					return;
-				if (
-					!binding ||
-					document.hidden ||
-					shell.live === false ||
-					shell.S().voice !== "off"
-				)
-					return;
+				if (!binding || document.hidden || shell.live === false) return;
 				event.stopPropagation();
+				// Under voice the handle keeps its press and moves nothing: the screen's own swipe
+				// must not lower the sheet from under the voice controls either.
+				if (shell.chatOwnedByVoice) return;
 				if (emptyInput) event.preventDefault();
 				const g = bounds(),
 					// A comms view rests on its bar even when the chat state says hidden (D2).
@@ -1051,7 +1038,9 @@ export function installChatOverlayMotion(Component: Shell) {
 										? () => out.grabTap({ detail: 1 })
 										: target?.closest("[data-alpha-strip]")
 											? out.strip?.tap
-											: undefined;
+											: label === "Stop reply"
+												? out.stopReply
+												: undefined;
 				shell.swallow = 0;
 				shell.chatMotion = {
 					id: event.pointerId,
@@ -1263,9 +1252,11 @@ export function installChatOverlayMotion(Component: Shell) {
 		// An outside tap lowers the sheet or dock without activating what it uncovers.
 		// A drag has no click, so it collapses on release. Assistive technology can
 		// still activate app controls directly. A comms view stays live above the sheet (staged, or an emergency call): its
-		// controls (draft Send, the call card, list chips) take their own taps (AC-02).
+		// controls (draft Send, the call card, list chips) take their own taps (AC-02). So does portrait Camera,
+		// laid out above the open sheet (phone.css): its viewfinder, shutter, modes and flip stay live.
+		const cameraStaged = s.view === "camera" && !document.documentElement.classList.contains("alpha-landscape");
 		out.scrimPE =
-			dockScrim || s.chat === "sheet" && s.voice === "off" && !shell.props.assistantSurface && !out.comms
+			dockScrim || s.chat === "sheet" && s.voice === "off" && !shell.props.assistantSurface && !out.comms && !cameraStaged
 				? "auto"
 				: "none";
 		const ownedPress = (event: PointerEvent) => {

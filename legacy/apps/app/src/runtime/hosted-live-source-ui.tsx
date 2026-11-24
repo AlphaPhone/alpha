@@ -1,16 +1,17 @@
 import {BrowserDigestDelegation} from '../browser/digest-delegation-ui';
-import {browserDevProfile} from '../browser/dev-profile';
+import {devSurfacesEnabled} from '../build-flags';
 import { CloudDelegationPanel } from "./cloud-delegation-ui";
 import { isAndroid } from '../native';
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { iconStyle } from "../icon-style";
 import { anyAbortSignal } from "./abort-signal";
-import type {
-	DigestLoop,
-	DigestSource,
-	HostedDigestProtocol,
-	HostedLiveAccount,
-	HostedLiveCalendar,
+import {
+	DIGEST_SOURCE_MAX_HOURS,
+	type DigestLoop,
+	type DigestSource,
+	type HostedDigestProtocol,
+	type HostedLiveAccount,
+	type HostedLiveCalendar,
 } from "./hosted-digests";
 
 // Native descriptors include a connection suffix. The revoke route owns the whole grant.
@@ -39,6 +40,7 @@ function removalImpact(grantId: string, sources: DigestSource[], loops: DigestLo
 export function HostedLiveSourcePicker({
 	client,
 	scope,
+	developmentConnection = false,
 	signal,
 	current,
 	busy,
@@ -47,6 +49,7 @@ export function HostedLiveSourcePicker({
 }: {
 	client: HostedDigestProtocol;
 	scope?: string;
+	developmentConnection?: boolean;
 	signal: AbortSignal;
 	current: () => boolean;
 	busy: boolean;
@@ -103,6 +106,10 @@ export function HostedLiveSourcePicker({
 	useEffect(() => { if (removal) removalHeading.current?.focus(); }, [removal]);
 	const range = (value: number, max: number) =>
 		Number.isInteger(value) && value >= 1 && value <= max;
+	const limitsValid =
+		range(windowHours, DIGEST_SOURCE_MAX_HOURS) &&
+		range(expiresHours, DIGEST_SOURCE_MAX_HOURS) &&
+		range(maxItems, 25);
 	async function loadAccounts() {
 		if (busy || pending) return;
 		setPending(true);
@@ -191,9 +198,7 @@ export function HostedLiveSourcePicker({
 			!account ||
 			!account.kinds.includes(kind) ||
 			(kind === "calendar" && !calendar) ||
-			!range(windowHours, 168) ||
-			!range(expiresHours, 168) ||
-			!range(maxItems, 25)
+			!limitsValid
 		)
 			return;
 		// One clock reading keeps a 168-hour expiry within the agent's observedAt + 7 days bound.
@@ -229,7 +234,7 @@ export function HostedLiveSourcePicker({
 	return (
 		<details ref={liveDetails} onToggle={event => { if (event.target === event.currentTarget && !event.currentTarget.open) retireRemoval(); }}>
 			<summary onClick={() => { if (liveDetails.current?.open) retireRemoval(); }}><span aria-hidden="true" className="alpha-google-icon" style={{ display: "inline-block", width: 18, height: 18, marginRight: 6, verticalAlign: "middle" }} />Live Google</summary>
-            {scope && (browserDevProfile&&JSON.parse(localStorage.getItem('alpha.connection.selection.v1')||'null')?.kind==='development'?<BrowserDigestDelegation client={client} scope={scope} signal={signal} current={current} onConnected={()=>void loadAccounts()} onReviewRemoval={grantId => void removeAccess({ grantId })} removalBusy={busy || pending || !!removal} revocation={revocation}/>:isAndroid?<CloudDelegationPanel client={client} scope={scope} signal={signal} current={current} onConnected={()=>void loadAccounts()} onReviewRemoval={grantId => void removeAccess({ grantId })} removalBusy={busy || pending || !!removal} revocation={revocation}/>:null) }
+            {scope && (devSurfacesEnabled&&developmentConnection?<BrowserDigestDelegation client={client} scope={scope} signal={signal} current={current} onConnected={()=>void loadAccounts()} onReviewRemoval={grantId => void removeAccess({ grantId })} removalBusy={busy || pending || !!removal} revocation={revocation}/>:isAndroid?<CloudDelegationPanel client={client} scope={scope} signal={signal} current={current} onConnected={()=>void loadAccounts()} onReviewRemoval={grantId => void removeAccess({ grantId })} removalBusy={busy || pending || !!removal} revocation={revocation}/>:null) }
 			{message && <p>{message === "Sign-in stays on phone" && <span aria-hidden="true" style={{ ...iconStyle("lock-keyhole"), width: "16px", height: "16px", marginRight: 6, verticalAlign: "middle" }} />}{message}</p>}
 			<button disabled={busy || pending} onClick={() => void loadAccounts()}>
 				Refresh connected accounts
@@ -334,7 +339,7 @@ export function HostedLiveSourcePicker({
 									aria-label="Source window hours"
 									type="number"
 									min={1}
-									max={168}
+									max={DIGEST_SOURCE_MAX_HOURS}
 									value={windowHours}
 									onChange={(e) => setWindowHours(Number(e.target.value))}
 								/>
@@ -356,7 +361,7 @@ export function HostedLiveSourcePicker({
 									aria-label="Source access hours"
 									type="number"
 									min={1}
-									max={168}
+									max={DIGEST_SOURCE_MAX_HOURS}
 									value={expiresHours}
 									onChange={(e) => setExpiresHours(Number(e.target.value))}
 								/>
@@ -366,9 +371,7 @@ export function HostedLiveSourcePicker({
 								disabled={
 									busy ||
 									pending ||
-									!range(windowHours, 168) ||
-									!range(maxItems, 25) ||
-									!range(expiresHours, 168) ||
+									!limitsValid ||
 									(kind === "calendar" && !calendar)
 								}
 								onClick={prepare}

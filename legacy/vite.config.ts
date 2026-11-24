@@ -7,17 +7,18 @@ import { browserFullReload } from './scripts/browser-full-reload.ts';
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import { localAgentDevBridge } from './scripts/local-agent-dev-bridge.ts';
+import appConfig from './app.config.json' with { type: 'json' };
 
 // One switch, upstream name (vendor/eliza/packages/app/scripts/dev-ui.ts): "1" opts
 // test-only mocks, fixtures and developer surfaces into a build. Anything else is off.
 // Only this single key is exposed; envPrefix stays VITE_ so ELIZA_* secrets never reach the bundle.
 checkCloudDeployment(fileURLToPath(new URL('.', import.meta.url)));
 const flagOn = process.env.ELIZA_DEV_ALLOW_TEST_MOCKS === '1';
-const appConfig = JSON.parse(readFileSync(fileURLToPath(new URL('./app.config.json', import.meta.url)), 'utf8')) as { version?: unknown };
-const appVersion = process.env.ELIZAOS_VERSION_NAME?.trim() || (typeof appConfig.version === 'string' ? appConfig.version : '0.0.0');
+const viteCacheScope = (process.env.ALPHA_VITE_CACHE_SCOPE ?? '').replace(/[^\w.-]/g, '');
+const appVersion = process.env.ELIZAOS_VERSION_NAME?.trim() || appConfig.version;
 const prototypeDirectory = fileURLToPath(new URL('./apps/app/src/prototype/', import.meta.url));
 const fixturesModule = path.join(prototypeDirectory, 'fixtures.js');
 const emptyFixturesModule = path.join(prototypeDirectory, 'fixtures.empty.js');
@@ -38,7 +39,7 @@ const disabledModulePrefix = '\0alpha-disabled-';
 const srcDirectory = fileURLToPath(new URL('./apps/app/src/', import.meta.url));
 
 /** Production CSP. Dev serve stays relaxed for HMR and the local agent bridge. */
-export function productionContentSecurityPolicy(testMocks: boolean): string {
+function productionContentSecurityPolicy(testMocks: boolean): string {
   // data: and blob: only resolve bytes already in the renderer (saved photos, captures).
   const connect = ["'self'", 'data:', 'blob:', 'https:', ...(testMocks ? ['http://10.0.2.2:*', 'http://127.0.0.1:*', 'http://localhost:*'] : [])];
   return [
@@ -67,8 +68,7 @@ function productionSurface(): Plugin[] {
         const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
         if (!resolved || resolved.external) return null;
         const id = resolved.id.split('?')[0];
-        // Tolerates a tree where the fixture module has not been extracted yet.
-        if (path.resolve(id) !== fixturesModule || !existsSync(emptyFixturesModule)) return null;
+        if (path.resolve(id) !== fixturesModule) return null;
         return emptyFixturesModule;
       },
     },
@@ -105,7 +105,9 @@ function productionSurface(): Plugin[] {
 export default defineConfig({
   root: "apps/app",
   // Worktrees may share node_modules; one preview must not replace another preview's optimized modules.
-  cacheDir: fileURLToPath(new URL(`./test-results/vite-cache/${flagOn ? "mocks" : "production"}/`, import.meta.url)),
+  // Concurrent browser-test runs in one worktree must not share one either: playwright.config.ts
+  // scopes its servers' caches by port. Plain dev:ui and builds keep the unscoped directory.
+  cacheDir: fileURLToPath(new URL(`./test-results/vite-cache/${flagOn ? "mocks" : "production"}${viteCacheScope ? `-${viteCacheScope}` : ""}/`, import.meta.url)),
   plugins: [productionSurface(), localOcrAssets(), browserPdfAssets(), browserFullReload(), react(), localAgentDevBridge(), browserCloudDevBridge()],
   define: {
     'import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS': JSON.stringify(flagOn ? '1' : ''),
@@ -180,7 +182,9 @@ export default defineConfig({
       "@elizaos/contracts/phone-workflow": fileURLToPath(new URL("./.eliza/client-features/packages/contracts/src/phone-workflow.ts",import.meta.url)),
       "@elizaos/contracts/workflow-client": fileURLToPath(new URL("./.eliza/client-features/packages/contracts/src/workflow-client.ts",import.meta.url)),
       "@elizaos/contracts/workflow-scope": fileURLToPath(new URL("./.eliza/client-features/packages/contracts/src/workflow-scope.ts",import.meta.url)),
+      "@elizaos/plugin-assistant/device-actions/browser-contract": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts",import.meta.url)),
       "@elizaos/plugin-assistant/device-actions/camera-contract": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts",import.meta.url)),
+      "@elizaos/plugin-assistant/device-actions/camera-request": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-request.ts",import.meta.url)),
       "@elizaos/plugin-assistant/device-actions/client-coordinator": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts",import.meta.url)),
       "@elizaos/plugin-assistant/device-actions/clock-contract": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/clock-contract.ts",import.meta.url)),
       "@elizaos/plugin-assistant/device-actions/files-browser-contract": fileURLToPath(new URL("./.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/files-browser-contract.ts",import.meta.url)),
@@ -206,6 +210,8 @@ export default defineConfig({
     fileURLToPath(new URL('./apps/app', import.meta.url)),
     // Prepared upstream modules, by real path when a worktree shares this prepared tree.
     realpathSync(fileURLToPath(new URL('./.eliza/client-features', import.meta.url))),
-    fileURLToPath(new URL('./node_modules', import.meta.url)),
+    // Vite resolves shared dependencies and the pinned password client to their real paths.
+    realpathSync(fileURLToPath(new URL('./node_modules', import.meta.url))),
+    realpathSync(fileURLToPath(new URL('./vendor/eliza/plugins/plugin-native-passwords/src', import.meta.url))),
   ] } },
 });

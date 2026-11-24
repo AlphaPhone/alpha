@@ -1,39 +1,29 @@
-/** Photos' agent bridge for the full permitted MediaStore library (issue 408, policy P-24).
+/** Photos' agent bridge for the full permitted MediaStore library (policy P-24).
  * Native reads go through AlphaPhotoLibrary; rules live in runtime/photo-library.ts. Reads return
  * identity-only rows; select, filter, open, album and share requests and every review act on the
  * main Photos Library the owner sees (camera-adapter registers it with setMainLibraryHost).
  * Nothing is copied or uploaded. */
 import { Capacitor } from '@capacitor/core';
-import { registerPlugin } from '../platform-plugins';
+import { alphaPhotoLibrary, type AlphaPhotoLibraryPlugin } from '../native/alpha-photo-library';
+import { errorCode } from '../lib/error-text';
 import { PHOTOS_MESSAGES } from '../ui/photos/photos-messages';
 import { refusalText } from '../ui/utils/native-refusal';
 import {
   LibraryRevisions, parsePage, parseScope, parseValidation, parseItem, prepareReview, modelItem, modelSearchResult, LIBRARY_LIMITS,
-  type LibraryReview, type LibraryScopeState, type LibraryItem, type LibraryChange, type LibraryAgentOperation, type LibraryAgentResult,
+  type LibraryReview, type LibraryScopeState, type LibraryItem, type LibraryAgentOperation, type LibraryAgentResult,
 } from '../runtime/photo-library';
 import type { PhotosViewOperation, PhotosViewResult } from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/photos-view-contract.ts';
 
-type Bag = Record<string, any>;
-type Items = { items: { id: string; revision: string }[] };
-export type PhotoLibraryPort = {
-  scope(): Promise<unknown>;
-  page(options: { before?: string; limit?: number; thumbnails?: boolean; thumbnailSize?: number; kind?: string; from?: number; to?: number; favorites?: boolean }): Promise<unknown>;
-  inspect(options: { id: string; size?: number; pixels?: boolean }): Promise<unknown>;
-  validate(options: Items): Promise<unknown>;
-  requestChange(options: Items & { operation: LibraryChange }): Promise<{ status: string; operation?: string; outcomes?: { id: string; status: string }[] }>;
-  share(options: Items): Promise<{ status: string; count: number }>;
-};
-const nativePort = registerPlugin<PhotoLibraryPort>('AlphaPhotoLibrary');
 const CHANGED_OUTCOMES = ['favorited', 'unfavorited', 'trashed', 'restored', 'unchanged'];
 /** Owner-facing summary of a native batch change result (never reports an unverified item as changed). */
-export function describeLibraryChange(result: { status: string; outcomes?: { id: string; status: string }[] }, requested: number) {
+function describeLibraryChange(result: { status: string; outcomes?: { id: string; status: string }[] }, requested: number) {
   const outcomes = Array.isArray(result.outcomes) ? result.outcomes : [];
   const verified = outcomes.filter(row => CHANGED_OUTCOMES.includes(row.status)).length, stale = outcomes.filter(row => row.status === 'stale').length;
   if (result.status === 'complete' && verified === requested) return `${verified} ✓`;
   return `${verified}/${requested} ✓${stale ? ` · ${stale} skipped` : ''}`;
 }
-export const deviceLibraryAvailable = () => Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('AlphaPhotoLibrary');
-const revisionSession = () => { try { return Array.from(crypto.getRandomValues(new Uint8Array(6)), byte => byte.toString(36).padStart(2, '0')).join('').slice(0, 12); } catch { return Date.now().toString(36).slice(-8); } };
+const deviceLibraryAvailable = () => Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('AlphaPhotoLibrary');
+const revisionSession = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), byte => byte.toString(36).padStart(2, '0')).join('').slice(0, 12);
 
 /** A refusal the agent executor reports as a failed action with this owner-facing text. */
 export class LibraryAgentRefusal extends Error { override readonly name = 'LibraryAgentRefusal'; }
@@ -60,10 +50,66 @@ export type MainLibraryHost = {
   trashed(ids: string[]): void;
 };
 let mainHost: MainLibraryHost | undefined;
+/** The rows an agent request names: those in the loaded Library window, then each other id read
+ * from the library one at a time (it may be older than the window). An id the library cannot
+ * read, or reads as deleted, is missing. Reads stop when the request is cancelled. */
+export async function resolveRequestedRows<T>(loaded: readonly T[], ids: readonly string[], idOf: (row: T) => string,
+  read: (id: string) => Promise<T | undefined>, signal: AbortSignal): Promise<{ rows: T[]; missing: number }> {
+  const wanted = new Set(ids), rows = loaded.filter(row => wanted.has(idOf(row)));
+  const found = new Set(rows.map(idOf));
+  for (const id of wanted) {
+    if (found.has(id)) continue;
+    signal.throwIfAborted();
+    let row: T | undefined;
+    try { row = await read(id); } catch { row = undefined; }
+    signal.throwIfAborted();
+    if (row !== undefined && idOf(row) === id && !found.has(id)) { rows.push(row); found.add(id); }
+  }
+  return { rows, missing: ids.length - rows.length };
+}
+/** A request that names library items for the main host: select them, or open an album or share review. */
+export type HostItemsOperation = Extract<HostOperation, { type: 'photo_library_select' | 'photos_album_create' | 'photos_share' }>;
+/** What the main Photos host lends an item request (specs/quint/application/PhotosAgentHost.qnt). */
+export type HostRequestPorts<T> = {
+  loaded(): readonly T[]; idOf(row: T): string; read(id: string): Promise<T | undefined>;
+  /** Photos is still active and showing in the visit the request started in. */
+  current(): boolean;
+  /** The editor, a video edit, a change or a share is running. */
+  busy(): boolean;
+  /** Any review over the grid: the host's album or share review, or the library's own review or change. */
+  reviewOpen(): boolean;
+  /** The library id of the item open in the Photos viewer, if any (photos.view-selected.v1). */
+  openId(): string | undefined;
+  select(rows: T[]): void;
+  openReview(operation: Exclude<HostItemsOperation, { type: 'photo_library_select' }>, rows: T[], missing: number): void;
+};
+/** Resolves the named items, then checks again that the same visible visit is free before it
+ * selects them or opens the one review: the reads can outlast a hide, a departure, a busy start
+ * or another review. An album or share with `selected` names the item open in the viewer when the
+ * request arrives; it opens the review only if that item is still the open one after the read. */
+export async function runHostItemsRequest<T>(operation: HostItemsOperation, ports: HostRequestPorts<T>, signal: AbortSignal) {
+  const selected = 'selected' in operation && operation.selected === true, open = selected ? ports.openId() : undefined;
+  if (selected && !open) throw new LibraryAgentRefusal('Open the photo or video in Photos, then ask again.');
+  const { rows, missing } = await resolveRequestedRows(ports.loaded(), open ? [open] : operation.ids, ports.idOf, ports.read, signal);
+  if (!ports.current()) throw new LibraryAgentRefusal('Open Photos, then ask again.');
+  if (ports.busy()) throw new LibraryAgentRefusal('Photos is busy right now.');
+  if (open && ports.openId() !== open) throw new LibraryAgentRefusal('Ask again because a different item is open now.');
+  if (operation.type === 'photo_library_select') {
+    if (!rows.length) throw new LibraryAgentRefusal('None of those items are in Photos.');
+    ports.select(rows);
+    return { kind: 'photo_library_select' as const, selected: rows.length, missing };
+  }
+  if (!rows.length) throw new LibraryAgentRefusal('Those items are not in Photos.');
+  if (ports.reviewOpen()) throw new LibraryAgentRefusal('Finish the open review first.');
+  ports.openReview(operation, rows, missing);
+  return operation.type === 'photos_share'
+    ? { kind: 'photos_share' as const, status: 'review_opened' as const, count: rows.length, missing }
+    : { kind: 'photos_album_create' as const, status: 'review_opened' as const, count: rows.length, missing };
+}
 export function setMainLibraryHost(host: MainLibraryHost | undefined) { mainHost = host; return () => { if (mainHost === host) mainHost = undefined; }; }
 
 /** One instance per Photos module mount. */
-export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, available = deviceLibraryAvailable) {
+export function createDeviceLibrary(port: AlphaPhotoLibraryPlugin = alphaPhotoLibrary, available = deviceLibraryAvailable) {
   const modelRevisions = new LibraryRevisions(revisionSession());
   let status = '', review: LibraryReview | undefined, acting = false, epoch = 0, disposed = false;
 
@@ -102,7 +148,7 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
         const result = await port.share({ items: pending.items });
         status = result.status === 'opened' ? '' : 'Share failed';
       } else {
-        // Native (PermittedMediaReview) resolves only after Android approved: {status:'complete'|'partial',
+        // Native (AlphaMediaReview) resolves only after Android approved: {status:'complete'|'partial',
         // outcomes:[{status:'favorited'|'unfavorited'|'trashed'|'restored'|'unchanged'|'stale'|'unverified'}]}.
         // A cancelled review rejects with LIBRARY_DECLINED and a revision changed before review with LIBRARY_STALE.
         const result = await port.requestChange({ operation: pending.action, items: pending.items });
@@ -112,8 +158,8 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
         if (pending.action === 'trash') mainHost?.trashed(trashed);
       }
     } catch (failure) {
-      const code = (failure as { code?: string })?.code;
-      // The review answers in its own words (PermittedMediaReview); Alpha words each sentence and keeps its code's line otherwise.
+      const code = errorCode(failure);
+      // The review answers in its own words (AlphaMediaReview); Alpha words each sentence and keeps its code's line otherwise.
       status = refusalText(failure, PHOTOS_MESSAGES, code === 'LIBRARY_DECLINED' ? 'Nothing changed.' : code === 'LIBRARY_STALE' ? 'Item changed' : 'Failed', { ownErrors: false });
     } finally { acting = false; changed(); }
   }
@@ -125,15 +171,15 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
     return host;
   };
 
-  /** Approved agent operations (issue 408). Reads stay local and return identity-only rows with
+  /** Approved agent operations. Reads stay local and return identity-only rows with
    * opaque revisions; select, view requests and reviews act only on the owner-visible Library. */
   const agent: LibraryAgent = {
     async run(operation, signal) {
       if (!available() || disposed) throw new LibraryAgentRefusal('The device library is available only in the Android app.');
       const current = await readScope();
       signal.throwIfAborted();
-      if (!current || current.scope === 'denied') throw new LibraryAgentRefusal('Alpha is not allowed to read the photo library. Nothing was shared.');
-      if (current.locked) throw new LibraryAgentRefusal('Unlock the phone to use the device library. Nothing was shared.');
+      if (!current || current.scope === 'denied') throw new LibraryAgentRefusal('Alpha is not allowed to read the photo library.');
+      if (current.locked) throw new LibraryAgentRefusal('Nothing was shared because the phone is locked.');
       if (operation.type === 'photo_library_search') {
         const limit = operation.limit ?? 20;
         const page = parsePage(await port.page({ limit, thumbnails: false, kind: operation.kind ?? 'all', ...(operation.from !== undefined ? { from: operation.from } : {}), ...(operation.to !== undefined ? { to: operation.to } : {}), ...(operation.favorites ? { favorites: true } : {}) }));
@@ -143,7 +189,7 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
       if (operation.type === 'photo_library_inspect') {
         let row: LibraryItem;
         try { row = parseItem(await port.inspect({ id: operation.id, size: 64, pixels: false })); }
-        catch (failure) { if ((failure as { code?: string })?.code === 'LIBRARY_MISSING') throw new LibraryAgentRefusal('That item is no longer in the library.'); throw failure; }
+        catch (failure) { if (errorCode(failure) === 'LIBRARY_MISSING') throw new LibraryAgentRefusal('That item is no longer in the library.'); throw failure; }
         signal.throwIfAborted();
         return { kind: operation.type, item: modelItem(row, modelRevisions) };
       }
@@ -152,10 +198,10 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
       if (acting || review || host.reviewOpen()) throw new LibraryAgentRefusal('Finish the open review first.');
       if (operation.type === 'photo_library_select') return host.run(operation, signal) as Promise<LibraryAgentResult>;
       const items = operation.items.map(entry => ({ id: entry.id, revision: modelRevisions.native(entry.id, entry.revision) ?? '' }));
-      if (items.some(entry => !entry.revision)) throw new LibraryAgentRefusal('An item changed since the assistant read it. Nothing changed; ask again.');
+      if (items.some(entry => !entry.revision)) throw new LibraryAgentRefusal('Nothing changed because an item changed since the assistant read it.');
       const prepared = prepareReview(operation.action, items), token = epoch;
       // The review binds the exact revisions the assistant read; the provider confirms they are still current.
-      if (!await validCurrent(prepared.items)) throw new LibraryAgentRefusal('An item changed or left the library. Nothing changed; ask again.');
+      if (!await validCurrent(prepared.items)) throw new LibraryAgentRefusal('Nothing changed because an item changed or left the library.');
       signal.throwIfAborted();
       // Photos may have been left, or another review opened, while the provider checked.
       if (token !== epoch || disposed) throw new LibraryAgentRefusal('Open Photos, then ask again.');
@@ -179,6 +225,8 @@ export function createDeviceLibrary(port: PhotoLibraryPort = nativePort, availab
       if (!review) return undefined;
       return { title: review.title, detail: review.detail, busy: acting, confirm: () => { void confirmReview(); }, cancel: () => { review = undefined; status = ''; changed(); } };
     },
+    /** The library's own review is open or its confirmed change is with Android. */
+    reviewBusy() { return !!review || acting; },
     /** One short line after a confirmed review, for the host's toast. */
     takeStatus() { const value = status; status = ''; return value; },
     agent,

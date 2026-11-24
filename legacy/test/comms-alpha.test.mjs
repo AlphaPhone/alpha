@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {build} from 'esbuild';
-import {mkdtempSync, writeFileSync, rmSync} from 'node:fs';
+import {mkdtempSync, readFileSync, writeFileSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -104,6 +104,67 @@ test('a contact call is chosen inside the approved card, never in a separate dia
   assert.deepEqual(digest[0].rows.map(row => row.who), ['Maya Chen', 'Not now']);
   assert.equal(R.placeTelephonyReview([{id: 3, isUser: true}], review, 'p1'), null, 'no card: the caller dismisses it');
   assert.equal(R.placeTelephonyReview(msgs, R.presentTelephonyReview(null), 'p1'), msgs);
+});
+
+test('the card names an existing contact before adding it again, and says which row keeps a contact\'s other details', () => {
+  const chosen = [], settle = choice => chosen.push(choice);
+  const twin = R.presentTelephonyReview({review: {kind: 'contact-create', options: [{name: 'Sam Lee', numbers: ['+14155550132']}]}, settle});
+  assert.deepEqual(twin.rows.map(row => [row.name, row.lines.map(line => line.text), row.label]), [['Add anyway', ['Sam Lee is already in Contacts', '(415) 555-0132'], 'Add anyway: Sam Lee is already in Contacts']]);
+  twin.rows[0].choose(); twin.dismiss(); assert.deepEqual(chosen, [0, null], 'Add anyway chooses it; Not now chooses nothing');
+  const digest = R.placeTelephonyReview([{id: 1, cDigest: true, c: {proposalId: 'p'}, rows: []}], twin, 'p');
+  assert.deepEqual(digest[0].rows.map(row => row.who), ['Add anyway', 'Not now']); assert.equal(digest[0].rows[0].marks[0].text, 'Sam Lee is already in Contacts');
+  const before = {id: '1', version: 'a'.repeat(64), displayName: 'Sam Lee', phoneNumbers: [], emailAddresses: [{address: 'sam@work.example', type: 'work'}]};
+  const one = {address: 'sam@example.com', type: 'home'}, draft = emailAddresses => ({displayName: 'Sam Lee', phoneNumbers: [], emailAddresses});
+  const both = R.presentTelephonyReview({review: {kind: 'contact-save', options: [{before, after: draft([before.emailAddresses[0], one]), keeps: 'add'}, {before, after: draft([one]), keeps: 'replace'}]}, settle});
+  assert.deepEqual(both.rows.map(row => row.label), ['Add (keep existing): save changes to Sam Lee', 'Replace: save changes to Sam Lee']);
+  assert.deepEqual(both.rows.map(row => row.lines.map(line => [line.text, line.decoration])), [
+    [['Add (keep existing)', 'none'], ['sam@work.example', 'none'], ['sam@example.com', 'none']],
+    [['Replace', 'none'], ['sam@work.example', 'line-through'], ['sam@example.com', 'none']]], 'Replace strikes what it removes');
+  // A change that drops nothing is one row with no such line.
+  const plain = R.presentTelephonyReview({review: {kind: 'contact-save', options: [{before, after: draft([before.emailAddresses[0], one])}]}, settle});
+  assert.deepEqual(plain.rows.map(row => [row.label, row.lines.length]), [['Save changes to Sam Lee', 2]]);
+});
+
+test('a contact change chosen in a generic chat card says in words what it removes, adds and keeps (review: contacts-approval)', () => {
+  const settle = () => {};
+  const digestOf = options => {
+    const review = R.presentTelephonyReview({review: {kind: 'contact-save', options}, settle});
+    return R.placeTelephonyReview([{id: 1, cDigest: true, c: {proposalId: 'p'}, rows: []}], review, 'p')[0].rows;
+  };
+  const marks = row => row.marks.map(mark => [mark.text, mark.decoration]);
+  const before = {id: '1', version: 'a'.repeat(64), displayName: 'Test Alpha', phoneNumbers: [{number: '+14155550100', type: 'mobile'}], emailAddresses: [{address: 'ta@example.com', type: 'home'}]};
+  const draft = (phoneNumbers, displayName = 'Test Alpha') => ({displayName, phoneNumbers, emailAddresses: before.emailAddresses});
+  const next = {number: '4155550101', type: 'mobile'};
+  // A replace: the number that goes is named as removed and struck, never listed as if it stays.
+  let rows = digestOf([{before, after: draft([next])}]);
+  assert.deepEqual(rows.map(row => row.who), ['Test Alpha', 'Not now']);
+  assert.deepEqual(marks(rows[0]), [['Remove (415) 555-0100', 'line-through'], ['Add (415) 555-0101', 'none'], ['Keep ta@example.com', 'none']]);
+  assert.equal(rows[0].text, '', 'no flattened one-line value list beside the marked lines');
+  // The same request offered both ways: the Add row keeps the old number, the Replace row removes it.
+  rows = digestOf([{before, after: draft([before.phoneNumbers[0], next]), keeps: 'add'}, {before, after: draft([next]), keeps: 'replace'}]);
+  assert.deepEqual(rows.slice(0, 2).map(marks), [
+    [['Add (keep existing)', 'none'], ['Keep (415) 555-0100', 'none'], ['Add (415) 555-0101', 'none'], ['Keep ta@example.com', 'none']],
+    [['Replace', 'none'], ['Remove (415) 555-0100', 'line-through'], ['Add (415) 555-0101', 'none'], ['Keep ta@example.com', 'none']]]);
+  // Remove only, and a rename.
+  const two = {...before, phoneNumbers: [...before.phoneNumbers, {number: '+14155550199', type: 'work'}]};
+  rows = digestOf([{before: two, after: draft([two.phoneNumbers[1]], 'T. Alpha')}]);
+  assert.deepEqual(marks(rows[0]), [['Rename from Test Alpha', 'line-through'], ['Remove (415) 555-0100', 'line-through'], ['Keep (415) 555-0199', 'none'], ['Keep ta@example.com', 'none']]);
+  // The generic card draws each marked line on its own wrapping line, with its strike and weight.
+  const template = readFileSync('apps/app/src/prototype/template.html', 'utf8');
+  const digestCard = template.slice(template.indexOf('<sc-if value="{{m.cDigest}}">'), template.indexOf('<sc-if value="{{m.cNote}}">'));
+  assert.match(digestCard, /<sc-for list="{{r\.marks}}" as="l"><div [^>]*text-decoration: {{l\.decoration}}[^>]*>{{l\.text}}<\/div><\/sc-for>/);
+  assert.doesNotMatch(digestCard.match(/<sc-for list="{{r\.marks}}"[^]*?<\/sc-for>/)[0], /nowrap|ellipsis/);
+});
+
+test('a review that could not list every matching contact says so in its card', () => {
+  const contact = {id: '1', version: 'a'.repeat(64), displayName: 'John A', phoneNumbers: [], emailAddresses: []};
+  const review = R.presentTelephonyReview({review: {kind: 'contact-delete', options: [contact], more: true}, settle() {}});
+  assert.match(review.note, /^Only the first 10 matching contacts are shown\./);
+  const rows = R.placeTelephonyReview([{id: 1, cDigest: true, c: {proposalId: 'p'}, rows: []}], review, 'p')[0].rows;
+  assert.deepEqual(rows.map(row => [row.who, !!row.disabled]), [['John A', false], ['More matches', true], ['Not now', false]]);
+  assert.equal(R.presentTelephonyReview({review: {kind: 'contact-delete', options: [contact]}, settle() {}}).note, '');
+  const template = readFileSync('apps/app/src/prototype/template.html', 'utf8');
+  assert.match(template, /<sc-if value="{{m\.c\.reviewing\.note}}"><p data-alpha-telephony-review-note[^>]*>{{m\.c\.reviewing\.note}}<\/p><\/sc-if>/);
 });
 
 test('the briefing is Alpha\'s first line for the opening, before rows that arrived after it (AC-25)', () => {

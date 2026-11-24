@@ -1,8 +1,7 @@
 import { browserDevProfile } from '../browser/dev-profile';
 import { admittedAospViews, aospImage } from '../runtime/aosp-image';
-// Approved October 12 scope: issue #422.
 // Wallet is removed from MVP, including AOSP: no payment/provider activation.
-// Phone, Contacts and SMS: owner decision P-36 (issue #420). They exist only on the Alpha AOSP
+// Phone, Contacts and SMS: owner decision P-36. They exist only on the Alpha AOSP
 // image, never in a standalone APK or another non-image install; the launcher flavor alone is not
 // proof of the image (runtime/aosp-image.ts). On the image an app view opens only once its in-app
 // surface is backed by a reviewed native adapter, so no simulated call, message or address book is
@@ -23,7 +22,8 @@ for (const view of IMAGE_VIEWS) ENABLED_MVP_VIEWS.add(view);
 export const DEFERRED_MVP_VIEWS = new Set(["phone", "messages", "contacts", "wallet"].filter(view => !ENABLED_MVP_VIEWS.has(view)));
 // Development-server fixtures only (browserDevProfile requires devSurfacesEnabled); never a product scope
 // change and never the AOSP image capability, which stays false in every browser and test-mocks build.
-if(browserDevProfile){for(const view of DEFERRED_MVP_VIEWS)ENABLED_MVP_VIEWS.add(view);DEFERRED_MVP_VIEWS.clear();}
+// Wallet has no implementation and stays deferred everywhere.
+if(browserDevProfile){for(const view of DEFERRED_MVP_VIEWS)if(view!=="wallet"){ENABLED_MVP_VIEWS.add(view);DEFERRED_MVP_VIEWS.delete(view);}}
 export function isMvpView(view: string) { return ENABLED_MVP_VIEWS.has(view); }
 const PROMPT_VIEWS: Record<string, string> = { phone: "phone", dialer: "phone", call: "phone", dial: "phone", sms: "messages", messages: "messages", text: "messages", "text message": "messages", contacts: "contacts" };
 const UNAVAILABLE_PROMPT = /^(?:(?:open|show|go to|launch)\s+(?:the\s+)?(phone|dialer|sms|messages|contacts|wallet)(?:\b)|(call|dial|text|sms|pay)\b|(?:send|write)\s+(?:an?\s+)?(sms|text message)\b)/i;
@@ -34,7 +34,8 @@ export function deferredMvpPrompt(text: unknown) {
   const match = UNAVAILABLE_PROMPT.exec(String(text).trim());
   if (!match) return false;
   const view = PROMPT_VIEWS[(match[1] || match[2] || match[3] || "").toLowerCase()];
-  return !view || !(view === "contacts" ? !browserDevProfile && isMvpView("contacts") : IMAGE_VIEWS.has(view));
+  if (!view) return true;
+  return view === "contacts" ? browserDevProfile || !isMvpView("contacts") : !IMAGE_VIEWS.has(view);
 }
 
 /** Admits Contacts from the native image capability at runtime; other image views are fixed at load (IMAGE_VIEWS). */

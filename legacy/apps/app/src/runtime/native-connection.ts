@@ -16,20 +16,20 @@ const browserCloudHost=(devSurfacesEnabled||browserCloudResidentEnabled)&&!Capac
 /** Exact current-key self-revocation is supported only by the owned Android/private browser hosts. */
 export const cloudSelfRevocationSupported=Capacitor.getPlatform()==='android'||browserCloudHost;
 const nativeSignInHeader=(Capacitor as typeof Capacitor&{PluginHeaders?:{name:string}[]}).PluginHeaders?.some(header=>header.name==='AlphaCloudSignIn')??false;
+/** Google uses the native picker or the explicitly hosted browser OAuth flow. */
+export const cloudSignInGoogle=nativeSignInHeader||browserCloudHost;
+export const cloudSignInPhone=(Capacitor as typeof Capacitor&{PluginHeaders?:{name:string;methods?:{name:string}[]}[]}).PluginHeaders?.some(header=>header.name==='AlphaCloudSignIn'&&header.methods?.some(method=>method.name==='startPhone')&&header.methods?.some(method=>method.name==='verifyPhone'))??false;
 /**
  * In-app Eliza Cloud sign-in host: AlphaCloudSignInPlugin on Android, or the development Cloud bridge
  * (email code or canonical hosted Google OAuth) in the explicit browser host. Undefined where this build has no sign-in.
  */
-/** Google uses the native picker or the explicitly hosted browser OAuth flow. */
-export const cloudSignInGoogle=nativeSignInHeader||browserCloudHost;
-export const cloudSignInPhone=(Capacitor as typeof Capacitor&{PluginHeaders?:{name:string;methods?:{name:string}[]}[]}).PluginHeaders?.some(header=>header.name==='AlphaCloudSignIn'&&header.methods?.some(method=>method.name==='startPhone')&&header.methods?.some(method=>method.name==='verifyPhone'))??false;
 // The durable Google commit/cancel extension belongs to BrowserCloudSignIn only.
 // Capacitor synthesizes functions even for absent native methods; a cancellation
 // method in a native header does not imply the browser's reference-only receipt contract.
 export const cloudSignIn:CloudSignInPort|undefined=nativeSignInHeader?new Proxy(registerPlugin<CloudSignInPort>('AlphaCloudSignIn'),{get(target,property,receiver){if(property==='cancelGoogleSignIn')return undefined;return Reflect.get(target,property,receiver);}})
   :browserCloudHost?registerPlugin<CloudSignInPort>('AlphaCloudSignIn',{web:()=>new BrowserCloudSignIn()}):undefined;
 
-export interface ConnectionPort {
+interface ConnectionPort {
   prepareGoogleWorkspaceReturn?(binding:GoogleWorkspaceBinding):ReturnType<GoogleWorkspaceReturnPort['prepare']>;
   consumeGoogleWorkspaceReturn?(binding:GoogleWorkspaceBinding):ReturnType<GoogleWorkspaceReturnPort['consume']>;
   cancelGoogleWorkspaceReturn?(input:{state:string}):Promise<void>;
@@ -46,25 +46,17 @@ export interface ConnectionPort {
 }
 /** Secret storage for the web build's connection slots only. Values are AES-GCM encrypted with a
  * non-extractable key held in IndexedDB. Any script running on this origin can use the key. */
-export interface BrowserSecretBackend {
+interface BrowserSecretBackend {
   read(slot:string):Promise<string|null>;
   /** Atomic within this origin: replaces only when the current value equals expected. */
   compareExchange(slot:string,expected:string|null|undefined,value:string|null):Promise<boolean>;
 }
 /** Web slots are limited to agent connection credentials. Other renderer stores keep their own
  * browser documents and must not silently start writing secrets here. */
-export const browserConnectionSlot=(slot:unknown):string=>{
+const browserConnectionSlot=(slot:unknown):string=>{
   if(typeof slot!=='string'||!slot||slot.length>1024||!/^(remote|cloud|device|cloud-runtime):[^\s]+$/.test(slot))throw new Error('This secure slot is unavailable in the browser.');
   return slot;
 };
-/** Explicit ephemeral port for isolated previews and tests; production webSecrets stays durable-only. */
-export function memorySecretBackend():BrowserSecretBackend{
-  const values=new Map<string,string>();
-  return {
-    async read(slot){return values.get(slot)??null;},
-    async compareExchange(slot,expected,value){if(expected!==undefined&&(values.get(slot)??null)!==expected)return false;if(value===null)values.delete(slot);else values.set(slot,value);return true;},
-  };
-}
 const SECRET_DATABASE='alpha-connection-secrets.v1';
 function idb<T>(request:IDBRequest<T>):Promise<T>{return new Promise((resolve,reject)=>{request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});}
 /** IndexedDB values are {iv,data}; the CryptoKey is structured-cloned and never exported. */
@@ -121,20 +113,6 @@ export function indexedDbSecretBackend(factory:IDBFactory=indexedDB,subtle:Subtl
       }
     });},
   };
-}
-/** Private windows can refuse IndexedDB: a durable store that has never answered is replaced by
- * `fallback` for this page, without claiming persistence. Once the durable store has answered, a
- * later failure is reported instead: moving to the fallback then would leave the stored secret in
- * place while a removal (sign-out) or a replacement appeared to succeed, and it would return after
- * a reload. */
-export function durableSecretsWithFallback(durable:BrowserSecretBackend,fallback:BrowserSecretBackend,slotName:(slot:string)=>string=slot=>slot):BrowserSecretBackend{
-  let degraded=false,answered=false;
-  const use=async<T>(work:(backend:BrowserSecretBackend)=>Promise<T>)=>{
-    if(degraded)return work(fallback);
-    try{const result=await work(durable);answered=true;return result;}
-    catch(error){if(!answered&&error instanceof DOMException&&['InvalidStateError','UnknownError','SecurityError','NotSupportedError'].includes(error.name)){degraded=true;return work(fallback);}throw error;}
-  };
-  return {read:slot=>use(backend=>backend.read(slotName(slot))),compareExchange:(slot,expected,value)=>use(backend=>backend.compareExchange(slotName(slot),expected,value))};
 }
 function webSecrets():BrowserSecretBackend{
   let durable:BrowserSecretBackend|undefined;
@@ -246,11 +224,7 @@ export const cloudCredentialStore:CloudCredentialStore={
   read:environment=>{
     let pending=browserCloudHost?pendingCredentialReads.get(environment):undefined;
     if(!pending){
-      pending=serial(async()=>{
-        const value=await secureConnectionStore.read<CloudCredential>(`cloud:${environment}`);
-        if(value&&!value.credentialId){value.credentialId=crypto.randomUUID();await secureConnectionStore.write(`cloud:${environment}`,value);}
-        return value;
-      });
+      pending=serial(()=>secureConnectionStore.read<CloudCredential>(`cloud:${environment}`));
       if(browserCloudHost){
         pendingCredentialReads.set(environment,pending);
         const settled=()=>{if(pendingCredentialReads.get(environment)===pending)pendingCredentialReads.delete(environment);};
@@ -268,17 +242,6 @@ export const cloudCredentialStore:CloudCredentialStore={
   ...(browserCloudHost?{clearIfCurrent:(environment:CloudEnvironment,expected:CloudCredential|null)=>{pendingCredentialReads.delete(environment);return serial(()=>clearBrowserCloudCredentialIfCurrent(environment,expected));}}:{}),
   clear:environment=>{pendingCredentialReads.delete(environment);return serial(()=>secureConnectionStore.remove(`cloud:${environment}`));},
 };
-/**
- * Forced sign-out of a build that cannot use Eliza Cloud: removes the Cloud key an earlier build
- * stored for this environment. Only the `cloud:<environment>` slot is deleted, without reading or
- * decrypting it; remote-agent, device and every other slot is left alone. Where the browser can list
- * its databases, a browser that never stored a secret is not given a secret store by this.
- */
-export async function removeStoredCloudCredential(environment:CloudEnvironment):Promise<void>{
-  if(!Capacitor.isNativePlatform()&&typeof indexedDB!=='undefined'&&typeof indexedDB.databases==='function'
-    &&!(await indexedDB.databases()).some(database=>database.name===SECRET_DATABASE))return;
-  await cloudCredentialStore.clear(environment);
-}
 export const remoteCredentialStore:RemoteCredentialStore={
   read:origin=>serial(()=>secureConnectionStore.read(`remote:${origin}`)),
   write:record=>serial(()=>secureConnectionStore.write(`remote:${record.origin}`,record)),

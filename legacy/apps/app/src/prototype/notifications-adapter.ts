@@ -1,10 +1,10 @@
 import {alphaClient} from '../runtime/alpha-client';
 import {connectionController} from '../runtime/connection-ui';
 import { registerPlugin } from '../platform-plugins';
+import type { AlphaNotificationsPlugin, NotificationRow } from '../native/alpha-notifications';
 import { Capacitor } from '@capacitor/core';
-import { reviewContentQuestion } from '../browser/content-question';
-import { sensitiveReadingText } from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-reading.ts';
 import { createOwnNoticeRevisions, noticeKind, noticeCurrent, noticeExcerpt, noticeReviewable } from './context-selection';
+import { noticeQuestionFile, stageNoticeQuestion } from './own-notice-question';
 import { isMvpView } from './mvp-features';
 import { formatTime } from './locale-time';
 const opaque=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -15,8 +15,7 @@ export function ownNotificationSelection(notice:{id:string;revision:string;sourc
  const revision=notice.source==='own'&&opaque.test(notice.id)?ownNoticeRevisions(notice):undefined;
  return revision===undefined?undefined:{kind:'notification',id:notice.id,revision,accountId:'own'};
 }
-type Notice = { id: string; revision:string; source:'own'|'external'|'hosted'; kind?:string; appLabel:string; title: string; text: string; at: number; clearable: boolean; canOpen: boolean };
-const native = registerPlugin<{canonicalPending():Promise<{token?:string;ownerId?:string;agentId?:string;notificationId?:string;view?:string;conversationId?:string;messageId?:string}>;acknowledgeCanonical(options:{token:string}):Promise<{ok:boolean}>;addListener(name:'canonicalNotificationTap',listener:()=>void):Promise<{remove():Promise<void>}>;list(): Promise<{items: Notice[]; scope: string; calendarStatus?:string}>;open(options:{id:string;revision:string;source:string}):Promise<void>;dismiss(options:{id:string;revision:string;source:string}):Promise<void>;clear(options:{items:Array<{id:string;revision:string;source:string}>}):Promise<{outcomes:Array<{status:string}>}>}>('AlphaNotifications');
+const native = registerPlugin<AlphaNotificationsPlugin>('AlphaNotifications');
 /** Opens the view a tapped canonical Alpha notification names. Android posts these from the
  * system shade, so this runs on every Android build, independent of the simulated shade. */
 export function installCanonicalNotificationTaps(Component: any) {
@@ -94,8 +93,8 @@ export function installNotificationsAdapter(Component: any) {
  const p=Component.prototype, render=p.renderVals, mount=p.componentDidMount, update=p.componentDidUpdate, unmount=p.componentWillUnmount;
  const shadeActive=(shell:any)=>{const state=shell.S();return !!state.shade&&state.screen==='home';};
  const active=(shell:any)=>shell.alphaNoticesLive&&!document.hidden&&shadeActive(shell);
- const key=(row:Notice)=>({id:row.id,revision:row.revision,source:row.source});
- const clearableKeys=(rows:Notice[])=>rows.filter(row=>row.clearable).map(key);
+ const key=(row:NotificationRow)=>({id:row.id,revision:row.revision,source:row.source});
+ const clearableKeys=(rows:NotificationRow[])=>rows.filter(row=>row.clearable).map(key);
  const retireQuestion=(shell:any)=>{
   const close=shell.alphaNoticeQuestion;
   shell.alphaNoticeQuestion=undefined;
@@ -133,7 +132,7 @@ export function installNotificationsAdapter(Component: any) {
   this.alphaNoticesBusy=true;
   const visit=this.alphaNoticeVisit;
   const current=()=>active(this)&&this.alphaNoticeVisit===visit;
-  try{const result=await native.list();if(!current())return;if(result.calendarStatus==='unavailable'){if(!this.alphaCalendarAlertError)this.toast('Alerts didn’t load');this.alphaCalendarAlertError=true;}else this.alphaCalendarAlertError=false;const next=result.items;const chosen=this.alphaNoticeSelection;if(chosen&&!next.some((n:Notice)=>n.id===chosen.id&&n.revision===chosen.revision&&n.source==='own'&&noticeKind(n)===noticeKind(chosen)))this.alphaNoticeSelection=undefined;if(JSON.stringify(next)!==JSON.stringify(this.alphaNotices)){this.alphaNotices=next;this.setState({nativeNoticeRevision:Date.now()});}this.alphaNoticeError=false;}
+  try{const result=await native.list();if(!current())return;if(result.calendarStatus==='unavailable'){if(!this.alphaCalendarAlertError)this.toast('Alerts didn’t load');this.alphaCalendarAlertError=true;}else this.alphaCalendarAlertError=false;const next=result.items;const chosen=this.alphaNoticeSelection;if(chosen&&!next.some((n:NotificationRow)=>n.id===chosen.id&&n.revision===chosen.revision&&n.source==='own'&&noticeKind(n)===noticeKind(chosen)))this.alphaNoticeSelection=undefined;if(JSON.stringify(next)!==JSON.stringify(this.alphaNotices)){this.alphaNotices=next;this.setState({nativeNoticeRevision:Date.now()});}this.alphaNoticeError=false;}
   catch{if(current()&&!this.alphaNoticeError){this.alphaNoticeError=true;this.alphaNotices=[];this.alphaNoticeSelection=undefined;this.setState({nativeNoticeRevision:Date.now()});this.toast('Unavailable');}}
   finally{this.alphaNoticesBusy=false;}
  };
@@ -157,11 +156,11 @@ export function installNotificationsAdapter(Component: any) {
    }catch{if(currentVisit())self.toast('Changed');}
    if(currentVisit())await self.refreshAlphaNotices();
   };
-  const rows:Notice[]=this.alphaNotices||[];
+  const rows:NotificationRow[]=this.alphaNotices||[];
   const items=clearableKeys(rows);
-  const shadeN=rows.map((n:Notice)=>{
+  const shadeN=rows.map((n:NotificationRow)=>{
    const target=key(n);
-   const current=()=>currentVisit()?self.alphaNotices.find((row:Notice)=>row.id===target.id&&row.revision===target.revision&&row.source===target.source):undefined;
+   const current=()=>currentVisit()?self.alphaNotices.find((row:NotificationRow)=>row.id===target.id&&row.revision===target.revision&&row.source===target.source):undefined;
    const swipe=this.sw(()=>{
     const row=current();
     if(!row)return;
@@ -169,35 +168,32 @@ export function installNotificationsAdapter(Component: any) {
     else this.toast('Ongoing');
    },{axis:'x'});
    const select=()=>{this.alphaNoticeSelection=ownNotificationSelection(n)?{id:n.id,revision:n.revision,source:n.source,...(n.kind===undefined?{}:{kind:n.kind})}:undefined;};
-   /** Review scope: this one Alpha Phone notification's shown title and text, editable before
-    * anything reaches the conversation draft. Other apps' and hosted rows offer no question.
-    * The list is read again when the owner continues, so a dismissed, replaced or updated
-    * notification (or one hidden by a lock) adds nothing and never becomes its neighbor. */
+   /** Stage the chosen Alpha Phone notification after rechecking its exact row and visibility. */
    const ask=()=>{
-    if(this.swallowed()||!current()||!noticeReviewable(n))return;
+    if(this.swallowed()||!current()||!noticeReviewable(n)||alphaClient.getState().context.sensitive)return;
+    const excerpt=noticeExcerpt(n),file=noticeQuestionFile('Alpha Phone notification.txt',excerpt);
+    if(!file){self.toast('Unavailable');return;}
     retireQuestion(self);select();self.publishAlphaNoticeSelection();
     const lease=self.alphaNoticeQuestionLease={};
-    const reviewed={id:n.id,revision:n.revision,source:n.source},excerpt=noticeExcerpt(n);
+    const reviewed=key(n);
     const owned=()=>self.alphaNoticeQuestionLease===lease;
-    const live=()=>owned()&&self.alphaNoticesLive&&!document.hidden&&shadeActive(self)&&noticeCurrent(reviewed,self.alphaNotices);
-    const refused=()=>{self.toast('Gone');void self.refreshAlphaNotices();};
-    self.alphaNoticeQuestion=reviewContentQuestion({name:(n.appLabel||'Alpha Phone')+' notification',text:excerpt,question:'Help me with this notification.',current:live,validate:text=>!sensitiveReadingText(text),closed:dismissed=>{
-     if(!owned())return;
-     self.alphaNoticeQuestion=undefined;
-     // The dialog closes before Continue starts the final list read.
-     if(dismissed)retireQuestion(self);
-    },compose:draft=>{void (async()=>{
-     if(!owned())return;
-     try{
-      if(!live()){refused();return;}
-      const epoch=self.alphaNoticeEpoch;
-      const fresh=(await native.list()).items,same=fresh.find((row:Notice)=>row.id===reviewed.id&&row.source===reviewed.source);
-      if(!owned())return;
-      if(epoch!==self.alphaNoticeEpoch||!live()||!noticeCurrent(reviewed,fresh)||!same||!noticeReviewable(same)||noticeKind(same)!==noticeKind(n)||noticeExcerpt(same)!==excerpt){refused();return;}
-      self.api(self.S().view).composeContentQuestion(draft);
-     }catch{if(owned()&&self.alphaNoticesLive)self.toast('Couldn’t check');}
-     finally{if(owned())retireQuestion(self);}
-    })();}});
+    let failure='Gone';
+    self.alphaNoticeQuestion=stageNoticeQuestion({
+     file,prompt:'Help me with this notification.',
+     current:()=>owned()&&currentVisit()&&!alphaClient.getState().context.sensitive&&noticeCurrent(reviewed,self.alphaNotices),
+     attach:selection=>self.api(self.S().view).attachSelectedFile(selection),
+     prepare:async admitted=>{
+      try{
+       const epoch=self.alphaNoticeEpoch;
+       const fresh=(await native.list()).items;
+       const same=fresh.find(row=>row.id===reviewed.id&&row.source===reviewed.source);
+       return epoch===self.alphaNoticeEpoch&&admitted()&&noticeCurrent(reviewed,fresh)&&!!same&&
+        noticeReviewable(same)&&noticeKind(same)===noticeKind(n)&&noticeExcerpt(same)===excerpt;
+      }catch{failure='Couldn’t check';return false;}
+     },
+     failed:()=>{if(owned()&&self.alphaNoticesLive){self.toast(failure);if(failure==='Gone')void self.refreshAlphaNotices();}},
+     closed:()=>{if(owned())retireQuestion(self);},
+    });
    };
    return {canAsk:noticeReviewable(n),ask,askLabel:'Ask Alpha about this '+(n.appLabel||'Alpha Phone')+' notification',id:n.id,d:out.ic.bell,who:n.source==='external'?n.appLabel:n.title||'Alpha Phone',text:n.source==='external'&&n.title!==n.appLabel?[n.title,n.text].filter(Boolean).join(' · '):n.text,time:formatTime(new Date(n.at)),tx:0,op:1,down:(event:unknown)=>{if(!current())return;select();return swipe.down(event);},up:(event:unknown)=>{if(currentVisit())window.setTimeout(()=>{if(currentVisit())self.publishAlphaNoticeSelection();},0);return swipe.up(event);},open:()=>{
     const row=current();

@@ -387,7 +387,8 @@ test('Brief appears for retained owner results with their run time',async({page}
   const {whenLabel}=await import('/src/prototype/home-cards.ts');return whenLabel(at.getTime(),Date.now());
  });
  await expect(card).toHaveAttribute('data-alpha-home-brief-failed','true');
- await expect(card).toContainText('Synthetic source expired');
+ await expect(card).toContainText('This digest stopped with an error on your agent. Open execution details to see what ran.');
+ await expect(card).not.toContainText('Synthetic source expired');
  await expect(card).toContainText(`Synthetic agent · Failed ${failedAt}`);
  // Opening it shows the retained results list; nothing is run.
  await card.click();
@@ -410,12 +411,23 @@ test('the digest panel publishes the connected profile\'s newest retained result
  await expect(page.locator('[data-alpha-home-apps]')).toBeVisible();
  expect(await retained()).toBeNull();
  // Saved for the development profile before it is connected, as results retained from an earlier session.
- const completedAt=await page.evaluate(()=>{
-  const at=Date.now()-3600000,iso=(value:number)=>new Date(value).toISOString(),key='alpha.browser.digests.local.v1',state=JSON.parse(localStorage.getItem(key)||'{"sources":[],"loops":[],"receipts":[],"results":[],"cursor":0,"acks":{}}');
-  const row=(runId:string,completed:number,extra:object)=>({cursor:++state.cursor,runId,workflowId:'workflow',workflowVersionId:'version',templateVersion:'hosted-digest-1',scheduledAt:iso(completed),source:{observedAt:iso(completed),expiresAt:iso(Date.now()+3600000)},startedAt:iso(completed),completedAt:iso(completed),error:null,...extra});
-  // Stored newest-first by cursor on purpose: the newest completion wins, not the last row.
-  state.results.push(row('overview-new',at,{status:'finished',output:[{nodeId:'typed-steps',runId:'overview-new',text:'Synthetic retained brief.',steps:[{id:'source',text:'SYNTHETIC_RAW_SOURCE_456'}]}]}),row('overview-old',at-86400000,{status:'finished',output:'Synthetic older brief'}));
-  localStorage.setItem(key,JSON.stringify(state));return iso(at);
+ const completedAt=await page.evaluate(async()=>{
+  const {developmentDigestDocument,initialDevelopmentDigests}=await import('/src/browser/development-digest-document.ts');
+  const {developmentIdentity}=await import('/src/browser/development-identity.ts');
+  const at=Date.now()-3600000,iso=(value:number)=>new Date(value).toISOString();
+  await developmentDigestDocument(developmentIdentity('local')).edit(initialDevelopmentDigests,state=>{
+   const row=(runId:string,completed:number,output:unknown)=>({
+    cursor:++state.cursor,runId,workflowId:'workflow',workflowVersionId:'version',templateVersion:'hosted-digest-1',
+    scheduledAt:iso(completed),source:{observedAt:iso(completed),expiresAt:iso(Date.now()+3600000)},startedAt:iso(completed),completedAt:iso(completed),
+    status:'finished' as const,error:null,output,
+   });
+   // Stored newest-first by cursor on purpose: the newest completion wins, not the last row.
+   state.results.push(
+    row('overview-new',at,[{nodeId:'typed-steps',runId:'overview-new',text:'Synthetic retained brief.',steps:[{id:'source',text:'SYNTHETIC_RAW_SOURCE_456'}]}]),
+    row('overview-old',at-86400000,'Synthetic older brief'),
+   );
+  });
+  return iso(at);
  });
  expect(await retained()).toBeNull();
  await page.getByRole('button',{name:'Settings',exact:true}).click();await openConnectionDiagnostics(page);await page.getByRole('button',{name:'Connect development profile'}).click();

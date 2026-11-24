@@ -14,6 +14,9 @@ const listed = (list: readonly string[]) =>
     ? list.map(baseName).join(", ")
     : `${list.slice(0, 2).map(baseName).join(", ")} and ${list.length - 2} more`;
 const count = (n: number) => (n === 1 ? "1 item" : `${n} items`);
+/** Shown positions before the phone resolves them to files (files.shown-target.v1). */
+const shownLabel = (list: readonly number[]) =>
+  `${list.length === 1 ? "Item" : "Items"} ${list.join(", ")} in the results shown`;
 const KIND_LABELS: Record<FilesFilterKind, string> = {
   image: "Images",
   video: "Videos",
@@ -37,6 +40,11 @@ function filesFilterLabel(op: Omit<FilesFilterOperation, "type">): string {
     .filter(Boolean)
     .join(" · ");
 }
+type FilesTarget = { paths: string[] } | { shown: number[] };
+const targets = (op: FilesTarget) =>
+  "shown" in op ? op.shown.length : op.paths.length;
+const targetLabel = (op: FilesTarget) =>
+  "shown" in op ? shownLabel(op.shown) : listed(op.paths);
 /** Owner-facing title and the exact effect of a proposal. */
 export function describeFilesOperation(op: FilesAgentOperation): {
   title: string;
@@ -52,18 +60,18 @@ export function describeFilesOperation(op: FilesAgentOperation): {
       };
     case "files_share":
       return {
-        title: `Share ${count(op.paths.length)}`,
-        description: listed(op.paths),
+        title: `Share ${count(targets(op))}`,
+        description: targetLabel(op),
       };
     case "files_trash":
       return {
-        title: `Move ${count(op.paths.length)} to Trash`,
-        description: listed(op.paths),
+        title: `Move ${count(targets(op))} to Trash`,
+        description: targetLabel(op),
       };
     case "files_move":
       return {
-        title: `Move ${count(op.paths.length)}`,
-        description: `${listed(op.paths)} → ${place(op.dest)}`,
+        title: `Move ${count(targets(op))}`,
+        description: `${targetLabel(op)} → ${place(op.dest)}`,
       };
     case "files_folder_create":
       return {

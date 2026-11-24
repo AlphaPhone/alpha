@@ -1,15 +1,19 @@
-import {test} from 'node:test';
+import {test,beforeEach,afterEach,mock} from 'node:test';
 import assert from 'node:assert/strict';
 import type {BatchProgressCue} from '../apps/app/src/runtime/local-agent-stream.ts';
 import {loadLocalAgentStream} from './fixtures/local-agent-stream.ts';
-const {createBatchProgressAcknowledgment:create,genuineBatchProgress,batchProgressBinding,emitBatchProgress,batchVoiceProgressEvents:events}=await loadLocalAgentStream();
+const {createBatchProgressAcknowledgment:create,BATCH_CUE_REPLY_BOUND_MS:BOUND,genuineBatchProgress,batchProgressBinding,emitBatchProgress,batchVoiceProgressEvents:events}=await loadLocalAgentStream();
 const turn='11111111-1111-4111-8111-111111111111',room='22222222-2222-4222-8222-222222222222';
 const tick=()=>new Promise<void>(resolve=>setImmediate(resolve));
+// The cue's reply bound runs on mocked setTimeout, which no test advances to start a cue; setImmediate
+// stays real for flushing.
+beforeEach(()=>mock.timers.enable({apis:['setTimeout']}));
+afterEach(()=>mock.timers.reset());
 const cue=(patch: Partial<BatchProgressCue> = {}): BatchProgressCue=>({turnId:turn,conversationId:room,ownerId:'owner',kind:'thinking',label:'Checking the calendar',...patch});
 function fixture(){
  const abort=new AbortController(),calls: {text: string; signal: AbortSignal}[]=[],history=[{id:'existing'}];
  let retired=true,current=true;
- const input: Parameters<typeof create>[0] = {turnId:turn,conversationId:room,ownerId:'owner',signal:abort.signal,assertCurrent:()=>{if(!current)throw Error('owner/view retired');},captureRetired:()=>retired,speak:async(text,signal)=>{calls.push({text,signal});}};
+ const input: Parameters<typeof create>[0] = {turnId:turn,conversationId:room,ownerId:'owner',signal:abort.signal,assertCurrent:()=>{if(!current)throw Error('owner/view retired');},captureRetired:()=>retired,speak:async(text,signal,onStarted)=>{calls.push({text,signal});onStarted();}};
  return {abort,calls,history,input,make:()=>create(input),set current(value: boolean){current=value;},set retired(value: boolean){retired=value;}};
 }
 test('missing genuine cue is negative control: no TTS, no chat/agent/model/tool work',async()=>{
@@ -35,12 +39,40 @@ test('a live path passes no retirement claim (null): its cue plays with the capt
 test('early final/token preempts cue queued in same turn',async()=>{
  const f=fixture(),a=f.make();a.progress(cue());a.replyStarted();await a.finish();assert.equal(f.calls.length,0);a.progress(cue());await tick();assert.equal(f.calls.length,0);
 });
-test('final aborts playing cue and waits cleanup before final speech or listening',async()=>{
- const f=fixture(),cleanup=Promise.withResolvers<void>(),started=Promise.withResolvers<void>();f.input.speak=async(text,signal)=>{f.calls.push({text,signal});started.resolve();await cleanup.promise;if(signal.aborted)throw new DOMException('retired','AbortError');};
- const a=f.make();a.progress(cue());await started.promise;let done=false;const final=a.finish().then(()=>{done=true;});await tick();assert.equal(f.calls[0].signal.aborted,true);assert.equal(done,false);cleanup.resolve();await final;assert.equal(done,true);
+test('the cue starts speaking one microtask after its status, with no timer wait',async()=>{
+ const f=fixture(),a=f.make();a.progress(cue());assert.equal(f.calls.length,0);
+ await Promise.resolve();assert.equal(f.calls.length,1);assert.equal(f.calls[0].text,'Checking the calendar');assert.equal(f.calls[0].signal.aborted,false);
+ await a.finish();assert.equal(f.calls.length,1);
+});
+test('a reply after the cue started lets it finish and reply speech waits for it',async()=>{
+ const f=fixture(),playback=Promise.withResolvers<void>();f.input.speak=async(text,signal,onStarted)=>{f.calls.push({text,signal});onStarted();await playback.promise;if(signal.aborted)throw new DOMException('retired','AbortError');};
+ const a=f.make();a.progress(cue());await tick();assert.equal(f.calls.length,1);
+ a.replyStarted();let idle=false;const reply=a.idle().then(()=>{idle=true;});await tick();
+ assert.equal(f.calls[0].signal.aborted,false);assert.equal(idle,false);
+ playback.resolve();await reply;assert.equal(idle,true);await a.finish();assert.equal(f.calls[0].signal.aborted,false);
+ mock.timers.tick(BOUND);assert.equal(f.calls[0].signal.aborted,false);
+});
+test('a reply while the cue is still being synthesised drops it at once instead of waiting for its audio',async()=>{
+ const f=fixture(),audio=Promise.withResolvers<void>();let late:(()=>void)|undefined;
+ f.input.speak=async(text,signal,onStarted)=>{f.calls.push({text,signal});late=onStarted;signal.addEventListener('abort',()=>audio.resolve(),{once:true});await audio.promise;throw new DOMException('dropped','AbortError');};
+ const a=f.make();a.progress(cue());await tick();assert.equal(f.calls.length,1);assert.equal(f.calls[0].signal.aborted,false);
+ a.replyStarted();assert.equal(f.calls[0].signal.aborted,true);await a.idle();await a.finish();
+ // A start report racing in after the reply cannot turn the dropped cue back into one the reply waits for.
+ late!();a.replyStarted();await a.idle();mock.timers.tick(BOUND);assert.equal(f.calls.length,1);
+});
+test('turn abort during playback still aborts the cue at once, even while the reply waits',async()=>{
+ const f=fixture(),cleanup=Promise.withResolvers<void>();f.input.speak=async(text,signal,onStarted)=>{f.calls.push({text,signal});onStarted();await cleanup.promise;if(signal.aborted)throw new DOMException('retired','AbortError');};
+ const a=f.make();a.progress(cue());await tick();a.replyStarted();const idle=a.idle();await tick();assert.equal(f.calls[0].signal.aborted,false);
+ f.abort.abort();assert.equal(f.calls[0].signal.aborted,true);cleanup.resolve();await idle;await a.stop();
+});
+test('a cue still playing past the bound after the reply is ready is aborted',async()=>{
+ const f=fixture(),cleanup=Promise.withResolvers<void>();f.input.speak=async(text,signal,onStarted)=>{f.calls.push({text,signal});onStarted();signal.addEventListener('abort',()=>cleanup.resolve(),{once:true});await cleanup.promise;throw new DOMException('cut','AbortError');};
+ const a=f.make();a.progress(cue());await tick();a.replyStarted();let idle=false;const reply=a.idle().then(()=>{idle=true;});
+ mock.timers.tick(BOUND-1);await tick();assert.equal(f.calls[0].signal.aborted,false);assert.equal(idle,false);
+ mock.timers.tick(1);assert.equal(f.calls[0].signal.aborted,true);await reply;assert.equal(idle,true);await a.finish();
 });
 test('Stop cancels playing acknowledgement, late progress cannot restart',async()=>{
- const f=fixture(),cleanup=Promise.withResolvers<void>();f.input.speak=async(text,signal)=>{f.calls.push({text,signal});await cleanup.promise;if(signal.aborted)throw new DOMException('retired','AbortError');};const a=f.make();a.progress(cue());await tick();const stop=a.stop();assert.equal(f.calls[0].signal.aborted,true);cleanup.resolve();await stop;a.progress(cue());await tick();assert.equal(f.calls.length,1);
+ const f=fixture(),cleanup=Promise.withResolvers<void>();f.input.speak=async(text,signal,onStarted)=>{f.calls.push({text,signal});onStarted();await cleanup.promise;if(signal.aborted)throw new DOMException('retired','AbortError');};const a=f.make();a.progress(cue());await tick();const stop=a.stop();assert.equal(f.calls[0].signal.aborted,true);cleanup.resolve();await stop;a.progress(cue());await tick();assert.equal(f.calls.length,1);
 });
 test('parent abort cancels queued acknowledgement before any speech',async()=>{
  const f=fixture(),a=f.make();a.progress(cue());f.abort.abort();await a.stop();assert.equal(f.calls.length,0);

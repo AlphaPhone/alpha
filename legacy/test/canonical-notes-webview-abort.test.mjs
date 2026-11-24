@@ -1,6 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import vm from 'node:vm';import {transformSync} from 'esbuild';import {stripTypeScriptTypes} from './fixtures/ts-source.mjs';
 import {nextDefaultNoteTitle} from '../apps/app/src/runtime/note-default-title.ts';
 import {authoredNoteText} from '../.eliza/client-features/plugins/plugin-notes/src/note-authored.ts';
+import {NOTES_DELETE_TOAST_MS} from '../apps/app/src/runtime/notes-trash-policy.ts';
 // Alpha's Notes controller and snapshot state, over the staged canonical client, run with
 // WebView113's static AbortSignal surface. Only the resident transport is a fixture.
 function fixture({wait=false}={}){
@@ -38,7 +39,7 @@ function notesUi(){
  const calls=[],dropped=[],toasts=[];
  class Controller{current=true;pending=false;revision=1;snapshot={notes:[{id:'n'}],trash:[],revision:1};constructor(_port,hooks){this.hooks=hooks;}listen(){}retire(){this.current=false;}hasViewNote(){return true;}}
  class Editor{draft=null;constructor(controller){this.controller=controller;}reconcile(){}begin(){this.draft={token:'draft',title:'',body:'',version:0};}edit(patch){Object.assign(this.draft,patch);this.draft.version++;}get hasAuthoredContent(){return !!this.draft&&(!!this.draft.title||!!this.draft.body||!!authoredNoteText(this.draft.format));}async save(){calls.push('save');this.draft.id='new';return true;}close(){this.draft=null;}async remove(id){calls.push('remove:'+id);return true;}async restore(id){calls.push('restore:'+id);return true;}}
- const {CanonicalNotesUi}=new Function('parseNoteFormat','projectNoteForModel','noteScheduleDraft','agentPendingText','agentAvailabilityNotice','DailyApps','CanonicalNotesController','CanonicalNotesEditor','window','nextDefaultNoteTitle','authoredNoteText',code+';return {CanonicalNotesUi};')(x=>x,()=>({title:'',body:''}),async()=>({}),(_s,text)=>text,(_s,text)=>text,{},Controller,Editor,{},nextDefaultNoteTitle,authoredNoteText);
+ const {CanonicalNotesUi}=new Function('parseNoteFormat','projectNoteForModel','noteScheduleDraft','agentPendingText','agentAvailabilityNotice','DailyApps','CanonicalNotesController','CanonicalNotesEditor','window','nextDefaultNoteTitle','authoredNoteText','NOTES_DELETE_TOAST_MS',code+';return {CanonicalNotesUi};')(x=>x,()=>({title:'',body:''}),async()=>({}),(_s,text)=>text,(_s,text)=>text,{},Controller,Editor,{},nextDefaultNoteTitle,authoredNoteText,NOTES_DELETE_TOAST_MS);
  const ui=new CanonicalNotesUi({},{paint(){},review(){calls.push('review');},dropped:title=>dropped.push(title)});
  return {ui,calls,dropped,toasts,api:{toast:(text,options)=>toasts.push({text,undo:options?.undo})}};
 }

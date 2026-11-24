@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
+import {isPhoneReviewInstruction, phoneReviewReply} from '../../../../apps/app/src/runtime/action-message-presentation.ts';
 import {stripTypeScriptTypes} from '../../../../test/support/strip-types.mjs';
 import {modelTraces, replayTraces, repositoryRoot} from '../assistant-model-traces.mjs';
 import {observedReplay} from '../observed-replay.mjs';
@@ -9,6 +10,7 @@ import {observedReplay} from '../observed-replay.mjs';
 const path = 'specs/quint/application/StoppedReplyReconciliation.qnt';
 const model = 'StoppedReplyReconciliation';
 const sourcePath = 'apps/app/src/runtime/connection-ui.tsx';
+const presentationPath = 'apps/app/src/runtime/action-message-presentation.ts';
 const manifestPath = 'specs/quint/application/manifest.json';
 const conversation = 'owned-conversation';
 const flush = () => new Promise(resolve => setImmediate(resolve));
@@ -31,7 +33,7 @@ function compile() {
   const stop = between('const STOPPED_REPLY_CHECK_MS =', 'async function conversationList(').replace(/^export /gm, '');
   const send = between('  async send(text:', '\n  },\n};');
   return new vm.Script(stripTypeScriptTypes(
-    key + '\n' + stop + '\nconst connectionController = {' + send + '\n}};\n' +
+    key + '\n' + stop + '\nconst connectionController = {getAppRecordClient: () => null,' + send + '\n}};\n' +
     'Object.assign(globalThis, {connectionController, conversationKey, scheduleStoppedReply, cancelStoppedReply,' +
     'hasCheck: () => stoppedReply !== null});',
     {mode: 'strip'},
@@ -49,6 +51,7 @@ function createDriver(script, findStoppedUserTurn) {
     state, epoch: 1, operation: null, sending: null, conversationMemory: new Map(),
     requestedCameraContinuation: undefined, clientObservationSession: undefined,
     AbortController, DOMException, Date, findStoppedUserTurn,
+    isPhoneReviewInstruction, phoneReviewReply,
     ownProviderSelected: () => false, isAndroid: false, testMocksEnabled: false,
     boundNavigation: () => undefined,
     phoneContextMessage: (text, context) => ({text, context}),
@@ -249,7 +252,7 @@ export async function checkStoppedReplyReconciliation() {
       'The restore action enters at scheduleStoppedReply after a qualifying restored turn. The full conversation restore, agent switching, and explicit reload are outside this replay.',
       'The read and abort replies are synthetic. Native IPC timing, durable agent history and the chat bubble presentation are outside this replay.',
     ],
-    extraSources: [path, sourcePath, manifestPath],
+    extraSources: [path, sourcePath, presentationPath, manifestPath],
     run: async () => {
       const {findStoppedUserTurn} = await import('../../../../apps/app/src/ui/api/conversation-turn-controller.ts');
       const script = compile();

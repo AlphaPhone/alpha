@@ -32,7 +32,7 @@ async function nativeStub(page: Page, apps: App[], refusals: Record<string, Refu
       DailyApps: ['surfaceInfo', 'requestPermissions', 'closeAssistant'],
       AlphaNotifications: ['status', 'list'],
       AlphaVoiceCloud: ['checkPermissions', 'requestPermissions'],
-      AlphaDevice: ['openSettings'],
+      AlphaDevice: ['openSettings', 'haptic'],
     };
     const answer = (plugin: string, method: string, options: any) => {
       if (plugin === 'ElizaSystem') {
@@ -237,7 +237,7 @@ test('same-label apps are separate tiles and each opens exactly its own componen
 
   // The locked work copy is asked for by profile and its refusal is shown; the personal copy is not opened instead.
   await drawer.getByRole('button', { name: 'Open Notes (Work · locked)', exact: true }).click();
-  await expect(drawer.getByRole('alert')).toHaveText('Notes could not be opened. Work apps are paused or locked. Turn on work apps in Android, then try again.');
+  await expect(drawer.getByRole('alert')).toHaveText('Notes could not be opened. Work apps are paused or locked. Turn them on in Android, then try again.');
   expect((await calls(page, 'launch')).slice(2)).toEqual([{ packageName: 'com.vendor.notes', activityName: 'com.vendor.notes.Launch', user: '10' }]);
   expect(errors).toEqual([]);
 });
@@ -319,6 +319,8 @@ test('Home edit mode removes and rearranges icons, "+" restores hidden views, an
   await expect(page.locator('html')).toHaveAttribute('data-active-view', 'home');
   const done = page.getByRole('button', { name: 'Done', exact: true });
   await expect(done).toBeVisible();
+  // The hold that starts editing gives one long-press touch feedback (NOTIF-12).
+  expect(await page.evaluate(() => (window as any).nativeCalls.filter((c: any) => c.plugin === 'AlphaDevice' && c.method === 'haptic').map((c: any) => c.options))).toEqual([{kind: 'long-press'}]);
   const add = page.getByRole('button', { name: 'Add to Home', exact: true });
   await expect(add).toBeDisabled();
   // Apps is not offered while editing; each icon is named for its removal.
@@ -444,11 +446,11 @@ test('an app removed or disabled behind a stale tile reports why and leaves the 
   await page.goto('/');
   const drawer = await openDrawer(page);
   await drawer.getByRole('button', { name: 'Open Notes', exact: true }).click();
-  await expect(drawer.getByRole('alert')).toHaveText('Notes could not be opened. This app is no longer installed.');
+  await expect(drawer.getByRole('alert')).toHaveText('Notes could not be opened. It’s no longer installed.');
   // The stale tile is gone after the refusal; the reason stays visible and nothing else was opened.
   await expect(drawer.getByRole('button', { name: 'Open Notes', exact: true })).toHaveCount(0);
   await drawer.getByRole('button', { name: 'Open Clock', exact: true }).click();
-  await expect(drawer.getByRole('alert')).toHaveText('Clock could not be opened. This app is disabled. Enable it in Android settings to open it.');
+  await expect(drawer.getByRole('alert')).toHaveText('Clock could not be opened. It’s turned off. Turn it on in Android Settings to open it.');
   await expect(drawer.getByRole('button', { name: 'Open Clock', exact: true })).toHaveCount(0);
   expect(await calls(page, 'launch')).toHaveLength(2);
   await expect.poll(() => tiles(drawer)).toEqual(['Open Settings']);

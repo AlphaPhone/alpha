@@ -4,14 +4,15 @@ import {browserCloudVoice,browserCloudCredential} from './cloud-connection';
 import type {LocalAgentProtocol} from '../runtime/local-agent';
 import {browserSpeechConnection as connectionController} from './agent-speech';
 import {recordingPcmWav,decodeRecordingPcm,encodePcm16Wav} from '../../../../.eliza/client-features/packages/voice/src/browser-capture/recording-pcm.ts';
-import type {SpeechRecordingInput} from '../runtime/cloud-voice';
+import type {SpeechRecordingInput} from '../native/alpha-voice-cloud';
 import {browserMediaVolume} from './audio-settings';
-import {audioRecord,audioMetadata,retainAudio,changeAudioDeleted,audioDeletionStatus,migrateAudio,purgeAudio,retainPendingAudio,pendingAudio,claimPendingAudio,commitPendingAudio,discardPendingAudio} from './note-audio-store';
+import {audioRecord,audioMetadata,retainAudio,changeAudioDeleted,audioDeletionStatus,purgeAudio,retainPendingAudio,pendingAudio,claimPendingAudio,commitPendingAudio,discardPendingAudio} from './note-audio-store';
 import { speechError, speechCancelled, type SpeechRequestKind, type SpeechCancelReason } from './speech-errors';
 import { BrowserAudioCapture } from './audio-capture';
 import { WebPlugin } from '@capacitor/core';
 import {browserDocuments} from './documents';
 import {createNoteRecordingJournal} from './note-recording-journal';
+import type {NoteRecordingBinding} from '../prototype/note-recorder';
 // Recordings stay local until transcription is requested. The selected Cloud or
 // explicit local/development route owns processing; provider credentials stay off-page.
 // There is no in-browser speech engine: local recognition and Paradee-8M playback run on the
@@ -34,7 +35,7 @@ export class BrowserVoice extends WebPlugin {
  // time as it goes (each fits every transcription request bound); the whole recording is kept
  // for the saved note. Stop journals those bytes before any canonical creation.
  private noteCapture=new BrowserAudioCapture(event=>{const note=this.note;if(note&&event.recordingId===note.recordingId&&note.state!=='stopped'){note.state='stopped';note.stopReason='error';this.noteChanged();}});
- private note?:{recordingId:string;binding:import('../prototype/note-recorder').NoteRecordingBinding;canonicalSavePending?:boolean;recovered?:boolean;staged?:boolean;stageTask?:Promise<void>;state:'recording'|'paused'|'stopped';stopReason?:string;durationMs:number;segments:{segmentId:string;durationMs:number;text?:string}[]};
+ private note?:{recordingId:string;binding:NoteRecordingBinding;canonicalSavePending?:boolean;recovered?:boolean;staged?:boolean;stageTask?:Promise<void>;state:'recording'|'paused'|'stopped';stopReason?:string;durationMs:number;segments:{segmentId:string;durationMs:number;text?:string}[]};
  private noteSegments=new Map<string,{blob:Blob;durationMs:number}>();
  private recoveredClip?:{blob:Blob;durationMs:number};
  private recoveredWindows=new Map<string,{offsetMs:number;durationMs:number}>();
@@ -116,7 +117,7 @@ export class BrowserVoice extends WebPlugin {
   return {state:note.state,recordingId:note.recordingId,binding:{...note.binding},canonicalSavePending:note.canonicalSavePending===true,recovered:note.recovered===true,...(note.stopReason?{stopReason:note.stopReason}:{}),durationMs:live?this.noteCapture.elapsed(note.recordingId):note.durationMs,segments:note.segments.map(segment=>({...segment})),peak};
  }
  private ownedNote(recordingId:string){const note=this.note;if(!note||note.recordingId!==recordingId)throw Error('Recording changed.');return note;}
- async startNoteRecording(binding:import('../prototype/note-recorder').NoteRecordingBinding){
+ async startNoteRecording(binding:NoteRecordingBinding){
   await this.recoverNote();
   if(this.note)throw Error('A recording is already open.');
   if(!binding||!/^[a-f0-9]{64}$/.test(binding.ownerDigest)||binding.folderId!==null&&!/^f-[A-Za-z0-9_-]{1,64}$/.test(binding.folderId))throw Error('Invalid recording ownership');
@@ -172,7 +173,6 @@ export class BrowserVoice extends WebPlugin {
  constructor(){super();
   window.addEventListener('alpha:device-settings',()=>{if(this.audio)this.audio.volume=browserMediaVolume();});
   if(this.audioChanges)this.audioChanges.onmessage=event=>{if(event.data?.deleted&&[this.audioId,this.pendingAudioId].includes(event.data.audioId))void this.stopPlayback();};
-  void migrateAudio().catch(()=>{});
   document.addEventListener('visibilitychange',()=>{if(document.hidden)void this.cancel(undefined,'hidden');});
   window.addEventListener('pagehide',()=>{void this.cancel(undefined,'pagehide');});
   window.addEventListener('alpha:device-state',()=>{void this.cancel(undefined,'device-state');});
@@ -201,7 +201,6 @@ export class BrowserVoice extends WebPlugin {
  }
 
  private async cloudBinding(input:{environment:string;credentialId:string}) {
-  if(!devSurfacesEnabled)throw Error('Cloud voice requires the native app or a development host.');
   const connection=await this.connection,binding=connection.getCloudClient();
   if(!binding||connection.getCloudEnvironment()!==input.environment||binding.credentialId!==input.credentialId)throw Object.assign(Error('Sign in to Cloud before using voice.'),{code:'voice-http-401'});
   const current=()=>{const next=connection.getCloudClient();if(document.hidden||connection.getCloudEnvironment()!==input.environment||next?.sessionId!==binding.sessionId||next.credentialId!==binding.credentialId)throw new DOMException('Cloud account changed','AbortError');};
@@ -343,7 +342,6 @@ export class BrowserVoice extends WebPlugin {
   return {audioId:saved.audioId,noteId:saved.noteId,durationMs:saved.durationMs,transcript:input.transcript};
  }
  async describe(input:{audioId:string}){return audioMetadata(await audioRecord(input.audioId,true));}
- migrationStatus(){return migrateAudio();}
  async deletionStatus(input:{audioId:string;noteId:string;operationId:string}){return audioDeletionStatus(input.audioId,input.noteId,input.operationId);}
  async remove(input:{audioId:string;noteId:string;operationId:string}){const result=await changeAudioDeleted(input.audioId,input.noteId,true,input.operationId);if(result.status==='removed'){if([this.audioId,this.pendingAudioId].includes(input.audioId))await this.stopPlayback();this.audioChanges?.postMessage({audioId:input.audioId,deleted:true});}return result;}
  async restore(input:{audioId:string;noteId:string;operationId:string}){return changeAudioDeleted(input.audioId,input.noteId,false,input.operationId);}

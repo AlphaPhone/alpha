@@ -5,8 +5,7 @@ import java.nio.charset.StandardCharsets;
 import org.json.JSONObject;
 
 /** Google Calendar sync writes need the native consent recorded by CalendarSyncBridge.
- * The renderer cannot write that slot, so a renderer fault cannot write Google without it.
- * Pure (org.json only) so it is tested without Android. */
+ * The renderer cannot write that slot, so a renderer fault cannot write Google without it. */
 final class CalendarSyncConsent {
  private CalendarSyncConsent() {}
  static final String EVENT_PATH="/api/v1/eliza/google/calendar/sync-v1/event";

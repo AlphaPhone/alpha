@@ -1,21 +1,25 @@
 /**
  * The on-phone confirmation of an agent-proposed call, text or contact change (telephony-executor.ts).
  * It shows exactly what will happen: the contact's name and the number that will be called or
- * texted, or a contact's fields before and after. One tap on a row chooses it; "Not now", leaving
- * the app or a cancelled request chooses nothing. The rows render inside the chat card whose
+ * texted, a contact's fields before and after, or the contact already in Contacts that a new one
+ * would repeat. A text recipient is selected before Done confirms the choice.
+ * "Not now", leaving the app or a cancelled request chooses nothing. The review renders inside the chat card whose
  * approval is running (AP-16 D8: the proposal card is the one approval surface, never a modal).
  */
-import type {ContactDraft, ContactRecord, TelephonyReview} from '../runtime/telephony-executor';
+import {CONTACT_CALL_LOOKUP_LIMIT, sameContactNumber, type ContactDraft, type ContactRecord, type TelephonyReview} from '../runtime/telephony-executor';
 import {displayNumber, initials} from './telephony-presenters';
+import type {BrowserTabChoice} from './browser-adapter';
 
-type Pending = {review: TelephonyReview; settle: (choice: number | null) => void};
+/** The open tabs a chat request's words match, when there are several (browser-adapter.ts browserControl). */
+type TabReview = {kind: 'tab'} & BrowserTabChoice;
+type Pending = {review: TelephonyReview | TabReview; settle: (choice: number | null) => void; selected?: number};
 let pending: Pending | null = null, repaint: () => void = () => {};
 const ICON = {
   call: 'M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z',
-  message: 'M12 19V5M6 11l6-6 6 6', dismiss: 'M6 6l12 12M18 6L6 18', save: 'M5 12l5 5 9-10', delete: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13',
+  tab: 'M4 6h16v12H4zM4 10h16', dismiss: 'M6 6l12 12M18 6L6 18', save: 'M5 12l5 5 9-10', delete: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13', add: 'M12 5v14M5 12h14',
 };
 /** Shows the review and resolves with the chosen option's index, or null when nothing was chosen. */
-export function askTelephonyReview(review: TelephonyReview, signal: AbortSignal): Promise<number | null> {
+export function askTelephonyReview(review: TelephonyReview | TabReview, signal: AbortSignal): Promise<number | null> {
   return new Promise(resolve => {
     pending?.settle(null);
     if (signal.aborted || (typeof document !== 'undefined' && document.hidden) || !review.options.length) { resolve(null); return; }
@@ -24,34 +28,72 @@ export function askTelephonyReview(review: TelephonyReview, signal: AbortSignal)
     pending = entry; signal.addEventListener('abort', abort, {once: true}); repaint();
   });
 }
-/** A contact's fields as lines; a line the change removes is struck, a line it adds is strong. */
+/** A contact's numbers, then its email addresses. */
+const contactLines = (contact: ContactDraft) => [...contact.phoneNumbers.map(row => displayNumber(row.number)), ...contact.emailAddresses.map(row => row.address)];
+/**
+ * A contact's fields as lines; a line the change removes is struck, a line it adds is strong. A number
+ * is the same line written either way ("+14155550100", "(415) 555-0100"), an address without case.
+ */
 export function contactChangeLines(before: ContactRecord, after: ContactDraft): {text: string; struck: boolean; added: boolean}[] {
-  const was = [...before.phoneNumbers.map(row => displayNumber(row.number)), ...before.emailAddresses.map(row => row.address)];
-  const will = [...after.phoneNumbers.map(row => displayNumber(row.number)), ...after.emailAddresses.map(row => row.address)];
-  return [...was.filter(text => !will.includes(text)).map(text => ({text, struck: true, added: false})),
-    ...will.map(text => ({text, struck: false, added: !was.includes(text)}))];
+  const holds = (draft: ContactDraft, value: {number?: string; address?: string}) => value.number !== undefined
+    ? draft.phoneNumbers.some(row => sameContactNumber(row.number, value.number!))
+    : draft.emailAddresses.some(row => row.address.toLowerCase() === value.address!.toLowerCase());
+  const lines = (draft: ContactDraft) => [...draft.phoneNumbers.map(row => ({text: displayNumber(row.number), value: {number: row.number}})), ...draft.emailAddresses.map(row => ({text: row.address, value: {address: row.address}}))];
+  return [...lines(before).filter(line => !holds(after, line.value)).map(line => ({text: line.text, struck: true, added: false})),
+    ...lines(after).map(line => ({text: line.text, struck: false, added: !holds(before, line.value)}))];
 }
 /** Template values of the sheet for the review that is open, or `{open: false}`. */
 export function presentTelephonyReview(entry: Pending | null) {
   if (!entry) return {open: false, rows: [] as never[], dismiss: () => {}};
   const {review, settle} = entry;
-  const style = (lines: {text: string; struck: boolean; added: boolean}[]) => lines.map(line => ({text: line.text, decoration: line.struck ? 'line-through' : 'none', color: line.struck ? 'var(--mut)' : 'var(--fg)', weight: line.added ? 600 : 400}));
+  if (review.kind === 'message') {
+    return {open: true, rows: [] as never[], dismiss: () => settle(null), recipientPicker: {
+      body: review.body,
+      options: review.options.map((match, index) => ({
+        name: match.name, number: displayNumber(match.number), selected: entry.selected === index,
+        select: () => {
+          if (pending !== entry) return;
+          entry.selected = index;
+          repaint();
+        },
+      })),
+      doneDisabled: entry.selected === undefined,
+      doneLabel: review.draftOnly ? 'Done' : 'Send',
+      done: () => { if (entry.selected !== undefined) settle(entry.selected); },
+      dismiss: () => settle(null),
+    }};
+  }
+  // `change` says in words what a contact change does to a line, for a card that cannot rely on the strike alone.
+  const style = (lines: {text: string; struck: boolean; added: boolean; change?: Change}[]) => lines.map(line => ({text: line.text, decoration: line.struck ? 'line-through' : 'none', color: line.struck ? 'var(--mut)' : 'var(--fg)', weight: line.added ? 600 : 400, change: line.change}));
   const plain = (text: string) => [{text, struck: false, added: false}];
   const rows = review.options.map((option, index) => {
     const choose = () => settle(index);
-    if (review.kind === 'call' || review.kind === 'message') { const match = option as {name: string; number: string};
-      return {ini: initials(match.name), name: match.name, lines: style(plain(displayNumber(match.number))), choose, icon: ICON[review.kind],
-        bg: review.kind === 'call' ? 'var(--alpha-call-green)' : 'var(--acc)', label: `${review.kind === 'call' ? 'Call' : 'Message'} ${match.name} ${displayNumber(match.number)}`}; }
-    if (review.kind === 'contact-save') { const change = option as {before: ContactRecord; after: ContactDraft}, renamed = change.after.displayName !== change.before.displayName;
+    if (review.kind === 'tab') { const tab = review.options[index], closing = review.verb === 'Close';
+      return {ini: initials(tab.title), name: tab.title, lines: style([...(tab.priv ? ['Private tab'] : []), ...(tab.host ? [tab.host] : [])].flatMap(plain)), choose, icon: closing ? ICON.dismiss : ICON.tab,
+        bg: closing ? 'var(--alpha-call-red)' : 'var(--acc)', label: `${review.verb} ${tab.priv ? 'private ' : ''}tab ${tab.title}${tab.host ? ' ' + tab.host : ''}`}; }
+    if (review.kind === 'call') { const match = option as {name: string; number: string};
+      return {ini: initials(match.name), name: match.name, lines: style(plain(displayNumber(match.number))), choose, icon: ICON.call,
+        bg: 'var(--alpha-call-green)', label: `Call ${match.name} ${displayNumber(match.number)}`}; }
+    if (review.kind === 'contact-create') { const twin = option as {name: string; numbers: string[]};
+      return {ini: initials(twin.name), name: 'Add anyway', lines: style([`${twin.name} is already in Contacts`, ...twin.numbers.slice(0, 2).map(displayNumber)].flatMap(plain)), choose, icon: ICON.add, bg: 'var(--acc)',
+        label: `Add anyway: ${twin.name} is already in Contacts`}; }
+    if (review.kind === 'contact-save') { const change = option as {before: ContactRecord; after: ContactDraft; keeps?: 'add' | 'replace'}, renamed = change.after.displayName !== change.before.displayName;
+      // The same request offered both ways says which row keeps the contact's other numbers and addresses.
+      const way = change.keeps === 'add' ? 'Add (keep existing)' : change.keeps === 'replace' ? 'Replace' : '';
       return {ini: initials(change.after.displayName || change.before.displayName), name: change.after.displayName || change.before.displayName,
-        lines: style([...(renamed ? [{text: change.before.displayName, struck: true, added: false}] : []), ...contactChangeLines(change.before, change.after)]), choose, icon: ICON.save, bg: 'var(--acc)',
-        label: `Save changes to ${change.before.displayName}`}; }
+        lines: style([...(way ? [{text: way, struck: false, added: true}] : []), ...(renamed ? [{text: change.before.displayName, struck: true, added: false, change: 'rename' as const}] : []),
+          ...contactChangeLines(change.before, change.after).map(line => ({...line, change: line.struck ? 'remove' as const : line.added ? 'add' as const : 'keep' as const}))]), choose, icon: change.keeps === 'add' ? ICON.add : ICON.save, bg: 'var(--acc)',
+        label: way ? `${way}: save changes to ${change.before.displayName}` : `Save changes to ${change.before.displayName}`}; }
     const contact = option as ContactRecord;
-    return {ini: initials(contact.displayName), name: contact.displayName, lines: style([...contact.phoneNumbers.map(row => displayNumber(row.number)), ...contact.emailAddresses.map(row => row.address)].slice(0, 2).flatMap(plain)),
+    return {ini: initials(contact.displayName), name: contact.displayName, lines: style(contactLines(contact).slice(0, 2).flatMap(plain)),
       choose, icon: ICON.delete, bg: 'var(--alpha-call-red)', label: `Delete ${contact.displayName}`};
   });
-  return {open: true, rows, body: review.kind === 'message' ? review.body : '', hasBody: review.kind === 'message', dismiss: () => settle(null)};
+  // The lookup read one contact past what the review lists: the owner is told the list is not every match.
+  const note = review.kind !== 'tab' && review.kind !== 'contact-create' && review.more ? `Only the first ${CONTACT_CALL_LOOKUP_LIMIT} matching contacts are shown. For another one, ask again with their full name.` : '';
+  return {open: true, rows, note, dismiss: () => settle(null)};
 }
+type Change = 'remove' | 'add' | 'keep' | 'rename';
+const CHANGE_WORD: Record<Change, string> = {remove: 'Remove ', add: 'Add ', keep: 'Keep ', rename: 'Rename from '};
 type Review = ReturnType<typeof presentTelephonyReview>;
 type Row = {id?: unknown; c?: {proposalId?: unknown} & Record<string, unknown>; cProposal?: boolean; cDigest?: boolean; [key: string]: unknown};
 /**
@@ -67,8 +109,13 @@ export function placeTelephonyReview(msgs: Row[], review: Review, approving: unk
   if (at < 0) return null;
   return msgs.map((m, index) => {
     if (index !== at) return m;
+    if (review.recipientPicker) return {...m, cDigest: false, cProposal: false, recipientPicker: review.recipientPicker};
     if (m.cProposal) return {...m, c: {...m.c, reviewing: review}, proposalAsk: false};
-    return {...m, rows: [...review.rows.map(row => ({ini: row.ini, who: row.name, text: row.lines.map(line => line.text).join(' · '), icon: row.icon, open: row.choose, label: row.label})),
+    // Each line keeps its own wrapping line, strike and weight, and a contact change names in words
+    // what it removes, adds and keeps: a flattened one-line list would show a removed number as kept.
+    const marks = (lines: Review['rows'][number]['lines']) => lines.map(({change, ...line}) => ({...line, text: change ? CHANGE_WORD[change] + line.text : line.text}));
+    return {...m, rows: [...review.rows.map(row => ({ini: row.ini, who: row.name, text: '', marks: marks(row.lines), icon: row.icon, open: row.choose, label: row.label})),
+      ...(review.note ? [{ini: '', who: 'More matches', text: review.note, icon: '', disabled: true}] : []),
       {ini: '', who: 'Not now', text: 'Nothing is called, sent or changed.', icon: ICON.dismiss, open: review.dismiss}]};
   });
 }
@@ -83,13 +130,13 @@ export function installTelephonyReview(Component: any) {
     return {...out, msgs, telephonyReview};
   };
   p.componentDidMount = function () {
-    mount?.call(this);
+    mount.call(this);
     repaint = () => this.setState({telephonyReviewRevision: Date.now()});
     this.telephonyReviewHide = () => { if (document.hidden) pending?.settle(null); };
     document.addEventListener('visibilitychange', this.telephonyReviewHide);
   };
   p.componentWillUnmount = function () {
     document.removeEventListener('visibilitychange', this.telephonyReviewHide); pending?.settle(null); repaint = () => {};
-    unmount?.call(this);
+    unmount.call(this);
   };
 }

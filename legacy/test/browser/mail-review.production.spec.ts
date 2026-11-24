@@ -168,7 +168,7 @@ async function connected(page: Page) {
   await completeAccessSetup(page);
 }
 
-test('Android: the send review shows Cc and Bcc, an edit after review is reviewed again, and only the last reviewed request is dispatched, byte for byte', async ({ page }) => {
+test('Android: one composer tap sends the exact addresses and content once', async ({ page }) => {
   test.setTimeout(120_000);
   const foreign = await fenceNetwork(page);
   await androidWithMailbox(page);
@@ -177,6 +177,13 @@ test('Android: the send review shows Cc and Bcc, an edit after review is reviewe
   await button(page, 'Inbox').click();
   await expect(button(page, 'Synthetic sender, Harbour schedule')).toBeVisible({ timeout: 30_000 });
   await button(page, 'Compose').click();
+  const header = page.locator('[data-alpha-subview="inbox-composing"] [data-alpha-app-header]');
+  const attachment = header.getByRole('button', {name: 'Attach file', exact: true});
+  await attachment.click();
+  const picker = page.getByRole('dialog', {name: 'Attach files', exact: true});
+  await expect(picker.getByRole('button', {name: 'Files', exact: true})).toBeVisible();
+  await picker.getByRole('button', {name: 'Close attachments', exact: true}).click();
+  await expect(picker).toHaveCount(0);
   await page.getByRole('textbox', {name: 'To', exact: true}).fill('friend@example.invalid');
   await page.getByRole('textbox', {name: 'To', exact: true}).press('Enter');
   await expect(page.getByRole('textbox', {name: 'Cc', exact: true})).toHaveCount(0);
@@ -184,36 +191,28 @@ test('Android: the send review shows Cc and Bcc, an edit after review is reviewe
   await page.getByRole('button', {name: 'Cc and Bcc', exact: true}).click();
   await page.getByRole('textbox', {name: 'Cc', exact: true}).fill('carol@example.invalid');
   await page.getByRole('textbox', { name: 'Bcc', exact: true }).fill('audit@example.invalid');
-  await page.getByRole('textbox', { name: 'Subject', exact: true }).fill('Flag-off reviewed send');
+  await page.getByRole('textbox', { name: 'Subject', exact: true }).fill('One-tap composer send');
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill('First body');
-  await button(page, 'Send email').click();
-  const review = page.getByRole('dialog', { name: 'Review mail operation' });
-  await expect(review.getByRole('status')).toHaveText('Review every field before confirming. No mail has been sent.');
-  expect((await review.locator('p').nth(1).innerText()).split('\n').map(line => line.trimEnd()).slice(0, 5)).toEqual([
-    'From: owner@example.invalid', 'To: friend@example.invalid', 'Cc: carol@example.invalid', 'Bcc: audit@example.invalid', 'Subject: Flag-off reviewed send']);
-  await expect(review.locator('[data-alpha-review-attachments]')).toHaveText('No attachments.');
-  await expect(review.getByText('First body', { exact: true })).toBeVisible();
-  let state = await fixture(page);
-  expect(state.prepares).toHaveLength(1);
-  expect(state.dispatches).toEqual([]);
-
-  // Close without cancelling, edit the body: the saved review is discarded and cannot be sent.
-  await review.getByRole('button', { name: 'Close mail review', exact: true }).click();
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Second body');
-  await expect(page.getByText('This email was edited after this review, so the review was discarded. Nothing was sent. Review the current email before sending.', { exact: true })).toBeVisible();
+  await button(page, 'Send email').dblclick();
+  await expect(page.getByText('Sent.', {exact: true})).toBeVisible();
+  await expect(page.getByRole('dialog', {name: 'Review mail operation'})).toHaveCount(0);
+  const state = await fixture(page);
+  expect(state.prepares).toHaveLength(1);
+  expect(state.dispatches).toEqual(state.prepares);
+  expect(JSON.parse(state.dispatches[0].proposal)).toEqual({ kind: 'send', mode: 'compose', to: ['friend@example.invalid'], cc: ['carol@example.invalid'], bcc: ['audit@example.invalid'], subject: 'One-tap composer send', bodyText: 'Second body', attachments: [] });
+  expect(state.sent).toEqual(['One-tap composer send | Second body']);
+  await button(page, 'Compose').click();
+  await page.getByRole('textbox', {name: 'To', exact: true}).fill('second@example.invalid');
+  await page.getByRole('textbox', {name: 'Subject', exact: true}).fill('Independent email');
+  await page.getByRole('textbox', {name: 'Message', exact: true}).fill('Another email');
   await button(page, 'Send email').click();
-  await expect(review.getByText('Second body', { exact: true })).toBeVisible();
-  await expect(review.getByText('First body', { exact: true })).toHaveCount(0);
-  await review.getByRole('button', { name: 'Send this email', exact: true }).dblclick();
-  await expect(review.getByRole('status')).toHaveText('Provider confirmed this operation.');
-  state = await fixture(page);
-  expect(state.prepares).toHaveLength(2);
-  expect(state.prepares[1].requestId).not.toBe(state.prepares[0].requestId);
-  // One dispatch: the second request, under the second digest, with the proposal text it was prepared with.
-  expect(state.dispatches).toEqual([state.prepares[1]]);
-  expect(JSON.parse(state.dispatches[0].proposal)).toEqual({ kind: 'send', mode: 'compose', to: ['friend@example.invalid'], cc: ['carol@example.invalid'], bcc: ['audit@example.invalid'], subject: 'Flag-off reviewed send', bodyText: 'Second body', attachments: [] });
-  expect(state.sent).toEqual(['Flag-off reviewed send | Second body']);
-  expect(state.unexpected).toEqual([]);
+  await expect.poll(async () => (await fixture(page)).sent).toEqual([
+    'One-tap composer send | Second body', 'Independent email | Another email',
+  ]);
+  const latest = await fixture(page);
+  expect(latest.dispatches).toEqual(latest.prepares);
+  expect(latest.unexpected).toEqual([]);
   expect(foreign).toEqual([]);
 });
 

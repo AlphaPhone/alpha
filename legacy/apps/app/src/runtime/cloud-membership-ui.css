@@ -26,14 +26,10 @@
 .alpha-membership .alpha-membership-code-entry form>button{color:var(--connection-fg,#111);border:0;border-radius:12px;background:var(--connection-s2,#f1f1f1);padding:0 16px;margin:0!important;font-size:14px}
 .alpha-membership button:focus-visible,.alpha-membership input:focus-visible{outline:2px solid var(--connection-acc,#0000ff);outline-offset:3px}
 .alpha-membership button:disabled{opacity:.45;cursor:default}
-.alpha-membership-actions{display:flex;flex-wrap:wrap;gap:8px}
-[data-alpha-membership-sheet] .alpha-membership-drag-handle{width:32px;height:4px;flex:none;border-radius:4px;background:var(--connection-line,#d7d7d7);margin:0 auto 20px}[data-alpha-membership-sheet] header{margin-bottom:10px}[data-alpha-membership-sheet] [data-alpha-membership-panel] header h1{font-size:30px;line-height:1.1;letter-spacing:-.03em;margin:0;font-weight:400}[data-alpha-membership-sheet] header>button{width:48px;height:48px;min-width:48px;flex:none;color:var(--connection-fg,#111);background:none;border:0;padding:12px}[data-alpha-membership-sheet] .alpha-membership-footer{border-top:1px solid var(--connection-line,#e7e7e7);margin-top:16px;padding-top:12px;display:flex;justify-content:center}[data-alpha-membership-sheet] .alpha-membership-footer button{min-height:max(48px,calc(48px / var(--phone-scale,1)));font-size:13px;color:var(--connection-mut,#666);background:none;border:0;padding:0 12px}
+[data-alpha-membership-sheet] .alpha-membership-drag-handle{width:32px;height:4px;flex:none;border-radius:4px;background:var(--connection-line,#d7d7d7);margin:0 auto 20px}[data-alpha-membership-sheet] header{margin-bottom:10px}[data-alpha-membership-sheet] [data-alpha-membership-panel] header h1{font-size:30px;line-height:1.1;letter-spacing:-.03em;margin:0;font-weight:400}[data-alpha-membership-sheet] header>button{width:48px;height:48px;min-width:48px;flex:none;color:var(--connection-fg,#111);background:none;border:0;padding:12px}
 [data-alpha-membership-panel] header h1{font-size:32px;line-height:1.12;letter-spacing:-.02em}[data-alpha-membership-panel]{align-self:center;width:min(420px,100%);max-height:calc(100dvh - 24px)}
 .alpha-connection-scrim[data-alpha-billing-overlay]{inset:auto;left:var(--phone-left,0px);top:var(--phone-top,0px);width:var(--phone-width,100vw);height:var(--phone-height,100dvh);transform:scale(var(--phone-scale,1));transform-origin:top left;padding:max(12px,var(--native-top-inset,0px),env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) max(12px,var(--native-bottom-inset,0px),env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px))}.alpha-connection-scrim[data-alpha-billing-overlay] [data-alpha-membership-panel]{max-width:100%;max-height:100%;box-sizing:border-box}.alpha-connection-scrim[data-alpha-billing-overlay] button{min-height:max(48px,calc(48px / var(--phone-scale,1)))}
 .alpha-connection-scrim[data-alpha-membership-sheet]{align-items:flex-end;justify-content:center;padding-bottom:0;padding-inline:0}.alpha-connection-scrim[data-alpha-membership-sheet] [data-alpha-membership-panel]{align-self:flex-end;width:min(420px,100%);max-height:100%;overflow-y:auto;overscroll-behavior:contain;border-radius:28px 28px 0 0;padding:12px 26px max(28px,calc(20px + var(--native-bottom-inset,0px)),env(safe-area-inset-bottom,0px));box-shadow:0 -4px 24px #00000012}
-.alpha-billing-review p{overflow-wrap:anywhere;margin:12px 0 24px}.alpha-billing-review .alpha-membership-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}.alpha-billing-review button{min-height:48px;padding:12px 16px;border-radius:16px}.alpha-billing-review button:first-child{background:var(--connection-fg,#000);color:var(--connection-bg,#fff)}
-.alpha-connection-scrim[data-alpha-billing-overlay] [data-alpha-membership-panel]:has(.alpha-billing-review){border-radius:28px;max-height:100%;padding:24px;overflow:auto;align-self:center}
-.alpha-billing-review h1{margin:0!important;font-size:28px!important;line-height:1.15!important;font-weight:600!important}
 
 .alpha-membership-limit-fact{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin:20px 0 0}.alpha-membership-limit-fact dt{font-size:14px;font-weight:500}.alpha-membership-limit-fact dd{font-size:13px;text-align:end}
 /* One Account sheet is shared by Settings, setup and a billing refusal. */
@@ -55,10 +51,9 @@
 .alpha-account-links button>span:nth-child(2){flex:1;min-width:0}
 .alpha-account-links small{font-size:12px;color:var(--connection-mut,#666)}
 .alpha-account-links button>[data-alpha-icon]{width:20px!important;height:20px!important;flex:none}
-.alpha-account-signout,.alpha-account-done,.alpha-account-cancel,.alpha-account-confirm{font:inherit;min-height:48px;border:0;border-radius:14px;padding:12px 16px}
+.alpha-account-signout,.alpha-account-done,.alpha-account-confirm{font:inherit;min-height:48px;border:0;border-radius:14px;padding:12px 16px}
 .alpha-account-signout{display:block;background:transparent;color:var(--connection-fg,#111);width:100%;font-size:14px;margin:12px 0 0}
 .alpha-account-done{width:100%;background:var(--connection-s2,#f1f1f1);color:var(--connection-fg,#111);margin-top:8px;font-weight:550}
-.alpha-account-cancel{background:var(--connection-s2,#f1f1f1);color:var(--connection-fg,#111)}
 .alpha-account-sheet .alpha-provider{padding-top:12px}
 .alpha-account-sheet .alpha-provider button{border-radius:13px}
 .alpha-account-sheet .alpha-segmented button[aria-pressed=true]{background:var(--connection-fg,#111);color:var(--connection-bg,#fff)}
@@ -66,7 +61,7 @@
 
 .alpha-account-expiry{padding-top:12px;font-size:13px;color:var(--connection-mut,#666)}.alpha-account-expiry button{background:var(--connection-s2,#f1f1f1);color:var(--connection-fg,#111);border:0;border-radius:12px;padding:12px 16px}.alpha-account-sheet .alpha-btn--primary{background:var(--connection-fg,#111);color:var(--connection-bg,#fff)}
 
-.alpha-connection.alpha-account-sheet .alpha-account-signout,.alpha-connection.alpha-account-sheet .alpha-account-done,.alpha-connection.alpha-account-sheet .alpha-account-cancel{color:var(--connection-fg,#111)}
+.alpha-connection.alpha-account-sheet .alpha-account-signout,.alpha-connection.alpha-account-sheet .alpha-account-done{color:var(--connection-fg,#111)}
 
 .alpha-connection.alpha-account-sheet .alpha-membership-main-actions button{display:flex;align-items:center;justify-content:center;gap:8px;text-align:center;line-height:1.25;font-size:15px;font-weight:550;border-radius:14px;padding:14px 12px;min-height:50px}
 .alpha-account-button-icon{width:18px;height:18px;display:inline-block;flex:none;background:currentColor;mask:var(--account-icon) center/contain no-repeat;-webkit-mask:var(--account-icon) center/contain no-repeat}

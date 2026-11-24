@@ -1,0 +1,16 @@
+# specs/quint/services/WorkflowExecutionAuditAdmission.qnt
+- Lines: 238 | Kind: Quint model (live; headed "Complementary audit scope" — audit twin) | Verdict: MERGE into `WorkflowExecution.qnt`; PORT its harness (`workflow-execution-audit-admission.mjs` via `workflow-adapter-fixture.mjs`) to import the adapter
+- Covers: same as `WorkflowExecution` plus: agents without submission identities ("legacy" agent) whose runs cannot be reconciled and are cleared only by owner confirmation; version mismatch reported, not accepted; changed approval request needs a new decision; foreground scan drops disabled/changed queued triggers. Duplicates: `WorkflowExecution.qnt`. Callers/importers: `quint:check` (12 runs, 7 witnesses); `refinement/services/workflow-execution-audit-admission.mjs` (aggregate `services/index.mjs:8,73`, `test/quint-workflow-execution-audit-admission.test.mjs`).
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 1 | A8 / §2.11 | "Complementary audit scope; the canonical model … remain registered separately." Self-declared second model of one component. | Merge actions/invariants/witnesses into `WorkflowExecution.qnt`, delete this file and its manifest entry. | Medium |
+| 2 | 3-4, 25, 111-117, 208-217 | A1? (owner) | The "legacy" agent (no `manualSubmissionProtocol`) is a live product path: `workflow-adapter.ts` `unverifiable`/`reviewClear`/`clearRunRequest` and `workflow-protocol.ts` `run()` comment. Whether an agent without submission identities can still be paired (bundled local agent is pinned; Cloud agent version is not under this repo's control) is not decidable here. | Owner question. If no supported agent lacks submission identities, delete the product path and the `legacy` half of this model together (A1); otherwise keep it in the merged model. | Medium |
+| 3 | harness `workflow-adapter-fixture.mjs:25-27` | T2 / T10 | Reads `prototype/workflow-adapter.ts` as text, strips every `import` line, rewrites `export function`, evaluates it in `vm` with `scripts/workflow-renderer-fixture.ts` globals. Harness also derives `s.phase` from rendered label regex `/^Not received/` and `runLabel` strings (`'Confirm resend'`, `'Confirm clear'`). | PORT: import `installWorkflowAdapter` through tsx with the renderer fixture supplied as real module stubs (or once the D2 adapter-to-module refactor lands, call the module with explicit ports); observe state via a typed view model, not label text. | Medium |
+| 4 | test | T5 | `test/quint-workflow-execution-audit-admission.test.mjs` mutates product source text (`'if(request){if(!reviewResend){'` → `if(false&&…)`) to prove the harness fails; asserts `traces === 6`, `checkpoints === 48`; respawns itself under tsx. | Delete mutation cases and exact counts; run under the tsx loader configured once for the suite. | Low |
+| 5 | manifest | T10 | 15 symbol pins into `workflow-adapter.ts`/`workflow-protocol.ts`/`workflow-intents.ts` (`unadmitted`, `unverifiable`, `reviewResend` …). | Drop `symbols`. | Low |
+
+## Proposed end state
+File deleted; its content lives in `WorkflowExecution.qnt`. Its harness becomes the single `WorkflowExecution` harness,
+importing the adapter instead of transplanting it. Legacy-agent half kept or deleted per the owner's answer.

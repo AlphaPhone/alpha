@@ -1,8 +1,8 @@
 import { Capacitor } from '@capacitor/core';
-import {Sense,parseAssistantInvocation,parseInvocationUnlocked,parseListenerStatus,parseListenerStopReceipt,stopSenseListenerForChatOnly,type AssistantInvocation,type ListenerStatus} from '@elizaos/capacitor-system/sense';
+import {Sense,parseListenerStatus,parseListenerStopReceipt,stopSenseListenerForChatOnly,type ListenerStatus} from '@elizaos/capacitor-system/sense';
 
 import {createSenseInvocationController} from '../ui/voice/sense-invocation';
-export type { AssistantInvocation, ListenerState, ListenerStatus } from '@elizaos/capacitor-system/sense';
+export type { ListenerStatus } from '@elizaos/capacitor-system/sense';
 
 const listener = Sense;
 
@@ -42,17 +42,6 @@ export async function openListenerSettings(): Promise<boolean> {
   try { return (await listener.openSettings()).opened === true; } catch { return false; }
 }
 
-/** An explicit owner-bound read. Unbound legacy callers cannot authorize a voice turn. */
-export async function assistantInvocation(sessionKey?: string, bindingId?: string, generation?: number): Promise<AssistantInvocation> {
-  if(!imageSenseAvailable() || !Number.isInteger(generation) || !generation || !bindingId || !sessionKey || !/^[a-f0-9]{64}$/.test(sessionKey))return null;
-  try {
-    const receipt=await Sense.takeInvocation({generation,bindingId,sessionKey});
-    return parseInvocationUnlocked(receipt)?parseAssistantInvocation(receipt):null;
-  }catch{return null;}
-}
-
-/** Any open modal surface: native dialogs and ARIA modal dialogs. */
-export const MODAL = 'dialog[open], [role="dialog"][aria-modal="true"], [role="alertdialog"]';
 /** AlphaAssistActivity fires this when a new invocation reaches the surface already in front. */
 export const INVOCATION_EVENT = 'alpha:assist-invocation';
 /**

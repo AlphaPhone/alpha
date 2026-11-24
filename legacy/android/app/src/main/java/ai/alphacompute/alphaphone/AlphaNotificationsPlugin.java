@@ -10,10 +10,11 @@ import ai.eliza.plugins.notifications.NotificationsHostPlugin;
 
 /**
  * Alpha's registration of the shared notifications bridge (ai.eliza.plugins.notifications.NotificationsHostPlugin):
- * own rows, channel settings, cross-app access, workflow taps and workflow notices are upstream code behind
- * its ForegroundNoticeGate. Alpha supplies only installed identities (label, scope, credential slots,
- * alpha-workflow-* channels and routes, the alpha-notification-access mirror), its own notice kinds and
- * the canonical Eliza notification tap, which is Alpha's resident-agent integration.
+ * own rows, channel settings, cross-app access and workflow taps are upstream code behind its
+ * ForegroundNoticeGate; the workflow notices themselves are posted by Alpha's WorkflowNoticePoster.
+ * Alpha supplies installed identities (label, scope, credential slots, alpha-workflow-* channels and
+ * routes, the alpha-notification-access mirror), its own notice kinds and the canonical Eliza
+ * notification tap, which is Alpha's resident-agent integration.
  */
 @CapacitorPlugin(name="AlphaNotifications")
 public class AlphaNotificationsPlugin extends NotificationsHostPlugin {
@@ -43,6 +44,8 @@ public class AlphaNotificationsPlugin extends NotificationsHostPlugin {
  @Override protected NoticeRoutes.Config routesConfig(){return WorkflowNoticeTaps.CONFIG;}
  @Override protected NoticeRoutes routes(){return WorkflowNoticeTapsFactory.create(getContext());}
  @Override protected HostNoticePoster.Config posterConfig(){return WorkflowNoticePoster.CONFIG;}
+ /** Alpha's own WorkflowNoticePoster posts every workflow notice; the shared poster is never built. */
+ @Override protected NoticeDelivery delivery(){NoticeRoutes routes=routes();return new NoticeDelivery(deliveryConfig(),noticeStorage(),new WorkflowNoticePoster(getContext(),routes::token));}
  @Override protected NotificationMirror mirror(){return NotificationAccess.MIRROR;}
  @Override protected String noticeKind(String channel){return kind(channel);}
  /**

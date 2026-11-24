@@ -17,7 +17,7 @@ fetched = reused = 0
 for row in manifest['files']:
     relative = Path(row['path'])
     assert not relative.is_absolute() and '..' not in relative.parts
-    assert row['url'] == base + row['path'], 'Unexpected source authority'
+    url = base + row['path'] + '?format=TEXT'
     destination = data / 'baseline' / relative
     current = data
     for component in ('baseline', *relative.parts):
@@ -27,8 +27,8 @@ for row in manifest['files']:
         assert hashlib.sha256(destination.read_bytes()).hexdigest() == row['beforeSha256'], 'Existing input drift: ' + row['path']
         reused += 1
         continue
-    with urllib.request.urlopen(row['url'] + '?format=TEXT', timeout=30) as response:
-        assert response.geturl() == row['url'] + '?format=TEXT', 'Unexpected source redirect'
+    with urllib.request.urlopen(url, timeout=30) as response:
+        assert response.geturl() == url, 'Unexpected source redirect'
         encoded = response.read(64 * 1024 * 1024 + 1)
     assert len(encoded) <= 64 * 1024 * 1024, 'Input exceeds bounded source size'
     content = base64.b64decode(encoded, validate=True)

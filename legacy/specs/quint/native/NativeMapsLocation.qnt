@@ -154,6 +154,11 @@ module NativeMapsLocation {
         if (s.oneShots.contains(id)) selfStop(aborted(delivered), id) else delivered
       }
   }
+  /// Stale and future-dated fixes leave the watch in place for the next fix.
+  action staleNativeFix(id: int, future: bool): bool = all {
+    s.listeners.contains(id), s.watches.size() > 0,
+    s' = s
+  }
   action nativeError(id: int): bool = all {
     s.listeners.contains(id), s.generation < MaxGeneration,
     s' = if (active(s, id)) selfStop(reported(s, id), id) else s
@@ -166,7 +171,7 @@ module NativeMapsLocation {
     any {
       start(flag), all { draw == 0, stop }, cleanupSettles(id, flag), permissionChecked(flag),
       permissionAnswered(flag), hide, show, listenersAdded, watchSettles(flag),
-      nativeFix(id, flag), nativeError(id), s' = s
+      nativeFix(id, flag), staleNativeFix(id, flag), nativeError(id), s' = s
     }
   }
 
@@ -235,6 +240,12 @@ module NativeMapsLocation {
     .then(nativeFix(1, true)).expect(s.deliveries.size() == 1 and s.session == 0)
     .then(nativeFix(1, true)).then(nativeError(1))
     .expect(s.deliveries.size() == 1 and s.errors.get(1) == 0 and safety)
+  run freshFixAfterClockSkewTest = initWith(true).then(start(false))
+    .then(permissionChecked(true)).then(listenersAdded).then(watchSettles(true))
+    .then(staleNativeFix(1, false)).then(staleNativeFix(1, true))
+    .expect(s.session == 1 and s.watches == Set(1) and s.deliveries == Set() and s.errors.get(1) == 0)
+    .then(nativeFix(1, true))
+    .expect(s.session == 1 and s.deliveries.size() == 1 and s.errors.get(1) == 0 and safety)
   run unconfirmedCleanupRejectsNextStartTest = initWith(true).then(start(false))
     .then(permissionChecked(true)).then(listenersAdded).then(watchSettles(true)).then(start(false))
     .expect(s.admission.phase == "stopping" and s.admission.awaits == 1)

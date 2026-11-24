@@ -14,44 +14,92 @@ const checkTraces = options => check(boundInputs({...options, sources: [...optio
 export async function filesAndSharing() {
   const source = 'apps/app/src/prototype/file-email-review.ts';
   const attachment = await bundledSource('apps/app/src/runtime/inbox-attachment.ts');
-  const modal = await bundledSource('apps/app/src/runtime/modal-inert.ts');
-  // The review's refusals are worded by Alpha (ui/mailbox/drafts-controller.ts attachmentRefusalText).
   const drafts = await bundledSource('apps/app/src/ui/mailbox/drafts-controller.ts', {'import.meta.env': '{}'});
   const traces = [];
-  for (const changed of [false, true]) {
-    const page = new JSDOM('<div class="os"></div>', {pretendToBeVisual: true});
-    page.window.HTMLDialogElement.prototype.showModal = function () {this.open = true;};
-    let inserted = null, readCount = 0, lastReview = Promise.resolve();
-    const document = page.window.document;
+  const earlierText = {1: 'Earlier unfinished text', 2: 'Earlier unfinished text, edited'};
+  // `duplicate`: the owner attached the selected file to the unfinished draft first, so the share is the duplicate refusal.
+  for (const [name, changed, edited, duplicate] of [['exact', false, false, false], ['changed', true, false, false], ['edited-earlier', false, true, false], ['duplicate', false, false, true]]) {
+    const page = new JSDOM('<div></div>', {pretendToBeVisual: true});
+    let readCount = 0, opened = 0, carryNotice = '';
+    const {document} = page.window, held = deferred(), rows = new Map(), toasts = [];
     const file = {name: 'Owned.txt', mimeType: 'text/plain', dataBase64: Buffer.from('first').toString('base64')};
     const reviewed = await attachment.exports.reviewMailAttachment(file);
-    const second = {name: 'Owned.txt', mimeType: 'text/plain', dataBase64: Buffer.from('changed').toString('base64')};
+    const second = {...file, dataBase64: Buffer.from('changed').toString('base64')};
     const changedReview = await attachment.exports.reviewMailAttachment(second);
+    // The actual drafts controller on in-memory compare-and-exchange slots: no provider, network or device.
+    const identity = {sessionId: 'session', account: {environment: 'test', userId: 'owner', sessionId: 'session'}};
+    const mail = drafts.exports.createMailDraftsController({
+      publish() {}, toast: text => toasts.push(text), identity: () => identity, confirm: () => true,
+      provider: {prepare: async () => { throw Error('No provider operation'); },
+        capabilities: () => ({send: false, providerDrafts: false, from: 'owner@example.invalid', attachmentPolicy: {maximumOutgoing: 10, maximumTotalBytes: 5 * 1024 * 1024}})},
+      store: {read: async key => structuredClone(rows.get(key) ?? null), compareExchange: async (key, before, next) => {
+        if (JSON.stringify(rows.get(key) ?? null) !== JSON.stringify(before)) return {status: 'conflict'};
+        if (next === null) rows.delete(key); else rows.set(key, structuredClone(next));
+        return {status: 'saved'};
+      }},
+      retained: () => ({ready: Promise.resolve(), available: false, peek: () => null, conflict: false, error: false, status: '',
+        edit() {}, resume() {}, replace() {}, retry() {}, clear: async () => {}, recover() {}, retire() {}}),
+      // The composer's own Attach picks the same selected file.
+      attachments: {select: async () => ({status: 'selected', selectionId: 'owner-pick', name: file.name}), read: async () => ({...file, ...reviewed}), forget: async () => {}},
+      reviewAttachment: async value => value,
+    });
+    await mail.bind('grant', 'owner@example.invalid');
+    for (let attempt = 0; !mail.newDraftTarget().ready && attempt < 12; attempt++) await tick();
+    // The owner's unfinished email, left when they went Home: its composer is closed, the draft is kept.
+    assert.equal(mail.useSuggestion(earlierText[1]), true);
+    const earlierId = mail.email().draftId;
+    mail.close();
+    const observe = () => {
+      const shelf = [...rows].find(([key]) => key.startsWith('inbox-drafts:v1:shelf:'))?.[1];
+      const kept = shelf?.items.find(row => row.draft.id === earlierId)?.draft;
+      const open = mail.email(), fresh = open && open.draftId !== earlierId ? open.proposal : null;
+      const earlier = kept || (open?.draftId === earlierId ? {body: open.proposal.bodyText, attachments: open.proposal.attachments} : null);
+      const content = draft => Number(Object.keys(earlierText).find(key => earlierText[key] === draft?.body) ?? -1);
+      // The source whose bytes a draft holds: 0 for none, -1 for anything the model does not name.
+      const bytes = draft => { const list = draft?.attachments || []; return !list.length ? 0 : list.length > 1 ? -1 : list[0].dataBase64 === file.dataBase64 ? 1 : list[0].dataBase64 === second.dataBase64 ? 2 : -1; };
+      return {'s.inserted': !!fresh && fresh.attachments.length === 1 && fresh.attachments[0].dataBase64 === file.dataBase64 && !fresh.bodyText,
+        's.newDraft': !!fresh, 's.earlier': content(earlier), 's.kept': kept ? content(kept) : 0,
+        's.earlierBytes': earlier ? bytes(earlier) : -1, 's.keptBytes': kept ? bytes(kept) : 0};
+    };
     const module = sourceContext([source], ['reviewFileEmail'], {window: page.window, document,
-      getComputedStyle: page.window.getComputedStyle.bind(page.window),
-      reviewSharedAttachment: value => (lastReview = attachment.exports.reviewMailAttachment(value)), attachmentRefusalText: drafts.exports.attachmentRefusalText,
-      holdPhoneInert: modal.exports.holdPhoneInert,
-      describeEmailTarget: () => ({account: 'Owner', destination: 'Draft'})});
-    const t = trace(`attachment-${changed ? 'changed' : 'exact'}`, {'s.inserted': !!inserted});
+      AbortController: page.window.AbortController, reviewMailAttachment: attachment.exports.reviewMailAttachment,
+      rethrowAttachmentRefusal: drafts.exports.rethrowAttachmentRefusal});
+    const t = trace(`attachment-${name}`, observe());
+    if (duplicate) {
+      mail.begin();mail.render().c.attach();
+      for (let attempt = 0; (observe()['s.earlierBytes'] !== 1 || mail.render().c.busy) && attempt < 40; attempt++) await tick();
+      mail.close();
+      checkpoint(t, 'the owner attaches the selected file to the unfinished draft in its composer', call('attachEarlier'), observe());
+    }
     const close = module.reviewFileEmail({read: async () => {
-      readCount++;
-      return readCount > 1 && changed ? {...second, ...changedReview} : {...file, ...reviewed};
-    }, current: () => true, target: () => ({ready: true, token: 'draft-one'}),
-    insert(value, token) {assert.equal(token, 'draft-one'); inserted = value; return true;}, inserted() {}});
-    await tick(); await lastReview; await tick();
-    const input = document.querySelector('input'); assert.equal(input.disabled, false);
-    checkpoint(t, 'source performs initial attachment validation', call('read'), {'s.inserted': !!inserted, 's.checked': input.checked});
-    input.checked = true; input.dispatchEvent(new page.window.Event('change'));
-    checkpoint(t, 'explicit checkbox', call('check'), {'s.checked': input.checked});
-    if (changed) checkpoint(t, 'source bytes changed before second read', call('changeSource'), {'s.inserted': !!inserted});
-    [...document.querySelectorAll('button')].find(button => button.textContent === 'Attach').click();
-    await tick(); await lastReview; await tick();
-    checkpoint(t, 'source rereads bytes before insertion', changed ? {...call('insert'), reject: true} : call('insert'), {'s.inserted': !!inserted});
+      if (++readCount === 1) return {...file, ...reviewed};
+      await held.promise;
+      return changed ? {...second, ...changedReview} : {...file, ...reviewed};
+    }, current: () => true, target: () => mail.newDraftTarget(),
+    insert: (value, token, live) => mail.attachReviewed(value, token, live),
+    inserted() {opened++;}, notify(message) {carryNotice=message;}});
+    for(let attempt=0;readCount<2&&attempt<12;attempt++) await tick();
+    assert.equal(readCount,2);
+    checkpoint(t, 'Email click binds the account and validates the first read', call('read'), observe());
+    if (changed) checkpoint(t, 'selected bytes change before the second read', call('changeSource'), observe());
+    if (edited) {
+      mail.render().c.onBody({target: {value: earlierText[2]}});
+      checkpoint(t, 'the owner edits the unfinished draft during the read', call('editEarlier'), observe());
+    }
+    held.resolve();
+    for (let attempt = 0; !opened && !carryNotice && attempt < 40; attempt++) await tick();
+    assert.equal(document.querySelector('dialog'), null);
+    assert.equal(opened, changed || duplicate ? 0 : 1);
+    if (changed) assert.match(carryNotice,/selected file changed/);
+    else if (duplicate) assert.equal(carryNotice, 'This file is already attached to your unfinished email in Inbox. Nothing was added.');
+    else assert.equal(carryNotice, '');
+    assert.deepEqual(toasts, [], 'the review shows its one outcome; the draft side adds no notice');
+    checkpoint(t, 'only new matching bytes start a new draft; the unfinished one is kept as it was', call(changed ? 'insertFailed' : duplicate ? 'duplicateRefused' : 'insert'), observe());
     close(); page.window.close(); traces.push(t);
   }
-  return checkTraces({model: 'FilesAndSharing', sources: [source, ...attachment.sources, ...modal.sources, ...drafts.sources], traces, scope: 'bounded-component', assumptions: [
-    'Real review dialog and upstream byte validation execute for exact and changed-byte copies. Destination description is a text-only stub.',
-    'Owner/draft token changes, focus/page retirement, revoked native grants and restart need further schedules.']});
+  return checkTraces({model: 'FilesAndSharing', sources: [source, ...attachment.sources, ...drafts.sources], traces, scope: 'bounded-component', assumptions: [
+    'The actual Email action, shared validator, exact-byte reread, drafts controller and composer Attach execute on in-memory draft slots.',
+    'Native grant changes, the Inbox account binding and cross-tab persistence are separate check boundaries.']});
 }
 
 export async function notificationCollection() {

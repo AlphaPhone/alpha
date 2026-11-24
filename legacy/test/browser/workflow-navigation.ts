@@ -25,9 +25,15 @@ export async function installWorkflowListFixture(page:Page){await page.evaluate(
 });}
 export const workflowCard=(page:Page,title:string)=>page.locator('[data-alpha-subview="workflows-list"]').getByRole('button').filter({has:page.getByText(title,{exact:true})});
 export async function newWorkflow(page:Page){
- await page.getByRole('button',{name:'New automation',exact:true}).click();
+ await page.getByRole('button',{name:'Add to Workflows',exact:true}).click();
  const choices=page.getByRole('region',{name:'Add to Workflows',exact:true});
  await choices.getByRole('button',{name:'More options',exact:true}).click();
  await choices.getByRole('button',{name:/^Steps/}).click();
  await expect(page.getByRole('textbox',{name:'Workflow name',exact:true})).toBeEditable();
+}
+
+export async function openWorkflowActions(page:Page){
+ const menu=page.getByLabel('Workflow actions',{exact:true});
+ await expect(menu).toBeVisible();
+ if(!await menu.evaluate(element=>element.closest('details')?.open))await menu.click();
 }

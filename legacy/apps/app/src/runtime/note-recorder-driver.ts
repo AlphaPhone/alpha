@@ -1,10 +1,8 @@
 import { Capacitor } from '@capacitor/core';
 import { registerPlugin } from '../platform-plugins';
 import { createOnDeviceVoice } from './local-voice';
-import { createPairedVoice } from './paired-voice';
 import { createCloudVoice } from './cloud-voice';
 import { selectVoiceRoute, speechRoute, noteNetworkSpeechFailure } from './voice-selection';
-import { browserDevProfile } from '../browser/dev-profile';
 import { developmentCloudVoiceEnabled } from './development-cloud-voice';
 import type { NoteRecorderDriver, NoteRecordingBinding, NoteRecordingStatus, SavedNoteAudio, SegmentTranscriber } from '../prototype/note-recorder';
 import type { TranscriptProvenance } from './voice-states';
@@ -24,7 +22,15 @@ const native = registerPlugin<{
   claimCanonicalNoteSave(input: { recordingId: string }): Promise<{ claimed: boolean }>;
   saveNoteRecording(input: { recordingId: string; noteId: string; transcript: string }): Promise<SavedNoteAudio>;
   addListener(event: 'noteRecordingChanged', callback: (status: NoteRecordingStatus) => void): Promise<{ remove(): Promise<void> }>;
+  consumeNoteRecordingOpen(): Promise<{ open: boolean }>;
+  clearNoteRecordingOpen(): Promise<unknown>;
 }>('AlphaVoiceCloud');
+
+/** A tap on Android's recording notification, held natively until the renderer can open Notes. */
+export const noteRecordingNotificationOpen = {
+  consume: () => native.consumeNoteRecordingOpen(),
+  clear: () => native.clearNoteRecordingOpen(),
+};
 
 export function createNoteRecorderDriver(): NoteRecorderDriver {
   return {
@@ -81,15 +87,10 @@ export async function noteSegmentTranscriber(signal: AbortSignal, selected = sel
       }),
     };
   }
-  if (selected === 'device' || (browserDevProfile && selected === 'agent')) {
+  if (selected === 'device') {
     const local = createOnDeviceVoice();
     if (!local || !await local.ready(signal).catch(() => false)) return null;
     return { provenance: { route: Capacitor.isNativePlatform() ? 'on-device' : 'browser' }, transcribe: wrap((id, owned) => local.transcribe(id, owned)) };
-  }
-  if (selected === 'agent') {
-    const paired = createPairedVoice();
-    if (!paired || !await paired.transcriptionReady(signal).catch(() => false)) return null;
-    return { provenance: { route: 'paired-agent' }, transcribe: wrap((id, owned) => paired.transcribe(id, owned)) };
   }
   return null;
 }

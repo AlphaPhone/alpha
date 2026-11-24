@@ -1,5 +1,6 @@
 import {test,expect,type Page,type TestInfo} from '@playwright/test';
 import {createServer,type ViteDevServer} from 'vite';
+import {scopedViteCacheDir} from './helpers/vite-cache';
 import {resolve} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {recordStartupFrames,expectNoHomeBeforePrompt,startupLoading} from './helpers/startup-frames';
@@ -12,7 +13,7 @@ import {recordStartupFrames,expectNoHomeBeforePrompt,startupLoading} from './hel
 let server:ViteDevServer,origin:string;
 test.beforeAll(async()=>{
  const previous=process.env.ELIZA_DEV_ALLOW_TEST_MOCKS;process.env.ELIZA_DEV_ALLOW_TEST_MOCKS='';
- try{server=await createServer({configFile:resolve('vite.config.ts'),configLoader:'native',cacheDir:resolve('test-results/post-sign-in-setup/vite-cache'),server:{host:'127.0.0.1',port:0},define:{
+ try{server=await createServer({configFile:resolve('vite.config.ts'),configLoader:'native',cacheDir:scopedViteCacheDir('test-results/post-sign-in-setup/vite-cache'),server:{host:'127.0.0.1',port:0},define:{
   'import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS':JSON.stringify(''),'import.meta.env.VITE_ALPHA_CLOUD_RESIDENT':JSON.stringify('1'),
   'import.meta.env.VITE_ALPHA_CLOUD_ENVIRONMENT':JSON.stringify('production'),'import.meta.env.VITE_LOCAL_AGENT':JSON.stringify('1')}});}
  finally{if(previous===undefined)delete process.env.ELIZA_DEV_ALLOW_TEST_MOCKS;else process.env.ELIZA_DEV_ALLOW_TEST_MOCKS=previous;}
@@ -140,7 +141,7 @@ test('a verified email code goes straight to access setup while the agent restar
  await expect(setup).toHaveCount(0);
  // The owner may open Account while the agent starts. It has no AI or billing claim yet.
  await page.evaluate(async()=>(await import('/src/runtime/connection-ui.tsx')).connectionController.open());
- await expect(accountSheet.getByRole('region',{name:'AI inference',exact:true}).getByText('Starting',{exact:true})).toBeVisible();
+ await expect(accountSheet.getByRole('region',{name:'AI service',exact:true}).getByText('Starting',{exact:true})).toBeVisible();
  await shot(page,info,'05-account-while-agent-starts');
  for(const text of STARTING_SLOP)expect(await accountSheet.innerText()).not.toContain(text);
  host.release!();
@@ -148,7 +149,7 @@ test('a verified email code goes straight to access setup while the agent restar
  await expect.poll(async()=>(await snapshot(page)).session,{timeout:30_000}).toBe(true);
  await expect(accountSheet).toHaveCount(0);
  await page.evaluate(async()=>(await import('/src/runtime/connection-ui.tsx')).connectionController.open());
- await expect(accountSheet.getByRole('region',{name:'AI inference',exact:true}).getByText('Eliza Cloud',{exact:true})).toBeVisible();
+ await expect(accountSheet.getByRole('region',{name:'AI service',exact:true}).getByText('Eliza Cloud',{exact:true})).toBeVisible();
  await expect(accountSheet.getByText('No plan',{exact:true})).toBeVisible();
  await shot(page,info,'06-account-with-agent-ready');
  expect(host.bound).toBe(true);expect(host.starts).toBe(2);

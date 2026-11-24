@@ -150,14 +150,13 @@ test.describe('fixture dev build (?fixture=1&mode=dev, ELIZA_DEV_ALLOW_TEST_MOCK
     await expect(page.locator('[data-alpha-incoming-card]')).toBeVisible();
   });
 
-  test('the status-bar call chip\'s text meets 4.5:1 (AC-28)', async ({page}) => {
+  test('the ongoing-call bar\'s text meets 4.5:1 (AC-28)', async ({page}) => {
     await page.goto('/?fixture=1&mode=dev&start=phone:keypad');
     for (const key of ['5', '5', '5']) await page.getByRole('button', {name: key, exact: true}).click();
     await page.getByRole('button', {name: 'Call', exact: true}).click();
     await page.evaluate(() => (window as any).alphaShell().goHome());
-    const chip = page.getByRole('button', {name: /^Return to /});
-    await expect(chip).toBeVisible();
-    const ratio = await chip.evaluate(el => {
+    await expect(page.getByRole('button', {name: /^Return to call, /})).toBeVisible();
+    const ratio = await page.getByRole('region', {name: 'Ongoing call'}).evaluate(el => {
       const rgb = (v: string) => (v.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
       const lum = ([r, g, b]: number[]) => [r, g, b].map(v => { v /= 255; return v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; }).reduce((sum, v, i) => sum + v * [.2126, .7152, .0722][i], 0);
       const style = getComputedStyle(el), [a, b] = [lum(rgb(style.color)), lum(rgb(style.backgroundColor))];
@@ -167,6 +166,9 @@ test.describe('fixture dev build (?fixture=1&mode=dev, ELIZA_DEV_ALLOW_TEST_MOCK
   });
 
   test('an emergency number keeps the full-screen call: no proposal, no stage, End reachable', async ({page}) => {
+    // The page's fake clock runs in real time; the waits below move it past the fixture agent's
+    // reply and follow-up timers (800 + 1300 + 700 ms) at once.
+    await page.clock.install();
     await page.goto('/?fixture=1&mode=dev&start=phone:keypad');
     for (const key of ['9', '1', '1']) await page.getByRole('button', {name: key, exact: true}).click();
     await page.getByRole('button', {name: 'Call', exact: true}).click();
@@ -187,7 +189,7 @@ test.describe('fixture dev build (?fixture=1&mode=dev, ELIZA_DEV_ALLOW_TEST_MOCK
     await page.evaluate(() => { const w = window as any, shell = w.alphaShell(); w.toasts = []; const toast = shell.toast; shell.toast = function (text: string, ...rest: unknown[]) { w.toasts.push(text); return toast.call(this, text, ...rest); }; });
     await page.evaluate(() => (window as any).alphaShell().api('messages').open('phone', {call: 'maya'}));
     await page.evaluate(() => (window as any).alphaShell().api('contacts').open('phone', {call: 'maya', ret: {view: 'contacts', patch: {open: 'maya'}}}));
-    await page.waitForTimeout(2000);
+    await page.clock.runFor(2000);
     expect(await page.evaluate(() => (window as any).toasts)).toEqual(['End the emergency call first', 'End the emergency call first']);
     expect(await page.evaluate(() => { const st = (window as any).alphaShell().vget('phone'); return [st.call, st.num, st.callWho]; })).toEqual([null, '911', '#911']);
     await expect(card).toHaveAttribute('data-emergency', 'true');
@@ -198,7 +200,7 @@ test.describe('fixture dev build (?fixture=1&mode=dev, ELIZA_DEV_ALLOW_TEST_MOCK
     // Only End ends it: free text asking to hang up, or not to, ends nothing (AC-19).
     for (const text of ['hang up', "don't hang up"]) {
       await askAlpha(page, text);
-      await page.waitForTimeout(2500);
+      await page.clock.runFor(2500);
       expect(await page.evaluate(() => (window as any).alphaShell().vget('phone').callWho)).toBe('#911');
     }
     // A ring over the emergency call: no compaction or strip replaces it, and declining or

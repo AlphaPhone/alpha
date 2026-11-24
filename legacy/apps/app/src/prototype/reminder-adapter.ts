@@ -4,12 +4,12 @@ import {deletions,refreshDeletionViews,reminderDeletionRefusal} from '../runtime
 import { alphaClient } from '../runtime/alpha-client';
 import { connectionController } from '../runtime/connection-ui';
 import {reminderUnsavedFields,reminderCreations,retainReminderCreation,discardUndispatchedCreation,checkReminderCreation,reconcileReminderCreations,retireRefusedCreation,isReminderRefusal,reminderWallTime,reminderEvents,overdueReminders,undatedTodos,reminderRefusalMessage,reopenSchedule,isUndatedReminder,reminderDueAt as dueOf,type ReminderCreation,type ReminderRefusal} from '../runtime/reminder-creations';
-// Pure reminder helpers (events, overdue, to-dos, refusal reasons, reopen) live in reminder-creations.
 import { DailyApps, type Reminder } from '../daily';
 import { pendingReminderDeletions,retainReminderDeletion,acknowledgeReminderDeletion,reconcileReminderDeletions,discardUndispatchedReminderDeletion } from '../runtime/reminder-deletions';
 import { Capacitor } from '@capacitor/core';
 import {rememberNoteOrigin,forgetNoteOrigin} from './note-origin-adapter';
 import {formatTime,formatLongDate} from './locale-time';
+import {sha256Hex} from '../lib/hash';
 type Bag = any;
 /** Native reminders use the reference calendar form, timeline and detail sheet. */
 export function installReminderAdapter(Component: Bag, views: Bag) {
@@ -24,7 +24,6 @@ export function installReminderAdapter(Component: Bag, views: Bag) {
   const render = views.calendar.render;
   views.calendar.state = { ...views.calendar.state, events: [] };
   let owner: Bag;
-  const events = (rows: Reminder[]) => reminderEvents(rows);
   let closeNoticeQuestion:(()=>void)|undefined;
   let tapBusy=false, tapRequested=false, tapInteraction=0;
   const interaction=()=>{tapInteraction++;};
@@ -68,7 +67,7 @@ export function installReminderAdapter(Component: Bag, views: Bag) {
       if(!selected){if(explicit)shell.toast('Unavailable');return;}
       const confirmation=await DailyApps.pendingReminderTap();
       if(!current()||confirmation.token!==pending.token||!confirmation.retained||!sameTarget(confirmation.target,pending.target))return;
-      const rows=[...(shell.nativeCalendarRows||[]),...events(result.reminders)];
+      const rows=[...(shell.nativeCalendarRows||[]),...reminderEvents(result.reminders)];
       const target=rows.find(row=>row.alphaReminderId===selected.id&&sameTarget(row.reminderTarget,pending.target));
       if(!target)return;
       shell.openView('calendar',{open:target.id,day:target.off,openDay:target.off,events:rows});
@@ -84,7 +83,7 @@ export function installReminderAdapter(Component: Bag, views: Bag) {
         closeNoticeQuestion=reviewOwnNoticeQuestion({notice:{id:selected.id,revision:pending.target.revision,source:'own',title:selected.title,text:selected.body||'',appLabel:'Alpha Phone'},current:live,recheck:async()=>{
           const again=await DailyApps.pendingReminderTap();if(!live()||again.token!==pending.token||!again.question||!again.retained||!sameTarget(again.target,pending.target))return false;
           const fresh=await DailyApps.listReminders();return live()&&fresh.reminders.some(row=>sameTarget(row.target,pending.target)&&row.title===selected.title&&(row.body||'')===(selected.body||''));
-        },consume:()=>DailyApps.consumeReminderTap({token:pending.token!}),release:()=>DailyApps.releaseReminderQuestion({token:pending.token!}),compose:draft=>shell.api(shell.S().view).composeContentQuestion(draft),report:message=>shell.toast(message),closed:()=>{closeNoticeQuestion=undefined;
+        },consume:()=>DailyApps.consumeReminderTap({token:pending.token!}),attach:selection=>shell.api(shell.S().view).attachSelectedFile(selection),report:message=>shell.toast(message),closed:()=>{closeNoticeQuestion=undefined;
           // Refresh only the saved-link banner from native; never reopen the review here.
           void DailyApps.pendingReminderTap().then(next=>{if(owner===shell&&shell.live)shell.vset('calendar',{reminderTapPending:!!next.token,reminderTapToken:next.token});}).catch(()=>{});}});
         return;
@@ -119,7 +118,7 @@ export function installReminderAdapter(Component: Bag, views: Bag) {
       if (!this.live || generation !== this.reminderRefreshGeneration) return;
       this.reminderTargets=new Map(result.reminders.map(r=>[r.id,r.target]));
       this.reminderRows=result.reminders;
-      const rows = [...(this.nativeCalendarRows || []), ...events(result.reminders)];
+      const rows = [...(this.nativeCalendarRows || []), ...reminderEvents(result.reminders)];
       this.reminderRefreshFailed = false;
       this.vset('calendar', { events: rows, reminderStale:false, reminderDeleteUnknown });
       const open = this.pendingReminderOpen;
@@ -132,7 +131,7 @@ export function installReminderAdapter(Component: Bag, views: Bag) {
     } catch {
       if (!this.live || generation !== this.reminderRefreshGeneration) return;
       // Device calendar rows never wait on the reminder store: they show with the reminders last read.
-      this.vset('calendar', {events:[...(this.nativeCalendarRows || []), ...events(this.reminderRows || [])], reminderStale:true});
+      this.vset('calendar', {events:[...(this.nativeCalendarRows || []), ...reminderEvents(this.reminderRows || [])], reminderStale:true});
       if (this.pendingReminderOpen) {this.pendingReminderOpen = undefined;this.toast("Couldn't open that reminder. Open Calendar to find it.");}
       else if (!this.reminderRefreshFailed) this.toast('Couldn’t refresh');
       this.reminderRefreshFailed = true;
@@ -255,7 +254,7 @@ export function installReminderAdapter(Component: Bag, views: Bag) {
               if(Object.entries(operation.target).some(([key,value])=>selected[key as keyof typeof selected]!==value)){api.toast('Changed');await saveOwner.refreshReminders();return;}
               if(schedule&&current.reminderStatus==='completed'&&!await confirmCalendarAction(saveOwner,api,'Reschedule?','','Reschedule',sameEditor))return;
               if(!sameEditor())return;
-              const bindingHash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(operation))))).map(v=>v.toString(16).padStart(2,'0')).join('');
+              const bindingHash=await sha256Hex(JSON.stringify(operation));
               if(!sameEditor())return;
               input={operationId:crypto.randomUUID(),bindingHash,operation};createdInput=input;editSession.attempt=input;
               await retainReminderDeletion(input);
@@ -371,13 +370,13 @@ export function installReminderAdapter(Component: Bag, views: Bag) {
         try{
           const operation={type:action==='done'?'reminder_complete' as const:'reminder_snooze' as const,target:renderedDecisionTarget};
           const pending=Object.values(await pendingReminderDeletions()).find(input=>Object.keys(renderedDecisionTarget).every(key=>input.operation.target[key as keyof typeof input.operation.target]===renderedDecisionTarget[key]));
-          if(pending&&pending.operation.type!==operation.type)throw Error('Another action on this revision is unconfirmed');
+          if(pending&&pending.operation.type!==operation.type)throw Error('Still saving your last change. Try again in a moment.');
           let input=pending;
           if(!input){
             const current=await DailyApps.selectedReminder({id:event.alphaReminderId});
             if(Object.keys(renderedDecisionTarget).some(key=>current[key as keyof typeof current]!==renderedDecisionTarget[key])){await decisionOwner.refreshReminders();api.toast('Changed');return;}
             if(!stillSelected())return;
-            const bindingHash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(operation))))).map(v=>v.toString(16).padStart(2,'0')).join('');
+            const bindingHash=await sha256Hex(JSON.stringify(operation));
             if(!stillSelected())return;
             input={operationId:crypto.randomUUID(),bindingHash,operation};createdInput=input;
             await retainReminderDeletion(input);
@@ -421,13 +420,13 @@ export function installReminderAdapter(Component: Bag, views: Bag) {
         try{
           const operation={type:'reminder_update' as const,target:renderedDecisionTarget,fields:{title:event.title,body:event.reminderBody||'',schedule}};
           const pending=Object.values(await pendingReminderDeletions()).find(input=>Object.keys(renderedDecisionTarget).every(key=>input.operation.target[key as keyof typeof input.operation.target]===renderedDecisionTarget[key]));
-          if(pending&&JSON.stringify(pending.operation)!==JSON.stringify(operation))throw Error('Another action on this revision is unconfirmed');
+          if(pending&&JSON.stringify(pending.operation)!==JSON.stringify(operation))throw Error('Still saving your last change. Try again in a moment.');
           let input=pending;
           if(!input){
             const current=await DailyApps.selectedReminder({id:event.alphaReminderId});
             if(Object.keys(renderedDecisionTarget).some(key=>current[key as keyof typeof current]!==renderedDecisionTarget[key])){await reopenOwner.refreshReminders();api.toast('Changed');return;}
             if(!stillSelected())return;
-            const bindingHash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(operation))))).map(v=>v.toString(16).padStart(2,'0')).join('');
+            const bindingHash=await sha256Hex(JSON.stringify(operation));
             if(!stillSelected())return;
             input={operationId:crypto.randomUUID(),bindingHash,operation};createdInput=input;
             await retainReminderDeletion(input);
@@ -466,7 +465,7 @@ export function installReminderAdapter(Component: Bag, views: Bag) {
         deleteOwner.reminderSaving=true;
         try {
           const pending=Object.values(await pendingReminderDeletions()).find(input=>Object.keys(renderedTarget).every(key=>input.operation.target[key as keyof typeof input.operation.target]===renderedTarget[key]));
-          if(pending&&pending.operation.type!=='reminder_cancel')throw Error('Another action on this revision is unconfirmed');
+          if(pending&&pending.operation.type!=='reminder_cancel')throw Error('Still saving your last change. Try again in a moment.');
           if(!pending){
             const reviewed=await deletions.reviewReminder({target:renderedTarget});
             if(reviewed.status==='queued'){if(stillSelected())api.set({open:null});refreshDeletionViews();api.toast('Paused');return;}
@@ -484,10 +483,10 @@ export function installReminderAdapter(Component: Bag, views: Bag) {
           if(stillSelected())api.set({open:null});
           if(owner===deleteOwner&&deleteOwner.live){await deleteOwner.refreshReminders();api.toast('Reminder deleted');}
         }catch{
-          if(owner===deleteOwner&&deleteOwner.live){
-            api.set({reminderDeleteUnknown:Object.keys(await pendingReminderDeletions()).length});
-            api.toast('Unconfirmed');
-          }
+          // A lost admission response may still have staged the deletion: re-read now so its
+          // Undo appears at once, not at the notice's next idle poll inside the 10 s window.
+          refreshDeletionViews();
+          if(owner===deleteOwner&&deleteOwner.live)api.toast('Unconfirmed');
         }finally{
           if(owner===deleteOwner&&deleteOwner.live)try{deleteOwner.reminderDeleteUnknown=Object.keys(await pendingReminderDeletions()).length;api.set({reminderDeleteUnknown:deleteOwner.reminderDeleteUnknown});}catch{}
           deleteOwner.reminderSaving=false;

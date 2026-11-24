@@ -32,7 +32,7 @@ export async function runControllerCompositionRefinement(extraSources=[]) {
   try {
     await server.listen();browser=await chromium.launch({headless:true});
     const origin=`http://127.0.0.1:${server.httpServer.address().port}`;
-    for(const scenario of ['calendar-success','replacement-after-dispatch','stale-calendar-review','cancelled-sign-in','sign-out-after-dispatch','hidden-after-dispatch','voice-open-signin','voice-pending-replacement','voice-hidden']) {
+    for(const scenario of ['sign-out','voice-open-signin','voice-pending-replacement','voice-hidden']) {
       const context=await browser.newContext(),page=await context.newPage();page.setDefaultTimeout(90000);
       const foreign=await fenceNetwork(page),errors=[];page.on('pageerror',error=>errors.push(error.message));
       await page.addInitScript({content:'window.__name=function(target){return target;};'});
@@ -40,7 +40,7 @@ export async function runControllerCompositionRefinement(extraSources=[]) {
       await page.goto(origin+'/quint-composition',{waitUntil:'commit'});
       try {await page.waitForFunction(()=>window.refinement?.controller.getSnapshot().cloudAccount&&window.refinement.controller.getSnapshot().kind==='resident'&&!window.refinement.controller.getSnapshot().busy);}
       catch(error){throw new Error('Composition startup failed '+JSON.stringify({scenario,errors,foreign,state:await page.evaluate(()=>window.refinement?.controller.getSnapshot()),calls:await page.evaluate(()=>window.flagOff?.calls),unexpected:await page.evaluate(()=>window.flagOff?.unexpected)}),{cause:error});}
-      const observe=async()=>{const s=await page.evaluate(()=>window.refinement.snapshot());const owner=s.owner===null?0:accounts.findIndex(account=>account.userId===s.owner)+1;return{'host.owner':owner,'credentialPresent':s.credential,'host.connectionOpen':s.open,'host.providerReady':s.providerReady,'state.calendar.enabled':s.calendarEnabled,'state.calendar.writes':s.providerWrites,'state.voice.phase':s.voicePhase==='awaiting-user-input'?'awaiting-review':s.voicePhase,'state.voice.capture':s.voiceCapture,'state.voice.inputHeld':s.voiceInputHeld,'voiceSubmissions':s.voiceSends,'host.foreground':s.foreground,...s.calendarState?{'state.calendar.state':s.calendarState,'state.calendar.pending':s.pending,'state.calendar.knownProvider':s.knownProvider,'state.calendar.remote':s.remote?1:0}:{}};};
+      const observe=async()=>{const s=await page.evaluate(()=>window.refinement.snapshot());const owner=s.owner===null?0:accounts.findIndex(account=>account.userId===s.owner)+1;return{'host.owner':owner,'credentialPresent':s.credential,'host.connectionOpen':s.open,'host.providerReady':s.providerReady,'state.voice.phase':s.voicePhase==='awaiting-user-input'?'awaiting-review':s.voicePhase,'state.voice.capture':s.voiceCapture,'state.voice.inputHeld':s.voiceInputHeld,'voiceSubmissions':s.voiceSends,'host.foreground':s.foreground};};
       const trace={name:scenario,init:action('readySetup'),expect:await observe(),steps:[]};
       if(scenario.startsWith('voice-')) {
         await page.evaluate(()=>window.refinement.startVoice());
@@ -61,50 +61,21 @@ export async function runControllerCompositionRefinement(extraSources=[]) {
           await page.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,value:true});document.dispatchEvent(new Event('visibilitychange'));window.refinement.recheckVoice();});
           trace.steps.push({label:'visibility invalidates the actual conversation guard',action:action('hide'),expect:await observe()});
         }
-        trace.implementationEvents=await page.evaluate(()=>({controller:window.refinement.events,calendar:window.compositionPorts.events}));
-        if(foreign.length||errors.length)throw Error(JSON.stringify({scenario,foreign,errors}));
-        traces.push(trace);console.log('Collected composition schedule '+scenario);await context.close();continue;
-      }
-      await page.evaluate(()=>window.refinement.prepareCalendar());
-      trace.steps.push({label:'actual Alpha host captures the current Calendar owner and review',action:[action('calendarBind'),action('calendarReview')],expect:await observe()});
-      if(scenario==='stale-calendar-review') {
-        await replace(page,trace,observe);
-        const result=await page.evaluate(()=>window.refinement.calendar.enable(window.refinement.calendarReview).then(()=>null,error=>error.message));
-        if(!result)throw Error('Stale Calendar review was accepted');
-        trace.steps.push({label:'old review cannot enable a replacement account',action:{...action('calendarEnable'),reject:true},expect:await observe()});
       } else {
-        await page.evaluate(()=>window.refinement.enableCalendar());await page.waitForFunction(()=>window.compositionPorts.writes===1);
-        trace.steps.push({label:'real Calendar host enables and checkpoints before dispatch',action:[action('calendarEnable'),action('calendarBegin'),action('calendarAnalyze'),action('calendarStage'),action('calendarDispatch')],expect:await observe()});
-        if(scenario==='replacement-after-dispatch')await replace(page,trace,observe);
-        if(scenario==='cancelled-sign-in') {
-          await page.evaluate(()=>window.refinement.controller.beginSignIn());await page.evaluate(()=>window.refinement.controller.signInEmail('b@example.invalid'));
-          trace.steps.push({label:'replacement starts while old Calendar request is held',action:action('beginSignIn'),expect:await observe()});
-          await page.evaluate(()=>window.refinement.controller.cancelSignIn());
-          trace.steps.push({label:'precommit cancellation preserves the old Calendar binding',action:action('cancelSignIn'),expect:await observe()});
-        }
-        if(scenario==='sign-out-after-dispatch') {
-          await page.evaluate(()=>window.refinement.controller.cloudSignOut());
-          await page.waitForFunction(()=>!window.refinement.controller.getSnapshot().cloudAccount&&!window.refinement.controller.getSnapshot().busy);
-          trace.steps.push({label:'sign-out retires captured consumers',action:action('signOut'),expect:await observe()});
-        }
-        if(scenario==='hidden-after-dispatch') {
-          await page.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,value:true});document.dispatchEvent(new Event('visibilitychange'));});
-          trace.steps.push({label:'visibility cancels the source host before any next effect',action:action('hide'),expect:await observe()});
-        }
-        await page.evaluate(()=>{window.compositionPorts.release();});
-        await page.waitForFunction(()=>window.compositionPorts.remote&&!window.refinement.calendar.snapshot().running);
-        trace.steps.push({label:'already dispatched provider effect settles under its captured binding',action:action('calendarReturned','succeeded',true),expect:await observe()});
+        await page.evaluate(()=>window.refinement.controller.cloudSignOut());
+        await page.waitForFunction(()=>!window.refinement.controller.getSnapshot().cloudAccount&&!window.refinement.controller.getSnapshot().busy);
+        trace.steps.push({label:'sign-out retires captured consumers',action:action('signOut'),expect:await observe()});
       }
-      trace.implementationEvents=await page.evaluate(()=>({controller:window.refinement.events,calendar:window.compositionPorts.events}));
+      trace.implementationEvents=await page.evaluate(()=>({controller:window.refinement.events}));
       if(foreign.length||errors.length)throw Error(JSON.stringify({scenario,foreign,errors}));
       traces.push(trace);console.log('Collected composition schedule '+scenario);await context.close();
     }
     const receipt=await checkTraces({model:'ControllerComposition',sources,driverHashes,traces,scope:'bounded-orchestration',assumptions:[
-      'Actual renderer ConnectionController, Alpha calendarSyncHost, shared Calendar controller/reconciler/store and native protocol wrappers execute in Chromium. Android/Cloud primitives are controlled external ports.',
+      'Actual renderer ConnectionController, shared VoiceAssistantSession and native protocol wrappers execute in Chromium. Android/Cloud primitives are controlled external ports.',
       'Initial and replacement native authentication internals are explicit IdentitySession contract macros. This campaign observes renderer publication, not native key-commit or acknowledgement internals.',
-      'One Calendar link belongs to a captured old account. New-account link collections, Inbox composition, full Resident/Reset coordination and the full voice-adapter UI remain separate obligations.'
+      'Inbox composition, full Resident/Reset coordination and the full voice-adapter UI remain separate obligations. Client Calendar linked sync is retired; agent-side Calendar sync is checked by CalendarLinkedSync.'
     ]});
-    return{receipts:[receipt],obligations:[{model:'ControllerComposition',obligation:'unobserved imported fields and broader orchestration',reason:'This campaign checks selected host/Calendar observations. Identity internals are contract macros, VoiceSession uses actual conversation predicates and explicit recheck calls, with microphone, reply and speaker ports controlled. Inbox multi-slot, Resident lifecycle and Reset are not imported into this bounded composition.',requires:['native-to-renderer intermediate publication','all imported field/action coverage','Inbox multi-owner composition','Resident and reset coordination','full voice-adapter UI wiring']}]};
+    return{receipts:[receipt],obligations:[{model:'ControllerComposition',obligation:'unobserved imported fields and broader orchestration',reason:'This campaign checks selected host and voice observations. Identity internals are contract macros, VoiceSession uses actual conversation predicates and explicit recheck calls, with microphone, reply and speaker ports controlled. Inbox multi-slot, Resident lifecycle and Reset are not imported into this bounded composition.',requires:['native-to-renderer intermediate publication','all imported field/action coverage','Inbox multi-owner composition','Resident and reset coordination','full voice-adapter UI wiring']}]};
   } finally {await browser?.close();await server?.close();}
 }
 async function replace(page,trace,observe) {

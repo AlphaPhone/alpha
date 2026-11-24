@@ -8,11 +8,11 @@
  * serial. Those rows appear only if the read returns them; otherwise the page links to Android's own
  * device status screen, which shows them.
  */
-import type {PhoneInfo, PhoneLine, TelephonyStatus} from '../../../../.eliza/client-features/packages/contracts/src/native-telephony.ts';
+import type {PhoneInfo, PhoneLine, TelephonyClient, TelephonyStatus, VoicemailCarrierState} from '../../../../.eliza/client-features/packages/contracts/src/native-telephony.ts';
 import {displayNumber} from './telephony-presenters.ts';
 
-export type PhoneInfoRow = {label: string; value: string};
-export type PhoneInfoSection = {caption: string; rows: PhoneInfoRow[]};
+type PhoneInfoRow = {label: string; value: string};
+type PhoneInfoSection = {caption: string; rows: PhoneInfoRow[]};
 const NETWORK: Record<PhoneLine['networkType'], string> = {none: 'No service', '2g': '2G', '3g': '3G', '4g': '4G', '5g': '5G', 'wifi-calling': 'Wi-Fi calling', unknown: 'Unknown'};
 const SIGNAL = ['None', 'Poor', 'Fair', 'Good', 'Excellent'];
 const app = (value: string | null, held: boolean) => held ? 'Alpha' : value || 'None';
@@ -34,7 +34,7 @@ export function phoneLineSections(info: PhoneInfo): PhoneInfoSection[] {
   });
 }
 /** Which apps Android uses for calls and texts, and whether the carrier's voicemail is set up. */
-export function phoneDefaultRows(status: TelephonyStatus, voicemail: 'ready' | 'unconfigured' | 'unsupported' | null): PhoneInfoRow[] {
+export function phoneDefaultRows(status: TelephonyStatus, voicemail: VoicemailCarrierState | null): PhoneInfoRow[] {
   const rows = [
     {label: 'Phone app', value: app(status.defaultDialer, status.roles.dialer.held)},
     {label: 'Messages app', value: app(status.defaultSms, status.roles.sms.held)},
@@ -45,15 +45,10 @@ export function phoneDefaultRows(status: TelephonyStatus, voicemail: 'ready' | '
 /** True when the read returned no device identifiers, so Android's own status screen is the place to see them. */
 export const identifiersElsewhere = (info: PhoneInfo) => !info.lines.some(line => line.imei);
 
-export type PhoneInfoClient = {
-  status(): Promise<TelephonyStatus>;
-  phoneInfo(): Promise<PhoneInfo>;
-  voicemailStatus(): Promise<{access: boolean; state: 'ready' | 'unconfigured' | 'unsupported' | null}>;
-  requestAccess(access: 'phoneState'): Promise<TelephonyStatus>;
-};
-export type PhoneInfoState =
+type PhoneInfoClient = Pick<TelephonyClient, 'status' | 'phoneInfo' | 'voicemailStatus' | 'requestAccess'>;
+type PhoneInfoState =
   | {phase: 'idle' | 'loading' | 'failed'}
-  | {phase: 'ready'; info: PhoneInfo; status: TelephonyStatus; voicemail: 'ready' | 'unconfigured' | 'unsupported' | null};
+  | {phase: 'ready'; info: PhoneInfo; status: TelephonyStatus; voicemail: VoicemailCarrierState | null};
 /**
  * Reads while the page is open and forgets when it closes. A reply that arrives after the page
  * closed, or after a newer read began, is dropped.

@@ -1,6 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {build} from 'esbuild';
-const bundle=await build({entryPoints:['apps/app/src/runtime/action-message-presentation.ts'],bundle:true,platform:'node',format:'esm',write:false});
-const {projectActionMessages,browserNavigationSummary,succeededBrowserDestination}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
+// One bundle, so the device hour-cycle preference reaches the same locale-time module the helpers read.
+const bundle=await build({stdin:{contents:"export * from './apps/app/src/runtime/action-message-presentation.ts';export {setLocalePreferences} from './apps/app/src/prototype/locale-time.ts';",resolveDir:process.cwd(),loader:'ts'},bundle:true,platform:'node',format:'esm',write:false});
+const {spokenActionReply,projectActionMessages,browserNavigationSummary,succeededBrowserDestination,mapsChatText,approvalExpiryText,emptyChatNotice,setLocalePreferences,VIEW_OPEN_UNCONFIRMED}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
 const notice='Review on phone';
 const old='Opened an approved HTTPS destination in a new browser tab. Page loading is not verified.';
 const legacySummary='Opened example.com.';
@@ -24,19 +25,19 @@ test('an unconfirmed action remains uncertain, appears once and never rewrites i
  const rows=[{...user,text:summary},uncertain,{id:'device-receipt:p',from:'agent',text:summary,deviceReceipt:true}];
  const frozen=structuredClone(rows),shown=projectActionMessages(render(rows),rows);
  assert.deepEqual(shown.map(m=>m.id),['user','action']);assert.equal(shown[0].text,summary);
- assert.equal(shown[1].displayText,'I couldn’t confirm the result. Check the app before trying again.');
+ assert.equal(shown[1].displayText,'I couldn’t confirm the result.');
  assert.equal(shown[1].cGeneric,false);assert.deepEqual(rows,frozen);
 });
 test('the current SDK uncertainty fallback gets the same safe presentation',()=>{
  const summary='Action did not reach a confirmed result. Check action history before requesting it again.';
  const rows=[{id:'current',from:'agent',text:summary,deviceReceipt:true}],frozen=structuredClone(rows);
- assert.equal(projectActionMessages(render(rows),rows)[0].displayText,'I couldn’t confirm the result. Check the app before trying again.');assert.deepEqual(rows,frozen);
+ assert.equal(projectActionMessages(render(rows),rows)[0].displayText,'I couldn’t confirm the result.');assert.deepEqual(rows,frozen);
 });
 test('standalone unconfirmed receipts get safe copy while specific results and ordinary prose remain intact',()=>{
  const generic='The action could not reach a confirmed result.',specific='Clock result is unknown. Check Clock before repeating the request.';
  const rows=[{id:'generic',from:'agent',text:generic,deviceReceipt:true},{id:'specific',from:'agent',text:specific,deviceReceipt:true},{id:'prose',from:'agent',text:generic}];
  const frozen=structuredClone(rows),shown=projectActionMessages(render(rows),rows);
- assert.equal(shown[0].displayText,'I couldn’t confirm the result. Check the app before trying again.');
+ assert.equal(shown[0].displayText,'I couldn’t confirm the result.');
  assert.equal(shown[1].displayText,specific);assert.equal(shown[2].displayText,generic);assert.deepEqual(rows,frozen);
 });
 test('restored verified browser receipt hides only exact protocol instruction in its turn',()=>{
@@ -48,10 +49,30 @@ test('receipt names the created tab and refuses a malformed or non-HTTPS destina
  assert.throws(()=>browserNavigationSummary('not a URL'));
 });
 
+test('history keeps the verified Browser dispatch and omits only its own premature view fallback',()=>{
+ const receipt={id:'device-receipt:p',from:'agent',text:tabCreated,deviceReceipt:true,browserDestination:'https://example.com/'};
+ const fallback={id:'first',from:'agent',text:VIEW_OPEN_UNCONFIRMED};
+ const rows=[user,fallback,receipt,{...user,id:'next'},{...fallback,id:'second'}];
+ const shown=projectActionMessages(render(rows),rows);
+ assert.deepEqual(shown.map(m=>m.id),['user','device-receipt:p','next','second']);
+ assert.equal(shown[1].displayText,tabCreated);
+ assert.equal(shown[3].displayText,VIEW_OPEN_UNCONFIRMED);
+ assert.equal(rows[1].text,VIEW_OPEN_UNCONFIRMED);
+ const compound=[{...user,text:'Open example.com and show my calendar'},fallback,receipt];
+ assert.deepEqual(projectActionMessages(render(compound),compound).map(m=>m.id),['user','first','device-receipt:p']);
+ const otherSite=[{...user,text:'Open example.org'},fallback,receipt];
+ assert.deepEqual(projectActionMessages(render(otherSite),otherSite).map(m=>m.id),['user','first','device-receipt:p']);
+});
+
 test('a completed Browser card preserves its unsynced receipt notice',()=>{
+ // Current receipts: one sentence, kept as written.
+ const current=tabCreated.replace(/\.$/,'')+", but it isn't synced yet.";
+ let rows=[user,{...action,card:{...action.card,sub:current}}];
+ assert.equal(projectActionMessages(render(rows),rows)[1].displayText,current);
+ // Receipts stored by older builds keep their old notice and get the current tab description.
  const pending=' Not synced yet; open action history to retry.';
  for(const summary of [tabCreated,legacySummary]){
-  const rows=[user,{...action,card:{...action.card,sub:summary+pending}}];
+  rows=[user,{...action,card:{...action.card,sub:summary+pending}}];
   assert.equal(projectActionMessages(render(rows),rows)[1].displayText,tabCreated+pending);
  }
 });
@@ -72,6 +93,22 @@ test('cold history refuses uncertain, foreign, changed or contradictory browser 
  for(const change of [(p,e)=>e.status='unknown',(p,e)=>e.phase='applying',(p,e)=>e.record.ownerId='foreign',(p,e)=>e.record.enrollmentId='foreign',(p,e)=>e.record.operation={type:'browser_navigate',url:'https://other.example/'},(p,e)=>e.operationHash='wrong',(p,e)=>e.attemptId='stale',(p,e)=>p.providerReceipt.operationId='other',(p,e)=>p.providerReceipt.outcome='unconfirmed',(p,e)=>p.providerReceipt.result={},(p,e)=>p.requestMessageId='other'])assert.equal((await restoredReceipt(change)).length,0);
 });
 
+test('the generic review instruction stays while a proposal is pending and yields to a visible outcome',()=>{
+ const review={id:'review',from:'agent',text:'Review this request on your phone before it can run.'};
+ const pending={id:'pending',from:'agent',card:{proposalId:'camera',sub:'Take photo'}};
+ const notice={id:'blocked',from:'agent',text:'Share open messages: Ask again from the open conversation.',card:{systemNotice:true,deviceActionNotice:true,done:true}};
+ const receipt={id:'device-receipt:sms',from:'agent',text:'The newest text sender ends in 1234.',deviceReceipt:true};
+ const proposed=[user,review,pending];
+ assert.deepEqual(projectActionMessages(render(proposed),proposed).map(row=>row.id),['user','review','pending']);
+ for(const replacement of [notice,receipt,{...pending,card:{...pending.card,done:true}}]){
+  const rows=[user,review,replacement],before=structuredClone(rows);
+  assert.deepEqual(projectActionMessages(render(rows),rows).map(row=>row.id),['user',replacement.id]);
+  assert.deepEqual(rows,before);
+  assert.deepEqual(projectActionMessages(render(rows.slice(0,2)),rows).map(row=>row.id),['user','review']);
+ }
+ const rows=[user,review,{...notice,card:{systemNotice:true,done:true}}];
+ assert.deepEqual(projectActionMessages(render(rows),rows).map(row=>row.id),['user','review','blocked']);
+});
 test('automatic live receipt replaces the exact protocol pause without needing an approval card',()=>{
  const rows=[user,{id:'protocol',from:'agent',text:notice},{id:'result',from:'agent',text:tabCreated,deviceReceipt:true}];const shown=projectActionMessages(render(rows),rows);assert.deepEqual(shown.map(m=>m.id),['user','result']);assert.equal(shown[1].displayText,tabCreated);
 });
@@ -130,7 +167,7 @@ test('a requested Browser open answered by the agent reply shows that reply once
 });
 test('failed, other, unanswered and offscreen-reply receipts stay visible',()=>{
  for(const rows of [
-  [user,browserReply,{id:'device-receipt:p',from:'agent',text:'Approved browser navigation is unavailable. No page opened.',deviceReceipt:true}],
+  [user,browserReply,{id:'device-receipt:p',from:'agent',text:'Browser navigation is unavailable, so no page opened.',deviceReceipt:true}],
   [user,browserReply,{id:'device-receipt:n',from:'agent',text:'Note saved.',deviceReceipt:true}],
   [user,{...browserReply,interrupted:true},browserReceipt],
   [user,{...browserReply,text:''},browserReceipt],
@@ -146,11 +183,143 @@ test('only a browser proposal receipt that succeeded with its exact summary name
  for(const [proposal,receipt] of [
   [card,{status:'succeeded',summary:tabCreated+' Server receipt is pending; check action history.'}],
   [card,{status:'succeeded',summary:legacySummary+' Not synced yet; open action history to retry.'}],
-  [card,{status:'failed',summary:'Approved browser navigation is unavailable. No page opened.'}],
+  [card,{status:'succeeded',summary:tabCreated.replace(/\.$/,'')+", but it isn't synced yet."}],
+  [card,{status:'failed',summary:'Browser navigation is unavailable, so no page opened.'}],
   [card,{...opened,status:'unknown'}],
   [{id:'p',description:'Open browser destination https://other.example'},opened],
   [{id:'p',description:'Open browser destination http://example.com'},opened],
   [{id:'p',description:'Save one note'},opened],
   [null,opened],[undefined,opened],
  ])assert.equal(succeededBrowserDestination(proposal,receipt),undefined);
+});
+
+// One wording table: each telephony, dial, text and Browser control completion is one short sentence
+// that the owner reads exactly as the agent received it, and none speaks of "the owner".
+test('every phone action completion is one sentence the owner reads as the agent received it',async()=>{
+ const receipts=await build({stdin:{contents:"export * from './apps/app/src/ui/telephony/telephony-receipt-text.ts';export {actionResultText,browserControlSummary} from './apps/app/src/runtime/action-message-presentation.ts';",resolveDir:process.cwd(),loader:'ts'},bundle:true,platform:'node',format:'esm',write:false});
+ const {telephonyActionResultText,phoneDialResultText,smsSendResultText,actionResultText,browserControlSummary}=await import('data:text/javascript;base64,'+Buffer.from(receipts.outputFiles[0].text).toString('base64'));
+ const statuses={'phone-call':['placed','emergency-handoff','not-found','busy','unavailable','cancelled','failed'],'contact-write':['saved','deleted','not-found','stale','unavailable','cancelled','failed','unknown'],'contact-show':['shown','not-found','unavailable'],'contact-read':['read','none-selected','unavailable'],
+  'sms-compose':['drafted','submitted','sent','delivered','unknown','not-found','unavailable','cancelled','failed'],'sms-reply':['drafted','none-selected','occupied','unavailable'],
+  'voicemail-delete':['deleted','none-selected','unavailable','cancelled','failed'],'messages-read':['read','none-selected','unavailable'],'voicemail-read':['read','none-selected','unavailable']};
+ const controls=[{type:'browser_search',query:'weather'},{type:'browser_tab_new',private:false},{type:'browser_tab_new',private:true},{type:'browser_tab_switch',target:'news'},{type:'browser_tab_close',target:'news'},{type:'browser_tab_close',all:true},{type:'browser_tabs_show'},{type:'browser_find',text:'price'},...['back','forward','reload','stop'].map(action=>({type:'browser_history',action}))];
+ const summaries=[...Object.entries(statuses).flatMap(([kind,list])=>list.map(status=>telephonyActionResultText({kind,status}))),
+  ...['handed-off','cancelled','unavailable','failed'].map(status=>phoneDialResultText({kind:'phone-dial',status,handler:null,contact:false})),
+  ...['submitted','sent','delivered','cancelled','denied','failed','unknown'].map(smsSendResultText),...controls.map(browserControlSummary)];
+ for(const summary of summaries){
+  assert.match(summary,/^[^.!?;]*[.!?]$/,`one sentence: ${summary}`);
+  assert.doesNotMatch(summary,/\bowner\b/i,summary);
+  assert.equal(actionResultText(summary),summary,'shown exactly as stored and sent');
+ }
+ // The new result kinds read as their own short outcome; a draft says that nothing was sent.
+ assert.equal(telephonyActionResultText({kind:'contact-show',status:'shown'}),'Contacts shows the matching contacts.');
+ assert.equal(telephonyActionResultText({kind:'contact-read',status:'read'}),'Shared the open contact.');
+ assert.equal(telephonyActionResultText({kind:'contact-read',status:'none-selected'}),'No contact is open.');
+ assert.equal(telephonyActionResultText({kind:'sms-compose',status:'drafted'}),'Draft added to the conversation, not sent.');
+ assert.equal(telephonyActionResultText({kind:'sms-reply',status:'drafted'}),'Draft added to the open conversation, not sent.');
+ assert.equal(telephonyActionResultText({kind:'phone-call',status:'placed'}),'Call started.');
+ assert.equal(browserControlSummary({type:'browser_search',query:'weather'}),'Searching the web for “weather”.');
+ assert.equal(browserControlSummary({type:'browser_history',action:'back'}),'Went back a page.');
+ // A completed proposal card is the one completion; a lone device receipt bubble shows the same sentence.
+ const drafted=telephonyActionResultText({kind:'sms-compose',status:'drafted'}),dismissed=telephonyActionResultText({kind:'sms-compose',status:'cancelled'});
+ const done={id:'action',from:'agent',text:'Text Sam',card:{type:'proposal',proposalId:'p',title:'Completed',sub:drafted,done:true}},bubble={id:'device-receipt:q',from:'agent',text:dismissed,deviceReceipt:true};
+ const rows=[user,done,{id:'u2',from:'user',text:'text Sam'},bubble],frozen=structuredClone(rows),shown=projectActionMessages(render(rows),rows);
+ assert.equal(shown.find(m=>m.id==='action').hasCalendarText,false,'no quote beside the card');
+ assert.notEqual(shown.find(m=>m.id==='action').deviceReceipt,true);
+ assert.equal(shown.find(m=>m.id==='device-receipt:q').displayText,'Message cancelled.');
+ assert.deepEqual(rows,frozen);
+});
+const mapsCard=body=>mapsChatText(`Maps\n\n[MAPSCARD]\n${JSON.stringify(body)}\n[/MAPSCARD]`).cards[0];
+test('a Maps results card for a search near a named place opens Maps around that place',()=>{
+ const rx={name:'Pharmacy 1',latitude:37.8,longitude:-122.3937,provider:'eliza-cloud',providerPlaceId:'g:rx1',formattedAddress:'1 Market St',categories:[]};
+ const ferry={name:'Ferry Building',latitude:37.7955,longitude:-122.3937,provider:'eliza-cloud',providerPlaceId:'g:ferry',categories:[]};
+ const near=mapsCard({kind:'places',query:'pharmacy',places:[rx],nextCursor:null,attribution:null,near:ferry});
+ // The tap searches "pharmacy" around the Ferry Building, not around the viewport or the phone.
+ assert.deepEqual(near,{kind:'places',title:'“pharmacy” near Ferry Building',lines:['Pharmacy 1, 1 Market St'],attribution:'',mapQuery:'pharmacy',searchNear:{latitude:37.7955,longitude:-122.3937}});
+ // A plain search, an older agent's card, or an unreadable point: no search point, the old title.
+ for(const body of [{kind:'places',query:'pharmacy',places:[rx],nextCursor:null,attribution:null},{kind:'places',query:'pharmacy',places:[rx],nextCursor:null,attribution:null,near:{name:'x'}}]){
+  const plain=mapsCard(body);assert.equal(plain.title,'Places for “pharmacy”');assert.equal(plain.searchNear,undefined);assert.equal(plain.mapQuery,'pharmacy');
+ }
+});
+test('a Maps locate card takes its subject from the card fields, and from the prompt only when an older agent names none',()=>{
+ const pharmacy={name:'Corner Pharmacy',latitude:37.79,longitude:-122.4,provider:'eliza-cloud',providerPlaceId:'g:p1',categories:[]};
+ const nearPrompt='I need your precise location to search near you for “coffee”.';
+ // The card's own query wins over the prompt's wording.
+ assert.deepEqual(mapsCard({kind:'locate',intent:'place-near',prompt:nearPrompt,query:'espresso bar'}),{kind:'locate',title:'“espresso bar” near you',lines:['Map searches around this phone · Location not shared with chat'],attribution:'',mapQuery:'espresso bar',nearMe:true});
+ assert.equal(mapsCard({kind:'locate',intent:'place-near',prompt:nearPrompt}).mapQuery,'coffee');
+ // A resolved destination is carried whole, with the travel mode, and is never searched again by name.
+ const exact=mapsCard({kind:'locate',intent:'route-origin',prompt:'I need your precise location to start the route to Corner Pharmacy.',destination:pharmacy,travelMode:'walk'});
+ assert.deepEqual(exact,{kind:'locate',title:'Directions to Corner Pharmacy',lines:['Map plans the route from this phone · Location not shared with chat'],attribution:'',place:pharmacy,directionsFromHere:true,travelMode:'walk'});
+ // A kind of place: search around the phone, then directions to the closest.
+ const nearest=mapsCard({kind:'locate',intent:'route-origin',prompt:'I need your precise location to start the route to pharmacy.',query:'pharmacy'});
+ assert.equal(nearest.mapQuery,'pharmacy');assert.equal(nearest.nearMe,true);assert.equal(nearest.directionsFromHere,true);assert.equal(nearest.place,undefined);
+ // An older agent: the destination name from the prompt, searched by name.
+ const old=mapsCard({kind:'locate',intent:'route-origin',prompt:'I need your precise location to start the route to Corner Pharmacy.'});
+ assert.equal(old.mapQuery,'Corner Pharmacy');assert.equal(old.nearMe,undefined);assert.equal(old.directionsFromHere,true);
+ // An invalid optional field is dropped and the card still reads from the prompt.
+ assert.equal(mapsCard({kind:'locate',intent:'place-near',prompt:nearPrompt,query:'x'.repeat(501),travelMode:'teleport'}).mapQuery,'coffee');
+ // Place and hand-off cards keep the exact place, so "Show on map" opens it under its name.
+ assert.deepEqual(mapsCard({kind:'place',place:pharmacy,attribution:null}).place,pharmacy);
+});
+// Pixel 10a, 2026-11-17 "Create a new contact - shaw 4153024399" on Contacts: the approved AC-26
+// proposal card showed "Done · Completed · The owner approved and the contact was saved on the
+// phone." and the same row also rendered that summary as a separate device-receipt quote above it.
+// The card is the one completion; its row shows no quote.
+test('a completed comms proposal card is the one completion: no receipt quote beside it',()=>{
+ const card={type:'proposal',state:'done',id:'c',proposalId:'c',kind:'other',title:'Completed',detail:'Contact saved.',sub:'Contact saved.',done:true};
+ const rows=[{id:'u',from:'user',text:'Create a new contact'},{id:'proposal',from:'agent',text:'Create contact\nName: Shaw',card},{id:'device-receipt:c',from:'agent',text:'Contact saved.',deviceReceipt:true}];
+ const frozen=structuredClone(rows);
+ const shown=projectActionMessages(rows.map(m=>({...m,c:m.card||{},cProposal:m.card?.type==='proposal',displayText:m.text,hasCalendarText:true})),rows);
+ assert.deepEqual(shown.map(m=>m.id),['u','proposal']);
+ assert.equal(shown[1].cProposal,true,'the card stays');
+ assert.equal(shown[1].hasCalendarText,false,'no quote line beside the card');
+ assert.notEqual(shown[1].deviceReceipt,true);
+ assert.deepEqual(rows,frozen);
+});
+
+
+test('voice distinguishes in-chat email wording from confirmed preparation and preserves the actual reply',()=>{
+ const request='Draft an email to my own address. Subject: shoot prep. Body: bring a tripod.';
+ const reply={text:"Got it. Here's the draft:\n\nTo: (your own address)\nSubject: Tomorrow’s shoot\n\nI’ll charge the Pixel. Can you bring the tripod?\n\nReady to send whenever you are."};
+ const before=structuredClone(reply);
+ assert.equal(spokenActionReply(request,reply),'The suggested email is in the chat.');
+ assert.deepEqual(reply,before);
+ assert.equal(spokenActionReply(request,{text:reply.text.replace('I’ll charge the Pixel.', 'I can’t make it.')}),'The suggested email is in the chat.');
+ const prepared='Drafted gmail message to owner@example.com.\n[gmail] To: owner@example.com\nSubject: Tomorrow’s shoot\nCan you bring the tripod?\nConfirm before I send it.';
+ const actionReply={text:prepared,actionResults:[{actionName:'MESSAGE_SEND_DRAFT',success:true,text:prepared}]};
+ assert.equal(spokenActionReply(request,actionReply),'The suggested email is in the chat.');
+ assert.equal(spokenActionReply(request,actionReply,true),'Your email draft is ready to review.');
+ assert.equal(spokenActionReply(request,{text:'Review the email in chat.'},true),'Your email draft is ready to review.');
+ const compound={...reply,text:reply.text+'\n\nYou have 2 appointments tomorrow.'};
+ assert.match(spokenActionReply('Draft an email and tell me about tomorrow.',compound),/2 appointments tomorrow/);
+ assert.equal(spokenActionReply(request,{...reply,actionResults:[{actionName:'MESSAGE_SEND_DRAFT',success:false,error:'unavailable'}]}),'The email action failed. The suggested wording is in the chat.');
+ assert.equal(spokenActionReply('Read the whole email aloud.',reply),reply.text);
+ assert.equal(spokenActionReply(request,{text:"I couldn't save it.\nTo: owner@example.com\nSubject: Shoot\nBring the tripod."}),"I couldn't save it.\n\nBring the tripod.");
+});
+
+test('spoken action responses omit isolated receipt identifiers and keep meaningful numbers, punctuation, and requested values',()=>{
+ const reply={text:'Meeting moved to 9:30 for 25 minutes.\nEvent ID: e-12abf\nRequest ID: 453786.',actionResults:[{actionName:'CALENDAR',success:true}]};
+ assert.equal(spokenActionReply('Move my meeting.',reply),'Meeting moved to 9:30 for 25 minutes.');
+ assert.equal(spokenActionReply('Tell me the exact ID.',reply),reply.text);
+ assert.equal(spokenActionReply('What’s the event ID?',reply),reply.text);
+ const asides={...reply,text:'Saved the 2 appointments (event ID: cal_43). Request ID: 93c4d. Next appointment at 9:30.'};
+ assert.equal(spokenActionReply('Save my appointments.',asides),'Saved the 2 appointments. Next appointment at 9:30.');
+ assert.equal(spokenActionReply('Read it back verbatim.',asides),asides.text);
+ assert.equal(spokenActionReply('What is on my screen?',{text:reply.text}),reply.text);
+ for(const text of ['Bus #7 costs $2.75.','The result is 3/4, or 75%.','The message said: “Use #42 at 8:15.”']){
+  assert.equal(spokenActionReply('Check that for me.',{text,completedActions:[{status:'succeeded'}]}),text);
+ }
+});
+test('a pending action states the clock time it expires in the device hour cycle, and nothing once expired or unknown',()=>{
+ const now=new Date(2026,10,19,14,0,0).getTime(),at=new Date(2026,10,19,14,5,0).getTime();
+ try{
+  setLocalePreferences({locale:'en-US',hourCycle:'h23'});assert.equal(approvalExpiryText(at,now),'Expires at 14:05');
+  setLocalePreferences({locale:'en-US',hourCycle:'h12'});assert.equal(approvalExpiryText(at,now),'Expires at 2:05 PM');
+ }finally{setLocalePreferences();}
+ assert.equal(approvalExpiryText(now,now),'');assert.equal(approvalExpiryText(now-1,now),'');
+ assert.equal(approvalExpiryText(undefined,now),'');assert.equal(approvalExpiryText(Number.NaN,now),'');assert.equal(approvalExpiryText('soon',now),'');
+});
+test('an empty conversation names the missing agent; any message or a session keeps it quiet',()=>{
+ assert.equal(emptyChatNotice(0,false,'Your agent is starting…'),'Your agent is starting…');
+ assert.equal(emptyChatNotice(1,false,'Your agent is starting…'),'');
+ assert.equal(emptyChatNotice(0,true,'Your agent is starting…'),'');
 });

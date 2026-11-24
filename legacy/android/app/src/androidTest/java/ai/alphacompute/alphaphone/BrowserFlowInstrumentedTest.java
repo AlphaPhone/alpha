@@ -71,6 +71,10 @@ public class BrowserFlowInstrumentedTest {
   catch(Throwable error){evidence.append("; child-diagnostic-unavailable:").append(error.getClass().getSimpleName());}
   return evidence.toString();
  }
+ /** Waits for the first view, then opens Browser and answers the first-run access panel. */
+ private void openBrowser()throws Exception{
+  until("document.documentElement.dataset.activeView");host(AppNavigation.request("Browser"));until(AppNavigation.selected("Browser"));AppNavigation.declineStartupAccess();
+ }
  private void page(String suffix)throws Exception{
   for(int i=0;i<300;i++){if("true".equals(child("location.protocol==='https:' && location.hostname==='example.com' && location.search==="+JSONObject.quote(suffix)+" && document.readyState==='complete' && !!document.body && document.body.innerText.trim().length>20")))return;SystemClock.sleep(100);}
   fail("Real HTTPS example.com page did not load: "+suffix+"; "+diagnostics());
@@ -85,14 +89,14 @@ public class BrowserFlowInstrumentedTest {
   AtomicReference<String> id=new AtomicReference<>();
   WebViewTestDriver.withActivity(MainActivity.class,main->{try{
    Object plugin=main.getBridge().getPlugin("AlphaBrowser").getInstance();
-   java.lang.reflect.Field field=ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class.getDeclaredField("presentedId");field.setAccessible(true);id.set((String)field.get(plugin));
+   java.lang.reflect.Field field=AlphaBrowserPlugin.class.getDeclaredField("presentedId");field.setAccessible(true);id.set((String)field.get(plugin));
   }catch(ReflectiveOperationException error){throw new AssertionError(error);}});
   return id.get();
  }
  @Test public void realHttpsHistoryMenuSharedNormalStorageAndPrivateTabIsolation()throws Exception{
   String token=UUID.randomUUID().toString(),one="?alpha_flow="+token+"-one",two="?alpha_flow="+token+"-two";
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
-   until("document.documentElement.dataset.activeView");host(AppNavigation.request("Browser"));until(AppNavigation.selected("Browser"));AppNavigation.declineStartupAccess();
+   openBrowser();
    address("https://alpha-network-check.invalid/");
    // The address bar closes only after the native tab exists; typing the next
    // address before then races that close and loses the text.
@@ -136,11 +140,6 @@ public class BrowserFlowInstrumentedTest {
   });
   return url.get();
  }
- /** By default this asserts what the product submits: the executable address is refused before any
-  * page exists, and a search becomes https://www.google.com/search?q=<query> in the child WebView.
-  * Nothing here needs the public page to load, so the default campaign can pass offline.
-  * browserFlowLive=1 (an emulator with network) also waits for the real results page and checks
-  * that the provider cannot reach the app bridge; rounds 7 and 8 failed only on that live load. */
  /** The address the shown page's history entry was first asked for, before any redirect the provider made. */
  private String requestedAddress()throws Exception{
   AtomicReference<String> value=new AtomicReference<>();
@@ -152,10 +151,15 @@ public class BrowserFlowInstrumentedTest {
   try{return "search="+child("JSON.stringify({host:location.hostname==='www.google.com'?'www.google.com':location.hostname==='consent.google.com'?'consent.google.com':/(^|\\.)google\\.[a-z.]{2,6}$/.test(location.hostname)?'other-google':'other',path:location.pathname==='/search'?'/search':location.pathname.startsWith('/sorry/')?'/sorry/':'other',hasQ:new URL(location.href).searchParams.has('q'),hasContinue:new URL(location.href).searchParams.has('continue'),textLength:document.body?document.body.innerText.trim().length:-1})");}
   catch(Throwable error){return "search-diagnostic-unavailable:"+error.getClass().getSimpleName();}
  }
+ /** By default this asserts what the product submits: the executable address is refused before any
+  * page exists, and a search becomes https://www.google.com/search?q=<query> in the child WebView.
+  * Nothing here needs the public page to load, so the default campaign can pass offline.
+  * browserFlowLive=1 (an emulator with network) also waits for the real results page and checks
+  * that the provider cannot reach the app bridge. */
  @Test public void submittedSearchUsesRealProviderAndRejectsExecutableAddress()throws Exception{
   boolean live="1".equals(androidx.test.platform.app.InstrumentationRegistry.getArguments().getString("browserFlowLive"));
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
-   until("document.documentElement.dataset.activeView");host(AppNavigation.request("Browser"));until(AppNavigation.selected("Browser"));AppNavigation.declineStartupAccess();
+   openBrowser();
    address("javascript:alert(1)");
    until("document.body.innerText.includes('valid HTTP or HTTPS address without credentials')");
    assertEquals("Rejected address cannot create a page","null",child("true"));
@@ -203,7 +207,7 @@ public class BrowserFlowInstrumentedTest {
 
  /** Same-document fixture origin. Every request to it is answered in memory by the tab's own client
   * wrapper below; nothing reaches the network and TLS is never bypassed for a real host. */
- private static final String SAME="https://same-document.invalid/";
+ static final String SAME="https://same-document.invalid/";
  private static String sameDocumentPage(String path){
   if(path.equals("/head"))return "<!doctype html><head><script>history.replaceState(null,'','/replaced')</script><title>Replaced fixture</title></head><body><p>Address replaced before first paint.</p></body>";
   return "<!doctype html><title>Same-document fixture</title><p>Same-document navigation fixture.</p><a id='frag' href='#section'>Section</a><form id='signin' onsubmit='return false'><input id='user' name='username' autocomplete='username'></form><section id='section' style='margin-top:1500px'>Section</section>";
@@ -212,7 +216,7 @@ public class BrowserFlowInstrumentedTest {
  /** The presented native tab of AlphaBrowser, or null. Main thread only. */
  private static Object presentedTabObject(MainActivity main)throws ReflectiveOperationException{
   Object plugin=main.getBridge().getPlugin("AlphaBrowser").getInstance();
-  Class<?> host=ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class;
+  Class<?> host=AlphaBrowserPlugin.class;
   Object id=field(host,plugin,"presentedId");
   return id==null?null:((Map<?,?>)field(host,plugin,"tabs")).get(id);
  }
@@ -223,7 +227,7 @@ public class BrowserFlowInstrumentedTest {
   WebViewTestDriver.withActivity(MainActivity.class,main->{try{
    Object tab=presentedTabObject(main);if(tab==null)return;Class<?> type=tab.getClass();
    WebView web=(WebView)field(type,tab,"web");
-   java.lang.reflect.Method eligible=ai.eliza.plugins.browsersurface.BrowserTabHostPlugin.class.getDeclaredMethod("canAutofill",type);eligible.setAccessible(true);
+   java.lang.reflect.Method eligible=AlphaBrowserPlugin.class.getDeclaredMethod("canAutofill",type);eligible.setAccessible(true);
    JSONObject state=new JSONObject();
    state.put("url",field(type,tab,"url"));state.put("engineUrl",String.valueOf(web.getUrl()));state.put("committed",field(type,tab,"committed"));state.put("loading",field(type,tab,"loading"));
    state.put("error",field(type,tab,"error"));state.put("shown",web.isShown());state.put("autofillEnabled",field(type,tab,"autofillEnabled"));
@@ -246,14 +250,19 @@ public class BrowserFlowInstrumentedTest {
  }
  /** Opens Browser and loads the in-memory fixture at {@code path} in the presented tab. */
  private void openSameDocument(String path)throws Exception{
-  until("document.documentElement.dataset.activeView");host(AppNavigation.request("Browser"));until(AppNavigation.selected("Browser"));AppNavigation.declineStartupAccess();
+  openBrowser();
   // The first address only creates the tab; it fails offline, before the fixture client exists.
   address(SAME+"start");until("!document.querySelector('input[aria-label=Address]')");
   for(int i=0;i<50&&presentedTab()==null;i++)SystemClock.sleep(100);
   assertNotNull("The fixture tab is presented",presentedTab());
   WebViewTestDriver.withActivity(MainActivity.class,main->{try{
-   Object tab=presentedTabObject(main);WebView web=(WebView)field(tab.getClass(),tab,"web");android.webkit.WebViewClient original=web.getWebViewClient();
-   web.setWebViewClient(new android.webkit.WebViewClient(){
+   Object tab=presentedTabObject(main);WebView web=(WebView)field(tab.getClass(),tab,"web");installSameDocumentFixture(web);
+  }catch(ReflectiveOperationException error){throw new AssertionError(error);}});
+  address(SAME+path.substring(1));
+ }
+ static void installSameDocumentFixture(WebView web){
+  android.webkit.WebViewClient original=web.getWebViewClient();
+  web.setWebViewClient(new android.webkit.WebViewClient(){
     @Override public android.webkit.WebResourceResponse shouldInterceptRequest(WebView v,android.webkit.WebResourceRequest r){
      original.shouldInterceptRequest(v,r);android.net.Uri uri=r.getUrl();boolean fixture=r.isForMainFrame()&&"https".equals(uri.getScheme())&&"same-document.invalid".equals(uri.getHost());
      byte[] body=(fixture?sameDocumentPage(uri.getPath()):"Fixture route refused").getBytes(java.nio.charset.StandardCharsets.UTF_8);
@@ -269,9 +278,7 @@ public class BrowserFlowInstrumentedTest {
     @Override public void onReceivedSslError(WebView v,android.webkit.SslErrorHandler h,android.net.http.SslError e){original.onReceivedSslError(v,h,e);}
     @Override public void onReceivedHttpAuthRequest(WebView v,android.webkit.HttpAuthHandler h,String host,String realm){original.onReceivedHttpAuthRequest(v,h,host,realm);}
     @Override public boolean onRenderProcessGone(WebView v,android.webkit.RenderProcessGoneDetail d){return original.onRenderProcessGone(v,d);}
-   });
-  }catch(ReflectiveOperationException error){throw new AssertionError(error);}});
-  address(SAME+path.substring(1));
+  });
  }
  /** pushState records a new entry without a load; Back and Forward then move within the same document. */
  @Test public void sameDocumentPushStateThenBackAndForward()throws Exception{
@@ -313,6 +320,57 @@ public class BrowserFlowInstrumentedTest {
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
    openSameDocument("/head");settled(SAME+"replaced","Head replaceState");
    assertEquals("The replaced page is the fixture document","\"Replaced fixture\"",child("document.title"));
+   click("Tabs");click("Close tab");
+  }
+ }
+ /** Taps the centre of the host control with this aria-label as a finger does: one real DOWN/UP
+  * pair injected at its screen position, so it goes through Alpha's tab input router. */
+ private void tapHost(String label)throws Exception{
+  tapAt("[...document.querySelectorAll('[data-screen] [aria-label]')].find(e=>e.getAttribute('aria-label')==="+JSONObject.quote(label)+")");
+ }
+ /** Taps the centre of the element the host expression {@code q} finds. */
+ private void tapAt(String q)throws Exception{
+  until(q);
+  JSONObject box=new JSONObject(new org.json.JSONTokener(host("(()=>{const r=("+q+").getBoundingClientRect();return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2,ratio:devicePixelRatio})})()")).nextValue().toString());
+  AtomicReference<int[]> origin=new AtomicReference<>();
+  WebViewTestDriver.withActivity(MainActivity.class,main->{int[] at=new int[2];main.getBridge().getWebView().getLocationOnScreen(at);origin.set(at);});
+  float x=origin.get()[0]+(float)(box.getDouble("x")*box.getDouble("ratio")),y=origin.get()[1]+(float)(box.getDouble("y")*box.getDouble("ratio"));
+  android.app.Instrumentation instrumentation=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation();
+  long down=SystemClock.uptimeMillis();
+  MotionEvent press=MotionEvent.obtain(down,down,MotionEvent.ACTION_DOWN,x,y,0);press.setSource(InputDevice.SOURCE_TOUCHSCREEN);
+  MotionEvent release=MotionEvent.obtain(down,down+60,MotionEvent.ACTION_UP,x,y,0);release.setSource(InputDevice.SOURCE_TOUCHSCREEN);
+  try{instrumentation.sendPointerSync(press);instrumentation.sendPointerSync(release);}finally{press.recycle();release.recycle();}
+  instrumentation.waitForIdleSync();
+ }
+ /** BRW-01: the find bar sits over the page. Real taps on its field and buttons reach Alpha, never the
+  * website, and the tapped field takes focus so the keyboard can open. */
+ @Test public void findBarTapsReachTheFindFieldNotThePage()throws Exception{
+  try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
+   openSameDocument("/");settled(SAME,"Fixture page");
+   List<String> pageTouches=Collections.synchronizedList(new ArrayList<>());
+   WebViewTestDriver.withActivity(MainActivity.class,main->{try{
+    WebView web=(WebView)field(presentedTabObject(main).getClass(),presentedTabObject(main),"web");
+    web.setOnTouchListener((view,event)->{pageTouches.add(MotionEvent.actionToString(event.getActionMasked()));return false;});
+   }catch(ReflectiveOperationException error){throw new AssertionError(error);}});
+   // A tap on the page itself reaches the website: the recorder sees real page input.
+   tapAt("document.querySelector('[data-native-browser-viewport]')");
+   for(int i=0;i<50&&pageTouches.isEmpty();i++)SystemClock.sleep(100);
+   assertTrue("A tap on the page reaches the website",pageTouches.contains("ACTION_DOWN"));
+   click("Menu");click("Find in page");
+   until("document.querySelector('[role=search][aria-label=\"Find in page\"] input')");
+   settled(SAME,"Page shown under the find bar");
+   pageTouches.clear();
+   host("document.activeElement&&document.activeElement.blur();true");
+   tapAt("document.querySelector('[role=search][aria-label=\"Find in page\"] input')");
+   until("document.activeElement===document.querySelector('[role=search][aria-label=\"Find in page\"] input')");
+   AtomicBoolean keyboardTarget=new AtomicBoolean();
+   WebViewTestDriver.withActivity(MainActivity.class,main->keyboardTarget.set(main.getSystemService(android.view.inputmethod.InputMethodManager.class).isActive(main.getBridge().getWebView())));
+   assertTrue("The tapped find field is the keyboard's target",keyboardTarget.get());
+   host("(()=>{const e=document.querySelector('[role=search][aria-label=\"Find in page\"] input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,'Section');e.dispatchEvent(new Event('input',{bubbles:true}));})()");
+   tapHost("Next match");
+   tapHost("Close find in page");
+   until("!document.querySelector('[role=search][aria-label=\"Find in page\"]')");
+   assertEquals("No tap on the find bar reached the website",Collections.emptyList(),new ArrayList<>(pageTouches));
    click("Tabs");click("Close tab");
   }
  }

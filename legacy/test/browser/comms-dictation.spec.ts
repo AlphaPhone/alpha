@@ -32,8 +32,8 @@ const inputs=(page:Page,method:string)=>page.evaluate(method=>(window as any).te
 for(const scale of [1,2])test(`Messages mic fills only the editable unsent draft at ${scale*100}% text`,async({page})=>{
   await setup(page);await setTextScale(page,scale);
   const bar=page.locator('[data-alpha-input-bar]');
-  await expect(bar.getByRole('button',{name:'Add picture',exact:true})).toBeVisible();
-  await expect(page.locator('[data-alpha-messages-accessories]').getByRole('button',{name:'Add picture',exact:true})).toHaveCount(0);
+  await expect(bar.getByRole('button',{name:'Message attachments',exact:true})).toBeVisible();
+  await expect(page.locator('[data-alpha-messages-accessories]').getByRole('button',{name:'Message attachments',exact:true})).toHaveCount(0);
   await page.getByRole('button',{name:'Dictate a text to Ada',exact:true}).click();
   await expect(capture(page)).toHaveAttribute('data-voice-state','recording');
   await expect(bar).not.toBeVisible();

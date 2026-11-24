@@ -1,0 +1,13 @@
+# test/fixtures/appearance-preference.mjs
+- Lines: 126 | Kind: transplant (slices `settings-adapter.ts`, `main.tsx`, `model.js` by 10 text anchors, strips types, runs in `vm` with fake window/matchMedia/localStorage) | Verdict: DELETE as a test fixture; the Quint harness that uses it must PORT
+- Covers: theme boot read (`?theme=`, stored choice, system scheme), Settings Theme picker, storage/pageshow/scheme listeners, failed-write toast "Theme not saved", commit writeback. Duplicates: Playwright settings/appearance specs cover the visible theme (research tests-browser). Callers/importers: `test/appearance-preference.test.mjs` (research: delete, C) and live Quint `specs/quint/refinement/application/appearance-preference-admission.mjs` (registered in `application/index.mjs`).
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 36-53 | T2/T10 | Anchors: `'    this.passwordLifecycle = passwordManagerLifecycle(changed);'`, `'    let lastBinding ='`, `"    window.removeEventListener('storage',this.appearanceStorageListener);"`, `'    this.settingsConnectionUnsubscribe?.();'`, `"          if(row.label==='Theme'&&row.kSeg){"`, `"          if(row.label==='Brightness')"`, `'  p.componentDidUpdate = function (previousProps: Bag, previousState: Bag) {'`, `'  p.componentWillUnmount = function () {'`, `'export type AppearanceChoice = '`/`'const UPDATE_KEY ='` (settings-adapter.ts); `'const initialTheme = (() => {'`/`'document.documentElement.dataset.connectionMode'` (main.tsx); `'    var theme = S.theme || ...'` and `'      themes: [["light",'` (model.js). All present today (checked). Any reformat (D9) or split breaks it. | Product: export `readInitialTheme()`, `installAppearanceListeners(shell)`, `appearanceOptions()` from one `appearance.ts`; harness imports them. | High for the D9 formatter and model.js split. |
+| 2 | 36 | - | The setup slice starts at the password-manager lifecycle line: password import/export deletion (D3) or any edit there breaks the theme harness. | Covered by finding 1. | Medium |
+| 3 | 59-66 | - | Pins the storage key `alpha.appearance.v1` (persisted, keep byte-identical). | Keep as one assertion in the journey. | - |
+
+## Proposed end state
+Delete with `test/appearance-preference.test.mjs`. Carry into `journeys/settings.spec.ts`: system/stored/query theme at boot, changing Theme in Settings persists across reload, a blocked storage write shows "Theme not saved", cross-tab `storage` change applies. The Quint `appearance-preference-admission` harness imports an exported appearance module instead of this transplant (PORT).

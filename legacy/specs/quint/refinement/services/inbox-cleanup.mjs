@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
 import {captureInputs, checkTraces} from '../check-traces.mjs';
 import {inboxDriverSources, rebuildInboxDriver} from './inbox-coordinator-ports.mjs';
-import {action, observe, step, setup, compose, review, startSend} from './inbox-coordinator.mjs';
+import {action, observe, step, setup, compose, send} from './inbox-coordinator.mjs';
 
 const stages = ['retained', 'shelf', 'saved'];
 const actions = {retained: 'clearRetained', shelf: 'clearShelf', saved: 'clearSaved'};
@@ -23,7 +23,8 @@ async function until(ready, description) {
 
 function writeStage({key, value}) {
   if (key.includes(':unsaved:') && value?.text === '') return 'retained';
-  if (key.includes(':shelf:') && value?.items?.length === 0) return 'shelf';
+  // An emptied Drafts shelf is removed from storage rather than written as an empty list.
+  if (key.includes(':shelf:') && (value === null || value?.items?.length === 0)) return 'shelf';
   if (key.startsWith('inbox-drafts:v1:[') && value === null) return 'saved';
   return null;
 }
@@ -39,14 +40,13 @@ async function prepareCopies(fixture, coordinator, trace) {
   coordinator.drafts.render().c.onBody({target: {value: 'original'}});
   await fixture.settle();
   step(trace, 'same-content typing creates the real retained recovery record', action('retainDraft'), observe(fixture, coordinator));
-  await review(fixture, coordinator, trace);
 }
 
 async function interruptedCleanup(faultStage, faultMode, traces) {
   const name = faultStage ? `${faultStage}-${faultMode}` : 'complete';
   const {fixture, coordinator, trace} = await setup(`cleanup-${name}`, traces);
   await prepareCopies(fixture, coordinator, trace);
-  const dispatch = await startSend(fixture, coordinator, trace);
+  const dispatch = await send(fixture, coordinator, trace);
   const pending = new Map();
   fixture.gates({
     store: async event => {
@@ -94,7 +94,7 @@ async function interruptedCleanup(faultStage, faultMode, traces) {
 async function retiredDuringKnownClear(traces) {
   const {fixture, coordinator, trace} = await setup('retired-during-known-retained-clear', traces);
   await prepareCopies(fixture, coordinator, trace);
-  const dispatch = await startSend(fixture, coordinator, trace);
+  const dispatch = await send(fixture, coordinator, trace);
   const reply = deferred();
   let committed = false;
   fixture.gates({storeResult: async event => {
@@ -140,7 +140,7 @@ async function peerSavedDuringCleanup(traces) {
   const resume = peer.drafts.chips((label, pick) => ({label, pick})).find(row => row.label === 'Resume unsaved email');
   assert.ok(resume);
   resume.pick();
-  const dispatch = await startSend(fixture, coordinator, trace);
+  const dispatch = await send(fixture, coordinator, trace);
   const pending = deferred();
   let entered = false;
   fixture.gates({store: async event => {

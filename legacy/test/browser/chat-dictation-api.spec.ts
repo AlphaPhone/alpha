@@ -11,8 +11,7 @@ import {attachVoiceFailureMetadata} from './voice-fixture-failure-metadata';
 // capture recovery (two cases; the echo-canceller hold is in voice-assistant.production); interruptSpeech accounting (the busy hold closes capture on submission; interrupting reopens it) is retained separately.
 // Dictation's public component API is retained but there is no chat dictation button.
 // Override only the source build-flags module to exercise local/native branches; no shipped hooks.
-// The stub must export every build flag: updateChannelCheckEnabled joined the module in f4ebce3b3 (#713).
-test.beforeEach(async({page})=>{await page.route('**/src/build-flags.ts*',route=>route.fulfill({contentType:'application/javascript',body:'export const testMocksEnabled=false;export const devSurfacesEnabled=false;export const privateLocalPreviewEnabled=false;export const updateChannelCheckEnabled=false;'}));});
+test.beforeEach(async({page})=>{await page.route('**/src/build-flags.ts*',route=>route.fulfill({contentType:'application/javascript',body:'export const testMocksEnabled=false;export const devSurfacesEnabled=false;export const privateLocalPreviewEnabled=false;'}));});
 test.afterEach(async({page},info)=>{await attachVoiceFailureMetadata(page,info);});
 async function captureApi(page:Page){
  await page.evaluate(async()=>{const {Component}=await import('/src/prototype/model.js'),{connectionController:c}=await import('/src/runtime/connection-ui.tsx');const render=Component.prototype.renderVals;Component.prototype.renderVals=function(){(window as any).dictationApiFixture=this;return render.call(this);};c.close();});
@@ -171,7 +170,7 @@ test('API dictation: a comms list filter is filled by dictation, never sent to A
   w.filterText='';
   VIEWS.notes.bar=()=>({target:{kind:'list',app:'Contacts',name:null,first:null,initials:null},
    closed:{kind:'filter',placeholder:'Search or ask',value:w.filterText,onText:(text:string)=>{w.filterText=text;w.dictationApiFixture.setState({});},submit:null,canSubmit:false,maxLength:null,suggestion:null,acceptSuggestion:null},
-   left:{icon:'search',label:'Back to search',initials:null,run:null},context:'Contacts',contextKey:'notes:list:',
+   left:null,context:'Contacts',contextKey:'notes:list:',
    strip:{title:'Contacts',subtitle:'',initials:null,live:false,actions:[]},end:null,incoming:null,emergency:false,fit:null,briefing:null});
   shell.openView('notes',null,'input');
  });

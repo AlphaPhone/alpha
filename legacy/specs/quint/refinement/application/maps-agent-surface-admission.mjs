@@ -18,7 +18,8 @@ import {modelTraces, replayTraces} from '../services/maps-model-traces.mjs';
 import {bundleMapsAdapter, mountMapsAdapter, tick, providerId, connectionId, providerConfig} from './maps-adapter-harness.mjs';
 
 const model = {path: 'specs/quint/application/MapsAgentSurfaceAdmission.qnt', module: 'MapsAgentSurfaceAdmission'};
-const realView = {home: 'home', maps: 'maps', other: 'notes'};
+// An open app Maps replaces (Browser, where the owner asked from) and the Phone app's dialer.
+const realView = {home: 'home', maps: 'maps', app: 'browser', dialer: 'phone'};
 
 async function driver(code) {
   const provider = {providerId, connectionId, async search() { return []; }, async detail() { return null; }, async route() { throw Error('No route in this fixture.'); }};
@@ -26,6 +27,9 @@ async function driver(code) {
   m = await mountMapsAdapter(code, {view: 'home', configure: app => app.configureMapsProvider(providerConfig, provider),
     onSet(patch) { if ('nativeMapsRevision' in patch && m.shellState.view === 'maps') m.render(); }});
   const {harness, shell, shellState} = m;
+  // The Phone view's state, as the shell's vget reads it: a ringing call has `incoming`.
+  const phone = {incoming: null};
+  shell.vget = view => view === 'phone' ? phone : {};
   const blocks = new Set(), requests = [], opens = [], admissions = new Set();
   let pendingOpen = false, disposed = false, lateOpens = 0, opening = null;
   const blocked = () => disposed || blocks.size > 0;
@@ -37,6 +41,7 @@ async function driver(code) {
     suspended: on => { shell.pageSuspended = on; }, assistant: on => { shell.props = {assistantSurface: on}; },
     sheet: on => { harness.connection.snapshot = {...harness.connection.snapshot, open: on}; },
     hidden: on => { m.visibility(on); }, dead: on => { shell.live = !on; },
+    ringing: on => { phone.incoming = on ? 'synthetic-caller' : null; },
   };
   const settle = async () => {
     await tick();

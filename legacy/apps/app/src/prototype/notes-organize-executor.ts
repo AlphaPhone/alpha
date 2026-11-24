@@ -1,5 +1,5 @@
 import type {NotesTarget} from '../runtime/notes-contract';
-import type {NotesOrganizeOperation} from '../runtime/notes-organize-contract';
+import type {NotesOrganizeOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-organize-contract.ts';
 import {addNotesFolder,findNotesFolderByName,newNotesFolderId,withNoteFolder,type NotesFoldersDocument} from '../runtime/notes-folders-model.ts';
 import type {NotesFilter} from '../runtime/notes-view';
 import {notesRecorderControl,type NotesRecordStart,type NotesRecordStop} from './notes-recorder-control.ts';
@@ -28,12 +28,13 @@ export interface NotesOrganizeHost {
 export interface NotesOrganizeReceipt {status:'succeeded'|'failed'|'unknown';summary:string}
 
 /**
- * Executes an approved Notes organisation proposal (runtime/notes-organize-contract). The
- * filter is read-only and returns no note content. A move applies only to the note revision the
+ * Executes an approved Notes organisation proposal of the shared Notes organisation contract:
+ * recording on either Notes source, everything else on Previous notes. The canonical list filter
+ * (`notes_list_filter`) runs in the Notes view instead. The filter is read-only and returns no note content. A move applies only to the note revision the
  * owner reviewed (specs/notes-view AgentMoveOnlyReviewed): a note edited since then is refused.
  * Folders are addressed by name and must exist when the move runs.
  */
-export async function executeNotesOrganize(host:NotesOrganizeHost,operation:NotesOrganizeOperation,current:()=>void):Promise<NotesOrganizeReceipt>{
+export async function executeNotesOrganize(host:NotesOrganizeHost,operation:Exclude<NotesOrganizeOperation,{type:'notes_list_filter'}>,current:()=>void):Promise<NotesOrganizeReceipt>{
  current();
  if(operation.type==='notes_filter'){
   let folder:string|undefined;
@@ -45,7 +46,8 @@ export async function executeNotesOrganize(host:NotesOrganizeHost,operation:Note
   host.showFilter({...(operation.text!==undefined?{text:operation.text}:{}),...(operation.kind!==undefined?{kind:operation.kind}:{}),...(folder!==undefined?{folder}:{})});
   return {status:'succeeded',summary:'Filtered'};
  }
- if(!host.ready())return {status:'failed',summary:'Notes unavailable'};
+ // Recording needs only the Notes recorder, which saves to whichever Notes source is open (the agent's own
+ // Notes or Previous notes), so it does not wait for the Previous notes store the other operations edit.
  if(operation.type==='notes_record'){
   if(operation.action==='start'){
    const started=await host.recordStart().catch(():NotesRecordStart=>'failed');
@@ -55,6 +57,7 @@ export async function executeNotesOrganize(host:NotesOrganizeHost,operation:Note
   if(stopped==='retained')return {status:'succeeded',summary:'Recording saved'};
   return stopped==='saved'?{status:'succeeded',summary:'Saved the voice note.'}:stopped==='none'?{status:'failed',summary:'No voice note is recording.'}:{status:'unknown',summary:'Not saved'};
  }
+ if(!host.ready())return {status:'failed',summary:'Notes unavailable'};
  if(operation.type==='notes_folder_create'){
   const before=await host.readFolders();current();
   if(findNotesFolderByName(before,operation.name))return {status:'succeeded',summary:`“${operation.name}” exists`};

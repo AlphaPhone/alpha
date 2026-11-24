@@ -1,0 +1,29 @@
+# apps/app/src/product/alpha-product-registration.ts
+- Lines: 349 | Role: Alpha's declarative product registration for the shared mobile shell (identity, theme tokens and a 221-entry palette, icons, view order/labels/aliases, installed storage names, feature capabilities) | Verdict: KEEP (data); two cross-file follow-ups
+- Importers: product/alpha-product.ts:17, product/native-cloud-runtime.ts:1; scripts/agent-identity.ts:3, scripts/feature-manifest.ts:29; tests test/agent-identity.test.mjs, browser/canonical-icons.spec.ts, cloud-deployment.test.mjs, product-character-host.test.mjs, product-identity.test.mjs, theme-palette.test.mjs; quint launcher refinements (combined-agent-launcher*.mjs, reviewed-workflow-launcher*.mjs list it as a source).
+- Text/path pins: test/font-license.test.mjs:290 asserts this file is among the files that reference font names (the `fonts` strings); test/theme-palette.test.mjs requires every renderer colour to be a `var(--alpha-...)` declared here; test/feature-parity.test.mjs:71 checks `features.capabilities` against `deviceCapabilities`; test/cloud-deployment.test.mjs:174 copies this file verbatim into a temp tree; android/app/src/main/res/values-night/styles.xml:2 and prototype/model.js:5729 cite it in comments; specs/quint/application/manifest.json:2096, specs/quint/services/manifest.json:2355. (Not in the test/support/feature-parity.mjs inventory.)
+
+## Findings
+| # | Lines | Pattern | Finding (with snippet) | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 325 | (research A1 claim corrected) | `legacyIds: { home: "chat", workflows: "automations", wallet: "inventory" }` was listed as a legacy-data reader. It is not: upstream `product-registration.ts:320-345` requires every `rendererKeys` value to appear in `legacyIds` (`legacyIds[key] !== id` → "must be an older id of this ordered view"), and `home`/`workflows`/`wallet` are Alpha's live renderer keys | Keep. Only `wallet: "inventory"` goes if the Wallet view is deleted (A3) | — |
+| 2 | 332-338 | D10, C6 | `storage.retained` declares `alpha.appearance.v1`, `alpha.connection.selection.v1`, `alpha.startup-permissions.v1`, `alpha:startup-permission-walkthrough:v1`, `alphaphone:daily:v1`, but consumers hard-code the literals: `alpha.connection.selection.v1` in 11 files (main.tsx, runtime/connection-ui.tsx, hosted-digest-ui.tsx, hosted-live-source-ui.tsx, prototype/workflow-authoring.ts, browser/development-actions.ts, development-connection.ts, development-digests.ts, development-workflows.ts, digest-storage.ts, workflow-drafts.ts); `alpha.appearance.v1` in prototype/data-adapter.ts, settings-adapter.ts; the startup keys in startup-permission-flow.ts / startup-permission-progress.ts; `alphaphone:daily:v1` in runtime/browser-notes-document.ts, notes-secure-store.ts. Upstream reads `retained` only for the feature manifest (feature-manifest.ts:97) | Export the registration's `storage.retained` as the one source and import `ALPHA_PRODUCT_REGISTRATION.storage.retained.connectionSelection` etc. at every consumer; add `alpha.maps.saved-places.v1` (maps/saved-places.ts:10) if the owner wants the registry complete. Strings stay byte-identical | Low; the feature manifest output is unchanged |
+| 3 | 337 | A1 (owner) | `dailyApps: "alphaphone:daily:v1"` — the research flags this key as the legacy notes source (`notes-secure-store.ts` `readLegacyDailyNotes`). If the "previous notes" chain is deleted (research n–z §7 Q1), this retained entry goes with it | Delete with the legacy notes chain after the owner decision | Owner |
+| 4 | 122-267 | D6, A5 (owner) | 146 `--alpha-photo-*` palette tokens (lines 122-267) plus `--alpha-scan-photo-1..5` are used only by prototype/model.js's synthetic placeholder photographs (e.g. model.js:2037 `PH_TONES`, :2039 city skyline art) — fixture art colours inside the product registration | Owner question: are the drawn placeholder photos reachable in production builds? If not, move these tokens with the art into the fixtures module (stubbed out of production) — ~150 lines leave this file. test/theme-palette.test.mjs would need the fixture palette as a second allowed source | Medium |
+| 5 | 280-281 | A3 | `--alpha-wallet-navy`, `--alpha-wallet-new-1` are used only by the Wallet view (model.js:3861, template.html:3431) | Delete with the Wallet feature if the owner confirms A3 | Owner |
+| 6 | 301, 307, 320, 324 | A3 | `inventory` view (icon `wallet`, label "Wallet", renderer key `wallet`) — Wallet is deferred (AP-13) | Same owner decision; removing it touches `views.order`, `labels`, `icons.views`, `rendererKeys`, `legacyIds` and the quint launcher models | Owner |
+| 7 | 1-349 | — | Pure data with a `satisfies MobileProductRegistration` check; no logic, no defensive code | keep | — |
+
+All 221 palette tokens have at least one reader outside this file (whole-repo grep over apps, android, scripts, test, specs) — nothing to delete as unused.
+
+## Local types and helpers
+| Name | Kind | Lines | Twin elsewhere? (paths) | Proposed home |
+|---|---|---|---|---|
+| `ALPHA_PRODUCT_REGISTRATION` | const | 4-349 | `ALPHA_PRODUCT` (validated form) in product/alpha-product.ts:20 | stays |
+| `storage.retained` keys | const strings | 332-338 | hard-coded copies in 15+ files (finding 2) | read from here |
+
+## Proposed end state
+Unchanged structure. After owner decisions: −~150 lines if the photo-art palette moves to fixtures, −~8 lines if Wallet goes, −1 if the legacy daily key goes. Consumers read storage keys from `storage.retained`.
+
+## Verification
+test/product-identity.test.mjs, test/theme-palette.test.mjs, test/font-license.test.mjs, test/feature-parity.test.mjs, test/agent-identity.test.mjs, test/cloud-deployment.test.mjs, test/browser/canonical-icons.spec.ts, test/browser/home-launcher.spec.ts; `scripts/feature-manifest.ts` output; quint launcher refinements; `npm run verify`.

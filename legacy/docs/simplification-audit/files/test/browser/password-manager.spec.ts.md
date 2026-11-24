@@ -1,0 +1,17 @@
+# test/browser/password-manager.spec.ts
+- Lines: 300 | Kind: Playwright, chromium; UI journeys on the development vault (`?mode=dev`) and on a hand-written Capacitor fake of `ElizaPasswords`, with `/src` probes | Verdict: MERGE into `journeys/settings.spec.ts` (Passwords section); delete the password import/export part (D3)
+- Covers: development vault unlock/search/add (HTTPS rule)/generate/edit/reveal/delete without exposing secrets; agent context is marked sensitive and the vault locks when Settings is left; autofill selection is reported only after readback; no simulated vault without the development profile; native vault: unlock, app bindings, copy, autofill picker readback, damaged-key reset only after confirmation and a fresh unlock, secret-carrying responses refused, delayed list after Lock and pending reset after leaving cannot act; no outbound request, beacon or console line carries a typed or stored value. Duplicates: `password-entry-back.spec.ts`, `password-provider-setup.spec.ts` (provider rows, no-provider browser case), `dev-password-provider.spec.ts`, host `test/password-manager*.test.mjs`, Quint `vault-coordinator`. Callers: chromium only.
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 125, 137, 190, 211-222 | A3 (D3) | The native-vault test drives `ElizaPasswordTransfer` export/import ("Export passwords, unencrypted file", "Import passwords"). PRD excludes password transfer; product code at `apps/app/src/passwords/password-manager.ts:8,58,249-262` is a D3 delete. | Delete lines 211-222 and the `transfer` option with the product code. | None. |
+| 2 | 172, 290, 294 | T6, D7 | Imports `passwordManagerHoldsEntries()` from `/src/passwords/password-manager.ts`; nothing in the product calls it (grep: only its definition, l.159). | Assert the visible locked state (Unlock button, no entry rows) and delete the test-only export. | Low. |
+| 3 | 15-17, 100, 186, 272-276, 292 | T6 | Agent context read through `import('/src/runtime/alpha-client.ts')`. | Assert `context.sensitive` on the outbound chat request (harness agent stub), once. | Low. |
+| 4 | 115-161 | T7 | 45-line inline Capacitor fake with ad-hoc `hold*`/`release*` hooks, duplicated in shape by `password-provider-setup.spec.ts:5-40`. | One typed `ElizaPasswords`/`AlphaDevice` handler in `harness/bridge.ts`. | Medium. |
+| 5 | 106-113 | T4 | "No simulated vault without dev profile" overlaps `password-provider-setup.spec.ts:78-83`. | One production-gating case (or rely on `audit-production-bundle`). | None. |
+| 6 | 172, 185 | T8 | `setTimeout(resolve,0)` after release to let the stale result land. | Wait on the visible locked state. | Low. |
+| 7 | 252-284 | — | Outbound capture of requests, beacons and console is a real privacy check. | Keep as one journey step. | None. |
+
+## Proposed end state
+In `journeys/settings.spec.ts` (Passwords): (1) development vault: unlock, search, add with HTTPS rule, generate, reveal in its own dialog, delete, Back on forms (from `password-entry-back`), leaving Settings locks, outbound capture clean; (2) autofill selection reported only after readback; (3) native vault on the typed bridge: unlock, bindings, copy, picker readback; (4) damaged vault reset needs confirmation and its own unlock; (5) secret-carrying list refused; (6) delayed list after Lock and pending reset after leaving have no effect. Delete transfer cases with D3 and the test-only `passwordManagerHoldsEntries` export.

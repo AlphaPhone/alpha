@@ -23,22 +23,15 @@ final class WorkflowWorkerAssets {
  interface Source { InputStream open(String path) throws IOException; }
  private static final long MAX_BYTES=64L*1024*1024;
  private static final int MAX_INDEX=1024*1024;
- private static String hex(byte[] bytes){StringBuilder result=new StringBuilder();for(byte value:bytes)result.append(String.format(Locale.ROOT,"%02x",value&255));return result.toString();}
- private static MessageDigest digest() throws IOException {try{return MessageDigest.getInstance("SHA-256");}catch(Exception error){throw new IOException("SHA-256 unavailable",error);}}
- private static byte[] bounded(InputStream input) throws IOException {
-  ByteArrayOutputStream result=new ByteArrayOutputStream();byte[] buffer=new byte[8192];int read;
-  while((read=input.read(buffer))!=-1){if(read==0){int one=input.read();if(one<0)break;result.write(one);}else result.write(buffer,0,read);if(result.size()>MAX_INDEX)throw new IOException("Worker index too large");}
-  return result.toByteArray();
- }
+ private static byte[] bounded(InputStream input) throws IOException {return AlphaUtil.readBounded(input,MAX_INDEX,"Worker index too large");}
  /** Package identity recorded beside an install; a new APK version or update time forces re-extraction. */
- // The APK identity of the installed tree lives beside it: the resident rejects any file the index does not name.
  private static final String PACKAGE_STAMP="workflow-worker.package";
  static synchronized File install(File root, InputStream indexStream, Source source, String packageStamp) throws IOException {
   byte[] index;try(InputStream input=indexStream){index=bounded(input);}
   LinkedHashMap<String,String> entries=new LinkedHashMap<>();
   for(String line:new String(index,StandardCharsets.UTF_8).split("\n")){
    if(line.isEmpty())continue;String[] fields=line.split("\t",-1);
-   if(fields.length!=2||!fields[0].matches("[a-f0-9]{64}")||!fields[1].matches("[A-Za-z0-9@_.+/-]+"))throw new IOException("Invalid worker index entry");
+   if(fields.length!=2||!AlphaUtil.isSha256Hex(fields[0])||!fields[1].matches("[A-Za-z0-9@_.+/-]+"))throw new IOException("Invalid worker index entry");
    for(String part:fields[1].split("/",-1))if(part.isEmpty()||part.equals(".")||part.equals(".."))throw new IOException("Invalid worker path");
    if(fields[1].equals("files.sha256")||entries.put(fields[1],fields[0])!=null||entries.size()>4096)throw new IOException("Duplicate or excessive worker entries");
   }
@@ -63,11 +56,11 @@ final class WorkflowWorkerAssets {
     File output=new File(staging,entry.getKey());
     if(!output.getCanonicalPath().startsWith(staging.getCanonicalPath()+File.separator))throw new IOException("Worker path escaped staging");
     File parent=output.getParentFile();if(!parent.isDirectory()&&!parent.mkdirs())throw new IOException("Could not create worker package directory");
-    MessageDigest hash=digest();byte[] buffer=new byte[8192];
+    MessageDigest hash=AlphaUtil.sha256();byte[] buffer=new byte[8192];
     try(InputStream input=source.open(entry.getKey());OutputStream stream=new FileOutputStream(output)){
      int count;while((count=input.read(buffer))!=-1){if(count==0){int one=input.read();if(one<0)break;buffer[0]=(byte)one;count=1;}total+=count;if(total>MAX_BYTES)throw new IOException("Worker payload too large");hash.update(buffer,0,count);stream.write(buffer,0,count);}
     }
-    if(!hex(hash.digest()).equals(entry.getValue()))throw new IOException("Worker payload hash mismatch");
+    if(!AlphaUtil.hex(hash.digest()).equals(entry.getValue()))throw new IOException("Worker payload hash mismatch");
    }
    try(OutputStream stream=new FileOutputStream(new File(staging,"files.sha256"))){stream.write(index);}
    if(target.exists()){if(!target.renameTo(backup))throw new IOException("Could not preserve previous worker artifact");moved=true;}
@@ -96,11 +89,11 @@ final class WorkflowWorkerAssets {
      if(!attributes.isRegularFile())throw new IOException("Invalid installed worker file");
      if(name.equals("files.sha256"))return FileVisitResult.CONTINUE;
      if(expected==null)throw new IOException("Unexpected installed worker file");
-     MessageDigest hash=digest();byte[] buffer=new byte[8192];
+     MessageDigest hash=AlphaUtil.sha256();byte[] buffer=new byte[8192];
      try(InputStream input=Files.newInputStream(file)) {
       int count;while((count=input.read(buffer))!=-1){total[0]+=count;if(total[0]>MAX_BYTES)throw new IOException("Worker payload too large");hash.update(buffer,0,count);}
      }
-     if(!hex(hash.digest()).equals(expected))throw new IOException("Installed worker hash mismatch");
+     if(!AlphaUtil.hex(hash.digest()).equals(expected))throw new IOException("Installed worker hash mismatch");
      verified[0]++;return FileVisitResult.CONTINUE;
     }
    });

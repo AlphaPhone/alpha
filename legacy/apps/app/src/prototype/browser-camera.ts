@@ -5,10 +5,11 @@ import {renderVideoEdit,validateVideoEdit,type VideoEdit} from '../browser/video
 import {BrowserCameraFocus} from '../browser/camera-focus';
 import {browserDevProfile} from '../browser/dev-profile';
 /** A browser image chosen for Photos or kept from scan review, re-encoded as JPEG. */
-export type ImportedCameraImage={original:File;image:string;width:number;height:number};
+type ImportedCameraImage={original:File;image:string;width:number;height:number};
 import {drawCameraFrame} from '../browser/camera-frame';
 import {BrowserVideoCapture} from '../browser/video-capture';
 import {editReceiptAbandoned,editReceiptSettled} from '../browser/edit-receipt';
+import {cropPixels,validCropRect,type CropRect} from './photo-crop';
 export {editReceiptAbandoned,editReceiptSettled};
 import {albumDocument} from '../browser/preference-documents';
 
@@ -37,12 +38,7 @@ function db(){return database??=new Promise<IDBDatabase>((resolve,reject)=>{
  request.onupgradeneeded=()=>{
   const store=request.result.objectStoreNames.contains('photos')?request.transaction!.objectStore('photos'):request.result.createObjectStore('photos',{keyPath:'id'});
   if(!store.indexNames.contains('chronological'))store.createIndex('chronological',['date','id']);
-  if(!request.result.objectStoreNames.contains(VIDEO_DATA)){
-   // Earlier versions stored each recording inside its row. Both writes belong to the upgrade
-   // transaction, so a row and its bytes move together or the upgrade does not happen.
-   const payloads=request.result.createObjectStore(VIDEO_DATA,{keyPath:'id'}),moving=store.openCursor();
-   moving.onsuccess=()=>{const cursor=moving.result;if(!cursor)return;const value=cursor.value as Row;if(value?.kind==='video'){const {row,data}=splitVideoRow(value);if(data){payloads.put(data);cursor.update(row);}}cursor.continue();};
-  }
+  if(!request.result.objectStoreNames.contains(VIDEO_DATA))request.result.createObjectStore(VIDEO_DATA,{keyPath:'id'});
  };
  request.onsuccess=()=>{request.result.onversionchange=()=>{request.result.close();database=undefined;};resolve(request.result);};
  request.onerror=()=>{database=undefined;reject(request.error);};
@@ -85,7 +81,7 @@ async function rows(options:{before?:string;trashed?:boolean;album?:string}={},m
 async function read(id:string){return transaction<Row>('readonly',(store,set,fail)=>{const r=store.get(id);r.onsuccess=()=>{
  const row=r.result as Row|undefined;if(!row||!['image','video'].includes(row.kind)){fail(Error('Photo no longer available.'));return;}
  if(row.kind!=='video'){set(row);return;}
- const data=videoData(store).get(id);data.onsuccess=()=>{const path=(data.result as VideoData|undefined)?.path??row.path;set(path?{...row,path}:row);};
+ const data=videoData(store).get(id);data.onsuccess=()=>{const path=(data.result as VideoData|undefined)?.path;set(path?{...row,path}:row);};
 };});}
 async function change(input:{id:string;revision:string},patch:Partial<Pick<Row,'favorite'|'trashed'>>){
  return transaction<Row>('readwrite',(store,set,fail)=>{const r=store.get(input.id);r.onsuccess=()=>{const row=r.result as Row|undefined;
@@ -93,7 +89,8 @@ async function change(input:{id:string;revision:string},patch:Partial<Pick<Row,'
   const updated={...row,...patch,...(patch.trashed!==undefined?{trashedAt:patch.trashed?Date.now():undefined}:{}),mutationRevision:revision()};store.put(updated);set(updated);
  };});
 }
-type EditParameters={rotation:number;crop:boolean;filter:string};
+/** cropRect keeps a chosen area of the rotated photo (photo-crop.ts); crop alone is the fixed centred crop. */
+type EditParameters={rotation:number;crop:boolean;filter:string;cropRect?:CropRect};
 type EditSession={id:string;source:Row;active:boolean;expiresAt:number};
 type EditRecord={id:string;kind:'edit-receipt';operationId:string;sourceId:string;sourceRevision:string;copyId:string;status:'prepared'|'saving'|'saved'|'failed'|'cancelled'|'unchanged';parameters?:string;attempt?:string;replace?:boolean;at?:number};
 function sweepAbandonedReceipts(store:IDBObjectStore){
@@ -105,20 +102,31 @@ const edits=new Map<string,EditSession>();
 const filters:Record<string,string>={none:'none',vivid:'saturate(1.55) contrast(1.08)',warm:'sepia(.3) saturate(1.35) hue-rotate(-8deg)',cool:'saturate(1.1) hue-rotate(14deg) brightness(1.03)',mono:'grayscale(1) contrast(1.05)',fade:'contrast(.78) brightness(1.12) saturate(.75)',noir:'grayscale(1) contrast(1.55) brightness(.88)'};
 const photoId=()=>Date.now().toString().padStart(13,'0')+Array.from(crypto.getRandomValues(new Uint8Array(12)),n=>String(n%10)).join('');
 function editKey(id:string){if(!/^[a-f0-9-]{36}$/.test(id))throw Error('Invalid edit identity.');return 'edit:'+id;}
-function parameters(input:EditParameters){if(![0,90,180,270].includes(input.rotation)||typeof input.crop!=='boolean'||!Object.hasOwn(filters,input.filter))throw Error('Invalid photo transform.');return JSON.stringify([input.rotation,input.crop,input.filter]);}
+function parameters(input:EditParameters){if(![0,90,180,270].includes(input.rotation)||typeof input.crop!=='boolean'||!Object.hasOwn(filters,input.filter))throw Error('Invalid photo transform.');const rect=input.cropRect;return JSON.stringify(rect?[input.rotation,input.crop,input.filter,[rect.x,rect.y,rect.width,rect.height]]:[input.rotation,input.crop,input.filter]);}
+/** A snapshot of the request: a chosen rectangle replaces the centred crop, and the whole photo is no crop. */
+function editInput(input:EditParameters):EditParameters{const rect=input.cropRect===undefined?undefined:validCropRect(input.cropRect);return rect?{rotation:input.rotation,crop:false,filter:input.filter,cropRect:rect}:{rotation:input.rotation,crop:input.crop,filter:input.filter};}
 function session(id:string){const value=edits.get(id);if(!value?.active||Date.now()>value.expiresAt)throw Error('Reopen the photo editor.');return value;}
 function outcome(record:EditRecord):EditResult{return {operationId:record.operationId,status:record.status==='saved'?'saved':record.status==='failed'?'failed':record.status==='unchanged'?'unchanged':'not-started',...(record.status==='saved'?{id:record.replace?record.sourceId:record.copyId,...(record.replace?{replaced:true}:{})}:{})};}
 async function renderEdit(value:EditSession,input:EditParameters){
- input={rotation:input.rotation,crop:input.crop,filter:input.filter};
+ input=editInput(input);
  parameters(input);session(value.id);
  const image=new Image();image.src=value.source.image;await image.decode();session(value.id);
  if(image.naturalWidth!==value.source.width||image.naturalHeight!==value.source.height)throw Error('Photo dimensions changed.');
- const crop=input.crop?1.3:1,sw=image.naturalWidth/crop,sh=image.naturalHeight/crop;
- const rotated=input.rotation===90||input.rotation===270,scale=Math.min(1,2048/Math.max(sw,sh));
- const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round((rotated?sh:sw)*scale));canvas.height=Math.max(1,Math.round((rotated?sw:sh)*scale));
- const context=canvas.getContext('2d');if(!context)throw Error('Photo editing is unavailable.');
- const nativeFilter='filter' in context;if(nativeFilter)context.filter=filters[input.filter];context.translate(canvas.width/2,canvas.height/2);context.rotate(input.rotation*Math.PI/180);
- context.drawImage(image,(image.naturalWidth-sw)/2,(image.naturalHeight-sh)/2,sw,sh,-sw*scale/2,-sh*scale/2,sw*scale,sh*scale);
+ const rotated=input.rotation===90||input.rotation===270,canvas=document.createElement('canvas');let scale:number;
+ const context=canvas.getContext('2d');if(!context)throw Error('Photo editing is unavailable.');const nativeFilter='filter' in context;
+ if(input.cropRect){
+  // The chosen area is in the rotated photo's frame: rotate the whole photo, then keep the area.
+  const width=image.naturalWidth,height=image.naturalHeight,rotatedWidth=rotated?height:width,rotatedHeight=rotated?width:height;
+  const [left,top,keptWidth,keptHeight]=cropPixels(input.cropRect,rotatedWidth,rotatedHeight);scale=Math.min(1,2048/Math.max(keptWidth,keptHeight));
+  canvas.width=Math.max(1,Math.round(keptWidth*scale));canvas.height=Math.max(1,Math.round(keptHeight*scale));
+  if(nativeFilter)context.filter=filters[input.filter];context.translate((rotatedWidth/2-left)*scale,(rotatedHeight/2-top)*scale);context.rotate(input.rotation*Math.PI/180);
+  context.drawImage(image,-width*scale/2,-height*scale/2,width*scale,height*scale);
+ }else{
+  const crop=input.crop?1.3:1,sw=image.naturalWidth/crop,sh=image.naturalHeight/crop;scale=Math.min(1,2048/Math.max(sw,sh));
+  canvas.width=Math.max(1,Math.round((rotated?sh:sw)*scale));canvas.height=Math.max(1,Math.round((rotated?sw:sh)*scale));
+  if(nativeFilter)context.filter=filters[input.filter];context.translate(canvas.width/2,canvas.height/2);context.rotate(input.rotation*Math.PI/180);
+  context.drawImage(image,(image.naturalWidth-sw)/2,(image.naturalHeight-sh)/2,sw,sh,-sw*scale/2,-sh*scale/2,sw*scale,sh*scale);
+ }
  if(!nativeFilter)applyPhotoFilter(context,canvas.width,canvas.height,filters[input.filter]);
  const encoded=canvas.toDataURL('image/jpeg',0.9);if(!encoded.startsWith('data:image/jpeg;base64,')||encoded.length>12_000_000)throw Error('Edited photo could not be encoded.');
  // Browser captures are Alpha's own: Replace may overwrite them in place.
@@ -160,7 +168,7 @@ async function forgetEdit(input:{operationId:string}){
 }
 async function savePhotoEdit(input:EditParameters&{sessionId:string;replace?:boolean}):Promise<EditResult>{
  const replace=input.replace===true;
- input={sessionId:input.sessionId,rotation:input.rotation,crop:input.crop,filter:input.filter};
+ input={sessionId:input.sessionId,...editInput(input)};
  // The mode is part of the save's identity: a retry cannot turn a copy into a replace.
  const encodedParameters=parameters(input)+(replace?':replace':''),key=editKey(input.sessionId),attempt=revision();
  const claimed=await transaction<EditRecord>('readwrite',(store,set,fail)=>{const request=store.get(key);request.onsuccess=()=>{
@@ -169,7 +177,7 @@ async function savePhotoEdit(input:EditParameters&{sessionId:string;replace?:boo
   if(record.parameters&&record.parameters!==encodedParameters){fail(Error('This save already refers to another edit.'));return;}
   if(record.status==='saved'||record.status==='failed'||record.status==='cancelled'||record.status==='unchanged'){set(record);return;}
   if(record.status==='saving'){fail(Error('Save is already in progress. Check its existing outcome.'));return;}
-  record.status=input.rotation===0&&!input.crop&&input.filter==='none'?'unchanged':'saving';record.parameters=encodedParameters;record.attempt=attempt;record.replace=replace;store.put(record);set(record);
+  record.status=input.rotation===0&&!input.crop&&!input.cropRect&&input.filter==='none'?'unchanged':'saving';record.parameters=encodedParameters;record.attempt=attempt;record.replace=replace;store.put(record);set(record);
  };});
  if(claimed.status!=='saving')return outcome(claimed);
  try{
@@ -194,11 +202,10 @@ async function savePhotoEdit(input:EditParameters&{sessionId:string;replace?:boo
 }
 
 type Album={id:string;name:string;revision:string;count:number;memberIds:string[]};
-const mediaId=()=>Date.now().toString().padStart(13,'0')+Array.from(crypto.getRandomValues(new Uint8Array(12)),n=>String(n%10)).join('');
 const prepared=new Map<string,{id:string;revision:string}[]>();
 type SelectedMedia={id:string;revision:string};
 /** Share and save hand one set to the system at once; changes are batched by the caller. */
-export const SHARE_LIMIT=100;
+const SHARE_LIMIT=100;
 function selectedMedia(items:SelectedMedia[],limit=20){
  if(!Array.isArray(items)||items.length<1||items.length>limit||items.some(item=>!item||typeof item.id!=='string'||!item.id||typeof item.revision!=='string'||!item.revision)||new Set(items.map(item=>item.id)).size!==items.length)throw Error(`Select between 1 and ${limit} distinct items again.`);
  return items.map(item=>({id:item.id,revision:item.revision}));
@@ -214,7 +221,7 @@ function trashSelection(input:unknown):SelectedMedia[]|null{
 /** The selected rows in selection order. `bytes` joins each video's recording for a handoff;
  * a revision check alone leaves the recordings unread. */
 async function selectedMediaRows(items:SelectedMedia[],bytes=false){
- return transaction<Row[]>('readonly',(store,set,fail)=>{const result:Row[]=new Array(items.length);set(result);items.forEach((item,index)=>{const request=store.get(item.id);request.onsuccess=()=>{const row=request.result as Row|undefined;if(!row||!['image','video'].includes(row.kind)||row.mutationRevision!==item.revision||row.trashed){fail(Error('Selection changed. Reselect the items.'));return;}result[index]=row;if(!bytes||row.kind!=='video')return;const data=videoData(store).get(item.id);data.onsuccess=()=>{const path=(data.result as VideoData|undefined)?.path??row.path;if(path)result[index]={...row,path};};};});});
+ return transaction<Row[]>('readonly',(store,set,fail)=>{const result:Row[]=new Array(items.length);set(result);items.forEach((item,index)=>{const request=store.get(item.id);request.onsuccess=()=>{const row=request.result as Row|undefined;if(!row||!['image','video'].includes(row.kind)||row.mutationRevision!==item.revision||row.trashed){fail(Error('Selection changed. Reselect the items.'));return;}result[index]=row;if(!bytes||row.kind!=='video')return;const data=videoData(store).get(item.id);data.onsuccess=()=>{const path=(data.result as VideoData|undefined)?.path;if(path)result[index]={...row,path};};};});});
 }
 async function selectedMediaFiles(items:SelectedMedia[]){
   const selected=await selectedMediaRows(items,true);
@@ -403,7 +410,7 @@ export const browserCamera={
   if(videoSave)return videoSave;
   const token=generation,session=videoSession;
   videoSave=(async()=>{
-   const clip=await videoCapture.stop(),id=mediaId();
+   const clip=await videoCapture.stop(),id=photoId();
    const path=await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(reader.error);reader.readAsDataURL(clip.blob);});
    const {row,data}=splitVideoRow<Row>({id:'v:'+id,kind:'video',path,duration:clip.duration,image:clip.image,width:clip.width,height:clip.height,date:Date.now(),revision:revision(),mutationRevision:revision(),favorite:false,trashed:false});
    await transaction<void>('readwrite',(store,set)=>{if(token!==generation||session!==videoSession)throw new DOMException('Video save cancelled.','AbortError');store.add(row);if(data)videoData(store).add(data);set(undefined);});

@@ -3,18 +3,15 @@ import {Capacitor} from '@capacitor/core';
 import {runFilePicker,inputFiles} from '../browser/file-picker';
 import {DailyApps} from '../daily';
 import {registerPlugin} from '../platform-plugins';
-import {reviewMailAttachment as reviewSharedAttachment,type MailAttachment} from '../runtime/inbox-attachment';
-import {attachmentRefusalText} from '../ui/mailbox/drafts-controller';
+import {reviewMailAttachment,type MailAttachment} from '../runtime/inbox-attachment';
+import {rethrowAttachmentRefusal} from '../ui/mailbox/drafts-controller';
 import {documentSourceOf,retainedSourceReferences,type DocumentSourceLink} from '../../../../.eliza/client-features/plugins/plugin-files/src/documents/source-links.ts';
-/** The shared attachment review, refusing in Alpha's words (never the shared module's). */
-const reviewMailAttachment=(file:MailAttachment)=>reviewSharedAttachment(file).catch((error:unknown)=>{throw new Error(attachmentRefusalText(error));});
 type Bag=Record<string,any>;
 /** A note's linked source document (shared plugin-files source-link rules, J03). */
 export type Source=DocumentSourceLink;
 const attachments=registerPlugin<{
  readSelected(input:{selectionId:string}):Promise<MailAttachment & {sha256:string;size:number;sourceReferenceVersion?:1}>;
  openReviewed(input:MailAttachment & {sha256:string;reviewed:boolean}):Promise<{message:string}>;
- retainSourceReference(input:{selectionId:string;sha256:string}):Promise<{reference?:string}>;
  openSourceReference(input:{reference:string;sha256:string;size:number;mimeType:string}):Promise<{message:string}>;
  releaseSourceReferences(input:{keep:string[]}):Promise<{removed:number;released:number;remaining:number}>;
  cancel():Promise<void>;
@@ -34,84 +31,72 @@ export async function releaseUnusedSourceReferences(notes:readonly unknown[]):Pr
  await attachments.releaseSourceReferences({keep});
 }
 export const sourceOf=documentSourceOf;
-/** What the source review shows. The SHA-256 stays the match identity but is not shown. */
-const typeLabel:Record<string,string>={'text/plain':'Text file','application/pdf':'PDF','image/png':'PNG image','image/jpeg':'JPEG image','image/webp':'WebP image'};
-const sizeLabel=(bytes:number)=>Math.round(bytes/1024)<1024?`${Math.max(1,Math.round(bytes/1024))} KB`:`${(bytes/(1024*1024)).toFixed(1).replace(/\.0$/,'')} MB`;
-/** Alpha's cross-app source review. Notes owns persistence; existing file ports
- * own picker grants and exact-byte validation. Never persist temporary grants. */
+/** Open the original file from a note’s attachment chip. Retained fingerprints
+ * from older notes can still be resolved through the system file picker. */
 export function installNoteSourceAdapter(views:Bag){
  const notes=views.notes,render=notes.render,leave=notes.onLeave;
- let closeCurrent:(()=>void)|undefined;
- notes.onLeave=(...args:any[])=>{closeCurrent?.();leave?.(...args);};
+ let pending:AbortController|undefined;
+ notes.onLeave=(...args:any[])=>{pending?.abort();leave?.(...args);};
  notes.render=(state:Bag,api:Bag)=>{
-  const out=render(state,api),selected=state.list?.find((n:Bag)=>n.id===state.open);
-  out.canLinkSource=selected?.kind==='text'&&!!sourceOf(selected.documentSource);
-  out.sourceLabel='Attachment';
-  out.sourceDocument=()=>{
-   closeCurrent?.();
-   const note=api.get('notes').list.find((n:Bag)=>n.id===api.get('notes').open);
-   if(!note||note.kind!=='text')return;
-   let expected=JSON.stringify(note),source=sourceOf(note.documentSource),closed=false,busy=false,opened=false;const pickerAbort=new AbortController();
-   const previous=document.activeElement;
-   const dialog=document.createElement('dialog');dialog.className='note-source-dialog note-source-document-dialog';dialog.setAttribute('aria-label','Note source document');const theme=document.querySelector('.os');if(theme){const style=getComputedStyle(theme);for(const token of ['bg','fg'])dialog.style.setProperty('--source-'+token,style.getPropertyValue('--'+token));dialog.style.colorScheme=style.getPropertyValue('--bg').trim().toUpperCase()==='#000000'?'dark':'light';}
-   const heading=document.createElement('h2');heading.textContent='Source document';
-   const content=document.createElement('div');content.className='note-source-content';content.tabIndex=0;content.setAttribute('role','region');content.setAttribute('aria-label','Source details');
-   const name=document.createElement('p'),detail=document.createElement('p');
-   const description=document.createElement('p');description.textContent='Max 5 MB';
-   const status=document.createElement('p');status.setAttribute('role','status');
-   const actions=document.createElement('div');actions.className='note-source-options';const footer=document.createElement('footer');
-   const button=(label:string)=>{const el=document.createElement('button');el.type='button';el.textContent=label;return el;};
-   const linked=button('Open linked source'),link=button('Link file'),open=button('Choose file'),remove=button('Remove source link'),done=button('Done');actions.append(linked,link,open,remove);footer.append(done);
-   const current=()=>!closed&&api.isActive()&&api.get('notes').open===note.id&&JSON.stringify(api.get('notes').list.find((n:Bag)=>n.id===note.id))===expected;
-   const close=()=>{if(closed)return;closed=true;pickerAbort.abort();if(opened)void attachments.cancel().catch(()=>{});dialog.remove();window.removeEventListener('alpha-back',back,true);window.removeEventListener('pagehide',close);if(closeCurrent===close)closeCurrent=undefined;if(previous instanceof HTMLElement&&previous.isConnected)previous.focus();};
-   const back=(event:Event)=>{if([...document.querySelectorAll('dialog[open]')].at(-1)!==dialog)return;event.preventDefault();event.stopImmediatePropagation();close();};
-   const paint=()=>{linked.hidden=!source?.reference;name.textContent=source?.name||'No source linked';detail.textContent=source?`${typeLabel[source.mimeType]??'File'} · ${sizeLabel(source.size)}`:'';link.textContent=source?'Replace source file':'Link file';open.hidden=remove.hidden=!source;for(const el of [linked,link,open,remove])el.disabled=busy;};
-   const save=async(next:Source|undefined)=>{
-    if(!current())throw Error('Note changed. Close this review and reopen the note.');
-    const state=api.get('notes'),record={...state.list.find((n:Bag)=>n.id===note.id)};
-    if(next)record.documentSource=next;else delete record.documentSource;
-    const saved=await api.saveImportedNote({list:state.list.map((n:Bag)=>n.id===note.id?record:n)});
-    if(!saved)throw Error('Source link save is unconfirmed. Reopen Notes before trying again.');
-    expected=JSON.stringify(api.get('notes').list.find((n:Bag)=>n.id===note.id));
-    // A replaced or removed link may have been the last one to its document.
-    if(source?.reference&&source.reference!==next?.reference)void api.notesTrash?.maintain?.();
-    source=next;
-   };
-   const choose=async(mode:'link'|'open')=>{
-    if(busy||!current())return;busy=true;status.textContent='Choose a file…';paint();let selectionId:string|undefined;
-    try{
-     let file:MailAttachment & {sha256:string;size:number;sourceReferenceVersion?:1};
-     if(Capacitor.isNativePlatform()){
-      const choice=await DailyApps.perform({action:'files'});selectionId=choice.selectionId;
-      if(!current())return;if(choice.status==='cancelled'){status.textContent='';return;}
-      if(choice.status!=='selected'||!selectionId)throw Error('Choose a supported file.');
-      file=await attachments.readSelected({selectionId});
-     }else{
-      const selected=await runFilePicker(async signal=>{
-       const owned=anyAbortSignal([signal,pickerAbort.signal]),files=await inputFiles(owned);owned.throwIfAborted();
-       if(!files.length)return null;const chosen=files[0];if(chosen.size>5*1024*1024)throw Error('Choose a file up to 5 MB.');
-       const bytes=new Uint8Array(await chosen.arrayBuffer());owned.throwIfAborted();let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
-       const value={name:chosen.name,mimeType:chosen.type,dataBase64:btoa(binary)};return {...value,...await reviewMailAttachment(value)};
-      },null);
-      if(!current())return;if(!selected){status.textContent='';return;}file=selected;
-     }
-     const checked=await reviewMailAttachment(file);
-     if(!current())return;
-     if(checked.sha256!==file.sha256||checked.size!==file.size)throw Error('Selected file changed. Choose it again.');
-     if(mode==='link'){
-      const reference=selectionId&&file.sourceReferenceVersion===1?(await attachments.retainSourceReference({selectionId,sha256:checked.sha256})).reference:undefined;if(!current())return;const next=sourceOf({version:1,name:file.name,mimeType:file.mimeType,sha256:checked.sha256,size:checked.size,...(reference?{reference}:{})});if(!next)throw Error('This file cannot be linked.');
-      await save(next);if(!closed)status.textContent='Source linked.';
-     }else{
-      if(!source||checked.sha256!==source.sha256||checked.size!==source.size||file.mimeType!==source.mimeType)throw Error('This file doesn\'t match the linked source.');
-      opened=true;await attachments.openReviewed({...file,reviewed:true});if(!closed)status.textContent='Matching source opened.';
-     }
-    }catch(error){if(!closed)status.textContent=error instanceof Error?error.message:'Source unavailable.';}
-    finally{if(selectionId)await DailyApps.forgetSelected({selectionId}).catch(()=>{if(!closed)status.textContent='Reopen Files';});busy=false;if(!closed)paint();}
-   };
-   linked.onclick=async()=>{if(busy||!current()||!source?.reference)return;busy=true;opened=true;paint();status.textContent='Opening verified source…';try{const result=await attachments.openSourceReference({reference:source.reference,sha256:source.sha256,size:source.size,mimeType:source.mimeType});if(!closed)status.textContent=result.message;}catch{if(!closed)status.textContent='Source missing';}finally{busy=false;if(!closed)paint();}};
-   link.onclick=()=>void choose('link');open.onclick=()=>void choose('open');remove.onclick=async()=>{if(busy||!current())return;busy=true;paint();try{await save(undefined);if(!closed)status.textContent='Unlinked';}catch(error){if(!closed)status.textContent=(error as Error).message;}finally{busy=false;if(!closed)paint();}};
-   done.onclick=close;dialog.oncancel=event=>{event.preventDefault();close();};
-   content.append(name,detail,description,status,actions);dialog.append(heading,content,footer);document.body.append(dialog);closeCurrent=close;window.addEventListener('alpha-back',back,true);window.addEventListener('pagehide',close);paint();dialog.showModal();done.focus();
+  const out=render(state,api),note=state.list?.find((n:Bag)=>n.id===state.open);
+  const source=note?.kind==='text'?sourceOf(note.documentSource):undefined;
+  out.canLinkSource=!!source;out.sourceLabel='Attachment';
+  out.sourceDocument=async()=>{
+   if(!source||pending||!api.isActive()||document.hidden)return;
+   const latest=api.get('notes'),record=latest.list.find((n:Bag)=>n.id===note.id);
+   if(latest.open!==note.id||JSON.stringify(record?.documentSource)!==JSON.stringify(note.documentSource))return;
+   const operation=pending=new AbortController(),signal=operation.signal,native=Capacitor.isNativePlatform();
+   let selectionId:string|undefined,opening=false;
+   const current=()=>!signal.aborted&&(native||!document.hidden)&&api.isActive()&&api.get('notes').open===note.id&&
+    JSON.stringify(api.get('notes').list.find((n:Bag)=>n.id===note.id)?.documentSource)===JSON.stringify(record.documentSource);
+   signal.addEventListener('abort',()=>{if(opening)void attachments.cancel().catch(()=>{});},{once:true});
+   const hide=()=>{if(document.hidden)operation.abort();};
+   window.addEventListener('pagehide',()=>operation.abort(),{signal});
+   // Android’s own file picker can hide the WebView while the selection is pending.
+   if(!native)document.addEventListener('visibilitychange',hide,{signal});
+   try{
+    if(source.reference){
+     opening=true;
+     await attachments.openSourceReference({reference:source.reference,sha256:source.sha256,size:source.size,mimeType:source.mimeType});
+     return;
+    }
+    let file:MailAttachment;
+    if(native){
+     const choice=await DailyApps.perform({action:'files'});
+     selectionId=choice.selectionId;
+     if(!current()||choice.status==='cancelled')return;
+     if(choice.status!=='selected'||!selectionId)throw Error('Choose a supported file.');
+     file=await attachments.readSelected({selectionId});
+    }else{
+     const chosen=await runFilePicker(async pickerSignal=>{
+      const owned=anyAbortSignal([pickerSignal,signal]),files=await inputFiles(owned);
+      const picked=files[0];
+      if(!picked)return null;
+      if(picked.size>5*1024*1024)throw Error('Choose a file up to 5 MB.');
+      const bytes=new Uint8Array(await picked.arrayBuffer());
+      owned.throwIfAborted();
+      let binary='';
+      for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
+      return {name:picked.name,mimeType:picked.type,dataBase64:btoa(binary)};
+     },null);
+     if(!current()||!chosen)return;
+     file=chosen;
+    }
+    if(!current())return;
+    const checked=await reviewMailAttachment(file).catch(rethrowAttachmentRefusal);
+    if(!current())return;
+    if(checked.sha256!==source.sha256||checked.size!==source.size||file.mimeType!==source.mimeType){
+     api.toast('That file doesn’t match this attachment.');
+     return;
+    }
+    opening=true;
+    await attachments.openReviewed({...file,sha256:checked.sha256,reviewed:true});
+   }catch{
+    if(current())api.toast('Couldn’t open the linked file.');
+   }finally{
+    if(selectionId)await DailyApps.forgetSelected({selectionId}).catch(()=>{if(current())api.toast('Reopen Files');});
+    opening=false;operation.abort();pending=undefined;
+   }
   };
   return out;
  };

@@ -1,5 +1,7 @@
 import {holdPhoneInert} from './modal-inert';
 
+const ASSISTANT_LAYERS='[data-alpha-layer="pill"],[data-alpha-layer="composer"],[data-alpha-layer="conversation"]';
+
 /** Focus ownership for a phone-positioned modal and its pointer-only backdrop. */
 export function createInlineModal(close:()=>void,returnFocus?:()=>HTMLElement|null,options:{coverAssistant?:boolean}={}) {
  let mounted:HTMLElement|null=null, dispose:(()=>void)|undefined;
@@ -7,15 +9,17 @@ export function createInlineModal(close:()=>void,returnFocus?:()=>HTMLElement|nu
   if(container===mounted)return;
   dispose?.();dispose=undefined;mounted=container;
   if(!container)return;
-  const dialog=container.matches('[role="dialog"]')?container:container.querySelector<HTMLElement>('[role="dialog"]');
+  // A menu over a scrim owns focus the same way; the arrow keys also move between its entries.
+  const dialog=container.matches('[role="dialog"],[role="menu"]')?container:container.querySelector<HTMLElement>('[role="dialog"],[role="menu"]');
   if(!dialog)return;
+  const menu=dialog.getAttribute('role')==='menu';
   const previous=returnFocus?.()||(document.activeElement instanceof HTMLElement?document.activeElement:null);
   const releases:Array<()=>void>=[],backgrounds:HTMLElement[]=[];
   let branch:HTMLElement=container;
   const phone=container.closest<HTMLElement>('.os');
   while(branch!==phone&&branch.parentElement){
    // The toast region stays live: a status message raised from inside the modal must still be announced.
-   for(const sibling of branch.parentElement.children)if(sibling!==branch&&sibling instanceof HTMLElement&&!sibling.inert&&!sibling.matches('[data-alpha-toast]')&&(options.coverAssistant||!sibling.matches('[data-alpha-layer="pill"],[data-alpha-layer="composer"],[data-alpha-layer="conversation"]')))backgrounds.push(sibling);
+   for(const sibling of branch.parentElement.children)if(sibling!==branch&&sibling instanceof HTMLElement&&!sibling.inert&&!sibling.matches('[data-alpha-toast]')&&(options.coverAssistant||!sibling.matches(ASSISTANT_LAYERS)))backgrounds.push(sibling);
    branch=branch.parentElement;
   }
   const ownsFocus=()=>container.isConnected&&!container.closest('[inert]')&&!Array.from(document.querySelectorAll('dialog[open]')).some(native=>native!==dialog);
@@ -25,6 +29,12 @@ export function createInlineModal(close:()=>void,returnFocus?:()=>HTMLElement|nu
   const key=(event:KeyboardEvent)=>{
    if(!ownsFocus())return;
    if(event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();close();return;}
+   if(menu&&['ArrowDown','ArrowUp','Home','End'].includes(event.key)){
+    const items=controls().filter(element=>element.getAttribute('role')==='menuitem');if(!items.length)return;
+    const at=items.indexOf(document.activeElement as HTMLElement);
+    const next=event.key==='Home'?0:event.key==='End'?items.length-1:event.key==='ArrowDown'?(at+1)%items.length:at<0?items.length-1:(at-1+items.length)%items.length;
+    event.preventDefault();items[next].focus();return;
+   }
    if(event.key!=='Tab')return;
    const items=controls(),first=items[0],last=items.at(-1),active=document.activeElement;
    if(!first){event.preventDefault();dialog.focus();}
@@ -32,7 +42,7 @@ export function createInlineModal(close:()=>void,returnFocus?:()=>HTMLElement|nu
    else if(!event.shiftKey&&(active===last||!dialog.contains(active))){event.preventDefault();first.focus();}
   };
   const back=(event:Event)=>{if(!ownsFocus())return;event.preventDefault();event.stopImmediatePropagation();close();};
-  const assistantTarget=(target:EventTarget|null)=>!options.coverAssistant&&target instanceof Element&&!!target.closest('[data-alpha-layer="pill"],[data-alpha-layer="composer"],[data-alpha-layer="conversation"]');
+  const assistantTarget=(target:EventTarget|null)=>!options.coverAssistant&&target instanceof Element&&!!target.closest(ASSISTANT_LAYERS);
   const assistantPress=(event:PointerEvent)=>{if(ownsFocus()&&assistantTarget(event.target)&&!dialog.contains(event.target as Node))close();};
   const contain=()=>{if(ownsFocus()&&!dialog.contains(document.activeElement)&&!assistantTarget(document.activeElement))focus();};
   document.addEventListener('pointerdown',assistantPress,true);

@@ -41,19 +41,19 @@ test('every reminder delivery code the contract accepts reads as Alpha’s recei
  assert.deepEqual(kinds.sort(),['reminder_cancel','reminder_complete','reminder_read_selected','reminder_snooze','reminder_update']);
  assert.deepEqual([...reminders.REMINDER_DELIVERY_PROBLEMS.keys()].sort(),['permission-denied','scheduling-failed']);
  const PINNED=[
-  ['reminder_create','permission-denied','Reminder saved; notifications are disabled.'],
-  ['reminder_create','scheduling-failed','Reminder saved; notification scheduling failed.'],
-  ['reminder_update','permission-denied','Reminder updated; notifications are disabled.'],
-  ['reminder_update','scheduling-failed','Reminder updated; notification scheduling failed.'],
-  ['reminder_snooze','permission-denied','Reminder snoozed; notifications are disabled.'],
-  ['reminder_snooze','scheduling-failed','Reminder snoozed; notification scheduling failed.'],
-  ['reminder_complete','permission-denied','Reminder completed; notifications are disabled.'],
-  ['reminder_complete','scheduling-failed','Reminder completed; notification scheduling failed.'],
-  ['reminder_read_selected','permission-denied','Reminder read; notifications are disabled.'],
-  ['reminder_other','scheduling-failed','Reminder changed; notification scheduling failed.'],
+  ['reminder_create','permission-denied','Reminder saved, but notifications are disabled.'],
+  ['reminder_create','scheduling-failed','Reminder saved, but notification scheduling failed.'],
+  ['reminder_update','permission-denied','Reminder updated, but notifications are disabled.'],
+  ['reminder_update','scheduling-failed','Reminder updated, but notification scheduling failed.'],
+  ['reminder_snooze','permission-denied','Reminder snoozed, but notifications are disabled.'],
+  ['reminder_snooze','scheduling-failed','Reminder snoozed, but notification scheduling failed.'],
+  ['reminder_complete','permission-denied','Reminder completed, but notifications are disabled.'],
+  ['reminder_complete','scheduling-failed','Reminder completed, but notification scheduling failed.'],
+  ['reminder_read_selected','permission-denied','Reminder read, but notifications are disabled.'],
+  ['reminder_other','scheduling-failed','Reminder changed, but notification scheduling failed.'],
  ];
  for(const [kind,status,alpha] of PINNED)assert.equal(reminders.reminderDeliveryProblemText(kind,status),alpha,kind+' '+status);
- assert.equal(reminders.reminderDeliveryProblemText('reminder_snooze','permission-denied',{approximate:true}),'Reminder snoozed; notifications are disabled. Android delivery is approximate.');
+ assert.equal(reminders.reminderDeliveryProblemText('reminder_snooze','permission-denied'),'Reminder snoozed, but notifications are disabled.','one sentence: no delivery disclaimer');
  // A delivered status is worded by the reviewed change's applied summary, not here.
  for(const status of statuses.filter(s=>!reminders.REMINDER_DELIVERY_PROBLEMS.has(s)))
   assert.equal(reminders.reminderDeliveryProblemText('reminder_update',status),undefined,status);
@@ -213,18 +213,18 @@ test('every named Calendar read summary reads as Alpha’s receipt sentence',()=
  assert.equal(read,source('.eliza/client-features/plugins/plugin-calendar/src/client/named-read.ts'),'staged copy');
  const failed=literals(read,/fail\(\s*"([^"]+)",?\s*\)/g),succeeded=literals(read,/summary:\s*"([^"]+)"/g);
  const PINNED=[
-  ['failed','Choose the exact matching event in Calendar before sharing it. Nothing was shared or changed.','Open the matching event in Calendar first, then ask again. Nothing was shared or changed.'],
-  ['failed','The event was not shared. Its selection, access or review changed; nothing was changed.','The event wasn’t shared because its selection, access or review changed. Nothing was changed.'],
-  ['failed','The selected event does not match the requested name. Nothing was shared or changed.','The open event doesn’t match the name you asked about. Nothing was shared or changed.'],
-  ['succeeded','Shared the matching event you chose. Its requested update still requires a separate review.','Shared the event you chose. Any change you asked for needs its own review.'],
+  ['failed','Choose the exact matching event in Calendar before sharing it. Nothing was shared or changed.','Nothing was shared because the matching event is not open in Calendar.'],
+  ['failed','The event was not shared. Its selection, access or review changed; nothing was changed.','The event wasn’t shared because its selection, access or review changed.'],
+  ['failed','The selected event does not match the requested name. Nothing was shared or changed.','Nothing was shared because the open event doesn’t match the name you asked about.'],
+  ['succeeded','Shared the matching event you chose. Its requested update still requires a separate review.','Shared the event you chose.'],
  ];
  assert.deepEqual(failed.sort(),PINNED.filter(([s])=>s==='failed').map(([,u])=>u).sort(),'fail summaries');
  assert.deepEqual(succeeded,PINNED.filter(([s])=>s==='succeeded').map(([,u])=>u),'success summary');
  assert.deepEqual([...named.NAMED_CALENDAR_READ_SUMMARIES].sort(),PINNED.map(([,u,a])=>[u,a]).sort());
  for(const [status,summary,alpha] of PINNED)assert.equal(named.namedCalendarReadSummary({status,summary}),alpha,summary);
  assert.equal(named.namedCalendarReadSummary({status:'succeeded',summary:'Reworded upstream success.'}),'Shared the event you chose.');
- assert.equal(named.namedCalendarReadSummary({status:'failed',summary:'Reworded upstream failure.'}),'The event wasn’t shared. Nothing was changed.');
- assert.equal(named.namedCalendarReadSummary({status:'failed'}),'The event wasn’t shared. Nothing was changed.');
+ assert.equal(named.namedCalendarReadSummary({status:'failed',summary:'Reworded upstream failure.'}),'The event wasn’t shared.');
+ assert.equal(named.namedCalendarReadSummary({status:'failed'}),'The event wasn’t shared.');
  const adapter=source('apps/app/src/prototype/agent-adapter.ts');
  assert.match(adapter,/const result=await executeNamedCalendarRead\([^;]*\);[\s\S]{0,200}return \{\.\.\.result,summary:namedCalendarReadSummary\(result\)\};/);
  assert.doesNotMatch(adapter,/return executeNamedCalendarRead\(/);
