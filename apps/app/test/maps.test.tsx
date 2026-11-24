@@ -478,6 +478,25 @@ describe("Maps in a browser", () => {
     expect([document.body.textContent?.includes("No location fix arrived."), world.maps.watches.size]).toEqual([true, 0]);
   });
 
+  it("A secondary click drops a pin at once, never on the directions (spec/app/maps/index.md, \"Story: Look at a place\")", async () => {
+    const world = scene();
+    const { alpha } = await open(world, withMaps);
+    await showMaps(alpha);
+    const runtime = maps.runtime(alpha);
+    await until(alpha, runtime, Screen, (s) => s.link.provider !== 0);
+    const send = (event: { readonly type: "menuPin"; readonly lat: number; readonly lng: number }) => act(async () => { await runtime.runPromise(Effect.ignore(Effect.flatMap(Screen, (screen) => screen.send(event)))); });
+    // spec/app/maps/index.md, "A secondary click, or a menu opened with no finger down, drops a pin there at once"
+    await send({ type: "menuPin", lat: 43_731_000, lng: 7_421_000 });
+    await until(alpha, runtime, Screen, (s) => s.place !== 0 && !s.pinning);
+    expect(document.body.textContent).toContain("43.73100, 7.42100");
+    await press("Directions");
+    await until(alpha, runtime, Screen, (s) => s.directions);
+    const before = await runtime.runPromise(Effect.flatMap(Screen, (screen) => screen.get()));
+    await send({ type: "menuPin", lat: 43_732_000, lng: 7_422_000 });
+    const after = await runtime.runPromise(Effect.flatMap(Screen, (screen) => screen.get()));
+    expect([after.place, after.directions]).toEqual([before.place, true]);
+  });
+
   it("A phone updated from the previous Alpha keeps its saved places (spec/app/maps/places.md, \"Story: Keep my saved places\")", async () => {
     const world = scene();
     const row = (label: string, latitude: number, longitude: number, providerId?: string, providerPlaceId?: string) => ({ label, coordinate: { latitude, longitude }, ...(providerId === undefined ? {} : { providerId, providerPlaceId }) });

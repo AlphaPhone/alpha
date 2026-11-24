@@ -224,7 +224,7 @@ function located(session: number, once: boolean): Stream.Stream<Ev, never, Locat
         if (once && (ageMs > maxFixAgeMs || ageMs < -maxFixAheadMs)) return undefined
         return { fix, ageMs }
       })
-      |> Stream.filterMap(%, (seen) => (seen === undefined ? Option.none() : Option.some(seen)))
+      |> Stream.filter(%, (seen): seen is { readonly fix: Sighting; readonly ageMs: number } => seen !== undefined)
       |> Stream.mapEffect(%, ({ fix, ageMs }) => effect {
         const at: Point = { lat: fix.lat, lng: fix.lng }
         atlas.located({ at, accuracy: fix.accuracy, approximate: !fix.precise })
@@ -552,7 +552,7 @@ const notification = started(effect {
   const navigation = try Navigation
   const reads = Stream.concat(Stream.succeed(true), device.visible) |> Stream.filter(%, (shown) => shown)
   try Stream.runForEach(reads, effect () => {
-    const tapped = try (navigation.opened() |> Effect.orElse(%, () => navigation.opened()))
+    const tapped = try navigation.opened()
     if (!tapped) return
     const showable = (try device.showing()) && (try shell.get()).assistant !== "Full"
     const { trip } = try screen.get()
