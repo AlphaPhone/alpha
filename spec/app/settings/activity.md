@@ -32,7 +32,7 @@ type Connection = Ready | Starting | NeedsRestart | NeedsRetry | Offline | Unpac
 type Recovery = Restart | Retry
 type Row = { proposal: int, declinable: bool, unsettled: bool }
 
-type Activity = { journal: T::Timed, rows: List[Row] }
+type Activity = { connection: Connection, recovering: bool, journal: T::Timed, rows: List[Row] }
 
 type Effect =
   Recover({ how: Recovery })
@@ -41,33 +41,45 @@ type Effect =
   | Reconcile({ proposal: int, happened: bool })
 type Sent = { state: Activity, out: List[Effect] }
 
-pure val initial: Activity = { journal: T::unasked, rows: List() }
+pure val initial: Activity = { connection: Offline, recovering: false, journal: T::unasked, rows: List() }
 
 pure def needs(how: Recovery, connection: Connection): bool =
   if (how == Restart) connection == NeedsRestart else connection == NeedsRetry
 
-pure def canRecover(s: Activity, how: Recovery, connection: Connection): bool = needs(how, connection)
+pure def canRecover(s: Activity, how: Recovery, connection: Connection): bool = s.connection == connection and needs(how, connection) and not(s.recovering)
 
-pure def recover(s: Activity, how: Recovery, connection: Connection): Sent = { state: s, out: List(Recover({ how: how })) }
+pure def recover(s: Activity, how: Recovery, connection: Connection): Sent = { state: { ...s, recovering: true }, out: List(Recover({ how: how })) }
 ```
 
-### Asking for a recovery changes nothing on this page
+### A recovery is asked once at a time and leaves the journal alone
+
+The request is marked in flight until the host responds. Its response returns the last reported connection, or says the connection could not be read.
 
 ```quint
+pure def canRecoveryReported(s: Activity, connection: Connection): bool = s.recovering
+
+pure def recoveryReported(s: Activity, connection: Connection): Activity =
+  { ...s, connection: if (s.connection == Starting or s.connection == NeedsRetry) connection else s.connection, recovering: false }
+
+
 pure def isRecover(e: Effect): bool = match e { | Recover(r) => true | _ => false }
 
 pure def stepARecoveryIsHandedOver(before: Activity, after: Activity, out: List[Effect]): bool =
-  out.some(e => isRecover(e)) implies (after == before and out.length() == 1)
+  out.some(e => isRecover(e)) implies (after.recovering and after.journal == before.journal and after.rows == before.rows and out.length() == 1)
 ```
 
 ### About's Agent activity says whether the agent runs, is starting, needs the owner or is stopped
 
-The row carries the connection the account area reports, so a stopped or
+A new connection report replaces the one the page is showing. The row carries the connection the phone reports, so a stopped or
 refused agent is seen from Settings: running only while it is ready,
 starting while it starts, needing the owner while it needs a restart or
 another try, and stopped otherwise.
 
 ```quint
+pure def canConnectionReported(s: Activity, connection: Connection): bool = s.connection != connection
+
+pure def connectionReported(s: Activity, connection: Connection): Activity = { ...s, connection: connection }
+
 type AgentWord = AgentRunning | AgentStarting | AgentNeedsYou | AgentStopped
 
 pure def agentWord(connection: Connection): AgentWord =
@@ -105,7 +117,7 @@ pure def askJournal(at: int, s: Activity): Sent =
   { state: { ...s, journal: asking }, out: List(ReadJournal({ reading: asking.read.ticket })) }
 
 pure def canRefreshActions(s: Activity, at: int, connection: Connection): bool =
-  connection == Ready and not(T::busy(s.journal))
+  s.connection == connection and connection == Ready and not(T::busy(s.journal))
 
 pure def refreshActions(s: Activity, at: int, connection: Connection): Sent = askJournal(at, s)
 ```
@@ -156,7 +168,7 @@ pure def listed(s: Activity, proposal: int, declining: bool): bool =
   s.rows.some(r => r.proposal == proposal and (if (declining) r.declinable else r.unsettled))
 
 pure def ready(s: Activity, connection: Connection): bool =
-  connection == Ready and s.journal.read.status == R::Loaded
+  s.connection == connection and connection == Ready and s.journal.read.status == R::Loaded
 
 pure def canDecline(s: Activity, proposal: int, at: int, connection: Connection): bool =
   ready(s, connection) and listed(s, proposal, true)

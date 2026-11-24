@@ -6,6 +6,8 @@ import {
   type SettingsAccess,
   type SettingsAccessWord,
   SettingsAboutPage,
+  SettingsActivityPage,
+  type SettingsActivityPageProps,
   type SettingsAndroidStart,
   type SettingsAndroidTarget,
   type SettingsAndroidTold,
@@ -30,10 +32,12 @@ import {
   SettingsSoundPage,
   SettingsTopPage,
   type SettingsTextSizePickerProps,
-  SettingsPage,
 } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import { type ReactNode, useState } from "react";
+import * as ActivityGen from "../../gen/app__settings__activity.ts";
+import { useMachine as useActivity } from "../../gen/app__settings__activity.react.ts";
+import type { Machine as ActivityMachine } from "../../gen/app__settings__activity.effect.vibe";
 import type * as AndroidGen from "../../gen/app__settings__android.ts";
 import { useMachine as useAndroid } from "../../gen/app__settings__android.react.ts";
 import type { Machine as AndroidMachine } from "../../gen/app__settings__android.effect.vibe";
@@ -60,7 +64,7 @@ import type { Time } from "../runtime/time.vibe";
 import { AppBack } from "../shell/AppBack.tsx";
 
 /** What every Settings page reads: where the owner is, the phone's facts, the hand-overs to Android, the preferences, the reset and the developer tools. */
-export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | FactsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ShellMachine | Time, unknown>;
+export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | FactsMachine | ActivityMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ShellMachine | Time, unknown>;
 
 /** What the frame gives each page: the runtime, Alpha's places, and the props every page shares. */
 export interface PageProps {
@@ -344,8 +348,11 @@ function App({ runtime, common, app }: PageProps & { app: "inbox" | "workflows" 
 
 function About({ runtime, alpha, common }: PageProps) {
   const facts = useFacts(runtime).state;
+  const pages = usePages(runtime).state;
+  const activity = useActivity(runtime).state;
+  const agent = activity === undefined ? undefined : agentWords[ActivityGen.agentWord(activity.connection)];
   return (
-    <SettingsAboutPage {...common} alphaVersion={reading(facts, "Versions")} androidVersion={reading(facts, "AndroidVersion")} storage={reading(facts, "Storage")}>
+    <SettingsAboutPage {...common} onPhone={pages?.phone} agent={agent} alphaVersion={reading(facts, "Versions")} androidVersion={reading(facts, "AndroidVersion")} storage={reading(facts, "Storage")}>
       {alpha.slot("settings/about")}
       {alpha.slot("settings/update")}
     </SettingsAboutPage>
@@ -365,18 +372,29 @@ function Developer({ runtime, common }: PageProps) {
   );
 }
 
-/** Agent activity: the conversations and, in a development build, the agent's restart details, which their own areas show. */
+const connections: Record<ActivityGen.Connection, SettingsActivityPageProps["connection"]> = {
+  Ready: "ready", Starting: "starting", NeedsRestart: "needs-restart", NeedsRetry: "needs-retry", Offline: "offline", Unpackaged: "unpackaged",
+};
+const agentWords: Record<ActivityGen.AgentWord, NonNullable<Parameters<typeof SettingsAboutPage>[0]["agent"]>> = {
+  AgentRunning: "running", AgentStarting: "starting", AgentNeedsYou: "needs-you", AgentStopped: "stopped",
+};
+
+/** Agent activity as reported by the resident host, with the conversation controls owned by Ask Alpha. */
 function Activity({ runtime, alpha, common }: PageProps) {
-  const pages = usePages(runtime);
-  const hand = (neighbour: Neighbour) => ({ type: "handOver", neighbour, micMayBeOn: false }) as const;
+  const { state, can, send } = useActivity(runtime);
+  if (!state) return null;
+  const retry = { type: "recover", how: "Retry", connection: state.connection } as const;
   return (
-    <SettingsPage title="Agent activity" onBack={common.onBack}>
+    <SettingsActivityPage
+      onBack={common.onBack}
+      connection={connections[state.connection]}
+      actions={[]}
+      journalUnavailable
+      onRecover={can(retry) ? () => void send(retry) : undefined}
+      onHandOver={common.onHandOver}
+    >
       {alpha.slot("settings/activity")}
-      <div className="flex flex-wrap gap-2 px-4">
-        {pages.can(hand("Conversations")) ? <Button variant="outline" onClick={() => void pages.send(hand("Conversations"))}>Conversations</Button> : null}
-        {pages.can(hand("RestartDetails")) ? <Button variant="outline" onClick={() => void pages.send(hand("RestartDetails"))}>Restart details</Button> : null}
-      </div>
-    </SettingsPage>
+    </SettingsActivityPage>
   );
 }
 

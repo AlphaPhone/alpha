@@ -1,0 +1,45 @@
+// spec/app/settings/activity.md, "Story: Help the agent recover"
+import type { AgentStatus } from "@elizaos/os/bridges/definitions/agent"
+import * as Activity from "../../gen/app__settings__activity.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { native } from "../platform/device.vibe"
+import { type Job, answer, hearing, reacting, stop, together } from "../runtime/reactor.vibe"
+
+function connection(status: AgentStatus | undefined): Activity.Connection {
+  if (status === undefined) return "Offline"
+  if (!status.available || status.state === "unavailable") return "Unpackaged"
+  if (status.state === "running") return "Ready"
+  if (status.state === "starting") return "Starting"
+  if (status.state === "failed" && status.error === "ipc-recovery-retention-limit") return "NeedsRestart"
+  return native() ? "NeedsRetry" : "Offline"
+}
+
+const observed = (seen: Activity.Connection): Activity.Event => ({ type: "connectionReported", connection: seen })
+
+function carry(fx: Activity.Effect): Job<Activity.Event, Agent | Activity.Machine, []> {
+  if (fx.tag !== "Recover") return stop(fx.tag)
+  const failed: Activity.Event = { type: "recoveryReported", connection: "Offline" }
+  return answer("recover", effect {
+    const host = (try Agent).life
+    const current = host.status() catch () => undefined
+    if (fx.how !== "Retry" || connection(current) !== "NeedsRetry") return { type: "recoveryReported", connection: connection(current) } as const
+    const starting = (try Activity.Machine).send(observed("Starting")) catch () => undefined
+    if (starting === undefined) return { type: "recoveryReported", connection: "Starting" } as const
+    const answered = host.start() catch () => undefined
+    return { type: "recoveryReported", connection: connection(answered) } as const
+  }, failed)
+}
+
+const hearingHost = hearing(
+  Stream.unwrap(effect {
+    const host = (try Agent).life
+    const read = Stream.fromEffect(Effect.option(host.status()))
+    const change = Stream.catch(host.changes, () => Stream.empty)
+    return Stream.changes(Stream.concat(Stream.map(read, Option.getOrUndefined), change))
+  }),
+  Activity.Machine,
+  (status) => observed(connection(status)),
+)
+
+/** Real resident status for Settings; a failed read or a missing agent is reflected in the Activity page. */
+export const activity = together(reacting(Activity, { carry }), hearingHost)
