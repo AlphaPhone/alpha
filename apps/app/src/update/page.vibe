@@ -63,7 +63,7 @@ effect function read(): void!!(LauncherUpdates | Names | Page.Machine) {
     try ignore(page.send({ type: "read", activation: number, stage: now.paused ? "Paused" : "Preparing", canContinue: now.canContinue, automatic: now.automatic }))
     return
   }
-  const ending = Option.match(now.outcome, { onNone: (): Settlement => "Gone", onSome: (outcome) => settlements[outcome] ?? "WasFailed" })
+  const ending: Settlement = Option.isSome(now.outcome) ? settlements[now.outcome.value] ?? "WasFailed" : "Gone"
   try ignore(page.send({ type: "endUpdate", activation: number, ending, resume: now.resume }))
 }
 

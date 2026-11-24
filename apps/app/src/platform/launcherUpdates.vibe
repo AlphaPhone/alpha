@@ -101,9 +101,10 @@ export const phoneLauncherUpdates = Layer.succeed(LauncherUpdates, {
   },
   check: () => Effect.map(asked("checkForUpdate", () => plugin().checkForUpdate()), (reply) => ({ manifest: Option.fromNullishOr(reply.manifest), digest: Option.fromNullishOr(reply.manifestSha256) })),
   install: (release: Release, manifest: Option.Option<string>) => effect {
-    const reply = try asked("installUpdate", () => plugin().installUpdate({ ...release, ...(Option.isSome(manifest) ? { automatic: true, manifestSha256: manifest.value } : {}) }))
+    const reply = asked("installUpdate", () => plugin().installUpdate({ ...release, ...(Option.isSome(manifest) ? { automatic: true, manifestSha256: manifest.value } : {}) })) catch () => undefined
+    if (reply === undefined) return "Deferred" as Ending
     return reply.status === undefined ? "Finished" as Ending : endings[reply.status]
-  } catch () => "Deferred" as Ending,
+  },
   activation: () => effect {
     const state = try asked("updateState", () => plugin().updateState())
     const ids = state.activationId !== undefined && state.bridgeId !== undefined ? Option.some({ activationId: state.activationId, bridgeId: state.bridgeId }) : Option.none<Ids>()

@@ -17,19 +17,18 @@ const kept = "alpha/update/manifest@1"
 /** How long a check or an install may take before the shell answers it for the channel. */
 const patience = 60000
 
-const Row = Schema.Struct({
-  schema: Schema.Literal("alpha-update/v1"),
-  versionCode: Schema.Number,
-  versionName: Schema.optional(Schema.String),
-  notes: Schema.optional(Schema.String),
-  variant: Schema.String,
-  signerSha256: Schema.String,
-  apkUrl: Schema.String,
-  sha256: Schema.String,
-  sizeBytes: Schema.Number,
-})
-const Index = Schema.Struct({ schema: Schema.Literal("alpha-update/index-v1"), releases: Schema.Array(Row) })
-type Row = typeof Row.Type
+schema Row {
+  readonly schema: "alpha-update/v1";
+  readonly versionCode: number;
+  readonly versionName?: string;
+  readonly notes?: string;
+  readonly variant: string;
+  readonly signerSha256: string;
+  readonly apkUrl: string;
+  readonly sha256: string;
+  readonly sizeBytes: number;
+}
+schema Index { readonly schema: "alpha-update/index-v1"; readonly releases: Row[] }
 
 module pure {
   /** @throws {never} */
@@ -118,7 +117,7 @@ function carry(fx: Out): Job<Event, LauncherUpdates | KeyValueStore.KeyValueStor
     when { tag: "CheckFeed", let ticket }: answer("check", checked(ticket), { type: "answer", ticket, reply: { tag: "Unreadable" }, now: untimed });
     when { tag: "StartInstall", let version, let digest, let signer, let manifest, let automatic }:
       answer("install", installing({ version, digest, signer, manifest, automatic }), { type: "endInstall", ending: "Deferred", now: untimed });
-    when { tag: "OpenInstallSettings" }: run("allow", (try LauncherUpdates).allowAutomatic());
+    when { tag: "OpenInstallSettings" }: run("allow", effect { try (try LauncherUpdates).allowAutomatic() });
   }
 }
 
