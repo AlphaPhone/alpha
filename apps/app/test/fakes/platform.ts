@@ -1,5 +1,5 @@
 // spec/app/platform/index.md, "Story: Talk to the resident agent"; spec/app/platform/index.md, "Story: Be told when to try again"; spec/app/platform/feed.md, "Story: Follow what my agent does on my screen"
-import { type Faked, rejection } from "./phone.ts";
+import type { Faked } from "./phone.ts";
 import { type Route, feed } from "./routes.ts";
 
 /** What the fake agent holds for the platform's journeys: the live events it publishes, and who is listening. */
@@ -22,7 +22,6 @@ export function alphaConnection(scene: PlatformScene): Faked {
   return () => ({
     secureRead: ({ slot }: { slot: string }) => Promise.resolve({ value: scene.earlier.get(slot) ?? null }),
     secureCompareExchange({ slot, expectedValue, value }: { slot: string; expectedValue: string; value: string | null }) {
-      if (typeof slot !== "string") return Promise.reject(rejection("Secure draft update failed"));
       if (scene.earlier.get(slot) !== expectedValue) return Promise.resolve({ status: "conflict" });
       if (value === null) scene.earlier.delete(slot);
       else scene.earlier.set(slot, value);
