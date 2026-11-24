@@ -48,6 +48,8 @@ export const meta: ComponentMeta<MessagesScreenViewProps> = {
       await expect(args.onSend).toHaveBeenCalledWith("thread:1");
     },
     SimRequired: async ({ canvasElement, args }) => {
+      // The spies in `args` are shared by every story of the file, and AlphaDraft's play taps Send: count only this story's taps.
+      for (const spy of [args.onChooseSim, args.onSend]) spy.mockClear();
       const thread = within(canvasElement);
       await userEvent.click(thread.getByRole("button", { name: "Work" }));
       await expect(args.onChooseSim).toHaveBeenCalledWith("thread:1", 2);

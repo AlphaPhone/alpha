@@ -6,5 +6,5 @@ import type { UpdateActivationProps } from "./UpdateActivation.tsx";
 
 export const meta: ComponentMeta<UpdateActivationProps> = {
   args: { updates: pausedActivation, onContinue: () => undefined },
-  states: { Preparing: { updates: { ...updates, activation: "Preparing", pending: true } }, Idle: { updates } },
+  examples: { Preparing: { updates: { ...updates, activation: "Preparing", pending: true } }, Idle: { updates } },
 };

@@ -200,6 +200,8 @@ describe("Launcher (spec/shell/gestures.md, \"Story: Arrange Home with my finger
       provide shell {
         const launcher = try Launcher
         const machine = try NavigationMachine
+        // Home is drawn before a finger can press it: the launcher's follower shows Home's keys to the gestures first.
+        try TestClock.adjust("1 millis")
         try launcher.context("alpha:notes")
         const editing = (try machine.get()).editing
         try launcher.finishEditing()
