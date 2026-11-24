@@ -5,6 +5,12 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Contacts } from "../gen/app__contacts.effect.vibe";
 import { Machine as Agent } from "../gen/app__contacts__agent.effect.vibe";
 import { Machine as Phone } from "../gen/app__phone.effect.vibe";
+import { Effect, Layer, ManagedRuntime, Stream } from "effect";
+import * as Voice from "../gen/app__voice.effect.vibe";
+import { together, untimed, whole } from "../src/runtime/reactor.vibe";
+import { shell } from "../src/shell/shell.vibe";
+import { placeOf, voicing } from "../src/voice/voice.vibe";
+import { fakeWorld } from "./fakes/world.vibe";
 import { type Asking, propose } from "../src/contacts/requests.vibe";
 import { closeAll, later, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
@@ -188,5 +194,37 @@ describe("Contacts on an Alpha image", () => {
     await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "Declined");
     await vi.waitFor(() => expect(desk.proposals[1]?.state).toBe("rejected"));
     expect(world.telephony.sent.length).toBe(1);
+  });
+});
+
+// spec/app/voice/index.md, "Story: Go where the conversation takes me"; spec/app/voice/index.md, "Voice keeps talking after a navigation only when it is the one the conversation asked for; any other ends it"
+describe("Talk on an Alpha image", () => {
+  it("Talk keeps listening as the agent opens the keypad, Contacts and Messages, and stops when the owner opens one himself", async () => {
+    localStorage.clear();
+    const world = image();
+    const layer = Layer.provideMerge(whole(together(shell, voicing)), fakeWorld(world)) as unknown as Layer.Layer<Voice.Machine | Shell>;
+    const runtime = ManagedRuntime.make(layer);
+    try {
+      const voice = (event: Voice.Event) => runtime.runPromise(Effect.flatMap(Voice.Machine, (machine) => machine.send(event)));
+      const reached = (ok: (state: Voice.Voice) => boolean) => runtime.runPromise(Effect.flatMap(Voice.Machine, (machine) => Stream.runHead(Stream.filter(machine.changes, ok))));
+      const trail = () => runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.get())).then((state) => state.trail);
+      await reached((s) => s.warmed);
+      await voice({ type: "permissionChanged", grant: "Granted" });
+      await voice({ type: "startTalking", now: untimed });
+      await reached((s) => s.phase === "Listening" && s.mic === "On");
+      for (const [turn, view] of [[1, "Phone"], [2, "Contacts"], [3, "Messages"]] as const) {
+        world.ask.nextReplyChunks = [`[NAVIGATE:${view}] Opening ${view}.`];
+        world.voice.emitLocal?.("liveCaptureTranscript", { text: `Open ${view}`, final: false });
+        await reached((s) => s.heard);
+        world.voice.emitLocal?.("liveCaptureTranscript", { text: `Open ${view}`, final: true });
+        await reached((s) => s.sent === turn && s.phase === "Listening" && s.mic === "On" && s.followed === placeOf(view) && s.claim === 0);
+        expect((await trail()).at(-1)).toBe(view);
+      }
+      await runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.send({ type: "openView", view: "Phone" })));
+      await reached((s) => s.phase === "Idle" && s.mic === "Off");
+    } finally {
+      await runtime.dispose();
+      localStorage.clear();
+    }
   });
 });
