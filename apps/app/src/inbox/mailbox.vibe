@@ -169,8 +169,11 @@ export const layer = Layer.effect(Mailbox, effect {
       const key = JSON.stringify([a.selected, a.readEpoch, a.fromDisk, a.phase === "Checked"])
       if (key === seen) continue
       seen = key
-      try ahead.invalidate()
       const s = try machine.get()
+      // spec/inbox/mailbox.md, "A list belongs to one account, read epoch, folder and search": a check again under the same
+      // selection and read epoch keeps the live list shown or being read, with its later pages and read-ahead.
+      if (s.account === a.selected && s.epoch === a.readEpoch && !a.fromDisk && !s.cached && (s.phase === "ListReady" || s.phase === "ListLoading")) continue
+      try ahead.invalidate()
       try showSelection(s.account === a.selected ? s.folder : "InboxFolder", s.account === a.selected ? s.query : "")
     }
   })
