@@ -44,8 +44,8 @@ The notice read again, and the question added to the composer.
 type Effect = Recheck({ ticket: int, revision: int }) | Add({ source: Source, linked: bool })
 type Moved = { state: Question, out: List[Effect] }
 
-pure def added(q: Question): Moved =
-  { state: { ...q, open: false, added: q.added + 1 }, out: List(Add({ source: q.source, linked: q.linked })) }
+pure def adding(source: Source, q: Question): Moved =
+  { state: { ...q, open: false, added: q.added + 1 }, out: List(Add({ source: source, linked: q.linked })) }
 ```
 
 ### What the simulator tries
@@ -90,7 +90,7 @@ pure def addToChat(q: Question): Moved =
   val recheck = R::ask(q.recheck)
   if (q.source == Notice)
     { state: { ...q, recheck: recheck }, out: List(Recheck({ ticket: recheck.ticket, revision: q.revision })) }
-  else added(q)
+  else adding(q.source, q)
 ```
 
 ### A notice is added only when exactly it is still listed at the revision the owner saw, and the review is still open
@@ -102,7 +102,7 @@ pure def canRechecked(q: Question, ticket: int, exact: bool): bool = R::canAnswe
 
 pure def rechecked(q: Question, ticket: int, exact: bool): Moved =
   val read = { ...q, recheck: R::answer(q.recheck, exact) }
-  if (exact and q.open) added(read) else { state: { ...read, open: false }, out: List() }
+  if (exact and q.open) adding(q.source, read) else { state: { ...read, open: false }, out: List() }
 ```
 
 ### Closing the review, or a sensitive screen, adds nothing and leaves a recheck behind

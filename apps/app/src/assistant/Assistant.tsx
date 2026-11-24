@@ -120,8 +120,8 @@ export function Assistant({ runtime }: AssistantProps) {
     const message = at + 1;
     const settled = settledLine(line.id);
     const fork = { type: "fork", message, ...free } as const;
-    const quote = { type: "quote", message, settled } as const;
-    const editAgain = { type: "editAgain", message, mine: line.mine, settled } as const;
+    const quote = { type: "quote", message, recorded: settled } as const;
+    const editAgain = { type: "editAgain", message, mine: line.mine, recorded: settled } as const;
     const readAloud = { type: "readAloud", message, mine: line.mine } as const;
     return {
       id: line.id,

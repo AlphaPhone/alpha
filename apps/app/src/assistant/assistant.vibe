@@ -80,13 +80,13 @@ const failures: Readonly<Record<string, Reply.Failure>> = {
 // spec/app/assistant/reply.md, "The settled reply is the whole final answer, shown and spoken, never the acknowledgment"; spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"
 /** How a reply ended, for the reply as it is shown: whole, failed by its kind, stopped, or not given. */
 function replied(turn: number, result: TurnResult | undefined): Reply.Event {
-  const failed = (said: TurnReply | undefined, code: string): Reply.Event => ({ type: "fail", turn, kind: failures[said?.failureKind ?? code] ?? "OtherFailure" })
-  if (result === undefined) return { type: "fail", turn, kind: "OtherFailure" }
+  const failed = (said: TurnReply | undefined, code: string): Reply.Event => ({ type: "failed", turn, kind: failures[said?.failureKind ?? code] ?? "OtherFailure" })
+  if (result === undefined) return { type: "failed", turn, kind: "OtherFailure" }
   return match (result) {
     when { kind: "Replied", let reply }: reply.failureKind === undefined ? (reply.text === "" ? { type: "decline", turn } : { type: "done", turn, units: reply.text.length }) : failed(reply, reply.failureKind);
     when { kind: "AgentFailed", let reply, let code }: failed(reply, code);
     when { kind: "StoppedByOwner" }: { type: "stop", turn };
-    default: { type: "fail", turn, kind: "OtherFailure" };
+    default: { type: "failed", turn, kind: "OtherFailure" };
   }
 }
 
@@ -120,7 +120,8 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const { controller } = try Turns
     const { board } = try Talk
     const reply = try Reply.Machine
-    const tell = (event: Reply.Event) => { runFork(ignore(reply.send(event))) }
+    let shown: Promise<unknown> = Promise.resolve()
+    const show = (event: Reply.Event) => { shown = shown.then(() => runPromise(ignore(reply.send(event)))) }
     const chats = try (try Chats.Machine).get()
     const known = board.known(chats.chosen)
     const text = board.outgoing
@@ -140,24 +141,25 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       if (!heard) Queue.offerUnsafe(queue, { type: "hear", ticket })
       heard = true
       board.change({ reply: written, label: "" })
-      tell({ type: "token", turn: ticket, units: written.length, provisional })
+      show({ type: "token", turn: ticket, units: written.length, provisional })
     }
     const hooks = {
       onPreview: preview,
       onAcknowledgment: (said: string) => {
         board.change({ label: said })
-        tell({ type: "acknowledge", turn: ticket, units: said.length })
+        show({ type: "acknowledge", turn: ticket, units: said.length })
       },
       onStatus: (activity: string) => { if (board.snapshot().reply === "") board.change({ label: activity }) },
       onTool: (name: string, label: string | undefined) => {
-        tell({ type: "toolStarts", turn: ticket })
+        show({ type: "toolStarts", turn: ticket })
         if (board.snapshot().reply === "") board.change({ label: label ?? `Using ${name}` })
       },
     }
     const metadata = observed(told, context)
     const result = tryPromise(() => controller.send({ text, ...(metadata === undefined ? {} : { metadata }) }, { stream: hooks })) catch () => undefined
     board.change({ reply: "", label: "" })
-    tell(replied(ticket, result))
+    show(replied(ticket, result))
+    try promise(() => shown)
     const event = ended(ticket, heard, result)
     const finishing = Conversation.canFinish(try (try Conversation.Machine).get(), ticket)
     if (result?.kind === "Replied" && finishing) board.append({ id: result.reply.messageId, mine: false, text: result.reply.text })

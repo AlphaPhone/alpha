@@ -659,9 +659,9 @@ whose turn has settled, is quoted: never a streaming reply, a card or a
 line Alpha wrote itself. Chats say which.
 
 ```quint
-pure def canQuote(c: Composer, message: int, settled: bool): bool = c.slot == Open and c.away == Free and message > 0 and settled
+pure def canQuote(c: Composer, message: int, recorded: bool): bool = c.slot == Open and c.away == Free and message > 0 and recorded
 
-pure def quote(c: Composer, message: int, settled: bool): Composer = { ...c, editor: { ...c.editor, quote: message } }
+pure def quote(c: Composer, message: int, recorded: bool): Composer = { ...c, editor: { ...c.editor, quote: message } }
 
 pure def canUnquote(c: Composer): bool = c.away == Free and c.editor.quote > 0
 
@@ -688,10 +688,10 @@ Chats say whether the message is the owner's own, and whether the agent
 recorded it and its turn has settled.
 
 ```quint
-pure def canEditAgain(c: Composer, message: int, mine: bool, settled: bool): bool =
-  mine and settled and c.slot == Open and c.away == Free and message > 0 and not(c.editor.text)
+pure def canEditAgain(c: Composer, message: int, mine: bool, recorded: bool): bool =
+  mine and recorded and c.slot == Open and c.away == Free and message > 0 and not(c.editor.text)
 
-pure def editAgain(c: Composer, message: int, mine: bool, settled: bool): Composer =
+pure def editAgain(c: Composer, message: int, mine: bool, recorded: bool): Composer =
   { ...c, draft: D::edit(c.draft), editor: { ...c.editor, text: true, editing: message } }
 ```
 

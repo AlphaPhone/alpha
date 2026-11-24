@@ -69,17 +69,17 @@ again.
 ```quint
 pure val recipientLimit = 20
 
-pure def validDraft(recipients: int, subjectLines: int, blank: bool): bool =
-  recipients >= 1 and recipients <= recipientLimit and subjectLines <= 1 and not(blank)
+pure def validDraft(addressees: int, subjectLines: int, blank: bool): bool =
+  addressees >= 1 and addressees <= recipientLimit and subjectLines <= 1 and not(blank)
 
 pure def offered(matching: int, valid: bool): bool = matching == 1 and valid
 
-pure def canStage(e: Email, matching: int, valid: bool, current: bool): bool =
-  e.state == Unstaged and offered(matching, valid) and current
+pure def canStage(e: Email, matching: int, valid: bool, here: bool): bool =
+  e.state == Unstaged and offered(matching, valid) and here
 
-pure def stage(e: Email, matching: int, valid: bool, current: bool): Email = { ...e, state: Drafting }
+pure def stage(e: Email, matching: int, valid: bool, here: bool): Email = { ...e, state: Drafting }
 
-pure val recipientsValues = Set(0, 1, 20, 21)
+pure val addresseesValues = Set(0, 1, 20, 21)
 pure val subjectLinesValues = Set(0, 1, 2)
 
 pure def lawAnAmbiguousTurnOffersNoCard(valid: bool): bool = not(offered(2, valid)) and not(offered(0, valid))

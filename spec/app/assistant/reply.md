@@ -171,9 +171,9 @@ type Failure = CredentialInvalid | InsufficientCredits | LimitReached | Provider
 
 pure def refusedBeforeOutput(kind: Failure): bool = kind != OtherFailure and kind != TimedOut
 
-pure def canFail(r: Reply, turn: int, kind: Failure): bool = live(r) and turn == r.turn
+pure def canFailed(r: Reply, turn: int, kind: Failure): bool = live(r) and turn == r.turn
 
-pure def fail(r: Reply, turn: int, kind: Failure): Reply =
+pure def failed(r: Reply, turn: int, kind: Failure): Reply =
   { ...r, status: Interrupted, shown: if (refusedBeforeOutput(kind)) 0 else r.shown, spoken: if (refusedBeforeOutput(kind)) 0 else r.spoken, provisional: false }
 
 pure def canDecline(r: Reply, turn: int): bool = live(r) and turn == r.turn and r.shown == 0
@@ -235,9 +235,9 @@ pure def lawAWaitIsAtLeastASecond(waitMs: int): bool = waitMs >= 0 implies waitS
 ```quint
 type PlanAction = ChoosePlan | RetryCloud | SignIn | RecheckProvider | Funding
 
-pure def onASettledReply(action: PlanAction): bool = action != Funding
+pure def onASettledReply(planned: PlanAction): bool = planned != Funding
 
-pure def lawFundingIsNeverOnASettledReply(action: PlanAction): bool = action == Funding implies not(onASettledReply(action))
+pure def lawFundingIsNeverOnASettledReply(planned: PlanAction): bool = planned == Funding implies not(onASettledReply(planned))
 ```
 
 ## Story: Read a reply with its cards
@@ -298,7 +298,7 @@ pure val noticeLength = 500
 
 pure def keptNotices(count: int): int = if (count < 0) 0 else if (count > noticeLimit) noticeLimit else count
 
-pure def noticeFits(length: int): bool = length >= 1 and length <= noticeLength
+pure def noticeFits(units: int): bool = units >= 1 and units <= noticeLength
 
 pure def systemNoticeShown(latest: bool, replyAfter: bool): bool = latest and not(replyAfter)
 
@@ -323,11 +323,11 @@ result and says it is not synced yet.
 ```quint
 type Result = Pending | Succeeded | Failed
 
-pure def merged(seen: Result, next: Result): Result = if (seen == Succeeded) Succeeded else next
+pure def merged(seen: Result, later: Result): Result = if (seen == Succeeded) Succeeded else later
 
 pure val seenValues = Set(Pending, Succeeded, Failed)
 
-pure def lawASuccessIsNeverReplaced(next: Result): bool = merged(Succeeded, next) == Succeeded
+pure def lawASuccessIsNeverReplaced(later: Result): bool = merged(Succeeded, later) == Succeeded
 
-pure def lawALaterReceiptWinsOtherwise(seen: Result, next: Result): bool = seen != Succeeded implies merged(seen, next) == next
+pure def lawALaterReceiptWinsOtherwise(seen: Result, later: Result): bool = seen != Succeeded implies merged(seen, later) == later
 ```

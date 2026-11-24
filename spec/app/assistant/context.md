@@ -81,16 +81,17 @@ pure val lValues = Set(initial)
 ### Turning Location for Alpha off, or Android taking the permission away, forgets every fix and answer, and leaves what was being read behind
 
 ```quint
-pure def forgotten(l: Locator): Locator =
-  { ...l, gps: X::dropped(l.gps), gpsAt: -1, gpsNext: 0, network: X::dropped(l.network), networkAt: -1, networkNext: 0 }
+pure def forgetting(on: bool, granted: bool, l: Locator): Locator =
+  { ...l, enabled: on, granted: granted,
+    gps: X::dropped(l.gps), gpsAt: -1, gpsNext: 0, network: X::dropped(l.network), networkAt: -1, networkNext: 0 }
 
 pure def canToggle(l: Locator, on: bool): bool = on != l.enabled
 
-pure def toggle(l: Locator, on: bool): Locator = if (on) { ...l, enabled: true } else { ...forgotten(l), enabled: false }
+pure def toggle(l: Locator, on: bool): Locator = if (on) { ...l, enabled: true } else forgetting(false, l.granted, l)
 
 pure def canPermit(l: Locator, granted: bool): bool = granted != l.granted
 
-pure def permit(l: Locator, granted: bool): Locator = if (granted) { ...l, granted: true } else { ...forgotten(l), granted: false }
+pure def permit(l: Locator, granted: bool): Locator = if (granted) { ...l, granted: true } else forgetting(l.enabled, false, l)
 ```
 
 ### Rough location is enough: a GPS read happens at most every five minutes, and an empty or failed one waits two minutes
