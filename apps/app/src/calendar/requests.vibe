@@ -93,6 +93,17 @@ export const requestsLayer = Layer.provide(Layer.effect(AgentRequests, effect {
     return try mapError(native.invoke(PLUGIN, method, args), (cause) => new AvailabilityUnavailable({ reason: cause._tag }))
   }
 
+  effect function readNamed(operation: unknown, operationId: string, context: NamedCalendarReadContext, current: () => NamedCalendarReadContext, journalIdentity?: AgentRun["journalIdentity"]) {
+    provide NamedReadMachine = namedReads {
+      return try executeNamedCalendarRead({
+        executeAgent: (input) => effect {
+          return try mapError(native.invoke(PLUGIN, "executeAgent", input), (cause) => new NamedReadUnavailable({ reason: cause._tag })) as { status: string; result?: unknown; feedComplete?: boolean }
+        },
+        cancelAgent: (input) => effect { native.invoke(PLUGIN, "cancelAgent", input) catch () => undefined },
+      }, operation, operationId, context, [CALENDAR_NAMED_READ_CAPABILITY, CALENDAR_CAPABILITY], current, journalIdentity)
+    }
+  }
+
   return {
     sheets: SubscriptionRef.changes(sheets),
     actions: machine.changes,
@@ -128,12 +139,7 @@ export const requestsLayer = Layer.provide(Layer.effect(AgentRequests, effect {
     },
     effect namedRead(operation: unknown, operationId: string, context: NamedCalendarReadContext, current: () => NamedCalendarReadContext, journalIdentity?: AgentRun["journalIdentity"]) {
       const outcome: NamedReadOutcome = shareOffered(context.view === "calendar", context.sensitive === true, context.selectedObject !== undefined)
-        ? Effect.provideService(executeNamedCalendarRead({
-            executeAgent: (input) => effect {
-              return try mapError(native.invoke(PLUGIN, "executeAgent", input), (cause) => new NamedReadUnavailable({ reason: cause._tag })) as { status: string; result?: unknown; feedComplete?: boolean }
-            },
-            cancelAgent: (input) => effect { native.invoke(PLUGIN, "cancelAgent", input) catch () => undefined },
-          }, operation, operationId, context, [CALENDAR_NAMED_READ_CAPABILITY, CALENDAR_CAPABILITY], current, journalIdentity), NamedReadMachine, namedReads) catch () => ({ status: "failed", summary: "unavailable" }) as NamedReadOutcome
+        ? readNamed(operation, operationId, context, current, journalIdentity) catch () => ({ status: "failed", summary: "unavailable" }) as NamedReadOutcome
         : { status: "failed", summary: "Open the event first" }
       return { outcome, sentence: SENTENCES[namedSentence(namedOutcome(outcome))] ?? SENTENCES.SaysNotShared! }
     },

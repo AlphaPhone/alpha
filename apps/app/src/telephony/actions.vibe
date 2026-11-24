@@ -503,8 +503,10 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
         }
         case "sms_latest_sender": {
           const sender = try messages.latestSender("includeAddress" in op && op.includeAddress === true)
-          const admitted = Option.getOrUndefined(readLatestSender(sender === "unavailable" ? { kind: "sms-latest-sender", status: "unavailable" } : { kind: "sms-latest-sender", ...sender }))
-          const result = admitted ?? { kind: "sms-latest-sender", status: "unavailable" as const }
+          const unavailable = { kind: "sms-latest-sender", status: "unavailable" } as const
+          const receipt = sender === "unavailable" ? unavailable : { kind: "sms-latest-sender", ...sender }
+          const admitted = Effect.try(() => readLatestSender(receipt)) catch () => Option.none()
+          const result = Option.getOrUndefined(admitted) ?? unavailable
           return try settle(operationId, result, result.status)
         }
         case "phone_keypad":
