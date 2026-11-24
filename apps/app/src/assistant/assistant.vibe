@@ -311,7 +311,7 @@ function carryLocator(fx: Locator.Effect): Job<Locator.Event, Location | Time | 
 }
 
 // spec/app/assistant/context.md, "Turning Location for Alpha off, or Android taking the permission away, forgets every fix and answer, and leaves what was being read behind"; spec/app/settings/preferences.md, "Alpha shares the phone's location or the Browser page open with a chat turn, and changes Gmail or Calendar, only when the phone read that the owner allowed it"
-const allowing = following(Prefs.Machine, (prefs) => Prefs.allows(prefs, "AgentLocation"), Locator.Machine, (on): Locator.Event => ({ type: "toggle", on }))
+const allowing = following(Prefs.Machine, (prefs) => (prefs.document.read.status === "Loading" ? undefined : Prefs.allows(prefs, "AgentLocation")), Locator.Machine, (on): Locator.Event | undefined => (on === undefined ? undefined : { type: "toggle", on }))
 
 // spec/app/assistant/context.md, "Nothing is kept or read without the owner's leave"
 const forgetting = started(effect {

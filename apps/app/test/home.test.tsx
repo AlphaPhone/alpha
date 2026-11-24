@@ -108,7 +108,7 @@ describe("Home on a phone", () => {
     const { alpha } = await open(world);
     await until(alpha, home.runtime(alpha), Home.Machine, (h) => h.tiles.load.status === "Loaded");
     await until(alpha, alpha.runtime, Shell, (s) => s.image);
-    const card = (title: string) => [...document.querySelectorAll("section[aria-label='Your day'] > button")].find((found) => found.textContent?.startsWith(title));
+    const card = (title: string) => [...document.querySelectorAll<HTMLButtonElement>("section[aria-label='Your day'] > button")].find((found) => found.textContent?.startsWith(title));
 
     // spec/app/home/cards.md, "The Messages and Phone cards show their waiting rows, only on an Alpha image, and are not drawn without a row"; spec/app/home/cards.md, "The mail card shows the unread count, senders and subjects only, never a message body; marked not up to date when Inbox's page is not, and not drawn without an account or a row"
     await drawn(() => {

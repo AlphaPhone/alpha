@@ -372,7 +372,7 @@ describe("Prove the protected release keys (spec/release/index.md, \"Story: Sign
     copyFileSync(join(keys, "alphaphone_app.x509.pem"), join(committed, "alphaphone_app.x509.pem"));
     openssl("pkcs12", "-export", "-inkey", join(directory, "alphaphone_app.key"), "-in", join(keys, "alphaphone_app.x509.pem"), "-name", "alpha-release", "-out", join(directory, "app.p12"), "-passout", "pass:app-secret");
     rmSync(join(keys, "alphaphone_app.x509.pem"));
-    execFileSync("tar", ["czf", join(directory, "keys.tgz"), "-C", keys, ...readdir(keys)]);
+    execFileSync("tar", ["czf", join(directory, "keys.tgz"), "-C", keys, ...readdir(keys)], { env: { ...process.env, COPYFILE_DISABLE: "1" } });
     const archive = readFileSync(join(directory, "keys.tgz")).toString("base64");
     const half = Math.ceil(archive.length / 8) * 4;
     const secrets = {

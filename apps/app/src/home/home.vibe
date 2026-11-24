@@ -87,10 +87,10 @@ function noticeOf(fx: Out): HomeNoticeMessage | undefined {
   }
 }
 
-/** The notice Home last told inside the edit bar, and where: an external store the screen reads without an effect. */
+/** The notice Home last told inside the edit bar or drawer, and where: an external store the screen reads without an effect. */
 export interface Told {
   readonly notice: HomeNoticeMessage
-  readonly place: "InEditBar"
+  readonly place: "InEditBar" | "InDrawer"
 }
 
 let last: Told | undefined

@@ -5,7 +5,9 @@ import { type ReactNode, useSyncExternalStore } from "react";
 import * as Cards from "../../gen/app__home__cards.ts";
 import type { Machine } from "../../gen/app__home__cards.effect.vibe";
 import { useMachine } from "../../gen/app__home__cards.react.ts";
+import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
+import type { Time } from "../runtime/time.vibe";
 import { fromAreas, named, others } from "./cards.vibe";
 
 const where: Readonly<Record<Cards.Origin, string>> = { PhoneCalendar: "Calendar", AgentCalendar: "Alpha", Reminder: "Reminder" };
@@ -24,8 +26,8 @@ function shown(item: Cards.Item): HomeAgendaItem {
  * Home's row of cards, in the spec's order and only those drawn: the agenda, Messages, Phone, mail, the brief and
  * Workflows, each from what its area told Home; a press opens the card's app. Empty when no card is drawn.
  */
-export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine, unknown>, image: boolean): readonly ReactNode[] {
-  const { state, can, send } = useMachine(runtime);
+export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Time, unknown>, image: boolean): readonly ReactNode[] {
+  const { state, can, send } = useTimed(runtime, useMachine);
   useSyncExternalStore(named.subscribe, named.snapshot, named.snapshot);
   const given = useSyncExternalStore(fromAreas.subscribe, fromAreas.snapshot, fromAreas.snapshot);
   if (!state) return [];

@@ -57,30 +57,33 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   const beginEditing = { type: "beginEditing", shell: s } as const;
   const pullDown = { type: "pullDown", shell: s, locked: false, now: untimed } as const;
   return (
-    <HomeScreen
-      date={today ? new Date(today * 86_400_000).toLocaleDateString([], { weekday: "long", day: "numeric" }) : undefined}
-      cards={Home.showsCards(h) ? day : []}
-      tiles={h.tiles.load.status === "Loaded" ? Home.tilesShown(h, s).map((tile) => tileItem(tile, known.apps, tile.tag === "Own" ? waits.get(tile.view) : undefined, h.editing)) : undefined}
-      editing={h.editing}
-      onOpenTile={(id) => {
-        const tile = tileOf(id);
-        const event: Home.Event = tile.tag === "Own" ? { type: "openTile", view: tile.view, shell: s } : { type: "openApp", app: tile.app, now: untimed };
-        if (can(event)) send(event);
-      }}
-      onBeginEditing={can(beginEditing) ? () => {
-        send(beginEditing);
-        void alpha.runtime.runPromise(feel("LongPress"));
-      } : undefined}
-      onRemoveTile={(id) => offered({ type: "removeFromHome", tile: tileOf(id), shell: s })?.()}
-      onMoveTile={({ id, onto, behind }) => offered({ type: "moveTile", tile: tileOf(id), onto: tileOf(onto), behind, shell: s })?.()}
-      onPullDown={offered(pullDown)}
-      onShowHidden={offered({ type: "showHidden", shell: s })}
-      onDone={offered({ type: "done" })}
-      notice={notice}
-      adding={h.adding}
-      hidden={Home.hiddenApps(h, s).map((view) => tileItem({ tag: "Own", view }, known.apps))}
-      onAddToHome={(id) => offered({ type: "addToHome", tile: tileOf(id), shell: s })?.()}
-      onCloseAdding={() => offered({ type: "backOut" })?.()}
-    />
+    <>
+      <HomeScreen
+        date={today ? new Date(today * 86_400_000).toLocaleDateString([], { weekday: "long", day: "numeric" }) : undefined}
+        cards={Home.showsCards(h) ? day : []}
+        tiles={h.tiles.load.status === "Loaded" ? Home.tilesShown(h, s).map((tile) => tileItem(tile, known.apps, tile.tag === "Own" ? waits.get(tile.view) : undefined, h.editing)) : undefined}
+        editing={h.editing}
+        onOpenTile={(id) => {
+          const tile = tileOf(id);
+          const event: Home.Event = tile.tag === "Own" ? { type: "openTile", view: tile.view, shell: s } : { type: "openApp", app: tile.app, now: untimed };
+          if (can(event)) send(event);
+        }}
+        onBeginEditing={can(beginEditing) ? () => {
+          send(beginEditing);
+          void alpha.runtime.runPromise(feel("LongPress"));
+        } : undefined}
+        onRemoveTile={(id) => offered({ type: "removeFromHome", tile: tileOf(id), shell: s })?.()}
+        onMoveTile={({ id, onto, behind }) => offered({ type: "moveTile", tile: tileOf(id), onto: tileOf(onto), behind, shell: s })?.()}
+        onPullDown={offered(pullDown)}
+        onShowHidden={offered({ type: "showHidden", shell: s })}
+        onDone={offered({ type: "done" })}
+        notice={notice}
+        adding={h.adding}
+        hidden={Home.hiddenApps(h, s).map((view) => tileItem({ tag: "Own", view }, known.apps))}
+        onAddToHome={(id) => offered({ type: "addToHome", tile: tileOf(id), shell: s })?.()}
+        onCloseAdding={() => offered({ type: "backOut" })?.()}
+      />
+      {Home.showsCards(h) && alpha.slot("home/cards")}
+    </>
   );
 }

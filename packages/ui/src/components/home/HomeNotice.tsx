@@ -2,7 +2,7 @@ import { Alert } from "../Alert.tsx";
 import { Toast } from "../Toast.tsx";
 
 /** What Android was asked, with the name of the app it was asked about. */
-export type HomeAsk = { tag: "OpenApp"; label: string } | { tag: "Shade" };
+export type HomeAsk = { tag: "OpenApp"; label: string } | { tag: "AppInfo"; label: string } | { tag: "Shade" };
 
 /** Why Android did not do what it was asked. */
 export type HomeWhy = "Gone" | "TurnedOff" | "ProfileLocked" | "NotInFront" | "Unable";
@@ -17,7 +17,7 @@ export type HomeNoticeMessage =
   | { tag: "TellAppsUnread" };
 
 /** Where the owner is when the notice is told. */
-export type HomePlace = "AsToast" | "InEditBar";
+export type HomePlace = "AsToast" | "InEditBar" | "InDrawer";
 
 export type HomeNoticeProps = {
   /** What went wrong. */
@@ -40,7 +40,7 @@ export const homeNoticeWords = (notice: HomeNoticeMessage): string => {
   switch (notice.tag) {
     case "TellNotOpened": {
       const { ask } = notice;
-      const lead = ask.tag === "Shade" ? "Couldn't open notifications" : `Couldn't open ${ask.label}`;
+      const lead = ask.tag === "Shade" ? "Couldn't open notifications" : ask.tag === "AppInfo" ? `Couldn't open info for ${ask.label}` : `Couldn't open ${ask.label}`;
       return `${lead}. ${reasons[notice.why]}`;
     }
     case "TellNoAnswer":
