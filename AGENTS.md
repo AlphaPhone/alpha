@@ -413,7 +413,7 @@ and nothing else would catch it.
 
 How `pnpm check` runs them, in its `tests` stage:
 
-- **The run.** It runs `pnpm run test` in the package's directory.
+- **The run.** It runs `pnpm test` in the package's directory.
   The exit code decides; a failure shows the runner's list of failures, at
   most 200 lines of it. A pass is remembered until something the tests read
   changes, and a complete passing Vitest run records a receipt that lets `check`
