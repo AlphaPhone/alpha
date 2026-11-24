@@ -1,0 +1,47 @@
+// spec/app/platform/adoption.md, "Story: Keep what the earlier Alpha kept"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { type Adoption, adoptionOf, earlierCleared } from "../../gen/app__platform__adoption.effect.vibe"
+import { type Slot, Vault } from "./vault.vibe"
+
+/** A place a value is kept: what it holds now, keeping a value there, and clearing it. Each fails where the place cannot be reached. */
+export interface Place<A> {
+  read(): Option.Option<A>!unknown
+  write(value: A): void!unknown
+  clear(): void!unknown
+}
+
+/**
+ * Move what `earlier` holds into `current`, as `copy` reads it, only where `current` holds nothing yet, and clear
+ * `earlier` once `current` holds a value. A value that could not be read, copied or written stays where it was, for
+ * a later reading to move. How it went.
+ */
+export effect function adopt<A, B>(earlier: Place<A>, current: Place<B>, copy: (value: A) => Option.Option<B>): Adoption!! {
+  const before = earlier.read() catch () => Option.none<A>()
+  if (Option.isNone(before)) return adoptionOf(false, false, false)
+  const now = current.read() catch () => undefined
+  const currentHeld = now !== undefined && Option.isSome(now)
+  const value = now === undefined || currentHeld ? Option.none<B>() : copy(before.value)
+  const copied = Option.isSome(value) && (effect { try current.write(value.value); return true } catch () => false)
+  const adoption = adoptionOf(true, currentHeld, copied)
+  if (earlierCleared(adoption)) try ignore(earlier.clear())
+  return adoption
+}
+
+/** What the page's storage keeps under `key`: where the earlier Alpha kept preferences and places, and this one keeps each machine's state. */
+export effect function keptAt(key: string): Place<string>!!KeyValueStore.KeyValueStore {
+  const store = try KeyValueStore.KeyValueStore
+  return {
+    effect read() {
+      const found = try store.get(key)
+      return found === undefined ? Option.none() : Option.some(found)
+    },
+    write: (value: string) => store.set(key, value),
+    clear: () => store.remove(key),
+  }
+}
+
+/** What the phone's secure store keeps in `slot`. */
+export effect function vaulted(slot: Slot): Place<Redacted.Redacted<string>>!!Vault {
+  const vault = try Vault
+  return { read: () => vault.read(slot), write: (secret: Redacted.Redacted<string>) => vault.write(slot, secret), clear: () => vault.remove(slot) }
+}

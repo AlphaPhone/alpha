@@ -17,7 +17,10 @@ screen lock and default apps; Display offers Android's display and
 brightness; Sound its sound and Do Not Disturb; Battery the battery saver;
 the Phone page default apps. Notifications offers Alpha's alerts, each of
 its channels and notification access; the Workflows page its own alerts.
-Permissions offers Alpha's permissions and location; the Calendar, Camera,
+Permissions offers Alpha's permissions, its access to all files and
+location; Network offers Android's Internet panel and its Wi-Fi page;
+Carrier & SIM setup offers About phone, mobile networks, the SIMs, the
+access point names and default apps; the Calendar, Camera,
 Maps and Notes pages Alpha's permissions, and the Photos page Alpha's
 photo access. About offers Android's About phone, and Developer its
 developer options. The password provider is the passwords area's.
@@ -27,7 +30,7 @@ import index as I from "./index"
 import read as R from "../../kit/read"
 import timed as T from "./timed"
 
-type Target = AndroidHome | AccountsSync | WifiNetworks | BluetoothDevices | MobileNetworks | AirplaneMode | ScreenLock | DefaultApps | DisplaySettings | Brightness | SoundSettings | DoNotDisturb | BatterySaver | AlphaAlerts | AlertChannel | NotificationAccess | WorkflowAlerts | AppPermissions | PhotoPermissions | LocationSettings | AboutPhone | DeveloperOptions
+type Target = AndroidHome | AccountsSync | WifiNetworks | BluetoothDevices | MobileNetworks | AirplaneMode | ScreenLock | DefaultApps | DisplaySettings | Brightness | SoundSettings | DoNotDisturb | BatterySaver | AlphaAlerts | AlertChannel | NotificationAccess | WorkflowAlerts | AppPermissions | PhotoPermissions | AllFilesAccess | LocationSettings | InternetPanel | SimCards | AccessPointNames | AboutPhone | DeveloperOptions
 
 pure def offers(page: I::Page, target: Target): bool =
   if (page == I::Top) target == AndroidHome or target == AccountsSync
@@ -40,7 +43,10 @@ pure def offers(page: I::Page, target: Target): bool =
   else if (page == I::PhonePage) target == DefaultApps
   else if (page == I::Notifications) target == AlphaAlerts or target == AlertChannel or target == NotificationAccess
   else if (page == I::WorkflowsApp) target == WorkflowAlerts
-  else if (page == I::Permissions) target == AppPermissions or target == LocationSettings
+  else if (page == I::Permissions) target == AppPermissions or target == AllFilesAccess or target == LocationSettings
+  else if (page == I::NetworkPage) target == InternetPanel or target == WifiNetworks
+  else if (page == I::CarrierPage)
+    target == AboutPhone or target == MobileNetworks or target == SimCards or target == AccessPointNames or target == DefaultApps
   else if (page == I::CalendarApp or page == I::CameraApp or page == I::MapsApp or page == I::NotesApp) target == AppPermissions
   else if (page == I::PhotosApp) target == PhotoPermissions
   else if (page == I::About) target == AboutPhone
@@ -55,6 +61,7 @@ type Scope = AlphasOwn | WholePhone
 
 pure def aboutAlpha(target: Target): bool =
   target == AlphaAlerts or target == AlertChannel or target == WorkflowAlerts or target == AppPermissions or target == PhotoPermissions
+    or target == AllFilesAccess
 
 pure def scopeOf(target: Target): Scope = if (aboutAlpha(target)) AlphasOwn else WholePhone
 
@@ -80,8 +87,8 @@ pure val initial: Android = { start: T::unasked, target: AndroidHome, channel: 0
 A start has ten seconds to be answered.
 
 ```quint
-pure val startLimit = 10
-pure val atValues = Set(0, 4, 20)
+pure val startLimit = 10000
+pure val atValues = Set(0, 4000, 20000)
 pure val channelValues = Set(0, 2)
 
 pure def canHandOff(s: Android, page: I::Page, target: Target, channel: int, at: int): bool =
@@ -123,7 +130,7 @@ pure def androidAnswered(s: Android, start: int, opened: Opened): Android =
 Its answer, if it comes later, is refused.
 
 ```quint
-pure val nowValues = Set(0, 4, 20, 40)
+pure val nowValues = Set(0, 4000, 20000, 40000)
 
 pure def canGiveUpOnAndroid(s: Android, now: int): bool = T::canGiveUp(s.start, now)
 

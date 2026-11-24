@@ -1,5 +1,15 @@
 // spec/kit/read.md, "Story: Read from outside"
+import { type Launcher, browserLauncher, phoneLauncher } from "./launcher.vibe"
+import { type CarrierSetup, browserCarrierSetup, phoneCarrierSetup } from "./carrier.vibe"
+import { type LauncherUpdates, browserLauncherUpdates, phoneLauncherUpdates } from "./launcherUpdates.vibe"
+import { type Passwords, browserPasswords, phonePasswords } from "./passwords.vibe"
+import { type SystemSettings, browserSystemSettings, phoneSystemSettings } from "./systemSettings.vibe"
+import { type WiFi, browserWiFi, phoneWiFi } from "./wifi.vibe"
+import { type PhoneCalendar, browserCalendar, phoneCalendar } from "./calendar.vibe"
 import { type Files, browserFiles, phoneFiles } from "./files.vibe"
+import { type Location, browserLocation, phoneLocation } from "./location.vibe"
+import { type Calls, browserCalls, phoneCalls } from "./calls.vibe"
+import { type Telephony, browserTelephony, phoneTelephony } from "./telephony.vibe"
 
 /**
  * The services over the phone's other plugins, one line per plugin in each of the three lists below: its service in
@@ -8,16 +18,46 @@ import { type Files, browserFiles, phoneFiles } from "./files.vibe"
  */
 export type Plugins =
   | never
+  | Launcher
+  | SystemSettings
+  | WiFi
+  | Passwords
+  | CarrierSetup
+  | LauncherUpdates
+  | PhoneCalendar
   | Files
+  | Location
+  | Telephony
+  | Calls
 
 /** On the phone: each plugin's service over eliza's client of it (`@elizaos/os/bridges/<plugin>`). */
 export const phonePlugins = Layer.mergeAll(
   Layer.empty,
+  phoneLauncher,
+  phoneSystemSettings,
+  phoneWiFi,
+  phonePasswords,
+  phoneCarrierSetup,
+  phoneLauncherUpdates,
+  phoneCalendar,
   phoneFiles,
+  phoneLocation,
+  phoneTelephony,
+  phoneCalls,
 )
 
 /** In a browser: each plugin's service saying the phone's part is absent. */
 export const browserPlugins = Layer.mergeAll(
   Layer.empty,
+  browserLauncher,
+  browserSystemSettings,
+  browserWiFi,
+  browserPasswords,
+  browserCarrierSetup,
+  browserLauncherUpdates,
+  browserCalendar,
   browserFiles,
+  browserLocation,
+  browserTelephony,
+  browserCalls,
 )

@@ -1,0 +1,135 @@
+// spec/cloud/rollout.md, "Story: Create an environment's Cloudflare resources once"; spec/cloud/rollout.md, "Each resource is kept when it is the one recorded, created only when absent and creating, and otherwise refused"
+import { reconcile, type Observed } from "../gen/cloud__rollout.effect.vibe"
+import type { CloudResources } from "./wrangler.vibe"
+import { resourceId } from "./wrangler.vibe"
+
+/** Cloudflare refused, answered something unexpected, or holds a resource of another identity: nothing more is changed. */
+export error ResourcesRefused { problem: string }
+
+/** What one reconciling of an environment's Cloudflare resources needs: its recorded ids, its sibling's, its two hosts and, to check or create the database binding, its database URL. */
+export interface Reconciling {
+  readonly ids: CloudResources
+  readonly sibling: CloudResources
+  readonly apiHost: string
+  readonly webHost: string
+  readonly databaseUrl: string | undefined
+  readonly accountId: string | undefined
+  readonly token: string | undefined
+  readonly creating: boolean
+  readonly base?: string
+}
+
+type Json = Record<string, unknown>
+const record = (value: unknown): Json => value !== null && typeof value === "object" && !Array.isArray(value) ? value as Json : {}
+
+interface Postgres { readonly host: string; readonly port: number; readonly database: string; readonly user: string; readonly password: string; readonly scheme: string }
+
+/** The PostgreSQL origin of DATABASE_URL, never echoing it: a refusal names no part of it. */
+export effect function postgresOrigin(value: string): Postgres!ResourcesRefused {
+  const url = URL.parse(value)
+  const port = url?.port ? Number(url.port) : 5432
+  if (url === null || !["postgres:", "postgresql:"].includes(url.protocol) || !url.hostname || !url.username || !url.password || url.pathname.length < 2 || !(port > 0 && port <= 65535))
+    throw new ResourcesRefused({ problem: "DATABASE_URL must include a PostgreSQL origin, database and credentials" })
+  return { host: url.hostname.toLowerCase(), port, database: decodeURIComponent(url.pathname.slice(1)), user: decodeURIComponent(url.username), password: decodeURIComponent(url.password), scheme: url.protocol.slice(0, -1) }
+}
+
+effect function call(base: string, token: string, resource: string, operation: string, body?: Json): Json!ResourcesRefused!HttpClient.HttpClient {
+  const started = body === undefined ? HttpClientRequest.get(`${base}${resource}`) : HttpClientRequest.bodyText(HttpClientRequest.post(`${base}${resource}`), JSON.stringify(body), "application/json")
+  const response = timeout(HttpClient.execute(HttpClientRequest.bearerToken(started, token)), "15 seconds") catch effect () => {
+    throw new ResourcesRefused({ problem: `Cloudflare ${operation} failed (no response)` })
+  }
+  const envelope = record(try (response.json catch effect () => { throw new ResourcesRefused({ problem: `Cloudflare ${operation} failed (HTTP ${response.status})` }) }))
+  if (response.status < 200 || response.status >= 300 || envelope.success !== true || !("result" in envelope))
+    throw new ResourcesRefused({ problem: `Cloudflare ${operation} failed (HTTP ${response.status})` })
+  return envelope
+}
+
+effect function list(base: string, token: string, resource: string, operation: string): ReadonlyArray<Json>!ResourcesRefused!HttpClient.HttpClient {
+  const results: Json[] = []
+  const pageSize = 50
+  for (let page = 1; page <= 100; page++) {
+    const answer = try call(base, token, `${resource}${resource.includes("?") ? "&" : "?"}per_page=${pageSize}&page=${page}`, operation)
+    if (!Array.isArray(answer.result)) throw new ResourcesRefused({ problem: `Cloudflare ${operation} did not return a list` })
+    results.push(...answer.result.map(record))
+    if (answer.result.length < pageSize) return results
+  }
+  throw new ResourcesRefused({ problem: `Cloudflare ${operation} exceeded the page limit` })
+}
+
+/** A recorded id, or none while the record holds a placeholder; a malformed one is refused. */
+effect function configured(value: string, label: string): (string | undefined)!ResourcesRefused {
+  const kind = resourceId(value)
+  if (kind === "Malformed") throw new ResourcesRefused({ problem: `${label} is not a Cloudflare ID` })
+  return kind === "Provisioned" ? value : undefined
+}
+
+/** Whether a resource found by name is the one recorded, absent, or another's: a second of the same name, the sibling's, or not the id recorded. */
+function observed(rows: ReadonlyArray<Json>, name: string, expected: string | undefined, sibling: string): { readonly seen: Observed; readonly id: string | undefined } {
+  const matching = rows.filter((row) => row.name === name)
+  const [entry] = matching
+  if (entry === undefined) return { seen: expected === undefined ? "Absent" : "Foreign", id: undefined }
+  const id = typeof entry.id === "string" ? entry.id : ""
+  const ours = matching.length === 1 && resourceId(id) === "Provisioned" && id !== sibling && (expected === undefined || id === expected)
+  return { seen: ours ? "Recorded" : "Foreign", id }
+}
+
+/**
+ * Checks, and with `creating` completes, one environment's Cloudflare resources in the selected account: the zone it
+ * owns, the database binding (Hyperdrive) for DATABASE_URL with query caching off, and the two hosts free or already
+ * the Workers'. Every refusal comes before any change; a rerun finds by name what a stopped run created.
+ */
+export effect function reconcileResources(at: Reconciling): CloudResources!ResourcesRefused!HttpClient.HttpClient {
+  const recordedAccount = try configured(at.ids.accountId, "Cloudflare account")
+  const account = recordedAccount ?? at.accountId ?? ""
+  if (resourceId(account) !== "Provisioned" || (recordedAccount !== undefined && at.accountId !== undefined && at.accountId !== recordedAccount))
+    throw new ResourcesRefused({ problem: "CLOUDFLARE_ACCOUNT_ID must identify the selected Alpha Cloud account" })
+  const token = at.token?.trim() ?? ""
+  if (token === "") throw new ResourcesRefused({ problem: "CLOUDFLARE_API_TOKEN is required to check Alpha Cloud's resources" })
+  if (at.ids.workerName === at.sibling.workerName || at.apiHost === at.webHost) throw new ResourcesRefused({ problem: "Alpha Cloud's Worker names and hosts must be distinct" })
+  for (const host of [at.apiHost, at.webHost]) if (host !== at.ids.zone && !host.endsWith("." + at.ids.zone)) throw new ResourcesRefused({ problem: `${host} is not in zone ${at.ids.zone}` })
+  const hyperdriveId = try configured(at.ids.hyperdriveId, "Hyperdrive")
+  if (!at.creating && (recordedAccount === undefined || hyperdriveId === undefined)) throw new ResourcesRefused({ problem: "record the account and Hyperdrive IDs (provision --write) before deploying" })
+  const origin = at.databaseUrl === undefined && !at.creating ? undefined : try postgresOrigin(at.databaseUrl ?? "")
+  const base = at.base ?? "https://api.cloudflare.com/client/v4"
+  const accountPath = `/accounts/${account}`
+  const zones = try list(base, token, `/zones?${new URLSearchParams({ name: at.ids.zone, "account.id": account, match: "all" })}`, "zone lookup")
+  const zone = zones[0]
+  if (zones.length !== 1 || zone?.name !== at.ids.zone || record(zone.account).id !== account || typeof zone.id !== "string")
+    throw new ResourcesRefused({ problem: `zone ${at.ids.zone} is not owned by the selected Cloudflare account alone` })
+  const hyperPath = `${accountPath}/hyperdrive/configs`
+  const hyperName = `${at.ids.workerName}-db`
+  const readHyperdrive = effect {
+    const rows = try list(base, token, hyperPath, "Hyperdrive lookup")
+    const found = observed(rows, hyperName, hyperdriveId, at.sibling.hyperdriveId)
+    const entry = rows.find((row) => row.id === found.id)
+    if (found.seen === "Recorded" && record(entry?.caching).disabled !== true) throw new ResourcesRefused({ problem: "Hyperdrive query caching must be off for Alpha Cloud's accounts" })
+    const bound = record(entry?.origin)
+    if (found.seen === "Recorded" && origin !== undefined && (!["postgres", "postgresql"].includes(String(bound.scheme)) || bound.host !== origin.host || bound.port !== origin.port || bound.database !== origin.database || bound.user !== origin.user))
+      throw new ResourcesRefused({ problem: "Hyperdrive's origin is not DATABASE_URL" })
+    return found
+  }
+  for (const [host, service] of [[at.apiHost, at.ids.workerName], [at.webHost, `${at.ids.workerName}-edge`]] as const) {
+    const domains = try list(base, token, `${accountPath}/workers/domains?${new URLSearchParams({ hostname: host, zone_id: zone.id })}`, "Worker domain lookup")
+    const domain = domains[0]
+    if (domain !== undefined && (domains.length !== 1 || domain.hostname !== host || domain.service !== service || domain.environment !== "production"))
+      throw new ResourcesRefused({ problem: `${host} is another Worker's custom domain` })
+    if (domain === undefined) {
+      const records = try list(base, token, `/zones/${zone.id}/dns_records?${new URLSearchParams({ "name.exact": host })}`, "DNS lookup")
+      if (records.some((row) => ["A", "AAAA", "CNAME"].includes(String(row.type)))) throw new ResourcesRefused({ problem: `${host} already has a DNS record; it must be free for the Worker's custom domain` })
+    }
+  }
+  const hyper = try readHyperdrive
+  switch (reconcile(hyper.seen, at.creating)) {
+    case "Keep": return { ...at.ids, accountId: account, hyperdriveId: hyper.id ?? at.ids.hyperdriveId }
+    case "Refuse": throw new ResourcesRefused({ problem: hyper.seen === "Absent" ? "Alpha Cloud's Hyperdrive is missing: run provision first" : `the Hyperdrive ${hyperName} is not the one recorded` })
+    case "Create": {
+      try call(base, token, hyperPath, "Hyperdrive create", { name: hyperName, origin: origin ?? {}, caching: { disabled: true } }) catch effect (failure) => {
+        if ((try readHyperdrive).seen !== "Recorded") throw failure
+        return {}
+      }
+      const created = try readHyperdrive
+      if (created.seen !== "Recorded") throw new ResourcesRefused({ problem: "Cloudflare did not confirm the created Hyperdrive" })
+      return { ...at.ids, accountId: account, hyperdriveId: created.id ?? at.ids.hyperdriveId }
+    }
+  }
+}

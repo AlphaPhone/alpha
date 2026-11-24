@@ -19,17 +19,29 @@
     "rootDirs": [
       "vibestack",
       ".vibe/build"
-    ]
+    ],
+    "declaration": true
   },
   "include": [
     "vibestack/spec.ts",
-    "vibestack/studio/src/main.vibe",
-    "vibestack/studio/gen/*.vibe",
+    "vibestack/formal.ts",
+    "vibestack/simulator.ts",
+    "vibestack/skill-links.ts",
     "vibestack/testing/index.ts",
     "vibestack/testing/vitest.ts",
+    "vibestack/testing/generate.ts",
     "vibestack/stories/meta.ts",
     "vibestack/stories/storybook.ts",
-    "vibestack/design/eslint.ts"
+    "vibestack/stories/cli.ts",
+    "vibestack/design/eslint.ts",
+    "vibestack/design/tokens.ts",
+    "vibestack/design/project.ts",
+    "vibestack/design/cli.ts",
+    "vibestack/eslint.ts",
+    "vibestack/chromium.ts",
+    "vibestack/config.ts",
+    "vibestack/doctor.ts",
+    "vibestack/upgrade.ts"
   ],
   "vibe": {
     "sidecarDir": ".vibe/build"

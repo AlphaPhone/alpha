@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "description": "Alpha's Pixel 10a (stallion) product on Android 17, as eliza's composition reads it (`pnpm aosp stage --target pixel10a`): the stock stallion vendor, Alpha's launcher as Home, the Sense listener when its image is qualified, and the shared system updater, disabled until the update channel is enrolled.",
+  "target": "pixel10a",
+  "sourceProfile": "pixel10a",
+  "vendorDirectory": "alphaphone",
+  "productName": "alpha_stallion_phone",
+  "model": "Alpha Phone Pixel 10a",
+  "brand": "Alpha",
+  "manufacturer": "Google",
+  "releaseConfig": "cp2a",
+  "launcher": {
+    "moduleName": "AlphaPhone",
+    "packageName": "ai.alphacompute.alphaphone"
+  },
+  "listener": {
+    "moduleName": "AlphaSense",
+    "packageName": "ai.alphacompute.alphaphone.sense"
+  },
+  "systemUpdater": true,
+  "firstRun": false,
+  "pixelConfig": {
+    "moduleName": "AlphaPixelConfig",
+    "packageName": "ai.alphacompute.pixelconfig",
+    "mimeType": "vnd.android.cursor.dir/vnd.alpha.pixel-flags"
+  }
+}

@@ -1,0 +1,145 @@
+// spec/app/home/index.md, "Story: Start Home"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import type { InstalledApp } from "@elizaos/os/bridges/definitions/system"
+import * as Home from "../../gen/app__home.effect.vibe"
+import type { Actor, Effect as Out, Event, Host } from "../../gen/app__home.effect.vibe"
+import { type Ask, waiting } from "../../gen/app__home__android.effect.vibe"
+import type { Tile } from "../../gen/app__home__tiles.effect.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
+import type { View } from "../../gen/app__shell.effect.vibe"
+import { Device } from "../platform/device.vibe"
+import { Launcher, type Presentation, type Why, keyOf } from "../platform/launcher.vibe"
+import { type Job, answer, contained, due, following, hearing, reacting, run, started, untimed } from "../runtime/reactor.vibe"
+import { say } from "../shell/notices.vibe"
+import { stepping } from "../shell/shell.vibe"
+import { catalog, labelOf } from "./catalog.vibe"
+import { parsedTiles, savedKey, written } from "./saved.vibe"
+
+const owner: Actor = "Owner"
+
+// spec/app/home/index.md, "Startup says once per run how Alpha is presented, and Home then reads its saved tiles"
+function hostOf(presented: Presentation): Host {
+  if (!presented.phone) return "InBrowser"
+  if (presented.assistant) return "AssistantOnly"
+  return presented.launcher ? "AsLauncher" : "AsApp"
+}
+
+// spec/app/home/tiles.md, "What was saved comes back as it was saved, an empty Home included; with no record Home shows its defaults"
+effect function readSaved(ticket: number): Event!!KeyValueStore.KeyValueStore {
+  const store = try KeyValueStore.KeyValueStore
+  const found = try parsedTiles((key) => store.get(key) catch () => undefined)
+  return { type: "savedRead", ticket, found: found.found, tiles: found.tiles }
+}
+
+// spec/app/home/index.md, "A save that lands becomes what is saved; one that fails puts Home back as it was and says so"
+effect function saveTiles(tiles: ReadonlyArray<Tile>, ticket: number): Event!!KeyValueStore.KeyValueStore {
+  const store = try KeyValueStore.KeyValueStore
+  const ok = effect { try store.set(savedKey, written(tiles)); return true } catch () => false
+  return { type: "homeSaved", ticket, ok }
+}
+
+// spec/app/home/index.md, "When the phone's apps change, or Alpha comes back to the front after a change, they are read again on the phone"
+effect function readApps(ticket: number): Event!!(Launcher | Device) {
+  const listed = (try Launcher).apps() catch () => undefined
+  const visible = try (try Device).showing()
+  if (listed === undefined) return { type: "appsRead", ticket, ok: false, listed: [], visible }
+  catalog.listed(listed)
+  return { type: "appsRead", ticket, ok: true, listed: [...new Set(listed.map(keyOf))], visible }
+}
+
+// spec/app/home/index.md, "Android's answer ends the wait; a refusal is told with its reason, and the apps are read again"
+effect function asked(ask: Ask, ticket: number): Event!!Launcher {
+  const launcher = try Launcher
+  const app = ask.tag === "Shade" ? undefined : catalog.app(ask.app)
+  const said = ask.tag === "Shade"
+    ? (try launcher.shade())
+    : app === undefined
+      ? { done: false as const, why: "Gone" as Why }
+      : ask.tag === "OpenApp" ? (try launcher.open(app)) : (try launcher.info(app))
+  return { type: "answered", ticket, opened: said.done, why: said.done ? "Unable" : said.why }
+}
+
+const reasons: Readonly<Record<Why, (label: string) => string>> = {
+  Gone: (label) => `${label} is no longer on this phone`,
+  TurnedOff: (label) => `${label} is turned off`,
+  ProfileLocked: (label) => `${label}'s profile is locked`,
+  NotInFront: () => "Alpha isn't in front, so Android didn't open it",
+  Unable: (label) => `Android couldn't open ${label}`,
+}
+
+/** What Home says of each failure, in the owner's words. */
+function sentence(fx: Out): string | undefined {
+  return match (fx) {
+    when { tag: "TellNotOpened", let ask, let why }: ask.tag === "Shade" ? `Couldn't open notifications. ${reasons[why]("the shade")}` : ask.tag === "AppInfo" ? `Couldn't show App info. ${reasons[why](labelOf(ask.app))}` : reasons[why](labelOf(ask.app));
+    when { tag: "TellNoAnswer" }: "Android didn't answer. Swipe down from the top of the screen for notifications";
+    when { tag: "TellUnlockFirst" }: "Unlock your phone to see notifications";
+    when { tag: "TellNotSaved" }: "Couldn't save Home. Try again";
+    when { tag: "TellSavedUnreadable" }: "Couldn't read your Home, so it shows Alpha's apps";
+    when { tag: "TellAppsUnread" }: "Couldn't load your apps";
+    default: undefined;
+  }
+}
+
+// spec/app/home/index.md, "A notice shows as a toast on bare Home, inline in the open drawer, and in the edit bar while editing; told while an app or Ask Alpha is up, it is not shown"
+effect function tell(fx: Out) {
+  const message = sentence(fx)
+  if (message === undefined) return
+  const shell = try (try Shell.Machine).get()
+  const home = try (try Home.Machine).get()
+  if (Home.noticeAt(home, shell) === "Nowhere") return
+  try say(message, { failure: true })
+}
+
+// spec/app/home/index.md, "A tap on one of Alpha's own tiles on bare Home asks the shell to open that app, never while Home is being edited"
+effect function go(view: View) {
+  try contained((try Shell.Machine).send({ type: "openView", view }), "opening an app from Home")
+}
+
+// spec/app/home/index.md, "Add to Home adds one of Alpha's own apps it lists, and an app's menu in the drawer adds that app; adding from the menu closes the drawer"
+effect function closeDrawer() {
+  const shell = try Shell.Machine
+  if ((try shell.get()).drawer) try contained(shell.send({ type: "goBack" }), "closing the drawer")
+}
+
+function carry(fx: Out): Job<Event, unknown, [Actor]> {
+  return match (fx) {
+    when { tag: "ReadSaved", let ticket }: answer("saved", readSaved(ticket), { type: "savedRead", ticket, found: "Unreadable", tiles: [] }, owner);
+    when { tag: "SaveHome", let tiles, let ticket }: answer("save", saveTiles(tiles, ticket), { type: "homeSaved", ticket, ok: false }, owner);
+    when { tag: "ReadApps", let ticket }: answer("apps", readApps(ticket), { type: "appsRead", ticket, ok: false, listed: [], visible: false }, owner);
+    when { tag: "AskAndroid", let ask, let ticket }: answer("android", asked(ask, ticket), { type: "answered", ticket, opened: false, why: "Unable" }, owner);
+    when { tag: "Go", let view }: run("go", go(view), owner);
+    when { tag: "CloseDrawer" }: run("drawer", closeDrawer(), owner);
+    default: run(`tell ${fx.tag}`, tell(fx), owner);
+  }
+}
+
+// spec/app/home/index.md, "Startup says once per run how Alpha is presented, and Home then reads its saved tiles"; spec/app/home/index.md, "Alpha is told when it becomes, or stops being, the phone's launcher"
+const presented = started(effect {
+  const home = try Home.Machine
+  const launcher = try Launcher
+  const device = try Device
+  const host = hostOf(try launcher.presentation())
+  try contained(home.send({ type: "presented", host }, owner), "presenting Home")
+  try Stream.runForEach(Stream.filter(device.visible, (shown) => shown), effect () => {
+    const now = hostOf(try launcher.presentation())
+    if (now === "AsLauncher" || now === "AsApp") try contained(home.send({ type: "launcherChanged", launcher: now === "AsLauncher" }, owner), "the launcher role")
+  })
+}, "presenting Home")
+
+/** Home's machine, kept across restarts for its numbers, and what tells it of the phone and the shell. */
+export const home = Layer.mergeAll(
+  reacting(Home, {
+    keep: 1,
+    open: [{ type: "restart" }, owner],
+    carry,
+    timers: (h) => (waiting(h.handoff) ? [due("android", h.handoff.until, { type: "stopWaiting", now: untimed }, owner)] : []),
+  }),
+  presented,
+  hearing(Stream.unwrap(effect {
+    const device = try Device
+    return Stream.mapEffect((try Launcher).changes, () => device.showing())
+  }), Home.Machine, (visible) => ({ type: "appsChanged", visible }), owner),
+  hearing(Stream.unwrap(effect { return Stream.filter((try Device).visible, (shown) => shown) }), Home.Machine, () => ({ type: "resumed" }), owner),
+  following(Shell.Machine, (shell) => shell, Home.Machine, (shell) => ({ type: "shellMoved", shell }), owner),
+  stepping("home", Home.Machine, Home.canBackOut),
+)

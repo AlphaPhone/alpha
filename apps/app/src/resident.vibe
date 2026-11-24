@@ -1,6 +1,19 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"
 import { together, whole } from "./runtime/reactor.vibe"
+import { pages } from "./settings/pages.vibe"
+import { preferences } from "./settings/preferences.vibe"
+import { updating } from "./settings/updates.vibe"
 import { shell } from "./shell/shell.vibe"
+import { notices } from "./shell/notices.vibe"
+import { haptics } from "./shell/haptics.vibe"
+import { canvas } from "./shell/canvas.vibe"
+import { mailbox } from "./inbox/mailbox.vibe"
+import { operations } from "./inbox/operations.vibe"
+import { attention } from "./telephony/attention.vibe"
+import { callBar } from "./telephony/callBar.vibe"
+import { comms } from "./telephony/comms.vibe"
+import { messages } from "./telephony/messages.vibe"
+import { phone } from "./telephony/phone.vibe"
 
 /**
  * The machines that live from launch to exit: those another area follows or tells, and those that must act while
@@ -9,6 +22,19 @@ import { shell } from "./shell/shell.vibe"
  */
 const machines = together(
   shell,
+  notices,
+  haptics,
+  canvas,
+  pages,
+  preferences,
+  updating,
+  mailbox,
+  operations,
+  callBar,
+  phone,
+  messages,
+  attention,
+  comms,
 )
 
 /** The resident machines, closed: each machine one of them follows or tells is among them. */

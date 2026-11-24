@@ -1,0 +1,75 @@
+// spec/app/inbox/sending.md, "Story: Archive or trash mail, with Undo"; spec/app/inbox/sending.md, "Story: Restore mail I archived or trashed"
+import * as Inbox from "../../gen/app__inbox.effect.vibe"
+import { accessOf } from "../../gen/app__inbox.effect.vibe"
+import * as Sending from "../../gen/app__inbox__sending.effect.vibe"
+import type { Effect as Out, Event, Kind } from "../../gen/app__inbox__sending.effect.vibe"
+import type { Actor } from "../../gen/app__inbox__access.ts"
+import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Cloud } from "../platform/cloud.vibe"
+import { Attempts } from "../runtime/attempts.vibe"
+import { Time } from "../runtime/time.vibe"
+import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import { Mail, relabel } from "./gmail.vibe"
+
+const labels = { Archive: "archive", Trash: "trash", Unarchive: "unarchive", Untrash: "untrash" } as const
+
+// spec/app/inbox/sending.md, "The answer to the request in flight ends it; a reply that does not match it, or none, leaves it unknown"
+/** Each message of a change, once, under its own key within the attempt: done only where every one was, known only where every one is. */
+effect function changed(attempt: number, kind: Kind, account: number, messages: ReadonlyArray<number>): Event!!(Attempts | Cloud | Mail) {
+  if (!(kind in labels)) return { type: "answered", attempt, done: false, matches: true, gmail: 0 }
+  let done = true
+  let known = true
+  for (const [at, message] of messages.entries()) {
+    const ended = try relabel(attempt, account, message, labels[kind as keyof typeof labels], at)
+    done = done && ended.done
+    known = known && ended.known
+    if (!ended.done) break
+  }
+  return { type: "answered", attempt, done, matches: known, gmail: 0 }
+}
+
+function carry(fx: Out): Job<Event, Cloud | Mail | Inbox.Machine | Shell, [by: Actor]> {
+  return match (fx) {
+    when { tag: "Request", let attempt, let kind, let access, let messages }:
+      answer(`request ${attempt}`, changed(attempt, kind, access.account, messages), { type: "replyLost", attempt }, "World");
+    // spec/app/inbox/index.md, "Messages handed to an operation are no longer chosen; once a change to the account's mail ends the first page is read again, and when its outcome is unknown the list says it may be out of date until Refresh"
+    when { tag: "Changed", let account, let known }: run("changed", effect { try ignore((try Inbox.Machine).send({ type: "changed", account, known })) }, "World");
+    // spec/app/inbox/sending.md, "While the account's grant lacks consent to send, nothing is sent, and Turn on hands over to Google access in Settings"
+    when { tag: "OpenGoogleAccess" }: run("access", effect { try ignore((try Shell).send({ type: "openView", view: "Settings" })) }, "World");
+    when { tag: "HandOver" }: run("draft", Effect.void, "World");
+    when { tag: "Cleanup" }: run("draft", Effect.void, "World");
+    when { tag: "Ended" }: run("draft", Effect.void, "World");
+  }
+}
+
+// spec/app/inbox/sending.md, "A recorded operation sends its one request, for its own account under that account's grant now, exactly as reviewed: a draft while it is at the revision shown and its hand-over is written to the phone, archive and Trash once the undo window has passed"
+/** A change held for the undo window goes out once the window has passed, under the grant its account has then. */
+const released = started(effect {
+  const operations = try Sending.Machine
+  const list = try Inbox.Machine
+  const time = try Time
+  const held = Stream.changesWith(operations.changes, (a, b) => a.undo.holding === b.undo.holding && a.undo.until === b.undo.until)
+  try Stream.runForEach(Stream.switchMap(held, (state) => (state.undo.holding === "Held" ? Stream.fromEffect(time.until(state.undo.until)) : Stream.empty)), effect () => {
+    const access = accessOf(try list.get(), (try operations.get()).account)
+    try contained(operations.send({ type: "dispatchNow", access, revision: 0, kept: false, now: untimed }, "World"), "releasing a held change")
+  })
+}, "releasing a held change")
+
+// spec/app/inbox/sending.md, "Losing the grant stops a review open and an operation recorded and not yet sent; a request already sent is never disowned"; spec/app/inbox/sending.md, "A change to what is under review, or to a draft whose operation is recorded and not yet sent, stops it and says it must be looked at again"
+const told = started(effect {
+  const operations = try Sending.Machine
+  const list = try Inbox.Machine
+  const facts = Stream.zipLatest(list.changes, operations.changes) |> Stream.map(%, ([mailbox, held]) => ({
+    access: accessOf(mailbox, held.account), revision: mailbox.revision, signedIn: mailbox.signedIn, review: held.review.showing,
+  }))
+  let signedIn: boolean | undefined
+  try Stream.runForEach(Stream.changesWith(facts, (a, b) => JSON.stringify(a) === JSON.stringify(b)), effect (fact) => {
+    try contained(operations.send({ type: "accessChanged", access: fact.access }, "World"), "the grant of the change")
+    if (fact.review) try ignore(operations.send({ type: "outdated", revision: fact.revision }, "World"))
+    if (signedIn !== undefined && signedIn !== fact.signedIn) try contained(operations.send({ type: "sessionChanged" }, "World"), "the cloud session")
+    signedIn = fact.signedIn
+  })
+}, "following the list")
+
+/** Archive, Trash and their restores: kept across restarts, held for the undo window, and sent through the owner's cloud. */
+export const operations = together(reacting(Sending, { keep: 1, open: [{ type: "restart" }, "World"], carry }), released, told)
