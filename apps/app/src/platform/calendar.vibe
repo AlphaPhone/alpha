@@ -1,47 +1,148 @@
-// spec/app/calendar/index.md, "Only the newest ticket's answer of the phone is taken; access Android refused hides its rows at once"; spec/kit/permission.md, "Story: Ask for access"
-import type { AndroidCalendarList, CalendarClient, CalendarRange } from "@elizaos/os/bridges/calendar"
+// spec/app/calendar/index.md, "Story: Let Calendar read my phone's calendar"; spec/app/calendar/editor.md, "Story: Write an event"; spec/app/calendar/editor.md, "Story: Never create an event twice"; spec/kit/permission.md, "Story: Ask for access"
+import type { AndroidCalendarDeletionScope, AndroidCalendarEditorFields, AndroidCalendarHandoffEvent, AndroidCalendarList, CalendarClient, CalendarPick, CalendarRange } from "@elizaos/os/bridges/calendar"
 import { registered } from "./device.vibe"
 
 module held {
-  import { calendarClient } from "@elizaos/os/bridges/calendar"
+  import { calendarClient, calendarPlugin } from "@elizaos/os/bridges/calendar"
+  import type { AndroidCalendarEditorFields, CalendarClient } from "@elizaos/os/bridges/calendar"
+  import { rendererDeletionClock } from "@elizaos/os/bridges/deletion-window"
 
-  let made: ReturnType<typeof calendarClient> | undefined
+  /** How long, by the clock eliza's deletion window keeps, until `expiresElapsed`. @throws {never} */
+  export function untilElapsed(expiresElapsed: number): number {
+    return Math.max(0, expiresElapsed - rendererDeletionClock().elapsed)
+  }
+
+  /**
+   * The calls of eliza's `ElizaCalendar` plugin that its typed client does not name yet: a create under a creation
+   * identity, which the plugin journals so that a lost answer is reconciled and never replayed, its receipts, opening
+   * an event in Android Calendar, and Android's own answer on access.
+   */
+  export interface Creations {
+    checkPermissions(): Promise<{ calendar: string }>
+    open(input: { id: string; begin?: number; end?: number }): Promise<{ status: string }>
+    save(input: AndroidCalendarEditorFields & { calendarId: string; creationId: string; separateCreation: boolean }): Promise<{ status: string; id?: string }>
+    pendingCreations(): Promise<{ status: string; creations?: ReadonlyArray<{ creationId: string; status: string }> }>
+  }
+
+  let made: CalendarClient | undefined
   /** eliza's client of the calendar plugin, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
-  export function client(): ReturnType<typeof calendarClient> {
+  export function client(): CalendarClient {
     return (made ??= calendarClient())
   }
+  /** @throws {never} */
+  export function creations(): Creations {
+    return calendarPlugin() as unknown as Creations
+  }
 }
-import { client } from held
+import { type Creations, client, creations, untilElapsed } from held
 
-/** The phone's calendar could not be read: the plugin refused, or did not answer. */
+/** The phone's calendar could not be read or written: the plugin refused, or did not answer. */
 export error CalendarUnread { cause: unknown }
 
+/** What Android says of Calendar's access, as the kit's permission takes it. */
+export type Grant = "Unasked" | "Granted" | "Denied"
+
+/** How a write to the phone's calendar ended, as the kit's `A::conclude(attempt, confirmed, known)` takes it. */
+export interface Written {
+  readonly confirmed: boolean
+  readonly known: boolean
+}
+
+/** What the phone's review of a deletion found: staged, with how many milliseconds its Undo window has left; for Android Calendar to review; changed since it was read; or refused. */
+export type Staged = { readonly kind: "ready"; readonly window: number } | { readonly kind: "editor" } | { readonly kind: "conflict" } | { readonly kind: "refused" }
+
+/** What the phone's own write review answered, as eliza's bridge says it (`WriteOutcome` of `@elizaos/os`). */
+function writtenOf(outcome: string): Written {
+  return outcome === "Applied" ? { confirmed: true, known: true } : outcome === "Uncertain" ? { confirmed: false, known: false } : { confirmed: false, known: true }
+}
+
 /**
- * The phone's own calendars, through eliza's `ElizaCalendar` plugin: whether this phone has them, a read of one range,
- * which says when Android wants Calendar access, and Android's one prompt for it.
+ * The phone's own calendars, through eliza's `ElizaCalendar` plugin: whether this phone has them, Android's answer on
+ * access and its one prompt, a read of one range, an event opened in Android Calendar or handed to its editor, and
+ * the writes Alpha makes itself, each once.
  */
 export service PhoneCalendar {
   readonly present: boolean
+  grant(): Grant!!
   list(range: CalendarRange): AndroidCalendarList!CalendarUnread
   requestAccess(): boolean!CalendarUnread
+  open(id: string, begin: number, end: number): void!CalendarUnread
+  handOff(event: AndroidCalendarHandoffEvent): boolean!CalendarUnread
+  create(fields: AndroidCalendarEditorFields, creationId: string, separate: boolean): Written!!
+  created(creationId: string): boolean!CalendarUnread
+  update(pick: CalendarPick, fields: AndroidCalendarEditorFields): Written!!
+  /** Stage the deletion through the phone's review, which inspects the event as it is now. */
+  stage(pick: CalendarPick, scope: AndroidCalendarDeletionScope): Staged!!
+  /** Send a staged deletion once its window is over; one the review still holds is refused, and nothing is sent. */
+  dispatch(id: string): Written!!
 }
 
 const plugin = "ElizaCalendar"
 
+/** The deletions the phone's review staged, each waiting for its Undo window to end before it is sent. */
+const staged = new Map<string, ReturnType<CalendarClient["review"]>>()
+
+const lost: Written = { confirmed: false, known: false }
+const refused: Written = { confirmed: false, known: true }
+
 /** On the phone: eliza's `calendarClient()` of `@elizaos/os/bridges/calendar`, where the host registered the plugin. */
 export const phoneCalendar = Layer.sync(PhoneCalendar, () => {
   const present = registered(plugin)
-  const calendar = (): CalendarClient => client()
+  const native = (): Creations => creations()
   return {
     present,
-    list: (range: CalendarRange) => tryPromise({ try: () => calendar().list(range), catch: (cause) => new CalendarUnread({ cause }) }),
-    requestAccess: () => tryPromise({ try: async () => (await calendar().requestAccess()).status === "granted", catch: (cause) => new CalendarUnread({ cause }) }),
+    grant: () => Effect.orElseSucceed(tryPromise(async () => {
+      const { calendar } = await native().checkPermissions()
+      return (calendar === "granted" ? "Granted" : calendar === "denied" ? "Denied" : "Unasked") as Grant
+    }), () => "Unasked" as Grant),
+    list: (range: CalendarRange) => tryPromise({ try: () => client().list(range), catch: (cause) => new CalendarUnread({ cause }) }),
+    requestAccess: () => tryPromise({ try: async () => (await client().requestAccess()).status === "granted", catch: (cause) => new CalendarUnread({ cause }) }),
+    open: (id: string, begin: number, end: number) => tryPromise({ try: async () => { await native().open({ id, begin, end }) }, catch: (cause) => new CalendarUnread({ cause }) }),
+    handOff: (event: AndroidCalendarHandoffEvent) => tryPromise({ try: async () => (await client().insertHandoff(event)).outcome === "Opened", catch: (cause) => new CalendarUnread({ cause }) }),
+    create: (fields: AndroidCalendarEditorFields, creationId: string, separate: boolean) => Effect.orElseSucceed(tryPromise(async (): Promise<Written> => {
+      const { status } = await native().save({ ...fields, calendarId: "local", creationId, separateCreation: separate })
+      return status === "saved" ? { confirmed: true, known: true } : status === "unknown" ? lost : refused
+    }), () => lost),
+    created: (creationId: string) => tryPromise({
+      try: async () => ((await native().pendingCreations()).creations ?? []).some((row) => row.creationId === creationId && row.status === "saved"),
+      catch: (cause) => new CalendarUnread({ cause }),
+    }),
+    update: (pick: CalendarPick, fields: AndroidCalendarEditorFields) => Effect.orElseSucceed(tryPromise(async (): Promise<Written> => {
+      const review = client().review(pick)
+      const inspected = await review.inspectUpdate()
+      return inspected.kind === "ready" ? writtenOf(await review.save(inspected.ticket, fields)) : refused
+    }), () => lost),
+    stage: (pick: CalendarPick, scope: AndroidCalendarDeletionScope) => Effect.orElseSucceed(tryPromise(async (): Promise<Staged> => {
+      const review = client().review(pick)
+      const inspected = await review.inspectDeletion(scope)
+      if (inspected.kind !== "ready") return { kind: inspected.kind === "editor" ? "editor" : "conflict" }
+      const deadline = await review.stageDeletion(inspected.ticket)
+      staged.set(pick.event.id, review)
+      return { kind: "ready", window: untilElapsed(deadline.expiresElapsed) }
+    }), (): Staged => ({ kind: "refused" })),
+    dispatch: (id: string) => Effect.orElseSucceed(tryPromise(async (): Promise<Written> => {
+      const review = staged.get(id)
+      staged.delete(id)
+      if (review === undefined) return refused
+      const dispatched = await review.dispatchDeletion().then(writtenOf, (cause: unknown) => (typeof cause === "object" && cause !== null && "_tag" in cause && cause._tag === "CalendarNotAllowed" ? refused : lost))
+      return dispatched
+    }), () => lost),
   }
 })
+
+const absent = (): CalendarUnread => new CalendarUnread({ cause: "a browser has no phone calendars" })
 
 /** In a browser: no phone, so no phone calendars. */
 export const browserCalendar = Layer.succeed(PhoneCalendar, {
   present: false,
-  list: () => fail(new CalendarUnread({ cause: "a browser has no phone calendars" })),
-  requestAccess: () => fail(new CalendarUnread({ cause: "a browser has no phone calendars" })),
+  grant: () => succeed("Denied" as Grant),
+  list: () => fail(absent()),
+  requestAccess: () => fail(absent()),
+  open: () => fail(absent()),
+  handOff: () => fail(absent()),
+  create: () => succeed(refused),
+  created: () => fail(absent()),
+  update: () => succeed(refused),
+  stage: () => succeed<Staged>({ kind: "refused" }),
+  dispatch: () => succeed(refused),
 })

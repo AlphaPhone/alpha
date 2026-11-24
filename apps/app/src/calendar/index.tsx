@@ -1,17 +1,29 @@
-// spec/app/calendar/index.md, "Back closes one layer at a time: the form, the delete sheet, the event, the Calendars sheet, the date picker, then search"
-import { Effect } from "effect";
-import * as Calendar from "../../gen/app__calendar.effect.vibe";
-import { Machine as Shell } from "../../gen/app__shell.effect.vibe";
-import { type Resident, type Shown, area } from "../runtime/area.tsx";
-import { Calendar as Screen } from "./Calendar.tsx";
+// spec/app/calendar/index.md, "The layout menu and the month dialog open over the days, never over an open event"; spec/app/calendar/index.md, "Back closes the event"; spec/app/calendar/editor.md, "Closing a form with edits kept on the phone sets it aside, offered back by a banner; otherwise the form is gone"
+import { Effect, Layer } from "effect";
+import * as View from "../../gen/app__calendar.effect.vibe";
+import * as Editor from "../../gen/app__calendar__editor.effect.vibe";
+import { area } from "../runtime/area.tsx";
+import { together } from "../runtime/reactor.vibe";
+import { changes } from "./agent.vibe";
+import { Calendar } from "./Calendar.tsx";
 import { calendar } from "./calendar.vibe";
+import { deletions } from "./deletions.vibe";
+import { editor } from "./editor.vibe";
+import { linking } from "./link.vibe";
+import { owners } from "./owner.vibe";
 
-function Opened({ runtime }: Shown<Calendar.Machine | Resident>) {
-  return <Screen runtime={runtime} onSettings={() => void runtime.runPromise(Effect.flatMap(Shell, (shell) => Effect.ignore(shell.send({ type: "openView", view: "Settings" }))))} />;
-}
-
-/** Calendar, at its view: its machine is its own, and it takes Back for each layer it has open. */
-export default area(calendar, Opened, {
-  back: Effect.flatMap(Calendar.Machine, (machine) => Effect.flatMap(machine.get(), (state) =>
-    Calendar.canGoBack(state) ? Effect.as(Effect.ignore(machine.send({ type: "goBack" })), true) : Effect.succeed(false))),
+/** Back inside Calendar: the form, then the overlay, then the open event, while one is open. */
+const back = Effect.gen(function* () {
+  const form = yield* Editor.Machine;
+  const view = yield* View.Machine;
+  const tried: ReadonlyArray<Effect.Effect<unknown, unknown>> = [
+    form.send({ type: "close" }),
+    view.send({ type: "closeOverlay" }),
+    view.send({ type: "closeEvent" }),
+  ];
+  for (const step of tried) if (yield* Effect.match(step, { onFailure: () => false, onSuccess: () => true })) return true;
+  return false;
 });
+
+/** Calendar, at its view (areas.ts): its view, its form, the Google link, who it reads for and the agent's changes live from its first opening until Alpha closes. */
+export default area(Layer.mergeAll(together(calendar, editor, linking, deletions, owners), changes), Calendar, { back });
