@@ -2,6 +2,7 @@
 import { assert, it } from "@effect/vitest"
 import { Machine as ConnectionMachine } from "../../gen/maps__connection.effect.vibe"
 import { Machine as GuidanceMachine } from "../../gen/maps__guidance.effect.vibe"
+import { Machine as LocatorMachine } from "../../gen/maps__location.effect.vibe"
 import { Machine as ScreenMachine } from "../../gen/maps__screen.effect.vibe"
 import { Machine as OpenMachine } from "../../gen/maps__notificationOpen.effect.vibe"
 import { MapsContent } from "../../src/maps/content.vibe"
@@ -57,19 +58,22 @@ it.live("Find a place, plan directions, choose a route and follow it (spec/maps/
     try until(guidance.changes, (g) => g.fixUsable)
     try Queue.offer(h.fixes, fixAt(pier))
     const end = try until(guidance.changes, (g) => g.phase === "Arrived")
+    // Arriving stops the watch; its removal is confirmed once the location custody has no cleanup pending.
+    try until((try LocatorMachine).changes, (s) => s.phase === "Idle" && !s.cleanupPending)
+    const arrived = (try content.get()).message
 
     try Effect.try(() => assert.deepStrictEqual({
       searched: [searched.queryRun, searches],
       shown: [detailed.choice, shown?.label, shown?.place?.phone],
       planned: [planned.routes, routeCalls === h.cloudCalls.filter((p) => p.endsWith("/routes")).length, chosen.chosen],
       started: [started.phase, screenOff.guidance?.screenOff],
-      end: [end.phase, h.nativeCalls.includes("AlphaMapsTransport.startNavigation"), h.nativeCalls.includes("ElizaLocation.clearWatch")],
+      end: [end.phase, h.nativeCalls.includes("AlphaMapsTransport.startNavigation"), h.nativeCalls.includes("ElizaLocation.clearWatch"), arrived],
     }, {
       searched: [1, 1],
       shown: ["ResultChoice", "Pier 39", "+1 415 555 0100"],
       planned: [2, true, 1],
       started: ["Guiding", true],
-      end: ["Arrived", true, true],
+      end: ["Arrived", true, true, "Destination reached."],
     }))
   }
 })

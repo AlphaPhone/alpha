@@ -57,6 +57,8 @@ export const navigationLayer = Layer.effect(MapsNavigation, effect {
   const voice = try NavigationVoice
   const native = try Native
   const watching = try Ref.make<Fiber.Fiber<void> | undefined>(undefined)
+  /** Counts watches started and stopped: a watch runs only while the count is the one it started under. */
+  let watches = 0
   const serviceEnds = try Queue.unbounded<"notification" | "lost" | "arrived">()
   const routes = new Map<string, number>()
 
@@ -126,8 +128,10 @@ export const navigationLayer = Layer.effect(MapsNavigation, effect {
         const session = out.session
         const previous = try Ref.getAndSet(watching, undefined)
         if (previous) try Fiber.interrupt(previous)
+        watches += 1
+        const mine = watches
         const fiber = fork.detached effect {
-          Stream.runForEach(location.watch(), (fix) => onFix(session, fix)) catch effect (error) => {
+          Stream.runForEachWhile(location.watch(), (fix) => map(onFix(session, fix), () => watches === mine)) catch effect (error) => {
             try tell(error.message)
             try service.watchFailed()
             try apply({ type: "watchFailed", owner: session })
@@ -137,8 +141,11 @@ export const navigationLayer = Layer.effect(MapsNavigation, effect {
         return
       }
       case "StopWatch": {
+        watches += 1
         const fiber = try Ref.getAndSet(watching, undefined)
-        if (fiber) try Fiber.interrupt(fiber)
+        // An arriving fix stops the watch from inside it: the watch ends once that fix is handled, so the arrival is still
+        // told, offered to voice and handed to the navigation service. Interrupting it here would cut the arrival short.
+        if (fiber && fiber.id !== (try Effect.fiberId)) try Fiber.interrupt(fiber)
         return
       }
       case "PlanReroute": {
