@@ -80,7 +80,7 @@ export function draftFrom(card: ContactDetail | undefined, after: Lines): Contac
   const notes = after.notes ?? card?.notes
   return {
     displayName: after.name,
-    ...(renamed ? (after.given !== undefined || after.family !== undefined ? { givenName: after.given ?? "", familyName: after.family ?? "" } : {}) : { givenName: card.givenName, familyName: card.familyName }),
+    ...(!renamed && card !== undefined ? { givenName: card.givenName, familyName: card.familyName } : after.given !== undefined || after.family !== undefined ? { givenName: after.given ?? "", familyName: after.family ?? "" } : {}),
     ...(notable && notes !== undefined ? { notes } : {}),
     phoneNumbers: after.phones.filter((number) => number.trim() !== "").map((number) => card?.phoneNumbers.find((one) => one.number === number) ?? { number, type: "mobile" }),
     emailAddresses: after.emails.filter((address) => address.trim() !== "").map((address) => card?.emailAddresses.find((one) => one.address === address) ?? { address, type: "home" }),
@@ -91,7 +91,7 @@ export function draftFrom(card: ContactDetail | undefined, after: Lines): Contac
 export function linesOfForm(form: Form, card: ContactDetail | undefined): Lines {
   const unrenamed = card !== undefined && form.givenName === card.givenName && form.familyName === card.familyName
   return {
-    name: unrenamed ? card.displayName : [form.givenName, form.familyName].filter((part) => part.trim() !== "").join(" "),
+    name: unrenamed && card !== undefined ? card.displayName : [form.givenName, form.familyName].filter((part) => part.trim() !== "").join(" "),
     given: form.givenName, family: form.familyName, phones: form.phones, emails: form.emails, notes: form.notes,
   }
 }
