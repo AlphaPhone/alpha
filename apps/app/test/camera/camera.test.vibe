@@ -96,7 +96,7 @@ it.live("the assistant's photo needs the visible Camera, flips to the named came
   let gallery = libraryId
   const device = camera({
     "ElizaCamera.capturePhoto": () => ({ format: "jpeg", thumbnail: "AA", width: 4000, height: 3000, path: "content://media/external/images/media/41", libraryId: gallery }),
-    "AlphaPhotos.read": (args) => ({ id: (args as { id: string }).id, kind: "image", width: 4000, height: 3000, date: 1, size: 1000, revision: "r1", image: "data:image/jpeg;base64,AA" }),
+    "AlphaPhotos.read": () => ({ id: "m:external_primary:i:41", kind: "image", width: 4000, height: 3000, date: 1, size: 1000, revision: "r1", image: "data:image/jpeg;base64,AA" }),
   })
   provide cameraOver(device) {
     const view = try Viewfinder
@@ -111,8 +111,9 @@ it.live("the assistant's photo needs the visible Camera, flips to the named came
     gallery = "m:external_primary:i:42"
     const mismatched = try actions.execute({ type: "camera_capture_photo" }, { operationId: "op-5", reviewed: true, ownerWords: false, capabilities: "camera.capture-photo.v1, camera.capture-library-id.v1" })
     const lens = (try view.get()).lens
-    try Effect.try(() => assert.deepStrictEqual({ closed, unasked, front, plain, mismatched, lens }, {
-      closed: "Open Camera first", unasked: "Camera busy",
+    const lookups = device.calls.filter(({ method }) => method === "AlphaPhotos.read").map(({ args }) => args)
+    try Effect.try(() => assert.deepStrictEqual({ closed, unasked, front, plain, mismatched, lens, lookups }, {
+      closed: "Open Camera first", unasked: "Camera busy", lookups: [{ id: libraryId, includeTrashed: false }],
       front: { status: "succeeded", summary: "Saved", receipt: { version: 1, kind: "camera_capture_photo", operationId: "op-3", mediaId: "41", width: 4000, height: 3000, mime: "image/jpeg", libraryId } },
       plain: { status: "succeeded", summary: "Saved", receipt: { version: 1, kind: "camera_capture_photo", operationId: "op-4", mediaId: "41", width: 4000, height: 3000, mime: "image/jpeg" } },
       mismatched: { status: "succeeded", summary: "Saved", receipt: { version: 1, kind: "camera_capture_photo", operationId: "op-5", mediaId: "41", width: 4000, height: 3000, mime: "image/jpeg" } },
