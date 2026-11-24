@@ -23,6 +23,7 @@
     "@elizaos/agent": "link:../../.eliza/packages/agent",
     "@elizaos/cloud": "link:../../.eliza/packages/cloud",
     "@elizaos/os": "link:../../.eliza/packages/os",
+    "@elizaos/plugin-inbox": "link:../../.eliza/packages/plugin-inbox",
     "@repo/design-system": "workspace:*",
     "@repo/ui": "workspace:*",
     "dompurify": "3.4.17",

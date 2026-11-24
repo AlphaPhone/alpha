@@ -49,7 +49,7 @@ effect function drafted(attempt: number, kind: Kind, account: number, draft: num
   const letters = try Letters
   const words = letters.words(draft)
   const copy = letters.copy(gmail)
-  if (kind !== "SaveDraft" && copy === undefined) return { type: "answered", attempt, done: false, matches: true, gmail: 0 }
+  if (kind !== "SaveDraft" && copy?.account !== account) return { type: "answered", attempt, done: false, matches: true, gmail: 0 }
   const ended = kind === "DeleteDraft"
     ? try operate(attempt, account, { kind: "draft-delete", draftId: copy?.id ?? "", expectedDigest: copy?.digest ?? "", confirmPermanentDelete: true })
     : try operate(attempt, account, {
@@ -60,7 +60,7 @@ effect function drafted(attempt: number, kind: Kind, account: number, draft: num
     })
   const id = ended.result?.["draftId"]
   const digest = ended.result?.["providerDigest"]
-  const saved = ended.done && kind !== "DeleteDraft" && typeof id === "string" && typeof digest === "string" ? letters.copied(id, digest) : 0
+  const saved = ended.done && kind !== "DeleteDraft" && typeof id === "string" && typeof digest === "string" ? letters.copied(account, id, digest) : 0
   return { type: "answered", attempt, done: ended.done && (kind === "DeleteDraft" || saved !== 0), matches: ended.known, gmail: saved }
 }
 

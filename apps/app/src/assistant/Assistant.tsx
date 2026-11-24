@@ -1,6 +1,6 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
 import {
-  Alert, AssistantCard, AssistantChatHistorySheet, AssistantConversation, AssistantGrabber, AssistantSearchSheet,
+  Alert, AssistantCard, AssistantChatHistorySheet, AssistantConversation, AssistantGrabber, AssistantSearchSheet, ConfirmDialog,
   type AssistantAttachment, type AssistantDraftNoticeProps, type AssistantMessageProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
@@ -25,11 +25,12 @@ import { useMachine as useSearch } from "../../gen/app__assistant__search.react.
 import { type Machine as ShellMachine, showing } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
+import { MailQuestions } from "../inbox/mail-context.vibe";
 import { freedom } from "./assistant.vibe";
 import { Talk } from "./talk.vibe";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | Talk, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | Talk | MailQuestions, unknown>;
 }
 
 function turnOf(talking: Talking, label: string): AssistantTurnNoteProps["status"] | undefined {
@@ -106,6 +107,8 @@ export function Assistant({ runtime }: AssistantProps) {
   const dock = useDock(runtime);
   const board = runtime.runSync(Effect.map(Talk, (talk) => talk.board));
   const seen = useSyncExternalStore((listener) => board.subscribe(listener), () => board.snapshot());
+  const mail = runtime.runSync(MailQuestions);
+  const reviewed = useSyncExternalStore(mail.subscribe, mail.snapshot);
   const [listing, setListing] = useState(false);
   const [words, setWords] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -127,6 +130,17 @@ export function Assistant({ runtime }: AssistantProps) {
   const type = (text: string) => {
     board.type(text);
     void composer.send({ type: "edit", blank: text.trim() === "", long: text.length > textLimit });
+  };
+  const attachMail = () => {
+    const question = mail.snapshot().question;
+    const offer = { type: "offer", kind: "Mail", revision: writing.offeredAt + 1 } as const;
+    if (!question || !composer.can(offer)) return;
+    void composer.send(offer).then((outcome) => {
+      if (outcome._tag !== "Success" || mail.snapshot().question !== question) return;
+      mail.attach(question);
+      if (!board.snapshot().typed.trim()) type("Summarize this email");
+      composerRef.current?.focus();
+    });
   };
   const send = () => {
     const talk = runtime.runSync(Effect.map(Talk, (t) => t.board));
@@ -276,10 +290,36 @@ export function Assistant({ runtime }: AssistantProps) {
           onRemoveAttachment: (id) => {
             if (id === "question") void composer.send({ type: "removeQuestion" });
             else if (id.startsWith("file ")) void composer.send({ type: "removeFile" });
-            else if (id === "mail" || id === "transcript" || id === "shown") void composer.send({ type: "detach", kind: detached[id] });
+            else if (id === "mail" || id === "transcript" || id === "shown") {
+              if (id === "mail") mail.clear();
+              void composer.send({ type: "detach", kind: detached[id] });
+            }
           },
           onUnquote: composer.can({ type: "unquote" }) ? () => void composer.send({ type: "unquote" }) : undefined,
         }}
+      />
+      <ConfirmDialog
+        open={open && reviewed.question !== undefined}
+        title="Share this email with Alpha?"
+        confirmLabel="Add to chat"
+        onConfirm={attachMail}
+        onCancel={() => mail.show({})}
+      >
+        {reviewed.question ? (
+          <span className="block max-h-72 overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere]">
+            {reviewed.question.review.source.subject || "(no subject)"}{"\n"}
+            {reviewed.question.review.source.from}{"\n"}
+            {reviewed.question.review.source.to.join(", ")}{"\n\n"}
+            {reviewed.question.review.source.bodyText}
+          </span>
+        ) : null}
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={open && reviewed.failure !== undefined}
+        title={reviewed.failure === "tooLarge" ? "This email is too long to share in full" : "Review this email again before sharing"}
+        confirmLabel="OK"
+        onConfirm={() => mail.show({})}
+        onCancel={() => mail.show({})}
       />
       <AssistantChatHistorySheet
         open={listing}

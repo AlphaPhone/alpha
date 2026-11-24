@@ -34,6 +34,7 @@ export function checkout(): Checkout {
 }
 
 const stamp = (at: Checkout) => path.join(at.root, ".alpha/ready.json");
+const inboxClient = (at: Checkout) => path.join(at.root, "packages/plugin-inbox/dist/src/client/index.js");
 
 const versionOf = (file: string, name: string) => (JSON.parse(fs.readFileSync(file, "utf8")) as { dependencies?: Record<string, string> }).dependencies?.[name];
 
@@ -51,8 +52,12 @@ function linked(at: Checkout) {
   fs.symlinkSync(at.root, link, "dir");
 }
 
-export function ready(at: Checkout = checkout()): boolean {
+function baseReady(at: Checkout): boolean {
   return fs.existsSync(stamp(at)) && (JSON.parse(fs.readFileSync(stamp(at), "utf8")) as { commit?: string }).commit === at.commit;
+}
+
+export function ready(at: Checkout = checkout()): boolean {
+  return baseReady(at) && fs.existsSync(inboxClient(at));
 }
 
 /** The checkout, or the command that makes it. */
@@ -94,6 +99,10 @@ export async function prepare() {
 
 async function build(at: Checkout) {
   if (ready(at)) return;
+  if (baseReady(at)) {
+    run(at.root, "pnpm", "--filter", "@elizaos/plugin-inbox", "build");
+    return;
+  }
   const source = process.env.ALPHA_ELIZA_SOURCE ?? lock.remote;
   if (!fs.existsSync(path.join(at.root, ".git"))) {
     fs.mkdirSync(path.dirname(at.root), { recursive: true });
@@ -101,7 +110,7 @@ async function build(at: Checkout) {
   }
   run(at.root, "git", "checkout", "-q", "--detach", at.commit);
   run(at.root, "pnpm", "install", "--frozen-lockfile", "--prefer-offline");
-  for (const name of ["core", "cloud", "agent", "os"]) run(at.root, "pnpm", "--filter", `@elizaos/${name}`, "build");
+  for (const name of ["core", "cloud", "agent", "os", "plugin-inbox"]) run(at.root, "pnpm", "--filter", `@elizaos/${name}`, "build");
   fs.rmSync(at.bundle, { recursive: true, force: true });
   const started = Date.now();
   const { buildAgentBundle } = await import(pathToFileURL(path.join(at.root, "packages/agent/dist/src/bundle/build.js")).href) as {

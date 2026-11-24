@@ -337,6 +337,9 @@ importers:
       '@elizaos/os':
         specifier: link:../../.eliza/packages/os
         version: link:../../.eliza/packages/os
+      '@elizaos/plugin-inbox':
+        specifier: link:../../.eliza/packages/plugin-inbox
+        version: link:../../.eliza/packages/plugin-inbox
       '@repo/design-system':
         specifier: workspace:*
         version: link:../../packages/design-system
