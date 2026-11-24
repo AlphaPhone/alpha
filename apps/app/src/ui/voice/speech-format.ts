@@ -28,7 +28,7 @@ const namedDate = new RegExp(
 );
 const clock = String.raw`(?:0?[1-9]|1[0-2])(?::[0-5]\d)?`;
 const bareClock = String.raw`(?:[01]?\d|2[0-3]):[0-5]\d`;
-const meridiem = String.raw`[ \t]*[ap]\.?[ \t]*m(?:\.(?=[ \t]*[,;–—−-]|[ \t]+to[ \t]))?`;
+const meridiem = String.raw`[ \t]*[aApP]\.?[ \t]*[mM](?:\.(?=[ \t]*[,;–—−-]|[ \t]+[tT][oO][ \t]))?`;
 const rangeSeparator = String.raw`(?:[ \t]*[-–—−][ \t]*|[ \t]+to[ \t]+)`;
 const clockTimeEnd = String.raw`(?![\p{L}\d:/-]|\.\d)`;
 const clockRange = new RegExp(
@@ -36,8 +36,8 @@ const clockRange = new RegExp(
   'giu',
 );
 const clockWithMeridiem = new RegExp(
-  String.raw`(?<![\p{L}\d:+./-])(${clock}${meridiem})${clockTimeEnd}`,
-  'giu',
+  String.raw`(?<![\p{L}\d:+./-])(${clock}${meridiem})(?:\.(?=[ \t]+\p{Ll}))?${clockTimeEnd}`,
+  'gu',
 );
 const bareClockTime = new RegExp(String.raw`(?<![\p{L}\d:+./-])${bareClock}${clockTimeEnd}`, 'gu');
 const contextualClockTime = new RegExp(String.raw`(?<=\bat )${bareClock}${clockTimeEnd}`, 'giu');
