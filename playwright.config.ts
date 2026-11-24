@@ -12,8 +12,10 @@ const productionOutput=`test-results/production-web-${productionPort}`;
 // The default port keeps the plain paths that CI uploads.
 const runSuffix=port===5317?'':`-${port}`;
 const webServerTimeout=scaledTimeout(180_000);
-// The production lane runs production-surface.spec.ts and every <name>.production.spec.ts.
-const productionSpec=/(production-surface|\.production)\.spec\.ts$/;
+// The older renderer's production suites remain on legacy Develop. Run the
+// contracts for this renderer against its own flag-off build.
+const productionSpec=/(?:^|[\\/])vibestack-production\.spec\.ts$/;
+const legacyProductionSpec=/(production-surface|\.production)\.spec\.ts$/;
 // Live specs need a running local agent and real providers; only the live project runs them
 // (pnpm test:browser:live).
 const liveSpec=/\.local\.spec\.ts$/;
@@ -79,7 +81,7 @@ export default defineConfig({
     // when it passes, so they are recorded only with ALPHA_TRACE=1.
     trace: process.env.ALPHA_TRACE === '1' ? 'retain-on-failure' : { mode: 'retain-on-failure', snapshots: false } },
   projects: [
-    { name: 'chromium', testIgnore: [productionSpec, liveSpec] },
+    { name: 'chromium', testIgnore: [productionSpec, legacyProductionSpec, liveSpec] },
     { name: 'production', testMatch: productionSpec, use: { baseURL: `http://127.0.0.1:${productionPort}` } },
     { name: 'firefox', testMatch: storageSpecPattern, use: { ...devices['Desktop Firefox'], baseURL: `http://127.0.0.1:${port}`, viewport: { width: 412, height: 915 } } },
     { name: 'webkit', testMatch: storageSpecPattern, use: { ...devices['Desktop Safari'], baseURL: `http://127.0.0.1:${port}`, viewport: { width: 412, height: 915 } } },
