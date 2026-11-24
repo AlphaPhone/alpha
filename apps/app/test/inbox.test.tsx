@@ -141,6 +141,18 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     step("15");
     expect([rows().includes("Your tax return"), world.inbox.changes.at(-1)]).toEqual([false, "archive g2"]);
 
+    // spec/app/inbox/sending.md, "A restore is reviewed for messages chosen in Archived or Trash, or right after the change went out, bound to the message's history revision; Gmail refuses it as out of date when the message changed since"
+    await drawn(() => [...document.querySelectorAll("[role=toolbar] button, nav button, button")].find((found) => found.textContent === "Archive" && !found.hasAttribute("aria-label"))?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    await until(alpha, runtime, List, (s) => s.selected.folder === "Archived" && s.list.status === "Loaded");
+    await choose("Your tax return");
+    await press("Move back");
+    await confirm("Move back");
+    await until(alpha, runtime, Changes, (s) => s.kind === "Unarchive" && s.attempt.outcome === "Confirmed");
+    expect(world.inbox.changes.at(-1)).toBe("unarchive g2");
+    await press("Inbox");
+    await until(alpha, runtime, List, (s) => s.selected.folder === "Incoming" && s.list.status === "Loaded");
+    expect(rows().includes("Your tax return")).toBe(true);
+
     // spec/app/inbox/index.md, "A read that fails offline or for another reason keeps what was on screen and the count, and says why"
     world.inbox.offline = true;
     await press("Refresh");
@@ -187,7 +199,7 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   expect([rows(), told()]).toEqual([[], expect.stringContaining("Alpha cannot read this mail")]);
 });
 
-it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I reviewed\"; spec/app/inbox/drafts.md, \"Story: Write a message\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\"; spec/app/inbox/suggestion.md, \"Story: Review what is offered into my email\")", async () => {
+it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I reviewed\"; spec/app/inbox/drafts.md, \"Story: Write a message\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\"; spec/app/inbox/suggestion.md, \"Story: Review what is offered into my email\"; spec/app/inbox/sending.md, \"Story: Save my draft to Gmail, or delete it there, knowingly\")", async () => {
   const world = { ...scene(), phone: false };
   const { alpha } = await open(world);
   const runtime = inbox.runtime(alpha);
@@ -214,6 +226,14 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
   expect((document.querySelector("textarea[aria-label=Message]") as HTMLTextAreaElement | null)?.value).toBe("Thanks, it is all in order.\n\nSee you on Friday.");
 
+  // spec/app/inbox/sending.md, "Story: Save my draft to Gmail, or delete it there, knowingly"
+  await menu("Save to Gmail");
+  await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "SaveDraft");
+  await confirm("Save");
+  await until(alpha, runtime, Changes, (s) => s.kind === "SaveDraft" && s.attempt.outcome === "Confirmed");
+  await until(alpha, runtime, Writing, (s) => s.letter.gmail !== 0);
+  expect(world.inbox.changes).toEqual(["draft-create Re: Your tax return"]);
+
   // spec/app/inbox/adding.md, "A file is attached to the draft open only once the picker gives one that fits within the room its account leaves; one too large, unreadable or without room is refused and said so"
   await press("Attach a file");
   await drawn(() => {
@@ -230,7 +250,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "Send");
   await confirm("Send");
   await until(alpha, runtime, Changes, (s) => s.attempt.outcome === "Confirmed");
-  expect([world.inbox.changes, world.inbox.attached]).toEqual([["send s2@mail.test Re: Your tax return"], ["receipt.txt"]]);
+  expect([world.inbox.changes.at(-1), world.inbox.attached]).toEqual(["send s2@mail.test Re: Your tax return", ["receipt.txt"]]);
 
   // spec/app/inbox/drafts.md, "Once its send is confirmed, a draft unchanged since the revision sent is forgotten; one edited after it, or whose write is in flight, is kept and marked as sent"
   await until(alpha, runtime, Writing, (s) => !s.open && s.shelf.shelved.length === 0);
