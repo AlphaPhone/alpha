@@ -30,7 +30,7 @@ migration is ineligible (setup open, app disabled or suspended), so the choice s
 when eligibility returns. Custom choices, managed users and
 secondary users retain their assignments. No credential or application data is copied.
 
-`python3 test/aosp-role-upgrade.test.py` (also run by `bun run test`) compiles the policy
+`python3 test/aosp-role-upgrade.test.py` compiles the policy
 cases, and the real staging projection, policy and Android adapter over a synthetic controller
 that carries the projection anchors, with Android boundary doubles. That synthetic controller
 test drives owner add, remove and clear requests through the injected hook. The test that

@@ -4,7 +4,7 @@ import { Machine as Bar } from "../../gen/app__telephony__callBar.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import * as Updates from "../../gen/app__update.effect.vibe"
-import type { Activity, Effect as Out, Event, Feed, Release, Reply } from "../../gen/app__update.effect.vibe"
+import type { Activity, Effect as Out, Event, Feed, Release } from "../../gen/app__update.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { LauncherUpdates } from "../platform/launcherUpdates.vibe"
 import { type Job, answer, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
@@ -13,7 +13,10 @@ import { type Engagement, Engagements, engagements } from "./activity.vibe"
 import { Names, names } from "./names.vibe"
 
 const hex64 = /^[0-9a-f]{64}$/
-const plainName = /^[^\u0000-\u001f\u007f]*$/
+const isPlainName = (text: string) => ![...text].some((character) => {
+  const code = character.charCodeAt(0)
+  return code <= 0x1f || code === 0x7f
+})
 /** Where the manifest last answered is kept, so that an install finds the address of the release the machine offers. */
 const kept = "alpha/update/manifest@1"
 /** How long a check may take before the shell answers it as unreadable. */
@@ -68,9 +71,9 @@ effect function releaseOf(row: Row): Release!!Names {
     digest: hex64.test(row.sha256) ? try named.number(row.sha256) : 0,
     bytes: whole(row.sizeBytes),
     https, credentials, url: row.apkUrl.length,
-    name: row.versionName !== undefined && plainName.test(row.versionName) ? row.versionName.length : 0,
+    name: row.versionName !== undefined && isPlainName(row.versionName) ? row.versionName.length : 0,
     notes: row.notes?.length ?? 0,
-    versionName: row.versionName !== undefined && plainName.test(row.versionName) ? row.versionName : "",
+    versionName: row.versionName !== undefined && isPlainName(row.versionName) ? row.versionName : "",
     releaseNotes: row.notes ?? "",
   }
 }

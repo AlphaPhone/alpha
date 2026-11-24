@@ -209,7 +209,8 @@ describe("Build a candidate and sign it (spec/release/index.md, \"Story: Build a
     expect(await released("review", "--run", run, "--plan", join(directory, "plan.json"), "--plan-sha256", planSha256)).toMatchObject({ ok: true, value: { stage: "Planned", reviewed: true, plan: 1 } });
     // spec/release/index.md, "Signing happens only in the protected environment, from the reviewed plan of the same attempt, with one signer and no key rotation": a keystore inside the working tree is not the protected one.
     const sign = (keystore: string) => released("sign", "--run", run, "--plan", join(directory, "plan.json"), "--apk", unsigned, "--out", join(directory, "signed.apk"), "--keystore", keystore, "--key-label", "alpha-release");
-    expect(await sign(place("aosp/signing/release-signer.json"))).toMatchObject({ ok: false, said: expect.stringContaining("protected keystore") });
+    const unguarded = await sign(place("aosp/signing/release-signer.json"));
+    expect([unguarded.ok, unguarded.ok ? "" : unguarded.said.includes("protected keystore")]).toEqual([false, true]);
     // spec/release/index.md, "A rerun keeps its number and takes a new attempt, before signing only": the plan reviewed for the first attempt no longer signs.
     expect(await released("rerun", "--run", run)).toMatchObject({ ok: true, value: { number: 122, attempt: 2 } });
     const keystore = join(directory, "release.p12");
@@ -231,6 +232,13 @@ describe("Build a candidate and sign it (spec/release/index.md, \"Story: Build a
 const PACKAGE = "ai.alphacompute.alphaphone";
 const STOCK = "com.android.launcher3/.Launcher";
 
+/** Answers one fake adb line from the first matching pattern. */
+function replyFor(answers: readonly [RegExp, () => string][], line: string) {
+  const answer = answers.find(([pattern]) => pattern.test(line));
+  if (answer === undefined) throw new Error(`the phone does not answer adb ${line}`);
+  return answer[1]();
+}
+
 /** A pilot phone at the other end of adb: Home's holder, Alpha's installed version and data, and every command it was sent. */
 function pilotPhone({ install = (): void => undefined } = {}) {
   const apk = digest("alpha 122");
@@ -243,7 +251,7 @@ function pilotPhone({ install = (): void => undefined } = {}) {
     const activity = /^shell cmd package set-home-activity --user 0 (\S+)$/.exec(line);
     if (activity?.[1] !== undefined) { phone.activity = activity[1]; return ""; }
     if (line.startsWith("install -r ")) { install(); phone.version = 122; return "Success"; }
-    const answers: [RegExp, () => string][] = [
+    return replyFor([
       [/^shell am get-current-user$/, () => "0"],
       [/^shell cmd role get-role-holders /, () => phone.holders.join(";")],
       [/^shell cmd package resolve-activity /, () => `priority=0 preferredOrder=0\n${phone.activity}`],
@@ -258,10 +266,7 @@ function pilotPhone({ install = (): void => undefined } = {}) {
       [/^shell date \+%s$/, () => "1790000000"],
       [/^shell am start /, () => ""],
       [/^shell logcat /, () => "1790000003.000 ElizaAgent: Detached agent health check passed"],
-    ];
-    const answer = answers.find(([pattern]) => pattern.test(line));
-    if (answer === undefined) throw new Error(`the phone does not answer adb ${line}`);
-    return answer[1]();
+    ], line);
   };
   return { phone, adb, apk: { file: "alpha-phone-122.apk", sha256: apk, versionCode: 122 } };
 }
@@ -269,13 +274,13 @@ function pilotPhone({ install = (): void => undefined } = {}) {
 describe("Update a pilot phone by cable (spec/release/pilot.md, \"Story: Update a pilot phone by cable\")", () => {
   it("hands Home to the stock launcher, installs in place, checks Alpha's data, gives Home back and starts the agent, holding the phone throughout", () => {
     const locks = scratch();
-    let second: unknown;
+    let second: { _tag?: string; message?: string } | undefined;
     const { phone, adb, apk } = pilotPhone({ install: () => {
       // spec/release/pilot.md, "A run claims the phone's lock, and no other run can start until it is released"
-      try { pilotUpdate({ adb, serial: "pilot-1", apk, locks }); } catch (failure) { second = failure; }
+      try { pilotUpdate({ adb, serial: "pilot-1", apk, locks }); } catch (failure) { second = failure as { _tag?: string; message?: string }; }
     } });
     const update = pilotUpdate({ adb, serial: "pilot-1", apk, locks, agentAttempts: 1 });
-    expect(second).toMatchObject({ _tag: "ReleaseRefused", message: expect.stringContaining("another pilot run holds this phone") });
+    expect([second?._tag, second?.message?.includes("another pilot run holds this phone")]).toEqual(["ReleaseRefused", true]);
     // spec/release/pilot.md, "A pilot update claims the phone, reads its data, installs, checks, restores Home and starts the agent, in that order"
     expect(update.state).toMatchObject({ leg: "Done", locked: false, moved: true, restoration: "Restored", before: "Inventory", verified: true, stopped: true, agent: "Running", passed: true, home: "AlphaHome" });
     expect(update.receipt).toEqual({ packageMatches: true, data: "DataPreserved", passed: true });
@@ -303,17 +308,14 @@ describe("Read back a phone that updated itself (spec/release/index.md, \"Story:
     const adb: Adb = (args) => {
       const line = args.join(" ");
       phone.sent.push(line);
-      const answers: [RegExp, () => string][] = [
+      return replyFor([
         [/^shell am get-current-user$/, () => "0"],
         [/^shell dumpsys package /, () => `versionCode=${phone.version} minSdk=35\n  userId=10234\n  firstInstallTime=2026-11-01 10:00:00\n  installInitiatingPackageName=${phone.initiator}`],
         [/^shell pm path /, () => "package:/data/app/alpha/base.apk"],
         [/^shell sha256sum /, () => `${phone.apk}  /data/app/alpha/base.apk`],
         [/^shell cmd role get-role-holders /, () => PACKAGE],
         [/^shell cmd package resolve-activity /, () => `priority=0\n${PACKAGE}/.MainActivity`],
-      ];
-      const answer = answers.find(([pattern]) => pattern.test(line));
-      if (answer === undefined) throw new Error(`the phone does not answer adb ${line}`);
-      return answer[1]();
+      ], line);
     };
     const before = readBack({ adb, offer });
     Object.assign(phone, { version: 122, apk: offer.sha256, initiator: PACKAGE });
@@ -372,7 +374,7 @@ describe("Prove the protected release keys (spec/release/index.md, \"Story: Sign
     copyFileSync(join(keys, "alphaphone_app.x509.pem"), join(committed, "alphaphone_app.x509.pem"));
     openssl("pkcs12", "-export", "-inkey", join(directory, "alphaphone_app.key"), "-in", join(keys, "alphaphone_app.x509.pem"), "-name", "alpha-release", "-out", join(directory, "app.p12"), "-passout", "pass:app-secret");
     rmSync(join(keys, "alphaphone_app.x509.pem"));
-    execFileSync("tar", ["czf", join(directory, "keys.tgz"), "-C", keys, ...readdir(keys)]);
+    execFileSync("tar", ["czf", join(directory, "keys.tgz"), "-C", keys, ...readdir(keys)], { env: { ...process.env, COPYFILE_DISABLE: "1" } });
     const archive = readFileSync(join(directory, "keys.tgz")).toString("base64");
     const half = Math.ceil(archive.length / 8) * 4;
     const secrets = {

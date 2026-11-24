@@ -9,7 +9,7 @@ import type { Machine as AndroidMachine } from "../../gen/app__settings__android
 import * as FactsGen from "../../gen/app__settings__facts.ts";
 import { useMachine as useFacts } from "../../gen/app__settings__facts.react.ts";
 import type { Machine as FactsMachine } from "../../gen/app__settings__facts.effect.vibe";
-import * as PrefsGen from "../../gen/app__settings__preferences.ts";
+import type * as PrefsGen from "../../gen/app__settings__preferences.ts";
 import { useMachine as usePrefs } from "../../gen/app__settings__preferences.react.ts";
 import type { Machine as PrefsMachine } from "../../gen/app__settings__preferences.effect.vibe";
 import { useMachine as useReset } from "../../gen/app__settings__reset.react.ts";
