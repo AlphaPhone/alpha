@@ -14,7 +14,7 @@ import { layer } from "../../src/voice/layer.vibe"
 import { Listener } from "../../src/voice/listener.vibe"
 import { VoiceRoute } from "../../src/voice/route.vibe"
 import { Speech } from "../../src/voice/speech.vibe"
-import { replyActionOf, spokenLineOf, EMAIL_DRAFT_READY } from "../../src/voice/spoken-text.ts"
+import { formatSpeechText, planReading, planReply, replyActionOf, spokenLineOf, EMAIL_DRAFT_READY } from "../../src/voice/spoken-text.ts"
 import { ReadingVoice } from "../../src/browser/ports.vibe"
 import { VoicemailTranscriber } from "../../src/telephony/ports.vibe"
 
@@ -235,6 +235,52 @@ it.live(`Keep a page I read and my voicemail on my phone (spec/voice/speech.md, 
     try Effect.try(() => assert.deepStrictEqual({ ready, words, unbound, refused: refused?._tag, transcribed, synthesized: names(calls).some((n) => n.includes("synthesize")) },
       { ready: true, words: "left a message", unbound: undefined, refused: "ReadingSpeechFailed", transcribed: ["AlphaVoiceCloud.transcribeLocalAudio"], synthesized: false }))
   }
+})
+
+it.effect(`Hear dates, times and percentages as words (spec/voice/speech.md, "Display dates, clock times, percentages and label colons are spoken as words")`, () => effect {
+  const said = (plan: ReturnType<typeof planReply>) => plan.kind === "speak" ? plan.pieces.join(" ") : plan.reason
+  try Effect.try(() => assert.deepStrictEqual(
+    {
+      meeting: said(planReading("Your meeting is at 3:30 PM.")),
+      clocks: said(planReading("Lunch at 7:00 then 9:05.")),
+      onTheHour: said(planReading("It starts at 3:00 PM.")),
+      money: said(planReading("It costs $12.50.")),
+      range: said(planReading("Open 9-5 on weekdays.")),
+      booked: said(planReading("Booked 9:30-10:00 today.")),
+      phone: said(planReading("Call 555-123-4567 later.")),
+      due: said(planReading("Due on 2026-11-06 at 10:30.")),
+      availability: said(planReply("Availability: Sun, Nov 22, 12:00 PM - 12:30 PM.")),
+      deadline: said(planReply("Sun Microsystems. Deadline: Sept. 1 at 9:05 a.m.")),
+      percent: said(planReply("Battery is at 40%.")),
+      heading: formatSpeechText("Here are three 30-minute options for tomorrow, Sun, Nov 22:"),
+      slots: formatSpeechText("Sun, Nov 22: 1. 12:00-12:30 PM"),
+      notADate: formatSpeechText("See Nov 22:30 in the transcript."),
+      display: formatSpeechText("2% of $1,299.50. Ratio 2:10. Call 415-555-0100 on 2026-11-21. UTC+01:00."),
+      times: formatSpeechText("Times: 2-3 p.m., 09:05–10:00, 18:30 to 19:00."),
+      secret: said(planReply("Your wifi password is: hunter2")),
+      secretLabel: formatSpeechText("The secret: abc"),
+    },
+    {
+      meeting: "Your meeting is at three thirty P M.",
+      clocks: "Lunch at seven o'clock then nine oh five.",
+      onTheHour: "It starts at three P M.",
+      money: "It costs 12 dollars 50.",
+      range: "Open 9 to 5 on weekdays.",
+      booked: "Booked nine thirty to ten o'clock today.",
+      phone: "Call 555, 123, 4567 later.",
+      due: "Due on 2026, 11, 06 at ten thirty.",
+      availability: "Availability, Sunday, November twenty second, noon to twelve thirty P M.",
+      deadline: "Sun Microsystems. Deadline, September first at nine oh five A M.",
+      percent: "Battery is at 40 percent.",
+      heading: "Here are three 30-minute options for tomorrow, Sunday, November twenty-second.",
+      slots: "Sunday, November twenty-second, 1. twelve o'clock to twelve thirty P M",
+      notADate: "See Nov 22:30 in the transcript.",
+      display: "2 percent of $1,299.50. Ratio 2:10. Call 415-555-0100 on 2026-11-21. UTC+01:00.",
+      times: "Times, two to three P M, nine oh five to ten o'clock, six thirty P M to seven P M.",
+      secret: "secret",
+      secretLabel: "The secret: abc",
+    },
+  ))
 })
 
 it.effect(`Hear a short line for an action (spec/voice/speech.md, "Story: Hear a short line for an action, and read the details in the chat")`, () => effect {

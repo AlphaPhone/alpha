@@ -176,6 +176,21 @@ pure def lawAReadingSpeaksOnlyCleanBoundedText(likelySecret: bool, linkOrEmail: 
     iff (chars >= 1 and chars <= readingMaxChars and not(linkOrEmail or likelySecret or unsayable))
 ```
 
+### Display dates, clock times, percentages and label colons are spoken as words
+
+Before a passage is split for speech, a named date is said by its weekday, month and ordinal day
+("Sun, Nov 22" is "Sunday, November twenty-second"), a clock time or range with A M or P M, noon and
+midnight by name, a percent sign as "percent", and a colon after a word as a pause. Every route
+speaks the planned pieces, so a bare 24-hour clock is a time wherever it stands. A passage that looks
+like it holds a secret is left as it is, so its refusal still sees the label.
+
+```quint
+type DisplayText = NamedDate | ClockTime | PercentSign | LabelColon | OtherDisplay
+pure def saidAsWords(shown: DisplayText, likelySecret: bool): bool = not(likelySecret) and shown != OtherDisplay
+pure def lawASecretKeepsItsLabels(shown: DisplayText): bool = not(saidAsWords(shown, true))
+pure def lawEveryDisplayFormIsSaidAsWords(shown: DisplayText): bool = saidAsWords(shown, false) iff shown != OtherDisplay
+```
+
 ## Story: Hear a short line for an action, and read the details in the chat
 
 > As the owner talking to Alpha, I want a spoken action reply, such as an email it drafted, said in
