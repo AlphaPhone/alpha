@@ -20,9 +20,12 @@ do next.
 - **Type.** `font-sans` is Public Sans, for everything read or pressed. `font-display` is Denton, with
   Fraunces behind it, at weight `light`: a screen's one title, the date on Home, a large figure. The sizes
   are in rem, so Android's text size scales them: `base` is body text, `3xl` a screen title, `4xl` the
-  Home date. `tracking-caps` with `text-xs` is a small uppercase label.
+  Home date. `tracking-caps` with `text-xs` is a small uppercase label. A list row reads `text-base`,
+  `text-subject` and `text-snippet` line by line; `text-meta` is a status line under a header, and `text-body`
+  the text of a message or of a field being typed.
 - **Shape.** `radius` is a card or a row group; `rounded-home-card` is a Home overview card;
-  `rounded-drawer-icon` rounds an installed app icon. `rounded-tile` is an app tile, a menu and a dialog;
+  `rounded-drawer-icon` rounds an installed app icon; `rounded-option` is a row of a floating menu and
+  `rounded-box` the box of a list row's selection check. `rounded-tile` is an app tile, a menu and a dialog;
   `rounded-sheet` the top of a bottom sheet; `rounded-full` a button, a chip and the Ask Alpha bar.
   Everything pressed is at least 44px in both directions.
 - **Elevation.** `shadow-sm` lifts a control, `shadow-md` a menu or dialog, `shadow-lg` the Ask Alpha
@@ -91,15 +94,25 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `rounded.sheet` | 1.75rem |
 | `rounded.home-card` | 1.875rem |
 | `rounded.drawer-icon` | 1.125rem |
+| `rounded.option` | 0.625rem |
+| `rounded.box` | 0.375rem |
 | `font.sans` | "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif |
 | `font.display` | Denton, Fraunces, Georgia, serif |
 | `font.mono` | ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace |
 | `text.xs.size` | 0.75rem |
 | `text.xs.leading` | 1.25 |
+| `text.meta.size` | 0.8125rem |
+| `text.meta.leading` | 1.25 |
+| `text.snippet.size` | 0.84375rem |
+| `text.snippet.leading` | 1.2 |
 | `text.sm.size` | 0.875rem |
 | `text.sm.leading` | 1.4 |
+| `text.subject.size` | 0.90625rem |
+| `text.subject.leading` | 1.2 |
 | `text.base.size` | 0.9375rem |
 | `text.base.leading` | 1.4 |
+| `text.body.size` | 1rem |
+| `text.body.leading` | 1.6 |
 | `text.lg.size` | 1.0625rem |
 | `text.lg.leading` | 1.4 |
 | `text.xl.size` | 1.25rem |
