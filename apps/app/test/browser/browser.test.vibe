@@ -129,7 +129,8 @@ it.live("the agent opens in the untouched tab, and a view command is reported di
       const refusedHttp = agent.openApproved("http://example.test/", false) catch (error) => error._tag
       try report(fake.events, session, { id: opened.tab, sequence: 1, navigation: "7", url: "https://example.test/", committed: true, canBack: true })
       try opened.present
-      const selection = try agent.selection()
+      const picked = try agent.selection()
+      const selection = picked === undefined ? undefined : { id: picked.id, revision: picked.revision }
       const dispatched = try agent.command({ subaction: "back" }, selection)
       try report(fake.events, session, { id: opened.tab, sequence: 2, navigation: "8", url: "https://example.test/next", committed: true, canBack: true })
       const stale = try agent.command({ subaction: "back" }, selection)
@@ -190,7 +191,9 @@ it.live("a view command whose native receipt names another tab or session is not
       const opened = try agent.openApproved("https://example.test/", false)
       try report(fake.events, session, { id: opened.tab, sequence: 1, navigation: "7", url: "https://example.test/", committed: true, canBack: true })
       try opened.present
-      const answer = try agent.command({ subaction: "back" }, try agent.selection())
+      const picked = try agent.selection()
+      const selection = picked === undefined ? undefined : { id: picked.id, revision: picked.revision }
+      const answer = try agent.command({ subaction: "back" }, selection)
       const got9 = try callsTo(fake.calls, "command")
       try Effect.try(() => assert.deepStrictEqual(
         { ok: answer.ok, code: answer.ok ? "" : answer.code, sent: got9.length },

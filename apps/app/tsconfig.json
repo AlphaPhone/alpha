@@ -13,7 +13,7 @@
     "outDir": "dist",
     "noEmitOnError": true,
     "rewriteRelativeImportExtensions": true,
-    "customConditions": ["eliza-source"],
+    // The upstream build produces the pinned SDK declarations this project typechecks against.
     "plugins": [{ "name": "@effect/language-service" }]
   },
   "include": ["src", "test", "gen/*.ts", "gen/*.vibe"],

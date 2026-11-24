@@ -1,6 +1,6 @@
 // spec/browser/session.md, "Story: Let the agent open and drive my tabs"; spec/browser/session.md, "Story: Close every tab from one listed review"; spec/browser/agent.md, "Story: Open the site I asked for"; spec/browser/agent.md, "Story: Go back, forward or reload only on the page I was looking at"; spec/browser/agent.md, "The native call names the admitted revision, is sent at most once per claim, and its result is a dispatch, never a finished page"; spec/browser/pageContext.md, "The agent has no separate page read: a page-text request is refused with where the page comes from, and only back, forward and reload are view commands"; spec/browser/agent.md, "A deferred switch, close of the showing tab, page-history move or tab list that does not run after its receipt says a correction"; spec/browser/session.md, "The agent shows Browser's own list of open tabs only after its receipt, only while the tab the request came from is still selected, and changes no tab"
 import { type BrowserControlOperation, browserControlReviewNotice, describeBrowserControl, parseBrowserControl, parseBrowserNavigate } from "@elizaos/plugin-browser/contract"
-import { type NativeHistorySelection, observedTabCurrent, parseNativeHistoryCommand } from "@elizaos/plugin-browser/native-command"
+import { observedTabCurrent, parseNativeHistoryCommand } from "@elizaos/plugin-browser/native-command"
 import { type AgentOutcome, type AgentSettled, type BrowserTab, type Event as SessionEvent, type ListedTab, canAgentShowTabs, curTab, isPrivateTab, keptOf, listingCurrent, listingOf, selectionOf, visibleTabs } from "../../gen/browser__session.effect.vibe"
 import { type AgentPresentation, type Preference, Machine, machine, presentedRan } from "../../gen/browser__agent.effect.vibe"
 import type { PageCommand } from "../../gen/browser__page.ts"
@@ -23,7 +23,11 @@ export interface BrowserTabChoice {
 }
 
 /** The opaque identity of the selected tab's document: never its address or content. */
-export type BrowserTabSelection = Pick<NativeHistorySelection, "id" | "revision">
+export interface BrowserTabSelection {
+  readonly kind: "browser-tab"
+  readonly id: string
+  readonly revision: string
+}
 
 /** One tab as a close-every-tab card lists it: its title, else its address; the card counts a private tab and never names it. */
 export interface BrowserTabLine {
@@ -273,7 +277,7 @@ export const agentLayer = Layer.provide(Layer.effect(BrowserAgent, effect {
     prefer: effect (preference: Preference) => agent.send({ type: "prefer", preference }) catch () => undefined,
     effect selection() {
       const picked = selectionOf(try tabs.get())
-      return picked.tab === "" ? undefined : { id: `${host.session}:${picked.tab}`, revision: String(picked.revision) }
+      return picked.tab === "" ? undefined : { kind: "browser-tab", id: `${host.session}:${picked.tab}`, revision: String(picked.revision) } as const
     },
     effect tabNeedsChoice(target: string) {
       const state = try tabs.get()
