@@ -229,7 +229,7 @@ const Bubble = memo(function Bubble({ row, choose, actions }: { row: MessageRow;
         {!complete ? <p className="rounded-tile bg-muted px-4 py-2.5 text-base">{label}</p> : (
           <>
             {complete.attachments > 0 && <span className="flex items-center gap-1.5 text-sm text-muted-foreground"><PictureIcon className="size-4" aria-hidden />{complete.attachments === 1 ? "1 picture" : `${complete.attachments} pictures`}</span>}
-            {complete.body && <p data-alpha-message-body className={`rounded-tile px-4 py-2.5 text-base whitespace-pre-wrap wrap-anywhere ${outgoing ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground"}`}><MessageText text={complete.body} /></p>}
+            {complete.body && <p data-alpha-message-body className={`rounded-tile px-4 py-2.5 text-md whitespace-pre-wrap wrap-anywhere ${outgoing ? "bg-foreground text-background" : "bg-secondary text-secondary-foreground"}`}><MessageText text={complete.body} /></p>}
           </>
         )}
         <span data-alpha-message-meta className="px-1.5 text-xs text-muted-foreground">{[when(row.date), status].filter(Boolean).join(" · ")}</span>
