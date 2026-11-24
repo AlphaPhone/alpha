@@ -1,7 +1,12 @@
-// spec/assistant/decision.md, "Story: Approve or deny a workflow step once"; spec/workflows/deviceSteps.md, "Story: Approve a phone step only as I reviewed it"
+// spec/assistant/decision.md, "Story: Approve or deny a workflow step once"; spec/assistant/decision.md, "A decision on a phone step runs the step while its request is in flight, and counts only once the step ran"; spec/workflows/deviceSteps.md, "Story: Approve a phone step only as I reviewed it"
 import { type WorkflowApproval, parseWorkflowRun, workflowApprovalProposalId } from "@elizaos/plugin-workflow/client"
+import { type PhoneRan, phoneDecisionAnswer } from "../../gen/assistant__decision.effect.vibe"
 import { type StepAnswer, WorkflowStepDecisions } from "../assistant/ports.vibe"
+import { type Approval, DeviceReview } from "../assistant/review.vibe"
 import { WorkflowApi } from "./api.vibe"
+
+/** How often the step's own proposal is looked for while its decision is in flight. */
+const STEP_POLL_MS = 1000
 
 function decidable(approval: WorkflowApproval, approved: boolean): boolean {
   return approval.status === "pending" && (!approved || approval.supported)
@@ -10,6 +15,7 @@ function decidable(approval: WorkflowApproval, approved: boolean): boolean {
 /** The assistant's step decisions over the engine's approval route: one decision on the run's one pending request, read back from its receipt. */
 export const stepDecisions = Layer.effect(WorkflowStepDecisions, effect {
   const agent = try WorkflowApi
+  const devices = try DeviceReview
   const client = agent.workflow
   return {
     effect decide(runId: string, approved: boolean) {
@@ -23,10 +29,28 @@ export const stepDecisions = Layer.effect(WorkflowStepDecisions, effect {
       const [approval] = pending
       if (approval === undefined || pending.length !== 1) return "unavailable" satisfies StepAnswer
       const id = workflowApprovalProposalId(approval)
-      const decided = (client.decideApproval(run, approval, approved) catch () => undefined)
-      if (decided === undefined) return "lost" satisfies StepAnswer
       const status = approved ? "approved" : "denied"
-      return decided.approvals.some((a) => workflowApprovalProposalId(a) === id && a.status === status && a.requestDigest === approval.requestDigest) ? "recorded" : "lost"
+      // The agent performs an approved phone step inside this request, offering it to the phone while the request is open, so the step's
+      // own proposal is run here while the decision is in flight (spec/assistant/decision.md).
+      const phone = approved ? (client.phoneReview(run) catch () => undefined) : undefined
+      const operation = phone?.spec.steps.find((step) => step.id === approval.nodeId)?.operation
+      const done = try Deferred.make<void>()
+      const decision = fork ensuring(exit(client.decideApproval(run, approval, approved)), Deferred.succeed(done, undefined))
+      let ran: Approval | undefined = undefined
+      if (operation !== undefined && operation !== "calendar_range") {
+        while (ran === undefined && !(try Deferred.isDone(done))) {
+          ran = try devices.workflowStep(run.id, approval.nodeId)
+          if (ran === undefined) try timeoutOption(Deferred.await(done), Duration.millis(STEP_POLL_MS))
+        }
+        if (ran === undefined) ran = try devices.workflowStep(run.id, approval.nodeId)
+      }
+      const answered = join decision
+      const decided = Exit.isSuccess(answered)
+        && answered.value.approvals.some((a) => workflowApprovalProposalId(a) === id && a.status === status && a.requestDigest === approval.requestDigest)
+      const phoneRan: PhoneRan = operation === undefined ? "NotAPhoneStep" : operation === "calendar_range" ? "BridgeRead"
+        : ran === undefined ? "RanNothing" : ran.outcome === "Applied" ? "RanApplied" : ran.outcome === "Unknown" ? "RanUnknown" : "RanNothing"
+      const outcome = phoneDecisionAnswer(decided, phoneRan)
+      return (outcome === "StepRecorded" ? "recorded" : outcome === "StepNothingDone" ? "nothing" : "lost") satisfies StepAnswer
     },
   }
 })

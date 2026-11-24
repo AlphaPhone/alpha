@@ -3,7 +3,7 @@ import { AccountBindings } from "../../account/bindings.vibe"
 import { DeviceEnrollment } from "../../account/enrollment.vibe"
 import { browserPagesFromBrowser, browserViewsFromBrowser, mapsViewsFromMaps } from "../../assistant/fills.vibe"
 import { askAlphaTarget } from "../../assistant/files-bridge.vibe"
-import { AdvertisedCapabilities, CameraComposer, MapsChatCards, MapsRelay, ReplyChanges } from "../../assistant/ports.vibe"
+import { AdvertisedCapabilities, CameraComposer, MapsChatCards, MapsRelay, ReplyChanges, WorkflowStepDecisions } from "../../assistant/ports.vibe"
 import { CameraChat, type ChatMessage } from "../../camera/chat.vibe"
 import { PageMail } from "../../browser/ports.vibe"
 import { CalendarMaps, type CalendarEventOrigin } from "../../calendar/ports.vibe"
@@ -70,7 +70,7 @@ effect function replyChangesBuilt() {
 /**
  * Fills every slot of ./slots.vibe from its provider, once the last of them is built: Files' share targets, Browser's page mail,
  * Calendar's Maps, Workflows' Clock, the assistant's email, Clock's own notices, Maps' chat and relay, Camera's composer requests,
- * Workflows' reply changes, the phone's device capabilities, Browser's page and views, Maps' views, and the enrolled
+ * Workflows' reply changes and step decisions, the phone's device capabilities, Browser's page and views, Maps' views, and the enrolled
  * device's headers with the capabilities it advertises of those the agent offered at registration.
  */
 export const fillsLive = Layer.effectDiscard(effect {
@@ -135,6 +135,9 @@ export const fillsLive = Layer.effectDiscard(effect {
 
   const changes = try calendarFollowsReplies(try replyChangesBuilt())
   try sync(() => fillCell(cells, cells.replyChanges, changes))
+
+  const decisions = try WorkflowStepDecisions
+  try sync(() => fillCell(cells, cells.stepDecisions, decisions))
 
   const capabilities = try deviceCapabilities
   try sync(() => fillCell(cells, cells.deviceCapabilities, capabilities))

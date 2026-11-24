@@ -41,12 +41,9 @@ const background = Layer.effectDiscard(effect {
  * Digests, DigestSourcesService, HostedResults, WorkflowClockDraft, RequestRecovery, SimulatedWorkflows, SimulatedTriggers, WorkflowCalendar, AgentChanges,
  * WorkflowsPlace and the assistant's WorkflowStepDecisions port, with the renewal reminder, foreground, route, owner, result and waiting-step
  * followers running. It needs Resident, ResidentControl, Native, Build and KeyValueStore from the platform, CloudSession from the account, and Navigation,
- * Foreground and Overview from the shell; WorkflowClockPort refuses until Clock's provider reaches it.
+ * Foreground and Overview from the shell and DeviceReview from the assistant; WorkflowClockPort refuses until Clock's provider reaches it.
  */
 export const layer = Layer.provideMerge(background, Layer.provideMerge(place, Layer.provideMerge(Layer.provideMerge(agentChanges, services), agent)))
-
-/** The assistant's WorkflowStepDecisions port over Workflows' agent routes, for the shell to provide where the assistant reads it. */
-export const workflowStepDecisions = Layer.provideMerge(stepDecisions, agent)
 
 /** The assistant's ReplyChanges port over Workflows' AgentChanges, for the shell's fills to put where the assistant settles a reply's action results. */
 export const replyChanges = Layer.effect(ReplyChanges, effect {

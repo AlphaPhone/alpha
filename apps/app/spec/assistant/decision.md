@@ -81,3 +81,25 @@ pure def sometimesRetainedForAReplacedRequest(d: Decision): bool = d.intent and 
 pure def sometimesAStaleReview(d: Decision): bool = d.reviewDigest != 0 and d.knownDigest != d.digest
 pure def sometimesDecided(d: Decision): bool = d.knownStatus != Pending and not(d.intent)
 ```
+
+### A decision on a phone step runs the step while its request is in flight, and counts only once the step ran
+
+The agent performs an approved phone step inside the decision request, offering it to this phone
+while the request is open, so approving one from a chat card runs the step's own proposal while the
+request is in flight, as approving it from its notice does (spec/workflows/deviceSteps.md). The
+decision reads as recorded only when the request reads approved and the step was applied or its
+outcome is unknown, never from the request's status alone; an approved phone step that ran nothing
+says Nothing was done. A step the agent reads through the phone's own bridge (a Calendar range)
+offers no proposal and counts once the request reads approved, as does a step that is not the
+phone's. A request that does not read as decided is lost.
+
+```quint
+type PhoneRan = RanApplied | RanUnknown | RanNothing | BridgeRead | NotAPhoneStep
+type PhoneDecisionAnswer = StepRecorded | StepNothingDone | StepLost
+pure def phoneDecisionAnswer(decided: bool, ran: PhoneRan): PhoneDecisionAnswer =
+  if (not(decided)) StepLost else if (ran == RanNothing) StepNothingDone else StepRecorded
+pure val decidedValues = Set(true, false)
+pure val ranValues = Set(RanApplied, RanUnknown, RanNothing, BridgeRead, NotAPhoneStep)
+pure def lawAPhoneStepThatRanNothingIsNeverRecorded(decided: bool): bool = phoneDecisionAnswer(decided, RanNothing) != StepRecorded
+pure def lawAnUndecidedRequestIsLost(ran: PhoneRan): bool = phoneDecisionAnswer(false, ran) == StepLost
+```

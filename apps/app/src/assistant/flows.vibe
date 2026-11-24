@@ -56,13 +56,15 @@ export const flowsLayer = Layer.effect(AssistantFlows, effect {
       const after = try machine.get()
       if (!after.wire) return after
       const answered = try steps.decide(runId, approved)
-      if (answered !== "recorded") {
+      if (answered !== "recorded" && answered !== "nothing") {
         try quiet(machine.send({ type: "requestLost" }))
         try quiet(machine.send({ type: "unknownReply" }))
         if (answered === "unavailable") try host.toast("Workflows isn’t available. Nothing was decided.")
       } else {
         try quiet(machine.send({ type: "serverRecord" }))
         if (!(try quiet(machine.send({ type: "successReply" })))) try quiet(machine.send({ type: "unknownReply" }))
+        // spec/assistant/decision.md: an approved phone step that ran nothing says so.
+        if (answered === "nothing") try host.toast("Nothing was done.")
       }
       try quiet(machine.send({ type: "readReceipt" }))
       return try machine.get()

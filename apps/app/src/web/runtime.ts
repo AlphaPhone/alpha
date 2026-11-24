@@ -19,7 +19,7 @@ import { layer as cameraLayer } from "../camera/layer.vibe";
 import { layer as telephonyLayer } from "../telephony/layer.vibe";
 import { layer as clockLayer } from "../clock/layer.vibe";
 import { layer as accountLayer } from "../account/layer.vibe";
-import { layer as workflowsLayer, workflowStepDecisions } from "../workflows/layer.vibe";
+import { layer as workflowsLayer } from "../workflows/layer.vibe";
 import { layer as settingsLayer } from "../settings/layer.vibe";
 
 const on = <A, E, R, A2, E2, R2>(upper: Layer.Layer<A, E, R>, lower: Layer.Layer<A2, E2, R2>) => Layer.provideMerge(upper, lower);
@@ -33,7 +33,7 @@ const settings = on(settingsLayer, files);
 const notes = on(notesLayer, settings);
 const calendar = on(calendarLayer, notes);
 const telephony = on(telephonyLayer, calendar);
-const host = on(Layer.mergeAll(assistantHostLive, deviceExecutorsLive([]), workflowStepDecisions, turnSourcesLive), telephony);
+const host = on(Layer.mergeAll(assistantHostLive, deviceExecutorsLive([]), turnSourcesLive), telephony);
 const assistant = on(assistantLayer, host);
 const workflows = on(workflowsLayer, assistant);
 const browser = on(browserLayer, workflows);
@@ -44,7 +44,7 @@ const clock = on(clockLayer, camera);
 
 /**
  * The one runtime of the app, built once: the platform with the late ports' slots, the shell, every area in order, the assistant
- * host with Workflows' step decisions and the turn sources of Notes and Calendar, Camera's handoffs from the areas before it, and
+ * host with the turn sources of Notes and Calendar, Camera's handoffs from the areas before it, and
  * last the shell's integration, which fills the slots, registers every area's device executors and runs the followers.
  */
 export const runtime = ManagedRuntime.make(on(shellIntegration, clock));

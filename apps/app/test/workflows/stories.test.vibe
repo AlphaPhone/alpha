@@ -1,6 +1,6 @@
 // spec/workflows/vocabulary.md, "Story: Send only the requests Workflows owns"; spec/workflows/vocabulary.md, "Story: See what my agent changed"; spec/workflows/agentSchedules.md, "Story: Save and run a prompt my agent sends on a schedule"; spec/workflows/agentSchedules.md, "Story: Answer a scheduled item from Workflows"; spec/workflows/runs.md, "Story: Open a workflow and see its runs"; spec/workflows/lifecycle.md, "Story: Remove a workflow only once its runs have settled, and restore it safely"; spec/workflows/digestSources.md, "Story: Renew my phone source before its week ends"
 import { assert, describe, it } from "@effect/vitest"
-import { type PhoneWorkflowSpec, workflowSha } from "@elizaos/plugin-workflow/client"
+import { type PhoneWorkflowSpec, validatePhoneWorkflowSpec, workflowSha } from "@elizaos/plugin-workflow/client"
 import type { DigestResult } from "@elizaos/plugin-workflow/digests"
 import { Machine as AutomationsMachine } from "../../gen/workflows__automations.effect.vibe"
 import { Machine as ClockMachine } from "../../gen/workflows__clockDraft.effect.vibe"
@@ -28,6 +28,8 @@ import { SimulatedTriggers, SimulatedWorkflows } from "../../src/workflows/simul
 import { DigestSourcesService } from "../../src/workflows/sources.vibe"
 import { WorkflowsPlace, followRoute } from "../../src/workflows/place.vibe"
 import { routeCrosses } from "../../src/shell/ownerRoutes.vibe"
+import { WorkflowStepDecisions } from "../../src/assistant/ports.vibe"
+import type { Approval } from "../../src/assistant/review.vibe"
 import { eventLabel, stopReasonSentences } from "../../src/web/workflows/words.ts"
 import { Machine as PlaceMachine } from "../../gen/workflows__place.effect.vibe"
 import { type Handler, type NativeCall, type NativeHandler, type ReportedBrief, type Sent, engineStatus, navigationOf, statusRoute, workflowsOf } from "./fakes.vibe"
@@ -435,6 +437,35 @@ describe("Scheduling (spec/workflows/scheduling.md, \"Story: Schedule a typed wo
 })
 
 describe("Phone steps (spec/workflows/deviceSteps.md, \"Story: Approve a phone step only as I reviewed it\")", () => {
+  it.effect("approving a phone step from a chat card runs the step while the request is in flight, and one that ran nothing is not recorded (spec/assistant/decision.md, \"A decision on a phone step runs the step while its request is in flight, and counts only once the step ran\")", () => effect {
+    const spec = try validatePhoneWorkflowSpec({
+      version: 1, name: "Brief", description: "", trigger: { kind: "manual" }, device: { installationId: "phone-1", enrollmentId: "enrollment-1" },
+      steps: [{ id: "text", kind: "Read", operation: "supplied_text", text: "hi" }, { id: "note", kind: "Write", operation: "save_note", source: "text", title: "Brief" }],
+    })
+    const review = { runId: "r1", workflowId: "w1", versionId: "v1", specDigest: try workflowSha(spec), spec, status: "waiting-approval", finished: false, cancellationRequestedAt: null }
+    const routes: Handler[] = [
+      ...workflowRoutes([execution("r1", false)], [approval]),
+      (m, p) => m === "GET" && p === "/api/workflow/executions/r1/phone-review" ? { status: 200, data: review } : undefined,
+      (m, p) => m === "POST" && p === "/api/workflow/executions/r1/approvals/note/0" ? { status: 200, data: receiptOf([{ ...approval, status: "approved" }]) } : undefined,
+    ]
+    const asked: string[] = []
+    const applied = (runId: string, stepId: string) => { asked.push(`${runId}:${stepId}`); return { card: {}, outcome: "Applied" } as unknown as Approval }
+    const ranSent: Sent[] = []
+    const nothingSent: Sent[] = []
+    let ran = ""
+    let nothing = ""
+    provide workflowsOf(routes, ranSent, { workflowStep: applied }) {
+      ran = try (try WorkflowStepDecisions).decide("r1", true)
+    }
+    provide workflowsOf(routes, nothingSent) {
+      nothing = try (try WorkflowStepDecisions).decide("r1", true)
+    }
+    try Effect.try(() => assert.deepStrictEqual(
+      { ran, asked, nothing, decisions: [ranSent, nothingSent].map((s) => s.filter((x) => x.method === "POST" && x.path.includes("/approvals/")).length) },
+      { ran: "recorded", asked: ["r1:note"], nothing: "nothing", decisions: [1, 1] },
+    ))
+  })
+
   it.effect("a run with no pending step shows nothing and decides nothing (spec/workflows/deviceSteps.md, \"The open run shows a pending, unexpired step of a run still going, and only in front\")", () => effect {
     const sent: Sent[] = []
     provide workflowsOf(workflowRoutes([execution("r1", false)]), sent) {

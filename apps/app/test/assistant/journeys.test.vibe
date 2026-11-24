@@ -317,6 +317,17 @@ it.effect("Approve or deny a workflow step once (spec/assistant/decision.md, \"A
   }
 })
 
+it.effect("An approved phone step that ran nothing says so (spec/assistant/decision.md, \"A decision on a phone step runs the step while its request is in flight, and counts only once the step ran\")", () => effect {
+  const toasts: string[] = []
+  const steps = Layer.succeed(WorkflowStepDecisions, { decide: () => succeed("nothing" as const) })
+  provide assistantWith(Layer.merge(steps, fakeHost(toasts))) {
+    const flows = try AssistantFlows
+    try flows.decideStep("run-1", true)
+    const decided = try flows.decideStep("run-1", true)
+    try Effect.try(() => assert.deepStrictEqual({ decided: decided.knownStatus, toasts }, { decided: "Approved", toasts: ["Nothing was done."] }))
+  }
+})
+
 it.effect("Know what became of a reply I stopped (spec/assistant/stoppedReply.md, \"The read says once what happened, and never replaces the chat while the owner is busy in it\")", () => effect {
   const seen: Seen = { calls: [] }
   const history = [{ id: "h1", role: "user", text: "Are you there?", createdAt: "1970-01-01T00:00:00.000Z" }]

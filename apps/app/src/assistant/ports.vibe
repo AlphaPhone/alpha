@@ -43,8 +43,8 @@ export service OwnNotices {
   })
 }
 
-/** What became of a workflow step decision on the wire: the engine recorded it, the answer was lost, or Workflows is not here. */
-export type StepAnswer = "recorded" | "lost" | "unavailable"
+/** What became of a workflow step decision on the wire: the engine recorded it, it approved a phone step that ran nothing, the answer was lost, or Workflows is not here. */
+export type StepAnswer = "recorded" | "nothing" | "lost" | "unavailable"
 
 /** The workflow engine's step decisions, owned by Workflows; unprovided, nothing is sent. */
 export service WorkflowStepDecisions {
