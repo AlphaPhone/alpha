@@ -63,9 +63,10 @@ export function Phone({ runtime }: PhoneProps) {
         <TabsList aria-label="Phone">
           <TabsTrigger value="Recents">Recents</TabsTrigger>
           <TabsTrigger value="Keypad">Keypad</TabsTrigger>
-          <TabsTrigger value="Voicemail">Voicemail</TabsTrigger>
+          {state.voicemail && <TabsTrigger value="Voicemail">Voicemail</TabsTrigger>}
         </TabsList>
         {state.failedDial && <Banner variant="destructive">Couldn't open the dialer</Banner>}
+        {state.unsureDial && <Banner variant="warn">Alpha cannot tell whether the call started</Banner>}
         <TabsContent value="Recents" className="flex flex-col gap-3">
           <SearchField aria-label="Call or ask" placeholder="Call or ask" value={query} onValueChange={search} />
           {state.sought && <Chip onClear={() => search("")} clearLabel="Clear the search">{query}</Chip>}

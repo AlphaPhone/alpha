@@ -44,10 +44,10 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Phone, (s) => s.recents.status === "Loaded" && s.rows === 2);
     expect(world.telephony.dialed).toEqual([]);
 
-    // spec/app/phone/index.md, "Tapping a recent call hands its number to the dialer"
+    // spec/app/phone/index.md, "Tapping a recent call hands its number to the dialer"; spec/app/phone/index.md, "With the dialer role a call is placed through Telecom, and counts as started only when Telecom accepted it"
     await press("Call Maya Chen");
     await until(alpha, alpha.runtime, Phone, (s) => s.dialled && s.dial.status === "Loaded");
-    expect([world.telephony.dialed, world.telephony.placed]).toEqual([["+14155550100"], []]);
+    expect([world.telephony.dialed, world.telephony.placed]).toEqual([[], ["+14155550100"]]);
 
     // spec/app/phone/index.md, "The filter and "Retry call history" read the log again"
     await press("Missed");
@@ -62,6 +62,9 @@ describe("Phone on an Alpha image", () => {
     await tab("Keypad");
     await until(alpha, alpha.runtime, Phone, (s) => s.tab === "Keypad");
 
+    // spec/app/phone/index.md, "With the dialer role a call is placed through Telecom, and counts as started only when Telecom accepted it": without the role the dial screen opens with the number.
+    world.telephony.dialer = false;
+
     // spec/app/phone/index.md, "Call hands the typed number to the dialer, only if the phone says it is a number it can dial": a partial number is never handed over.
     await press("1");
     await until(alpha, alpha.runtime, Phone, (s) => s.digits === 1 && s.typed === "Partial");
@@ -72,13 +75,39 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Phone, (s) => s.typed === "Dialable" && s.matched);
     await press("Call");
     await until(alpha, alpha.runtime, Phone, (s) => s.dialled && s.dial.status === "Loaded");
-    expect(world.telephony.dialed).toEqual(["14155550100"]);
+    expect([world.telephony.dialed, world.telephony.placed]).toEqual([["14155550100"], []]);
 
     // spec/app/phone/index.md, "Leaving Phone, or leaving Recents, forgets the rows"
     await tab("Recents");
     await until(alpha, alpha.runtime, Phone, (s) => s.tab === "Recents" && s.recents.status === "Loaded" && s.rows === 2);
     await hardware("home");
     await until(alpha, alpha.runtime, Phone, (s) => !s.front && s.rows === 0);
+  });
+
+  it("See missed calls on Home, then unheard voicemail (spec/app/phone/index.md, \"Story: See missed calls on Home\"; spec/app/phone/voicemail.md, \"Story: See my voicemail\")", async () => {
+    const world = image();
+    const { alpha } = await open(world);
+    await until(alpha, alpha.runtime, Shell, (s) => s.image);
+
+    // spec/app/phone/index.md, "Home shows the missed-calls card while there are missed calls not yet seen"; spec/app/phone/index.md, "One tap on the card opens Recents with the missed calls, and otherwise the Voicemail tab while a voicemail is unheard"
+    await until(alpha, alpha.runtime, Phone, (s) => s.missed === 1 && s.voicemail);
+    await press("Phone: 1 missed call");
+    await until(alpha, alpha.runtime, Phone, (s) => s.front && s.tab === "Recents" && s.chip === "MissedCalls" && s.recents.status === "Loaded" && s.rows === 1 && s.missed === 0);
+
+    // spec/app/phone/voicemail.md, "The phone reports how many voicemails are unheard, for Home and the tab"
+    world.telephony.calls = world.telephony.calls.filter((one) => one.type !== "missed");
+    await hardware("home");
+    await until(alpha, alpha.runtime, Voicemail, (s) => s.unheard === 1);
+    await press("Phone: 1 unheard voicemail");
+    await until(alpha, alpha.runtime, Voicemail, (s) => s.front && s.list.status === "Loaded" && s.items === 1);
+
+    // spec/app/phone/index.md, "The Voicemail tab is offered only while the carrier's visual voicemail is ready"
+    world.telephony.carrier = "unconfigured";
+    await hardware("home");
+    await until(alpha, alpha.runtime, Phone, (s) => !s.voicemail && s.tab === "Recents");
+    await press("Phone");
+    await until(alpha, alpha.runtime, Phone, (s) => s.front && s.recents.status === "Loaded");
+    expect([...document.querySelectorAll("[role=tab]")].map((one) => one.textContent)).toEqual(["Recents", "Keypad"]);
   });
 
   it("See my voicemail, listen to one, and delete it (spec/app/phone/voicemail.md, \"Story: See my voicemail\"; spec/app/phone/voicemail.md, \"Story: Listen to a voicemail\"; spec/app/phone/voicemail.md, \"Story: Delete a voicemail\")", async () => {

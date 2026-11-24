@@ -1,9 +1,11 @@
 # Phone
 
-The phone app on an Alpha image that admits it: Recents, the Keypad and
-Voicemail as three tabs. Alpha never places a call itself. Every call the
-owner starts here is handed to the phone's own dialer, and the phone's own
-call screen owns every live call. Alpha keeps only what the phone last said
+The phone app on an Alpha image that admits it: Recents, the Keypad and,
+while the carrier's visual voicemail is ready, Voicemail as tabs. Alpha
+never calls on its own. Every call the owner starts here is handed to the
+phone: placed through Telecom where Alpha holds the dialer role, else opened
+in the dial screen with the number, and the phone's own call screen owns
+every live call. Alpha keeps only what the phone last said
 about calls and the carrier. Other areas read those facts, for example to
 pause voice during a call or to refuse a write during a call that may be an
 emergency call.
@@ -20,8 +22,9 @@ emergency call.
 
 Which tab is showing; call-log access; the recent calls as last read; the
 keypad's digits, what the phone says the typed number is, and the contact it
-matches; the handoff to the dialer; and the phone's last word on calls,
-missed calls and the carrier.
+matches; the handoff to the dialer and whether its answer was lost; and the
+phone's last word on calls, missed calls, the carrier and its visual
+voicemail.
 
 ```quint
 import read as R from "../../kit/read"
@@ -35,16 +38,16 @@ type Phone = {
   front: bool, tab: Tab,
   log: P::Permission, recents: R::Read, rows: int, chip: Filter, sought: bool,
   digits: int, typed: Typed, lookup: R::Read, matched: bool,
-  dial: R::Read, dialled: bool, failedDial: bool,
-  telecom: Telecom, carrier: bool, missed: int,
+  dial: R::Read, dialled: bool, failedDial: bool, unsureDial: bool,
+  telecom: Telecom, carrier: bool, missed: int, voicemail: bool,
 }
 
 pure val initial: Phone = {
   front: false, tab: Recents,
   log: P::unasked, recents: R::unread, rows: 0, chip: AllCalls, sought: false,
   digits: 0, typed: Blank, lookup: R::unread, matched: false,
-  dial: R::unread, dialled: false, failedDial: false,
-  telecom: CallUnknown, carrier: false, missed: 0,
+  dial: R::unread, dialled: false, failedDial: false, unsureDial: false,
+  telecom: CallUnknown, carrier: false, missed: 0, voicemail: false,
 }
 ```
 
@@ -77,6 +80,7 @@ pure def handoffIn(out: List[Effect]): bool =
 pure val numberValues = Set("", "+14155550100")
 pure val ticketValues = Set(1, 2, 3)
 pure val countValues = Set(-1, 0, 2)
+pure val unheardValues = Set(0, 1)
 pure val weight_recentsRead = 3
 pure val weight_press = 3
 ```
@@ -101,7 +105,7 @@ pure def readLog(chip: Filter, s: Phone): Moved =
 pure def canShow(s: Phone): bool = not(s.front)
 
 pure def show(s: Phone): Moved =
-  val shown = { ...s, front: true, dialled: false, failedDial: false }
+  val shown = { ...s, front: true, dialled: false, failedDial: false, unsureDial: false }
   if (shown.tab == Recents) readLog(s.chip, shown) else { state: shown, out: List() }
 ```
 
@@ -110,13 +114,31 @@ pure def show(s: Phone): Moved =
 ```quint
 pure def canLeave(s: Phone): bool = s.front
 
-pure def leave(s: Phone): Phone = { ...s, front: false, rows: 0, failedDial: false }
+pure def leave(s: Phone): Phone = { ...s, front: false, rows: 0, failedDial: false, unsureDial: false }
 
-pure def canPickTab(s: Phone, tab: Tab): bool = s.front and tab != s.tab
+pure def canPickTab(s: Phone, tab: Tab): bool = s.front and tab != s.tab and (tab != Voicemail or s.voicemail)
 
 pure def pickTab(s: Phone, tab: Tab): Moved =
   val turned = { ...s, tab: tab, rows: 0 }
   if (tab == Recents) readLog(s.chip, turned) else { state: turned, out: List() }
+```
+
+### The Voicemail tab is offered only while the carrier's visual voicemail is ready
+
+The phone says whether it is ready when Phone shows and with each read of
+the voicemail. When it stops being ready, a Voicemail tab that is showing
+turns to Recents.
+
+```quint
+pure def voicemailReported(s: Phone, ready: bool): Moved =
+  val told = { ...s, voicemail: ready }
+  if (ready or s.tab != Voicemail) { state: told, out: List() }
+  else if (s.front) readLog(s.chip, { ...told, tab: Recents, rows: 0 })
+  else { state: { ...told, tab: Recents, rows: 0 }, out: List() }
+
+pure def alwaysVoicemailOnlyWhileReady(s: Phone): bool = s.tab == Voicemail implies s.voicemail
+
+pure def sometimesVoicemailTab(s: Phone): bool = s.front and s.tab == Voicemail
 ```
 
 ### The filter and "Retry call history" read the log again
@@ -240,7 +262,7 @@ number it can dial or an emergency number. The lookup happens on the phone.
 ```quint
 pure def judged(digits: int, typed: Typed, s: Phone): Moved =
   val lookup = R::ask(s.lookup)
-  { state: { ...s, digits: digits, typed: typed, lookup: lookup, matched: false, failedDial: false },
+  { state: { ...s, digits: digits, typed: typed, lookup: lookup, matched: false, failedDial: false, unsureDial: false },
     out: List(MatchNumber({ ticket: lookup.ticket })) }
 
 pure def canPress(s: Phone, typed: Typed): bool =
@@ -318,7 +340,7 @@ pure def dialable(s: Phone): bool =
 
 pure def handOff(source: Source, number: str, s: Phone): Moved =
   val dial = R::ask(s.dial)
-  { state: { ...s, dial: dial, dialled: true, failedDial: false }, out: List(Handoff({ ticket: dial.ticket, source: source, number: number })) }
+  { state: { ...s, dial: dial, dialled: true, failedDial: false, unsureDial: false }, out: List(Handoff({ ticket: dial.ticket, source: source, number: number })) }
 
 pure def canDialTyped(s: Phone): bool = s.front and s.tab == Keypad and not(s.dialled) and dialable(s)
 
@@ -359,7 +381,26 @@ When the dialer did not open, Phone says so.
 pure def canDialAnswered(s: Phone, ticket: int): bool = s.front and s.dialled and R::canAnswer(s.dial, ticket)
 
 pure def dialAnswered(s: Phone, ticket: int, opened: bool): Phone =
-  { ...s, dial: R::answer(s.dial, opened), failedDial: not(opened) }
+  { ...s, dial: R::answer(s.dial, opened), failedDial: not(opened), unsureDial: false }
+```
+
+### With the dialer role a call is placed through Telecom, and counts as started only when Telecom accepted it
+
+Without the role or Android's call grant the dial screen opens with the
+number instead, and an emergency number only ever opens the dial screen.
+When Telecom's answer never comes, Phone says Alpha cannot tell whether
+the call started, and the number is not handed over again in this
+showing.
+
+```quint
+pure def canDialLost(s: Phone): bool = s.front and s.dialled and s.dial.status == R::Loading
+
+pure def dialLost(s: Phone): Phone = { ...s, dial: R::answer(s.dial, false), failedDial: false, unsureDial: true }
+
+pure def alwaysAnUnsureCallIsThisShowings(s: Phone): bool =
+  s.unsureDial implies (s.front and s.dialled and not(s.failedDial) and s.dial.status == R::Failed)
+
+pure def sometimesUnsureCall(s: Phone): bool = s.unsureDial
 ```
 
 ### "Couldn't open the dialer" is shown only for this showing's handoff
@@ -436,6 +477,24 @@ One tap on the card opens Recents with the missed calls.
 
 ```quint
 pure def missedCard(s: Phone): bool = s.missed > 0
+```
+
+### One tap on the card opens Recents with the missed calls, and otherwise the Voicemail tab while a voicemail is unheard
+
+`unheard` is Voicemail's count of unheard voicemails.
+
+```quint
+pure def canOpenMissed(s: Phone): bool = s.missed > 0
+
+pure def openMissed(s: Phone): Moved =
+  val turned = { ...s, tab: Recents, chip: MissedCalls, rows: 0, sought: false }
+  if (s.front) readLog(MissedCalls, turned) else { state: turned, out: List() }
+
+pure def canOpenVoicemail(s: Phone, unheard: int): bool = s.missed == 0 and unheard > 0 and s.voicemail
+
+pure def openVoicemail(s: Phone, unheard: int): Phone = { ...s, tab: Voicemail, rows: 0 }
+
+pure def sometimesOpenedOnMissed(s: Phone): bool = s.front and s.tab == Recents and s.chip == MissedCalls and s.missed > 0
 ```
 
 ### Missed calls are counted, and are marked seen only by showing Recents

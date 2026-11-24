@@ -35,10 +35,12 @@ effect function opened(): Option.Option<ListedVoicemail>!!Voicemails {
 }
 
 // spec/app/phone/voicemail.md, "Only the newest read of the list is shown, and nothing without a carrier"
-effect function listed(ticket: number): Event!!(Telephony | Voicemails) {
+// spec/app/phone/index.md, "The Voicemail tab is offered only while the carrier's visual voicemail is ready"
+effect function listed(ticket: number): Event!!(Telephony | Voicemails | PhoneMachine) {
   const store = try Voicemails
   const listing = telephony("refreshVoicemail", (c) => c.phone.refreshVoicemail("ExplicitRead")) catch () => undefined
   const carrier = listing?.carrier === "CarrierReady"
+  if (listing !== undefined) try ignore((try PhoneMachine).send({ type: "voicemailReported", ready: carrier }))
   const rows = carrier ? listing?.voicemails ?? [] : []
   try store.set({ rows })
   return { type: "listed", ticket, ok: listing !== undefined, carrier, count: rows.length, unheard: rows.filter((row) => !row.heard).length }

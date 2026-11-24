@@ -80,6 +80,28 @@ describe("Messages on an Alpha image", () => {
     await until(alpha, alpha.runtime, Messages, (s) => s.pane === "Threads" && s.list.ticket > read && s.list.status === "Loaded");
   });
 
+  it("See my conversations from Home's unread card (spec/app/messages/index.md, \"Story: See my conversations\")", async () => {
+    const world = image();
+    world.telephony.texts.push({ id: 2, thread: 2, address: "+14155550122", box: "inbox", date: 1_700_000_060_000, body: "Lunch?", read: false });
+    const { alpha } = await open(world);
+    await until(alpha, alpha.runtime, Shell, (s) => s.image);
+
+    // spec/app/messages/index.md, "The phone reports how many conversations are unread, for the list and Home"; spec/app/messages/index.md, "One tap on Home's unread card opens the conversation when exactly one is unread, and the list filtered to the unread ones when several are"
+    await until(alpha, alpha.runtime, Messages, (s) => s.unread === 2);
+    await press("Messages: 2 unread conversations");
+    await until(alpha, alpha.runtime, Messages, (s) => s.front && s.pane === "Threads" && s.chip === "UnreadThreads" && s.list.status === "Loaded" && s.threads === 2);
+
+    // spec/app/messages/index.md, "Only the newest read of the open conversation is shown, and it marks the shown messages read only where Alpha is the phone's SMS app"
+    await press("Ben Ortiz");
+    await until(alpha, alpha.runtime, Messages, (s) => s.pane === "Conversation" && s.page.status === "Loaded");
+    await until(alpha, alpha.runtime, Messages, () => world.telephony.texts[1]!.read);
+    await hardware("home");
+    await until(alpha, alpha.runtime, Messages, (s) => s.unread === 1);
+    await press("Messages: 1 unread conversation");
+    await until(alpha, alpha.runtime, Messages, (s) => s.front && s.pane === "Conversation" && s.page.status === "Loaded" && s.shown.rows === 1);
+    await until(alpha, alpha.runtime, Messages, () => world.telephony.texts[0]!.read);
+  });
+
   it("Start a new message to a number I type (spec/app/messages/index.md, \"Story: Start a new message\")", async () => {
     const world = image();
     const { alpha } = await open(world);

@@ -1,5 +1,6 @@
-// spec/app/phone/index.md, "The phone reports missed calls not yet seen"; spec/app/messages/index.md, "The phone reports how many conversations are unread, for the list and Home"; spec/app/phone/voicemail.md, "The phone reports how many voicemails are unheard, for Home and the tab"
+// spec/app/phone/index.md, "The phone reports missed calls not yet seen"; spec/app/phone/index.md, "The Voicemail tab is offered only while the carrier's visual voicemail is ready"; spec/app/messages/index.md, "The phone reports how many conversations are unread, for the list and Home"; spec/app/phone/voicemail.md, "The phone reports how many voicemails are unheard, for Home and the tab"
 import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
+import { Conversations } from "../messages/messages.vibe"
 import { Machine as Phone } from "../../gen/app__phone.effect.vibe"
 import { Machine as Voicemail } from "../../gen/app__phone__voicemail.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
@@ -15,6 +16,7 @@ effect function report(): void!!(Telephony | Phone | Messages | Voicemail) {
   const threads = telephony("threadPage", (c) => c.messages.threadPage()) catch () => undefined
   if (threads !== undefined) try contained((try Messages).send({ type: "unreadReported", count: threads.rows.filter((row) => !("incomplete" in row) && row.unread).length }), "unread conversations")
   const listing = telephony("refreshVoicemail", (c) => c.phone.refreshVoicemail("AutomaticRead")) catch () => undefined
+  if (listing !== undefined) try contained((try Phone).send({ type: "voicemailReported", ready: listing.carrier === "CarrierReady" }), "visual voicemail")
   if (listing !== undefined && listing.carrier === "CarrierReady") try contained((try Voicemail).send({ type: "unheardReported", count: listing.voicemails.filter((one) => !one.heard).length }), "unheard voicemail")
 }
 
@@ -28,3 +30,25 @@ export const reports = started(effect {
     if (shown) try report()
   })
 }, "the phone's counts for Home")
+
+// spec/app/phone/index.md, "One tap on the card opens Recents with the missed calls, and otherwise the Voicemail tab while a voicemail is unheard"
+/** Home's calls card, tapped: Phone opens on Recents with the missed calls, or else on the Voicemail tab. */
+export effect function openCalls(): void!!(Phone | Voicemail | Shell) {
+  const phone = try Phone
+  const missed = (try phone.get()).missed
+  const unheard = (try (try Voicemail).get()).unheard
+  try contained(phone.send(missed > 0 ? { type: "openMissed" } : { type: "openVoicemail", unheard }), "the calls card")
+  try contained((try Shell).send({ type: "openView", view: "Phone" }), "the calls card")
+}
+
+// spec/app/messages/index.md, "One tap on Home's unread card opens the conversation when exactly one is unread, and the list filtered to the unread ones when several are"
+/** Home's unread card, tapped: once Messages shows its list, the one unread conversation opens, or the list of the unread ones. */
+export effect function openUnread(): void!!(Telephony | Messages | Conversations | Shell) {
+  try contained((try Shell).send({ type: "openView", view: "Messages" }), "the unread card")
+  const messages = try Messages
+  try Stream.runHead(Stream.filter(messages.changes, (s) => s.front && s.pane === "Threads"))
+  const page = telephony("threadPage", (c) => c.messages.threadPage()) catch () => undefined
+  const unread = (page?.rows ?? []).flatMap((row) => ("incomplete" in row || !row.unread ? [] : [row]))
+  const only = unread.length === 1 ? try (try Conversations).of({ id: unread[0].id, addresses: unread[0].addresses }) : 0
+  try contained(messages.send({ type: "openUnread", only }), "the unread card")
+}

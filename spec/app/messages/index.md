@@ -90,6 +90,7 @@ pure def removeMessage(id: int): List[Effect] = List(RemoveMessage({ id: id }))
 pure val ticketValues = Set(1, 2, 3)
 pure val idValues = Set(1, 2, 3)
 pure val threadValues = Set(0, 1, 2)
+pure val onlyValues = Set(0, 1)
 pure val countValues = Set(-1, 0, 1, 2)
 pure val seenValues = Set(
   blankPage,
@@ -191,14 +192,24 @@ pure def threadsRead(s: Messages, ticket: int, ok: bool, grant: P::Grant, count:
 
 ### The phone reports how many conversations are unread, for the list and Home
 
-Home shows the unread card while any conversation is unread. One tap on it
-opens the conversation when exactly one is unread, and the list filtered to
-the unread ones when several are.
+Home shows the unread card while any conversation is unread.
 
 ```quint
 pure def canUnreadReported(s: Messages, count: int): bool = count >= 0
 
 pure def unreadReported(s: Messages, count: int): Messages = { ...s, unread: count }
+```
+
+### One tap on Home's unread card opens the conversation when exactly one is unread, and the list filtered to the unread ones when several are
+
+`only` is the one unread conversation, or none.
+
+```quint
+pure def canOpenUnread(s: Messages, only: int): bool =
+  showingPane(s, Threads) and readable(s) and s.unread > 0 and only >= 0 and (only > 0 implies s.unread == 1)
+
+pure def openUnread(s: Messages, only: int): Moved =
+  if (only > 0) openConversation(only, s) else relisted(false, UnreadThreads, s)
 ```
 
 ### No conversations, no matches, a failed read and missing access are told apart

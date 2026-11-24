@@ -6,8 +6,8 @@ import type { Effect as Out, Event, Filter, Telecom, Typed } from "../../gen/app
 import type { Grant } from "../../gen/kit__permission.ts"
 import { Calls } from "../platform/calls.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { Telephony, namesOf, telephony } from "../platform/telephony.vibe"
-import { type Job, answer, hearing, reacting, run, together } from "../runtime/reactor.vibe"
+import { Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
+import { type Job, answer, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { on, visiting } from "./visit.vibe"
 import { judge, matches } from "./words.ts"
 
@@ -78,12 +78,28 @@ effect function askLog(): Event!!Telephony {
   return { type: "logReported", grant: grantOf(status?.permissions.callLog) }
 }
 
-// spec/app/phone/index.md, "Call hands the typed number to the dialer, only if the phone says it is a number it can dial"; spec/app/phone/index.md, "Tapping a recent call hands its number to the dialer"
+/** Whether a failure means the phone may have acted: no answer came back. */
+const lost = (failure: unknown) => failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === ""
+
+/** The dial screen opened with `number`, as the phone answers it. */
+effect function dialScreen(ticket: number, number: string): Event!!Telephony {
+  const report = telephony("dial", (c) => c.phone.dial(number)) catch () => undefined
+  return { type: "dialAnswered", ticket, opened: report?.dialStatus === "DialHandedOff" }
+}
+
+// spec/app/phone/index.md, "Call hands the typed number to the dialer, only if the phone says it is a number it can dial"; spec/app/phone/index.md, "Tapping a recent call hands its number to the dialer"; spec/app/phone/index.md, "With the dialer role a call is placed through Telecom, and counts as started only when Telecom accepted it"
 effect function handoff(ticket: number, typed: boolean, tapped: string): Event!!(Telephony | Dialer) {
   const held = try (try Dialer).get()
   const number = typed ? held.digits : tapped
-  const report = telephony("dial", (c) => c.phone.dial(number)) catch () => undefined
-  return { type: "dialAnswered", ticket, opened: report?.dialStatus === "DialHandedOff" }
+  const status = telephony("status", (c) => c.phone.status()) catch () => undefined
+  if (status?.roles.dialer.held !== true || judge(number) === "Emergency") return try dialScreen(ticket, number)
+  const placed = telephony("placeCall", (c) => c.phone.placeCall(number)) catch (failure) => (lost(failure) ? undefined : null)
+  if (placed === undefined) return { type: "dialLost" }
+  switch (placed?.placeStatus) {
+    case "CallPlaced": case "CallEmergencyHandoff": return { type: "dialAnswered", ticket, opened: true }
+    case "CallRoleRequired": case "CallPermissionRequired": return try dialScreen(ticket, number)
+    default: return { type: "dialAnswered", ticket, opened: false }
+  }
 }
 
 function carry(fx: Out): Job<Event, Telephony | Dialer | Phone.Machine | SystemSettings | Calls, []> {
@@ -93,7 +109,7 @@ function carry(fx: Out): Job<Event, Telephony | Dialer | Phone.Machine | SystemS
     when { tag: "AskLog" }: answer("ask", askLog(), { type: "logReported", grant: "Unasked" });
     when { tag: "OpenSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", 0) });
     when { tag: "MarkSeen" }: run("seen", effect {});
-    when { tag: "Handoff", let ticket, let source, let number }: answer(`dial ${ticket}`, handoff(ticket, source === "TypedNumber", number), { type: "dialAnswered", ticket, opened: false });
+    when { tag: "Handoff", let ticket, let source, let number }: answer(`dial ${ticket}`, handoff(ticket, source === "TypedNumber", number), { type: "dialLost" });
   }
 }
 
@@ -121,6 +137,13 @@ const opening = effect {
   return [{ type: "telecomReported", ...telecomOf(raw) }] as const
 }
 
+// spec/app/phone/index.md, "The Voicemail tab is offered only while the carrier's visual voicemail is ready"
+/** Whether the carrier's visual voicemail is ready, as the phone last kept its voicemail, when Alpha opens. */
+const ready = started(effect {
+  const listing = telephony("voicemail", (c) => c.phone.voicemail()) catch () => undefined
+  if (listing !== undefined) try contained((try Phone.Machine).send({ type: "voicemailReported", ready: listing.carrier === "CarrierReady" }), "visual voicemail")
+}, "visual voicemail")
+
 const machine = reacting(Phone, { carry, open: opening })
 
 const shown = visiting(on("Phone"), Phone.Machine, (showing): Event => (showing ? { type: "show" } : { type: "leave" }))
@@ -128,4 +151,4 @@ const shown = visiting(on("Phone"), Phone.Machine, (showing): Event => (showing 
 const telecom = hearing(Stream.unwrap(effect { return (try Calls).readings }), Phone.Machine, (raw): Event => ({ type: "telecomReported", ...telecomOf(raw) }))
 
 /** Phone: resident, since Contacts, Voicemail, Messages and the agent hand it a number and every area reads whether a call is live; it reads only while its view is in front. */
-export const phone = together(machine, dialer, shown, telecom)
+export const phone = together(machine, dialer, shown, telecom, ready)
