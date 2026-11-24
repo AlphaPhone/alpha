@@ -104,6 +104,9 @@ error NotServing { output: string }
 /** What eliza's client was refused with. */
 error Refusal { cause: unknown }
 
+/** `@repo/deployment` names an environment Alpha registers with a local cloud. */
+error NotHosted { name: string }
+
 /** A gate's answer was not what Alpha needs. */
 error GateRefused { gate: Gate; answer: string }
 
@@ -448,7 +451,7 @@ describe(`Alpha's app is registered with each cloud it talks to (spec/cloud/inde
   it.effect("registers Alpha's package once per hosted environment at its App Link host, with the release signer in production and its returns off the API origin, and serves asset links that name it alone", () => effect {
     for (const [name, environment] of [["staging", "Staging"], ["production", "Production"]] as const) {
       const row = try deployment(name)
-      if (row.kind !== "hosted") throw new GateRefused({ gate: "Health", answer: `${name} is not hosted` })
+      if (row.kind !== "hosted") throw new NotHosted({ name })
       const settings = (try profileNamed(row.profile)).environments[row.profile]
       try holds(() => assert.ok(profileFits(row, { api: settings.api, webHost: settings.web.replace(/^https:\/\//, "") }), `${name}: the profile answers at its deployment's cloud`))
       const registration = registrationAt(environment, row.appLinkHost)
