@@ -1,7 +1,7 @@
-// spec/camera/viewfinder.md, "Story: Keep the viewfinder only while Camera is in front"; spec/camera/viewfinder.md, "Story: Record videos"; spec/camera/focus.md, "Story: Focus where I tap"; spec/camera/scanDialogs.md, "Story: Keep my scan open while a system picker covers it"
+// spec/camera/viewfinder.md, "Story: Keep the viewfinder only while Camera is in front"; spec/camera/viewfinder.md, "Story: Record videos"; spec/camera/focus.md, "Story: Focus where I tap"; spec/camera/scanDialogs.md, "Story: Keep my scan open while a system picker covers it"; spec/camera/viewfinder.md, "Photo mode offers 4:3 or 16:9 when the bound camera lists both, and a new ratio restarts the preview with it"
 import { Build } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"
-import { AccessReply, ExportReply, PhotoReply, PickedImage, PreviewReply, RecordingReply, SourceBytes, VideoReply } from "./bridge.schema.vibe"
+import { AccessReply, DeviceList, ExportReply, PhotoReply, PickedImage, PreviewReply, RecordingReply, SourceBytes, VideoReply } from "./bridge.schema.vibe"
 import { browserCamera, pickBrowserImage, readContentImage } from "./browserCamera.ts"
 
 /** A camera, device or picker call failed; `code` is the plugin's code, `UNAVAILABLE` without the plugin, `MALFORMED` for a reply of the wrong shape. */
@@ -9,6 +9,9 @@ export error CameraFailed { method: string; code: string; message: string }
 
 /** Which camera a preview runs on. */
 export type LensDirection = "front" | "back"
+
+/** The photo aspect ratio a preview captures at; 4:3 is the camera's default. */
+export type PhotoRatio = "4:3" | "16:9"
 
 /** What a photo capture asks of the camera. */
 export interface CaptureOptions {
@@ -32,7 +35,10 @@ export const RECORDING = { quality: "medium", maxDuration: 300, maxFileSize: 104
 /** The phone's camera, its device controls and the system pickers, as Camera and scans reach them. */
 export service CameraBridge {
   readonly browser: boolean
-  startPreview(lens: LensDirection): PreviewReply!CameraFailed
+  /** Start the preview; a ratio other than 4:3 is sent as its capture ratio, so the default request is unchanged. */
+  startPreview(lens: LensDirection, ratio: PhotoRatio): PreviewReply!CameraFailed
+  /** The cameras and the photo ratios each accepts; the browser lists none. */
+  devices(): (typeof DeviceList.Type)!CameraFailed
   stopPreview(): void!CameraFailed
   setCaptureMode(mode: "photo" | "video"): void!CameraFailed
   switchCamera(lens: LensDirection): PreviewReply!CameraFailed
@@ -83,7 +89,9 @@ export const nativeCameraBridge = Layer.effect(CameraBridge, effect {
   const native = try Native
   return {
     browser: false,
-    startPreview: (lens: LensDirection) => call(native, CAMERA, "startPreview", PreviewReply, { direction: lens, resolution: { width: 1920, height: 1440 }, mirror: lens === "front" }),
+    startPreview: (lens: LensDirection, ratio: PhotoRatio) => call(native, CAMERA, "startPreview", PreviewReply,
+      { direction: lens, resolution: { width: 1920, height: 1440 }, mirror: lens === "front", ...(ratio === "4:3" ? {} : { captureAspectRatio: ratio }) }),
+    devices: () => call(native, CAMERA, "getDevices", DeviceList),
     stopPreview: () => run(native, CAMERA, "stopPreview"),
     setCaptureMode: (mode: "photo" | "video") => run(native, CAMERA, "setCaptureMode", { mode, quality: RECORDING.quality }),
     switchCamera: (lens: LensDirection) => call(native, CAMERA, "switchCamera", PreviewReply, { direction: lens }),
@@ -119,6 +127,7 @@ export const nativeCameraBridge = Layer.effect(CameraBridge, effect {
 export const browserCameraBridge = Layer.succeed(CameraBridge, {
   browser: true,
   startPreview: (lens: LensDirection) => lifted("startPreview", () => browserCamera.startPreview(lens)),
+  devices: () => succeed({ devices: [] }),
   stopPreview: () => lifted("stopPreview", () => browserCamera.stopPreview()),
   setCaptureMode: () => Effect.void,
   switchCamera: (lens: LensDirection) => lifted("switchCamera", () => browserCamera.switchCamera(lens)),

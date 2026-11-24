@@ -259,6 +259,10 @@ export const operationPorts = effect {
       if (op.kind === "closeAll") return closedSummary(proposalId === undefined ? undefined : closed.get(proposalId))
       return op.kind === "navigate" ? browserNavigationSummary(op.url) : controlSummary(op.operation)
     },
+    tabList: (operation) => {
+      const op = decoded(operation)
+      return op?.kind === "control" && op.operation.type === "browser_tabs_show"
+    },
     itemized: (operation) => decoded(operation)?.kind === "closeAll",
     itemize: (operation, proposalId) => decoded(operation)?.kind === "closeAll" ? listed(proposalId) : undefined,
     stillListed: (operation, proposalId) => {

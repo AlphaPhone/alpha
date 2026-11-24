@@ -5,6 +5,7 @@ import { canAgentShowTabs, initial } from "../../gen/browser__session.ts"
 import { BrowserAgent } from "../../src/browser/agent.vibe"
 import { BrowserTabs } from "../../src/browser/session.vibe"
 import { TABS_SHOWN_SUMMARY, browserDeviceCapabilities, browserNotDone, groundedIn, operationPorts } from "../../src/browser/operations.vibe"
+import { composeExecutors } from "../../src/shell/assistantHost.vibe"
 import { callsTo, fakeHost, loadPage, settledTabs, shownBrowser } from "./fakes.vibe"
 
 const show = { type: "browser_tabs_show" }
@@ -24,6 +25,10 @@ it.live("showing the open tabs brings Browser's own tab list forward only when p
       const docs = try loadPage(tabs, fake.events, session, "https://docs.example.org/", "1", 1)
       try SubscriptionRef.set(fake.foreground, { ...shownBrowser, view: "" })
       const card = ports.describe(show)
+      const tabList = [ports.tabList?.(show), ports.tabList?.({ type: "browser_navigate", url: "https://news.example/" }), ports.tabList?.({ type: "browser_tab_close", all: true })]
+      // The direct pass gets Browser's tab-list classification through the composed executors.
+      const composed = composeExecutors([ports])
+      const composedTabList = [composed.tabList?.(show), composed.tabList?.({ type: "browser_navigate", url: "https://news.example/" }), composed.tabList?.({ type: "telephony_dial", number: "+14155550100" })]
       const applied = try promise(() => ports.execute(show, call("show")))
       const openBeforeReceipt = (try tabs.get()).layers.tabsOpen
       const shownBeforeReceipt = (try Ref.get(fake.opened)).includes("browser")
@@ -35,7 +40,7 @@ it.live("showing the open tabs brings Browser's own tab list forward only when p
       const opened = try Ref.get(fake.opened)
       const said = try Ref.get(fake.toasts)
       try Effect.try(() => assert.deepStrictEqual({
-        card, applied, openBeforeReceipt, shownBeforeReceipt, receipt,
+        card, tabList, composedTabList, applied, openBeforeReceipt, shownBeforeReceipt, receipt,
         listOpen: after.layers.tabsOpen,
         tabs: after.tabs.map((t) => t.id),
         cur: after.cur,
@@ -44,6 +49,8 @@ it.live("showing the open tabs brings Browser's own tab list forward only when p
         said,
       }, {
         card: { title: "Show open tabs", detail: "Shows the list of your open tabs in Browser. The agent does not see your tabs." },
+        tabList: [true, false, false],
+        composedTabList: [true, false, false],
         applied: { kind: "applied" },
         openBeforeReceipt: false,
         shownBeforeReceipt: false,

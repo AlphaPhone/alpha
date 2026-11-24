@@ -217,7 +217,7 @@ export const nativePlugins = {
   ElizaCamera: {
     reach: "AnyNative",
     methods: [
-      "checkPermissions", "startPreview", "stopPreview", "setCaptureMode", "switchCamera", "capturePhoto", "startRecording",
+      "checkPermissions", "getDevices", "startPreview", "stopPreview", "setCaptureMode", "switchCamera", "capturePhoto", "startRecording",
       "stopRecording", "getRecordingState", "setSettings", "setZoom", "setFocusPoint",
     ],
     events: [],
