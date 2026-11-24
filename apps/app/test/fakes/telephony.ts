@@ -215,7 +215,11 @@ function telephony(world: TelephonyScene): Faked {
         const rows = world.texts.filter((one) => `thread:${one.thread}` === threadId).sort((x, y) => y.date - x.date).slice(0, limit);
         return Promise.resolve({ messages: rows.map(message), next: null });
       },
-      latestIncomingSender: () => Promise.resolve({ status: "empty" }),
+      latestIncomingSender: (options?: { includeAddress: true }) => {
+        const newest = world.texts.filter((one) => one.box === "inbox").sort((x, y) => y.date - x.date)[0];
+        if (newest === undefined) return Promise.resolve({ status: "empty" });
+        return Promise.resolve(options?.includeAddress ? { status: "found", address: newest.address, threadId: `thread:${newest.thread}` } : { status: "found", numberEnding: newest.address.slice(-4) });
+      },
       markThreadRead: ({ threadId, throughDate }) => {
         const unread = world.texts.filter((one) => `thread:${one.thread}` === threadId && one.box === "inbox" && !one.read && one.date <= throughDate);
         for (const one of unread) one.read = true;
