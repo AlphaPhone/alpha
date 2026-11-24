@@ -1,9 +1,14 @@
-// spec/app/calendar/index.md, "Story: See my days"; spec/app/calendar/index.md, "Story: Look at an event"
+// spec/app/calendar/index.md, "Story: See my days"; spec/app/calendar/index.md, "Story: Look at an event"; spec/app/calendar/index.md, "Story: Keep what I see current"
 import type * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as View from "../../gen/app__calendar.effect.vibe"
 import type { Effect as Out, Event, Source } from "../../gen/app__calendar.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
-import type * as Editor from "../../gen/app__calendar__editor.effect.vibe"
+import * as Canvas from "../../gen/app__shell__keyboard.effect.vibe"
+import * as Writes from "../../gen/app__calendar__editor.effect.vibe"
+import { inFlight } from "../../gen/app__calendar__editor.ts"
+import type * as Held from "../../gen/app__calendar__deletions.effect.vibe"
+import { pageOffered } from "../../gen/app__calendar__presentation.ts"
+import { answersOffered, cancellation, ownAnswer } from "../../gen/app__calendar__writing.ts"
 import type * as Changes from "../../gen/app__calendar__agent.effect.vibe"
 import type * as SyncState from "../../gen/app__calendar__sync.effect.vibe"
 import type { AndroidCalendarEvent } from "@elizaos/os/bridges/calendar"
@@ -11,17 +16,27 @@ import { Agent } from "../platform/agent.vibe"
 import { PhoneCalendar } from "../platform/calendar.vibe"
 import { type Failure, ask } from "../platform/remote.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { type Job, answer, contained, due, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, due, following, hearing, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { type Read, shown } from "./shown.ts"
-import { civilDay, dayStart, localDate, openLink, zone } from "./time.ts"
+import { type Person, type Read, shown } from "./shown.ts"
+import { civilDay, dayStart, localDate, openLink, plainHttps, readWindow, zone } from "./time.ts"
 
 /** An event of the phone's calendars as the screen shows it. */
 function phoneRow(event: AndroidCalendarEvent): Read {
   return {
     key: event.id, calendarId: event.calendarId, title: event.title ?? "", place: event.location ?? "", notes: event.body ?? "",
     begin: event.begin, end: event.end, allDay: event.allDay, recurring: event.recurring, link: "", video: "",
+    people: [], answer: "NotInvited", answerable: false, version: "",
   }
+}
+
+/** One of an event's people as the agent's feed gives them (eliza's `CalendarAttendee` of `@elizaos/plugin-calendar`). */
+schema FeedAttendee {
+  readonly email: string | null
+  readonly displayName: string | null
+  readonly responseStatus: string | null
+  readonly self: boolean
+  readonly organizer: boolean
 }
 
 /** The part of the agent's calendar feed Calendar shows (eliza's `CalendarFeed` of `@elizaos/plugin-calendar`). */
@@ -36,23 +51,54 @@ schema FeedEvent {
   readonly isAllDay: boolean
   readonly htmlLink: string | null
   readonly conferenceLink: string | null
+  readonly provider: string
+  readonly attendees: ReadonlyArray<FeedAttendee>
+  readonly recurringEventId?: string | null
+  readonly updatedAt: string
+  readonly metadata: Readonly<Record<string, unknown>>
+  readonly organizer: Readonly<Record<string, unknown>> | null
+}
+
+/** The version a write names, as eliza's `eventVersion` of `@elizaos/plugin-calendar` reads it: the provider's etag, or the change time. */
+function versionOf(event: FeedEvent): string {
+  const etag = event.metadata["etag"]
+  return typeof etag === "string" && etag !== "" ? etag : event.updatedAt
 }
 schema Feed { readonly state: "complete" | "partial" | "unavailable"; readonly events: FeedEvent[] }
 
+/** The calendar the agent manages for the owner, whose answers and deletions are the owner's to make in Google Calendar. */
+function managed(event: FeedEvent): boolean {
+  return event.metadata["managed"] === true
+}
+
+// spec/app/calendar/presentation.md, "An event's page is offered only for a Google event at a plain HTTPS address without credentials"; spec/app/calendar/writing.md, "An invitee answers Going or Maybe from the invitation; Decline stays the deletion's decline"
 /** An event of the agent's calendar as the screen shows it; an all-day date is the same date on this phone. */
 function googleRow(event: FeedEvent): Read {
   const begin = event.isAllDay ? localDate(event.startAt) : Date.parse(event.startAt)
   const end = event.isAllDay ? localDate(event.endAt) : Date.parse(event.endAt)
+  const own = event.attendees.find((person) => person.self && !person.organizer)
+  const organizes = event.provider === "eliza" || event.organizer?.["self"] === true || event.attendees.some((person) => person.self && person.organizer)
+  const answer = ownAnswer(own !== undefined, own?.responseStatus ?? "")
+  const recurring = (event.recurringEventId ?? "") !== ""
+  const mode = cancellation(organizes, own !== undefined, false, false)
+  const page = event.htmlLink ?? ""
+  const people: ReadonlyArray<Person> = event.attendees.map((person) => ({
+    name: person.displayName ?? person.email ?? "", organizer: person.organizer, status: person.responseStatus ?? "",
+  }))
   return {
     key: event.id, calendarId: event.calendarId, title: event.title, place: event.location, notes: event.description,
-    begin, end, allDay: event.isAllDay, recurring: false, link: event.htmlLink ?? "", video: event.conferenceLink ?? "",
+    begin, end, allDay: event.isAllDay, recurring,
+    link: pageOffered(event.provider === "google", plainHttps(page), false) ? page : "", video: event.conferenceLink ?? "",
+    people, answer, answerable: answersOffered(mode, answer, true, managed(event), recurring),
+    version: versionOf(event), changedAt: Date.parse(event.updatedAt),
   }
 }
 
-/** The agent's calendar for `day`, or none where no Google account is connected to the agent. */
-effect function readFeed(day: number): Option.Option<ReadonlyArray<Read>>!Failure!Agent {
+/** The agent's calendar for the window around `day`, or none where no Google account is connected to the agent. */
+export effect function readFeed(day: number): Option.Option<ReadonlyArray<Read>>!Failure!Agent {
+  const range = readWindow(day)
   const request = HttpClientRequest.get("/api/lifeops/calendar/feed", {
-    urlParams: { timeMin: new Date(dayStart(day)).toISOString(), timeMax: new Date(dayStart(day + 1)).toISOString(), timeZone: zone() },
+    urlParams: { timeMin: new Date(range.begin).toISOString(), timeMax: new Date(range.end).toISOString(), timeZone: zone() },
   })
   const feed = try ask(Agent, request, Feed)
   if (feed.state === "unavailable") return Option.none()
@@ -65,14 +111,20 @@ effect function readDay(source: Source, ticket: number, day: number): Event!!(Ph
   if (source === "Google") {
     return effect {
       const read = try readFeed(day)
-      if (Option.isNone(read)) return { type: "googleChanged", connected: false } as Event
+      if (Option.isNone(read)) {
+        shown.drop("Google")
+        return { type: "googleChanged", connected: false } as Event
+      }
       return { type: "googleAnswered", ticket, ok: true, rows: shown.keep("Google", day, read.value).length } as Event
     } catch () => ({ type: "googleAnswered", ticket, ok: false, rows: 0 })
   }
   const phone = try PhoneCalendar
   return effect {
-    const listed = try phone.list({ begin: dayStart(day), end: dayStart(day + 1) })
-    if (listed.status !== "ready") return { type: "accessAnswered", grant: "Denied" } as Event
+    const listed = try phone.list(readWindow(day))
+    if (listed.status !== "ready") {
+      shown.drop("Phone")
+      return { type: "accessAnswered", grant: "Denied" } as Event
+    }
     const rows = shown.keep("Phone", day, listed.events.map(phoneRow))
     return { type: "phoneAnswered", ticket, ok: true, rows: rows.length, limited: listed.truncated } as Event
   } catch () => ({ type: "phoneAnswered", ticket, ok: false, rows: 0, limited: false })
@@ -88,7 +140,7 @@ effect function readEvent(ticket: number, id: number): Event!!(PhoneCalendar | A
   const again: Option.Option<ReadonlyArray<Read>> = row.source === "Google"
     ? (readFeed(day) catch () => Option.none<ReadonlyArray<Read>>())
     : (effect {
-        const listed = try (try PhoneCalendar).list({ begin: dayStart(day), end: dayStart(day + 1) })
+        const listed = try (try PhoneCalendar).list(readWindow(day))
         return listed.status === "ready" ? Option.some(listed.events.map(phoneRow)) : Option.none<ReadonlyArray<Read>>()
       } catch () => Option.none<ReadonlyArray<Read>>())
   if (Option.isNone(again) || !again.value.some((candidate) => candidate.key === row.key)) return gone
@@ -97,14 +149,14 @@ effect function readEvent(ticket: number, id: number): Event!!(PhoneCalendar | A
 }
 
 // spec/app/calendar/index.md, "The video call is joined, and the event opened in Android Calendar, only from the event shown"; spec/app/calendar/index.md, "The event's place opens in Maps, and coming back reads the event again"
-/** Hand the open event to Maps, Android Calendar or its video call. */
-effect function hand(id: number, to: "Maps" | "AndroidCalendar" | "VideoCall") {
+/** Hand the open event to Maps, Android Calendar, Google Calendar or its video call. */
+effect function hand(id: number, to: "Maps" | "AndroidCalendar" | "VideoCall" | "GoogleCalendar") {
   const row = shown.find(id)
   if (row === undefined) return
   if (to === "Maps") return try (try Shell.Machine).send({ type: "openView", view: "Maps" })
   if (to === "VideoCall") return openLink(row.video)
+  if (to === "GoogleCalendar") return row.source === "Google" ? openLink(row.link) : false
   if (row.source === "Phone") return try (try PhoneCalendar).open(row.key, row.begin, row.end)
-  return openLink(row.link)
 }
 
 function carry(fx: Out): Job<Event, PhoneCalendar | Agent | SystemSettings | Shell.Machine | Time, []> {
@@ -119,6 +171,7 @@ function carry(fx: Out): Job<Event, PhoneCalendar | Agent | SystemSettings | She
         return { type: "accessAnswered", grant: granted ? "Granted" : "Denied" } as Event
       }, { type: "accessAnswered", grant: "Denied" });
     when { tag: "OpenCalendarSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", 0) });
+    when { tag: "OpenAccountSettings" }: run("account", effect { try (try Shell.Machine).send({ type: "openView", view: "Settings" }) });
   }
 }
 
@@ -127,11 +180,14 @@ effect function today(): Event!!Time {
   return { type: "dayBegins", day: civilDay(try (try Time).now()) }
 }
 
-// spec/app/calendar/index.md, "When the date changes, a calendar on today moves to the new today, and any other day stays the same date"
+// spec/app/calendar/index.md, "When the date changes, a calendar on today moves to the new today, and any other day stays the same date"; spec/app/calendar/index.md, "While Calendar is in front it reads again once a minute, never during a read"
 const kept = reacting(View, {
   open: Effect.map(today(), (event) => [event] as const),
   carry,
-  timers: (state) => [due<Event, []>("midnight", dayStart(state.today + 1), { type: "dayBegins", day: state.today + 1 })],
+  timers: (state) => [
+    due<Event, []>("midnight", dayStart(state.today + 1), { type: "dayBegins", day: state.today + 1 }),
+    ...(state.front ? [due<Event, []>("minute", state.readAt + 60_000, { type: "minutePassed", now: untimed })] : []),
+  ],
 })
 
 // spec/app/calendar/index.md, "What Android answers replaces what Calendar believed; granted, the day is read, withdrawn, the phone's rows go"; spec/app/calendar/index.md, "Connecting an account reads the day from Google; disconnecting takes its rows away at once"
@@ -146,17 +202,26 @@ const told = started(effect {
   try contained(view.send({ type: "googleChanged", connected }), "telling Calendar of the agent's account")
 }, "reading what Calendar may read")
 
-/** Each time the shell brings Calendar forward. */
-const forward = Stream.unwrap(effect {
-  return Stream.filter(Stream.changes(Stream.map((try Shell.Machine).changes, (shell) => Shell.showing(shell, "Calendar"))), (front) => front)
+/** Whether Calendar is the app the shell shows, each time that changes. */
+const showing = Stream.unwrap(effect {
+  return Stream.changes(Stream.map((try Shell.Machine).changes, (shell) => Shell.showing(shell, "Calendar")))
 })
 
-// spec/app/calendar/index.md, "The owner reads again whenever a source can be read"; spec/app/calendar/index.md, "The event's place opens in Maps, and coming back reads the event again"
-const opened = hearing(forward, View.Machine, (): Event => ({ type: "refresh" }))
+/** Each time the shell brings Calendar forward. */
+const forward = Stream.filter(showing, (front) => front)
+
+// spec/app/calendar/index.md, "Calendar says when it comes in front and when it leaves; coming in front reads again"; spec/app/calendar/index.md, "The event's place opens in Maps, and coming back reads the event again"
+const fronted = hearing(showing, View.Machine, (front): Event => ({ type: "frontChanged", front, now: untimed }))
 const returned = hearing(forward, View.Machine, (): Event => ({ type: "comeBack" }))
 
+// spec/app/calendar/index.md, "A screen that narrows shows one day instead of several"
+const widened = following(Canvas.Machine, (canvas) => canvas.wide, View.Machine, (wide): Event => ({ type: "resize", wide }))
+
+// spec/app/calendar/index.md, "A read asked for during a write waits for it, and follows it once"
+const writing = following(Writes.Machine, (form) => inFlight(form), View.Machine, (busy): Event => ({ type: "writeChanged", writing: busy }))
+
 /** Calendar's view: in memory, told today by Alpha's time and the shell, and what it may read by Android and the agent. */
-export const calendar = together(kept, told, opened, returned)
+export const calendar = together(kept, told, fronted, returned, widened, writing)
 
 /** Every machine of the Calendar area, which its screen reads, and Alpha's time. */
-export type Calendared = View.Machine | Editor.Machine | Changes.Machine | SyncState.Machine | Time | KeyValueStore.KeyValueStore
+export type Calendared = View.Machine | Writes.Machine | Changes.Machine | SyncState.Machine | Held.Machine | Time | KeyValueStore.KeyValueStore

@@ -4,10 +4,10 @@ import type { Actor, Effect as Out, Event, Query, Reply } from "../../gen/app__c
 import { Agent } from "../platform/agent.vibe"
 import { ask, attemptedWith } from "../platform/remote.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
-import { type Job, answer, reacting, run, stream } from "../runtime/reactor.vibe"
+import { type Job, answer, reacting, run } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { type Row, shown } from "./shown.ts"
-import { civilDay, dayStart, zone } from "./time.ts"
+import { civilDay, dayStart, readWindow, zone } from "./time.ts"
 
 const base = "/api/lifeops/calendar"
 
@@ -37,7 +37,7 @@ const replies: Readonly<Record<Reply, string>> = { NoReply: "", Going: "accepted
 /** The request that carries an approved change under its idempotency key: the event as the agent selected it. */
 function request(change: Out & { tag: "Send" }, row: Row | undefined, key: string) {
   const event = encodeURIComponent(row?.key ?? "")
-  const version = String(change.revision)
+  const version = row?.version ?? ""
   const scope = change.series ? "all" : "this"
   switch (change.change) {
     case "Create":
@@ -45,7 +45,7 @@ function request(change: Out & { tag: "Send" }, row: Row | undefined, key: strin
     case "Update":
       return HttpClientRequest.patch(`${base}/events/${event}`) |> HttpClientRequest.bodyJsonUnsafe(%, { title: row?.title, recurrenceScope: scope, expectedProviderVersion: version, idempotencyKey: key })
     case "Delete":
-      return HttpClientRequest.delete(`${base}/events/${event}`, { urlParams: { recurrenceScope: scope, expectedProviderVersion: version, idempotencyKey: key, cancellationMode: "organizer_cancel" } })
+      return HttpClientRequest.delete(`${base}/events/${event}`, { urlParams: { recurrenceScope: scope, expectedProviderVersion: version, idempotencyKey: key, cancellationMode: row !== undefined && row.answer !== "NotInvited" ? "decline_invitation" : "organizer_cancel" } })
     case "Respond":
       return HttpClientRequest.post(`${base}/events/${event}/response`) |> HttpClientRequest.bodyJsonUnsafe(%, { responseStatus: replies[change.reply], expectedProviderVersion: version, idempotencyKey: key })
   }
@@ -58,15 +58,15 @@ effect function send(change: Out & { tag: "Send" }): Event!!(Agent | Attempts) {
   return { type: "sent", attempt: change.attempt, confirmed, known }
 }
 
-// spec/app/calendar/agent.md, "The read back says whether the change is there, and the agent is told"
-/** The read back's answer, or nothing where the agent could not be read: the change then waits to be read back after a restart. */
-function readBack(ticket: number, id: number): Stream.Stream<Event, never, Agent | Time> {
-  return Stream.unwrap(effect {
-    const key = shown.find(id)?.key ?? ""
-    const window = week(try (try Time).now())
-    const listed = ask(Agent, HttpClientRequest.get(`${base}/feed`, { urlParams: window }), Listed) catch () => undefined
-    return listed === undefined ? Stream.empty : Stream.succeed<Event>({ type: "readBack", ticket, present: listed.events.some((event) => event.id === key) })
-  })
+// spec/app/calendar/agent.md, "The read back says whether the change is there, and the agent is told"; spec/app/calendar/agent.md, "A read back that fails leaves a confirmed deletion deleted by its receipt, and any other change sent but unverified"
+/** The read back's answer, over the window around the event's own day, or a failed read back where the agent could not be read. */
+effect function readBack(ticket: number, id: number): Event!!(Agent | Time) {
+  const row = shown.find(id)
+  const range = readWindow(row === undefined ? civilDay(try (try Time).now()) : civilDay(row.begin))
+  const urlParams = { timeMin: new Date(range.begin).toISOString(), timeMax: new Date(range.end).toISOString(), timeZone: zone() }
+  const listed = ask(Agent, HttpClientRequest.get(`${base}/feed`, { urlParams }), Listed) catch () => undefined
+  if (listed === undefined) return { type: "readBackFailed", ticket }
+  return { type: "readBack", ticket, present: listed.events.some((event) => event.id === (row?.key ?? "")) }
 }
 
 const world: Actor = "World"
@@ -75,7 +75,7 @@ function carry(fx: Out): Job<Event, Agent | Time, [by: Actor]> {
   return match (fx) {
     when { tag: "Ask", let ticket, let query }: answer("ask", read(ticket, query), { type: "feedAnswered", ticket, ok: false }, world);
     when { tag: "Send" }: answer(`send ${fx.attempt}`, send(fx), { type: "sent", attempt: fx.attempt, confirmed: false, known: false }, world);
-    when { tag: "ReadBack", let ticket, let id }: stream("read back", readBack(ticket, id), { type: "restart" }, world);
+    when { tag: "ReadBack", let ticket, let id }: answer("read back", readBack(ticket, id), { type: "readBackFailed", ticket }, world);
     when { tag: "Report" }: run("report", succeed(undefined), world);
   }
 }

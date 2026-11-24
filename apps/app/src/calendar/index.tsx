@@ -7,6 +7,7 @@ import { together } from "../runtime/reactor.vibe";
 import { changes } from "./agent.vibe";
 import { Calendar } from "./Calendar.tsx";
 import { calendar } from "./calendar.vibe";
+import { deletions } from "./deletions.vibe";
 import { editor } from "./editor.vibe";
 import { syncing } from "./sync.vibe";
 
@@ -24,4 +25,4 @@ const back = Effect.gen(function* () {
 });
 
 /** Calendar, at its view (areas.ts): its view, its form, sync and the agent's changes live from its first opening until Alpha closes. */
-export default area(Layer.mergeAll(together(calendar, editor, syncing), changes), Calendar, { back });
+export default area(Layer.mergeAll(together(calendar, editor, syncing, deletions), changes), Calendar, { back });

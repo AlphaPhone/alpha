@@ -21,17 +21,18 @@ by the shell.
 ```quint
 import undo as U from "../../kit/undo"
 
-type Deletions = { owner: int, waiting: int, undo: U::Undo, notice: bool, sending: int, hiding: int }
+type Deletions = { owner: int, waiting: int, series: bool, undo: U::Undo, notice: bool, sending: int, hiding: int }
 
-type Effect = Release({ id: int })
+type Effect = Release({ id: int, series: bool })
 
 type Held = { state: Deletions, out: List[Effect] }
 
-pure val initial: Deletions = { owner: 0, waiting: 0, undo: U::free, notice: false, sending: 0, hiding: 0 }
+pure val initial: Deletions = { owner: 0, waiting: 0, series: false, undo: U::free, notice: false, sending: 0, hiding: 0 }
 
 pure val undoWindow = 5000
 
 pure val idValues = Set(1, 2)
+pure val seriesValues = Set(false, true)
 pure val nowValues = Set(0, 3000, 6000)
 pure val ownerValues = Set(0, 1, 2)
 
@@ -41,11 +42,11 @@ pure def hidden(id: int, s: Deletions): bool = id > 0 and (id == s.waiting or id
 ### Confirming a deletion holds it; a deletion still waiting is sent first, so the only Undo shown is the newest
 
 ```quint
-pure def canConfirm(s: Deletions, id: int, now: int): bool = id > 0 and not(hidden(id, s)) and s.sending == 0
+pure def canConfirm(s: Deletions, id: int, series: bool, now: int): bool = id > 0 and not(hidden(id, s)) and s.sending == 0
 
-pure def confirm(s: Deletions, id: int, now: int): Held =
-  val held = { ...s, waiting: id, undo: U::hold(now, undoWindow), notice: true }
-  if (s.waiting != 0) { state: { ...held, sending: s.waiting }, out: List(Release({ id: s.waiting })) }
+pure def confirm(s: Deletions, id: int, series: bool, now: int): Held =
+  val held = { ...s, waiting: id, series: series, undo: U::hold(now, undoWindow), notice: true }
+  if (s.waiting != 0) { state: { ...held, sending: s.waiting }, out: List(Release({ id: s.waiting, series: s.series })) }
   else { state: held, out: List() }
 ```
 
@@ -74,16 +75,16 @@ pure def undoShown(s: Deletions): Deletions = { ...s, waiting: 0, undo: U::undo(
 pure def canWindowEnded(s: Deletions, now: int): bool = s.waiting != 0 and U::canRelease(s.undo, now) and not(s.notice) and s.sending == 0
 
 pure def windowEnded(s: Deletions, now: int): Held =
-  { state: { ...s, waiting: 0, undo: U::release(s.undo), sending: s.waiting }, out: List(Release({ id: s.waiting })) }
+  { state: { ...s, waiting: 0, undo: U::release(s.undo), sending: s.waiting }, out: List(Release({ id: s.waiting, series: s.series })) }
 ```
 
-### Leaving the app sends a waiting deletion at once
+### Leaving Calendar sends a waiting deletion at once
 
 ```quint
 pure def canLeave(s: Deletions): bool = s.waiting != 0 and s.sending == 0
 
 pure def leave(s: Deletions): Held =
-  { state: { ...s, waiting: 0, undo: U::release(s.undo), notice: false, sending: s.waiting }, out: List(Release({ id: s.waiting })) }
+  { state: { ...s, waiting: 0, undo: U::release(s.undo), notice: false, sending: s.waiting }, out: List(Release({ id: s.waiting, series: s.series })) }
 ```
 
 ### Another owner signing in drops a waiting deletion unsent
@@ -119,7 +120,7 @@ pure def alwaysAWaitingDeletionIsHeld(s: Deletions): bool =
 ```quint
 pure def stepSentOnlyWhenItMayBe(before: Deletions, via: str, after: Deletions, out: List[Effect]): bool =
   out.every(e => match e {
-    | Release(r) => r.id == before.waiting and (via == "windowEnded" or via == "leave" or via == "confirm")
+    | Release(r) => r.id == before.waiting and r.series == before.series and (via == "windowEnded" or via == "leave" or via == "confirm")
   })
 ```
 

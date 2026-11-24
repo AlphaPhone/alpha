@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as View } from "../gen/app__calendar.effect.vibe";
 import { Machine as Changes } from "../gen/app__calendar__agent.effect.vibe";
 import { Machine as Editor } from "../gen/app__calendar__editor.effect.vibe";
+import { Machine as Held } from "../gen/app__calendar__deletions.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Sync } from "../gen/app__calendar__sync.effect.vibe";
 import calendar from "../src/calendar/index.tsx";
@@ -28,7 +29,13 @@ function morning(phone: boolean): Scene & { at: (day: number, hours: number) => 
   const at = (day: number, hours: number) => dayStart(today + day) + hours * hour;
   world.calendar.events.push(
     agentEvent("Standup", at(0, 10), at(0, 10.5), { conferenceLink: "https://meet.alpha.test/standup" }),
-    agentEvent("Team lunch", at(0, 12), at(0, 13), { location: "Cafe", htmlLink: "https://calendar.google.com/event?eid=1" }),
+    agentEvent("Team lunch", at(0, 12), at(0, 13), {
+      location: "Cafe", htmlLink: "https://calendar.google.com/event?eid=1", provider: "google", organizer: { email: "sam@alpha.test" },
+      attendees: [
+        { email: "sam@alpha.test", displayName: "Sam", responseStatus: "accepted", self: false, organizer: true, optional: false },
+        { email: "owner@alpha.test", displayName: "You", responseStatus: "needsAction", self: true, organizer: false, optional: false },
+      ],
+    }),
     agentEvent("Dentist", at(2, 15), at(2, 16)),
   );
   world.calendar.phoneEvents.push({ id: "p1", calendarId: "local", title: "Gym", begin: at(0, 18), end: at(0, 19), allDay: false, recurring: false });
@@ -81,16 +88,25 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, View, (s) => s.anchor === world.today && s.google.status === "Loaded");
     expect(titles()).toEqual(phone ? ["Standup", "Team lunch", "Gym"] : ["Standup", "Team lunch"]);
 
-    // spec/app/calendar/index.md, "Choosing a layout closes the menu, and the agenda goes back to today"
+    // spec/app/calendar/index.md, "A day is empty only when every source it may read answered with nothing, no calendar is hidden, and there are no reminders": a browser, which may not read the phone, still calls tomorrow empty.
+    await press(dayButton(world.today + 1));
+    await until(alpha, runtime, View, (s) => s.anchor === world.today + 1 && s.google.status === "Loaded" && (!phone || s.phone.status === "Loaded"));
+    expect([titles(), Boolean(document.body.textContent?.includes("Nothing on this day"))]).toEqual([[], true]);
+    await press("Today");
+    await until(alpha, runtime, View, (s) => s.anchor === world.today && s.google.status === "Loaded");
+
+    // spec/app/calendar/index.md, "Choosing a layout closes the menu, and the agenda goes back to today"; spec/app/calendar/presentation.md, "A read for a day covers the month before it through the month after next": the agenda lists what is coming, not only today.
     await press("Layout");
     await until(alpha, runtime, View, (s) => s.overlay === "LayoutMenu");
     await press("Agenda");
     await until(alpha, runtime, View, (s) => s.layout === "Agenda" && s.overlay === "NoOverlay");
+    expect(titles()).toEqual(phone ? ["Standup", "Team lunch", "Gym", "Dentist"] : ["Standup", "Team lunch", "Dentist"]);
 
-    // spec/app/calendar/index.md, "An event opens from the rows shown, with what it offers"; spec/app/calendar/index.md, "Back closes the event"
+    // spec/app/calendar/index.md, "An event opens from the rows shown, with what it offers"; spec/app/calendar/index.md, "Back closes the event"; spec/app/calendar/index.md, "The video call is joined, and the event opened in Android Calendar, only from the event shown"; spec/app/calendar/presentation.md, "The people list says Organizer or Alpha's word for each reply, never the provider's value"
     await tap("Team lunch");
-    await until(alpha, runtime, View, (s) => s.open !== 0 && s.place && !s.video);
-    expect([Boolean(button("Open in Maps")), Boolean(button("Join video call"))]).toEqual([true, false]);
+    await until(alpha, runtime, View, (s) => s.open !== 0 && s.place && !s.video && s.web && !s.local);
+    expect([Boolean(button("Open in Maps")), Boolean(button("Join video call")), Boolean(button("Open in Google Calendar")), Boolean(button("Open in Android Calendar"))]).toEqual([true, false, true, false]);
+    expect(["Organizer", "Hasn't answered"].map((word) => Boolean(document.body.textContent?.includes(word)))).toEqual([true, true]);
     await hardware("back");
     await until(alpha, runtime, View, (s) => s.open === 0);
     expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).trail).toEqual(["Calendar"]);
@@ -130,11 +146,14 @@ describe("on a phone", () => {
     await openCalendar(alpha);
     await until(alpha, runtime, View, (s) => s.phoneRows === 1);
 
-    // spec/app/calendar/editor.md, "Saving sends the form once, as a new numbered write built on the revision its edits began from"
+    // spec/app/calendar/editor.md, "Saving sends the form once, as a new numbered write built on the revision its edits began from"; spec/app/calendar/writing.md, "Save is off while loading, while saving, for another account, for an event that changed, and without a title, in that order"
     await press("New event");
-    await until(alpha, runtime, Editor, (e) => e.shown && e.form === "NewEvent");
+    await until(alpha, runtime, Editor, (e) => e.shown && e.form === "NewEvent" && e.receipts.status === "Loaded");
+    await fill("Place", "Corner");
+    await until(alpha, runtime, Editor, (e) => e.draft.edits === 1);
+    expect([button("Save")?.hasAttribute("disabled"), Boolean(document.body.textContent?.includes("Add a title."))]).toEqual([true, true]);
     await fill("Title", "Coffee");
-    await until(alpha, runtime, Editor, (e) => e.draft.edits === 1 && e.kept);
+    await until(alpha, runtime, Editor, (e) => e.draft.edits === 2 && e.kept && e.titled);
     await press("Save");
     await until(alpha, runtime, Editor, (e) => e.form === "NoForm" && e.write.outcome === "Confirmed");
     await until(alpha, runtime, View, (s) => s.phoneRows === 2);
@@ -156,12 +175,25 @@ describe("on a phone", () => {
     await tap("Gym");
     await until(alpha, runtime, View, (s) => s.open !== 0);
     expect(Boolean(button("Delete the series"))).toBe(false);
+    // spec/app/calendar/deletions.md, "Confirming a deletion holds it; a deletion still waiting is sent first, so the only Undo shown is the newest"; spec/app/calendar/deletions.md, "Undo inside the window sends nothing, and shows the event again"
+    await press("Delete");
+    await until(alpha, runtime, Held, (d) => d.waiting !== 0 && d.notice);
+    expect(titles()).not.toContain("Gym");
+    await press("Undo");
+    await until(alpha, runtime, Held, (d) => d.waiting === 0 && d.undo.holding === "Undone");
+    expect([titles().includes("Gym"), world.calendar.phoneEvents.map((event) => event.title).includes("Gym")]).toEqual([true, true]);
+
+    // spec/app/calendar/deletions.md, "The window ends only once its Undo notice is no longer shown"; spec/app/calendar/deletions.md, "A refused send shows the event again; a sent deletion hides it until a read no longer has it unchanged"
+    await tap("Gym");
+    await until(alpha, runtime, View, (s) => s.open !== 0);
     vi.useFakeTimers({ toFake: ["performance"] });
     await press("Delete");
-    vi.advanceTimersByTime(10_000);
+    vi.advanceTimersByTime(20_000);
+    await later(alpha, 6_000);
     await later(alpha, 10_000);
     vi.useRealTimers();
     await until(alpha, runtime, Editor, (e) => e.kind === "Remove" && e.write.outcome === "Confirmed");
+    await until(alpha, runtime, Held, (d) => d.sending === 0 && d.undo.holding === "Released");
     expect(world.calendar.phoneEvents.map((event) => event.title)).not.toContain("Gym");
   });
 
@@ -216,5 +248,50 @@ describe("on a phone", () => {
     await press("Approve");
     await until(alpha, runtime, Changes, (a) => a.result === "Done");
     expect(world.calendar.writes).toEqual(["answer ev-team-lunch tentative"]);
+  });
+});
+
+describe("in a browser", () => {
+  it("Search my events and choose which calendars I see (spec/app/calendar/index.md, \"Story: Search my events and choose which calendars I see\")", async () => {
+    const world = morning(false);
+    const { alpha } = await open(world, only("view:Calendar"));
+    const runtime = calendar.runtime(alpha);
+    await openCalendar(alpha);
+    await until(alpha, runtime, View, (s) => s.googleRows === 2);
+
+    // spec/app/calendar/index.md, "Search and the Calendars sheet open over the days, never over an open event"
+    await press("Search");
+    await until(alpha, runtime, View, (s) => s.overlay === "Search");
+    await fill("Search events", "dent");
+    await tap("Dentist");
+    await until(alpha, runtime, View, (s) => s.anchor === world.today + 2 && s.overlay === "NoOverlay" && s.google.status === "Loaded");
+    expect(titles()).toEqual(["Dentist"]);
+
+    // spec/app/calendar/index.md, "A switch of the Calendars sheet hides or shows one calendar"; spec/app/calendar/presentation.md, "A hidden calendar's rows show neither in Calendar nor on Home"
+    await press("Calendars");
+    await until(alpha, runtime, View, (s) => s.overlay === "CalendarsSheet");
+    const agent = [...document.querySelectorAll("[role=switch]")][0] as HTMLElement | undefined;
+    if (!agent) throw new Error("no switch");
+    agent.click();
+    await until(alpha, runtime, View, (s) => s.hidden.includes(0));
+    await hardware("back");
+    await until(alpha, runtime, View, (s) => s.overlay === "NoOverlay");
+    expect([titles(), Boolean(document.body.textContent?.includes("Nothing on this day"))]).toEqual([[], false]);
+  });
+
+  it("Answer an invitation (spec/app/calendar/editor.md, \"Story: Delete an event, or answer an invitation\")", async () => {
+    const world = morning(false);
+    const { alpha } = await open(world, only("view:Calendar"));
+    const runtime = calendar.runtime(alpha);
+    await openCalendar(alpha);
+    await until(alpha, runtime, View, (s) => s.googleRows === 2);
+
+    // spec/app/calendar/editor.md, "An invitation is answered Going or Maybe once, at the revision shown, and Decline is the deletion's decline"; spec/app/calendar/editor.md, "A confirmed answer holds its event until a read shows it"; spec/app/calendar/writing.md, "An applied create, change or answer is read back; only a read back that finds it as asked says saved"
+    await tap("Team lunch");
+    await until(alpha, runtime, View, (s) => s.open !== 0);
+    expect([Boolean(button("Going")), Boolean(button("Maybe")), Boolean(button("Decline"))]).toEqual([true, true, true]);
+    await press("Going");
+    await until(alpha, runtime, Editor, (e) => e.kind === "Reply" && e.write.outcome === "Confirmed" && e.latched === 0);
+    expect(world.calendar.writes).toEqual(["answer ev-team-lunch accepted"]);
   });
 });

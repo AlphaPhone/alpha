@@ -1,0 +1,37 @@
+// spec/app/calendar/deletions.md, "Story: Undo a deletion before it is sent"
+import * as Held from "../../gen/app__calendar__deletions.effect.vibe"
+import type { Effect as Out, Event } from "../../gen/app__calendar__deletions.effect.vibe"
+import * as Editor from "../../gen/app__calendar__editor.effect.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
+import { type Due, type Job, due, hearing, reacting, tell, together } from "../runtime/reactor.vibe"
+import { shown } from "./shown.ts"
+
+// spec/app/calendar/deletions.md, "Confirming a deletion holds it; a deletion still waiting is sent first, so the only Undo shown is the newest"; spec/app/calendar/deletions.md, "A refused send shows the event again; a sent deletion hides it until a read no longer has it unchanged"
+/** A released deletion goes to the editor, which sends it once; one the editor cannot take now ends refused, and its event shows again. */
+function carry(fx: Out): Job<Event, Editor.Machine, []> {
+  const row = shown.find(fx.id)
+  const remove: Editor.Event = {
+    type: "deleteEvent", id: fx.id, revision: row?.revision ?? 0, scope: fx.series ? "WholeSeries" : "ThisOne", repeating: row?.recurring ?? false,
+  }
+  return tell(`release ${fx.id}`, Editor.Machine, [remove], { refused: { type: "ended", id: fx.id, done: false } })
+}
+
+// spec/app/calendar/deletions.md, "The window ends only once its Undo notice is no longer shown"
+/** The Undo notice lasts the window; once it has gone, the window ends. */
+function timers(state: Held.Deletions): ReadonlyArray<Due<Event, []>> {
+  if (state.waiting === 0) return []
+  return state.notice
+    ? [due<Event, []>("notice", state.undo.until, { type: "noticeGone" })]
+    : [due<Event, []>("window", state.undo.until, { type: "windowEnded", now: state.undo.until })]
+}
+
+/** Whether Alpha's page is in front, each time that changes. */
+const away = Stream.unwrap(effect {
+  return Stream.filter(Stream.changes(Stream.map((try Shell.Machine).changes, (shell) => Shell.showing(shell, "Calendar"))), (front) => !front)
+})
+
+// spec/app/calendar/deletions.md, "Leaving Calendar sends a waiting deletion at once"
+const left = hearing(away, Held.Machine, (): Event => ({ type: "leave" }))
+
+/** Calendar's deletions: held in memory with their Undo window, released to the editor. */
+export const deletions = together(reacting(Held, { carry, timers }), left)

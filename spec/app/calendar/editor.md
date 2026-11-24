@@ -548,6 +548,7 @@ pure def keepMyDraft(s: Editor): Composed = { state: { ...s, banner: NoBanner, c
 pure def canTakeOtherDraft(s: Editor): bool = s.banner == Conflict and s.confirming == ConfirmReplace
 
 pure def takeOtherDraft(s: Editor): Editor = { ...s, banner: NoBanner, confirming: NoConfirm, draft: D::edit(s.draft) }
+```
 
 ### Discarding a draft and replacing it with the other copy each wait for the owner to confirm, and can be called off
 
