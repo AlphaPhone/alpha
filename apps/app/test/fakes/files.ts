@@ -34,6 +34,9 @@ export interface FilesScene {
   gate: Promise<unknown>;
   /** The time the phone's clock says, for what it writes. */
   now: number;
+  /** The most rows a listing and a search give, as `StorageBrowser.LIST_MAX` and `StorageCatalog.QUERY_MAX` are. */
+  listMost: number;
+  queryMost: number;
   /** Tell the page the storage changed, as the plugin's `storageChanged` event does; set once the page listens. */
   changed: () => void;
 }
@@ -54,7 +57,7 @@ export function filesScene(): FilesScene {
       folder("primary", "Documents/Old"),
       file("card", "song.mp3", "audio/mpeg", 4_000, 2),
     ],
-    trash: [], shared: [], opened: [], calls: [], gate: Promise.resolve(), now: 10, changed: () => {},
+    trash: [], shared: [], opened: [], calls: [], gate: Promise.resolve(), now: 10, listMost: 5_000, queryMost: 500, changed: () => {},
   };
 }
 
@@ -103,7 +106,8 @@ export function elizaFiles(scene: FilesScene): Faked {
         if (denied()) return refused();
         const there = on(volume);
         if (path !== "" && !find(there, path)?.directory) return { status: "missing" };
-        return { status: "ready", entries: scene.stored.filter((one) => one.volume === there && one.path !== path && parent(one.path) === path).map(entry), truncated: false };
+        const rows = scene.stored.filter((one) => one.volume === there && one.path !== path && parent(one.path) === path).map(entry);
+        return { status: "ready", entries: rows.slice(0, scene.listMost), truncated: rows.length > scene.listMost };
       },
       storageCategory({ category }) {
         called("storageCategory");
@@ -122,7 +126,7 @@ export function elizaFiles(scene: FilesScene): Faked {
           && (text === undefined || leaf(one.path).toLowerCase().includes(text.toLowerCase()))
           && (mimePrefix === undefined || one.mimeType.startsWith(mimePrefix))
           && (!documents || one.mimeType === "application/pdf" || one.mimeType.startsWith("text/"))).map(entry);
-        return Promise.resolve({ status: "ready", entries, truncated: false });
+        return Promise.resolve({ status: "ready", entries: entries.slice(0, scene.queryMost) });
       },
       storageReviewedIdentities({ paths }) {
         return Promise.resolve({ status: "ready", reviewed: paths.map((path) => `${path}@1`) });

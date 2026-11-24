@@ -44,6 +44,18 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Browser, (s) => s.inCategory && s.listing.status === "Loaded");
     expect(listed()).toEqual(["beach.jpg"]);
 
+    // spec/app/files/index.md, "A place is called empty only after the phone read all of it; a reading cut short keeps what it read"
+    world.files.listMost = 1;
+    await press("Files");
+    await press("Internal storage");
+    await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 1);
+    expect([listed().length, document.body.textContent?.includes("Only part of this place could be read")]).toEqual([1, true]);
+    world.files.listMost = 0;
+    await press("Refresh");
+    await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 0);
+    expect([document.body.textContent?.includes("Nothing here"), document.body.textContent?.includes("Only part of this place could be read")]).toEqual([false, true]);
+    world.files.listMost = 5_000;
+
     // spec/app/files/index.md, "The place showing is read again when asked, and only its newest answer is taken; a folder that no longer exists brings the owner back to the top and says so, never that the storage is unavailable"
     await press("Files");
     await press("Internal storage");
@@ -126,6 +138,21 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Browser, (s) => s.change.attempt.outcome === "Confirmed" && s.listing.status === "Loaded");
     expect(listed().sort()).toEqual(["beach.jpg", "beach.jpg (2)"]);
 
+    // spec/app/files/change.md, "A file of the same name is replaced only when the owner chose to replace it, never for the agent"
+    for (let round = 0; round < 2; round += 1) {
+      await select("beach.jpg");
+      await press("Move or copy");
+      await press("Internal storage");
+      await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded");
+      await press("Documents");
+      await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded" && s.sheet.trail.length === 2);
+      await press("Copy here");
+      if (runtime.runSync(Browser.use((m) => m.get())).change.clash.showing) await press("Replace");
+      await until(alpha, runtime, Browser, (s) => s.change.work === "CopyTo" && s.change.attempt.outcome === "Confirmed" && s.listing.status === "Loaded");
+    }
+    expect([paths(world).filter((path) => path.startsWith("primary:Documents/beach")), world.files.trash.map((one) => one.was.path)]).toEqual([["primary:Documents/beach.jpg"], ["Documents/beach.jpg"]]);
+    world.files.trash.splice(0);
+
     // spec/app/files/index.md, "One request leaves for each change, for items listed as they are now or the file shown, and only when the owner starts, chooses or renames it, or approved it"
     await press("New folder");
     await fill("Name", "Taxes");
@@ -193,6 +220,17 @@ describe("Files on a phone", () => {
     await press("Erase");
     await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Confirmed" && s.entries.length === 0);
     expect(world.files.trash).toEqual([]);
+
+    // spec/app/files/trash.md, "The owner restores everything listed that is still kept, together, from a list read since the last job"
+    world.files.trash.push(
+      { id: "10", was: { volume: "primary", path: "Download/a.txt", directory: false, mimeType: "text/plain", size: 1, modified: 1 }, deletedAt: world.files.now },
+      { id: "11", was: { volume: "card", path: "b.txt", directory: false, mimeType: "text/plain", size: 1, modified: 1 }, deletedAt: world.files.now },
+    );
+    await press("Refresh");
+    await until(alpha, runtime, Bin, (s) => s.listing.status === "Loaded" && s.entries.length === 2);
+    await press("Restore all");
+    await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Confirmed" && s.entries.length === 0 && s.listing.status === "Loaded");
+    expect([world.files.trash, paths(world).filter((path) => path.endsWith("a.txt") || path.endsWith("b.txt"))]).toEqual([[], ["card:b.txt", "primary:Download/a.txt"]]);
     await hardware("home");
   });
 });
