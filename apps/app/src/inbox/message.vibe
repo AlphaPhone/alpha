@@ -101,13 +101,17 @@ const questionAbout = (account: number, message: number, revision: number) => ef
   const opened = effect {
     const cached = ledger.body(initial.body.ticket)
     if (!grant || !cached || !(try live)) throw new MailContextRefused({ reason: "changed" })
+    const reread = Effect.provideService(Effect.provideService(body(account, message), Cloud, cloud), Mail, ledger)
+    const fresh = sourceOf(grant, try reread)
+    const seen = sourceOf(grant, cached)
+    if (JSON.stringify({ ...seen, revision: fresh.revision }) !== JSON.stringify(fresh)) throw new MailContextRefused({ reason: "changed" })
     const target = try destination
-    const review = try reviewMailContext(sourceOf(grant, cached), target)
+    const review = try reviewMailContext(fresh, target)
     if (!(try live)) throw new MailContextRefused({ reason: "changed" })
     const current: MailQuestion["current"] = effect () => {
       if (!(try live)) throw new MailContextRefused({ reason: "changed" })
+      const fetched = try reread
       const target = try destination
-      const fetched = try Effect.provideService(Effect.provideService(body(account, message), Cloud, cloud), Mail, ledger)
       if (!(try live)) throw new MailContextRefused({ reason: "changed" })
       return { source: sourceOf(grant, fetched), destination: target }
     }

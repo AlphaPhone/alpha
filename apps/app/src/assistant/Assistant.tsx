@@ -26,12 +26,18 @@ import { type Machine as ShellMachine, showing } from "../../gen/app__shell.effe
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { MailQuestions } from "../inbox/mail-context.vibe";
+import { useInEmail, type Offers } from "../inbox/suggestion.vibe";
+import type { Machine as InboxList } from "../../gen/app__inbox.effect.vibe";
+import { useMachine as useInboxList } from "../../gen/app__inbox.react.ts";
+import type { Machine as InboxSuggestions } from "../../gen/app__inbox__suggestion.effect.vibe";
+import type { Machine as InboxWriting } from "../../gen/app__inbox__drafts.effect.vibe";
+import { useMachine as useInboxWriting } from "../../gen/app__inbox__drafts.react.ts";
 import { isCommsView } from "../shell/views.tsx";
 import { freedom } from "./assistant.vibe";
 import { Talk } from "./talk.vibe";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | Talk | MailQuestions, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | Talk | MailQuestions | InboxList | InboxWriting | InboxSuggestions | Offers, unknown>;
 }
 
 function turnOf(talking: Talking, label: string): AssistantTurnNoteProps["status"] | undefined {
@@ -106,6 +112,8 @@ export function Assistant({ runtime }: AssistantProps) {
   const reply = useReply(runtime);
   const shell = useShell(runtime);
   const dock = useDock(runtime);
+  const inbox = useInboxList(runtime);
+  const email = useInboxWriting(runtime);
   const board = runtime.runSync(Effect.map(Talk, (talk) => talk.board));
   const seen = useSyncExternalStore((listener) => board.subscribe(listener), () => board.snapshot());
   const mail = runtime.runSync(MailQuestions);
@@ -179,6 +187,8 @@ export function Assistant({ runtime }: AssistantProps) {
     const quote = { type: "quote", message, recorded: settled } as const;
     const editAgain = { type: "editAgain", message, mine: line.mine, recorded: settled } as const;
     const readAloud = { type: "readAloud", message, mine: line.mine } as const;
+    const account = inbox.state?.selected.account ?? 0;
+    const canOfferMail = settled && !line.mine && line.text.trim() !== "" && (email.state?.open || account !== 0);
     return {
       id: line.id,
       author: line.mine ? "owner" : "alpha",
@@ -189,6 +199,7 @@ export function Assistant({ runtime }: AssistantProps) {
       onQuote: composer.can(quote) ? () => void composer.send(quote) : undefined,
       onEditAgain: composer.can(editAgain) ? () => { board.type(line.text); void composer.send(editAgain); } : undefined,
       onReadAloud: message > 0 && chats.can(readAloud) ? () => void chats.send(readAloud) : undefined,
+      onUseInEmail: canOfferMail ? () => void runtime.runPromise(useInEmail(line.text, "Ask Alpha", { target: "NewEmail", account, message: 0 })) : undefined,
     };
   });
   // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
