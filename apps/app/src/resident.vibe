@@ -23,6 +23,7 @@ import { composer as messagesComposer } from "./messages/composer.vibe"
 import { messages } from "./messages/messages.vibe"
 import { contacts } from "./contacts/contacts.vibe"
 import { requests } from "./contacts/requests.vibe"
+import { notes } from "./notes/notes.vibe"
 
 /**
  * The machines that live from launch to exit: those another area follows or tells, and those that must act while
@@ -53,6 +54,7 @@ const machines = together(
   paging,
   focus,
   reports,
+  notes,
 )
 
 /** The resident machines, closed: each machine one of them follows or tells is among them. */

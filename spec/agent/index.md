@@ -136,7 +136,9 @@ health and which device steps it takes; Home and Calendar
 calendar feed and the calendars and create, change, answer and delete
 events through the calendar plugin. Workflows reads the owner identity,
 active and removed workflows, prompts, scheduled tasks and the runs of a
-prompt. The approvals area lists the agent's proposals and resolves one
+prompt. Notes reads the same owner identity and calls the Notes module to
+read and edit notes, erase Trash and finish recording cleanup. The approvals
+area lists the agent's proposals and resolves one
 through the approvals module. A route an area
 fakes for want of an agent plugin is not listed: none does today. Each line
 of `apps/agent/host/routes.jsonl` is one route; the pack is refused unless
@@ -170,6 +172,11 @@ pure val pageRoutes: List[Route] = List(
   { method: Get, path: "/api/triggers", stream: false },
   { method: Get, path: "/api/scheduled-tasks", stream: false },
   { method: Get, path: "/api/triggers/{id}/runs", stream: false },
+  { method: Get, path: "/api/notes/state", stream: false },
+  { method: Post, path: "/api/notes/interact", stream: false },
+  { method: Post, path: "/api/notes/trash/erase", stream: false },
+  { method: Get, path: "/api/notes/trash/recordings", stream: false },
+  { method: Post, path: "/api/notes/trash/recordings/complete", stream: false },
 )
 pure def admitted(listed: List[Route], r: Route): bool = listed.includes(r)
 pure def routeListAdmitted(listed: List[Route]): bool =
