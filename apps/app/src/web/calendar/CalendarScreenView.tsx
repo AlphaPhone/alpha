@@ -5,11 +5,11 @@ import { type CalendarView, type Event as PresentationEvent, type Presentation, 
 import type { RecurrenceScope } from "../../../gen/calendar__editor.ts";
 import type { EditorDraft } from "../../../gen/calendar__drafts.ts";
 import type { DeviceWrites } from "../../../gen/calendar__device.ts";
-import type { AgentView } from "../../calendar/agent.vibe";
+import { invitationBinding, type AgentView } from "../../calendar/agent.vibe";
 import type { DeviceRead } from "../../calendar/device.vibe";
 import type { DraftFieldsRecord } from "../../calendar/drafts.schema.vibe";
 import type { CalendarLinkView } from "../../calendar/link.vibe";
-import type { CalendarRow } from "../../calendar/model.vibe";
+import type { CalendarRow, InvitationAnswer } from "../../calendar/model.vibe";
 import type { OriginView } from "../../notes/origins.vibe";
 import { formatLongDate, midnightAfter } from "../../calendar/time.ts";
 import { Button, Input, Tabs, TabsList, TabsTrigger } from "../components/ui/index.ts";
@@ -79,6 +79,7 @@ export type CalendarScreenViewProps = {
   onOpenRow: (row: CalendarRow) => void;
   onOpenLink: (url: string) => void;
   onDelete: (row: CalendarRow, scope: RecurrenceScope) => void;
+  onRespond: (row: CalendarRow, answer: InvitationAnswer, binding: string) => void;
   onPlace: (row: CalendarRow) => void;
   onOpenOrigin: (row: CalendarRow) => void;
   onCloseRow: () => void;
@@ -96,7 +97,7 @@ export type CalendarScreenViewProps = {
  */
 export function CalendarScreenView({
   presentation: p, can, agent, device, writes, draft, link, rows, facts, origin, editing, timingLocked, problem, zone, now,
-  onClose, onEvent, onOpenSources, onCloseSources, onLink, onRetry, onConnectDevice, onOpenRow, onOpenLink, onDelete, onPlace, onOpenOrigin, onCloseRow,
+  onClose, onEvent, onOpenSources, onCloseSources, onLink, onRetry, onConnectDevice, onOpenRow, onOpenLink, onDelete, onRespond, onPlace, onOpenOrigin, onCloseRow,
   onStartEditor, draftActions, onSave, onCloseEditor,
 }: CalendarScreenViewProps) {
   const [query, setQuery] = useState("");
@@ -173,6 +174,7 @@ export function CalendarScreenView({
           canEdit={open !== undefined && can({ type: "editForm", editable: open.writable })} canDelete={open !== undefined && can({ type: "askDelete", editable: open.writable })}
           onEdit={() => onStartEditor(open)} onAskDelete={() => open && go({ type: "askDelete", editable: open.writable })}
           onDelete={(scope) => open && onDelete(open, scope)}
+          invitationBinding={invitationBinding(agent.state)} onRespond={onRespond}
           onCloseDelete={() => go({ type: "closeDeleteSheet" })} onCheckAgain={onRetry}
           onOpenLink={onOpenLink} onPlace={() => open && onPlace(open)}
           {...(open === undefined || origin === undefined ? {} : { origin, onOpenOrigin: () => onOpenOrigin(open) })}

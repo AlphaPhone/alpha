@@ -2,7 +2,7 @@
 import { type ApprovalReview, type ApprovalState, type Decision, type Resolution, type Event as ReviewEvent, Machine as ReviewMachine, refreshesCalendar } from "../../gen/calendar__approvals.effect.vibe"
 import { Resident } from "../platform/resident.vibe"
 import { AgentCalendar } from "./agent.vibe"
-import { type ApprovalPresentation, type ApprovalTarget, approvalPresentation, approvalTarget } from "./approvalFields.vibe"
+import { type ApprovalPresentation, type ApprovalTarget, approvalPresentation, approvalTarget, invitationApproval } from "./approvalFields.vibe"
 import { type ApprovalRecord, type ResolutionRecord, decodeApproval, decodeApprovals, decodeResolution } from "./feed.schema.vibe"
 import { deviceZone } from "./time.ts"
 
@@ -81,8 +81,10 @@ export const approvalsLayer = Layer.effect(ApprovalReviews, effect {
       const matching: ApprovalRecord[] = []
       for (const raw of list) {
         const row = decodeApproval(raw) catch () => undefined
-        if (row !== undefined && row.id.toLowerCase() === requestId && row.payload.action === row.action && row.payload.side === "owner"
-          && typeof row.payload.calendarId === "string" && row.payload.calendarId !== "") matching.push(row)
+        if (row === undefined || row.id.toLowerCase() !== requestId) continue
+        const legacy = row.payload.action === row.action && row.payload.side === "owner"
+          && typeof row.payload.calendarId === "string" && row.payload.calendarId !== ""
+        if (legacy || invitationApproval(row) !== undefined) matching.push(row)
       }
       return matching.length === 1 ? matching[0] : undefined
     } catch () => undefined
@@ -91,7 +93,8 @@ export const approvalsLayer = Layer.effect(ApprovalReviews, effect {
   effect function targetOf(row: ApprovalRecord): ApprovalTarget!! {
     if (row.action === "schedule_event") return { verified: true }
     const view = try agent.view()
-    const loaded = view.savedAt === undefined && view.feed !== undefined ? approvalTarget(row.payload, view.calendars, view.feed.events) : { verified: false }
+    const payload = invitationApproval(row) ?? row.payload
+    const loaded = view.savedAt === undefined && view.feed !== undefined ? approvalTarget(payload, view.calendars, view.feed.events) : { verified: false }
     if (loaded.verified || typeof row.payload.expectedEventStartAtMs !== "number") return loaded
     const sourceKey = JSON.stringify(["google", "owner", String(row.payload.grantId ?? ""), "", String(row.payload.calendarId)])
     const read = try agent.readSourceAt(sourceKey, row.payload.expectedEventStartAtMs)

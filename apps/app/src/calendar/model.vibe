@@ -113,6 +113,19 @@ export function managedGoogle(calendar: Pick<CalendarSummary, "provider" | "gran
   return calendar.provider === "google" && /^alpha-google:[a-f0-9]{64}$/.test(calendar.grantId)
 }
 
+export type InvitationAnswer = "accepted" | "tentative"
+
+/** The owner's own invitation status. An organizer's guest row cannot answer. */
+export function ownInvitationStatus(event: Pick<CalendarEvent, "organizer" | "attendees">): ("needsAction" | InvitationAnswer | "declined" | undefined) {
+  if (event.organizer?.self === true) return undefined
+  const self = event.attendees.find((guest) => guest.self)
+  if (self === undefined || self.organizer) return undefined
+  const status = self.responseStatus?.trim()
+  if (status === "needsAction" || status === "needs-action") return "needsAction"
+  if (status === "accepted" || status === "tentative" || status === "declined") return status
+  return undefined
+}
+
 /** The agent's own calendar, where Alpha creates new events. */
 export function agentOwnCalendar(calendar: CalendarSummary): boolean {
   return calendar.provider === "eliza" && calendar.side === "owner" && calendar.grantId === "eliza-calendar" && calendar.calendarId === "primary" && writableSource(calendar)

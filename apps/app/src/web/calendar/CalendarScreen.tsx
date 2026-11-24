@@ -10,7 +10,7 @@ import { CalendarDrafts } from "../../calendar/drafts.vibe";
 import type { DraftFieldsRecord } from "../../calendar/drafts.schema.vibe";
 import { type CalendarRow, agentEventKey, eventSourceKey } from "../../calendar/model.vibe";
 import {
-  closeEditor, closeRow, closeSources, deleteRow, linkSavedNote, newFields, openEditor, openEventLink, openRow, openRowOrigin, openSources, placeRow,
+  answerInvitation, closeEditor, closeRow, closeSources, deleteRow, linkSavedNote, newFields, openEditor, openEventLink, openRow, openRowOrigin, openSources, placeRow,
   rowFields, rowTimingLocked, saveEditor, timingChanged,
 } from "../../calendar/screen.vibe";
 import type { OriginView } from "../../notes/origins.vibe";
@@ -102,6 +102,7 @@ export function CalendarScreen({ route, onClose }: CalendarScreenProps) {
       onOpenRow={(row) => void perform(openRow(row)).then((view) => setOrigin({ rowId: row.id, view }))}
       onOpenLink={(url) => void perform(openEventLink(url)).then((how) => { if (how === "web") window.open(url, "_blank", "noopener,noreferrer"); })}
       onDelete={(row, scope) => void perform(deleteRow(row, SCOPE[scope], facts.mode === "DeclineInvitation" ? "decline_invitation" : "organizer_cancel"))}
+      onRespond={(row, answer, binding) => void perform(answerInvitation(row, answer, binding))}
       onPlace={(row) => void perform(placeRow(row))}
       onOpenOrigin={(row) => void perform(openRowOrigin(row))}
       onCloseRow={() => void perform(closeRow())}

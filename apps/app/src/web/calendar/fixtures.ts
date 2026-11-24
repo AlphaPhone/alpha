@@ -41,11 +41,11 @@ export const groups: readonly ListGroup[] = [
 ];
 
 /** An organizer's event with a meeting link. */
-export const organizerFacts: EventFacts = { mode: "OrganizerCancel", managed: false, join: "https://meet.example.com/abc", provider: undefined, repeat: "", invitePending: false,
+export const organizerFacts: EventFacts = { mode: "OrganizerCancel", managed: false, join: "https://meet.example.com/abc", provider: undefined, repeat: "",
   people: [{ key: "0:owner@example.com", name: "Sam Rivera", reply: "WordOrganizer" }, { key: "1:ada@example.com", name: "Ada Park", reply: "WordGoing" }, { key: "2:lee@example.com", name: "lee@example.com", reply: "WordAwaiting" }] };
 
 /** An unanswered invitation in a managed Google calendar. */
-export const inviteFacts: EventFacts = { mode: "DeclineInvitation", managed: true, join: undefined, provider: "https://calendar.google.com/event", repeat: "Repeats weekly on Fri", invitePending: true,
+export const inviteFacts: EventFacts = { mode: "DeclineInvitation", managed: true, join: undefined, provider: "https://calendar.google.com/event", repeat: "Repeats weekly on Fri", invitation: "needsAction",
   people: [{ key: "0:host@example.com", name: "Host", reply: "WordOrganizer" }, { key: "1:owner@example.com", name: "You", reply: "WordAwaiting" }] };
 
 /** A new event's fields, today at ten for an hour. */

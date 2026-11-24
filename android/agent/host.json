@@ -297,6 +297,10 @@
      "path": "/api/lifeops/calendar/events"
     },
     {
+     "method": "POST",
+     "path": "/api/lifeops/calendar/events/{id}/response"
+    },
+    {
      "method": "DELETE",
      "path": "/api/lifeops/calendar/events/{id}",
      "query": [
@@ -1324,6 +1328,10 @@
     {
      "method": "POST",
      "path": "/api/lifeops/calendar/events"
+    },
+    {
+     "method": "POST",
+     "path": "/api/lifeops/calendar/events/{id}/response"
     },
     {
      "method": "DELETE",

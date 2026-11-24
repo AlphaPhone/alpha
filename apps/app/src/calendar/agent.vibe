@@ -10,9 +10,10 @@ import { Resident, ResidentRefused, ResidentUnavailable } from "../platform/resi
 import { ownerKey } from "../platform/storage.vibe"
 import { type CalendarRecord as CalendarSummary, type EventRecord, type FeedRecord, decodeCalendars, decodeFeed, decodeNext } from "./feed.schema.vibe"
 import type { CalendarChangeReply, CalendarCreateRequest, CalendarDeleteRequest, CalendarUpdateRequest } from "@elizaos/plugin-calendar/client"
+import { invitationAnswerAllowed } from "../../gen/calendar__editor.effect.vibe"
 import { residentClients } from "./client.vibe"
 import { sha256Hex } from "./digest.ts"
-import { type InstantRange, agentEventKey, eventSourceKey, readableSource, windowKey } from "./model.vibe"
+import { type InstantRange, type InvitationAnswer, agentEventKey, eventSourceKey, managedGoogle, ownInvitationStatus, readableSource, windowKey, writableSource } from "./model.vibe"
 import { isoInstant } from "./time.ts"
 
 /** The agent binding the account area reports: owner key, session, agent id and whether the connection is usable. */
@@ -37,6 +38,22 @@ export interface CreateRequest { readonly sourceKey: string; readonly request: C
 
 /** A reviewed change of one event at the version reviewed. */
 export interface UpdateRequest { readonly eventKey: string; readonly request: CalendarUpdateRequest; readonly admitted: boolean }
+
+/** A Going or Maybe answer for the exact event and owner reviewed. */
+export interface InvitationRequest {
+  readonly eventKey: string
+  readonly revision: string
+  readonly binding: string
+  readonly idempotencyKey: string
+  readonly answer: InvitationAnswer
+}
+
+export interface InvitationOutcome { readonly outcome: WriteOutcome; readonly approvalRequestId?: string }
+
+/** Identifies the signed-in owner and resident session that supplied the event. */
+export function invitationBinding(state: AgentState): string {
+  return JSON.stringify([state.portOwner, state.portSession])
+}
 
 /** A reviewed deletion or decline of one event at the version reviewed. */
 /**
@@ -69,6 +86,7 @@ export service AgentCalendar {
   refresh(window: CalendarWindow): void!!
   create(request: CreateRequest): WriteOutcome!!
   update(request: UpdateRequest): WriteOutcome!!
+  respond(request: InvitationRequest): InvitationOutcome!!
   remove(request: DeleteRequest): WriteOutcome!!
   /** Whether an event left for Maps is still the version left, for the same binding; with `sourceRevision`, also from the same calendar selection. */
   verifyReturn(eventKey: string, revision: string, begin: number, sourceRevision?: string): EventReturn!!
@@ -339,6 +357,34 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
       }
       return try write("UpdateEvent", admitted, () => api.updateLifeOpsCalendarEvent(event?.id ?? "", request), find,
         receiptSource(event === undefined ? "" : eventSourceKey(event)), at, event?.timezone ?? "UTC")
+    },
+    effect respond(request: InvitationRequest) {
+      const view = try SubscriptionRef.get(shown)
+      const event = try currentEvent(request.eventKey)
+      if (event === undefined) return { outcome: "WriteNotAdmitted" as WriteOutcome }
+      const source = eventSourceKey(event)
+      const calendar = view.calendars.find((candidate) => sourceKeyId(candidate) === source)
+      const current = view.state.portOwner !== "" && invitationBinding(view.state) === request.binding
+        && typeof event.metadata.etag === "string" && event.metadata.etag.trim() === request.revision && request.revision !== ""
+      const status = ownInvitationStatus(event)
+      const recurring = Boolean(event.recurringEventId || event.recurrence?.length)
+      const admitted = calendar !== undefined && invitationAnswerAllowed(status === undefined ? "NoCancellation" : "DeclineInvitation",
+        event.side === "owner" && writableSource(calendar), managedGoogle(calendar), recurring, current)
+      const at = utcInstant(event.startAt)
+      if (!admitted || (request.answer !== "accepted" && request.answer !== "tentative")
+        || status === request.answer || request.idempotencyKey.trim() === "" || at === undefined) return { outcome: "WriteNotAdmitted" as WriteOutcome }
+      let approvalRequestId: string | undefined
+      const send = async () => {
+        const reply = await api.respondToLifeOpsCalendarEvent(event.id, { calendarId: event.calendarId, responseStatus: request.answer,
+          expectedProviderVersion: request.revision, idempotencyKey: request.idempotencyKey })
+        if ("approvalRequestId" in reply) approvalRequestId = reply.approvalRequestId
+        return reply
+      }
+      const find = (events: readonly EventRecord[]): Readback =>
+        events.some((found) => agentEventKey(found) === request.eventKey && found.agentId === event.agentId && ownInvitationStatus(found) === request.answer)
+          ? "ReadbackFound" : "ReadbackMissing"
+      const outcome = try write("UpdateEvent", true, send, find, () => source, at, event.timezone ?? "UTC")
+      return approvalRequestId === undefined ? { outcome } : { outcome, approvalRequestId }
     },
     effect remove(change: DeleteRequest) {
       const request = change.request

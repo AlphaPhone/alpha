@@ -96,6 +96,21 @@ pure def lawUnknownOrganizerCannotDelete(selfAttendeeOrganizes: bool): bool =
   cancellationMode(false, false, selfAttendeeOrganizes, false) == NoCancellation
 ```
 
+### The owner reviews Going or Maybe for a writable one-off invitation
+
+The current invitee, calendar and event version must still match at confirmation. The answer uses
+the Calendar response route without notifying guests. A managed Google invitation is answered in
+Google Calendar. A reply queued for approval goes to the existing Calendar review.
+
+```quint
+pure def invitationAnswerAllowed(mode: CancellationMode, writable: bool, managed: bool, recurring: bool, current: bool): bool =
+  mode == DeclineInvitation and writable and not(managed) and not(recurring) and current
+pure def lawAnOrganizerCannotAnswerAnInvitation(writable: bool, managed: bool, recurring: bool, current: bool): bool =
+  not(invitationAnswerAllowed(OrganizerCancel, writable, managed, recurring, current))
+pure def lawAStaleOrRepeatingInvitationCannotBeAnswered(mode: CancellationMode, writable: bool, managed: bool): bool =
+  not(invitationAnswerAllowed(mode, writable, managed, true, true)) and not(invitationAnswerAllowed(mode, writable, managed, false, false))
+```
+
 ### A repeating event changes its repeat only for the entire series
 
 ```quint

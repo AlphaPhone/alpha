@@ -4,7 +4,7 @@
 const DAY = 86_400_000;
 
 /** One stored agent Calendar event. */
-export interface FakeEvent { id: string; title: string; startAt: string; endAt: string; etag: string; status: string }
+export interface FakeEvent { id: string; title: string; startAt: string; endAt: string; etag: string; status: string; answer?: string }
 
 /** The agent's calendar routes over a list of events in its own calendar. */
 export class CalendarAgentFake {
@@ -24,7 +24,9 @@ export class CalendarAgentFake {
     return {
       id: record.id, externalId: record.id, agentId: this.agentId, provider: "eliza", side: "owner", calendarId: "primary", title: record.title,
       description: "", location: "", status: record.status, startAt: record.startAt, endAt: record.endAt, isAllDay: false, timezone: "UTC",
-      htmlLink: null, conferenceLink: null, organizer: { self: true }, attendees: [], metadata: { etag: record.etag }, syncedAt: record.startAt,
+      htmlLink: null, conferenceLink: null, organizer: { self: record.answer === undefined },
+      attendees: record.answer === undefined ? [] : [{ email: "owner@example.com", displayName: null, responseStatus: record.answer, self: true, organizer: false, optional: false }],
+      metadata: { etag: record.etag }, syncedAt: record.startAt,
       updatedAt: record.startAt, grantId: "eliza-calendar", connectorAccountId: "",
     };
   }
@@ -58,13 +60,23 @@ export class CalendarAgentFake {
       this.events.push(created);
       return { status: 200, data: { event: this.event(created), receipt: { operation: "create", source: this.sourceKey(), eventId: created.id, providerVersion: created.etag, event: this.event(created), target: null, acceptedAt: created.startAt } } };
     }
-    const match = /^\/api\/lifeops\/calendar\/events\/(.+)$/.exec(url.pathname);
+    const match = /^\/api\/lifeops\/calendar\/events\/([^/]+)(\/response)?$/.exec(url.pathname);
     if (match) {
       this.writes.push({ method, path, body });
       const target = this.events.find((event) => event.id === decodeURIComponent(match[1]!));
       if (!target) throw Object.assign(new Error("missing"), { status: 404 });
       const request = body as { expectedProviderVersion: string };
       if (request.expectedProviderVersion !== target.etag) throw Object.assign(new Error("version"), { status: 409 });
+      if (match[2] === "/response" && method === "POST") {
+        const answer = body as { responseStatus: string; idempotencyKey: string };
+        if (target.answer === undefined || !answer.idempotencyKey || !["accepted", "tentative"].includes(answer.responseStatus)) {
+          throw Object.assign(new Error("not admitted"), { status: 403 });
+        }
+        const before = this.event(target);
+        Object.assign(target, { answer: answer.responseStatus, etag: `${target.etag}+` });
+        return { status: 200, data: { event: this.event(target), receipt: { operation: "respond", source: this.sourceKey(), eventId: target.id,
+          providerVersion: target.etag, event: this.event(target), target: before, acceptedAt: target.startAt } } };
+      }
       if (method === "DELETE") {
         this.events = this.events.filter((event) => event !== target);
         return { status: 200, data: { deleted: true, event: null, receipt: { operation: "delete", source: this.sourceKey(), eventId: target.id, providerVersion: `deleted:${target.etag}`, event: null, target: this.event(target), acceptedAt: target.startAt } } };

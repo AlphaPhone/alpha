@@ -1,7 +1,7 @@
 // spec/calendar/agent.md, "Story: Return to the event I left Calendar from"; spec/calendar/approvals.md, "Story: Read where a Calendar request stands"
 import { describe, it } from "@effect/vitest"
-import { AgentCalendar, eventSourceRevision } from "../../src/calendar/agent.vibe"
-import { approvalPresentation } from "../../src/calendar/approvalFields.vibe"
+import { AgentCalendar, eventSourceRevision, invitationBinding } from "../../src/calendar/agent.vibe"
+import { approvalPresentation, approvalTarget, invitationApproval } from "../../src/calendar/approvalFields.vibe"
 import { bindCalendar, readCalendar } from "../../src/calendar/binding.vibe"
 import type { ApprovalRecord } from "../../src/calendar/feed.schema.vibe"
 import { agentEventKey } from "../../src/calendar/model.vibe"
@@ -44,5 +44,50 @@ describe("The agent's Calendar (spec/calendar/agent.md, spec/calendar/approvals.
     const unverified = approvalPresentation(modify, { verified: false }, "UTC")
     const unknownField = approvalPresentation({ ...schedule, payload: { ...schedule.payload, secret: "x" } }, { verified: true }, "UTC")
     try same([created.complete, created.fields.length > 0, unverified.complete, unknownField.complete], [true, true, false, false])
+  })
+
+  it.effect("a reviewed invitation answer uses the response route for its original binding and version (spec/calendar/editor.md, \"The owner reviews Going or Maybe for a writable one-off invitation\")", () => effect {
+    const host = new CalendarAgentFake()
+    host.add("invite-a", "Planning", 1, 10)
+    host.events[0]!.answer = "needs-action"
+    provide calendarOver(host, new DeviceCalendarFake()) {
+      try bindCalendar(binding)
+      try readCalendar(false, false)
+      const calendar = try AgentCalendar
+      const view = try calendar.view()
+      const event = view.feed!.events[0]!
+      const request = { eventKey: agentEventKey(event), binding: invitationBinding(view.state), revision: "etag-1", idempotencyKey: "invite-review-1", answer: "tentative" as const }
+      const stale = try calendar.respond({ ...request, revision: "old" })
+      const foreign = try calendar.respond({ ...request, binding: "another owner" })
+      const saved = try calendar.respond(request)
+      try same([stale.outcome, foreign.outcome, saved.outcome, host.events[0]!.answer, host.writes],
+        ["WriteNotAdmitted", "WriteNotAdmitted", "Saved", "tentative",
+          [{ method: "POST", path: "/api/lifeops/calendar/events/invite-a/response", body: {
+            calendarId: "primary", responseStatus: "tentative", expectedProviderVersion: "etag-1", idempotencyKey: "invite-review-1",
+          } }]])
+    }
+  })
+
+  it.effect("a queued invitation review shows the answer and verifies the exact calendar account (spec/calendar/approvals.md, \"A request is complete only with its known fields, a verified current target and a valid time\")", () => effect {
+    const host = new CalendarAgentFake()
+    host.add("invite-a", "Planning", 1, 10)
+    host.events[0]!.answer = "needsAction"
+    provide calendarOver(host, new DeviceCalendarFake()) {
+      try bindCalendar(binding)
+      try readCalendar(false, false)
+      const view = try (try AgentCalendar).view()
+      const source = { provider: "eliza", side: "owner", grantId: "eliza-calendar", connectorAccountId: "", calendarId: "primary" }
+      const change = { action: "respond_invitation", account: "owner", scope: "instance", response: "accepted",
+        target: { source, eventId: "invite-a", expectedVersion: "etag-1" } }
+      const row: ApprovalRecord = { ...schedule, action: "modify_event", payload: { change, digest: "0".repeat(64) } }
+      const payload = invitationApproval(row)!
+      const target = approvalTarget(payload, view.calendars, view.feed!.events)
+      const review = approvalPresentation(row, target, "UTC")
+      const foreignSource = invitationApproval({ ...row, payload: { ...row.payload, change: { ...change,
+        target: { ...change.target, source: { ...source, connectorAccountId: "other account" } } } } })!
+      try same([review.heading, review.fields.find((field) => field.label === "Answer")?.value, review.complete,
+        approvalTarget(foreignSource, view.calendars, view.feed!.events).verified],
+        ["Accept invitation", "Going", true, false])
+    }
   })
 })

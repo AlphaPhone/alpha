@@ -13,7 +13,8 @@ import { DeviceCalendar, type DeviceOutcome } from "./device.vibe"
 import { CalendarDrafts } from "./drafts.vibe"
 import type { DraftFieldsRecord } from "./drafts.schema.vibe"
 import type { EventRecord } from "./feed.schema.vibe"
-import { type CalendarRow, DAY, agentEventKey, agentOwnCalendar, rruleFor } from "./model.vibe"
+import { type CalendarRow, type InvitationAnswer, DAY, agentEventKey, agentOwnCalendar, rruleFor } from "./model.vibe"
+import { newId } from "../platform/ids.ts"
 import { calendarWall, civil, civilDay, deviceZone, isoInstant, midnightAfter, resolveWall } from "./time.ts"
 import { sha256Hex } from "./digest.ts"
 import { CalendarMaps } from "./ports.vibe"
@@ -159,6 +160,36 @@ export effect function deleteRow(row: CalendarRow, scope: CalendarWriteScope | "
   const problem = deleteProblem(result)
   if (problem !== "") try (try Notices).show(problem)
   return result
+}
+
+const INVITATION_PROBLEMS: Partial<Record<WriteOutcome, string>> = {
+  WriteBusy: "Calendar is still updating. Review the invitation again in a moment.",
+  WriteNotAdmitted: "Invitation changed. Review it again before answering.",
+  WriteOwnerChanged: "Another account is signed in now. No answer was sent.",
+  WriteTransport: "Couldn’t reach your agent. Try again.",
+  WriteRefused: "Your Calendar refused this answer.",
+  SentUnverified: "Answer not confirmed. Check Calendar before answering again.",
+  WriteUnknown: "Answer not confirmed. Check Calendar before answering again.",
+  WriteForeign: "Answer not confirmed. Check Calendar before answering again.",
+}
+
+/** Send one invitation answer after the confirmation sheet accepted it. */
+export effect function answerInvitation(row: CalendarRow, answer: InvitationAnswer, binding: string) {
+  const machine = try PresentationMachine
+  const presentation = try machine.get()
+  if (row.source !== "agent" || presentation.openEvent !== row.id || !presentation.deleteSheet || presentation.form !== "NoForm") return
+  if ((machine.send({ type: "closeDeleteSheet" }) catch () => undefined) === undefined) return
+  const calendar = try AgentCalendar
+  const result = try calendar.respond({ eventKey: row.id.slice("agent:".length), revision: row.revision, binding, idempotencyKey: newId(), answer })
+  const notices = try Notices
+  if (result.outcome === "WriteQueuedForApproval" && result.approvalRequestId !== undefined) {
+    try (try ApprovalReviews).open(result.approvalRequestId)
+  } else if (result.outcome === "Saved") {
+    try notices.show(answer === "accepted" ? "Invitation accepted" : "Answered maybe")
+    try readCalendar(true, false)
+  } else {
+    try notices.show(INVITATION_PROBLEMS[result.outcome] ?? "Answer not sent")
+  }
 }
 
 effect function stageDeletion(row: CalendarRow, scope: CalendarWriteScope | "event", mode: "organizer_cancel" | "decline_invitation" | "remove_private_copy") {

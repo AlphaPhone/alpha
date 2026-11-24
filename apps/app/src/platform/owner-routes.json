@@ -43,7 +43,8 @@
             "POST"
           ],
           "paths": [
-            "/api/lifeops/calendar/events"
+            "/api/lifeops/calendar/events",
+            "/api/lifeops/calendar/events/{id}/response"
           ],
           "query": []
         },

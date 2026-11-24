@@ -2,9 +2,9 @@
 import { Trash2, Pencil, Video, MapPin, ExternalLink, RefreshCw, StickyNote } from "lucide-react";
 import { useState } from "react";
 import { type ReplyWord, replyWord } from "../../../gen/calendar__presentation.ts";
-import { cancellationMode, managedDeleteOffered, managedScopeAllowed, type CancellationMode, type RecurrenceScope } from "../../../gen/calendar__editor.ts";
+import { cancellationMode, invitationAnswerAllowed, managedDeleteOffered, managedScopeAllowed, type CancellationMode, type RecurrenceScope } from "../../../gen/calendar__editor.ts";
 import type { EventRecord, CalendarRecord as CalendarSummary } from "../../calendar/feed.schema.vibe";
-import { type CalendarRow, managedGoogle, repeatText } from "../../calendar/model.vibe";
+import { type CalendarRow, type InvitationAnswer, managedGoogle, ownInvitationStatus, repeatText } from "../../calendar/model.vibe";
 import type { OriginView } from "../../notes/origins.vibe";
 import { Avatar, Button, RadioGroup, RadioGroupItem, Sheet, SheetContent } from "../components/ui/index.ts";
 import { intervalDetail } from "./layout.ts";
@@ -23,7 +23,7 @@ export interface EventFacts {
   readonly join: string | undefined;
   readonly provider: string | undefined;
   readonly repeat: string;
-  readonly invitePending: boolean;
+  readonly invitation?: "needsAction" | InvitationAnswer | "declined" | undefined;
   readonly people: readonly EventPerson[];
 }
 
@@ -44,7 +44,7 @@ function https(value: string | null | undefined): string | undefined {
 
 /** The facts of an agent Calendar event: its cancellation mode, managed source, links, repeat line and unanswered invitation. */
 export function eventFacts(event: EventRecord | undefined, calendar: CalendarSummary | undefined): EventFacts {
-  if (event === undefined) return { mode: "OrganizerCancel", managed: false, join: undefined, provider: undefined, repeat: "", invitePending: false, people: [] };
+  if (event === undefined) return { mode: "OrganizerCancel", managed: false, join: undefined, provider: undefined, repeat: "", people: [] };
   const self = event.attendees.find((guest) => guest.self);
   const organizerEmail = typeof event.organizer?.email === "string" ? event.organizer.email.toLowerCase() : "";
   const mode = cancellationMode(event.organizer?.self === true, self !== undefined, self?.organizer === true,
@@ -52,7 +52,7 @@ export function eventFacts(event: EventRecord | undefined, calendar: CalendarSum
   return {
     mode, managed: calendar !== undefined && managedGoogle(calendar), join: https(event.conferenceLink),
     provider: event.provider === "google" ? https(event.htmlLink) : undefined, repeat: repeatText(event.recurrence, event.recurringEventId),
-    invitePending: self !== undefined && !self.organizer && (self.responseStatus === "needsAction" || self.responseStatus === "needs-action"),
+    invitation: mode === "DeclineInvitation" ? ownInvitationStatus(event) : undefined,
     people: event.attendees.map((guest, index) => {
       const name = guest.displayName?.trim() || guest.email?.trim() || "Guest";
       return { key: `${index}:${guest.email ?? name}`, name, reply: replyWord(guest.organizer, guest.responseStatus?.trim() ?? "") };
@@ -74,6 +74,8 @@ export type EventDetailProps = {
   onEdit: () => void;
   onAskDelete: () => void;
   onDelete: (scope: RecurrenceScope) => void;
+  invitationBinding: string;
+  onRespond: (row: CalendarRow, answer: InvitationAnswer, binding: string) => void;
   onCloseDelete: () => void;
   onCheckAgain: () => void;
   onOpenLink: (url: string) => void;
@@ -92,16 +94,33 @@ const SCOPES: readonly { readonly scope: RecurrenceScope; readonly label: string
   { scope: "ThisOccurrence", label: "This occurrence" }, { scope: "ThisAndFollowing", label: "This and following" }, { scope: "EntireSeries", label: "Entire series" },
 ];
 
+const INVITATION_STATUS = {
+  needsAction: "You haven’t answered this invitation.",
+  accepted: "You’re going.",
+  tentative: "You said maybe.",
+  declined: "You declined this invitation.",
+};
+
 /**
  * One event: when and where, its calendar, and only the changes Alpha can make to it exactly.
  * @model spec/calendar/presentation.md
  */
-export function EventDetail({ row, facts, deleting, held, canEdit, canDelete, onEdit, onAskDelete, onDelete, onCloseDelete, onCheckAgain, onOpenLink, onPlace, origin, onOpenOrigin, onClose }: EventDetailProps) {
+export function EventDetail({ row, facts, deleting, held, canEdit, canDelete, onEdit, onAskDelete, onDelete, invitationBinding, onRespond, onCloseDelete, onCheckAgain, onOpenLink, onPlace, origin, onOpenOrigin, onClose }: EventDetailProps) {
   const [scope, setScope] = useState<RecurrenceScope>("ThisOccurrence");
+  const [response, setResponse] = useState<{ row: CalendarRow; answer: InvitationAnswer; binding: string }>();
   if (row === undefined) return null;
   const detail = intervalDetail(row);
   const decline = facts.mode === "DeclineInvitation";
   const deletable = canDelete && row.writable && facts.mode !== "NoCancellation" && managedDeleteOffered(facts.managed) && !held;
+  const invitation = facts.invitation;
+  const answerable = invitation !== undefined && row.source === "agent"
+    && invitationAnswerAllowed(facts.mode, row.writable, facts.managed, row.recurring, row.revision !== "" && !held);
+  const responseCurrent = response !== undefined && answerable && invitation !== response.answer
+    && response.row.id === row.id && response.row.revision === row.revision && response.binding === invitationBinding;
+  const propose = (answer: InvitationAnswer) => {
+    setResponse({ row, answer, binding: invitationBinding });
+    onAskDelete();
+  };
   const scopes = row.recurring ? SCOPES.filter((choice) => managedScopeAllowed(facts.managed, choice.scope)) : [];
   return (
     <Sheet open onOpenChange={(next) => !next && onClose()}>
@@ -132,7 +151,7 @@ export function EventDetail({ row, facts, deleting, held, canEdit, canDelete, on
               ))}
             </ul>
           )}
-          {facts.invitePending && <p role="status" className="text-sm">You haven’t answered this invitation.</p>}
+          {invitation !== undefined && (invitation === "needsAction" || answerable) && <p role="status" className="text-sm">{INVITATION_STATUS[invitation]}</p>}
           {facts.managed && <p className="text-sm text-muted-foreground">{decline ? "Decline this invitation in Google Calendar." : "Delete this event in Google Calendar."}</p>}
           {held && (
             <div role="status" className="flex items-center justify-between gap-2 text-sm">
@@ -144,9 +163,24 @@ export function EventDetail({ row, facts, deleting, held, canEdit, canDelete, on
             {facts.join && <Button variant="secondary" onClick={() => onOpenLink(facts.join!)}><Video aria-hidden />Join</Button>}
             {facts.provider && <Button variant="ghost" onClick={() => onOpenLink(facts.provider!)}><ExternalLink aria-hidden />Open in Google Calendar</Button>}
             {canEdit && row.writable && !held && <Button variant="secondary" onClick={onEdit}><Pencil aria-hidden />Edit</Button>}
-            {deletable && <Button variant="destructive" onClick={onAskDelete}><Trash2 aria-hidden />{decline ? "Decline" : "Delete"}</Button>}
+            {answerable && canDelete && invitation !== "accepted" && <Button variant="secondary" aria-label="Accept this invitation" onClick={() => propose("accepted")}>Going</Button>}
+            {answerable && canDelete && invitation !== "tentative" && <Button variant="secondary" aria-label="Answer maybe to this invitation" onClick={() => propose("tentative")}>Maybe</Button>}
+            {deletable && invitation !== "declined" && <Button variant="destructive" onClick={() => { setResponse(undefined); onAskDelete(); }}><Trash2 aria-hidden />{decline ? "Decline" : "Delete"}</Button>}
           </div>
-          {deleting && (
+          {deleting && response !== undefined && (
+            <div role="dialog" aria-label="Review invitation answer" className="flex flex-col gap-3 border-t border-border pt-3">
+              <p className="font-display text-xl">{response.answer === "accepted" ? "Accept invitation?" : "Answer maybe?"}</p>
+              <p className="text-sm">{responseCurrent ? `Your answer: ${response.answer === "accepted" ? "Going" : "Maybe"}` : "Invitation changed. Review it again before answering."}</p>
+              {responseCurrent && <p className="text-sm text-muted-foreground">No guest notification will be sent.</p>}
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" onClick={onCloseDelete}>Cancel</Button>
+                <Button disabled={!responseCurrent} onClick={() => onRespond(response.row, response.answer, response.binding)}>
+                  {response.answer === "accepted" ? "Accept invitation" : "Answer maybe"}
+                </Button>
+              </div>
+            </div>
+          )}
+          {deleting && response === undefined && (
             <div role="dialog" aria-label={decline ? "Decline invitation?" : "Delete event?"} className="flex flex-col gap-3 border-t border-border pt-3">
               <p className="font-display text-xl">{decline ? "Decline invitation?" : "Delete event?"}</p>
               {scopes.length > 0 && (

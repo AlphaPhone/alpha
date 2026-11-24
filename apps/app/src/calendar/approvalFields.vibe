@@ -1,6 +1,7 @@
 // spec/calendar/approvals.md, "A request is complete only with its known fields, a verified current target and a valid time"; spec/calendar/approvals.md, "Approve needs every field the change would apply to be shown; Decline is always possible for a pending request"
 import { approvalComplete, targetVerified } from "../../gen/calendar__approvals.effect.vibe"
 import type { ApprovalRecord, CalendarRecord as CalendarSummary, EventRecord } from "./feed.schema.vibe"
+import { ownInvitationStatus } from "./model.vibe"
 import { formatDateTime, validZone } from "./time.ts"
 
 /** The current event a change or cancellation targets, as one read of its calendar found it. */
@@ -35,13 +36,38 @@ function instant(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 8.64e15
 }
 
+/** The pinned agent sends an invitation response as a digest-bound Calendar change. */
+export function invitationApproval(row: ApprovalRecord): Readonly<Record<string, unknown>> | undefined {
+  const { change, digest } = row.payload
+  if (row.action !== "modify_event" || !isObject(change) || change.action !== "respond_invitation"
+    || typeof digest !== "string" || !/^[a-f0-9]{64}$/.test(digest)
+    || Object.keys(row.payload).some((key) => key !== "change" && key !== "digest")) return undefined
+  const { account, target, scope, response, notifyAttendees } = change
+  if (typeof account !== "string" || account === "" || !isObject(target)
+    || (scope !== "instance" && scope !== "series") || (response !== "accepted" && response !== "tentative")
+    || (notifyAttendees !== undefined && notifyAttendees !== true)
+    || Object.keys(change).some((key) => !["action", "account", "target", "scope", "response", "notifyAttendees"].includes(key))) return undefined
+  const { source, eventId, expectedVersion } = target
+  if (!isObject(source) || typeof eventId !== "string" || eventId === "" || typeof expectedVersion !== "string" || expectedVersion.trim() === ""
+    || Object.keys(target).some((key) => !["source", "eventId", "expectedVersion"].includes(key))) return undefined
+  const { side, provider, grantId, connectorAccountId, calendarId } = source
+  if (side !== "owner" || (provider !== "eliza" && provider !== "google") || typeof grantId !== "string"
+    || typeof connectorAccountId !== "string" || typeof calendarId !== "string" || calendarId === ""
+    || Object.keys(source).some((key) => !["side", "provider", "grantId", "connectorAccountId", "calendarId"].includes(key))) return undefined
+  return { calendarId, side, grantId, eventId, expectedProvider: provider, expectedConnectorAccountId: connectorAccountId,
+    expectedProviderVersion: expectedVersion, recurrenceScope: scope, invitationResponse: response, notifyAttendees: notifyAttendees === true }
+}
+
 /** The calendar and current event a request names, verified only when exactly one of each matches its version and start. */
 export function approvalTarget(payload: Readonly<Record<string, unknown>>, calendars: readonly CalendarSummary[], events: readonly EventRecord[]): ApprovalTarget {
-  const matches = (value: { calendarId: string; side: string; grantId?: string; provider?: string }) =>
+  const response = payload.invitationResponse
+  const matches = (value: { calendarId: string; side: string; grantId?: string; provider?: string; connectorAccountId?: string }) =>
     value.calendarId === payload.calendarId && value.side === "owner" && String(value.grantId ?? "") === String(payload.grantId ?? "")
     && (!payload.expectedProvider || value.provider === payload.expectedProvider)
+    && (response === undefined || (value.connectorAccountId ?? "") === payload.expectedConnectorAccountId)
   const sources = calendars.filter(matches)
-  const found = events.filter((event) => matches(event) && (event.externalId === payload.eventId || event.id === payload.eventId)
+  const found = events.filter((event) => matches(event)
+    && (response === undefined ? (event.externalId === payload.eventId || event.id === payload.eventId) : event.id === payload.eventId && ownInvitationStatus(event) !== undefined)
     && (payload.expectedEventStartAtMs == null || Date.parse(event.startAt) === payload.expectedEventStartAtMs))
   const event = found.length === 1 ? found[0] : undefined
   const startsAt = Date.parse(event?.startAt ?? "")
@@ -57,13 +83,16 @@ export function approvalTarget(payload: Readonly<Record<string, unknown>>, calen
 
 /** The lines a review shows: only effect fields; versions and request ids stay authority, never prose. */
 export function approvalPresentation(row: ApprovalRecord, target: ApprovalTarget, zone: string): ApprovalPresentation {
-  const p = row.payload
+  const invitation = invitationApproval(row)
+  const p = invitation ?? row.payload
+  const response = invitation?.invitationResponse
   const fields: ApprovalField[] = []
   const add = (label: string, value: string) => fields.push({ label, value })
-  const heading = row.action === "schedule_event" ? "Add event" : row.action === "modify_event" ? "Change event"
+  const heading = response === "accepted" ? "Accept invitation" : response === "tentative" ? "Answer maybe"
+    : row.action === "schedule_event" ? "Add event" : row.action === "modify_event" ? "Change event"
     : p.cancellationMode === "decline_invitation" ? "Decline invitation" : p.cancellationMode === "remove_private_copy" ? "Remove event from your calendar" : "Cancel event"
   const allowed = row.action === "schedule_event" ? SCHEDULE : row.action === "modify_event" ? MODIFY : CANCEL
-  let known = Object.keys(p).every((key) => allowed.includes(key))
+  let known = invitation !== undefined || Object.keys(p).every((key) => allowed.includes(key))
   let valid = true
   add("Calendar", target.calendar ?? (p.calendarId === "primary" ? "Primary calendar" : String(p.calendarId ?? "")))
   if (target.account) add("Account", target.account)
@@ -79,7 +108,8 @@ export function approvalPresentation(row: ApprovalRecord, target: ApprovalTarget
     }
   }
   const value = row.action === "modify_event" ? p.patch : p
-  if (!isObject(value)) valid = false
+  if (response !== undefined) add("Answer", response === "accepted" ? "Going" : "Maybe")
+  else if (!isObject(value)) valid = false
   else if (row.action !== "cancel_event") {
     if (row.action === "modify_event" && Object.keys(value).some((key) => !PATCH.includes(key))) known = false
     if (row.action === "schedule_event" && (typeof value.title !== "string" || value.title.trim() === "")) valid = false
