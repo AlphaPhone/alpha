@@ -317,6 +317,30 @@ lemma flip_ensures(s: Camera, by_: app__photos__actor_Actor)
   StartingAccounted();
 }
 
+lemma setRatio_ensures(s: Camera, ratio: Ratio, by_: app__photos__actor_Actor)
+  ensures (inv(s) ==> canSetRatio(s, ratio, by_) ==> alwaysNoCameraWithoutAccess(setRatio(s, ratio, by_).state))
+  ensures (inv(s) ==> canSetRatio(s, ratio, by_) ==> alwaysNothingHeldAway(setRatio(s, ratio, by_).state))
+  ensures (inv(s) ==> canSetRatio(s, ratio, by_) ==> alwaysStartsAccounted(setRatio(s, ratio, by_).state))
+  ensures (inv(s) ==> canSetRatio(s, ratio, by_) ==> alwaysLensSettingsValid(setRatio(s, ratio, by_).state))
+  ensures (inv(s) ==> canSetRatio(s, ratio, by_) ==> alwaysFocusFollowsTheNewestTap(setRatio(s, ratio, by_).state))
+  ensures (inv(s) ==> canSetRatio(s, ratio, by_) ==> alwaysRecordingHoldsThePreview(setRatio(s, ratio, by_).state))
+  ensures (inv(s) ==> canSetRatio(s, ratio, by_) ==> alwaysOneShutterOnTheCamera(setRatio(s, ratio, by_).state))
+  ensures (inv(s) ==> canSetRatio(s, ratio, by_) ==> alwaysTheRequestWaitsOnTheCamera(setRatio(s, ratio, by_).state))
+  ensures (inv(s) ==> canSetRatio(s, ratio, by_) ==> alwaysSecureShowsOnlyItsSession(setRatio(s, ratio, by_).state))
+  ensures (inv(s) ==> canSetRatio(s, ratio, by_) ==> stepALostPreviewFails(s, "setRatio", setRatio(s, ratio, by_).state))
+  ensures (inv(s) ==> canSetRatio(s, ratio, by_) ==> stepARetiredPreviewIsReleased(s, "setRatio", setRatio(s, ratio, by_).state, setRatio(s, ratio, by_).out))
+  ensures (inv(s) ==> canSetRatio(s, ratio, by_) ==> stepOneFocusWriteAtATime(s, "setRatio", setRatio(s, ratio, by_).state, setRatio(s, ratio, by_).out))
+  ensures (inv(s) ==> canSetRatio(s, ratio, by_) ==> stepSoundOnlyWithTheMicrophone(s, setRatio(s, ratio, by_).state, setRatio(s, ratio, by_).out))
+  ensures (inv(s) ==> canSetRatio(s, ratio, by_) ==> stepASavedVideoIsTheLast(s, setRatio(s, ratio, by_).state))
+  ensures (inv(s) ==> canSetRatio(s, ratio, by_) ==> stepTheShutterNeverFiresCovered(s, setRatio(s, ratio, by_).state, setRatio(s, ratio, by_).out))
+  ensures (inv(s) ==> canSetRatio(s, ratio, by_) ==> stepEachRequestIsAnsweredOnce(s, setRatio(s, ratio, by_).state, setRatio(s, ratio, by_).out))
+  ensures (inv(s) ==> canSetRatio(s, ratio, by_) ==> stepTheAgentFailsOnlyForCause(s, "setRatio", setRatio(s, ratio, by_).state))
+  ensures (inv(s) ==> canSetRatio(s, ratio, by_) ==> stepTheLockScreenOpensNothingElse(s, setRatio(s, ratio, by_).state, setRatio(s, ratio, by_).out))
+  ensures (inv(s) ==> canSetRatio(s, ratio, by_) ==> stepOnlyThisVisitJoinsTheSession(s, "setRatio", setRatio(s, ratio, by_).state))
+{
+  StartingAccounted();
+}
+
 lemma open_ensures(s: Camera, secure: bool, newest: int, by_: app__photos__actor_Actor)
   ensures (inv(s) ==> canOpen(s, by_) ==> alwaysNoCameraWithoutAccess(open(s, secure, newest, by_).state))
   ensures (inv(s) ==> canOpen(s, by_) ==> alwaysNothingHeldAway(open(s, secure, newest, by_).state))

@@ -33,14 +33,15 @@ import agent as G from "./agent"
 
 Photo or Video mode, the back or front lens, the flash, and zoom in tenths:
 from half to ten times on the back lens, one time on the front, which has no
-flash. A preview is off, starting, ready or failed. Ask Alpha covering Camera
-keeps the preview for ten seconds. A banner tells the owner of a photo not
-taken or a video not saved. When Camera fails the agent's request it names
-the cause.
+flash. Photos are 4:3, or 16:9 on a lens that lists it. A preview is off,
+starting, ready or failed. Ask Alpha covering Camera keeps the preview for
+ten seconds. A banner tells the owner of a photo not taken or a video not
+saved. When Camera fails the agent's request it names the cause.
 
 ```quint
 type Mode = Photo | Video
 type Lens = Back | Front
+type Ratio = Standard | Wide
 type Phase = Off | Starting | Ready | Failed
 type Said = Quiet | NotTaken | NothingRecorded | NotSaved
 type Cause = NoCause | Left | Denied | PreviewFailed | Busy | Protected
@@ -54,12 +55,12 @@ pure val grace = 10
 ### What Camera asks of the phone
 
 Android's camera and microphone prompts and its Settings, and the shell's
-"Unlock to continue"; a preview started or stopped, each under its own
-number; the flash, the zoom and the focus point; a photo, for the owner or
-for the agent's request; a recording started, stopped or checked; the
-scanner in Files; the last capture opened in Photos, limited on the lock
-screen to what was taken there; Ask Alpha about the live frame or the last
-capture; asking the shell to lower Ask Alpha so the owner sees the
+"Unlock to continue"; a preview started at its photo ratio or stopped, each
+under its own number; the flash, the zoom and the focus point; a photo, for
+the owner or for the agent's request; a recording started, stopped or
+checked; the scanner in Files; the last capture opened in Photos, limited on
+the lock screen to what was taken there; Ask Alpha about the live frame or
+the last capture; asking the shell to lower Ask Alpha so the owner sees the
 viewfinder the agent asks to use; and the agent's answer: how its request
 ended, why, and the photo taken.
 
@@ -69,7 +70,7 @@ type Effect =
   | AskMicrophone
   | OpenSettings
   | Unlock
-  | StartPreview({ ticket: int, lens: Lens })
+  | StartPreview({ ticket: int, lens: Lens, ratio: Ratio })
   | StopPreview({ ticket: int })
   | SetFlash({ on: bool })
   | SetZoom({ level: int })
@@ -89,7 +90,8 @@ type Effect =
 
 The camera and microphone permissions; whether Camera is showing, from the
 lock screen, in which visit, and covered by Ask Alpha since when; the
-preview and the starts the phone has not answered; the controls; focus taps;
+preview and the starts the phone has not answered; the controls, with the
+photo ratio chosen and the lenses that list 16:9; focus taps;
 the photo being taken and for whom; the recording and the visit it started
 in; the agent's request; the banner; and the last capture with those taken
 in this secure session. Nothing is kept through a restart.
@@ -99,7 +101,7 @@ type Camera = {
   permission: P::Permission, mic: P::Permission,
   showing: bool, secure: bool, visit: int, covered: bool, coveredAt: int,
   phase: Phase, preview: int, pending: Set[int],
-  mode: Mode, lens: Lens, flash: bool, zoom: int,
+  mode: Mode, lens: Lens, flash: bool, zoom: int, ratio: Ratio, wide: Set[Lens],
   taps: int, focus: int, writing: int, confirmed: int, waited: int,
   shots: int, shot: int, shotFor: int,
   film: F::Film, filmVisit: int,
@@ -113,7 +115,7 @@ pure val initial: Camera = {
   permission: P::unasked, mic: P::unasked,
   showing: false, secure: false, visit: 0, covered: false, coveredAt: 0,
   phase: Off, preview: 0, pending: Set(),
-  mode: Photo, lens: Back, flash: false, zoom: oneTime,
+  mode: Photo, lens: Back, flash: false, zoom: oneTime, ratio: Standard, wide: Set(),
   taps: 0, focus: 0, writing: 0, confirmed: 0, waited: 0,
   shots: 0, shot: 0, shotFor: 0,
   film: F::initial, filmVisit: 0,
@@ -130,6 +132,8 @@ pure def ready(c: Camera): bool = holds(c) and c.phase == Ready and not(c.covere
 pure def recording(c: Camera): bool = F::recording(c.film)
 
 pure def free(c: Camera): bool = c.shot == 0 and not(recording(c))
+
+pure def framing(c: Camera): Ratio = if (c.ratio == Wide and c.wide.contains(c.lens)) Wide else Standard
 
 pure def seen(a: G::Capture): G::Capture = if (G::open(a)) G::viewChanged(a, Phone) else a
 
@@ -179,7 +183,7 @@ shown as the last capture.
 ```quint
 pure def starting(out: List[Effect], c: Camera): Done =
   val n = c.preview + 1
-  emit(out.append(StartPreview({ ticket: n, lens: c.lens })),
+  emit(out.append(StartPreview({ ticket: n, lens: c.lens, ratio: framing(c) })),
     { ...c, phase: Starting, preview: n, pending: c.pending.union(Set(n)), focus: 0, writing: 0, confirmed: 0, agent: seen(c.agent) })
 
 pure def mayStart(c: Camera): bool = holds(c) and not(c.covered) and (c.phase == Off or c.phase == Failed)
@@ -437,7 +441,8 @@ pure def sometimesReleasedUnderAskAlpha(s: Camera): bool = s.showing and s.cover
 ## Story: Frame the shot
 
 > As the owner, I want to switch between photo and video, flip the lens,
-> use the flash, zoom by chip or pinch, and tap to focus.
+> use the flash, zoom by chip or pinch, take photos at 4:3 or 16:9, and tap
+> to focus.
 
 ### Mode changes while nothing is being taken
 
@@ -474,6 +479,29 @@ pure def canZoomTo(s: Camera, level: int, by: Actor): bool =
     and level >= minZoom and level <= maxZoom and (s.lens == Front implies level == oneTime)
 
 pure def zoomTo(s: Camera, level: int, by: Actor): Done = emit(List(SetZoom({ level: level })), { ...s, zoom: level, agent: seen(s.agent) })
+```
+
+### Photo mode offers 4:3 or 16:9 on a lens that lists both, and a new ratio starts the preview again with it
+
+The phone says which lenses list 16:9 photos: on Android each camera lists
+its photo ratios, and the browser lists none, so it offers no choice. The
+ratio is chosen like a flip, over a ready Photo preview while nothing is
+being taken: the preview stops and starts again on the same lens at the new
+ratio, with the flash off and at one time. The choice is kept across lenses,
+and a preview starts at 16:9 only on a lens that lists it; on any other it
+starts at 4:3.
+
+```quint
+pure def canRatiosListed(s: Camera, lens: Lens, wide: bool, by: Actor): bool = by == Phone
+
+pure def ratiosListed(s: Camera, lens: Lens, wide: bool, by: Actor): Camera =
+  { ...s, wide: if (wide) s.wide.union(Set(lens)) else s.wide.exclude(Set(lens)) }
+
+pure def canSetRatio(s: Camera, ratio: Ratio, by: Actor): bool =
+  by == Owner and ready(s) and free(s) and s.mode == Photo and ratio != s.ratio and s.wide.contains(s.lens)
+
+pure def setRatio(s: Camera, ratio: Ratio, by: Actor): Done =
+  starting(List(StopPreview({ ticket: s.preview })), { ...s, ratio: ratio, flash: false, zoom: oneTime })
 ```
 
 ### The front lens has no flash and no zoom, and zoom stays within its range
@@ -538,6 +566,12 @@ pure def sometimesFocusAfterWaiting(s: Camera): bool = s.confirmed != 0 and s.co
 
 ```quint
 pure def sometimesZoomed(s: Camera): bool = ready(s) and s.zoom > oneTime and s.flash
+```
+
+### A photo can be framed at 16:9
+
+```quint
+pure def sometimesWidePhoto(s: Camera): bool = ready(s) and s.mode == Photo and framing(s) == Wide
 ```
 
 ## Story: Take photos and videos
