@@ -5,12 +5,11 @@ import { checkOffered } from "../../gen/calendar__availability.effect.vibe"
 import {
   type AvailabilityOutcome, type AvailabilitySource, type NamedCalendarReadContext, type NamedReadOutcome,
   executeCalendarAvailability, executeNamedCalendarRead, CALENDAR_CAPABILITY, CALENDAR_NAMED_READ_CAPABILITY,
+  NamedReadUnavailable, ReviewedReadsMachine, reviewedReadsMachine,
 } from "@elizaos/plugin-calendar/client"
 import {
   type CalendarAvailabilityOperation, type CalendarAvailabilityResult, type ReadAnswer, type SourcesAnswer, AvailabilityUnavailable,
 } from "@elizaos/plugin-calendar/availability"
-import { NamedReadUnavailable } from "@elizaos/plugin-calendar/client"
-import { Machine as NamedReadMachine, machine as namedReadMachine } from "../../../../vendor/eliza/packages/plugin-calendar/gen/calendar__reviewedReads.effect.vibe"
 import { Native } from "../platform/native.vibe"
 import { decodeAccess, decodeAgentReply, decodeAvailability, decodeAvailabilitySources } from "./device.schema.vibe"
 import { deviceZone } from "./time.ts"
@@ -82,7 +81,7 @@ function namedOutcome(outcome: NamedReadOutcome): NamedOutcome {
 export const requestsLayer = Layer.provide(Layer.effect(AgentRequests, effect {
   const native = try Native
   const machine = try ActionMachine
-  const namedReads = try NamedReadMachine
+  const namedReads = try ReviewedReadsMachine
   const sheets = try SubscriptionRef.make<RequestSheet>({ kind: "none" })
   const choice = try Ref.make<Deferred.Deferred<readonly string[] | null> | undefined>(undefined)
   const confirm = try Ref.make<Deferred.Deferred<boolean> | undefined>(undefined)
@@ -94,7 +93,7 @@ export const requestsLayer = Layer.provide(Layer.effect(AgentRequests, effect {
   }
 
   effect function readNamed(operation: unknown, operationId: string, context: NamedCalendarReadContext, current: () => NamedCalendarReadContext, journalIdentity?: AgentRun["journalIdentity"]) {
-    provide NamedReadMachine = namedReads {
+    provide ReviewedReadsMachine = namedReads {
       return try executeNamedCalendarRead({
         executeAgent: (input) => effect {
           return try mapError(native.invoke(PLUGIN, "executeAgent", input), (cause) => new NamedReadUnavailable({ reason: cause._tag })) as { status: string; result?: unknown; feedComplete?: boolean }
@@ -182,4 +181,4 @@ export const requestsLayer = Layer.provide(Layer.effect(AgentRequests, effect {
       if (pending !== undefined) try Deferred.succeed(pending, share)
     },
   }
-}), namedReadMachine())
+}), reviewedReadsMachine())
