@@ -3,10 +3,8 @@ import { CloudError, isCredentialInvalid } from "@elizaos/cloud/client";
 import { Effect, Exit, Fiber, Layer, Option, Redacted, Stream } from "effect";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Machine as Press } from "../gen/app__home__press.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { at } from "../src/areas.ts";
-import home from "../src/home/index.tsx";
 import { adopt, earlierSlot, keptAt, vaulted } from "../src/platform/adoption.vibe";
 import { Agent, type Reached } from "../src/platform/agent.vibe";
 import { Cloud } from "../src/platform/cloud.vibe";
@@ -40,9 +38,7 @@ it("Move between Home and the apps on an Alpha image, where a screen that throws
   expect(["Phone", "Messages", "Contacts"].map((name) => Boolean(button(name)))).toEqual([true, true, true]);
 
   // spec/app/shell/index.md, "Opening an app shows it on top and lowers Ask Alpha to its bar"
-  const homes = home.runtime(alpha);
   for (const view of ["Files", "Maps"]) {
-    await until(alpha, homes, Press, (p) => p.surface === "OnHome" && p.shown.includes(`view:${view}`));
     await press(view);
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === view);
     expect(document.querySelector("main [role=alert]")?.textContent).toBe("This part of Alpha stopped. Go back, and open it again.");

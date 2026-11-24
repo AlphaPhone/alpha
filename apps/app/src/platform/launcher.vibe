@@ -2,7 +2,6 @@
 import type { InstalledApp } from "@elizaos/os/bridges/definitions/system"
 
 module held {
-  import type { InstalledApp } from "@elizaos/os/bridges/definitions/system"
   import type * as SystemBridge from "@elizaos/os/bridges/system"
   type Bridge = typeof SystemBridge
   let loaded: Promise<Bridge> | undefined
