@@ -91,6 +91,18 @@ function replied(turn: number, result: TurnResult | undefined): Reply.Event {
   }
 }
 
+/** The fix the agent named for a failed reply, in the reply spec's words. */
+function fixOf(result: TurnResult | undefined): Reply.Fix {
+  const said = result?.kind === "Replied" || result?.kind === "AgentFailed" ? result.reply?.planAction : undefined
+  return said === "sign-in" ? "SignInFix" : said === "funding" ? "FundingFix" : said === "retry" ? "RetryFix" : "NoFix"
+}
+
+/** How long a live limit asked to wait, or -1 where nothing said. */
+function waitOf(result: TurnResult | undefined): number {
+  const said = result?.kind === "Replied" || result?.kind === "AgentFailed" ? result.reply?.retryAfterMs : undefined
+  return typeof said === "number" ? said : -1
+}
+
 module web {
   /** The time zone the phone is set to. @throws {never} */
   export function zone(): string {
@@ -137,7 +149,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     board.lastSent = text
     let heard = false
     try ignore(reply.send({ type: "begin", turn: ticket }))
-    board.change({ label: "" })
+    board.change({ label: "", failure: undefined })
     const preview = (written: string, provisional: boolean) => {
       if (!heard) Queue.offerUnsafe(queue, { type: "hear", ticket })
       heard = true
@@ -159,7 +171,9 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const metadata = observed(told, context)
     const result = tryPromise(() => controller.send({ text, ...(metadata === undefined ? {} : { metadata }) }, { stream: hooks })) catch () => undefined
     board.change({ reply: "", label: "" })
-    show(replied(ticket, result))
+    const ending = replied(ticket, result)
+    if (ending.type === "failed") board.change({ failure: { kind: ending.kind, fix: fixOf(result), waitMs: waitOf(result) } })
+    show(ending)
     try promise(() => shown)
     const event = ended(ticket, heard, result)
     const finishing = Conversation.canFinish(try (try Conversation.Machine).get(), ticket)

@@ -1,6 +1,7 @@
 // spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Keep what I am writing"
 import { ConversationRecord } from "@elizaos/agent/client"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import type { Failure, Fix } from "../../gen/app__assistant__reply.ts"
 
 /** One message of the conversation showing, as the agent keeps it. */
 export interface Line {
@@ -30,6 +31,8 @@ export interface Seen {
   readonly reply: string
   /** What the agent says it is doing until its reply is written: its acknowledgment, its status or the app its tool uses. */
   readonly label: string
+  /** Why the last reply did not finish, the fix the agent named, and how long the provider asked to wait, or -1. */
+  readonly failure: { readonly kind: Failure; readonly fix: Fix; readonly waitMs: number } | undefined
   /** The text in the composer's box, which its slot keeps. */
   readonly typed: string
   /** The text of a message the slot marks as sending, under review; or the saved copy of a conflict. */
@@ -97,7 +100,7 @@ export const talk = Layer.effect(Talk, effect {
   const messages: string[] = []
   const listeners = new Set<() => void>()
   let seen: Seen = {
-    pages: new Map(), reply: "", label: "", typed: "", saved: "", hits: [],
+    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", saved: "", hits: [],
     titles: new Map(records.map((one, at) => [at + 1, one.title])),
   }
   const keep = () => runFork(ignore(store.set(key, JSON.stringify({ conversations: records.map((one) => ({ id: one.record.id, roomId: one.record.roomId, title: one.title })) }))))

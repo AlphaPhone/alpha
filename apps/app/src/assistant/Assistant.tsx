@@ -1,6 +1,6 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
 import {
-  Alert, AssistantChatHistorySheet, AssistantConversation, AssistantGrabber, AssistantSearchSheet,
+  Alert, AssistantCard, AssistantChatHistorySheet, AssistantConversation, AssistantGrabber, AssistantSearchSheet,
   type AssistantAttachment, type AssistantDraftNoticeProps, type AssistantMessageProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
@@ -16,7 +16,8 @@ import { textLimit } from "../../gen/app__assistant__composer.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import type { Machine as DockMachine } from "../../gen/app__assistant__dock.effect.vibe";
 import { useMachine as useDock } from "../../gen/app__assistant__dock.react.ts";
-import type { Machine as ReplyMachine } from "../../gen/app__assistant__reply.effect.vibe";
+import type { Failure, Fix, Machine as ReplyMachine } from "../../gen/app__assistant__reply.effect.vibe";
+import { fixShown, managesPlan, showsWait, waitSeconds } from "../../gen/app__assistant__reply.ts";
 import { useMachine as useReply } from "../../gen/app__assistant__reply.react.ts";
 import type { Machine as SearchMachine } from "../../gen/app__assistant__search.effect.vibe";
 import { useMachine as useSearch } from "../../gen/app__assistant__search.react.ts";
@@ -70,6 +71,29 @@ function waiting(writing: Writing): AssistantAttachment[] {
     ...(editor.shown ? [{ id: "shown", kind: "image", name: "Photo" } as const] : []),
     ...(editor.question ? [{ id: "question", kind: "transcript", name: "Question" } as const] : []),
   ];
+}
+
+/** Alpha's words for why a reply did not finish. */
+const failures: Record<Failure, string> = {
+  CredentialInvalid: "Your provider refused its key", InsufficientCredits: "Out of credits", LimitReached: "Too many requests",
+  ProviderIssue: "The provider had a problem", TimedOut: "The reply timed out", MissingCapability: "Your agent cannot do that yet",
+  NoProvider: "No AI provider", PlanLimit: "Your plan's limit is reached", OtherFailure: "The reply did not finish",
+};
+
+/** "about …" for a wait: seconds under 90, then minutes under 90, then hours. */
+function about(waitMs: number): string {
+  const seconds = waitSeconds(waitMs);
+  if (seconds < 90) return `${seconds} s`;
+  const minutes = Math.round(seconds / 60);
+  return minutes < 90 ? `${minutes} min` : `${Math.round(minutes / 60)} h`;
+}
+
+/** The action a failed reply's card offers, if any. */
+function actionOf(kind: Failure, fix: Fix): "signIn" | "funding" | "retry" | undefined {
+  if (fix === "SignInFix") return "signIn";
+  if (fix === "FundingFix" || (fix === "NoFix" && managesPlan(kind))) return "funding";
+  if (fix === "RetryFix") return "retry";
+  return undefined;
 }
 
 const detached = { mail: "Mail", transcript: "Transcript", shown: "Shown" } as const;
@@ -141,6 +165,20 @@ export function Assistant({ runtime }: AssistantProps) {
     };
   });
   const writingReply = seen.reply !== "" ? [{ id: "reply", author: "alpha", text: seen.reply } as const] : [];
+  // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"
+  const failure = seen.failure;
+  const act = failure === undefined ? undefined : actionOf(failure.kind, failure.fix);
+  const failed = failure === undefined ? [] : [{
+    id: "failure", author: "alpha", text: "",
+    children: (
+      <AssistantCard
+        card={act === undefined || !fixShown(failure.fix, failure.kind)
+          ? { kind: "plain", text: failures[failure.kind] }
+          : { kind: "action", action: act, title: failures[failure.kind], ...(showsWait(failure.kind, failure.waitMs) ? { detail: `Try again in about ${about(failure.waitMs)}` } : {}), ...(act === "funding" ? { label: "Manage plan" } : {}) }}
+        onAct={act === "retry" ? () => type(board.lastSent) : act !== undefined && shell.can({ type: "openView", view: "Settings" }) ? () => void shell.send({ type: "openView", view: "Settings" }) : undefined}
+      />
+    ),
+  } as const];
   const quoted = writing.editor.quote > 0 ? lines[writing.editor.quote - 1]?.text : undefined;
   const view = talking.context.showing.tag === "App" ? talking.context.showing.view : "Home";
 
@@ -175,7 +213,7 @@ export function Assistant({ runtime }: AssistantProps) {
           ) : undefined,
         }}
         transcript={{
-          messages: [...messages, ...writingReply],
+          messages: [...messages, ...writingReply, ...failed],
           status: shown.page.status === "Loading" ? "loading" : shown.page.status === "Failed" ? "failed" : "loaded",
           turn: status === undefined ? undefined : { status, label: seen.label === "" ? undefined : seen.label, onCheck: checkable ? () => void conversation.send(check) : undefined },
           onRetry: chats.can({ type: "reread" }) ? () => void chats.send({ type: "reread" }) : undefined,
