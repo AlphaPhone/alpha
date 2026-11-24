@@ -4,6 +4,7 @@ import ai.eliza.plugins.notifications.MailBackgroundDelivery;
 import android.Manifest;
 import android.app.Notification;
 import android.app.NotificationChannel;
+import android.app.NotificationChannelGroup;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
@@ -45,7 +46,8 @@ final class GmailNoticePoster implements MailBackgroundDelivery.Notices {
   if(!question&&!uri.startsWith(OPEN_PREFIX))return null;
   return new Tap(uri.substring((question?ASK_PREFIX:OPEN_PREFIX).length()),question);
  }
- @Override public boolean allowed(){NotificationChannel c=manager.getNotificationChannel(CHANNEL);return (Build.VERSION.SDK_INT<33||context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)==PackageManager.PERMISSION_GRANTED)&&manager.areNotificationsEnabled()&&c!=null&&c.getImportance()!=NotificationManager.IMPORTANCE_NONE;}
+ /** A blocked channel group (AlphaNotificationChannels puts this channel in one) is refused like a blocked channel. */
+ @Override public boolean allowed(){NotificationChannel c=manager.getNotificationChannel(CHANNEL);if(!((Build.VERSION.SDK_INT<33||context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)==PackageManager.PERMISSION_GRANTED)&&manager.areNotificationsEnabled()&&c!=null&&c.getImportance()!=NotificationManager.IMPORTANCE_NONE))return false;NotificationChannelGroup group=c.getGroup()==null?null:manager.getNotificationChannelGroup(c.getGroup());return group==null||!group.isBlocked();}
  @Override public boolean active(String key){for(StatusBarNotification n:manager.getActiveNotifications())if((TAG_PREFIX+key).equals(n.getTag()))return true;return false;}
  private Intent intent(String key,boolean question){
   return new Intent(context,MainActivity.class).setAction(ACTION).setData(Uri.parse((question?ASK_PREFIX:OPEN_PREFIX)+key)).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP);

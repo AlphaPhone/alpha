@@ -1,6 +1,6 @@
-// spec/telephony/common.md, "A question for Alpha leaves the bar only once a turn took it"; spec/telephony/callBar.md, "The bar shows only on a trusted reading, where it may show, while a call is live"; spec/assistant/receipts.md, "An action is reconciled as applied only with its exact saved receipt, and only a handoff may stay unresolved"; spec/telephony/phone.md, "Story: Read my recent calls while Phone is open"; spec/telephony/drafts.md, "Story: Send only what I reviewed, once"; spec/telephony/contacts.md, "Story: Change only the contact I reviewed"; spec/telephony/actions.md, "Story: Call or text only the person I approved"; spec/telephony/callBar.md, "Story: See my live call over every view"
+// spec/telephony/common.md, "A question for Alpha leaves the bar only once a turn took it"; spec/telephony/callBar.md, "The bar shows only on a trusted reading, where it may show, while a call is live"; spec/assistant/receipts.md, "An action is reconciled as applied only with its exact saved receipt, and only a handoff may stay unresolved"; spec/telephony/phone.md, "Story: Read my recent calls while Phone is open"; spec/telephony/drafts.md, "Story: Send only what I reviewed, once"; spec/telephony/contacts.md, "Story: Change only the contact I reviewed"; spec/telephony/actions.md, "Story: Call or text only the person I approved"; spec/telephony/callBar.md, "Story: See my live call over every view"; spec/telephony/callBar.md, "While a call rings, Android's incoming alert is the only call bar"
 import { assert, it } from "@effect/vitest"
-import { Machine as CallBarMachine, barPhase } from "../../gen/telephony__callBar.effect.vibe"
+import { Machine as CallBarMachine, barDrawn, barPhase, shownCall } from "../../gen/telephony__callBar.effect.vibe"
 import { Machine as ContactsMachine } from "../../gen/telephony__contacts.effect.vibe"
 import { Machine as DraftsMachine, slotOf } from "../../gen/telephony__drafts.effect.vibe"
 import { Machine as PhoneMachine } from "../../gen/telephony__phone.effect.vibe"
@@ -135,6 +135,44 @@ it.live("See my live call over every view (spec/telephony/callBar.md, \"Story: S
     try Effect.try(() => assert.deepStrictEqual(
       { live, untrusted, ended: fake.calls.filter((c) => c === "AlphaOngoingCall.endCall").length },
       { live: "LiveBar", untrusted: "NoBar", ended: 1 },
+    ))
+  }
+})
+
+it.live("A ringing call leaves the top bar to Android's alert (spec/telephony/callBar.md, \"While a call rings, Android's incoming alert is the only call bar\")", () => effect {
+  const fake = fakePhone()
+  provide fake.layer {
+    const watch = try CallWatch
+    const bar = try CallBarMachine
+    effect function report(calls: unknown[]) {
+      try sync(() => { fake.world.ongoing = { calls } })
+      try watch.refresh()
+      const b = try bar.get()
+      return { drawn: barDrawn(b), held: b.shown, call: shownCall(b.calls).id }
+    }
+    try watch.eligible(true)
+    const active = try report([{ id: "c1", state: "active", connectedAt: 1000 }])
+    // A call waiting behind a held call: the bar draws nothing, and the ring stays listed for the comms stage and End.
+    const waiting = try report([{ id: "c1", state: "held", connectedAt: 1000 }, { id: "c2", state: "ringing", connectedAt: null }])
+    const left = try report([{ id: "c1", state: "held", connectedAt: 1000 }])
+    const ended = try report([])
+    // A ring during the Call ended moment clears it; a ring the bar never drew holds no moment when it goes.
+    const ring = try report([{ id: "c3", state: "ringing", connectedAt: null }])
+    const declined = try report([])
+    try report([{ id: "c4", state: "ringing", connectedAt: null }])
+    const answered = try report([{ id: "c4", state: "active", connectedAt: 2000 }])
+    try Effect.try(() => assert.deepStrictEqual(
+      { active, waiting, left, ended: ended.drawn, ring, declined: declined.drawn, answered, ends: fake.calls.filter((c) => c === "AlphaOngoingCall.endCall").length },
+      {
+        active: { drawn: "LiveBar", held: true, call: "c1" },
+        waiting: { drawn: "NoBar", held: true, call: "c2" },
+        left: { drawn: "LiveBar", held: true, call: "c1" },
+        ended: "EndedBar",
+        ring: { drawn: "NoBar", held: true, call: "c3" },
+        declined: "NoBar",
+        answered: { drawn: "LiveBar", held: true, call: "c4" },
+        ends: 0,
+      },
     ))
   }
 })

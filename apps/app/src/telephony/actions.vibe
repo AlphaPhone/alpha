@@ -4,7 +4,7 @@ import { contactWriteAdvertised, type ContactDetail, type ContactDraft, type Con
 import { operationIdOf } from "@elizaos/os/bridges/definitions/messages"
 import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone"
 import {
-  Machine as ActionsMachine, isChoosing, readBackOf, runIdOf, type ActionKind, type Candidate, type Event as ActionsEvent, type SendRecord, type Settled, type TargetForm,
+  Machine as ActionsMachine, isChoosing, lineChange, readBackOf, runIdOf, type ActionKind, type Candidate, type Event as ActionsEvent, type SendRecord, type Settled, type TargetForm,
 } from "../../gen/telephony__actions.effect.vibe"
 import { Machine as CallBarMachine } from "../../gen/telephony__callBar.effect.vibe"
 import { sameLine, withoutBody, writtenNumbers } from "../assistant/grounding.vibe"
@@ -144,6 +144,32 @@ export function valuesChanged(draft: ContactDraft, add?: { phoneNumbers?: readon
   const emails = draft.emailAddresses.filter((e) => !goneEmails.includes(e.address.toLowerCase()))
   for (const address of add?.emailAddresses ?? []) if (!emails.some((e) => e.address.toLowerCase() === address.toLowerCase())) emails.push({ address, type: "home" })
   return { displayName: draft.displayName, phoneNumbers: phones, emailAddresses: emails }
+}
+
+/** What a contact change does to one line of the review, in the words the line says (#1453). */
+export type ChangeWord = "Remove" | "Add" | "Keep" | "Rename from"
+/** One line of a contact change's review: the word, the value as stored, and whether it is a number. */
+export interface ChangeLine { readonly word: ChangeWord; readonly value: string; readonly number: boolean }
+
+const WORDS = { RemoveLine: "Remove", AddLine: "Add", KeepLine: "Keep" } as const
+
+/**
+ * A contact change as the review lines it: the old name when it changes, the numbers and addresses it removes, then those it
+ * saves, each saying whether it is added or kept. A number is the same line written either way, an address without case.
+ */
+export function changeLines(before: ContactDetail, after: ContactDraft): readonly ChangeLine[] {
+  const numbers = (d: ContactDraft) => d.phoneNumbers.map((p) => p.number)
+  const addresses = (d: ContactDraft) => d.emailAddresses.map((e) => e.address)
+  const holdsNumber = (d: ContactDraft, n: string) => d.phoneNumbers.some((p) => sameLine(p.number, n))
+  const holdsAddress = (d: ContactDraft, a: string) => d.emailAddresses.some((e) => e.address.toLowerCase() === a.toLowerCase())
+  const line = (value: string, number: boolean, was: boolean, stays: boolean): ChangeLine => ({ word: WORDS[lineChange(was, stays)], value, number })
+  return [
+    ...(after.displayName !== before.displayName && before.displayName.trim() !== "" ? [{ word: "Rename from" as const, value: before.displayName, number: false }] : []),
+    ...numbers(before).filter((n) => !holdsNumber(after, n)).map((n) => line(n, true, true, false)),
+    ...addresses(before).filter((a) => !holdsAddress(after, a)).map((a) => line(a, false, true, false)),
+    ...numbers(after).map((n) => line(n, true, holdsNumber(before, n), true)),
+    ...addresses(after).map((a) => line(a, false, holdsAddress(before, a), true)),
+  ]
 }
 
 /** Every number a contact operation saves, adds or removes. */
@@ -370,7 +396,13 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
       for (const query of [op.contact.displayName, ...op.contact.phoneNumbers]) {
         for (const found of (numbersOf(query) catch () => [] as Candidate[])) if (!twins.some((t) => t.candidateId === found.candidateId)) twins.push(found)
       }
-      const twin = twins.find((t) => op.contact.phoneNumbers.some((n) => sameLine(n, t.number)) || t.title.toLowerCase() === op.contact.displayName.toLowerCase())
+      let twin = twins.find((t) => op.contact.phoneNumbers.some((n) => sameLine(n, t.number)) || t.title.toLowerCase() === op.contact.displayName.toLowerCase())
+      // The search matches names, so a number saved under another name ("Mother" for "Mom") is found by Android's own number matching over the whole address book (#1453).
+      if (twin === undefined && op.contact.phoneNumbers.length > 0) {
+        const held = (bridgeCall("holders", (c) => c.holders.resolve({ surface: "phone", numbers: op.contact.phoneNumbers })) catch () => [] as readonly { readonly number: string; readonly name: string | null }[])
+        const holder = held.find((h) => h.name !== null)
+        if (holder !== undefined) twin = { candidateId: "add-anyway", title: holder.name!, number: holder.number }
+      }
       const shown = try choose(runId, twin === undefined ? [] : [{ candidateId: "add-anyway", title: twin.title, number: twin.number }])
       if (twin !== undefined && shown === undefined) return try cancelled(runId, result("cancelled"))
       const clients = bridges.clients() catch () => undefined
