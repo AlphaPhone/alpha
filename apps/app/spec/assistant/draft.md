@@ -167,3 +167,40 @@ pure def sometimesUnsettledAfterRestart(d: Drafts): bool = slotOf(d, d.active).u
 pure val textValues = Set(List()).union(Set(List(1))).union(Set(List(2, 3)))
 pure val bindingValues = Set("", "a", "b")
 ```
+
+## Story: Keep the message I was writing before the update
+
+> As the owner, I want the message I was writing in a conversation before Alpha updated to be in
+> that conversation's composer afterwards, and one that was being sent to wait for my review
+> rather than be sent again.
+
+### A draft the previous Alpha kept for the open conversation is taken once, and never sent
+
+The previous Alpha kept each conversation's draft in its own encrypted slot, named from the same
+binding, so only the binding that opens can find its slot. When a conversation opens and its draft
+has never been used here, the previous text becomes its draft. A text the previous Alpha marked as
+being sent may already have reached the agent: it is held for review as a send a restart found, so
+nothing can be sent there until the owner puts it back or lets it go. A draft already used here, a
+storage that is failing, and an empty or over-long previous text take nothing. The previous slot is
+cleared only once the draft here holds a value (spec/platform/storage.md, "A legacy slot is cleared
+only once the secure store holds a value for it"); other conversations' slots wait until they open.
+
+```quint
+pure def draftUsed(d: Drafts, binding: str): bool = slotOf(d, binding) != emptySlot
+pure def canAdoptPrevious(d: Drafts, text: List[int], wasSending: bool): bool =
+  not(draftUsed(d, d.active)) and not(d.failed) and text.length() > 0 and text.length() <= draftUnitLimit
+pure def adoptPrevious(d: Drafts, text: List[int], wasSending: bool): Drafts = {
+  val s = slotOf(d, d.active)
+  val taken = if (wasSending) { ...s, held: text, unsettled: true, revision: s.revision + 1 } else { ...s, text: text, revision: s.revision + 1 }
+  { ...d, slots: d.slots.put(d.active, taken), notice: if (wasSending) MaySent else Quiet }
+}
+pure def stepAPreviousDraftIsNeverSent(before: Drafts, via: str, after: Drafts): bool =
+  via == "adoptPrevious" implies (not(slotOf(after, after.active).sending)
+    and before.bindings.every(b => b == before.active or slotOf(after, b) == slotOf(before, b)))
+pure def stepOnlyAnUnusedDraftTakesThePreviousText(before: Drafts, via: str, after: Drafts): bool =
+  via == "adoptPrevious" implies (not(draftUsed(before, before.active)) and draftUsed(after, after.active))
+pure def lawAPreviousSendWaitsForReview(text: List[int]): bool =
+  text.length() > 0 implies not(canHold(adoptPrevious(initial, text, true)))
+pure val wasSendingValues = Set(false, true)
+pure def sometimesAPreviousSendWaitsForReview(d: Drafts): bool = slotOf(d, d.active).unsettled and slotOf(d, d.active).revision == 1
+```

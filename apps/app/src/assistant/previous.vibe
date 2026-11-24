@@ -1,0 +1,34 @@
+// spec/assistant/draft.md, "A draft the previous Alpha kept for the open conversation is taken once, and never sent"; spec/platform/storage.md, "A legacy slot is cleared only once the secure store holds a value for it"
+import { Machine as DraftsMachine, canAdoptPrevious, draftUsed } from "../../gen/assistant__draft.effect.vibe"
+import { adoptLegacySlot } from "../platform/legacy-slots.vibe"
+import { Native } from "../platform/native.vibe"
+import { SecureSlotExchange, SecureSlotRead } from "../platform/native.schema.vibe"
+import { decodePreviousDraft, previousDraftSlot } from "./previous-slot.ts"
+import { unitsOf } from "./units.vibe"
+
+const SECURE_STORE = "ElizaSecureStore"
+
+/**
+ * Takes the draft the previous Alpha kept for the open binding, once: the slot is moved into the secure store, its
+ * text becomes the open draft (one that was being sent waits for review), and the moved copy is cleared only once the
+ * draft here holds a value. Anything that cannot be read, moved or taken stays where it is, for a later open.
+ */
+export effect function adoptPreviousDraft(binding: string) {
+  const native = try Native
+  const drafts = try DraftsMachine
+  if (!(native.available(SECURE_STORE) catch () => false)) return
+  const before = try drafts.get()
+  if (before.active !== binding) return
+  const slot = tryPromise({ try: () => previousDraftSlot(binding), catch: () => "" }) catch () => ""
+  if (slot === "") return
+  if ((try adoptLegacySlot(slot, slot)) === "NotAdopted") return
+  const answer = Effect.flatMap(native.invoke(SECURE_STORE, "get", { key: slot }), Schema.decodeUnknownEffect(SecureSlotRead)) catch () => undefined
+  const raw = answer?.value ?? undefined
+  if (raw === undefined) return
+  const previous = decodePreviousDraft(raw, binding)
+  if (previous === undefined) return
+  const text = unitsOf(previous.text)
+  if (canAdoptPrevious(before, text, previous.sending)) drafts.send({ type: "adoptPrevious", text, wasSending: previous.sending }) catch () => undefined
+  if (!draftUsed(try drafts.get(), binding)) return
+  Effect.flatMap(native.invoke(SECURE_STORE, "compareAndExchange", { key: slot, expected: raw, value: null }), Schema.decodeUnknownEffect(SecureSlotExchange)) catch () => undefined
+}

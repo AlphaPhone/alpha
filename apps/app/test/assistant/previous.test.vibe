@@ -1,0 +1,63 @@
+// spec/assistant/draft.md, "Story: Keep the message I was writing before the update"
+import { assert, it } from "@effect/vitest"
+import { Machine as DraftsMachine, shown, slotOf } from "../../gen/assistant__draft.effect.vibe"
+import { Composer } from "../../src/assistant/composer.vibe"
+import { previousDraftSlot } from "../../src/assistant/previous-slot.ts"
+import { bindingOf, textOf } from "../../src/assistant/units.vibe"
+import { Native, NativeUnavailable } from "../../src/platform/native.vibe"
+import { assistantOver, countingExecutors, fakeHost, fakeResident } from "./fakes.vibe"
+
+const quietResident = () => fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals: [] })
+
+/** A phone whose previous Alpha kept `legacy` in its encrypted slots, with the secure store `secure` beside them. */
+function slotsNative(legacy: Map<string, string>, secure: Map<string, string>) {
+  return Layer.succeed(Native, {
+    available: (plugin: string) => succeed(plugin === "AlphaConnection" || plugin === "ElizaSecureStore"),
+    invoke: (plugin: string, method: string, args: any) => effect {
+      if (plugin === "AlphaConnection" && method === "secureRead") return { value: legacy.get(args.slot) ?? null }
+      if (plugin === "AlphaConnection" && method === "secureCompareExchange") {
+        if ((legacy.get(args.slot) ?? null) !== args.expectedValue) return { status: "conflict" }
+        if (args.value === null) legacy.delete(args.slot)
+        else legacy.set(args.slot, args.value)
+        return { status: "saved" }
+      }
+      if (plugin === "ElizaSecureStore" && method === "get") return { value: secure.get(args.key) ?? null }
+      if (plugin === "ElizaSecureStore" && method === "compareAndExchange") {
+        if ((secure.get(args.key) ?? null) !== args.expected) return { exchanged: false }
+        if (args.value === null) secure.delete(args.key)
+        else secure.set(args.key, args.value)
+        return { exchanged: true }
+      }
+      throw new NativeUnavailable({ plugin, method })
+    },
+    listen: (plugin: string, event: string) => Stream.fail(new NativeUnavailable({ plugin, method: event })),
+  })
+}
+
+const row = (binding: string, text: string, sending: boolean) =>
+  JSON.stringify(sending ? { version: 1, binding, revision: "r1", text, sending: true } : { version: 1, binding, revision: "r1", text })
+
+it.effect("the draft the previous Alpha kept for a conversation is in its composer, and one being sent waits for review (spec/assistant/draft.md, \"A draft the previous Alpha kept for the open conversation is taken once, and never sent\")", () => effect {
+  const chat = bindingOf("https://agent.local", "o1", "a1", "c1")
+  const fresh = bindingOf("https://agent.local", "o1", "a1", null)
+  const chatSlot = try promise(() => previousDraftSlot(chat))
+  const freshSlot = try promise(() => previousDraftSlot(fresh))
+  const legacy = new Map([[chatSlot, row(chat, "Half a thought", false)], [freshSlot, row(fresh, "Book the table", true)]])
+  const secure = new Map<string, string>()
+  provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 }), slotsNative(legacy, secure)) {
+    const composer = try Composer
+    const drafts = try DraftsMachine
+    try composer.open("c1", false)
+    const typed = textOf(shown(try drafts.get()))
+    try composer.open(null, false)
+    const waiting = slotOf(try drafts.get(), fresh)
+    try composer.open("c1", false)
+    try composer.edit("")
+    try composer.open("c1", true)
+    const again = textOf(shown(try drafts.get()))
+    try Effect.try(() => assert.deepStrictEqual(
+      { typed, waiting: [textOf(waiting.held), waiting.unsettled, waiting.sending, textOf(waiting.text)], again, legacy: [...legacy.keys()], secure: [...secure.keys()] },
+      { typed: "Half a thought", waiting: ["Book the table", true, false, ""], again: "", legacy: [], secure: [] },
+    ))
+  }
+})
