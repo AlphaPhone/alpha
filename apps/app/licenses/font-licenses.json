@@ -1,0 +1,35 @@
+{
+  "description": "Recorded licences of the fonts Alpha ships (packages/design-system/fonts), each by the exact file hashes it covers; `pnpm licences` reads it (spec/app/release/licences.md). An open font names its SPDX licence and source. A proprietary font is recorded in one of two states. Full: {name, sha256: [..], license: \"LicenseRef-Commercial-Font\", licensor, licensee, scope (naming app and web embedding), evidence (where the signed licence is held), recordedOn}. Owner statement: {name, sha256: [..], license: \"LicenseRef-Commercial-Font\", evidence: \"held-outside-repository\", holder, basis, recordedOn, optional reference}, which records only what the owner stated and stays flagged. A shipped font with no record is flagged as having no licence recorded.",
+  "entries": [
+    {
+      "name": "Denton typeface",
+      "sha256": [
+        "7e9341445b0bf2ec7f75e4a5d4dd4a677e9d2341f67ddcf766db92a21f310e05"
+      ],
+      "license": "LicenseRef-Commercial-Font",
+      "evidence": "held-outside-repository",
+      "holder": "Alpha Compute (owner statement, 2026-10-10)",
+      "basis": "owner states the licence is held; the licence document is kept outside this repository",
+      "recordedOn": "2026-10-10"
+    },
+    {
+      "name": "Fraunces",
+      "sha256": [
+        "25bae1ffe157fa448306e73c5f4928c3cbfb621d4b35a09ff1c34f4972680404",
+        "c3c6d103fb2c493812567ec8d25abf081204c4124e704eb85801256f0f09d7fa"
+      ],
+      "license": "OFL-1.1",
+      "source": "https://github.com/undercasetype/Fraunces"
+    },
+    {
+      "name": "Public Sans",
+      "sha256": [
+        "3a00a32f0242b723dcea79935747d6d27dd93675d03ef23f470dfe274e79586a",
+        "5ed4d31c988e73b258894244f209069ebe77dc7e564861954b21198b6de90d68",
+        "94593e69fad0885b2b0b74cd18d036c7e9cd6051b2256ab281a20f5bc9ccb46f"
+      ],
+      "license": "OFL-1.1",
+      "source": "https://github.com/uswds/public-sans"
+    }
+  ]
+}

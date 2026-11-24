@@ -1,0 +1,77 @@
+{
+  "schema": 1,
+  "sha256": "31cff3950bac199924fbe729fbbe8a4a9105abbbb535b683a8223cbfb056cef3",
+  "sdkCommit": "30b4844152673243f1faf2d68a4f707a7a7da543",
+  "allowedProducerCommits": [
+    "c73e72f54be8fd7f0b7044d9ef9d1390562c74fb",
+    "6d892eaa112d3875658ca758e84789c7332e34df",
+    "100ba673676ef20ac9bb4726bbf00f40dc7db223",
+    "573bc2c25ec09e6bf40ca5b18a1ebb1e3afb4dc4",
+    "ab862fcfab60c82b26ef3d7846bc864d727feae1",
+    "15841427daa5062650a7e662cd1d17bc0e5a0bd6",
+    "535e9f68ff57d3397da319a12b9a6fcdca7e6f70"
+  ],
+  "apkSignerMappingsSha256": "e5534e2830ad94343ee11cbc08857cf2435522fe1f3d0e560ec4f5610f80223e",
+  "avbKeyConfigurationSha256": "f8ed78f8705d63a011a82a2655f7875a1d86033ee601a190f53aa9f6dacfdd5d",
+  "qualified": true,
+  "reviewedTargets": [
+    {
+      "targetFilesSha256": "57e21e78f711f15906f8be8c191b2abe0ffb6976b72cf0b5e60ca12089422c08",
+      "sourceCommit": "6d892eaa112d3875658ca758e84789c7332e34df",
+      "sdkCommit": "30b4844152673243f1faf2d68a4f707a7a7da543",
+      "targetFingerprint": "Alpha/alpha_stallion_phone/stallion:17/CP2A.260605.016/alpha_wireless_delivery_20261113_12:userdebug/test-keys",
+      "buildTimestamp": 1794604543
+    },
+    {
+      "targetFilesSha256": "403492532b8215eb3862adc166ed63d0aec123b9f2f0e2773d404f960c9bb108",
+      "sourceCommit": "100ba673676ef20ac9bb4726bbf00f40dc7db223",
+      "sdkCommit": "30b4844152673243f1faf2d68a4f707a7a7da543",
+      "targetFingerprint": "Alpha/alpha_stallion_phone/stallion:17/CP2A.260605.016/alpha_wireless_delivery_20261113_15:userdebug/test-keys",
+      "buildTimestamp": 1794608471
+    },
+    {
+      "targetFilesSha256": "fc87fa30dded43ec105f64625d4f4bd12cdc9be15fe6afe612d49bfd34bd7c36",
+      "sourceCommit": "100ba673676ef20ac9bb4726bbf00f40dc7db223",
+      "sdkCommit": "30b4844152673243f1faf2d68a4f707a7a7da543",
+      "targetFingerprint": "Alpha/alpha_stallion_phone/stallion:17/CP2A.260605.016/alpha_wireless_delivery_20261114_16:userdebug/test-keys",
+      "buildTimestamp": 1794704054,
+      "apkSignerMappingsSha256": "290da9f391d643ec1f25564c865f68890bbe16e5ca875c57a0a1b1a3f3e3ef2c"
+    },
+    {
+      "targetFilesSha256": "b00ec4bce8af6f1c911e458b287a21319e73f4a57eb4744172f74e9dacb10e91",
+      "sourceCommit": "573bc2c25ec09e6bf40ca5b18a1ebb1e3afb4dc4",
+      "sdkCommit": "1803ea88c9460f2e3cb779abe31cd77cfc6f64c5",
+      "targetFingerprint": "Alpha/alpha_stallion_phone/stallion:17/CP2A.260605.016/alpha_canonical_20261117_17:userdebug/test-keys",
+      "buildTimestamp": 1794947813,
+      "otaPostTimestamp": 1794904347,
+      "apkSignerMappingsSha256": "f086d852f8a017ff7e910c2e4564509022c3f686129f3eacab21610fdf38566c"
+    },
+    {
+      "targetFilesSha256": "890efa1123a8988f49215a5d25325de32c4a56d469f4bb4399568b16077d297a",
+      "sourceCommit": "ab862fcfab60c82b26ef3d7846bc864d727feae1",
+      "sdkCommit": "1803ea88c9460f2e3cb779abe31cd77cfc6f64c5",
+      "targetFingerprint": "Alpha/alpha_stallion_phone/stallion:17/CP2A.260605.016/alpha_canonical_20261117_18:userdebug/test-keys",
+      "buildTimestamp": 1794958776,
+      "otaPostTimestamp": 1794958776,
+      "apkSignerMappingsSha256": "f086d852f8a017ff7e910c2e4564509022c3f686129f3eacab21610fdf38566c"
+    },
+    {
+      "targetFilesSha256": "bf8abd18aecacd334e77cb4812d1f31aeb82b08c2b5a422daca534ce9e4df574",
+      "sourceCommit": "15841427daa5062650a7e662cd1d17bc0e5a0bd6",
+      "sdkCommit": "1803ea88c9460f2e3cb779abe31cd77cfc6f64c5",
+      "targetFingerprint": "Alpha/alpha_stallion_phone/stallion:17/CP2A.260605.016/alpha_canonical_20261117_19:userdebug/test-keys",
+      "buildTimestamp": 1794960690,
+      "otaPostTimestamp": 1794960690,
+      "apkSignerMappingsSha256": "f086d852f8a017ff7e910c2e4564509022c3f686129f3eacab21610fdf38566c"
+    },
+    {
+      "targetFilesSha256": "fc2320f3ec7eab7acb75f7e34afb4e400803f84d3d0cbbd8227e37b4236e014c",
+      "sourceCommit": "535e9f68ff57d3397da319a12b9a6fcdca7e6f70",
+      "sdkCommit": "1803ea88c9460f2e3cb779abe31cd77cfc6f64c5",
+      "targetFingerprint": "Alpha/alpha_stallion_phone/stallion:17/CP2A.260605.016/alpha_canonical_20261118_home:userdebug/test-keys",
+      "buildTimestamp": 1794974485,
+      "otaPostTimestamp": 1794974485,
+      "apkSignerMappingsSha256": "f086d852f8a017ff7e910c2e4564509022c3f686129f3eacab21610fdf38566c"
+    }
+  ]
+}
