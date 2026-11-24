@@ -1,4 +1,4 @@
-// spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing the composer on the bar raises it to typing: the bar grows above the keyboard and the page stays in view"; spec/app/assistant/dock.md, "Alpha's mark, a send from the bar, or a tap on the handle opens Ask Alpha as a sheet"; spec/app/assistant/dock.md, "Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
+// spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing the composer on the bar raises it to typing: the bar grows above the keyboard and the page stays in view"; spec/app/assistant/dock.md, "Alpha's mark, a send from the bar, or a tap on the handle opens Ask Alpha as a sheet"; spec/app/assistant/dock.md, "Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/app/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence every line stays code"
 import {
   Alert, AssistantCard, AssistantConversation, AssistantGrabber, AssistantSearchSheet,
   type AssistantAttachment, type AssistantDraftNoticeProps, type AssistantMessageProps, type AssistantTurnNoteProps,
@@ -29,6 +29,7 @@ import { home } from "../shell/shell.vibe";
 import { untimed } from "../runtime/reactor.vibe";
 import { isCommsView } from "../shell/views.tsx";
 import { freedom } from "./assistant.vibe";
+import { shownReply } from "./shown.ts";
 import { Talk } from "./talk.vibe";
 
 export interface AssistantProps {
@@ -169,29 +170,32 @@ export function Assistant({ runtime }: AssistantProps) {
       />
     );
   };
-  const messages = lines.map((line): AssistantMessageProps & { id: string } => {
+  const messages = lines.flatMap((line): (AssistantMessageProps & { id: string })[] => {
+    const text = line.mine ? line.text : shownReply(line.text);
+    if (text === "" && !line.mine && line.failure === undefined) return [];
     const message = board.numbered(line.id);
     const settled = message > 0 && settledLine(line.id);
     const fork = { type: "fork", message, ...free } as const;
     const quote = { type: "quote", message, recorded: settled } as const;
     const editAgain = { type: "editAgain", message, mine: line.mine, recorded: settled } as const;
     const readAloud = { type: "readAloud", message, mine: line.mine } as const;
-    return {
+    return [{
       id: line.id,
       author: line.mine ? "owner" : "alpha",
-      text: line.text,
+      text,
       ...(line.quote === undefined ? {} : { quote: line.quote }),
       ...(line.failure === undefined ? {} : { children: failureCard({ kind: line.failure, fix: "NoFix", waitMs: -1 }, false) }),
       onFork: settled && chats.can(fork) ? () => void chats.send(fork) : undefined,
       onQuote: composer.can(quote) ? () => void composer.send(quote) : undefined,
       onEditAgain: composer.can(editAgain) ? () => { board.type(line.text); void composer.send(editAgain); } : undefined,
       onReadAloud: message > 0 && chats.can(readAloud) ? () => void chats.send(readAloud) : undefined,
-    };
+    }];
   });
   // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
   const earlier = { type: "scroll", around: board.numbered(lines[0]?.id ?? "") } as const;
   const later = { type: "scroll", around: board.numbered(lines.at(-1)?.id ?? "") } as const;
-  const writingReply = seen.reply !== "" ? [{ id: "reply", author: "alpha", text: seen.reply } as const] : [];
+  const streamed = shownReply(seen.reply);
+  const writingReply = streamed !== "" ? [{ id: "reply", author: "alpha", text: streamed } as const] : [];
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
   const failed = seen.failure === undefined ? [] : [{ id: "failure", author: "alpha", text: "", children: failureCard(seen.failure, true) } as const];
   const quoteId = writing.editor.quote > 0 ? board.messageId(writing.editor.quote) : undefined;
@@ -232,7 +236,7 @@ export function Assistant({ runtime }: AssistantProps) {
 <<<<<<< HEAD
       <AssistantConversation
         detent={assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : inPill ? "pill" : "bar"}
-        className={open ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
+        className={open || inPill ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
         style={keptHeight ? { height: keptHeight } : undefined}
 =======
       {(!comms || open) && <AssistantConversation

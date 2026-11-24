@@ -320,8 +320,8 @@ Type focuses the composer, and Talk starts a spoken turn.
 ```quint
 pure def pill(s: S::Shell): bool = s.assistant == S::Bar and s.trail.length() > 0 and not(S::showing(s, S::Browser))
 
-pure def lawThePillIsOnlyTheBarInAnApp(s: S::Shell): bool =
-  pill(s) implies (s.assistant == S::Bar and s.trail.length() > 0)
+pure def lawThePillIsOnlyTheBarInAnApp(phone: S::Shell): bool =
+  pill(phone) implies (phone.assistant == S::Bar and phone.trail.length() > 0)
 
 pure def lawTypeLeavesThePill(phone: S::Shell): bool =
   (pill(phone) and not(phone.drawer)) implies not(pill(applied(focused(phone.assistant), phone)))

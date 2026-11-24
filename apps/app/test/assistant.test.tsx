@@ -160,6 +160,13 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await press("Send");
     await until(alpha, runtime, Conversation, (s) => s.turn.send.id === 4 && s.turn.reply === "Complete");
     expect([world.ask.metadata?.at(-1), world.ask.said.at(-1)]).toEqual([expect.objectContaining({ replyToMessageId: "m1a" }), "Why?"]);
+
+    // spec/app/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence every line stays code": a tool call written out as text is hidden from Alpha's words, never from the owner's.
+    const written = "Open Maps <tool_call>\n<function=phone_use() {}</function>\n</tool_call>";
+    await write(written);
+    await press("Send");
+    await until(alpha, runtime, Conversation, (s) => s.turn.send.id === 5 && s.turn.reply === "Complete");
+    expect(lines().slice(-2)).toEqual([written, "You said: Open Maps"]);
   });
 
   // spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/chats.md, "Story: Open a message that search found"
