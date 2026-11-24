@@ -62,6 +62,9 @@ pure def read(s: Page, activation: int, stage: Stage, canContinue: bool, automat
 
 ### A page that cannot read the update state holds rather than mount
 
+A phone or a browser without Alpha's own updater has no update to read:
+that is no update pending, and the page mounts.
+
 ```quint
 pure def canUnreadable(s: Page): bool = s.mount != Mounted
 
@@ -95,7 +98,12 @@ pure def stepContinueIsNotRepeated(before: Page, after: Page, out: List[Effect])
 
 ### A page that was not mounted mounts its editors only once no update is pending
 
+Until then the page shows Home and the apps not at all, only "Updating
+Alpha…".
+
 ```quint
+pure def editorsMounted(s: Page): bool = s.mount == Mounted
+
 pure def stepAFreshPageMountsOnlyWhenSettled(before: Page, via: str, after: Page): bool =
   (before.mount != Mounted and after.mount == Mounted) implies (via == "endUpdate" and after.activation == 0)
 ```
@@ -113,8 +121,13 @@ pure def sometimesContinueOffered(s: Page): bool = s.mount == Holding and s.canC
 
 ### A mounted page's navigation is frozen exactly while an update is pending
 
+While its navigation is frozen, or while it holds, the page holds the phone
+([Layers](../shell/layers.md)): Back and Home take nothing.
+
 ```quint
 pure def navigationFrozen(s: Page): bool = s.frozen
+
+pure def holdsThePhone(s: Page): bool = navigationFrozen(s) or dialogShown(s)
 
 pure def alwaysFrozenWhilePending(s: Page): bool =
   (s.mount == Mounted implies (s.frozen == (s.activation != 0))) and (s.mount != Mounted implies not(s.frozen) and not(s.flushing))
@@ -122,16 +135,55 @@ pure def alwaysFrozenWhilePending(s: Page): bool =
 
 ### When every area has saved its drafts the page answers ready, and otherwise it refuses
 
-The answer counts only for the activation being prepared.
+Every area keeps its drafts on the phone with each edit
+([Draft](../../kit/draft.md)), so saving them is ending the edit in the
+field that has focus; the drafts are saved once no field holds one. The
+answer counts only for the activation being prepared.
 
 ```quint
 pure def canFlushed(s: Page, activation: int): bool = s.flushing and activation == s.activation
 
-pure def flushed(s: Page, activation: int, ok: bool): Moved =
+pure def flushed(s: Page, activation: int, saved: bool, engaged: Engaged): Moved =
+  val ok = saved and readyToUpdate(engaged, s.automatic)
   {
     state: { ...s, flushing: false, answered: activation, reply: if (ok) Readied else Refused },
     out: List(Answer({ activation: activation, ready: ok })),
   }
+```
+
+### A page is ready for an update only with no voice turn, connection step, call or recording under way, and for a hands-off update only while the phone is still idle
+
+What the phone is doing is read when the drafts are saved: a voice turn, a
+step of the connection to the agent, a call, and a Notes or chat recording;
+for an update Alpha started on its own, also whether the owner is still idle
+and the phone still quiet, as [Updates](./index.md) decides it.
+
+```quint
+type Engaged = { voice: bool, connecting: bool, call: bool, recording: bool, idle: bool }
+
+pure def readyToUpdate(e: Engaged, automatic: bool): bool =
+  not(e.voice) and not(e.connecting) and not(e.call) and not(e.recording) and (e.idle or not(automatic))
+```
+
+### No page is ready for an update during a call
+
+```quint
+pure def lawNoActivationIsReadyOnACall(engaged: Engaged, automatic: bool): bool =
+  not(readyToUpdate({ ...engaged, call: true }, automatic))
+```
+
+### No page is ready for an update while it is recording
+
+```quint
+pure def lawNoActivationIsReadyWhileRecording(engaged: Engaged, automatic: bool): bool =
+  not(readyToUpdate({ ...engaged, recording: true }, automatic))
+```
+
+### A page is ready for a hands-off update only while the phone is idle
+
+```quint
+pure def lawAHandsOffActivationNeedsIdle(engaged: Engaged): bool =
+  readyToUpdate(engaged, true) implies engaged.idle
 ```
 
 ### A page answers each activation at most once
@@ -223,4 +275,8 @@ pure def sometimesNoticeShown(s: Page): bool = s.notice
 
 ```quint
 pure val activationValues = Set(1, 2, 3)
+pure val calm: Engaged = { voice: false, connecting: false, call: false, recording: false, idle: true }
+pure val engagedValues =
+  Set(calm).union(Set({ ...calm, idle: false })).union(Set({ ...calm, call: true, idle: false }))
+    .union(Set({ ...calm, voice: true, idle: false })).union(Set({ ...calm, recording: true, idle: false }))
 ```

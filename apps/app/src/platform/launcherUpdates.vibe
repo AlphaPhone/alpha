@@ -29,12 +29,17 @@ module held {
   }
 }
 import { listen, plugin } from held
+import { registered } from "./device.vibe"
 
 /** Android's install permission for Alpha's own updates, as the phone reports it. */
 export type Permission = "Unsupported" | "Required" | "Starting" | "Supported"
 
-/** How an install Alpha asked for ended, from the page's side: Android took it, put it off, or found the offer changed or gone. */
-export type Ending = "Finished" | "Deferred" | "OfferChanged" | "OfferWithdrawn"
+/**
+ * How an install Alpha asked for ended, from the page's side: Android took it, put it off for a reason of its own,
+ * while it is starting, for its missing permission or because it cannot install Alpha's updates, or found the offer
+ * changed or gone.
+ */
+export type Ending = "Finished" | "Deferred" | "OfferChanged" | "OfferWithdrawn" | "WhileStarting" | "WithoutPermission" | "WithoutSupport"
 
 /** What the launcher installed reports of itself: its version, the digest of its signing certificate and Android's permission. */
 export interface Installed {
@@ -86,7 +91,13 @@ export service LauncherUpdates {
 }
 
 const permissions = { starting: "Starting", "permission-required": "Required", supported: "Supported", unsupported: "Unsupported" } as const
-const endings = { "offer-unavailable": "Deferred", "offer-withdrawn": "OfferWithdrawn", "offer-response-changed": "OfferChanged", starting: "Deferred", "permission-required": "Deferred", unsupported: "Deferred" } as const
+const endings = { "offer-unavailable": "Deferred", "offer-withdrawn": "OfferWithdrawn", "offer-response-changed": "OfferChanged", starting: "WhileStarting", "permission-required": "WithoutPermission", unsupported: "WithoutSupport" } as const
+
+/** Nothing pending and nothing settled: what a phone or a browser without Alpha's updater has. */
+const nothing: Activation = { pending: false, paused: false, automatic: false, canContinue: false, outcome: Option.none(), resume: false, ids: Option.none() }
+
+/** Alpha's own updater, the `AlphaDevice` plugin, as this build's host registers it. */
+const updater = "AlphaDevice"
 
 function asked<A>(method: string, call: () => Promise<A>): A!UpdaterUnreachable {
   return tryPromise({ try: call, catch: (cause) => new UpdaterUnreachable({ method, cause }) })
@@ -106,6 +117,7 @@ export const phoneLauncherUpdates = Layer.succeed(LauncherUpdates, {
     return reply.status === undefined ? "Finished" as Ending : endings[reply.status]
   },
   activation: () => effect {
+    if (!registered(updater)) return nothing
     const state = try asked("updateState", () => plugin().updateState())
     const ids = state.activationId !== undefined && state.bridgeId !== undefined ? Option.some({ activationId: state.activationId, bridgeId: state.bridgeId }) : Option.none<Ids>()
     return {
@@ -119,12 +131,12 @@ export const phoneLauncherUpdates = Layer.succeed(LauncherUpdates, {
   told: Stream.callback<void>((queue) => Effect.acquireRelease(sync(() => listen(() => Queue.offerUnsafe(queue, undefined))), (stop) => sync(stop))),
 })
 
-/** A browser updates nothing: there is no updater to ask. */
+/** A browser updates nothing: there is no updater to ask, and so no update pending. */
 export const browserLauncherUpdates = Layer.succeed(LauncherUpdates, {
   installed: () => Effect.fail(new UpdaterUnreachable({ method: "snapshot", cause: "no updater in a browser" })),
   check: () => Effect.fail(new UpdaterUnreachable({ method: "checkForUpdate", cause: "no updater in a browser" })),
   install: () => succeed<Ending>("Deferred"),
-  activation: () => Effect.fail(new UpdaterUnreachable({ method: "updateState", cause: "no updater in a browser" })),
+  activation: () => succeed(nothing),
   answer: () => Effect.fail(new UpdaterUnreachable({ method: "activateUpdate", cause: "no updater in a browser" })),
   continueInstall: () => Effect.fail(new UpdaterUnreachable({ method: "continueUpdate", cause: "no updater in a browser" })),
   allowAutomatic: () => succeed(false),

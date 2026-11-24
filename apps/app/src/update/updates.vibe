@@ -2,20 +2,24 @@
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { Machine as Bar } from "../../gen/app__telephony__callBar.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import * as Updates from "../../gen/app__update.effect.vibe"
 import type { Activity, Effect as Out, Event, Feed, Release, Reply } from "../../gen/app__update.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { LauncherUpdates } from "../platform/launcherUpdates.vibe"
 import { type Job, answer, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
+import { type Engagement, Engagements, engagements } from "./activity.vibe"
 import { Names, names } from "./names.vibe"
 
 const hex64 = /^[0-9a-f]{64}$/
 const plainName = /^[^\u0000-\u001f\u007f]*$/
 /** Where the manifest last answered is kept, so that an install finds the address of the release the machine offers. */
 const kept = "alpha/update/manifest@1"
-/** How long a check or an install may take before the shell answers it for the channel. */
+/** How long a check may take before the shell answers it as unreadable. */
 const patience = 60000
+/** What an update holds the phone under, which is no activity of the owner's. */
+export const holder = "update"
 
 schema Row {
   readonly schema: "alpha-update/v1";
@@ -66,6 +70,8 @@ effect function releaseOf(row: Row): Release!!Names {
     https, credentials, url: row.apkUrl.length,
     name: row.versionName !== undefined && plainName.test(row.versionName) ? row.versionName.length : 0,
     notes: row.notes?.length ?? 0,
+    versionName: row.versionName !== undefined && plainName.test(row.versionName) ? row.versionName : "",
+    releaseNotes: row.notes ?? "",
   }
 }
 
@@ -94,8 +100,8 @@ effect function checked(ticket: number): Event!!(LauncherUpdates | KeyValueStore
   return { type: "answer", ticket, reply: { tag: "Answered", ...feed }, now: untimed }
 }
 
-// spec/app/update/index.md, "An install is only ever of the offer that applies, never while a check or another install is under way"
-effect function installing(fx: { readonly version: number; readonly digest: number; readonly signer: number; readonly manifest: number; readonly automatic: boolean }): Event!!(LauncherUpdates | KeyValueStore.KeyValueStore | Time | Names) {
+// spec/app/update/index.md, "An install is only ever of the offer that applies, never while a check or another install is under way"; spec/app/update/index.md, "Every check and every install ends, so Settings never waits on one for ever"
+effect function installing(fx: { readonly version: number; readonly digest: number; readonly signer: number; readonly manifest: number; readonly automatic: boolean }): Event!!(LauncherUpdates | KeyValueStore.KeyValueStore | Names) {
   const store = try KeyValueStore.KeyValueStore
   const named = try Names
   const [signer, digest, manifest] = [Option.getOrUndefined(try named.name(fx.signer)), Option.getOrUndefined(try named.name(fx.digest)), Option.getOrUndefined(try named.name(fx.manifest))]
@@ -104,10 +110,7 @@ effect function installing(fx: { readonly version: number; readonly digest: numb
     one.variant === "launcher" && one.signerSha256 === signer && one.versionCode === fx.version && one.sha256 === digest))))
   if (row === undefined || (fx.automatic && manifest === undefined)) return { type: "endInstall", ending: "OfferChanged", now: untimed }
   const release = { apkUrl: row.apkUrl, sha256: row.sha256, sizeBytes: row.sizeBytes, versionCode: row.versionCode }
-  const ending = try race(
-    (try LauncherUpdates).install(release, fx.automatic ? Option.fromNullishOr(manifest) : Option.none()),
-    Effect.as((try Time).until((try (try Time).now()) + patience), "Deferred" as const),
-  )
+  const ending = try (try LauncherUpdates).install(release, fx.automatic ? Option.fromNullishOr(manifest) : Option.none())
   if (ending === "OfferWithdrawn") try ignore(store.remove(kept))
   return { type: "endInstall", ending, now: untimed }
 }
@@ -146,19 +149,38 @@ const shown = started(effect {
   try Stream.runForEach(device.visible, (visible) => ignore(updates.send({ type: "show", visible })))
 }, "following whether Alpha is on screen for updates")
 
-/** The owner's activity as the shell knows it, and whether a call is up: what an automatic update waits on. */
-function activityOf(shell: { readonly trail: ReadonlyArray<unknown>; readonly drawer: boolean; readonly assistant: string }, call: boolean): Activity {
-  return {
-    home: shell.trail.length === 0 && !shell.drawer, open: shell.trail.length > 0 || shell.drawer || shell.assistant !== "Bar",
-    typing: shell.assistant === "Typing", voice: false, dialog: false, busy: false, front: true, call, audio: !call,
-  }
+/** What the owner's activity is read from: the shell, what covers or holds the phone, a call, Alpha in front, a field with focus and the other areas' reports. */
+interface Facts {
+  readonly shell: { readonly trail: ReadonlyArray<unknown>; readonly drawer: boolean; readonly assistant: string }
+  readonly layers: { readonly open: ReadonlyArray<{ readonly kind: string }>; readonly holds: ReadonlyArray<string>; readonly steps: ReadonlyArray<string> }
+  readonly call: boolean
+  readonly front: boolean
+  readonly typing: boolean
+  readonly reported: Engagement
 }
 
-// spec/app/update/index.md, "The owner is idle only on Home with nothing open, not typing, no voice, no dialog and the connection not busy, and the phone is quiet only with Alpha in front, no call and normal audio"; spec/app/update/index.md, "Any one activity keeps an automatic update from starting"
+/** The owner's activity: what an automatic update waits on. The phone reports no audio mode apart from a call. */
+function activityOf({ shell, layers, call, front, typing, reported }: Facts): Activity {
+  const held = layers.holds.some((id) => id !== holder)
+  return Updates.withSignIn({
+    home: shell.trail.length === 0 && !shell.drawer,
+    open: shell.trail.length > 0 || shell.drawer || shell.assistant !== "Bar" || layers.open.length > 0 || layers.steps.length > 0 || held,
+    typing: typing || shell.assistant === "Typing", voice: reported.voice, dialog: layers.open.some((layer) => layer.kind === "DialogLayer"),
+    busy: reported.connecting, recording: reported.recording, front, call, audio: !call,
+  }, reported.card)
+}
+
+// spec/app/update/index.md, "The owner is idle only on Home with nothing open, not typing, no voice, no dialog and the connection not busy, and the phone is quiet only with Alpha in front, no call and normal audio"; spec/app/update/index.md, "Any one activity keeps an automatic update from starting"; spec/app/update/index.md, "A signed-out phone resting on its untouched sign-in card is idle; a card touched in any way is an open screen"
 const activity = started(effect {
   const updates = try Updates.Machine
-  const facts = Stream.zipLatest((try Shell).changes, Stream.map((try Bar).changes, (bar) => bar.calls.length > 0))
-  try Stream.runForEach(Stream.changesWith(Stream.map(facts, ([shell, call]) => activityOf(shell, call)), (a, b) => JSON.stringify(a) === JSON.stringify(b)),
+  const device = try Device
+  const reports = try Engagements
+  const facts = Stream.zipLatestAll(
+    (try Shell).changes, (try Layers).changes, Stream.map((try Bar).changes, (bar) => bar.calls.length > 0),
+    Stream.concat(Stream.fromEffect(device.showing()), device.visible), reports.typing, reports.changes,
+  )
+  const activities = Stream.map(facts, ([shell, layers, call, front, typing, reported]) => activityOf({ shell, layers, call, front, typing, reported }))
+  try Stream.runForEach(Stream.changesWith(activities, (a, b) => JSON.stringify(a) === JSON.stringify(b)),
     (fact) => ignore(updates.send({ type: "observeActivity", activity: fact })))
 }, "following the owner's activity for updates")
 
@@ -188,4 +210,4 @@ const schedule = started(effect {
 }, "the update schedule")
 
 /** Alpha's launcher updates, from launch: checks and automatic updates run whether or not Settings was ever opened. */
-export const updating = together(names, machine, phone, shown, activity, schedule)
+export const updating = together(names, engagements, machine, phone, shown, activity, schedule)
