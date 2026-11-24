@@ -11,6 +11,7 @@
 //   tailwindcss (ui, design-system, studio, apps)  resolved by @tailwindcss/vite and the lint plugin from CSS
 //   entry *.schema, *.contract              imported by the tests vibestack/testing/generate.ts writes under .cache/
 //   design-system eslint, eslint-plugin-better-tailwindcss, typescript-eslint  loaded by name in vibestack/design/test/design.test.ts
+//   cloud wrangler                          run as an executable by apps/cloud/src/operator.vibe
 import vibelang from "vibelang/knip"
 
 export default {
@@ -107,6 +108,9 @@ export default {
       "project": [
         "src/**/*.{ts,vibe,vibex}",
         "test/**/*.{ts,vibe,vibex}"
+      ],
+      "ignoreDependencies": [
+        "wrangler"
       ]
     },
     "vibestack/studio": {
