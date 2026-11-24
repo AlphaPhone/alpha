@@ -99,13 +99,14 @@ module pure {
     return found?.[1]
   }
 
-  /** @throws {never} */
+  /** The reply's speakable text: each run of spaces is one space and each line break is kept as one, so no spoken form joins two lines. @throws {never} */
   export function speakableText(text: string): string {
     return text
       .replace(/\[NAVIGATE:[a-zA-Z]+\]/gi, "")
       .replace(/\[(APPROVAL|PROPOSAL|REVIEW|DRAFT|CALENDAR_APPROVAL|EMAIL_DRAFT)[^\]]*\]/gi, "")
       .replace(/:[ \t]*(?=\r?\n)/g, ".")
-      .replace(/\s+/g, " ")
+      .replace(/\s*\n\s*/g, "\n")
+      .replace(/[^\S\n]+/g, " ")
       .trimStart()
   }
 
@@ -209,6 +210,7 @@ module pure {
       .replace(/(?<![\p{L}\d:./-])(\d{1,2})[ \t]*[-–][ \t]*(\d{1,2})(?![\p{L}\d:/-]|\.\d)/gu, "$1 to $2")
       .replace(/(?<=\d)[ \t]?%(?![\p{L}\d])/gu, " percent")
       .replace(/(?<=\p{L}):(?=[ \t]+\S)/gu, ",")
+      .replace(/\s+/g, " ")
   }
 }
 import { replyNeedsReview, requestedDestination, speakableText, spokenForm, takeCompleteSentences } from pure

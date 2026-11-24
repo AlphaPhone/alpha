@@ -139,6 +139,22 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     expect([world.ask.cloudWarmCalls >= 1, [...new Set(world.voice.relayWarmups)], world.voice.startCloudSpeechCalls]).toEqual([true, ["production"], 0]);
   });
 
+  // spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"
+  it("warms the Cloud speech relay for an own-key account that agreed to network speech, as talking on it uses the relay", async () => {
+    const world = { ...scene(), phone: true };
+    const runtime = bootVoice(world);
+    await until(runtime, Voice.Machine, (s) => s.warmed);
+    await untilCondition(runtime, () => world.voice.warmSpeechOutputCalls === 1);
+    expect(world.voice.relayWarmups).toEqual([]);
+
+    await sendVoice(runtime, { type: "accountChanged", account: "OwnKey", key: 2 });
+    await sendVoice(runtime, { type: "chooseNetworkSpeech", agree: true });
+    await sendVoice(runtime, { type: "returned" });
+    await untilCondition(runtime, () => world.voice.relayWarmups.length >= 1, () => world.voice.relayWarmups);
+    const warm = await getVoice(runtime);
+    expect([[...new Set(world.voice.relayWarmups)], warm.mic, world.voice.startCloudSpeechCalls, world.voice.startLiveCaptureCalls]).toEqual([["production"], "Off", 0, 0]);
+  });
+
   // spec/app/voice/index.md, "Alpha's reply is spoken a sentence at a time, sentences streamed before the reply is complete included, and only for the current turn"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"
   it("streams multi-sentence replies incrementally with append chaining, says dates and times in words, and returns to listening", async () => {
     const world = { ...scene(), phone: true };
@@ -185,6 +201,25 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
       expect(world.voice.spoken.slice(from).map((one) => one.text)).toEqual(spokenAbbreviations);
       expect(world.ask.kept.get("c1")?.messages.at(-1)?.text).toBe(withAbbreviations.join(""));
     }
+
+    const written = [
+      "Ages 8-12 welcome. Pages 10-20.\n",
+      "Standup at 9:00\n- 10:00 Review.\n",
+      "Items 3\n- 5 left. ",
+      "Call 555-123-4567 on 2026-11-24 at UTC+01:00, if you may 3 times.",
+    ];
+    const from = world.voice.spoken.length;
+    world.ask.nextReplyChunks = written;
+    await speakUtterance(runtime, world, "Anything else");
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.sent === 5 && s.turn === 6);
+    expect(world.voice.spoken.slice(from).map((one) => one.text)).toEqual([
+      "Ages 8 to 12 welcome.",
+      "Pages 10 to 20.",
+      "Standup at nine o'clock - ten o'clock Review.",
+      "Items 3 - 5 left.",
+      "Call 555-123-4567 on 2026-11-24 at UTC+01:00, if you may 3 times.",
+    ]);
+    expect(world.ask.kept.get("c1")?.messages.at(-1)?.text).toBe(written.join(""));
   });
 
   // spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"

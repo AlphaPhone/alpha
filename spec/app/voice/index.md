@@ -353,7 +353,10 @@ Nov 23" is "Monday, November twenty-third". A clock time is said in words:
 o'clock" and "14:30" is "two thirty P M"; twelve with no minutes is "noon"
 in the afternoon and "midnight" in the morning ("12 pm", "0:00"). A range
 of clock times or short numbers joins its ends with "to" ("2-3 p.m.",
-"09:05–10:00", "5–10 minutes"), and "%" is "percent". A line that ends in a
+"09:05–10:00", "5–10 minutes"), at the end of a sentence too ("Pages
+10-20."), and "%" is "percent". A range never joins two lines: a time or
+number that ends one line and a list item that starts the next with a dash
+stay apart. A line that ends in a
 colon, such as the Calendar heading "Sun, Nov 22:", ends a sentence, and a
 colon after a word inside a line is a pause. Digits in an ISO date, a phone
 number or an offset such as "UTC+01:00" keep their groups, and a month name
@@ -446,8 +449,7 @@ pure def stepReviewKeepsVoiceAndMicrophoneOpen(before: Voice, via: str, after: V
 Cloud's own code for an account with no plan allowance and no credits
 left decides it, never the owner's words. Nothing of the turn is spoken,
 voice shows no text of its own about it, and it does not listen again:
-the conversation shuts down as Stop shuts it. The one word of it is Ask
-Alpha's out-of-funds line with Manage plan ([reply](../assistant/reply.md)).
+the conversation shuts down as Stop shuts it.
 
 ```quint
 pure def canRefusedForFunds(v: Voice, session: int, turn: int): bool =
