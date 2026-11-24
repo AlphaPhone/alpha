@@ -1,0 +1,269 @@
+// spec/app/photos/index.md, "Story: Give Photos access"; spec/app/photos/index.md, "Story: See what Alpha took without library access"; spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/index.md, "Story: Select photos"
+import type { FlagChange, LibraryAccess, MediaItem, MediaPage, OwnedAlbum, RowOutcome } from "@elizaos/os/bridges/media"
+import * as Grid from "../../gen/app__photos.effect.vibe"
+import type { Effect as Out, Event } from "../../gen/app__photos.effect.vibe"
+import type { AlbumChange } from "../../gen/app__photos__albums.effect.vibe"
+import type { Change } from "../../gen/app__photos__changes.effect.vibe"
+import { maxRequest } from "../../gen/app__photos__changes.effect.vibe"
+import * as Viewer from "../../gen/app__photos__viewer.effect.vibe"
+import type { Grant } from "../../gen/kit__permission.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { offer, withdraw } from "../notices/toasts.vibe"
+import { Device } from "../platform/device.vibe"
+import { Photos, called } from "../platform/photos.vibe"
+import { type Job, answer, following, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+import { Library, library } from "./library.vibe"
+import { viewer } from "./viewer.vibe"
+
+/** What Android's grant is, in the kit's words: a grant to some photos is limited, and none is unasked until Alpha asked. */
+function grantOf(access: LibraryAccess, asked: boolean): Grant {
+  if (access.scope === "full") return "Granted"
+  if (access.scope === "partial" || access.scope === "selected") return "Limited"
+  return asked ? "Denied" : "Unasked"
+}
+
+const videosAllowed = (access: LibraryAccess) => access.videos === "full" || access.videos === "selected"
+
+// spec/app/photos/index.md, "What the phone reports about access replaces what Photos believed, and the library is read again"
+effect function reported(asked: boolean, ask: (photos: Parameters<Parameters<typeof called>[1]>[0]) => Promise<LibraryAccess>): Event!!Photos {
+  return effect {
+    const access = try called(asked ? "requestLibraryAccess" : "libraryAccess", ask)
+    const told: Event = { type: "accessIs", grant: grantOf(access, asked), videos: videosAllowed(access) }
+    return told
+  } catch () => ({ type: "accessIs", grant: asked ? "Denied" : "Unasked", videos: false })
+}
+
+const looked = (asked: boolean) => reported(asked, (photos) => (asked ? photos.requestLibraryAccess() : photos.libraryAccess()))
+
+/** Whether the phone refused a read because it is locked: its own sentence for that, which Alpha words for the owner. */
+function lockedPhone(cause: unknown): boolean {
+  const reason = (cause as { readonly cause?: { readonly reason?: unknown } } | undefined)?.cause?.reason
+  return typeof reason === "string" && reason.startsWith("Unlock")
+}
+
+type Fetch = Extract<Out, { tag: "Fetch" }>
+
+/** The page the phone gives for what is showing: an album's items, Alpha's own captures, or the permitted library narrowed. */
+effect function paged(fx: Fetch): { page: MediaPage; own: boolean }!!(Photos | Library) {
+  const numbers = try Library
+  const before = fx.page ? try numbers.cursor() : undefined
+  const from = before === undefined ? {} : { before }
+  if (fx.album !== 0) {
+    const album = try numbers.album(fx.album)
+    const custom = Option.isSome(album) ? `custom:${album.value.id}` as const : undefined
+    if (custom === undefined) throw new Error("no such album")
+    return { page: try called("list", (photos) => photos.list({ ...from, album: custom, thumbnails: true })), own: true }
+  }
+  if (fx.own) {
+    const album = fx.filter === "Favorites" ? { album: "favorites" as const } : fx.filter === "Videos" ? { album: "videos" as const } : {}
+    return { page: try called("list", (photos) => photos.list({ ...from, ...album, thumbnails: true })), own: true }
+  }
+  const narrowed = {
+    ...from,
+    thumbnails: true,
+    kind: fx.filter === "Videos" ? "video" as const : "all" as const,
+    filter: fx.filter === "Favorites" ? "favorites" as const : "all" as const,
+    ...(fx.filter === "Matching" ? { query: fx.query } : {}),
+  }
+  return { page: try called("listPermitted", (photos) => photos.listPermitted(narrowed)), own: false }
+}
+
+// spec/app/photos/index.md, "Only the newest read's answer is shown, only while Photos is showing, and a further page only adds older items"; spec/app/photos/index.md, "The phone can say its library is locked until the phone is unlocked"
+effect function fetched(fx: Fetch): Event!!(Photos | Library) {
+  const numbers = try Library
+  const revision = try numbers.revision()
+  const failed: Event = { type: "listed", ticket: fx.ticket, ok: false, rows: [], owned: [], starred: [], revision, more: false }
+  return effect {
+    if (fx.tab === "Albums" && fx.album === 0) {
+      const albums: ReadonlyArray<OwnedAlbum> = try called("albums", (photos) => photos.albums())
+      const rows: number[] = []
+      for (const album of albums) rows.push(try numbers.albumNumber(album))
+      const told: Event = { type: "listed", ticket: fx.ticket, ok: true, rows, owned: [], starred: [], revision, more: false }
+      return told
+    }
+    const { page, own } = try paged(fx)
+    try numbers.leaveOff(page.next)
+    const rows: number[] = []
+    const owned: number[] = []
+    const starred: number[] = []
+    for (const item of page.items.filter((one: MediaItem) => one.trashed !== true)) {
+      const photo = try numbers.number(item, own)
+      rows.push(photo)
+      if (own || item.owned === true) owned.push(photo)
+      if (item.favorite === true) starred.push(photo)
+    }
+    const told: Event = { type: "listed", ticket: fx.ticket, ok: true, rows, owned, starred, revision, more: page.next !== null }
+    return told
+  } catch (cause) => (lockedPhone(cause) ? { type: "lockedOut", ticket: fx.ticket } : failed)
+}
+
+const operations: Record<Exclude<Change, "Share">, FlagChange> = { Favorite: "favorite", Unfavorite: "unfavorite", Trash: "trash", Restore: "restore" }
+
+const applied = new Set<RowOutcome["status"]>(["favorited", "unfavorited", "trashed", "restored", "deleted"])
+
+type ChangeItems = Extract<Out, { tag: "ChangeItems" }>
+
+// spec/app/photos/index.md, "A request ends as the phone answers it, item by item; when the run is over the grid is read again"
+effect function changedItems(fx: ChangeItems): Event!!(Photos | Library) {
+  const numbers = try Library
+  const unknown: Event = { type: "changed", attempt: fx.attempt, done: [], stale: [], declined: false, known: false }
+  return effect {
+    const reviewed = try numbers.reviewed(fx.items)
+    const byId = new Map<string, number>()
+    for (const photo of fx.items) {
+      const seen = try numbers.seen(photo)
+      if (Option.isSome(seen)) byId.set(seen.value.item.id, photo)
+    }
+    if (fx.change === "Share") {
+      const opened = try called("shareMany", (photos) => photos.shareMany(reviewed)) catch () => undefined
+      const told: Event = { type: "changed", attempt: fx.attempt, done: opened === undefined ? [] : [...fx.items], stale: [], declined: false, known: true }
+      return told
+    }
+    const report = try called("changeMany", (photos) => photos.changeMany(operations[fx.change], reviewed))
+    const done: number[] = []
+    const stale: number[] = []
+    let known = true
+    for (const row of report.outcomes) {
+      const photo = byId.get(row.id)
+      if (photo === undefined) continue
+      if (applied.has(row.status)) done.push(photo)
+      else if (row.status === "stale") stale.push(photo)
+      else if (row.status === "unverified") known = false
+    }
+    const told: Event = { type: "changed", attempt: fx.attempt, done, stale, declined: false, known }
+    return told
+  } catch () => unknown
+}
+
+type WriteAlbum = Extract<Out, { tag: "WriteAlbum" }>
+
+// spec/app/photos/index.md, "An album change ends as the phone answers it; the albums are read again, a change that carried the selection ends it, and a deleted album showing closes"
+effect function albumWritten(fx: WriteAlbum): Event!!(Photos | Library) {
+  const numbers = try Library
+  let wrote = false
+  return effect {
+    const found = fx.change === "Create" ? Option.none<OwnedAlbum>() : try numbers.album(fx.album)
+    const listed = try numbers.reviewed(fx.items)
+    const target = match (fx.change as AlbumChange) {
+      when "Create": effect {
+        const made = try called("changeAlbum", (photos) => photos.changeAlbum({ operation: "create", name: fx.name }))
+        wrote = true
+        return { id: made.id, revision: made.revision }
+      };
+      default: effect {
+        if (Option.isNone(found)) throw new Error("no such album")
+        return { id: found.value.id, revision: found.value.revision }
+      };
+    }
+    let album = try target
+    if (fx.change === "Rename") try called("changeAlbum", (photos) => photos.changeAlbum({ operation: "rename", ...album, name: fx.name }))
+    if (fx.change === "Delete") try called("changeAlbum", (photos) => photos.changeAlbum({ operation: "delete", ...album }))
+    for (const item of fx.change === "Remove" ? listed : []) {
+      const written = try called("changeAlbum", (photos) => photos.changeAlbum({ operation: "remove", ...album, mediaId: item.id }))
+      wrote = true
+      album = { id: written.id, revision: written.revision }
+    }
+    for (const item of fx.change === "Add" || fx.change === "Create" ? listed : []) {
+      const written = try called("changeAlbum", (photos) => photos.changeAlbum({ operation: "add", ...album, mediaId: item.id, mediaRevision: item.revision }))
+      wrote = true
+      album = { id: written.id, revision: written.revision }
+    }
+    const told: Event = { type: "albumWritten", attempt: fx.attempt, confirmed: true, known: true }
+    return told
+  } catch () => ({ type: "albumWritten", attempt: fx.attempt, confirmed: false, known: !wrote })
+}
+
+function carry(fx: Out): Job<Event, Photos | Library | Viewer.Machine, [by: Grid.Actor]> {
+  return match (fx) {
+    when { tag: "AskAccess" }: answer("access", looked(true), { type: "accessIs", grant: "Denied", videos: false }, "Phone");
+    when { tag: "PickItems" }: answer("access", looked(true), { type: "accessIs", grant: "Denied", videos: false }, "Phone");
+    when { tag: "OpenSettings" }: run("settings", called("openLibrarySettings", (photos) => photos.openLibrarySettings()) catch () => undefined, "Phone");
+    when { tag: "Revoke" }: run("revoke", effect {
+      const viewing = try Viewer.Machine
+      if (Viewer.canRevoked(try viewing.get(), "Phone")) try ignore(viewing.send({ type: "revoked" }, "Phone"))
+    }, "Phone");
+    when { tag: "Fetch" }: answer("fetch", fetched(fx), { type: "listed", ticket: fx.ticket, ok: false, rows: [], owned: [], starred: [], revision: 0, more: false }, "Phone");
+    when { tag: "ChangeItems" }: answer(`change ${fx.attempt}`, changedItems(fx), { type: "changed", attempt: fx.attempt, done: [], stale: [], declined: false, known: false }, "Phone");
+    when { tag: "WriteAlbum" }: answer(`album ${fx.attempt}`, albumWritten(fx), { type: "albumWritten", attempt: fx.attempt, confirmed: false, known: false }, "Phone");
+  }
+}
+
+const gridding = reacting(Grid, { carry })
+
+// spec/app/photos/index.md, "Hiding Photos keeps nothing of the library on screen, and showing it reads again"
+const onScreen = following(Shell, (shell) => showing(shell, "Photos"), Grid.Machine, (shown): Event => (shown ? { type: "showView", secure: false, only: [] } : { type: "hideView" }), "Phone")
+
+// spec/app/photos/index.md, "What the phone reports about access replaces what Photos believed, and the library is read again": as Photos opens, and each time Alpha comes back to the front, as from Android's Settings
+const access = hearing(
+  Stream.unwrap(effect {
+    const device = try Device
+    return Stream.concat(Stream.make(true), device.visible) |> Stream.filter(%, (visible) => visible) |> Stream.mapEffect(%, () => looked(false))
+  }),
+  Grid.Machine,
+  (event: Event) => event,
+  "Phone",
+)
+
+// spec/app/photos/index.md, "A change made outside Photos lists the library again"
+const changes = started(effect {
+  const grid = try Grid.Machine
+  const numbers = try Library
+  try Stream.runForEach((try Photos).changed, effect () => {
+    try numbers.moved()
+    try ignore(grid.send({ type: "libraryChanged" }, "Phone"))
+  })
+}, "the library's changes")
+
+/** The next request of the run: the whole of a share, or at most the phone's limit of what is left; none while one is on its way. */
+function nextRequest(s: Grid.Photos): number[] | undefined {
+  if (!Grid.fresh(s) || s.job.left.length === 0 || s.job.sending.length > 0) return undefined
+  return s.job.change === "Share" ? [...s.job.left] : [...s.job.left].sort((a, b) => b - a).slice(0, maxRequest)
+}
+
+// spec/app/photos/index.md, "The phone sends the run's requests one at a time, each naming the change, its items, the revision decided on and who decided it"
+const sending = following(Grid.Machine, nextRequest, Grid.Machine, (items): Event | undefined => (items === undefined ? undefined : { type: "sendNext", items }), "Phone")
+
+/** How long Undo of a deletion is offered: the least Notices offers one for. */
+const undoFor = 10_000
+
+/** The area's name for its Undo toasts. */
+const area = "photos"
+
+// spec/app/photos/index.md, "Undo puts back what the deletion moved, at the revision now listed, until Notices says it is gone"
+const undoing = started(effect {
+  const grid = try Grid.Machine
+  const time = try Time
+  const offered = Stream.changesWith(Stream.map(grid.changes, (s) => (s.job.undoable ? s.job.requests : 0)), (a, b) => a === b)
+  let shown = 0
+  try Stream.runForEach(offered, effect (requests) => {
+    if (shown !== 0) try withdraw(area, shown)
+    shown = requests
+    if (requests === 0) return
+    const count = (try grid.get()).job.done.length
+    try offer(`${count === 1 ? "1 item" : `${count} items`} moved to Recently deleted`, area, requests, ignore(grid.send({ type: "undoTrash" }, "Owner")))
+    try fork.detached (effect {
+      try time.until((try time.now()) + undoFor)
+      try ignore(grid.send({ type: "undoLapsed" }, "Phone"))
+    })
+  })
+}, "the Undo of a deletion")
+
+/** Photos and its Viewer, in memory, carried out through the phone's photo library and told by the shell whether Photos shows. */
+export const photos = Layer.provideMerge(together(gridding, onScreen, access, changes, sending, undoing, viewer), library)
+
+// spec/app/photos/index.md, "An album opens from the albums listed, and closes back to them"; spec/app/photos/index.md, "Selection starts over a grid of items, toggles only items it lists, and has no limit"
+/** Back inside Photos: the Viewer, then the dialog, the selection and the album open, each closed by its own event. Whether it took one. */
+export const back: boolean!!(Grid.Machine | Viewer.Machine) = effect {
+  const viewing = try Viewer.Machine
+  const grid = try Grid.Machine
+  const v = try viewing.get()
+  const s = try grid.get()
+  if (Viewer.canClose(v, "Owner")) return effect { try viewing.send({ type: "close" }, "Owner"); return true } catch () => false
+  const step: Event | undefined = Grid.canCloseDialog(s, "Owner") ? { type: "closeDialog" }
+    : Grid.canEndSelect(s, "Owner") ? { type: "endSelect" }
+    : Grid.canCloseAlbum(s, "Owner") ? { type: "closeAlbum" }
+    : undefined
+  if (step === undefined) return false
+  return effect { try grid.send(step, "Owner"); return true } catch () => false
+}

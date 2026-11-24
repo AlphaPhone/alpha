@@ -1,0 +1,50 @@
+// spec/app/photos/index.md, "Story: Give Photos access"; spec/app/photos/index.md, "Story: Browse the library"
+import type { PhotosClient } from "@elizaos/os/bridges/media"
+import { registered } from "./device.vibe"
+
+module held {
+  import { photosClient } from "@elizaos/os/bridges/media"
+
+  let made: ReturnType<typeof photosClient> | undefined
+  /** eliza's client of the plugin, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
+  export function client(): ReturnType<typeof photosClient> {
+    return (made ??= photosClient())
+  }
+}
+import { client } from held
+
+/** The phone's plugin refused, broke or is absent: `method` is the plugin's method, `cause` what it said. */
+export error PhotosFailed { method: string; cause: unknown }
+
+/**
+ * The phone's photo library: eliza's client of its `ElizaPhotos` plugin, which reads what Android permits, Alpha's
+ * own captures and the trash, and asks Android for each change, or none where the page is no phone or its host did
+ * not register the plugin. `changed` says each time the phone saw the library change.
+ */
+export service Photos {
+  readonly client: Option.Option<PhotosClient>
+  readonly changed: Stream.Stream<void>
+}
+
+/** One call of the plugin, failing with `PhotosFailed` where the phone refused it, broke, or there is no plugin. */
+export effect function called<A>(method: string, call: (client: PhotosClient) => Promise<A>): A!PhotosFailed!Photos {
+  const { client } = try Photos
+  if (Option.isNone(client)) throw new PhotosFailed({ method, cause: "no photo library" })
+  return try tryPromise({ try: () => call(client.value), catch: (cause) => new PhotosFailed({ method, cause }) })
+}
+
+const name = "ElizaPhotos"
+
+/** The phone: eliza's client of `ElizaPhotos` where the host registered it, and its `libraryChanged` events. */
+export const phonePhotos = Layer.sync(Photos, () => {
+  if (!registered(name)) return { client: Option.none(), changed: Stream.empty }
+  const photos = client()
+  const changed = Stream.callback<void>((queue) => acquireRelease(
+    promise(() => photos.onLibraryChanged(() => { Queue.offerUnsafe(queue, undefined) })),
+    (handle) => promise(() => handle.remove()),
+  ))
+  return { client: Option.some(photos), changed }
+})
+
+/** A browser: no photo library, so Photos lists nothing and Android's access is never asked for. */
+export const browserPhotos = Layer.succeed(Photos, { client: Option.none(), changed: Stream.empty })

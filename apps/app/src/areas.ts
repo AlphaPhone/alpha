@@ -43,4 +43,5 @@ export const mounts: readonly Mount[] = [
   at("home/cards", () => import("./phone/cards.tsx")),
   at("settings/update", () => import("./update/index.tsx")),
   at("overlay", () => import("./update/overlay.tsx")),
+  at("view:Photos", () => import("./photos/index.tsx")),
 ];

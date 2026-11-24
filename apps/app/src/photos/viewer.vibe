@@ -1,0 +1,73 @@
+// spec/app/photos/viewer.md, "Story: Look at a photo or video"; spec/app/photos/viewer.md, "Story: Share what I am looking at"
+import type { MediaItem } from "@elizaos/os/bridges/media"
+import * as Grid from "../../gen/app__photos.effect.vibe"
+import * as Viewer from "../../gen/app__photos__viewer.effect.vibe"
+import type { Effect as Out, Event } from "../../gen/app__photos__viewer.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Photos, called } from "../platform/photos.vibe"
+import { type Job, answer, following, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { Library } from "./library.vibe"
+
+/** The longest edge the phone renders an item at for the Viewer. */
+const edge = 2_048
+
+// spec/app/photos/viewer.md, "Only the newest read's answer is shown, while the viewer is showing; one that failed can be read again"
+effect function loaded(ticket: number, photo: number): Event!!(Photos | Library) {
+  const numbers = try Library
+  const failed: Event = { type: "loaded", ticket, ok: false, kind: "Still", duration: 0, revision: 0, favourite: false }
+  return effect {
+    const seen = try numbers.seen(photo)
+    if (Option.isNone(seen)) return failed
+    const { id } = seen.value.item
+    const item: MediaItem = seen.value.own
+      ? try called("read", (photos) => photos.read({ id }))
+      : try called("readPermitted", (photos) => photos.readPermitted({ id, pixels: true, edge }))
+    try numbers.number(item, seen.value.own)
+    const clip = item.kind === "video"
+    const told: Event = {
+      type: "loaded", ticket, ok: true, kind: clip ? "Clip" : "Still",
+      duration: clip ? Math.max(1, Math.round((item.duration ?? 0) / 100)) : 0,
+      revision: try numbers.revision(), favourite: item.favorite === true,
+    }
+    return told
+  } catch () => failed
+}
+
+// spec/app/photos/index.md, "The Viewer's favourite, share or delete of the item open is a change of that one item, at the revision it showed"
+effect function requested(fx: Extract<Out, { tag: "Request" }>): void!!Grid.Machine {
+  try ignore((try Grid.Machine).send({ type: "requested", change: fx.change, photo: fx.photo, revision: fx.revision }, "Owner"))
+}
+
+function carry(fx: Out): Job<Event, Photos | Library | Grid.Machine, [by: Viewer.Actor]> {
+  return match (fx) {
+    when { tag: "Load" }: answer("load", loaded(fx.ticket, fx.photo), { type: "loaded", ticket: fx.ticket, ok: false, kind: "Still", duration: 0, revision: 0, favourite: false }, "Phone");
+    when { tag: "Request" }: run(`request ${fx.change} ${fx.photo}`, requested(fx), "Phone");
+    when { tag: "AskAbout" }: run("ask", Effect.void, "Phone");
+    when { tag: "Compose" }: run("compose", Effect.void, "Phone");
+    when { tag: "Render" }: run("render", Effect.void, "Phone");
+    when { tag: "WriteCopy" }: run("write", Effect.void, "Phone");
+    when { tag: "FindCopy" }: run("find", Effect.void, "Phone");
+  }
+}
+
+const viewing = reacting(Viewer, { carry })
+
+// spec/app/photos/viewer.md, "Hiding the viewer stops playback and closes the editor, and showing it reads the item again"
+const onScreen = following(Shell, (shell) => showing(shell, "Photos"), Viewer.Machine, (shown): Event => ({ type: shown ? "showView" : "hideView" }), "Phone")
+
+// spec/app/photos/viewer.md, "The phone reports the item changed or deleted while open"
+const reporting = started(effect {
+  const grid = try Grid.Machine
+  const machine = try Viewer.Machine
+  try Stream.runForEach(Stream.filter(grid.changes, (s) => s.visible && s.library.status === "Loaded" && Grid.showsItems(s)), effect (s) => {
+    const v = try machine.get()
+    if (!Viewer.shown(v)) return
+    const told: Event | undefined = !s.rows.includes(v.open) ? { type: "deleted" }
+      : s.starred.includes(v.open) !== v.favourite ? { type: "itemChanged", revision: s.revision, favourite: s.starred.includes(v.open) }
+      : undefined
+    if (told !== undefined) try ignore(machine.send(told, "Phone"))
+  })
+}, "the item open as the library changes")
+
+/** The Viewer, in memory: what it reads comes from the phone, and what it changes Photos carries out. */
+export const viewer = together(viewing, onScreen, reporting)
