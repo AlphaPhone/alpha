@@ -158,6 +158,7 @@ function relaying(relay: Relay, wifi: WiFi.Shape): typeof globalThis.fetch {
     const { url, method, headers, body, signal } = asked(input, init)
     const sent = body === undefined ? relayed(method, url.pathname, Object.fromEntries(url.searchParams), headers, undefined)
       : body !== false && "text" in body ? relayed(method, url.pathname, Object.fromEntries(url.searchParams), headers, JSON.parse(body.text) as unknown)
+      : body !== false && "bytes" in body ? relayed(method, url.pathname, Object.fromEntries(url.searchParams), headers, JSON.parse(new TextDecoder().decode(body.bytes)) as unknown)
       : undefined
     if (sent === undefined) throw new TypeError("the phone relays only JSON to the cloud")
     if (await runPromise(offline(wifi))) throw new TypeError("the phone has no network")

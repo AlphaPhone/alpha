@@ -10,6 +10,7 @@ import { type Location, browserLocation, phoneLocation } from "./location.vibe"
 import { type Calls, browserCalls, phoneCalls } from "./calls.vibe"
 import { type Telephony, browserTelephony, phoneTelephony } from "./telephony.vibe"
 import { type Documents, browserDocuments, phoneDocuments } from "./documents.vibe"
+import { type Navigation, browserNavigation, phoneNavigation } from "./navigation.vibe"
 
 /**
  * The services over the phone's other plugins, one line per plugin in each of the three lists below: its service in
@@ -29,6 +30,7 @@ export type Plugins =
   | Telephony
   | Calls
   | Documents
+  | Navigation
 
 /** On the phone: each plugin's service over eliza's client of it (`@elizaos/os/bridges/<plugin>`). */
 export const phonePlugins = Layer.mergeAll(
@@ -44,6 +46,7 @@ export const phonePlugins = Layer.mergeAll(
   phoneTelephony,
   phoneCalls,
   phoneDocuments,
+  phoneNavigation,
 )
 
 /** In a browser: each plugin's service saying the phone's part is absent. */
@@ -60,4 +63,5 @@ export const browserPlugins = Layer.mergeAll(
   browserTelephony,
   browserCalls,
   browserDocuments,
+  browserNavigation,
 )
