@@ -126,6 +126,9 @@ jobs:
         env:
           ALPHA_CALENDAR_BRIDGE_EXPECTED_HEAD: ${{ github.sha }}
         run: python scripts/ci/calendar-bridge.py
+      - name: Prepare the pinned Robolectric Android 35 framework
+        timeout-minutes: 10
+        run: bash scripts/ci/prepare-robolectric-android.sh "$HOME/.m2/repository"
       # Alpha's JVM unit tests for its forked native UI (android/app/src/test, Robolectric) on the
       # Gradle host the build generated. JVM evidence only, not device evidence.
       - name: Run Alpha's native unit tests
