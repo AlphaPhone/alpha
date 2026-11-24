@@ -5,6 +5,7 @@
   "test/agent-always-local.test.mjs",
   "test/agent-cache-probe.test.mjs",
   "test/agent-context-audit.test.mjs",
+  "test/agent-launch-host.test.mjs",
   "test/agent-launch-token-budget.test.mjs",
   "test/agent-speech-environment.test.mjs",
   "test/android-gzip-assets.test.mjs",

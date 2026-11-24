@@ -51,6 +51,12 @@ private static final class ResidentAttachDiagnostic {
  // intent or preference activation. In a debug build in a secondary user it may point the stored provider at a
  // loopback model: only the keys below, and only http://127.0.0.1 base URLs.
  static volatile java.util.function.Function<JSONObject,java.util.Map<String,String>> instrumentationLaunchEnvironment;
+ /** Provider keys and model selectors the legacy launch exported; the launch model now comes from host.json. */
+ static final String[] LAUNCH_MODEL_ENVIRONMENT={
+  "ELIZAOS_CLOUD_API_KEY","ELIZAOS_CLOUD_BASE_URL","ELIZAOS_CLOUD_SMALL_MODEL","ELIZAOS_CLOUD_LARGE_MODEL","ELIZAOS_CLOUD_IMAGE_DESCRIPTION_MODEL",
+  "ELIZAOS_CLOUD_USE_INFERENCE","ELIZAOS_CLOUD_USE_EMBEDDINGS","ELIZAOS_CLOUD_EMBEDDING_MODEL","ELIZAOS_CLOUD_EMBEDDING_DIMENSIONS",
+  "CEREBRAS_API_KEY","CEREBRAS_BASE_URL","CEREBRAS_MODEL","CEREBRAS_SMALL_MODEL","CEREBRAS_LARGE_MODEL",
+  "OPENAI_API_KEY","OPENAI_BASE_URL","ELIZA_PROVIDER","CARTESIA_API_KEY","CARTESIA_API_KEY_FILE"};
  private static final java.util.Set<String> INSTRUMENTATION_LAUNCH_KEYS=java.util.Set.of("CEREBRAS_BASE_URL","OPENAI_BASE_URL","OPENAI_API_KEY","ELIZA_PROVIDER");
  private static String rootToken,ownerToken,ownerIdentity,notificationAgent;
  private static long expiresAt;
@@ -691,7 +697,10 @@ private static final class ResidentAttachDiagnostic {
   // Shared provider admission and native embedding order. Keep the verified
   // product module independently of credential availability for Alpha identity.
   if(!NativeProviderSlot.applyLaunchEnvironment(BuildConfig.ELIZA_RUNTIME_PROFILE,provider,cloudSaved,new File(context.getApplicationInfo().nativeLibraryDir),context.getFilesDir(),env,System.currentTimeMillis())){provider=null;saved=null;cloudSaved=null;googleBinding=null;}
-  if(provider!=null&&"elizacloud".equals(provider.optString("provider")))env.put("ELIZAOS_CLOUD_BASE_URL",CloudDeployment.PRODUCTION_API+"/api/v1");
+  // The text model and its credential come from android/agent/host.json and the launch frame
+  // (upstream spec/os/agentService/config.md), never from these variables: the agent reads none of
+  // them, and the service writes the launch document, environment included, to a file (A2-005, E2-004).
+  for(String retired:LAUNCH_MODEL_ENVIRONMENT)env.remove(retired);
   if(google!=null&&google.isFile())env.put("ELIZA_NATIVE_GOOGLE_HOST_MODULE",google.getCanonicalPath());
   if(googleBinding!=null)env.putAll(googleBinding);
   // The agent process has no /etc/localtime on Android and would run in UTC; calendar dates and
