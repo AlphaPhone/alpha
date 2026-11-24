@@ -2,6 +2,7 @@
 import type { Change, Reply } from "../../gen/app__calendar__agent.ts";
 import { cardComplete, targetVerified } from "../../gen/app__calendar__agent.ts";
 import type { Row } from "./shown.ts";
+import { externalStore } from "../runtime/store.ts";
 
 /** The fields a Calendar request of the agent sets, as eliza's `CalendarEventFields` of `@elizaos/plugin-calendar` names them. */
 export interface RequestFields {
@@ -117,23 +118,16 @@ export function complete(request: Request, rows: ReadonlyArray<Row>): boolean {
 }
 
 const held = new Map<number, Request>();
-const listeners = new Set<() => void>();
-let version = 0;
+const version = externalStore(0);
 
 /** The requests the card was given, by the number the machine names each by, as a store the screen reads. */
 export const requests = {
-  snapshot: (): number => version,
-  subscribe(listener: () => void): () => void {
-    listeners.add(listener);
-    return () => {
-      listeners.delete(listener);
-    };
-  },
+  snapshot: version.snapshot,
+  subscribe: version.subscribe,
   /** @throws {never} */
   keep(request: Request): void {
     held.set(request.filing, request);
-    version += 1;
-    for (const listener of [...listeners]) listener();
+    version.set(version.snapshot() + 1);
   },
   /** @throws {never} */
   find: (filing: number): Request | undefined => held.get(filing),

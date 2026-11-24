@@ -16,6 +16,7 @@ import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vi
 import { stepping } from "../shell/shell.vibe"
 import { catalog, labelOf } from "./catalog.vibe"
 import { parsedTiles, savedKey, written } from "./saved.vibe"
+import { externalStore } from "../runtime/store.ts"
 
 module words {
   import { type HomeNoticeMessage, homeNoticeWords } from "@repo/ui"
@@ -94,16 +95,9 @@ export interface Told {
   readonly place: "InDrawer" | "InEditBar"
 }
 
-let last: Told | undefined
-const listeners = new Set<() => void>()
+const last = externalStore<Told | undefined>(undefined)
 
-export const told = {
-  snapshot: (): Told | undefined => last,
-  subscribe(listener: () => void): () => void {
-    listeners.add(listener)
-    return () => { listeners.delete(listener) }
-  },
-}
+export const told = { snapshot: last.snapshot, subscribe: last.subscribe }
 
 // spec/app/home/index.md, "A notice shows as a toast on bare Home, inline in the open drawer, and in the edit bar while editing; told while an app or Ask Alpha is up, it is not shown"
 effect function tell(fx: Out) {
@@ -117,8 +111,7 @@ effect function tell(fx: Out) {
     try say(wordsOf(notice), true)
     return
   }
-  last = { notice, place }
-  for (const listener of [...listeners]) listener()
+  last.set({ notice, place })
 }
 
 // spec/app/home/index.md, "A tap on one of Alpha's own tiles on bare Home asks the shell to open that app, never while Home is being edited"
