@@ -46,6 +46,9 @@ const onPhone: Record<string, Answer> = {
   "ElizaSense.turnOff": { available: false, reason: "not-installed" },
 }
 
+/** A native answer that never comes, as from a stalled bridge. */
+const HANGS: Answer = { hangs: true }
+
 function refused(answer: Answer): answer is { readonly refuse: string } {
   return typeof answer === "object" && answer !== null && "refuse" in answer
 }
@@ -69,6 +72,7 @@ function platform(calls: Calls, native: Record<string, Answer>, variant: "launch
         const answer = native[`${plugin}.${method}`]
         if (answer === undefined) return Effect.fail(new NativeFailed({ plugin, method, message: "absent" }))
         if (refused(answer)) return Effect.fail(new NativeFailed({ plugin, method, message: "refused", code: answer.refuse }))
+        if (answer === HANGS) return Effect.never
         if (typeof answer === "function") return Effect.try({
           try: () => answer((args ?? {}) as Record<string, unknown>),
           catch: () => new NativeFailed({ plugin, method, message: "fixture failed" }),
@@ -343,7 +347,7 @@ it.effect(`Hear the reply start at once (spec/voice/speech.md, "Story: Hear the 
 
 it.effect(`A warm-up also warms the Cloud speech relay for a Cloud account (spec/voice/speech.md, "Story: Hear the reply start at once")`, () => effect {
   // spec/voice/speech.md, "A sent turn warms the phone's output, and Cloud is warmed at most once a minute for each connection, only in front and online"
-  const warmed = (account: VoiceAccount) => effect {
+  const warmed = (account: VoiceAccount, relayAnswer: Answer = {}) => effect {
     const calls: Calls = []
     const connection = try SubscriptionRef.make<ResidentConnection>({ ...residentInitial, phase: "Connected", generation: 1 })
     const front = try SubscriptionRef.make<ForegroundState>({ visible: true, locked: false, screen: "home", view: "", shade: false, chat: "closed", modal: false })
@@ -354,27 +358,36 @@ it.effect(`A warm-up also warms the Cloud speech relay for a Cloud account (spec
       stop: () => Effect.void,
       recovered: () => Effect.void,
     })
-    const phone = Layer.provideMerge(layer, platform(calls, { ...onPhone, "ElizaSystem.getNetworkStatus": () => ({ connected: true }), "AlphaCloudSpeechStream.prewarmCloudSpeech": {} }, "launcher", { control, relay: true }))
+    const phone = Layer.provideMerge(layer, platform(calls, { ...onPhone, "ElizaSystem.getNetworkStatus": () => ({ connected: true }), "AlphaCloudSpeechStream.prewarmCloudSpeech": relayAnswer }, "launcher", { control, relay: true }))
     const shown = Layer.succeed(Foreground, { changes: SubscriptionRef.changes(front), get: () => SubscriptionRef.get(front) })
     const app = Layer.provideMerge(Layer.mergeAll(lifecycleOver(() => () => undefined), shown), phone)
     const settle = effect { for (let round = 0; round < 20; round += 1) try Effect.yieldNow }
     provide Layer.provideMerge(cloudWarmUpLive, app) {
       const routes = try VoiceRoute
       try settle
-      // The account arrives after the first warm-up; the sheet opening a minute later warms under it.
+      // The account arrives after the first warm-up; the sheet opening a minute later warms under it, and again a minute after that.
       try routes.observeAccount(account)
       calls.length = 0
       try TestClock.adjust("60 seconds")
       try SubscriptionRef.update(front, (now): ForegroundState => ({ ...now, chat: "sheet" }))
+      try settle
+      try TestClock.adjust("60 seconds")
+      try SubscriptionRef.update(front, (now): ForegroundState => ({ ...now, chat: "closed" }))
+      try settle
+      try SubscriptionRef.update(front, (now): ForegroundState => ({ ...now, chat: "full" }))
       try settle
     }
     return calls.filter((c) => c.name === "AlphaCloudSpeechStream.prewarmCloudSpeech" || c.name === "resident POST /api/cloud/warm")
   }
   const cloud = try warmed({ kind: "cloud", environment: "production", credentialId: "key-1" })
   const own = try warmed({ kind: "own", revision: "r1", cartesia: true })
-  try Effect.try(() => assert.deepStrictEqual({ cloud: cloud.map((c) => [c.name, c.args]), own: own.map((c) => c.name) }, {
-    cloud: [["AlphaCloudSpeechStream.prewarmCloudSpeech", { environment: "production" }], ["resident POST /api/cloud/warm", undefined]],
-    own: ["resident POST /api/cloud/warm"],
+  // A relay that never answers holds up neither the resident warm-up nor the next warm-up.
+  const stalled = try warmed({ kind: "cloud", environment: "production", credentialId: "key-1" }, HANGS)
+  const both = [["AlphaCloudSpeechStream.prewarmCloudSpeech", { environment: "production" }], ["resident POST /api/cloud/warm", undefined]]
+  try Effect.try(() => assert.deepStrictEqual({ cloud: cloud.map((c) => [c.name, c.args]), own: own.map((c) => c.name), stalled: stalled.map((c) => [c.name, c.args]) }, {
+    cloud: [...both, ...both],
+    own: ["resident POST /api/cloud/warm", "resident POST /api/cloud/warm"],
+    stalled: [...both, ...both],
   }))
 })
 

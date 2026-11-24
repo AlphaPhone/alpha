@@ -924,9 +924,10 @@ public class AlphaBrowserPlugin extends Plugin {
    case IGNORE:if(!fresh)settleLeftWeb(t);return;
    case CLOSE_POPUP:closePopup(t);return;
    case BLOCKED:if(loadFallback(t,raw))return;
-    // A page already showing that opens an app link without a tap (a script probing for its app) stays silent, as it did
-    // before app links were handed off; mail, phone, text, map, market and intent links keep the notice.
-    if(!(t.committed&&t.error.isEmpty()&&!BrowserExternalLinkPolicy.external(raw)))notice(t,"Blocked a link to another app that opened without a tap.");
+    // A page showing or loading its own document that opens an app link without a tap (a script probing for its app,
+    // often before first paint) stays silent; mail, phone, text, map, market and intent links keep the notice, and a tab
+    // with no document of its own (a redirect straight to the app) still says why it is empty.
+    if(!((t.committed||t.documentStarted)&&t.error.isEmpty()&&!BrowserExternalLinkPolicy.external(raw)))notice(t,"Blocked a link to another app that opened without a tap.");
     settleLeftWeb(t);return;
    case UNSUPPORTED:if(!fresh&&loadFallback(t,raw))return;notice(report,"This link type is not supported.");if(fresh)closePopup(t);else settleLeftWeb(t);return;
    case ASK:{
