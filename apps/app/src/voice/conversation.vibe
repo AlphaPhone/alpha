@@ -23,7 +23,7 @@ import { Listener, type InvocationScreen } from "./listener.vibe"
 import { ClefTurnAnswer, EndOfTurnScore, LiveCaptureEnded, LiveCaptureStarted, LiveCaptureStatus, RecordingClip, RecordingStarted, TranscriptReply, VoiceTurnReply } from "./native.schema.vibe"
 import { VoiceRoute, attemptFailed, type VoiceAccount } from "./route.vibe"
 import { Speech, SpeechNotStopped, type SpeechInterrupted, type SpeechRefused, type SpeechUnavailable } from "./speech.vibe"
-import { planReply, replyActionOf, spokenLineOf } from "./spoken-text.ts"
+import { planReply, planVoiceReply } from "./spoken-text.ts"
 import { cloudStreaming } from "./stream.vibe"
 import { transcription } from "./transcription.vibe"
 import { gateRecording } from "./vad.vibe"
@@ -413,15 +413,37 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
         })
       },
     }
-    const speaker = {
-      speak(segments: readonly string[], events: SpeakerEvents) {
-        run(effect {
-          try latency.mark("TtsStart")
-          const turn = try latency.nativeTurn()
-          speech.speakPieces(segments.flatMap((segment) => { const plan = planReply(segment); return plan.kind === "speak" ? plan.pieces : [] }), () => sync(() => { events.segmentPlayed(); follows() }), turn)
-            catch (error) => { events.broke(error); follows() }
-          try latency.finish("Answered")
+    const play = (groups: readonly (readonly string[])[], events: SpeakerEvents) => {
+      run(effect {
+        try latency.mark("TtsStart")
+        const turn = try latency.nativeTurn()
+        let total = 0
+        let played = 0
+        const groupEnds = new Set<number>()
+        const pieces = groups.flatMap(group => {
+          total += group.length
+          groupEnds.add(total)
+          return group
         })
+        speech.speakPieces(pieces, () => sync(() => {
+          if (groupEnds.has(++played)) {
+            events.segmentPlayed()
+            follows()
+          }
+        }), turn) catch (error) => { events.broke(error); follows() }
+        try latency.finish("Answered")
+      })
+    }
+    const speaker = {
+      prepare(reply: VoiceReply) {
+        const groups = planVoiceReply(reply)
+        return { sourceEnds: groups.map(({ sourceEnd }) => sourceEnd), play: (events: SpeakerEvents) => play(groups.map(({ pieces }) => pieces), events) }
+      },
+      speak(segments: readonly string[], events: SpeakerEvents) {
+        play(segments.flatMap(segment => {
+          const plan = planReply(segment)
+          return plan.kind === "speak" && plan.pieces.length > 0 ? [plan.pieces] : []
+        }), events)
       },
       stop() { run(speech.stop("Replies")) },
     }
@@ -476,7 +498,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
         try ack.idle()
         if (cue === ack) cue = undefined
         if (signal.aborted) throw new Error("The agent's voice reply was not usable.")
-        const answered: VoiceReply = { messageId: reply.messageId, text: spokenLineOf(reply.text, replyActionOf(reply.action)), ...(reply.action === undefined ? {} : { action: reply.action }) }
+        const answered: VoiceReply = { messageId: reply.messageId, text: reply.text, ...(reply.action === undefined ? {} : { action: reply.action }) }
         return answered
       }),
       abort: (roomId: string, reason: string) => runPromise(effect {

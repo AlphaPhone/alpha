@@ -151,7 +151,12 @@ pure def lawAPassageIsBounded(chars: int): bool = passageFits(chars) implies cha
 
 ### A spoken reply refuses only a likely password, key or card; everything else it cannot say becomes a pause
 
-A reply with nothing left to say is silent, not an error.
+Ordinary speech keeps the prose in emphasized words and skips roleplay
+directions. Spoken clock ranges use “to” between the times. A reply with
+nothing left to say finishes silently. The
+speaker completes each audible segment after all its pieces play. An
+interrupted reply reports the original stored prefix through its last
+completed segment.
 
 ```quint
 type Screened = SpeakIt | RefusedSecret | NothingToSay | RefusedLink | RefusedCharacters | RefusedLength

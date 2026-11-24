@@ -1,5 +1,5 @@
 // spec/voice/speech.md, "A spoken reply refuses only a likely password, key or card; everything else it cannot say becomes a pause"; spec/voice/speech.md, "A reading also refuses a link or email address, characters it cannot say and more than 16,000 characters"; spec/voice/speech.md, "Each finished sentence is spoken while the rest is generated, in order, and streamed audio is never kept"; spec/voice/speech.md, "An email draft is said as one line, by whether its card was validated or the action failed; other action replies drop IDs and asides unless I asked for them word for word"
-import type { VoiceReplyAction } from "@elizaos/agent/voice";
+import { speechSegmentsWithSource, type VoiceReply, type VoiceReplyAction } from "@elizaos/agent/voice";
 
 /** Why a passage was not spoken: a likely secret, a link or address, a character it cannot say, a length, or a word too long. */
 export type SpokenRefusal = "secret" | "link" | "characters" | "length" | "word";
@@ -29,6 +29,15 @@ export function looksSecret(text: string): boolean {
   return credentialLike.test(text);
 }
 
+const twelveHourClock = String.raw`(?:0?[1-9]|1[0-2])(?::[0-5]\d)?`;
+const clock = String.raw`(?:[01]?\d|2[0-3]):[0-5]\d`;
+const clockSeparator = String.raw`[ \t]*[-–—−][ \t]*`;
+const clockStart = String.raw`(?<![\p{L}\p{N}:+.-])`;
+const meridiemRange = new RegExp(
+  String.raw`${clockStart}(${twelveHourClock}(?:[ \t]*[ap]m)?)${clockSeparator}(${twelveHourClock}[ \t]*[ap]m)\b`, "giu",
+);
+const clockRange = new RegExp(String.raw`${clockStart}(${clock})${clockSeparator}(${clock})\b`, "giu");
+
 function speakNumbers(text: string): string {
   return text
     .replace(/(\d),(?=\d{3}(?!\d))/g, "$1")
@@ -45,6 +54,10 @@ function fold(input: string, conversation: boolean): string {
     ? input.normalize("NFD").replace(/\p{M}+/gu, "").replace(/([A-Za-z])\/(?=[A-Za-z])/g, "$1 ").replace(/\b(?:https?:\/\/|mailto:)|\bwww\./gi, "")
     : input;
   return speakNumbers(base.normalize("NFC")
+    .replace(/(\d[ \t]*)([ap])\.[ \t]*m\b(?:\.(?=[ \t]*[,;:–—−-]))?/gi, "$1$2m")
+    .replace(/\b([ap]m)(?:[ \t]+\1)+\b/gi, "$1")
+    .replace(meridiemRange, "$1 to $2")
+    .replace(clockRange, "$1 to $2")
     .replace(/[‘’]/g, "'").replace(/[“”"]/g, "").replace(/…/g, "...")
     .replace(/[—–]/g, "; ").replace(/−/g, "-")
     .replace(/^\s{0,3}#{1,6}\s+/gm, "")
@@ -176,4 +189,24 @@ export function spokenLineOf(text: string, action: ReplyAction): string {
       return sayable.test(stripped) ? stripped : DETAILS_IN_CHAT;
     }
   }
+}
+
+
+export interface ReplySpeechGroup {
+  readonly sourceEnd: number;
+  readonly pieces: readonly string[];
+}
+
+export function planVoiceReply(reply: VoiceReply): readonly ReplySpeechGroup[] {
+  const { text, action } = reply;
+  if (!text.trim()) return [];
+  const line = spokenLineOf(text, replyActionOf(action));
+  if (looksSecret(line)) return [];
+  const segments = line === text
+    ? speechSegmentsWithSource(text, action?.verbatimAsked === true)
+    : [{ text: line, sourceEnd: text.length }];
+  return segments.flatMap(({ text: segment, sourceEnd }) => {
+    const plan = planReply(segment);
+    return plan.kind === "speak" && plan.pieces.length > 0 ? [{ sourceEnd, pieces: plan.pieces }] : [];
+  });
 }

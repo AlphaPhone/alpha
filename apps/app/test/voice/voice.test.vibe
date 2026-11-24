@@ -14,7 +14,7 @@ import { layer } from "../../src/voice/layer.vibe"
 import { Listener } from "../../src/voice/listener.vibe"
 import { VoiceRoute } from "../../src/voice/route.vibe"
 import { Speech } from "../../src/voice/speech.vibe"
-import { replyActionOf, spokenLineOf, EMAIL_DRAFT_READY } from "../../src/voice/spoken-text.ts"
+import { planVoiceReply, replyActionOf, spokenLineOf, EMAIL_DRAFT_READY } from "../../src/voice/spoken-text.ts"
 import { ReadingVoice } from "../../src/browser/ports.vibe"
 import { VoicemailTranscriber } from "../../src/telephony/ports.vibe"
 
@@ -243,4 +243,36 @@ it.effect(`Hear a short line for an action (spec/voice/speech.md, "Story: Hear a
   const plain = spokenLineOf("It is sunny.", replyActionOf(undefined))
   const verbatim = spokenLineOf("Event ID: ev_123 is booked.", replyActionOf({ kind: "CALENDAR_CREATE", validatedCard: false, verbatimAsked: true }))
   try Effect.try(() => assert.deepStrictEqual({ drafted, plain, verbatim }, { drafted: EMAIL_DRAFT_READY, plain: "It is sunny.", verbatim: "Event ID: ev_123 is booked." }))
+})
+
+it.effect('Spoken clock ranges join the times and leave neighboring number forms alone (spec/voice/speech.md, "A spoken reply refuses only a likely password, key or card; everything else it cannot say becomes a pause")', () => effect {
+  for (const [text, heard] of [
+    ["Meet from 9 am – 10 am.", "Meet from 9 am to 10 am."],
+    ["The window is 14:30 — 16:05.", "The window is 14 30 to 16 oh 5."],
+    ["Meet from 9 a.m. – 10 a.m., then leave.", "Meet from 9 am to 10 am, then leave."],
+    ["Call 555-123-4567.", "Call 555, 123, 4567."],
+    ["I can do 3–5 tasks.", "I can do 3; 5 tasks."],
+  ]) {
+    const segments = planVoiceReply({ messageId: "reply-clock", text })
+    assert.strictEqual(segments.flatMap(segment => segment.pieces).join(" "), heard)
+    assert.strictEqual(segments.at(-1)?.sourceEnd, text.length)
+  }
+})
+
+it.effect('Ordinary speech omits stage directions and keeps the stored source positions (spec/voice/speech.md, "A spoken reply refuses only a likely password, key or card; everything else it cannot say becomes a pause")', () => effect {
+  const first = "*sighs* Your train leaves at **nine**."
+  const text = first + " *leans in closer* It is on platform two."
+  const groups = planVoiceReply({ messageId: "reply", text })
+  assert.deepStrictEqual(groups.map(group => group.pieces), [["Your train leaves at nine."], ["It is on platform two."]])
+  assert.deepStrictEqual(groups.map(group => text.slice(0, group.sourceEnd)), [first, text])
+  assert.deepStrictEqual(planVoiceReply({ messageId: "silent", text: "**laughs**" }), [])
+  assert.deepStrictEqual(planVoiceReply({ messageId: "secret", text: "Password is: a-fixture. It is on the next page." }), [])
+
+  const numeric = planVoiceReply({ messageId: "numeric", text: "Rent is $1,250.50." })
+  assert.deepStrictEqual(numeric.flatMap(group => group.pieces), ["Rent is 1250 dollars 50."])
+  const literal = planVoiceReply({ messageId: "literal", text: "*sighs* Event ID: ev_123.", action: { kind: "CALENDAR_READ", validatedCard: false, verbatimAsked: true } })
+  assert.match(literal.flatMap(group => group.pieces).join(" "), /sighs Event ID: ev 123/)
+  const draft = "The full email is in chat."
+  const drafted = planVoiceReply({ messageId: "draft", text: draft, action: { kind: "INBOX_COMPOSE_EMAIL", validatedCard: true, verbatimAsked: false } })
+  assert.deepStrictEqual(drafted, [{ sourceEnd: draft.length, pieces: [EMAIL_DRAFT_READY] }])
 })
