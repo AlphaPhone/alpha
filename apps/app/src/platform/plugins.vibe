@@ -2,7 +2,6 @@
 import { type Launcher, browserLauncher, phoneLauncher } from "./launcher.vibe"
 import { type CarrierSetup, browserCarrierSetup, phoneCarrierSetup } from "./carrier.vibe"
 import { type LauncherUpdates, browserLauncherUpdates, phoneLauncherUpdates } from "./launcherUpdates.vibe"
-import { type Passwords, browserPasswords, phonePasswords } from "./passwords.vibe"
 import { type SystemSettings, browserSystemSettings, phoneSystemSettings } from "./systemSettings.vibe"
 import { type WiFi, browserWiFi, phoneWiFi } from "./wifi.vibe"
 import { type PhoneCalendar, browserCalendar, phoneCalendar } from "./calendar.vibe"
@@ -21,7 +20,6 @@ export type Plugins =
   | Launcher
   | SystemSettings
   | WiFi
-  | Passwords
   | CarrierSetup
   | LauncherUpdates
   | PhoneCalendar
@@ -36,7 +34,6 @@ export const phonePlugins = Layer.mergeAll(
   phoneLauncher,
   phoneSystemSettings,
   phoneWiFi,
-  phonePasswords,
   phoneCarrierSetup,
   phoneLauncherUpdates,
   phoneCalendar,
@@ -52,7 +49,6 @@ export const browserPlugins = Layer.mergeAll(
   browserLauncher,
   browserSystemSettings,
   browserWiFi,
-  browserPasswords,
   browserCarrierSetup,
   browserLauncherUpdates,
   browserCalendar,

@@ -7,14 +7,7 @@ import { Device, native } from "../platform/device.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type Job, answer, due, following, hearing, reacting, run, stop, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-
-module web {
-  /** Whether this is a development build: the Developer page and its Problem log exist only there. @throws {never} */
-  export function development(): boolean {
-    return import.meta.env.DEV
-  }
-}
-import { development } from web
+import { development } from "./build.ts"
 
 const settingsShowing = (shell: Parameters<typeof showing>[0]) => showing(shell, "Settings")
 
@@ -25,8 +18,8 @@ const admitting = effect {
   return [admit] as const
 }
 
-// spec/app/settings/index.md, "Each page links to what another area owns there": what the shell can open is opened; every other neighbour draws its own row at `settings/<neighbour>`.
-function handed(fx: Pages.Effect): Job<Pages.Event, Shell, []> {
+// spec/app/settings/index.md, "Each page links to what another area owns there": what the shell can open is opened; the other neighbours draw on the places Settings offers them.
+function handed(fx: Pages.Effect): Job<Pages.Event, Shell | Device, []> {
   return match (fx) {
     when { tag: "Handed", let neighbour }: run(`hand ${neighbour}`, effect {
       const shell = try Shell
@@ -39,7 +32,11 @@ function handed(fx: Pages.Effect): Job<Pages.Event, Shell, []> {
 }
 
 /** Where the owner is in Settings, from launch: a notice or Ask Alpha may open a section of it. */
-export const pages = reacting(Pages, { open: admitting, carry: handed })
+export const pages = together(
+  reacting(Pages, { open: admitting, carry: handed }),
+  // spec/app/settings/index.md, "A notice or Ask Alpha may open a section directly, at its top, and Back from it goes to its parent": leaving Settings puts it back at its first page, so opening it from Home shows that page.
+  following(Shell, settingsShowing, Pages.Machine, (shown): Pages.Event | undefined => (shown ? undefined : { type: "openSection", page: "Top" })),
+)
 
 // spec/app/settings/facts.md, "Only the newest asking's answer is taken, and it replaces everything shown"
 effect function readPhone(ticket: number): Facts.Event!!SystemSettings {

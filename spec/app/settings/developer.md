@@ -113,6 +113,9 @@ pure def alwaysAProblemCountWasRead(s: Developer): bool =
 
 ### Clear is offered only for a log with problems, one at a time; once the startup area answers, the log is read again
 
+Clear asks the owner first; backing out clears nothing and asks nothing of
+the startup area.
+
 ```quint
 pure val clearingValues = Set(1, 2)
 

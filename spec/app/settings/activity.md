@@ -60,6 +60,28 @@ pure def stepARecoveryIsHandedOver(before: Activity, after: Activity, out: List[
   out.some(e => isRecover(e)) implies (after == before and out.length() == 1)
 ```
 
+### About's Agent activity says whether the agent runs, is starting, needs the owner or is stopped
+
+The row carries the connection the account area reports, so a stopped or
+refused agent is seen from Settings: running only while it is ready,
+starting while it starts, needing the owner while it needs a restart or
+another try, and stopped otherwise.
+
+```quint
+type AgentWord = AgentRunning | AgentStarting | AgentNeedsYou | AgentStopped
+
+pure def agentWord(connection: Connection): AgentWord =
+  if (connection == NeedsRestart or connection == NeedsRetry) AgentNeedsYou
+  else if (connection == Ready) AgentRunning
+  else if (connection == Starting) AgentStarting
+  else AgentStopped
+
+pure def lawRunningOnlyWhileReady(connection: Connection): bool = (agentWord(connection) == AgentRunning) iff (connection == Ready)
+
+pure def lawTheOwnerIsNeededExactlyWhenARecoveryIsOffered(connection: Connection): bool =
+  (agentWord(connection) == AgentNeedsYou) iff (needs(Restart, connection) or needs(Retry, connection))
+```
+
 ## Story: Answer for what the agent did on the phone
 
 > As the owner, I want to see what the agent did or proposed on my phone,

@@ -1,5 +1,4 @@
 // spec/app/settings/index.md, "Story: Find a setting and come back"
-import type { ElizaPasswordsPlugin, PasswordEntrySummary } from "@elizaos/os/bridges/definitions/passwords";
 import type { DataResetPlugin } from "@elizaos/os/bridges/definitions/reset";
 import type { LocationPermissionStatus, LocationPlugin } from "@elizaos/os/bridges/definitions/location";
 import type { AndroidRoleStatus, NativeCrashEntry, SystemFacts, SystemHostPlugin, SystemPlugin, SystemSettingsPage } from "@elizaos/os/bridges/definitions/system";
@@ -29,8 +28,6 @@ export interface SettingsScene {
   readonly joins: ConnectOptions[];
   connectivity: ConnectivityResult;
   carrier: { slots: Array<{ slotIndex: number; imei: CarrierField; simState: CarrierField }>; iccid: CarrierField; eid: CarrierField };
-  vault: { locked: boolean; entries: PasswordEntrySummary[] };
-  readonly vaultCalls: string[];
 }
 
 export function settingsScene(): SettingsScene {
@@ -48,8 +45,6 @@ export function settingsScene(): SettingsScene {
       slots: [{ slotIndex: 0, imei: { status: "available", value: "356938035643809" }, simState: { status: "available", value: "Ready" } }, { slotIndex: 1, imei: { status: "permission-denied" }, simState: { status: "available", value: "Absent" } }],
       iccid: { status: "permission-denied" }, eid: { status: "available", value: "89049032000000000000000000000001" },
     },
-    vault: { locked: true, entries: [{ id: "a", label: "Bank", username: "ann", bindings: [{ kind: "web", facet: "https://bank.example", display: "bank.example" }], updatedAt: 1, revision: 1 }] },
-    vaultCalls: [],
   };
 }
 
@@ -160,37 +155,6 @@ export function alphaCarrierSetup(scene: SettingsScene): Faked {
   });
 }
 
-/** The `ElizaPasswords` plugin: a vault that unlocks, lists entries without their passwords, and removes one. */
-export function elizaPasswords(scene: SettingsScene): Faked {
-  const call = <A>(name: string, answer: () => A) => {
-    scene.vaultCalls.push(name);
-    if (scene.vault.locked && name !== "unlock" && name !== "status") return Promise.reject(rejection("locked"));
-    return Promise.resolve(answer());
-  };
-  return plugin<ElizaPasswordsPlugin>(() => ({
-    status: () => Promise.resolve({ available: true, locked: scene.vault.locked, unlockRemainingMs: null, unlockSeconds: 300, biometric: true, autofill: { supported: true, selected: "other" } }),
-    unlock: () => call("unlock", () => {
-      scene.vault.locked = false;
-      return { unlocked: true as const, unlockRemainingMs: 300_000 };
-    }),
-    lock: () => {
-      scene.vault.locked = true;
-      scene.vaultCalls.push("lock");
-      return Promise.resolve({ locked: true as const });
-    },
-    list: () => call("list", () => ({ entries: scene.vault.entries })),
-    save: () => call("save", () => ({ id: "b" })),
-    openEditor: () => call("openEditor", () => ({ status: "cancelled" as const })),
-    remove: ({ id }) => call(`remove ${id}`, () => {
-      scene.vault.entries = scene.vault.entries.filter((entry) => entry.id !== id);
-      return { removed: true as const };
-    }),
-    reset: () => call("reset", () => ({ reset: true as const })),
-    reveal: ({ id }) => call(`reveal ${id}`, () => ({ shown: true as const, hidesAfterMs: 30_000 })),
-    copy: ({ id }) => call(`copy ${id}`, () => ({ copied: true as const, clearsAfterMs: 60_000 })),
-    openAutofillSettings: () => call("autofill", () => ({ status: "opened" as const, destination: "autofill-picker" as const })),
-  }));
-}
 
 /** The licence notices the page ships beside it, as the fake origin serves them. */
 export const notices = [

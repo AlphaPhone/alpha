@@ -3,8 +3,10 @@ import * as Developer from "../../gen/app__settings__developer.effect.vibe"
 import * as Licences from "../../gen/app__settings__licences.effect.vibe"
 import * as Prefs from "../../gen/app__settings__preferences.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
-import { SystemSettings } from "../platform/systemSettings.vibe"
+import { Device, native } from "../platform/device.vibe"
+import { type PhoneReport, type Problem, SystemSettings } from "../platform/systemSettings.vibe"
 import { type Job, answer, due, following, reacting, run, stop, together, untimed } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
 
 module web {
   /** The licence notices shipped with Alpha, beside its page: never a remote source. */
@@ -31,12 +33,9 @@ module web {
     URL.revokeObjectURL(link.href)
     return true
   }
-  /** @throws {never} */
-  export function versions(): { readonly app: string; readonly mode: string } {
-    return { app: import.meta.env.VITE_ALPHA_VERSION ?? "development", mode: import.meta.env.MODE }
-  }
 }
-import { shared, shipped, versions } from web
+import { shared, shipped } from web
+import { development, versions } from "./build.ts"
 
 /** One licence as the notices file holds it. */
 export schema Notice { name: string; version: string; license: string; text: string; flags?: ReadonlyArray<string> }
@@ -75,7 +74,7 @@ effect function logRead(reading: number): Developer.Event!!(SystemSettings | Pre
   const prefs = try (try Prefs.Machine).get()
   const needs: Developer.Store[] = prefs.document.read.status === "Failed" ? ["DevicePreferences"] : []
   return Option.isSome(problems)
-    ? { type: "logRead", reading, ok: true, problems: Math.min(problems.value, Developer.journalCap), needs }
+    ? { type: "logRead", reading, ok: true, problems: Math.min(problems.value.length, Developer.journalCap), needs }
     : { type: "logRead", reading, ok: false, problems: 0, needs: [] }
 }
 
@@ -83,11 +82,61 @@ effect function logCleared(clearing: number): Developer.Event!!SystemSettings {
   return { type: "logCleared", clearing, ok: try (try SystemSettings).clearProblems(), at: untimed }
 }
 
-// spec/app/settings/developer.md, "The report copies only the fields Alpha allows, so no text, address, key or identifier can reach it"
-effect function exported(exporting: number): Developer.Event!!(SystemSettings | Developer.Machine) {
-  const { problems } = try (try Developer.Machine).get()
+/** The packaged agent files whose digests a report may carry; Alpha's Android host hashes the same list. */
+export const runtimeHashAssets = ["agent/alpha-source.json", "agent/inventory.json", "agent/agent.mjs", "agent/workflow-worker/manifest.json", "agent/workflow-worker/files.sha256"] as const
+
+const shapes = {
+  version: /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$/,
+  variant: /^(launcher|standalone)$/,
+  buildType: /^(debug|release)$/,
+  patch: /^\d{4}-\d{2}-\d{2}$/,
+  pin: /^[0-9a-f]{40}$/,
+  digest: /^[0-9a-f]{64}$/,
+}
+
+/**
+ * The support report: only the fields Alpha allows, each of a strict shape, and anything else left out, never
+ * scrubbed. What the host says about its build is untrusted; Alpha's own roles say only whether Alpha holds them.
+ */
+export function reportOf(input: { readonly at: number; readonly native: boolean; readonly facts: unknown; readonly phone: PhoneReport; readonly problems: ReadonlyArray<Problem> }) {
+  const facts: Record<string, unknown> = typeof input.facts === "object" && input.facts !== null ? { ...input.facts } : {}
+  const text = (value: unknown, shape: RegExp) => (typeof value === "string" && shape.test(value) ? value : undefined)
+  const whole = (value: unknown, below: number) => (typeof value === "number" && Number.isSafeInteger(value) && value > 0 && value < below ? value : undefined)
+  const hashes: Record<string, unknown> = typeof facts.runtimeHashes === "object" && facts.runtimeHashes !== null ? { ...facts.runtimeHashes } : {}
   const { app, mode } = versions()
-  const report = { appVersion: app, buildType: mode, problemEntries: problems }
+  const version = input.phone.readings.find((reading) => reading.fact === "Versions")?.value
+  return {
+    format: "alpha-diagnostics/v1",
+    generatedAt: new Date(input.at).toISOString(),
+    platform: input.native ? "android" : "web",
+    app: {
+      version: text(version, shapes.version) ?? text(app, shapes.version) ?? null, versionCode: whole(facts.versionCode, 2 ** 31),
+      variant: text(facts.variant, shapes.variant), buildType: text(facts.buildType, shapes.buildType), mode, testMocks: development(),
+    },
+    os: { androidRelease: text(facts.androidRelease, shapes.version), securityPatch: text(facts.securityPatch, shapes.patch), sdkInt: whole(facts.sdkInt, 1000) },
+    upstreamPin: text(facts.upstreamPin, shapes.pin) ?? null,
+    runtimeHashes: Object.fromEntries(runtimeHashAssets.flatMap((asset) => {
+      const hash = text(hashes[asset], shapes.digest)
+      return hash === undefined ? [] : [[asset, hash]]
+    })),
+    permissions: Object.fromEntries(input.phone.grants.flatMap(({ access, grant }) => (grant === "Granted" || grant === "Limited" ? [[access, true]] : grant === "Denied" ? [[access, false]] : []))),
+    roles: ([["home", input.phone.home], ["assistant", input.phone.assistant]] as const).map(([role, holder]) => ({ role, held: holder === "Alpha", available: holder !== "NoSuchRole" })),
+    problems: { count: input.problems.length, recent: input.problems.slice(-Developer.journalCap) },
+  }
+}
+
+// spec/app/settings/developer.md, "The report copies only the fields Alpha allows, so no text, address, key or identifier can reach it"
+effect function exported(exporting: number): Developer.Event!!(SystemSettings | Device | Time) {
+  const system = try SystemSettings
+  const device = try Device
+  const logged = try system.problems()
+  const report = reportOf({
+    at: try (try Time).now(),
+    native: native(),
+    facts: Option.getOrUndefined(try device.buildFacts()),
+    phone: try system.report(),
+    problems: Option.getOrElse(logged, () => []),
+  })
   const ok = tryPromise(() => shared("alpha-diagnostics.json", JSON.stringify(report, null, 2))) catch () => false
   return { type: "exported", exporting, ok }
 }
@@ -97,7 +146,7 @@ const recoverPreferences = effect {
   try ignore((try Prefs.Machine).send({ type: "recover", at: untimed }, "Owner"))
 }
 
-function carryDeveloper(fx: Developer.Effect): Job<Developer.Event, SystemSettings | Prefs.Machine | Developer.Machine, []> {
+function carryDeveloper(fx: Developer.Effect): Job<Developer.Event, SystemSettings | Device | Time | Prefs.Machine | Developer.Machine, []> {
   return match (fx) {
     when { tag: "ReadLog", let reading }: answer("log", logRead(reading), { type: "giveUpOnLog", now: untimed });
     when { tag: "ClearLog", let clearing }: answer("clear", logCleared(clearing), { type: "giveUpOnClearing", now: untimed });

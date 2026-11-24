@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Android from "../gen/app__settings__android.effect.vibe";
 import * as Carrier from "../gen/app__settings__carrier.effect.vibe";
@@ -6,7 +7,6 @@ import * as Developer from "../gen/app__settings__developer.effect.vibe";
 import * as Facts from "../gen/app__settings__facts.effect.vibe";
 import * as Licences from "../gen/app__settings__licences.effect.vibe";
 import * as Network from "../gen/app__settings__network.effect.vibe";
-import * as Vault from "../gen/app__settings__passwords.effect.vibe";
 import * as Prefs from "../gen/app__settings__preferences.effect.vibe";
 import * as Reset from "../gen/app__settings__reset.effect.vibe";
 import * as Pages from "../gen/app__settings.effect.vibe";
@@ -21,6 +21,17 @@ afterEach(closeAll);
 
 const shipped = vi.fn(() => Promise.resolve(Response.json(notices)));
 vi.stubGlobal("fetch", ((input: RequestInfo | URL, init?: RequestInit) => (String(input).endsWith("licenses/third-party-notices.json") ? shipped() : fetch(input, init))) as typeof fetch);
+
+/** The row, switch or choice whose title is `title`, as a person reads it: a row's title, never its value beside it. */
+const titled = (title: string) => [...document.querySelectorAll<HTMLElement>("button, label")].find((found) => found.querySelector("span > span")?.textContent === title);
+
+/** Press the row titled `title`; a switch's or a choice's row presses its control, as a tap on the row does. */
+const tap = (title: string) => act(async () => {
+  const found = titled(title);
+  if (!found) throw new Error(`no row ${title}`);
+  const control = found instanceof HTMLLabelElement ? document.getElementById(found.htmlFor) : found;
+  (control ?? found).click();
+});
 
 const page = (alpha: Awaited<ReturnType<typeof open>>["alpha"]) => alpha.runtime.runPromise(Pages.Machine.use((pages) => pages.get())).then((state) => state.page);
 
@@ -96,9 +107,9 @@ describe("Settings", () => {
     await press("General");
     await until(alpha, machines, Facts.Machine, (s) => s.read.read.status === "Loaded" && s.home === "AnotherApp");
     // spec/app/settings/facts.md, "When Android's dialog closes, the phone is read again if Settings is showing, and the role shown is what that read reports"
-    await press("Set Alpha as Home");
+    await tap("Set as Home");
     await until(alpha, machines, Facts.Machine, (s) => s.home === "Alpha" && s.read.read.status === "Loaded");
-    expect(Boolean(button("Set Alpha as Home"))).toBe(false);
+    expect(Boolean(titled("Set as Home"))).toBe(false);
   });
 
   describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
@@ -106,16 +117,16 @@ describe("Settings", () => {
       const { alpha, machines, world } = await settingsOpen({ ...scene(), phone });
       await press("General");
       // spec/app/settings/android.md, "Android says whether it opened that page, a nearby one, or none"
-      await press("Wi-Fi networks");
+      await tap("Wi-Fi");
       await until(alpha, machines, Android.Machine, (s) => s.start.read.status !== "Loading");
       const exactly = await machines.runPromise(Android.Machine.use((android) => android.get()));
       expect(exactly.told).toBe(phone ? "Silent" : "SaidUnavailable");
       if (!phone) return;
-      await press("Mobile networks");
+      await tap("Mobile data");
       await until(alpha, machines, Android.Machine, (s) => s.told === "SaidNearby");
       // spec/app/settings/android.md, "Alpha's alert, permission and photo pages open for Alpha itself, never for another app, and a channel's page names its channel"
       await press("Notifications");
-      await press("Alpha's alerts");
+      await tap("Alpha's alerts");
       await until(alpha, machines, Android.Machine, (s) => s.target === "AlphaAlerts" && s.start.read.status === "Loaded");
       expect(world.settings.opened).toEqual(["wifi", "mobile", "app-info ai.alphacompute.alphaphone"]);
     });
@@ -132,13 +143,13 @@ describe("Settings", () => {
     await press("General");
     await press("Display");
     // spec/app/settings/preferences.md, "A choice shows at once and is kept on the phone, one at a time, with ten seconds to be kept"
-    await press("Light");
+    await tap("Light");
     await until(first.alpha, first.alpha.runtime, Prefs.Machine, (s) => s.kept === "Light" && s.keeping.read.status === "Loaded");
     // spec/app/settings/preferences.md, "Legible text is turned on or off by the owner and kept with the appearance, the same way"
-    await press("Legible text");
+    await tap("Legible text");
     await until(first.alpha, first.alpha.runtime, Prefs.Machine, (s) => s.keptLegible);
     // spec/app/settings/preferences.md, "The size shown is the one the phone says it applied; when it cannot say, Alpha says so and reads the size again"
-    await press("Text at 150%");
+    await press("150 percent");
     await until(first.alpha, first.alpha.runtime, Prefs.Machine, (s) => s.size === 150 && !s.changing);
     expect([document.documentElement.classList.contains("dark"), document.documentElement.hasAttribute("data-alpha-legible"), document.documentElement.style.fontSize, document.documentElement.hasAttribute("data-alpha-large-text")])
       .toEqual([false, true, "150%", true]);
@@ -156,14 +167,16 @@ describe("Settings", () => {
     expect([Prefs.asksBeforeActing(unread, "WebAction"), Prefs.allows(unread, "BrowserPage")]).toEqual([true, false]);
     // spec/app/settings/preferences.md, "When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again"
     await press("Privacy");
-    await press("Recover preferences");
-    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded" && Prefs.allows(s, "BrowserPage"));
+    await tap("Recover device settings");
+    await press("Recover");
+    // spec/app/settings/preferences.md, "A new phone lets Alpha act without asking first, load images in Inbox, use its location and the Browser page open, and change Gmail and Calendar"
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded" && Prefs.allows(s, "BrowserPage") && !Prefs.asksBeforeActing(s, "WebAction") && s.images);
     // spec/app/settings/preferences.md, "The owner changes Ask before Alpha acts, Load images or what Alpha may share only once the phone has read them, one save at a time, with ten seconds to save"
-    await press("Ask before Alpha acts");
-    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && !Prefs.asksBeforeActing(s, "WebAction"));
-    await press("Browser page for Alpha");
+    await tap("Ask before Alpha acts");
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && Prefs.asksBeforeActing(s, "WebAction"));
+    await tap("Browser page");
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && !Prefs.allows(s, "BrowserPage"));
-    expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: false, images: false, shares: ["AgentLocation", "GmailChanges", "CalendarEdits"] });
+    expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: true, images: true, shares: ["AgentLocation", "GmailChanges", "CalendarEdits"] });
   });
 
   it("A phone updated from the previous Alpha keeps its choices (spec/app/settings/preferences.md, \"The device preferences are read when Alpha starts, when Settings opens, and when Alpha comes back while Settings shows, with ten seconds to answer, never while a change or a recovery is in flight\")", async () => {
@@ -184,9 +197,9 @@ describe("Settings", () => {
     await fill("Search licences", "mpl");
     await until(alpha, machines, Licences.Machine, (s) => s.query === "mpl" && s.shown === 1);
     // spec/app/settings/licences.md, "Back from a licence returns to the same search"
-    await press("mediabunny");
+    await tap("mediabunny");
     await until(alpha, machines, Licences.Machine, (s) => s.licence === 0);
-    await press("Back to licences");
+    await hardware("back");
     await until(alpha, machines, Licences.Machine, (s) => s.licence < 0 && s.query === "mpl");
     // spec/app/settings/licences.md, "Opening the page clears the search, and loads the licences unless they are loading or loaded with some found"
     await hardware("back");
@@ -202,8 +215,23 @@ describe("Settings", () => {
     await press("Developer");
     await press("Problem log");
     await until(alpha, machines, Developer.Machine, (s) => s.log.read.status === "Loaded" && s.problems === 2);
-    // spec/app/settings/developer.md, "Clear is offered only for a log with problems, one at a time; once the startup area answers, the log is read again"
+    // spec/app/settings/developer.md, "Export diagnostics shares the log and Alpha's diagnostics, one export at a time, with ten seconds to start"; spec/app/settings/developer.md, "The report copies only the fields Alpha allows, so no text, address, key or identifier can reach it"
+    const sharedFiles: File[] = [];
+    Object.defineProperty(navigator, "canShare", { configurable: true, value: () => true });
+    Object.defineProperty(navigator, "share", { configurable: true, value: (data: ShareData) => { sharedFiles.push(...(data.files ?? [])); return Promise.resolve(); } });
+    await press("Export diagnostics");
+    await until(alpha, machines, Developer.Machine, (s) => s.exporting.read.status === "Loaded");
+    const text = await sharedFiles[0]?.text();
+    const report = JSON.parse(text ?? "{}");
+    expect([report.format, report.roles, report.problems.count, report.permissions, text?.includes("launcher3"), text?.includes("ai.alphacompute")]).toEqual([
+      "alpha-diagnostics/v1", [{ role: "home", held: false, available: true }, { role: "assistant", held: false, available: true }], 2, { LocationAccess: true }, false, false,
+    ]);
+    // spec/app/settings/developer.md, "Clear is offered only for a log with problems, one at a time; once the startup area answers, the log is read again": Clear asks first, and backing out clears nothing.
     await press("Clear");
+    await press("Cancel");
+    expect(world.settings.crashes.length).toBe(2);
+    await press("Clear");
+    await press("Clear log");
     await until(alpha, machines, Developer.Machine, (s) => s.log.read.status === "Loaded" && s.problems === 0);
     expect([world.settings.crashes, Boolean(button("Clear"))]).toEqual([[], false]);
   });
@@ -226,7 +254,7 @@ describe("Settings", () => {
     await press("General");
     await press("Network");
     await until(alpha, machines, Network.Machine, (s) => s.scan === "Found" && s.found === 1 && s.online === "Validated");
-    await press("home");
+    await tap("home");
     // spec/app/settings/network.md, "A passphrase fits its network before Android is asked: none for an open network, 8 to 63 printable characters for WPA2 and 1 to 63 for WPA3"
     await fill("Password for home", "short");
     expect(button("Join home")?.hasAttribute("disabled")).toBe(true);
@@ -243,6 +271,7 @@ describe("Settings", () => {
     const { alpha, machines } = await settingsOpen();
     await press("General");
     await press("Carrier & SIM setup");
+    await until(alpha, machines, Carrier.Machine, (s) => s.showing);
     // spec/app/settings/carrier.md, "Opening the page reads nothing; leaving it, the phone locking or Alpha going to the background forgets everything it read, and an answer that comes later is refused"
     expect((await machines.runPromise(Carrier.Machine.use((carrier) => carrier.get()))).read.read.ticket).toBe(0);
     await press("Show identifiers");
@@ -255,28 +284,5 @@ describe("Settings", () => {
     await seen(false);
     await until(alpha, machines, Carrier.Machine, (s) => s.fields.length === 0 && !s.showing);
     await seen(true);
-  });
-
-  it("Use my saved passwords only after Android unlocks them (spec/app/settings/passwords.md, \"Story: Use my saved passwords only after Android unlocks them\"; spec/app/settings/passwords.md, \"Story: Delete or reset only on purpose\")", async () => {
-    const { alpha, machines, world } = await settingsOpen();
-    await press("Apps");
-    await press("Passwords");
-    await until(alpha, machines, Vault.Machine, (s) => s.phase === "Locked" && !s.observed);
-    await press("Unlock");
-    await until(alpha, machines, Vault.Machine, (s) => s.phase === "Unlocked" && s.entries.length === 1);
-    await press("Bank");
-    await press("Copy");
-    await until(alpha, machines, Vault.Machine, (s) => s.task === "NoTask");
-    // spec/app/settings/passwords.md, "A removal acts on the revision the owner had open, after a second tap"
-    await press("Delete");
-    await until(alpha, machines, Vault.Machine, (s) => s.confirmRemove === "a");
-    expect(world.settings.vaultCalls.some((call) => call.startsWith("remove"))).toBe(false);
-    await press("Delete");
-    await until(alpha, machines, Vault.Machine, (s) => s.entries.length === 0 && s.task === "NoTask");
-    // spec/app/settings/passwords.md, "Alpha going to the background locks the vault, and leaving the page ends the visit and forgets everything"
-    await seen(false);
-    await until(alpha, machines, Vault.Machine, (s) => s.phase === "Locked" && s.task === "NoTask");
-    await seen(true);
-    expect([world.settings.vault.locked, world.settings.vaultCalls]).toEqual([true, ["unlock", "list", "copy a", "remove a", "list", "lock"]]);
   });
 });

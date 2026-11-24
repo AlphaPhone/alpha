@@ -1,23 +1,29 @@
 // spec/app/settings/facts.md, "Story: See what the phone says"; spec/app/settings/android.md, "Story: Change what only Android can change"
-import type { AndroidRoleStatus, SettingsHandoff, SystemFacts, SystemSettingsPage } from "@elizaos/os/bridges/definitions/system"
+import type { AndroidRoleStatus, NativeCrashEntry, SettingsHandoff, SystemFacts, SystemSettingsPage } from "@elizaos/os/bridges/definitions/system"
 import type { LocationPermissionStatus } from "@elizaos/os/bridges/definitions/location"
+import type { FilesAccess, StorageVolume } from "@elizaos/os/bridges/definitions/files"
 import type { Opened, Target } from "../../gen/app__settings__android.ts"
 import type { Access, AccessGrant, Holder, Reading } from "../../gen/app__settings__facts.ts"
 import type { Grant } from "../../gen/kit__permission.ts"
 
 module held {
-  import { systemClient } from "@elizaos/os/bridges/system"
+  import type { SystemClient } from "@elizaos/os/bridges/system"
   import { locationClient } from "@elizaos/os/bridges/location"
   import { wifiClient } from "@elizaos/os/bridges/wifi"
+  import { filesClient } from "@elizaos/os/bridges/files"
 
-  let system: ReturnType<typeof systemClient> | undefined
+  let system: Promise<SystemClient> | undefined
   let location: ReturnType<typeof locationClient> | undefined
   let wifi: ReturnType<typeof wifiClient> | undefined
-  /** eliza's clients of the plugins, each made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
-  export function systemOf(): ReturnType<typeof systemClient> {
-    return (system ??= systemClient())
+  let files: ReturnType<typeof filesClient> | undefined
+  /**
+   * eliza's client of `ElizaSystem`, which its bridge makes as it loads: loaded at first use, once the phone's host is
+   * up, since Capacitor binds a plugin to the platform it finds when the plugin is first registered.
+   */
+  export function systemOf(): Promise<SystemClient> {
+    return (system ??= import("@elizaos/os/bridges/system").then((bridge) => bridge.System))
   }
-  /** @throws {never} */
+  /** eliza's clients of the other plugins, each made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
   export function locationOf(): ReturnType<typeof locationClient> {
     return (location ??= locationClient())
   }
@@ -25,8 +31,12 @@ module held {
   export function wifiOf(): ReturnType<typeof wifiClient> {
     return (wifi ??= wifiClient())
   }
+  /** @throws {never} */
+  export function filesOf(): ReturnType<typeof filesClient> {
+    return (files ??= filesClient())
+  }
 }
-import { locationOf, systemOf, wifiOf } from held
+import { filesOf, locationOf, systemOf, wifiOf } from held
 
 module web {
   /** The browser's own answer for `name`, or none where it has no such permission. */
@@ -58,11 +68,16 @@ export service SystemSettings {
   requestHome(): void!!
   /** Android's own page for `target`, for Alpha itself where the page is about Alpha. */
   open(target: Target, channel: number): Opened!!
-  /** How many problems the phone's log holds, or none where it could not be read. */
-  problems(): Option.Option<number>!!
+  /** The problems the phone's log holds, each by its classes and reasons alone, or none where it could not be read. */
+  problems(): Option.Option<ReadonlyArray<Problem>>!!
   /** Whether the phone cleared its problem log. */
   clearProblems(): boolean!!
 }
+
+/** One problem the phone recorded, by the fields a report may carry: when, where it came from, and its classes and reasons; never a message or a process name. */
+export type Problem = Pick<NativeCrashEntry, "at" | "source" | "kind" | "errorClass" | "rootClass" | "reason" | "thread">
+
+const problemOf = ({ at, source, kind, errorClass, rootClass, reason, thread }: NativeCrashEntry): Problem => ({ at, source, kind, errorClass, rootClass, reason, thread })
 
 const empty: PhoneReport = { readings: [], grants: [], home: "NotAlpha", assistant: "NotAlpha", launcher: false }
 
@@ -92,23 +107,41 @@ function grantOf(state: PermissionState | LocationPermissionStatus["location"] |
 
 const settled = <A>(call: () => Promise<A>) => Effect.option(tryPromise(call))
 
+/** The storage the primary volume reports, as used of total, only where Android reported a total and used is never above it. */
+function storageOf(volumes: ReadonlyArray<StorageVolume> | undefined): Reading | undefined {
+  const primary = volumes?.find((volume) => volume.primary)
+  if (primary === undefined || primary.total <= 0 || primary.free < 0 || primary.free > primary.total) return undefined
+  const gigabytes = (bytes: number) => `${Math.round(bytes / 1e8) / 10} GB`
+  return { fact: "Storage", value: `${gigabytes(primary.total - primary.free)} of ${gigabytes(primary.total)}` }
+}
+
+function filesGrantOf(access: FilesAccess | undefined): Grant | undefined {
+  return access === "granted" ? "Granted" : access === "denied" ? "Denied" : undefined
+}
+
 /** What the phone reports, through eliza's clients of `ElizaSystem` and `ElizaLocation`. */
 effect function phoneReport(): PhoneReport!! {
-  const system = systemOf()
-  const facts = try settled(() => system.getSystemFacts())
-  const status = try settled(() => system.getStatus())
-  const build = try settled(() => system.getBuildInfo())
+  const facts = try settled(async () => (await systemOf()).getSystemFacts())
+  const status = try settled(async () => (await systemOf()).getStatus())
+  const build = try settled(async () => (await systemOf()).getBuildInfo())
   const located = try settled(() => locationOf().checkPermissions())
+  const stored = try settled(() => filesOf().storageState())
+  const storage = Option.isSome(stored) ? storageOf(stored.value.volumes) : undefined
+  const filesGrant = Option.isSome(stored) ? filesGrantOf(stored.value.access) : undefined
   const readings = [
     ...(Option.isSome(facts) ? switched(facts.value) : []),
     ...(Option.isSome(status) ? [{ fact: "Roles" as const, value: "" }] : []),
     ...(Option.isSome(build) ? [{ fact: "Versions" as const, value: build.value.version }] : []),
+    ...(storage === undefined ? [] : [storage]),
   ]
   const location = Option.isSome(located) ? grantOf(located.value.location, located.value.accuracy === "approximate") : undefined
   const roles = Option.isSome(status) ? status.value.roles : []
   return {
     readings,
-    grants: location === undefined ? [] : [{ access: "LocationAccess", grant: location }],
+    grants: [
+      ...(location === undefined ? [] : [{ access: "LocationAccess" as const, grant: location }]),
+      ...(filesGrant === undefined ? [] : [{ access: "FilesAccess" as const, grant: filesGrant }]),
+    ],
     home: Option.isSome(status) ? holderOf(roles, "home") : "NotAlpha",
     assistant: Option.isSome(status) ? holderOf(roles, "assistant") : "NotAlpha",
     launcher: Option.isSome(status) && Option.isSome(build) && build.value.launcher,
@@ -143,8 +176,8 @@ function openedOf(target: Target, handoff: Pick<SettingsHandoff, "outcome" | "sp
 }
 
 effect function opening(target: Target): Opened!! {
-  const system = systemOf()
   const handed = effect {
+    const system = try tryPromise(() => systemOf())
     if (target === "AndroidHome") return try tryPromise(() => system.openSettings())
     if (target === "InternetPanel") return { outcome: try tryPromise(() => wifiOf().openInternetPanel()), specific: true }
     if (alphasOwn.includes(target)) {
@@ -156,16 +189,16 @@ effect function opening(target: Target): Opened!! {
     if (page === undefined) return { outcome: "Refused" as const, specific: false }
     return try tryPromise(() => system.openSettingsPage({ page }))
   } catch () => ({ outcome: "Refused" as const, specific: false })
-  return openedOf(target, try handed)
+  return openedOf(target, handed)
 }
 
 /** The phone, through eliza's clients of its plugins. */
 export const phoneSystemSettings = Layer.succeed(SystemSettings, {
   report: phoneReport,
-  requestHome: () => ignore(tryPromise(() => systemOf().requestRole({ role: "home" }))),
+  requestHome: () => ignore(tryPromise(async () => (await systemOf()).requestRole({ role: "home" }))),
   open: (target: Target, _channel: number) => opening(target),
-  problems: () => Effect.map(settled(() => systemOf().crashLog()), Option.map((log) => log.entries.length)),
-  clearProblems: () => Effect.map(settled(() => systemOf().clearCrashLog()), Option.isSome),
+  problems: () => Effect.map(settled(async () => (await systemOf()).crashLog()), Option.map((log) => log.entries.map(problemOf))),
+  clearProblems: () => Effect.map(settled(async () => (await systemOf()).clearCrashLog()), Option.isSome),
 })
 
 /** A browser: none of the phone's facts, roles, pages or log. */
@@ -173,6 +206,6 @@ export const browserSystemSettings = Layer.succeed(SystemSettings, {
   report: browserReport,
   requestHome: () => Effect.void,
   open: () => succeed<Opened>("NotAtAll"),
-  problems: () => succeed(Option.none<number>()),
+  problems: () => succeed(Option.none<ReadonlyArray<Problem>>()),
   clearProblems: () => succeed(false),
 })

@@ -11,4 +11,5 @@ export const meta: ComponentMeta<SettingsLicenceDetailProps> = {
     onBack: fn(),
   },
   decorator: fullHeight,
+  examples: { "With what it obliges": { name: "libwebp", licence: "BSD-3-Clause", flags: ["Weak copyleft", "No license file in package"] } },
 };
