@@ -44,7 +44,7 @@ import {androidIdentity} from './android-identity.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {AGENT_ASSETS, ANDROID_CLASSPATH, COMMERCIAL_FONT, FONT_LICENSES, HELD_OUTSIDE_REPOSITORY, KNOWN_LICENSES, NO_FONT_LICENCE, ROOT, RUNTIME_ENTRY, TESSERACT_CORE_SOURCES, UNKNOWN, UNVERIFIED, VOICE_HOST, collectNotices, exists, fontLicense, fontNames, listFonts, mavenFamily, packagedRuntimePresent, pinnedVoiceModels, productionLockPackages, readJson, voiceHostProblems, type PackageLock} from './generate-licenses.ts';
+import {AGENT_ASSETS, ANDROID_CLASSPATH, JNI_LIBS, COMMERCIAL_FONT, FONT_LICENSES, HELD_OUTSIDE_REPOSITORY, KNOWN_LICENSES, NO_FONT_LICENCE, ROOT, RUNTIME_ENTRY, TESSERACT_CORE_SOURCES, UNKNOWN, UNVERIFIED, VOICE_HOST, collectNotices, exists, fontLicense, fontNames, listFonts, mavenFamily, packagedRuntimePresent, pinnedVoiceModels, productionLockPackages, readJson, voiceHostProblems, type PackageLock} from './generate-licenses.ts';
 import {sha256} from './sha256.ts';
 import {METADATA as GRADLE_METADATA, coordinateChecksum, parseVerificationMetadata} from './gradle-verification.ts';
 import {classifyLicence, orderFlags} from './licence-policy.ts';
@@ -59,7 +59,6 @@ export const LICENCE_NOT_RECORDED = 'not recorded in this inventory';
 export const DEFAULT_OUTPUT = 'artifacts/sbom/alphaphone.cdx.json';
 const NOT_COVERED = 'Staged resident runtime payload (Node.js, bundled agent and workflow-worker packages, PGlite): present only after agent:stage-android; add it with --packaged-runtime. Verified per APK by scripts/verify-packaged-runtime.py.';
 const EMBEDDING_HOST = 'android/embedding-host/qualified-host.json';
-const JNI_LIBS = 'android/app/src/main/jniLibs';
 
 interface Hash {
   alg: string;

@@ -32,7 +32,7 @@ export type {PackageLock};
 // Generation fails only on broken input: a package that is not installed or whose manifest
 // cannot be read, a pinned licence copy or core that drifted from its recorded hash, a stale
 // Android classpath snapshot, a malformed font licence record. A flag is not legal review.
-import {sha256} from './sha256.ts';
+import {sha256, sha256File} from './sha256.ts';
 import {execFileSync} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -802,9 +802,37 @@ export function installedPackageDirectory(root: string, sourceDir: string, name:
 }
 
 
+/** The app source set's native libraries; stageRuntimePayload stages the Node runtime at jniLibs/<abi>/libeliza_node.so. */
+export const JNI_LIBS = 'android/app/src/main/jniLibs';
+const NODE_LIBRARY = 'libeliza_node.so';
+
 /** True when a resident runtime is staged into the APK assets (runtimePackaging PACKAGED). */
 export function packagedRuntimePresent(root = ROOT, agentDir = path.join(root, AGENT_ASSETS)) {
   return fs.existsSync(path.join(agentDir, 'agent.mjs')) && fs.existsSync(path.join(agentDir, 'inventory.json'));
+}
+
+type NodeLock = {version?: string; ndk?: string; buildCommit?: string; entries?: {abi: string; sha256: string}[]};
+
+/**
+ * The Node runtime ABIs the staged payload carries: each lib/<abi>/libeliza_node.so row of its inventory
+ * (vendor/eliza spec/os/build/runtimePayload.md), staged in jniLibs as the pinned bytes the lock names.
+ */
+export function stagedNodeAbis(root: string, agentDir: string, lock: NodeLock, errors: string[]): string[] {
+  let rows: {path?: unknown; sha256?: unknown}[] = [];
+  try { const files = JSON.parse(fs.readFileSync(path.join(agentDir, 'inventory.json'), 'utf8')).files; rows = Array.isArray(files) ? files : []; }
+  catch (error) { errors.push(`${agentDir}/inventory.json is unreadable: ${errorMessage(error)}`); return []; }
+  const abis: string[] = [];
+  for (const row of rows) {
+    const abi = typeof row.path === 'string' ? /^lib\/([^/]+)\/libeliza_node\.so$/.exec(row.path)?.[1] : undefined;
+    if (!abi) continue;
+    const pinned = lock.entries?.find(entry => entry.abi === abi)?.sha256;
+    const file = path.join(root, JNI_LIBS, abi, NODE_LIBRARY);
+    if (row.sha256 !== pinned) errors.push(`${row.path}: the staged inventory names ${String(row.sha256)}, the Node lock ${pinned ?? 'no runtime'} for ${abi}`);
+    else if (!fs.existsSync(file) || sha256File(file) !== pinned) errors.push(`${JNI_LIBS}/${abi}/${NODE_LIBRARY} is not the staged Node runtime; run pnpm agent:stage-android`);
+    else abis.push(abi);
+  }
+  if (!rows.some(row => typeof row.path === 'string' && row.path.endsWith(`/${NODE_LIBRARY}`))) errors.push(`${agentDir}/inventory.json lists no ${NODE_LIBRARY}; run pnpm agent:stage-android`);
+  return abis.sort();
 }
 
 function runtimePackageEntry(dir: string, bundle: string, templates: Templates, errors: string[]): RuntimePackageNotice | null {
@@ -816,18 +844,30 @@ function runtimePackageEntry(dir: string, bundle: string, templates: Templates, 
   return {name: manifest.name, version: manifest.version, source: `https://www.npmjs.com/package/${manifest.name}/v/${manifest.version}`, ...notice, _bundles: [bundle]};
 }
 
-/** The pinned Node runtime (vendor/eliza/packages/os/aosp/runtime/node.lock.json) packaged as libeliza_node.so. */
-function nodeEntry(lock: {version?: string; ndk?: string; buildCommit?: string; entries?: {abi: string}[]}, templates: Templates, offer: string | null): NoticeDraft {
+/** The pinned Node runtime (vendor/eliza/packages/os/aosp/runtime/node.lock.json) packaged as libeliza_node.so for the staged ABIs. */
+function nodeEntry(lock: NodeLock, abis: readonly string[], templates: Templates, offer: string | null): NoticeDraft {
   const {version, buildCommit} = lock;
   return {name: RUNTIME_ENTRY, version: `${version} (nodejs/node v${version})`, license: UNVERIFIED,
     source: `https://github.com/nodejs/node/tree/v${version}`, _flags: [],
     text: [
-      `Node.js ${version}, built for Android with NDK ${lock.ndk} (elizaOS/eliza ${buildCommit}), is packaged as libeliza_node.so for ${(lock.entries ?? []).map(entry => entry.abi).join(' and ')} and runs the on-device agent.`,
+      `Node.js ${version}, built for Android with NDK ${lock.ndk} (elizaOS/eliza ${buildCommit}), is packaged as ${NODE_LIBRARY} for ${abis.join(' and ')} and runs the on-device agent.`,
       'Node.js is distributed under the MIT License:',
       templates.mit,
       `Corresponding source: https://github.com/nodejs/node/tree/v${version}. Node.js bundles third-party components (for example V8, libuv, OpenSSL, ICU, llhttp, zlib, brotli and c-ares) whose licences are listed in its LICENSE file at that tag.`,
       ...(offer ? [offer] : []),
     ].join('\n\n')};
+}
+
+/** Private packages this repository itself defines and bundles, by name and version: the resident entry under scripts/resident. */
+export function firstPartyPackages(root: string): Map<string, string> {
+  const own = new Map<string, string>();
+  for (const manifest of ['scripts/resident/package.json']) {
+    const file = path.join(root, manifest);
+    if (!fs.existsSync(file)) continue;
+    const pkg = JSON.parse(fs.readFileSync(file, 'utf8')) as {name?: unknown; version?: unknown; private?: unknown};
+    if (pkg.private === true && typeof pkg.name === 'string' && typeof pkg.version === 'string') own.set(pkg.name, pkg.version);
+  }
+  return own;
 }
 
 /**
@@ -837,17 +877,14 @@ function nodeEntry(lock: {version?: string; ndk?: string; buildCommit?: string; 
  */
 export function runtimeEntries(root: string, templates: Templates, errors: string[], {agentDir = path.join(root, AGENT_ASSETS), sourceDir}: {agentDir?: string; sourceDir?: string} = {}): NoticeDraft[] {
   if (!packagedRuntimePresent(root, agentDir)) return [];
-  const lock = JSON.parse(fs.readFileSync(path.join(root, 'vendor/eliza/packages/os/aosp/runtime/node.lock.json'), 'utf8'));
+  const lock: NodeLock = JSON.parse(fs.readFileSync(path.join(root, 'vendor/eliza/packages/os/aosp/runtime/node.lock.json'), 'utf8'));
   if (!lock.version) errors.push('vendor/eliza/packages/os/aosp/runtime/node.lock.json: no Node version');
   let offer: string | null = null;
   try { offer = readSourceOffer(root); } catch (error) { errors.push(errorMessage(error)); }
-  const entries = [nodeEntry(lock, templates, offer)];
-  if (!sourceDir) {
-    try {
-      const base = JSON.parse(fs.readFileSync(path.join(agentDir, 'alpha-source.json'), 'utf8')).base;
-      sourceDir = process.env.ALPHA_LOCAL_AGENT_SOURCE_DIR || path.join(root, 'vendor/eliza');
-    } catch { errors.push(`${agentDir}/alpha-source.json is missing or unreadable`); return entries; }
-  }
+  const abis = stagedNodeAbis(root, agentDir, lock, errors);
+  const entries = abis.length ? [nodeEntry(lock, abis, templates, offer)] : [];
+  if (!fs.existsSync(path.join(agentDir, 'alpha-source.json'))) { errors.push(`${agentDir}/alpha-source.json is missing; run pnpm agent:stage-android`); return entries; }
+  sourceDir ??= process.env.ALPHA_LOCAL_AGENT_SOURCE_DIR || path.join(root, 'vendor/eliza');
   const byId = new Map<string, RuntimePackageNotice>();
   const add = (entry: RuntimePackageNotice | null) => {
     if (!entry) return;
@@ -861,7 +898,10 @@ export function runtimeEntries(root: string, templates: Templates, errors: strin
   try {
     const manifest = JSON.parse(fs.readFileSync(path.join(agentDir, 'manifest.json'), 'utf8')) as {packages?: {name: string; version: string}[]};
     if (!Array.isArray(manifest.packages) || !manifest.packages.length) errors.push(`${agentDir}/manifest.json lists no bundled package`);
+    const own = firstPartyPackages(root);
     for (const {name, version} of manifest.packages ?? []) {
+      // This repository's own private packages (the resident entry) are Alpha's code under its own licence, not third-party notices.
+      if (own.get(name) === version) continue;
       const directory = installedPackageDirectory(root, sourceDir, name, version);
       if (!directory) { errors.push(`agent bundle: ${name}@${version} is not installed in this workspace; run pnpm install`); continue; }
       add(runtimePackageEntry(directory, 'agent bundle', templates, errors));
@@ -914,7 +954,7 @@ function payloadEntries(packaged: boolean) {
     {name: 'On-device elizaOS agent runtime payload', version: 'pinned upstream runtime when present in the APK payload', license: UNVERIFIED,
       source: 'scripts/stage-agent-runtime.ts',
       text: packaged
-        ? 'The staged on-device agent payload is present. Node.js and every npm package bundled into the agent and the workflow worker are listed as separate entries. The remaining payload files (musl loader, libstdc++ and libgcc_s runtime libraries, PGlite WebAssembly and data, PostgreSQL extensions and models) are not enumerated here.'
+        ? 'The staged on-device agent payload is present. Node.js and every npm package bundled into the agent and the workflow worker are listed as separate entries. The remaining payload files (bundled assets such as PGlite WebAssembly and data, and models) are not enumerated here.'
         : 'This build does not include the on-device agent runtime (Node.js and the bundled elizaOS agent), so no agent notices are listed.'},
   ];
 }
@@ -1076,8 +1116,8 @@ async function main(argv: readonly string[]) {
   const {entries, errors, warnings, flagLines, json, text} = generate(ROOT, {packagedRuntime});
   const summarize = (rows: readonly Notice[], label: string) => {
     const bundled = rows.filter(entry => /^Bundled in the on-device /.test(entry.text));
-    const bun = rows.find(entry => entry.name === RUNTIME_ENTRY);
-    console.log(`${label}: ${bun ? `${bun.name} ${bun.version}` : 'Node.js runtime MISSING'}; ${bundled.length} bundled agent/workflow-worker npm packages.`);
+    const node = rows.find(entry => entry.name === RUNTIME_ENTRY);
+    console.log(`${label}: ${node ? `${node.name} ${node.version}` : 'Node.js runtime MISSING'}; ${bundled.length} bundled agent/workflow-worker npm packages.`);
   };
   if (packagedRuntime) summarize(entries, 'PACKAGED runtime notices');
   else if (check && packagedRuntimePresent(ROOT)) {

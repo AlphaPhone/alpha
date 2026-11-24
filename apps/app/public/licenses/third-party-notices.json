@@ -1846,7 +1846,7 @@
     "obligations": [
       {
         "flag": "unverified",
-        "note": "The staged runtime can ship in standard Android builds. When it is staged, Bun and the bundled agent and workflow-worker npm packages are enumerated from the prepared source; the remaining payload files (musl loader, libstdc++/libgcc_s, PGlite WebAssembly and data, PostgreSQL extensions, models) are not. The licence has not been verified from shipped metadata. This flag is a record of that, not a clearance."
+        "note": "The staged runtime can ship in standard Android builds. When it is staged, Node.js (from the staged inventory and the Node lock) and the bundled agent and workflow-worker npm packages (from the bundle manifests, verified in the prepared source) are enumerated; the remaining payload files (bundled assets such as PGlite WebAssembly and data, and models) are not. The licence has not been verified from shipped metadata. This flag is a record of that, not a clearance."
       }
     ]
   },

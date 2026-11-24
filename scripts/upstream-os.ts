@@ -11,7 +11,6 @@ import {FetchHttpClient} from 'effect/http';
 import * as NodeServices from '@effect/platform-node/NodeServices';
 import * as osBuild from '@elizaos/os/build';
 import * as osImage from '@elizaos/os/image';
-import {buildAgentBundle as upstreamBuildAgentBundle, readBundleManifest, residentLoadList} from '@elizaos/agent/bundle';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 /** The upstream checkout the workspace links its @elizaos packages from. */
@@ -60,6 +59,10 @@ export const {aaptManifestTree, apkReleaseBlockers, apkUpdateAdmission, cloudVoi
   readApkBuildFlags, readbackInventory, provisioningComponents, releaseDescriptorProblems, releaseRecordProblems, loadProfile,
   verifyDeviceSource, verifySource, assertStockVendorApi, readNativeLibraries, NATIVE_TARGETS, NATIVE_INSTALLS} = osImage;
 
-/** Build the resident agent's mobile bundle from the pinned upstream source (@elizaos/agent/bundle). */
-export const buildAgentBundle = (options: Parameters<typeof upstreamBuildAgentBundle>[0]) => upstreamBuildAgentBundle(options);
-export {readBundleManifest, residentLoadList};
+type AgentBundle = typeof import('@elizaos/agent/bundle');
+/** Build the resident agent's mobile bundle from the pinned upstream source (@elizaos/agent/bundle). The agent package loads only
+ * here, so a tool that stages or verifies without bundling compiles no agent source. */
+export async function buildAgentBundle(options: Parameters<AgentBundle['buildAgentBundle']>[0]) {
+  const {buildAgentBundle: build}: AgentBundle = await import('@elizaos/agent/bundle');
+  return build(options);
+}
