@@ -190,8 +190,8 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     ]);
     expect(world.ask.kept.get("c1")?.messages.at(-1)?.text).toBe("Sun, Nov 22:\nDentist Mon, Nov 23 at 3:30 pm, about 5–10 minutes. Then 9:05 to 10:00, and lunch at 12 pm. Battery is at 80%.");
 
-    const withAbbreviations = ["Dentist Mon.", " Se", "pt. 0", "7 from 2 p.", " m. to", " 3 p.m. Bring 5–10."];
-    const spokenAbbreviations = ["Dentist Monday, September seventh from two P M to three P M.", "Bring 5 to 10."];
+    const withAbbreviations = ["Dentist Mon.", " Se", "pt. 0", "7 from 2 p.", " m. to", " 3 p.m. Bring 5–10.", " Call again at 4 P.M. ", "tomorrow!"];
+    const spokenAbbreviations = ["Dentist Monday, September seventh from two P M to three P M.", "Bring 5 to 10.", "Call again at four P M tomorrow!"];
     for (const [index, provisional] of [false, true].entries()) {
       const from = world.voice.spoken.length;
       world.ask.nextReplyChunks = withAbbreviations;

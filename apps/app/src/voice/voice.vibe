@@ -139,12 +139,12 @@ module pure {
   )
   const clock = String.raw`(?:0?[1-9]|1[0-2])(?::[0-5]\d)?`
   const bareClock = String.raw`(?:[01]?\d|2[0-3]):[0-5]\d`
-  const meridiem = String.raw`[ \t]*[ap]\.?[ \t]*m(?:\.(?=[ \t]*[,;–—−-]|[ \t]+to[ \t]))?`
-  const rangeSeparator = String.raw`(?:[ \t]*[-–—−][ \t]*|[ \t]+to[ \t]+)`
+  const meridiem = String.raw`[ \t]*[aApP]\.?[ \t]*[mM](?:\.(?=[ \t]*[,;!?–—−-]|[ \t]+(?:\p{Ll}|[tT][oO][ \t])))?`
+  const rangeSeparator = String.raw`(?:[ \t]*[-–—−][ \t]*|[ \t]+[tT][oO][ \t]+)`
   const clockEnd = String.raw`(?![\p{L}\d:/-]|\.\d)`
   const clockStart = String.raw`(?<![\p{L}\d:+./−-])`
-  const clockRange = new RegExp(String.raw`${clockStart}(?:(${clock}(?:${meridiem})?)${rangeSeparator}(${clock}${meridiem})|(${bareClock})${rangeSeparator}(${bareClock}))${clockEnd}`, "giu")
-  const clockWithMeridiem = new RegExp(String.raw`${clockStart}(${clock}${meridiem})${clockEnd}`, "giu")
+  const clockRange = new RegExp(String.raw`${clockStart}(?:(${clock}(?:${meridiem})?)${rangeSeparator}(${clock}${meridiem})|(${bareClock})${rangeSeparator}(${bareClock}))${clockEnd}`, "gu")
+  const clockWithMeridiem = new RegExp(String.raw`${clockStart}(${clock}${meridiem})${clockEnd}`, "gu")
   const bareClockTime = new RegExp(String.raw`${clockStart}${bareClock}${clockEnd}`, "gu")
   const unfinishedWeekday = new RegExp(String.raw`\b(?:${weekdayNames})\.,?(?:[ \t]+([A-Z][A-Za-z]*)\.?(?:[ \t]+0)?)?[ \t]*$`, "u")
   const unfinishedMonth = new RegExp(String.raw`\b(?:${monthNames})\.(?:[ \t]+0)?[ \t]*$`, "u")
