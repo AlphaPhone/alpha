@@ -125,8 +125,8 @@ pure def sometimesStoppedForStorage(s: Recorder): bool = s.phase == RecStopped a
 
 ### Done claims the save once, and the recording closes only after its note is confirmed
 
-Done stops the recording, lets transcription catch up, and saves one canonical voice note with the
-recording's opaque handle bound to the confirmed note. The native recorder records the claim before the
+Done stops the recording and saves one canonical voice note with the recording's opaque handle bound
+to the confirmed note. It keeps any existing journal text. The native recorder records the claim before the
 note is created, so a lost reply, a retry, a reload or an aborted save never creates the note twice. A
 claimed recording cannot resume or be discarded. A failed save keeps the recording; after a claim the
 owner is asked to check Notes.

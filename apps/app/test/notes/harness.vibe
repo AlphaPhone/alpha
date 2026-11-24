@@ -1,6 +1,7 @@
 // spec/notes/collection.md, "Story: Read my notes under the account I am signed in as"
 import { CloudSession } from "../../src/account/layer.vibe"
 import { initial as signedOut } from "../../gen/account__session.effect.vibe"
+import { initial as startingNavigation } from "../../gen/shell__navigation.effect.vibe"
 import { sendsOf } from "../../gen/voice__route.effect.vibe"
 import { Build } from "../../src/platform/build.vibe"
 import { Native, NativeFailed } from "../../src/platform/native.vibe"
@@ -61,7 +62,9 @@ export function fakes(agent: NotesAgentFake, device: DeviceFake, shown?: Subscri
     privacy: () => succeed("ViaCloud" as const),
     sends: () => succeed(sendsOf("Cloud")),
   })
-  const navigation = routes ?? Layer.succeed(Navigation, { changes: Stream.empty, send: () => succeed(false) } as unknown as Navigation.Shape)
+  const navigation = routes ?? Layer.succeed(Navigation, {
+    changes: Stream.empty, get: () => succeed(startingNavigation), send: () => succeed(false),
+  } as unknown as Navigation.Shape)
   return Layer.mergeAll(
     native,
     speech,
