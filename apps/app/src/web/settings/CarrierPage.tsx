@@ -58,8 +58,10 @@ function Identifier({ label, carrier, target, acts }: { readonly label: string; 
   if (value === "") return <Fact label={label} text={fieldText(fieldAt(carrier, target))} />;
   const marked = carrier.copy.target.kind === target.kind && carrier.copy.target.index === target.index;
   const mark = !marked ? "Copy" : carrier.copy.copied ? "Copied" : "Not copied";
+  // The mark is in the row's name, so a screen reader hears whether the copy happened.
+  const name = marked ? `Copy ${label}, ${mark.toLowerCase()}` : `Copy ${label}`;
   return (
-    <ListRow title={label} detail={<span className="font-mono">{value}</span>} aria-label={`Copy ${label}`}
+    <ListRow title={label} detail={<span className="font-mono">{value}</span>} aria-label={name}
       trailing={<span className="inline-flex items-center gap-2"><Copy aria-hidden className="size-4" />{mark}</span>} onClick={() => acts.copy(target)} />
   );
 }
