@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode, Ref } from "react";
-import { ArrowUp, Mic, Paperclip, Square } from "lucide-react";
+import { ArrowUp, Mic, Plus, Square } from "lucide-react";
 import { cn } from "../../lib/cn.ts";
 import { Banner } from "../Banner.tsx";
 import { Button } from "../Button.tsx";
@@ -47,7 +47,9 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
   onOpen?: () => void;
   /** The other target when Ask Alpha is open above a call or a conversation. */
   leading?: ReactNode;
-  /** The current target named in the field. */
+  /** The mark in the closed dock when it also acts as the gesture handle. */
+  opener?: ReactNode;
+  /** The target or action named in the field. */
   placeholder?: string;
   /** Called when the field takes focus: on the bar this opens Ask Alpha as a sheet. */
   onFocusField?: () => void;
@@ -70,41 +72,42 @@ const reasons = { away: "Alpha cannot be reached", sensitive: "This screen is pr
  */
 export function AssistantComposer({
   variant = "sheet", value, onValueChange, closed = false, notice, unavailable, attachments = [], limit = 4, quote, editing = false, lift,
-  onSend, onStop, stopping = false, onAttach, onTalk, onOpen, leading, placeholder, onFocusField, fieldRef, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
+  onSend, onStop, stopping = false, onAttach, onTalk, onOpen, leading, opener, placeholder, onFocusField, fieldRef, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
 }: AssistantComposerProps) {
   const written = value.trim() !== "" || attachments.length > 0;
   const bar = variant === "bar";
+  const targeting = !bar && placeholder !== undefined;
   return (
-    <div data-host-chrome={bar ? "" : undefined} className={cn("flex flex-col gap-2", bar ? "z-dock touch-none rounded-tile border border-border bg-popover p-2 shadow-lg" : "border-t border-border bg-background px-3 py-2", className)} style={lift ? { marginBottom: lift, ...style } : style} {...props}>
+    <div data-host-chrome={bar ? "" : undefined} className={cn("flex shrink-0 flex-col gap-2", bar ? "mx-4 mb-[max(1.75rem,calc(env(safe-area-inset-bottom)_+_0.75rem))]" : "mx-3 mb-[max(1.875rem,calc(env(safe-area-inset-bottom)_+_0.75rem))]", className)} style={lift ? { marginBottom: lift, ...style } : style} {...props}>
       {notice ? <AssistantDraftNotice {...notice} /> : null}
       {unavailable ? <Banner variant="warn">{reasons[unavailable]}</Banner> : null}
       {attachments.length ? <AssistantPendingAttachments attachments={attachments} limit={limit} onRemove={onRemoveAttachment} onPreview={onPreviewAttachment} /> : null}
       {quote ? <AssistantQuoteBar kind="quote" text={quote} onRemove={onUnquote} /> : null}
       {editing ? <AssistantQuoteBar kind="editing" /> : null}
-      <div className="flex items-end gap-1">
+      <div className={cn("flex touch-pan-y items-center bg-secondary", bar ? "min-h-18.5 gap-1 rounded-full py-1.5 pr-2 pl-2.25 shadow-lg" : "min-h-17 gap-1.5 rounded-sheet py-1.5 pr-1.5 pl-5")}>
         {leading}
-        {bar && onOpen ? (
-          <Button size="icon" aria-label="Open conversation" className="bg-alpha text-alpha-foreground hover:bg-alpha/90" onClick={onOpen}><Mark aria-hidden /></Button>
-        ) : null}
-        {placeholder === undefined || onAttach ? <Button variant="ghost" size="icon" aria-label="Attach" disabled={!onAttach || closed} onClick={onAttach}><Paperclip /></Button> : null}
+        {bar ? opener ?? (onOpen ? (
+          <Button size="icon" aria-label="Open conversation" className="overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" onClick={onOpen}><Mark aria-hidden className="size-[118%]" /></Button>
+        ) : null) : null}
+        {!targeting || onAttach ? <Button variant="ghost" size="icon" aria-label="Attach" disabled={!onAttach || closed} onClick={onAttach}><Plus /></Button> : null}
         <Textarea
           ref={fieldRef}
           data-alpha-composer=""
-          aria-label={placeholder ?? "Message Alpha"}
-          placeholder={placeholder}
+          aria-label={targeting ? placeholder : "Message Alpha"}
+          placeholder={placeholder ?? (bar ? "Ask Alpha" : "Message Alpha")}
           rows={1}
           value={value}
           disabled={closed}
           onChange={(event) => onValueChange(event.target.value)}
           onFocus={onFocusField}
-          className={cn("max-h-40 min-w-0 flex-1 touch-auto rounded-full bg-transparent px-2", placeholder === undefined ? "border-0" : "border border-alpha px-3")}
+          className={cn("max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 touch-auto rounded-full bg-transparent py-2.75", targeting ? "border border-alpha px-3" : "border-0 px-1")}
         />
         {onStop || stopping ? (
-          <Button size="icon" aria-label="Stop reply" loading={stopping} className="bg-foreground text-background hover:bg-foreground/90" onClick={onStop}><Square fill="currentColor" /></Button>
+          <Button size="icon" aria-label="Stop reply" loading={stopping} className="bg-foreground text-background hover:bg-foreground/90" onClick={onStop}><Square className="size-2.5" fill="currentColor" /></Button>
         ) : written ? (
-          <Button size="icon" aria-label="Send" disabled={!onSend} onClick={onSend}><ArrowUp /></Button>
+          <Button size="icon" aria-label="Send" className="bg-alpha text-alpha-foreground hover:bg-alpha/90" disabled={!onSend} onClick={onSend}><ArrowUp /></Button>
         ) : onTalk ? (
-          <Button variant="secondary" size="icon" aria-label="Talk" onClick={onTalk}><Mic /></Button>
+          <Button variant="ghost" size="icon" aria-label="Talk" className={bar ? undefined : "bg-foreground text-background hover:bg-foreground/90"} onClick={onTalk}><Mic /></Button>
         ) : null}
       </div>
     </div>

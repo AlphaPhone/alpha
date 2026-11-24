@@ -1,6 +1,6 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
 import {
-  Alert, AssistantCard, AssistantChatHistorySheet, AssistantConversation, AssistantGrabber, AssistantSearchSheet,
+  Alert, AssistantCard, AssistantChatHistorySheet, AssistantConversation, AssistantGrabber, AssistantSearchSheet, ConfirmDialog,
   type AssistantAttachment, type AssistantDraftNoticeProps, type AssistantMessageProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
@@ -27,13 +27,14 @@ import { useMachine as useComms } from "../../gen/app__phone__comms.react.ts";
 import { type Machine as ShellMachine, showing } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
+import { MailQuestions } from "../inbox/mail-context.vibe";
 import { isCommsView } from "../shell/views.tsx";
 import { askComms, freedom } from "./assistant.vibe";
 import { Talk } from "./talk.vibe";
 import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | Talk, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | Talk | MailQuestions, unknown>;
 }
 
 function turnOf(talking: Talking, label: string): AssistantTurnNoteProps["status"] | undefined {
@@ -111,6 +112,8 @@ export function Assistant({ runtime }: AssistantProps) {
   const comms = useComms(runtime);
   const board = runtime.runSync(Effect.map(Talk, (talk) => talk.board));
   const seen = useSyncExternalStore((listener) => board.subscribe(listener), () => board.snapshot());
+  const mail = runtime.runSync(MailQuestions);
+  const reviewed = useSyncExternalStore(mail.subscribe, mail.snapshot);
   const [listing, setListing] = useState(false);
   const [words, setWords] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -142,6 +145,17 @@ export function Assistant({ runtime }: AssistantProps) {
     board.type(text);
     void composer.send({ type: "edit", blank: text.trim() === "", long: text.length > textLimit });
   };
+  const attachMail = () => {
+    const question = mail.snapshot().question;
+    const offer = { type: "offer", kind: "Mail", revision: writing.offeredAt + 1 } as const;
+    if (!question || !composer.can(offer)) return;
+    void composer.send(offer).then((outcome) => {
+      if (outcome._tag !== "Success" || mail.snapshot().question !== question) return;
+      mail.attach(question);
+      if (!board.snapshot().typed.trim()) type("Summarize this email");
+      composerRef.current?.focus();
+    });
+  };
   const send = () => {
     if (subject !== undefined) {
       void runtime.runPromise(askComms({ about: subject, text: request }));
@@ -158,7 +172,6 @@ export function Assistant({ runtime }: AssistantProps) {
     void composer.send(hold);
   };
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"
-  /** The card of a reply that did not finish: live, with the fix the agent named and its wait, or read again from history, with neither. */
   const failureCard = ({ kind, fix, waitMs }: { kind: Failure; fix: Fix; waitMs: number }, live: boolean) => {
     const act = actionOf(kind, fix);
     const detail = showsWait(kind, waitMs) ? `Try again in about ${about(waitMs)}` : !live && kind === "LimitReached" ? "Wait a moment, then try again" : undefined;
@@ -214,6 +227,26 @@ export function Assistant({ runtime }: AssistantProps) {
     }
     if (focusField) composerRef.current?.focus();
   };
+  const grabber = shell.state ? (
+    <AssistantGrabber
+      variant={open ? "handle" : "mark"}
+      onPress={() => { void dock.send({ type: "press", detent: assistantDetent, now: untimed }); }}
+      onDrag={() => { void dock.send({ type: "drag" }); }}
+      onRelease={({ direction, flick, y }) => {
+        const height = Math.max(0, Math.round(window.innerHeight - y));
+        void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
+      }}
+      onLift={() => {
+        void dock.send({ type: "lift", now: untimed });
+        if (!open) composerRef.current?.focus();
+      }}
+      onCancel={() => { void dock.send({ type: "shift", now: untimed }); }}
+      onTap={({ keyboard }) => {
+        void dock.send({ type: "click", now: untimed });
+        if (!open && keyboard) composerRef.current?.focus();
+      }}
+    />
+  ) : undefined;
 
   return (
     <>
@@ -234,27 +267,12 @@ export function Assistant({ runtime }: AssistantProps) {
           onSearch: search.can({ type: "openSearch" }) ? () => { void chats.send({ type: "browse" }); void search.send({ type: "openSearch" }); } : undefined,
           onNew: chats.can(start) ? () => void chats.send(start) : undefined,
           onClose: open && shell.can({ type: "goBack" }) ? () => void shell.send({ type: "goBack" }) : undefined,
+          expanded: assistantDetent === "Full",
+          onResize: assistantDetent === "Full"
+            ? () => void shell.send({ type: "goBack" })
+            : shell.can({ type: "raise", detent: "Full" }) ? () => void shell.send({ type: "raise", detent: "Full" }) : undefined,
           making: making(shown),
-          grabber: shell.state ? (
-            <AssistantGrabber
-              onPress={() => {
-                void dock.send({ type: "press", detent: assistantDetent, now: untimed });
-              }}
-              onDrag={() => { void dock.send({ type: "drag" }); }}
-              onRelease={({ direction, flick, y }) => {
-                void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height: Math.max(0, Math.round(window.innerHeight - y)), floor: barHeight, full: window.innerHeight, now: untimed });
-              }}
-              onLift={() => {
-                void dock.send({ type: "lift", now: untimed });
-                if (!open) composerRef.current?.focus();
-              }}
-              onCancel={() => { void dock.send({ type: "shift", now: untimed }); }}
-              onTap={() => {
-                void dock.send({ type: "click", now: untimed });
-                if (!open) composerRef.current?.focus();
-              }}
-            />
-          ) : undefined,
+          grabber: open ? grabber : undefined,
         }}
         transcript={{
           messages: [...messages, ...writingReply, ...failed],
@@ -291,7 +309,8 @@ export function Assistant({ runtime }: AssistantProps) {
           attachments: onComms ? undefined : waiting(writing),
           quote: onComms ? undefined : quoted,
           editing: !onComms && writing.editor.editing > 0,
-          onOpen: !open ? () => openWithFocus(true) : undefined,
+          opener: !open ? grabber : undefined,
+          onOpen: !open && !grabber ? () => openWithFocus(true) : undefined,
           onSend: sendable && !inFlight(talking.turn) ? send : undefined,
           onStop: conversation.can({ type: "stop" }) ? () => void conversation.send({ type: "stop" }) : undefined,
           stopping: talking.turn.stopping,
@@ -303,11 +322,37 @@ export function Assistant({ runtime }: AssistantProps) {
           onRemoveAttachment: (id) => {
             if (id === "question") void composer.send({ type: "removeQuestion" });
             else if (id.startsWith("file ")) void composer.send({ type: "removeFile" });
-            else if (id === "mail" || id === "transcript" || id === "shown") void composer.send({ type: "detach", kind: detached[id] });
+            else if (id === "mail" || id === "transcript" || id === "shown") {
+              if (id === "mail") mail.clear();
+              void composer.send({ type: "detach", kind: detached[id] });
+            }
           },
           onUnquote: composer.can({ type: "unquote" }) ? () => void composer.send({ type: "unquote" }) : undefined,
         }}
       />}
+      <ConfirmDialog
+        open={!onComms && open && reviewed.question !== undefined}
+        title="Share this email with Alpha?"
+        confirmLabel="Add to chat"
+        onConfirm={attachMail}
+        onCancel={() => mail.show({})}
+      >
+        {reviewed.question ? (
+          <span className="block max-h-72 overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere]">
+            {reviewed.question.review.source.subject || "(no subject)"}{"\n"}
+            {reviewed.question.review.source.from}{"\n"}
+            {reviewed.question.review.source.to.join(", ")}{"\n\n"}
+            {reviewed.question.review.source.bodyText}
+          </span>
+        ) : null}
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={!onComms && open && reviewed.failure !== undefined}
+        title={reviewed.failure === "tooLarge" ? "This email is too long to share in full" : "Review this email again before sharing"}
+        confirmLabel="OK"
+        onConfirm={() => mail.show({})}
+        onCancel={() => mail.show({})}
+      />
       <AssistantChatHistorySheet
         open={listing}
         onOpenChange={setListing}
