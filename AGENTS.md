@@ -109,10 +109,11 @@ the device. This branch rebuilds it on the stack below.
 
 The canonical skill files are committed in `.agents/skills/`, including
 `sync`, `shell`, `prove`, `design`, `architect` and the [principles](#principles).
-Edit them there. `pnpm install` and `spec init` create project-relative skill
-links for Claude, Cursor, Muse, Grokbot and the other supported agents, and
-`CLAUDE.md` links to `AGENTS.md`. These generated paths are ignored by Git;
-`.claude/` contains no committed files.
+Edit them there. `pnpm install` (via `vibestack link`) and `vibestack init`
+create project-relative skill links for Claude, Cursor, Muse, Grokbot and the
+other supported agents, and `CLAUDE.md` links to `AGENTS.md`. Use
+`vibestack upgrade` to refresh managed skills and docs when upgrading Vibestack.
+These generated paths are ignored by Git; `.claude/` contains no committed files.
 
 A skill's name and description are only its discovery metadata. Before
 the work listed in [Where the rest is](#where-the-rest-is), read the matching
@@ -185,7 +186,7 @@ installed the tools has `README.md` in `node_modules/vibestack/`.
 | [`prove` skill](.agents/skills/prove/SKILL.md) | a `proof` stage `✗`, writing a `.proof.dfy`, or a `//@` file |
 | [`design` skill](.agents/skills/design/SKILL.md) | anything a person looks at: layout, components, stories and tokens |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | generated files, tests, caching and CI; adding a package or task, or changing the tools under `vibestack/` |
-| [vibestack/README.md](vibestack/README.md#commands) | the commands, Studio, and [using the tools from another package](vibestack/README.md#using-it-from-another-package) |
+| [vibestack/README.md](vibestack/README.md#commands) | the commands, Studio, configuration, and [using the tools from another package](vibestack/README.md#using-it-from-another-package) |
 
 ## Hard rules
 
@@ -225,6 +226,11 @@ Check each point before you write, and again after.
   feature flags, environment variables or settings for a change.
 - **Reuse.** Search for existing code and types first. Extend and share; no
   duplicates or one-offs.
+- **Barrel exports.** Expose a workspace package's code only through its root
+  barrel (`"."` in `exports`), plus explicit non-code static assets (`.css`,
+  `.json`, etc.); no subpath code routes or wildcards. Import workspace packages
+  by package name or declared static asset path. `pnpm lint:js` enforces both
+  (`barrel/exports` and `barrel/no-subpath-imports`) without inline disables.
 - **Compact.** Reread for needless branches, `try` blocks, wrappers and
   indirection. Shorter, if it reads as well.
 - **No code comments.** Use clear names and structure to make the code readable.
@@ -234,6 +240,12 @@ Check each point before you write, and again after.
   step shows), and the doc comment of a declaration (`/** … */`), which
   Studio, the stories and VibeLang's `@throws` and `@model` read. A line
   that explains the code below it is a name or a doc comment that is missing.
+  This holds for the project's own code, tests, scripts and proof files;
+  `vibestack/` and vendored checkouts are upstream's. In `apps/` and
+  `packages/`, `pnpm lint:js` enforces it, with no effect hooks, timers or
+  `console`. An `eslint-disable` there names its rules, never `code/*`,
+  `barrel/*` or `no-console`, and says why; any other inline config fails the
+  lint.
 - **Scripts and tests.** Extend existing ones before adding; no new scripts.
   Delete code that becomes unused. Tests follow "Tests" below.
 - **Speed.** Keep checks and CI fast: a small change reruns only what it
@@ -319,7 +331,7 @@ its name.
 
 Read the [`typescript-best-practices` skill](.agents/skills/typescript-best-practices/SKILL.md)
 before reading or editing `.ts` or `.tsx` files. Adapt the
-[TypeScript type reference](vibestack/reference/typereferences.md)
+[TypeScript type reference](.agents/skills/typescript-best-practices/references/typereferences.md)
 to the repository's schema library. Validate that a duration is nonnegative
 when it represents an ordered range.
 
@@ -409,8 +421,8 @@ How `pnpm check` runs them, in its `tests` stage:
   reuse the same result. Filtered or failed runs supply no receipt; acceptance
   and nightly checks always run afresh.
 - **One configuration.** The `test` script is `vitest run`, on
-  `project({ root: import.meta.dirname })` from `vibestack/testing/vitest.ts`, as
-  `spec init` writes it; a package with `test/` and no `test` script gets
+  `project({ root: import.meta.dirname })` from `vibestack/testing/vitest`, as
+  `vibestack init` writes it; a package with `test/` and no `test` script gets
   both from `check`. It runs `test/**/*.test.{ts,tsx,vibe}` in Node (a test
   that needs a DOM says `// @vitest-environment happy-dom`), and
   `*.browser.test.*` in Chromium, by `vitest run --project browser` (the

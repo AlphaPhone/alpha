@@ -1,0 +1,382 @@
+// spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"
+import { ConversationRecord, TurnController, type TurnResult } from "@elizaos/agent/client"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import * as Conversation from "../../gen/app__assistant.effect.vibe"
+import * as Chats from "../../gen/app__assistant__chats.effect.vibe"
+import * as Composer from "../../gen/app__assistant__composer.effect.vibe"
+import * as Search from "../../gen/app__assistant__search.effect.vibe"
+import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { ask, outcomeOf } from "../platform/remote.vibe"
+import { Attempts } from "../runtime/attempts.vibe"
+import { type Job, answer, contained, following, hearing, reacting, run, started, stream, tell, together } from "../runtime/reactor.vibe"
+import { type Board, type Line, Talk, talk } from "./talk.vibe"
+
+/** The assistant's turns, in eliza's own protocol: its `TurnController` over the platform's agent, bound to the conversation showing. */
+service Turns {
+  readonly controller: TurnController
+}
+
+const turns = Layer.effect(Turns, effect {
+  const { runtime } = try Agent
+  return { controller: new TurnController(runtime) }
+})
+
+const titled = Schema.Struct({ ...ConversationRecord.fields, title: Schema.String })
+/** What the agent answers to `GET /api/conversations`, to `POST /api/conversations` and to a fork. */
+const listing = () => Schema.Struct({ conversations: Schema.Array(titled) })
+const made = () => Schema.Struct({ conversation: titled })
+/** A page of a conversation's messages, and a page of search hits, as eliza's history routes give them. */
+const page = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.String, role: Schema.Literals(["user", "assistant"]), text: Schema.String })) })
+const hits = () => Schema.Struct({ results: Schema.Array(Schema.Struct({ conversationId: Schema.NonEmptyString, roomId: Schema.NonEmptyString, messageId: Schema.String, text: Schema.String })) })
+const health = () => Schema.Struct({ ready: Schema.Boolean })
+
+/** A slot of the composer as the phone keeps it: the text, the revision it was saved at, and whether it is marked as sending. */
+const slotted = Schema.fromJsonString(Schema.Struct({ revision: Schema.Int, text: Schema.String, sending: Schema.Boolean }))
+
+const pageSize = 20
+
+function slotKey(binding: Composer.Binding): string {
+  return `alpha/assistant/slot/${binding.owner}/${binding.conversation}@1`
+}
+
+/** Whether the turn and the composer are free, as chats and search ask: what the composer holds in a new conversation moves with it. */
+export function freedom(conversation: Conversation.Conversation, composer: Composer.Composer, chosen: number) {
+  return {
+    replying: Conversation.inFlight(conversation.turn),
+    holding: chosen > 0 && (composer.away !== "Free" || Composer.attached(composer.editor) || composer.draft.sync !== "Kept"),
+  }
+}
+
+// spec/app/assistant/index.md, "The screen is told only to an agent that said, on this connection, that it takes it"
+effect function supported(ticket: number): Conversation.Event!!Agent {
+  return effect {
+    try ask(Agent, HttpClientRequest.get("/api/client-devices/capabilities"), Schema.Unknown)
+    return { type: "supported", ticket, ok: true, takes: false }
+  } catch () => ({ type: "supported", ticket, ok: false, takes: false })
+}
+
+/** How a turn ended, as eliza's controller tells it: replied, known never to have left, or, where its post may have reached the agent, lost. */
+function ended(ticket: number, heard: boolean, result: TurnResult | undefined): Conversation.Event {
+  if (result === undefined) return { type: "lose", ticket }
+  return match (result) {
+    when { kind: "Replied" }: { type: "finish", ticket };
+    when { kind: "NotAccepted" }: heard ? { type: "lose", ticket } : { type: "refuse", ticket };
+    when { kind: "RefusedBusy" }: heard ? { type: "lose", ticket } : { type: "refuse", ticket };
+    when { kind: "RefusedStopUnconfirmed" }: heard ? { type: "lose", ticket } : { type: "refuse", ticket };
+    default: { type: "lose", ticket };
+  }
+}
+
+// spec/app/assistant/index.md, "Every message asked is posted exactly once, under a new ticket, whoever gave the text, with the screen showing and never a sensitive one"; spec/app/assistant/index.md, "The first word of a reply shows that the agent has the message, and a withdrawal that came too late stops it there"
+function posted(ticket: number): Stream.Stream<Conversation.Event, never, Turns | Talk | Chats.Machine | Conversation.Machine> {
+  return Stream.callback<Conversation.Event, never, Turns | Talk | Chats.Machine | Conversation.Machine>((queue) => effect {
+    const { controller } = try Turns
+    const { board } = try Talk
+    const chats = try (try Chats.Machine).get()
+    const known = board.known(chats.chosen)
+    const text = board.outgoing
+    if (known === undefined || text === "") {
+      Queue.offerUnsafe(queue, { type: "refuse", ticket })
+      Queue.endUnsafe(queue)
+      return
+    }
+    if (controller.conversation?.id !== known.record.id) try ignore(tryPromise(() => controller.bind(known.record)))
+    const mine: Line = { id: `sent ${ticket}`, mine: true, text }
+    board.append(mine)
+    board.lastSent = text
+    let heard = false
+    const preview = (written: string) => {
+      if (!heard) Queue.offerUnsafe(queue, { type: "hear", ticket })
+      heard = true
+      board.change({ reply: written })
+    }
+    const result = tryPromise(() => controller.send({ text }, { stream: { onPreview: preview } })) catch () => undefined
+    board.change({ reply: "" })
+    const event = ended(ticket, heard, result)
+    const finishing = Conversation.canFinish(try (try Conversation.Machine).get(), ticket)
+    if (result?.kind === "Replied" && finishing) board.append({ id: result.reply.messageId, mine: false, text: result.reply.text })
+    if (event.type === "refuse") board.drop(mine)
+    Queue.offerUnsafe(queue, event)
+    Queue.endUnsafe(queue)
+  })
+}
+
+// spec/app/assistant/index.md, "The agent's answer to the abort starts the one read of the conversation"
+effect function aborted(turn: number): Conversation.Event!!Turns {
+  const { controller } = try Turns
+  const stopped = tryPromise(() => controller.interrupt()) catch () => undefined
+  return { type: "answerAbort", ticket: turn, confirmed: stopped?.kind === "Stopped" }
+}
+
+// spec/app/assistant/index.md, "The read says the reply finished anyway, was stopped for sure, was never recorded, or to look later"
+effect function checked(recheck: number): Conversation.Event!!(Agent | Talk | Chats.Machine) {
+  return effect {
+    const { board } = try Talk
+    const chats = try (try Chats.Machine).get()
+    const known = board.known(chats.chosen)
+    if (known === undefined) return { type: "reconcile", ticket: recheck, found: "Unread" }
+    const { messages } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(known.record.id)}/messages`), page())
+    const asked = messages.findLastIndex((one) => one.role === "user" && one.text === board.lastSent)
+    const found: Conversation.Found = asked < 0 ? "Unrecorded" : messages.slice(asked + 1).some((one) => one.role === "assistant") ? "Ended" : "Unended"
+    return { type: "reconcile", ticket: recheck, found }
+  } catch () => ({ type: "reconcile", ticket: recheck, found: "Unread" })
+}
+
+/** The composer's answer to how its message left: committed, or given back ahead of what was typed since. */
+effect function settled(hold: number, sent: boolean): Composer.Event!!Talk {
+  const { board } = try Talk
+  if (!sent) giveBack(board)
+  return sent ? { type: "commit", hold } : { type: "release", hold }
+}
+
+function giveBack(board: Board) {
+  const { typed } = board.snapshot()
+  board.change({ typed: typed === "" ? board.outgoing : `${board.outgoing}\n${typed}` })
+  board.outgoing = ""
+}
+
+function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Agent | Turns | Talk | Chats.Machine | Composer.Machine | Conversation.Machine | Shell, []> {
+  return match (fx) {
+    when { tag: "CheckSupport", let support }: answer("support", supported(support), { type: "supported", ticket: support, ok: false, takes: false });
+    when { tag: "Upload", let ticket }: answer("upload", succeed<Conversation.Event>({ type: "uploaded", ticket, ok: false }), { type: "uploaded", ticket, ok: false });
+    when { tag: "Post", let ticket }: stream("post", posted(ticket), { type: "lose", ticket });
+    when { tag: "Withdraw" }: run("withdraw", effect {
+      const { controller } = try Turns
+      try ignore(tryPromise(() => controller.interrupt()))
+    });
+    when { tag: "Abort", let turn }: answer("abort", aborted(turn), { type: "answerAbort", ticket: turn, confirmed: false });
+    when { tag: "ReadReply", let recheck }: answer("check", checked(recheck), { type: "reconcile", ticket: recheck, found: "Unread" });
+    when { tag: "Settle", let hold, let sent }: run(`settle ${hold}`, effect {
+      const event = try settled(hold, sent)
+      try contained((try Composer.Machine).send(event), "settling the composer")
+    });
+    when { tag: "Prompted" }: run("prompted", Effect.void);
+    when { tag: "Kept", let messages }: run("kept", effect { try contained((try Chats.Machine).send({ type: "kept", messages }), "counting kept messages") });
+    when { tag: "Reread" }: run("reread", effect { try contained((try Chats.Machine).send({ type: "reread" }), "reading again") });
+    when { tag: "Arrived", let recorded }: run("arrived", effect { try contained((try Composer.Machine).send({ type: "arrived", recorded }), "telling the composer") });
+    when { tag: "Navigate", let turn, let view }: tell("navigate", Shell, [{ type: "openView", view }], { taken: { type: "navigated", ticket: turn, opened: true }, refused: { type: "navigated", ticket: turn, opened: false } });
+    when { tag: "Navigated" }: run("navigated", Effect.void);
+  }
+}
+
+// spec/app/assistant/chats.md, "The newest list says which conversations there are, and a conversation no longer listed stops showing"
+effect function listed(ticket: number): Chats.Event!!(Agent | Talk) {
+  return effect {
+    const { board } = try Talk
+    const { conversations } = try ask(Agent, HttpClientRequest.get("/api/conversations"), listing())
+    return { type: "listed", ticket, ok: true, ids: conversations.map((one) => board.numberOf({ id: one.id, roomId: one.roomId } as ConversationRecord, one.title)) }
+  } catch () => ({ type: "listed", ticket, ok: false, ids: [] })
+}
+
+// spec/app/assistant/chats.md, "A page of the conversation showing is taken only from the newest asking"
+effect function paged(conversation: number, around: number, ticket: number): Chats.Event!!(Agent | Talk) {
+  return effect {
+    const { board } = try Talk
+    const known = board.known(conversation)
+    if (known === undefined) return { type: "paged", ticket, ok: false, messages: 0 }
+    const pivot = around > 0 ? board.messageId(around) : undefined
+    const { messages } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(known.record.id)}/messages`, { urlParams: pivot === undefined ? {} : { around: pivot } }), page())
+    board.change({ pages: new Map([...board.snapshot().pages, [ticket, messages.map((one) => ({ id: one.id, mine: one.role === "user", text: one.text }))]]) })
+    return { type: "paged", ticket, ok: true, messages: messages.length }
+  } catch () => ({ type: "paged", ticket, ok: false, messages: 0 })
+}
+
+/** A conversation the agent made, under the number Alpha gives it, or how its making ended where it was not. */
+effect function making(ticket: number, request: HttpClientRequest.HttpClientRequest): Chats.Event!!(Agent | Talk | Attempts | Chats.Machine) {
+  const chats = try (try Chats.Machine).get()
+  const key = try (try Attempts).key(ticket)
+  return effect {
+    const { board } = try Talk
+    const { conversation } = try ask(Agent, HttpClientRequest.setHeader(request, "idempotency-key", key), made())
+    return { type: "made", ticket, confirmed: true, known: true, conversation: board.numberOf({ id: conversation.id, roomId: conversation.roomId } as ConversationRecord, conversation.title) }
+  } catch (failure) => {
+    const { confirmed, known } = outcomeOf(failure)
+    return { type: "made", ticket, confirmed: false, known: known && !confirmed, conversation: chats.chosen + 1 }
+  }
+}
+
+// spec/app/assistant/chats.md, "A fork is asked for from a message of the conversation showing"
+effect function forked(conversation: number, message: number, ticket: number): Chats.Event!!(Agent | Talk | Attempts | Chats.Machine) {
+  const { board } = try Talk
+  const known = board.known(conversation)
+  const line = board.latest()[message - 1]
+  if (known === undefined || line === undefined) return { type: "made", ticket, confirmed: false, known: true, conversation: conversation + 1 }
+  const key = try (try Attempts).key(ticket)
+  return try making(ticket, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`/api/conversations/${encodeURIComponent(known.record.id)}/fork`), { messageId: line.id, requestId: key, expectedText: line.text }))
+}
+
+function carryChats(fx: Chats.Effect): Job<Chats.Event, Agent | Talk | Chats.Machine, []> {
+  return match (fx) {
+    when { tag: "ReadList", let ticket }: answer("list", listed(ticket), { type: "listed", ticket, ok: false, ids: [] });
+    when { tag: "ReadPage", let conversation, let around, let ticket }: answer("page", paged(conversation, around, ticket), { type: "paged", ticket, ok: false, messages: 0 });
+    when { tag: "Create", let ticket }: answer("make", making(ticket, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/conversations"), { title: "Ask Alpha" })), { type: "made", ticket, confirmed: false, known: false, conversation: 1 });
+    when { tag: "Fork", let conversation, let message, let ticket }: answer("make", forked(conversation, message, ticket), { type: "made", ticket, confirmed: false, known: false, conversation: conversation + 1 });
+    when { tag: "Speak" }: run("speak", Effect.void);
+  }
+}
+
+/** What the slot holds: nothing, a draft, a message marked as sending, something that is no slot, or no answer. */
+effect function slotOf(binding: Composer.Binding): { found: Composer.Found; revision: number; text: string }!!KeyValueStore.KeyValueStore {
+  const store = try KeyValueStore.KeyValueStore
+  return effect {
+    const raw = try store.get(slotKey(binding))
+    if (raw === undefined) return { found: "Nothing" as const, revision: 0, text: "" }
+    return effect {
+      const slot = try Schema.decodeUnknownEffect(slotted)(raw)
+      return { found: slot.sending ? "Sending" as const : "Saved" as const, revision: slot.revision, text: slot.text }
+    } catch () => ({ found: "Corrupt" as const, revision: 0, text: "" })
+  } catch () => ({ found: "Failure" as const, revision: 0, text: "" })
+}
+
+// spec/app/assistant/composer.md, "The slot's answer fills the empty editor with the saved draft, or reports it damaged or unreadable"; spec/app/assistant/composer.md, "A damaged slot is recovered on the owner's word"
+effect function slotRead(ticket: number, binding: Composer.Binding, recover: boolean): Composer.Event!!(KeyValueStore.KeyValueStore | Talk) {
+  const { board } = try Talk
+  if (recover) try ignore((try KeyValueStore.KeyValueStore).remove(slotKey(binding)))
+  const { found, revision, text } = try slotOf(binding)
+  board.change(found === "Saved" ? { typed: text, saved: "" } : found === "Sending" ? { typed: "", saved: text } : { typed: "", saved: "" })
+  return { type: "slotRead", ticket, found, revision }
+}
+
+// spec/app/assistant/composer.md, "A write that lands clears any sending mark, and one that finds another revision stops for the owner to choose"
+effect function wrote(ticket: number, binding: Composer.Binding, sending: boolean): Composer.Event!!(KeyValueStore.KeyValueStore | Talk | Composer.Machine) {
+  const { board } = try Talk
+  const composer = try (try Composer.Machine).get()
+  const base = composer.draft.base
+  const held = try slotOf(binding)
+  const lost = (): Composer.Event => {
+    if (sending) giveBack(board)
+    return { type: "wrote", ticket, result: "Lost", revision: 0 }
+  }
+  if (held.found === "Failure") return lost()
+  if (held.revision > base) {
+    board.change({ saved: held.text })
+    if (sending) giveBack(board)
+    return { type: "wrote", ticket, result: "Collided", revision: held.revision }
+  }
+  const text = sending ? board.outgoing : board.snapshot().typed
+  return effect {
+    try (try KeyValueStore.KeyValueStore).set(slotKey(binding), JSON.stringify({ revision: base + 1, text, sending }))
+    return { type: "wrote", ticket, result: "Landed", revision: base + 1 }
+  } catch () => lost()
+}
+
+// spec/app/assistant/composer.md, "A message written before its conversation existed moves into the new one, then its old slot is cleared on the exact revision read"
+effect function cleared(attempt: number, binding: Composer.Binding, revision: number): Composer.Event!!KeyValueStore.KeyValueStore {
+  const held = try slotOf(binding)
+  if (held.found === "Failure") return { type: "cleared", attempt, ok: false, known: false }
+  if (held.found === "Nothing" || held.revision !== revision) return { type: "cleared", attempt, ok: false, known: true }
+  return effect {
+    try (try KeyValueStore.KeyValueStore).remove(slotKey(binding))
+    return { type: "cleared", attempt, ok: true, known: true }
+  } catch () => ({ type: "cleared", attempt, ok: false, known: false })
+}
+
+// spec/app/assistant/index.md, "A message is asked when the agent can be reached, the screen may be sent and no turn is in flight"; spec/app/assistant/index.md, "A message that cannot be asked is given back at once: a typed one to the composer, a card's prompt to its card"
+function asked(hold: number, attachments: number): Stream.Stream<Composer.Event, never, Conversation.Machine | Talk> {
+  return Stream.unwrap(effect {
+    const conversation = try Conversation.Machine
+    if (try contained(conversation.send({ type: "ask", hold, prompt: 0, attachments }), "asking")) return Stream.empty
+    if (try contained(conversation.send({ type: "decline", hold, prompt: 0 }), "declining")) return Stream.empty
+    giveBack((try Talk).board)
+    return Stream.succeed<Composer.Event>({ type: "release", hold })
+  })
+}
+
+function carryComposer(fx: Composer.Effect): Job<Composer.Event, KeyValueStore.KeyValueStore | Talk | Composer.Machine | Conversation.Machine, []> {
+  return match (fx) {
+    when { tag: "ReadSlot", let ticket, let binding, let recover }: answer("slot", slotRead(ticket, binding, recover), { type: "slotRead", ticket, found: "Failure", revision: 0 });
+    when { tag: "Write", let ticket, let binding, let sending }: answer(`write ${ticket}`, wrote(ticket, binding, sending), { type: "wrote", ticket, result: "Lost", revision: 0 });
+    when { tag: "Clear", let attempt, let binding, let revision }: answer("clear", cleared(attempt, binding, revision), { type: "cleared", attempt, ok: false, known: false });
+    when { tag: "Ask", let hold, let attachments }: stream(`ask ${hold}`, asked(hold, attachments), { type: "release", hold });
+  }
+}
+
+// spec/app/assistant/search.md, "Only the newest asking's hits are shown, a page at a time, after those already shown"
+effect function found(words: string, from: number, ticket: number): Search.Event!!(Agent | Talk) {
+  return effect {
+    const { board } = try Talk
+    const { results } = try ask(Agent, HttpClientRequest.get("/api/conversations/messages/search", { urlParams: { q: words, offset: String(from), limit: String(pageSize) } }), hits())
+    const shown = results.map((one) => ({ conversation: board.numberOf({ id: one.conversationId, roomId: one.roomId } as ConversationRecord), message: board.messageNumber(one.messageId), text: one.text }))
+    board.change({ hits: [...(from === 0 ? [] : board.snapshot().hits.slice(0, from)), ...shown] })
+    return { type: "found", ticket, ok: true, count: results.length, further: results.length === pageSize }
+  } catch () => ({ type: "found", ticket, ok: false, count: 0, further: false })
+}
+
+// spec/app/assistant/search.md, "Opening a hit closes search and opens its conversation around its message, and another conversation only while the turn and the composer are free"
+effect function opened(conversation: number, message: number): void!!(Chats.Machine | Conversation.Machine | Composer.Machine) {
+  const chats = try Chats.Machine
+  const free = freedom(try (try Conversation.Machine).get(), try (try Composer.Machine).get(), (try chats.get()).chosen)
+  try contained(chats.send({ type: "openHit", conversation, message, ...free }), "opening a hit")
+}
+
+function carrySearch(fx: Search.Effect): Job<Search.Event, Agent | Talk | Chats.Machine | Conversation.Machine | Composer.Machine, []> {
+  return match (fx) {
+    when { tag: "Find", let words, let from, let ticket }: answer("find", found(words, from, ticket), { type: "found", ticket, ok: false, count: 0, further: false });
+    when { tag: "Open", let conversation, let message }: run("open", opened(conversation, message));
+  }
+}
+
+module web {
+  /** The time zone the phone is set to. @throws {never} */
+  export function zone(): string {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone
+  }
+}
+import { zone } from web
+
+// spec/app/assistant/index.md, "The resident agent says whether it can be reached, and losing it ends the turn in flight honestly"
+const reached = hearing(
+  Stream.fromEffect(Effect.orElseSucceed(Effect.map(ask(Agent, HttpClientRequest.get("/api/health"), health()), (one) => one.ready), () => false)),
+  Conversation.Machine,
+  (ready): Conversation.Event => ({ type: "reach", ready }),
+)
+
+// spec/app/assistant/index.md, "A screen that changed takes a new revision and stops the turn in flight; an unchanged one is ignored"
+const looked = following(Shell, (shell) => shell.trail.at(-1), Conversation.Machine, (view): Conversation.Event => ({
+  type: "look", showing: view === undefined ? { tag: "Home" } : { tag: "App", view }, zone: zone(), day: 0, selected: false, sensitive: false,
+}))
+
+// spec/app/assistant/index.md, "When another conversation is shown, the last turn stays behind with its own"
+const left = following(Chats.Machine, (chats) => chats.chosen, Conversation.Machine, (): Conversation.Event => ({ type: "leave" }))
+
+// spec/app/assistant/composer.md, "The slot is opened when the composer is shown, and opened again after it could not be read"
+const opening = following(Composer.Machine, (composer) => (composer.slot === "Closed" && composer.read.status !== "Loading" ? composer.binding : undefined), Composer.Machine, (binding): Composer.Event | undefined => (binding === undefined ? undefined : { type: "open" }))
+
+// spec/app/assistant/composer.md, "Edits are saved while no send is in hand and storage has not failed"
+const saving = following(Composer.Machine, (composer) => (Composer.canSave(composer) ? composer.draft.edits : undefined), Composer.Machine, (edits): Composer.Event | undefined => (edits === undefined ? undefined : { type: "save" }))
+
+// spec/app/assistant/composer.md, "Another conversation showing closes the slot and opens that conversation's, once nothing waits in this one"; spec/app/assistant/composer.md, "A message written before its conversation existed moves into the new one, then its old slot is cleared on the exact revision read"
+const bound = started(effect {
+  const chats = try Chats.Machine
+  const composer = try Composer.Machine
+  const conversation = try Conversation.Machine
+  const { board } = try Talk
+  try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(chats.changes, composer.changes), conversation.changes), effect ([[shown, writing], talking]) => {
+    const here = writing.binding.conversation
+    if (shown.chosen !== here) {
+      const moving = here === 0 && shown.chosen > 0 && (writing.editor.text || writing.draft.sync !== "Kept")
+      try contained(composer.send(moving ? { type: "adopt", conversation: shown.chosen } : { type: "bind", conversation: shown.chosen }), "binding the composer")
+      return
+    }
+    if (board.sendWhenMade && here > 0 && writing.source === 0 && writing.clear.outcome !== "Sent") {
+      board.sendWhenMade = false
+      const event: Composer.Event = { type: "hold", askable: Conversation.askable(talking) }
+      if (Composer.enabled(writing, event)) board.outgoing = board.snapshot().typed
+      if (try contained(composer.send(event), "sending what waited for its conversation")) board.change({ typed: "" })
+      else board.outgoing = ""
+    }
+  })
+}, "binding the composer")
+
+/** Ask Alpha: the conversation, the chats, the composer and search, kept across restarts but search, over the agent and the phone's store. */
+export const assisting = Layer.provideMerge(
+  together(
+    reacting(Conversation, { keep: 1, open: [{ type: "restart" }], carry: carryTurn }),
+    reacting(Chats, { keep: 1, open: [{ type: "restart" }], carry: carryChats }),
+    reacting(Composer, { keep: 1, open: [{ type: "reopen" }], carry: carryComposer }),
+    reacting(Search, { carry: carrySearch }),
+    reached, looked, left, opening, saving, bound,
+  ),
+  Layer.merge(Layer.fresh(turns), talk),
+)
