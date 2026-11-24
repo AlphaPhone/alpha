@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Only the gesture mode's name is Alpha's. Three-button mode (the default) and the gesture
-         descriptions use AOSP's own strings, which describe Back, Home and Recents as they behave. -->
+    <!-- Only the gesture mode's name is Alpha's. Three-button mode (the fallback and Settings
+         option) and the gesture descriptions use AOSP's own strings, which describe Back, Home
+         and Recents as they behave. -->
     <string name="edge_to_edge_navigation_title">Alpha gestures</string>
     <string name="gesture_settings_activity_title">Alpha gestures</string>
 </resources>

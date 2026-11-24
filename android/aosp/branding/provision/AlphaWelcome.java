@@ -214,6 +214,7 @@ final class AlphaWelcome {
                 }
             } catch (IllegalStateException | SecurityException failure) { fail(R.string.alpha_appearance_preset_failed); return; }
             if (!verifyRoles(roles, required) || !eligible()) return;
+            AlphaFreshPresets.defaultToGestureNavigation(activity);
             waiting = false;
             completed.run();
         }
