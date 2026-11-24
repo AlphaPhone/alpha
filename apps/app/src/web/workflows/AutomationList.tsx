@@ -1,8 +1,9 @@
-// spec/workflows/automations.md, "Story: See all my automations even when one source fails"; spec/workflows/automations.md, "Story: Change an automation once, even when the answer is lost"; spec/workflows/vocabulary.md, "An automation status Alpha has no word for reads as Unknown, and a snoozed item shows no word"
-import { AlertTriangle, Bell, CalendarClock, MessageSquareText, Repeat, Workflow } from "lucide-react";
-import type { Automations, Read, Row, RowKind } from "../../../gen/workflows__automations.ts";
+// spec/workflows/automations.md, "Story: See all my automations even when one source fails"; spec/workflows/automations.md, "Story: Change an automation once, even when the answer is lost"; spec/workflows/automations.md, "A filter by type and status narrows the rows shown, never a source's note"; spec/workflows/vocabulary.md, "An automation status Alpha has no word for reads as Unknown, and a snoozed item shows no word"
+import { AlertTriangle, Bell, CalendarClock, ListFilter, MessageSquareText, Repeat, Workflow } from "lucide-react";
+import { useState } from "react";
+import { type Automations, type Read, type Row, type RowKind, type StatusFilter, type TypeFilter, rowPasses } from "../../../gen/workflows__automations.ts";
 import { statusWord } from "../../../gen/workflows__vocabulary.ts";
-import { Alert, Button, EmptyState, ListRow, Spinner } from "../components/ui/index.ts";
+import { Alert, Button, EmptyState, ListRow, RadioGroup, RadioGroupItem, Sheet, SheetContent, Spinner } from "../components/ui/index.ts";
 import { outcomeUnknown, scheduleText, scheduledTitle, statusText } from "./words.ts";
 
 /** The Workflows list as the Automations machine holds it, and what it offers. */
@@ -20,6 +21,17 @@ export interface AutomationListProps {
 const icons: Record<RowKind, typeof Workflow> = { WorkflowRow: Workflow, PromptRow: MessageSquareText, ScheduleRow: CalendarClock, ReminderRow: Bell, RoutineRow: Repeat };
 
 const sourceNames = { automations: "Automations", schedules: "Scheduled items and reminders", routines: "Routines" } as const;
+
+const typeNames: ReadonlyArray<readonly [TypeFilter, string]> = [
+  ["AllTypes", "All types"], ["ReminderType", "Reminders"], ["PromptType", "Prompts"], ["WorkflowType", "Workflows"], ["ScheduleType", "Schedules"],
+];
+const statusNames: ReadonlyArray<readonly [StatusFilter, string]> = [["AnyStatus", "All"], ["ActiveOnly", "Active"], ["InactiveOnly", "Inactive"]];
+
+/** The filter as the list names it: "All workflows", "Workflows · Active". */
+export function filterLabel(type: TypeFilter, status: StatusFilter): string {
+  const name = type === "AllTypes" ? "All workflows" : typeNames.find(([key]) => key === type)?.[1] ?? "";
+  return status === "AnyStatus" ? name : `${name} · ${statusNames.find(([key]) => key === status)?.[1] ?? ""}`;
+}
 
 function note(name: string, read: Read): string | undefined {
   switch (read) {
@@ -41,13 +53,17 @@ function title(row: Row): string {
  * @design design.md
  */
 export function AutomationList({ list, waiting = [], canAllowAnother, onOpen, onAllowAnother }: AutomationListProps) {
+  // spec/workflows/automations.md: the filter is presentation only; its choices apply together on Done, and closing changes nothing.
+  const [filter, setFilter] = useState<{ type: TypeFilter; status: StatusFilter }>({ type: "AllTypes", status: "AnyStatus" });
+  const [choosing, setChoosing] = useState<{ type: TypeFilter; status: StatusFilter } | undefined>(undefined);
   const notes = [
     note(sourceNames.automations, list.automations), note(sourceNames.schedules, list.schedules),
     note(sourceNames.routines, list.routines),
     list.partial ? "Some workflow data or run history couldn’t refresh. Open the workflow to check it before running." : undefined,
   ].filter((text): text is string => text !== undefined);
   const held = list.held.find((h) => h.owner === list.owner);
-  const rows = [...list.rows].sort((a, b) => Number(b.enabled) - Number(a.enabled) || title(a).localeCompare(title(b)));
+  const all = [...list.rows];
+  const rows = all.filter((row) => rowPasses(row.kind, row.enabled, filter.type, filter.status)).sort((a, b) => Number(b.enabled) - Number(a.enabled) || title(a).localeCompare(title(b)));
   const loading = list.automations === "NotRead" && rows.length === 0;
   return (
     <section aria-label="Workflows" className="flex flex-col gap-3">
@@ -60,8 +76,35 @@ export function AutomationList({ list, waiting = [], canAllowAnother, onOpen, on
           <Button variant="outline" size="sm" disabled={!canAllowAnother} onClick={onAllowAnother}>Allow another</Button>
         </Alert>
       )}
-      {loading ? <Spinner label="Loading workflows" /> : rows.length === 0 && notes.length === 0 ? (
+      {!loading && all.length > 0 && (
+        <div className="flex items-center justify-between gap-2 px-4">
+          <span className="text-sm text-muted-foreground">{filterLabel(filter.type, filter.status)}</span>
+          <Button variant="outline" size="sm" className="min-h-12" onClick={() => setChoosing(filter)}><ListFilter aria-hidden className="size-4" />Filter</Button>
+        </div>
+      )}
+      <Sheet open={choosing !== undefined} onOpenChange={(open) => { if (!open) setChoosing(undefined); }}>
+        <SheetContent side="bottom" title="Filter workflows">
+          {choosing !== undefined && (
+            <div className="flex flex-col gap-4 pb-4">
+              <RadioGroup aria-label="Type" value={choosing.type} onValueChange={(value) => setChoosing({ ...choosing, type: value as TypeFilter })}>
+                {typeNames.map(([value, label]) => (
+                  <label key={value} className="flex min-h-12 items-center gap-3 text-sm"><RadioGroupItem value={value} />{label}</label>
+                ))}
+              </RadioGroup>
+              <RadioGroup aria-label="Status" value={choosing.status} onValueChange={(value) => setChoosing({ ...choosing, status: value as StatusFilter })}>
+                {statusNames.map(([value, label]) => (
+                  <label key={value} className="flex min-h-12 items-center gap-3 text-sm"><RadioGroupItem value={value} />{label}</label>
+                ))}
+              </RadioGroup>
+              <Button size="lg" onClick={() => { setFilter(choosing); setChoosing(undefined); }}>Done</Button>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
+      {loading ? <Spinner label="Loading workflows" /> : all.length === 0 && notes.length === 0 ? (
         <EmptyState title="No workflows yet" icon={<Workflow aria-hidden />} />
+      ) : rows.length === 0 && all.length > 0 ? (
+        <EmptyState title="Nothing matches this filter" icon={<ListFilter aria-hidden />} />
       ) : (
         <ul className="flex flex-col">
           {rows.map((row) => {

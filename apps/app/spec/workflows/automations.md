@@ -101,6 +101,45 @@ pure def bindOwner(a: Automations, owner: str): Automations =
 pure def sometimesSecondOwnerListed(a: Automations): bool = a.owner == "ben" and a.rows.length() > 0 and a.held.length() >= 1
 ```
 
+### A filter by type and status narrows the rows shown, never a source's note
+
+The list offers a filter: a type (All, Reminders, Prompts, Workflows, Schedules) and a status (All,
+Active, Inactive), applied together and named on the list ("Workflows · Active"). It is presentation
+only: it changes no record, closing it without applying changes nothing, and a source's note stays
+whatever the filter (legacy `workflow-filters.ts`, `rowPasses`). Active is a row that is on; a
+routine is listed only under All.
+
+```quint
+type TypeFilter = AllTypes | ReminderType | PromptType | WorkflowType | ScheduleType
+type StatusFilter = AnyStatus | ActiveOnly | InactiveOnly
+pure def typePasses(kind: RowKind, typeFilter: TypeFilter): bool = match typeFilter {
+  | AllTypes => true
+  | ReminderType => kind == ReminderRow
+  | PromptType => kind == PromptRow
+  | WorkflowType => kind == WorkflowRow
+  | ScheduleType => kind == ScheduleRow
+}
+pure def statusPasses(rowOn: bool, statusFilter: StatusFilter): bool = match statusFilter {
+  | AnyStatus => true
+  | ActiveOnly => rowOn
+  | InactiveOnly => not(rowOn)
+}
+pure def rowPasses(kind: RowKind, rowOn: bool, typeFilter: TypeFilter, statusFilter: StatusFilter): bool =
+  typePasses(kind, typeFilter) and statusPasses(rowOn, statusFilter)
+pure def noteShown(read: Read, typeFilter: TypeFilter, statusFilter: StatusFilter): bool =
+  read == NotOnAgent or read == NeedsOwner or read == RefreshFailed
+pure val rowKindValues = Set(WorkflowRow, PromptRow, ScheduleRow, ReminderRow, RoutineRow)
+pure val rowOnValues = Set(true, false)
+pure val sourceReadValues = Set(NotRead, Listed, NotOnAgent, NeedsOwner, RefreshFailed)
+pure val typeFilterValues = Set(AllTypes, ReminderType, PromptType, WorkflowType, ScheduleType)
+pure val statusFilterValues = Set(AnyStatus, ActiveOnly, InactiveOnly)
+pure def lawAllAndAllPassesEveryRow(rowKind: RowKind, rowOn: bool): bool = rowPasses(rowKind, rowOn, AllTypes, AnyStatus)
+pure def lawAFilterNeverRemovesASourceNote(sourceRead: Read, typeFilter: TypeFilter, statusFilter: StatusFilter): bool =
+  noteShown(sourceRead, typeFilter, statusFilter) == noteShown(sourceRead, AllTypes, AnyStatus)
+pure def lawARoutineIsListedOnlyUnderAllTypes(rowOn: bool, typeFilter: TypeFilter, statusFilter: StatusFilter): bool =
+  rowPasses(RoutineRow, rowOn, typeFilter, statusFilter) implies typeFilter == AllTypes
+```
+
 ## Story: Change an automation once, even when the answer is lost
 
 > As the owner, I turn an automation on or off, delete it, run it or answer a scheduled item, and I
