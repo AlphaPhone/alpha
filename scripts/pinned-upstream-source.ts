@@ -18,6 +18,8 @@ export const GENERATED_UPSTREAM_DIRECTORIES = [
  */
 export const GENERATED_UPSTREAM_FILES = [
 	".turbo/turbo-build.log", ".turbo/turbo-gen.log", "packages/os/android/browser-surface/resources/control-channel.js",
+	// The SDK image contract tests in Android CI write this manifest before APK source admission.
+	"packages/os/.cache/generated/tests/manifest.json",
 ];
 
 /** Authenticate vendor bytes at the pinned commit before resolving or compiling consumer source. */
