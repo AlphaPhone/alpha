@@ -100,13 +100,13 @@ effect function asked<A>(call: (client: CloudClient, signal: AbortSignal, covera
   const before = try connection.get()
   if (!mayRequest(before, now)) throw new Unanswered({ cause: "Maps is not available now" })
   const { client } = try Cloud
-  const sent: A!Unanswered = tryPromise({ try: (signal) => call(client, signal, before.coverage), catch: (cause) => new Unanswered({ cause }) })
+  const sent: { value: A }!Unanswered = tryPromise({ try: (signal) => call(client, signal, before.coverage).then((value) => ({ value })), catch: (cause) => new Unanswered({ cause }) })
   const got = try (sent catch effect (failure) => {
     try paused(failure.cause, before.generation)
     throw failure
   })
   if (!mayReturn(try connection.get(), before.generation, before.account, false)) throw new Unanswered({ cause: "the account or the provider changed" })
-  return { answer: got, coverage: before.coverage }
+  return { answer: got.value, coverage: before.coverage }
 }
 
 /** Where the screen ranks a search around: the phone's last position, when it has one. */

@@ -136,7 +136,7 @@ export function Maps({ runtime }: MapsProps) {
             <ListGroup heading="Results">
               {state.results.map((place) => (
                 <ListRow key={place.ref} asChild title={place.name} detail={place.category || coordinates(place)} leading={<MapPin />}>
-                  <button type="button" onClick={() => void send({ type: "pick", choice: "ResultChoice", point: place }, owner)} />
+                  <button type="button" aria-label={place.name} onClick={() => void send({ type: "pick", choice: "ResultChoice", point: place }, owner)} />
                 </ListRow>
               ))}
             </ListGroup>
@@ -148,7 +148,7 @@ export function Maps({ runtime }: MapsProps) {
         <ListGroup heading="Recent">
           {state.recent.map((recent) => (
             <ListRow key={recent.key} asChild title={recent.text}>
-              <button type="button" onClick={() => { void send({ type: "typeQuery", text: recent.text, now: untimed }, owner).then(() => send({ type: "submitSearch", len: recent.text.length, key: recent.key }, owner)); }} />
+              <button type="button" aria-label={recent.text} onClick={() => { void send({ type: "typeQuery", text: recent.text, now: untimed }, owner).then(() => send({ type: "submitSearch", len: recent.text.length, key: recent.key }, owner)); }} />
             </ListRow>
           ))}
         </ListGroup>
@@ -160,7 +160,7 @@ export function Maps({ runtime }: MapsProps) {
             const point = { ...noPlace, ref: item.ref, name: item.label, lat: item.lat, lng: item.lng, kind: item.provider === "OpenProvider" ? "OpenProvider" : item.provider === "" ? "NoProvider" : "GoogleProvider" } as const;
             return (
               <ListRow key={item.id} asChild title={item.label} leading={<Star />}>
-                <button type="button" onClick={() => void send({ type: "pick", choice: "SavedChoice", point }, owner)} />
+                <button type="button" aria-label={item.label} onClick={() => void send({ type: "pick", choice: "SavedChoice", point }, owner)} />
               </ListRow>
             );
           })}
@@ -205,7 +205,7 @@ export function Maps({ runtime }: MapsProps) {
             <ListGroup heading="Start from">
               {state.candidates.map((place) => (
                 <ListRow key={place.ref} asChild title={place.name} detail={coordinates(place)}>
-                  <button type="button" onClick={() => void send({ type: "chooseOrigin", kind: "ChosenOrigin", point: place }, owner)} />
+                  <button type="button" aria-label={place.name} onClick={() => void send({ type: "chooseOrigin", kind: "ChosenOrigin", point: place }, owner)} />
                 </ListRow>
               ))}
             </ListGroup>
@@ -230,7 +230,7 @@ export function Maps({ runtime }: MapsProps) {
             <ListGroup heading="Routes">
               {state.routes.map((route, index) => (
                 <ListRow key={routeName(index)} asChild selected={index === state.chosen} title={`${routeName(index)}, ${minutes(route.seconds)}`} detail={distance(route.meters)}>
-                  <button type="button" aria-pressed={index === state.chosen} onClick={() => { if (can({ type: "chooseRoute", index }, owner)) void send({ type: "chooseRoute", index }, owner); }} />
+                  <button type="button" aria-label={routeName(index)} aria-pressed={index === state.chosen} onClick={() => { if (can({ type: "chooseRoute", index }, owner)) void send({ type: "chooseRoute", index }, owner); }} />
                 </ListRow>
               ))}
             </ListGroup>

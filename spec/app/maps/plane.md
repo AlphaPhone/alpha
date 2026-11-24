@@ -6,9 +6,9 @@ of a plane belongs to the generation it was built under; a plane that was
 retired reports nothing. Google content is drawn only on the Google raster
 served through Cloud, never on the world map, and with no raster the screen
 says the Google map is missing. On a Google map the Google Maps badge is the
-only credit; tapping it opens the full copyright of the view, who receives
-searches and route points, and entering coordinates. Other maps keep their
-credit links and an information button.
+only credit; tapping it opens the full copyright of the view and who
+receives searches and route points, with no prompt for coordinates. Other
+maps keep their credit links and an information button.
 
 ## Story: See the map for what I am looking at
 
