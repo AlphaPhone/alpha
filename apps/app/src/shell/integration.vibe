@@ -11,11 +11,9 @@ import { Conversations } from "../assistant/conversations.vibe"
 import { DeviceFacts } from "../settings/facts.vibe"
 import { CallWatch } from "../telephony/call-bar.vibe"
 import { active } from "../../gen/voice__conversation.effect.vibe"
-import { talking as chatOpen } from "../../gen/shell__navigation.effect.vibe"
 import { busy, holdsClip } from "../../gen/voice__dictation.effect.vibe"
 import { Dictation } from "../voice/dictation.vibe"
 import { VoiceConversation } from "../voice/conversation.vibe"
-import type { TalkReview } from "../voice/talk-text.vibe"
 import { executorsLive } from "./compose/executors.vibe"
 import { fillsLive, idleFill } from "./compose/fills.vibe"
 import { Foreground } from "./foreground.vibe"
@@ -23,6 +21,7 @@ import { handoffsLive } from "./handoffs.vibe"
 import { Navigation } from "./navigation.vibe"
 import { Overview } from "./overview.vibe"
 import { pageEvents, pageHidden } from "./page.ts"
+import { talkReview } from "./talk-review.vibe"
 
 /**
  * What the other areas follow of the shell: the foreground, HOME, covering screens, voice leaving and returning, the assistant's
@@ -46,19 +45,6 @@ export const integrationLive = Layer.effectDiscard(effect {
   const reminders = try Reminders
   const listing = try RemindersMachine
 
-  // spec/voice/conversation.md, "Story: Send a text I reviewed by saying so": a spoken turn's cards join the chat it went to, and
-  // the one text card Talk bound is shown only while the open chat shows that conversation on a visible page.
-  function talkReview(conversation: string): TalkReview {
-    return {
-      replied: (messageId: string, words: string) => composer.talkReplied(conversation, messageId, words),
-      shown: (proposalId: string) => effect {
-        const nav = try navigation.get()
-        return !nav.hidden && chatOpen(nav) && (try composer.talkTextShown(conversation, proposalId))
-      },
-      send: (proposalId: string) => composer.talkSend(proposalId),
-    }
-  }
-
   effect function invocation() {
     const nav = try navigation.get()
     const front = try foreground.get()
@@ -77,7 +63,7 @@ export const integrationLive = Layer.effectDiscard(effect {
       chatCurrent: () => true,
       context: () => composer.turnContext(),
       outOfFunds: () => composer.talkOutOfFunds(latest?.id ?? ""),
-      review: talkReview(latest?.id ?? ""),
+      review: talkReview(latest?.id ?? "", composer, navigation),
     }
     if (try voice.startFromInvocation(screen, start)) try navigation.send({ type: "startVoice" })
   }
@@ -100,7 +86,7 @@ export const integrationLive = Layer.effectDiscard(effect {
       chatCurrent: () => chatNow === started,
       context: () => composer.turnContext(),
       outOfFunds: () => composer.talkOutOfFunds(started),
-      review: talkReview(started),
+      review: talkReview(started, composer, navigation),
     }
     try voice.start(start)
     if ((try voice.get()).shown === "Starting") try navigation.send({ type: "startVoice" })

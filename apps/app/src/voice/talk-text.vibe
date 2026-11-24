@@ -1,14 +1,19 @@
 // spec/voice/conversation.md, "Story: Send a text I reviewed by saying so"; spec/voice/conversation.md, "A reply that needs review stops voice with the microphone off and says it waits in the chat"; spec/voice/conversation.md, "A reply whose only card is one addressed text keeps voice listening and says the text is ready"; spec/voice/conversation.md, "Saying the send phrase sends the bound card once, as its Send tap does, only as the next thing said and only while it is still the one live text shown in that conversation"
 import { Machine } from "../../gen/voice__conversation.effect.vibe"
-import { NO_TEXT_READY, sendPhraseOf } from "./spoken-text.ts"
+import { NO_TEXT_READY, TEXT_NOT_SENT, sendPhraseOf } from "./spoken-text.ts"
 
 /** What the chat a voice conversation speaks into does with a spoken turn's cards. */
 export interface TalkReview {
-  /** The turn was answered as `messageId`: its cards join the chat; `text` is the one addressed text card it left, when it left no other. */
+  /**
+   * The turn was answered as `messageId`: its cards join the chat. `text` is the one addressed text card that answers this turn
+   * when the reply left no other card and the owner can see it in the open chat now.
+   */
   replied(messageId: string, words: string): { readonly cards: number; readonly text?: string }!!
-  /** Whether that card is still the one live addressed text card in this conversation's open, visible chat, under the screen it was drawn for. */
+  /** Talk bound that card: it waits for the owner's next words. */
+  bind(proposalId: string): void!!
+  /** Whether that card is still the bound, one live addressed text card in this conversation's open, visible chat, with no approval of it under way. */
   shown(proposalId: string): boolean!!
-  /** Send it as its Send tap does: its receipt sentence, or undefined when it was not sent. */
+  /** Send it as its Send tap does: its receipt sentence, or undefined when the approval did not finish. */
   send(proposalId: string): (string | undefined)!!
 }
 
@@ -32,12 +37,17 @@ export function talkText(held: Machine.Shape, review: TalkReview | undefined): T
       const binding = bound
       bound = undefined
       const before = try held.get()
-      const shown = phrase !== "NotSend" && binding !== undefined && review !== undefined && binding.starts === before.starts && (try review.shown(binding.proposalId))
+      const asked = phrase !== "NotSend" && binding !== undefined && review !== undefined && binding.starts === before.starts
+      // A check that died counts as not shown: nothing is sent, and the turn is still answered here.
+      const seen = asked && binding !== undefined && review !== undefined ? (try exit(review.shown(binding.proposalId))) : undefined
+      const shown = seen !== undefined && Exit.isSuccess(seen) && seen.value
       const after = held.send({ type: "spokenTurn", sendPhrase: phrase !== "NotSend", cardShown: shown }) catch () => undefined
       if (phrase === "NotSend" || (phrase === "Send" && binding === undefined)) return undefined
       const sent = binding !== undefined && review !== undefined && after !== undefined && after.spokenSends > before.spokenSends
-      const said = sent ? (try review.send(binding.proposalId)) : undefined
-      return said ?? NO_TEXT_READY
+      if (!sent) return NO_TEXT_READY
+      // The card was shown and its approval ran: one that did not finish is never called missing, and a failure is answered here.
+      const done = try exit(review.send(binding.proposalId))
+      return (Exit.isSuccess(done) ? done.value : undefined) ?? TEXT_NOT_SENT
     },
     replied: (messageId: string | undefined, ranActions: boolean, words: string) => effect {
       if (review === undefined || messageId === undefined || !ranActions) return "NoCards" as const
@@ -45,6 +55,7 @@ export function talkText(held: Machine.Shape, review: TalkReview | undefined): T
       if (offer.text !== undefined) {
         const after = held.send({ type: "textOffered" }) catch () => undefined
         if (after !== undefined) {
+          try review.bind(offer.text)
           bound = { proposalId: offer.text, starts: after.starts }
           return "TextBound" as const
         }

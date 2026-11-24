@@ -260,8 +260,10 @@ export function spokenLineOf(text: string, action: ReplyAction): string {
 
 /** Said for a reply whose only card is one addressed text; it never names the phrase, which would make the owner's next words look like its echo. */
 export const TEXT_READY = "The message is ready for review.";
-/** Said when the owner asked to send a text and none was sent. */
+/** Said when the owner asked to send a text and no text card was bound and shown. */
 export const NO_TEXT_READY = "There is no text ready to send.";
+/** Said when the bound, shown text card's approval did not finish: a text exists, so it is never called missing. */
+export const TEXT_NOT_SENT = "Check Messages before trying to send again.";
 
 /** What a spoken turn asks of a bound text: nothing, to send it ("Send it"), or to send the text or message it names ("Send this text"). */
 export type SendPhrase = "NotSend" | "Send" | "SendText";

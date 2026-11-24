@@ -238,13 +238,17 @@ pure def sometimesWaitingForReview(c: Conversation): bool = c.shown == AwaitingR
 
 A text card is addressed when it sends to the number or numbers it shows (`sms_send`, or an
 `sms_compose` to a number that is not a draft); one to a contact name still has its recipient
-chosen on the phone and is never sent by voice. Every text card shows, and reads its button Send,
-whether "Ask before Alpha acts" is on or off (a text is always reviewed, `spec/assistant/review.md`).
-When a spoken turn's reply leaves that one card in the chat and no other, voice keeps
-listening, the conversation binds the card, and the reply is said as "The message is ready for
-review." in place of the agent's words, which never name the phrase: a reply that said "Send this
-text" would make the owner's next words look like its own echo. While the card is bound it says
-"Say “Send this text” to send it." under the text, in the chat, never by the composer.
+chosen on the phone and is never sent by voice. Every text card shows whether "Ask before Alpha
+acts" is on or off (a text is always reviewed, `spec/assistant/review.md`), and every addressed
+text card reads its button Send. When a spoken turn's reply leaves one addressed text card that
+answers that turn and no other card, and the owner can see it as the reply settles (the chat is
+open on that conversation, on a visible, non-private page with no layer over it and nothing
+holding the phone, and it is the only live addressed text card there), voice keeps listening,
+the conversation binds the card, and the reply is said as "The message is ready for review." in
+place of the agent's words, which never name the phrase: a reply that said "Send this text"
+would make the owner's next words look like its own echo. Any other card, or that card where
+the owner cannot see it, needs review as the story above says. The card adds no words of its
+own for voice.
 
 ```quint
 pure def canTextOffered(c: Conversation): bool = c.shown == Listening or c.shown == Thinking or c.shown == Speaking
@@ -260,10 +264,13 @@ whole turn is the phrase ("Send this text", "Send this message", "Send this" or 
 optionally after "OK", "yes", "um" or "hmm" and with "please", "I want to", "I'd like to" or
 "let's" before "send") and the bound card is, as it is said, of the same Talk, in the
 conversation the chat shows, still live and unexpired under the screen it was drawn for (a
-changed screen replaces it), and the only live addressed text card in that open chat on a
-visible, non-private screen. The send is the card's own approval (`spec/assistant/approvals.md`),
+changed screen replaces it), the only live addressed text card in that open chat on a
+visible, non-private screen with no layer over it and nothing holding the phone, and no
+approval of it is under way. The send is the card's own approval (`spec/assistant/approvals.md`),
 with every check a tap has, and Alpha says its receipt. The phrase is answered on the phone and
-never reaches the agent: when it sends nothing it says "There is no text ready to send." A
+never reaches the agent: when no card was bound and shown it says "There is no text ready to
+send.", and when the approval did not finish it says "Check Messages before trying to send
+again." A
 "Send it" or "Send this" with no card bound, and any other words, go to the agent as an ordinary
 turn, and a bound card still waits for a tap. A tap on Send works throughout, and a card sent by
 tap or by voice is never sent again.

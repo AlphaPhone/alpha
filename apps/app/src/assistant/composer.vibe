@@ -64,13 +64,18 @@ export service Composer {
   talkOutOfFunds(conversation: string): void!!
   /**
    * A spoken turn of the voice conversation in `conversation` was answered as `messageId`: while that chat is shown, the message is
-   * reviewed as a typed one is and its cards, receipts and notices join it. `text` is the card Talk binds when the reply left only
-   * that one addressed text card.
+   * reviewed as a typed one is and its cards, receipts and notices join it. `text` is the card Talk may bind: the reply left only
+   * that one addressed text card, it answers this message, and it is now the one live addressed text card of the transcript.
    */
   talkReplied(conversation: string, messageId: string, words: string): { readonly cards: number; readonly text?: string }!!
-  /** Whether `proposalId` is the card Talk bound and still the one live addressed text card shown in `conversation`, on a screen Alpha may act on. */
+  /** Talk bound `proposalId`, the text card it may send when the owner says so. */
+  talkBind(proposalId: string): void!!
+  /**
+   * Whether `proposalId` is the card Talk bound and still the one live addressed text card shown in `conversation`, on a screen
+   * Alpha may act on, with no approval of it under way.
+   */
   talkTextShown(conversation: string, proposalId: string): boolean!!
-  /** Send the text card Talk bound, as its Send tap does; the receipt sentence, or undefined when it was not sent. */
+  /** Send the text card Talk bound, as its Send tap does; the receipt sentence, or undefined when its approval did not finish. */
   talkSend(proposalId: string): (string | undefined)!!
   /** Talk let go of the text card it bound. */
   talkReleased(): void!!
@@ -631,7 +636,7 @@ export const composerLayer = Layer.effect(Composer, effect {
       if ((try host.identity()) === undefined || !(try talkShown(conversation))) return none
       const pass = try directly(messageId, words, spokenLinks)
       if (!(try talkShown(conversation))) return none
-      const only = pass.cards.length === 1 && pass.cards[0].addressedText === true ? pass.cards[0].proposalId : undefined
+      const one = pass.cards.length === 1 && pass.cards[0].addressedText === true && (pass.answering ?? []).includes(pass.cards[0].proposalId) ? pass.cards[0].proposalId : undefined
       // A card a listing already drew is redrawn where it is, never shown twice.
       const drawn = new Map<string, ProposalCard>(pass.cards.map((card) => [`card:${card.proposalId}`, card]))
       try rows((list) => [
@@ -640,21 +645,25 @@ export const composerLayer = Layer.effect(Composer, effect {
         ...pass.receipts.flatMap((done): Row[] => done.receipt === undefined ? [] : [{ kind: "receipt", id: `device-receipt:${done.card.proposalId}`, proposalId: done.card.proposalId, title: done.receipt.title, summary: done.receipt.summary }]),
         ...pass.cards.filter((card) => !list.some((row) => row.id === `card:${card.proposalId}`)).map((card): Row => ({ kind: "card", id: `card:${card.proposalId}`, card })),
       ])
-      try SubscriptionRef.update(transcript, (t) => ({ ...t, voiceText: only }))
       try watch(pass.cards)
+      // An older live text card in the chat would make "Send this text" ambiguous: then this one waits for a tap like any other.
+      const now = try Clock.currentTimeMillis
+      const only = one !== undefined && spokenTextCard((try SubscriptionRef.get(transcript)).rows, now)?.proposalId === one ? one : undefined
       return only === undefined ? { cards: pass.cards.length } : { cards: pass.cards.length, text: only }
     },
+    talkBind: (proposalId: string) => SubscriptionRef.update(transcript, (t) => ({ ...t, voiceText: proposalId })),
     talkTextShown: (conversation: string, proposalId: string) => effect {
       if (!(try talkShown(conversation))) return false
       const t = try SubscriptionRef.get(transcript)
       const now = try Clock.currentTimeMillis
-      return t.voiceText === proposalId && spokenTextCard(t.rows, now)?.proposalId === proposalId
+      return t.voiceText === proposalId && spokenTextCard(t.rows, now)?.proposalId === proposalId && (try review.tappable(proposalId))
     },
+    // Talk checked the card was bound and shown as the owner said the phrase; the binding may already be let go by now.
     talkSend: (proposalId: string) => effect {
       const t = try SubscriptionRef.get(transcript)
-      try SubscriptionRef.update(transcript, (now) => ({ ...now, voiceText: undefined }))
+      try SubscriptionRef.update(transcript, (now) => now.voiceText === undefined ? now : { ...now, voiceText: undefined })
       const row = t.rows.find((each) => each.kind === "card" && each.card.proposalId === proposalId)
-      if (row === undefined || row.kind !== "card" || t.voiceText !== proposalId) return undefined
+      if (row === undefined || row.kind !== "card") return undefined
       const done = try review.approve(row.card)
       try rows((list) => list.map((each) => each.id === row.id ? { ...row, card: done.card } : each))
       return done.receipt?.summary
