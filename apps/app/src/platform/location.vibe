@@ -3,17 +3,17 @@ import type { LocationResult, LocationPermissionStatus } from "@elizaos/os/bridg
 
 module held {
   import { type LocationClient, locationClient } from "@elizaos/os/bridges/location"
-  import { systemClient } from "@elizaos/os/bridges/system"
+  import type { SystemClient } from "@elizaos/os/bridges/system"
 
   let made: LocationClient | undefined
-  let system: ReturnType<typeof systemClient> | undefined
+  let system: Promise<SystemClient> | undefined
   /** eliza's client of the phone's `ElizaLocation` plugin, made once: Capacitor registers a plugin a single time. @throws {never} */
   export function client(): LocationClient {
     return (made ??= locationClient())
   }
-  /** eliza's client of the phone's `ElizaSystem` plugin, made once. @throws {never} */
-  export function settings(): ReturnType<typeof systemClient> {
-    return (system ??= systemClient())
+  /** eliza's client of the phone's `ElizaSystem` plugin, loaded at first use so Capacitor binds it after the host registers its plugins. @throws {never} */
+  export function settings(): Promise<SystemClient> {
+    return (system ??= import("@elizaos/os/bridges/system").then((bridge) => bridge.systemClient()))
   }
 }
 import { client, settings } from held
@@ -90,7 +90,7 @@ export const phoneLocation = Layer.sync(Location, () => {
         ? Option.some<Sighting>({ lat: Math.round(read.coords.latitude * 1e6), lng: Math.round(read.coords.longitude * 1e6), accuracy: Math.round(read.coords.accuracy), precise: false, taken: read.coords.timestamp })
         : Option.none<Sighting>()))
       |> Effect.orElseSucceed(%, () => Option.none<Sighting>()),
-    openSettings: () => tryPromise(() => settings().openSettingsPage({ page: "location" })) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false),
+    openSettings: () => tryPromise(() => settings().then((sys) => sys.openSettingsPage({ page: "location" }))) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false),
   }
 })
 

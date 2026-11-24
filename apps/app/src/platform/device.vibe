@@ -21,7 +21,9 @@ module web {
 
   /** Whether the phone's host registered `plugin` in this build. @throws {never} */
   export function registered(plugin: string): boolean {
-    return Capacitor.isNativePlatform() && Capacitor.isPluginAvailable(plugin)
+    if (!Capacitor.isNativePlatform()) return false
+    const headers = (globalThis as { Capacitor?: { PluginHeaders?: ReadonlyArray<{ readonly name: string }> } }).Capacitor?.PluginHeaders
+    return headers !== undefined ? headers.some((one) => one.name === plugin) : Capacitor.isPluginAvailable(plugin)
   }
   /** Whether the page runs inside the phone's host. @throws {never} */
   export function native(): boolean {

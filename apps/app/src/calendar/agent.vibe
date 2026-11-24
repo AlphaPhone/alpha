@@ -29,7 +29,7 @@ schema Listed {
 }
 
 /** The agent's approvals list, as far as Calendar reads it: its rows, untrusted, which `requestOf` reads. */
-schema Approvals { readonly approvals: ReadonlyArray<unknown> }
+const Approvals = Schema.Struct({ approvals: Schema.Array(Schema.Unknown) })
 
 /** How the agent ended a decision, as its approvals route answers. */
 schema Resolved { readonly kind: string }

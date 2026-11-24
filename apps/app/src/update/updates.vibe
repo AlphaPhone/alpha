@@ -1,6 +1,6 @@
 // spec/app/update/index.md, "Story: Read the update channel"; spec/app/update/index.md, "Story: Check for updates"; spec/app/update/index.md, "Story: Install an update"; spec/app/update/index.md, "Story: Start again where Alpha left off"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { Machine as Bar } from "../../gen/app__telephony__callBar.effect.vibe"
+import { Machine as Bar } from "../../gen/app__phone__call.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import * as Updates from "../../gen/app__update.effect.vibe"

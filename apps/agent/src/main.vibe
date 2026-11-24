@@ -171,7 +171,7 @@ effect function build(name: string) {
   const hosted = hostedPlugins.map((name) => ({ name, module: hostedExports[name] ?? "" }))
   const unbuilt = hosted.filter(({ module }) => module === "")
   if (unbuilt.length > 0) throw new Refused({ reason: `no module export is known for ${unbuilt.map(({ name }) => name).join(", ")}` })
-  const pack = try pinnedPack(packedPlugins, entrySource(bundledPlugins, hosted)) catch effect (cause) => {
+  const pack = pinnedPack(packedPlugins, entrySource(bundledPlugins, hosted)) catch effect (cause) => {
     throw new Refused({ reason: `the pack's clone of the pinned eliza could not be prepared: ${cause.reason}` })
   }
   const builder = try tryPromise({ try: () => builderOf(pack.dir), catch: () => new Refused({ reason: `${pack.dir} holds no built bundle builder` }) })

@@ -2,7 +2,6 @@
 import type { GoogleStatus } from "@elizaos/cloud/client"
 import * as Link from "../../gen/app__calendar__link.effect.vibe"
 import type { Effect as Out, Event, Grant, LinksRead, Planned } from "../../gen/app__calendar__link.effect.vibe"
-import { grantOf } from "../../gen/app__calendar__link.ts"
 import * as View from "../../gen/app__calendar.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
@@ -33,7 +32,7 @@ schema Mappings { readonly links: ReadonlyArray<{ readonly destination: Destinat
 
 const same = (a: Destination, b: Destination) => a.connectorAccountId === b.connectorAccountId && a.providerCalendarId === b.providerCalendarId
 
-/** A dispatch the agent has pending, as the number the rules compare: 0 is none. @throws {never} */
+/** A dispatch the agent has pending, as the number the rules compare: 0 is none. */
 function dispatchNumber(pending: Control["pendingDispatch"]): number {
   if (pending === null) return 0
   const name = pending.reference ?? pending.linkId
@@ -47,7 +46,7 @@ effect function googleNow(): { readonly grant: Grant; readonly email: string }!u
   const { client } = try Cloud
   const status: GoogleStatus = try tryPromise({ try: () => client.googleStatus(), catch: (cause) => cause })
   const has = (capability: GoogleStatus["grantedCapabilities"][number]) => status.connected && status.grantedCapabilities.includes(capability)
-  return { grant: grantOf(has("google.calendar.read"), has("google.calendar.write")), email: (status.identity?.email ?? "").toLowerCase() }
+  return { grant: Link.grantOf(has("google.calendar.read"), has("google.calendar.write")), email: (status.identity?.email ?? "").toLowerCase() }
 }
 
 // spec/app/calendar/link.md, "The account area's read says what Google allows now; a grant that no longer writes stops a setup under way"
@@ -83,7 +82,7 @@ effect function write(ticket: number, planned: Planned, revision: number): Event
   return effect {
     const idempotencyKey = `alpha.calendar.link:${planned}:${revision}`
     const body = planned === "SelectDestination"
-      ? effect {
+      ? try effect {
           const listed = try ask(Agent, HttpClientRequest.get(`${base}/sync-control/destinations`), Destinations)
           const { email } = try googleNow()
           const primary = listed.candidates.filter((candidate) => candidate.primary && email !== "" && (candidate.accountEmail ?? "").toLowerCase() === email)
@@ -143,6 +142,13 @@ const account = started(effect {
   try Stream.runForEach(Stream.changesWith(view.changes, (a, b) => a.google.ticket === b.google.ticket && a.owner === b.owner), (state) =>
     state.owner === 0 ? Effect.void : contained(flatMap(accountRead(), (event) => link.send(event)), "reading what Google allows"))
 }, "reading the Google account for the link")
+
+/** Read what Google allows now and start the link setup. */
+export effect function setUp(): void!!(Cloud | Link.Machine) {
+  const link = try Link.Machine
+  try contained(link.send(try accountRead()), "reading what Google allows")
+  try contained(link.send({ type: "start" }), "starting Google Calendar link setup")
+}
 
 /** The link: in memory, a run at a time, its answers refused once another owner signs in. */
 export const linking = together(reacting(Link, { carry }), calendar, account)

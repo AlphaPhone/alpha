@@ -37,7 +37,7 @@ export function Agenda({ runtime }: { runtime: ManagedRuntime.ManagedRuntime<Mac
   const first = Cards.lead(items, now)[0];
   if (card === "Hidden" || first === undefined) return null;
   const next = first.overdue ? Cards.following(items, now)[0] : undefined;
-  const open = { type: "openCard", kind: "AgendaCard", now: untimed } as const;
+  const open = { type: "openCard", kind: "AgendaCard", now } as const;
   return (
     <HomeAgendaCard
       item={shown(first)}

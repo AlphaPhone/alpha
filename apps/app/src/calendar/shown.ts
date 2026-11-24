@@ -139,9 +139,9 @@ export const shown = {
     const both = [...(phone ? shown.all("Phone") : []), ...(google ? shown.all("Google") : [])];
     return both.filter((row) => rowShown(row.calendar, [...hidden])).sort((a, b) => a.begin - b.begin);
   },
-  /** Forget what `source` read: an account changed or a permission went. @throws {never} */
   /** Whether the last read of `source` said it gave only part of its window. @throws {never} */
   partial: (source: Source): boolean => cut.has(source),
+  /** Forget what `source` read: an account changed or a permission went. @throws {never} */
   drop(source: Source): void {
     windows.delete(source);
     cut.delete(source);

@@ -13,6 +13,7 @@ import type * as Changes from "../../gen/app__calendar__agent.effect.vibe"
 import type * as Linking from "../../gen/app__calendar__link.effect.vibe"
 import type { AndroidCalendarEvent } from "@elizaos/os/bridges/calendar"
 import { Agent } from "../platform/agent.vibe"
+import { Cloud } from "../platform/cloud.vibe"
 import { PhoneCalendar } from "../platform/calendar.vibe"
 import { type Failure, ask } from "../platform/remote.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
@@ -238,4 +239,4 @@ const writing = following(Writes.Machine, (form) => inFlight(form), View.Machine
 export const calendar = together(kept, told, fronted, returned, widened, writing)
 
 /** Every machine of the Calendar area, which its screen reads, and Alpha's time. */
-export type Calendared = View.Machine | Writes.Machine | Changes.Machine | Linking.Machine | Held.Machine | Time | KeyValueStore.KeyValueStore
+export type Calendared = View.Machine | Writes.Machine | Changes.Machine | Linking.Machine | Held.Machine | Cloud | Time | KeyValueStore.KeyValueStore

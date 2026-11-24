@@ -3,7 +3,7 @@ import { CloudError, type GoogleStatus, type MailCard, type MailMessage, type Ma
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type { Failure, Folder, Linked, Mailbox, Selection } from "../../gen/app__inbox.ts"
 import type { Fault } from "../../gen/app__inbox__message.ts"
-import { Cloud } from "../platform/cloud.vibe"
+import { Cloud, type CloudClient } from "../platform/cloud.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 
 module pure {
@@ -270,7 +270,7 @@ function expiredBy(failed: Asked): boolean {
 const refusedBefore: Changed = { done: false, known: true, expired: false }
 
 /** What Gmail is asked to do in one operation, as eliza's cloud client names it. */
-export type Proposal = Parameters<Cloud.Shape["client"]["gmailPrepare"]>[0]["proposal"]
+export type Proposal = Parameters<CloudClient["gmailPrepare"]>[0]["proposal"]
 
 /**
  * Ask Gmail for `proposal` once, as attempt `id` of the machine whose job this is: prepared under the attempt's own

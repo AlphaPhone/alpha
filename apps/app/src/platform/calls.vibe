@@ -1,4 +1,4 @@
-// spec/app/telephony/callBar.md, "Story: See my live call over every view"; spec/app/telephony/callBar.md, "Story: Know when a call may be an emergency call"
+// spec/app/phone/call.md, "Story: See my live call over every view"
 
 module capacitor {
   import { registerPlugin } from "@capacitor/core"

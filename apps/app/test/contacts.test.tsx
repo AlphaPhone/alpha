@@ -106,7 +106,11 @@ describe("Contacts on an Alpha image", () => {
     expect(world.telephony.sent).toEqual([]);
 
     // spec/app/contacts/agent.md, "The owner picks the exact number or the one contact, and that one is shown"
-    await press("Maya Chen");
+    await act(async () => {
+      const found = [...document.querySelectorAll("[role=dialog] button")].find((one) => one.querySelector("span > span")?.textContent === "Maya Chen");
+      if (!(found instanceof HTMLButtonElement)) throw new Error("no button Maya Chen");
+      found.click();
+    });
     await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Shown" && s.number === "+14155550100" && !s.addressed);
 
     // spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call"

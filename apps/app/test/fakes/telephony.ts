@@ -1,4 +1,4 @@
-// spec/app/telephony/common.md, "A provider is read only while its view is in front on an unlocked phone with the grant"
+// spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
 import { createHash } from "node:crypto";
 import type { ActionJournalPlugin } from "@elizaos/os/bridges/definitions/action-journal";
 import type { AddressBookNativePlugin } from "@elizaos/os/bridges/definitions/contacts";
@@ -263,7 +263,9 @@ function contacts(world: TelephonyScene): Faked {
         return Promise.resolve(status());
       },
       list: ({ query, limit }) => {
-        const found = world.people.filter((one) => one.displayName.toLowerCase().includes(query.toLowerCase())).sort((x, y) => Number(x.id) - Number(y.id));
+        const q = query.toLowerCase();
+        const digits = query.replace(/[^\d+]/g, "");
+        const found = world.people.filter((one) => one.displayName.toLowerCase().includes(q) || (digits !== "" && one.phoneNumbers.some((phone) => phone.number.replace(/[^\d+]/g, "").includes(digits)))).sort((x, y) => Number(x.id) - Number(y.id));
         const page = found.slice(0, limit);
         return Promise.resolve({
           contacts: page.map((one) => ({ id: one.id, lookup: `lookup-${one.id}`, name: one.displayName, revision: String(one.revision), starred: false, phones: one.phoneNumbers.map(({ number }) => number), emails: one.emailAddresses.map(({ address }) => address) })),

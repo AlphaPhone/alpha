@@ -40,7 +40,7 @@ it("Move between Home and the apps on an Alpha image, where a screen that throws
   for (const view of ["Files", "Maps"]) {
     await press(view);
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === view);
-    expect(document.querySelector("main > [role=alert]")?.textContent).toBe("This part of Alpha stopped. Go back, and open it again.");
+    expect(document.querySelector("main [role=alert]")?.textContent).toBe("This part of Alpha stopped. Go back, and open it again.");
     // spec/app/shell/index.md, "Back closes one layer: the drawer, then Ask Alpha by a step, then the app on top"
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);

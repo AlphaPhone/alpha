@@ -101,11 +101,16 @@ function relabel(stored: Stored, kind: string) {
 export function inboxRoutes(scene: InboxScene): Route[] {
   const asked = new Map<string, { kind: MailOperation["receipt"]["kind"]; messageId: string }>();
   const lost = () => Promise.reject(new TypeError("offline"));
+  let revokedSeen = false;
   return [
     (request, url) => {
       if (!url.pathname.startsWith(`${google}/`)) return;
       if (scene.offline) return lost();
-      if (scene.revoked && url.pathname !== `${google}/status`) return refused(403, "google_reauth_required");
+      if (!scene.revoked) revokedSeen = false;
+      if (scene.revoked && (url.pathname !== `${google}/status` || revokedSeen)) {
+        revokedSeen = true;
+        return refused(403, "google_reauth_required");
+      }
       return undefined;
     },
     (request, url) => (request.method === "GET" && url.pathname === `${google}/status` ? Response.json(status(scene)) : undefined),

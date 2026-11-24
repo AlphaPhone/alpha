@@ -21,7 +21,7 @@ import { fixShown, managesPlan, showsWait, waitSeconds } from "../../gen/app__as
 import { useMachine as useReply } from "../../gen/app__assistant__reply.react.ts";
 import type { Machine as SearchMachine } from "../../gen/app__assistant__search.effect.vibe";
 import { useMachine as useSearch } from "../../gen/app__assistant__search.react.ts";
-import type { Machine as ShellMachine } from "../../gen/app__shell.effect.vibe";
+import { type Machine as ShellMachine, showing } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { freedom } from "./assistant.vibe";
@@ -153,12 +153,17 @@ export function Assistant({ runtime }: AssistantProps) {
   const failureCard = ({ kind, fix, waitMs }: { kind: Failure; fix: Fix; waitMs: number }, live: boolean) => {
     const act = actionOf(kind, fix);
     const detail = showsWait(kind, waitMs) ? `Try again in about ${about(waitMs)}` : !live && kind === "LimitReached" ? "Wait a moment, then try again" : undefined;
+    const openSettings = shell.can({ type: "openView", view: "Settings" })
+      ? () => void shell.send({ type: "openView", view: "Settings" })
+      : shell.state && showing(shell.state, "Settings")
+        ? () => { if (shell.can({ type: "raise", detent: "Bar" })) void shell.send({ type: "raise", detent: "Bar" }); }
+        : undefined;
     return (
       <AssistantCard
         card={act === undefined || !fixShown(fix, kind)
           ? { kind: "plain", text: detail === undefined ? failures[kind] : `${failures[kind]}. ${detail}` }
           : { kind: "action", action: act, title: failures[kind], ...(detail === undefined ? {} : { detail }), ...(act === "funding" ? { label: "Manage plan" } : {}) }}
-        onAct={act === "retry" ? () => type(board.lastSent) : act !== undefined && shell.can({ type: "openView", view: "Settings" }) ? () => void shell.send({ type: "openView", view: "Settings" }) : undefined}
+        onAct={act === "retry" ? () => type(board.lastSent) : act !== undefined ? openSettings : undefined}
       />
     );
   };

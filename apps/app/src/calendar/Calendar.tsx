@@ -136,11 +136,11 @@ export function Calendar({ runtime }: CalendarProps) {
   const view = useView(runtime);
   const editor = useEditor(runtime);
   const agent = useChanges(runtime);
+  const deleting = useHeld(runtime).state;
   useSyncExternalStore(shown.subscribe, shown.snapshot, shown.snapshot);
   const s = view.state;
   if (!s) return <Spinner />;
   const send = (event: View.Event) => () => void view.send(event);
-  const deleting = useHeld(runtime).state;
   const visible = shown.visible(s.hidden, allows(s.access), s.connected).filter((row) => !deletedNow(deleting, row));
   const dayRows = (day: number) => visible.filter((row) => onDay(row, day));
   const rows = s.layout === "Agenda" ? visible.filter((row) => row.end > dayStart(s.today)) : dayRows(s.anchor);
@@ -183,7 +183,7 @@ export function Calendar({ runtime }: CalendarProps) {
       {s.phone.status === "Failed" || s.google.status === "Failed" ? <Banner variant="warn" action={offer({ type: "refresh" }, "Retry")}>Calendar couldn't read this day.</Banner> : null}
       {statusAction(s.connected, false) === "OfferSettings" ? <Banner action={offer({ type: "openAccountSettings" }, "Settings")}>Not connected: your agent has no Google Calendar.</Banner> : null}
       <Undo runtime={runtime} />
-      {editor.state?.filed ? <Banner role="status">{editor.state.kind === "Reply" ? "Your answer waits for your approval below." : "This change waits for your approval below."}</Banner> : null}
+      {editor.state?.filed ? <Banner>{editor.state.kind === "Reply" ? "Your answer waits for your approval below." : "This change waits for your approval below."}</Banner> : null}
       <Drafts runtime={runtime} day={s.anchor} />
       <GoogleRow runtime={runtime} />
       <Proposal runtime={runtime} />
@@ -567,7 +567,7 @@ function GoogleRow({ runtime }: CalendarProps) {
     <ListGroup heading="Google Calendar" className="mx-4 my-2">
       <ListRow title={running ? "Checking…" : rowWords[Link.rowOf(l)]} detail={said[l.said] || (l.ending === "NoOutcome" ? undefined : endings[l.ending])} />
       <div className="flex flex-wrap gap-2 p-2">
-        {link.can({ type: "start", grant: "Writable" }) ? <Button variant={l.ending === "Synced" ? "outline" : "primary"} onClick={() => void runtime.runPromise(setUp())}>{l.ending === "NoOutcome" ? "Link Google Calendar" : "Check again"}</Button> : null}
+        {link.can({ type: "start" }) ? <Button variant={l.ending === "Synced" ? "outline" : "primary"} onClick={() => void runtime.runPromise(setUp())}>{l.ending === "NoOutcome" ? "Link Google Calendar" : "Check again"}</Button> : null}
         {link.can({ type: "cancel" }) ? <Button variant="ghost" onClick={() => void link.send({ type: "cancel" })}>Cancel</Button> : null}
         {link.can({ type: "pauseAsked" }) && l.ending === "Synced" ? <Button variant="ghost" onClick={() => void link.send({ type: "pauseAsked" })}>Pause sync</Button> : null}
       </div>

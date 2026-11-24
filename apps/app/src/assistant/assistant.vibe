@@ -10,6 +10,7 @@ import * as Reply from "../../gen/app__assistant__reply.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
 import * as Search from "../../gen/app__assistant__search.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { stepping } from "../shell/shell.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { ask, outcomeOf } from "../platform/remote.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
@@ -89,7 +90,7 @@ function replied(turn: number, result: TurnResult | undefined): Reply.Event {
   if (result === undefined) return { type: "failed", turn, kind: "OtherFailure" }
   return match (result) {
     when { kind: "Replied", let reply }: reply.failureKind === undefined ? (reply.text === "" ? { type: "decline", turn } : { type: "done", turn, units: reply.text.length }) : failed(reply, reply.failureKind);
-    when { kind: "AgentFailed", let reply, let code }: outOfFunds.has(code) ? { type: "failed", turn, kind: "OutOfFunds" } : failed(reply, code);
+    when { kind: "AgentFailed", let code }: outOfFunds.has(code) ? { type: "failed", turn, kind: "OutOfFunds" } : failed(result.reply, code);
     when { kind: "StoppedByOwner" }: { type: "stop", turn };
     default: { type: "failed", turn, kind: "OtherFailure" };
   }
@@ -138,8 +139,8 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const { controller } = try Turns
     const { board } = try Talk
     const reply = try Reply.Machine
-    let shown: Promise<unknown> = Promise.resolve()
-    const show = (event: Reply.Event) => { shown = shown.then(() => runPromise(ignore(reply.send(event)))) }
+    let shown: Promise<unknown> | undefined
+    const show = (event: Reply.Event) => { shown = (shown ?? Promise.resolve()).then(() => runPromise(ignore(reply.send(event)))) }
     const chats = try (try Chats.Machine).get()
     const known = board.known(chats.chosen)
     const text = board.outgoing
@@ -182,10 +183,16 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const ending = replied(ticket, result)
     if (ending.type === "failed") board.change({ failure: { kind: ending.kind, fix: fixOf(result), waitMs: waitOf(result) } })
     show(ending)
-    try promise(() => shown)
+    if (shown !== undefined) {
+      const last = shown
+      try promise(() => last)
+    }
     const event = ended(ticket, heard, result)
     const finishing = Conversation.canFinish(try (try Conversation.Machine).get(), ticket)
-    if (result?.kind === "Replied" && finishing) board.append({ id: result.reply.messageId, mine: false, text: result.reply.text })
+    if (result?.kind === "Replied" && finishing) {
+      if (result.reply.userMessageId !== undefined) board.rename(mine, result.reply.userMessageId)
+      board.append({ id: result.reply.messageId, mine: false, text: result.reply.text })
+    }
     if (event.type === "refuse") board.drop(mine)
     Queue.offerUnsafe(queue, event)
     Queue.endUnsafe(queue)
@@ -227,7 +234,7 @@ function giveBack(board: Board) {
   board.outgoing = ""
 }
 
-function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Agent | Turns | Talk | Chats.Machine | Composer.Machine | Conversation.Machine | Shell, []> {
+function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Agent | Turns | Talk | Chats.Machine | Composer.Machine | Conversation.Machine | Reply.Machine | Shell, []> {
   return match (fx) {
     when { tag: "CheckSupport", let support }: answer("support", supported(support), { type: "supported", ticket: support, ok: false, takes: false });
     when { tag: "Upload", let ticket }: answer("upload", succeed<Conversation.Event>({ type: "uploaded", ticket, ok: false }), { type: "uploaded", ticket, ok: false });
@@ -269,9 +276,11 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
     if (known === undefined) return { type: "paged", ticket, ok: false, messages: 0 }
     const pivot = around > 0 ? board.messageId(around) : undefined
     const { messages } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(known.record.id)}/messages`, { urlParams: pivot === undefined ? {} : { around: pivot } }), page())
-    board.change({ pages: new Map([...board.snapshot().pages, [ticket, messages.map((one) => ({
+    const next = new Map(board.snapshot().pages)
+    next.set(ticket, messages.map((one) => ({
       id: one.id, mine: one.role === "user", text: one.text, ...(one.failureKind === undefined ? {} : { failure: failures[one.failureKind] ?? "OtherFailure" }),
-    }))]]) })
+    })))
+    board.change({ pages: next })
     const numbers = messages.map((one) => board.messageNumber(one.id))
     return { type: "paged", ticket, ok: true, messages: Math.max(0, ...numbers) }
   } catch () => ({ type: "paged", ticket, ok: false, messages: 0 })
@@ -280,10 +289,9 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
 /** A conversation the agent made, under the number Alpha gives it, or how its making ended where it was not. */
 effect function making(ticket: number, request: HttpClientRequest.HttpClientRequest): Chats.Event!!(Agent | Talk | Attempts | Chats.Machine) {
   const chats = try (try Chats.Machine).get()
-  const key = try (try Attempts).key(ticket)
   return effect {
     const { board } = try Talk
-    const { conversation } = try ask(Agent, HttpClientRequest.setHeader(request, "idempotency-key", key), made())
+    const { conversation } = try ask(Agent, request, made())
     return { type: "made", ticket, confirmed: true, known: true, conversation: board.numberOf({ id: conversation.id, roomId: conversation.roomId } as ConversationRecord, conversation.title) }
   } catch (failure) => {
     const { confirmed, known } = outcomeOf(failure)
@@ -419,8 +427,8 @@ const reached = hearing(
   (ready): Conversation.Event => ({ type: "reach", ready }),
 )
 
-/** The Settings pages whose screen the agent is never told: the saved passwords and the carrier's identifiers. */
-const sensitivePages: ReadonlySet<Pages.Page> = new Set(["PasswordsPage", "CarrierPage"])
+/** The Settings pages whose screen the agent is never told: the carrier's identifiers (and Passwords once ported). */
+const sensitivePages: ReadonlySet<Pages.Page> = new Set(["CarrierPage"])
 
 // spec/app/assistant/index.md, "A screen that changed takes a new revision and stops the turn in flight; an unchanged one is ignored"; spec/app/assistant/index.md, "A sensitive screen says only that it is sensitive: no selection and no day"
 const looked = started(effect {
@@ -461,6 +469,7 @@ const bound = started(effect {
       return
     }
     if (board.sendWhenMade && here > 0 && writing.source === 0 && writing.clear.outcome !== "Sent") {
+      if (writing.slot !== "Open" || writing.draft.sync === "Saving") return
       board.sendWhenMade = false
       const event: Composer.Event = { type: "hold", askable: Conversation.askable(talking) }
       if (Composer.enabled(writing, event)) board.outgoing = board.snapshot().typed
@@ -501,6 +510,7 @@ export const assisting = Layer.provideMerge(
     reacting(Search, { carry: carrySearch }),
     reacting(Reply, {}),
     reacting(Dock, { carry: carryDock }),
+    stepping("assistant", Search.Machine, (search) => search.open),
     reached, looked, left, opening, saving, bound,
   ),
   Layer.merge(Layer.fresh(turns), talk),

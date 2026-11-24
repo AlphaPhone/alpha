@@ -86,7 +86,7 @@ policy's refused list with the reason the old phone did not run it:
 
 ```quint
 pure val coreActions: List[str] = List("REPLY", "IGNORE", "NONE")
-pure val allowedActions: List[str] = coreActions.concat(List(ALLOWED_PLACEHOLDER))
+pure val allowedActions: List[str] = coreActions.concat(List("PROPOSE_DEVICE_ACTION", "VIEWS"))
 pure def sameNames(a: List[str], b: List[str]): bool =
   a.length() == b.length() and a.every(x => b.includes(x)) and b.every(x => a.includes(x))
 pure def refusedActions(registered: List[str]): List[str] = registered.select(a => not(allowedActions.includes(a)))

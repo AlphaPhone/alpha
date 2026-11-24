@@ -493,7 +493,6 @@ pure def sometimesPinnedByHand(m: Maps): bool = m.pinning and m.presses > 0
 
 ### A query another app hands to Maps opens as a search, never over navigation
 
-```quint
 A query handed over while no provider works waits for one, as a search
 does, and the owner's next action drops it before it is sent.
 

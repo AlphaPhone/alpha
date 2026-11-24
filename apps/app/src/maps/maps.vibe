@@ -224,7 +224,7 @@ function located(session: number, once: boolean): Stream.Stream<Ev, never, Locat
         if (once && (ageMs > maxFixAgeMs || ageMs < -maxFixAheadMs)) return undefined
         return { fix, ageMs }
       })
-      |> Stream.filterMap(%, (seen) => (seen === undefined ? Option.none() : Option.some(seen)))
+      |> Stream.filter(%, (seen): seen is { readonly fix: Sighting; readonly ageMs: number } => seen !== undefined)
       |> Stream.mapEffect(%, ({ fix, ageMs }) => effect {
         const at: Point = { lat: fix.lat, lng: fix.lng }
         atlas.located({ at, accuracy: fix.accuracy, approximate: !fix.precise })
@@ -232,7 +232,7 @@ function located(session: number, once: boolean): Stream.Stream<Ev, never, Locat
         const { trip, chosen } = try screen.get()
         const way = atlas.way(trip.route, chosen)
         if (way === undefined) return { type: "locationFix", session, fix: "Along" } satisfies Ev
-        const along = measured(at, { line: way.line, turns: way.turns.map((turn) => turn.at) }, trip.turn - 1)
+        const along = measured(at, { line: way.line, turns: way.turns.map((turn) => turn.at) }, trip.turn)
         return { type: "locationFix", session, fix: judged(fix.precise, ageMs, fix.accuracy, along.toEnd, along.toRoute, along.toStep, along.beyond) } satisfies Ev
       })
       |> Stream.catch(%, () => Stream.succeed<Ev>({ type: "locationLost", session }))
@@ -542,7 +542,7 @@ const notification = started(effect {
   try Stream.runForEach(device.visible |> Stream.filter(%, (shown) => shown), effect () => {
     if (!(try navigation.opened())) return
     const { trip } = try screen.get()
-    try ignore(screen.send({ type: "openNotification", journey: trip.journey }))
+    try ignore(screen.send({ type: "openNotification", journey: trip.journey, showable: true }))
   })
 }, "opening Maps from its notification")
 
@@ -581,6 +581,7 @@ export const maps = together(
   notificationWords,
   following(Screen.Machine, (state) => [state.place, state.details.status] as const, Screen.Machine, ([place, status]): Ev | undefined => (status !== "Idle" || (atlas.spot(place)?.id ?? "") === "" ? undefined : { type: "readDetails", place })),
   following(Screen.Machine, (state) => [state.link.plane, state.link.basemap === "Cloud"] as const, Credits.Machine, ([plane, raster]): CreditsEv => ({ type: "drawnOn", plane, raster })),
+  following(Screen.Machine, (state) => (state.link.surface === "Drawn" ? state.link.plane : 0), Credits.Machine, (plane): CreditsEv | undefined => (plane === 0 ? undefined : { type: "planeDrawn", plane })),
 )
 
 // spec/app/maps/index.md, "An event's place opens on its card once Maps is on screen, never over navigation, and Maps remembers the event"

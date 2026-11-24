@@ -69,7 +69,6 @@ describe("Maps on a phone", () => {
 
     // spec/app/maps/index.md, "\"Use my location\" locates once when allowed, asks when it may, and otherwise opens Settings"; spec/app/maps/index.md, "A fix goes to whoever holds the location"
     await press("Directions");
-    await press("From my location");
     await until(alpha, runtime, Screen, (s) => s.trip.route !== 0 && s.trip.origin === "MyLocation" && s.link.locator === "Nobody");
     expect(world.maps.asked.at(-1)?.body).toMatchObject({ from: start, to: harbour.coordinate, mode: "drive" });
 
@@ -123,7 +122,6 @@ describe("Maps on a phone", () => {
     await until(alpha, runtime, Screen, (s) => s.search.status === "Loaded" && s.results === 1);
     await press("Harbour Cafe");
     await press("Directions");
-    await press("From my location");
     await until(alpha, runtime, Screen, (s) => s.trip.route !== 0 && s.trip.plan.status === "Loaded");
 
     // spec/app/maps/index.md, "Start guides along the route shown, with location allowed"; spec/app/maps/index.md, "Android confirms or loses the service of this journey"
@@ -161,6 +159,7 @@ describe("Maps on a phone", () => {
     await act(async () => { world.maps.guidance.stop?.("task-removed"); });
     await until(alpha, runtime, Screen, (s) => s.trip.guidance === "Stopped" && s.guideNotice === "PausedAway");
     await seen(true);
+    await until(alpha, runtime, Screen, (s) => !s.trip.away);
     expect(document.body.textContent).toContain("Navigation paused while the app is in the background. Tap Start to resume.");
 
     // spec/app/maps/index.md, "Arriving with Maps away is told once on the phone"
@@ -242,7 +241,9 @@ describe("Maps in a browser", () => {
     await until(second.alpha, again, Screen, (s) => s.place !== 0);
     expect([Boolean(button("Directions")), Boolean(button("Save")), Boolean(button("Share"))]).toEqual([true, false, false]);
 
-    // spec/app/maps/credits.md, "The credits panel opens from the badge or the information button of a drawn surface": Back closes it first
+    // spec/app/maps/credits.md, "The credits panel opens from the badge or the information button of a drawn surface": Back closes it first (this page has no WebGL, so the drawn surface is told as the map tells it)
+    const plane = (await again.runPromise(Effect.flatMap(Credits, (c) => c.get()))).plane;
+    await act(async () => { await again.runPromise(Effect.ignore(Effect.flatMap(Credits, (c) => c.send({ type: "planeDrawn", plane })))); });
     await press("Google Maps");
     await until(second.alpha, again, Credits, (s) => s.infoOpen);
     await hardware("back");
@@ -315,6 +316,7 @@ describe("Maps in a browser", () => {
     await until(alpha, runtime, Screen, (s) => s.place === before.startPlace && s.startPlace === before.place && s.trip.route !== 0);
     expect(world.maps.asked.at(-1)?.body).toMatchObject({ from: gallery.coordinate, to: harbour.coordinate });
     expect(button("Copy number")).toBeUndefined();
+    await hardware("back");
     await hardware("back");
     await until(alpha, runtime, Screen, (s) => !s.directions && s.place === before.startPlace);
     await press("Copy number");

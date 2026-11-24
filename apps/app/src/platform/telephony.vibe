@@ -1,4 +1,4 @@
-// spec/app/telephony/common.md, "A provider is read only while its view is in front on an unlocked phone with the grant"; spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
+// spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
 import type { AddressBookClient, ContactNamesClient, NameSurface } from "@elizaos/os/bridges/contacts"
 import type { MessagesClient } from "@elizaos/os/bridges/messages"
 import type { PhoneClient } from "@elizaos/os/bridges/phone"

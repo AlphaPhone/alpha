@@ -75,7 +75,13 @@ function factTimers(state: Facts.Facts) {
 const factsMachine = reacting(Facts, { carry: readFacts, timers: factTimers })
 
 // spec/app/settings/facts.md, "Opening Settings and Refresh read the phone; Alpha coming back to the front reads it again if Settings is showing"; spec/app/settings/facts.md, "Leaving Settings retires the read in flight and forgets what was shown, so the next opening waits for a fresh answer"
-const factsShown = following(Shell, settingsShowing, Facts.Machine, (shown): Facts.Event => (shown ? { type: "refresh", at: untimed } : { type: "leave" }))
+const factsShown = hearing(
+  Stream.unwrap(effect {
+    return Stream.changes(Stream.map((try Shell).changes, settingsShowing))
+  }),
+  Facts.Machine,
+  (shown): Facts.Event => (shown ? { type: "refresh", at: untimed } : { type: "leave" }),
+)
 
 const factsResumed = hearing(
   Stream.unwrap(effect {

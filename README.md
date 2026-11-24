@@ -125,7 +125,7 @@ deploy: the app's sign-in callback and App Link host come from them.
   Calendar scope verification early: it takes weeks) and, where
   `google.nativeSignIn` is on, an Android client for
   `ai.alphacompute.alphaphone` with the release certificate's SHA-1 (the App
-  Links file names the signer in `apps/cloud/deployment.json`), a Google Maps
+  Links file names the signer in `apps/app/aosp/signing/release-signer.json`), a Google Maps
   Platform server key (below), and Stripe (test mode for staging, live for
   production; the tool refuses a mismatch) with Plus at exactly $30 and Pro
   at exactly $100 a month and a webhook to
@@ -143,8 +143,8 @@ deploy: the app's sign-in callback and App Link host come from them.
   encrypted; it is the only copy of keys whose loss signs everyone out.
   Rotate a provider key with `--apply`, never by editing the generated values.
 - **Operator inputs:** one JSON file outside the checkout in the shape of
-  `OperatorInputs` in `apps/cloud/src/profile.vibe`, with fictitious values
-  filled in at `apps/cloud/test/fixtures/operator.json`;
+  Alpha's cloud profile (`apps/cloud/src/alpha.vibe`), with fictitious values
+  filled in at `apps/cloud/profile/candidate.example.json`;
   `pnpm cloud profile --inputs <file> --out <file>` checks it. Per
   environment:
   - `databaseIdentity`: a new `openssl rand -hex 32`, never reused; the first

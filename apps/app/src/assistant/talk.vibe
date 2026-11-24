@@ -75,6 +75,7 @@ export interface Board {
   page(ticket: number): ReadonlyArray<Line>
   latest(): ReadonlyArray<Line>
   append(line: Line): void
+  rename(line: Line, id: string): void
   drop(line: Line): void
 }
 
@@ -156,6 +157,10 @@ export const talk = Layer.effect(Talk, effect {
     append: (line) => {
       const newest = Math.max(0, ...seen.pages.keys())
       board.change({ pages: new Map([...seen.pages, [newest, [...board.page(newest), line]]]) })
+    },
+    rename: (line, id) => {
+      const newest = Math.max(0, ...seen.pages.keys())
+      board.change({ pages: new Map([...seen.pages, [newest, board.page(newest).map((one) => (one === line ? { ...one, id } : one))]]) })
     },
     drop: (line) => {
       const newest = Math.max(0, ...seen.pages.keys())

@@ -1,5 +1,6 @@
 // spec/app/messages/index.md, "Story: See my conversations"; spec/app/messages/index.md, "Story: Read a conversation"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/messages/index.md, "Story: Start a new message"; spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/messages/composer.md, "Story: Send a message"
-import { MMS_ATTACHMENT_TYPES, type MessageRow, type ThreadRow } from "@elizaos/os/bridges/messages";
+import { MMS_ATTACHMENT_TYPES } from "@elizaos/os/bridges/definitions/messages";
+import type { MessageRow, ThreadRow } from "@elizaos/os/bridges/messages";
 import { Alert, Banner, Button, Chip, ConfirmDialog, EmptyState, ListGroup, ListRow, SearchField, Spinner, Textarea } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import { ArrowLeft, ImagePlus, Phone as Call, Send, Sparkles, X } from "lucide-react";
@@ -105,11 +106,15 @@ function Bubble({ row, onChoose, chosen }: { row: MessageRow; onChoose: () => vo
 function Conversation({ runtime }: MessagesProps) {
   const { state, can, send } = useMessages(runtime);
   const phone = usePhone(runtime).state;
+  const [, redraw] = useState(0);
   if (!state || !phone) return null;
   const held = runtime.runSync(Inbox.use((inbox) => inbox.get()));
   const conversation = runtime.runSync(Conversations.use((numbering) => numbering.get(state.thread)));
   const title = conversation._tag === "Some" ? titleOf(conversation.value.addresses, held.names) : "Conversation";
-  const choose = (id: string) => runtime.runSync(Inbox.use((inbox) => inbox.set({ chosen: id })));
+  const choose = (id: string) => {
+    runtime.runSync(Inbox.use((inbox) => inbox.set({ chosen: id })));
+    redraw((n) => n + 1);
+  };
   const confirm = { type: "confirmDelete", clear: clear(phone) } as const;
   return (
     <div className="flex flex-col gap-3">

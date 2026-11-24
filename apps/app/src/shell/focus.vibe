@@ -8,6 +8,7 @@ import { Device } from "../platform/device.vibe"
 import { applying, contained, following, reacting, started, together } from "../runtime/reactor.vibe"
 
 module page {
+  import type { Target } from "../../gen/app__shell__focus.effect.vibe"
   const focusable = "a[href], button, input, select, textarea, [tabindex], [contenteditable=true]"
   const layered = "[role=dialog], [role=alertdialog], [role=menu]"
 
@@ -30,7 +31,12 @@ module page {
   export const shown = (key: string): boolean => key !== "" && find(key) !== undefined
   /** Focus the control with `key`. @throws {never} */
   export function give(key: string): void {
-    find(key)?.focus()
+    const target = find(key)
+    if (target === undefined) return
+    target.focus()
+    if (document.activeElement !== target) queueMicrotask(() => {
+      if (active() === "") find(key)?.focus()
+    })
   }
   function targetOf(target: Target): HTMLElement | undefined {
     const main = document.querySelector("main")
@@ -89,7 +95,7 @@ function targetFor(s: Shown): Target {
   return s.trail.length > 0 ? "Title" : s.drawer ? "Search" : "HomeStart"
 }
 
-effect function tell(event: Event): Focus.Focus | undefined!!Focus.Machine {
+effect function tell(event: Event): (Focus.Focus | undefined)!!Focus.Machine {
   return effect { return try (try Focus.Machine).send(event) } catch () => undefined
 }
 

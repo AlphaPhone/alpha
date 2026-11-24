@@ -105,12 +105,33 @@ const released = started(effect {
   })
 }, "releasing a held change")
 
+/** A recorded operation with no undo window goes out as soon as it is ready: a restore at once, a draft once its hand-over is written to the phone. */
+const dispatched = started(effect {
+  const operations = try Sending.Machine
+  const list = try Inbox.Machine
+  const drafts = try Drafts.Machine
+  const ready = Stream.zipLatest(operations.changes, drafts.changes) |> Stream.map(%, ([op, draft]) => ({
+    attempt: op.attempt.id,
+    recorded: op.attempt.outcome === "Recorded" && !Sending.holdable(op.kind),
+    draft: Sending.ofDraft(op.kind),
+    kept: draft.open && draft.letter.id === op.draft && draft.letter.sending === op.attempt.id && draft.stored && Drafts.flushed(draft),
+    revision: draft.letter.revision,
+    account: op.account,
+  }))
+  try Stream.runForEach(Stream.changesWith(ready, (a, b) => JSON.stringify(a) === JSON.stringify(b)), effect (fact) => {
+    if (!fact.recorded) return
+    if (fact.draft && !fact.kept) return
+    const access = accessOf(try list.get(), fact.account)
+    try ignore(operations.send({ type: "dispatchNow", access, revision: fact.draft ? fact.revision : 0, kept: fact.draft, now: untimed }, "World"))
+  })
+}, "dispatching a recorded operation")
+
 // spec/app/inbox/sending.md, "Losing the grant stops a review open and an operation recorded and not yet sent; a request already sent is never disowned"; spec/app/inbox/sending.md, "A change to what is under review, or to a draft whose operation is recorded and not yet sent, stops it and says it must be looked at again"
 const told = started(effect {
   const operations = try Sending.Machine
   const list = try Inbox.Machine
   const facts = Stream.zipLatest(list.changes, operations.changes) |> Stream.map(%, ([mailbox, held]) => ({
-    access: accessOf(mailbox, held.account), revision: mailbox.revision, signedIn: mailbox.signedIn, review: held.review.showing,
+    access: accessOf(mailbox, held.account), revision: mailbox.revision, signedIn: mailbox.signedIn, review: held.review.showing && !Sending.ofDraft(held.kind),
   }))
   let signedIn: boolean | undefined
   try Stream.runForEach(Stream.changesWith(facts, (a, b) => JSON.stringify(a) === JSON.stringify(b)), effect (fact) => {
@@ -122,4 +143,4 @@ const told = started(effect {
 }, "following the list")
 
 /** Archive, Trash and their restores: kept across restarts, held for the undo window, and sent through the owner's cloud. */
-export const operations = together(reacting(Sending, { keep: 1, open: [{ type: "restart" }, "World"], carry }), released, told)
+export const operations = together(reacting(Sending, { keep: 1, open: [{ type: "restart" }, "World"], carry }), released, dispatched, told)

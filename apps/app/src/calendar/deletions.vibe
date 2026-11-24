@@ -3,7 +3,7 @@ import * as Held from "../../gen/app__calendar__deletions.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__calendar__deletions.effect.vibe"
 import * as Editor from "../../gen/app__calendar__editor.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
-import * as Notices from "../../gen/app__shell__notices.effect.vibe"
+import * as Notices from "../../gen/app__notices__toasts.effect.vibe"
 import { type Due, type Job, due, following, hearing, reacting, tell, together } from "../runtime/reactor.vibe"
 import { shown } from "./shown.ts"
 

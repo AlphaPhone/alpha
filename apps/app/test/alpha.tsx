@@ -35,6 +35,7 @@ const opened = new WeakMap<Alpha, { world?: Scene; mounts: readonly Mount[] }>()
 export async function closeAll() {
   for (const close of closing.splice(0)) await close();
   localStorage.clear();
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
 }
 
 /**

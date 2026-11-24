@@ -4,12 +4,11 @@ import * as Editor from "../../gen/app__calendar__editor.effect.vibe"
 import type { Effect as Out, Event, Scope } from "../../gen/app__calendar__editor.effect.vibe"
 import * as View from "../../gen/app__calendar.effect.vibe"
 import * as Held from "../../gen/app__calendar__deletions.effect.vibe"
-import { type Readback, type WriteKind, answerReadback, defaultStart, readbackSeen } from "../../gen/app__calendar__writing.ts"
+import { type Readback, type WriteKind, answerReadback, defaultStart, newEventTarget, readbackSeen } from "../../gen/app__calendar__writing.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { ask, attemptedWith } from "../platform/remote.vibe"
 import type { AndroidCalendarDeletionScope, AndroidCalendarEditorFields, CalendarPick } from "@elizaos/os/bridges/calendar"
 import { PhoneCalendar, type Written } from "../platform/calendar.vibe"
-import { newEventTarget } from "../../gen/app__calendar__writing.ts"
 import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
@@ -198,7 +197,7 @@ effect function sendAgent(attempt: number, kind: "Update" | "Remove" | "Reply", 
 
 // spec/app/calendar/editor.md, "Saving sends the form once, as a new numbered write built on the revision its edits began from"; spec/app/calendar/editor.md, "No create is sent while an earlier one is in doubt, unless the owner asked for a separate event"
 /** Carry out write `attempt`: a create under its own creation identity, a change or a deletion through the phone's review. */
-effect function send(attempt: number, kind: "Create" | "Update" | "Remove" | "Reply", id: number, scope: Scope, going: boolean): Written!!(PhoneCalendar | Agent | KeyValueStore.KeyValueStore | Attempts | Time | Editor.Machine) {
+effect function send(attempt: number, kind: "Create" | "Update" | "Remove" | "Reply", id: number, scope: Scope, going: boolean): Written!!(PhoneCalendar | Agent | KeyValueStore.KeyValueStore | Attempts | Time | Editor.Machine | View.Machine) {
   const phone = try PhoneCalendar
   const fields = try kept(0, try owner())
   if (kind === "Create") {
@@ -297,6 +296,8 @@ const reread = started(effect {
 }, "following the calendars' reads for the form")
 
 module web {
+  import { Stream } from "effect"
+
   /** The keys another page of Alpha changed in the store this one shares, as the browser says; none where there is no window. @throws {never} */
   export function storeChanged(): Stream.Stream<string> {
     const target = globalThis as unknown as Partial<EventTarget>

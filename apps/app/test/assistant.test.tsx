@@ -100,10 +100,11 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     // spec/app/assistant/composer.md, "A message longer than a message may hold is kept as a draft and never sent"
     await write("x".repeat(64_001));
     await until(alpha, runtime, Composer, (s) => s.long);
-    expect(button("Send")).toBe(undefined);
+    expect(button("Send")?.disabled).toBe(true);
     // spec/app/assistant/reply.md, "One brief acknowledgment at most, only from the agent's acknowledgment frame, before any tool runs"
     world.ask.acknowledgment = "Let me look";
     await write("Again");
+    await until(alpha, runtime, Composer, (s) => !s.long && s.draft.sync === "Kept");
     await press("Send");
     await until(alpha, runtime, Conversation, (s) => s.turn.send.id === 2 && s.turn.reply === "Complete");
     await until(alpha, runtime, Reply, (s) => s.turn === 2 && s.status === "Settled");
@@ -125,16 +126,19 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Chats, (s) => s.list.status === "Loaded");
     expect(rows("Chats")).toBe(2);
 
-    // spec/app/assistant/index.md, "A sensitive screen is never sent, and no reply is awaited over one": Settings showing the saved passwords is a sensitive screen.
-    await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Settings" })));
-    await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "openSection", page: "PasswordsPage" })));
-    await until(alpha, runtime, Conversation, (s) => s.context.sensitive && s.context.showing.tag === "App");
-    await write("my password is hunter2");
-    expect([button("Send"), world.ask.said.length]).toEqual([undefined, 2]);
-    // spec/app/assistant/index.md, "A sensitive screen says only that it is sensitive: no selection and no day"
-    await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "goBack" })));
-    await until(alpha, runtime, Conversation, (s) => !s.context.sensitive);
-    expect(Boolean(button("Send"))).toBe(true);
+    // spec/app/assistant/index.md, "A sensitive screen is never sent, and no reply is awaited over one": Settings showing carrier identifiers is a sensitive screen (on a phone).
+    if (phone) {
+      await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Settings" })));
+      await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "open", page: "General" })));
+      await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "open", page: "CarrierPage" })));
+      await until(alpha, runtime, Conversation, (s) => s.context.sensitive && s.context.showing.tag === "App");
+      await write("my password is hunter2");
+      expect([button("Send")?.disabled, world.ask.said.length]).toEqual([true, 2]);
+      // spec/app/assistant/index.md, "A sensitive screen says only that it is sensitive: no selection and no day"
+      await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "goBack" })));
+      await until(alpha, runtime, Conversation, (s) => !s.context.sensitive);
+      expect(button("Send")?.disabled).toBe(false);
+    }
 
     // spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
     world.ask.refusal = "allowance_exhausted";

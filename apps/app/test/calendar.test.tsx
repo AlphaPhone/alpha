@@ -10,12 +10,27 @@ import calendar from "../src/calendar/index.tsx";
 import { shown } from "../src/calendar/shown.ts";
 import { civilDay, dateOf, dayStart } from "../src/calendar/time.ts";
 import type { Alpha } from "../src/runtime/area.tsx";
-import { button, closeAll, fill, hardware, later, only, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, only, open, press, underAct, until } from "./alpha.tsx";
 import { agentEvent, agentRequest } from "./fakes/calendar.ts";
 import { type Scene, scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
+
+/** Choose `option` in the Select whose trigger has accessible name `name`. */
+async function chooseOption(name: string, option: string) {
+  await drawn(() => {
+    const trigger = document.querySelector<HTMLElement>(`[role=combobox][aria-label='${name}']`);
+    if (!trigger) throw new Error(`no select ${name}`);
+    trigger.focus();
+    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  });
+  await drawn(() => {
+    const found = [...document.querySelectorAll<HTMLElement>("[role=option]")].find((one) => one.textContent === option);
+    if (!found) throw new Error(`no option ${option}`);
+    found.click();
+  });
+}
 
 const hour = 3_600_000;
 const weekday = new Intl.DateTimeFormat(undefined, { weekday: "short" });
@@ -153,6 +168,7 @@ describe("on a phone", () => {
     expect([button("Save")?.hasAttribute("disabled"), Boolean(document.body.textContent?.includes("Add a title."))]).toEqual([true, true]);
     await fill("Title", "Coffee");
     await until(alpha, runtime, Editor, (e) => e.draft.edits === 2 && e.kept && e.titled);
+    await chooseOption("Calendar", "This phone's calendar");
     await press("Save");
     await until(alpha, runtime, Editor, (e) => e.form === "NoForm" && e.write.outcome === "Confirmed");
     await until(alpha, runtime, View, (s) => s.phoneRows === 2);
@@ -162,6 +178,7 @@ describe("on a phone", () => {
     world.calendar.lost = true;
     await press("New event");
     await fill("Title", "Walk");
+    await chooseOption("Calendar", "This phone's calendar");
     await press("Save");
     await until(alpha, runtime, Editor, (e) => e.unknownCreate && e.draft.sync === "Saving" && e.write.outcome === "Unknown");
     expect(button("Save")?.hasAttribute("disabled")).toBe(true);
@@ -187,8 +204,11 @@ describe("on a phone", () => {
     await until(alpha, runtime, View, (s) => s.open !== 0);
     vi.useFakeTimers({ toFake: ["performance"] });
     await press("Delete");
-    vi.advanceTimersByTime(20_000);
     await later(alpha, 6_000);
+    await later(alpha, 10_000);
+    await until(alpha, runtime, Editor, (e) => e.kind === "Remove" && e.write.outcome === "Sent");
+    await drawn(() => {});
+    vi.advanceTimersByTime(20_000);
     await later(alpha, 10_000);
     vi.useRealTimers();
     await until(alpha, runtime, Editor, (e) => e.kind === "Remove" && e.write.outcome === "Confirmed");

@@ -3,6 +3,7 @@ import type { SelectedDocumentsClient } from "@elizaos/os/bridges/definitions/me
 import { registered } from "./device.vibe"
 
 module held {
+  import type { SelectedDocumentsClient } from "@elizaos/os/bridges/definitions/media"
   import { selectedDocumentsClient, selectedDocumentsPlugin } from "@elizaos/os/bridges/media"
 
   let made: SelectedDocumentsClient | undefined

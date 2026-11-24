@@ -8,13 +8,18 @@ import { Machine as Bin } from "../gen/app__files__trash.effect.vibe";
 import { agentFilter, agentOpen, agentRead, approved, offer, shownAt } from "../src/files/agent.vibe";
 import { showDownloads } from "../src/files/files.vibe";
 import files from "../src/files/index.tsx";
-import { button, closeAll, fill, hardware, later, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
 
 const listed = () => [...document.querySelectorAll("[aria-label=Listed] button:not([role=checkbox])")].map((row) => row.textContent);
+const openRow = (name: string) => drawn(() => {
+  const found = [...document.querySelectorAll("[aria-label=Listed] button:not([role=checkbox])")].find((row) => row.textContent === name);
+  if (!(found instanceof HTMLElement)) throw new Error(`no listed row ${name}`);
+  found.click();
+});
 const paths = (world: ReturnType<typeof scene>) => world.files.stored.map((one) => `${one.volume}:${one.path}`).sort();
 const select = (name: string) => press(`Select ${name}`);
 const buttonOnTop = (name: string) => [...([...document.querySelectorAll("[role=dialog]")].at(-1)?.querySelectorAll("button") ?? [])].find((one) => (one.getAttribute("aria-label") ?? one.textContent) === name);
@@ -24,7 +29,7 @@ async function onFiles(world = { ...scene(), phone: true }) {
   const running = await open(world);
   const { alpha } = running;
   const runtime = files.runtime(alpha);
-  await press("Files");
+  if (button("Files")) await press("Files");
   return { ...running, world, runtime };
 }
 
@@ -50,7 +55,7 @@ describe("Files on a phone", () => {
     await press("List");
     await press("Name");
     expect([world.files.calls.filter((call) => call === "storageList").length, runtime.runSync(Browser.use((m) => m.get())).trail.length]).toEqual([reads, 1]);
-    await press("Documents");
+    await openRow("Documents");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 2);
     expect(listed().sort()).toEqual(["Old", "notes.txt"]);
     await press("Internal storage");
@@ -76,14 +81,15 @@ describe("Files on a phone", () => {
     await press("Files");
     await press("Internal storage");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded");
-    await press("Documents");
+    await openRow("Documents");
     await press("Old");
     // spec/app/files/index.md, "The place showing is read again when asked, and only its newest answer is taken; a folder that no longer exists brings the owner back to the top and says so, never that the storage is unavailable": the phone watches the folder showing
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 3 && world.files.watching === "primary:Documents/Old");
     world.files.stored.splice(world.files.stored.findIndex((one) => one.path === "Documents/Old"), 1);
     world.files.changed();
-    await until(alpha, runtime, Browser, (s) => s.missing && world.files.watching === undefined);
-    expect(Boolean(button("Internal storage"))).toBe(true);
+    await until(alpha, runtime, Browser, (s) => s.missing);
+    await drawn(() => {});
+    expect([world.files.watching, Boolean(button("Internal storage"))]).toEqual([undefined, true]);
   });
 
   it("Browse my storage from the Browser's Show in Files, and go back (spec/app/files/index.md, \"Story: Browse my storage\")", async () => {
@@ -255,13 +261,11 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Browser, (s) => s.change.sending.outcome === "Confirmed");
     expect(world.files.shared).toEqual([["Download/dunes.jpg"]]);
     // spec/app/files/change.md, "Each sheet sends once, by email when an account can take it, through the phone's chooser, as copied text or saved through the system picker, and then goes away; sharing by text message is not offered"
-    await select("dunes.jpg");
     await press("Share");
     await press("Copy");
     await until(alpha, runtime, Browser, (s) => s.change.sending.outcome === "Confirmed" && s.change.sentTo === "Copy");
     expect(await navigator.clipboard.readText()).toBe("Internal storage/Download/dunes.jpg");
     // spec/app/files/change.md, "The sheet goes away when the owner closes it or Files is hidden, and when the selection changes the owner is told it sent nothing; a sheet never opens again"
-    await select("dunes.jpg");
     await press("Share");
     await until(alpha, runtime, Browser, (s) => s.change.panel !== 0);
     await select("beach.jpg");
@@ -285,7 +289,7 @@ describe("Files on a phone", () => {
     const { alpha, runtime, world } = await onFiles();
     await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
     await press("Internal storage");
-    await press("Documents");
+    await openRow("Documents");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 2);
     // spec/app/files/index.md, "The owner opens a file that is listed or found, with the names beside it, and Recent remembers it"
     // spec/app/files/preview.md, "What was read of a file is shown only in its own viewer, while it can be read"
@@ -405,7 +409,7 @@ describe("Files on a phone", () => {
     await press("Close");
     await until(first.alpha, first.runtime, Browser, (s) => s.storage.status === "Loaded");
     await press("Internal storage");
-    await press("Documents");
+    await openRow("Documents");
     await until(first.alpha, first.runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 2);
     await press("Name");
     await press("Grid");

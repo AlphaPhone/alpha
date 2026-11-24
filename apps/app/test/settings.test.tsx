@@ -92,6 +92,7 @@ describe("Settings", () => {
     answer();
     // spec/app/settings/facts.md, "Leaving Settings retires the read in flight and forgets what was shown, so the next opening waits for a fresh answer"
     await hardware("home");
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
     await until(alpha, machines, Facts.Machine, (s) => s.reported.length === 0 && s.read.read.status !== "Loading");
     await press("Settings");
     await until(alpha, machines, Facts.Machine, (s) => s.read.read.status === "Loaded" && s.reported.length > 0);
@@ -224,7 +225,7 @@ describe("Settings", () => {
     const text = await sharedFiles[0]?.text();
     const report = JSON.parse(text ?? "{}");
     expect([report.format, report.roles, report.problems.count, report.permissions, text?.includes("launcher3"), text?.includes("ai.alphacompute")]).toEqual([
-      "alpha-diagnostics/v1", [{ role: "home", held: false, available: true }, { role: "assistant", held: false, available: true }], 2, { LocationAccess: true }, false, false,
+      "alpha-diagnostics/v1", [{ role: "home", held: false, available: true }, { role: "assistant", held: false, available: true }], 2, { FilesAccess: true, LocationAccess: true }, false, false,
     ]);
     // spec/app/settings/developer.md, "Clear is offered only for a log with problems, one at a time; once the startup area answers, the log is read again": Clear asks first, and backing out clears nothing.
     await press("Clear");

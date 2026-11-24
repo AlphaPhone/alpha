@@ -49,6 +49,16 @@ const write = (name: string, text: string) => drawn(() => {
 const told = () => document.body.textContent ?? "";
 const title = () => document.querySelector("main[aria-label]:not([aria-label=Inbox]), main[aria-label=Inbox]")?.getAttribute("aria-label");
 const step = (name: string) => process.stderr.write(`STEP ${name}\n`);
+const tile = (view: string) => drawn(() => {
+  const found = document.querySelector<HTMLButtonElement>(`[data-home-tile='view:${view}']`);
+  if (!found) throw new Error(`no tile ${view}`);
+  found.click();
+});
+const action = (name: string) => drawn(() => {
+  const found = document.querySelector<HTMLButtonElement>(`button[aria-label='${name}']`);
+  if (!found) throw new Error(`no action ${name}`);
+  found.click();
+});
 const search = (text: string) => fill("Search mail", text).then(() => document.querySelector("form[role=search]")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
 
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
@@ -60,7 +70,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const runtime = inbox.runtime(alpha);
 
     // spec/app/inbox/index.md, "Opening Inbox, and every change to Google access, checks the accounts again, even while a check is out"
-    await press("Inbox");
+    await tile("Inbox");
     await until(alpha, runtime, List, (s) => s.list.status === "Loaded" && s.pages === 1);
     step("1");
     expect([rows().slice(0, 2), rows().length]).toEqual([["Lunch on Friday", "Your tax return"], 25]);
@@ -119,7 +129,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/inbox/sending.md, "Archive and Trash are held for the undo window, and only the owner's Undo before it ends sends nothing"
     await choose("Your tax return");
-    await press("Archive");
+    await action("Archive");
     await confirm("Archive");
     await until(alpha, runtime, Changes, (s) => s.undo.holding === "Held");
     step("12");
@@ -132,7 +142,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/inbox/sending.md, "A recorded operation sends its one request, for its own account under that account's grant now, exactly as reviewed: a draft while it is at the revision shown and its hand-over is written to the phone, archive and Trash once the undo window has passed"
     await choose("Your tax return");
-    await press("Archive");
+    await action("Archive");
     await confirm("Archive");
     await later(alpha, 10_000);
     await until(alpha, runtime, Changes, (s) => s.attempt.outcome === "Confirmed");
@@ -203,7 +213,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   const world = { ...scene(), phone: false };
   const { alpha } = await open(world);
   const runtime = inbox.runtime(alpha);
-  await press("Inbox");
+  await tile("Inbox");
   await until(alpha, runtime, List, (s) => s.list.status === "Loaded" && s.pages === 1);
 
   // spec/app/inbox/drafts.md, "A new message, a reply, a reply to all or a forward begins as [one draft](./letter.md) says; a reply to a message with no usable address is refused and the owner told"
@@ -223,6 +233,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await until(alpha, runtime, Offering, (s) => s.review.showing && s.target === "ToDraft");
   await confirm("Add");
   await until(alpha, runtime, Offering, (s) => s.used === 1 && s.text === 0);
+  await later(alpha, 10);
   await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
   expect((document.querySelector("textarea[aria-label=Message]") as HTMLTextAreaElement | null)?.value).toBe("Thanks, it is all in order.\n\nSee you on Friday.");
 
@@ -244,6 +255,8 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   });
   await until(alpha, runtime, Writing, (s) => s.letter.attachments === 1);
   expect(told()).toContain("receipt.txt");
+  await later(alpha, 10);
+  await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
 
   // spec/app/inbox/sending.md, "Only the owner confirms, only the review of the thing as it is now, while the account's grant allows it and, for a send, it has a valid recipient"
   await press("Send");

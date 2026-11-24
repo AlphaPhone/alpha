@@ -1,3 +1,4 @@
 @import "maplibre-gl/dist/maplibre-gl.css";
+
 /* The classes of every component: an application's Tailwind entry imports this beside the theme. */
 @source "./src";

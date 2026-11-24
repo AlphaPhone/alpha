@@ -34,6 +34,9 @@ export interface Listed {
   readonly stream?: boolean;
 }
 
+/** The policy the build wrote beside the bundle. */
+export const policy = () => read("policy.json") as { actions: { allowed: string[]; refused: Record<string, string> } };
+
 /** The routes the host file admits for the page. */
 export const listed = () => read("host.json").routes as Listed[];
 

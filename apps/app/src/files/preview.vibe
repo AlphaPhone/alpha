@@ -60,7 +60,7 @@ module kept {
     try {
       const found: unknown = JSON.parse(raw)
       if (!Array.isArray(found)) return []
-      const rows = found.flatMap((row): Earlier[] => typeof row?.selectionId === "string" && /^[A-Za-z0-9:_-]{1,100}$/.test(row.selectionId) && row.kind === "selected"
+      const rows = found.flatMap((row): Earlier[] => typeof row?.selectionId === "string" && /^[A-Za-z0-9:._/-]{1,100}$/.test(row.selectionId) && row.kind === "selected"
         && row.status === "ready" && typeof row.name === "string" && typeof row.mimeType === "string" && Number.isFinite(row.openedAt)
         ? [{ selection: row.selectionId, name: row.name, mimeType: row.mimeType, at: Number(row.openedAt) }] : [])
       return rows.sort((a, b) => a.at - b.at).slice(-most)
@@ -227,7 +227,10 @@ function carryShown(fx: Shown.Effect): Job<Shown.Event, Documents | Opened | Rec
     // spec/app/files/preview.md, "Open elsewhere hands the file over to read only"
     when { tag: "OpenElsewhere", let item }: run("elsewhere", ignore(effect {
       const selection = try selectionOf(try grantOf(item))
-      if (Option.isSome(selection)) try tryPromise(() => (try documents()).open(selection.value))
+      if (Option.isSome(selection)) {
+        const docs = try documents()
+        try tryPromise(() => docs.open(selection.value))
+      }
     }), "Phone");
     when { tag: "Forget", let item }: run("forget", effect { try ignore((try Recent.Machine).send({ type: "forget", key: item }, "Owner")) }, "Phone");
     when { tag: "Lost", let item }: run("lost", toRecent({ type: "lapsed", key: item }), "Phone");
@@ -245,7 +248,8 @@ effect function reached(ticket: number, key: number): Recent.Event!!(Documents |
     const asked = (try (try Recent.Machine).get()).asked
     const selection = try selectionOf(asked.key === key ? asked.grant : 0)
     if (Option.isNone(selection)) return { ...failed, ended: true }
-    const described = try tryPromise(() => (try documents()).describe(selection.value))
+    const docs = try documents()
+    const described = try tryPromise(() => docs.describe(selection.value))
     if (described.status === "selected") return { type: "reached", ticket, ok: true, ended: false }
     return { ...failed, ended: described.status === "renamed-reselect" || described.status === "unavailable" }
   } catch () => failed
@@ -265,7 +269,10 @@ function carryRecent(fx: Recent.Effect): Job<Recent.Event, Documents | Opened | 
     // spec/app/files/recent.md, "Access is held by a row or by the document open, and what a step leaves unheld is given up in that step"
     when { tag: "Release", let grant }: run(`release ${grant}`, ignore(effect {
       const given = try (try Opened).take(grant)
-      if (Option.isSome(given)) try tryPromise(() => (try documents()).forget(given.value.selection as SelectionId))
+      if (Option.isSome(given)) {
+        const docs = try documents()
+        try tryPromise(() => docs.forget(given.value.selection as SelectionId))
+      }
     }), "Phone");
     when { tag: "Reach", let ticket, let key }: answer("reach", reached(ticket, key), { type: "reached", ticket, ok: false, ended: false }, "Phone");
     when { tag: "Open", let key, let grant }: run(`open ${key}`, reopened(key, grant), "Phone");

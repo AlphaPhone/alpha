@@ -299,19 +299,29 @@ function reactor<I, S, Ev, M, Fx, Refused, Undecoded, By extends ReadonlyArray<u
       }
     }
     if (open !== undefined) {
-      if (Effect.isEffect(open)) try launch("open", effect { try contained(send(...(try open)), `opening ${scope}`) })
-      else try contained(send(...open), `opening ${scope}`)
+      if (Effect.isEffect(open)) try launch("open", effect {
+        const opened = (try open) as unknown as readonly [Ev, ...By]
+        try contained(send(...opened), `opening ${scope}`)
+      })
+      else try contained(send(...(open as unknown as readonly [Ev, ...By])), `opening ${scope}`)
     }
     try contained(Semaphore.withPermit(turn, effect { try arm(try inner.get()) }), `arming ${scope}`)
     return { changes: inner.changes, get: () => inner.get(), send, receive }
   })
 }
 
+/** One call to a machine's `send`, with its sender held at the type `spec` declared so literals in `open` never widen `By`. */
+type OpeningArgs<Ev, By extends ReadonlyArray<unknown>> = NoInfer<By> extends readonly []
+  ? readonly [event: Ev]
+  : NoInfer<By> extends readonly [infer A]
+    ? readonly [event: Ev, by: A]
+    : never
+
 /**
  * The event a machine is sent once when it is built, with its sender: the event itself, or, where the event carries
  * what only the world knows (what the phone kept, today's date), an effect that asks and returns it.
  */
-export type Opening<Ev, R, By extends ReadonlyArray<unknown>> = readonly [event: Ev, ...by: By] | ((readonly [event: Ev, ...by: By])!never!R)
+export type Opening<Ev, R, By extends ReadonlyArray<unknown>> = OpeningArgs<Ev, By> | (OpeningArgs<Ev, By>!never!R)
 
 /** A machine is kept only with the event that takes up what was under way when Alpha stopped: the spec's `reopen`, `restart` or `start`. */
 type Kept<Ev, R, By extends ReadonlyArray<unknown>> =
@@ -330,7 +340,7 @@ type Carrying<M, Ev, R, By extends ReadonlyArray<unknown>> = M extends { readonl
   : { readonly carry?: undefined }
 
 /** What a reacting machine needs to be built: the platform's part, and, in name only, what its jobs need when they run. */
-type Needs<SR, R> = SR | KeyValueStore.KeyValueStore | Whole | Time | Install | R
+type Needs<SR, R> = SR | KeyValueStore.KeyValueStore | Whole | Time | Install | Exclude<R, Attempts>
 
 /**
  * The machine of the generated module `spec`, in memory or, with `keep`, in the store under the spec's own name.

@@ -5,7 +5,7 @@ import type { Typed } from "../../gen/app__phone.ts";
 /** Numbers every network routes to emergency services, as Android's own list starts. */
 const emergencyNumbers = new Set(["911", "112", "999", "000", "110", "119", "118", "08"]);
 
-/** What the keypad's digits are: none, a start of a number, a number the phone can dial, or an emergency number. */
+/** What the keypad's digits are: none, a start of a number, a number the phone can dial, or an emergency number. @throws {never} */
 export function judge(digits: string): Typed {
   if (digits === "") return "Blank";
   if (emergencyNumbers.has(digits)) return "Emergency";

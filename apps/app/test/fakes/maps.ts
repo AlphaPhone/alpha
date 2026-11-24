@@ -72,7 +72,7 @@ export function mapsScene(): MapsScene {
     asked: [],
     here: { latitude: 43.7300, longitude: 7.4200, accuracy: 8 },
     allowed: "granted",
-    precision: "approximate",
+    precision: "precise",
     listeners: new Set(),
     watches: new Set(),
     guidance: { session: undefined, title: "", text: "", arrivals: [], opened: false },
@@ -104,14 +104,17 @@ export function mapsRoutes(scene: MapsScene): Route[] {
           return Response.json({ error: { code: "RateLimited", message: "slow down" } }, { status: 429, headers: { "retry-after": String(wait) } });
         }
         const query = typeof body === "object" && body !== null && "query" in body ? String(body.query).toLowerCase() : "";
-        return Response.json({ providerId: "test-open", attribution, places: scene.places.filter((place) => place.name.toLowerCase().includes(query)) });
+        const providerId = scene.coverage.available ? scene.coverage.providerId : "test-open";
+        return Response.json({ providerId, attribution, places: scene.places.filter((place) => place.name.toLowerCase().includes(query)).map((place) => ({ ...place, providerId })) });
       });
     },
     (request, url) => {
       if (request.method !== "POST" || url.pathname !== "/api/v1/maps/places/details") return;
       return asked(scene, request, url).then((body) => {
         const id = typeof body === "object" && body !== null && "id" in body ? String(body.id) : "";
-        return Response.json({ providerId: "test-open", attribution, place: scene.places.find((place) => place.id === id) ?? null });
+        const providerId = scene.coverage.available ? scene.coverage.providerId : "test-open";
+        const found = scene.places.find((place) => place.id === id);
+        return Response.json({ providerId, attribution, place: found ? { ...found, providerId } : null });
       });
     },
     (request, url) => {
