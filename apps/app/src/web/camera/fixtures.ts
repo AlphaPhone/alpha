@@ -7,6 +7,9 @@ import { initial as editInitial, type Edit } from "../../../gen/camera__edit.ts"
 import { initial as videoInitial, type VideoEditor } from "../../../gen/camera__videoEdit.ts";
 import { initial as dialogsInitial, type Dialogs } from "../../../gen/camera__scanDialogs.ts";
 import { initial as scanInitial, type Scan } from "../../../gen/camera__scan.ts";
+import { initial as albumsInitial, type Dialogs as Albums } from "../../../gen/camera__albums.ts";
+import { initial as reviewsInitial, type Reviews } from "../../../gen/camera__libraryReview.ts";
+import { initial as hostInitial, type Host } from "../../../gen/camera__agentLibrary.ts";
 
 /** A ready back camera in Photo mode with a flash and a 5× lens. */
 export const readyPhoto: Camera = { ...initial, phase: "PreviewReady", epoch: 1, hasFlash: true, widest: 5, longest: 50, flash: "FlashAuto" };
@@ -22,7 +25,6 @@ export const denied: Camera = { ...initial, notice: "CameraNotice" };
 
 /** A refused microphone in Video mode, offering Retry and No sound. */
 export const microphone: Camera = { ...readyPhoto, mode: "VideoMode", micDenied: true, notice: "MicrophoneNotice" };
-
 
 /** The day the Photos fixtures are seen on. */
 export const today = Date.UTC(2026, 10, 20, 12);
@@ -76,3 +78,52 @@ export const twoPages: Scan = { ...scanInitial, pages: { count: 2, bytes: 2048, 
 
 /** The document dialog over two pages. */
 export const documentOpen: Dialogs = { ...dialogsInitial, document: true };
+
+/** Photos before its first page of the library came back. */
+export const libraryLoading: Catalog = { ...catalogInitial, scope: "ScopeFull", main: { ...catalogInitial.main, loading: true } };
+
+/** A first read of the library that failed. */
+export const libraryFailed: Catalog = { ...catalogInitial, scope: "ScopeFull", main: { ...catalogInitial.main, loaded: true, failed: true } };
+
+/** Many photos over a month, newest first. */
+export const manyRows: Row[] = Array.from({ length: 60 }, (_, at) => tile(`m:${100 + at}`, at * 11, { favorite: at % 9 === 0, video: at % 13 === 0, duration: at % 13 === 0 ? 30 : 0 }));
+
+/** The loaded library of many photos. */
+export const largeLibrary: Catalog = { ...library, main: { ...library.main, rows: manyRows } };
+
+/** The grid of many photos. */
+export const largeGrid: Browse = { ...browseInitial, pool: manyRows.map((row) => row.id), columns: 3 };
+
+/** Recently deleted, holding one photo with days left. */
+export const trashRows: Row[] = [tile("m:9", 50, { expiresAt: today + 12 * 86_400_000 })];
+
+/** The library with one item in Recently deleted. */
+export const libraryWithTrash: Catalog = { ...library, trash: { ...catalogInitial.trash, rows: trashRows, loaded: true } };
+
+/** Recently deleted open. */
+export const trashTab: Browse = { ...browseInitial, tab: "TrashTab", pool: trashRows.map((row) => row.id) };
+
+/** The Albums tab. */
+export const albumsTab: Browse = { ...grid, tab: "AlbumsTab" };
+
+/** A trash change that may be undone. */
+export const undoable: Browse = { ...grid, undo: ["m:3"] };
+
+/** One Recently deleted item reviewed for permanent deletion. */
+export const confirmingDelete: Browse = { ...trashTab, selecting: true, selection: ["m:9"], work: "Deleting", deleting: ["m:9"] };
+
+/** The owner's two albums, no dialog open. */
+export const albumsClosed: Albums = { ...albumsInitial, albums: [{ id: "a", name: "Trip", revision: "r1" }, { id: "b", name: "Family", revision: "r1" }] };
+
+/** Naming a new album. */
+export const albumCreate: Albums = { ...albumsClosed, generation: 1, stage: "CreateAlbum", name: "Summer", nameOk: true };
+
+/** No library change under review. */
+export const noReview: Reviews = reviewsInitial;
+
+/** The assistant's requests, none waiting. */
+export const hostIdle: Host = hostInitial;
+
+/** The assistant asked to make an album of two photos. */
+export const albumAsk: Host = { ...hostInitial, albumReview: ["m:1", "m:2"] };
+

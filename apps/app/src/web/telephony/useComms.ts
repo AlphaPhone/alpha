@@ -12,6 +12,20 @@ import { askFromContacts, askFromList, sendRequest } from "../../telephony/list-
 import { act, answer, now } from "../shell/services.ts";
 import { openApp } from "./open.ts";
 import { runtime } from "./runtime.ts";
+import type { StageViewProps } from "./stage.ts";
+
+/** The stage as the Phone, Messages and Contacts views take it. */
+export const stageView = (stage: ReturnType<typeof useComms>): StageViewProps => ({
+  comms: stage.comms,
+  request: stage.request,
+  card: stage.card,
+  onRequest: stage.setRequest,
+  onSubmitRequest: stage.submitRequest,
+  onAlpha: stage.openAlpha,
+  onEndCall: stage.endCall,
+  onCloseChat: stage.closeChat,
+  onDecline: stage.decline,
+});
 
 /** The comms stage and the owner's request to Alpha for the subject on screen, with the bar's two targets. */
 export function useComms() {

@@ -9,6 +9,9 @@ import { initial as pageInitial, type ReminderPage } from "../../../gen/clock__r
 import type { DeletionNotices } from "../../../gen/clock__deletions.ts";
 import { initial as shadeInitial, type Shade } from "../../../gen/clock__notifications.ts";
 import type { Ringer } from "../../../gen/clock__ringer.ts";
+import type { HandoffHistory } from "../../../gen/clock__handoffHistory.ts";
+import { initial as workflowInitial, type WorkflowNotices } from "../../../gen/clock__workflowNotices.ts";
+import { initial as noticesInitial, type Notices } from "../../../gen/clock__notices.ts";
 import type { ReminderDraft } from "../../clock/schedule.ts";
 
 const NOW = 1_800_000_000_000;
@@ -113,3 +116,36 @@ export const reopenPage: ReminderPage = { ...pageInitial, detail: "r3", reopen: 
 
 /** The edit form of the reminder shown. */
 export const editPage: ReminderPage = { ...pageInitial, detail: "r1", form: "EditForm" };
+
+/** Eight alarms, some with long labels, to scroll through. */
+export const manyAlarms: AlarmClock = {
+  ...alarms,
+  alarms: [5, 6, 7, 8, 9, 12, 18, 22].map((hour, i) => ({
+    id: `alarm_${i}`, hour, minute: i % 2 === 0 ? 0 : 45, label: i % 3 === 0 ? "Take the morning medication before breakfast and water the balcony plants" : i % 3 === 1 ? "Gym" : "",
+    days: i % 2 === 0 ? [2, 3, 4, 5, 6] : [], nextAt: NOW + (i + 1) * 3_600_000, phase: "AlarmSet" as const, revision: i + 1,
+  })),
+};
+
+/** Six followed cities. */
+export const manyZones: WorldClock = { zones: ["Asia/Tokyo", "Europe/Paris", "America/New_York", "America/Los_Angeles", "Australia/Sydney", "America/Argentina/Buenos_Aires"] };
+
+/** The zones a phone knows, for suggestions. */
+export const knownZones: readonly string[] = ["UTC", "Europe/London", "Europe/Paris", "Asia/Tokyo", "America/New_York", "America/Los_Angeles", "Australia/Sydney"];
+
+/** The last Clock request was left opening before a restart, so it reads as unknown. */
+export const lastHandoffUnknown: HandoffHistory = { record: { tag: "LastHandoff", id: "h1", handoffAction: "SetAlarm", answered: false, status: "ClockOpened", at: NOW - 3_600_000 }, writes: 1 };
+
+/** The shade's question review about the own reminder row. */
+export const shadeQuestion: Shade = { ...shade, question: { tag: "QuestionReview", id: "reminder-1", revision: "v1" } };
+
+/** The reminder a tapped notification asks about. */
+export const reminderQuestion = { title: "Call the dentist", text: "Ask about Friday" };
+
+/** A workflow notice whose run is no longer available. */
+export const workflowUnavailable: WorkflowNotices = { ...workflowInitial, report: "RunUnavailable" };
+
+/** Reminders could not be read, and their bytes were kept. */
+export const retainedNotices: Notices = { ...noticesInitial, retained: { tag: "Retained", heading: "Reminders" } };
+
+/** A test-mocks build asking the developer to confirm the reset. */
+export const retainedReset: Notices = { ...retainedNotices, mocks: true, recovery: "ConfirmingReset" };

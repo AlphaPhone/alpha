@@ -1,4 +1,4 @@
-// spec/files/storage.md, "Only a complete read with no rows is empty; a partial read keeps its rows"; spec/files/storage.md, "An item's days left count down from 30 and never go below zero"; spec/files/browser.md, "Only the newest access read decides access, and without access nothing is listed"; spec/files/browser.md, "A press starts a selection with its row, a tap adds or removes a row, and an empty selection ends"; spec/files/browser.md, "Choosing the sort shown reverses it, choosing another starts it in its own order"; spec/files/trash.md, "A permanent deletion first shows the rows it will erase, and erases only those Trash still lists"; spec/files/share.md, "A selection reaches Android's share sheet only when it is one to 100 files that are all still there"; spec/files/filter.md, "A filter says it found nothing only after a complete query"
+// spec/files/storage.md, "Only a complete read with no rows is empty; a partial read keeps its rows"; spec/files/storage.md, "An item's days left count down from 30 and never go below zero"; spec/files/browser.md, "Only the newest access read decides access, and without access nothing is listed"; spec/files/browser.md, "A press starts a selection with its row, a tap adds or removes a row, and an empty selection ends"; spec/files/browser.md, "Choosing the sort shown reverses it, choosing another starts it in its own order"; spec/files/trash.md, "A permanent deletion first shows the rows it will erase, and erases only those Trash still lists"; spec/files/share.md, "A selection reaches Android's share sheet only when it is one to 100 files that are all still there"; spec/files/filter.md, "A filter says it found nothing only after a complete query"; spec/files/storage.md, "The primary volume is listed first, and its used share is a whole percentage of what is known"
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
 
@@ -82,3 +82,18 @@ export const filesFilterChipCountsItsResults = always(() => {
   const f = files.current;
   return f === null || f.chipCount < 0 || f.chipCount === f.results;
 });
+
+const selectionCount = extract(({ document }) => {
+  const bar = document.querySelector('main[aria-label="Files"] [role="toolbar"][aria-label="Selection"]');
+  return bar === null ? -1 : Number(/(\d+) selected/.exec(bar.textContent ?? "")?.[1] ?? "0");
+});
+
+/** An empty selection ends: the selection bar never counts zero rows. */
+export const filesEmptySelectionEnds = always(() => selectionCount.current !== 0);
+
+const storageShares = extract(({ document }) =>
+  Array.from(document.querySelectorAll('ul[aria-label="Storage"] [role="progressbar"]')).map((bar) => bar.getAttribute("aria-valuenow")));
+
+/** A volume's used share is drawn as a whole percentage from 0 to 100. */
+export const filesStorageShareIsAWholePercentage = always(() =>
+  storageShares.current.every((value) => value === null || (/^\d+$/.test(value) && Number(value) <= 100)));
