@@ -1,5 +1,6 @@
 // spec/app/home/index.md, "Story: Open an app"; spec/app/home/index.md, "Story: See the apps on this phone"
 import type { InstalledApp, LaunchTarget } from "@elizaos/os/bridges/definitions/system"
+import type { SystemClient } from "@elizaos/os/bridges/system"
 
 module held {
   import type { InstalledApp } from "@elizaos/os/bridges/definitions/system"
@@ -25,6 +26,11 @@ module held {
 }
 import { bridge, details, found } from held
 export { details, found }
+
+/** eliza's client of the phone's `ElizaSystem` plugin, from the one bridge the launcher loads. @throws {never} */
+export function phoneSystem(): Promise<SystemClient> {
+  return bridge().then((loaded) => loaded.System)
+}
 
 /** How Alpha is presented, as the phone says: as its launcher, as the assistant alone, or as an ordinary app. */
 export interface Presentation {
