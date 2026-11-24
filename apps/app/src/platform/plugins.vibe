@@ -5,6 +5,8 @@ import { type LauncherUpdates, browserLauncherUpdates, phoneLauncherUpdates } fr
 import { type SystemSettings, browserSystemSettings, phoneSystemSettings } from "./systemSettings.vibe"
 import { type WiFi, browserWiFi, phoneWiFi } from "./wifi.vibe"
 import { type PhoneCalendar, browserCalendar, phoneCalendar } from "./calendar.vibe"
+import { type CameraPort, browserCamera, phoneCamera } from "./camera.vibe"
+import { type PhotosPort, browserPhotos, phonePhotos } from "./photos.vibe"
 import { type Files, browserFiles, phoneFiles } from "./files.vibe"
 import { type Location, browserLocation, phoneLocation } from "./location.vibe"
 import { type Calls, browserCalls, phoneCalls } from "./calls.vibe"
@@ -21,6 +23,8 @@ export type Plugins =
   | CarrierSetup
   | LauncherUpdates
   | PhoneCalendar
+  | CameraPort
+  | PhotosPort
   | Files
   | Location
   | Telephony
@@ -38,6 +42,8 @@ export const phonePlugins = Layer.mergeAll(
   phoneLauncherUpdates,
   phoneCalendar,
   phoneFiles,
+  phoneCamera,
+  phonePhotos,
   phoneLocation,
   phoneTelephony,
   phoneCalls,
@@ -55,6 +61,8 @@ export const browserPlugins = Layer.mergeAll(
   browserLauncherUpdates,
   browserCalendar,
   browserFiles,
+  browserCamera,
+  browserPhotos,
   browserLocation,
   browserTelephony,
   browserCalls,

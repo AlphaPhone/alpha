@@ -26,6 +26,7 @@ import { type Machine as ShellMachine, showing } from "../../gen/app__shell.effe
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { isCommsView } from "../shell/views.tsx";
+import { type Attachment, removeAttachment } from "./attachments.vibe";
 import { freedom } from "./assistant.vibe";
 import { Talk } from "./talk.vibe";
 
@@ -60,10 +61,14 @@ function noticeOf(writing: Writing): AssistantDraftNoticeProps["status"] | undef
   return undefined;
 }
 
-function waiting(writing: Writing): AssistantAttachment[] {
+function chip(file: Pick<Attachment, "id" | "name" | "mimeType">): AssistantAttachment {
+  return { id: file.id, kind: file.mimeType.startsWith("image/") ? "image" : "file", name: file.name };
+}
+
+function waiting(writing: Writing, files: readonly Attachment[]): AssistantAttachment[] {
   const { editor } = writing;
   return [
-    ...Array.from({ length: editor.files }, (_, at): AssistantAttachment => ({ id: `file ${at + 1}`, kind: "file", name: `File ${at + 1}` })),
+    ...files.slice(0, editor.files).map(chip),
     ...(editor.mail ? [{ id: "mail", kind: "mail", name: "Mail" } as const] : []),
     ...(editor.transcript ? [{ id: "transcript", kind: "transcript", name: "Transcript" } as const] : []),
     ...(editor.shown ? [{ id: "shown", kind: "image", name: "Photo" } as const] : []),
@@ -118,7 +123,7 @@ export function Assistant({ runtime }: AssistantProps) {
   const hold = { type: "hold", askable: askable(talking) } as const;
   const start = { type: "start", ...free } as const;
   const newChat = shown.chosen === 0;
-  const sendable = newChat ? writing.editor.text && !writing.long && chats.can(start) && askable(talking) : composer.can(hold);
+  const sendable = newChat ? (writing.editor.text || writing.editor.files > 0) && !writing.long && chats.can(start) && askable(talking) : composer.can(hold);
   const status = turnOf(talking, seen.label);
   const notice = noticeOf(writing);
   const check = { type: "checkForReply" } as const;
@@ -170,6 +175,7 @@ export function Assistant({ runtime }: AssistantProps) {
       id: line.id,
       author: line.mine ? "owner" : "alpha",
       text: line.text,
+      ...(line.files === undefined ? {} : { attachments: line.files.map(chip) }),
       ...(line.quote === undefined ? {} : { quote: line.quote }),
       ...(line.failure === undefined ? {} : { children: failureCard({ kind: line.failure, fix: "NoFix", waitMs: -1 }, false) }),
       onFork: settled && chats.can(fork) ? () => void chats.send(fork) : undefined,
@@ -268,7 +274,7 @@ export function Assistant({ runtime }: AssistantProps) {
             onCheck: writing.unsettled && conversation.can(check) ? () => void conversation.send(check) : undefined,
           },
           unavailable: !talking.ready ? "away" : talking.context.sensitive ? "sensitive" : undefined,
-          attachments: waiting(writing),
+          attachments: waiting(writing, seen.files),
           quote: quoted,
           editing: writing.editor.editing > 0,
           onOpen: !open ? () => openWithFocus(true) : undefined,
@@ -282,8 +288,8 @@ export function Assistant({ runtime }: AssistantProps) {
           } : undefined,
           onRemoveAttachment: (id) => {
             if (id === "question") void composer.send({ type: "removeQuestion" });
-            else if (id.startsWith("file ")) void composer.send({ type: "removeFile" });
             else if (id === "mail" || id === "transcript" || id === "shown") void composer.send({ type: "detach", kind: detached[id] });
+            else void runtime.runPromise(removeAttachment(id));
           },
           onUnquote: composer.can({ type: "unquote" }) ? () => void composer.send({ type: "unquote" }) : undefined,
         }}

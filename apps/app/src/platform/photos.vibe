@@ -1,0 +1,138 @@
+// spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/viewer.md, "Story: Look at a photo or video"
+import type { DeviceLibraryClient, PhotosClient } from "@elizaos/os/bridges/definitions/media"
+import { registered } from "./device.vibe"
+
+module native {
+  import { deviceLibraryClient, deviceLibraryPlugin, photosClient, photosPlugin } from "@elizaos/os/bridges/media"
+
+  /** @throws {never} */
+  export function phoneLibrary(name: string): PhotosClient {
+    return photosClient(photosPlugin(name), name)
+  }
+
+  /** @throws {never} */
+  export function reviewedLibrary(name: string): DeviceLibraryClient {
+    return deviceLibraryClient(deviceLibraryPlugin(name), name)
+  }
+}
+import { phoneLibrary, reviewedLibrary } from native
+
+/** A browser capture, stored in the origin with its original pixels and optional camera thumbnail. */
+export interface BrowserCapture {
+  readonly id: string
+  readonly file: Blob
+  readonly name: string
+  readonly width: number
+  readonly height: number
+  readonly created: number
+  readonly duration?: number
+  readonly thumbnail?: string
+}
+
+module browser {
+  const event = "alpha:photos-captured"
+  const store = "captures"
+
+  /** @throws {never} */
+  export const page = (): EventTarget => window
+
+  /** @throws {never} */
+  export const captureEvent = (): string => event
+
+  async function storage(): Promise<IDBDatabase> {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open("alpha-photo-library", 1)
+      request.onupgradeneeded = () => request.result.createObjectStore(store, { keyPath: "id" })
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
+    })
+  }
+
+  /** Keep the original before the capture is reported as saved. */
+  export async function saveBrowserCapture(file: Blob, name: string, width: number, height: number, duration?: number, thumbnail?: string): Promise<string> {
+    const database = await storage()
+    const created = Date.now()
+    const id = `browser:${created}:${crypto.randomUUID()}`
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const tx = database.transaction(store, "readwrite")
+        tx.objectStore(store).add({ id, file, name, width, height, created, duration, thumbnail } satisfies BrowserCapture)
+        tx.oncomplete = () => resolve()
+        tx.onabort = () => reject(tx.error)
+      })
+    } finally {
+      database.close()
+    }
+    window.dispatchEvent(new Event(event))
+    return id
+  }
+
+  /** Read saved capture data from this browser origin. */
+  export async function browserCaptures(): Promise<readonly BrowserCapture[]> {
+    const database = await storage()
+    try {
+      return await new Promise((resolve, reject) => {
+        const request = database.transaction(store).objectStore(store).getAll()
+        request.onsuccess = () => {
+          const rows: unknown = request.result
+          resolve(Array.isArray(rows) ? rows.filter(valid) : [])
+        }
+        request.onerror = () => reject(request.error)
+      })
+    } finally {
+      database.close()
+    }
+  }
+
+  function valid(row: unknown): row is BrowserCapture {
+    return typeof row === "object" && row !== null && "id" in row && typeof row.id === "string"
+      && "name" in row && typeof row.name === "string" && "file" in row && row.file instanceof Blob
+      && "created" in row && Number.isSafeInteger(row.created)
+      && "width" in row && Number.isSafeInteger(row.width) && "height" in row && Number.isSafeInteger(row.height)
+      && (!("duration" in row) || row.duration === undefined || typeof row.duration === "number" && Number.isFinite(row.duration))
+      && (!("thumbnail" in row) || row.thumbnail === undefined || typeof row.thumbnail === "string")
+  }
+}
+import { browserCaptures, captureEvent, page, saveBrowserCapture } from browser
+export { saveBrowserCapture }
+
+/** The phone's permitted library and its reviewed read surface, or the captures saved in this browser. */
+export service PhotosPort {
+  readonly phone: Option.Option<PhotosClient>
+  readonly reviewed: Option.Option<DeviceLibraryClient>
+  readonly changes: Stream.Stream<void>
+  captures(): readonly BrowserCapture[]!PhotosFailed
+  handoff(id: string): void!!
+  takeHandoff(): (string | undefined)!!
+}
+
+export error PhotosFailed { readonly cause: unknown }
+
+function entry() {
+  let next: string | undefined
+  return {
+    handoff: (id: string) => sync(() => { next = id }),
+    takeHandoff: () => sync(() => { const known = next; next = undefined; return known }),
+  }
+}
+
+const photosName = "AlphaPhotos"
+const reviewedName = "AlphaPhotoLibrary"
+
+export const phonePhotos = Layer.sync(PhotosPort, () => {
+  const phone = registered(photosName) ? Option.some(phoneLibrary(photosName)) : Option.none<PhotosClient>()
+  const reviewed = registered(reviewedName) ? Option.some(reviewedLibrary(reviewedName)) : Option.none<DeviceLibraryClient>()
+  const changes = Option.isNone(phone) ? Stream.empty : Stream.callback<void>((queue) => acquireRelease(
+    tryPromise(() => phone.value.onLibraryChanged(() => { Queue.offerUnsafe(queue, undefined) })) catch () => undefined,
+    (handle) => handle === undefined ? Effect.void : ignore(tryPromise(() => handle.remove())),
+  ))
+  return { phone, reviewed, changes, captures: () => succeed([]), ...entry() }
+})
+
+export const browserPhotos = Layer.sync(PhotosPort, () => ({
+  ...entry(),
+  phone: Option.none(),
+  reviewed: Option.none(),
+  changes: Stream.suspend(() => Stream.as(Stream.fromEventListener(page(), captureEvent()), undefined)),
+  captures: () => tryPromise({ try: browserCaptures, catch: (cause) => new PhotosFailed({ cause }) }),
+}))

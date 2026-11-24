@@ -1,4 +1,5 @@
 // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
+import { type CameraScene, cameraScene } from "./camera.ts";
 import { type AskScene, askRoutes, askScene } from "./ask.ts";
 import { type CalendarScene, calendarRoutes, calendarScene } from "./calendar.ts";
 import { type MapsScene, mapsRoutes, mapsScene } from "./maps.ts";
@@ -10,6 +11,7 @@ import { type SampleScene, sampleRoutes, sampleScene } from "./sample.ts";
 import { type LauncherScene, launcherScene } from "./launcher.ts";
 import { type SettingsScene, settingsScene } from "./settings.ts";
 import { type FilesScene, filesScene } from "./files.ts";
+import { type PhotosScene, photosScene } from "./photos.ts";
 import { type TelephonyScene, telephonyRoutes, telephonyScene } from "./telephony.ts";
 import { type UpdateScene, updateScene } from "./update.ts";
 import { type VoiceScene, voiceScene } from "./voice.ts";
@@ -27,7 +29,9 @@ export interface Scene {
   readonly settings: SettingsScene;
   readonly inbox: InboxScene;
   readonly calendar: CalendarScene;
+  readonly camera: CameraScene;
   readonly files: FilesScene;
+  readonly photos: PhotosScene;
   readonly maps: MapsScene;
   readonly telephony: TelephonyScene;
   readonly platform: PlatformScene;
@@ -44,7 +48,9 @@ export function scene(): Scene {
     settings: settingsScene(),
     inbox: inboxScene(),
     calendar: calendarScene(),
+    camera: cameraScene(),
     files: filesScene(),
+    photos: photosScene(),
     maps: mapsScene(),
     telephony: telephonyScene(),
     platform: platformScene(),

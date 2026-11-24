@@ -1,0 +1,19 @@
+// spec/app/camera/index.md, "Story: Scan a document"; spec/app/files/scan.md, "Story: Arrange the pages"
+/** The owner opened the scanner from Camera, for the next Files view alone. */
+export service ScanEntry {
+  ask(): void!!
+  take(): boolean!!
+}
+
+/** A single handoff is consumed on the destination's next view. */
+export const scanEntry = Layer.sync(ScanEntry, () => {
+  let waiting = false
+  return {
+    ask: () => sync(() => { waiting = true }),
+    take: () => sync(() => {
+      const asked = waiting
+      waiting = false
+      return asked
+    }),
+  }
+})

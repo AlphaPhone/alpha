@@ -1,0 +1,395 @@
+// spec/app/camera/index.md, "Story: Open the camera"; spec/app/camera/index.md, "Story: Leave and come back"; spec/app/camera/index.md, "Story: Frame the shot"; spec/app/camera/index.md, "Story: Take photos and videos"; spec/app/camera/index.md, "Story: Let Alpha take a photo"
+import * as Camera from "../../gen/app__camera.effect.vibe"
+import * as Film from "../../gen/app__camera__recording.effect.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
+import * as Layers from "../../gen/app__shell__layers.effect.vibe"
+import { allows } from "../../gen/kit__permission.effect.vibe"
+import { ScanEntry } from "../files/scanEntry.vibe"
+import { Device } from "../platform/device.vibe"
+import { CameraPort, playable, type CameraMedia, type LensFacts, type Point } from "../platform/camera.vibe"
+import { PhotosPort, saveBrowserCapture } from "../platform/photos.vibe"
+import { attachToAlpha } from "../assistant/attachments.vibe"
+import { SystemSettings } from "../platform/systemSettings.vibe"
+import { answer, applying, contained, due, reacting, run, started, together, untimed, type Due, type Job } from "../runtime/reactor.vibe"
+
+type Phone = ["Phone"]
+type CameraJob = Job<Camera.Event, CameraPort | Camera.Machine | CameraAssets | Shell.Machine | SystemSettings | PhotosPort | ScanEntry | Effect.Services<ReturnType<typeof askAbout>>, Phone>
+type Outcome = Camera.Camera["agent"]["result"]
+
+/** What an external request to the viewfinder returned, with its media only when it reached a known capture. */
+export interface CaptureAnswer {
+  readonly result: Outcome
+  readonly cause: Camera.Cause
+  readonly media?: CameraMedia
+}
+
+/** The data behind the machine's identities: native receipts, the viewfinder element and focus coordinates. */
+export service CameraAssets {
+  bind(element: HTMLVideoElement | null): void!!
+  readonly mounted: Stream.Stream<boolean>
+  newest(): number!!
+  store(media: CameraMedia, secure: boolean): number!!
+  read(id: number): CameraMedia | undefined!!
+  setLens(ticket: number, lens: LensFacts): void!!
+  lens(ticket: number): LensFacts | undefined!!
+  setPoint(tap: number, point: Point): void!!
+  point(tap: number): Point!!
+}
+
+const assets = Layer.effect(CameraAssets, effect {
+  const mounted = try SubscriptionRef.make(false)
+  const port = try CameraPort
+  const captures = new Map<number, CameraMedia>()
+  const points = new Map<number, Point>()
+  let serial = 0
+  let newest = 0
+  let lens: { ticket: number; facts: LensFacts } | undefined
+  try addFinalizer(() => effect {
+    for (const media of captures.values()) try port.release(media)
+  })
+  return {
+    bind: (element: HTMLVideoElement | null) => effect {
+      try port.bind(element)
+      try SubscriptionRef.set(mounted, element !== null)
+    },
+    mounted: SubscriptionRef.changes(mounted),
+    newest: () => sync(() => newest),
+    effect store(media: CameraMedia, secure: boolean): number!! {
+      const id = ++serial
+      captures.set(id, media)
+      if (!secure) newest = id
+      const removed = [...captures.keys()].find((one) => one !== newest)
+      if (captures.size > 16 && removed !== undefined) {
+        const expired = captures.get(removed)
+        captures.delete(removed)
+        if (expired !== undefined) try port.release(expired)
+      }
+      return id
+    },
+    read: (id: number) => sync(() => captures.get(id)),
+    setLens: (ticket: number, facts: LensFacts) => sync(() => {
+      if (lens === undefined || lens.ticket <= ticket) lens = { ticket, facts }
+    }),
+    lens: (ticket: number) => sync(() => lens?.ticket === ticket ? lens.facts : undefined),
+    setPoint: (tap: number, point: Point) => sync(() => {
+      points.set(tap, point)
+      points.delete(tap - 16)
+    }),
+    point: (tap: number) => sync(() => points.get(tap) ?? { x: .5, y: .5 }),
+  }
+})
+
+effect function tell(event: Camera.Event): boolean!!Camera.Machine {
+  return try contained((try Camera.Machine).send(event, "Phone"), event.type)
+}
+
+effect function openView(view: "Camera" | "Photos" | "Files"): boolean!!Shell.Machine {
+  const shell = try Shell.Machine
+  if (Shell.showing(try shell.get(), view)) return true
+  return try contained(shell.send({ type: "openView", view }), `opening ${view}`)
+}
+
+effect function uncover(): void!!Shell.Machine {
+  const shell = try Shell.Machine
+  while ((try shell.get()).assistant !== "Bar") {
+    if (!(try contained(shell.send({ type: "goBack" }), "showing the viewfinder"))) return
+  }
+}
+
+effect function startPreview(ticket: number, lens: Camera.Lens): void!!(CameraPort | CameraAssets | Camera.Machine) {
+  const port = try CameraPort
+  const held = try CameraAssets
+  const state = (try Camera.Machine)
+  if (!Camera.canPreviewStarted(try state.get(), ticket, "Phone")) {
+    try tell({ type: "staleFailed", ticket })
+    return
+  }
+  const current = try state.get()
+  const facts = try port.start(ticket, lens, current.wide ? "16:9" : "4:3")
+  const ok = facts !== undefined
+  if (facts !== undefined) try held.setLens(ticket, facts)
+  if (!(try tell({ type: "previewStarted", ticket, ok }))) {
+    try tell({ type: ok ? "staleOpened" : "staleFailed", ticket })
+    if (ok) try port.stop(ticket)
+  }
+}
+
+effect function permission(kind: "camera" | "microphone"): Camera.Event!!CameraPort {
+  const grant = try (try CameraPort).ask(kind)
+  return kind === "camera" ? { type: "accessIs", grant, now: untimed } : { type: "microphoneIs", grant }
+}
+
+effect function saved(media: CameraMedia, elapsed: number): CameraMedia | undefined!! {
+  if (media.blob === undefined) return media
+  const video = media.mime.startsWith("video/")
+  const suffix = video ? (media.mime.startsWith("video/mp4") ? "mp4" : "webm") : "jpg"
+  const blob = media.blob
+  const libraryId = tryPromise(() => saveBrowserCapture(blob, `Camera.${suffix}`, media.width, media.height, video ? media.duration ?? elapsed : undefined, media.thumbnail)) catch () => undefined
+  return libraryId === undefined ? undefined : { ...media, libraryId }
+}
+
+effect function take(ticket: number): Camera.Event!!(CameraPort | CameraAssets | Camera.Machine) {
+  const port = try CameraPort
+  const camera = try Camera.Machine
+  const before = try camera.get()
+  const captured = before.shot === ticket && Camera.ready(before) ? try port.capture(true) : undefined
+  const media = captured === undefined ? undefined : try saved(captured, 0)
+  if (captured !== undefined && media === undefined) try port.release(captured)
+  const id = media === undefined ? 0 : try (try CameraAssets).store(media, before.secure)
+  return { type: "captured", ticket, photo: id }
+}
+
+effect function observeSize(bytes: number): void!!Camera.Machine {
+  const camera = try Camera.Machine
+  const size = Math.min(Film.maxBytes, Math.floor(bytes))
+  if (Camera.canRecordingSize(try camera.get(), size, "Phone")) try tell({ type: "recordingSize", size, now: untimed })
+}
+
+effect function finish(): Camera.Event!!(CameraPort | CameraAssets | Camera.Machine) {
+  const port = try CameraPort
+  const camera = try Camera.Machine
+  const before = try camera.get()
+  const captured = try port.finish()
+  if (captured?.size !== undefined) try observeSize(captured.size)
+  const media = captured === undefined ? undefined : try saved(captured, before.film.elapsed)
+  if (captured !== undefined && media === undefined) try port.release(captured)
+  const after = try camera.get()
+  const id = media === undefined ? 0 : try (try CameraAssets).store(media, before.secure || after.secure)
+  return { type: "recordingEnded", ok: media !== undefined, video: id, now: untimed }
+}
+
+function carry(fx: Camera.Effect): CameraJob {
+  switch (fx.tag) {
+    case "AskAccess": return answer("camera permission", permission("camera"), { type: "accessIs", grant: "Unasked", now: untimed }, "Phone")
+    case "AskMicrophone": return answer("mic permission", permission("microphone"), { type: "microphoneIs", grant: "Unasked" }, "Phone")
+    case "OpenSettings": return run("camera settings", effect { try (try SystemSettings).open("AppPermissions", 0) }, "Phone")
+    case "StartPreview": return run(`bind preview ${fx.ticket}`, startPreview(fx.ticket, fx.lens), "Phone")
+    case "StopPreview": return run(`release preview ${fx.ticket}`, effect { try (try CameraPort).stop(fx.ticket) }, "Phone")
+    case "SetFlash": return run("flash", effect { try (try CameraPort).flash(fx.auto ? "auto" : fx.on ? (fx.video ? "torch" : "on") : "off") }, "Phone")
+    case "SetZoom": return run("zoom", effect { try (try CameraPort).zoom(fx.level) }, "Phone")
+    case "FocusAt": return answer(`focus ${fx.tap}`, effect {
+      const point = try (try CameraAssets).point(fx.tap)
+      const applied = try (try CameraPort).focus(point)
+      return { type: "focusWritten", tap: fx.tap, applied } as const
+    }, { type: "focusWritten", tap: fx.tap, applied: false }, "Phone")
+    case "Capture": return answer(`capture ${fx.ticket}`, take(fx.ticket), { type: "captured", ticket: fx.ticket, photo: 0 }, "Phone")
+    case "StartRecording": return answer("start recording", effect {
+      const ok = try (try CameraPort).record(fx.sound)
+      return { type: "recordingStarted", ok, now: untimed } as const
+    }, { type: "recordingStarted", ok: false, now: untimed }, "Phone")
+    case "StopRecording": return answer("finish recording", finish(), { type: "recordingEnded", ok: false, video: 0, now: untimed }, "Phone")
+    case "CheckRecording": return answer("check recording", effect {
+      const asset = try (try CameraAssets).read(fx.video)
+      return { type: "recordingVerified", ok: asset !== undefined, now: untimed } as const
+    }, { type: "recordingVerified", ok: false, now: untimed }, "Phone")
+    case "OpenScan": return run("open scanner", effect {
+      try (try ScanEntry).ask()
+      try openView("Files")
+    }, "Phone")
+    case "OpenLast": return run("open last capture", fx.only.length === 0 ? openLast(fx.photo) : Effect.void, "Phone")
+    case "Uncover": return run("uncover Camera", uncover(), "Phone")
+    case "Answer": return run(`answered request ${fx.request}`, Effect.void, "Phone")
+    case "AskAbout": return run("ask about this", askAbout(fx.photo), "Phone")
+    case "Unlock": return run("unlock", Effect.void, "Phone")
+  }
+}
+
+function timers(state: Camera.Camera): ReadonlyArray<Due<Camera.Event, Phone>> {
+  const wakes: Array<Due<Camera.Event, Phone>> = []
+  const grace = state.coveredAt + Camera.grace
+  if (Camera.canGraceOver(state, grace, "Phone")) wakes.push(due("covered preview", grace, { type: "graceOver", now: untimed }, "Phone"))
+  if (state.countdown > 0) wakes.push(due("photo timer", state.nextCount, { type: "delayTick", now: untimed }, "Phone"))
+  const { film } = state
+  if (film.stage === "Running") wakes.push(due("video timer", film.since + (film.elapsed + 1) * Film.second, { type: "tick", now: untimed }, "Phone"))
+  if (film.stage === "Stopping") wakes.push(due("video deadline", film.deadline, { type: "stopTimedOut", now: untimed }, "Phone"))
+  return wakes
+}
+
+const visit = started(effect {
+  const device = try Device
+  const shell = try Shell.Machine
+  const layers = try Layers.Machine
+  const camera = try Camera.Machine
+  const port = try CameraPort
+  const photos = try CameraAssets
+  const visibility = Stream.concat(Stream.succeed(try device.showing()), device.visible)
+  const states = Stream.zipLatestAll([shell.changes, layers.changes, visibility, photos.mounted] as const)
+  try Stream.runForEach(states, effect ([where, above, shown, mounted]) => {
+    const wanted = shown && mounted && Shell.showing(where, "Camera")
+    const state = try camera.get()
+    if (!wanted) {
+      if (state.showing) try tell({ type: "close", now: untimed })
+      return
+    }
+    if (!state.showing) {
+      try tell({ type: "open", secure: false, newest: try photos.newest() })
+      const access = try port.access()
+      try tell({ type: "microphoneIs", grant: access.microphone })
+      try tell({ type: "accessIs", grant: access.camera, now: untimed })
+    }
+    const covered = where.assistant === "Full" || Layers.pageInert(above)
+    if (covered !== (try camera.get()).covered) try tell(covered ? { type: "covered", at: untimed } : { type: "uncovered" })
+  })
+}, "Camera foreground")
+
+const hardware = started(effect {
+  const port = try CameraPort
+  const camera = try Camera.Machine
+  try fork.scoped Stream.runForEach(port.volumeKeys, () => shutter())
+  try Stream.runForEach(port.signals, effect (signal) => {
+    const { ticket, kind } = signal
+    const current = try camera.get()
+    if (current.preview !== ticket) return
+    if (kind !== "preview-lost") {
+      try observeSize(signal.size)
+      if (kind === "recording-finished" && (try camera.get()).film.stage === "Running") try tell({ type: "recordingInterrupted", now: untimed })
+      return
+    }
+    if (Camera.recording(current)) try tell({ type: "recordingInterrupted", now: untimed })
+    else try tell({ type: "previewLost", ticket })
+  })
+}, "Camera hardware")
+
+const volume = applying(Camera.Machine, (state) => Camera.ready(state), effect (ready: boolean) => {
+  try (try CameraPort).volume(ready)
+})
+
+const mode = applying(Camera.Machine, (state) => ({ ticket: state.phase === "Ready" ? state.preview : 0, mode: state.mode }), effect ({ ticket, mode }: { ticket: number; mode: Camera.Mode }) => {
+  if (ticket > 0) try (try CameraPort).mode(mode)
+})
+
+const approval = started(effect {
+  const camera = try Camera.Machine
+  try Stream.runForEach(camera.changes, effect (state) => {
+    if (Camera.canAgentShown(state, "Phone")) try tell({ type: "agentShown" })
+  })
+}, "Camera capture review")
+
+const latest = applying(Camera.Machine, (s) => s.showing && !s.secure ? s.visit : 0, effect (visit: number) => {
+  if (visit === 0) return
+  const { phone } = try PhotosPort
+  if (Option.isNone(phone)) return
+  const held = try CameraAssets
+  const current = try (try Camera.Machine).get()
+  const previous = current.last
+  const page = tryPromise(() => phone.value.list({ album: "camera", limit: 1, thumbnails: true })) catch () => undefined
+  if (page === undefined) return
+  const row = page.items[0]
+  const observed = try (try Camera.Machine).get()
+  if (!Camera.canLastSeen(observed, visit, previous, "Phone")) return
+  const known = try held.read(previous)
+  if (row !== undefined && row.id === known?.libraryId) return
+  const newest = row === undefined ? 0 : try held.store({
+    libraryId: row.id,
+    path: row.path ?? "",
+    source: row.image || (row.path ? playable(row.path) : ""),
+    mime: row.kind === "video" ? "video/mp4" : "image/jpeg",
+    width: row.width,
+    height: row.height,
+    duration: row.duration,
+    thumbnail: row.image,
+  }, false)
+  try tell({ type: "lastSeen", visit, previous, newest })
+})
+
+effect function openLast(photo: number): void!!(CameraAssets | PhotosPort | Shell.Machine) {
+  const media = try (try CameraAssets).read(photo)
+  if (media?.libraryId !== undefined) try (try PhotosPort).handoff(media.libraryId)
+  try openView("Photos")
+}
+
+module bytes {
+  /** @throws {never} */
+  export async function imageData(source: string): Promise<string | undefined> {
+    if (!source.startsWith("data:image/") && !source.startsWith("blob:")) return undefined
+    const response = await fetch(source)
+    const file = await response.blob()
+    if (!response.ok || !file.type.startsWith("image/") || file.size === 0 || file.size > 5_000_000) return undefined
+    return new Promise((resolve) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result.slice(reader.result.indexOf(",") + 1) : undefined)
+      reader.onerror = () => resolve(undefined)
+      reader.readAsDataURL(file)
+    })
+  }
+}
+import { imageData } from bytes
+
+effect function askAbout(photo: number) {
+  const camera = try Camera.Machine
+  const before = try camera.get()
+  const port = try CameraPort
+  const from = photo === 0 ? (try port.capture(false)) : (try (try CameraAssets).read(photo))
+  if (from === undefined) return
+  const result = tryPromise(() => imageData(from.source)) catch () => undefined
+  if (photo === 0) try port.release(from)
+  if (result === undefined) return
+  const now = try camera.get()
+  if (!now.showing || now.secure || now.visit !== before.visit || now.preview !== before.preview || (photo !== 0 && now.last !== photo)) return
+  try attachToAlpha({ id: `camera:${before.visit}:${photo}:${before.preview}`, name: "Camera.jpg", mimeType: from.mime, data: result })
+}
+
+export const camera = together(reacting(Camera, { carry, timers }), assets, visit, hardware, volume, mode, approval, latest)
+
+/** Take a photo, stop a recording, or start the mode's next capture from the screen or the hardware shutter. */
+export effect function shutter(): void!!Camera.Machine {
+  const machine = try Camera.Machine
+  const state = try machine.get()
+  if (state.mode === "Video" && state.film.stage !== "Running" && !allows(state.mic)) return
+  const event: Camera.Event = state.mode === "Photo"
+    ? state.countdown > 0 ? { type: "cancelDelay" } : state.delay > 0 ? { type: "startDelay", now: untimed } : { type: "shutter" }
+    : state.film.stage === "Running"
+      ? { type: "stopRecording", now: untimed }
+      : { type: "startRecording", sound: allows(state.mic) }
+  if (Camera.enabled(state, event, "Owner")) try contained(machine.send(event, "Owner"), "the shutter")
+}
+
+/** Pass a pointer position to the one outstanding focus write named by the camera's machine. */
+export effect function focus(point: Point): void!!(Camera.Machine | CameraAssets) {
+  const machine = try Camera.Machine
+  const state = try machine.get()
+  if (!Camera.canTapFocus(state, "Owner")) return
+  try (try CameraAssets).setPoint(state.taps + 1, point)
+  try contained(machine.send({ type: "tapFocus" }, "Owner"), "focus")
+}
+
+/** An approval still belongs to the visible viewfinder when the shutter is handed to the phone. */
+export effect function approveCapture(): void!!(Camera.Machine | Layers.Machine | Shell.Machine | Device) {
+  const camera = try Camera.Machine
+  const approved = try contained(camera.send({ type: "agentApprove" }, "Owner"), "approving the camera request")
+  if (!approved) return
+  const shell = try (try Shell.Machine).get()
+  const layers = try (try Layers.Machine).get()
+  const visible = try (try Device).showing()
+  const sensitive = !visible || !Shell.showing(shell, "Camera") || shell.assistant === "Full" || Layers.pageInert(layers)
+  try tell({ type: "agentShoot", sensitive })
+}
+
+/** An agent capture opens Camera before entering the viewfinder's own single review and returns its actual outcome. */
+export effect function requestCapture(): CaptureAnswer!!(Camera.Machine | CameraAssets | Shell.Machine) {
+  const machine = try Camera.Machine
+  if (!(try openView("Camera"))) return { result: "Blocked", cause: "Left" }
+  try uncover()
+  const visible = Stream.filter(machine.changes, (state) => state.showing && (allows(state.permission) || state.permission.asked))
+  const opened = timeout(Stream.runHead(visible), 90000) catch () => Option.none<Camera.Camera>()
+  if (Option.isNone(opened)) return { result: "Expired", cause: "NoCause" }
+  const state = try machine.get()
+  if (!state.showing) return { result: "Blocked", cause: "Left" }
+  if (!allows(state.permission)) return { result: "Blocked", cause: "Denied" }
+  if (state.phase === "Failed") return { result: "Blocked", cause: "PreviewFailed" }
+  const asked = machine.send({ type: "agentAsk" }, "Agent") catch () => undefined
+  if (asked === undefined) return { result: "Blocked", cause: state.secure ? "Protected" : "Busy" }
+  const request = asked.state.agent.request
+  const settled = Stream.filter(machine.changes, (next) => next.agent.request >= request && next.agent.stage === "Over")
+  const answered = ensuring(
+    timeout(Stream.runHead(settled), 90000),
+    effect {
+      const current = try machine.get()
+      if (current.agent.request === request && Camera.canAgentExpired(current, "Phone")) try tell({ type: "agentExpired" })
+    },
+  ) catch () => Option.none<Camera.Camera>()
+  if (Option.isNone(answered)) return { result: "Expired", cause: "NoCause" }
+  const ended = answered.value
+  if (ended.agent.request !== request) return { result: "Uncertain", cause: "NoCause" }
+  return { result: ended.agent.result, cause: ended.cause, media: try (try CameraAssets).read(ended.agent.photo) }
+}
