@@ -251,9 +251,11 @@ question mark in its first 80. An ungrounded Browser proposal of the
 current message gets the notice "I only open a site or search you ask for
 yourself" with an example, and no card; a grounded one that is not a
 direct command keeps its review card. Showing Browser's own list of open
-tabs uses Browser's whole-message tab list request ([Browser session](../browser/session.md)).
-"Show my open tabs" and "What tabs do I have open?" open the list without a
-card. Binding a tab-list proposal to unrelated words does not authorize it to open. A Browser open of a link of the
+tabs ([Browser session](../browser/session.md)) has no side effect, so the model decides it: a
+tab-list proposal the agent made in reply to the owner's current message opens the list without a
+card, as for "Show my open tabs". Only a proposal bound to that message can open it; a stale one, or
+one injected by a page or a tool rather than proposed for that message, never opens on its own. No
+word of the owner's message is matched to decide it. A Browser open of a link of the
 page my message carried ([Turn context](./context.md)), exactly as the page
 gave it, also keeps its review card and never opens on its own (#1444): the
 page's words are not the owner's, so such an open counts as not typed even
