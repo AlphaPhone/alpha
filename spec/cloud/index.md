@@ -316,19 +316,6 @@ pure def returnAnswer(q: ReturnQuery): ReturnAnswer =
   else if (q.hasError) Cancelled
   else Continue
 
-pure val qValues: Set[ReturnQuery] = Set(
-  { given: 0, repeated: false, unknown: false, stateValid: false, hasCode: false, codeFits: false, hasError: false, hasDescription: false, descriptionFits: false },
-  { given: 2, repeated: false, unknown: false, stateValid: true, hasCode: true, codeFits: true, hasError: false, hasDescription: false, descriptionFits: false },
-  { given: 2, repeated: false, unknown: false, stateValid: true, hasCode: false, codeFits: false, hasError: true, hasDescription: true, descriptionFits: true },
-  { given: 3, repeated: true, unknown: false, stateValid: true, hasCode: true, codeFits: true, hasError: false, hasDescription: false, descriptionFits: false },
-  { given: 3, repeated: false, unknown: true, stateValid: true, hasCode: true, codeFits: true, hasError: false, hasDescription: false, descriptionFits: false },
-  { given: 2, repeated: false, unknown: false, stateValid: false, hasCode: true, codeFits: true, hasError: false, hasDescription: false, descriptionFits: false },
-  { given: 3, repeated: false, unknown: false, stateValid: true, hasCode: true, codeFits: true, hasError: true, hasDescription: false, descriptionFits: false },
-  { given: 2, repeated: false, unknown: false, stateValid: true, hasCode: true, codeFits: false, hasError: false, hasDescription: false, descriptionFits: false },
-  { given: 3, repeated: false, unknown: false, stateValid: true, hasCode: false, codeFits: false, hasError: true, hasDescription: true, descriptionFits: false },
-  { given: 3, repeated: false, unknown: false, stateValid: true, hasCode: true, codeFits: true, hasError: false, hasDescription: true, descriptionFits: true }
-)
-
 pure def lawHandsBackOneResult(q: ReturnQuery): bool =
   (returnAnswer(q) == Continue or returnAnswer(q) == Cancelled)
     implies (q.stateValid and not(q.repeated) and not(q.unknown) and q.hasCode != q.hasError)

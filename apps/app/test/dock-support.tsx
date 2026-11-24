@@ -6,6 +6,7 @@ import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Assistant } from "../src/assistant/Assistant.tsx";
 import { assisting } from "../src/assistant/assistant.vibe";
+import { mailQuestions } from "../src/inbox/mail-context.vibe";
 import { agentAt } from "../src/platform/agent.vibe";
 import { cloudAt } from "../src/platform/cloud.vibe";
 import { pagePlatform } from "../src/platform/platform.vibe";
@@ -38,7 +39,7 @@ export async function mountDock({ view = "Browser", withToast = false, flush }: 
     }),
   );
   const platform = pagePlatform(Layer.provide(agentAt("http://agent.test"), client), Layer.provide(cloudAt("http://cloud.test"), client));
-  const runtime = ManagedRuntime.make(Layer.provideMerge(whole(together(shell, canvas, haptics, pages, assisting)), platform));
+  const runtime = ManagedRuntime.make(Layer.provideMerge(whole(together(shell, canvas, haptics, pages, mailQuestions, assisting)), platform));
   const host = document.body.appendChild(document.createElement("div"));
   const reactRoot = createRoot(host);
   await run(async () => {
