@@ -18,7 +18,7 @@ import { type Answer, type Calls, account, cloudAnswers, expiresAt, found, names
 function signedOutNative(held: { key: boolean }): Record<string, Answer> {
   return {
     ...signedInNative,
-    "AlphaCloudSignIn.credentialIdentity": () => (held.key ? { credentialId: "key-2", expiresAt } : { refuse: "signed-out" }),
+    "AlphaCloudSignIn.credentialIdentity": () => (held.key ? { credentialId: "key-2", expiresAt } : { credentialId: null }),
     "AlphaCloudSignIn.startGoogle": () => {
       held.key = true
       return { status: "authenticated", expiresAt, credentialId: "key-2", accountCreated: true }
@@ -185,6 +185,54 @@ it.live(`A wrong code keeps the step and the right one signs in (spec/account/si
 })
 
 // spec/account/signIn.md, "Story: Leave sign-in"
+it.live(`Back during phone verification adopts only a newly installed identity (spec/account/signIn.md, "Story: Leave sign-in")`, () => effect {
+  for (const committed of [false, true]) {
+    const calls: Calls = []
+    const held = { key: false }
+    const verifying = try Deferred.make<void>()
+    const native = {
+      ...signedOutNative(held),
+      "AlphaCloudSignIn.status": { inApp: true, methodsKnown: true, email: true, phone: true },
+      "AlphaCloudSignIn.startPhone": { attemptId: "phone-attempt", expiresAt, resendAt: now },
+      "AlphaCloudSignIn.verifyPhone": () => {
+        held.key = committed
+        return Effect.flatMap(Deferred.succeed(verifying, undefined), () => Effect.never)
+      }
+    }
+    const cloud = { ...cloudAnswers, "GET /api/v1/user": { success: true, data: { id: "user-1", organization_id: "org-1", email: null } } }
+    provide account(calls, native, cloud) {
+      try scoped(effect {
+        const session = try CloudSession
+        const signIn = try SignInScreen
+        fork.scoped session.run()
+        fork.scoped signIn.run()
+        try until(signIn.changes, (s) => s.screen === "Choose" && s.methods.phone)
+        try signIn.choose("PhoneCode")
+        try signIn.submit("+1 415 555 ABCD")
+        const refused = try signIn.current()
+        try signIn.submit("(415) 555-0100")
+        try until(signIn.changes, (s) => s.screen === "CodeStep")
+        fork.scoped signIn.verify("123456")
+        try Deferred.await(verifying)
+        try signIn.back()
+        const screen = try signIn.current()
+        const owner = try session.current()
+        const sends = calls.filter((c) => c.name === "AlphaCloudSignIn.startPhone")
+        try Effect.try(() => assert.deepStrictEqual({
+          fault: refused.fault,
+          numbers: sends.map((c) => (c.args as { phone: string }).phone),
+          cancelled: calls.find((c) => c.name === "AlphaCloudSignIn.cancel")?.args,
+          screen: screen.screen, prefill: screen.prefill, adopted: screen.adoptedByBack, account: owner.phase,
+        }, {
+          fault: "InvalidPhone", numbers: ["+14155550100"], cancelled: { requestId: (sends[0]?.args as { requestId: string }).requestId },
+          screen: committed ? "ScreenClosed" : "Choose", prefill: !committed, adopted: committed, account: committed ? "SignedIn" : "SignedOut",
+        }))
+      })
+    }
+  }
+})
+
+// spec/account/signIn.md, "Story: Leave sign-in"
 it.live(`Back from the code step cancels the attempt and keeps the address (spec/account/signIn.md, "Story: Leave sign-in")`, () => effect {
   const calls: Calls = []
   provide account(calls, signedOutNative({ key: false })) {
@@ -304,6 +352,7 @@ it.live(`Subscribing opens Stripe's page and Cloud's confirmation on return acti
   const plans = { plans: [{ key: "plus_monthly", name: "Plus", amountCents: 3000, currency: "usd", interval: "month", allowance: { amountUsd: "25" } }] }
   const cloud = {
     ...cloudAnswers,
+    "GET /api/v1/user": { success: true, data: { id: "user-1", organization_id: "org-1", email: null } },
     "GET /api/v1/subscriptions/plans": plans,
     "GET /api/v1/referrals": { code: "ALPHA-1", total_referrals: 0, is_active: true },
     "POST /api/v1/subscriptions/checkout": { status: "open", commandId: "cmd-1", checkoutUrl: "https://checkout.stripe.com/c/pay/plus", sessionId: "cs-1", expiresAt: now + 600000 },

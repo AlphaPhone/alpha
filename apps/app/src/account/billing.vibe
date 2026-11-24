@@ -125,7 +125,7 @@ export const billingService = Layer.effect(Membership, effect {
     try Ref.set(snapshot, snap)
     try SubscriptionRef.set(details, {
       offers: [...(plans?.plans ?? [])].sort((a, b) => a.amountCents - b.amountCents),
-      referral, email: user?.data.email, quote: undefined, renewsAt: snap?.subscription?.periodEnd
+      referral, email: user?.data.email ?? undefined, quote: undefined, renewsAt: snap?.subscription?.periodEnd
     })
     return { ok: plans !== undefined && snap !== undefined, current: snap === undefined ? ({ tag: "NoPaidPlan" } as const) : currentOf(snap) }
   }

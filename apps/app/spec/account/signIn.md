@@ -21,10 +21,10 @@ key; the Android host does not.
 type Host = AndroidHost | PreviewHost | BrowserHost
 type Entry = NoEntry | RequiredEntry | FirstRunEntry | OpenedEntry
 type Screen = ScreenClosed | Choose | GoogleWait | CodeStep | FactorStep
-type Work = NoWork | Probing | GoogleWork | Sending | Resending | Verifying | SavingOwnKeys
+type Work = NoWork | Probing | GoogleWork | Sending | Resending | Verifying | CancellingVerification | SavingOwnKeys
 type CodeMethod = EmailCode | PhoneCode
 type FactorKind = TotpFactor | SmsFactor | PasskeyFactor
-type Fault = NoFault | AttemptFailed | SendFailed | ResendFailed | WrongCode | CodeSpent | KeysBusy
+type Fault = NoFault | AttemptFailed | SendFailed | ResendFailed | WrongCode | CodeSpent | InvalidPhone | KeysBusy
 type Net = NetUnknown | NetOnline | NetOffline | NetUnvalidated
 type Methods = { known: bool, google: bool, email: bool, phone: bool }
 type SignIn = {
@@ -78,7 +78,7 @@ page ends; it starts no sign-in. The owner opens sign-in, or retries the check, 
 in the slot. After a check the owner started, the resident agent is ensured.
 
 ```quint
-type SignInEffect = ReadMethods | StartGoogle | SendCode | VerifyCode | CancelAttempt | EnsureResident | Adopted
+type SignInEffect = ReadMethods | StartGoogle | SendCode | VerifyCode | CancelAttempt | ReconcileVerification | EnsureResident | Adopted
 type SignInStep = { state: SignIn, out: List[SignInEffect] }
 pure def probing(automatic: bool, s: SignIn): SignIn =
   { ...s, work: Probing, readinessOwner: true, automatic: automatic, late: false, probes: s.probes + 1 }
@@ -222,12 +222,17 @@ pure def sometimesRetainedFactorShown(s: SignIn): bool = s.screen == FactorStep 
 ### A code is sent before it is asked for, and a resend the host did not take keeps the earlier code
 
 A send or resend starts a cooldown the host sets; the screen offers no resend until it ends.
+The phone field accepts spacing and punctuation, a leading + or 00 country code, and the usual
+ten-digit or 1-prefixed North American format. A submitted number is sent and shown in E.164.
+An invalid number is shown on the chooser for correction without asking the host to send a code.
 
 ```quint
 pure def canSubmitAddress(s: SignIn): bool =
   s.screen == Choose and s.work == NoWork and methodReady(s.methods, s.method) and reachable(s.net) and not(s.cooldown)
 pure def submitAddress(s: SignIn): SignInStep =
   { state: { ...s, work: Sending, fault: NoFault, readinessOwner: false }, out: List(SendCode) }
+pure def canInvalidPhone(s: SignIn): bool = canSubmitAddress(s) and s.method == PhoneCode
+pure def invalidPhone(s: SignIn): SignIn = { ...s, fault: InvalidPhone, prefill: true }
 pure def canSendEnds(s: SignIn, accepted: bool): bool = s.work == Sending
 pure def sendEnds(s: SignIn, accepted: bool): SignIn =
   if (accepted) { ...s, work: NoWork, screen: CodeStep, fault: NoFault, prefill: false, address: true,
@@ -291,7 +296,8 @@ pure def alwaysPrefillOnlyOnTheChooser(s: SignIn): bool = s.prefill implies s.sc
 pure def alwaysAddressOnlyOnCodeSteps(s: SignIn): bool = s.address implies (s.screen == CodeStep or s.screen == FactorStep)
 pure def alwaysTheScreenMatchesItsWork(s: SignIn): bool =
   ((s.work == GoogleWork) iff (s.screen == GoogleWait)) and (s.work == Sending implies s.screen == Choose)
-    and (s.work == Resending implies s.screen == CodeStep) and (s.work == Verifying implies (s.screen == CodeStep or s.screen == FactorStep))
+    and (s.work == Resending implies s.screen == CodeStep)
+    and ((s.work == Verifying or s.work == CancellingVerification) implies (s.screen == CodeStep or s.screen == FactorStep))
 pure def sometimesSpentCode(s: SignIn): bool = s.stale and s.work == NoWork
 pure def sometimesSignedInWithACode(s: SignIn): bool = s.signedIn and s.adoptedKey >= 1 and s.attempts >= 1 and not(s.adoptedByBack)
 ```
@@ -305,28 +311,35 @@ pure def sometimesSignedInWithACode(s: SignIn): bool = s.signedIn and s.adoptedK
 
 During a check, Back ends it, and an owner's check still ensures the agent; on the required or
 first-run page the check ends on its chooser, offering email while readiness is unknown, so the page
-is never left blank. During a send or a verification it cancels that attempt. On the required or first-run page showing its chooser with
+is never left blank. During a send or a verification it cancels that attempt. If a verification
+already stored a new key and Cloud confirms it, Alpha adopts the sign-in after cancellation.
+On the required or first-run page showing its chooser with
 nothing pending, Back changes nothing. In the Account app, Back from the chooser of a sign-in the owner
 opened while signed out closes it and leaves Account too, since nothing of Account is behind it.
 
 ```quint
-pure def canBack(s: SignIn): bool = entryOf(s) != NoEntry and s.work != GoogleWork
+pure def canBack(s: SignIn): bool = entryOf(s) != NoEntry and s.work != GoogleWork and s.work != CancellingVerification
 pure def chooserFrom(fill: bool, s: SignIn): SignIn =
   { ...s, work: NoWork, fault: NoFault, screen: Choose, attempt: 0, stale: false, address: false, prefill: fill }
 pure def back(s: SignIn): SignInStep = {
   val page = isPage(entryOf(s))
   val ended = { ...s, work: NoWork, late: false }
-  val fill = s.screen == CodeStep or s.prefill
+  val fill = s.address or s.prefill
   if (s.work == NoWork and s.screen == Choose and page) { state: s, out: List() }
   else if (s.work == Probing)
     { state: if (page) { ...ended, screen: Choose } else { ...ended, screen: ScreenClosed, opened: false, prefill: false },
       out: if (s.automatic) List() else List(EnsureResident) }
   else if (s.work == SavingOwnKeys) { state: { ...s, work: NoWork }, out: List() }
+  else if (s.work == Verifying) { state: { ...s, work: CancellingVerification }, out: List(ReconcileVerification) }
   else if (s.work != NoWork) { state: chooserFrom(fill, s), out: List(CancelAttempt) }
   else if (s.screen == CodeStep or s.screen == FactorStep) { state: chooserFrom(fill, s), out: List(CancelAttempt) }
   else if (page) { state: s, out: List() }
   else { state: { ...s, screen: ScreenClosed, opened: false, fault: NoFault, prefill: false }, out: List() }
 }
+pure def canVerificationCancelSettles(s: SignIn, adopted: bool): bool = s.work == CancellingVerification
+pure def verificationCancelSettles(s: SignIn, adopted: bool): SignIn =
+  if (adopted) { ...signedInFrom(s.storedKey + 1, s), adoptedByBack: true }
+  else chooserFrom(s.address or s.prefill, s)
 pure def stepTheRequiredPageKeepsItsChooser(before: SignIn, via: str, after: SignIn): bool =
   (via == "back" and entryOf(before) == RequiredEntry and before.work == NoWork and before.screen == Choose) implies after == before
 pure def alwaysAShownPageHasAChooserOrACheck(s: SignIn): bool =

@@ -105,6 +105,7 @@ export function platform(calls: Calls, native: Record<string, Answer>, cloud: Re
         const found = answer(native, `${plugin}.${method}`, args)
         if (found === undefined) return Effect.fail(new NativeFailed({ plugin, method, message: "absent" }))
         if (refused(found)) return Effect.fail(new NativeFailed({ plugin, method, message: "refused", code: found.refuse }))
+        if (Effect.isEffect(found)) return found as Effect.Effect<unknown, NativeFailed>
         return Effect.succeed(found)
       },
       listen: (plugin: string, event: string) => Stream.fromIterable(options.events?.[`${plugin}.${event}`] ?? [])

@@ -12,7 +12,8 @@ import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
 import { freshKey } from "./deployment.ts"
 import { ensureResident } from "./inference.vibe"
-import { CloudSession, noNews, newsOf, type SignInNews } from "./session.vibe"
+import { normalizeSignInPhone, validSignInPhone } from "./phone-number.ts"
+import { CloudSession, noNews, newsOf, readCredentialIdentity, type SignInNews } from "./session.vibe"
 import { CodeStarted, HostStatus, MfaRequired, MfaResumed, NetworkStatus, ReadinessChanged, ServiceAnswer, SignInAnswer } from "./signIn.schema.vibe"
 
 const plugin = "AlphaCloudSignIn"
@@ -90,11 +91,13 @@ export const signInService = Layer.effect(SignInScreen, effect {
   const environment = environmentName(buildCloudEnvironment(build.info))
   const android = build.info.variant !== "browser"
   const attemptId = try Ref.make("")
-  const requestId = try Ref.make("")
+  const requestId = try Ref.make<string | undefined>(undefined)
   const typed = try Ref.make({ address: "", code: "" })
   const news = try Ref.make<SignInNews>(noNews)
   const epoch = try Ref.make(0)
   const retained = try Ref.make<MfaRequired | undefined>(undefined)
+  // null is a known empty slot; undefined means no reliable before-read.
+  const verificationKey = try Ref.make<string | null | undefined>(undefined)
 
   effect function send(event: Parameters<typeof machine.send>[0]) {
     const step = machine.send(event) catch () => undefined
@@ -109,7 +112,8 @@ export const signInService = Layer.effect(SignInScreen, effect {
         when "StartGoogle": try runGoogle();
         when "SendCode": try runSend();
         when "VerifyCode": try runVerify();
-        when "CancelAttempt": native.invoke(plugin, "cancel", { requestId: try Ref.get(requestId) }) catch () => undefined;
+        when "CancelAttempt": try cancelAttempt();
+        when "ReconcileVerification": try reconcileVerification();
         when "EnsureResident": try ensureResident(resident);
         when "Adopted": try session.adopt(try Ref.get(news));
       }
@@ -144,6 +148,11 @@ export const signInService = Layer.effect(SignInScreen, effect {
 
   effect function begin() {
     return try Ref.updateAndGet(epoch, (n) => n + 1)
+  }
+
+  effect function cancelAttempt() {
+    const id = try Ref.get(requestId)
+    native.invoke(plugin, "cancel", id === undefined ? {} : { requestId: id }) catch () => undefined
   }
 
   effect function cooldown(until: number) {
@@ -200,13 +209,17 @@ export const signInService = Layer.effect(SignInScreen, effect {
     const code = (try Ref.get(typed)).code
     try Ref.update(typed, (t) => ({ ...t, code: "" }))
     try Ref.set(news, noNews)
+    try Ref.set(verificationKey, undefined)
+    const before = readCredentialIdentity(native, environment) catch () => undefined
+    if (!(try stillCurrent(turn)) || (try machine.get()).work !== "Verifying") return
+    try Ref.set(verificationKey, before?.credentialId)
     const method = s.screen === "FactorStep" ? "verifyMfa" : methodNames[s.method].verify
     const verified = try held(effect {
       const call = Effect.map(native.invoke(plugin, method, { attemptId: attempt, code }), (value) => ({ ok: true as const, value }))
       const result = call catch (error) => ({ ok: false as const, code: error._tag === "NativeFailed" ? error.code : undefined })
       if (!result.ok) return verifyRefusal(result.code)
       const answer = Schema.decodeUnknownEffect(SignInAnswer)(result.value) catch () => undefined
-      if (answer === undefined) return { tag: "CodeFailed" } as VerifyOutcome
+      if (answer === undefined || !(try stillCurrent(turn))) return { tag: "CodeFailed" } as VerifyOutcome
       if (answer.status === "authenticated") {
         try Ref.set(news, newsOf(answer))
         return { tag: "CodeAccepted" } as VerifyOutcome
@@ -215,6 +228,19 @@ export const signInService = Layer.effect(SignInScreen, effect {
       return { tag: "CodeNeedsFactor", codeFactor: factorOf(answer.method) } as VerifyOutcome
     })
     if (try stillCurrent(turn)) try send({ type: "verifyEnds", verified, attempt: s.attempt })
+  }
+
+  effect function reconcileVerification() {
+    // Invalidate the old renderer reply before asking the host to stop the attempt.
+    try begin()
+    const prior = try Ref.get(verificationKey)
+    try Ref.set(verificationKey, undefined)
+    try cancelAttempt()
+    const stored = prior === undefined ? undefined : (readCredentialIdentity(native, environment) catch () => undefined)
+    const candidate = stored?.credentialId
+    if (candidate !== undefined && candidate !== null && candidate !== prior) try session.adopt(try Ref.get(news), candidate)
+    const current = try session.current()
+    try send({ type: "verificationCancelSettles", adopted: (current.phase === "SignedIn" || current.phase === "ActivationPending") && current.account.credentialId === candidate })
   }
 
   effect function offerRetained() {
@@ -231,6 +257,7 @@ export const signInService = Layer.effect(SignInScreen, effect {
     } catch () => ({ active: false })
     if (!resumed.active) return
     try Ref.set(attemptId, waiting.attemptId)
+    try Ref.set(requestId, waiting.requestId)
     try send({ type: "factorReturned", returnedFactor: factor })
   }
 
@@ -323,11 +350,20 @@ export const signInService = Layer.effect(SignInScreen, effect {
       if (canTapGoogle(try machine.get())) try send({ type: "tapGoogle" })
     },
     effect submit(address: string) {
-      try Ref.set(typed, { address: address.trim(), code: "" })
+      const phone = (try machine.get()).method === "PhoneCode"
+      const destination = phone ? normalizeSignInPhone(address) : address.trim()
+      if (phone && !validSignInPhone(destination)) {
+        try send({ type: "invalidPhone" })
+        return
+      }
+      try Ref.set(typed, { address: destination, code: "" })
       try send({ type: "submitAddress" })
     },
     effect resend(address: string) {
-      try Ref.set(typed, { address: address.trim(), code: "" })
+      const phone = (try machine.get()).method === "PhoneCode"
+      const destination = phone ? normalizeSignInPhone(address) : address.trim()
+      if (phone && !validSignInPhone(destination)) return
+      try Ref.set(typed, { address: destination, code: "" })
       try send({ type: "resend" })
     },
     effect verify(code: string) {

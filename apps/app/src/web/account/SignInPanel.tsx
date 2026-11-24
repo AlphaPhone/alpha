@@ -6,6 +6,7 @@ import {
   canSubmitAddress, canTapGoogle, canVerify, entryOf, isPage, mayReopenGoogle, methodReady,
 } from "../../../gen/account__signIn.ts";
 import type { ServiceInfo } from "../../account/signIn.vibe";
+import { normalizeSignInPhone, validSignInPhone } from "../../account/phone-number.ts";
 import { Alert, Button, Input, Label, Spinner } from "../components/ui/index.ts";
 import { cn } from "../lib/cn.ts";
 
@@ -39,6 +40,7 @@ const faults: Record<Exclude<Fault, "NoFault">, string> = {
   ResendFailed: "Code not sent",
   WrongCode: "Wrong code",
   CodeSpent: "Code expired",
+  InvalidPhone: "Enter a phone number with country code",
   KeysBusy: "Sign-in is busy · try own keys again when it ends",
 };
 
@@ -78,7 +80,10 @@ export function SignInPanel({ signIn, serviceName, terms, android = false, onRet
   const back = signIn.work === "GoogleWork" ? canBackDuringGoogle(signIn) : canBack(signIn) && !(isPage(entry) && signIn.screen === "Choose" && !working);
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (canSubmitAddress(signIn) && address.trim()) onSubmit(address);
+    if (!canSubmitAddress(signIn) || !address.trim()) return;
+    const normalized = phone ? normalizeSignInPhone(address) : address.trim();
+    if (!phone || validSignInPhone(normalized)) setAddress(normalized);
+    onSubmit(normalized);
   };
   const verify = (event: FormEvent) => {
     event.preventDefault();
