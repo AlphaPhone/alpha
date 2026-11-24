@@ -3,9 +3,23 @@ import { stepping } from "../shell/shell.vibe";
 import { Machine } from "../../gen/app__workflows__list.effect.vibe";
 import { together } from "../runtime/reactor.vibe";
 import { Workflows } from "./Workflows.tsx";
+import { backHistory, history } from "./history.vibe";
+import { Effect } from "effect";
+import { backLifecycle, lifecycle } from "./lifecycle.vibe";
+import { backRuns, runs } from "./runs.vibe";
+import { approvals } from "./approvals.vibe";
+import { authoring, backDraft } from "./authoring.vibe";
 import { backList, listing } from "./list.vibe";
+import { automations, backAutomations } from "./automations.vibe";
 
-const mounted = together(listing, stepping("view:Workflows", Machine, (state) => state.sheet || state.place.tag !== "ListingRows"));
+const mounted = together(listing, history, lifecycle, runs, approvals, authoring, automations, stepping("view:Workflows", Machine, (state) => state.sheet || state.place.tag !== "ListingRows"));
+
+const back = Effect.gen(function* () {
+  for (const step of [backDraft(), backAutomations(), backRuns(), backLifecycle(), backHistory()]) {
+    if (yield* step) return true;
+  }
+  return yield* backList();
+});
 
 /** Workflows, opened over the resident agent the first time the view is drawn. */
-export default area(mounted, Workflows, { back: backList });
+export default area(mounted, Workflows, { back });

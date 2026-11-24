@@ -1,0 +1,212 @@
+// spec/app/workflows/sheet.md, "Story: See a workflow's history"; spec/app/workflows/sheet.md, "Story: Read a run's sheet"; spec/app/workflows/sheet.md, "Story: Keep the sheet to its owner"
+import type { RemoteWorkflow, WorkflowApproval, WorkflowRun } from "@elizaos/plugin-workflow/client"
+import * as Listing from "../../gen/app__workflows__list.effect.vibe"
+import * as Sheet from "../../gen/app__workflows__sheet.effect.vibe"
+import type { Effect as Out, Event, Output } from "../../gen/app__workflows__sheet.effect.vibe"
+import type { Status } from "../../gen/app__workflows__runs.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { ownerAt } from "../platform/owner.vibe"
+import { type Job, answer, applying, reacting, run, together } from "../runtime/reactor.vibe"
+import { WorkflowsApi, type PromptRun, readPromptRuns } from "./api.vibe"
+import { Rows } from "./list.vibe"
+
+interface RunWords {
+  readonly number: number
+  readonly id: string
+  readonly startedAt: number
+  readonly status: Status
+  readonly raw?: WorkflowRun
+  readonly error?: string
+}
+
+interface HistoryWords {
+  readonly owner: number
+  readonly row: number
+  readonly workflow?: RemoteWorkflow
+  readonly all: readonly RunWords[]
+  readonly opened?: { readonly number: number; readonly raw: WorkflowRun; readonly approvals: readonly WorkflowApproval[] }
+}
+
+const empty: HistoryWords = { owner: 0, row: 0, all: [] }
+
+export service HistoryWordsPort {
+  view(owner: number, row: number): HistoryWords!!
+  store(owner: number, row: number, newest: RemoteWorkflow | undefined, runs: readonly Omit<RunWords, "number">[]): readonly RunWords[]!!
+  output(owner: number, row: number, opened: NonNullable<HistoryWords["opened"]>): void!!
+  clear(): void!!
+}
+
+const remembered = Layer.sync(HistoryWordsPort, () => {
+  let words = empty
+  let next = 0
+  const numbers = new Map<string, number>()
+  return {
+    view: (owner: number, row: number) => succeed(words.owner === owner && words.row === row ? words : empty),
+    store: (owner: number, row: number, newest: RemoteWorkflow | undefined, runs: readonly Omit<RunWords, "number">[]) => sync(() => {
+      if (owner !== words.owner || row !== words.row) numbers.clear()
+      const all = runs.map((run) => {
+        const number = numbers.get(run.id) ?? ++next
+        numbers.set(run.id, number)
+        return { ...run, number }
+      })
+      words = { owner, row, all, ...(newest === undefined ? {} : { workflow: newest }), ...(words.owner === owner && words.row === row && words.opened ? { opened: words.opened } : {}) }
+      return all
+    }),
+    output: (owner: number, row: number, opened: NonNullable<HistoryWords["opened"]>) => sync(() => {
+      if (words.owner === owner && words.row === row) words = { ...words, opened }
+    }),
+    clear: () => sync(() => { words = empty; numbers.clear() }),
+  }
+})
+
+export function statusOf(record: WorkflowRun): Status {
+  if (record.reconciliation?.state === "outcome-unknown") return "Interrupted"
+  if (record.occurrence?.status === "missed") return "Missed"
+  if (record.occurrence?.status === "overlap") return "Skipped"
+  if (record.status === "cancelled") return "Stopped"
+  if (record.status === "failed" || record.occurrence?.status === "unavailable") return "Failed"
+  return record.finished ? "Done" : "Running"
+}
+
+function workflowRun(raw: WorkflowRun): Omit<RunWords, "number"> {
+  return { id: raw.id, startedAt: Date.parse(raw.startedAt), status: statusOf(raw), raw, ...(raw.error === undefined ? {} : { error: raw.error }) }
+}
+
+function promptRun(record: PromptRun, index: number): Omit<RunWords, "number"> {
+  const status = record.status === "success" ? "Done" : record.status === "skipped" ? "Skipped" : "Failed"
+  return { id: `${record.startedAt}/${record.finishedAt}/${index}`, startedAt: record.startedAt, status, ...(record.error === undefined ? {} : { error: record.error }) }
+}
+
+module speech {
+  /** @throws {never} */
+  export function canSpeak(): boolean {
+    return typeof speechSynthesis !== "undefined" && typeof SpeechSynthesisUtterance !== "undefined"
+  }
+
+  export function said(text: string, signal: AbortSignal): Promise<void> {
+    if (!canSpeak() || signal.aborted) return Promise.resolve()
+    return new Promise((resolve) => {
+      const words = new SpeechSynthesisUtterance(text)
+      const ended = () => {
+        signal.removeEventListener("abort", stopped)
+        words.onend = null
+        words.onerror = null
+        resolve()
+      }
+      const stopped = () => {
+        speechSynthesis.cancel()
+        ended()
+      }
+      signal.addEventListener("abort", stopped, { once: true })
+      words.onend = ended
+      words.onerror = ended
+      speechSynthesis.speak(words)
+    })
+  }
+}
+import { said } from speech
+export { canSpeak } from speech
+
+const selectedRow = (place: Listing.Place): number => place.tag === "ListingDetail" ? place.row : 0
+
+effect function reading(ticket: number, owner: number, after: number): Event!!(Agent | WorkflowsApi | Rows | HistoryWordsPort | Listing.Machine | Sheet.Machine) {
+  const failed: Event = { type: "runsRead", ticket, ok: false, count: 0, more: false }
+  const listing = try Listing.Machine
+  const sheet = try Sheet.Machine
+  const held = try Rows
+  const history = try HistoryWordsPort
+  const { workflow } = try WorkflowsApi
+  const current = try listing.get()
+  const row = selectedRow(current.place)
+  const selected = try held.row(owner, row)
+  if (current.owner !== owner || selected === undefined || selected.kind === "Reminder" || selected.kind === "Schedule") return failed
+  const scope = ownerAt() catch () => ""
+  if (!(try held.sameOwner(scope, owner))) return failed
+  const fetched = effect {
+    if (after > 0) return { all: (try history.view(owner, row)).all, newest: undefined }
+    if (selected.kind === "Routine") {
+      const { detail, executions } = try all({ detail: workflow.detail(selected.id), executions: workflow.executions(selected.id) }, { concurrency: 2 })
+      return { newest: detail, all: executions.map(workflowRun) }
+    }
+    return { newest: undefined, all: (try readPromptRuns(selected.id)).map(promptRun) }
+  } catch () => undefined
+  if (fetched === undefined) return failed
+  const confirmed = ownerAt() catch () => ""
+  const final = try listing.get()
+  if (scope !== confirmed || final.owner !== owner || selectedRow(final.place) !== row || !Sheet.canRunsRead(try sheet.get(), ticket, 0)) return failed
+  if (after === 0) try history.store(owner, row, fetched.newest, fetched.all)
+  const remaining = Math.max(0, fetched.all.length - after)
+  return { type: "runsRead", ticket, ok: true, count: Math.min(Sheet.maxPage, remaining), more: remaining > Sheet.maxPage }
+}
+
+effect function output(ticket: number, number: number): Event!!(Agent | WorkflowsApi | Rows | HistoryWordsPort | Listing.Machine | Sheet.Machine) {
+  const failed: Event = { type: "outputRead", ticket, ok: false, text: "Empty" }
+  const listing = try Listing.Machine
+  const sheet = try Sheet.Machine
+  const held = try Rows
+  const history = try HistoryWordsPort
+  const { workflow } = try WorkflowsApi
+  const owner = (try sheet.get()).owner
+  const current = try listing.get()
+  const row = selectedRow(current.place)
+  const selected = (try history.view(owner, row)).all.find((item) => item.number === number)
+  if (current.owner !== owner || selected?.raw === undefined) return failed
+  const before = ownerAt() catch () => ""
+  if (!(try held.sameOwner(before, owner))) return failed
+  const receipt = (workflow.receipt(selected.id, selected.raw.workflowId) catch () => undefined)
+  if (receipt === undefined) return failed
+  const approvalRead = receipt.status === "waiting-approval" ? (workflow.approvals(receipt) catch () => null) : null
+  const after = ownerAt() catch () => ""
+  const final = try listing.get()
+  const text: Output = receipt.output === undefined || receipt.output.trim() === "" ? "Empty" : receipt.output.length === 4000 ? "Truncated" : "Text"
+  if (after !== before || final.owner !== owner || selectedRow(final.place) !== row || !Sheet.canOutputRead(try sheet.get(), ticket, text)) return failed
+  try history.output(owner, row, { number, raw: receipt, approvals: approvalRead?.approvals ?? [] })
+  return { type: "outputRead", ticket, ok: true, text }
+}
+
+type Needs = Agent | WorkflowsApi | Rows | HistoryWordsPort | Listing.Machine | Sheet.Machine
+
+effect function speak(id: number, runId: number): Event!!(Listing.Machine | HistoryWordsPort) {
+  const listing = try (try Listing.Machine).get()
+  const current = try (try HistoryWordsPort).view(listing.owner, selectedRow(listing.place))
+  const opened = current.opened
+  if (opened?.number === runId && opened.raw.output !== undefined) {
+    try ignore(tryPromise((signal) => said(opened.raw.output ?? "", signal)))
+  }
+  return { type: "speechEnded", id }
+}
+
+export effect function backHistory(): boolean!!Sheet.Machine {
+  const sheet = try Sheet.Machine
+  if (!Sheet.canCloseRun(try sheet.get())) return false
+  try ignore(sheet.send({ type: "closeRun" }))
+  return true
+}
+
+function carry(fx: Out): Job<Event, Needs, []> {
+  return match (fx) {
+    when { tag: "ReadRuns", let ticket, let owner, let after }: answer("workflow history", reading(ticket, owner, after), { type: "runsRead", ticket, ok: false, count: 0, more: false });
+    when { tag: "ReadOutput", let ticket, let runId }: answer("workflow output", output(ticket, runId), { type: "outputRead", ticket, ok: false, text: "Empty" });
+    when { tag: "Speak", let id, let runId }: answer("workflow speech", speak(id, runId), { type: "speechEnded", id });
+    when { tag: "Silence" }: run("workflow speech", succeed(undefined));
+    when { tag: "AskAlpha" }: run("workflow question", succeed(undefined));
+  }
+}
+
+const followRow = applying(
+  Listing.Machine,
+  (state) => ({ owner: state.owner, row: selectedRow(state.place) }),
+  effect ({ owner, row }: { owner: number; row: number }) => {
+    const sheet = try Sheet.Machine
+    const held = try Rows
+    const history = try HistoryWordsPort
+    try ignore(sheet.send({ type: "closeRun" }))
+    try ignore(sheet.send({ type: "restart" }))
+    try ignore(sheet.send({ type: "ownerChanged", owner }))
+    try history.clear()
+    const selected = try held.row(owner, row)
+    if (selected?.kind === "Routine" || selected?.kind === "Prompt") try ignore(sheet.send({ type: "readHistory", removed: selected.removed }))
+  },
+)
+
+export const history = together(reacting(Sheet, { carry }), remembered, followRow)

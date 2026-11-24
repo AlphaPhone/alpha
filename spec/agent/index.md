@@ -135,8 +135,13 @@ health and which device steps it takes; Home and Calendar
 (`apps/app/src/home/cards.vibe`, `apps/app/src/calendar/agent.vibe`) read the
 calendar feed and the calendars and create, change, answer and delete
 events through the calendar plugin. Workflows reads the owner identity,
-active and removed workflows, prompts, scheduled tasks and the runs of a
-prompt. Notes reads the same owner identity and calls the Notes module to
+active and removed workflows, prompts, scheduled tasks, definitions,
+execution and approval receipts. It sends the owner's exact-version
+approval, lifecycle and run decisions and reads back their outcomes.
+The builder reads the phone catalogue, generates and validates drafts,
+saves the reviewed spec and checks save receipts. Workflows also sends
+the owner's prompt and scheduled task changes.
+Notes reads the same owner identity and calls the Notes module to
 read and edit notes, erase Trash and finish recording cleanup. The approvals
 area lists the agent's proposals and resolves one
 through the approvals module. A route an area
@@ -177,6 +182,39 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/notes/trash/erase", stream: false },
   { method: Get, path: "/api/notes/trash/recordings", stream: false },
   { method: Post, path: "/api/notes/trash/recordings/complete", stream: false },
+  { method: Get, path: "/api/workflow/status", stream: false },
+  { method: Get, path: "/api/workflow/workflows/{id}", stream: false },
+  { method: Get, path: "/api/workflow/workflows/{id}/executions", stream: false },
+  { method: Get, path: "/api/workflow/executions/{id}", stream: false },
+  { method: Get, path: "/api/workflow/executions/{id}/approvals", stream: false },
+  { method: Post, path: "/api/workflow/executions/{id}/approvals/{nodeId}/{iteration}", stream: false },
+  { method: Post, path: "/api/workflow/workflows/{id}/activate", stream: false },
+  { method: Post, path: "/api/workflow/workflows/{id}/deactivate", stream: false },
+  { method: Post, path: "/api/workflow/workflows/{id}/metadata", stream: false },
+  { method: Post, path: "/api/workflow/workflows/{id}/lifecycle", stream: false },
+  { method: Get, path: "/api/workflow/workflows/{id}/metadata-mutations/{mutationId}", stream: false },
+  { method: Get, path: "/api/workflow/workflows/{id}/lifecycle-mutations/{mutationId}", stream: false },
+  { method: Post, path: "/api/workflow/workflows/{id}/run", stream: false },
+  { method: Post, path: "/api/workflow/executions/{id}/cancel", stream: false },
+  { method: Get, path: "/api/workflow/workflows/{id}/submissions/{submissionId}", stream: false },
+  { method: Get, path: "/api/workflow/phone/catalog", stream: false },
+  { method: Get, path: "/api/workflow/phone/mutations/{mutationId}", stream: false },
+  { method: Post, path: "/api/workflow/phone/generate", stream: false },
+  { method: Post, path: "/api/workflow/phone/validate", stream: false },
+  { method: Post, path: "/api/workflow/phone/workflows", stream: false },
+  { method: Post, path: "/api/workflow/workflows/{id}/phone-spec", stream: false },
+  { method: Get, path: "/api/scheduled-tasks/{id}", stream: false },
+  { method: Get, path: "/api/triggers/{id}", stream: false },
+  { method: Post, path: "/api/triggers", stream: false },
+  { method: Post, path: "/api/triggers/{id}/execute", stream: false },
+  { method: Put, path: "/api/triggers/{id}", stream: false },
+  { method: Delete, path: "/api/triggers/{id}", stream: false },
+  { method: Post, path: "/api/scheduled-tasks/{id}/snooze", stream: false },
+  { method: Post, path: "/api/scheduled-tasks/{id}/complete", stream: false },
+  { method: Post, path: "/api/scheduled-tasks/{id}/dismiss", stream: false },
+  { method: Post, path: "/api/scheduled-tasks/{id}/skip", stream: false },
+  { method: Post, path: "/api/scheduled-tasks/{id}/reopen", stream: false },
+  { method: Post, path: "/api/scheduled-tasks/{id}/fire", stream: false },
 )
 pure def admitted(listed: List[Route], r: Route): bool = listed.includes(r)
 pure def routeListAdmitted(listed: List[Route]): bool =
