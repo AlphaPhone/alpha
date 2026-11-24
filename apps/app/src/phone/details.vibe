@@ -1,7 +1,7 @@
-// spec/app/telephony/phoneInfo.md, "Story: See my SIM, carrier and number on the image"; spec/app/telephony/phoneInfo.md, "Story: Keep Alpha as my phone and SMS app"
+// spec/app/phone/details.md, "Story: See my SIM, carrier and number on the image"; spec/app/phone/details.md, "Story: Keep Alpha as my phone and SMS app"
 import type { PhoneLine, TelephonyStatus } from "@elizaos/os/bridges/phone"
-import * as Info from "../../gen/app__telephony__phoneInfo.effect.vibe"
-import type { Effect as Out, Event, Holders, Line, Network, VoicemailSetup } from "../../gen/app__telephony__phoneInfo.effect.vibe"
+import * as Info from "../../gen/app__phone__details.effect.vibe"
+import type { Effect as Out, Event, Holders, Line, Network, VoicemailSetup } from "../../gen/app__phone__details.effect.vibe"
 import { Telephony, telephony } from "../platform/telephony.vibe"
 import { type Job, answer, reacting, together } from "../runtime/reactor.vibe"
 import { on, visiting } from "./visit.vibe"
@@ -25,7 +25,7 @@ function holdersOf(status: TelephonyStatus): Holders {
 
 const setups = { CarrierReady: "VoicemailOn", CarrierUnconfigured: "VoicemailNotSetUp", CarrierUnsupported: "VoicemailNotOffered", CarrierUnread: "VoicemailUnknown" } as const satisfies Record<string, VoicemailSetup>
 
-// spec/app/telephony/phoneInfo.md, "The page reads only while it is in front, and leaving forgets what it read"
+// spec/app/phone/details.md, "The page reads only while it is in front, and leaving forgets what it read"
 /** The page's one read under `ticket`, after `before`: the owner's Allow or role request, where there is one. */
 effect function read(ticket: number, before: (unknown!!Telephony) | undefined): Event!!Telephony {
   return effect {
@@ -52,4 +52,4 @@ const machine = reacting(Info, { carry })
 const left = visiting(on("Settings"), Info.Machine, (shown): Event | undefined => (shown ? undefined : { type: "show", showing: false }))
 
 /** Settings → Phone: in memory, read while the page is open. */
-export const phoneInfo = together(machine, left)
+export const details = together(machine, left)

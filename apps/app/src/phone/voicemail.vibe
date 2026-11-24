@@ -1,0 +1,116 @@
+// spec/app/phone/voicemail.md, "Story: See my voicemail"; spec/app/phone/voicemail.md, "Story: Listen to a voicemail"; spec/app/phone/voicemail.md, "Story: Read what was said"; spec/app/phone/voicemail.md, "Story: Answer a voicemail"; spec/app/phone/voicemail.md, "Story: Delete a voicemail"
+import type { ListedVoicemail, VoicemailId } from "@elizaos/os/bridges/phone"
+import { Machine as PhoneMachine, liveCall } from "../../gen/app__phone.effect.vibe"
+import * as Voicemail from "../../gen/app__phone__voicemail.effect.vibe"
+import type { Effect as Out, Event } from "../../gen/app__phone__voicemail.effect.vibe"
+import { Telephony, TelephonyRefused, telephony } from "../platform/telephony.vibe"
+import { type Job, answer, following, reacting, run, together } from "../runtime/reactor.vibe"
+import { Dialer, prefilled } from "./phone.vibe"
+
+/** What Voicemail counts, kept beside it: the voicemails last listed, the one open, its audio as a playable source and its transcript. */
+export interface Heard {
+  readonly rows: ReadonlyArray<ListedVoicemail>
+  readonly open: string
+  readonly audio: string
+  readonly transcript: string
+}
+
+const nothing: Heard = { rows: [], open: "", audio: "", transcript: "" }
+
+/** The voicemails behind Voicemail's counts. */
+export service Voicemails {
+  get(): Heard!!
+  set(change: Partial<Heard>): void!!
+}
+
+const voicemails = Layer.sync(Voicemails, () => {
+  let held = nothing
+  return { get: () => sync(() => held), set: (change: Partial<Heard>) => sync(() => { held = { ...held, ...change } }) }
+})
+
+/** The open voicemail as listed, if it still is. */
+effect function opened(): Option.Option<ListedVoicemail>!!Voicemails {
+  const held = try (try Voicemails).get()
+  return Option.fromNullishOr(held.rows.find((row) => row.id === held.open))
+}
+
+// spec/app/phone/voicemail.md, "Only the newest read of the list is shown, and nothing without a carrier"
+effect function listed(ticket: number): Event!!(Telephony | Voicemails) {
+  const store = try Voicemails
+  const listing = telephony("refreshVoicemail", (c) => c.phone.refreshVoicemail("ExplicitRead")) catch () => undefined
+  const carrier = listing?.carrier === "CarrierReady"
+  const rows = carrier ? listing?.voicemails ?? [] : []
+  try store.set({ rows })
+  return { type: "listed", ticket, ok: listing !== undefined, carrier, count: rows.length, unheard: rows.filter((row) => !row.heard).length }
+}
+
+// spec/app/phone/voicemail.md, "Only the open voicemail's newest audio is taken, and with it a transcript is asked of the phone's own recognizer"
+effect function fetched(ticket: number): Event!!(Telephony | Voicemails) {
+  const store = try Voicemails
+  const open = try opened()
+  const source = Option.isNone(open) ? "" : effect {
+    const id = open.value.id
+    const ready = try telephony("fetchVoicemailAudio", (c) => c.phone.fetchVoicemailAudio(id))
+    if (ready !== "ready") return ""
+    const found = try telephony("voicemailAudio", (c) => c.phone.voicemailAudio(id))
+    return `data:${found.mimeType};base64,${found.data}`
+  } catch () => ""
+  try store.set({ audio: source })
+  return { type: "audioFetched", ticket, ok: source !== "", recognizer: false }
+}
+
+// spec/app/phone/voicemail.md, "The phone's answer ends the removal it names"
+effect function removed(id: number): Event!!(Telephony | Voicemails) {
+  const open = try opened()
+  if (Option.isNone(open)) return { type: "removed", id, done: true, known: true }
+  const voicemail: VoicemailId = open.value.id
+  return effect {
+    try telephony("deleteVoicemail", (c) => c.phone.deleteVoicemail(voicemail))
+    return { type: "removed", id, done: true, known: true } satisfies Event
+  } catch (failure) => ({ type: "removed", id, done: false, known: !(failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === "") } satisfies Event)
+}
+
+// spec/app/phone/voicemail.md, "Call back and Message open Phone or Messages with the caller's number, and do nothing else"
+effect function reached(app: Voicemail.Reach): void!!(Voicemails | Dialer | PhoneMachine | Callers) {
+  const open = try opened()
+  if (Option.isNone(open)) return
+  const number = open.value.number
+  if (app === "Message") {
+    try (try Callers).message(number)
+    return
+  }
+  const handed = prefilled(number)
+  if (handed === undefined) return
+  try (try Dialer).set({ digits: handed.digits })
+  try ignore((try PhoneMachine).send(handed.event))
+}
+
+/** Where a number handed out of Phone goes to be written to: Messages, which says how. */
+export service Callers {
+  message(number: string): void!!
+}
+
+function carry(fx: Out): Job<Event, Telephony | Voicemails | Dialer | PhoneMachine | Callers, []> {
+  return match (fx) {
+    when { tag: "ReadList", let ticket }: answer("list", listed(ticket), { type: "listed", ticket, ok: false, carrier: false, count: 0, unheard: 0 });
+    when { tag: "FetchAudio", let ticket }: answer("audio", fetched(ticket), { type: "audioFetched", ticket, ok: false, recognizer: false });
+    when { tag: "TranscribeOnPhone", let ticket }: answer("transcript", succeed<Event>({ type: "transcribed", ticket, ok: false }), { type: "transcribed", ticket, ok: false });
+    when { tag: "MarkHeard" }: run("heard", effect {
+      const open = try opened()
+      if (Option.isSome(open)) try ignore(telephony("markVoicemailHeard", (c) => c.phone.markVoicemailHeard(open.value.id)))
+    });
+    when { tag: "Prefill", let app }: run("reach", reached(app));
+    when { tag: "Remove", let id }: answer(`remove ${id}`, removed(id), { type: "removalLost" });
+  }
+}
+
+const machine = reacting(Voicemail, { carry })
+
+const shown = following(PhoneMachine, (phone) => phone.front && phone.tab === "Voicemail", Voicemail.Machine, (showing): Event => (showing ? { type: "show" } : { type: "leave" }))
+
+// spec/app/phone/voicemail.md, "A call that starts pauses playback"
+const calls = following(PhoneMachine, liveCall, Voicemail.Machine, (live): Event | undefined => (live ? { type: "callStarted" } : undefined))
+
+/** Voicemail: resident, so that Home's unheard count and a call starting reach it; its list is read while its tab shows. */
+export const voicemail = together(machine, voicemails, shown, calls)
+

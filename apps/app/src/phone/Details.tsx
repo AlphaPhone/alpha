@@ -1,14 +1,14 @@
-// spec/app/telephony/phoneInfo.md, "Story: See my SIM, carrier and number on the image"; spec/app/telephony/phoneInfo.md, "Story: Keep Alpha as my phone and SMS app"
+// spec/app/phone/details.md, "Story: See my SIM, carrier and number on the image"; spec/app/phone/details.md, "Story: Keep Alpha as my phone and SMS app"
 import { Alert, Banner, Button, ListGroup, ListRow, Spinner } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import { ChevronRight } from "lucide-react";
-import type { Line, Machine as InfoMachine } from "../../gen/app__telephony__phoneInfo.effect.vibe";
-import { imeiElsewhere, simSummary } from "../../gen/app__telephony__phoneInfo.ts";
-import { useMachine } from "../../gen/app__telephony__phoneInfo.react.ts";
+import type { Line, Machine as DetailsMachine } from "../../gen/app__phone__details.effect.vibe";
+import { imeiElsewhere, simSummary } from "../../gen/app__phone__details.ts";
+import { useMachine } from "../../gen/app__phone__details.react.ts";
 
-export interface PhoneInfoProps {
+export interface DetailsProps {
   /** Provides the page's machine, the area's own. */
-  runtime: ManagedRuntime.ManagedRuntime<InfoMachine, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<DetailsMachine, unknown>;
 }
 
 const networks = { NoService: "No service", Network2g: "2G", Network3g: "3G", Network4g: "4G", Network5g: "5G", WifiCalling: "Wi-Fi calling", NetworkUnknown: "Unknown network" } as const;
@@ -30,9 +30,9 @@ function LineRows({ line }: { line: Line }) {
 /**
  * Settings → Phone: each line's SIM, carrier, number, network and signal, and the apps that handle calls and texts, read
  * when the page opens and forgotten when it closes.
- * @model spec/app/telephony/phoneInfo.md
+ * @model spec/app/phone/details.md
  */
-export function PhoneInfo({ runtime }: PhoneInfoProps) {
+export function Details({ runtime }: DetailsProps) {
   const { state, cause, can, send } = useMachine(runtime);
   if (cause) return <Alert variant="destructive" className="m-4">Alpha could not read the phone's details</Alert>;
   if (!state) return null;

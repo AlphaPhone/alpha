@@ -1,0 +1,100 @@
+// spec/app/contacts/agent.md, "Story: Let the agent ask for a call or a contact change"; spec/app/contacts/agent.md, "Story: Approve what the agent asked"; spec/app/contacts/agent.md, "Story: Learn how the request ended"
+import type { AddressBookContact, ContactId } from "@elizaos/os/bridges/contacts"
+import type { OperationId } from "@elizaos/os/bridges/messages"
+import type { PhoneNumber } from "@elizaos/os/bridges/phone"
+import * as Agent from "../../gen/app__contacts__agent.effect.vibe"
+import type { Ask, Effect as Out, Ending, Event } from "../../gen/app__contacts__agent.effect.vibe"
+import { Telephony, TelephonyRefused, telephony } from "../platform/telephony.vibe"
+import { Attempts } from "../runtime/attempts.vibe"
+import { type Job, answer, reacting, run, together } from "../runtime/reactor.vibe"
+import { judge } from "../phone/words.ts"
+import { type Form, draftOf } from "./contacts.vibe"
+
+/** What the agent asked, as the phone shows it to the owner: the number or the search, the text, and the contact's new form. */
+export interface Asked {
+  readonly ask: Ask
+  readonly number: string
+  readonly search: string
+  readonly text: string
+  readonly form: Form
+  readonly matches: ReadonlyArray<AddressBookContact>
+  readonly chosen: AddressBookContact | undefined
+  readonly ending: Ending | undefined
+}
+
+const quiet: Asked = { ask: "Dial", number: "", search: "", text: "", form: { givenName: "", familyName: "", phones: [], emails: [], notes: "" }, matches: [], chosen: undefined, ending: undefined }
+
+/** The request behind the agent's machine: what it names, what the search found, the contact chosen and how it ended. */
+export service Requested {
+  get(): Asked!!
+  set(change: Partial<Asked>): void!!
+}
+
+const requested = Layer.sync(Requested, () => {
+  let held = quiet
+  return { get: () => sync(() => held), set: (change: Partial<Asked>) => sync(() => { held = { ...held, ...change } }) }
+})
+
+/** The number a request reaches: the one the agent named, or the chosen contact's first. */
+function numberOf(held: Asked): string {
+  return held.number !== "" ? held.number : held.chosen?.phones[0] ?? ""
+}
+
+// spec/app/contacts/agent.md, "Only the phone answers the newest search, and the request goes on by how many contacts it found"
+effect function searched(ticket: number): Event!!(Telephony | Requested) {
+  const store = try Requested
+  const held = try store.get()
+  const page = effect {
+    try telephony("open", (c) => c.contacts.open())
+    return try telephony("list", (c) => c.contacts.list({ query: held.search, limit: Agent.maxMatches + 1 }))
+  } catch () => undefined
+  if (page === undefined) return { type: "found", ticket, ok: false, matches: 0, emergency: false }
+  const found = page.contacts.filter((row): row is AddressBookContact => !("incomplete" in row)).slice(0, Agent.maxMatches)
+  try store.set({ matches: found, chosen: found.length === 1 ? found[0] : undefined })
+  const emergency = found.length === 1 && found[0].phones.some((phone) => judge(phone.replace(/[^\d+]/g, "")) === "Emergency")
+  return { type: "found", ticket, ok: true, matches: found.length, emergency }
+}
+
+// spec/app/contacts/agent.md, "Nothing is done but what the owner approved, as it was shown, once"
+effect function acted(id: number, ask: Ask): Event!!(Telephony | Requested | Attempts) {
+  const held = try (try Requested).get()
+  const lost = (failure: unknown) => !(failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === "")
+  return effect {
+    if (ask === "Dial") {
+      const report = try telephony("dial", (c) => c.phone.dial(numberOf(held)))
+      return { type: "acted", id, done: report.dialStatus === "handed-off", known: true } satisfies Event
+    }
+    if (ask === "Text") {
+      const operation = (try (try Attempts).key(id)) as OperationId
+      const status = try telephony("status", (c) => c.messages.status())
+      const sim = status.subscriptions?.find((one) => one.defaultSms)?.id ?? status.subscriptions?.[0]?.id
+      if (sim === undefined) return { type: "acted", id, done: false, known: true } satisfies Event
+      const result = try telephony("sendSms", (c) => c.messages.sendSms({ recipients: [numberOf(held) as PhoneNumber], body: held.text, subscriptionId: sim }, operation))
+      return { type: "acted", id, done: result.status === "sent" || result.status === "submitted" || result.status === "delivered", known: result.status !== "unknown" } satisfies Event
+    }
+    if (ask === "AddContact") {
+      const done = try telephony("createContact", (c) => c.contacts.createContact(draftOf(held.form, true)))
+      return { type: "acted", id, done: done.status === "saved", known: true } satisfies Event
+    }
+    const chosen = held.chosen
+    if (chosen === undefined) return { type: "acted", id, done: false, known: true } satisfies Event
+    const card = try telephony("get", (c) => c.contacts.get(chosen.id as ContactId, "ExplicitRead"))
+    if (ask === "DeleteContact") {
+      const done = try telephony("remove", (c) => c.contacts.remove({ id: card.id, version: card.version }))
+      return { type: "acted", id, done: done.status === "queued", known: true } satisfies Event
+    }
+    const done = try telephony("updateContact", (c) => c.contacts.updateContact({ id: card.id, version: card.version }, draftOf(held.form, card.notes !== undefined)))
+    return { type: "acted", id, done: done.status === "saved", known: done.status !== "unknown" } satisfies Event
+  } catch (failure) => ({ type: "acted", id, done: false, known: lost(failure) } satisfies Event)
+}
+
+function carry(fx: Out): Job<Event, Telephony | Requested | Attempts, [by: "Device"]> {
+  return match (fx) {
+    when { tag: "Search", let ticket }: answer("search", searched(ticket), { type: "found", ticket, ok: false, matches: 0, emergency: false }, "Device");
+    when { tag: "Act", let id, let ask }: answer(`act ${id}`, acted(id, ask), { type: "answerLost" }, "Device");
+    when { tag: "Answer", let ending }: run("answer", effect { try (try Requested).set({ ending }) }, "Device");
+  }
+}
+
+/** What the agent asked of the phone, held until it ends: resident, since the approvals desk hands it requests whatever is showing. */
+export const requests = together(reacting(Agent, { carry }), requested)

@@ -9,11 +9,14 @@ import { haptics } from "./shell/haptics.vibe"
 import { canvas } from "./shell/canvas.vibe"
 import { mailbox } from "./inbox/mailbox.vibe"
 import { operations } from "./inbox/operations.vibe"
-import { attention } from "./telephony/attention.vibe"
-import { callBar } from "./telephony/callBar.vibe"
-import { comms } from "./telephony/comms.vibe"
-import { messages } from "./telephony/messages.vibe"
-import { phone } from "./telephony/phone.vibe"
+import { callStrip } from "./phone/call.vibe"
+import { comms } from "./phone/comms.vibe"
+import { phone } from "./phone/phone.vibe"
+import { voicemail } from "./phone/voicemail.vibe"
+import { composer } from "./messages/composer.vibe"
+import { messages } from "./messages/messages.vibe"
+import { contacts } from "./contacts/contacts.vibe"
+import { requests } from "./contacts/requests.vibe"
 
 /**
  * The machines that live from launch to exit: those another area follows or tells, and those that must act while
@@ -30,10 +33,13 @@ const machines = together(
   updating,
   mailbox,
   operations,
-  callBar,
+  callStrip,
   phone,
+  voicemail,
   messages,
-  attention,
+  composer,
+  contacts,
+  requests,
   comms,
 )
 

@@ -1,13 +1,13 @@
-// spec/app/telephony/callBar.md, "Story: See my live call over every view"
+// spec/app/phone/call.md, "Story: See my live call over every view"
 import { Button } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import { PhoneOff } from "lucide-react";
-import type { BarWords, Machine as BarMachine } from "../../gen/app__telephony__callBar.effect.vibe";
-import { barDrawn, barWords, shownCall } from "../../gen/app__telephony__callBar.ts";
-import { useMachine } from "../../gen/app__telephony__callBar.react.ts";
+import type { BarWords, Machine as BarMachine } from "../../gen/app__phone__call.effect.vibe";
+import { barDrawn, barWords, shownCall } from "../../gen/app__phone__call.ts";
+import { useMachine } from "../../gen/app__phone__call.react.ts";
 
-export interface CallBarProps {
-  /** Provides the resident call bar. */
+export interface CallStripProps {
+  /** Provides the resident call strip. */
   runtime: ManagedRuntime.ManagedRuntime<BarMachine, unknown>;
 }
 
@@ -31,9 +31,9 @@ function said(words: BarWords): string {
 /**
  * The bar over every view while a call is live: what the call screen says, Return on the bar itself and End beside it;
  * an ended call's bar holds its place a moment and takes no taps, and a ringing call is Android's alone.
- * @model spec/app/telephony/callBar.md
+ * @model spec/app/phone/call.md
  */
-export function CallBar({ runtime }: CallBarProps) {
+export function CallStrip({ runtime }: CallStripProps) {
   const { state, can, send } = useMachine(runtime);
   if (!state) return null;
   const phase = barDrawn(state);

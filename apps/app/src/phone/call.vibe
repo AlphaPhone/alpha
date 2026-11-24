@@ -1,7 +1,6 @@
-// spec/app/telephony/callBar.md, "Story: See my live call over every view"; spec/app/telephony/callBar.md, "Story: Know when a call may be an emergency call"
-import * as Bar from "../../gen/app__telephony__callBar.effect.vibe"
-import type { CallBar, CallPhase, Effect as Out, Event, LiveCall } from "../../gen/app__telephony__callBar.effect.vibe"
-import { type CallReading, type Known, emergencyLive } from "../../gen/app__telephony__common.effect.vibe"
+// spec/app/phone/call.md, "Story: See my live call over every view"
+import * as Bar from "../../gen/app__phone__call.effect.vibe"
+import type { CallBar, CallPhase, Effect as Out, Event, LiveCall } from "../../gen/app__phone__call.effect.vibe"
 import { Calls } from "../platform/calls.vibe"
 import { Device } from "../platform/device.vibe"
 import { type Job, answer, due, hearing, reacting, run, stream, together, untimed } from "../runtime/reactor.vibe"
@@ -14,14 +13,9 @@ const Row = Schema.Struct({
 })
 const Report = Schema.Struct({ calls: Schema.Array(Row).check(Schema.isMaxLength(8)) })
 
-/** Telecom's call-state reading, each fact possibly unknown. */
-const Reading = Schema.Struct({ inCall: Schema.NullOr(Schema.Boolean), emergency: Schema.NullOr(Schema.Boolean), emergencyLive: Schema.Boolean })
-
 const phases = { dialing: "Dialing", ringing: "Ringing", active: "Active", held: "Held" } as const satisfies Record<string, CallPhase>
 
-const known = (value: boolean | null): Known => (value === null ? "NotKnown" : value ? "KnownYes" : "KnownNo")
-
-// spec/app/telephony/callBar.md, "The bar shows only on a trusted reading, while the page shows, while a call is live"
+// spec/app/phone/call.md, "The bar shows only on a trusted reading, while the page shows, while a call is live"
 /** The calls of a report, or none for one the bar cannot trust. */
 function callsOf(raw: unknown): LiveCall[] | undefined {
   const report = Option.getOrUndefined(Schema.decodeUnknownOption(Report)(raw))
@@ -34,28 +28,17 @@ function reported(raw: unknown) {
   return { calls: calls ?? [], wellFormed: calls !== undefined }
 }
 
-// spec/app/telephony/common.md, "A live call that cannot be ruled out as an emergency call holds the gate"
-/** A call-state reading, or none for one that does not parse; one claiming a live emergency is never lifted by its other fields. */
-function readingOf(raw: unknown): CallReading | undefined {
-  const row = Option.getOrUndefined(Schema.decodeUnknownOption(Reading)(raw))
-  if (row === undefined) return undefined
-  const reading: CallReading = { inCall: known(row.inCall), emergency: known(row.emergency) }
-  return row.emergencyLive && !emergencyLive(reading) ? { inCall: "KnownYes", emergency: "NotKnown" } : reading
-}
-
-// spec/app/telephony/callBar.md, "A reading older than the latest one never replaces it"
-/** Telecom read under `ticket`: its calls, then its call-state reading. A phone with no call plugins has no call. */
+// spec/app/phone/call.md, "A reading older than the latest one never replaces it"
+/** Telecom's calls read under `ticket`. A phone with no call plugins has no call. */
 function read(ticket: number): Stream.Stream<Event, never, Calls> {
   return Stream.unwrap(effect {
     const calls = try Calls
     const raw = calls.ongoing() catch (failure) => (failure._tag === "CallsAbsent" ? { calls: [] } : undefined)
-    const state = readingOf(calls.state() catch () => undefined)
-    const answered: Event = { type: "refreshAnswered", ticket, ...reported(raw) }
-    return Stream.fromIterable<Event>(state === undefined ? [answered] : [answered, { type: "callStateReported", reading: state }])
+    return Stream.succeed<Event>({ type: "refreshAnswered", ticket, ...reported(raw) })
   })
 }
 
-// spec/app/telephony/callBar.md, "Return and End act only on the call the bar shows, and End is asked once"
+// spec/app/phone/call.md, "Return and End act only on the call the bar shows, and End is asked once"
 effect function ended(callId: string): Event!!Calls {
   const done = (try Calls).end(callId) catch () => false
   return { type: "endAnswered", callId, ended: done }
@@ -69,7 +52,7 @@ function carry(fx: Out): Job<Event, Calls, []> {
   }
 }
 
-// spec/app/telephony/callBar.md, "The bar says Calling until the call is active, and only an active call counts a clock from its connect time"; spec/app/telephony/callBar.md, "An ended call's bar holds its place for a moment and takes no taps"
+// spec/app/phone/call.md, "The bar says Calling until the call is active, and only an active call counts a clock from its connect time"; spec/app/phone/call.md, "An ended call's bar holds its place for a moment and takes no taps"
 function timers(state: CallBar) {
   const tick: Event = { type: "tick", at: untimed }
   return [
@@ -82,12 +65,7 @@ const machine = reacting(Bar, { carry, timers, open: [{ type: "eligibilityChange
 
 const pushed = hearing(Stream.unwrap(effect { return (try Calls).reports }), Bar.Machine, (raw): Event => ({ type: "callsReported", ...reported(raw) }))
 
-const readings = hearing(Stream.unwrap(effect { return (try Calls).readings }), Bar.Machine, (raw): Event | undefined => {
-  const reading = readingOf(raw)
-  return reading === undefined ? undefined : { type: "callStateReported", reading }
-})
-
 const seen = hearing(Stream.unwrap(effect { return (try Device).visible }), Bar.Machine, (visible): Event => ({ type: "eligibilityChanged", eligible: visible }))
 
-/** The ongoing-call bar: resident, since it is over every view and the emergency gate of every area; read when Alpha opens and each time the page shows. */
-export const callBar = together(machine, pushed, readings, seen)
+/** The call strip: resident, since it is over every view; read when Alpha opens and each time the page shows. */
+export const callStrip = together(machine, pushed, seen)

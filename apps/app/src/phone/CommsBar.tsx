@@ -1,15 +1,15 @@
-// spec/app/telephony/comms.md, "Story: Address the person or Alpha from one bar"; spec/app/telephony/comms.md, "Story: Never lose End"
+// spec/app/phone/comms.md, "Story: Address the person or Alpha from one bar"; spec/app/phone/comms.md, "Story: Never lose End"
 import { Button } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import { PhoneOff, Sparkles } from "lucide-react";
 import type { Machine as ShellMachine } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
-import type { Machine as BarMachine } from "../../gen/app__telephony__callBar.effect.vibe";
-import { shownCall } from "../../gen/app__telephony__callBar.ts";
-import { useMachine as useBar } from "../../gen/app__telephony__callBar.react.ts";
-import type { Machine as CommsMachine } from "../../gen/app__telephony__comms.effect.vibe";
-import { endPlace, leftSlot } from "../../gen/app__telephony__comms.ts";
-import { useMachine as useComms } from "../../gen/app__telephony__comms.react.ts";
+import type { Machine as BarMachine } from "../../gen/app__phone__call.effect.vibe";
+import { shownCall } from "../../gen/app__phone__call.ts";
+import { useMachine as useBar } from "../../gen/app__phone__call.react.ts";
+import type { Machine as CommsMachine } from "../../gen/app__phone__comms.effect.vibe";
+import { endPlace, leftSlot } from "../../gen/app__phone__comms.ts";
+import { useMachine as useComms } from "../../gen/app__phone__comms.react.ts";
 
 /** What the comms bar reads: the resident comms stage, call bar and shell. */
 export type CommsServices = CommsMachine | BarMachine | ShellMachine;
@@ -21,7 +21,7 @@ export interface CommsBarProps {
 /**
  * The bottom of Phone, Messages and Contacts: Alpha one tap away while the person is addressed, and End beside the bar,
  * red and right-most, while a call is live and the conversation with Alpha is closed.
- * @model spec/app/telephony/comms.md
+ * @model spec/app/phone/comms.md
  */
 export function CommsBar({ runtime }: CommsBarProps) {
   const comms = useComms(runtime);

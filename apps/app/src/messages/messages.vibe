@@ -1,0 +1,266 @@
+// spec/app/messages/index.md, "Story: See my conversations"; spec/app/messages/index.md, "Story: Read a conversation"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/messages/index.md, "Story: Start a new message"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import type { AddressBookContact } from "@elizaos/os/bridges/contacts"
+import type { MessageCursor, MessageRow, ThreadCursor, ThreadId, ThreadRow } from "@elizaos/os/bridges/messages"
+import type { PhoneNumber } from "@elizaos/os/bridges/phone"
+import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import * as Messages from "../../gen/app__messages.effect.vibe"
+import type { Effect as Out, Event, Need, Page } from "../../gen/app__messages.effect.vibe"
+import { CarrierSetup } from "../platform/carrier.vibe"
+import { SystemSettings } from "../platform/systemSettings.vibe"
+import { Telephony, TelephonyRefused, telephony } from "../platform/telephony.vibe"
+import { type Job, Whole, answer, hearing, reacting, run, together } from "../runtime/reactor.vibe"
+import { Dialer, grantOf, prefilled } from "../phone/phone.vibe"
+import { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
+import { Callers } from "../phone/voicemail.vibe"
+import { on, visiting } from "../phone/visit.vibe"
+import { matches } from "../phone/words.ts"
+
+/** A conversation Messages has given a number: the phone's thread, where it has one, and the numbers it is with. */
+export interface Conversation {
+  readonly id: string
+  readonly addresses: ReadonlyArray<string>
+}
+
+/**
+ * The numbers Messages gives conversations, kept across restarts so that a draft saved for a number still names its
+ * conversation. A conversation started with a number the phone has no thread for is numbered by that number.
+ */
+export service Conversations {
+  of(conversation: Conversation): number!!
+  get(thread: number): Option.Option<Conversation>!!
+}
+
+module text {
+  /** What the store kept: the conversations in the order they were numbered, from 1. @throws {never} */
+  export function kept(raw: string | undefined): Conversation[] {
+    if (raw === undefined) return []
+    try {
+      const found: unknown = JSON.parse(raw)
+      return Array.isArray(found) ? found.filter((one): one is Conversation => typeof one?.id === "string" && Array.isArray(one?.addresses)) : []
+    } catch {
+      return []
+    }
+  }
+}
+import { kept } from text
+
+const conversationsKey = "alpha/messages/conversations@1"
+
+const conversations = Layer.effect(Conversations, effect {
+  const store = try KeyValueStore.KeyValueStore
+  const known = kept(store.get(conversationsKey) catch () => undefined)
+  const keyOf = (one: Conversation) => (one.id !== "" ? `id:${one.id}` : `to:${[...one.addresses].sort().join(",")}`)
+  const numbers = new Map(known.map((one, at) => [keyOf(one), at + 1]))
+  return {
+    effect of(conversation: Conversation): number!! {
+      const found = numbers.get(keyOf(conversation))
+      if (found !== undefined) {
+        known[found - 1] = conversation
+        return found
+      }
+      known.push({ id: conversation.id, addresses: [...conversation.addresses] })
+      numbers.set(keyOf(conversation), known.length)
+      try ignore(store.set(conversationsKey, JSON.stringify(known)))
+      return known.length
+    },
+    get: (thread: number) => sync(() => Option.fromNullishOr(known[thread - 1])),
+  }
+})
+
+/** What Messages counts, kept beside it: the rows each pane last read, the search, the message the owner chose, and where a further read goes on from. */
+export interface Texts {
+  readonly threads: ReadonlyArray<ThreadRow>
+  readonly threadsNext: ThreadCursor | undefined
+  readonly sought: string
+  readonly messages: ReadonlyArray<MessageRow>
+  readonly messagesNext: MessageCursor | undefined
+  readonly chosen: string
+  readonly choices: ReadonlyArray<AddressBookContact>
+  readonly choicesNext: string | undefined
+  readonly typed: string
+}
+
+const empty: Texts = { threads: [], threadsNext: undefined, sought: "", messages: [], messagesNext: undefined, chosen: "", choices: [], choicesNext: undefined, typed: "" }
+
+/** The rows behind Messages' counts. */
+export service Inbox {
+  get(): Texts!!
+  set(change: Partial<Texts>): void!!
+}
+
+const inbox = Layer.sync(Inbox, () => {
+  let held = empty
+  return { get: () => sync(() => held), set: (change: Partial<Texts>) => sync(() => { held = { ...held, ...change } }) }
+})
+
+const smsGrant = Effect.map(telephony("status", (c) => c.messages.status()), (status) => grantOf(status.permissions.sms))
+
+// spec/app/messages/index.md, "Only the newest read of the list is shown, with what Android says about SMS access"
+effect function threadsRead(ticket: number, further: boolean): Event!!(Telephony | Inbox | Conversations | Messages.Machine) {
+  const store = try Inbox
+  const held = try store.get()
+  const chip = (try (try Messages.Machine).get()).chip
+  const grant = smsGrant catch () => "Unasked" as const
+  if (grant !== "Granted") return { type: "threadsRead", ticket, ok: true, grant, count: 0, further: false }
+  const page = telephony("threadPage", (c) => c.messages.threadPage(further ? held.threadsNext : undefined)) catch () => undefined
+  if (page === undefined) return { type: "threadsRead", ticket, ok: false, grant, count: 0, further: false }
+  const fitting = page.rows.filter((row) => "incomplete" in row || ((chip === "AllThreads" || row.unread) && matches(held.sought, `${row.addresses.join(" ")} ${row.snippet}`, row.addresses.join(" "))))
+  const rows = further ? [...held.threads, ...fitting] : fitting
+  try store.set({ threads: rows, threadsNext: page.next ?? undefined })
+  return { type: "threadsRead", ticket, ok: true, grant, count: rows.length, further: page.next !== null }
+}
+
+/** The phone's thread for a conversation Messages numbered: its own, or the listed one with exactly its numbers. */
+effect function threadOf(conversation: Conversation): Option.Option<ThreadId>!!Telephony {
+  if (conversation.id !== "") return Option.some(conversation.id as ThreadId)
+  const page = telephony("threadPage", (c) => c.messages.threadPage()) catch () => undefined
+  const same = (row: ThreadRow) => !("incomplete" in row) && [...row.addresses].sort().join(",") === [...conversation.addresses].sort().join(",")
+  return Option.fromNullishOr(page?.rows.find(same)?.id)
+}
+
+// spec/app/messages/index.md, "Only the newest read of the open conversation is shown, and it marks the shown messages read only where Alpha is the phone's SMS app"
+effect function pageRead(ticket: number, thread: number, further: boolean): Event!!(Telephony | Inbox | Conversations) {
+  const store = try Inbox
+  const held = try store.get()
+  const blank: Page = { rows: 0, failed: 0, partial: 0 }
+  const grant = smsGrant catch () => "Unasked" as const
+  const status = telephony("status", (c) => c.messages.status()) catch () => undefined
+  const role = status?.roles.sms.held ?? false
+  const conversation = try (try Conversations).get(thread)
+  if (grant !== "Granted" || Option.isNone(conversation)) return { type: "pageRead", ticket, ok: grant === "Granted" || grant === "Unasked", grant, seen: blank, further: false, unreadShown: false, role }
+  const id = try threadOf(conversation.value)
+  if (Option.isNone(id)) {
+    try store.set({ messages: [], messagesNext: undefined })
+    return { type: "pageRead", ticket, ok: true, grant, seen: blank, further: false, unreadShown: false, role }
+  }
+  const page = telephony("messagePage", (c) => c.messages.messagePage(id.value, further ? held.messagesNext : undefined)) catch () => undefined
+  if (page === undefined) return { type: "pageRead", ticket, ok: false, grant, seen: blank, further: false, unreadShown: false, role }
+  const rows = further ? [...held.messages, ...page.rows] : page.rows
+  try store.set({ messages: rows, messagesNext: page.next ?? undefined })
+  const seen: Page = {
+    rows: rows.length,
+    failed: rows.filter((row) => !("incomplete" in row) && row.status === "failed").length,
+    partial: rows.filter((row) => "incomplete" in row).length,
+  }
+  const unreadShown = rows.some((row) => !("incomplete" in row) && row.direction === "incoming" && !row.read)
+  return { type: "pageRead", ticket, ok: true, grant, seen, further: page.next !== null, unreadShown, role }
+}
+
+// spec/app/messages/index.md, "Only the newest read of the choices is shown, with what Android says about address-book access"
+effect function choicesRead(ticket: number, further: boolean): Event!!(Telephony | Inbox) {
+  const store = try Inbox
+  const held = try store.get()
+  const status = telephony("status", (c) => c.phone.status()) catch () => undefined
+  const grant = grantOf(status?.permissions.contacts)
+  if (grant !== "Granted") return { type: "choicesRead", ticket, ok: true, grant, count: 0, further: false }
+  const page = effect {
+    try telephony("open", (c) => c.contacts.open())
+    return try telephony("list", (c) => c.contacts.list({ query: held.typed, limit: 20, ...(further && held.choicesNext !== undefined ? { cursor: held.choicesNext as never } : {}) }))
+  } catch () => undefined
+  if (page === undefined) return { type: "choicesRead", ticket, ok: false, grant, count: 0, further: false }
+  const found = page.contacts.filter((row): row is AddressBookContact => !("incomplete" in row) && row.phones.length > 0)
+  const rows = further ? [...held.choices, ...found] : found
+  try store.set({ choices: rows, choicesNext: page.next ?? undefined })
+  return { type: "choicesRead", ticket, ok: true, grant, count: rows.length, further: page.next !== null }
+}
+
+// spec/app/messages/index.md, "Access that arrives reads the pane again, and access that goes forgets what it showed"
+effect function prompted(need: Need): Event!!Telephony {
+  const status = telephony("requestAccess", (c) => c.phone.requestAccess(need === "SmsAccess" ? "sms" : "contacts")) catch () => undefined
+  return { type: "accessReported", need, grant: grantOf(need === "SmsAccess" ? status?.permissions.sms : status?.permissions.contacts) }
+}
+
+/** The message the owner chose in the open conversation, as the phone listed it. */
+effect function chosen(): Option.Option<MessageRow>!!Inbox {
+  const held = try (try Inbox).get()
+  return Option.fromNullishOr(held.messages.find((row) => row.id === held.chosen))
+}
+
+// spec/app/messages/index.md, "The phone's answer ends the removal it names, and the conversation is read again unless it was refused"
+effect function removed(id: number): Event!!(Telephony | Inbox) {
+  const row = try chosen()
+  if (Option.isNone(row)) return { type: "removed", id, done: false, known: true }
+  const one = row.value
+  return effect {
+    const answered = try telephony("deleteMessage", (c) => c.messages.deleteMessage({ id: one.id, kind: one.kind, threadId: one.threadId, date: one.date }))
+    return { type: "removed", id, done: answered.status === "queued" || answered.status === "not-found", known: true } satisfies Event
+  } catch (failure) => ({ type: "removed", id, done: false, known: !(failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === "") } satisfies Event)
+}
+
+/** The open conversation's numbers. */
+effect function numbers(thread: number): ReadonlyArray<string>!!Conversations {
+  const conversation = try (try Conversations).get(thread)
+  return Option.isSome(conversation) ? conversation.value.addresses : []
+}
+
+// spec/app/messages/index.md, "Copy puts a message's text on the clipboard, Call opens Phone with the number, and a message Alpha cannot show opens in the messaging app; none changes anything here"
+effect function called(thread: number): void!!(Conversations | Dialer | PhoneMachine | Shell) {
+  const number = (try numbers(thread))[0] ?? ""
+  const handed = prefilled(number)
+  if (handed === undefined) return
+  try (try Dialer).set({ digits: handed.digits })
+  try ignore((try PhoneMachine).send(handed.event))
+  try ignore((try Shell).send({ type: "openView", view: "Phone" }))
+}
+
+/** The messaging app, opened on the conversation's numbers, for what Alpha cannot show or send. */
+export effect function elsewhere(thread: number): void!!(Telephony | Conversations) {
+  const to = (try numbers(thread)) as PhoneNumber[]
+  try ignore(telephony("composeSms", (c) => c.messages.composeSms({ recipients: to, body: "", subscriptionId: null })))
+}
+
+function carry(fx: Out): Job<Event, Telephony | Inbox | Conversations | Messages.Machine | SystemSettings | CarrierSetup | Dialer | PhoneMachine | Shell, []> {
+  return match (fx) {
+    when { tag: "ReadThreads", let ticket, let further }: answer("list", threadsRead(ticket, further), { type: "threadsRead", ticket, ok: false, grant: "Unasked", count: 0, further: false });
+    when { tag: "ReadConversation", let ticket, let thread, let further }: answer("page", pageRead(ticket, thread, further), { type: "pageRead", ticket, ok: false, grant: "Unasked", seen: { rows: 0, failed: 0, partial: 0 }, further: false, unreadShown: false, role: false });
+    when { tag: "ReadChoices", let ticket, let further }: answer("choices", choicesRead(ticket, further), { type: "choicesRead", ticket, ok: false, grant: "Unasked", count: 0, further: false });
+    when { tag: "MarkRead", let thread }: run(`read ${thread}`, effect {
+      const conversation = try (try Conversations).get(thread)
+      const latest = (try (try Inbox).get()).messages.reduce((at, row) => Math.max(at, row.date), 0)
+      if (Option.isSome(conversation) && conversation.value.id !== "") try ignore(telephony("markThreadRead", (c) => c.messages.markThreadRead(conversation.value.id as ThreadId, latest)))
+    });
+    when { tag: "Prompt", let need }: answer("prompt", prompted(need), { type: "accessReported", need, grant: "Unasked" });
+    when { tag: "OpenSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", 0) });
+    when { tag: "CopyText" }: run("copy", effect {
+      const row = try chosen()
+      if (Option.isSome(row) && !("incomplete" in row.value)) try (try CarrierSetup).copy(row.value.body)
+    });
+    when { tag: "OpenPhone" }: run("call", effect { try called((try (try Messages.Machine).get()).thread) });
+    when { tag: "OpenMessagingApp" }: run("elsewhere", effect { try elsewhere((try (try Messages.Machine).get()).thread) });
+    when { tag: "RemoveMessage", let id }: answer(`remove ${id}`, removed(id), { type: "removalLost" });
+  }
+}
+
+/** Each change the phone reports while Messages shows: a message that arrived or was sent. */
+const arrivals: Stream.Stream<Event, never, Telephony> = Stream.callback<Event, never, Telephony>((queue) => Effect.asVoid(acquireRelease(
+  Effect.orElseSucceed(telephony("observeMessages", (c) => c.messages.observeMessages(() => { Queue.offerUnsafe(queue, { type: "arrived" }) })), () => undefined),
+  (unsubscribe) => (unsubscribe === undefined ? Effect.void : ignore(tryPromise(() => unsubscribe()))),
+)))
+
+const machine = reacting(Messages, { carry })
+
+const shown = visiting(on("Messages"), Messages.Machine, (showing): Event => (showing ? { type: "show" } : { type: "leave" }))
+
+// spec/app/messages/index.md, "A new message, or one sent, reads the list or the open conversation again"
+const heard = hearing(arrivals, Messages.Machine, (event: Event) => event)
+
+// spec/app/phone/voicemail.md, "Call back and Message open Phone or Messages with the caller's number, and do nothing else"; spec/app/contacts/index.md, "Call and Message open Phone or Messages with the number filled in, and do nothing else"
+/** A number handed to Messages: Messages opens on the conversation with it, through the picker, as if the owner typed it. */
+const callers = Layer.effect(Callers, effect {
+  const whole = try Whole
+  effect function handed(number: string): void!!(Conversations | Inbox | Messages.Machine | Shell) {
+    const thread = try (try Conversations).of({ id: "", addresses: [number] })
+    try (try Inbox).set({ typed: number })
+    try ignore((try Shell).send({ type: "openView", view: "Messages" }))
+    const machine = try Messages.Machine
+    try ignore(machine.send({ type: "newMessage" }))
+    try ignore(machine.send({ type: "choose", thread, typed: true }))
+  }
+  return {
+    message: (number: string) => flatMap(whole.context, (context) => Effect.provideContext(handed(number), context as Context.Context<Conversations | Inbox | Messages.Machine | Shell>)),
+  }
+})
+
+/** Messages: resident, since Phone, Voicemail, Contacts and the agent hand it a number and Home reads its unread count; it reads only while its view is in front. */
+export const messages = together(machine, inbox, conversations, shown, heard, callers)
