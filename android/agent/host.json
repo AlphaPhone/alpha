@@ -7,9 +7,14 @@
   "text": "Your agent is running on this phone"
  },
  "model": {
-  "backend": "none"
+  "backend": "cloud",
+  "cloudBaseUrl": "https://api.eliza.app",
+  "smallModel": "qwen-3.8-27b",
+  "largeModel": "qwen-3.8-27b",
+  "imageModel": ""
  },
  "embeddings": "local",
+ "embeddingDimensions": 384,
  "persistMemory": true,
  "callerRole": "owner",
  "privacy": {

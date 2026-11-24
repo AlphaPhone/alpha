@@ -1,7 +1,7 @@
 // spec/shell/overview.md, "Story: See my day on Home"
 import { Machine as OverviewMachine, nextChange, type Attention, type BriefOutcome, type Event as OverviewEvent, type FeedState, type Item } from "../../gen/shell__overview.effect.vibe"
 import { Resident } from "../platform/resident.vibe"
-import { AutomationList, CalendarFeed } from "./overview.schema.vibe"
+import { AutomationList, CalendarFeed, TriggerOverviewList, WorkflowOverviewList } from "./overview.schema.vibe"
 import { localDay, nextMidnight, pageEvents, pageHidden } from "./page.ts"
 
 /** What another area reports for Home's overview: the mail it loaded, the newest brief, overdue reminders. */
@@ -53,6 +53,14 @@ effect function readAgenda(machine: OverviewMachine.Shape) {
 effect function readWorkflows(machine: OverviewMachine.Shape) {
   const resident = try Resident
   const at = try Clock.currentTimeMillis
+  const workflows = effect { return try Schema.decodeUnknownEffect(WorkflowOverviewList)((try resident.json("GET", "/api/workflow/workflows")).data) } catch () => undefined
+  const triggers = effect { return try Schema.decodeUnknownEffect(TriggerOverviewList)((try resident.json("GET", "/api/triggers")).data) } catch () => undefined
+  if (workflows !== undefined || triggers !== undefined) {
+    const workflowCount = (workflows?.workflows ?? []).filter((row) => row.removed !== true && (row.enabled === true || row.status === "active")).length
+    const triggerCount = (triggers?.triggers ?? []).filter((row) => row.enabled === true).length
+    try sendTo(machine, { type: "workflowsRead", count: workflowCount + triggerCount, at })
+    return
+  }
   const list = effect { return try Schema.decodeUnknownEffect(AutomationList)((try resident.json("GET", "/api/automations")).data) } catch () => undefined
   if (list === undefined) return
   const count = list.automations.filter((row) => row.enabled === true || row.status === "active").length

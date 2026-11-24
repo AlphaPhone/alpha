@@ -1111,6 +1111,29 @@ public abstract class AlphaCloudSignInClient extends Plugin {
  @PluginMethod public void clearCredentialState(PluginCall call) {
   getActivity().runOnUiThread(() -> NativeGoogleCredential.clear(getActivity(), () -> call.resolve()));
  }
+ @PluginMethod public void revokeCurrentKey(PluginCall call) {
+  final CloudSignInEnvironment environment;
+  try { environment = config().environment(call.getString("environment", config().defaultEnvironment().name)); }
+  catch (Exception invalid) { call.reject("Unsupported Cloud environment", "invalid-request"); return; }
+  final String expectedId = call.getString("credentialId", "");
+  try {
+   prober.execute(() -> {
+    boolean revoked = false;
+    try {
+     String saved = withCredentialRead(() -> store().read(config().credentialSlot(environment)));
+     if (saved != null) {
+      JSONObject record = new JSONObject(saved);
+      String id = record.optString("credentialId", "");
+      String token = record.optString("token", null);
+      if ((expectedId == null || expectedId.isEmpty() || expectedId.equals(id)) && token != null) {
+       revoked = CloudKeyRevocation.signOut(config(), environment, token);
+      }
+     }
+    } catch (Exception ignored) { revoked = false; }
+    call.resolve(new JSObject().put("revoked", revoked));
+   });
+  } catch (java.util.concurrent.RejectedExecutionException closed) { call.resolve(new JSObject().put("revoked", false)); }
+ }
 
  @PluginMethod public void cancel(PluginCall call) {
   final String requestId;

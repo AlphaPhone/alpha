@@ -97,7 +97,7 @@ export schema TriggerList { triggers: ReadonlyArray<TriggerRecord> }
 export schema TriggerReply { trigger: TriggerRecord; deliveryConversationId?: string }
 
 /** `GET /api/triggers/:id/runs`. */
-export schema TriggerRuns { runs: ReadonlyArray<{ startedAtIso?: string; status?: string; error?: string }> }
+export schema TriggerRuns { runs: ReadonlyArray<{ startedAt?: number; startedAtIso?: string; finishedAt?: number; status?: string; error?: string; source?: string }> }
 
 /** `POST /api/triggers/:id/execute`. */
 export schema ExecuteReply { ok: boolean; result: { status: string; error?: string } }

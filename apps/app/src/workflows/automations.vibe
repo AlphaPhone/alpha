@@ -367,7 +367,7 @@ export const automations = Layer.provideMerge(Layer.effect(Automations, effect {
     effect promptRuns(id: string) {
       const path = `/api/triggers/${id}/runs`
       const { runs } = try decoded(TriggerRuns, path, try agent.request("GET", path))
-      return runs.map((run) => ({ at: instant(run.startedAtIso), status: run.status ?? "", ...(run.error === undefined ? {} : { error: run.error }) }))
+      return runs.map((run) => ({ at: typeof run.startedAt === "number" && Number.isFinite(run.startedAt) ? run.startedAt : instant(run.startedAtIso), status: run.status ?? "", ...(run.error === undefined ? {} : { error: run.error }) }))
     },
     effect removed() {
       const workflows = agent.workflow.removedWorkflows() catch () => undefined

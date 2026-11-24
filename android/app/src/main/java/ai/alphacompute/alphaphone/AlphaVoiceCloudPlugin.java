@@ -175,13 +175,21 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
   String code=null,retryAt=null,resetAt=null;Number seconds=null;
   if(body!=null)try{
    JSONObject parsed=new JSONObject(body);JSONObject error=parsed.optJSONObject("error");JSONObject row=error!=null?error:parsed;
-   code=jsonText(row,"code");retryAt=jsonText(row,"retryAt");resetAt=jsonText(row,"resetAt");if(code==null&&row!=parsed)code=jsonText(parsed,"code");
+   code=jsonText(row,"code");if(code==null&&error==null)code=jsonText(parsed,"error");if(code==null&&row!=parsed)code=jsonText(parsed,"code");
+   retryAt=jsonInstant(row,"retryAt");resetAt=jsonInstant(row,"resetAt");if(resetAt==null)resetAt=jsonInstant(row,"resetsAt");
    Object value=row.opt("retryAfterSeconds");if(value instanceof Number)seconds=(Number)value;
   }catch(Exception ignored){/* A body that is not JSON leaves only Retry-After. */}
   return CloudVoiceLimit.read(retryAfter,code,seconds,retryAt,resetAt,System.currentTimeMillis());
  }
  /** A string member only: JSON null or a number is absent, never coerced to text ("null"). */
  private static String jsonText(JSONObject row,String key){Object value=row.opt(key);return value instanceof String?(String)value:null;}
+ /** An ISO string or positive epoch-millisecond number for retryAt / resetsAt. */
+ private static String jsonInstant(JSONObject row,String key){
+  Object value=row.opt(key);
+  if(value instanceof String)return (String)value;
+  if(value instanceof Number){long ms=((Number)value).longValue();if(ms>0)return java.time.Instant.ofEpochMilli(ms).toString();}
+  return null;
+ }
  private static JSObject limitData(CloudVoiceLimit limit){JSObject data=new JSObject();if(limit.retryAfterSeconds!=null)data.put("retryAfterSeconds",limit.retryAfterSeconds);if(limit.limitCode!=null)data.put("limitCode",limit.limitCode);if(limit.resetAt!=null)data.put("resetAt",limit.resetAt);return data;}
 
  // ---- Explicit Cloud voice profile (credential-bound) -----------------------------------------

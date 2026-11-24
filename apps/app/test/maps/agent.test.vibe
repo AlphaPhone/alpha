@@ -97,19 +97,28 @@ it.live("The agent reads only the selection its approved card showed (spec/maps/
     const agent = try MapsAgent
     const screen = try MapsScreen
     const machine = try ScreenMachine
+    const waitContext = (want: (c: unknown) => boolean) => effect {
+      for (let i = 0; i < 40; i++) {
+        const current = try agent.context()
+        if (want(current)) return current
+        try sleep("25 millis")
+      }
+      return try agent.context()
+    }
     try shownPier()
-    try sleep("20 millis")
+    try waitContext((c) => c !== undefined)
     const reviewed = try agent.review()
     const approved = try agent.approve()
     const read = try agent.readSelected()
     try agent.review()
     try agent.approve()
+    const beforePick = JSON.stringify(try agent.context())
     try screen.pickResult(1)
     try until(machine.changes, (s) => s.details === "Ready")
-    try sleep("20 millis")
+    try waitContext((c) => c !== undefined && JSON.stringify(c) !== beforePick)
     const stale = try agent.readSelected()
     try screen.closePlace()
-    try sleep("20 millis")
+    try waitContext((c) => c === undefined)
     const search = try agent.review()
     try Effect.try(() => assert.deepStrictEqual(
       { reviewed, approved, place: read?.includes('"kind":"map-place"'), stale, search },

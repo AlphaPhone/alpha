@@ -40,7 +40,7 @@ const STATUS_LIMIT = "10 seconds"
 export function buildReport(input: { readonly at: number; readonly native: boolean; readonly testMocks: boolean; readonly read: DeviceRead; readonly entries: ReadonlyArray<NativeCrashEntry>; readonly facts: Record<string, unknown> }) {
   const text = (value: unknown, pattern: RegExp) => typeof value === "string" && pattern.test(value) ? value : undefined
   const hashes = typeof input.facts.runtimeHashes === "object" && input.facts.runtimeHashes !== null ? input.facts.runtimeHashes as Record<string, unknown> : {}
-  const assets = ["agent/alpha-source.json", "agent/agent-bundle.js", "agent/workflow-worker/manifest.json", "agent/workflow-worker/files.sha256"]
+  const assets = ["agent/alpha-source.json", "agent/agent.mjs", "agent/inventory.json", "agent/agent-bundle.js", "agent/workflow-worker/manifest.json", "agent/workflow-worker/files.sha256"]
   const grant = (access: string) => access === "Allowed" ? true : access === "Denied" ? false : undefined
   const permissions = Object.fromEntries(([["Camera", input.read.camera], ["Microphone", input.read.microphone], ["Location", input.read.locationAccess], ["Calendar", input.read.calendar], ["Notifications", input.read.notifications]] as const)
     .flatMap(([name, access]) => grant(access) === undefined ? [] : [[name, grant(access)]]))

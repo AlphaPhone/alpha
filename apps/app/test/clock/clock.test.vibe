@@ -23,12 +23,14 @@ describe("Clock (spec/clock/alarms.md, \"Story: Set an alarm in the browser buil
       const set = try actions.addAlarm(7, 0, "Work", [])
       const refused = try actions.addAlarm(25, 0, "", [])
       const added = (try alarms.get()).alarms[0]!
-      try TestClock.adjust("2 days")
+      try TestClock.setTime(added.nextAt)
+      try TestClock.adjust("1 second")
       const rang = (try alarms.get()).alarms[0]!
       const snoozed = try actions.snoozeAlarm(rang.id, rang.revision)
       const stale = try actions.dismissAlarm(rang.id, rang.revision)
       const after = (try alarms.get()).alarms[0]!
-      try TestClock.adjust("11 minutes")
+      try TestClock.setTime(after.nextAt)
+      try TestClock.adjust("1 second")
       const again = (try alarms.get()).alarms[0]!
       const dismissed = try actions.dismissAlarm(again.id, again.revision)
       const off = (try alarms.get()).alarms[0]!

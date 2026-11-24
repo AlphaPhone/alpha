@@ -25,3 +25,15 @@ export schema AutomationRow { readonly enabled?: boolean; readonly status?: stri
 
 /** `GET /api/automations`. */
 export schema AutomationList { readonly automations: AutomationRow[] }
+
+/** One workflow of `GET /api/workflow/workflows`. */
+export schema WorkflowOverviewRow { readonly enabled?: boolean; readonly status?: string; readonly removed?: boolean }
+
+/** `GET /api/workflow/workflows`. */
+export schema WorkflowOverviewList { readonly workflows: WorkflowOverviewRow[] }
+
+/** One trigger of `GET /api/triggers`. */
+export schema TriggerOverviewRow { readonly enabled?: boolean }
+
+/** `GET /api/triggers`. */
+export schema TriggerOverviewList { readonly triggers: TriggerOverviewRow[] }

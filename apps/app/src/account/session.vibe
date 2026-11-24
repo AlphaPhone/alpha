@@ -107,6 +107,14 @@ export const sessionService = Layer.effect(CloudSession, effect {
   effect function revoke(credentialId: string) {
     const held = readIdentity(native, environment) catch () => undefined
     if (held === undefined || held.credentialId !== credentialId) return false
+    if (build.info.variant !== "browser") {
+      const nativeAnswer = effect {
+        return try native.invoke(plugin, "revokeCurrentKey", { environment, credentialId })
+      } catch () => undefined
+      if (typeof nativeAnswer === "object" && nativeAnswer !== null && typeof (nativeAnswer as { revoked?: unknown }).revoked === "boolean") {
+        return (nativeAnswer as { revoked: boolean }).revoked
+      }
+    }
     const answer = effect {
       try cloud.json("DELETE", "/api/v1/api-keys/current")
       return true

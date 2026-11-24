@@ -404,9 +404,12 @@ export const signInService = Layer.effect(SignInScreen, effect {
       if (try send({ type: "ownKeysStart" })) try send({ type: "ownKeysEnd", saved: true })
     },
     effect serviceInfo() {
-      const answer = effect {
+      const fromNative = android ? (effect {
+        return try Schema.decodeUnknownEffect(ServiceAnswer)(try native.invoke(plugin, "serviceInfo", { environment }))
+      } catch () => undefined) : undefined
+      const answer = fromNative !== undefined ? fromNative : (effect {
         return try Schema.decodeUnknownEffect(ServiceAnswer)(try cloud.json("GET", "/api/public/service"))
-      } catch () => undefined
+      } catch () => undefined)
       return answer !== undefined && answer.success && answer.version === 1 ? answer.service : undefined
     },
     effect openWifiSettings() {
