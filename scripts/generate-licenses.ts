@@ -858,6 +858,18 @@ function nodeEntry(lock: NodeLock, abis: readonly string[], templates: Templates
     ].join('\n\n')};
 }
 
+/** Private packages this repository itself defines and bundles, by name and version: the resident entry under scripts/resident. */
+export function firstPartyPackages(root: string): Map<string, string> {
+  const own = new Map<string, string>();
+  for (const manifest of ['scripts/resident/package.json']) {
+    const file = path.join(root, manifest);
+    if (!fs.existsSync(file)) continue;
+    const pkg = JSON.parse(fs.readFileSync(file, 'utf8')) as {name?: unknown; version?: unknown; private?: unknown};
+    if (pkg.private === true && typeof pkg.name === 'string' && typeof pkg.version === 'string') own.set(pkg.name, pkg.version);
+  }
+  return own;
+}
+
 /**
  * Node.js, every npm package bundled into the agent and every package in the
  * workflow-worker artifact, when a resident runtime is staged. Without one, the
@@ -886,7 +898,10 @@ export function runtimeEntries(root: string, templates: Templates, errors: strin
   try {
     const manifest = JSON.parse(fs.readFileSync(path.join(agentDir, 'manifest.json'), 'utf8')) as {packages?: {name: string; version: string}[]};
     if (!Array.isArray(manifest.packages) || !manifest.packages.length) errors.push(`${agentDir}/manifest.json lists no bundled package`);
+    const own = firstPartyPackages(root);
     for (const {name, version} of manifest.packages ?? []) {
+      // This repository's own private packages (the resident entry) are Alpha's code under its own licence, not third-party notices.
+      if (own.get(name) === version) continue;
       const directory = installedPackageDirectory(root, sourceDir, name, version);
       if (!directory) { errors.push(`agent bundle: ${name}@${version} is not installed in this workspace; run pnpm install`); continue; }
       add(runtimePackageEntry(directory, 'agent bundle', templates, errors));

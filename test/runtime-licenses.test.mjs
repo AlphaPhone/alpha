@@ -48,7 +48,9 @@ async function stagedCheckout(t, {abi = ABIS} = {}) {
   const agent = 'export const agent = 1\n';
   write(path.join(bundle, 'agent.mjs'), agent);
   write(path.join(bundle, 'manifest.json'), JSON.stringify({schema: 1, node: '26', bundleSha256: sha256(agent), localInference: false,
-    workflowWorkerSha256: sha256('export const worker = 1\n'), packages: [{name: '@elizaos/core', version: '2.0.0'}, {name: 'zod', version: '4.1.0'}]}));
+    workflowWorkerSha256: sha256('export const worker = 1\n'), packages: [{name: '@elizaos/core', version: '2.0.0'}, {name: 'zod', version: '4.1.0'}, {name: '@alphacompute/alphaphone-resident', version: '0.1.0'}]}));
+  // Alpha's own private resident entry is bundled too; it is first-party, so it carries no third-party notice.
+  write(path.join(root, 'scripts/resident/package.json'), JSON.stringify({name: '@alphacompute/alphaphone-resident', version: '0.1.0', private: true}));
   // Earlier build steps: the voice host's engine, and a Node runtime from an older staging for x86_64.
   write(path.join(main, 'jniLibs/arm64-v8a/libelizainference.so'), 'voice engine');
   write(path.join(main, 'jniLibs/x86_64/libeliza_node.so'), 'older runtime');
