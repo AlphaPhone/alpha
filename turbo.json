@@ -286,7 +286,10 @@
         "@repo/eliza-harness#test",
         "@repo/deployment#build",
         "@repo/deployment#typecheck",
-        "@repo/deployment#test"
+        "@repo/deployment#test",
+        "@repo/site#build",
+        "@repo/site#typecheck",
+        "@repo/site#test"
       ],
       "cache": false
     },
@@ -296,7 +299,8 @@
         "@repo/app#typecheck",
         "@repo/eliza-harness#typecheck",
         "@repo/deployment#typecheck",
-        "vibestack-studio#typecheck"
+        "vibestack-studio#typecheck",
+        "@repo/site#typecheck"
       ],
       "inputs": [
         "apps/**",
