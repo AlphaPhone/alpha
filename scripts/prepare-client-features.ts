@@ -311,15 +311,19 @@ export function prepareClientFeatures({ root = projectRoot, projectVoice = true,
     if (content.split(before).length !== 2) throw Error('Review changed browser address re-export: ' + name);
     project(name, content.replace(before, 'from "../../../packages/contracts/src/browser-address-input.ts";'));
   }
-  // The browser command parser reads the turn observation through the contracts
-  // package. Plain Node has no package alias, so bind that one reviewed value
-  // import to the exact authenticated leaf in this prepared tree.
+  // The browser command parser reads the turn observation and the Browser request
+  // grounding through the contracts package. Plain Node has no package alias, so bind
+  // those two reviewed value imports to the exact authenticated leaves in this tree.
   {
     const name = 'plugins/plugin-browser/src/native-client-command.ts';
-    const before = 'import { readClientTurnObservation } from "@elizaos/contracts/client-turn-observation";';
-    const content = text(name);
-    if (content.split(before).length !== 2) throw Error('Review changed browser observation import: ' + name);
-    project(name, content.replace(before, 'import { readClientTurnObservation } from "../../../packages/contracts/src/client-turn-observation.ts";'));
+    let content = text(name);
+    for (const leaf of ['client-turn-observation', 'browser-request-grounding']) {
+      const before = `} from "@elizaos/contracts/${leaf}";`;
+      if (content.split(before).length !== 2) throw Error('Review changed browser contracts import: ' + name + ' (' + leaf + ')');
+      content = content.replace(before, `} from "../../../packages/contracts/src/${leaf}.ts";`);
+    }
+    if (content.includes('@elizaos/contracts/')) throw Error('Review a new browser contracts import: ' + name);
+    project(name, content);
   }
   // Upstream voice sessions import the shared random-id helper by its emitted .js name. Plain
   // Node (tests and scripts that strip types) cannot map that to the copied .ts source, so the
