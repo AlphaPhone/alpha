@@ -1,0 +1,122 @@
+// spec/app/notices/toasts.md, "Story: Read a toast before it goes"; spec/app/notices/toasts.md, "Story: Keep an Undo in reach"; spec/app/notices/toasts.md, "Story: Keep what I must not miss"
+import * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
+import type { Effect as Out, Event } from "../../gen/app__notices__toasts.effect.vibe"
+import * as Layers from "../../gen/app__shell__layers.effect.vibe"
+import { Device } from "../platform/device.vibe"
+import { type Job, answer, contained, following, reacting, run, started } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+
+/** What a toast says, which the rules never hold: its sentence, and whether it reports a failure, to be announced at once. */
+export interface Words {
+  readonly message: string
+  readonly failure: boolean
+}
+
+/** The sentences of the toasts and of the notices kept, and the Undo of each change offered, by its area and number. */
+export service Said {
+  readonly toasts: Map<number, Words>
+  readonly kept: Map<string, string>
+  readonly undos: Map<string, void!!>
+}
+
+const said = Layer.sync(Said, () => ({ toasts: new Map<number, Words>(), kept: new Map<string, string>(), undos: new Map<string, void!!>() }))
+
+/** The name of a change, or of a kept notice, in the maps above: its area and its number there. */
+export function nameOf(area: string, about: number): string {
+  return `${area}#${about}`
+}
+
+effect function raised(words: Words, undo: boolean, area: string, about: number): void!!(Toasts.Machine | Said) {
+  const toasts = try Toasts.Machine
+  const sentences = try Said
+  const before = try toasts.get()
+  sentences.toasts.set(before.issued + 1, words)
+  try contained(toasts.send({ type: "raise", chars: Math.max(1, words.message.length), undo, area, about }), "a toast")
+}
+
+/** Tell the owner `message` in passing: a failure is announced at once, other news politely. */
+export effect function say(message: string, failure = false): void!!(Toasts.Machine | Said) {
+  try raised({ message, failure }, false, "", 0)
+}
+
+// spec/app/notices/toasts.md, "Tapping Undo passes the tap on once, naming the change of the toast showing, and the next toast waiting is shown"
+/** Offer Undo of the change `about` of `area`, which `undo` takes back, until the area withdraws it. */
+export effect function offer(message: string, area: string, about: number, undo: void!!): void!!(Toasts.Machine | Said) {
+  (try Said).undos.set(nameOf(area, about), undo)
+  try raised({ message, failure: false }, true, area, about)
+}
+
+// spec/app/notices/toasts.md, "The area that raised an Undo toast withdraws it, showing or waiting, once its change can no longer be undone"
+/** The change `about` of `area` can no longer be undone: its toast goes, wherever it is. */
+export effect function withdraw(area: string, about: number): void!!(Toasts.Machine | Said) {
+  (try Said).undos.delete(nameOf(area, about))
+  const toasts = try Toasts.Machine
+  if (Toasts.canRetract(try toasts.get(), area, about)) try contained(toasts.send({ type: "retract", area, about }), "withdrawing an Undo")
+}
+
+// spec/app/notices/toasts.md, "An area keeps a notice under its own name and number, once; at most three are listed, and a fourth pushes out the oldest"
+/** Keep `message` listed until the owner dismisses it, and announce it once as a failure. */
+export effect function keep(message: string, area: string, about: number): void!!(Toasts.Machine | Said) {
+  (try Said).kept.set(nameOf(area, about), message)
+  try contained((try Toasts.Machine).send({ type: "keep", area, about }), "a kept notice")
+  try say(message, true)
+}
+
+// spec/app/notices/toasts.md, "Alpha asks Android how long toasts should stay, and only the newest answer counts"
+effect function scaleRead(ticket: number): Event!!Device {
+  const scale = try (try Device).timeoutScale()
+  return { type: "scaled", ticket, scale: Option.getOrElse(scale, () => 100), ok: Option.isSome(scale) }
+}
+
+effect function undone(area: string, about: number): void!!Said {
+  const undos = (try Said).undos
+  const name = nameOf(area, about)
+  const undo = undos.get(name)
+  undos.delete(name)
+  if (undo !== undefined) try contained(undo, "an Undo")
+}
+
+function carry(fx: Out): Job<Event, Device | Said, []> {
+  return match (fx.act) {
+    when "AskScale": answer("scale", scaleRead(fx.number), { type: "scaled", ticket: fx.number, scale: 100, ok: false });
+    when "Undone": run(`undo ${nameOf(fx.area, fx.number)}`, undone(fx.area, fx.number));
+  }
+}
+
+/** Which plain toast is counting down, and from how much: a toast held, an Undo or nothing shown counts nothing. */
+function counting(t: Toasts.Toasts): { readonly number: number; readonly left: number } | undefined {
+  return t.showing && !t.current.undo && !t.held ? { number: t.current.number, left: t.left } : undefined
+}
+
+// spec/app/notices/toasts.md, "Time passes for a plain toast only while it is shown and not held, and it goes once its time is up"
+const ticking = started(effect {
+  const toasts = try Toasts.Machine
+  const time = try Time
+  const counted = Stream.changesWith(Stream.map(toasts.changes, counting), (a, b) => a?.number === b?.number && a?.left === b?.left)
+  try Stream.runDrain(Stream.switchMap(counted, (count) => count === undefined ? Stream.empty : Stream.fromEffect(effect {
+    if (count.left > 0) {
+      try time.until((try time.now()) + count.left)
+      try contained(toasts.send({ type: "elapse", ms: count.left }), "a toast's time")
+    }
+    try contained(toasts.send({ type: "expire" }), "a toast's end")
+  })))
+}, "the toasts' time")
+
+// spec/app/notices/toasts.md, "Alpha asks Android how long toasts should stay, and only the newest answer counts"
+const asking = started(effect {
+  const toasts = try Toasts.Machine
+  try contained(toasts.send({ type: "askScale" }), "the timeout scale")
+  try Stream.runForEach(Stream.filter((try Device).visible, (shown) => shown), () => contained(toasts.send({ type: "askScale" }), "the timeout scale"))
+}, "asking for the timeout scale")
+
+// spec/app/notices/toasts.md, "The phone says which dialog is on top, and the toast showing moves into it"
+const covered = following(Layers.Machine, (l) => l.open.filter((layer) => layer.kind === "DialogLayer").length, Toasts.Machine, (top) => ({ type: "cover", top } as const))
+
+/** The toasts and the notices kept, in memory, shown once the shell is up. */
+export const toasts = Layer.mergeAll(
+  reacting(Toasts, { open: [{ type: "started" }], carry }),
+  said,
+  ticking,
+  asking,
+  covered,
+)

@@ -4,6 +4,7 @@ import { opaque } from "../../gen/app__home.effect.vibe"
 import { keyOf } from "../platform/launcher.vibe"
 
 module eliza {
+  import type { InstalledApp } from "@elizaos/os/bridges/definitions/system"
   import { describeLauncherApps, filterLauncherApps } from "@elizaos/os/bridges/system"
 
   /** @throws {never} */

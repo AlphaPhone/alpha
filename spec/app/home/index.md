@@ -11,7 +11,6 @@ startup says how Alpha is presented. Alpha's agent does nothing on Home.
 - [Tiles](./tiles.md): the tiles kept on Home, read when Alpha starts and saved after each change
 - [Asking Android](./android.md): one ask at a time, its wait and its answer
 - [Cards](./cards.md): the daily overview above the tiles
-- [Press](./press.md): which finger owns a press or a drag on a tile, and what it becomes
 
 ## Story: Start Home
 

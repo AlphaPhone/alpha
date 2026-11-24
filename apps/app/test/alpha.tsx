@@ -14,7 +14,7 @@ import { fakeWorld } from "./fakes/world.vibe";
 const environment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
 
 /** `work` under React's act in Node, where happy-dom draws only what act flushes; as it is in a browser, which draws by itself. */
-async function drawn(work: () => unknown) {
+export async function drawn(work: () => unknown) {
   if (environment.IS_REACT_ACT_ENVIRONMENT) await act(async () => { await work(); });
   else await work();
 }

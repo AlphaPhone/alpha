@@ -1,7 +1,7 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"
 import { together, whole } from "./runtime/reactor.vibe"
 import { shell } from "./shell/shell.vibe"
-import { notices } from "./shell/notices.vibe"
+import { toasts } from "./notices/toasts.vibe"
 import { haptics } from "./shell/haptics.vibe"
 import { canvas } from "./shell/canvas.vibe"
 
@@ -12,7 +12,7 @@ import { canvas } from "./shell/canvas.vibe"
  */
 const machines = together(
   shell,
-  notices,
+  toasts,
   haptics,
   canvas,
 )

@@ -48,7 +48,7 @@ export effect function feel(kind: Haptic): void!!(Haptics.Machine | Device) {
 const clicks = started(effect {
   const page = document_()
   if (page === undefined) return
-  try Stream.runForEach(Stream.fromEventListener(page, "click", { capture: true }), (event) => {
+  try Stream.runForEach(Stream.fromEventListener<Event>(page, "click", { capture: true }), (event) => {
     const control = clicked(event)
     const kind = Haptics.hapticForClick(control.role as Role, control.disabled, control.inert, control.checked, control.inDialog, control.destructive)
     return kind === "NoHaptic" ? Effect.void : feel(kind)

@@ -2,6 +2,7 @@
 import type { InstalledApp, LaunchTarget } from "@elizaos/os/bridges/definitions/system"
 
 module held {
+  import type { LaunchTarget } from "@elizaos/os/bridges/definitions/system"
   import { appKey, launcherRefusalCode, systemClient } from "@elizaos/os/bridges/system"
 
   let made: ReturnType<typeof systemClient> | undefined
