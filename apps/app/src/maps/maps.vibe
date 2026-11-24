@@ -2,7 +2,7 @@
 import { CloudError } from "@elizaos/cloud/client"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Screen from "../../gen/app__maps.effect.vibe"
-import { pressMs, readable, shown } from "../../gen/app__maps.effect.vibe"
+import { mode, pressMs, readable, shown } from "../../gen/app__maps.effect.vibe"
 import type { Change, Effect as Out, Event as Ev, HandOff, Maps as State } from "../../gen/app__maps.effect.vibe"
 import * as Credits from "../../gen/app__maps__credits.effect.vibe"
 import type { Effect as CreditsOut, Event as CreditsEv } from "../../gen/app__maps__credits.effect.vibe"
@@ -144,14 +144,13 @@ effect function planned(ticket: number, origin: Origin, travel: Travel, place: n
   return effect {
     if (from === undefined || to === undefined) throw new Unanswered({ cause: "the route has no start or no end" })
     const found = try asked((client, signal) => client.mapsRoutes({ from: coordinateOf(from), to: coordinateOf(to.at), mode: travelModes[travel] }, { signal }))
-    const first = found.routes[0]
-    const way: Way = {
-      meters: Math.round(first.distanceMeters), seconds: Math.round(first.durationSeconds), line: first.geometry.map(pointOf),
-      turns: first.steps.map((step) => ({ instruction: step.instruction, at: pointOf(step.coordinate), meters: Math.round(step.distanceMeters) })),
-    }
-    atlas.routed(ticket, way)
-    return { type: "answerRoute", ticket, ok: true, turns: Math.max(1, way.turns.length) }
-  } catch () => ({ type: "answerRoute", ticket, ok: false, turns: 0 })
+    const ways: Way[] = found.routes.map((route) => ({
+      meters: Math.round(route.distanceMeters), seconds: Math.round(route.durationSeconds), line: route.geometry.map(pointOf),
+      turns: route.steps.map((step) => ({ instruction: step.instruction, at: pointOf(step.coordinate), meters: Math.round(step.distanceMeters) })),
+    }))
+    atlas.routed(ticket, ways)
+    return { type: "answerRoute", ticket, ok: true, turns: Math.max(1, ways[0].turns.length), routes: ways.length }
+  } catch () => ({ type: "answerRoute", ticket, ok: false, turns: 0, routes: 0 })
 }
 
 function allowedOf(grant: Grant): Allowed {
@@ -172,8 +171,8 @@ function located(session: number, once: boolean): Stream.Stream<Ev, never, Locat
         const at: Point = { lat: heard.lat, lng: heard.lng }
         atlas.located({ at, accuracy: heard.accuracy, approximate: !heard.precise })
         if (once) return { type: "locationFix", session, fix: "Along" } satisfies Ev
-        const { trip } = try screen.get()
-        const way = atlas.way(trip.route)
+        const { trip, chosen } = try screen.get()
+        const way = atlas.way(trip.route, chosen)
         const ageMs = (try time.now()) - heard.taken
         if (way === undefined) return { type: "locationFix", session, fix: "Along" } satisfies Ev
         const along = measured(at, { line: way.line, turns: way.turns.map((turn) => turn.at) }, trip.turn - 1)
@@ -285,14 +284,15 @@ effect function handed(place: number, kind: HandOff): void!!(Screen.Machine | Ti
   const spot = atlas.spot(place)
   if (spot === undefined) return
   const where = `${spot.at.lat / 1e6},${spot.at.lng / 1e6}`
-  const { trip } = try (try Screen.Machine).get()
-  const way = atlas.way(trip.route)
+  const { trip, chosen } = try (try Screen.Machine).get()
+  const way = atlas.way(trip.route, chosen)
   const arrival = way === undefined ? "" : new Date((try (try Time).now()) + way.seconds * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
   try ignore(match (kind) {
     when "SharePlace": tryPromise(() => shared(spot.name, `${spot.name}${spot.address === undefined ? "" : `, ${spot.address}`}`));
     when "EtaShare": tryPromise(() => shared(spot.name, `On my way to ${spot.name}${arrival === "" ? "" : `, arriving around ${arrival}`}`));
     when "Website": sync(() => { if (spot.website !== undefined) opened(spot.website) });
     when "MapsApp": sync(() => opened(`geo:${where}?q=${encodeURIComponent(`${where}(${spot.name})`)}`));
+    when "Call": sync(() => { if (spot.phone !== undefined) opened(`tel:${spot.phone.replace(/[^+0-9]/g, "")}`) });
   })
 }
 
@@ -303,12 +303,12 @@ function carry(fx: Out): Job<Ev, Cloud | Time | Location | Screen.Machine | KeyV
     when { tag: "FindPlaces", let ticket, let query }: answer("search", searched(ticket, query), { type: "answerSearch", ticket, ok: false, found: 0 });
     when { tag: "FindForAgent", let query }: run("agentSearch", foundForAgent(query));
     when { tag: "MakePin", let lat, let lng }: answer("pin", pinned({ lat, lng }), { type: "dropPin", place: 0 });
-    when { tag: "PlanRoute", let ticket, let origin, let travel, let place, let lat, let lng }: answer("route", planned(ticket, origin, travel, place, { lat, lng }), { type: "answerRoute", ticket, ok: false, turns: 0 });
+    when { tag: "PlanRoute", let ticket, let origin, let travel, let place, let lat, let lng }: answer("route", planned(ticket, origin, travel, place, { lat, lng }), { type: "answerRoute", ticket, ok: false, turns: 0, routes: 0 });
     when { tag: "StartLocation", let session, let once }: stream("location", located(session, once), { type: "locationLost", session });
     when { tag: "StopLocation" }: run("location", stopped());
     when { tag: "AskLocation" }: answer("permission", permitted(), { type: "observeLocation", grant: "Denied" });
     when { tag: "OpenLocationSettings" }: run("settings", settingsOpened());
-    when { tag: "ShowMyLocation" }: run("show", Effect.void);
+    when { tag: "ShowMyLocation" }: run("show", sync(() => atlas.showMe()));
     when { tag: "GuideWithScreenOff", let journey }: answer("service", succeed<Ev>({ type: "serviceReport", journey, running: false }), { type: "serviceReport", journey, running: false });
     when { tag: "StopGuidance" }: run("location", stopped());
     when { tag: "KeepSaved", let saved, let change }: answer("saved", keep(saved, change), { type: "savedKept", change, ok: false });
@@ -407,14 +407,17 @@ const retried = started(effect {
   )
 }, "retrying Maps")
 
-// spec/app/maps/index.md, "What Android reports about location is taken at once; guidance without it ends"; spec/app/maps/connection.md, "Signing in, out or to another account retires the provider and reads the new account's coverage"
+// spec/app/maps/index.md, "What Android reports about location is taken at once; guidance without it ends"; spec/app/maps/index.md, "A fix goes to whoever holds the location"; spec/app/maps/connection.md, "Signing in, out or to another account retires the provider and reads the new account's coverage"
 const opening = started(effect {
   const shell = try Shell
   const screen = try Screen.Machine
   const location = try Location
   try Stream.runForEach(shell.changes |> Stream.map(%, (s) => showing(s, "Maps")) |> Stream.changes(%), effect (shown) => {
     if (!shown) return
-    try ignore(screen.send({ type: "observeLocation", grant: allowedOf(try location.permission()) }))
+    const grant = allowedOf(try location.permission())
+    try ignore(screen.send({ type: "observeLocation", grant }))
+    const now = try screen.get()
+    if (grant !== "Denied" && grant !== "Unasked" && mode(now) === "Browse") try ignore(screen.send({ type: "useMyLocation" }))
     try accountRead()
     try ignore(screen.send({ type: "connect" }))
   })

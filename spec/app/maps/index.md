@@ -33,7 +33,7 @@ import places as S from "./places"
 type Mode = Browse | Search | Place | Directions | Navigating
 type Sheet = Peek | Half | Full
 type Question = NoQuestion | ReadPlace | StartTrip
-type HandOff = SharePlace | EtaShare | Website | MapsApp
+type HandOff = SharePlace | EtaShare | Website | MapsApp | Call
 type Change = Added | Renamed | Removed
 type SavedNotice = NoNotice | PlaceSaved | PlaceRenamed | PlaceRemoved | NotKept
 type Maps = {
@@ -42,7 +42,7 @@ type Maps = {
   place: int, directions: bool, sheet: Sheet, saved: List[S::Saved],
   fromEvent: int, question: Question, review: V::Review, asked: int, telling: A::Attempt,
   startLat: int, startLng: int, pinning: bool, pressing: bool, presses: int, pressedAt: int,
-  pressLat: int, pressLng: int, keepable: bool, notice: SavedNotice,
+  pressLat: int, pressLng: int, keepable: bool, notice: SavedNotice, alternatives: int, chosen: int,
 }
 
 pure val initial: Maps = {
@@ -51,7 +51,7 @@ pure val initial: Maps = {
   place: 0, directions: false, sheet: Peek, saved: List(),
   fromEvent: 0, question: NoQuestion, review: V::unreviewed, asked: 0, telling: A::plan(0),
   startLat: 0, startLng: 0, pinning: false, pressing: false, presses: 0, pressedAt: 0,
-  pressLat: 0, pressLng: 0, keepable: true, notice: NoNotice,
+  pressLat: 0, pressLng: 0, keepable: true, notice: NoNotice, alternatives: 0, chosen: 0,
 }
 
 pure val accountValues = Set(1, 2)
@@ -72,6 +72,9 @@ pure val nowValues = Set(0, 1000)
 pure val secondsValues = Set(0, 120)
 pure val holdValues = Set(1, 2)
 pure val pressValues = Set(1, 2)
+pure val routesValues = Set(1, 3)
+pure val indexValues = Set(0, 1)
+pure val weight_chooseRoute = 10
 pure val weight_cloudWaits = 5
 pure val weight_waitEnded = 10
 pure val weight_pressMap = 5
@@ -505,7 +508,9 @@ pure def alwaysSavedPlacesAreDistinctAndNamed(m: Maps): bool = S::distinctAndNam
 
 The hours are shown on the card, and a provider's place is subtitled with
 its most specific category. Only the place on the card is handed on, and an
-arrival time only with a route. A place Google served is never shared.
+arrival time only with a route, as the time of arrival. A place with a
+dialable number is called through the phone's dialer. A place Google served
+is never shared.
 
 ```quint
 pure def canHandOn(m: Maps, kind: HandOff): bool =
@@ -582,14 +587,38 @@ pure def chooseTravel(m: Maps, travel: N::Travel): Stepped =
 
 ### The route's answer is the trip's, and a new route is put to the owner when the agent proposed it
 
-```quint
-pure def canAnswerRoute(m: Maps, ticket: int, ok: bool, turns: int): bool =
-  N::canAnswerRoute(m.trip, ticket, ok, turns)
+The provider answers one to three routes in its order, the first shown;
+`turns` are the first route's.
 
-pure def answerRoute(m: Maps, ticket: int, ok: bool, turns: int): Maps =
+```quint
+pure def canAnswerRoute(m: Maps, ticket: int, ok: bool, turns: int, routes: int): bool =
+  N::canAnswerRoute(m.trip, ticket, ok, turns) and (not(ok) or (routes >= 1 and routes <= 3))
+
+pure def answerRoute(m: Maps, ticket: int, ok: bool, turns: int, routes: int): Maps =
   val trip = N::answerRoute(m.trip, ticket, ok, turns)
   val review = if (trip.route != m.trip.route) V::revise(m.review) else m.review
-  { ...m, trip: trip, review: if (m.question == StartTrip and ok) V::present(review) else review }
+  val answered = if (ok) { ...m, alternatives: routes, chosen: 0 } else m
+  { ...answered, trip: trip, review: if (m.question == StartTrip and ok) V::present(review) else review }
+```
+
+### The provider's routes are listed in order, and choosing one shows it and sends no new request
+
+They read Recommended, Alternative 1 and Alternative 2; Start guides along
+the route chosen.
+
+```quint
+pure def canChooseRoute(m: Maps, index: int, turns: int): bool =
+  mode(m) == Directions and m.trip.route != 0 and m.trip.plan.status != R::Loading
+    and index >= 0 and index < m.alternatives and index != m.chosen and turns > 0
+
+pure def chooseRoute(m: Maps, index: int, turns: int): Maps =
+  { ...m, chosen: index, trip: { ...m.trip, turns: turns, turn: 0, speaking: -1 }, review: V::revise(m.review) }
+
+pure def alwaysTheChosenRouteIsOneOffered(m: Maps): bool =
+  m.alternatives >= 0 and m.alternatives <= 3 and m.chosen >= 0
+    and (m.trip.route != 0 implies m.chosen < m.alternatives)
+
+pure def sometimesAnAlternativeChosen(m: Maps): bool = m.chosen > 0 and mode(m) == Directions
 ```
 
 ### Routes are asked for the place on screen, under the trip's newest ticket
@@ -662,7 +691,8 @@ pure def endGuidance(m: Maps): Stepped =
 ### A fix goes to whoever holds the location
 
 "Use my location" takes one fix: the starting point on directions, or
-the map centred on it. Guidance moves on with each fix; straying asks for
+the map centred on it. Opening Maps with location already allowed and
+nothing chosen takes one such fix, quietly. Guidance moves on with each fix; straying asks for
 a reroute from here, and arriving stops guidance and its location.
 
 ```quint

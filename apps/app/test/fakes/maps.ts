@@ -1,4 +1,4 @@
-// spec/app/maps/connection.md, "Every Maps request goes through eliza's cloud client under its own request key, and a tile comes back as its image"
+// spec/app/maps/connection.md, "Story: Serve Maps through my cloud account"
 import type { LocationErrorEvent, LocationPermissionStatus, LocationPlugin, LocationResult } from "@elizaos/os/bridges/definitions/location";
 import type { CloudClient } from "../../src/platform/cloud.vibe";
 import { type Faked, plugin, rejection } from "./phone.ts";

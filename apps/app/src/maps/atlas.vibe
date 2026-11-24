@@ -63,16 +63,18 @@ export interface View {
 export interface Seen {
   readonly spots: ReadonlyMap<number, Spot>
   readonly results: ReadonlyArray<number>
-  readonly ways: ReadonlyMap<number, Way>
+  readonly ways: ReadonlyMap<number, ReadonlyArray<Way>>
   readonly here: Here | undefined
   /** Each coverage read's answer, by the ticket of the read: the machine decides which one is in force. */
   readonly coverages: ReadonlyMap<number, Coverage>
   /** The view the camera last settled on, and the area the last copyright request covers. */
   readonly view: View | undefined
   readonly credited: View | undefined
+  /** How many times "Use my location" asked the map to show the phone. */
+  readonly showings: number
 }
 
-const empty: Seen = { spots: new Map(), results: [], ways: new Map(), here: undefined, coverages: new Map(), view: undefined, credited: undefined }
+const empty: Seen = { spots: new Map(), results: [], ways: new Map(), here: undefined, coverages: new Map(), view: undefined, credited: undefined, showings: 0 }
 const accounts = new Map<string, number>()
 let current: Seen = empty
 const listeners = new Set<() => void>()
@@ -109,13 +111,18 @@ export const atlas = {
   found(places: ReadonlyArray<number>): void {
     change({ results: places })
   },
-  /** The route a plan's `ticket` brought. */
-  routed(ticket: number, way: Way): void {
-    change({ ways: new Map(current.ways).set(ticket, way) })
+  /** The routes a plan's `ticket` brought, in the provider's order. */
+  routed(ticket: number, ways: ReadonlyArray<Way>): void {
+    change({ ways: new Map(current.ways).set(ticket, ways) })
   },
-  way: (ticket: number): Way | undefined => current.ways.get(ticket),
+  /** The route `chosen` of those `ticket` brought. */
+  way: (ticket: number, chosen: number): Way | undefined => current.ways.get(ticket)?.[chosen],
   located(here: Here): void {
     change({ here })
+  },
+  /** "Use my location" found the phone: the map centres on it. */
+  showMe(): void {
+    change({ showings: current.showings + 1 })
   },
   /** The answer of the coverage read `ticket`. */
   covered(ticket: number, coverage: Coverage): void {
@@ -148,7 +155,7 @@ export const atlas = {
     byProvider.clear()
     handles.clear()
     const kept = new Map([...current.spots].filter(([, spot]) => !spot.google))
-    current = { ...empty, spots: kept, here: current.here, view: current.view }
+    current = { ...empty, spots: kept, here: current.here, view: current.view, showings: current.showings }
     for (const listener of [...listeners]) listener()
   },
 }

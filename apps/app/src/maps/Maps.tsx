@@ -41,7 +41,7 @@ const distance = (meters: number) => (meters < 1000 ? `${meters} m` : `${(meters
 // spec/app/maps/credits.md, "The camera goes to what the owner picked, on every map"
 /** Where the camera goes for `state`, named so the map applies each aim once. */
 function cameraOf(state: State, seen: Seen, following: boolean): MapCamera {
-  const way = state.trip.route === 0 ? undefined : seen.ways.get(state.trip.route);
+  const way = atlas.way(state.trip.route, state.chosen);
   const spot = atlas.spot(state.place);
   const results = state.place === 0 && state.search.status === "Loaded" ? seen.results.slice(0, state.results) : [];
   const aim = cameraAim(following, way !== undefined, true, spot !== undefined, true, true, results.length);
@@ -51,6 +51,9 @@ function cameraOf(state: State, seen: Seen, following: boolean): MapCamera {
   if (aim === "FitResults") {
     const points = results.flatMap((place) => atlas.spot(place)?.at ?? []).map(degreesOf);
     return { kind: "fit", key: `results:${state.search.ticket}`, points, maxZoom: resultsMaxZoom };
+  }
+  if (aim === "KeepCamera" && way === undefined && spot === undefined && seen.here !== undefined && seen.showings > 0) {
+    return { kind: "centre", key: `me:${seen.showings}`, at: degreesOf(seen.here.at), zoom: placeZoom };
   }
   return northUpAfterGuidance(state.trip.journey > 0, following) ? { kind: "northUp", key: `north:${state.trip.journey}` } : { kind: "keep" };
 }
@@ -72,7 +75,8 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
   if (!state || !credits.state) return null;
   const now = mode(state);
   const spot: Spot | undefined = atlas.spot(state.place);
-  const way = state.trip.route === 0 ? undefined : seen.ways.get(state.trip.route);
+  const way = atlas.way(state.trip.route, state.chosen);
+  const alternatives = seen.ways.get(state.trip.route) ?? [];
   const coverage = coverageOf(state);
   const tiles = coverage?.available ? coverage.tiles : undefined;
   const saved = state.saved.flatMap((entry) => {
@@ -243,6 +247,7 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
             {can({ type: "handOn", kind: "SharePlace" }) && <Button variant="outline" onClick={() => void send({ type: "handOn", kind: "SharePlace" })}><Share2 />Share</Button>}
             {spot.website !== undefined && can({ type: "handOn", kind: "Website" }) && <Button variant="outline" onClick={() => void send({ type: "handOn", kind: "Website" })}>Website</Button>}
             {can({ type: "handOn", kind: "MapsApp" }) && <Button variant="outline" onClick={() => void send({ type: "handOn", kind: "MapsApp" })}>Open in another app</Button>}
+            {spot.phone !== undefined && can({ type: "handOn", kind: "Call" }) && <Button variant="outline" onClick={() => void send({ type: "handOn", kind: "Call" })}>Call</Button>}
             {can({ type: "forgetPlace" }) && <Button variant="outline" onClick={() => void send({ type: "forgetPlace" })}>Remove from saved</Button>}
             {can({ type: "returnToEvent" }) && <Button variant="ghost" onClick={() => void send({ type: "returnToEvent" })}>Back to event</Button>}
           </div>
@@ -284,7 +289,17 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
           )}
           {state.trip.plan.status === "Loading" && <Spinner label="Planning the route" />}
           {state.trip.plan.status === "Failed" && !holding(state.link) && <Alert variant="warn">No route was found.</Alert>}
-          {way !== undefined && <p>{`${minutes(way.seconds)}, ${distance(way.meters)}`}</p>}
+          {now === "Directions" && alternatives.length > 1 ? (
+            <div role="group" aria-label="Routes" className="flex flex-col gap-1">
+              {alternatives.map((option, index) => (
+                <Button key={index} variant={index === state.chosen ? "primary" : "outline"} aria-pressed={index === state.chosen}
+                  disabled={!can({ type: "chooseRoute", index, turns: Math.max(1, option.turns.length) })}
+                  onClick={() => void send({ type: "chooseRoute", index, turns: Math.max(1, option.turns.length) })}>
+                  {`${index === 0 ? "Recommended" : `Alternative ${index}`}: ${minutes(option.seconds)}, ${distance(option.meters)}`}
+                </Button>
+              ))}
+            </div>
+          ) : way !== undefined && <p>{`${minutes(way.seconds)}, ${distance(way.meters)}`}</p>}
           {now === "Navigating" && ahead.length > 0 && (
             <ListGroup heading="Next">
               {ahead.slice(0, 3).map((step, at) => <ListRow key={`${state.trip.turn + at}`} title={step.instruction} detail={distance(step.meters)} />)}
