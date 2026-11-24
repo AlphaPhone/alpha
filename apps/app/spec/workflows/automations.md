@@ -1,10 +1,10 @@
 # Automations list
 
-The Workflows list: the agent's workflows and prompts (`/api/automations`), its owner-visible
-scheduled tasks, its reminders, and its routines and goals, each read on its own so that one
-source failing never hides the others. A change the owner asks for is held, one per owner, until
-the agent's answer or a complete re-read settles it, so a lost answer never lets a second copy go
-(PRD AP-07; legacy `AutomationRequestSettlement`).
+The Workflows list: the agent's workflows and prompts (`/api/workflow/workflows` and
+`/api/triggers`), its owner-visible scheduled tasks, its reminders, and its routines and goals,
+each read on its own so that one source failing never hides the others. A change the owner asks
+for is held, one per owner, until the agent's answer or a complete re-read settles it, so a lost
+answer never lets a second copy go (PRD AP-07; legacy `AutomationRequestSettlement`).
 
 ## Domain
 
