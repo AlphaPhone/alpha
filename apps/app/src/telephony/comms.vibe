@@ -1,0 +1,47 @@
+// spec/app/telephony/comms.md, "Story: Address the person or Alpha from one bar"; spec/app/telephony/comms.md, "Story: Never lose End"; spec/app/telephony/comms.md, "Story: See what Alpha is acting on"
+import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Machine as Bar, callHolds, shownCall } from "../../gen/app__telephony__callBar.effect.vibe"
+import { emergencyLive } from "../../gen/app__telephony__common.effect.vibe"
+import * as Comms from "../../gen/app__telephony__comms.effect.vibe"
+import type { Event } from "../../gen/app__telephony__comms.effect.vibe"
+import { Machine as Messages } from "../../gen/app__telephony__messages.effect.vibe"
+import { Machine as Phone } from "../../gen/app__telephony__phone.effect.vibe"
+import { contained, following, reacting, started, together } from "../runtime/reactor.vibe"
+
+// spec/app/telephony/comms.md, "A proposal kept across a restart is shown, never approved, until Alpha proposes it again"
+const machine = reacting(Comms, { keep: 1, open: [{ type: "reopen" }, "Device"] })
+
+// spec/app/telephony/comms.md, "End is beside the bar when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn"
+const calls = following(Bar, (bar) => ({ live: callHolds(bar), emergencyCall: emergencyLive(bar.reading) }), Comms.Machine, (call): Event => ({ type: "callChanged", ...call }), "Device")
+
+// spec/app/telephony/comms.md, "A ring shows its card in the stage, and its Screen it proposal retires when the ring ends"
+const rings = following(Bar, (bar) => (bar.calls.some((call) => call.phase === "Ringing") ? shownCall(bar.calls).id : ""), Comms.Machine, (ring): Event => (ring === "" ? { type: "ringEnded" } : { type: "ringStarted", ring }), "Device")
+
+// spec/app/telephony/comms.md, "The bar addresses Alpha exactly while the conversation is open, and the left slot holds the other target"
+const lowered = following(Shell, (shell) => shell.assistant === "Bar", Comms.Machine, (resting): Event | undefined => (resting ? { type: "chatClosed" } : undefined), "Device")
+
+// spec/app/telephony/comms.md, "A view change while the conversation is open keeps the sheet's height and remembers the view it left"
+/** The subject on screen, of Phone or Messages in front; Contacts tells its own. */
+const subjects = started(effect {
+  const shell = try Shell
+  const phone = try Phone
+  const messages = try Messages
+  const comms = try Comms.Machine
+  let told = ""
+  try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(shell.changes, phone.changes), messages.changes), effect ([[where, dialer], texts]) => {
+    const top = where.trail.at(-1)
+    const event: Event | undefined = top === "Phone"
+      ? { type: "subjectShown", app: "PhoneApp", subject: dialer.tab === "KeypadTab" ? "KeypadSubject" : "RecentsSubject", key: dialer.tab === "KeypadTab" ? "phone:keypad:" : "phone:recents:" }
+      : top === "Messages"
+        ? texts.view.tag === "InThread"
+          ? { type: "subjectShown", app: "MessagesApp", subject: "ThreadSubject", key: `messages:thread:${texts.view.threadId}` }
+          : { type: "subjectShown", app: "MessagesApp", subject: "ListSubject", key: texts.view.tag === "Composing" ? "messages:new:" : "messages:list:" }
+        : undefined
+    if (event === undefined || event.type !== "subjectShown" || event.key === told) return
+    told = event.key
+    try contained(comms.send(event, "Device"), "the subject on screen")
+  })
+}, "comms subjects")
+
+/** The comms stage: kept across restarts, told of calls, rings, the subject on screen and Ask Alpha lowering. */
+export const comms = together(machine, calls, rings, lowered, subjects)

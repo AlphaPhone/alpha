@@ -1,0 +1,381 @@
+// spec/app/maps/index.md, "Story: Find a place"; spec/app/maps/index.md, "Story: Plan directions and choose a route"; spec/app/maps/connection.md, "Story: Keep Cloud Maps on the account that asked for it"
+import { CloudError } from "@elizaos/cloud/client"
+import * as Screen from "../../gen/app__maps.effect.vibe"
+import type { Effect as ScreenOut, Event as ScreenEvent, Leg, Place } from "../../gen/app__maps.effect.vibe"
+import * as Connection from "../../gen/app__maps__connection.effect.vibe"
+import { mayRequest, mayReturn, noCoverage, pauseSeconds } from "../../gen/app__maps__connection.effect.vibe"
+import type { Connection as ConnectionState, Coverage, Effect as ConnectionOut, Event as ConnectionEvent } from "../../gen/app__maps__connection.effect.vibe"
+import * as Guidance from "../../gen/app__maps__guidance.effect.vibe"
+import type { Effect as GuidanceOut, Event as GuidanceEvent } from "../../gen/app__maps__guidance.effect.vibe"
+import * as Locator from "../../gen/app__maps__location.effect.vibe"
+import { gpsGraceMs, oneShot, oneShotTimeoutMs } from "../../gen/app__maps__location.effect.vibe"
+import type { Effect as LocatorOut, Event as LocatorEvent, Fix, Locator as LocatorState } from "../../gen/app__maps__location.effect.vibe"
+import * as Plane from "../../gen/app__maps__plane.effect.vibe"
+import { basemapFor } from "../../gen/app__maps__plane.effect.vibe"
+import type { Effect as PlaneOut, Event as PlaneEvent } from "../../gen/app__maps__plane.effect.vibe"
+import * as Saved from "../../gen/app__maps__saved.effect.vibe"
+import type { ProviderKind, Travel } from "../../gen/app__maps__vocabulary.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { type CloudClient, Cloud } from "../platform/cloud.vibe"
+import { Location } from "../platform/location.vibe"
+import { type Job, answer, due, following, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+import { type Point, type Shape, coordinateOf, measured, pointOf } from "./geometry.ts"
+
+type CloudPlace = Awaited<ReturnType<CloudClient["mapsPlacesSearch"]>>["places"][number]
+type CloudRoute = Awaited<ReturnType<CloudClient["mapsRoutes"]>>["routes"][number]
+type Capabilities = Awaited<ReturnType<CloudClient["mapsCapabilities"]>>
+
+/** A Maps request that was not answered for this screen: refused before it left, failed, or answered for an account or generation that moved on. */
+error Unanswered { cause: unknown }
+
+/** The shapes of the routes the screen was answered, by route number: what guidance measures fixes against and the map draws. */
+export service Routes {
+  keep(id: number, shape: Shape): void!!
+  shape(id: number): Option.Option<Shape>!!
+}
+
+const routes = Layer.sync(Routes, () => {
+  const kept = new Map<number, Shape>()
+  return {
+    keep: (id: number, shape: Shape) => sync(() => { kept.set(id, shape) }),
+    shape: (id: number) => sync(() => Option.fromUndefinedOr(kept.get(id))),
+  }
+})
+
+/** The number guidance knows a route of the screen by: its plan's ticket and its place among the alternatives. */
+export function routeId(ticket: number, index: number): number {
+  return ticket * 10 + index + 1
+}
+
+const google = "eliza-cloud-google"
+
+/** The kind of provider a deployment's coverage names: Google's own, or an open-data provider. */
+function kindOf(capabilities: Capabilities): ProviderKind {
+  if (!capabilities.available) return "NoProvider"
+  return capabilities.providerId === google || capabilities.sources.data === "Google Maps" ? "GoogleProvider" : "OpenProvider"
+}
+
+const travelModes = { Drive: "drive", Walk: "walk", Bicycle: "bicycle", Transit: "transit" } as const satisfies Record<Travel, string>
+
+/** What the coverage offers, by the modes it names. */
+export function coverageOf(capabilities: Capabilities): Coverage {
+  if (!capabilities.available) return noCoverage
+  const modes: ReadonlyArray<string> = capabilities.capabilities.modes
+  return {
+    kind: kindOf(capabilities),
+    offer: {
+      drive: modes.includes("drive"), walk: modes.includes("walk"), bicycle: modes.includes("bicycle"), transit: modes.includes("transit"),
+      alternatives: capabilities.capabilities.alternatives, map: capabilities.capabilities.map,
+    },
+  }
+}
+
+/** A provider's place as the screen shows it. */
+export function placeOf(raw: CloudPlace, kind: ProviderKind): Place {
+  const { lat, lng } = pointOf(raw.coordinate)
+  return { ref: raw.id, name: raw.name, category: "", kind, lat, lng, phone: raw.phone ?? "" }
+}
+
+/** The phone's position as a place to show or to start from. */
+export function herePlace(fix: Fix): Place {
+  return { ref: "", name: "Your location", category: "", kind: "NoProvider", lat: fix.lat, lng: fix.lng, phone: "" }
+}
+
+// spec/app/maps/connection.md, "A wait Cloud names is kept when it is at most a day, an allowance reset when at most 400 days, and any other wait is one minute"
+effect function paused(failure: unknown, captured: number): void!!(Connection.Machine | Time) {
+  if (!(failure instanceof CloudError)) return
+  const { failure: why } = failure
+  const wall = try Clock.currentTimeMillis
+  const until = why.tag === "CloudRateLimited" ? why.retryAt : why.tag === "CloudAllowanceExhausted" ? why.resetsAt : undefined
+  if (until === undefined) return
+  const seconds = pauseSeconds(Math.ceil((until - wall) / 1000))
+  try ignore((try Connection.Machine).send({ type: "pause", captured, waitMs: seconds * 1000, now: untimed }))
+}
+
+// spec/app/maps/connection.md, "A data request starts only on the installed provider of the bound account outside a pause, and its answer is taken only for the generation and account it started under"
+effect function asked<A>(call: (client: CloudClient, signal: AbortSignal, coverage: Coverage) => Promise<A>): { answer: A; coverage: Coverage }!Unanswered!(Cloud | Connection.Machine | Time) {
+  const connection = try Connection.Machine
+  const now = try (try Time).now()
+  const before = try connection.get()
+  if (!mayRequest(before, now)) throw new Unanswered({ cause: "Maps is not available now" })
+  const { client } = try Cloud
+  const sent: { value: A }!Unanswered = tryPromise({ try: (signal) => call(client, signal, before.coverage).then((value) => ({ value })), catch: (cause) => new Unanswered({ cause }) })
+  const got = try (sent catch effect (failure) => {
+    try paused(failure.cause, before.generation)
+    throw failure
+  })
+  if (!mayReturn(try connection.get(), before.generation, before.account, false)) throw new Unanswered({ cause: "the account or the provider changed" })
+  return { answer: got.value, coverage: before.coverage }
+}
+
+/** Where the screen ranks a search around: the phone's last position, when it has one. */
+effect function near(): { near?: { latitude: number; longitude: number } }!!Locator.Machine {
+  const here = try (try Locator.Machine).get()
+  return here.located ? { near: coordinateOf(here.here) } : {}
+}
+
+// spec/app/maps/index.md, "Only the newest search's answer is shown: its places, or that there are none, or that it failed"
+effect function searched(ticket: number, text: string): ScreenEvent!!(Cloud | Connection.Machine | Time | Locator.Machine) {
+  const around = try near()
+  return effect {
+    const { answer: found, coverage } = try asked((client, signal) => client.mapsPlacesSearch({ query: text, limit: 10, ...around }, { signal }))
+    return { type: "found", ticket, places: found.places.map((raw) => placeOf(raw, coverage.kind)) }
+  } catch () => ({ type: "notFound", ticket })
+}
+
+// spec/app/maps/index.md, "A starting point is the phone's position, coordinates, a saved place or a place the provider found"
+effect function origins(ticket: number, text: string): ScreenEvent!!(Cloud | Connection.Machine | Time | Locator.Machine) {
+  const around = try near()
+  return effect {
+    const { answer: found, coverage } = try asked((client, signal) => client.mapsPlacesSearch({ query: text, limit: 5, ...around }, { signal }))
+    return { type: "originsFound", ticket, places: found.places.map((raw) => placeOf(raw, coverage.kind)) }
+  } catch () => ({ type: "originsFailed", ticket })
+}
+
+// spec/app/maps/index.md, "A place opens from a result, a saved place or a pin, and a result's details are asked for under the next ticket"
+effect function details(ticket: number, ref: string): ScreenEvent!!(Cloud | Connection.Machine | Time) {
+  return effect {
+    const { answer: found, coverage } = try asked((client, signal) => client.mapsPlaceDetails({ id: ref }, { signal }))
+    if (found.place === null) return { type: "undetailed", ticket }
+    return { type: "detailed", ticket, point: placeOf(found.place, coverage.kind) }
+  } catch () => ({ type: "undetailed", ticket })
+}
+
+function legOf(route: CloudRoute): Leg {
+  return { meters: Math.round(route.distanceMeters), seconds: Math.round(route.durationSeconds), steps: Math.max(1, route.steps.length) }
+}
+
+function shapeOf(route: CloudRoute): Shape {
+  return { line: route.geometry.map(pointOf), turns: route.steps.map((step) => pointOf(step.coordinate)) }
+}
+
+/** The routes from `from` to `to`, each shape kept under its route number. */
+effect function routesBetween(from: Point, to: Point, travel: Travel, ticket: number): ReadonlyArray<Leg>!Unanswered!(Cloud | Connection.Machine | Time | Routes) {
+  const kept = try Routes
+  const { answer: found, coverage } = try asked((client, signal, offered) =>
+    client.mapsRoutes({ from: coordinateOf(from), to: coordinateOf(to), mode: travelModes[travel], alternatives: offered.offer.alternatives }, { signal }))
+  const listed = found.routes.slice(0, coverage.offer.alternatives ? 3 : 1)
+  for (const [index, route] of listed.entries()) try kept.keep(routeId(ticket, index), shapeOf(route))
+  return listed.map(legOf)
+}
+
+// spec/app/maps/index.md, "The provider's routes are listed in order, and choosing one asks nothing new"
+effect function planned(ticket: number, from: Place, to: Place, travel: Travel): ScreenEvent!!(Cloud | Connection.Machine | Time | Routes) {
+  return effect {
+    const legs = try routesBetween(from, to, travel, ticket)
+    return legs.length === 0 ? { type: "routeFailed", ticket } : { type: "routed", ticket, legs: [...legs] }
+  } catch () => ({ type: "routeFailed", ticket })
+}
+
+/** The session `generation` of the location machine once it has ended: with a fix, or without. */
+effect function ended(generation: number): Option.Option<LocatorState>!!Locator.Machine {
+  const locator = try Locator.Machine
+  return try Stream.runHead(Stream.filter(locator.changes, (s) => s.generation !== generation || s.phase === "Idle" || s.phase === "Failed"))
+}
+
+// spec/app/maps/index.md, "Locate shows the phone's position, or makes it the starting point in directions"
+effect function locatedHere(ticket: number): ScreenEvent!!Locator.Machine {
+  const locator = try Locator.Machine
+  const begun = (try (locator.send({ type: "beginLocate", purpose: "OwnerFix", now: untimed }) |> Effect.map(%, (moved) => moved.state) |> Effect.option(%)))
+  if (Option.isNone(begun)) return { type: "unlocated", ticket }
+  const last = Option.getOrUndefined(try ended(begun.value.generation))
+  return last !== undefined && last.generation === begun.value.generation && last.phase === "Idle" && last.located
+    ? { type: "located", ticket, point: herePlace(last.here) }
+    : { type: "unlocated", ticket }
+}
+
+function carryScreen(fx: ScreenOut): Job<ScreenEvent, Cloud | Connection.Machine | Time | Locator.Machine | Routes, ["Owner" | "Flow"]> {
+  return match (fx) {
+    when { tag: "Search", let ticket, let text }: answer("search", searched(ticket, text), { type: "notFound", ticket }, "Flow");
+    when { tag: "Details", let ticket, let ref }: answer("details", details(ticket, ref), { type: "undetailed", ticket }, "Flow");
+    when { tag: "FindOrigin", let ticket, let text }: answer("origin", origins(ticket, text), { type: "originsFailed", ticket }, "Flow");
+    when { tag: "Plan", let ticket, let from, let to, let travel }: answer("plan", planned(ticket, from, to, travel), { type: "routeFailed", ticket }, "Flow");
+    when { tag: "Locate", let ticket }: answer("locate", locatedHere(ticket), { type: "unlocated", ticket }, "Flow");
+  }
+}
+
+// spec/app/maps/index.md, "When the owner pauses, the typed query or starting point is sent, and only while Maps is in front"
+function screenTimers(state: Screen.Maps) {
+  if (state.pending === "NoPending") return []
+  const len = state.pending === "QueryPending" ? state.query.length : state.originText.length
+  return [due<ScreenEvent, ["Owner" | "Flow"]>("debounce", state.due, { type: "debounce", len, now: untimed }, "Flow")]
+}
+
+const screen = reacting(Screen, { carry: carryScreen, timers: screenTimers })
+
+// spec/app/maps/connection.md, "Only the newest read for the bound account installs the provider, and coverage with no provider or no mode is Maps not offered"
+effect function covered(generation: number): ConnectionEvent!!Cloud {
+  const { client } = try Cloud
+  return effect {
+    const found = try tryPromise({ try: (signal) => client.mapsCapabilities({ signal }), catch: (cause) => new Unanswered({ cause }) })
+    return { type: "covered", generation, answer: "Covered", coverage: coverageOf(found) }
+  } catch (failure) => ({
+    type: "covered", generation, coverage: noCoverage,
+    answer: failure.cause instanceof CloudError && failure.cause.failure.tag === "CloudCredentialInvalid" ? "Unauthorized" : failure.cause instanceof CloudError ? "Unavailable" : "Garbled",
+  })
+}
+
+function carryConnection(fx: ConnectionOut): Job<ConnectionEvent, Cloud | Guidance.Machine, []> {
+  return match (fx) {
+    when { tag: "ReadCoverage", let generation }: answer("coverage", covered(generation), { type: "covered", generation, answer: "Unavailable", coverage: noCoverage });
+    when { tag: "Retired" }: run("retired", Effect.flatMap(Guidance.Machine, (guidance) => ignore(guidance.send({ type: "providerRetires" }))));
+  }
+}
+
+const connection = reacting(Connection, { carry: carryConnection, open: [{ type: "openMaps" }] })
+
+// spec/app/maps/connection.md, "Changing account retires the provider before anything reads the new account, clears the pause and owes a read"
+const account = started(effect {
+  const { client } = try Cloud
+  const found = tryPromise(() => client.account()) |> Effect.option(%)
+  const owner = try found
+  if (Option.isSome(owner)) try ignore((try Connection.Machine).send({ type: "bindAccount", account: owner.value.id }))
+}, "reading the Maps account")
+
+// spec/app/maps/location.md, "Only the owner's own locate or the guidance they started may prompt for permission"
+effect function checked(generation: number): LocatorEvent!!Location {
+  const grant = try (try Location).permission()
+  return { type: "permissionChecked", owner: generation, granted: grant === "precise" || grant === "approximate" }
+}
+
+effect function prompted(generation: number): LocatorEvent!!Location {
+  const grant = try (try Location).request()
+  return { type: "permissionAnswered", owner: generation, granted: grant === "precise" || grant === "approximate" }
+}
+
+// spec/app/maps/location.md, "Fixes count only from the current watch; a one-shot session ends at its first fix or after 15 seconds"
+function watched(generation: number): Stream.Stream<LocatorEvent, never, Location | Time> {
+  return Stream.unwrap(effect {
+    const location = try Location
+    const time = try Time
+    return location.watch()
+      |> Stream.mapEffect(%, (heard) => effect {
+        if (heard.kind === "started") return { type: "watchStarted", owner: generation, created: true, now: untimed } satisfies LocatorEvent
+        const ageMs = (try time.now()) - heard.taken
+        return { type: "fixArrives", owner: generation, ageMs, fix: { lat: heard.lat, lng: heard.lng, accuracy: heard.accuracy, precise: heard.precise } } satisfies LocatorEvent
+      })
+      |> Stream.catch(%, () => Stream.succeed<LocatorEvent>({ type: "watchFails", owner: generation }))
+  })
+}
+
+effect function cleared(): LocatorEvent!!Location {
+  return { type: "cleanupSettles", confirmed: try (try Location).clear() }
+}
+
+function carryLocator(fx: LocatorOut): Job<LocatorEvent, Location | Time, []> {
+  return match (fx) {
+    when { tag: "Check", let generation }: answer("check", checked(generation), { type: "permissionChecked", owner: generation, granted: false });
+    when { tag: "Prompt", let generation }: answer("prompt", prompted(generation), { type: "permissionAnswered", owner: generation, granted: false });
+    when { tag: "Watch", let generation }: stream("watch", watched(generation), { type: "watchFails", owner: generation });
+    when { tag: "Unwatch" }: answer("watch", cleared(), { type: "cleanupSettles", confirmed: false });
+    when { tag: "LookUp" }: run("network", Effect.void);
+  }
+}
+
+// spec/app/maps/location.md, "When GPS gives no fix for 4 seconds, a network position stands in as approximate until GPS answers"
+function locatorTimers(state: LocatorState) {
+  const timers = []
+  if (oneShot(state.purpose) && state.phase !== "Idle" && state.phase !== "Failed") timers.push(due<LocatorEvent, []>("timeout", state.startedAt + oneShotTimeoutMs, { type: "timedOut", now: untimed }))
+  if (state.phase === "Watching" && !state.gps && !state.networkAsked) timers.push(due<LocatorEvent, []>("network", state.watchingSince + gpsGraceMs, { type: "networkDue", now: untimed }))
+  return timers
+}
+
+// spec/app/maps/index.md, "The quiet fix taken on opening centres the map only while nothing is chosen, listed or being located, and its failure says nothing"
+const locator = reacting(Locator, { carry: carryLocator, timers: locatorTimers, open: [{ type: "beginLocate", purpose: "QuietFix", now: untimed }] })
+
+// spec/app/maps/guidance.md, "A fix guides only when it is usable, and only for the current session"
+function guided(session: number): Stream.Stream<GuidanceEvent, never, Locator.Machine | Guidance.Machine | Routes> {
+  return Stream.unwrap(effect {
+    const locations = try Locator.Machine
+    const guidance = try Guidance.Machine
+    const kept = try Routes
+    const begun = try (locations.send({ type: "beginLocate", purpose: "GuidanceWatch", now: untimed }) |> Effect.option(%))
+    if (Option.isNone(begun)) return Stream.succeed<GuidanceEvent>({ type: "watchFailed", owner: session })
+    const generation = begun.value.state.generation
+    let counted = begun.value.state.fixes
+    return locations.changes
+      |> Stream.takeWhile(%, (s) => s.generation === generation && s.phase !== "Failed")
+      |> Stream.filter(%, (s) => s.fixes > counted)
+      |> Stream.mapEffect(%, (s) => effect {
+        counted = s.fixes
+        const now = try guidance.get()
+        const shape = try kept.shape(now.route)
+        const along = Option.isSome(shape) ? measured(s.here, shape.value, now.step) : { toStep: 0, beyond: 0, toRoute: 0, toEnd: 0 }
+        return { type: "fix", owner: session, reading: { accuracy: s.here.accuracy, ageMs: 0, precise: s.here.precise && !s.approximate, ...along } } satisfies GuidanceEvent
+      })
+      |> Stream.concat(%, Stream.succeed<GuidanceEvent>({ type: "watchFailed", owner: session }))
+  })
+}
+
+// spec/app/maps/guidance.md, "A reroute belongs to its session, and a failed or late one keeps the current route"
+effect function rerouted(ticket: number): GuidanceEvent!!(Cloud | Connection.Machine | Time | Routes | Locator.Machine | Guidance.Machine | Screen.Machine) {
+  const here = try (try Locator.Machine).get()
+  const shown = try (try Screen.Machine).get()
+  return effect {
+    const legs = try routesBetween(here.here, shown.place, shown.travel, 1000 + ticket)
+    const first = legs[0]
+    return first === undefined ? { type: "rerouteSettles", ticket, route: 0, steps: 1 } : { type: "rerouteSettles", ticket, route: routeId(1000 + ticket, 0), steps: first.steps }
+  } catch () => ({ type: "rerouteSettles", ticket, route: 0, steps: 1 })
+}
+
+function carryGuidance(fx: GuidanceOut): Job<GuidanceEvent, Cloud | Connection.Machine | Time | Routes | Locator.Machine | Guidance.Machine | Screen.Machine, []> {
+  return match (fx) {
+    when { tag: "StartWatch", let session }: stream("guide", guided(session), { type: "watchFailed", owner: session });
+    when { tag: "StopWatch" }: run("guide", Effect.flatMap(Locator.Machine, (locations) => ignore(locations.send({ type: "stopLocate" }))));
+    when { tag: "PlanReroute", let ticket }: answer("reroute", rerouted(ticket), { type: "rerouteSettles", ticket, route: 0, steps: 1 });
+  }
+}
+
+const guidance = reacting(Guidance, { carry: carryGuidance })
+
+// spec/app/maps/plane.md, "Only the answer to the latest copyright request, for the view in place, is shown, and a failed one never breaks the map"
+effect function copyrighted(token: number): PlaneEvent!!(Cloud | Connection.Machine | Time | Screen.Machine | Locator.Machine) {
+  const shown = try (try Screen.Machine).get()
+  const here = try (try Locator.Machine).get()
+  const centre: Point = shown.choice !== "NoChoice" ? shown.place : here.here
+  const span = 20_000
+  return effect {
+    const { answer: found } = try asked((client, signal) => client.mapsViewport({
+      zoom: 14, north: Math.min(90, (centre.lat + span) / 1e6), south: Math.max(-90, (centre.lat - span) / 1e6),
+      east: Math.min(180, (centre.lng + span) / 1e6), west: Math.max(-180, (centre.lng - span) / 1e6),
+    }, { signal }))
+    return { type: "copyrightAnswered", token, success: true, text: found.copyright }
+  } catch () => ({ type: "copyrightAnswered", token, success: false, text: "" })
+}
+
+function carryPlane(fx: PlaneOut): Job<PlaneEvent, Cloud | Connection.Machine | Time | Screen.Machine | Locator.Machine, []> {
+  return match (fx) {
+    when { tag: "Copyright", let token }: answer("copyright", copyrighted(token), { type: "copyrightAnswered", token, success: false, text: "" });
+  }
+}
+
+const plane = reacting(Plane, { carry: carryPlane })
+
+/** The basemap the connection's provider gives: its raster where it serves one, and otherwise none, so that nothing is drawn but what Cloud serves. */
+function basemapOf(state: ConnectionState): PlaneEvent {
+  if (state.phase !== "Installed" || !state.coverage.offer.map) return { type: "releasePlane" }
+  return { type: "mountPlane", element: 1, basemap: basemapFor(state.coverage.kind, true, state.coverage.kind === "GoogleProvider") }
+}
+
+// spec/app/maps/saved.md, "When Alpha opens again the saved places are as they were"
+const saved = reacting(Saved, { keep: 1, open: [{ type: "reopen" }] })
+
+/**
+ * Maps: its screen, the connection to Cloud Maps, the phone's location, guidance and the map, which live from Maps'
+ * first opening until Alpha closes; the saved places, kept across restarts; and what each follows of the others.
+ */
+export const maps = Layer.provideMerge(together(
+  screen,
+  connection,
+  account,
+  locator,
+  guidance,
+  plane,
+  saved,
+  following(Shell, (shell) => showing(shell, "Maps"), Screen.Machine, (shown): ScreenEvent => ({ type: "show", showing: shown }), "Flow"),
+  following(Shell, (shell) => showing(shell, "Maps"), Locator.Machine, (shown): LocatorEvent => ({ type: "showScreen", showing: shown })),
+  following(Connection.Machine, (state) => state.phase === "Installed", Screen.Machine, (installed): ScreenEvent => ({ type: "providerChanged", installed }), "Flow"),
+  following(Connection.Machine, basemapOf, Plane.Machine, (told) => told),
+  following(Screen.Machine, (state) => `${state.choice}:${state.place.lat}:${state.place.lng}`, Plane.Machine, (): PlaneEvent => ({ type: "cameraSettled", covered: false })),
+), routes)

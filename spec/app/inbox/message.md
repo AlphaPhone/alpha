@@ -103,10 +103,10 @@ pure def open(s: MessageView, access: Access, account: int, message: int, thread
 ### Previous and next move one place through the thread
 
 ```quint
-pure def canOlder(s: MessageView, access: Access): bool =
+pure def canEarlier(s: MessageView, access: Access): bool =
   s.message != 0 and s.position > 0 and allowsFor(access, s.account, Reading)
 
-pure def older(s: MessageView, access: Access, remote: bool): Shown = reading(s.position - 1, remote, s)
+pure def earlier(s: MessageView, access: Access, remote: bool): Shown = reading(s.position - 1, remote, s)
 
 pure def canNewer(s: MessageView, access: Access): bool =
   s.message != 0 and s.position < s.thread - 1 and allowsFor(access, s.account, Reading)

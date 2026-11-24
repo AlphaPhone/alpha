@@ -16,8 +16,10 @@ offers the same Export diagnostics while the agent is recovering.
 
 ### The developer page holds the last read of the problem log and what it found, a clearing and an export in flight, and the stores that need recovery
 
-A read finds how many problems were recorded, and which saved stores
-cannot be read normally. A failure stays shown until a newer read answers.
+A read finds how many problems were recorded, at most fifty, newest last,
+and which saved stores cannot be read normally. Each problem is shown by
+Alpha's own title for its source, reason or kind, and one Alpha does not
+know by its fallback; an identifier is never shown. A failure stays shown until a newer read answers.
 Nothing here outlives Alpha.
 
 ```quint
@@ -33,9 +35,9 @@ type Asked = { state: Developer, out: List[Effect] }
 
 pure val initial: Developer = { log: T::unasked, problems: 0, failed: false, needs: List(), clearing: T::unasked, exporting: T::unasked }
 
-pure val limit = 10
-pure val atValues = Set(0, 4, 20)
-pure val nowValues = Set(0, 4, 20, 40)
+pure val limit = 10000
+pure val atValues = Set(0, 4000, 20000)
+pure val nowValues = Set(0, 4000, 20000, 40000)
 ```
 
 ### The log is read when the Problem log opens, on Retry, and after it was cleared, one read at a time, with ten seconds to answer
@@ -65,8 +67,10 @@ pure val readingValues = Set(1, 2)
 pure val problemsValues = Set(-1, 0, 3)
 pure val needsValues = Set(List(), List(DevicePreferences, NotificationData))
 
+pure val journalCap = 50
+
 pure def canLogRead(s: Developer, reading: int, ok: bool, problems: int, needs: List[Store]): bool =
-  T::canAnswer(s.log, reading) and problems >= 0
+  T::canAnswer(s.log, reading) and problems >= 0 and problems <= journalCap
 
 pure def logRead(s: Developer, reading: int, ok: bool, problems: int, needs: List[Store]): Developer =
   if (ok) { ...s, log: T::answer(s.log, true), problems: problems, failed: false, needs: needs }
@@ -103,7 +107,7 @@ pure def logWord(s: Developer): LogWord =
   else SomeProblems
 
 pure def alwaysAProblemCountWasRead(s: Developer): bool =
-  s.problems >= 0 and s.log.read.ticket >= 0 and (T::busy(s.log) implies s.log.read.ticket > 0)
+  s.problems >= 0 and s.problems <= journalCap and s.log.read.ticket >= 0 and (T::busy(s.log) implies s.log.read.ticket > 0)
     and (s.log.read.ticket == 0 implies (s.problems == 0 and not(s.failed) and s.needs.length() == 0))
 ```
 
@@ -137,6 +141,9 @@ pure def stepOnlyALogWithProblemsIsCleared(before: Developer, after: Developer, 
 
 ### Export diagnostics shares the log and Alpha's diagnostics, one export at a time, with ten seconds to start
 
+On a phone the report goes to Android's share sheet; in a browser it is
+saved as a file. Either way the page says whether it was shared or saved.
+
 ```quint
 pure val exportingValues = Set(1, 2)
 
@@ -158,6 +165,24 @@ pure def isExport(e: Effect): bool = match e { | ExportDiagnostics(x) => true | 
 
 pure def stepOneExportAtATime(before: Developer, after: Developer, out: List[Effect]): bool =
   out.some(e => isExport(e)) implies (not(T::busy(before.exporting)) and T::busy(after.exporting) and out.length() == 1)
+```
+
+### The report copies only the fields Alpha allows, so no text, address, key or identifier can reach it
+
+Versions, the eliza pin, asset hashes, the build's variant, Android's
+release and security patch, the permissions granted, Alpha's own roles,
+the agent's connection, the plan, and each problem as the log shows it.
+Another app's name, the apps holding a role, an account or session, a web
+address or any free text is left out, never scrubbed.
+
+```quint
+type Field = AppVersion | VersionCode | Variant | BuildType | TestMocks | AndroidRelease | SecurityPatch | SdkLevel | UpstreamPin | AssetHash | PermissionGrant | AlphaRole | ConnectionKind | PlanView | ProblemEntry | RoleHolder | AccountId | SessionId | FreeText | Url | PackageName
+
+pure def reported(fieldId: Field): bool =
+  not(fieldId == RoleHolder or fieldId == AccountId or fieldId == SessionId or fieldId == FreeText or fieldId == Url or fieldId == PackageName)
+
+pure def lawNoIdentifierIsExported(fieldId: Field): bool =
+  (fieldId == AccountId or fieldId == SessionId or fieldId == PackageName or fieldId == RoleHolder or fieldId == Url or fieldId == FreeText) implies not(reported(fieldId))
 ```
 
 ### Every read, clearing and export ends
