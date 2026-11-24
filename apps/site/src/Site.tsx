@@ -9,7 +9,6 @@ import { type Demo, type Part, type Scene, initial, shown } from "../gen/site.ts
 import { untimed } from "./demo.vibe";
 
 export interface SiteProps {
-  /** Provides the demo, `demo` of demo.vibe over the visitor's page. */
   runtime: ManagedRuntime.ManagedRuntime<Machine, unknown>;
 }
 
@@ -24,7 +23,6 @@ const events = [
   { at: "15:00", time: "3:00 PM", title: "Design review", part: "SecondEvent" },
 ] as const;
 
-/** The staged conversation over the chat's capture: each part from its beat, fading in unless the scene is shown whole. */
 function Conversation({ demo }: { demo: Demo }) {
   const enter = !demo.whole && "motion-safe:animate-fade";
   const at = (part: Part) => shown(demo, part);
@@ -54,11 +52,7 @@ function Conversation({ demo }: { demo: Demo }) {
   );
 }
 
-/**
- * Alpha's public page: its name, the links to its source and to Alpha Compute, and a phone that plays Home, the chat
- * and the Calendar, with a control for each scene and one to pause, each offered exactly when the rules allow it.
- * @model spec/site/index.md
- */
+/** @model spec/site/index.md */
 export function Site({ runtime }: SiteProps) {
   const { state, can, send } = useMachine(runtime);
   const demo = state ?? initial;

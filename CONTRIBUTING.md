@@ -9,6 +9,7 @@ Everything is built on [the stack](AGENTS.md#the-stack): Node 26, pnpm, VibeLang
 | Path | Holds |
 |---|---|
 | `apps/` | deployable applications; `apps/app` is Alpha's page: Home, the built-in apps and Ask Alpha, over eliza's agent and cloud (`pnpm eliza` builds the pinned commit once) |
+| `apps/site` | `@repo/site`: Alpha's public page (`spec/site/`): `build` writes the static page its deploy uploads to Cloudflare Pages; operating it is in [README.md](README.md#operating-alpha) |
 | `apps/cloud` | `@repo/cloud`: Alpha Cloud, eliza's cloud with Alpha's profile on Cloudflare (`spec/cloud/`): the API and web host Workers, and `pnpm cloud`, the operator command that renders, checks, provisions, deploys and smoke-tests an environment from a private secrets file and reviewed inputs (`apps/cloud/alpha-cloud.env.example`, `.github/workflows/cloud-deploy.yml`) |
 | `packages/` | what applications share: `@repo/ui` (components), `@repo/design-system` (tokens) |
 | `packages/eliza-harness` | `@repo/eliza-harness`: the pinned eliza checkout (`pnpm eliza`, `pinnedCheckout()`), its cloud and agent started for journeys and `pnpm dev`, the run's owners, and `pnpm no-bun`; an app imports it from `test/` and its configs, and `pinned` from `src/` |

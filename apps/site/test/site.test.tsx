@@ -11,7 +11,6 @@ import { browserPage, demo } from "../src/demo.vibe";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-/** The browser's answer to `(prefers-reduced-motion: reduce)`, which the visitor changes: the page's boundary. */
 const motion = Object.assign(new EventTarget(), { matches: false });
 vi.stubGlobal("matchMedia", () => motion);
 
@@ -22,7 +21,6 @@ afterEach(async () => {
   shown(true);
 });
 
-/** The page as main.tsx opens it, on a clock the test moves. */
 async function open() {
   const runtime = ManagedRuntime.make(Layer.provideMerge(demo, Layer.merge(browserPage, TestClock.layer())));
   const root = createRoot(document.body.appendChild(document.createElement("div")));
@@ -34,15 +32,12 @@ async function open() {
     act(() => root.unmount());
     await runtime.dispose();
   });
-  /** Wait until the demo reaches a state `ok` accepts, and React has drawn it. */
   const until = (ok: (demo: Demo) => boolean) => act(() => runtime.runPromise(Effect.flatMap(Machine, (machine) => Stream.runHead(Stream.filter(machine.changes, ok)))));
-  /** Let `ms` pass, then wait until the demo reaches a state `ok` accepts. */
   const later = async (ms: number, ok: (demo: Demo) => boolean = () => true) => {
     await act(() => runtime.runPromise(TestClock.adjust(ms)));
     await until(ok);
   };
   const state = () => runtime.runPromise(Effect.flatMap(Machine, (machine) => machine.get()));
-  /** Press the button named `name`, as a visitor does, and wait until what it sent is applied. */
   const press = (name: string) => act(async () => {
     const found = button(name);
     if (!found || found.disabled) throw new Error(`no button ${name} to press`);
@@ -55,7 +50,6 @@ async function open() {
 const button = (name: string) => [...document.querySelectorAll("button")].find((found) => found.getAttribute("aria-label") === name);
 
 
-/** The page in sight, or out of it, as when the visitor switches tabs. */
 function shown(visible: boolean) {
   Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (visible ? "visible" : "hidden") });
   document.dispatchEvent(new Event("visibilitychange"));

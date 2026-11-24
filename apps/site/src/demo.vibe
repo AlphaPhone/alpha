@@ -14,10 +14,8 @@ module web {
 }
 import { asksStill, calmQuery, outOfSight, pages } from web
 
-/** What a screen writes for an event's `now`: the shell sends every event at the page's time. */
 export const untimed = 0
 
-/** The visitor's page: whether they ask for less motion and whether it is out of sight, now and at each change. */
 export service Page {
   still(): boolean!!
   hidden(): boolean!!
@@ -25,7 +23,6 @@ export service Page {
   readonly hid: Stream.Stream<boolean>
 }
 
-/** The page in a browser. */
 export const browserPage = Layer.succeed(Page, {
   still: () => sync(asksStill),
   hidden: () => sync(outOfSight),
@@ -33,10 +30,6 @@ export const browserPage = Layer.succeed(Page, {
   hid: Stream.suspend(() => Stream.map(Stream.fromEventListener(pages(), "visibilitychange"), () => outOfSight())),
 })
 
-/**
- * The demo: the spec's machine, each event sent at the page's time, opened with what the page says of the visitor,
- * told each time that changes, and each beat told once its time has come.
- */
 export const demo = Layer.provide(Layer.effect(Demo.Machine, effect {
   const inner = try Demo.Machine
   const page = try Page
