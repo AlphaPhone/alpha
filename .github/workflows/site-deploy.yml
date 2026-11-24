@@ -6,6 +6,7 @@ on:
     paths:
       - 'apps/site/**'
       - 'apps/app/public/logo-mark.svg'
+      - 'apps/app/public/denton-300.woff2'
       - '.github/workflows/site-deploy.yml'
 
 permissions:

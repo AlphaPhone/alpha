@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
  * Reports what a phone's resident agent sent to its text model, from a copy of the
- * on-device database (`files/.eliza/workspace/.elizadb`). It measures recorded requests;
- * it does not call a model and proves nothing about replies or action choice.
+ * on-device database: the vibestack agent's store (`files/agent/<account digest>/store-v4`)
+ * or a develop runtime's (`files/.eliza/workspace/.elizadb`). It measures recorded
+ * requests; it does not call a model and proves nothing about replies or action choice.
  *
- *   node scripts/agent-context-audit.ts <copied .elizadb> [--since <ISO time>] [--tpm <limit>]
+ *   node scripts/agent-context-audit.ts <copied store-v4 or .elizadb> [--since <ISO time>] [--tpm <limit>]
  *       [--cache-minutes <n>] [--uncached-tpm <limit>] [--total-tpm <limit>]
  *       [--reserve <stage>=<tokens>[,...]] [--json <file>] [--show-text]
  *
@@ -38,6 +39,8 @@ export type RecordedCall = {
   tools?: { name: string; chars: number; hash?: string }[];
   maxTokens?: number;
   usage?: ProviderUsage;
+  /** What the caller made the call for (planner, evaluator, ...), where the runtime records it. */
+  purpose?: string;
 };
 /** The provider's own counts for a call. `cached` is absent when it reported none, which is not a count of zero. */
 export type ProviderUsage = { input: number; output: number; cached?: number };
@@ -81,8 +84,12 @@ export function wireText(call: Pick<RecordedCall, 'system' | 'prompt'>): string 
   return [call.system, ...messages.map(m => contentOf(m) + (m.tool_calls ? JSON.stringify(m.tool_calls) : ''))].join('\n');
 }
 
-/** Which stage of a turn made the call, read from the stage block the runtime writes into the system prompt. */
-export function stageOf(call: Pick<RecordedCall, 'type' | 'system'>): string {
+/**
+ * Which stage of a turn made the call: the purpose the runtime recorded, else the stage
+ * block a develop runtime writes into the system prompt, else the model type.
+ */
+export function stageOf(call: Pick<RecordedCall, 'type' | 'system' | 'purpose'>): string {
+  if (call.purpose) return call.purpose;
   const stage = /\n(evaluator_stage|planner_stage):\ntask: ([^\n]*)/.exec(call.system);
   if (stage) return stage[1] === 'evaluator_stage' ? 'evaluator' : /final reply/i.test(stage[2]) ? 'planner-final-reply' : 'planner';
   if (call.type === 'RESPONSE_HANDLER') return 'stage1';
@@ -458,6 +465,16 @@ export const readUsage = (body: Record<string, unknown>): ProviderUsage | undefi
   return { input, output: number('completionTokens', 'completion_tokens', 'outputTokens', 'output_tokens') ?? 0, ...(cached === undefined ? {} : { cached }) };
 };
 
+/**
+ * Recorded text-model calls in each store layout. A develop runtime keeps them in `logs`;
+ * the vibestack agent keeps every record in `device_records`, with the log row in `data`
+ * and its time as epoch milliseconds in `created_at`.
+ */
+const LOGGED_CALLS = {
+  develop: "select id, type, created_at, room_id, body from logs where type like 'useModel:%' and type <> 'useModel:TEXT_EMBEDDING' order by created_at asc",
+  vibestack: "select key as id, data->>'type' as type, created_at, room_id, data->'body' as body from device_records where collection = 'logs' and data->>'type' like 'useModel:%' and data->>'type' <> 'useModel:TEXT_EMBEDDING' order by created_at asc, key asc",
+};
+
 /** Reads recorded text-model calls from a private copy of the database directory, never the original. */
 export async function loadCalls(databaseDirectory: string): Promise<RecordedCall[]> {
   const scratch = mkdtempSync(join(tmpdir(), 'alpha-context-audit-'));
@@ -477,13 +494,15 @@ export async function loadCalls(databaseDirectory: string): Promise<RecordedCall
     }
     const database = await PGlite.create({ dataDir: copy, extensions });
     try {
-      const result = await database.query<{ id: string; type: string; created_at: Date | string; room_id: string; body: Record<string, unknown> }>(
-        "select id, type, created_at, room_id, body from logs where type like 'useModel:%' and type <> 'useModel:TEXT_EMBEDDING' order by created_at asc",
+      const { rows: [layout] } = await database.query<{ logs: string | null; records: string | null }>(
+        "select to_regclass('public.logs')::text as logs, to_regclass('public.device_records')::text as records",
       );
+      const query = layout.records && !layout.logs ? LOGGED_CALLS.vibestack : LOGGED_CALLS.develop;
+      const result = await database.query<{ id: string; type: string; created_at: Date | string | number | bigint; room_id: string; body: Record<string, unknown> }>(query);
       return result.rows.map(row => ({
         id: row.id,
         type: row.type.slice('useModel:'.length),
-        at: new Date(row.created_at).getTime(),
+        at: typeof row.created_at === 'bigint' || typeof row.created_at === 'number' || /^\d+$/.test(String(row.created_at)) ? Number(row.created_at) : new Date(row.created_at).getTime(),
         room: row.room_id,
         runId: typeof row.body.runId === 'string' && row.body.runId ? row.body.runId : row.id,
         ms: typeof row.body.executionTime === 'number' ? Math.round(row.body.executionTime) : 0,
@@ -497,6 +516,7 @@ export async function loadCalls(databaseDirectory: string): Promise<RecordedCall
           : undefined,
         maxTokens: typeof row.body.maxTokens === 'number' ? row.body.maxTokens : undefined,
         usage: readUsage(row.body),
+        ...(typeof row.body.purpose === 'string' && row.body.purpose ? { purpose: row.body.purpose } : {}),
       }));
     } finally {
       await database.close();
@@ -579,7 +599,7 @@ if (import.meta.main) {
   };
   const directory = args.find((arg, at) => !arg.startsWith('--') && !args[at - 1]?.startsWith('--'));
   if (!directory) {
-    console.error('Usage: node scripts/agent-context-audit.ts <copied .elizadb> [--since <ISO time>] [--tpm <limit>] [--cache-minutes <n>] [--uncached-tpm <limit>] [--total-tpm <limit>] [--reserve <stage>=<tokens>[,...]] [--assume-tools <stage>=[<unchanged chars>+]<chars>[,...] [--assumed-tools-change]] [--json <file>] [--show-text]');
+    console.error('Usage: node scripts/agent-context-audit.ts <copied store-v4 or .elizadb> [--since <ISO time>] [--tpm <limit>] [--cache-minutes <n>] [--uncached-tpm <limit>] [--total-tpm <limit>] [--reserve <stage>=<tokens>[,...]] [--assume-tools <stage>=[<unchanged chars>+]<chars>[,...] [--assumed-tools-change]] [--json <file>] [--show-text]');
     process.exit(2);
   }
   const since = value('--since') ? Date.parse(value('--since')!) : 0;

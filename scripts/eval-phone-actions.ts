@@ -13,7 +13,7 @@
  *   node scripts/eval-phone-actions.ts --origin http://127.0.0.1:47849 \
  *     --token-file <paired-machine-token> --output test-results/phone-actions.json \
  *     [--runs 3] [--pause-ms 4000] [--one-conversation] [--ask-before] [--stream] [--only <case id>[,...]]
- *     [--database <resident .elizadb>]
+ *     [--database <resident store-v4 or .elizadb>]
  *
  * Each request is sent the way a phone sends it by default, as one the owner wants done
  * without being asked first (agentActionMode direct-request-v1). The eval still performs
@@ -328,7 +328,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const origin = flag('--origin'), tokenFile = flag('--token-file'), output = flag('--output');
   const runs = Number(flag('--runs') ?? 1), pauseMs = Number(flag('--pause-ms') ?? 0);
   if (!origin || !tokenFile || !output || !Number.isInteger(runs) || runs < 1 || !(pauseMs >= 0)) {
-    console.error('Usage: eval-phone-actions.ts --origin <loopback> --token-file <file> --output <json> [--runs <n>] [--pause-ms <n>] [--one-conversation] [--ask-before] [--stream] [--only <case id>[,...]] [--database <resident .elizadb>]');
+    console.error('Usage: eval-phone-actions.ts --origin <loopback> --token-file <file> --output <json> [--runs <n>] [--pause-ms <n>] [--one-conversation] [--ask-before] [--stream] [--only <case id>[,...]] [--database <resident store-v4 or .elizadb>]');
     process.exit(2);
   }
   const only = flag('--only')?.split(',').filter(Boolean);
