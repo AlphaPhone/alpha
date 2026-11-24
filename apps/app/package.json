@@ -12,8 +12,8 @@
     "prepare": "eliza-harness --link",
     "eliza": "eliza-harness",
     "eliza:page": "node test/eliza/page.ts",
-    "aosp": "node --import vibelang/register scripts/aosp.vibe",
-    "licences": "node --import vibelang/register scripts/licences.vibe"
+    "aosp": "node scripts/aosp.ts",
+    "licences": "node scripts/licences.ts"
   },
   "dependencies": {
     "@capacitor/core": "8.5.2",

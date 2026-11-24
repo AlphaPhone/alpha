@@ -21,4 +21,4 @@ rules.
 - [Maps](./maps/): search, places, directions, guidance and the map, over Cloud Maps
 - [Telephony](./telephony/): Phone, Messages, Contacts, voicemail and the call bar, on an Alpha image
 - [Platform](./platform/): the world outside the page as services: the phone, the resident agent, the cloud, what the build allows and what the earlier Alpha kept
-- [Release](./release/): the Alpha image, its updates, signing and the licences of what ships
+- [Image](./image/): the Alpha image, what it grants the launcher, the cable tools and the licences of what ships

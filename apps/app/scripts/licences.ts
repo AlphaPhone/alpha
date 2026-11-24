@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// spec/app/release/licences.md, "Story: Ship what Alpha is built from, with its licences"
+// spec/app/image/licences.md, "Story: Ship what Alpha is built from, with its licences"
 import { createHash, randomUUID } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs"
 import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { licenceFlags as flagsOf, releaseBlockedByLicences, type Family, type Flag, type FontCheck } from "../gen/app__release__licences.ts"
+import { licenceFlags as flagsOf, releaseBlockedByLicences, type Family, type Flag, type FontCheck } from "../gen/app__image__licences.ts"
 
 export const app = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 
