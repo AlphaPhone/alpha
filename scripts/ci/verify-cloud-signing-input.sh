@@ -2,7 +2,7 @@
 set -euo pipefail
 umask 077
 test "$GITHUB_REF" = refs/heads/main
-test "$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')" = alphacompute/alpha
+test "$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')" = eliza-research/alpha
 test "$GITHUB_REPOSITORY_ID" = 1396333361
 test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
 directory=$(mktemp -d "$RUNNER_TEMP/alpha-cloud-input.XXXXXX")
