@@ -212,3 +212,20 @@ pure def alwaysAPendingActivationBlocksInstall(u: Updates): bool = (u.activation
 pure def sometimesAcknowledged(u: Updates): bool = u.activation == Preparing and u.acknowledged
 pure def sometimesContinued(u: Updates): bool = u.activation == Continuing
 ```
+
+### While Android holds an activation the phone is held, and a refused update the owner started says why
+
+While Android holds an activation (preparing, paused or continuing) the update screen holds the phone
+(spec/shell/navigation.md, "A layer is listed once, closes with its owner or with Back, and holds
+the phone while open"): Back and HOME do nothing, and the phone returns when Android ends it. When
+this page answers an update the owner started as not ready, Android cancels it and Alpha says
+"Finish your changes, then try updating again." once; a hands-off update that was not ready says
+nothing, and is tried again when the phone is idle.
+
+```quint
+pure def holdsThePhone(u: Updates): bool = followsActivation(u)
+pure def refusalTold(ready: bool, automatic: bool): bool = not(ready) and not(automatic)
+pure def alwaysAPendingActivationHoldsThePhone(u: Updates): bool = u.pending implies holdsThePhone(u)
+pure def lawAReadyAnswerTellsNothing(automatic: bool): bool = not(refusalTold(true, automatic))
+pure def lawAHandsOffRefusalIsQuiet(ready: bool): bool = not(refusalTold(ready, true))
+```

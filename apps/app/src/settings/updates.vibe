@@ -1,11 +1,13 @@
-// spec/settings/updates.md, "Story: Update Alpha when I choose"; spec/settings/updates.md, "Story: Get updates hands-off"; spec/settings/updates.md, "Story: Let Android finish an update without losing what I typed"
+// spec/settings/updates.md, "Story: Update Alpha when I choose"; spec/settings/updates.md, "Story: Get updates hands-off"; spec/settings/updates.md, "Story: Let Android finish an update without losing what I typed"; spec/settings/updates.md, "While Android holds an activation the phone is held, and a refused update the owner started says why"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { type Activation, type InstallAnswer, type Permission, type PollEnd, Machine, activationReadMs, activationReady, checkDue, followsActivation, initial, machine, pollEndOf, pollFailedOf, updateIdle } from "../../gen/settings__updates.effect.vibe"
+import { type Activation, type InstallAnswer, type Permission, type PollEnd, Machine, activationReadMs, activationReady, checkDue, followsActivation, holdsThePhone, initial, machine, pollEndOf, pollFailedOf, refusalTold, updateIdle } from "../../gen/settings__updates.effect.vibe"
 import { Build } from "../platform/build.vibe"
 import { AppLifecycle } from "../platform/lifecycle.vibe"
 import { Native } from "../platform/native.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 import { Activity } from "../shell/activity.vibe"
+import { Navigation } from "../shell/navigation.vibe"
+import { Notices } from "../shell/notices.vibe"
 import { attempt, call } from "./call.vibe"
 import { DeviceSnapshot, InstallReply, PermissionPage, SystemBuild, UpdateCheck, UpdateState } from "./native.schema.vibe"
 import { type Offer, completeFeed, isDigest, offerFor } from "./offer.vibe"
@@ -39,6 +41,12 @@ export service Updates {
   continueInstall(): void!!
 }
 
+/** What Alpha says when this page answered an update the owner started as not ready. */
+export const REFUSED_UPDATE = "Finish your changes, then try updating again."
+
+/** The navigation hold the update screen takes while Android holds an activation. */
+const ACTIVATION_HOLD = "update-activation"
+
 /** Updates over the updates Machine, started from the saved feed. */
 export const updates = Layer.unwrap(effect {
   const store = try KeyValueStore.KeyValueStore
@@ -49,6 +57,7 @@ export const updates = Layer.unwrap(effect {
     const held = try Machine
     const native = try Native
     const activity = try Activity
+    const notices = try Notices
     const buildInfo = (try Build).info
     const native_ = buildInfo.variant !== "browser"
     let feed: { checkedAt: number; feed: unknown; digest?: string } = saved ?? { checkedAt: -1, feed: null }
@@ -123,6 +132,7 @@ export const updates = Layer.unwrap(effect {
       const ready = activationReady(try activity.updateIdleFacts(), state.automatic === true) && (try keepDrafts())
       held.send({ type: "acknowledge", ready }) catch () => undefined
       try attempt(native.invoke("AlphaDevice", "activateUpdate", { ...activationIds, ready, ...(ready ? { resumeEligible: true } : {}) }))
+      if (refusalTold(ready, state.automatic === true)) try notices.show(REFUSED_UPDATE)
     }
 
     return {
@@ -167,12 +177,23 @@ export const updates = Layer.unwrap(effect {
   return Layer.provideMerge(service, machine({ ...initial, checkedAt: saved?.checkedAt ?? -1 }))
 })
 
-/** The hands-off schedule and Android's activation events, for as long as the layer lives. */
+/** The hands-off schedule, Android's activation events and the hold the update screen keeps on the phone, for as long as the layer lives. */
 export const schedule = Layer.effectDiscard(effect {
   const service = try Updates
   const native = try Native
   const lifecycle = try AppLifecycle
   const activity = try Activity
+  const held = try Machine
+  const navigation = try Navigation
+  let holding = false
+  try fork.scoped (effect {
+    for try (const u of held.changes) {
+      const holds = holdsThePhone(u)
+      if (holds === holding) continue
+      holding = holds
+      navigation.send(holds ? { type: "hold", id: ACTIVATION_HOLD } : { type: "release", id: ACTIVATION_HOLD }) catch () => undefined
+    }
+  })
   try service.setActive(true)
   try fork.scoped (effect {
     while (true) {

@@ -17,6 +17,9 @@ import { Resident } from "../../src/platform/resident.vibe"
 import { memoryStore } from "../../src/platform/storage.vibe"
 import { Activity } from "../../src/shell/activity.vibe"
 import { Navigation } from "../../src/shell/navigation.vibe"
+import { Notices } from "../../src/shell/notices.vibe"
+import { AppLifecycle } from "../../src/platform/lifecycle.vibe"
+import { initial as appStart } from "../../gen/platform__lifecycle.ts"
 import { Permissions } from "../../src/shell/permissions.vibe"
 import { Listener } from "../../src/voice/listener.vibe"
 import { VoiceRoute } from "../../src/voice/route.vibe"
@@ -29,7 +32,7 @@ import { Vault, vault } from "../../src/settings/passwords.vibe"
 import { Preferences, PREFERENCES_KEY, preferences } from "../../src/settings/preferences.vibe"
 import { PrivacyRow, privacyRow } from "../../src/settings/privacy.vibe"
 import { Reset, reset } from "../../src/settings/reset.vibe"
-import { Updates, updates } from "../../src/settings/updates.vibe"
+import { REFUSED_UPDATE, Updates, schedule, updates } from "../../src/settings/updates.vibe"
 
 const SIGNER = "a".repeat(64)
 const DIGEST = "d".repeat(64)
@@ -73,6 +76,7 @@ const activity = (call: boolean) => Layer.succeed(Activity, {
   keepDrafts: () => effect { return true },
 })
 const idle = activity(false)
+const quietNotices = Layer.succeed(Notices, recorder("Notices", []))
 const volume = Layer.succeed(StorageUsage, { usage: () => effect { return { kind: "volume", name: "Internal storage", free: 88, total: 128, percent: 31 } as const } })
 const noStorage = Layer.succeed(StorageUsage, { usage: () => effect { return { kind: "unknown" } as const } })
 const row = { schema: "alpha-update/v1", versionCode: 150, versionName: "1.5.0", variant: "launcher", signerSha256: SIGNER, apkUrl: "https://updates.example/alpha.apk", sha256: "b".repeat(64), sizeBytes: 1000 }
@@ -440,7 +444,7 @@ it.effect("Update Alpha when I choose (spec/settings/updates.md, \"Story: Update
     "AlphaDevice.checkForUpdate": () => ({ manifest: feed, manifestSha256: DIGEST }),
     "AlphaDevice.installUpdate": { status: "offer-withdrawn" },
   })
-  provide Layer.provideMerge(updates, Layer.mergeAll(memoryStore, native, build(), idle)) {
+  provide Layer.provideMerge(updates, Layer.mergeAll(quietNotices, memoryStore, native, build(), idle)) {
     const u = try Updates
     try u.check(true)
     const ready = try (try UpdatesMachine).get()
@@ -464,7 +468,7 @@ it.effect("Install only the reviewed update, once (spec/settings/native.md, \"St
     "AlphaDevice.checkForUpdate": () => ({ manifest: JSON.stringify(row), manifestSha256: DIGEST }),
     "AlphaDevice.installUpdate": {},
   })
-  provide Layer.provideMerge(updates, Layer.mergeAll(memoryStore, native, build(), idle)) {
+  provide Layer.provideMerge(updates, Layer.mergeAll(quietNotices, memoryStore, native, build(), idle)) {
     const u = try Updates
     try u.check(true)
     try u.install()
@@ -483,7 +487,7 @@ it.effect("Get updates hands-off (spec/settings/updates.md, \"Story: Get updates
       "AlphaDevice.checkForUpdate": () => ({ manifest: JSON.stringify(row), manifestSha256: DIGEST }),
       "AlphaDevice.installUpdate": {},
     })
-    provide Layer.provideMerge(updates, Layer.mergeAll(memoryStore, native, build(), activity(busy))) {
+    provide Layer.provideMerge(updates, Layer.mergeAll(quietNotices, memoryStore, native, build(), activity(busy))) {
       const u = try Updates
       try u.check(true)
       try u.setActive(true)
@@ -509,7 +513,7 @@ it.effect("Let Android finish an update without losing what I typed (spec/settin
     "AlphaDevice.activateUpdate": {},
     "AlphaDevice.continueUpdate": {},
   })
-  provide Layer.provideMerge(updates, Layer.mergeAll(memoryStore, native, build(), idle)) {
+  provide Layer.provideMerge(updates, Layer.mergeAll(quietNotices, memoryStore, native, build(), idle)) {
     const u = try Updates
     try u.watchActivation(() => effect { return true })
     try u.watchActivation(() => effect { return true })
@@ -525,6 +529,35 @@ it.effect("Let Android finish an update without losing what I typed (spec/settin
       },
     ))
   }
+})
+
+// spec/settings/updates.md, "While Android holds an activation the phone is held, and a refused update the owner started says why"
+it.effect("Hold the phone while Android installs, and say why an update I started was refused (spec/settings/updates.md, \"Story: Let Android finish an update without losing what I typed\")", () => effect {
+  const run = (automatic: boolean) => effect {
+    const shown: string[] = []
+    const held: string[] = []
+    const { calls, native } = android({
+      "AlphaDevice.updateState": { pending: true, phase: "preparing", activationId: "act-1", bridgeId: "bridge-1", automatic },
+      "AlphaDevice.activateUpdate": {},
+    })
+    const unkept = Layer.succeed(Activity, { updateIdleFacts: () => effect { return idleFacts }, keepDrafts: () => effect { return false } })
+    const lifecycle = Layer.succeed(AppLifecycle, {
+      changes: Stream.make(appStart), get: () => Effect.succeed(appStart), refreshNetwork: () => Effect.succeed(appStart.network),
+      metered: () => Effect.succeed(null), turnSent: () => Effect.void, turnSettled: () => Effect.void,
+    })
+    const platform = Layer.mergeAll(Layer.succeed(Notices, recorder("Notices", shown)), Layer.succeed(Navigation, recorder("Navigation", held)), lifecycle, memoryStore, native, build(), unkept)
+    try scoped(effect {
+      try Layer.build(Layer.provideMerge(schedule, Layer.provideMerge(updates, platform)))
+      try Effect.yieldNow
+    })
+    return { ready: calls.filter((c) => c.name === "AlphaDevice.activateUpdate").map((c) => (c.args as { ready: boolean }).ready), held, shown }
+  }
+  const manual = try run(false)
+  const handsOff = try run(true)
+  try Effect.try(() => assert.deepStrictEqual({ manual, handsOff }, {
+    manual: { ready: [false], held: [`Navigation.send ${JSON.stringify([{ type: "hold", id: "update-activation" }])}`], shown: [`Notices.show ${JSON.stringify([REFUSED_UPDATE])}`] },
+    handsOff: { ready: [false], held: [`Navigation.send ${JSON.stringify([{ type: "hold", id: "update-activation" }])}`], shown: [] },
+  }))
 })
 
 it.effect("Erase Alpha's data on purpose (spec/settings/reset.md, \"Story: Erase Alpha's data on purpose\")", () => effect {
