@@ -1,0 +1,76 @@
+// spec/app/shell/keyboard.md, "Story: Type without the page turning sideways"
+import * as Canvas from "../../gen/app__shell__keyboard.effect.vibe"
+import type { Event, Field } from "../../gen/app__shell__keyboard.effect.vibe"
+import { Device } from "../platform/device.vibe"
+import { Launcher } from "../platform/launcher.vibe"
+import { applying, contained, reacting, started } from "../runtime/reactor.vibe"
+
+module page {
+  /** The window as measured: its width, its height, and the height left to the page above the keyboard. @throws {never} */
+  export function measured(): { width: number; height: number; visible: number } {
+    const width = Math.round(window.innerWidth)
+    const height = Math.round(window.innerHeight)
+    const visible = Math.round(Math.min(height, window.visualViewport?.height ?? height))
+    return { width, height, visible: Math.max(1, visible) }
+  }
+  /** What has focus: Ask Alpha's composer, another field, or nothing that takes text. @throws {never} */
+  export function focused(): "Composer" | "OtherField" | "NoField" {
+    const active = document.activeElement
+    if (!(active instanceof HTMLElement)) return "NoField"
+    if (active.closest("[data-alpha-composer]")) return "Composer"
+    return active.matches("input, textarea, [contenteditable=true]") ? "OtherField" : "NoField"
+  }
+  /** Each change of the window, of the space above the keyboard and of focus. @throws {never} */
+  export function watched(heard: (what: "resize" | "focus") => void): () => void {
+    const resize = () => heard("resize")
+    const focus = () => heard("focus")
+    window.addEventListener("resize", resize)
+    window.visualViewport?.addEventListener("resize", resize)
+    document.addEventListener("focusin", focus)
+    document.addEventListener("focusout", focus)
+    return () => {
+      window.removeEventListener("resize", resize)
+      window.visualViewport?.removeEventListener("resize", resize)
+      document.removeEventListener("focusin", focus)
+      document.removeEventListener("focusout", focus)
+    }
+  }
+  /** @throws {never} */
+  export const paged = (): boolean => typeof window !== "undefined" && typeof document !== "undefined"
+}
+import { focused, measured, paged, watched } from page
+
+// spec/app/shell/keyboard.md, "At the same width, a shorter window while a field has focus is the keyboard; a new width while a field has focus, within a fifth of the height kept, is a rotation, and the width kept stands in for the new height; any other change takes the height measured"
+const followed = started(effect {
+  if (!paged()) return
+  const canvas = try Canvas.Machine
+  const presented = try (try Launcher).presentation()
+  const tell = (event: Event) => contained(canvas.send(event), "the canvas")
+  const window0 = measured()
+  try tell({ type: "mount", width: window0.width, height: window0.height, launcher: presented.launcher })
+  const changes = Stream.callback<"resize" | "focus">((queue) => acquireRelease(sync(() => watched((what) => { Queue.offerUnsafe(queue, what) })), (off) => sync(off)))
+  try Stream.runForEach(changes, effect (what) => {
+    if (what === "focus") {
+      const field: Field = focused()
+      if ((try canvas.get()).field !== field) try tell({ type: "focusField", focus: field })
+      return
+    }
+    const now = measured()
+    try tell({ type: "resize", width: now.width, height: now.height, visible: now.visible })
+  })
+}, "the canvas")
+
+// spec/app/shell/keyboard.md, "Alpha going to the background puts the composer away"
+const backgrounded = started(effect {
+  const canvas = try Canvas.Machine
+  try Stream.runForEach(Stream.filter((try Device).visible, (shown) => !shown), () => contained(canvas.send({ type: "background" }), "the canvas"))
+}, "the canvas going to the background")
+
+// spec/app/shell/keyboard.md, "The canvas is landscape when the window is wider than its height without the keyboard; the launcher lays a portrait phone out at 412 points, and a canvas of 760 or more is wide"
+const marked = applying(Canvas.Machine, (c) => ({ landscape: c.landscape, wide: c.wide, covered: c.covered, split: c.split, agenda: c.agenda }), effect (marks) => {
+  const device = try Device
+  for (const [name, on] of Object.entries(marks)) try device.mark(name, on ? "" : undefined)
+})
+
+/** The canvas, in memory: measured when the shell mounts and at every change of the window, and marked on the page. */
+export const canvas = Layer.mergeAll(reacting(Canvas, {}), followed, backgrounded, marked)

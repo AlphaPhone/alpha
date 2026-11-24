@@ -4,6 +4,13 @@ Where the owner is in Alpha: on Home or in one of the built-in apps, with
 the Apps drawer and Ask Alpha as layers over it. Every other area is shown
 inside the shell and moves through it.
 
+- [Layers](./layers.md): the sheets, menus and dialogs over the page, and what holds the phone
+- [Notices](./notices.md): toasts, their turn and their time, and the notices kept until dismissed
+- [Keyboard and canvas](./keyboard.md): the window without the keyboard, the canvas, text size and Ask Alpha's footprint
+- [Focus](./focus.md): where focus goes when the screen changes under the owner
+- [Gestures](./gestures.md): what a swipe on the page means
+- [Haptics](./haptics.md): touch feedback
+
 ## Story: Move between Home and the apps
 
 > As the phone's owner, I want to open an app from Home, go back the way I

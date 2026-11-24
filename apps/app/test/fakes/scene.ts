@@ -3,6 +3,7 @@ import { type AskScene, askRoutes, askScene } from "./ask.ts";
 import { cloudRoutes } from "./cloud.ts";
 import { type Route, answering } from "./routes.ts";
 import { type SampleScene, sampleRoutes, sampleScene } from "./sample.ts";
+import { type LauncherScene, launcherScene } from "./launcher.ts";
 
 /** Everything the fake world holds, one field per area; a journey reads and changes it. */
 export interface Scene {
@@ -19,6 +20,7 @@ export interface Scene {
   readonly slots: Set<string>;
   readonly sample: SampleScene;
   readonly ask: AskScene;
+  readonly launcher: LauncherScene;
 }
 
 /** A fresh world: each area adds its field here, one line each. */
@@ -27,6 +29,7 @@ export function scene(): Scene {
     phone: false, image: false, now: 0, signedIn: true, secrets: new Map(), slots: new Set(),
     sample: sampleScene(),
     ask: askScene(),
+    launcher: launcherScene(),
   };
 }
 

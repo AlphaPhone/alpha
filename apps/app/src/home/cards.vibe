@@ -1,0 +1,122 @@
+// spec/app/home/cards.md, "Story: See my day at a glance"
+import type { AndroidCalendarList } from "@elizaos/os/bridges/definitions/calendar"
+import * as Cards from "../../gen/app__home__cards.effect.vibe"
+import type { Effect as Out, Event, Item, Origin } from "../../gen/app__home__cards.effect.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
+import type { View } from "../../gen/app__shell.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { Device, native, registered } from "../platform/device.vibe"
+import { ask } from "../platform/remote.vibe"
+import { type Job, answer, contained, due, following, hearing, reacting, run, untimed } from "../runtime/reactor.vibe"
+
+module held {
+  import { calendarClient } from "@elizaos/os/bridges/calendar"
+
+  let made: ReturnType<typeof calendarClient> | undefined
+  /** eliza's client of the `ElizaCalendar` plugin, made once. @throws {never} */
+  export function client(): ReturnType<typeof calendarClient> {
+    return (made ??= calendarClient())
+  }
+}
+import { client } from held
+
+/** The phone's calendar, where this phone's host registered it. */
+function phoneCalendar() {
+  return native() && registered("ElizaCalendar") ? client() : undefined
+}
+
+/** What each item of a card is called, which the spec never holds: by its origin and its number in the read. */
+const titles = new Map<string, string>()
+const listeners = new Set<() => void>()
+let version = 0
+
+/** The titles of the items read, as an external store the card reads without an effect. */
+export const named = {
+  snapshot: (): number => version,
+  subscribe(listener: () => void): () => void {
+    listeners.add(listener)
+    return () => { listeners.delete(listener) }
+  },
+  title: (origin: Origin, id: number): string => titles.get(`${origin}:${id}`) ?? "",
+}
+
+function titled(origin: Origin, rows: ReadonlyArray<{ readonly title: string }>) {
+  rows.forEach((row, at) => titles.set(`${origin}:${at + 1}`, row.title))
+  version += 1
+  for (const listener of [...listeners]) listener()
+}
+
+/** The span a card reads: from the day before the day asked to two days after it. */
+function span(now: number) {
+  const day = Cards.dayOf(now) * Cards.dayLength
+  return { begin: day - Cards.dayLength, end: day + 2 * Cards.dayLength }
+}
+
+// spec/app/home/cards.md, "An answer replaces what the calendar had; one whose access is off or has no account leaves nothing behind, and one that failed, could not reach it or ran out keeps what was read before, as not up to date"
+effect function readPhone(ticket: number, now: number): Event!! {
+  const calendar = phoneCalendar()
+  if (calendar === undefined) return { type: "calendarRead", ticket, source: "Unavailable", items: [] }
+  const listed: AndroidCalendarList | undefined = tryPromise(() => calendar.list(span(now))) catch () => undefined
+  if (listed === undefined) return { type: "calendarRead", ticket, source: "Broken", items: [] }
+  if (listed.status === "permission-required") return { type: "calendarRead", ticket, source: "Denied", items: [] }
+  titled("PhoneCalendar", listed.events.map((event) => ({ title: event.title ?? "" })))
+  const items: Item[] = listed.events.map((event, at) => ({
+    id: at + 1, origin: "PhoneCalendar", calendar: Number.parseInt(event.calendarId, 10) || 0,
+    begin: event.begin, end: event.end, allDay: event.allDay, overdue: false, done: false,
+  }))
+  return { type: "calendarRead", ticket, source: "Ready", items }
+}
+
+/** The part of the agent's calendar feed the agenda reads: what it could reach, and each event's title and times. */
+schema FeedEvent { readonly title: string; readonly startAt: string; readonly endAt: string; readonly isAllDay: boolean }
+schema Feed { readonly state: "complete" | "partial" | "unavailable"; readonly events: FeedEvent[] }
+
+// spec/app/home/cards.md, "An answer replaces what the calendar had; one whose access is off or has no account leaves nothing behind, and one that failed, could not reach it or ran out keeps what was read before, as not up to date"
+effect function readAgent(ticket: number, now: number): Event!!Agent {
+  const { begin, end } = span(now)
+  const request = HttpClientRequest.get("/api/lifeops/calendar/feed", { urlParams: { timeMin: new Date(begin).toISOString(), timeMax: new Date(end).toISOString() } })
+  const feed = ask(Agent, request, Feed) catch () => undefined
+  if (feed === undefined) return { type: "agentRead", ticket, source: "Broken", events: [] }
+  if (feed.state === "unavailable") return { type: "agentRead", ticket, source: "NotConnected", events: [] }
+  const events = feed.events.flatMap((event) => {
+    const from = Date.parse(event.startAt)
+    const to = Date.parse(event.endAt)
+    return Number.isFinite(from) && Number.isFinite(to) ? [{ title: event.title, begin: from, end: to, allDay: event.isAllDay }] : []
+  })
+  titled("AgentCalendar", events)
+  return {
+    type: "agentRead", ticket, source: feed.state === "complete" ? "Ready" : "Unavailable",
+    events: events.map((event, at) => ({ id: at + 1, origin: "AgentCalendar", calendar: 0, begin: event.begin, end: event.end, allDay: event.allDay, overdue: false, done: false })),
+  }
+}
+
+// spec/app/home/cards.md, "A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed"
+effect function go(view: View) {
+  try contained((try Shell.Machine).send({ type: "openView", view }), "opening an app from a card")
+}
+
+function carry(fx: Out, state: () => Cards.Cards!!): Job<Event, unknown, []> {
+  return match (fx) {
+    when { tag: "ReadCalendar", let ticket }: answer("calendar", flatMap(state(), (c) => readPhone(ticket, c.calendar.since)), { type: "calendarRead", ticket, source: "Broken", items: [] });
+    when { tag: "ReadAgentCalendar", let ticket }: answer("agent", flatMap(state(), (c) => readAgent(ticket, c.agent.since)), { type: "agentRead", ticket, source: "Broken", events: [] });
+    when { tag: "Go", let view }: run("go", go(view));
+  }
+}
+
+const current = () => flatMap(Cards.Machine.asEffect(), (machine) => machine.get())
+
+/** The cards, kept across restarts for their tickets: looked at when Home shows, when Alpha comes back to the front and when the day turns. */
+export const cards = Layer.mergeAll(
+  reacting(Cards, {
+    keep: 1,
+    open: [{ type: "restart" }],
+    carry: (fx) => carry(fx, current),
+    timers: (c) => [
+      due("day", (c.today + 1) * Cards.dayLength, { type: "look", now: untimed }),
+      ...(Cards.loading(c.calendar) ? [due(`calendar ${c.calendar.read.ticket}`, c.calendar.since + Cards.patience, { type: "ranOut", now: untimed })] : []),
+      ...(Cards.loading(c.agent) ? [due(`agent ${c.agent.read.ticket}`, c.agent.since + Cards.patience, { type: "ranOut", now: untimed })] : []),
+    ],
+  }),
+  following(Shell.Machine, (shell) => shell.trail.length === 0, Cards.Machine, (bare) => (bare ? { type: "look", now: untimed } : undefined)),
+  hearing(Stream.unwrap(effect { return Stream.filter((try Device).visible, (shown) => shown) }), Cards.Machine, () => ({ type: "look", now: untimed })),
+)

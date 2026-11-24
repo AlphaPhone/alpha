@@ -1,0 +1,62 @@
+// spec/app/shell/haptics.md, "Story: Feel the changes I make"
+import * as Haptics from "../../gen/app__shell__haptics.effect.vibe"
+import type { Haptic, Role } from "../../gen/app__shell__haptics.effect.vibe"
+import { Device } from "../platform/device.vibe"
+import { contained, reacting, started, untimed } from "../runtime/reactor.vibe"
+
+module page {
+  /** What a click on the page lands on, read before the control's own handler changes it. */
+  export interface Clicked {
+    readonly role: "NotAControl" | "PlainButton" | "CheckboxSwitch" | "ButtonSwitch"
+    readonly disabled: boolean
+    readonly inert: boolean
+    readonly checked: boolean
+    readonly inDialog: boolean
+    readonly destructive: boolean
+  }
+  const removing = /^(delete|discard|erase|remove|replace|clear|reset|sign out)\b/i
+  /** @throws {never} */
+  export function clicked(event: Event): Clicked {
+    const target = event.target instanceof Element ? event.target.closest("button, [role=switch], input[type=checkbox]") : null
+    if (target === null) return { role: "NotAControl", disabled: false, inert: false, checked: false, inDialog: false, destructive: false }
+    const checkbox = target instanceof HTMLInputElement
+    const role = checkbox ? "CheckboxSwitch" : target.getAttribute("role") === "switch" ? "ButtonSwitch" : "PlainButton"
+    return {
+      role,
+      disabled: target.hasAttribute("disabled") || target.getAttribute("aria-disabled") === "true",
+      inert: target.closest("[inert]") !== null,
+      checked: checkbox ? target.checked : target.getAttribute("aria-checked") === "true",
+      inDialog: target.closest("[role=dialog], [role=alertdialog]") !== null,
+      destructive: target.hasAttribute("data-destructive") || removing.test((target.textContent ?? "").trim()),
+    }
+  }
+  /** @throws {never} */
+  export const document_ = (): EventTarget | undefined => (typeof document === "undefined" ? undefined : document)
+}
+import { clicked, document_ } from page
+
+const kinds: Readonly<Record<Haptic, string>> = { NoHaptic: "", ToggleOn: "toggle-on", ToggleOff: "toggle-off", Confirm: "confirm", LongPress: "long-press" }
+
+// spec/app/shell/haptics.md, "One gesture plays once, even when it reaches two paths: the same feedback within 300 milliseconds plays once"
+/** Play `kind` once for a gesture, where the phone plays feedback. */
+export effect function feel(kind: Haptic): void!!(Haptics.Machine | Device) {
+  const played = try contained((try Haptics.Machine).send({ type: "play", kind, now: untimed }), "touch feedback")
+  if (played) try (try Device).haptic(kinds[kind])
+}
+
+// spec/app/shell/haptics.md, "A click earns feedback only from a control that takes it: a switch, or a dialog's button that removes or overwrites something"
+const clicks = started(effect {
+  const page = document_()
+  if (page === undefined) return
+  try Stream.runForEach(Stream.fromEventListener(page, "click", { capture: true }), (event) => {
+    const control = clicked(event)
+    const kind = Haptics.hapticForClick(control.role as Role, control.disabled, control.inert, control.checked, control.inDialog, control.destructive)
+    return kind === "NoHaptic" ? Effect.void : feel(kind)
+  })
+}, "touch feedback")
+
+/** Touch feedback, in memory: told once whether the phone plays it, and every click that earns some. */
+export const haptics = Layer.mergeAll(
+  reacting(Haptics, { open: effect { return [{ type: "install", available: try (try Device).feels() }] as const } }),
+  clicks,
+)
