@@ -7,6 +7,7 @@ import { test, expect } from '@playwright/test';
 // boundaries: no model call, physical microphone, Android Intent or real alarm.
 for (const mode of ['confirm','transcribed','zone','modal','unknown','receipt-loss','unavailable','denied','failed','show','snooze','dismiss','browser','old-host','duplicate','review-cancel','review-owner','review-context','review-cancel-failure'] as const) {
   test(`agent Clock handoff: ${mode}`, async ({ page }) => {
+    if (mode === 'duplicate' || mode === 'unknown') test.slow(); // The replay reloads the renderer and pairs a second time.
     await page.addInitScript((mode) => {
       const w = window as any, store = new Map(JSON.parse(localStorage.getItem('fixture-secure')||'[]'));w.calendarEntry=JSON.parse(localStorage.getItem('fixture-journal')||'null');
       const agentId = '12345678-1234-4234-8234-123456789abc';
@@ -105,6 +106,10 @@ for (const mode of ['confirm','transcribed','zone','modal','unknown','receipt-lo
     await local.getByLabel('Pairing code', { exact: true }).fill('synthetic-code');
     await local.getByRole('button', { name: 'Connect local agent', exact: true }).click();
     await page.locator('.alpha-connection-scrim').waitFor({ state: 'detached' });
+    await page.evaluate(async () => {
+      const { editDevicePreferences } = await import('/src/browser/device-preferences.ts');
+      await editDevicePreferences(preferences => { preferences.askBeforeAgentActions = true; });
+    });
     };await connect();
     if(mode==='browser')await returnToApps(page);
     const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});
@@ -124,10 +129,14 @@ for (const mode of ['confirm','transcribed','zone','modal','unknown','receipt-lo
       expect(await page.evaluate(()=>({uploads:(window as any).recoveryFixture.cloudUploads,local:(window as any).recoveryFixture.localProbes,channel:(window as any).calendarSent.channelType}))).toEqual({uploads:1,local:0,channel:'VOICE_DM'});
     }
     else {await input.fill(mode==='show'?'Show my alarms':mode==='snooze'?'Snooze ringing alarms for ten minutes':mode==='dismiss'?'Dismiss the ringing alarm':'Set an alarm for 07:00; await my review.');await input.press('Enter');}
-    if(mode==='old-host'||mode==='browser'){await expect(page.locator('[data-alpha-message-text]').filter({hasText:/^Clock handoff is unavailable on this host\. Open Clock from Calendar\.$/})).toBeVisible();expect(await page.evaluate(()=>(window as any).recoveryFixture.effects)).toBe(0);await expect(page.getByText('clock handoff',{exact:true})).toHaveCount(0);return;}
+    const review = page.getByRole('button', { name: /^clock handoff (?:Ask Clock to set 07:00|Open Clock)/ });
+    if(mode==='old-host'||mode==='browser'){await expect(page.locator('[data-alpha-message-text]').filter({hasText:/^Clock handoff is unavailable on this host\. Open Clock from Calendar\.$/})).toBeVisible();expect(await page.evaluate(()=>(window as any).recoveryFixture.effects)).toBe(0);await expect(review).toHaveCount(0);return;}
     if(mode!=='transcribed')await expect(page.getByText(/Review the action below\./)).toBeVisible();
-    await expect(page.getByText('clock handoff',{exact:true})).toBeVisible();
-    expect(await page.evaluate(()=>(window as any).recoveryFixture.effects)).toBe(0);
+    await expect(review).toBeVisible();
+    expect(await page.evaluate(() => {
+      const { decisions, claims, reviews, effects } = (window as any).recoveryFixture;
+      return { decisions, claims, reviews, effects };
+    })).toEqual({ decisions: 0, claims: 0, reviews: 0, effects: 0 });
     // The zone moves at the tap itself, so only the approval-time recheck can see it. Changed any
     // earlier, the next render (the composer blurring as focus moves to the review) republishes the
     // phone context and recovery retires the card first; that path ends disabled, asserted below.
@@ -147,7 +156,7 @@ for (const mode of ['confirm','transcribed','zone','modal','unknown','receipt-lo
     }
     // Activate the actual review button through its keyboard path. The chat sheet
     // can still be settling after voice closes; nested text is not a stable click target.
-    await page.getByRole('button',{name:/^clock handoff /}).press('Enter');
+    await review.press('Enter');
     if(mode==='zone'){await expect(page.getByText('No longer pending',{exact:true}).first()).toBeVisible();await expect(page.getByRole('button',{name:/^Review unavailable /})).toBeDisabled();expect(await page.evaluate(()=>(window as any).recoveryFixture.effects)).toBe(0);return;}
 
     if(mode==='review-cancel'){
@@ -205,7 +214,7 @@ for (const mode of ['confirm','transcribed','zone','modal','unknown','receipt-lo
       // A newly opening sheet can scroll its inner text between pointer down/up.
       await expect(page.getByText(/Review the action below\./)).toBeVisible();
       await page.getByRole('button',{name:'Expand chat',exact:true}).click();
-      await page.getByRole('button',{name:/^clock handoff /}).click();
+      await review.click();
       await expect(page.getByText(/already has a device journal entry/).first()).toBeVisible();expect(await page.evaluate(()=>(window as any).recoveryFixture.effects)).toBe(1);
     }
 

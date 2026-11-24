@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import {
   button,
+  enableAgentActionReview,
   fenceNetwork,
   flagOffAndroid,
   harness,
@@ -64,7 +65,6 @@ for (const decision of [
       decision,
     async ({ page }) => {
       const foreign = await fenceNetwork(page);
-      await page.addInitScript(()=>localStorage.setItem('alpha.browser.device.v1',JSON.stringify({askBeforeAgentActions:true})));
       await flagOffAndroid(page, {
         accounts: [
           {
@@ -81,6 +81,7 @@ for (const decision of [
         },
       });
       await residentHome(page);
+      await enableAgentActionReview(page);
       await openRetainedNativeNotes(page);
       await button(page, 'Open conversation').click();
       const composer = page.getByRole('textbox', {
@@ -248,6 +249,7 @@ async function editCrewDraft(page: Page) {
     emailDraft: { to: crew, subject: 'Tomorrow’s shoot', body: 'Bring the tripod.' },
   });
   await residentHome(page);
+  await enableAgentActionReview(page);
   await openRetainedNativeNotes(page);
   await button(page, 'Open conversation').click();
   const composer = page.getByRole('textbox', { name: 'Message Alpha', exact: true });

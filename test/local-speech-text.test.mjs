@@ -50,6 +50,7 @@ test('a colon after a Calendar date separates the heading from the slots', () =>
 test('speech formatting handles clock syntax without rewriting other numeric display data', () => {
   assert.equal(formatSpeechText('Times: 2-3 p.m., 09:05–10:00, 18:30 to 19:00.'), "Times, two to three P M, nine oh five to ten o'clock, six thirty P M to seven P M.");
   assert.equal(formatSpeechText('2% of $1,299.50. Ratio 2:10. Call 415-555-0100 on 2026-11-21. UTC+01:00.'), '2 percent of $1,299.50. Ratio 2:10. Call 415-555-0100 on 2026-11-21. UTC+01:00.');
+  assert.equal(formatSpeechText('Meet at 5 a.m. for coffee. Doors close at 6 A.M. Bring your pass.'), 'Meet at five A M for coffee. Doors close at six A M. Bring your pass.');
 });
 
 test('bullets and quotes are read without spoken labels, and each bullet stays its own sentence', () => {

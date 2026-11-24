@@ -57,6 +57,19 @@ test('optional EID is independent of the physical SIM read and cannot replace a 
  page.clear();assert.equal(page.snapshot().data,undefined);
 });
 
+test('an EID request rejected by the bridge stays unread and can be retried',async()=>{
+ let eidReads=0;
+ const eid=field('89012345678901234567890123456789');
+ const page=session.createCarrierSetupSession({read:async()=>({...data,eid:{status:'not-read'}}),readEid:async()=>{
+  if(++eidReads===1)throw Error('An EID read is in progress');
+  return eid;
+ },copy:async()=>{},current:()=>true,changed(){}});
+ await page.show();await page.showEid();
+ assert.deepEqual(page.snapshot().data.eid,{status:'not-read'});
+ assert.equal(page.snapshot().eidBusy,false);
+ await page.showEid();assert.deepEqual(page.snapshot().data.eid,eid);
+});
+
 test('native identifier field preserves genuine values and does not turn denial or missing hardware into a fabricated identifier',{skip:jvmSkip('javac')},()=>{
  const java=readFileSync('android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCarrierSetupPlugin.java','utf8');
  const begin=java.indexOf(' interface Read {');const end=java.indexOf(' private static JSObject unavailable()',begin);

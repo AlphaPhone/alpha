@@ -512,6 +512,18 @@ export async function residentHome(page: Page) {
   await expect(button(page, 'Notes')).toBeVisible();
   await completeAccessSetup(page);
 }
+/** Turn on review through the persisted Settings control, then return to the launcher. */
+export async function enableAgentActionReview(page: Page) {
+  await button(page, 'Settings').click();
+  await button(page, 'Privacy').click();
+  const review = page.getByRole('switch', { name: 'Ask before Alpha acts', exact: true });
+  await expect(review).toBeEnabled();
+  if (await review.getAttribute('aria-checked') !== 'true') await review.click();
+  await expect(review).toHaveAttribute('aria-checked', 'true');
+  await page.reload();
+  await expect(button(page, 'Settings')).toBeVisible();
+}
+
 /** Opens the required sign-in gate or the signed-in agent activity page. */
 export async function openYourAgent(page: Page) {
   const gate = page.locator('[role="main"].alpha-cloud-sign-in');

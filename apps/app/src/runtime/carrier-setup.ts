@@ -37,7 +37,8 @@ export function createCarrierSetupSession(ports:{read():Promise<CarrierSetup>;re
    if(busy||eidBusy||!data||!ports.readEid||!ports.current())return;
    const token=generation;eidBusy=true;ports.changed();
    try{const eid=await ports.readEid();if(token===generation&&ports.current()&&data)data={...data,eid};}
-   catch{if(token===generation&&ports.current()&&data)data={...data,eid:{status:'unavailable'}};}
+   // The eSIM service can refuse a concurrent request without returning a field status.
+   catch{if(token===generation&&ports.current()&&data)data={...data,eid:{status:'not-read'}};}
    finally{if(token===generation){eidBusy=false;if(!ports.current())data=undefined;ports.changed();}}
   },
   async copy(token:string){

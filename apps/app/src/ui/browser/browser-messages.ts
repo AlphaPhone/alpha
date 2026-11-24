@@ -130,6 +130,7 @@ export const BROWSER_PAGE_ERRORS: ReadonlyMap<string, string> = new Map([
   ["Sign-in was cancelled. Reload to try again.", "Sign-in cancelled. Reload to try again."],
   ["Sign-in failed. Reload to try again.", "Sign-in didn’t work. Reload to try again."],
   ["Loading stopped. Reload from the menu to try again.", "Loading stopped. Reload from the menu to try again."],
+  ["This site has no secure (HTTPS) connection.", "This site has no secure (HTTPS) connection, so it can’t be opened."],
   ["Browser renderer stopped. Close this tab and open a new one.", "This tab stopped working. Close it and open a new one."],
 ]);
 

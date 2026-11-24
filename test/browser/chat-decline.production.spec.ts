@@ -1,5 +1,4 @@
-import {seedCompletedAccessSetup} from './flag-off-android';
-import { completeAccessSetup } from './flag-off-android';
+import { completeAccessSetup, enableAgentActionReview, seedCompletedAccessSetup } from './flag-off-android';
 import { test, expect, type Page } from '@playwright/test';
 import { installResidentAgentPlugin } from './helpers/resident-agent-plugin';
 
@@ -11,7 +10,6 @@ const AGENT = '6f1d3c3e-8c55-4c1b-9d1f-2b6f0b0d3a11';
 async function residentAgent(page: Page, seed: 'pending' | 'reconcile') {
   await installResidentAgentPlugin(page);
   await page.addInitScript(({ agentId, seed }) => {
-    localStorage.setItem('alpha.browser.device.v1', JSON.stringify({ askBeforeAgentActions: true }));
     const w = window as any;
     w.androidBridge = {};
     const store = new Map<string, string>();
@@ -120,6 +118,7 @@ async function connected(page: Page) {
   // Retained proposals do not open a modal while the resident starts.
   await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0, { timeout: 30_000 });
   await completeAccessSetup(page);
+  await enableAgentActionReview(page);
 }
 
 test('a proposal is declined from its chat card and the agent records the rejection', async ({ page }) => {
