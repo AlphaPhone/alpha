@@ -4,7 +4,8 @@
     "allowed": ["REPLY", "IGNORE", "NONE"],
     "refused": {
       "CALCULATE": "No area of the phone asks the agent to calculate.",
-      "VIEWS": "The phone declares no agent views while the bundle carries no plugin (D11)."
+      "VIEWS": "The phone declares no agent views while the bundle carries no plugin (D11).",
+      "PROPOSE_DEVICE_ACTION": "The phone runs no device action of the agent while the bundle carries no plugin (D11)."
     }
   },
   "plugins": { "load": [] }

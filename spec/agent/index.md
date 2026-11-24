@@ -39,9 +39,9 @@ pure def characterAdmitted(name: str, system: str): bool = name == characterName
 ### The agent may run exactly the actions Alpha's stories need, and every other action the bundle registers is listed as refused
 
 A turn is answered by `REPLY`, and core's own `IGNORE` and `NONE` let it end
-without one. Nothing else the bundle registers (today `CALCULATE` and
-`VIEWS`) is needed by an area of the phone, so each is named in the policy's
-refused list with its reason. The policy loads no module of the agent: no
+without one. Nothing else the bundle registers (today `CALCULATE`, `VIEWS`
+and `PROPOSE_DEVICE_ACTION`) is needed by an area of the phone, so each is
+named in the policy's refused list with its reason. The policy loads no module of the agent: no
 route the page reaches belongs to one.
 
 ```quint
