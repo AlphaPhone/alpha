@@ -1,5 +1,4 @@
-import {seedCompletedAccessSetup} from './flag-off-android';
-import { completeAccessSetup } from './flag-off-android';
+import { completeAccessSetup, enableAgentActionReview, seedCompletedAccessSetup } from './flag-off-android';
 import { test, expect, type Page } from '@playwright/test';
 import { installResidentAgentPlugin } from './helpers/resident-agent-plugin';
 
@@ -33,7 +32,6 @@ const card = [
 async function residentAgent(page: Page, operation: unknown, capabilities: string[]) {
   await installResidentAgentPlugin(page);
   await page.addInitScript(({ agentId, operation, capabilities }) => {
-    localStorage.setItem('alpha.browser.device.v1', JSON.stringify({ askBeforeAgentActions: true }));
     const w = window as any;
     w.androidBridge = {};
     const store = new Map<string, string>();
@@ -160,6 +158,7 @@ async function connected(page: Page) {
   await expect.poll(() => page.evaluate(() => (window as any).declineFixture.installationId), { timeout: 30_000 }).not.toBe('');
   await expect(page.locator('.alpha-connection-scrim')).toHaveCount(0, { timeout: 30_000 });
   await completeAccessSetup(page);
+  await enableAgentActionReview(page);
 }
 
 test('Android: the proposal card states time zone, calendar and attendees, and Approve hands over exactly the reviewed operation once', async ({ page }, testInfo) => {
