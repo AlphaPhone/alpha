@@ -78,7 +78,8 @@ it.live("Maps is blocked by a ringing call and admitted over the launcher (spec/
     const surface = try SurfaceMachine
     try (try MapsSession).open()
     try SubscriptionRef.update(h.shell, (s) => ({ ...s, ringing: true, view: "phone" }))
-    const ringing = try until(surface.changes, (s) => s.blocked)
+    // One shell change is two surface steps, the block and then the view: wait for both.
+    const ringing = try until(surface.changes, (s) => s.blocked && s.view !== "HomeView")
     const refused = try surface.send({ type: "requestMaps" })
     try SubscriptionRef.update(h.shell, (s) => ({ ...s, ringing: false, view: "maps" }))
     const clear = try until(surface.changes, (s) => !s.blocked && s.view === "MapsView")
