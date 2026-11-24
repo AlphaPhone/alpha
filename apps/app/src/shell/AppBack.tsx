@@ -8,5 +8,5 @@ import type { Alpha } from "../runtime/area.tsx";
 export function AppBack({ alpha }: { alpha: Alpha }) {
   const { can } = useMachine(alpha.runtime);
   if (!can({ type: "goBack" })) return null;
-  return <Button variant="ghost" size="icon" aria-label="Back" onClick={() => void alpha.back()}><ChevronLeft /></Button>;
+  return <Button variant="ghost" size="icon" aria-label="Back" className="rounded-lg" onClick={() => void alpha.back()}><ChevronLeft /></Button>;
 }

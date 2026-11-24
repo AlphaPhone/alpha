@@ -3,7 +3,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../lib/cn.ts";
 
 const rowsVariants = cva("flex flex-col overflow-hidden rounded-lg", {
-  variants: { surface: { card: "border border-border bg-card text-card-foreground", plain: "" } },
+  variants: { surface: { card: "rounded-group bg-secondary py-1 text-secondary-foreground", plain: "" } },
   defaultVariants: { surface: "card" },
 });
 
@@ -20,7 +20,7 @@ export function ListGroup({ heading, surface, className, children, ...props }: L
   const id = useId();
   return (
     <section aria-labelledby={heading ? id : undefined} className={cn("flex flex-col gap-2", className)} {...props}>
-      {heading ? <h2 id={id} className="px-4 text-xs font-semibold tracking-caps text-muted-foreground uppercase">{heading}</h2> : null}
+      {heading ? <h2 id={id} className="px-3.5 pt-0.5 text-caption font-normal text-muted-foreground">{heading}</h2> : null}
       <div className={rowsVariants({ surface })}>{children}</div>
     </section>
   );

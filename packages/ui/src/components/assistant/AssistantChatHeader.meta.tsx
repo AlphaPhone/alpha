@@ -5,25 +5,25 @@ import type { AssistantChatHeaderProps } from "./AssistantChatHeader.tsx";
 
 const onHome = fn();
 const onResize = fn();
-const onMinimize = fn();
+const onClose = fn();
 
 export const meta: ComponentMeta<AssistantChatHeaderProps> = {
-  args: { title: "Friday plans", context: { view: "Calendar", day: "Thu 10 Jul" }, grabber: <AssistantGrabber />, onHome, onResize, onMinimize },
+  args: { title: "Friday plans", context: { view: "Calendar", day: "Thu 10 Jul" }, grabber: <AssistantGrabber />, onHome, onResize, onClose },
   examples: {
     "Long title": { title: "Where to eat near the office on a rainy Friday with a large group" },
-    "Full screen": { full: true },
+    "Full screen": { expanded: true },
     Sensitive: { context: { view: "Passwords", sensitive: true } },
   },
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onHome.mockClear();
       onResize.mockClear();
-      onMinimize.mockClear();
+      onClose.mockClear();
       const canvas = within(canvasElement);
       await userEvent.click(canvas.getByRole("button", { name: "Go Home" }));
       await userEvent.click(canvas.getByRole("button", { name: "Expand chat" }));
       await userEvent.click(canvas.getByRole("button", { name: "Minimize chat" }));
-      await expect([onHome.mock.calls.length, onResize.mock.calls.length, onMinimize.mock.calls.length]).toEqual([1, 1, 1]);
+      await expect([onHome.mock.calls.length, onResize.mock.calls.length, onClose.mock.calls.length]).toEqual([1, 1, 1]);
     },
   },
 };

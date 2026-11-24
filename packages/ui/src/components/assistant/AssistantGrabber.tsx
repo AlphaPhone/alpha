@@ -1,5 +1,6 @@
 import { type ComponentProps, type PointerEvent, useRef } from "react";
 import { cn, focusRing } from "../../lib/cn.ts";
+import { Mark } from "../Mark.tsx";
 
 type Press = { now: number };
 
@@ -7,6 +8,8 @@ type Press = { now: number };
 export type AssistantRelease = { direction: "up" | "down"; flick: boolean; y: number; now: number };
 
 export type AssistantGrabberProps = Omit<ComponentProps<"button">, "children" | "disabled" | "onClick" | "onPointerDown" | "onPointerMove" | "onPointerUp" | "onPointerCancel" | "onLostPointerCapture"> & {
+  /** The resting dock opens by its mark. The sheet uses a resize handle. */
+  variant?: "mark" | "handle";
   /** A finger came down on the handle; `now` is the event's time in milliseconds. */
   onPress?: (press: Press) => void;
   /** The finger moved past a few pixels: `y` is where it is, to follow it; called on each move from then on. */
@@ -18,7 +21,7 @@ export type AssistantGrabberProps = Omit<ComponentProps<"button">, "children" | 
   /** The gesture was taken away, by the system, a resize or the window losing focus: it asks for nothing. */
   onCancel?: (press: Press) => void;
   /** The click a button receives, which may be the late click of a gesture just ended. */
-  onTap?: (press: Press) => void;
+  onTap?: (press: Press & { keyboard: boolean }) => void;
 };
 
 const slop = 6;
@@ -41,7 +44,7 @@ const fast = (t: Track) => t.moved && Math.abs(t.last.y - t.prev.y) >= (t.last.a
  * the dock's rules choose where Ask Alpha lands.
  * @model spec/app/assistant/dock.md
  */
-export function AssistantGrabber({ onPress, onDrag, onRelease, onLift, onCancel, onTap, className, ...props }: AssistantGrabberProps) {
+export function AssistantGrabber({ variant = "handle", onPress, onDrag, onRelease, onLift, onCancel, onTap, className, ...props }: AssistantGrabberProps) {
   const trackRef = useRef<Track | undefined>(undefined);
   const move = (event: PointerEvent<HTMLButtonElement>) => {
     const t = trackRef.current;
@@ -55,8 +58,8 @@ export function AssistantGrabber({ onPress, onDrag, onRelease, onLift, onCancel,
   return (
     <button
       type="button"
-      aria-label="Resize chat"
-      className={cn(focusRing, "flex size-11 cursor-grab touch-none items-start justify-center rounded-md pt-1.5", className)}
+      aria-label={variant === "mark" ? "Open conversation" : "Resize chat"}
+      className={cn(focusRing, "flex size-11 shrink-0 touch-none justify-center", variant === "mark" ? "items-center overflow-hidden rounded-full bg-alpha text-alpha-foreground" : "cursor-grab items-start rounded-sm pt-1.5", className)}
       onPointerDown={(event) => {
         capture(event.currentTarget, event.pointerId);
         const sample = { y: event.clientY, at: event.timeStamp };
@@ -81,10 +84,10 @@ export function AssistantGrabber({ onPress, onDrag, onRelease, onLift, onCancel,
         if (trackRef.current) onCancel?.({ now: event.timeStamp });
         trackRef.current = undefined;
       }}
-      onClick={(event) => onTap?.({ now: event.timeStamp })}
+      onClick={(event) => onTap?.({ now: event.timeStamp, keyboard: event.detail === 0 })}
       {...props}
     >
-      <span aria-hidden className="h-1 w-10 rounded-full bg-muted-foreground/45" />
+      {variant === "mark" ? <Mark aria-hidden className="size-[118%] shrink-0" /> : <span aria-hidden className="h-1 w-10 rounded-full bg-muted-foreground/45" />}
     </button>
   );
 }

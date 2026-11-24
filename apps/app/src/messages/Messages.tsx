@@ -1,5 +1,5 @@
 // spec/app/messages/index.md, "Story: See my conversations"; spec/app/messages/index.md, "Story: Read a conversation"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/messages/index.md, "Story: Start a new message"; spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/messages/composer.md, "Story: Send a message"
-import { MMS_ATTACHMENT_TYPES } from "@elizaos/os/bridges/definitions/messages";
+import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY, MMS_MAX_RECIPIENTS } from "@elizaos/os/bridges/definitions/messages";
 import type { MessageRow, ThreadRow } from "@elizaos/os/bridges/messages";
 import { Alert, Avatar, Banner, Button, Chip, ConfirmDialog, SearchField, Spinner, Textarea } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
@@ -149,7 +149,11 @@ function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesPr
           </div>
         </>
       )}
-      <CommsBar runtime={runtime} closed={smsNeeded(state) ? undefined : <SearchField className="min-w-0 flex-1" aria-label="Search or ask" placeholder="Search or ask" value={sought} onValueChange={search} />} />
+      <CommsBar runtime={runtime} closed={smsNeeded(state) ? undefined : (ask) => (
+        <form className="min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); ask(sought.trim()); }}>
+          <SearchField data-alpha-composer aria-label="Search or ask" placeholder="Search or ask" value={sought} onValueChange={search} />
+        </form>
+      )} />
     </>
   );
 }
@@ -161,6 +165,7 @@ function MessageText({ text }: { text: string }) {
   for (const matched of text.matchAll(messageURL)) {
     const found = matched[0];
     const offset = matched.index;
+    if (offset === undefined) continue;
     const raw = found.replace(/[.,!?;:]+$/u, "").replace(/\)+$/u, (ending) => {
       const excess = (found.match(/\)/gu)?.length ?? 0) - (found.match(/\(/gu)?.length ?? 0);
       return ending.slice(0, Math.max(0, ending.length - Math.max(0, excess)));
@@ -268,7 +273,11 @@ function Conversation({ runtime, messages: { state, can, send } }: MessagesProps
   const confirm = { type: "confirmDelete", clear: clear(phone) } as const;
   const actions = selectedRow && !("incomplete" in selectedRow) && !state.confirming && content(state) ? {
     copy: selectedRow.body && can({ type: "copy" }) ? () => { void send({ type: "copy" }); } : undefined,
-    remove: state.removal.outcome !== "Unknown" && can({ type: "askDelete" }) ? () => { void send({ type: "askDelete" }); } : undefined,
+    remove: state.smsApp && state.removal.outcome !== "Unknown" && can({ type: "askDelete" }) ? () => {
+      const { id, kind, threadId, date } = selectedRow;
+      runtime.runSync(Inbox.use((inbox) => inbox.set({ deleteTarget: { id, kind, threadId, date } })));
+      void send({ type: "askDelete" });
+    } : undefined,
   } : undefined;
   return (
     <>
@@ -294,7 +303,7 @@ function Conversation({ runtime, messages: { state, can, send } }: MessagesProps
         </div>
       </div>
       {state.removal.outcome === "Unknown" && <Banner variant="warn">Alpha cannot tell whether the message was deleted</Banner>}
-      {state.removal.outcome === "Refused" && <Banner variant="destructive">The message was not deleted</Banner>}
+      {state.removal.outcome === "Refused" && held.deleteTarget && <Banner variant="destructive">The message was not deleted</Banner>}
       <ConfirmDialog open={state.confirming} title="Delete message?" confirmLabel="Delete" destructive
         onConfirm={() => void (selectedRow && !("incomplete" in selectedRow) && can(confirm) && send(confirm))} onCancel={() => void (can({ type: "keep" }) && send({ type: "keep" }))}>Delete this message from this phone?</ConfirmDialog>
       <Compose runtime={runtime} title={title} addresses={addresses} thread={state.thread} />
@@ -321,8 +330,9 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
     void send(event);
   };
   const sendNow = { type: "send", supported: runtime.runSync(supported(state.recipients, pictures.length)), clear: clear(phone) } as const;
+  const sendable = (Boolean(text.trim()) || pictures.length > 0) && can(sendNow);
   const submit = () => {
-    if (!can(sendNow)) return;
+    if (!sendable) return;
     runtime.runSync(prepare(thread, state.sims > 1 ? state.sim : null));
     void send(sendNow);
   };
@@ -354,14 +364,14 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
             }} />
         </label>
       ))}
-      <Textarea className="max-h-[min(10.5rem,28dvh)] min-w-0 flex-1 overflow-y-auto" aria-label="Message" placeholder={`Text ${firstName(title)}`} value={text} readOnly={!editable}
+      <Textarea className="max-h-[min(10.5rem,28dvh)] min-w-0 flex-1 overflow-y-auto" aria-label="Message" placeholder={`Text ${firstName(title)}`} value={text} maxLength={MMS_MAX_BODY} readOnly={!editable}
         ref={(element) => {
           field.current = element;
           if (element && focus.current) { focus.current = false; element.focus(); }
         }}
         onChange={(event) => write(event.target.value)} />
       {can({ type: "suggest" }) && <Button variant="ghost" size="icon" aria-label="Let Alpha suggest a reply" onClick={() => void send({ type: "suggest" })}><Sparkles /></Button>}
-      {can(sendNow) && <Button size="icon" aria-label="Send" data-alpha-bar-send onClick={submit}><Send /></Button>}
+      {sendable && <Button size="icon" aria-label="Send" data-alpha-bar-send onClick={submit}><Send /></Button>}
     </div>
   );
   return (
@@ -376,7 +386,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
           <div className="flex shrink-0 flex-wrap justify-end gap-1 py-1">
             {can({ type: "undo" }) && <Button size="sm" variant="ghost" onClick={() => void send({ type: "undo" })}>Don't send</Button>}
             {editable && <Button size="sm" variant="outline" data-alpha-draft-edit onClick={edit}>Edit</Button>}
-            {dock.open && <Button size="sm" data-alpha-draft-send disabled={!can(sendNow)} onClick={submit}>Send</Button>}
+            {dock.open && <Button size="sm" data-alpha-draft-send disabled={!sendable} onClick={submit}>Send</Button>}
           </div>
         </div>
       )}
@@ -414,7 +424,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
           if (can(settings)) return <Button key={need} size="sm" variant="outline" onClick={() => void send(settings)}>{`Open Settings for ${right} access`}</Button>;
           return null;
         })}
-        {can(handoff) && <Button size="sm" variant="outline" onClick={() => void send(handoff)}>Review in messaging app</Button>}
+        {can(handoff) && <Button size="sm" variant="outline" onClick={() => void send(handoff)}>{pictures.length > 0 ? "Review text in messaging app" : "Review in messaging app"}</Button>}
       </div>
       <CommsBar runtime={runtime} person={person} closed={messageForm} />
     </>
@@ -441,7 +451,7 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
   };
   const to = typed.split(",").map((part) => part.trim());
   const parsed = to.map((part) => /^\+?[\d\s().-]+$/u.test(part) && part.replace(/\D/gu, "").length >= 3 ? normalizePhoneNumber(part) : null);
-  const numbers = parsed.every((number) => number !== null) ? [...new Set(parsed)] : [];
+  const numbers = parsed.length <= MMS_MAX_RECIPIENTS && parsed.every((number) => number !== null) ? [...new Set(parsed)] : [];
   const allow = { type: "allow", need: "ContactsAccess" } as const;
   const settings = { type: "goToSettings", need: "ContactsAccess" } as const;
   return (

@@ -1,6 +1,6 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing the composer on the bar raises it to typing: the bar grows above the keyboard and the page stays in view"; spec/app/assistant/dock.md, "Alpha's mark, a send from the bar, or a tap on the handle opens Ask Alpha as a sheet"; spec/app/assistant/dock.md, "Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/app/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence every line stays code"
 import {
-  Alert, AssistantCard, AssistantConversation, AssistantGrabber, AssistantSearchSheet,
+  Alert, AssistantCard, AssistantConversation, AssistantGrabber, AssistantSearchSheet, ConfirmDialog,
   type AssistantAttachment, type AssistantDraftNoticeProps, type AssistantMessageProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
@@ -22,18 +22,22 @@ import { fixShown, managesPlan, showsWait, waitSeconds } from "../../gen/app__as
 import { useMachine as useReply } from "../../gen/app__assistant__reply.react.ts";
 import type { Machine as SearchMachine } from "../../gen/app__assistant__search.effect.vibe";
 import { useMachine as useSearch } from "../../gen/app__assistant__search.react.ts";
+import type { Machine as CommsMachine } from "../../gen/app__phone__comms.effect.vibe";
+import { useMachine as useComms } from "../../gen/app__phone__comms.react.ts";
 import { type Machine as ShellMachine, showing } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effect.vibe";
 import { home } from "../shell/shell.vibe";
 import { untimed } from "../runtime/reactor.vibe";
+import { MailQuestions } from "../inbox/mail-context.vibe";
 import { isCommsView } from "../shell/views.tsx";
-import { freedom } from "./assistant.vibe";
+import { askComms, freedom } from "./assistant.vibe";
 import { shownReply } from "./shown.ts";
 import { Talk } from "./talk.vibe";
+import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | LayersMachine | Talk, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | LayersMachine | CommsMachine | CommsTargetServices | Talk | MailQuestions, unknown>;
 }
 
 function turnOf(talking: Talking, label: string): AssistantTurnNoteProps["status"] | undefined {
@@ -108,8 +112,11 @@ export function Assistant({ runtime }: AssistantProps) {
   const reply = useReply(runtime);
   const shell = useShell(runtime);
   const dock = useDock(runtime);
+  const comms = useComms(runtime);
   const board = runtime.runSync(Effect.map(Talk, (talk) => talk.board));
   const seen = useSyncExternalStore((listener) => board.subscribe(listener), () => board.snapshot());
+  const mail = runtime.runSync(MailQuestions);
+  const reviewed = useSyncExternalStore(mail.subscribe, mail.snapshot);
   const [listing, setListing] = useState(false);
   const [words, setWords] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -128,7 +135,12 @@ export function Assistant({ runtime }: AssistantProps) {
   const hold = { type: "hold", askable: askable(talking) } as const;
   const start = { type: "start", ...free } as const;
   const newChat = shown.chosen === 0;
-  const sendable = newChat ? writing.editor.text && !writing.long && chats.can(start) && askable(talking) : composer.can(hold);
+  const onComms = isCommsView(shell.state?.trail.at(-1));
+  const subject = onComms ? comms.state?.key : undefined;
+  const request = subject === undefined ? "" : (comms.state?.requests.find((draft) => draft.about === subject)?.request ?? "");
+  const sendable = subject !== undefined
+    ? request.trim() !== "" && request.length <= textLimit && askable(talking) && (!newChat || chats.can(start))
+    : newChat ? writing.editor.text && !writing.long && chats.can(start) && askable(talking) : composer.can(hold);
   const status = turnOf(talking, seen.label);
   const notice = noticeOf(writing);
   const check = { type: "checkForReply" } as const;
@@ -136,10 +148,29 @@ export function Assistant({ runtime }: AssistantProps) {
   const settledLine = (id: string) => !id.startsWith("sent ") && !inFlight(talking.turn) && !pending(talking);
 
   const type = (text: string) => {
+    if (subject !== undefined) {
+      void comms.send({ type: "requestTyped", about: subject, request: text }, "Owner");
+      return;
+    }
     board.type(text);
     void composer.send({ type: "edit", blank: text.trim() === "", long: text.length > textLimit });
   };
+  const attachMail = () => {
+    const question = mail.snapshot().question;
+    const offer = { type: "offer", kind: "Mail", revision: writing.offeredAt + 1 } as const;
+    if (!question || !composer.can(offer)) return;
+    void composer.send(offer).then((outcome) => {
+      if (outcome._tag !== "Success" || mail.snapshot().question !== question) return;
+      mail.attach(question);
+      if (!board.snapshot().typed.trim()) type("Summarize this email");
+      composerRef.current?.focus();
+    });
+  };
   const send = () => {
+    if (subject !== undefined) {
+      void runtime.runPromise(askComms({ about: subject, text: request }));
+      return;
+    }
     carry(dockOpened(assistantDetent));
     const talk = runtime.runSync(Effect.map(Talk, (t) => t.board));
     if (newChat) {
@@ -152,7 +183,6 @@ export function Assistant({ runtime }: AssistantProps) {
     void composer.send(hold);
   };
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"
-  /** The card of a reply that did not finish: live, with the fix the agent named and its wait, or read again from history, with neither. */
   const failureCard = ({ kind, fix, waitMs }: { kind: Failure; fix: Fix; waitMs: number }, live: boolean) => {
     const act = actionOf(kind, fix);
     const detail = showsWait(kind, waitMs) ? `Try again in about ${about(waitMs)}` : !live && kind === "LimitReached" ? "Wait a moment, then try again" : undefined;
@@ -202,11 +232,8 @@ export function Assistant({ runtime }: AssistantProps) {
   const quoted = quoteId === undefined ? undefined : lines.find((line) => line.id === quoteId)?.text;
   const view = talking.context.showing.tag === "App" ? talking.context.showing.view : "Home";
   const open = dockOpen(assistantDetent);
-<<<<<<< HEAD
-  const inPill = shell.state !== undefined && dockPill(shell.state);
-=======
-  const comms = isCommsView(shell.state?.trail.at(-1));
->>>>>>> origin/vibestack-develop
+  const inPill = !onComms && shell.state !== undefined && dockPill(shell.state);
+  const full = assistantDetent === "Full";
   const keptHeight = assistantDetent === "Sheet" && dock.state && dock.state.kept > 0 ? dock.state.kept : undefined;
   const openWithFocus = () => {
     carry(dockOpened(assistantDetent));
@@ -230,43 +257,46 @@ export function Assistant({ runtime }: AssistantProps) {
     onBack: () => setListing(false),
     onRetry: () => void chats.send({ type: "browse" }),
   } : undefined;
+  const grabber = shell.state ? (
+    <AssistantGrabber
+      variant={open ? "handle" : "mark"}
+      onPress={() => { void dock.send({ type: "press", detent: assistantDetent, now: untimed }); }}
+      onDrag={() => { void dock.send({ type: "drag" }); }}
+      onRelease={({ direction, flick, y }) => {
+        const height = Math.max(0, Math.round(window.innerHeight - y));
+        void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
+      }}
+      onLift={() => {
+        void dock.send({ type: "lift", now: untimed });
+        if (!open) composerRef.current?.focus();
+      }}
+      onCancel={() => { void dock.send({ type: "shift", now: untimed }); }}
+      onTap={({ keyboard }) => {
+        void dock.send({ type: "click", now: untimed });
+        if (!open && keyboard) composerRef.current?.focus();
+      }}
+    />
+  ) : undefined;
 
   return (
     <>
-<<<<<<< HEAD
-      <AssistantConversation
+      {onComms && full && <CommsTarget runtime={runtime} placement="strip" />}
+      {(!onComms || open) && <AssistantConversation
         detent={assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : inPill ? "pill" : "bar"}
-        className={open || inPill ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
-        style={keptHeight ? { height: keptHeight } : undefined}
-=======
-      {(!comms || open) && <AssistantConversation
-        detent={assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
-        className={comms ? "relative w-full motion-safe:transition-[height] motion-safe:duration-[420ms]" : open ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
-        style={comms
+        className={onComms ? "relative w-full motion-safe:transition-[height] motion-safe:duration-[420ms]" : open || inPill ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
+        style={onComms
           ? { height: assistantDetent === "Full" ? "calc(100dvh - 52px)" : `clamp(38dvh, ${keptHeight === undefined ? "50dvh" : `${keptHeight}px`}, 60dvh)` }
           : keptHeight ? { height: keptHeight } : undefined}
->>>>>>> origin/vibestack-develop
         header={{
           title: seen.titles.get(shown.chosen) ?? "Ask Alpha",
           context: { view, selected: talking.context.selected, sensitive: talking.context.sensitive },
           onHome: () => void runtime.runPromise(home()),
-          full: assistantDetent === "Full",
-          onResize: assistantDetent === "Full" ? () => carry(asked("Full", "Sheet")) : shell.can({ type: "raise", detent: "Full" }) ? () => carry(asked(assistantDetent, "Full")) : undefined,
-          onMinimize: open ? () => carry(asked(assistantDetent, "Bar")) : undefined,
-          grabber: shell.state ? (
-            <AssistantGrabber
-              onPress={() => {
-                void dock.send({ type: "press", detent: assistantDetent, now: untimed });
-              }}
-              onDrag={() => { void dock.send({ type: "drag" }); }}
-              onRelease={({ direction, flick, y }) => {
-                void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height: Math.max(0, Math.round(window.innerHeight - y)), floor: barHeight, full: window.innerHeight, now: untimed });
-              }}
-              onLift={() => { void dock.send({ type: "lift", now: untimed }); }}
-              onCancel={() => { void dock.send({ type: "shift", now: untimed }); }}
-              onTap={() => { void dock.send({ type: "click", now: untimed }); }}
-            />
-          ) : undefined,
+          onClose: open && shell.can({ type: "goBack" }) ? () => void shell.send({ type: "goBack" }) : undefined,
+          expanded: assistantDetent === "Full",
+          onResize: assistantDetent === "Full"
+            ? () => void shell.send({ type: "goBack" })
+            : shell.can({ type: "raise", detent: "Full" }) ? () => void shell.send({ type: "raise", detent: "Full" }) : undefined,
+          grabber: open ? grabber : undefined,
         }}
         history={history}
         pill={{
@@ -287,10 +317,12 @@ export function Assistant({ runtime }: AssistantProps) {
         }}
         composer={{
           fieldRef: composerRef,
-          value: seen.typed,
+          value: subject === undefined ? seen.typed : request,
           onValueChange: type,
-          closed: !composer.can({ type: "edit", blank: false, long: false }),
-          notice: notice === undefined ? undefined : {
+          placeholder: onComms ? "Ask Alpha" : undefined,
+          leading: onComms ? <CommsTarget runtime={runtime} placement="composer" /> : undefined,
+          closed: subject === undefined && !composer.can({ type: "edit", blank: false, long: false }),
+          notice: notice === undefined || onComms ? undefined : {
             status: notice,
             saved: seen.saved,
             onRetry: composer.can({ type: "retry" }) ? () => void composer.send({ type: "retry" }) : undefined,
@@ -304,10 +336,11 @@ export function Assistant({ runtime }: AssistantProps) {
             onCheck: writing.unsettled && conversation.can(check) ? () => void conversation.send(check) : undefined,
           },
           unavailable: !talking.ready ? "away" : talking.context.sensitive ? "sensitive" : undefined,
-          attachments: waiting(writing),
-          quote: quoted,
-          editing: writing.editor.editing > 0,
-          onOpen: !open ? openWithFocus : undefined,
+          attachments: onComms ? undefined : waiting(writing),
+          quote: onComms ? undefined : quoted,
+          editing: !onComms && writing.editor.editing > 0,
+          opener: !open ? grabber : undefined,
+          onOpen: !open && !grabber ? openWithFocus : undefined,
           onSend: sendable && !inFlight(talking.turn) ? send : undefined,
           onStop: conversation.can({ type: "stop" }) ? () => void conversation.send({ type: "stop" }) : undefined,
           stopping: talking.turn.stopping,
@@ -319,32 +352,36 @@ export function Assistant({ runtime }: AssistantProps) {
           onRemoveAttachment: (id) => {
             if (id === "question") void composer.send({ type: "removeQuestion" });
             else if (id.startsWith("file ")) void composer.send({ type: "removeFile" });
-            else if (id === "mail" || id === "transcript" || id === "shown") void composer.send({ type: "detach", kind: detached[id] });
+            else if (id === "mail" || id === "transcript" || id === "shown") {
+              if (id === "mail") mail.clear();
+              void composer.send({ type: "detach", kind: detached[id] });
+            }
           },
           onUnquote: composer.can({ type: "unquote" }) ? () => void composer.send({ type: "unquote" }) : undefined,
         }}
-<<<<<<< HEAD
-=======
       />}
-      <AssistantChatHistorySheet
-        open={listing}
-        onOpenChange={setListing}
-        history={{
-          chats: shown.ids.map((id) => ({ id: String(id), title: seen.titles.get(id) ?? "Ask Alpha", current: id === shown.chosen })),
-          status: shown.list.status === "Loading" ? "loading" : shown.list.status === "Failed" ? "failed" : "loaded",
-          blocked: free.replying || free.holding,
-          making: making(shown),
-          unsure: unsure(shown),
-          onChoose: (id) => {
-            const choose = { type: "choose", conversation: Number(id), ...free } as const;
-            if (!chats.can(choose)) return;
-            void chats.send(choose);
-            setListing(false);
-          },
-          onStart: chats.can(start) ? () => { void chats.send(start); setListing(false); } : undefined,
-          onRetry: () => void chats.send({ type: "browse" }),
-        }}
->>>>>>> origin/vibestack-develop
+      <ConfirmDialog
+        open={!onComms && open && reviewed.question !== undefined}
+        title="Share this email with Alpha?"
+        confirmLabel="Add to chat"
+        onConfirm={attachMail}
+        onCancel={() => mail.show({})}
+      >
+        {reviewed.question ? (
+          <span className="block max-h-72 overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere]">
+            {reviewed.question.review.source.subject || "(no subject)"}{"\n"}
+            {reviewed.question.review.source.from}{"\n"}
+            {reviewed.question.review.source.to.join(", ")}{"\n\n"}
+            {reviewed.question.review.source.bodyText}
+          </span>
+        ) : null}
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={!onComms && open && reviewed.failure !== undefined}
+        title={reviewed.failure === "tooLarge" ? "This email is too long to share in full" : "Review this email again before sharing"}
+        confirmLabel="OK"
+        onConfirm={() => mail.show({})}
+        onCancel={() => mail.show({})}
       />
       <AssistantSearchSheet
         open={finding.open}

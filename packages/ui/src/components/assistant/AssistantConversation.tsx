@@ -28,32 +28,29 @@ export type AssistantConversationProps = Omit<ComponentProps<"section">, "childr
  * @model spec/app/assistant/index.md
  */
 export function AssistantConversation({ header, transcript, history, composer, pill, detent = "sheet", className, ...props }: AssistantConversationProps) {
-  const open = detent === "sheet" || detent === "full";
+  const resting = detent === "bar" || detent === "pill";
+  const full = detent === "full";
   return (
     <section
       aria-label="Ask Alpha"
       data-host-chrome=""
       data-alpha-detent={detent}
       className={cn(
-        "flex min-h-0 flex-col text-foreground",
-        open ? "z-sheet bg-card pt-2" : "pointer-events-none z-dock h-auto touch-none",
-        detent === "full" ? "h-full rounded-none" : detent === "sheet" ? "h-1/2 rounded-t-sheet" : null,
+        "flex flex-col text-foreground",
+        resting ? "z-dock" : "z-sheet overflow-hidden bg-card",
+        full ? "h-full rounded-none pt-4" : resting ? null : cn("rounded-t-sheet pt-1", props.style?.height ? "max-h-dvh" : "min-h-[38dvh] max-h-[60dvh]"),
         className,
       )}
       {...props}
     >
-      <div hidden={!open} className={cn("flex min-h-0 flex-col", open ? "flex-1" : "max-h-0 overflow-hidden")}>
-        <AssistantChatHeader {...header} />
+      <div hidden={resting} className={cn("min-h-0 flex-1 basis-auto flex-col", resting ? "hidden" : "flex")}>
+        <AssistantChatHeader {...header} grabber={full ? undefined : header.grabber} />
         {history
           ? <AssistantChatHistory {...history} className={cn("min-h-0 flex-1 overflow-y-auto px-5 py-2", history.className)} />
           : <AssistantTranscript {...transcript} className={cn("flex-1", transcript.className)} />}
       </div>
-      {detent === "pill" ? <AssistantPill {...pill} className={cn("pb-6.5", pill?.className)} /> : null}
-      <AssistantComposer
-        {...composer}
-        variant={open ? "sheet" : "bar"}
-        className={cn(detent === "pill" ? "sr-only" : open ? null : "pointer-events-auto mx-4 mb-4", composer.className)}
-      />
+      {detent === "pill" ? <AssistantPill {...pill} className={cn("mb-6.5", pill?.className)} /> : null}
+      <AssistantComposer {...composer} variant={resting ? "bar" : "sheet"} className={cn(detent === "pill" && "sr-only", composer.className)} />
     </section>
   );
 }

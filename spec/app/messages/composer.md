@@ -351,6 +351,9 @@ pure def detach(c: Composer): Composer = { ...c, pictures: c.pictures - 1 }
 ### What Alpha cannot send is handed to the messaging app
 
 `supported` is the phone's word that Alpha can send this message itself.
+A single plain text uses SMS. Pictures and groups use one MMS. If Alpha
+cannot send, the handoff opens the messaging app with the draft text for
+review.
 
 ```quint
 pure def canHandOff(c: Composer, supported: bool): bool = c.thread > 0 and not(supported)

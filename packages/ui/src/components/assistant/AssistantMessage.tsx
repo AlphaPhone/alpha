@@ -1,7 +1,7 @@
 import type { ComponentProps, ReactNode } from "react";
 import { CornerUpLeft, GitBranch, Pencil, Volume2 } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
-import { AssistantMark } from "./AssistantMark.tsx";
+import { Mark } from "../Mark.tsx";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
 import { AssistantAttachmentChip, type AssistantAttachment } from "./AssistantAttachmentChip.tsx";
 
@@ -36,22 +36,22 @@ export type AssistantMessageProps = Omit<ComponentProps<"article">, "children"> 
 export function AssistantMessage({ author, text, quote, attachments = [], children, onPreview, onQuote, onEditAgain, onFork, onReadAloud, className, ...props }: AssistantMessageProps) {
   const owner = author === "owner";
   const body = <span className="wrap-anywhere whitespace-pre-line">{text}</span>;
-  const bubble = cn("min-w-0 text-left", owner ? "max-w-[80%] rounded-tile rounded-br-bubble-tail bg-alpha px-4 py-2.75 text-base text-alpha-foreground" : "flex-1 text-chat");
+  const bubble = cn("min-w-0 max-w-full text-left", owner ? "rounded-tile rounded-br-box bg-alpha px-4 py-2.75 text-base leading-normal text-alpha-foreground" : "text-chat");
   const actions = onQuote || onEditAgain || onFork || onReadAloud;
   return (
-    <article aria-label={owner ? "You" : "Alpha"} className={cn("flex flex-col gap-3", owner ? "items-end" : "items-start", className)} {...props}>
+    <article aria-label={owner ? "You" : "Alpha"} className={cn("flex flex-col gap-2", owner ? "ml-auto max-w-4/5 items-end" : "items-start", className)} {...props}>
       {attachments.length ? (
         <div className={cn("flex flex-wrap gap-2", owner && "justify-end")}>
           {attachments.map((attachment) => <AssistantAttachmentChip key={attachment.id} attachment={attachment} onPreview={onPreview && (() => onPreview(attachment.id))} />)}
         </div>
       ) : null}
       {quote ? <p className="line-clamp-2 border-l-2 border-border pl-3 text-sm break-words text-muted-foreground">{quote}</p> : null}
-      <div className={cn("flex w-full items-start", owner ? "justify-end" : "gap-2.5")}>
-        {owner ? null : <AssistantMark className="mt-0.75 size-4.5" />}
+      <div className="flex min-w-0 max-w-full items-start gap-2.5">
+        {owner ? null : <Mark aria-hidden className="mt-1 size-4.5 shrink-0 text-alpha" />}
         {actions ? (
           <Menu>
             <MenuTrigger asChild>
-              <button type="button" className={cn(focusRing, bubble, owner || "min-h-11")}>{body}</button>
+              <button type="button" className={cn(focusRing, bubble, "relative before:absolute before:inset-0 before:min-h-11")}>{body}</button>
             </MenuTrigger>
             <MenuContent align={owner ? "end" : "start"}>
               {onQuote ? <MenuItem onSelect={onQuote}><CornerUpLeft aria-hidden />Reply</MenuItem> : null}

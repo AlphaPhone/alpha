@@ -59,7 +59,7 @@ describe("Ask Alpha dock", () => {
   });
 
   // spec/app/assistant/dock.md, "Alpha's mark, a send from the bar, or a tap on the handle opens Ask Alpha as a sheet"; spec/app/assistant/dock.md, "A press that did not move taps its control once"
-  it("Open control focuses Sheet, and a tap on the open sheet's handle keeps it there (spec/app/assistant/dock.md, \"Alpha's mark, a send from the bar, or a tap on the handle opens Ask Alpha as a sheet\")", async () => {
+  it("The dock mark opens and focuses Sheet on click and touch (spec/app/assistant/dock.md, \"Alpha's mark, a send from the bar, or a tap on the handle opens Ask Alpha as a sheet\")", async () => {
     await page.viewport(390, 844);
     const { runtime } = await mountDock({ view: "Browser" });
 
@@ -67,14 +67,15 @@ describe("Ask Alpha dock", () => {
     await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
     expect(document.activeElement).toBe(document.querySelector("textarea[data-alpha-composer]"));
 
-    const grabber = document.querySelector<HTMLButtonElement>("button[aria-label='Resize chat']");
-    expect(grabber).not.toBeNull();
-    grabber?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientY: 500, pointerId: 2, pointerType: "touch" }));
-    grabber?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientY: 500, pointerId: 2, pointerType: "touch" }));
-    expect((await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).assistant).toBe("Sheet");
-
     await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "goBack" })));
     await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar"))));
-    expect(document.querySelector("button[aria-label='Resize chat']")?.checkVisibility()).toBe(false);
+    (document.activeElement as HTMLElement | null)?.blur();
+
+    const grabber = document.querySelector<HTMLButtonElement>("button[aria-label='Open conversation']");
+    expect(grabber).not.toBeNull();
+    grabber?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientY: 760, pointerId: 2, pointerType: "touch" }));
+    grabber?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientY: 760, pointerId: 2, pointerType: "touch" }));
+    await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
+    expect(document.activeElement).toBe(document.querySelector("textarea[data-alpha-composer]"));
   });
 });

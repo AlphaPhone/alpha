@@ -4,7 +4,7 @@ import { AssistantCard } from "./AssistantCard.tsx";
 import { AssistantGrabber } from "./AssistantGrabber.tsx";
 import type { AssistantConversationProps } from "./AssistantConversation.tsx";
 
-const header = { title: "Friday plans", context: { view: "Calendar", day: "Thu 10 Jul" }, grabber: <AssistantGrabber />, onHome: fn(), onResize: fn(), onMinimize: fn() };
+const header = { title: "Friday plans", context: { view: "Calendar", day: "Thu 10 Jul" }, grabber: <AssistantGrabber />, onHome: fn(), onResize: fn(), onClose: fn() };
 const transcript = {
   messages: [
     { id: "1", author: "owner" as const, text: "What is on my calendar on Friday?" },

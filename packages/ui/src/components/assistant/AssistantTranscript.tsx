@@ -47,8 +47,7 @@ function followEnd(viewport: HTMLElement) {
 
 /**
  * The conversation as it was being read. New replies follow the end while it is in view; a history page or a search
- * hit opens around the message requested. An empty conversation shows
- * nothing, as Alpha had it before VibeStack.
+ * hit opens around the message requested.
  * @model spec/app/assistant/chats.md
  */
 export function AssistantTranscript({ messages, position, visible = true, status = "loaded", turn, onRetry, onEarlier, onLater, onReturnToOriginal, className, onScroll, ...props }: AssistantTranscriptProps) {
@@ -103,7 +102,7 @@ export function AssistantTranscript({ messages, position, visible = true, status
       role="log"
       aria-label="Conversation"
       tabIndex={0}
-      className={cn(focusRing, "min-h-0 overflow-y-auto px-5 pt-2 pb-3.5 select-text focus-visible:-outline-offset-focus", className)}
+      className={cn(focusRing, "min-h-0 touch-pan-y overflow-y-auto px-5 pt-2 pb-3.5 select-text focus-visible:-outline-offset-focus", className)}
       onScroll={(event) => {
         const viewport = event.currentTarget;
         if (visible && status === "loaded") scroll.current.follows = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 80;
