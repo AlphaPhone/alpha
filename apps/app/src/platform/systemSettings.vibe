@@ -1,5 +1,5 @@
 // spec/app/settings/facts.md, "Story: See what the phone says"; spec/app/settings/android.md, "Story: Change what only Android can change"
-import type { AndroidRoleStatus, SettingsHandoff, SystemFacts, SystemSettingsPage } from "@elizaos/os/bridges/definitions/system"
+import type { AndroidRoleStatus, NativeCrashEntry, SettingsHandoff, SystemFacts, SystemSettingsPage } from "@elizaos/os/bridges/definitions/system"
 import type { LocationPermissionStatus } from "@elizaos/os/bridges/definitions/location"
 import type { FilesAccess, StorageVolume } from "@elizaos/os/bridges/definitions/files"
 import type { Opened, Target } from "../../gen/app__settings__android.ts"
@@ -65,11 +65,16 @@ export service SystemSettings {
   requestHome(): void!!
   /** Android's own page for `target`, for Alpha itself where the page is about Alpha. */
   open(target: Target, channel: number): Opened!!
-  /** How many problems the phone's log holds, or none where it could not be read. */
-  problems(): Option.Option<number>!!
+  /** The problems the phone's log holds, each by its classes and reasons alone, or none where it could not be read. */
+  problems(): Option.Option<ReadonlyArray<Problem>>!!
   /** Whether the phone cleared its problem log. */
   clearProblems(): boolean!!
 }
+
+/** One problem the phone recorded, by the fields a report may carry: when, where it came from, and its classes and reasons; never a message or a process name. */
+export type Problem = Pick<NativeCrashEntry, "at" | "source" | "kind" | "errorClass" | "rootClass" | "reason" | "thread">
+
+const problemOf = ({ at, source, kind, errorClass, rootClass, reason, thread }: NativeCrashEntry): Problem => ({ at, source, kind, errorClass, rootClass, reason, thread })
 
 const empty: PhoneReport = { readings: [], grants: [], home: "NotAlpha", assistant: "NotAlpha", launcher: false }
 
@@ -190,7 +195,7 @@ export const phoneSystemSettings = Layer.succeed(SystemSettings, {
   report: phoneReport,
   requestHome: () => ignore(tryPromise(() => systemOf().requestRole({ role: "home" }))),
   open: (target: Target, _channel: number) => opening(target),
-  problems: () => Effect.map(settled(() => systemOf().crashLog()), Option.map((log) => log.entries.length)),
+  problems: () => Effect.map(settled(() => systemOf().crashLog()), Option.map((log) => log.entries.map(problemOf))),
   clearProblems: () => Effect.map(settled(() => systemOf().clearCrashLog()), Option.isSome),
 })
 
@@ -199,6 +204,6 @@ export const browserSystemSettings = Layer.succeed(SystemSettings, {
   report: browserReport,
   requestHome: () => Effect.void,
   open: () => succeed<Opened>("NotAtAll"),
-  problems: () => succeed(Option.none<number>()),
+  problems: () => succeed(Option.none<ReadonlyArray<Problem>>()),
   clearProblems: () => succeed(false),
 })

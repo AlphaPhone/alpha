@@ -72,7 +72,7 @@ effect function logRead(reading: number): Developer.Event!!(SystemSettings | Pre
   const prefs = try (try Prefs.Machine).get()
   const needs: Developer.Store[] = prefs.document.read.status === "Failed" ? ["DevicePreferences"] : []
   return Option.isSome(problems)
-    ? { type: "logRead", reading, ok: true, problems: Math.min(problems.value, Developer.journalCap), needs }
+    ? { type: "logRead", reading, ok: true, problems: Math.min(problems.value.length, Developer.journalCap), needs }
     : { type: "logRead", reading, ok: false, problems: 0, needs: [] }
 }
 
@@ -81,10 +81,10 @@ effect function logCleared(clearing: number): Developer.Event!!SystemSettings {
 }
 
 // spec/app/settings/developer.md, "The report copies only the fields Alpha allows, so no text, address, key or identifier can reach it"
-effect function exported(exporting: number): Developer.Event!!(SystemSettings | Developer.Machine) {
-  const { problems } = try (try Developer.Machine).get()
+effect function exported(exporting: number): Developer.Event!!SystemSettings {
+  const logged = try (try SystemSettings).problems()
   const { app, mode } = versions()
-  const report = { appVersion: app, buildType: mode, problemEntries: problems }
+  const report = { appVersion: app, buildType: mode, problemEntries: Option.getOrElse(logged, () => []).slice(-Developer.journalCap) }
   const ok = tryPromise(() => shared("alpha-diagnostics.json", JSON.stringify(report, null, 2))) catch () => false
   return { type: "exported", exporting, ok }
 }

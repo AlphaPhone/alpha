@@ -185,7 +185,8 @@ function Top({ runtime, alpha, common }: PageProps) {
   const pages = usePages(runtime).state;
   return (
     <SettingsTopPage {...common} developer={pages?.development ?? false}>
-      {alpha.slot("settings/top")}
+      {alpha.slot("settings/account")}
+      {alpha.slot("settings/updates")}
     </SettingsTopPage>
   );
 }
@@ -247,7 +248,7 @@ function Privacy({ runtime, alpha, common }: PageProps) {
   const review = { type: "reviewAccess", access: "NotificationsAccess" } as const;
   return (
     <SettingsPrivacyPage {...common} {...device} onSetUpAccess={can(review) ? () => void send(review) : undefined}>
-      {alpha.slot("settings/privacy")}
+      {alpha.slot("settings/listening")}
     </SettingsPrivacyPage>
   );
 }
