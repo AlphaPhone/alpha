@@ -103,15 +103,15 @@ const make = effect {
   const content = try SubscriptionRef.make<DraftContent | undefined>(undefined)
   const keptReview = try SubscriptionRef.make<KeptReview | undefined>(undefined)
   const writing = try Semaphore.make(1)
-  const lastOwner = try Ref.make<{ owner: string; snapshot: NotesSnapshot; digest: string } | undefined>(undefined)
+  const lastOwner = try Ref.make<OwnedSnapshot | undefined>(undefined)
   const unsaved = try PubSub.unbounded<string>()
 
   effect function send(event: EditorEvent): (Editor | undefined)!! {
     return (machine.send(event) catch () => undefined)
   }
 
-  effect function owned(): ({ owner: string; snapshot: NotesSnapshot; digest: string } | undefined)!! {
-    const current = try collection.current()
+  effect function owned(previous?: OwnedSnapshot): ({ owner: string; snapshot: NotesSnapshot; digest: string } | undefined)!! {
+    const current = previous ?? (try collection.current())
     if (current === undefined) return undefined
     const digest = (tryPromise(() => sha256Hex(`notes-owner:${current.owner}`)) catch () => "")
     return digest === "" ? undefined : { ...current, digest }
@@ -134,9 +134,8 @@ const make = effect {
     try show({ ...held, ...fieldsOf(saved), basePrint: notePrint(saved) })
   }
 
-  effect function keepFailedDraft(state: Editor, kept?: { owner: string; snapshot: NotesSnapshot; digest: string }): void!! {
-    const held = try SubscriptionRef.get(content)
-    const owner = kept ?? (try owned())
+  effect function keepFailedDraft(state: Editor, held: DraftContent | undefined, kept?: OwnedSnapshot): void!! {
+    const owner = try owned(kept)
     if (held === undefined || owner === undefined || !state.present) return
     const base = state.draftId === "" ? undefined : owner.snapshot.notes.find((row) => row.id === state.draftId)
     const basePrint = base === undefined ? "" : (tryPromise(() => sha256Hex(notePrint(base))) catch () => "")
@@ -182,7 +181,7 @@ const make = effect {
       const after = try send({ type: "finishSave", noteId: reply?.target?.id ?? "", revision: reply?.target?.revision ?? -1, observed: reply !== undefined })
       if (after === undefined) break
       if (reply === undefined || after.review) {
-        try keepFailedDraft(after)
+        try keepFailedDraft(after, try SubscriptionRef.get(content))
         try collection.needReview()
         break
       }
@@ -219,19 +218,18 @@ const make = effect {
       // spec/notes/editor.md: an owner change or sign-out keeps an edited draft as a failed save does, and says it was not saved.
       const held = try SubscriptionRef.get(content)
       const previous = try Ref.get(lastOwner)
-      if (state.current && state.present && dirty(state) && held !== undefined && previous !== undefined) {
-        try keepFailedDraft(state, previous)
-        try PubSub.publish(unsaved, held.title.trim() === "" ? (held.defaultTitle ?? "Untitled") : held.title.trim())
-      }
       try Ref.set(lastOwner, undefined)
       if (state.current) try send({ type: "retireOwner" })
       try show(undefined)
       try SubscriptionRef.set(keptReview, undefined)
+      if (state.current && state.present && dirty(state) && held !== undefined && previous !== undefined) {
+        try keepFailedDraft(state, held, previous)
+        try PubSub.publish(unsaved, held.title.trim() === "" ? (held.defaultTitle ?? "Untitled") : held.title.trim())
+      }
       return
     }
     if (!state.current) try send({ type: "bindOwner" })
-    const previous = try Ref.get(lastOwner)
-    try Ref.set(lastOwner, previous !== undefined && previous.owner === current.owner ? { ...previous, snapshot: current.snapshot } : try owned())
+    try Ref.set(lastOwner, current)
     const after = try send({ type: "publish", revision: current.snapshot.revision, notes: [...noteIds(current.snapshot)], trashed: [...trashIds(current.snapshot)] })
     if (after === undefined) return
     const held = try SubscriptionRef.get(content)

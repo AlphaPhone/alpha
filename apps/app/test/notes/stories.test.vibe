@@ -364,7 +364,7 @@ describe("Notes stories", () => {
   it.live("Every finished segment and its words survive a restart (spec/notes/recordingJournal.md, \"Story: Keep every finished segment of a recording through a crash\")", () => effect {
     const agent = new NotesAgentFake()
     const device = new DeviceFake()
-    device.segmentText = undefined
+    device.segmentText = "Buy stamps"
     provide notesOver(agent, device) {
       const recorder = try NotesRecorder
       const journal = try JournalMachine
@@ -373,10 +373,11 @@ describe("Notes stories", () => {
       try recorder.stop()
       // spec/notes/recordingJournal.md, "Finished segments are journaled as a prefix, with text only for journaled segments"
       const written = try until(journal.changes, (state) => state.texts >= 1)
+      const shown = try until(recorder.display, (view) => view.transcript === "Buy stamps")
       const restarted = try journal.send({ type: "restarted" })
       try check(() => assert.deepStrictEqual(
-        { segments: written.segments, durable: written.durable, texts: written.texts, phase: restarted.phase, recovered: restarted.recovered, kept: restarted.segments },
-        { segments: 1, durable: 1, texts: 1, phase: "PendingStopped", recovered: true, kept: 1 },
+        { segments: written.segments, durable: written.durable, texts: written.texts, transcript: shown.transcript, phase: restarted.phase, recovered: restarted.recovered, kept: restarted.segments },
+        { segments: 1, durable: 1, texts: 1, transcript: "Buy stamps", phase: "PendingStopped", recovered: true, kept: 1 },
       ))
     }
   })
@@ -514,7 +515,7 @@ describe("Notes stories", () => {
     }
   })
 
-  it.live("The agent moves, creates folders and restores only what I reviewed (spec/notes/organize.md, \"Story: Let the agent organise my notes after I review the change\")", () => effect {
+  it.live("The Notes executor moves, creates folders and restores only what I reviewed (spec/notes/organize.md, \"Story: Let the agent organise my notes after I review the change\")", () => effect {
     const plan = note("plan", "Plan", "\nSteps", 1)
     const agent = seeded(plan, note("old", "Old", "\nGone soon", 2))
     const device = new DeviceFake()
@@ -528,8 +529,9 @@ describe("Notes stories", () => {
       // spec/notes/organize.md, "A move applies only to the note revision the owner reviewed, into a folder that exists"
       const revision = try tryPromise(() => recordNoteOriginFor(plan))
       const target = { sourceId: "notes", sourceRevision: sha, noteId: "plan", revision: revision?.revision ?? sha }
-      const admitted = try organize.admit({ type: "notes_move", target, folder: "Work" }, { view: "notes" }, true, false, false)
-      const moved = admitted === undefined ? undefined : try organize.execute(admitted.operation)
+      const move = { type: "notes_move" as const, target, folder: "Work" }
+      const admitted = try organize.admit(move, { view: "notes" }, true, false, false)
+      const moved = try organize.execute(move)
       const stale = try organize.execute({ type: "notes_move", target, folder: null })
       const missing = try organize.execute({ type: "notes_move", target, folder: "Nowhere" })
       // spec/notes/organize.md, "A restore brings back the newest Recently deleted copy of that note through the Trash restore"
@@ -538,9 +540,9 @@ describe("Notes stories", () => {
       const restored = try organize.execute({ type: "notes_restore", noteId: "old" })
       const live = try organize.execute({ type: "notes_restore", noteId: "old" })
       try check(() => assert.deepStrictEqual(
-        { made: made.status, exists: exists.summary, direct: admitted?.direct, moved: moved?.status, folder: typeof agent.notes.find((item) => item.id === "plan")?.format?.data.folderId,
+        { made: made.status, exists: exists.summary, legacyOffered: admitted !== undefined, moved: moved.status, folder: typeof agent.notes.find((item) => item.id === "plan")?.format?.data.folderId,
           stale: [stale.status, stale.summary], missing: missing.status, restored: restored.status, live: live.summary },
-        { made: "succeeded", exists: "“work” exists", direct: false, moved: "succeeded", folder: "string",
+        { made: "succeeded", exists: "“work” exists", legacyOffered: false, moved: "succeeded", folder: "string",
           stale: ["failed", "Note changed"], missing: "failed", restored: "succeeded", live: "The note is already in Notes." },
       ))
     }

@@ -125,6 +125,8 @@ describe("Notes journeys", () => {
   it.live("Record a voice note and save it once (spec/notes/recorder.md, \"Story: Save the recording as one voice note\"; spec/notes/organize.md, \"Story: Let the agent start and stop a voice note\")", () => effect {
     const agent = new NotesAgentFake()
     const device = new DeviceFake()
+    let speechRequests = 0
+    device.speech = () => { speechRequests += 1; return { text: "Buy stamps", local: false } }
     provide notesOver(agent, device) {
       const recorder = try NotesRecorder
       const organize = try NotesOrganize
@@ -138,10 +140,10 @@ describe("Notes journeys", () => {
       const again = try recorder.finish()
       try check(() => assert.deepStrictEqual({
         direct: admitted?.direct, started, stopped, voices: voice.length, audio: voice[0]?.format?.data.audio, claims: device.claims, again,
-        retained: device.saved.get("rec_9")?.noteId === voice[0]?.id,
+        retained: device.saved.get("rec_9")?.noteId === voice[0]?.id, lines: voice[0]?.format?.data.lines, speechRequests,
       }, {
         direct: true, started: { status: "succeeded", summary: "Recording" }, stopped: { status: "succeeded", summary: "Saved the voice note." },
-        voices: 1, audio: { audioId: "rec_9", durationMs: 3000 }, claims: 1, again: false, retained: true,
+        voices: 1, audio: { audioId: "rec_9", durationMs: 3000 }, claims: 1, again: false, retained: true, lines: [], speechRequests: 0,
       }))
     }
   })

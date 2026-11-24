@@ -124,7 +124,7 @@ export class DeviceFake {
   saved = new Map<string, { noteId: string; durationMs: number; transcript: string; deletedAt?: number; purged?: boolean }>();
   claims = 0;
   recordingOpen = false;
-  segmentText: string | undefined = "Buy stamps";
+  segmentText: string | undefined;
   refuseStart: string | undefined;
   speech: (args: Record<string, unknown>) => unknown = () => ({ text: "Buy stamps", local: false });
   playing: string | undefined;

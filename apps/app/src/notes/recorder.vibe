@@ -2,7 +2,7 @@
 import type { NoteFormat, NoteJson, StickyNote } from "@elizaos/plugin-notes/types"
 import { playbackAllowed } from "../../gen/notes__audio.effect.vibe"
 import {
-  type Event as RecorderEvent, Machine as RecorderMachine, type Recorder, type StartRefusal, machine as recorderMachine, voiceSavePlan,
+  type Event as RecorderEvent, Machine as RecorderMachine, type Recorder, type StartRefusal, holdsRecording, machine as recorderMachine, voiceSavePlan,
 } from "../../gen/notes__recorder.effect.vibe"
 import { type Event as JournalEvent, Machine as JournalMachine, machine as journalMachine } from "../../gen/notes__recordingJournal.effect.vibe"
 import { Native } from "../platform/native.vibe"
@@ -131,8 +131,12 @@ const make = effect {
     const segments = status.segments ?? []
     const before = (try journal.get()).segments
     for (let index = before; index < segments.length; index += 1) try record({ type: "segmentFinished", journaled: true })
-    for (const segment of segments) if (segment.text !== undefined && !(try Ref.get(texts)).has(segment.segmentId)) {
-      try Ref.update(texts, (known) => new Map([...known, [segment.segmentId, segment.text ?? ""]]))
+    for (const segment of segments) {
+      const text = segment.text
+      if (text === undefined) break
+      if ((try Ref.get(texts)).has(segment.segmentId)) continue
+      try Ref.update(texts, (known) => new Map([...known, [segment.segmentId, text]]))
+      try record({ type: "textJournaled" })
     }
   }
 
@@ -210,6 +214,16 @@ const make = effect {
     return (try SubscriptionRef.get(display)).recordingId
   }
 
+  effect function stopCapture(id: string): (RecordingStatus | undefined)!! {
+    const stopped = (effect { return try decodeRecordingStatus(try voice("stopNoteRecording", { recordingId: id })) } catch () => undefined)
+    if (stopped?.state !== "stopped" || stopped.recordingId !== id || (try recordingId()) !== id
+        || !matches(stopped, try Ref.get(digest), try Ref.get(folder))) return undefined
+    try send({ type: "stopRecording" })
+    try absorb(stopped)
+    try record({ type: "stopPending" })
+    return stopped
+  }
+
   effect function close(): void!! {
     try SubscriptionRef.set(display, { ...idle })
     try Ref.set(texts, new Map())
@@ -254,9 +268,12 @@ const make = effect {
 
   effect function finish(): boolean!! {
     const id = try recordingId()
-    if (id === undefined || (try send({ type: "finishRecording" })) === undefined) return false
-    const stopped = (effect { return try decodeRecordingStatus(try voice("stopNoteRecording", { recordingId: id })) } catch () => undefined)
-    if (stopped === undefined || stopped.recordingId !== id || stopped.state !== "stopped") { try send({ type: "voiceSaveFailed" }); return false }
+    const state = try machine.get()
+    if (id === undefined || !holdsRecording(state)) return false
+    const stopped = state.phase === "RecStopped" ? try status() : try stopCapture(id)
+    if (stopped?.state !== "stopped" || stopped.recordingId !== id || (try recordingId()) !== id
+        || !matches(stopped, try Ref.get(digest), try Ref.get(folder))) return false
+    if ((try send({ type: "finishRecording" })) === undefined) return false
     if (stopped.canonicalSavePending === true && !(try machine.get()).savePending) try send({ type: "claim" })
     try learn(stopped)
     try record({ type: "stopPending" })
@@ -336,14 +353,7 @@ const make = effect {
     },
     effect stop() {
       const id = try recordingId()
-      if (id === undefined) return false
-      const stopped = (effect { return try decodeRecordingStatus(try voice("stopNoteRecording", { recordingId: id })) } catch () => undefined)
-      if (stopped === undefined || stopped.state !== "stopped" || stopped.recordingId !== id) return false
-      try send({ type: "stopRecording" })
-      try learn(stopped)
-      try record({ type: "stopPending" })
-      try absorb(stopped)
-      return true
+      return id !== undefined && (try stopCapture(id)) !== undefined
     },
     finish,
     effect askDiscard() { try send({ type: "askDiscard" }) },
@@ -376,7 +386,9 @@ const make = effect {
     effect recordStop() {
       const state = try machine.get()
       if (state.phase === "RecClosed" || state.phase === "RecFailed" || state.phase === "RecStarting") return "none"
-      return (try finish()) ? "saved" : (try machine.get()).phase === "RecStopped" ? "retained" : "failed"
+      if (try finish()) return "saved"
+      const after = try machine.get()
+      return after.phase === "RecStopped" && after.segments > 0 && !after.savePending ? "retained" : "failed"
     },
   }
 }
