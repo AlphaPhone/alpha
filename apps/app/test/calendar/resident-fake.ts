@@ -89,8 +89,8 @@ export class CalendarAgentFake {
       this.writes.push({ method, path, body });
       const target = this.events.find((event) => event.id === decodeURIComponent(match[1]!));
       if (!target) throw Object.assign(new Error("missing"), { status: 404 });
-      const request = body as { expectedProviderVersion: string };
-      if (request.expectedProviderVersion !== target.etag) throw Object.assign(new Error("version"), { status: 409 });
+      const expected = method === "DELETE" ? url.searchParams.get("expectedProviderVersion") : (body as { expectedProviderVersion: string }).expectedProviderVersion;
+      if (expected !== target.etag) throw Object.assign(new Error("version"), { status: 409 });
       if (method === "DELETE") {
         this.events = this.events.filter((event) => event !== target);
         return { status: 200, data: { deleted: true, event: null, receipt: { operation: "delete", source: this.sourceKey(), eventId: target.id, providerVersion: `deleted:${target.etag}`, event: null, target: this.event(target), acceptedAt: target.startAt } } };
@@ -132,9 +132,9 @@ export class CalendarAgentFake {
     this.events[this.events.length - 1]!.answer = answer;
   }
 
-  /** Add an event today at `hour` UTC. @throws {never} */
-  add(id: string, title: string, day: number, hour: number) {
-    const start = Math.floor(Date.now() / DAY) * DAY + day * DAY + hour * 3_600_000;
+  /** Add an event `day` days from `now` at `hour` UTC. @throws {never} */
+  add(id: string, title: string, day: number, hour: number, now = Date.now()) {
+    const start = Math.floor(now / DAY) * DAY + day * DAY + hour * 3_600_000;
     this.events.push({ id, title, startAt: new Date(start).toISOString(), endAt: new Date(start + 3_600_000).toISOString(), etag: "etag-1", status: "confirmed" });
   }
 }

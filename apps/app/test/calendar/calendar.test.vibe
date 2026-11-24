@@ -105,6 +105,15 @@ describe("Calendar journeys (spec/calendar/agent.md, \"Story: See my agent's Cal
         { undone: true, second: true, sends: 1, standupGone: true, held: 0 },
       ))
 
+      const deletes = fakeAgent.writes.filter((write) => write.method === "DELETE").map(({ path, body }) => {
+        const url = new URL(path, "https://agent.test")
+        return [url.pathname, url.searchParams.get("expectedProviderVersion"), url.searchParams.get("idempotencyKey"),
+          url.searchParams.get("cancellationMode"), body]
+      })
+      try check(() => assert.deepStrictEqual(deletes, [
+        ["/api/lifeops/calendar/events/event-a", "etag-1", "delete-1", "organizer_cancel", undefined],
+      ]))
+
       // spec/calendar/agent.md, "Retiring the binding empties Calendar and abandons the read"
       try bindCalendar({ ...binding, owner: JSON.stringify(["https://agent.test", "owner-2", "agent-1"]), session: 2 })
       const other = try agent.view()
