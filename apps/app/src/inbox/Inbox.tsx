@@ -26,14 +26,18 @@ import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { Time } from "../runtime/time.vibe";
-import { Compose, Shelf } from "./Compose.tsx";
+import { Compose, FileOffer, Shelf, Suggested } from "./Compose.tsx";
+import type { Offers } from "./suggestion.vibe";
+import type { Machine as Offering } from "../../gen/app__inbox__suggestion.effect.vibe";
+import type { Incoming } from "./adding.vibe";
+import type { Machine as Adding } from "../../gen/app__inbox__adding.effect.vibe";
 import { type Beginning, Letters, begin } from "./composer.vibe";
 import { type Letter, Mail, revisionOf } from "./gmail.vibe";
 import { linksOf } from "./links.ts";
 
 export interface InboxProps {
   /** Provides the list, the message open and its marks, the changes, the shell, and Mail, which holds what Gmail said. */
-  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Writing | Letters | Shell | Mail | Time, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Writing | Adding | Incoming | Offering | Offers | Letters | Shell | Mail | Time, unknown>;
 }
 
 type Runtime = InboxProps["runtime"];
@@ -271,7 +275,7 @@ export function Inbox({ runtime }: InboxProps) {
       ? () => void runtime.runPromise(begin(beginning))
       : undefined;
   };
-  if (drafts.state.open) return <><Compose runtime={runtime} list={state} />{<ChangeReview runtime={runtime} list={state} cards={(number) => mailOf(runtime, (mail) => mail.card(number))} />}</>;
+  if (drafts.state.open) return <><Compose runtime={runtime} list={state} /><ChangeReview runtime={runtime} list={state} cards={(number) => mailOf(runtime, (mail) => mail.card(number))} /><FileOffer runtime={runtime} /><Suggested runtime={runtime} /></>;
   const cards = (number: number) => mailOf(runtime, (mail) => mail.card(number));
   const refresh = can({ type: "refresh" }) ? () => void send({ type: "refresh" }) : undefined;
   const review = <ChangeReview runtime={runtime} list={state} cards={cards} />;
@@ -352,6 +356,8 @@ export function Inbox({ runtime }: InboxProps) {
       {mustChoose ? <InboxAccountList accounts={accounts} onChoose={chooseAccount} /> : null}
       <InboxAccountSheet open={choosing} onOpenChange={setChoosing} accounts={accounts} selected={String(account)} onChoose={chooseAccount} />
       <Shelf runtime={runtime} open={shelf} onOpenChange={setShelf} />
+      <FileOffer runtime={runtime} />
+      <Suggested runtime={runtime} />
       {review}
     </>
   );

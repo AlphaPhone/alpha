@@ -10,6 +10,8 @@ import { canvas } from "./shell/canvas.vibe"
 import { mailbox } from "./inbox/mailbox.vibe"
 import { operations } from "./inbox/operations.vibe"
 import { composer } from "./inbox/composer.vibe"
+import { adding } from "./inbox/adding.vibe"
+import { suggestions } from "./inbox/suggestion.vibe"
 import { attention } from "./telephony/attention.vibe"
 import { callBar } from "./telephony/callBar.vibe"
 import { comms } from "./telephony/comms.vibe"
@@ -32,6 +34,8 @@ const machines = together(
   mailbox,
   operations,
   composer,
+  adding,
+  suggestions,
   callBar,
   phone,
   messages,

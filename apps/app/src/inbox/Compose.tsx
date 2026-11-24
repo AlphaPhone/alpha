@@ -1,23 +1,31 @@
 // spec/app/inbox/drafts.md, "Story: Write a message"; spec/app/inbox/drafts.md, "Story: Set a draft aside or discard it"; spec/app/inbox/sending.md, "Story: Send a draft I reviewed"
-import { InboxComposer, InboxDiscardDialog, InboxDraftReview, type InboxSendOutcomeProps, InboxShelfSheet } from "@repo/ui";
+import { Button, InboxComposer, InboxDiscardDialog, InboxDraftReview, InboxFileOfferSheet, InboxSuggestionSheet, type InboxNoticeKind, type InboxSendOutcomeProps, InboxShelfSheet } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
 import { useState } from "react";
 import { type Mailbox, accessOf } from "../../gen/app__inbox.ts";
 import type { Machine as Writing } from "../../gen/app__inbox__drafts.effect.vibe";
 import { type Composer, flushed, ready } from "../../gen/app__inbox__drafts.ts";
 import { useMachine as useDrafts } from "../../gen/app__inbox__drafts.react.ts";
-import type { Letter } from "../../gen/app__inbox__letter.ts";
+import { type Letter, canAttach } from "../../gen/app__inbox__letter.ts";
+import type { Machine as Adding } from "../../gen/app__inbox__adding.effect.vibe";
+import type { Refusal } from "../../gen/app__inbox__adding.ts";
+import { useMachine as useAdding } from "../../gen/app__inbox__adding.react.ts";
+import type { Machine as Offering } from "../../gen/app__inbox__suggestion.effect.vibe";
+import { useMachine as useOffer } from "../../gen/app__inbox__suggestion.react.ts";
+import { held } from "../../gen/app__inbox__shelf.ts";
 import type { Machine as Changes } from "../../gen/app__inbox__sending.effect.vibe";
 import type { Operations } from "../../gen/app__inbox__sending.ts";
 import { useMachine as useChanges } from "../../gen/app__inbox__sending.react.ts";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import type { Time } from "../runtime/time.vibe";
-import { Letters, type Words, acceptable } from "./composer.vibe";
+import { Incoming, mibOf } from "./adding.vibe";
+import { Offers, fits } from "./suggestion.vibe";
+import { Letters, type Words, acceptable, policy } from "./composer.vibe";
 import { Mail } from "./gmail.vibe";
 
 export interface ComposeProps {
-  runtime: ManagedRuntime.ManagedRuntime<Writing | Changes | Letters | Mail | Time, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Writing | Changes | Adding | Incoming | Offering | Offers | Letters | Mail | Time, unknown>;
   list: Mailbox;
 }
 
@@ -34,6 +42,8 @@ function outcomeOf(ops: Operations, letter: Letter): InboxSendOutcomeProps["outc
   return undefined;
 }
 
+const refusals = { TooBig: "fileTooBig", NotReadable: "fileUnreadable", NoRoom: "noRoom" } as const satisfies Partial<Record<Refusal, InboxNoticeKind>>;
+
 const keepingOf = (s: Composer) => (s.unkept ? (s.full ? "full" : "notKept") : s.write.status === "Loading" || s.pending ? "writing" : "kept");
 
 /**
@@ -44,8 +54,9 @@ const keepingOf = (s: Composer) => (s.unkept ? (s.full ? "full" : "notKept") : s
 export function Compose({ runtime, list }: ComposeProps) {
   const { state, can, send } = useTimed(runtime, useDrafts);
   const ops = useTimed(runtime, useChanges);
+  const adding = useAdding(runtime);
   const [typing, setTyping] = useState({ to: "", cc: "", bcc: "" });
-  if (!state || !ops.state || !state.open) return null;
+  if (!state || !ops.state || !adding.state || !state.open) return null;
   const letter = state.letter;
   const draft = letter.id;
   const words = runtime.runSync(Letters.use((all) => Effect.sync(() => all.words(draft))));
@@ -81,6 +92,19 @@ export function Compose({ runtime, list }: ComposeProps) {
   const reviewing = ops.state.review.showing && ops.state.draft === draft && ops.state.kind === "Send";
   const outcome = outcomeOf(ops.state, letter);
   const aside = { type: "setAside" } as const;
+  // spec/app/inbox/adding.md, "A file is attached to the draft open only once the picker gives one that fits within the room its account leaves; one too large, unreadable or without room is refused and said so"
+  const attach = { type: "attach", draft } as const;
+  const refused = adding.state.draft === draft && adding.state.refused !== "Accepted" ? refusals[adding.state.refused] : undefined;
+  // spec/app/inbox/drafts.md, "A file joins the draft open only within its account's limits, and one is removed with its size"
+  const detach = (id: string) => {
+    const file = words.files[Number(id)];
+    const event = { type: "detach", now: untimed, mib: mibOf(file?.size ?? 0) } as const;
+    if (!file || !can(event, "Owner")) return undefined;
+    return () => {
+      runtime.runSync(Letters.use((all) => Effect.sync(() => all.set(draft, { ...words, files: words.files.filter((_, at) => at !== Number(id)) }))));
+      void send(event, "Owner");
+    };
+  };
   return (
     <>
       <InboxComposer
@@ -95,6 +119,9 @@ export function Compose({ runtime, list }: ComposeProps) {
         text={words.text}
         onTextChange={(text) => change({ text })}
         attachments={words.files.map((file, at) => ({ id: String(at), name: file.name }))}
+        onRemoveAttachment={(id) => detach(id)?.()}
+        onAttach={adding.can(attach) && canAttach(letter, policy, 1) ? () => void adding.send(attach) : undefined}
+        notice={refused}
         outcome={outcome === undefined ? undefined : { outcome }}
         storage={ready(state) ? undefined : state.load.status === "Failed" ? "unavailable" : "checking"}
         onReloadStorage={can({ type: "reload" }, "World") ? () => void send({ type: "reload" }, "World") : undefined}
@@ -147,6 +174,75 @@ export function Shelf({ runtime, open, onOpenChange }: { runtime: ComposeProps["
         const event = { type: "resume", draft: Number(id) } as const;
         if (can(event, "Owner")) void send(event, "Owner");
       }}
+    />
+  );
+}
+
+/**
+ * A file another part of Alpha handed to Inbox, shown before it joins the draft open or starts a new message.
+ * @model spec/app/inbox/adding.md
+ */
+export function FileOffer({ runtime }: { runtime: ComposeProps["runtime"] }) {
+  const { state, can, send } = useAdding(runtime);
+  const drafts = useDrafts(runtime);
+  if (!state || !drafts.state) return null;
+  const held = runtime.runSync(Incoming.use((files) => Effect.sync(() => files.file())));
+  const open = state.thing !== 0 && held !== undefined && held.source !== "Picker";
+  const room = state.into === 0 || (drafts.state.open && drafts.state.letter.id === state.into && canAttach(drafts.state.letter, policy, state.mib));
+  const takeIn = { type: "takeIn", room } as const;
+  return (
+    <InboxFileOfferSheet
+      open={open}
+      name={held?.attached.name ?? ""}
+      size={`${state.mib} MB`}
+      source={held?.source === "Photos" ? "Photos" : "Files"}
+      into={state.into === 0 ? "new" : "draft"}
+      onTakeIn={() => {
+        if (can(takeIn)) void send(takeIn);
+      }}
+      onLeaveOut={() => {
+        if (can({ type: "leaveOut" })) void send({ type: "leaveOut" });
+      }}
+    />
+  );
+}
+
+const targets = { ToDraft: "draft", NewReply: "newReply", NewEmail: "newEmail" } as const;
+
+/**
+ * Text offered into an email: Alpha's suggestion for a draft, or text handed over with "Use in email", shown against
+ * the draft as it is now before it goes in, added or in place of its text.
+ * @model spec/app/inbox/suggestion.md
+ */
+export function Suggested({ runtime }: { runtime: ComposeProps["runtime"] }) {
+  const { state, can, send } = useOffer(runtime);
+  const drafts = useDrafts(runtime);
+  if (!state || !drafts.state || state.text === 0) return null;
+  const composer = drafts.state;
+  const letter = state.target !== "ToDraft" ? undefined : composer.open && composer.letter.id === state.draft ? composer.letter : held(composer.shelf, state.draft);
+  const revision = letter?.revision ?? 0;
+  const text = runtime.runSync(Offers.use((offers) => Effect.sync(() => offers.text(state.text))));
+  const before = letter === undefined ? "" : runtime.runSync(Letters.use((all) => Effect.sync(() => all.words(letter.id).text)));
+  const review = { type: "review", revision } as const;
+  // spec/app/inbox/suggestion.md, "Only the owner puts it in, once, as it was last shown, into the draft as it still is, adding or replacing as the owner chooses; text that does not fit is refused whole and the offer stays"
+  const using = (appends: boolean) => {
+    const event = { type: "use", revision, appends, fits: fits(before, text, appends) } as const;
+    return can(event, "Owner") ? () => void send(event, "Owner") : undefined;
+  };
+  if (!state.review.showing) {
+    return can(review, "Owner") ? <Button variant="secondary" size="sm" className="m-4 self-start" onClick={() => void send(review, "Owner")}>Review email suggestion</Button> : null;
+  }
+  return (
+    <InboxSuggestionSheet
+      open
+      text={text}
+      from={state.from === "Agent" ? "alpha" : "owner"}
+      source={runtime.runSync(Offers.use((offers) => Effect.sync(() => offers.source(state.text))))}
+      target={targets[state.target]}
+      tooLong={state.blocked}
+      onAdd={state.target === "ToDraft" ? using(true) : using(false)}
+      onReplace={state.target === "ToDraft" ? using(false) : undefined}
+      onDismiss={() => void send({ type: "dismiss" }, "Owner")}
     />
   );
 }

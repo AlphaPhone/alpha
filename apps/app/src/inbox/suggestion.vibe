@@ -1,0 +1,139 @@
+// spec/app/inbox/suggestion.md, "Story: Review what is offered into my email"
+import * as Inbox from "../../gen/app__inbox.effect.vibe"
+import * as Suggestion from "../../gen/app__inbox__suggestion.effect.vibe"
+import type { Effect as Out, Event, Target } from "../../gen/app__inbox__suggestion.effect.vibe"
+import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
+import type { Actor } from "../../gen/app__inbox__access.ts"
+import { held } from "../../gen/app__inbox__shelf.effect.vibe"
+import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { type Job, contained, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import { Letters, policy } from "./composer.vibe"
+import { Mail } from "./gmail.vibe"
+
+/** The longest text a draft takes, in characters: Gmail's own limit on a message, with room to spare. */
+export const longest = 100_000
+
+/** Whether `text` fits the draft whose text is `before`, added to it or in its place. */
+export function fits(before: string, text: string, appends: boolean): boolean {
+  return (appends ? before.length + 2 + text.length : text.length) <= longest
+}
+
+/** The texts offered into an email, by the number the rules know each by, and where each came from. */
+export service Offers {
+  text(number: number): string
+  /** Where the text came from, as the owner is told: a note's title, say. */
+  source(number: number): string | undefined
+  add(text: string, source: string | undefined): number
+}
+
+export const offers = Layer.sync(Offers, () => {
+  const texts = new Map<number, { readonly text: string; readonly source: string | undefined }>()
+  return {
+    text: (number: number) => texts.get(number)?.text ?? "",
+    source: (number: number) => texts.get(number)?.source,
+    add(text: string, source: string | undefined) {
+      const number = texts.size + 1
+      texts.set(number, { text, source })
+      return number
+    },
+  }
+})
+
+// spec/app/inbox/suggestion.md, "What goes in is the text shown, where it was aimed, as the owner confirmed it, once"
+/** The offer's text goes into `draft` at `revision`, added or in place of its text, open or set aside. */
+effect function inserted(draft: number, revision: number, text: number, appends: boolean): void!!(Offers | Letters | Drafts.Machine) {
+  const composer = try Drafts.Machine
+  const words = try Letters
+  const said = (try Offers).text(text)
+  const state = try composer.get()
+  const open = state.open && state.letter.id === draft
+  const event: Drafts.Event = open ? { type: "inserted", now: untimed, draft, revision } : { type: "insertedAside", draft, revision }
+  const before = words.words(draft)
+  const sent = try exit(composer.send(event, "Owner"))
+  if (Exit.isSuccess(sent)) words.set(draft, { ...before, text: appends && before.text !== "" ? `${before.text}\n\n${said}` : said })
+}
+
+// spec/app/inbox/drafts.md, "Text the owner reviewed goes into the draft it was shown against, as that draft still is, open or set aside; text for a new message or reply starts one with it; a file handed over with no draft open starts a new message with it"
+/** A new email from `account`, or a reply to `message`, beginning with the offer's text. */
+effect function startedWith(target: Target, account: number, message: number, text: number): void!!(Offers | Letters | Drafts.Machine | Mail | Shell) {
+  const composer = try Drafts.Machine
+  const words = try Letters
+  const ledger = try Mail
+  const card = message === 0 ? undefined : ledger.card(message)
+  const sender = card === undefined ? "" : /<([^>]+)>/u.exec(card.from)?.[1] ?? card.from.trim()
+  const replying = target === "NewReply"
+  const event: Drafts.Event = { type: "startedWith", kind: replying ? "Reply" : "Fresh", account, replyTo: false, addressable: !replying || sender !== "", policy }
+  const sent = try exit(composer.send(event, "Owner"))
+  if (!Exit.isSuccess(sent) || !sent.value.state.open) return
+  const subject = card === undefined ? "" : card.subject.toLowerCase().startsWith("re:") ? card.subject : `Re: ${card.subject}`
+  words.set(sent.value.state.letter.id, {
+    to: replying ? [sender] : [], cc: [], bcc: [], subject, text: (try Offers).text(text), files: [],
+    answers: card?.id, mode: replying ? "reply" : "compose",
+  })
+  try ignore((try Shell).send({ type: "openView", view: "Inbox" }))
+}
+
+function carry(fx: Out): Job<Event, Offers | Letters | Drafts.Machine | Mail | Shell, [by: Actor]> {
+  return match (fx) {
+    when { tag: "Insert", let draft, let revision, let text, let appends }: run("insert", inserted(draft, revision, text, appends), "World");
+    when { tag: "StartWith", let target, let account, let message, let text }: run("start", startedWith(target, account, message, text), "World");
+  }
+}
+
+// spec/app/inbox/suggestion.md, "The owner can put it away, and it goes when its draft is discarded or forgotten, with the session, or with a restart"
+/** A draft that is neither open nor set aside any more is gone, and its offer with it. */
+const gone = started(effect {
+  const composer = try Drafts.Machine
+  const offer = try Suggestion.Machine
+  const held = Stream.changesWith(Stream.map(composer.changes, (state) => [...(state.open ? [state.letter.id] : []), ...state.shelf.shelved]), (a, b) => a.join() === b.join())
+  let before: ReadonlyArray<number> = []
+  try Stream.runForEach(held, effect (drafts) => {
+    for (const draft of before) if (!drafts.includes(draft)) try contained(offer.send({ type: "draftGone", draft }, "World"), "a draft gone")
+    before = drafts
+  })
+}, "a draft gone")
+
+const sessions = started(effect {
+  const list = try Inbox.Machine
+  const offer = try Suggestion.Machine
+  try Stream.runForEach(Stream.drop(Stream.changes(Stream.map(list.changes, (mailbox) => mailbox.signedIn)), 1), effect () => {
+    try contained(offer.send({ type: "sessionChanged" }, "World"), "a new cloud session")
+  })
+}, "a new cloud session")
+
+/** Where text handed over from elsewhere in Alpha goes: the draft open, else a reply to the message `message` of `account`, else a new email. */
+export interface Aim {
+  readonly target: Target
+  readonly account: number
+  readonly message: number
+}
+
+// spec/app/inbox/suggestion.md, "Alpha suggests text only for a draft; the owner hands text over from elsewhere in Alpha into a draft, a new reply or a new email; either replaces an offer not yet used"
+/** The owner hands `text` from elsewhere in Alpha, such as a note, to Inbox with "Use in email": shown before it goes in. Whether Inbox took it. */
+export effect function useInEmail(text: string, source: string, aim: Aim): boolean!!(Offers | Suggestion.Machine | Drafts.Machine | Shell) {
+  const composer = try (try Drafts.Machine).get()
+  const number = (try Offers).add(text, source)
+  const draft = composer.open ? composer.letter.id : 0
+  const event: Event = {
+    type: "useInEmail", text: number, target: draft !== 0 ? "ToDraft" : aim.target, draft, account: aim.account, message: aim.message,
+    revision: draft !== 0 ? composer.letter.revision : 0,
+  }
+  const sent = try exit((try Suggestion.Machine).send(event, "Owner"))
+  if (!Exit.isSuccess(sent)) return false
+  try ignore((try Shell).send({ type: "openView", view: "Inbox" }))
+  return true
+}
+
+/** Alpha suggests `text` for the draft `draft`, at the revision the composer holds it at. Whether it is offered. */
+export effect function suggest(text: string, draft: number): boolean!!(Offers | Suggestion.Machine | Drafts.Machine) {
+  const composer = try (try Drafts.Machine).get()
+  const aside = composer.shelf.shelved.includes(draft) ? held(composer.shelf, draft) : undefined
+  const letter = composer.open && composer.letter.id === draft ? composer.letter : aside
+  if (letter === undefined) return false
+  const number = (try Offers).add(text, undefined)
+  const sent = try exit((try Suggestion.Machine).send({ type: "suggest", text: number, draft, revision: letter.revision }, "Agent"))
+  return Exit.isSuccess(sent)
+}
+
+/** Text offered into an email, held until the owner reviews it, and put in once, as shown. */
+export const suggestions = together(Layer.provideMerge(reacting(Suggestion, { open: [{ type: "restart" }, "World"], carry }), offers), gone, sessions)
