@@ -2,7 +2,7 @@ import {androidIdentity} from './android-identity.ts';
 /**
  * Verify, build the launcher APKs and retain immutable matching app/test artifacts.
  *
- *   node scripts/build-archive.ts test-results/<new-archive>
+ *   node --conditions=eliza-source --import vibelang/register scripts/build-archive.ts test-results/<new-archive>
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -14,7 +14,7 @@ import {buildEnv as androidBuildEnv} from './build-android.ts';
 import {publicUpdateChannel} from './update-channel.ts';
 const cli=process.argv.slice(2);
 const runtimeProfile='native';
-assert.ok(cli.length===1&&!cli[0].startsWith('--'),'Use: node scripts/build-archive.ts test-results/<new-archive>');
+assert.ok(cli.length===1&&!cli[0].startsWith('--'),'Use: node --conditions=eliza-source --import vibelang/register scripts/build-archive.ts test-results/<new-archive>');
 const [destination]=cli;
 // Full verification compiles Calendar host tests which run real SQLite queries.
 // Check this before preparation or model verification starts.

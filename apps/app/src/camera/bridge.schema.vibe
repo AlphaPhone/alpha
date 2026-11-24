@@ -1,4 +1,4 @@
-// spec/camera/viewfinder.md, "Only the answer to the current start makes the preview ready"; spec/camera/agentCapture.md, "Story: Let the assistant take the photo I asked for"; spec/camera/agentLibrary.md, "Story: Let the assistant point at photos I can see"; spec/camera/libraryReview.md, "Story: Approve each library change the assistant proposes"
+// spec/camera/viewfinder.md, "Only the answer to the current start makes the preview ready"; spec/camera/agentCapture.md, "Story: Let the assistant take the photo I asked for"; spec/camera/agentLibrary.md, "Story: Let the assistant point at photos I can see"; spec/camera/libraryReview.md, "Story: Approve each library change the assistant proposes"; spec/camera/viewfinder.md, "Photo mode offers 4:3 or 16:9 when the bound camera lists both, and a new ratio restarts the preview with it"
 
 const Finite = Schema.Finite
 const Positive = Schema.Finite.check(Schema.isGreaterThan(0))
@@ -18,6 +18,11 @@ export schema PreviewReply {
   hasFlash?: boolean
   flash?: string
 }
+
+/** The cameras `ElizaCamera.getDevices` lists, with the photo ratios each accepts; other fields are not read. */
+export const DeviceList = Schema.Struct({
+  devices: Schema.Array(Schema.Struct({ deviceId: Schema.String, supportedCaptureAspectRatios: Schema.optionalKey(Schema.Array(Schema.String)) })),
+})
 
 /** A photo `ElizaCamera.capturePhoto` answered with: a thumbnail or the bytes, and its media-store identity. */
 export schema PhotoReply {

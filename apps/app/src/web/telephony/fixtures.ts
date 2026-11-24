@@ -24,6 +24,10 @@ export const activeCall: CallBar = {
 };
 /** A call that rings. */
 export const ringingCall: CallBar = { ...activeCall, calls: [{ id: "c2", phase: "Ringing", connectedAt: 0 }] };
+/** A held call with a second call ringing behind it. */
+export const heldWhileRinging: CallBar = {
+  ...activeCall, calls: [{ id: "c1", phase: "Held", connectedAt: at - 90_000 }, { id: "c2", phase: "Ringing", connectedAt: 0 }],
+};
 /** A call that just ended, holding its place. */
 export const endedCall: CallBar = { ...activeCall, calls: [], shown: false, endedUntil: at + 1_500 };
 
@@ -71,6 +75,11 @@ export const choosing: Actions = {
     { candidateId: "8:4155550111", title: "Maya Ortiz", number: "4155550111" },
   ] },
   ran: ["op1"], dispatches: 0, refusals: 0,
+};
+/** A contact change choosing its one row, whose fields are `reviewChange`'s. */
+export const choosingChange: Actions = {
+  ongoing: { tag: "Choosing", runId: "op2", kind: "ContactChange", candidates: [{ candidateId: "7:replace", title: "Maya Chen", number: "7:replace" }] },
+  ran: ["op2"], dispatches: 0, refusals: 0,
 };
 
 /** Home with an unread conversation and a missed call. */

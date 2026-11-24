@@ -1,7 +1,7 @@
-// spec/browser/handoff.md, "Story: Open the page I see in another browser"
+// spec/browser/handoff.md, "Story: Open the page I see in another browser"; spec/browser/page.md, "A page that failed in a normal native tab offers another browser for the address the host named, and nothing else does"
 import { type Event, type HandoffEffect, type ShownPage, Machine, machine } from "../../gen/browser__handoff.effect.vibe"
 import { type Session, curTab } from "../../gen/browser__session.effect.vibe"
-import { isSettled } from "../../gen/browser__page.effect.vibe"
+import { isSettled, offersElsewhere } from "../../gen/browser__page.effect.vibe"
 import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
 import { Toasts } from "../shell/toasts.vibe"
 import { HANDOFF_NOTICES, refusalText } from "./messages.ts"
@@ -14,6 +14,8 @@ import { BrowserCallFailed, TabHost } from "./tabHost.vibe"
 export service BrowserHandoff {
   /** The menu's Open in another browser. */
   openExternal(): void!!
+  /** Open in browser on a page that failed here: only the address the native host named goes. */
+  openFailed(): void!!
   /** Follows the Browser view's visits, retiring a handoff whose view was left or hidden; never returns. */
   follow(): void!!
 }
@@ -88,6 +90,13 @@ export const handoffLayer = Layer.provide(Layer.effect(BrowserHandoff, effect {
         try presenter.forget()
         try send({ type: "cleaned" })
       }
+    },
+    effect openFailed() {
+      const s = try tabs.get()
+      const tab = curTab(s)
+      if (!offersElsewhere(tab.page, tab.profile === "Private", s.host === "NativeHost")) return
+      const opened = host.call("openFailedPage", { id: s.cur, url: tab.page.elsewhere, navigation: tab.page.navigation }) catch (error) => error
+      if (opened instanceof BrowserCallFailed) try toasts.show(refusalText(opened.message))
     },
     effect follow() {
       let was = false

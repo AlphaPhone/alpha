@@ -9,6 +9,10 @@
 // its own package's tsconfig.json, which reads that package's @elizaos dependencies through their built
 // declarations. So the packages this repository depends on, and everything they depend on, are built; the
 // other upstream packages are not.
+//
+// `--gen` runs only upstream's root generation step (//#gen), which writes each package's gitignored gen/
+// directory. Root tests that import an upstream `.vibe` module (scripts/apk.ts reads @elizaos/os/image) need
+// it, and they run before any upstream build does in `pnpm verify`.
 import {spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -27,13 +31,16 @@ function dependedOn(): string[] {
   return [...named].sort();
 }
 
-const packages = process.argv.slice(2);
-const filters = packages.length === 0
+const args = process.argv.slice(2);
+const genOnly = args.includes('--gen');
+const packages = args.filter((name) => name !== '--gen');
+if (genOnly && packages.length > 0) throw new Error('--gen runs upstream\'s root generation step; it takes no package names.');
+const filters = genOnly ? ['--filter=//'] : packages.length === 0
   ? [...dependedOn().map((name) => `--filter=${name}...`), '--filter=//']
   : packages.map((name) => `--filter=${name}`);
 // The outer run's own variables would make the inner run read as part of it.
 const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('TURBO_') || name === 'TURBO_TELEMETRY_DISABLED'));
-const result = spawnSync('pnpm', ['exec', 'turbo', 'run', 'build', ...filters, '--output-logs=errors-only'],
+const result = spawnSync('pnpm', ['exec', 'turbo', 'run', genOnly ? 'gen' : 'build', ...filters, '--output-logs=errors-only'],
   {cwd: path.join(root, 'vendor/eliza'), stdio: 'inherit', env});
 if (result.error) throw result.error;
 process.exit(result.status ?? 1);

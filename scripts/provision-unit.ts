@@ -2,7 +2,7 @@
 /**
  * Provision one pilot unit from a verified APK build and write its per-unit record.
  *
- *   node scripts/provision-unit.ts --serial <adb serial> --alias <unit-name> \
+ *   node --conditions=eliza-source --import vibelang/register scripts/provision-unit.ts --serial <adb serial> --alias <unit-name> \
  *     --apk-manifest artifacts/apk-manifest.json [--variant launcher] \
  *     [--build release|debug] [--output test-results/pilot-units] [--home-wait-ms 0]
  *

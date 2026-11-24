@@ -23,6 +23,11 @@
     <string name="alpha_channel_reminders_old_description">Kept so your earlier sound and alert choices carry over. Reminder alerts use Reminders.</string>
     <string name="alpha_channel_reminders_name">Reminders</string>
     <string name="alpha_channel_reminders_description">Reminders you set on this phone. Android may delay them.</string>
+    <!-- Channel groups in Android's notification settings (AlphaNotificationChannels). -->
+    <string name="alpha_channel_group_assistant">Assistant</string>
+    <string name="alpha_channel_group_mail_briefs">Mail and briefs</string>
+    <string name="alpha_channel_group_workflows">Workflows</string>
+    <string name="alpha_channel_group_ongoing">Ongoing activity</string>
     <!-- New Gmail messages (GmailNoticePoster). -->
     <string name="alpha_gmail_channel_name">New Gmail messages</string>
     <string name="alpha_gmail_channel_description">Tells you when new unread mail arrives. Never shows the sender or subject. Android may delay checks.</string>
