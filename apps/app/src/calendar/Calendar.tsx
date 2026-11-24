@@ -11,9 +11,9 @@ import { useMachine as useView } from "../../gen/app__calendar.react.ts";
 import type * as Changes from "../../gen/app__calendar__agent.ts";
 import { useMachine as useChanges } from "../../gen/app__calendar__agent.react.ts";
 import * as Editor from "../../gen/app__calendar__editor.ts";
-import * as Sync from "../../gen/app__calendar__sync.ts";
-import { useMachine as useSync } from "../../gen/app__calendar__sync.react.ts";
-import { calendars } from "./sync.vibe";
+import type * as Link from "../../gen/app__calendar__link.ts";
+import { useMachine as useLink } from "../../gen/app__calendar__link.react.ts";
+import { setUp } from "./link.vibe";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { useMachine as useEditor } from "../../gen/app__calendar__editor.react.ts";
@@ -418,40 +418,36 @@ function Proposal({ runtime }: CalendarProps) {
   );
 }
 
-const rows: Readonly<Record<Sync.Row, string>> = {
-  NotConnected: "Not connected", CouldNotCheck: "Couldn't check", FinishSetup: "Finish setup", Off: "Off", UpToDate: "Synced", Syncing: "Syncing", NeedsYou: "Needs you",
+const said: Readonly<Record<Link.Said, string>> = {
+  Quiet: "", ReadOnlyAccess: "Google lets your agent read this calendar but not change it. Allow changes to link it.",
+  NotConnected: "Google isn't connected.", Stopped: "Setup stopped. Nothing was linked.", NotReady: "Calendar isn't ready yet. Try again.",
+  ControlChanged: "Sync was changed somewhere else. Check it and try again.", DestinationMissing: "The linked calendar is no longer in your Google account.",
+  DestinationUnapproved: "The linked calendar isn't one your agent may write to.", WaitingForDispatch: "Your agent is still sending an earlier change.",
+  StillSyncing: "Syncing.", ChoosePrimary: "Choose a calendar in Google Calendar first.", ConflictHeld: "One event conflicts and is held.",
+  ConflictMany: "Several events conflict.", UnconfirmedReview: "Alpha couldn't confirm sync.", UnconfirmedWrite: "Alpha couldn't confirm the change to sync.",
+  UnconfirmedLinks: "Alpha couldn't read the linked events back.", UnsentReview: "Alpha couldn't read sync. Nothing changed.", Linked: "Synced.",
 };
 
-// spec/app/calendar/sync.md, "Calendar's Google row says Not connected, Couldn't check, Finish setup, Off, Synced or Needs you, from the link and the change under way alone"; spec/app/calendar/sync.md, "Story: Turn sync on knowingly"; spec/app/calendar/sync.md, "Story: Decide after a restart"
+const endings: Readonly<Record<Link.Outcome, string>> = {
+  NoOutcome: "Google Calendar", Synced: "Synced", Syncing: "Syncing", NeedsGrant: "Finish setup", NotLinked: "Not linked", Unconfirmed: "Couldn't check",
+};
+
+// spec/app/calendar/link.md, "Story: See whether my agent's Calendar reaches Google"; spec/app/calendar/link.md, "Story: Link a Google calendar I can write to, and be told it is synced only when it is"; spec/app/calendar/link.md, "Story: Disconnect Google from Calendar without leaving sync running"
 function GoogleRow({ runtime }: CalendarProps) {
-  const sync = useTimed(runtime, useSync);
-  const y = sync.state;
-  if (!y) return null;
-  const act = (event: Sync.Event, label: string, variant: "primary" | "outline" | "ghost" = "outline") =>
-    sync.can(event) ? <Button key={label} variant={variant} onClick={() => void sync.send(event)}>{label}</Button> : null;
-  const target = calendars()[y.target - 1];
+  const link = useLink(runtime);
+  const view = useView(runtime);
+  const l = link.state;
+  if (!l || !view.state || l.owner === 0) return null;
+  const running = l.phase !== "Idle" && l.phase !== "Done";
   return (
-    <ListGroup heading="Copy to Google Calendar" className="mx-4 my-2">
-      <ListRow title={rows[Sync.rowOf(y)]} detail={target === undefined ? undefined : target.name} />
-      {y.link === "Linked" && !y.on ? calendars().map((one, at) => (
-        <ListRow key={one.id} title={one.name} selected={y.target === at + 1} disabled={!sync.can({ type: "chooseTarget", target: at + 1 })} onClick={() => void sync.send({ type: "chooseTarget", target: at + 1 })} />
-      )) : null}
-      {y.consent.showing ? <p className="px-4 text-sm">{`Events you add, change or delete on this phone will be copied to ${target?.name ?? "this calendar"}. A deletion waits ten seconds, so you can undo it.`}</p> : null}
+    <ListGroup heading="Google Calendar" className="mx-4 my-2">
+      <ListRow title={running ? "Checking…" : view.state.connected || l.ending !== "NoOutcome" ? endings[l.ending] : "Not connected"} detail={said[l.said] || undefined} />
       <div className="flex flex-wrap gap-2 p-2">
-        {act({ type: "link" }, "Link Google Calendar", "primary")}
-        {act({ type: "review" }, "Review")}
-        {act({ type: "turnOn" }, "Turn on", "primary")}
-        {act({ type: "turnOff" }, "Turn off")}
-        {act({ type: "undo", now: untimed }, "Undo deletion")}
-        {act({ type: "retry" }, "Try again")}
-        {act({ type: "resolve", keepPhones: true }, "Keep the phone's")}
-        {act({ type: "resolve", keepPhones: false }, "Keep Google's")}
-        {act({ type: "lookForIt" }, "Look for it in Google")}
-        {act({ type: "letItGo" }, "Let it go")}
-        {act({ type: "decide", send: true }, "Delete it in Google")}
-        {act({ type: "decide", send: false }, "Keep it in Google")}
-        {act({ type: "disconnect" }, "Disconnect", "ghost")}
+        {link.can({ type: "start", grant: "Writable" }) ? <Button variant={l.ending === "Synced" ? "outline" : "primary"} onClick={() => void runtime.runPromise(setUp())}>{l.ending === "NoOutcome" ? "Link Google Calendar" : "Check again"}</Button> : null}
+        {link.can({ type: "cancel" }) ? <Button variant="ghost" onClick={() => void link.send({ type: "cancel" })}>Cancel</Button> : null}
+        {link.can({ type: "pauseAsked" }) && l.ending === "Synced" ? <Button variant="ghost" onClick={() => void link.send({ type: "pauseAsked" })}>Pause sync</Button> : null}
       </div>
+      {l.pause === "PauseConfirmed" ? <p className="px-4 text-sm">Sync is paused.</p> : l.pause === "PauseUnknown" ? <p className="px-4 text-sm">Alpha couldn't confirm sync paused.</p> : null}
     </ListGroup>
   );
 }

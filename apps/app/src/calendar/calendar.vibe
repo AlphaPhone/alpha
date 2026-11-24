@@ -10,7 +10,7 @@ import type * as Held from "../../gen/app__calendar__deletions.effect.vibe"
 import { pageOffered } from "../../gen/app__calendar__presentation.ts"
 import { answersOffered, cancellation, ownAnswer } from "../../gen/app__calendar__writing.ts"
 import type * as Changes from "../../gen/app__calendar__agent.effect.vibe"
-import type * as SyncState from "../../gen/app__calendar__sync.effect.vibe"
+import type * as Linking from "../../gen/app__calendar__link.effect.vibe"
 import type { AndroidCalendarEvent } from "@elizaos/os/bridges/calendar"
 import { Agent } from "../platform/agent.vibe"
 import { PhoneCalendar } from "../platform/calendar.vibe"
@@ -188,15 +188,12 @@ const kept = reacting(View, {
 })
 
 // spec/app/calendar/index.md, "What Android answers replaces what Calendar believed; granted, the day is read, withdrawn, the phone's rows go"; spec/app/calendar/index.md, "Connecting an account reads the day from Google; disconnecting takes its rows away at once"
-/** What Android says of access now, and whether the agent has a Google account, told once Calendar is built. */
+/** What Android says of access now, told once Calendar is built. */
 const told = started(effect {
   const view = try View.Machine
   const phone = try PhoneCalendar
   shown.phone(phone.present)
   if (phone.present) try contained(view.send({ type: "accessAnswered", grant: try phone.grant() }), "telling Calendar of its access")
-  const day = civilDay(try (try Time).now())
-  const connected = Option.isSome(readFeed(day) catch () => Option.none<ReadonlyArray<Read>>())
-  try contained(view.send({ type: "googleChanged", connected }), "telling Calendar of the agent's account")
 }, "reading what Calendar may read")
 
 /** Whether Calendar is the app the shell shows, each time that changes. */
@@ -221,4 +218,4 @@ const writing = following(Writes.Machine, (form) => inFlight(form), View.Machine
 export const calendar = together(kept, told, fronted, returned, widened, writing)
 
 /** Every machine of the Calendar area, which its screen reads, and Alpha's time. */
-export type Calendared = View.Machine | Writes.Machine | Changes.Machine | SyncState.Machine | Held.Machine | Time | KeyValueStore.KeyValueStore
+export type Calendared = View.Machine | Writes.Machine | Changes.Machine | Linking.Machine | Held.Machine | Time | KeyValueStore.KeyValueStore

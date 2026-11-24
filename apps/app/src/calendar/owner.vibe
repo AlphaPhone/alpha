@@ -1,0 +1,78 @@
+// spec/app/calendar/index.md, "Story: See only my own account's calendar"; spec/app/calendar/index.md, "A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars"; spec/app/calendar/editor.md, "Another owner signing in closes the editor; the old owner's slot keeps its edits"; spec/app/calendar/link.md, "A result shows only for the owner it ran for; another owner signing in ends setup and refuses its late answers"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { CloudError } from "@elizaos/cloud/client"
+import * as View from "../../gen/app__calendar.effect.vibe"
+import * as Editor from "../../gen/app__calendar__editor.effect.vibe"
+import * as Link from "../../gen/app__calendar__link.effect.vibe"
+import { Cloud } from "../platform/cloud.vibe"
+import { contained, started, together } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+import { readFeed } from "./calendar.vibe"
+import type { Read } from "./shown.ts"
+import { civilDay } from "./time.ts"
+
+const ownersKey = "alpha.calendar.owners"
+
+/** Where `owner`'s hidden calendars are kept: each owner's choice in a slot of their own. */
+function hiddenKey(owner: number): string {
+  return `alpha.calendar.hidden.${owner}`
+}
+
+const decodeIds = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Schema.String)))
+const decodeHidden = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Schema.Number)))
+
+/** The number `account` keeps on this phone across restarts, which names its draft and hidden-calendar slots: 0 for no account. */
+effect function numberOf(account: string): number!!KeyValueStore.KeyValueStore {
+  if (account === "") return 0
+  const store = try KeyValueStore.KeyValueStore
+  const text = store.get(ownersKey) catch () => undefined
+  const known: ReadonlyArray<string> = text === undefined ? [] : (decodeIds(text) catch () => [])
+  const at = known.indexOf(account)
+  if (at >= 0) return at + 1
+  try ignore(store.set(ownersKey, JSON.stringify([...known, account])))
+  return known.length + 1
+}
+
+/** The calendars `owner` hid, as kept on this phone. */
+effect function hiddenOf(owner: number): ReadonlyArray<number>!!KeyValueStore.KeyValueStore {
+  const text = (try KeyValueStore.KeyValueStore).get(hiddenKey(owner)) catch () => undefined
+  return text === undefined ? [] : (decodeHidden(text) catch () => [])
+}
+
+/** The account the cloud session is signed in to: "" when signed out, nothing when the cloud could not say. */
+effect function account(): (string | undefined)!!Cloud {
+  const { client } = try Cloud
+  return effect {
+    const signed = try tryPromise({ try: () => client.account(), catch: (cause) => cause })
+    return signed.id
+  } catch (failed) => (failed instanceof CloudError && failed.failure.tag === "CloudCredentialInvalid" ? "" : undefined)
+}
+
+// spec/app/calendar/index.md, "Google's rows are only ever an owner's who is signed in and connected"; spec/app/calendar/index.md, "Connecting an account reads the day from Google; disconnecting takes its rows away at once"
+/** Tell Calendar's machines who is signed in, each time Calendar is built: the view, the form and the Google link change owner together. */
+const session = started(effect {
+  const who = try account()
+  if (who === undefined) return
+  const owner = try numberOf(who)
+  const hidden = try hiddenOf(owner)
+  const view = try View.Machine
+  try contained(view.send({ type: "ownerChanged", owner, hidden: [...hidden] }), "telling Calendar who is signed in")
+  try contained((try Editor.Machine).send({ type: "ownerChanged", owner }), "telling the form who is signed in")
+  try contained((try Link.Machine).send({ type: "ownerChanged", owner }), "telling the Google link who is signed in")
+  if (owner === 0) return
+  const connected = Option.isSome(readFeed(civilDay(try (try Time).now())) catch () => Option.none<ReadonlyArray<Read>>())
+  try contained(view.send({ type: "googleChanged", connected }), "telling Calendar of the agent's account")
+}, "reading who is signed in")
+
+// spec/app/calendar/index.md, "A switch of the Calendars sheet hides or shows one calendar"
+/** Keep the calendars the owner hid in that owner's own slot, each time they change. */
+const remembered = started(effect {
+  const view = try View.Machine
+  const store = try KeyValueStore.KeyValueStore
+  try Stream.runForEach(Stream.changesWith(view.changes, (a, b) => a.owner === b.owner && JSON.stringify(a.hidden) === JSON.stringify(b.hidden)), effect (s) => {
+    if (s.owner > 0) try ignore(store.set(hiddenKey(s.owner), JSON.stringify(s.hidden)))
+  })
+}, "keeping the hidden calendars")
+
+/** Who Calendar reads for: told to every machine of the area, and the hidden calendars kept per owner. */
+export const owners = together(session, remembered)

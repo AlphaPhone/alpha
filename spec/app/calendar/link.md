@@ -15,7 +15,7 @@ says Synced only after it read the links back clean.
 > from a grant that may write it, to the destination I approved, and to see
 > "Synced" only after Alpha read the links back.
 
-### Setup holds the owner it runs for, the grant it started from, the control revision it wrote and the one it reviewed, the writes it planned and made, and how it ended
+### Setup holds the owner it runs for, what the account read last said of Google, the grant it started from, the control revision it wrote and the one it reviewed, the writes it planned and made, and how it ended
 
 Each request out names a new ticket, so an answer for an earlier request,
 another owner or a cancelled setup is refused. A dispatch the agent still
@@ -31,11 +31,12 @@ type Said = Quiet | ReadOnlyAccess | NotConnected | Stopped | NotReady | Control
   | UnconfirmedReview | UnconfirmedWrite | UnconfirmedLinks | UnsentReview | Linked
 type Planned = NoWrite | SelectDestination | ResumeSync
 type Pause = NoPause | Pausing | PauseConfirmed | PauseUnknown | PauseNotNeeded
+type Checked = NotChecked | CheckedOk | CheckFailed
 type Asked = AskControl | AskLinks
 type LinksRead = Clean | Held | Many | Unread
 
 type Link = {
-  owner: int, grant: Grant, busy: bool, ready: bool, cancelled: bool,
+  owner: int, account: Grant, checked: Checked, grant: Grant, busy: bool, ready: bool, cancelled: bool,
   phase: Phase, ticket: int, reviews: int, writes: int, linkReads: int, sent: bool,
   revision: int, seen: int, pending: int, pendingSeen: bool, planned: Planned,
   destination: bool, authorized: bool, paused: bool,
@@ -51,7 +52,7 @@ type Effect =
 type Moved = { state: Link, out: List[Effect] }
 
 pure val initial: Link = {
-  owner: 0, grant: NoGrant, busy: false, ready: true, cancelled: false,
+  owner: 0, account: NoGrant, checked: NotChecked, grant: NoGrant, busy: false, ready: true, cancelled: false,
   phase: Idle, ticket: 0, reviews: 0, writes: 0, linkReads: 0, sent: false,
   revision: -1, seen: -1, pending: 0, pendingSeen: false, planned: NoWrite,
   destination: false, authorized: false, paused: true,
@@ -78,16 +79,30 @@ Setup may start again once it ended; each run counts its own reviews,
 writes and link reads.
 
 ```quint
-pure def canStart(s: Link, grant: Grant): bool = s.owner > 0 and not(running(s))
+pure def canStart(s: Link): bool = s.owner > 0 and not(running(s)) and s.checked == CheckedOk
 
-pure def start(s: Link, grant: Grant): Moved =
-  val begun = { ...initial, owner: s.owner, busy: s.busy, ready: s.ready, ticket: s.ticket, grant: grant }
-  if (grant == Writable) waitForReview(begun)
+pure def start(s: Link): Moved =
+  val grant = s.account
+  val begun = { ...initial, owner: s.owner, account: s.account, checked: s.checked, busy: s.busy, ready: s.ready, ticket: s.ticket, grant: grant }
+  if (grant == Writable) waitForReview(0, begun)
   else if (grant == ReadOnly) { state: { ...begun, phase: Done, ending: NeedsGrant, said: ReadOnlyAccess }, out: List(AskConsent) }
   else finish(NeedsGrant, NotConnected, begun)
 
 pure def alwaysNoGrantNoRequest(s: Link): bool =
   (s.grant == Writable or (s.reviews == 0 and s.writes == 0 and s.linkReads == 0)) and (running(s) implies s.grant == Writable)
+```
+
+### The account area's read says what Google allows now; a grant that no longer writes stops a setup under way
+
+```quint
+pure def canAccountRead(s: Link, ok: bool, grant: Grant): bool =
+  s.owner > 0 and (s.checked != (if (ok) CheckedOk else CheckFailed) or (ok and grant != s.account))
+
+pure def accountRead(s: Link, ok: bool, grant: Grant): Moved =
+  val told = { ...s, checked: if (ok) CheckedOk else CheckFailed, account: if (ok) grant else s.account }
+  if (running(s) and ok and grant != Writable) advance(s.ready, { ...told, cancelled: true }) else { state: told, out: List() }
+
+pure def sometimesStoppedByTheAccount(s: Link): bool = s.cancelled and s.account == ReadOnly and s.phase == Done
 ```
 
 ### Setup waits while Calendar reads or writes, and makes at most three control reviews, two writes and one link read
@@ -96,22 +111,22 @@ A review asked while Calendar could not be read ends setup: before a write
 nothing was linked; after one, the link is unconfirmed.
 
 ```quint
-pure def advance(s: Link): Moved =
+pure def advance(ready: bool, s: Link): Moved =
   if (s.phase != WaitReview and s.phase != WaitWrite) { state: s, out: List() }
   else if (s.cancelled) failed(UnconfirmedReview, Stopped, s)
   else if (s.busy) { state: s, out: List() }
   else if (s.phase == WaitWrite)
     { state: { ...s, phase: Writing, ticket: s.ticket + 1, writes: s.writes + 1, sent: true },
       out: List(WriteControl({ ticket: s.ticket + 1, planned: s.planned, revision: s.seen })) }
-  else if (not(s.ready)) failed(UnconfirmedReview, NotReady, s)
+  else if (not(ready)) failed(UnconfirmedReview, NotReady, s)
   else { state: { ...s, phase: Reviewing, ticket: s.ticket + 1, reviews: s.reviews + 1 }, out: List(Ask({ ticket: s.ticket + 1, asked: AskControl })) }
 
-pure def waitForReview(s: Link): Moved =
-  if (s.reviews >= 3) finish(Unconfirmed, UnconfirmedReview, s) else advance({ ...s, phase: WaitReview })
+pure def waitForReview(reviews: int, s: Link): Moved =
+  if (reviews >= 3) finish(Unconfirmed, UnconfirmedReview, s) else advance(s.ready, { ...s, phase: WaitReview })
 
 pure def canCalendarChanged(s: Link, ready: bool, busy: bool): bool = ready != s.ready or busy != s.busy
 
-pure def calendarChanged(s: Link, ready: bool, busy: bool): Moved = advance({ ...s, ready: ready, busy: busy })
+pure def calendarChanged(s: Link, ready: bool, busy: bool): Moved = advance(ready, { ...s, ready: ready, busy: busy })
 
 pure def alwaysBudgetsHold(s: Link): bool =
   s.reviews <= 3 and s.writes <= 2 and s.writes <= s.reviews and s.linkReads <= 1
@@ -141,13 +156,13 @@ pure def reviewed(s: Link, ticket: int, revision: int, destination: bool, listed
   else if (s.cancelled) failed(UnconfirmedReview, Stopped, seen)
   else if (destination and not(paused))
     (if (pending == 0) { state: { ...seen, phase: Listing, ticket: s.ticket + 1, linkReads: s.linkReads + 1, pending: 0 }, out: List(Ask({ ticket: s.ticket + 1, asked: AskLinks })) }
-     else if (not(s.pendingSeen)) waitForReview({ ...seen, pendingSeen: true, pending: pending })
+     else if (not(s.pendingSeen)) waitForReview(s.reviews, { ...seen, pendingSeen: true, pending: pending })
      else if (s.pending == pending) finish(Unconfirmed, WaitingForDispatch, seen)
      else finish(Syncing, StillSyncing, { ...seen, pending: pending }))
   else if (pending != 0) finish(NotLinked, WaitingForDispatch, { ...seen, pending: pending })
   else if (s.reviews >= 3) finish(Unconfirmed, UnconfirmedReview, seen)
-  else if (destination) advance({ ...seen, phase: WaitWrite, planned: ResumeSync, pendingSeen: true })
-  else if (onePrimary) advance({ ...seen, phase: WaitWrite, planned: SelectDestination, pendingSeen: true })
+  else if (destination) advance(s.ready, { ...seen, phase: WaitWrite, planned: ResumeSync, pendingSeen: true })
+  else if (onePrimary) advance(s.ready, { ...seen, phase: WaitWrite, planned: SelectDestination, pendingSeen: true })
   else finish(NotLinked, ChoosePrimary, seen)
 
 pure def canReviewFailed(s: Link, ticket: int): bool = s.phase == Reviewing and ticket == s.ticket
@@ -163,7 +178,7 @@ other.
 ```quint
 pure def canWritten(s: Link, ticket: int, revision: int): bool = s.phase == Writing and ticket == s.ticket and revision > s.seen
 
-pure def written(s: Link, ticket: int, revision: int): Moved = waitForReview({ ...s, revision: revision })
+pure def written(s: Link, ticket: int, revision: int): Moved = waitForReview(s.reviews, { ...s, revision: revision })
 
 pure def canWriteFailed(s: Link, ticket: int): bool = s.phase == Writing and ticket == s.ticket
 
@@ -195,9 +210,9 @@ pure def alwaysSyncedNeedsReadback(s: Link): bool =
 
 pure def sometimesSynced(s: Link): bool = s.ending == Synced
 
-pure val eval_witness_sometimesSynced = (("ownerChanged", 1), ("start", Writable), ("reviewed", 2, 0, true, true, true, false, 0, false), ("linksListed", 3, Clean))
+pure val eval_witness_sometimesSynced = (("ownerChanged", 1), ("accountRead", true, Writable), "start", ("reviewed", 2, 0, true, true, true, false, 0, false), ("linksListed", 3, Clean))
 
-pure val eval_witness_sometimesSyncedAfterAWrite = (("ownerChanged", 1), ("start", Writable), ("reviewed", 2, 0, false, false, false, true, 0, true),
+pure val eval_witness_sometimesSyncedAfterAWrite = (("ownerChanged", 1), ("accountRead", true, Writable), "start", ("reviewed", 2, 0, false, false, false, true, 0, true),
   ("written", 3, 1), ("reviewed", 4, 1, true, true, true, false, 0, false), ("linksListed", 5, Clean))
 
 pure def sometimesSyncedAfterAWrite(s: Link): bool = s.ending == Synced and s.writes == 1
@@ -212,7 +227,7 @@ pure def sometimesAConflictNamed(s: Link): bool = s.said == ConflictMany
 ```quint
 pure def canCancel(s: Link): bool = running(s) and not(s.cancelled)
 
-pure def cancel(s: Link): Moved = advance({ ...s, cancelled: true })
+pure def cancel(s: Link): Moved = advance(s.ready, { ...s, cancelled: true })
 
 pure def alwaysACancelledSetupIsNeverSynced(s: Link): bool = s.cancelled implies s.ending != Synced
 ```
@@ -247,6 +262,10 @@ pure def lawAFailedReadIsNeverNotConnected(calendarRead: bool, calendarWrite: bo
 ### A result shows only for the owner it ran for; another owner signing in ends setup and refuses its late answers
 
 ```quint
+pure def rowOf(s: Link): GoogleRow =
+  if (s.checked == CheckFailed) RowCouldNotCheck
+  else if (s.account == Writable) RowConnected else if (s.account == ReadOnly) RowFinishSetup else RowNotConnected
+
 pure def canOwnerChanged(s: Link, owner: int): bool = owner != s.owner and owner >= 0
 
 pure def ownerChanged(s: Link, owner: int): Link =
@@ -306,7 +325,7 @@ pure def alwaysAConfirmedPauseWasReviewed(s: Link): bool =
 
 pure def sometimesPauseConfirmed(s: Link): bool = s.pause == PauseConfirmed
 
-pure val eval_witness_sometimesPauseConfirmed = (("ownerChanged", 1), ("start", Writable), ("reviewed", 2, 0, true, true, true, false, 0, false),
+pure val eval_witness_sometimesPauseConfirmed = (("ownerChanged", 1), ("accountRead", true, Writable), "start", ("reviewed", 2, 0, true, true, true, false, 0, false),
   ("linksListed", 3, Clean), "pauseAsked", ("pauseAnswered", 4, true, true, 1))
 
 pure def sometimesPauseUnknown(s: Link): bool = s.pause == PauseUnknown and s.destination
