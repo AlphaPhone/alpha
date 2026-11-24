@@ -145,8 +145,8 @@ export function EventDetail({ row, facts, deleting, held, canEdit, canDelete, on
             </ul>
           )}
           {answerNotice && (
-            <div role="status" className="flex flex-wrap items-center gap-2 text-sm">
-              <span className="min-w-0 flex-1">{answerNotice}</span>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <p role="status" className="min-w-0 flex-1">{answerNotice}</p>
               {goingOffered(facts.answer, answers) && <Button variant="secondary" size="sm" aria-label="Accept this invitation" disabled={answering} onClick={() => onAnswer("accepted")}>Going</Button>}
               {maybeOffered(facts.answer, answers) && <Button variant="secondary" size="sm" aria-label="Answer maybe to this invitation" disabled={answering} onClick={() => onAnswer("tentative")}>Maybe</Button>}
             </div>
