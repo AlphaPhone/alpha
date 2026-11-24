@@ -14,6 +14,8 @@ export type HomeAgendaItem = {
 export type HomeAgendaCardProps = Omit<ComponentProps<"button">, "children" | "title"> & {
   /** What the card leads with: the overdue reminder, or else the next item that has not ended. */
   item: HomeAgendaItem;
+  /** The item's day or the number of overdue reminders. */
+  heading?: string;
   /** The item is an overdue reminder. */
   overdue?: boolean;
   /** Under an overdue reminder, the next item that is not overdue. */
@@ -26,15 +28,20 @@ export type HomeAgendaCardProps = Omit<ComponentProps<"button">, "children" | "t
  * The agenda card: what needs the owner first and where it was read; a press opens Calendar.
  * @model spec/app/home/cards.md
  */
-export function HomeAgendaCard({ item, overdue = false, next, notCurrent = false, ...props }: HomeAgendaCardProps) {
+export function HomeAgendaCard({ item, heading, overdue = false, next, notCurrent = false, ...props }: HomeAgendaCardProps) {
   return (
-    <HomeCard title={overdue ? "Overdue" : "Next"} icon={<Calendar />} notCurrent={notCurrent ? "Not up to date" : undefined} {...props}>
-      <span className="line-clamp-3 font-display text-2xl font-light break-words">{item.title}</span>
-      <span className="text-sm text-muted-foreground">{item.when} · {item.source}</span>
+    <HomeCard variant="agenda" title={heading ?? (overdue ? "Overdue reminder" : "Next")} icon={<Calendar />} notCurrent={notCurrent ? "Not up to date" : undefined} {...props}>
+      <span className="flex min-h-0 flex-1 items-center">
+        <span className="line-clamp-3 font-display text-home-display tracking-tight wrap-anywhere">{item.title}</span>
+      </span>
+      <span className="flex min-w-0 items-baseline justify-between gap-2.5 text-sm leading-snug font-medium">
+        <span className="truncate">{item.when}</span>
+        <span className="truncate text-right text-xs text-alpha-foreground/85">{item.source}</span>
+      </span>
       {next ? (
-        <span className="mt-auto flex min-w-0 flex-col pt-2">
-          <span className="truncate font-semibold">{next.title}</span>
-          <span className="text-sm text-muted-foreground">{next.when} · {next.source}</span>
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <span className="text-sm leading-snug font-medium wrap-anywhere">{next.title} · {next.when}</span>
+          <span className="text-xs text-alpha-foreground/85">{next.source}</span>
         </span>
       ) : null}
     </HomeCard>
