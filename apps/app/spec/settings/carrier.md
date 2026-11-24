@@ -67,6 +67,7 @@ pure val setupValues = Set(noSetup)
     sims: List({ ...noSim, subscription: 1, slot: 0, defaultData: true, carrier: { status: Returned, value: "Carrier" }, iccid: { status: Returned, value: "8901260000000000000" } }) }))
   .union(Set({ ...noSetup, simsStatus: AccessDenied, eid: { status: Unsupported, value: "" } }))
 pure val eidValues = Set({ status: Returned, value: "89049032000000000000000000000000" }).union(Set({ status: Missing, value: "" }))
+  .union(Set(notRead))
 pure val targetValues = Set(noTarget)
   .union(Set({ kind: ImeiTarget, index: 0 })).union(Set({ kind: ImeiTarget, index: 1 }))
   .union(Set({ kind: IccidTarget, index: 1 })).union(Set({ kind: EidTarget, index: -1 }))
@@ -127,7 +128,9 @@ pure val fValues = Set(notRead).union(Set({ status: Returned, value: "Ready" }))
 ### The EID is its own optional read, after the identifiers, and never delays them
 
 The first read never asks the eSIM service; the owner asks for the EID separately, and a phone
-without an eSIM offers no EID read.
+without an eSIM offers no EID read. A read Android refused without answering, such as one asked
+while an earlier read is still with the eSIM service, leaves the EID not read, so it is never shown
+as unavailable and can be asked again.
 
 ```quint
 pure def canEidAsked(c: Carrier): bool = c.phase == CarrierShown and not(c.eidReading) and c.setup.eid.status != Unsupported

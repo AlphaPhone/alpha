@@ -95,3 +95,48 @@ it.live("Read what my carrier needs only when I ask, copy one IMEI, and forget i
     ))
   }
 })
+
+it.live("A role Android does not offer reads as not available, and a refused EID read stays not read and can be asked again (spec/settings/carrier.md, \"The EID is its own optional read, after the identifiers, and never delays them\")", () => effect {
+  let eidReads = 0
+  const front = try SubscriptionRef.make(inFront)
+  const native = Layer.succeed(Native, {
+    available: () => effect { return true },
+    invoke: (plugin: string, method: string) => effect {
+      if (plugin === "AlphaCarrierSetup" && method === "read") return { ...read, smsRole: { status: "unavailable" }, dialerRole: { status: "permission-denied" } }
+      if (plugin === "AlphaCarrierSetup" && method === "readEid") {
+        eidReads += 1
+        // The first ask is refused, as Android does while an earlier EID read is still with the eSIM service.
+        if (eidReads === 1) throw new NativeUnavailable({ plugin, method })
+        return value(EID)
+      }
+      throw new NativeUnavailable({ plugin, method })
+    },
+    listen: () => Stream.empty,
+  } as unknown as Native.Shape)
+  const foreground = Layer.succeed(Foreground, { changes: SubscriptionRef.changes(front), get: () => SubscriptionRef.get(front) })
+  provide Layer.provideMerge(carrierSetup, Layer.mergeAll(carrierMachine(), native, foreground)) {
+    const page = try CarrierSetup
+    const held = try CarrierMachine
+    const visit = fork page.visit()
+    try until(held.changes, (c) => c.shown)
+    try page.read()
+    const roles = try held.get()
+    try page.readEid()
+    const refused = try held.get()
+    try page.readEid()
+    const answered = try held.get()
+    try Fiber.interrupt(visit)
+    try Effect.try(() => assert.deepStrictEqual(
+      {
+        roles: [roles.setup.smsRole, roles.setup.dialerRole],
+        refused: [refused.phase, refused.eidReading, refused.setup.eid.status],
+        answered: answered.setup.eid, eidReads,
+      },
+      {
+        roles: ["RoleUnavailable", "RoleUnread"],
+        refused: ["CarrierShown", false, "NotRead"],
+        answered: { status: "Returned", value: EID }, eidReads: 2,
+      },
+    ))
+  }
+})

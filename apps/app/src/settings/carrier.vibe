@@ -108,7 +108,8 @@ export const carrierSetup = Layer.effect(CarrierSetup, effect {
       const asked = try tell({ type: "eidAsked" })
       if (asked === undefined) return
       const answer = (ask("readEid", CarrierFieldRead) catch () => undefined)
-      const eid: Field = answer === undefined ? { status: "Missing", value: "" } : fieldOf(answer)
+      // A refusal is no answer: it may only mean an earlier read is still with the eSIM service, so the EID stays not read.
+      const eid: Field = answer === undefined ? { status: "NotRead", value: "" } : fieldOf(answer)
       try tell({ type: "eidAnswered", ticket: asked.epoch, eid })
     },
     effect copy(target: CopyTarget) {
