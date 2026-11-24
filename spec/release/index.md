@@ -168,6 +168,23 @@ pure def alwaysOneSignerNoRotation(s: Channel): bool =
   rank(s.stage) >= 4 implies (s.signers == 1 and not(s.rotation))
 ```
 
+### The protected keys are proven to be the enrolled ones: each of the nine OS certificates, the two verified-boot keys and Alpha's app key pairs with its committed public identity, none is a test key, and no two are the same
+
+The release owner runs the proof in the protected environment, on memory
+that never reaches a disk, before the keys sign anything; it reads only the
+key archive and Alpha's keystore, and writes only what is already public.
+
+```quint
+type Custody = { pairs: int, matching: int, distinct: bool, testKeys: bool }
+
+pure val custodyKeys = 12
+
+pure def custodyProven(c: Custody): bool =
+  c.pairs == custodyKeys and c.matching == custodyKeys and c.distinct and not(c.testKeys)
+
+pure def lawARepeatedKeyIsNoCustody(custody: Custody): bool = not(custodyProven({ ...custody, distinct: false }))
+```
+
 ### A plan can name a stale attempt after a rerun
 
 ```quint
@@ -401,6 +418,7 @@ pure val nowValues = Set(0, 10, 23, 24, 30)
 pure val versionValues = Set(76, 77, 79)
 pure val namedValues = Set(0, 76, 77, 78, 80)
 pure val tookIt: Readback = { sameInstall: true, advanced: true, exact: true, selfInitiated: true, homeKept: true, offerKept: true }
+pure val custodyValues = Set({ pairs: 12, matching: 12, distinct: true, testKeys: false }, { pairs: 12, matching: 11, distinct: true, testKeys: false })
 pure val readbackValues = Set(tookIt).union(Set({ ...tookIt, selfInitiated: false })).union(Set({ ...tookIt, sameInstall: false }))
 pure val weight_build = 3
 pure val weight_mirror = 4
