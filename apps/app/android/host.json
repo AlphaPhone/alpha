@@ -41,6 +41,8 @@
     { "module": "filesystem" },
     { "module": "location" },
     { "module": "wifi" },
+    { "module": "voice-io" },
+    { "module": "cloud-speech" },
     { "module": "browser-surface" }
   ],
   "modules": [
