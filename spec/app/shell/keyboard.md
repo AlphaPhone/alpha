@@ -87,7 +87,7 @@ pure def lawARotationWhileTypingSwapsTheSides(base: Base, h: int): bool =
 pure def laidOut(base: Base, c: Canvas): Canvas =
   val landscape = c.width > base.h
   val canvas = if (c.launcher and not(landscape)) reference else if (landscape or c.width >= reference) c.width else reference
-  { ...c, base: base, landscape: landscape, canvasWidth: canvas, wide: canvas >= wideCanvas }
+  withLayout(c.textScale, { ...c, base: base, landscape: landscape, canvasWidth: canvas, wide: canvas >= wideCanvas })
 
 pure def canMount(c: Canvas, width: int, height: int, launcher: bool): bool = not(c.mounted) and width > 0 and height > 0
 

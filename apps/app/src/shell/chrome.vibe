@@ -1,0 +1,92 @@
+// spec/app/shell/keyboard.md, "Ask Alpha's footprint is what it covers now and its bar alone, which is never more; while nothing of Ask Alpha shows, the last footprint stays"
+import * as Canvas from "../../gen/app__shell__keyboard.effect.vibe"
+import { contained } from "../runtime/reactor.vibe"
+
+module page {
+  import type { Event } from "../../gen/app__shell__keyboard.ts"
+
+  export type Chrome = Extract<Event, { type: "dockMeasured" | "headerMeasured" }>
+
+  /** Follow the mounted dock and header instead of observing transcript or list contents. @throws {never} */
+  export function watchChrome(root: HTMLElement, heard: (event: Chrome) => void): () => void {
+    const page = root.querySelector<HTMLElement>("[data-alpha-shell-page]")
+    const assistant = root.querySelector<HTMLElement>("[data-alpha-assistant-host]")
+    const win = root.ownerDocument.defaultView
+    let dock: HTMLElement | null = null
+    let header: HTMLElement | null = null
+    let detent: string | undefined
+    let clearance = 0
+    let rest = 0
+    let bar = 0
+    let headerBottom = 0
+    let overlap = -1
+    const measure = () => {
+      const frame = root.getBoundingClientRect()
+      if (frame.height <= 0) return
+      const headerBox = header?.getBoundingClientRect()
+      const headerPx = headerBox && headerBox.height > 0 ? Math.max(0, Math.round(headerBox.bottom - frame.top)) : 0
+      if (headerPx !== headerBottom) {
+        headerBottom = headerPx
+        root.style.setProperty("--alpha-header-clearance", `${headerPx}px`)
+        heard({ type: "headerMeasured", px: headerPx })
+      }
+      const dockBox = dock?.getBoundingClientRect()
+      if (dockBox && dockBox.height > 0 && dock?.dataset.alphaDragging !== "true") {
+        const total = Math.max(0, Math.round(frame.bottom - dockBox.top))
+        if (detent === "bar" && total > 0) rest = total
+        const floor = Math.min(total, rest || Math.round(dockBox.height))
+        if (floor > 0 && (total !== clearance || floor !== bar)) {
+          clearance = total
+          bar = floor
+          root.style.setProperty("--alpha-dock-clearance", `${total}px`)
+          heard({ type: "dockMeasured", clearance: total, bar: floor })
+        }
+      }
+      const pageBox = page?.getBoundingClientRect()
+      const beside = pageBox && dockBox && (dockBox.left >= pageBox.right || dockBox.right <= pageBox.left)
+      const nextOverlap = dockBox && dockBox.height > 0 && pageBox && !beside ? Math.max(0, Math.round(pageBox.bottom - dockBox.top)) : 0
+      if (nextOverlap !== overlap) {
+        overlap = nextOverlap
+        root.style.setProperty("--alpha-dock-overlap", `${nextOverlap}px`)
+      }
+    }
+    const sizes = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(measure)
+    const changes = typeof MutationObserver === "undefined" ? undefined : new MutationObserver(() => refresh())
+    const refresh = () => {
+      const nextDock = assistant?.querySelector<HTMLElement>("[data-alpha-detent]") ?? null
+      const nextDetent = nextDock?.dataset.alphaDetent
+      const nextHeader = (nextDetent === "full" ? nextDock?.querySelector("header") : page?.querySelector<HTMLElement>("header[data-host-chrome]")) ?? null
+      if (dock !== nextDock || header !== nextHeader || detent !== nextDetent) {
+        dock = nextDock
+        header = nextHeader
+        detent = nextDetent
+        observe()
+      }
+      measure()
+    }
+    const observe = () => {
+      sizes?.disconnect()
+      changes?.disconnect()
+      sizes?.observe(root)
+      if (page) { sizes?.observe(page); changes?.observe(page, { childList: true }) }
+      if (assistant) changes?.observe(assistant, { childList: true })
+      if (header) sizes?.observe(header)
+      if (dock) {
+        sizes?.observe(dock)
+        changes?.observe(dock, { attributes: true, attributeFilter: ["data-alpha-detent", "data-alpha-dragging"] })
+      }
+    }
+    observe()
+    refresh()
+    win?.addEventListener("resize", measure)
+    return () => { sizes?.disconnect(); changes?.disconnect(); win?.removeEventListener("resize", measure) }
+  }
+}
+import { type Chrome, watchChrome } from page
+export { watchChrome }
+
+/** Report the mounted shell's geometry to the existing canvas machine. */
+export effect function measureChrome(event: Chrome): void!!Canvas.Machine {
+  const canvas = try Canvas.Machine
+  if (Canvas.enabled(try canvas.get(), event)) try contained(canvas.send(event), "the canvas chrome")
+}

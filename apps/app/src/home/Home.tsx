@@ -15,7 +15,7 @@ import { Agenda } from "./Agenda.tsx";
 import { MailOnHome } from "./Mail.tsx";
 import { catalog, labelOf } from "./catalog.vibe";
 import { told } from "./home.vibe";
-import { launcherHeld, watchHomePull } from "./pull.vibe";
+import { launcherHeld, openNotifications, watchHomePull } from "./pull.vibe";
 import { waiting } from "./waiting.vibe";
 import type { HomeMachines } from "./index.tsx";
 
@@ -51,10 +51,9 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   const h = home.state;
   const s = shell.state;
   const canPull = s !== undefined && home.can({ type: "pullDown", shell: s, locked: false, now: untimed }, owner);
-  const sendHome = home.send;
   const homeScroller = useCallback((node: HTMLDivElement | null) => {
-    if (node && s && canPull) return watchHomePull(node, () => { void sendHome({ type: "pullDown", shell: s, locked: false, now: untimed }, owner); });
-  }, [canPull, s, sendHome]);
+    if (node && canPull) return watchHomePull(node, () => { void runtime.runPromise(openNotifications()); });
+  }, [canPull, runtime]);
   const hold = useCallback((held: () => void) => {
     const fiber = alpha.runtime.runFork(launcherHeld(held));
     return () => fiber.interruptUnsafe();

@@ -1,5 +1,6 @@
 import type { ReactNode, Ref } from "react";
 import { cn } from "../../lib/cn.ts";
+import { dockClearance } from "../../lib/styles.ts";
 import { AddToHomeSheet } from "./AddToHomeSheet.tsx";
 import { HomeCardRow } from "./HomeCardRow.tsx";
 import { HomeEditBar } from "./HomeEditBar.tsx";
@@ -58,7 +59,7 @@ export function HomeScreen({
 }: HomeScreenProps) {
   return (
     <div inert={covered || undefined} className={cn("flex h-full min-h-0 flex-1 flex-col bg-background text-base text-foreground", className)}>
-      <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-y-contain pb-[calc(--spacing(27)+env(safe-area-inset-bottom))]">
+      <div ref={scrollRef} className={cn(dockClearance, "flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-y-contain")}>
         <div className="min-h-[calc(env(safe-area-inset-top)+--spacing(3))] shrink-0">
           <h1 className="sr-only">Home</h1>
         </div>

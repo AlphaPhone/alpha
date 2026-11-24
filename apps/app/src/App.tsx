@@ -1,6 +1,6 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"; spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back"; spec/app/shell/gestures.md, "On the launcher a pull down that Home allows opens Android's shade, and a swipe up from the bottom bar goes Home; nothing else is a swipe"; spec/app/shell/layers.md, "The page under a layer or a hold takes no touch, and a covering layer or a hold takes none for Ask Alpha either"; spec/app/update/page.md, "A page that was not mounted mounts its editors only once no update is pending"
 import { Alert, AppHeader, cn } from "@repo/ui";
-import { type PointerEvent, useRef } from "react";
+import { type PointerEvent, useCallback, useRef } from "react";
 import { useMachine } from "../gen/app__shell.react.ts";
 import { useMachine as useCanvas } from "../gen/app__shell__keyboard.react.ts";
 import { useMachine as useLayers } from "../gen/app__shell__layers.react.ts";
@@ -10,6 +10,7 @@ import { useMachine as usePage } from "../gen/app__update__page.react.ts";
 import { editorsMounted } from "../gen/app__update__page.ts";
 import type { Alpha } from "./runtime/area.tsx";
 import { AppBack } from "./shell/AppBack.tsx";
+import { measureChrome, watchChrome } from "./shell/chrome.vibe";
 import { home } from "./shell/shell.vibe";
 import { isCommsView, viewHasHeader, views } from "./shell/views.tsx";
 
@@ -41,6 +42,9 @@ export function App({ alpha }: AppProps) {
   const canvas = useCanvas(alpha.runtime).state;
   const launcher = canvas?.launcher ?? false;
   const startedRef = useRef<StartedSwipe | undefined>(undefined);
+  const frame = useCallback((node: HTMLElement | null) => {
+    if (node) return watchChrome(node, (event) => { void alpha.runtime.runPromise(measureChrome(event)); });
+  }, [alpha]);
   if (cause) return <Alert variant="destructive" className="m-6">Alpha could not read where you were</Alert>;
   if (!state) return null;
   const showing = state.trail.at(-1);
@@ -84,18 +88,29 @@ export function App({ alpha }: AppProps) {
   };
   const inert = layers !== undefined && pageInert(layers);
   const comms = isCommsView(showing);
+  const side = showing === undefined && canvas?.landscape;
   const back = can({ type: "goBack" });
+  const canGoBack = String(back || (layers !== undefined && takesBack(layers)));
   return (
     <main
       data-alpha-launcher={launcher ? "" : undefined}
-      ref={(page) => { if (page) page.ownerDocument.documentElement.dataset.alphaCanGoBack = String(back || (layers !== undefined && takesBack(layers))); }}
+      ref={frame}
       onPointerDown={beginSwipe}
       onPointerUp={swiped}
       onPointerCancel={(event) => { if (startedRef.current?.id === event.pointerId) startedRef.current = undefined; }}
       style={canvas?.covered ? { height: canvas.visible } : undefined}
-      className="relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground sm:pointer-fine:max-w-103"
+      className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground sm:pointer-fine:max-w-103", side && "pointer-coarse:flex-row")}
     >
-      <div className={cn("relative flex min-h-0 flex-1 flex-col", showing !== undefined && "overflow-auto overscroll-contain")} data-alpha-comms-stage={comms ? "" : undefined} inert={inert}>
+      <div
+        data-alpha-shell-page=""
+        data-alpha-comms-stage={comms ? "" : undefined}
+        ref={(node) => {
+          const document = node?.ownerDocument.documentElement;
+          if (document && document.dataset.alphaCanGoBack !== canGoBack) document.dataset.alphaCanGoBack = canGoBack;
+        }}
+        className={cn("relative flex min-h-0 min-w-0 flex-1 flex-col", showing !== undefined && "overflow-auto overscroll-contain")}
+        inert={inert}
+      >
         {page === undefined || !editorsMounted(page) ? null : showing === undefined
           ? alpha.slot("home")
           : (
@@ -109,7 +124,21 @@ export function App({ alpha }: AppProps) {
             </>
           )}
       </div>
-      <div className={comms ? "shrink-0" : undefined} inert={layers !== undefined && assistantInert(layers)}>{alpha.slot("assistant")}</div>
+      <div
+        data-alpha-assistant-host=""
+        className={cn(
+          comms && "shrink-0",
+          !comms && "[&>[data-alpha-detent]]:absolute [&>[data-alpha-detent]]:inset-x-0 [&>[data-alpha-detent]]:bottom-0 [&>[data-alpha-detent]]:max-w-none",
+          side && [
+            "pointer-coarse:relative pointer-coarse:flex pointer-coarse:w-[min(400px,46%)] pointer-coarse:shrink-0 pointer-coarse:flex-col pointer-coarse:justify-end",
+            "pointer-coarse:[&>[data-alpha-detent=sheet]]:inset-0 pointer-coarse:[&>[data-alpha-detent=sheet]]:h-full pointer-coarse:[&>[data-alpha-detent=sheet]]:max-h-full",
+            "pointer-coarse:[&>[data-alpha-detent=full]]:inset-0",
+          ],
+        )}
+        inert={state.drawer || (layers !== undefined && assistantInert(layers))}
+      >
+        {alpha.slot("assistant")}
+      </div>
       {alpha.slot("overlay")}
       {alpha.slot("notice")}
     </main>

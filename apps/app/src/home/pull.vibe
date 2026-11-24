@@ -1,4 +1,8 @@
 // spec/app/shell/gestures.md, "A pull opens the shade only when it is clearly downward, one and a half times its sideways travel, starts below the 44-point status band, on Home itself and not in a field, with no keyboard up and nothing under the finger scrolled from its top"
+import * as Home from "../../gen/app__home.effect.vibe"
+import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { contained, untimed } from "../runtime/reactor.vibe"
+
 module page {
   import { overflowPull, pullOpensShade, travel } from "../../gen/app__shell__gestures.ts"
 
@@ -36,19 +40,23 @@ module page {
   export function watchHomePull(home: HTMLDivElement, open: () => void): () => void {
     let pointer: Start | undefined
     let touch: { start: Start; claimed: boolean } | undefined
+    let suppressClick = false
     const finish = (start: Start, x: number, y: number) => {
-      if (home.isConnected && !home.closest("[inert]") && pullOpensShade(true, start.startY, (x - start.x) * start.across, (y - start.y) * start.down, true, false, false, false)) {
-        open()
-      }
+      if (!home.isConnected || home.closest("[inert]")) return false
+      if (!pullOpensShade(true, start.startY, (x - start.x) * start.across, (y - start.y) * start.down, true, false, false, false)) return false
+      open()
+      return true
     }
     const pointerDown = (event: PointerEvent) => {
-      if (event.pointerType !== "touch" && event.isPrimary && event.button === 0) pointer = startAt(home, event.target, event.pointerId, event.clientX, event.clientY)
+      if (event.pointerType === "touch" || !event.isPrimary || event.button !== 0) return
+      suppressClick = false
+      pointer = startAt(home, event.target, event.pointerId, event.clientX, event.clientY)
     }
     const pointerUp = (event: PointerEvent) => {
       if (pointer?.id !== event.pointerId || event.pointerType === "touch") return
       const start = pointer
       pointer = undefined
-      finish(start, event.clientX, event.clientY)
+      suppressClick = finish(start, event.clientX, event.clientY)
     }
     const pointerCancel = (event: PointerEvent) => {
       if (pointer?.id === event.pointerId) pointer = undefined
@@ -79,6 +87,12 @@ module page {
       if (last) finish(ending.start, last.clientX, last.clientY)
     }
     const touchCancel = () => { touch = undefined }
+    const click = (event: MouseEvent) => {
+      if (!suppressClick || event.detail === 0) return
+      suppressClick = false
+      event.preventDefault()
+      event.stopPropagation()
+    }
     home.addEventListener("pointerdown", pointerDown)
     home.addEventListener("pointerup", pointerUp)
     home.addEventListener("pointercancel", pointerCancel)
@@ -86,6 +100,7 @@ module page {
     home.addEventListener("touchmove", touchMove, { capture: true, passive: false })
     home.addEventListener("touchend", touchEnd, { passive: true })
     home.addEventListener("touchcancel", touchCancel)
+    home.addEventListener("click", click, true)
     return () => {
       home.removeEventListener("pointerdown", pointerDown)
       home.removeEventListener("pointerup", pointerUp)
@@ -94,11 +109,22 @@ module page {
       home.removeEventListener("touchmove", touchMove, true)
       home.removeEventListener("touchend", touchEnd)
       home.removeEventListener("touchcancel", touchCancel)
+      home.removeEventListener("click", click, true)
     }
   }
 }
 import { watchHomePull } from page
 export { watchHomePull }
+
+// spec/app/home/index.md, "A pull on bare Home asks Android for its shade only when Alpha is the launcher; on a locked phone it asks nothing and says to unlock first"
+/** Ask for the shade only where this Home and this shell still admit the completed pull. */
+export effect function openNotifications(): void!!(Home.Machine | Shell) {
+  const shell = try (try Shell).get()
+  const home = try Home.Machine
+  if (Home.canPullDown(try home.get(), shell, false, "Owner")) {
+    try contained(home.send({ type: "pullDown", shell, locked: false, now: untimed }, "Owner"), "Android's notifications")
+  }
+}
 
 // spec/app/home/index.md, "A long press on bare Home starts editing, only on the phone and once the tiles are read"; spec/app/home/index.md, "An app's menu opens in the open drawer, for an app in the last reading, and says Add to Home or On Home"
 /** Wait for one physical long press. Its caller interrupts it when the pointer moves, releases or is canceled. */

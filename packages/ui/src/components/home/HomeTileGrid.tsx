@@ -37,8 +37,8 @@ export type HomeTileGridProps = Omit<ComponentProps<"nav">, "children"> & {
   onOpenDrawer?: () => void;
 };
 
-/** The columns of a grid of app tiles: four on a phone, more on a wider screen, fewer with large text. */
-export const tileColumns = "grid grid-cols-[repeat(auto-fill,minmax(max(calc(25%_-_.5px),3.875rem),1fr))] gap-y-6";
+/** App grids keep four columns while the measured text fits, then give each label more room. */
+export const tileColumns = "grid grid-cols-[repeat(auto-fill,minmax(min(100%,max(calc(25%_-_.5px),calc(62px_*_var(--alpha-text-scale,1)))),1fr))] gap-y-6";
 
 const steps: Partial<Record<string, -1 | 1>> = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 };
 

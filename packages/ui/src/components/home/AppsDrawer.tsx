@@ -1,6 +1,7 @@
 import { X } from "lucide-react";
 import { useMemo } from "react";
 import { cn } from "../../lib/cn.ts";
+import { dockClearance } from "../../lib/styles.ts";
 import { AppHeader } from "../AppHeader.tsx";
 import { Button } from "../Button.tsx";
 import { SearchField } from "../SearchField.tsx";
@@ -110,7 +111,7 @@ export function AppsDrawer({
       </AppHeader>
       <SearchField aria-label="Search apps" placeholder="Search apps" autoComplete="off" value={query} onValueChange={onSearch} className="mx-4 mt-3 mb-2 shrink-0 [&_input]:rounded-full [&_input]:border-0 [&_input]:bg-secondary [&_input]:pl-11 [&>svg]:size-4.5" />
       {notice ? <HomeNotice notice={notice} place="InDrawer" className="mx-5 my-1" /> : null}
-      <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto px-2 pt-1 pb-[calc(--spacing(27)+env(safe-area-inset-bottom))]">
+      <div className={cn(dockClearance, "min-h-0 flex-1 touch-pan-y overflow-y-auto px-2 pt-1")}>
         {view === "Grid" ? (
           <div aria-busy={refreshing || undefined} className={cn(tileColumns, "gap-y-5 px-0.5 py-1.5")}>
             {entries.map(({ app }) => (
