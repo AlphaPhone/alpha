@@ -1,7 +1,7 @@
 // Alpha owns its native media screens: the reviewed-attachment PDF viewer (AlphaMailPdfActivity),
 // the device photo review dialog (AlphaMediaReview), the Photos and agent album bridges that open
 // it (AlphaPhotosPlugin, AlphaPhotoLibraryPlugin) and the Android share sheet (AlphaShareSheet).
-// They are forked from shared plugin-native-media classes (vendor/eliza, at the pin) so only the
+// They are forked from the shared @elizaos/os media classes (vendor/eliza/packages/os/android/media, at the pin) so only the
 // wording and ownership differ. This checks that Alpha's words are its own (host JVM), that no
 // Alpha source still reaches the shared screens, and that each fork keeps the shared bridge
 // contract (method names, refusal sentences and codes) and its checks in the same order. It reads
@@ -13,7 +13,7 @@ import {readFileSync,readdirSync} from 'node:fs';
 import {join} from 'node:path';
 import {root,nativeSource,fixture,runJvm,jvmSkip} from './fixtures/jvm-tools.mjs';
 
-const MEDIA=join(root,'vendor/eliza/plugins/plugin-native-media/android/src/main/java/ai/eliza/plugins/media');
+const MEDIA=join(root,'vendor/eliza/packages/os/android/media/src/main/java/ai/eliza/plugins/media');
 const ALPHA=join(root,'android/app/src/main/java/ai/alphacompute/alphaphone');
 const read=path=>readFileSync(path,'utf8');
 const shared=name=>read(join(MEDIA,name+'.java'));
