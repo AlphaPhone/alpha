@@ -19,7 +19,7 @@ export function RadioGroupItem({ className, ...props }: RadioGroupItemProps) {
   return (
     <RadioGroupPrimitive.Item className={cn(markTarget, className)} {...props}>
       <span className={radioMark}>
-        <RadioGroupPrimitive.Indicator className="size-3 rounded-full bg-primary" />
+        <RadioGroupPrimitive.Indicator className="size-3 rounded-full bg-alpha" />
       </span>
     </RadioGroupPrimitive.Item>
   );
