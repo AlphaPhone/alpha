@@ -2,7 +2,7 @@
 import type { NoteFormat, NoteJson, StickyNote } from "@elizaos/plugin-notes/types"
 import { playbackAllowed } from "../../gen/notes__audio.effect.vibe"
 import {
-  type Event as RecorderEvent, Machine as RecorderMachine, type Recorder, type StartRefusal, machine as recorderMachine, voiceSavePlan,
+  type Event as RecorderEvent, Machine as RecorderMachine, type Recorder, type StartRefusal, hasFinishedAudio, machine as recorderMachine, voiceSavePlan,
 } from "../../gen/notes__recorder.effect.vibe"
 import { type Event as JournalEvent, Machine as JournalMachine, machine as journalMachine } from "../../gen/notes__recordingJournal.effect.vibe"
 import { Native } from "../platform/native.vibe"
@@ -254,11 +254,22 @@ const make = effect {
 
   effect function finish(): boolean!! {
     const id = try recordingId()
-    if (id === undefined || (try send({ type: "finishRecording" })) === undefined) return false
+    const owner = (try collection.current())?.owner
+    if (id === undefined || owner === undefined) return false
+    const finishing = try send({ type: "finishRecording" })
+    if (finishing === undefined) return false
     const stopped = (effect { return try decodeRecordingStatus(try voice("stopNoteRecording", { recordingId: id })) } catch () => undefined)
-    if (stopped === undefined || stopped.recordingId !== id || stopped.state !== "stopped") { try send({ type: "voiceSaveFailed" }); return false }
+    const current = try machine.get()
+    if (current.phase !== "RecFinishing" || current.recording !== finishing.recording) return false
+    if (stopped === undefined || stopped.recordingId !== id || stopped.state !== "stopped"
+      || !hasFinishedAudio(stopped.segments?.length ?? 0)
+      || !matches(stopped, try Ref.get(digest), try Ref.get(folder))
+      || (try collection.current())?.owner !== owner) {
+      try send({ type: "voiceSaveFailed" })
+      return false
+    }
     if (stopped.canonicalSavePending === true && !(try machine.get()).savePending) try send({ type: "claim" })
-    try learn(stopped)
+    try absorb(stopped)
     try record({ type: "stopPending" })
     const words = try transcript(stopped.segments ?? [])
     const durationMs = Math.round(stopped.durationMs ?? (try SubscriptionRef.get(display)).durationMs)

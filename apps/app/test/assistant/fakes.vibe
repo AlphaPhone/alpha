@@ -249,6 +249,8 @@ export function fakeHost(toasts: string[], screen: ScreenFacts = homeScreen, ema
     inference: () => succeed({ where: "OnDevice" as const, provider: "this phone" }),
     emergency: () => succeed(false),
     openView: () => succeed(true),
+    openSavedNote: () => succeed(false),
+    showsSavedNote: () => succeed(false),
     toast: (text: string) => sync(() => { toasts.push(text) }),
   }))
 }

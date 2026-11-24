@@ -4,7 +4,7 @@ One draft at a time over the [collection](./collection.md): opened from a curren
 edited by explicit patches, saved only against the revision it started from, and adopted only from the
 mutation reply's own note identity, never from a difference between two collections. The draft's text
 and rich fields live beside this machine in the shell; the machine owns its identity, base revision,
-version and the mutation that continues after a save.
+version and the mutation that continues after a save. The agent may open a\nsaved note only when no draft is showing, or while the current saved draft\nis clean. Opening a different saved note never saves or discards an unsaved\ndraft.
 
 ## Story: Edit a note without losing a word
 
@@ -50,6 +50,9 @@ pure def canOpenNote(s: Editor, id: str): bool =
 pure def openNote(s: Editor, id: str, authored: bool): Editor =
   { ...s, present: true, token: s.nextToken + 1, nextToken: s.nextToken + 1, draftId: id, base: s.revision, version: 0,
     authored: authored, defaultOnly: false, queued: -1 }
+pure def canOpenAgentNote(s: Editor, id: str): bool =
+  canOpenNote(s, id) and (not(s.present) or (s.draftId != "" and not(dirty(s))))
+pure def openAgentNote(s: Editor, id: str, authored: bool): Editor = openNote(s, id, authored)
 pure def canBeginNote(s: Editor): bool = s.current and s.revision >= 0 and not(s.saving) and s.mutation == NoMutation
 pure def beginNote(s: Editor, titled: bool): Editor =
   { ...s, present: true, token: s.nextToken + 1, nextToken: s.nextToken + 1, draftId: "", base: s.revision,

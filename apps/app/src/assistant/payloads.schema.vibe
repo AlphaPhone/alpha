@@ -147,7 +147,7 @@ export schema ViewHandoff {
   readonly viewPath?: string
   readonly viewType?: string
   readonly label?: string
-  readonly subview?: boolean
+  readonly subview?: boolean | "saved-note-v1"
   readonly completedActionDelivered?: boolean
   readonly completedActionHandoffId?: string
   readonly navigationPrepared: true
@@ -155,7 +155,10 @@ export schema ViewHandoff {
 }
 
 /** The claim route's answer: the claim id that settles it. */
-export schema ViewClaim { readonly claimId: Schema.NonEmptyString }
+export schema ViewClaim {
+  readonly claimId: Schema.NonEmptyString
+  readonly target?: { readonly kind: "saved-note"; readonly noteId: Schema.NonEmptyString }
+}
 
 /** The result route's answer: whether the host took the result. */
 export schema ViewResultAnswer { readonly accepted: boolean }

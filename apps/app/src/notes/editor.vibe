@@ -45,6 +45,7 @@ export service NotesEditor {
   readonly unsaved: Stream.Stream<string>
   draft(): (DraftContent | undefined)!!
   openNote(id: string): boolean!!
+  openSavedEditor(id: string): boolean!!
   newNote(kind: "text" | "list", folderId?: string): boolean!!
   edit(patch: DraftPatch): boolean!!
   save(): boolean!!
@@ -127,10 +128,9 @@ const make = effect {
     try show({ ...held, ...fieldsOf(saved), basePrint: notePrint(saved) })
   }
 
-  effect function keepFailedDraft(state: Editor, kept?: { owner: string; snapshot: NotesSnapshot; digest: string }): void!! {
-    const held = try SubscriptionRef.get(content)
+  effect function keepFailedDraft(state: Editor, held: DraftContent, kept?: { owner: string; snapshot: NotesSnapshot; digest: string }): void!! {
     const owner = kept ?? (try owned())
-    if (held === undefined || owner === undefined || !state.present) return
+    if (owner === undefined || !state.present) return
     const base = state.draftId === "" ? undefined : owner.snapshot.notes.find((row) => row.id === state.draftId)
     const basePrint = base === undefined ? "" : (tryPromise(() => sha256Hex(notePrint(base))) catch () => "")
     drafts.keep(owner.digest, {
@@ -175,7 +175,8 @@ const make = effect {
       const after = try send({ type: "finishSave", noteId: reply?.target?.id ?? "", revision: reply?.target?.revision ?? -1, observed: reply !== undefined })
       if (after === undefined) break
       if (reply === undefined || after.review) {
-        try keepFailedDraft(after)
+        const failed = try SubscriptionRef.get(content)
+        if (failed !== undefined) try keepFailedDraft(after, failed)
         try collection.needReview()
         break
       }
@@ -212,19 +213,22 @@ const make = effect {
       // spec/notes/editor.md: an owner change or sign-out keeps an edited draft as a failed save does, and says it was not saved.
       const held = try SubscriptionRef.get(content)
       const previous = try Ref.get(lastOwner)
-      if (state.current && state.present && dirty(state) && held !== undefined && previous !== undefined) {
-        try keepFailedDraft(state, previous)
-        try PubSub.publish(unsaved, held.title.trim() === "" ? (held.defaultTitle ?? "Untitled") : held.title.trim())
-      }
       try Ref.set(lastOwner, undefined)
       if (state.current) try send({ type: "retireOwner" })
       try show(undefined)
       try SubscriptionRef.set(keptReview, undefined)
+      if (state.current && state.present && dirty(state) && held !== undefined && previous !== undefined) {
+        try keepFailedDraft(state, held, previous)
+        try PubSub.publish(unsaved, held.title.trim() === "" ? (held.defaultTitle ?? "Untitled") : held.title.trim())
+      }
       return
     }
-    if (!state.current) try send({ type: "bindOwner" })
     const previous = try Ref.get(lastOwner)
-    try Ref.set(lastOwner, previous !== undefined && previous.owner === current.owner ? { ...previous, snapshot: current.snapshot } : try owned())
+    if (previous !== undefined && previous.owner !== current.owner) try publish(undefined)
+    const ours = previous !== undefined && previous.owner === current.owner ? { ...previous, snapshot: current.snapshot } : try owned()
+    if (ours?.owner !== current.owner || (try collection.current())?.owner !== current.owner) return
+    if (!(try machine.get()).current) try send({ type: "bindOwner" })
+    try Ref.set(lastOwner, ours)
     const after = try send({ type: "publish", revision: current.snapshot.revision, notes: [...noteIds(current.snapshot)], trashed: [...trashIds(current.snapshot)] })
     if (after === undefined) return
     const held = try SubscriptionRef.get(content)
@@ -233,12 +237,12 @@ const make = effect {
     if (held !== undefined && after.draftId !== "" && after.version === 0) try adopt(after.draftId, held.token)
   }
 
-  effect function openNote(id: string): boolean!! {
+  effect function openNote(id: string, fromAgent = false): boolean!! {
     const saved = try note(id)
     if (saved === undefined) return false
     const fields = fieldsOf(saved)
     const words: DraftContent = { token: 0, creationId: randomId(), basePrint: notePrint(saved), ...fields }
-    const after = try send({ type: "openNote", id, authored: authored(words) })
+    const after = try send({ type: fromAgent ? "openAgentNote" : "openNote", id, authored: authored(words) })
     if (after === undefined) return false
     try SubscriptionRef.set(keptReview, undefined)
     try show({ ...words, token: after.token })
@@ -287,12 +291,22 @@ const make = effect {
     return next === undefined ? true : try openNote(next)
   }
 
+  effect function currentOwner(): boolean!! {
+    const owner = (try collection.current())?.owner
+    return owner !== undefined && owner === (try Ref.get(lastOwner))?.owner
+  }
+
   return {
     drafts: SubscriptionRef.changes(content),
     keptReviews: SubscriptionRef.changes(keptReview),
     unsaved: Stream.fromPubSub(unsaved),
-    draft: () => SubscriptionRef.get(content),
+    effect draft() { return (try currentOwner()) ? try SubscriptionRef.get(content) : undefined },
     openNote,
+    effect openSavedEditor(id: string) {
+      const state = try machine.get()
+      if (state.draftId === id && selectionCurrent(state)) return (try SubscriptionRef.get(content))?.token === state.token
+      return try openNote(id, true)
+    },
     effect newNote(kind: "text" | "list", folderId?: string) {
       if (!(try leave())) return false
       const current = try collection.current()
@@ -379,7 +393,7 @@ const make = effect {
     },
     effect selection() {
       const state = try machine.get()
-      return selectionCurrent(state) ? { kind: "canonical-note" as const, id: state.draftId, revision: String(state.revision) } : undefined
+      return (try currentOwner()) && selectionCurrent(state) ? { kind: "canonical-note" as const, id: state.draftId, revision: String(state.revision) } : undefined
     },
     publish,
   }
