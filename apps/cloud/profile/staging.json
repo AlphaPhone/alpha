@@ -1,0 +1,216 @@
+{
+  "version": 1,
+  "name": "Alpha Cloud",
+  "environments": {
+    "production": {
+      "name": "Alpha Cloud",
+      "api": "https://api.eliza.app",
+      "web": "https://eliza.app",
+      "entitlementAudience": "ai.alphacompute.alphaphone",
+      "mailSender": "sign-in@mail.alphacompute.invalid",
+      "databaseIdentity": "86106a1083f96bca7b68485c779387a1cebdbe628c7de92c47442e75cb937c63",
+      "firstPartyOrigins": [
+        "https://eliza.app"
+      ],
+      "capabilities": [
+        "billing"
+      ],
+      "documents": {
+        "terms": {
+          "title": "Alpha Terms",
+          "revision": "2026-11-23",
+          "sections": [
+            {
+              "title": "Your phone and its agent",
+              "paragraphs": [
+                "Alpha is a personal agent phone. Its agent runs on the phone; this cloud supplies sign-in, model inference, speech and the services the agent asks for on your behalf."
+              ]
+            },
+            {
+              "title": "Your plan",
+              "paragraphs": [
+                "A paid plan renews each month until you cancel it, and a cancellation takes effect when the paid period ends."
+              ]
+            }
+          ]
+        },
+        "privacy": {
+          "title": "Alpha Privacy",
+          "revision": "2026-11-23",
+          "sections": [
+            {
+              "title": "What the cloud keeps",
+              "paragraphs": [
+                "The cloud keeps your account, your sign-in methods, the devices signed in to it and what each paid request cost. It does not keep your conversations with Alpha."
+              ]
+            },
+            {
+              "title": "Your choices",
+              "paragraphs": [
+                "You may sign a device out, disconnect Google, or ask for your account to be deleted at any time."
+              ]
+            }
+          ]
+        }
+      },
+      "signIn": {
+        "smsCountries": [
+          "+1"
+        ],
+        "smsHourlyBudget": 100
+      },
+      "mail": {
+        "kind": "https",
+        "url": "https://mail.provider.invalid/deliver",
+        "apiKeyEnv": "CLOUD_MAIL_TOKEN"
+      },
+      "sms": {
+        "kind": "none"
+      },
+      "digestKeyEnv": "CLOUD_DIGEST_KEY",
+      "sealing": {
+        "currentKeyId": "seal-1",
+        "keys": [
+          {
+            "keyId": "seal-1",
+            "env": "CLOUD_SEALING_KEY"
+          }
+        ]
+      },
+      "entitlement": {
+        "keyId": "entitlement-1",
+        "signingKeyEnv": "CLOUD_ENTITLEMENT_KEY",
+        "publicKeys": [
+          {
+            "kid": "entitlement-1",
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "RwIpsg2vaG6Q8pJcPP8rnReb71VKZqTlEMeF14ahp-E",
+            "y": "rzJhMHg6SUtsGH4dntUcMgkpnt8qM_ITn_REryydY5U"
+          }
+        ]
+      },
+      "billing": {
+        "apiUrl": "https://payments.provider.invalid",
+        "secretKeyEnv": "STRIPE_SECRET_KEY",
+        "webhookSecretEnv": "STRIPE_WEBHOOK_SECRET",
+        "publishableKey": "pk_live_placeholder",
+        "plans": {
+          "plus_monthly": {
+            "priceId": "price_alphaplus",
+            "productId": "prod_alphaplus"
+          },
+          "pro_monthly": {
+            "priceId": "price_alphapro",
+            "productId": "prod_alphapro"
+          }
+        }
+      }
+    },
+    "staging": {
+      "name": "Alpha Cloud Staging",
+      "api": "https://api-staging.eliza.app",
+      "web": "https://staging.eliza.app",
+      "entitlementAudience": "ai.alphacompute.alphaphone",
+      "mailSender": "sign-in@mail.alphacompute.invalid",
+      "databaseIdentity": "f352738fd9a8159c81acb4ce9efeb87f6219e40f5e5a249b2d09ee12faee2ea0",
+      "firstPartyOrigins": [
+        "https://staging.eliza.app",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173"
+      ],
+      "capabilities": [
+        "billing"
+      ],
+      "documents": {
+        "terms": {
+          "title": "Alpha Terms",
+          "revision": "2026-11-23",
+          "sections": [
+            {
+              "title": "Your phone and its agent",
+              "paragraphs": [
+                "Alpha is a personal agent phone. Its agent runs on the phone; this cloud supplies sign-in, model inference, speech and the services the agent asks for on your behalf."
+              ]
+            },
+            {
+              "title": "Your plan",
+              "paragraphs": [
+                "A paid plan renews each month until you cancel it, and a cancellation takes effect when the paid period ends."
+              ]
+            }
+          ]
+        },
+        "privacy": {
+          "title": "Alpha Privacy",
+          "revision": "2026-11-23",
+          "sections": [
+            {
+              "title": "What the cloud keeps",
+              "paragraphs": [
+                "The cloud keeps your account, your sign-in methods, the devices signed in to it and what each paid request cost. It does not keep your conversations with Alpha."
+              ]
+            },
+            {
+              "title": "Your choices",
+              "paragraphs": [
+                "You may sign a device out, disconnect Google, or ask for your account to be deleted at any time."
+              ]
+            }
+          ]
+        }
+      },
+      "signIn": {
+        "smsCountries": [
+          "+1"
+        ],
+        "smsHourlyBudget": 100
+      },
+      "mail": {
+        "kind": "loopback"
+      },
+      "sms": {
+        "kind": "loopback"
+      },
+      "digestKeyEnv": "CLOUD_DIGEST_KEY",
+      "sealing": {
+        "currentKeyId": "seal-1",
+        "keys": [
+          {
+            "keyId": "seal-1",
+            "env": "CLOUD_SEALING_KEY"
+          }
+        ]
+      },
+      "entitlement": {
+        "keyId": "entitlement-1",
+        "signingKeyEnv": "CLOUD_ENTITLEMENT_KEY",
+        "publicKeys": [
+          {
+            "kid": "entitlement-1",
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "RwIpsg2vaG6Q8pJcPP8rnReb71VKZqTlEMeF14ahp-E",
+            "y": "rzJhMHg6SUtsGH4dntUcMgkpnt8qM_ITn_REryydY5U"
+          }
+        ]
+      },
+      "billing": {
+        "apiUrl": "http://127.0.0.1:9/stripe",
+        "secretKeyEnv": "STRIPE_SECRET_KEY",
+        "webhookSecretEnv": "STRIPE_WEBHOOK_SECRET",
+        "publishableKey": "pk_test_alpha",
+        "plans": {
+          "plus_monthly": {
+            "priceId": "price_alphaplus",
+            "productId": "prod_alphaplus"
+          },
+          "pro_monthly": {
+            "priceId": "price_alphapro",
+            "productId": "prod_alphapro"
+          }
+        }
+      }
+    }
+  }
+}
