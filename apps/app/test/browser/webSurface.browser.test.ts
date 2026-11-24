@@ -52,3 +52,20 @@ it("Stop swaps in a blank frame, closing forgets the tab, and another session's 
   await expect(call("command", { id: "w2", command: "back" })).rejects.toThrow("Browser tab is unavailable");
   await expect(host.call("create", { id: "w3", session: "another-session" })).rejects.toThrow("Expired browser session");
 });
+
+// spec/browser/bookmarks.md, "A read replaces the marks with the store's list, keeping each saved name, and a failed read is reported, or offered for recovery once when the list is damaged"
+it("the browser build's bookmark document keeps each name with its address, and a list from before names reads back untitled", async () => {
+  const { call } = frameHost();
+  const key = "alpha/browser/bookmarks", old = "https://old.test/", saved = "https://a.test/";
+  localStorage.setItem(key, JSON.stringify([old]));
+  try {
+    expect(await call("bookmarks")).toEqual({ urls: [old], entries: [{ url: old }] });
+    expect(await call("setBookmark", { url: saved, saved: true, title: "A page" })).toEqual({ urls: [saved, old], entries: [{ url: saved, title: "A page" }, { url: old }] });
+    expect(await call("setBookmark", { url: saved, saved: true })).toEqual({ urls: [saved, old], entries: [{ url: saved, title: "A page" }, { url: old }] });
+    expect(JSON.parse(localStorage.getItem(key) ?? "")).toEqual([{ url: saved, title: "A page" }, old]);
+    expect(await call("setBookmark", { url: saved, saved: true, title: " " })).toEqual({ urls: [saved, old], entries: [{ url: saved }, { url: old }] });
+    expect(JSON.parse(localStorage.getItem(key) ?? "")).toEqual([saved, old]);
+  } finally {
+    localStorage.removeItem(key);
+  }
+});
