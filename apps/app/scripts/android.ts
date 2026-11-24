@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// spec/app/release/index.md, "Story: Stage Alpha into an image"; spec/agent/index.md, "Story: Build the pack only from the pinned eliza"
+// spec/app/image/index.md, "Story: Stage Alpha into an image"; spec/agent/index.md, "Story: Build the pack only from the pinned eliza"
 import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -402,4 +402,3 @@ if (import.meta.main) {
     process.exitCode ||= 1;
   }
 }
-
