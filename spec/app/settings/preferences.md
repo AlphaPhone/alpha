@@ -327,6 +327,21 @@ pure def stepTheDocumentIsReadOnlyWhenDue(before: Preferences, via: str, after: 
     (via == "start" or ((via == "opened" or via == "resumed" or via == "recovered" or via == "giveUpOnRecovery") and not(T::busy(before.saving))))
 ```
 
+### A new phone lets Alpha act without asking first, load images in Inbox, use its location and the Browser page open, and change Gmail and Calendar
+
+Location is on because the launcher already holds the location grant on an
+Alpha image; the owner turns any of these off here, or revokes the grant in
+Android. A recovery restores these, and a choice the previous Alpha lacked
+starts as one of these.
+
+```quint
+type Chosen = { askFirst: bool, images: bool, shares: List[Share] }
+
+pure val newPhone: Chosen = { askFirst: false, images: true, shares: List(AgentLocation, BrowserPage, GmailChanges, CalendarEdits) }
+
+pure def lawANewPhoneAllowsEveryShare(share: Share): bool = newPhone.shares.includes(share) and not(newPhone.askFirst) and newPhone.images
+```
+
 ### What the phone could not read is taken as asking first, loading no images and sharing nothing
 
 The phone reports the document readable, with its values, or not.

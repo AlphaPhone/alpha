@@ -38,8 +38,8 @@ schema PreviousChoices {
   autoLoadMailImages?: boolean
 }
 
-/** What a new phone holds: Alpha asks first, loads no images, and may use the location and the open Browser page and change Gmail and Calendar. */
-const fresh: Choices = { askFirst: true, images: false, shares: ["AgentLocation", "BrowserPage", "GmailChanges", "CalendarEdits"] }
+// spec/app/settings/preferences.md, "A new phone lets Alpha act without asking first, load images in Inbox, use its location and the Browser page open, and change Gmail and Calendar"
+const fresh: Choices = Prefs.newPhone
 
 const look = (): Look => (darkPhone() ? "DarkLook" : "LightLook")
 const json = <A>(schema: Schema.Codec<A, A>) => Schema.fromJsonString(schema)

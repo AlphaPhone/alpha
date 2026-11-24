@@ -168,13 +168,14 @@ describe("Settings", () => {
     // spec/app/settings/preferences.md, "When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again"
     await press("Privacy");
     await tap("Recover device settings");
-    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded" && Prefs.allows(s, "BrowserPage"));
+    // spec/app/settings/preferences.md, "A new phone lets Alpha act without asking first, load images in Inbox, use its location and the Browser page open, and change Gmail and Calendar"
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded" && Prefs.allows(s, "BrowserPage") && !Prefs.asksBeforeActing(s, "WebAction") && s.images);
     // spec/app/settings/preferences.md, "The owner changes Ask before Alpha acts, Load images or what Alpha may share only once the phone has read them, one save at a time, with ten seconds to save"
     await tap("Ask before Alpha acts");
-    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && !Prefs.asksBeforeActing(s, "WebAction"));
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && Prefs.asksBeforeActing(s, "WebAction"));
     await tap("Browser page");
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && !Prefs.allows(s, "BrowserPage"));
-    expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: false, images: false, shares: ["AgentLocation", "GmailChanges", "CalendarEdits"] });
+    expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: true, images: true, shares: ["AgentLocation", "GmailChanges", "CalendarEdits"] });
   });
 
   it("A phone updated from the previous Alpha keeps its choices (spec/app/settings/preferences.md, \"The device preferences are read when Alpha starts, when Settings opens, and when Alpha comes back while Settings shows, with ten seconds to answer, never while a change or a recovery is in flight\")", async () => {
