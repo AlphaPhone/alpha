@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import warnings
 import zipfile
 
 spec = importlib.util.spec_from_file_location('packaged_runtime', Path(__file__).resolve().parents[1] / 'scripts/verify-packaged-runtime.py')
@@ -51,13 +52,15 @@ class PackagedRuntimeTest(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
 
-    def apk(self, name='app.apk', drop=(), change=None):
+    def apk(self, name='app.apk', drop=(), change=None, replace=None, extra=None):
         file = self.root / name
         with zipfile.ZipFile(file, 'w') as archive:
-            for entry, data in self.entries.items():
+            for entry, data in {**self.entries, **(replace or {})}.items():
                 if entry in drop:
                     continue
                 archive.writestr(entry, b'changed' if entry == change else data)
+            for entry, data in (extra or {}).items():
+                archive.writestr(entry, data)
         return file
 
     def test_a_debug_apk_with_both_abis_is_byte_verified_without_execution_claim(self):
@@ -86,6 +89,43 @@ class PackagedRuntimeTest(unittest.TestCase):
     def test_a_release_that_packages_x86_64_still_checks_its_rows(self):
         with self.assertRaisesRegex(ValueError, 'differs from its inventory: lib/x86_64/libeliza_node.so'):
             verifier.verify(self.apk(change='lib/x86_64/libeliza_node.so'), release=True)
+
+    def test_duplicate_zip_entries_are_refused(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', UserWarning)
+            apk = self.apk(extra={'assets/agent/agent.mjs': b'duplicate'})
+        with self.assertRaisesRegex(ValueError, 'Duplicate APK entries'):
+            verifier.verify(apk)
+
+    def test_a_stamp_from_a_different_pin_or_stager_is_refused(self):
+        apk = self.apk()
+        for name, data in (('upstream.lock.json', json.dumps({'commit': 'b' * 40}).encode()),
+                           ('scripts/stage-agent-runtime.ts', b'changed stager')):
+            original = (self.root / name).read_bytes()
+            self.write(name, data)
+            with self.subTest(source=name), self.assertRaisesRegex(ValueError, 'different pin or stager'):
+                verifier.verify(apk)
+            self.write(name, original)
+
+    def test_a_packaged_stamp_that_differs_from_the_staged_one_is_refused(self):
+        apk = self.apk()
+        self.write('android/app/src/main/assets/agent/alpha-source.json', json.dumps({'base': 'c' * 40}).encode())
+        with self.assertRaisesRegex(ValueError, 'differs from the staged payload'):
+            verifier.verify(apk)
+
+    def test_the_workflow_worker_must_match_the_bundle_pin(self):
+        with self.assertRaisesRegex(ValueError, 'pins no workflow worker'):
+            verifier.verify(self.apk(replace={'assets/agent/manifest.json': json.dumps({'schema': 1}).encode()}))
+        for name in ('src/worker/main.js', 'manifest.json', 'workflow-worker.json', 'dependencies.json'):
+            with self.subTest(missing=name), self.assertRaisesRegex(ValueError, 'worker is not packaged'):
+                verifier.verify(self.apk(drop={'assets/agent/workflow-worker/' + name}))
+        with self.assertRaisesRegex(ValueError, 'differs from the bundle pin'):
+            verifier.verify(self.apk(change='assets/agent/workflow-worker/src/worker/main.js'))
+
+    def test_an_unexpected_packaged_abi_is_refused_in_debug_and_release(self):
+        for release in (False, True):
+            with self.subTest(release=release), self.assertRaisesRegex(ValueError, 'Unexpected packaged ABI'):
+                verifier.verify(self.apk(extra={'lib/armeabi-v7a/libfoo.so': b'32-bit'}), release=release)
 
     def test_an_apk_without_the_payload_reports_it_missing(self):
         self.assertEqual(verifier.verify(self.apk(drop={'assets/agent/inventory.json'}))['runtime'], 'MISSING')
