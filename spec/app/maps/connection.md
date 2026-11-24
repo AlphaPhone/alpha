@@ -1,236 +1,292 @@
-# Cloud Maps connection
+# Connection
 
-[Maps](./index.md) reaches its provider only through the owner's Alpha
-Cloud account, on the account's `/api/v1/maps/*` routes through eliza's
-cloud client, and never calls a provider directly. The connection reads the
-deployment's coverage once per signed-in account, installs the provider
-only from the newest read for that account, and retires it the moment the
-account changes. Every search, place, route, copyright and tile request
-carries the generation and account it started under, and its answer is
-dropped if either changed by the time it returns. A refusal that asks the
-phone to wait pauses every data request for as long as it asks.
+What [Maps](./index.md) is drawn and served with: the owner's cloud
+account, the map provider installed for it, the base map, the map surface
+on screen, and Android's location. The Maps screen holds one connection;
+[navigation](./navigation.md) follows the location it gives.
 
-## Story: Keep Cloud Maps on the account that asked for it
+## Story: Serve Maps through my cloud account
 
-> As the owner, I want the map data I see to come from the account I am
-> signed in as, and never to arrive for an account I have left.
+> As the owner, I want Maps served through my own cloud account, never
+> through another's, and a connection that is working left alone when the
+> network comes and goes, so that nothing I am doing is lost.
 
-### The connection holds the bound account, whether Maps was opened, the generation that fences requests, the coverage read and the request pause
+### A connection holds the signed-in account, the coverage read for it, the provider installed, the base map, the map surface and the location
 
-The account is the one [Account](../account/) is signed in as; `""` is signed
-out. The coverage names the provider kind and what it offers. The pause runs
-until a time in milliseconds.
+The provider is named by the account it serves (0 for none). The base map
+is the world map until a provider is installed, then the cloud map inside
+its coverage or the regional map outside it. The map surface is numbered
+and is drawing, drawn or broken. Location is Android's permission, whether
+the owner has seen Alpha's location disclosure, and the location session:
+whose it is (the screen's "Use my location" or guidance) and its number.
 
 ```quint
-import vocabulary.* from "./vocabulary"
+import read as R from "../../kit/read"
+import permission as P from "../../kit/permission"
 
-type Phase = NeverRead | Reading | Installed | ReadFailed
-type Why = NoFailure | SignedOut | NotOffered | Transient | Invalid
-type Coverage = { kind: ProviderKind, offer: Offer }
+type Basemap = World | Regional | Cloud
+type Surface = Drawing | Drawn | Broken
+type Locator = Nobody | Finder | Guide
 type Connection = {
-  account: str, opened: bool, generation: int, phase: Phase, owner: str, coverage: Coverage, failure: Why, pausedUntil: int,
+  account: int, coverage: R::Read, provider: int, basemap: Basemap,
+  plane: int, surface: Surface,
+  location: P::Permission, disclosed: bool, locator: Locator, session: int,
 }
-type Effect = ReadCoverage({ generation: int }) | Retired
-type Moved = { state: Connection, out: List[Effect] }
-
-pure val noCoverage: Coverage = { kind: NoProvider, offer: noOffer }
 
 pure val initial: Connection = {
-  account: "", opened: false, generation: 0, phase: NeverRead, owner: "", coverage: noCoverage, failure: SignedOut, pausedUntil: 0,
-}
-```
-
-### What the simulator tries
-
-```quint
-pure val accountValues = Set("", "a", "b")
-pure val generationValues = Set(0, 1, 2, 3, 4)
-pure val capturedValues = Set(0, 1, 2, 3)
-pure val ownerValues = Set("", "a", "b")
-pure val coverageValues = Set(
-  noCoverage,
-  { kind: GoogleProvider, offer: { ...noOffer, drive: true, walk: true, map: true, alternatives: true } },
-  { kind: OpenProvider, offer: { ...noOffer, drive: true } },
-  { kind: OpenProvider, offer: noOffer })
-pure val nowValues = Set(0, 1000, 4000, 70000)
-pure val waitMsValues = Set(1000, 60000)
-```
-
-### A coverage read starts only for a signed-in account under the next generation, and a signed-out one asks nothing
-
-Opening Maps, binding an account once Maps has been opened, and the owner's
-Retry after a failure each start a read. A read is never repeated while one
-is under way or a provider is installed. Signed out, it records the sign-in
-failure and makes no Cloud request.
-
-```quint
-pure def reading(opened: bool, s: Connection): Moved =
-  if (s.account == "")
-    { state: { ...s, opened: opened, generation: s.generation + 1, phase: ReadFailed, failure: SignedOut }, out: List() }
-  else {
-    state: { ...s, opened: opened, generation: s.generation + 1, phase: Reading, failure: NoFailure, owner: "", coverage: noCoverage },
-    out: List(ReadCoverage({ generation: s.generation + 1 })),
-  }
-
-pure def owed(s: Connection): bool = s.phase == NeverRead or s.phase == ReadFailed
-
-pure def openMaps(s: Connection): Moved =
-  if (owed(s)) reading(true, s) else { state: { ...s, opened: true }, out: List() }
-
-pure def canRetryCoverage(s: Connection): bool = s.phase == ReadFailed
-
-pure def retryCoverage(s: Connection): Moved = reading(s.opened, s)
-
-pure val sValues = Set(initial, { ...initial, account: "a" })
-
-pure def lawASignedOutReadAsksNothing(s: Connection, opened: bool): bool =
-  s.account == "" implies (reading(opened, s).out == List() and reading(opened, s).state.phase == ReadFailed)
-```
-
-### Only the newest read for the bound account installs the provider, and coverage with no provider or no mode is Maps not offered
-
-An answer names the generation it was asked under; one of an older
-generation settles nothing.
-
-```quint
-type Answer = Covered | Garbled | Unavailable | Unauthorized
-
-pure val answerValues = Set(Covered, Garbled, Unavailable, Unauthorized)
-
-pure def canCovered(s: Connection, generation: int): bool = generation == s.generation and s.phase == Reading
-
-pure def covered(s: Connection, generation: int, answer: Answer, coverage: Coverage): Connection =
-  if (answer == Covered and coverage.kind != NoProvider and anyMode(coverage.offer))
-    { ...s, phase: Installed, owner: s.account, coverage: coverage, failure: NoFailure }
-  else {
-    ...s, phase: ReadFailed, owner: "", coverage: noCoverage,
-    failure: if (answer == Unauthorized) SignedOut else if (answer == Garbled) Invalid
-      else if (answer == Unavailable) Transient else NotOffered,
-  }
-
-pure def alwaysTheInstalledProviderIsTheAccounts(s: Connection): bool =
-  s.phase == Installed implies (s.account != "" and s.owner == s.account and s.coverage.kind != NoProvider and s.failure == NoFailure)
-
-pure def alwaysAReadHasAnAccount(s: Connection): bool = s.phase == Reading implies s.account != ""
-
-pure def alwaysNoProviderUnlessInstalled(s: Connection): bool = s.phase != Installed implies s.coverage == noCoverage
-
-pure def sometimesGoogleInstalled(s: Connection): bool = s.phase == Installed and s.coverage.kind == GoogleProvider
-
-pure def sometimesSignedOutRead(s: Connection): bool = s.phase == ReadFailed and s.account == "" and s.generation > 0
-```
-
-### Changing account retires the provider before anything reads the new account, clears the pause and owes a read
-
-The generation moves on first, so no request of the old account can come
-back. Guidance the old provider planned ends with it. Once Maps has been
-opened, a signed-in account is read at once.
-
-```quint
-pure def canBindAccount(s: Connection, account: str): bool = account != s.account
-
-pure def bindAccount(s: Connection, account: str): Moved = {
-  val retired: Connection = {
-    ...s, account: account, generation: s.generation + 1, phase: NeverRead, owner: "",
-    coverage: noCoverage, failure: if (account == "") SignedOut else NoFailure, pausedUntil: 0,
-  }
-  val following: Moved = if (s.opened and account != "") reading(true, retired) else { state: retired, out: List() }
-  { state: following.state, out: if (s.phase == Installed) List(Retired).concat(following.out) else following.out }
+  account: 0, coverage: R::unread, provider: 0, basemap: World,
+  plane: 1, surface: Drawing,
+  location: P::unasked, disclosed: false, locator: Nobody, session: 0,
 }
 
-pure def stepAnAccountChangeRetiresTheProvider(before: Connection, after: Connection): bool =
-  before.account != after.account implies (after.phase != Installed and after.generation > before.generation)
+pure val accountValues = Set(0, 1, 2)
+pure val ticketValues = Set(1, 2, 3)
+pure val planeValues = Set(1, 2, 3)
+pure val sessionValues = Set(1, 2)
+
+pure def working(c: Connection): bool = c.provider != 0
 ```
 
-### A data request starts only on the installed provider of the bound account outside a pause, and its answer is taken only for the generation and account it started under
-
-A request the screen no longer needs is cancelled, and a cancelled one
-returns nothing.
+### A new base map is drawn on a new surface in place of the old one
 
 ```quint
-pure def mayRequest(s: Connection, now: int): bool = s.phase == Installed and s.owner == s.account and now >= s.pausedUntil
-
-pure def mayReturn(s: Connection, captured: int, owner: str, cancelled: bool): bool =
-  s.phase == Installed and captured == s.generation and owner == s.account and not(cancelled)
-
-pure def lawAnotherAccountReceivesNothing(s: Connection, captured: int, owner: str, cancelled: bool): bool =
-  owner != s.account implies not(mayReturn(s, captured, owner, cancelled))
-
-pure def lawACancelledRequestReturnsNothing(s: Connection, captured: int, owner: str): bool =
-  not(mayReturn(s, captured, owner, true))
+pure def redrawn(basemap: Basemap, c: Connection): Connection =
+  if (basemap == c.basemap) c else { ...c, basemap: basemap, plane: c.plane + 1, surface: Drawing }
 ```
 
-### Every Maps request goes through eliza's cloud client under its own request key, and a tile comes back as its image
+### Signing in, out or to another account retires the provider and reads the new account's coverage
 
-Search, place details, routes and tiles are sent with a request key of
-their own, so Cloud admits and bills each once; the coverage and the
-viewport copyright need none. A tile is the image Cloud sends, PNG, JPEG or
-WebP of at most 1 MiB.
+Signed out, nothing is read.
 
 ```quint
-type Call = CoverageCall | SearchCall | DetailsCall | RoutesCall | ViewportCall | TileCall
+pure def canChangeAccount(c: Connection, account: int): bool = account != c.account and account >= 0
 
-pure def keyed(call: Call): bool = call != CoverageCall and call != ViewportCall
-
-pure def lawEveryChargedCallIsKeyed(call: Call): bool =
-  (call == SearchCall or call == DetailsCall or call == RoutesCall or call == TileCall) implies keyed(call)
-
-pure val maxTileBytes = 1048576
-
-pure def tileAccepted(bytes: int): bool = bytes >= 1 and bytes <= maxTileBytes
-
-pure val bytesValues = Set(0, 1, 1048576, 1048577)
-
-pure def lawAnEmptyOrHugeTileIsRefused(bytes: int): bool = (bytes < 1 or bytes > maxTileBytes) implies not(tileAccepted(bytes))
+pure def changeAccount(c: Connection, account: int): Connection =
+  redrawn(World, { ...c, account: account, provider: 0,
+    coverage: if (account != 0) R::ask(c.coverage) else c.coverage })
 ```
 
-## Story: Back off when Maps asks me to wait
+### Opening Maps, regaining the network or Retry reads the coverage again only when no provider is working
 
-> As the owner, I want Maps to stop sending requests while Cloud has asked it
-> to wait, and to resume on its own when the wait is over, without retrying a
-> refused request by itself.
-
-### A refusal asking to wait, for the current generation, pauses every data request until its wait ends
-
-A pause only lengthens. A refusal of an older generation changes nothing.
-The coverage read is never paused. A new account clears the pause; opening
-Maps again keeps it.
+A read already under way is not repeated, and a working provider is left
+alone.
 
 ```quint
-pure def canPause(s: Connection, captured: int, waitMs: int, now: int): bool = waitMs > 0 and s.phase == Installed
+pure def canConnect(c: Connection): bool =
+  c.account != 0 and not(working(c)) and c.coverage.status != R::Loading
 
-pure def pause(s: Connection, captured: int, waitMs: int, now: int): Connection =
-  if (captured == s.generation) { ...s, pausedUntil: larger(s.pausedUntil, now + waitMs) } else s
-
-pure def alwaysThePauseIsNotNegative(s: Connection): bool = s.pausedUntil >= 0
-
-pure def stepAPauseOnlyLengthens(before: Connection, via: str, after: Connection): bool =
-  via == "pause" implies after.pausedUntil >= before.pausedUntil
-
-pure def sometimesPaused(s: Connection): bool = s.phase == Installed and s.pausedUntil > 0
+pure def connect(c: Connection): Connection = { ...c, coverage: R::ask(c.coverage) }
 ```
 
-### A wait Cloud names is kept when it is at most a day, an allowance reset when at most 400 days, and any other wait is one minute
-
-The owner reads that the Maps request limit was reached and when to try
-again, or that the allowance for the period is used and when it resets;
-with no usable wait it says to try again later. The wait is data; the
-sentence around it is Alpha's, never the provider's.
+### Only the newest read's answer is taken, while signed in, and a healthy answer installs the provider for that account
 
 ```quint
-pure val defaultPauseSeconds = 60
-pure val maxWaitSeconds = 86400
-pure val maxResetSeconds = 34560000
+pure def canAnswerCoverage(c: Connection, ticket: int, ok: bool, covered: bool): bool =
+  R::canAnswer(c.coverage, ticket) and c.account != 0
 
-pure def waitNamed(seconds: int): bool = seconds > 0 and seconds <= maxWaitSeconds
+pure def answerCoverage(c: Connection, ticket: int, ok: bool, covered: bool): Connection =
+  val answered = { ...c, coverage: R::answer(c.coverage, ok) }
+  if (ok) redrawn(if (covered) Cloud else Regional, { ...answered, provider: c.account }) else answered
+```
 
-pure def resetNamed(seconds: int): bool = seconds > 0 and seconds <= maxResetSeconds
+### A provider is installed only after a healthy read
 
-pure def pauseSeconds(seconds: int): int = if (waitNamed(seconds)) seconds else defaultPauseSeconds
+```quint
+pure def alwaysAProviderIsHealthy(c: Connection): bool =
+  working(c) implies c.coverage.status == R::Loaded
+```
 
-pure val secondsValues = Set(-1, 0, 1, 60, 86400, 86401)
+### A provider serves only the signed-in account
 
-pure def lawEveryRefusalPausesAtMostADay(seconds: int): bool = pauseSeconds(seconds) >= 1 and pauseSeconds(seconds) <= maxWaitSeconds
+```quint
+pure def alwaysTheProviderIsTheSignedInAccounts(c: Connection): bool =
+  working(c) implies c.provider == c.account
+```
 
-pure def lawAnUnnamedWaitIsAMinute(seconds: int): bool = not(waitNamed(seconds)) implies pauseSeconds(seconds) == defaultPauseSeconds
+### The world map shows exactly when no provider is working
+
+Its credits are the world map's own; the cloud and regional maps carry
+their provider's attribution and the provider's disclosure of which
+services receive searches and route points, which the screen shows with
+them.
+
+```quint
+pure def alwaysTheWorldMapStandsInForTheProvider(c: Connection): bool =
+  (c.basemap == World) == not(working(c))
+```
+
+### Only an account change takes a working provider away
+
+Regaining the network, a retry or a coverage answer never does, so
+nothing that runs on the provider is ended by a reconnect.
+
+```quint
+pure def stepOnlyAnAccountChangeRetiresAProvider(before: Connection, via: str, after: Connection): bool =
+  (working(before) and after.provider != before.provider) implies via == "changeAccount"
+```
+
+### A failed read is tried again
+
+Alpha retries on its own while the account is signed in.
+
+```quint
+pure def leadsToAFailedReadIsTriedAgain(c: Connection, later: Connection): bool =
+  (c.account != 0 and c.coverage.status == R::Failed) implies
+    (later.coverage.status != R::Failed or later.account != c.account)
+
+pure val fair_connect = "weak"
+```
+
+### The cloud map can be drawn
+
+```quint
+pure def sometimesCloudMap(c: Connection): bool = c.basemap == Cloud and c.surface == Drawn
+```
+
+### The regional map can be drawn outside cloud coverage
+
+```quint
+pure def sometimesRegionalMap(c: Connection): bool = c.basemap == Regional
+```
+
+### A read can fail while signed in
+
+```quint
+pure def sometimesReadFailed(c: Connection): bool = c.account != 0 and c.coverage.status == R::Failed
+```
+
+## Story: See the map
+
+> As the owner, I want to know when the map could not be drawn and to try
+> again, and never to see an old map's news.
+
+### Only the surface in place reports whether it was drawn
+
+```quint
+pure def canReportMap(c: Connection, plane: int, ok: bool): bool = plane == c.plane
+
+pure def reportMap(c: Connection, plane: int, ok: bool): Connection =
+  { ...c, surface: if (ok) Drawn else Broken }
+```
+
+### Retry draws a broken map again on a new surface
+
+```quint
+pure def canRetryMap(c: Connection): bool = c.surface == Broken
+
+pure def retryMap(c: Connection): Connection = { ...c, plane: c.plane + 1, surface: Drawing }
+```
+
+### One map surface is alive at a time: a new one replaces the last and starts drawing
+
+```quint
+pure def stepANewSurfaceReplacesTheOld(before: Connection, via: str, after: Connection): bool =
+  after.plane != before.plane implies (after.plane == before.plane + 1 and after.surface == Drawing)
+
+pure def alwaysASurfaceIsNumbered(c: Connection): bool = c.plane > 0
+```
+
+### The map can be broken
+
+```quint
+pure def sometimesMapBroken(c: Connection): bool = c.surface == Broken
+```
+
+## Story: Use my location
+
+> As the owner, I want to be told why Alpha wants my location before
+> Android asks, to be asked once, to be sent to Settings when I said no,
+> and only one thing following my location at a time.
+
+### The owner reads Alpha's location disclosure before Android asks
+
+The disclosure names the provider and every service that receives
+searches, search areas and route points, and says that the cloud keeps
+only the kind of each request and its result.
+
+```quint
+pure def canDisclose(c: Connection): bool = not(c.disclosed)
+
+pure def disclose(c: Connection): Connection = { ...c, disclosed: true }
+
+pure def canAskLocation(c: Connection): bool = c.disclosed and P::canAsk(c.location)
+
+pure def askLocation(c: Connection): Connection = { ...c, location: P::ask(c.location) }
+```
+
+### Android is asked only after the disclosure
+
+```quint
+pure def alwaysAskedAfterTheDisclosure(c: Connection): bool = c.location.asked implies c.disclosed
+```
+
+### What Android reports replaces what Alpha believed, and without permission no session goes on
+
+```quint
+pure def observeLocation(c: Connection, grant: P::Grant): Connection =
+  val seen = { ...c, location: P::observe(c.location, grant) }
+  if (P::allows(seen.location)) seen else { ...seen, locator: Nobody }
+```
+
+### Once Android has said no, Use my location opens Settings
+
+```quint
+pure def needsSettings(c: Connection): bool = P::needsSettings(c.location) and not(P::allows(c.location))
+```
+
+### A location session has one owner and a new number
+
+"Use my location" takes one fix and ends; guidance follows until it ends.
+Guidance takes the location from "Use my location"; nothing takes it from
+guidance.
+
+```quint
+pure def canLocate(c: Connection, owner: Locator): bool =
+  owner != Nobody and P::allows(c.location) and c.locator != Guide
+    and not(owner == Finder and c.locator == Finder)
+
+pure def locate(c: Connection, owner: Locator): Connection =
+  { ...c, locator: owner, session: c.session + 1 }
+```
+
+### Only the session in place gives fixes, and "Use my location" ends with its fix
+
+```quint
+pure def canTakeFix(c: Connection, session: int): bool = c.locator != Nobody and session == c.session
+
+pure def takeFix(c: Connection, session: int): Connection =
+  if (c.locator == Finder) { ...c, locator: Nobody } else c
+
+pure def canStopLocating(c: Connection): bool = c.locator != Nobody
+
+pure def stopLocating(c: Connection): Connection = { ...c, locator: Nobody }
+```
+
+### A location session runs only with Android's permission
+
+```quint
+pure def alwaysASessionHasPermission(c: Connection): bool =
+  c.locator != Nobody implies P::allows(c.location)
+```
+
+### Every session has its own number
+
+```quint
+pure def alwaysSessionsAreNumbered(c: Connection): bool =
+  c.session >= 0 and (c.locator != Nobody implies c.session > 0)
+
+pure def stepASessionIsNewOnlyWhenLocating(before: Connection, via: str, after: Connection): bool =
+  after.session != before.session implies (via == "locate" and after.session == before.session + 1)
+```
+
+### Guidance can follow the location
+
+```quint
+pure def sometimesGuideLocates(c: Connection): bool = c.locator == Guide
+```
+
+### The owner can be sent to Settings for location
+
+```quint
+pure def sometimesSettingsNeeded(c: Connection): bool = needsSettings(c)
 ```
