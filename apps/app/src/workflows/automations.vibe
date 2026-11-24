@@ -1,7 +1,7 @@
 // spec/workflows/automations.md, "Story: See all my automations even when one source fails"; spec/workflows/automations.md, "Story: Change an automation once, even when the answer is lost"; spec/workflows/agentSchedules.md, "Story: Save and run a prompt my agent sends on a schedule"; spec/workflows/agentSchedules.md, "Story: Answer a scheduled item from Workflows"
 import { type Answer, type ChangeKind, type Row, type RowKind, type Source, Machine, answerOfStatus, readOf, stored } from "../../gen/workflows__automations.effect.vibe"
 import {
-  type Draft, type TaskStatus, type Verb, draftProblem, editConfirmed, enableOutcome, fireOutcome, listedAsScheduled, promptEditable, reminderTask,
+  type Draft, type TaskStatus, type Verb, draftProblem, editConfirmed, editDaysAllowed, editSendsTrigger, enableOutcome, fireOutcome, listedAsScheduled, promptEditable, reminderTask,
   reminderVerbOffered, routineListing, routineStatusFor, runNowOutcome, saveConfirmed, snoozeConfirmed, snoozeUntil, taskEnded, taskOn, taskSnoozed,
 } from "../../gen/workflows__agentSchedules.effect.vibe"
 import { ownerKey } from "../platform/storage.vibe"
@@ -25,7 +25,7 @@ export interface Report {
 /** Known outcomes the screen words. */
 export type ReportWord =
   | "limit" | "not-confirmed" | "not-sent" | "prompt-not-run" | "fire-skipped" | "fire-deferred" | "fire-failed" | "fire-raced"
-  | "needs-name" | "needs-future-time" | "needs-schedule" | "needs-event" | "needs-instructions" | "snooze-past" | "not-editable"
+  | "needs-name" | "needs-future-time" | "needs-schedule" | "needs-event" | "needs-instructions" | "needs-day" | "snooze-past" | "not-editable"
 
 /** A prompt as the owner edits it. */
 export interface PromptInput {
@@ -56,7 +56,7 @@ export service Automations {
   /** Snooze a scheduled item or a reminder by ten minutes. */
   snooze(key: string): Report!!
   /** Change a scheduled item's instructions, and its daily time when it changed. */
-  editSchedule(key: string, instructions: string, minuteOfDay?: number): Report!!
+  editSchedule(key: string, instructions: string, minuteOfDay?: number, days?: ReadonlyArray<number>): Report!!
   /** Save a new prompt, or the prompt `id`. */
   savePrompt(input: PromptInput, id?: string): Report!!
   /** The prompt's run history, newest first. */
@@ -320,12 +320,13 @@ export const automations = Layer.provideMerge(Layer.effect(Automations, effect {
         return task.taskId === row.id && snoozeConfirmed(until, statusOf(task.state.status), instant(task.state.firedAt)) ? reportOf("AnswerApplied") : reportOf("AnswerUnknown", "not-confirmed")
       })
     },
-    effect editSchedule(key: string, instructions: string, minuteOfDay?: number) {
+    effect editSchedule(key: string, instructions: string, minuteOfDay?: number, days?: ReadonlyArray<number>) {
       const row = try rowOf(key)
       const text = instructions.trim()
       if (row === undefined || row.kind !== "ScheduleRow") return { answer: "refused" } satisfies Report
       if (text === "") return reportOf("AnswerRefused", "needs-instructions")
-      const trigger = editedTrigger(row.schedule, minuteOfDay)
+      if (days !== undefined && !editDaysAllowed(new Set(days.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)).size)) return reportOf("AnswerRefused", "needs-day")
+      const trigger = editedTrigger(row.schedule, minuteOfDay, days)
       return try settle("EditChange", key, false, effect {
         const path = `/api/scheduled-tasks/${row.id}/edit`
         const { task } = try decoded(TaskReply, path, try agent.request("POST", path, { promptInstructions: text, ...(trigger === undefined ? {} : { trigger }) }))
@@ -389,14 +390,41 @@ export const automations = Layer.provideMerge(Layer.effect(Automations, effect {
 }), stored(AUTOMATIONS_KEY))
 
 /** The cron trigger an edit sends: the item's own days, month fields and zone at the new time; undefined when the time did not change or the item is not on a cron schedule. */
-export function editedTrigger(code: string, minuteOfDay: number | undefined): { readonly kind: "cron"; readonly expression: string; readonly tz: string } | undefined {
+/** The days of the week (0 Sunday to 6 Saturday) a cron day-of-week field names, or undefined when it is not a plain list, range or `*`. */
+export function cronDays(field: string): ReadonlyArray<number> | undefined {
+  if (field === "*" || field === "?") return [0, 1, 2, 3, 4, 5, 6]
+  const days = new Set<number>()
+  for (const part of field.split(",")) {
+    const range = /^([0-7])(?:-([0-7]))?$/.exec(part)
+    if (range === null) return undefined
+    const from = Number(range[1])
+    const to = range[2] === undefined ? from : Number(range[2])
+    if (to < from) return undefined
+    for (let day = from; day <= to; day++) days.add(day % 7)
+  }
+  return [...days].sort((a, b) => a - b)
+}
+
+/** The day-of-week field for a set of days: `*` for every day, else the days in order. */
+function dayField(days: ReadonlyArray<number>): string {
+  const chosen = [...new Set(days.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort((a, b) => a - b)
+  return chosen.length === 7 ? "*" : chosen.join(",")
+}
+
+// spec/workflows/agentSchedules.md: an edit sends a cron trigger only when its time or days changed, keeping the month fields and zone.
+export function editedTrigger(code: string, minuteOfDay: number | undefined, days?: ReadonlyArray<number>): { readonly kind: "cron"; readonly expression: string; readonly tz: string } | undefined {
   const match = /^cron:([^|]*)\|([^|]*)/.exec(code)
   const fields = match?.[1]?.split(" ") ?? []
-  if (minuteOfDay === undefined || match === null || fields.length !== 5 || minuteOfDay < 0 || minuteOfDay >= 1440) return undefined
-  const minute = String(minuteOfDay % 60)
-  const hour = String(Math.floor(minuteOfDay / 60))
-  if (fields[0] === minute && fields[1] === hour) return undefined
-  return { kind: "cron", expression: [minute, hour, ...fields.slice(2)].join(" "), tz: match[2] === "" ? deviceZone() : match[2] ?? deviceZone() }
+  if (match === null || fields.length !== 5) return undefined
+  if (minuteOfDay !== undefined && (!Number.isInteger(minuteOfDay) || minuteOfDay < 0 || minuteOfDay >= 1440)) return undefined
+  const minute = minuteOfDay === undefined ? fields[0] : String(minuteOfDay % 60)
+  const hour = minuteOfDay === undefined ? fields[1] : String(Math.floor(minuteOfDay / 60))
+  const chosen = days === undefined ? undefined : dayField(days)
+  const own = cronDays(fields[4])
+  const daysChanged = chosen !== undefined && (own === undefined ? chosen !== fields[4] : chosen !== dayField(own))
+  const count = chosen === undefined ? 1 : chosen === "*" ? 7 : chosen === "" ? 0 : chosen.split(",").length
+  if (!editSendsTrigger(count, minute !== fields[0] || hour !== fields[1], daysChanged)) return undefined
+  return { kind: "cron", expression: [minute, hour, fields[2], fields[3], daysChanged ? chosen : fields[4]].join(" "), tz: match[2] === "" ? deviceZone() : match[2] ?? deviceZone() }
 }
 
 /** The next local occurrence of a daily `cron:m h * * *` schedule code after `now`, or 0. */

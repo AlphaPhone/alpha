@@ -178,6 +178,33 @@ describe("Scheduled items (spec/workflows/agentSchedules.md, \"Story: Answer a s
       ))
     }
   })
+
+  it.effect("an edit changes the item's days, sends no trigger with its own days and time, and sends nothing with no day chosen (spec/workflows/agentSchedules.md, \"Any other verb is confirmed by the item it names, and an edit by the instructions and trigger it sent\")", () => effect {
+    const sent: Sent[] = []
+    const task = { taskId: "s1", kind: "reminder", ownerVisible: true, promptInstructions: "Brief me", state: { status: "scheduled" }, trigger: { kind: "cron", expression: "0 8 * * *", tz: "UTC" } }
+    const handlers: Handler[] = [
+      ...emptySources,
+      (m, p) => m === "GET" && p.startsWith("/api/scheduled-tasks") ? { status: 200, data: { tasks: [task] } } : undefined,
+      (m, p, b) => m === "POST" && p === "/api/scheduled-tasks/s1/edit"
+        ? { status: 200, data: { task: { ...task, promptInstructions: (b as { promptInstructions: string }).promptInstructions, trigger: (b as { trigger?: unknown }).trigger ?? task.trigger } } } : undefined,
+    ]
+    provide workflowsOf(handlers, sent) {
+      const list = try Automations
+      try list.refresh()
+      const none = try list.editSchedule("scheduled:s1", "Brief me", 540, [])
+      const afterNone = sent.filter((s) => s.path.endsWith("/edit")).length
+      const own = try list.editSchedule("scheduled:s1", "Brief me", 480, [0, 1, 2, 3, 4, 5, 6])
+      const weekdays = try list.editSchedule("scheduled:s1", "Brief me", 540, [1, 2, 3, 4, 5])
+      const bodies = sent.filter((s) => s.path === "/api/scheduled-tasks/s1/edit").map((s) => s.body)
+      try Effect.try(() => assert.deepStrictEqual(
+        { none: [none.answer, none.word], afterNone, own: own.answer, weekdays: weekdays.answer, bodies },
+        {
+          none: ["refused", "needs-day"], afterNone: 0, own: "applied", weekdays: "applied",
+          bodies: [{ promptInstructions: "Brief me" }, { promptInstructions: "Brief me", trigger: { kind: "cron", expression: "0 9 * * 1,2,3,4,5", tz: "UTC" } }],
+        },
+      ))
+    }
+  })
 })
 
 describe("Agent reminders (spec/workflows/agentSchedules.md, \"Story: Answer a scheduled item from Workflows\")", () => {

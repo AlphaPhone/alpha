@@ -59,6 +59,7 @@ export const reportWords: Record<ReportWord, string> = {
   "fire-deferred": "Your agent couldn’t deliver this item yet. It will try again later.",
   "fire-failed": "Your agent couldn’t deliver this item, so it did not run.",
   "fire-raced": "Another run was already in progress.",
+  "needs-day": "Pick a time and day",
   "needs-name": "Add a name and instructions.",
   "needs-future-time": "Choose a future time.",
   "needs-schedule": "Add a schedule.",

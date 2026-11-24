@@ -193,14 +193,26 @@ pure def lawAnotherItemNeverConfirmsAFire(kind: str): bool = kind != "raced" imp
 
 ### Any other verb is confirmed by the item it names, and an edit by the instructions and trigger it sent
 
-An edit sends a cron trigger only when its time changed, keeping the item's days, month fields and
-time zone; only an item on a cron schedule offers a time at all (legacy `ScheduledTaskControls`).
+Only an item on a cron schedule offers a time and days at all (legacy `ScheduledTaskControls`). Its
+edit offers the days of the week as seven choices with Every day, Weekdays and Weekends at hand; an
+edit with no day chosen is refused with "Pick a time and day" and sends nothing (legacy
+`SCHEDULE_INVALID`). An edit sends a cron trigger only when its time or its days changed, with the
+chosen days as the day-of-week field (every day as `*`) and the item's month fields and time zone
+kept; an edit with the item's own days and time sends no trigger.
 
 ```quint
 pure def editConfirmed(sentInstructions: str, savedInstructions: str, sentTrigger: bool, sameTrigger: bool): bool =
   sentInstructions != "" and sentInstructions == savedInstructions and (not(sentTrigger) or sameTrigger)
 pure def lawAnEditWithoutInstructionsIsNeverConfirmed(savedInstructions: str, sentTrigger: bool, sameTrigger: bool): bool =
   not(editConfirmed("", savedInstructions, sentTrigger, sameTrigger))
+pure def editDaysAllowed(chosenDays: int): bool = chosenDays > 0
+pure def editSendsTrigger(chosenDays: int, timeChanged: bool, daysChanged: bool): bool =
+  editDaysAllowed(chosenDays) and (timeChanged or daysChanged)
+pure val chosenDaysValues = Set(0, 1, 5, 7)
+pure val timeChangedValues = Set(true, false)
+pure val daysChangedValues = Set(true, false)
+pure def lawAnEditWithItsOwnDaysAndTimeSendsNoTrigger(chosenDays: int): bool = not(editSendsTrigger(chosenDays, false, false))
+pure def lawAnEditWithNoDaySendsNothing(timeChanged: bool, daysChanged: bool): bool = not(editSendsTrigger(0, timeChanged, daysChanged))
 ```
 
 ### A routine is listed from the agent's routines, an archived one is not, and its switch sets its status

@@ -192,7 +192,7 @@ export function WorkflowsScreenView({
           onRun={() => rowActions.onRun(row)}
           onVerb={(verb) => rowActions.onVerb(row, verb)}
           onSnooze={() => rowActions.onSnooze(row)}
-          onEdit={(instructions, minute) => rowActions.onEdit(row, instructions, minute)}
+          onEdit={(instructions, minute, days) => rowActions.onEdit(row, instructions, minute, days)}
           onDelete={() => rowActions.onDelete(row)}
           onEditPrompt={() => rowActions.onEditPrompt(row)} />
       )}

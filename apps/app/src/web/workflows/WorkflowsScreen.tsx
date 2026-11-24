@@ -174,7 +174,7 @@ export function WorkflowsScreen({ onClose }: WorkflowsScreenProps) {
         onRun: (row) => act(Automations.use((a) => a.run(row.key))),
         onVerb: (row, verb) => act(Automations.use((a) => a.verb(row.key, verb))),
         onSnooze: (row) => act(Automations.use((a) => a.snooze(row.key))),
-        onEdit: (row, instructions, minute) => act(Automations.use((a) => a.editSchedule(row.key, instructions, minute))),
+        onEdit: (row, instructions, minute, days) => act(Automations.use((a) => a.editSchedule(row.key, instructions, minute, days))),
         onDelete: (row) => act(Automations.use((a) => a.remove(row.key))),
         onEditPrompt: (row) => void perform(Automations.use((a) => Effect.orElseSucceed(a.prompt(row.target), () => undefined))).then((editing) => {
           if (editing === undefined) setReport({ answer: "refused", word: "not-editable" });
