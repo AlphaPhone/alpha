@@ -1,0 +1,182 @@
+// spec/app/photos/agent.md, "Story: Let Alpha read my library"; spec/app/photos/agent.md, "Story: Let Alpha change my photos"
+import type { DeviceOperation, OperationResultOf } from "@elizaos/agent/operations"
+import type { MediaItem } from "@elizaos/os/bridges/definitions/media"
+import * as Library from "../../gen/app__photos.effect.vibe"
+import * as Assistant from "../../gen/app__photos__agent.effect.vibe"
+import * as Viewer from "../../gen/app__photos__viewer.effect.vibe"
+import * as Changes from "../../gen/app__photos__changes.effect.vibe"
+import { PhotosPort } from "../platform/photos.vibe"
+import { reacting, run, started, together, type Job } from "../runtime/reactor.vibe"
+import { Catalog, type Row } from "./catalog.vibe"
+
+module wire {
+  import { Schema } from "effect"
+  import { MediaId } from "@elizaos/os/bridges/media.schema"
+
+  /** @throws {never} */
+  export function mediaId(id: string) {
+    const read = Schema.decodeUnknownOption(MediaId)(id)
+    return read._tag === "Some" ? read.value : undefined
+  }
+}
+import { mediaId } from wire
+
+type Names = "photos_filter" | "photos_open" | "photos_album_create" | "photos_share" | "photo_library_search" | "photo_library_inspect" | "photo_library_select" | "photo_library_review"
+type Operation = Extract<DeviceOperation, { type: Names }>
+type Receipt = OperationResultOf<Names>
+
+const columns: readonly Assistant.Field[] = ["Identity", "Revision", "ItemKind", "Taken", "Dimensions"]
+const changes = { trash: "Trash", share: "Share", favorite: "Favorite", unfavorite: "Unfavorite" } as const
+
+/** Only the public metadata admitted by the pinned agent contract. */
+function summary(item: MediaItem) {
+  return {
+    id: item.id, revision: item.mutationRevision ?? item.revision, kind: item.kind,
+    takenAt: [item.takenAt, item.dateTaken, item.taken, item.date].find((date) => date !== undefined && date > 0) ?? 0, width: item.width, height: item.height,
+    ...(item.favorite === true ? { favorite: true as const } : {}),
+    ...(item.kind === "video" && item.duration !== undefined ? { duration: Math.round(item.duration) } : {}),
+  }
+}
+
+effect function accepted(event: Assistant.Event, by: Assistant.Actor) {
+  return try exit((try Assistant.Machine).send(event, by))
+}
+
+effect function read(op: Extract<Operation, { type: "photo_library_search" | "photo_library_inspect" }>, current: Library.Photos) {
+  const { reviewed } = try PhotosPort
+  if (Option.isNone(reviewed)) return undefined
+  const library = try Library.Machine
+  const inspect = op.type === "photo_library_inspect"
+  const id = inspect ? mediaId(op.id) : undefined
+  if (inspect && id === undefined) return undefined
+  const narrowing: Assistant.Narrowing = inspect ? "AllItems" : op.favorites === true ? "FavouritesOnly"
+    : op.favorites === false ? "NotFavourites" : op.kind === "image" ? "StillsOnly" : op.kind === "video" ? "VideosOnly" : "AllItems"
+  const { rows: indexed } = try (try Catalog).displayed()
+  const requestedPhoto = id === undefined ? undefined : handle(id, current.rows, indexed)
+  if (inspect && requestedPhoto === undefined) return undefined
+  const wanted: Assistant.Event = inspect
+    ? { type: "askInspect", photo: requestedPhoto ?? 0, columns, allowed: true, secure: false }
+    : { type: "askSearch", narrowing, earliest: op.from ?? 0, latest: op.to ?? Number.MAX_SAFE_INTEGER, limit: op.limit ?? 20, columns, allowed: true, secure: false }
+  if (!Exit.isSuccess(try accepted(wanted, "Agent"))) return undefined
+  const confirmed = try accepted({ type: "confirm", revision: current.revision }, "Owner")
+  if (!Exit.isSuccess(confirmed)) return undefined
+  const ticket = confirmed.value.state.read.ticket
+  let receipt: Receipt | undefined
+  let count = 0
+  if (inspect && id !== undefined) {
+    const item = tryPromise(() => reviewed.value.inspect(id, false)) catch () => undefined
+    if (item !== undefined) { receipt = { kind: "photo_library_inspect", item: summary(item) }; count = 1 }
+  } else if (!inspect) {
+    const page = tryPromise(() => reviewed.value.page({ kind: op.kind, favorites: op.favorites, from: op.from, to: op.to, limit: op.limit ?? 20, thumbnails: false })) catch () => undefined
+    if (page !== undefined && (page.scope === "full" || page.scope === "partial" || page.scope === "selected") && !page.locked) {
+      const items = page.items.slice(0, op.limit ?? 20).map(summary)
+      receipt = { kind: "photo_library_search", scope: page.scope, items, more: page.next !== null }
+      count = items.length
+    }
+  }
+  const after = try library.get()
+  const allowed = Library.unlocked(after) && after.revision === current.revision
+  const answered = try accepted({ type: "answered", ticket, ok: allowed && receipt !== undefined, rows: allowed ? count : 0 }, "Phone")
+  return allowed && Exit.isSuccess(answered) ? receipt : undefined
+}
+
+function handle(id: string, rows: readonly number[], indexed: ReadonlyMap<number, Row>): number | undefined {
+  return rows.find((number) => indexed.get(number)?.item.id === id)
+}
+
+/** Execute a phone proposal the shared coordinator has authorized; destructive/share proposals only show a Photos review. */
+export effect function photoAction(input: DeviceOperation): (Receipt | undefined)!!(PhotosPort | Catalog | Library.Machine | Viewer.Machine | Assistant.Machine) {
+  const library = try Library.Machine
+  const viewer = try Viewer.Machine
+  const now = try library.get()
+  if (!Library.unlocked(now) || now.library.status !== "Loaded") return undefined
+  const { rows } = try (try Catalog).displayed()
+  switch (input.type) {
+    case "photo_library_search":
+    case "photo_library_inspect":
+      return try read(input, now)
+    case "photos_open": {
+      const number = handle(input.id, now.rows, rows)
+      if (number === undefined) return undefined
+      const sent = try exit(viewer.send({ type: "openItem", photo: number, listed: true, secure: false, only: [], reviewing: false }, "Agent"))
+      if (!Exit.isSuccess(sent)) return undefined
+      const ticket = sent.value.state.read.ticket
+      const response = try Stream.runHead(Stream.filter(viewer.changes, (state) => state.read.ticket !== ticket || state.read.status !== "Loading" || state.open !== number))
+      return Option.isSome(response) && response.value.read.ticket === ticket && response.value.read.status === "Loaded" && response.value.open === number
+        ? { kind: "photos_open", opened: true } : undefined
+    }
+    case "photo_library_select": {
+      const selected = input.ids.flatMap((id) => {
+        const number = handle(id, now.rows, rows)
+        return number === undefined ? [] : [number]
+      })
+      if (selected.length === 0) return { kind: "photo_library_select", selected: 0, missing: input.ids.length }
+      const result = try exit(library.send({ type: "agentSelect", items: selected }, "Agent"))
+      return Exit.isSuccess(result) ? { kind: "photo_library_select", selected: selected.length, missing: input.ids.length - selected.length } : undefined
+    }
+    case "photos_filter": {
+      if (input.favorite === false || input.kind === "image" || input.from !== undefined || input.to !== undefined) return undefined
+      const requested = [input.favorite === true, input.kind === "video", input.text !== undefined && input.text !== "", input.album !== undefined].filter(Boolean).length
+      if (requested > 1) return undefined
+      if (input.album !== undefined) return undefined
+      const narrowing = input.favorite === true ? "Favorites" : input.kind === "video" ? "Videos" : input.text ? "Matching" : "Everything"
+      const selected = try exit(library.send({ type: "narrow", narrowing, query: input.text ?? "", person: 0 }, "Agent"))
+      if (!Exit.isSuccess(selected)) return undefined
+      const ticket = selected.value.state.library.ticket
+      const response = try Stream.runHead(Stream.filter(library.changes, (state) => state.library.ticket !== ticket || state.library.status !== "Loading" || !state.visible))
+      return Option.isSome(response) && response.value.visible && response.value.library.ticket === ticket && response.value.library.status === "Loaded"
+        ? { kind: "photos_filter", shown: response.value.rows.length, more: response.value.more } : undefined
+    }
+    case "photo_library_review":
+    case "photos_album_create":
+    case "photos_share": {
+      const view = try viewer.get()
+      const ids = input.type === "photo_library_review" ? input.items.map((item) => item.id) : (input.ids ?? [])
+      const selected = "selected" in input && input.selected === true
+      const picked = selected ? [view.open].filter((id) => id > 0 && now.rows.includes(id))
+        : ids.flatMap((id) => {
+          const number = handle(id, now.rows, rows)
+          return number === undefined ? [] : [number]
+        })
+      if (picked.length === 0 || input.type === "photo_library_review" && input.items.some((item, index) => {
+        const row = rows.get(picked[index] ?? 0)
+        return row?.kind !== "phone" || (row.item.mutationRevision ?? row.item.revision) !== item.revision
+      })) return undefined
+      const facts = { items: picked, basis: now.revision, revision: now.revision, listed: true, running: Changes.running(now.job), allowed: true, secure: false }
+      const event: Assistant.Event = input.type === "photos_album_create"
+        ? { type: "proposeAlbum", name: input.name, letters: Array.from(input.name).length, ...facts }
+        : { type: "propose", change: input.type === "photos_share" ? "Share" : changes[input.action], ...facts }
+      const sent = try accepted(event, "Agent")
+      if (!Exit.isSuccess(sent) || sent.value.state.stage !== "Shown") return undefined
+      return input.type === "photo_library_review"
+        ? { kind: input.type, status: "review_opened", action: input.action, count: picked.length }
+        : { kind: input.type, status: "review_opened", count: picked.length, missing: selected ? 0 : ids.length - picked.length }
+    }
+    default:
+      return undefined
+  }
+}
+
+function carry(fx: Assistant.Effect): Job<Assistant.Event, Library.Machine, [Assistant.Actor]> {
+  return match (fx) {
+    when { tag: "Hand", let change, let items, let basis }: run("apply", effect {
+      try ignore((try Library.Machine).send({ type: "confirmProposal", change, items, basis }, "Owner"))
+    }, "Phone");
+    when { tag: "HandAlbum", let name, let letters, let items, let basis }: run("album", effect {
+      try ignore((try Library.Machine).send({ type: "confirmAlbum", name, letters, items, basis }, "Owner"))
+    }, "Phone");
+    when { tag: "SearchLibrary" }: run("search", Effect.void, "Phone");
+    when { tag: "InspectItem" }: run("inspect", Effect.void, "Phone");
+    when { tag: "Answer" }: run("answer", Effect.void, "Phone");
+  }
+}
+
+const leaving = started(effect {
+  const library = try Library.Machine
+  const agent = try Assistant.Machine
+  try Stream.runForEach(Stream.changes(Stream.map(library.changes, Library.unlocked)), effect (unlocked) => {
+    if (!unlocked) try ignore(agent.send({ type: "leave" }, "Phone"))
+  })
+}, "Photos agent review visibility")
+
+export const agentPhotos = together(reacting(Assistant, { carry }), leaving)

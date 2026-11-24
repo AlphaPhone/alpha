@@ -50,20 +50,20 @@ export function App({ alpha }: AppProps) {
       ref={(page) => { if (page) page.ownerDocument.documentElement.dataset.alphaCanGoBack = String(back || (layers !== undefined && takesBack(layers))); }}
       onPointerDown={(event) => { startedRef.current = { x: event.clientX - event.currentTarget.getBoundingClientRect().left, y: event.clientY }; }}
       onPointerUp={swiped}
-      className={cn("relative mx-auto flex w-full flex-col bg-background font-sans text-base text-foreground sm:pointer-fine:max-w-103", comms ? "h-dvh overflow-hidden" : "min-h-dvh")}
+      className={cn("relative mx-auto flex w-full flex-col bg-background has-[[data-alpha-camera-native]]:bg-transparent font-sans text-base text-foreground sm:pointer-fine:max-w-103", comms ? "h-dvh overflow-hidden" : "min-h-dvh")}
     >
       <div className={cn("relative flex min-h-0 flex-1 flex-col", comms && "overflow-auto overscroll-contain", strip && "overflow-hidden")} data-alpha-comms-stage={comms ? "" : undefined} inert={inert || strip}>
         {comms && alpha.slot("phone/stage")}
         {page === undefined || !editorsMounted(page) ? null : showing === undefined
           ? alpha.slot("home")
           : (
-            <>
+            <div key={showing} className="flex min-h-0 flex-1 flex-col motion-safe:animate-rise">
               {!viewHasHeader(showing) && <AppHeader
                 title={views[showing].label}
                 leading={back && <AppBack alpha={alpha} />}
               />}
               {alpha.slot(`view:${showing}`)}
-            </>
+            </div>
           )}
       </div>
       <div className={comms ? "shrink-0" : undefined} inert={layers !== undefined && assistantInert(layers)}>{alpha.slot("assistant")}</div>
