@@ -179,6 +179,9 @@ async function main() {
   const buildConsumer = buildAndroidConsumer as unknown as (options: ReturnType<typeof consumerBuildOptions>) => unknown;
   console.log(`Android build: launcher ${release ? "debug and release" : "debug only"}, test mocks off -> ${OUTPUT}/`);
 
+  // Running upstream's package tests leaves ignored test caches (packages/*/.cache) in the pinned checkout, which the
+  // source check refuses as extra files; they are not source, so only those ignored caches are removed first.
+  run("git", ["-C", "vendor/eliza", "clean", "-fdXq", "--", ":(glob)packages/*/.cache"]);
   run(process.execPath, ["--conditions=eliza-source", "--import", "vibelang/register", "scripts/verify-upstream.ts"]);
   // The pinned upstream generator writes the Gradle host from android/consumer-host.json.
   run(process.execPath, ["--conditions=eliza-source", "--import", "vibelang/register", "scripts/android-host.ts"]);
