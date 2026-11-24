@@ -2,9 +2,9 @@ name: no Bun
 
 on:
   pull_request:
-    branches: [main, vibestack-develop]
+    branches: [vibestack-develop]
   push:
-    branches: [main, vibestack-develop]
+    branches: [vibestack-develop]
 
 permissions:
   contents: read

@@ -20,6 +20,9 @@
     ".cache/toolchain.json"
   ],
   "tasks": {
+    "//#no-bun": {
+      "cache": false
+    },
     "gen": {
       "outputs": [
         "gen/**",
