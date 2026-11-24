@@ -243,7 +243,7 @@ pure val targetValues = Set(NoTarget).union(Set(NumberTarget({ matches: true }))
   .union(Set(ContactTarget({ nameWritten: true }))).union(Set(ContactTarget({ nameWritten: false })))
 ```
 
-### The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote
+### The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote or my own ask for its tab list
 
 A photo runs directly at most once per message and only on a visible,
 uncovered viewfinder; the request is at most 512 characters with no

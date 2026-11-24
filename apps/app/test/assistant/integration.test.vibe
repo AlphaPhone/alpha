@@ -123,7 +123,7 @@ it.effect("Find what a card is about (spec/assistant/review.md, \"A card opens t
   }
 })
 
-it.effect("A page link stays a card even when its family grounds it (spec/assistant/review.md, \"The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote\")", () => effect {
+it.effect("A page link stays a card even when its family grounds it (spec/assistant/review.md, \"The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote or my own ask for its tab list\")", () => effect {
   const runs = { count: 0 }
   const page = { tabId: "t1", revision: "r1", url: "https://news.example.com/today", title: "Today", capturedAt: 1, text: "Top stories", truncated: false, links: [{ url: "https://news.example.com/story-2", text: "Second story" }] }
   const story = wireProposal("p21", digest("f"), { type: "browser_navigate", url: "https://news.example.com/story-2" }, "u1")
@@ -164,7 +164,7 @@ function tabListExecutors(runs: { count: number }) {
   return Layer.succeed(DeviceExecutors, { ports: composeExecutors([notes, browser]) })
 }
 
-it.effect("Showing my open tabs opens without a card in any words, while another control or a grounded open that is not a command keeps its card (spec/assistant/review.md, \"The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote\")", () => effect {
+it.effect("Showing my open tabs opens without a card in any words, while another control or a grounded open that is not a command keeps its card (spec/assistant/review.md, \"The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote or my own ask for its tab list\")", () => effect {
   const sent = effect function (text: string, operation: unknown) {
     const runs = { count: 0 }
     provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "Here they are." }, proposals: [wireProposal("p31", digest("9"), operation, "u1")] }), fakeHost([]), tabListExecutors(runs), journalNative(new Map())) {
