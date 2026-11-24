@@ -4,7 +4,7 @@ import android.content.Context;
 
 /**
  * AP-16 AC-19: follows Telephony's call-state changes for the renderer. Registration needs
- * READ_PHONE_STATE (Android 12+ TelephonyCallback.CallStateListener); when it is not granted yet,
+ * READ_PHONE_STATE (Android 12+ TelephonyCallback); when it is not granted yet,
  * {@link #ensure()} registers on a later call (each read, each resume), so a grant that arrives
  * after start is picked up. {@link #stop()} unregisters exactly what was registered.
  */
@@ -43,9 +43,10 @@ final class AlphaCallStateWatch {
  }
 
  @android.annotation.TargetApi(31)
- static final class Listener extends android.telephony.TelephonyCallback implements android.telephony.TelephonyCallback.CallStateListener {
+ static final class Listener extends android.telephony.TelephonyCallback implements android.telephony.TelephonyCallback.CallStateListener, android.telephony.TelephonyCallback.ServiceStateListener {
   private final Runnable changed;
   Listener(Runnable changed) { this.changed = changed; }
   @Override public void onCallStateChanged(int state) { changed.run(); }
+  @Override public void onServiceStateChanged(android.telephony.ServiceState state) { changed.run(); }
  }
 }

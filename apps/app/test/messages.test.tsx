@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Messages } from "../gen/app__messages.effect.vibe";
 import { Machine as Composer } from "../gen/app__messages__composer.effect.vibe";
+import { Machine as Toasts } from "../gen/app__notices__toasts.effect.vibe";
 import { closeAll, hardware, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
@@ -28,11 +29,12 @@ const write = (name: string, text: string) => act(async () => {
   found.dispatchEvent(new Event("input", { bubbles: true }));
 });
 
-/** Press the message bubble that says `text`. */
+/** Open the message action menu from the keyboard. */
 const bubble = (text: string) => act(async () => {
-  const found = [...document.querySelectorAll("[role=log] button")].find((one) => one.textContent?.includes(text));
-  if (!(found instanceof HTMLButtonElement)) throw new Error(`no message ${text}`);
-  found.click();
+  const found = [...document.querySelectorAll("[role=log] [data-alpha-message-id]")].find((one) => one.textContent?.includes(text));
+  if (!(found instanceof HTMLElement)) throw new Error(`no message ${text}`);
+  found.focus();
+  found.dispatchEvent(new KeyboardEvent("keydown", { key: "ContextMenu", bubbles: true }));
 });
 
 describe("Messages on an Alpha image", () => {
@@ -78,6 +80,17 @@ describe("Messages on an Alpha image", () => {
     await until(alpha, alpha.runtime, Composer, (s) => s.outgoing.reported === 1 && s.outgoing.retired === s.outgoing.op.id);
 
     // spec/app/messages/index.md, "Confirming removes the message under a new number, never during a call that may be an emergency call"
+    world.telephony.holdMessageDeletion = true;
+    await bubble("See you at five");
+    await press("Delete");
+    await until(alpha, alpha.runtime, Messages, (s) => s.confirming);
+    await confirm("Delete");
+    await until(alpha, alpha.runtime, Toasts, (state) => state.showing && state.current.undo);
+    await press("Undo");
+    await until(alpha, alpha.runtime, Messages, (s) => s.removal.outcome === "Refused" && s.page.status === "Loaded");
+    expect(world.telephony.texts.map((one) => one.body)).toEqual(["See you at five", "On my way"]);
+
+    world.telephony.holdMessageDeletion = false;
     await bubble("See you at five");
     await press("Delete");
     await until(alpha, alpha.runtime, Messages, (s) => s.confirming);
@@ -128,5 +141,29 @@ describe("Messages on an Alpha image", () => {
     await press("Ben Ortiz");
     await until(alpha, alpha.runtime, Messages, (s) => s.pane === "Conversation" && s.page.status === "Loaded");
     await until(alpha, alpha.runtime, Composer, (s) => s.thread > 0);
+
+    await press("Back");
+    await until(alpha, alpha.runtime, Messages, (s) => s.pane === "Threads" && s.list.status === "Loaded");
+    await press("New message");
+    await until(alpha, alpha.runtime, Messages, (s) => s.pane === "Picker" && s.picker.status === "Loaded");
+    await write("To", "+14155550100, +14155550122");
+    await press("Text 2 recipients");
+    await until(alpha, alpha.runtime, Composer, (s) => s.thread > 0 && s.recipients === 2 && s.sending.grant === "Granted");
+    await write("Message", "Meet at five");
+    await until(alpha, alpha.runtime, Composer, (s) => s.slot.author === "OwnerWrote");
+    await press("Send");
+    await until(alpha, alpha.runtime, Composer, (s) => s.outgoing.op.outcome === "Confirmed");
+    expect(world.telephony.sent.map(({ operationId, recipients, body }) => ({ kind: world.telephony.journal.get(operationId)?.kind, recipients, body }))).toEqual([
+      { kind: "mms-send", recipients: ["+14155550100", "+14155550122"], body: "Meet at five" },
+    ]);
+  });
+
+  it("Opens the exact conversation from a cold-start notification (spec/app/messages/index.md, \"A message notification opens its exact conversation once access is available\")", async () => {
+    const world = image();
+    world.telephony.texts.push({ id: 2, thread: 23, address: "+14155550122", box: "inbox", date: 1_700_000_060_000, body: "Lunch?", read: false });
+    world.telephony.smsNotice = { threadId: "thread:23", token: "1" };
+    const { alpha } = await open(world);
+    await until(alpha, alpha.runtime, Messages, (state) => state.pane === "Conversation" && state.page.status === "Loaded" && world.telephony.smsNotice === undefined && world.telephony.texts[1]?.read === true);
+    expect([world.telephony.texts.map((text) => text.read), world.telephony.sent]).toEqual([[false, true], []]);
   });
 });

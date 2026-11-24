@@ -42,6 +42,7 @@ export function App({ alpha }: AppProps) {
   const inert = layers !== undefined && pageInert(layers);
   const showing = state.trail.at(-1);
   const comms = isCommsView(showing);
+  const strip = comms && state.assistant === "Full";
   const back = can({ type: "goBack" });
   return (
     <main
@@ -51,7 +52,8 @@ export function App({ alpha }: AppProps) {
       onPointerUp={swiped}
       className={cn("relative mx-auto flex w-full flex-col bg-background font-sans text-base text-foreground sm:pointer-fine:max-w-103", comms ? "h-dvh overflow-hidden" : "min-h-dvh")}
     >
-      <div className={cn("relative flex min-h-0 flex-1 flex-col", comms && "overflow-auto overscroll-contain")} data-alpha-comms-stage={comms ? "" : undefined} inert={inert}>
+      <div className={cn("relative flex min-h-0 flex-1 flex-col", comms && "overflow-auto overscroll-contain", strip && "overflow-hidden")} data-alpha-comms-stage={comms ? "" : undefined} inert={inert || strip}>
+        {comms && alpha.slot("phone/stage")}
         {page === undefined || !editorsMounted(page) ? null : showing === undefined
           ? alpha.slot("home")
           : (

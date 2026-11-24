@@ -23,12 +23,13 @@ import attempt as A from "../../kit/attempt"
 
 type Playback = Stopped | Playing | Paused
 type Reach = CallBack | Message
+type Undo = NoUndo | CanUndo | Undoing | UndoExpired | Kept | KeepUnconfirmed
 type Voicemail = {
   front: bool, list: R::Read, items: int, unheard: int,
   open: bool, heard: bool,
   audio: R::Read, playback: Playback,
   transcript: R::Read, carrierText: bool, noRecognizer: bool,
-  confirming: bool, removal: A::Attempt,
+  confirming: bool, removal: A::Attempt, undo: Undo,
 }
 
 pure val initial: Voicemail = {
@@ -36,7 +37,7 @@ pure val initial: Voicemail = {
   open: false, heard: false,
   audio: R::unread, playback: Stopped,
   transcript: R::unread, carrierText: false, noRecognizer: false,
-  confirming: false, removal: A::plan(0),
+  confirming: false, removal: A::plan(0), undo: NoUndo,
 }
 ```
 
@@ -54,6 +55,7 @@ type Effect =
   | MarkHeard
   | ReachCaller({ app: Reach })
   | Remove({ id: int })
+  | UndoRemoval({ id: int })
 
 type Moved = { state: Voicemail, out: List[Effect] }
 
@@ -355,7 +357,40 @@ pure def canConfirmDelete(s: Voicemail): bool = s.confirming and not(removing(s)
 
 pure def confirmDelete(s: Voicemail): Moved =
   val removal = A::dispatch(A::record(A::plan(s.removal.id + 1)))
-  { state: { ...s, confirming: false, removal: removal }, out: removeOne(removal.id) }
+  { state: { ...s, confirming: false, removal: removal, undo: NoUndo }, out: removeOne(removal.id) }
+```
+
+### Undo can keep a voicemail while Android's deletion window is open
+
+The phone's receipt names a staged deletion and its deadline. The owner can
+request Undo once. A native confirmation that Undo won is required before
+Alpha says the voicemail was kept.
+
+```quint
+pure def canRemovalStaged(s: Voicemail, id: int): bool = A::canConclude(s.removal, id) and s.undo == NoUndo
+
+pure def removalStaged(s: Voicemail, id: int): Voicemail = { ...s, undo: CanUndo }
+
+pure def canUndoExpired(s: Voicemail, id: int): bool = A::canConclude(s.removal, id) and s.undo == CanUndo
+
+pure def undoExpired(s: Voicemail, id: int): Voicemail = { ...s, undo: UndoExpired }
+
+pure def canUndoRemoval(s: Voicemail): bool = s.front and removing(s) and s.undo == CanUndo
+
+pure def undoRemoval(s: Voicemail): Moved =
+  { state: { ...s, undo: Undoing }, out: List(UndoRemoval({ id: s.removal.id })) }
+
+pure def canUndoRefused(s: Voicemail, id: int): bool = A::canConclude(s.removal, id) and s.undo == Undoing
+
+pure def undoRefused(s: Voicemail, id: int): Voicemail = { ...s, undo: KeepUnconfirmed }
+
+pure def alwaysUndoNeedsARemoval(s: Voicemail): bool =
+  (s.undo == CanUndo or s.undo == Undoing or s.undo == UndoExpired or s.undo == KeepUnconfirmed) implies removing(s)
+
+pure def stepUndoIsRequestedByItsControl(before: Voicemail, via: str, after: Voicemail, out: List[Effect]): bool =
+  out.some(e => match e { | UndoRemoval(r) => true | _ => false }) implies (via == "undoRemoval" and canUndoRemoval(before))
+
+pure def sometimesRemovingCanBeUndone(s: Voicemail): bool = canUndoRemoval(s)
 ```
 
 ### The phone's answer ends the removal it names
@@ -368,14 +403,14 @@ When Alpha stops waiting for that result, the outcome is unknown.
 ```quint
 pure def canRemoved(s: Voicemail, id: int): bool = A::canConclude(s.removal, id)
 
-pure def canRemovalLost(s: Voicemail): bool = removing(s)
+pure def canRemovalLost(s: Voicemail, id: int): bool = A::canConclude(s.removal, id)
 
-pure def removalLost(s: Voicemail): Moved = removed(s, s.removal.id, false, false)
+pure def removalLost(s: Voicemail, id: int): Moved = removed(s, id, false, false, false)
 
-pure def removed(s: Voicemail, id: int, done: bool, known: bool): Moved =
-  val removal = A::conclude(s.removal, done, known)
-  val after = { ...s, removal: removal }
-  if (removal.outcome == A::Refused or not(s.front)) { state: after, out: List() }
+pure def removed(s: Voicemail, id: int, done: bool, known: bool, kept: bool): Moved =
+  val removal = A::conclude(s.removal, done and not(kept), known)
+  val after = { ...s, removal: removal, undo: if (known and kept) Kept else NoUndo }
+  if ((removal.outcome == A::Refused and not(kept)) or not(s.front)) { state: after, out: List() }
   else readList(true, true, closing(true, after))
 ```
 
