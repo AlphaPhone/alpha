@@ -183,7 +183,7 @@ A pause only lengthens. A refusal for an older generation changes nothing.
 Capabilities are metadata and never paused. A new account clears the pause;
 reopening the screen keeps it. One pause holds every data request of the account alike, as in the
 previous Alpha: a tile's refusal pauses search, place details, routes and the viewport copyright
-too, and a refusal of any of those pauses tiles, while the map keeps the tiles it drew.
+too, and a refusal of any of those pauses tiles.
 
 ```quint
 pure def canTick(s: MapsConnection, now: int): bool = now > s.now
@@ -194,10 +194,7 @@ pure def rateLimited(s: MapsConnection, captured: int, retryAfter: int): MapsCon
 pure def alwaysPauseIsNotNegative(s: MapsConnection): bool = s.pausedUntil >= 0 and s.now >= 0
 pure def stepStaleRefusalKeepsPause(before: MapsConnection, via: str, after: MapsConnection): bool =
   (via == "rateLimited" and before.account == after.account) implies after.pausedUntil >= before.pausedUntil
-pure def pausedBy(call: MapsCall): bool = call != CoverageCall
-pure def lawOnePauseHoldsTilesAndDataAlike(call: MapsCall, other: MapsCall): bool =
-  (pausedBy(call) and other != CoverageCall) implies pausedBy(other)
-pure def lawATilesRefusalPausesSearchAndRoutes(s: MapsConnection, retryAfter: int): bool =
+pure def lawACurrentRefusalHoldsTheNextRequest(s: MapsConnection, retryAfter: int): bool =
   (retryAfter > 0 and s.phase == Installed and s.owner == s.account) implies not(mayRequest(rateLimited(s, s.generation, retryAfter)))
 pure def sometimesPaused(s: MapsConnection): bool = s.phase == Installed and s.pausedUntil > s.now
 pure def sometimesResumedAfterPause(s: MapsConnection): bool = s.phase == Installed and s.pausedUntil > 0 and s.now >= s.pausedUntil

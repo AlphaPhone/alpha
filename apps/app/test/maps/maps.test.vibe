@@ -5,7 +5,9 @@ import { Machine as GuidanceMachine } from "../../gen/maps__guidance.effect.vibe
 import { Machine as LocatorMachine } from "../../gen/maps__location.effect.vibe"
 import { Machine as ScreenMachine } from "../../gen/maps__screen.effect.vibe"
 import { Machine as OpenMachine } from "../../gen/maps__notificationOpen.effect.vibe"
+import { MapsProvider } from "../../src/maps/cloud.vibe"
 import { MapsContent } from "../../src/maps/content.vibe"
+import { type MapsFailure } from "../../src/maps/failure.vibe"
 import { MapsHandoff } from "../../src/maps/handoff.vibe"
 import { MapsSession } from "../../src/maps/layer.vibe"
 import { MapsNavigation } from "../../src/maps/navigation.vibe"
@@ -125,6 +127,39 @@ it.live("Back off when Maps asks me to wait (spec/maps/connection.md, \"Story: B
     try screen.submitSearch()
     try until(machine.changes, (s) => s.search === "Failed" && s.searched === "tea")
     try Effect.try(() => assert.deepStrictEqual({ paused: paused.pausedUntil > paused.now, calls: h.cloudCalls.length - calls }, { paused: true, calls: 0 }))
+  }
+  // spec/maps/connection.md, "A rate-limit refusal of the current generation pauses every data request until its wait ends":
+  // one pause holds tiles and data alike. A tile's refusal pauses search, details, routes and the copyright; a search's pauses tiles.
+  const area = { north: 37.81, south: 37.79, east: -122.39, west: -122.41 }
+  const tiled = try harness({ id: "alpha-osm", data: "OpenStreetMap" }, { tiles: true })
+  provide tiled.layer {
+    const provider = try MapsProvider
+    try (try MapsSession).open()
+    try until((try ConnectionMachine).changes, (s) => s.phase === "Installed")
+    try until((try MapsContent).changes, (c) => c.coverage?.tiles !== undefined)
+    try Ref.set(tiled.refuseNext, 1)
+    const refused = provider.tile(10, 163, 395) catch (e: MapsFailure) => e.code
+    const calls = tiled.cloudCalls.length
+    const search = provider.search("tea") catch (e: MapsFailure) => e.code
+    const details = provider.details("p1") catch (e: MapsFailure) => e.code
+    const routes = provider.routes(ferry, pier, "Walk", false) catch (e: MapsFailure) => e.code
+    const copyright = provider.viewport(area, 12) catch (e: MapsFailure) => e.code
+    try Effect.try(() => assert.deepStrictEqual(
+      { refused, held: [search, details, routes, copyright], calls: tiled.cloudCalls.length - calls },
+      { refused: "rate-limited", held: ["rate-limited", "rate-limited", "rate-limited", "rate-limited"], calls: 0 },
+    ))
+  }
+  const searched = try harness({ id: "alpha-osm", data: "OpenStreetMap" }, { tiles: true })
+  provide searched.layer {
+    const provider = try MapsProvider
+    try (try MapsSession).open()
+    try until((try ConnectionMachine).changes, (s) => s.phase === "Installed")
+    try until((try MapsContent).changes, (c) => c.coverage?.tiles !== undefined)
+    try Ref.set(searched.refuseNext, 1)
+    const refused = provider.search("tea") catch (e: MapsFailure) => e.code
+    const calls = searched.cloudCalls.length
+    const tile = provider.tile(10, 163, 395) catch (e: MapsFailure) => e.code
+    try Effect.try(() => assert.deepStrictEqual({ refused, tile, calls: searched.cloudCalls.length - calls }, { refused: "rate-limited", tile: "rate-limited", calls: 0 }))
   }
 })
 
