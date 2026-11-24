@@ -81,10 +81,12 @@ def verify(apk, release=False):
             if not isinstance(path, str) or path in listed or '..' in path.split('/') or type(size) is not int:
                 raise ValueError('Invalid runtime inventory row')
             listed.add(path)
-            # The payload lists native files for every staged ABI; an APK built for fewer ABIs (the
-            # arm64-v8a release) carries only its own, and the device checks only its own ABI's rows.
+            # The payload lists native files for every staged ABI; the release APK is filtered to
+            # arm64-v8a and carries only its own, as the device checks only its own ABI's rows. A debug
+            # APK packages every staged ABI, so it must still carry every row.
             parts = path.split('/')
-            if parts[0] == 'lib' and len(parts) == 3 and parts[1] in ABIS and parts[1] not in packaged_abis:
+            if (release and parts[0] == 'lib' and len(parts) == 3 and parts[1] in ABIS
+                    and parts[1] != 'arm64-v8a' and parts[1] not in packaged_abis):
                 continue
             entry = path if path in names else 'assets/' + path
             if entry not in names or archive.getinfo(entry).file_size != size or packaged(entry) != expected:

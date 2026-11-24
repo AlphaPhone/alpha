@@ -70,7 +70,7 @@ class PackagedRuntimeTest(unittest.TestCase):
         self.assertEqual(result['runtime'], 'PACKAGED')
 
     def test_a_release_without_the_arm64_runtime_is_refused(self):
-        with self.assertRaisesRegex(ValueError, 'arm64-v8a Node differs'):
+        with self.assertRaisesRegex(ValueError, 'differs from its inventory: lib/arm64-v8a/libeliza_node.so'):
             verifier.verify(self.apk(drop={'lib/arm64-v8a/libeliza_node.so'}), release=True)
 
     def test_a_changed_listed_file_or_runtime_is_refused(self):
@@ -78,6 +78,14 @@ class PackagedRuntimeTest(unittest.TestCase):
             verifier.verify(self.apk(change='assets/agent/agent.mjs'))
         with self.assertRaisesRegex(ValueError, 'differs from its inventory: lib/x86_64/libeliza_node.so'):
             verifier.verify(self.apk(change='lib/x86_64/libeliza_node.so'))
+
+    def test_a_debug_apk_missing_an_abi_runtime_is_refused(self):
+        with self.assertRaisesRegex(ValueError, 'differs from its inventory: lib/x86_64/libeliza_node.so'):
+            verifier.verify(self.apk(drop={'lib/x86_64/libeliza_node.so'}))
+
+    def test_a_release_that_packages_x86_64_still_checks_its_rows(self):
+        with self.assertRaisesRegex(ValueError, 'differs from its inventory: lib/x86_64/libeliza_node.so'):
+            verifier.verify(self.apk(change='lib/x86_64/libeliza_node.so'), release=True)
 
     def test_an_apk_without_the_payload_reports_it_missing(self):
         self.assertEqual(verifier.verify(self.apk(drop={'assets/agent/inventory.json'}))['runtime'], 'MISSING')
