@@ -11,3 +11,4 @@ Calendar and Maps, and never hosts the agent.
 - [Cloud](./cloud/): Alpha Cloud, Alpha's own deployment of eliza's cloud, in `apps/cloud`
 - [Agent](./agent/): the agent pack the phone runs, in `apps/agent`
 - [Cloud](./cloud/): Alpha's deployment of eliza's cloud, in `apps/cloud`
+- [Release](./release/): how a new version of Alpha reaches phones: the launcher channel, a pilot phone by cable and the OS image
