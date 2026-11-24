@@ -25,12 +25,9 @@ const shares: readonly [Dest, string][] = [["Chooser", "Share to an app"], ["Ema
 const unnamed = "/";
 const changeWords: Record<Work, string> = { NewFolder: "make the folder", Rename: "rename it", MoveTo: "move them", CopyTo: "copy them" };
 
-/** The name the phone's storage gives a number: the last step of its path, or its volume's name at a volume's root. */
-function labelOf(runtime: FilesProps["runtime"], volumes: readonly { id: number; name: string }[], handle: number): string {
-  const named = volumes.find((volume) => volume.id === handle);
-  if (named) return named.name;
-  const spot = runtime.runSync(Handles.use((handles) => handles.spot(handle)));
-  return Option.isSome(spot) ? spot.value.path.slice(spot.value.path.lastIndexOf("/") + 1) : "…";
+/** The name the phone's storage gives a number: its volume's name at a volume's root, else the last step of its path. */
+function labelOf(runtime: FilesProps["runtime"], handle: number): string {
+  return Option.getOrElse(runtime.runSync(Handles.use((handles) => handles.label(handle))), () => "…");
 }
 
 /**
@@ -47,7 +44,7 @@ export function Files({ runtime }: FilesProps) {
   const owner = <E extends Parameters<typeof can>[0]>(event: E) => can(event, "Owner");
   const tell = <E extends Parameters<typeof send>[0]>(event: E) => void send(event, "Owner");
   const shown = browse(state);
-  const label = (handle: number) => labelOf(runtime, state.volumes, handle);
+  const label = (handle: number) => labelOf(runtime, handle);
   if (shown === "Closed") return null;
   if (shown === "Unsupported") return <EmptyState className="m-4" title="This phone's storage cannot be reached" />;
   if (shown === "NotAsked" || shown === "NoAccess") {
@@ -94,8 +91,8 @@ export function Files({ runtime }: FilesProps) {
             {state.volumes.map((volume) => (
               <ListRow
                 key={volume.id}
-                title={volume.name}
-                detail={volume.total > 0 && <Progress aria-label={`${volume.name} used`} value={filled(volume.used, volume.total)} />}
+                title={label(volume.id)}
+                detail={volume.total > 0 && <Progress aria-label={`${label(volume.id)} used`} value={filled(volume.used, volume.total)} />}
                 onClick={owner({ type: "openVolume", target: volume.id }) ? () => tell({ type: "openVolume", target: volume.id }) : undefined}
               />
             ))}
@@ -196,6 +193,7 @@ export function Files({ runtime }: FilesProps) {
           <DialogTitle>Some names are already there</DialogTitle>
           <div className="flex flex-col gap-2">
             {owner({ type: "keepBoth" }) && <Button onClick={() => tell({ type: "keepBoth" })}>Keep both</Button>}
+            {owner({ type: "replaceThem" }) && <Button variant="destructive" onClick={() => tell({ type: "replaceThem" })}>Replace</Button>}
             {owner({ type: "goBack" }) && <Button variant="secondary" onClick={() => tell({ type: "goBack" })}>Back</Button>}
           </div>
         </DialogContent>

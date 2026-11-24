@@ -1,4 +1,4 @@
-// spec/app/files/trash.md, "Story: See what is in the Trash"; spec/app/files/trash.md, "Story: Bring something back"; spec/app/files/trash.md, "Story: Erase for good"
+// spec/app/files/trash.md, "Story: See what is in the Trash"; spec/app/files/trash.md, "Story: Bring something back"; spec/app/files/trash.md, "Story: Erase for good"; spec/app/files/trash.md, "The owner restores everything listed that is still kept, together, from a list read since the last job"
 import { Alert, Button, Dialog, DialogContent, DialogTitle, EmptyState, ListGroup, ListRow, Spinner } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import type { Machine } from "../../gen/app__files__trash.effect.vibe";
@@ -33,6 +33,7 @@ export function Trash({ runtime, onBack }: TrashProps) {
         {onBack && <Button variant="ghost" size="sm" onClick={onBack}>Files</Button>}
         <h2 className="font-semibold">Trash</h2>
         {owner({ type: "refresh" }) && <Button variant="ghost" size="sm" onClick={() => tell({ type: "refresh" })}>Refresh</Button>}
+        {owner({ type: "restoreAll", now: untimed }) && <Button variant="outline" size="sm" onClick={() => tell({ type: "restoreAll", now: untimed })}>Restore all</Button>}
         {owner({ type: "askToEmpty" }) && <Button variant="outline" size="sm" onClick={() => tell({ type: "askToEmpty" })}>Empty the Trash</Button>}
       </div>
       {(ended === "Refused" || ended === "Unknown") && <Alert variant="warn">{ended === "Unknown" ? "Alpha cannot tell how far the phone got" : "The phone did not do all of it"}</Alert>}

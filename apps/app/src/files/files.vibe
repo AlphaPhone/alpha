@@ -85,7 +85,9 @@ effect function measured(ticket: number): Event!!(Files | Handles) {
     const numbered = try Handles
     const volumes: Volume[] = []
     for (const volume of [...(state.volumes ?? [])].sort((a, b) => Number(b.primary) - Number(a.primary))) {
-      volumes.push({ id: try numbered.of({ volume: volume.id, path: "" }), name: volume.name, used: Math.max(0, Math.trunc(volume.total - volume.free)), total: Math.max(0, Math.trunc(volume.total)) })
+      const id = try numbered.of({ volume: volume.id, path: "" })
+      try numbered.name(id, volume.name)
+      volumes.push({ id, used: Math.max(0, Math.trunc(volume.total - volume.free)), total: Math.max(0, Math.trunc(volume.total)) })
     }
     return { type: "storageRead", ticket, ok: true, volumes }
   } catch () => ({ type: "storageRead", ticket, ok: false, volumes: [] })
@@ -93,28 +95,31 @@ effect function measured(ticket: number): Event!!(Files | Handles) {
 
 // spec/app/files/index.md, "The place showing is read again when asked, and only its newest answer is taken; a folder that no longer exists brings the owner back to the top and says so, never that the storage is unavailable"
 effect function looked(ticket: number, trail: ReadonlyArray<number>, category: Kind, inCategory: boolean): Event!!(Files | Handles) {
-  const failed: Event = { type: "listed", look: ticket, ok: false, gone: false, complete: false, entries: [] }
+  const failed: Event = { type: "listed", ticket, ok: false, gone: false, complete: false, entries: [] }
   return effect {
     if (inCategory) {
       const wanted = categories[category]
       if (wanted === undefined) return failed
       const reply = try called("storageCategory", (plugin) => plugin.storageCategory({ category: wanted }))
       if (reply.status !== "ready") return failed
-      return { type: "listed", look: ticket, ok: true, gone: false, complete: reply.truncated !== true, entries: try itemsOf(primary, reply.entries ?? [], category === "Download" ? "Download" : undefined) }
+      return { type: "listed", ticket, ok: true, gone: false, complete: reply.truncated !== true, entries: try itemsOf(primary, reply.entries ?? [], category === "Download" ? "Download" : undefined) }
     }
     const found = try folderOf(trail)
-    if (Option.isNone(found)) return { type: "listed", look: ticket, ok: false, gone: true, complete: false, entries: [] }
+    if (Option.isNone(found)) return { type: "listed", ticket, ok: false, gone: true, complete: false, entries: [] }
     const { volume, path } = found.value
     const reply = try called("storageList", (plugin) => plugin.storageList({ volume, path }))
-    if (reply.status === "missing") return { type: "listed", look: ticket, ok: false, gone: true, complete: false, entries: [] }
+    if (reply.status === "missing") return { type: "listed", ticket, ok: false, gone: true, complete: false, entries: [] }
     if (reply.status !== "ready") return failed
-    return { type: "listed", look: ticket, ok: true, gone: false, complete: reply.truncated !== true, entries: try itemsOf(volume, reply.entries ?? []) }
+    return { type: "listed", ticket, ok: true, gone: false, complete: reply.truncated !== true, entries: try itemsOf(volume, reply.entries ?? []) }
   } catch () => failed
 }
 
-/** Whether the phone said its search reached every file: an answer that leaves it out is a search cut short. */
-function whole(reply: object): boolean {
-  return "truncated" in reply && reply.truncated === false
+/** The most rows the phone's search gives in one answer: an answer that fills it may have stopped short of every match. */
+const queryMost = 500
+
+/** Whether the phone's search reached every file: as it says, or, where it does not say, an answer short of a full page. */
+function whole(reply: { readonly entries?: ReadonlyArray<unknown> }): boolean {
+  return "truncated" in reply ? reply.truncated === false : (reply.entries ?? []).length < queryMost
 }
 
 /** What the phone's search takes for a filter in a place. */
@@ -216,8 +221,25 @@ function sorted(rows: ReadonlyArray<FileOutcomeRow>, paths: Map<string, number>,
   }
 }
 
+// spec/app/files/change.md, "A file of the same name is replaced only when the owner chose to replace it, never for the agent"
+/**
+ * Make room in `folder` for `paths` the owner chose to put in place of what has their names: the phone never writes
+ * over a file, so each file of the same name goes to the Trash first, where the owner can still bring it back. The
+ * paths whose name could not be freed, which are not sent.
+ */
+effect function cleared(volume: string, folder: string, paths: ReadonlyMap<string, number>): string[]!!Files {
+  const wanted = new Map([...paths.keys()].map((path) => [path.slice(path.lastIndexOf("/") + 1), path]))
+  const there = called("storageList", (plugin) => plugin.storageList({ volume, path: folder })) catch () => undefined
+  if (there?.status !== "ready") return [...paths.keys()]
+  const clashing = (there.entries ?? []).filter((entry) => wanted.has(entry.name) && wanted.get(entry.name) !== entry.path)
+  if (clashing.length === 0) return []
+  const batch = try batched("storageTrash", clashing.map((entry) => entry.path), (plugin, part) => plugin.storageTrash({ volume, paths: part }))
+  const freed = new Set(batch.rows.filter((row) => row.status === "trashed").map((row) => row.path))
+  return clashing.filter((entry) => !freed.has(entry.path)).map((entry) => wanted.get(entry.name) ?? "")
+}
+
 // spec/app/files/index.md, "A change ends as its answer says, what a move took away is told, and the place is read again"
-effect function performed(ticket: number, work: string, items: ReadonlyArray<Item>, name: string, folder: number, dest: number): Event!!(Files | Handles) {
+effect function performed(ticket: number, work: string, items: ReadonlyArray<Item>, name: string, folder: number, dest: number, replace: boolean): Event!!(Files | Handles) {
   const unknown: Event = { type: "finished", ticket, done: [], failed: [] }
   return effect {
     const done: number[] = []
@@ -244,6 +266,11 @@ effect function performed(ticket: number, work: string, items: ReadonlyArray<Ite
       if (volume !== into.value.volume) {
         failed.push(...paths.values())
         continue
+      }
+      if (replace) {
+        const kept = try cleared(volume, into.value.path, paths)
+        for (const path of kept) failed.push(paths.get(path) ?? 0)
+        for (const path of kept) paths.delete(path)
       }
       const batch = try batched("storageTransfer", [...paths.keys()], (plugin, part) => plugin.storageTransfer({ volume, paths: part, dest: into.value.path, copy }))
       sorted(batch.rows, paths, done, failed, copy ? "copied" : "moved")
@@ -296,12 +323,12 @@ function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Mach
     when { tag: "AskAccess" }: answer("access", allowed(false), { type: "accessReported", grant: "Denied", supported: true }, "Phone");
     when { tag: "OpenSettings" }: run("settings", ignore(called("storageRequestAccess", (plugin) => plugin.storageRequestAccess({ settings: true }))), "Phone");
     when { tag: "Measure", let ticket }: answer("measure", measured(ticket), { type: "storageRead", ticket, ok: false, volumes: [] }, "Phone");
-    when { tag: "Look", let ticket, let trail, let category, let inCategory }: answer("look", looked(ticket, trail, category, inCategory), { type: "listed", look: ticket, ok: false, gone: false, complete: false, entries: [] }, "Phone");
+    when { tag: "Look", let ticket, let trail, let category, let inCategory }: answer("look", looked(ticket, trail, category, inCategory), { type: "listed", ticket, ok: false, gone: false, complete: false, entries: [] }, "Phone");
     when { tag: "Search", let ticket, let where, let filter }: answer("search", searched(ticket, where, filter), { type: "searched", ticket, ok: false, complete: false, entries: [] }, "Phone");
     when { tag: "LookInto", let ticket, let trail }: answer("sheet", destination(ticket, trail), { type: "destRead", ticket, ok: false, entries: [] }, "Phone");
     when { tag: "AgentLook", let ticket, let folder }: answer("peek", peeked(ticket, folder), { type: "agentLooked", ticket, ok: false, entries: [] }, "Phone");
     when { tag: "Tell" }: stop("tell");
-    when { tag: "Perform", let ticket, let work, let items, let name, let folder, let dest }: answer(`perform ${ticket}`, performed(ticket, work, items, name, folder, dest), { type: "finished", ticket, done: [], failed: [] }, "Phone");
+    when { tag: "Perform", let ticket, let work, let items, let name, let folder, let dest, let replace }: answer(`perform ${ticket}`, performed(ticket, work, items, name, folder, dest, replace), { type: "finished", ticket, done: [], failed: [] }, "Phone");
     when { tag: "ToTrash", let items, let approval }: run("trash", ignore(effect { try (try Bin.Machine).send({ type: "moveToTrash", items, approval }, "Phone") }), "Phone");
     when { tag: "Show", let item }: run("show", shown(item), "Phone");
     when { tag: "Share", let ticket, let channel, let items }: answer(`share ${ticket}`, shared(ticket, channel, items), { type: "shareEnded", ticket, opened: false, known: false }, "Phone");

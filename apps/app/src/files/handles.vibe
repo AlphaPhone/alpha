@@ -15,6 +15,10 @@ export interface Spot {
 export service Handles {
   of(spot: Spot): number!!
   spot(handle: number): Option.Option<Spot>!!
+  /** Give the number of a volume's root the name the phone shows for that volume. */
+  name(handle: number, label: string): void!!
+  /** What the owner calls a number: its volume's name at a volume's root, else the last step of its path. */
+  label(handle: number): Option.Option<string>!!
 }
 
 module text {
@@ -42,6 +46,7 @@ export const handles = Layer.effect(Handles, effect {
   const store = try KeyValueStore.KeyValueStore
   const spots = kept(store.get(key) catch () => undefined)
   const numbers = new Map(spots.map((spot, at) => [keyed(spot), at + 1]))
+  const names = new Map<number, string>()
   return {
     effect of(spot: Spot): number!! {
       const known = numbers.get(keyed(spot))
@@ -52,5 +57,12 @@ export const handles = Layer.effect(Handles, effect {
       return spots.length
     },
     spot: (handle: number) => sync(() => Option.fromNullishOr(spots[handle - 1])),
+    name: (handle: number, label: string) => sync(() => { names.set(handle, label) }),
+    label: (handle: number) => sync(() => {
+      const named = names.get(handle)
+      if (named !== undefined) return Option.some(named)
+      const spot = spots[handle - 1]
+      return spot === undefined ? Option.none<string>() : Option.some(spot.path.slice(spot.path.lastIndexOf("/") + 1))
+    }),
   }
 })
