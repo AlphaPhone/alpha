@@ -26,7 +26,10 @@ export schema Fields {
   readonly end: number
   readonly allDay: boolean
   readonly people: string
+  readonly repeat?: "NoRepeat" | "Daily" | "Weekly" | "Monthly" | "Yearly"
 }
+
+const rules: Readonly<Record<"Daily" | "Weekly" | "Monthly" | "Yearly", string>> = { Daily: "FREQ=DAILY", Weekly: "FREQ=WEEKLY", Monthly: "FREQ=MONTHLY", Yearly: "FREQ=YEARLY" }
 
 /** The form a new event opens with on `day`: an hour from nine. */
 export function blank(day: number): Fields {
@@ -183,7 +186,8 @@ effect function receipts(ticket: number): Event!!(PhoneCalendar | KeyValueStore.
 effect function handOff() {
   const fields = try kept(0, try owner())
   const people = fields.people.split(",").map((person) => person.trim()).filter((person) => person !== "")
-  try (try PhoneCalendar).handOff({ ...fieldsOf(fields), allDay: fields.allDay, timeZone: zone(), attendees: people })
+  const rrule = fields.repeat === undefined || fields.repeat === "NoRepeat" ? {} : { rrule: rules[fields.repeat] }
+  try (try PhoneCalendar).handOff({ ...fieldsOf(fields), allDay: fields.allDay, timeZone: zone(), attendees: people, ...rrule })
 }
 
 /** The event a confirmed write left on the phone, as sync copies it. */

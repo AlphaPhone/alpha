@@ -1,7 +1,7 @@
 // spec/app/calendar/index.md, "Story: See my days"; spec/app/calendar/index.md, "Story: Move through the days"; spec/app/calendar/index.md, "Story: Look at an event"; spec/app/calendar/index.md, "Story: Search my events and choose which calendars I see"; spec/app/calendar/editor.md, "Story: Write an event"; spec/app/calendar/agent.md, "Story: Approve what the agent changes"; spec/app/calendar/deletions.md, "Story: Undo a deletion before it is sent"
 import {
   AppHeader, Banner, Button, Card, CardFooter, CardTitle, Dialog, DialogContent, DialogTitle, EmptyState, Input, Label,
-  ListGroup, ListRow, SearchField, Sheet, SheetContent, Spinner, Switch, Textarea,
+  ListGroup, ListRow, SearchField, Select, SelectContent, SelectItem, SelectTrigger, Sheet, SheetContent, Spinner, Switch, Textarea,
 } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import { CalendarDays, Eye, Layers, Plus, Search } from "lucide-react";
@@ -56,6 +56,11 @@ const words: Readonly<Record<ReplyWord, string>> = {
   NoReplyWord: "", WordOrganizer: "Organizer", WordAwaiting: "Hasn't answered", WordGoing: "Going", WordMaybe: "Maybe",
   WordDeclined: "Not going", WordDelegated: "Delegated", WordInvited: "Invited",
 };
+
+const repeats: ReadonlyArray<{ repeat: NonNullable<Fields["repeat"]>; label: string }> = [
+  { repeat: "NoRepeat", label: "Never" }, { repeat: "Daily", label: "Every day" }, { repeat: "Weekly", label: "Every week" },
+  { repeat: "Monthly", label: "Every month" }, { repeat: "Yearly", label: "Every year" },
+];
 
 const saveOff: Readonly<Record<SaveBlock, string>> = {
   SaveAllowed: "", WaitLoading: "Loading…", WaitSaving: "Saving…", OtherAccount: "This draft belongs to another account.",
@@ -338,6 +343,7 @@ function Form({ runtime, day }: CalendarProps & { day: number }) {
           <Banner variant="warn" action={<>
             {editor.can({ type: "checkReceipts" }) ? <Button onClick={() => void editor.send({ type: "checkReceipts" })}>Check again</Button> : null}
             {editor.can({ type: "createSeparately" }) ? <Button variant="ghost" onClick={() => void editor.send({ type: "createSeparately" })}>Create a separate event</Button> : null}
+            {editor.can({ type: "letDoubtGo" }) ? <Button variant="ghost" onClick={() => void editor.send({ type: "letDoubtGo" })}>Stop checking</Button> : null}
           </>}>Alpha can't tell whether your last new event was saved.</Banner>
         ) : null}
         <div className="flex flex-col gap-3">
@@ -357,9 +363,24 @@ function Form({ runtime, day }: CalendarProps & { day: number }) {
           }} /></Label>
           <Label>People<Input value={fields.people} placeholder="Email addresses, separated by commas" onChange={(input) => {
             const people = input.target.value;
-            const extras = people.trim() !== "";
+            const extras = people.trim() !== "" || (fields.repeat ?? "NoRepeat") !== "NoRepeat";
             change({ ...fields, people }, extras === e.extras ? { type: "editTitle", blank: fields.title.trim() === "" } : { type: "setExtras", extras });
           }} /></Label>
+          {e.form === "NewEvent" ? (
+            <Label>Repeats
+              <Select value={fields.repeat ?? "NoRepeat"} onValueChange={(value) => {
+                const repeat = value as NonNullable<Fields["repeat"]>;
+                const extras = repeat !== "NoRepeat" || fields.people.trim() !== "";
+                change({ ...fields, repeat }, extras === e.extras ? { type: "editTitle", blank: fields.title.trim() === "" } : { type: "setExtras", extras });
+              }}>
+                <SelectTrigger aria-label="Repeats" />
+                <SelectContent>
+                  {repeats.map(({ repeat, label }) => <SelectItem key={repeat} value={repeat}>{label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Label>
+          ) : null}
+          <p className="text-sm text-muted-foreground">{`Times are in ${Intl.DateTimeFormat().resolvedOptions().timeZone}.`}</p>
           <Label>Notes<Textarea value={fields.notes} disabled={!editor.can({ type: "editTitle", blank: fields.title.trim() === "" })} onChange={(input) => change({ ...fields, notes: input.target.value }, { type: "editTitle", blank: fields.title.trim() === "" })} /></Label>
           {e.form === "EditEvent" && e.repeats ? (
             <ListGroup heading="Change">
@@ -368,7 +389,7 @@ function Form({ runtime, day }: CalendarProps & { day: number }) {
               ))}
             </ListGroup>
           ) : null}
-          {e.extras ? <p className="text-sm text-muted-foreground">People, video calls and alerts are added in Android Calendar.</p> : null}
+          {e.extras ? <p className="text-sm text-muted-foreground">People, repeats, video calls and alerts are added in Android Calendar.</p> : null}
         </div>
       </SheetContent>
     </Sheet>
