@@ -36,7 +36,7 @@ type Need = SmsAccess | ContactsAccess
 type Page = { rows: int, failed: int, partial: int }
 type Messages = {
   front: bool, pane: Pane, sms: P::Permission, book: P::Permission,
-  list: R::Read, threads: int, older: bool, sought: bool, chip: Filter, unread: int,
+  list: R::Read, threads: int, moreThreads: bool, sought: bool, chip: Filter, unread: int,
   thread: int, page: R::Read, shown: Page, earlier: bool, smsApp: bool,
   confirming: bool, removal: A::Attempt,
   picker: R::Read, choices: int, moreChoices: bool,
@@ -46,7 +46,7 @@ pure val blankPage: Page = { rows: 0, failed: 0, partial: 0 }
 
 pure val initial: Messages = {
   front: false, pane: Threads, sms: P::unasked, book: P::unasked,
-  list: R::unread, threads: 0, older: false, sought: false, chip: AllThreads, unread: 0,
+  list: R::unread, threads: 0, moreThreads: false, sought: false, chip: AllThreads, unread: 0,
   thread: 0, page: R::unread, shown: blankPage, earlier: false, smsApp: false,
   confirming: false, removal: A::plan(0),
   picker: R::unread, choices: 0, moreChoices: false,
@@ -136,7 +136,7 @@ pure def show(s: Messages): Moved = askThreads(false, { ...s, front: true, pane:
 
 ```quint
 pure def cleared(pane: Pane, s: Messages): Messages =
-  { ...s, pane: pane, thread: 0, threads: 0, older: false, shown: blankPage, earlier: false, confirming: false,
+  { ...s, pane: pane, thread: 0, threads: 0, moreThreads: false, shown: blankPage, earlier: false, confirming: false,
     choices: 0, moreChoices: false, list: idle(s.list), page: idle(s.page), picker: idle(s.picker) }
 
 pure def canLeave(s: Messages): bool = s.front
@@ -150,7 +150,7 @@ pure def leave(s: Messages): Messages = { ...cleared(Threads, s), front: false }
 pure def narrowed(s: Messages): bool = s.sought or s.chip != AllThreads
 
 pure def relisted(sought: bool, chip: Filter, s: Messages): Moved =
-  askThreads(false, { ...s, sought: sought, chip: chip, threads: 0, older: false })
+  askThreads(false, { ...s, sought: sought, chip: chip, threads: 0, moreThreads: false })
 
 pure def canPickChip(s: Messages, chip: Filter): bool = showingPane(s, Threads) and readable(s) and chip != s.chip
 
@@ -168,7 +168,7 @@ pure def retryThreads(s: Messages): Moved = askThreads(false, s)
 ### "Older conversations" reads further only when the phone said there are more
 
 ```quint
-pure def canOlderThreads(s: Messages): bool = showingPane(s, Threads) and s.older and s.list.status == R::Loaded
+pure def canOlderThreads(s: Messages): bool = showingPane(s, Threads) and s.moreThreads and s.list.status == R::Loaded
 
 pure def olderThreads(s: Messages): Moved = askThreads(true, s)
 ```
@@ -184,7 +184,7 @@ pure def canThreadsRead(s: Messages, ticket: int, count: int): bool =
 pure def threadsRead(s: Messages, ticket: int, ok: bool, grant: P::Grant, count: int, further: bool): Messages =
   val sms = P::observe(s.sms, grant)
   val good = ok and P::allows(sms)
-  { ...s, sms: sms, list: R::answer(s.list, good), threads: if (good) count else 0, older: good and further and count > 0 }
+  { ...s, sms: sms, list: R::answer(s.list, good), threads: if (good) count else 0, moreThreads: good and further and count > 0 }
 ```
 
 ### The phone reports how many conversations are unread, for the list and Home
@@ -216,8 +216,8 @@ rows.
 ```quint
 pure def alwaysRowsOnlyWhileShowing(s: Messages): bool = and {
   s.threads >= 0, s.choices >= 0, s.unread >= 0,
-  (s.threads > 0 or s.older) implies (showingPane(s, Threads) and readable(s)),
-  s.older implies s.threads > 0,
+  (s.threads > 0 or s.moreThreads) implies (showingPane(s, Threads) and readable(s)),
+  s.moreThreads implies s.threads > 0,
   (s.shown.rows > 0 or s.earlier) implies (showingPane(s, Conversation) and readable(s)),
   s.earlier implies s.shown.rows > 0,
   (s.choices > 0 or s.moreChoices) implies (showingPane(s, Picker) and P::allows(s.book)),
@@ -232,7 +232,7 @@ pure def sometimesNoThreads(s: Messages): bool = noThreads(s)
 pure def sometimesNoMatches(s: Messages): bool = noMatches(s) and s.chip == UnreadThreads
 pure def sometimesThreadsFailed(s: Messages): bool = threadsFailed(s)
 pure def sometimesSmsNeeded(s: Messages): bool = smsNeeded(s) and s.sms.asked
-pure def sometimesOlderConversations(s: Messages): bool = s.older and s.list.status == R::Loaded
+pure def sometimesOlderConversations(s: Messages): bool = s.moreThreads and s.list.status == R::Loaded
 pure def sometimesUnreadForHome(s: Messages): bool = s.unread > 0 and not(s.front)
 ```
 
@@ -269,7 +269,7 @@ pure def goToSettings(s: Messages, need: Need): Moved = { state: s, out: List(Op
 
 ```quint
 pure def forgotten(need: Need, s: Messages): Messages =
-  if (need == SmsAccess) { ...s, threads: 0, older: false, shown: blankPage, earlier: false, confirming: false }
+  if (need == SmsAccess) { ...s, threads: 0, moreThreads: false, shown: blankPage, earlier: false, confirming: false }
   else { ...s, choices: 0, moreChoices: false }
 
 pure def accessReported(s: Messages, need: Need, grant: P::Grant): Moved =
