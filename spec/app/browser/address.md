@@ -202,6 +202,43 @@ pure def canFollowed(p: Page): bool = p.phase == Shown
 pure def followed(p: Page): Page = { ...started(p), behind: p.behind + 1, ahead: 0 }
 ```
 
+### A page that replaces its own address at its own origin, without loading another document, is still the same load
+
+A page may do it before it first paints, as Facebook does, or while it is
+shown. The new address has the same scheme, host and port as the page, so
+the secure mark still holds for it, and no other document was fetched. The
+load keeps its number, so it still commits or fails, and the tab keeps the
+page it shows under the new address. An address at another origin, or one
+that loads another document, is a new load the page followed.
+
+```quint
+pure def canReaddressed(p: Page, load: int, sameOrigin: bool, sameDocument: bool): bool =
+  load == p.load and (p.phase == Loading or p.phase == Shown) and sameOrigin and sameDocument
+
+pure def readdressed(p: Page, load: int, sameOrigin: bool, sameDocument: bool): Page = p
+```
+
+### A load whose page replaced its own address still commits, and the commit is history
+
+A tab that took the new address for a new load would refuse the commit of
+the load the page is part of, and leave the page loading.
+
+```quint
+pure def lawAReaddressedLoadStillCommits(load: int): bool =
+  val loading = { ...initial, phase: Loading, load: load }
+  val after = readdressed(loading, load, true, true)
+  canReaddressed(loading, load, true, true) and canCommitted(after, load) and
+    committed(after, load, true).out == List(Visit({ load: load }))
+```
+
+### Another origin, or another document, is never taken as the same load
+
+```quint
+pure def lawOnlyTheSameDocumentAtItsOriginIsTheSameLoad(load: int, sameOrigin: bool, sameDocument: bool): bool =
+  val loading = { ...initial, phase: Loading, load: load }
+  canReaddressed(loading, load, sameOrigin, sameDocument) iff (sameOrigin and sameDocument)
+```
+
 ### Back and forward move through the tab's own pages
 
 ```quint
