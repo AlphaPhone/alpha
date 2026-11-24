@@ -7,6 +7,7 @@ import * as Composer from "../../gen/app__assistant__composer.effect.vibe"
 import * as Dock from "../../gen/app__assistant__dock.effect.vibe"
 import { zoneOf } from "../../gen/app__assistant__context.effect.vibe"
 import * as Reply from "../../gen/app__assistant__reply.effect.vibe"
+import { readAgain, type FundsCode } from "../../gen/app__assistant__reply.ts"
 import * as Pages from "../../gen/app__settings.effect.vibe"
 import * as Search from "../../gen/app__assistant__search.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
@@ -30,7 +31,7 @@ const turns = Layer.effect(Turns, effect {
 const titled = Schema.Struct({ ...ConversationRecord.fields, title: Schema.String })
 const listing = () => Schema.Struct({ conversations: Schema.Array(titled) })
 const made = () => Schema.Struct({ conversation: titled })
-const page = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.String, role: Schema.Literals(["user", "assistant"]), text: Schema.String, clientMessageId: Schema.optionalKey(Schema.String), failureKind: Schema.optionalKey(Schema.String) })) })
+const page = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.String, role: Schema.Literals(["user", "assistant"]), text: Schema.String, clientMessageId: Schema.optionalKey(Schema.String), failureKind: Schema.optionalKey(Schema.String), cloudCode: Schema.optionalKey(Schema.String) })) })
 const hits = () => Schema.Struct({ results: Schema.Array(Schema.Struct({ conversationId: Schema.NonEmptyString, roomId: Schema.NonEmptyString, messageId: Schema.String, text: Schema.String })) })
 const health = () => Schema.Struct({ ready: Schema.Boolean })
 
@@ -71,8 +72,10 @@ function ended(ticket: number, heard: boolean, result: TurnResult | undefined): 
 const failures: Readonly<Record<string, Reply.Failure>> = {
   credential_invalid: "CredentialInvalid", insufficient_credits: "InsufficientCredits", limit_reached: "LimitReached",
   rate_limited: "LimitReached", provider_issue: "ProviderIssue", timeout: "TimedOut", missing_capability: "MissingCapability",
-  no_provider: "NoProvider", billing_refused: "PlanLimit", subscription_required: "PlanLimit", allowance_exhausted: "PlanLimit",
+  no_provider: "NoProvider",
 }
+
+const fundsCodes: Readonly<Record<string, FundsCode>> = { insufficient_credits: "CreditsSpent", allowance_exhausted: "AllowanceSpent" }
 
 /** Whether the resident's failed turn carries Cloud's own code for spent allowance and credits. */
 export function isCloudFundsRefusal(result: TurnResult | undefined): boolean {
@@ -280,7 +283,7 @@ effect function listed(ticket: number): Chats.Event!!(Agent | Talk) {
   } catch () => ({ type: "listed", ticket, ok: false, ids: [] })
 }
 
-// spec/app/assistant/chats.md, "A page of the conversation showing is taken only from the newest asking"; spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
+// spec/app/assistant/chats.md, "A page of the conversation showing is taken only from the newest asking"; spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
 /** A page of the conversation showing, each message numbered as Alpha first saw it: the page counts up to its highest number, which a scroll names. */
 effect function paged(conversation: number, around: number, ticket: number): Chats.Event!!(Agent | Talk) {
   return effect {
@@ -291,7 +294,7 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
     const { messages } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(known.record.id)}/messages`, { urlParams: pivot === undefined ? {} : { around: pivot } }), page())
     const next = new Map(board.snapshot().pages)
     next.set(ticket, messages.map((one) => ({
-      id: one.id, mine: one.role === "user", text: one.text, ...(one.failureKind === undefined ? {} : { failure: failures[one.failureKind] ?? "OtherFailure" }),
+      id: one.id, mine: one.role === "user", text: one.text, ...(one.failureKind === undefined ? {} : { failure: readAgain(failures[one.failureKind] ?? "OtherFailure", fundsCodes[one.cloudCode ?? ""] ?? "NoFundsCode") }),
     })))
     board.change({ pages: next })
     const numbers = messages.map((one) => board.messageNumber(one.id))

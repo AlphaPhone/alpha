@@ -22,7 +22,7 @@ export interface AskScene {
 export interface Kept {
   readonly roomId: string;
   readonly title: string;
-  readonly messages: { id: string; role: "user" | "assistant"; text: string }[];
+  readonly messages: { id: string; role: "user" | "assistant"; text: string; failureKind?: string; cloudCode?: string }[];
 }
 
 export function askScene(): AskScene {
@@ -34,7 +34,7 @@ const frame = (data: unknown) => encoder.encode(`data: ${JSON.stringify(data)}\n
 /** What ends a turn, as eliza's agent names its messages (`.eliza/packages/agent/src/client/reply-frame.schema.vibe`, `DoneFrame`). */
 const named = (turn: number) => ({ messageId: `m${turn}a`, userMessageId: `m${turn}u`, agentName: "Alpha", actionResults: [] });
 
-function reply(scene: AskScene, room: string, text: string, keep: (said: string) => void): Response {
+function reply(scene: AskScene, room: string, text: string, keep: (said: string, failed?: { failureKind: string; cloudCode?: string }) => void): Response {
   const custom = scene.nextReplyChunks;
   const provisional = scene.nextReplyProvisional;
   scene.nextReplyChunks = undefined;
@@ -43,6 +43,8 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
     start(controller) {
       controller.enqueue(frame({ type: "status", activity: "thinking" }));
       if (scene.refusal !== undefined) {
+        // The agent stores the refused reply with its failure kind and Cloud's code, as eliza's history serves it.
+        keep("", { failureKind: scene.refusal.failureKind, ...(scene.refusal.cloudCode === undefined ? {} : { cloudCode: scene.refusal.cloudCode }) });
         controller.enqueue(frame({ type: "done", fullText: "", ...named(scene.said.length), ...scene.refusal }));
         controller.close();
         return;
@@ -119,14 +121,15 @@ export function askRoutes(scene: AskScene): Route[] {
       const found = /^\/api\/conversations\/c(\d+)\/messages(\/stream)?$/.exec(url.pathname);
       if (request.method !== "POST" || !found) return;
       const messages = scene.kept.get(`c${found[1]}`)?.messages ?? [];
-      const keep = (role: "user" | "assistant", text: string) => void messages.push({ id: `m${scene.said.length}${role === "user" ? "u" : "a"}`, role, text });
+      const keep = (role: "user" | "assistant", text: string, failed?: { failureKind: string; cloudCode?: string }) =>
+        void messages.push({ id: `m${scene.said.length}${role === "user" ? "u" : "a"}`, role, text, ...failed });
       return request.json().then((body: { text: string; metadata?: unknown }) => {
         scene.metadata?.push(body.metadata);
         if (found[2] === undefined) return Response.json({ text: `You said: ${body.text}`, ...named(scene.said.length) });
         scene.said.push(body.text);
         keep("user", body.text);
         Object.assign(messages.at(-1) ?? {}, { clientMessageId: (body as { clientMessageId?: string }).clientMessageId });
-        return reply(scene, `r${found[1]}`, body.text, (said) => keep("assistant", said));
+        return reply(scene, `r${found[1]}`, body.text, (said, failed) => keep("assistant", said, failed));
       });
     },
     (request, url) => {
