@@ -366,7 +366,7 @@ pure def sometimesCouldNotCheck(s: Updates): bool = s.note == CouldNotCheck
 
 ### The owner is idle only on Home with nothing open, not typing, no voice, no dialog and the connection not busy, and the phone is quiet only with Alpha in front, no call and normal audio
 
-Open is an app, the drawer, Ask Alpha raised, a sheet or menu, a screen with
+Open is an app, Ask Alpha raised, a sheet or menu, a screen with
 a step of its own such as Home being edited, or anything else holding the
 phone. A recording under way is not idle either.
 

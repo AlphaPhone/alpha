@@ -10,7 +10,7 @@ each frame it waits; a control is named by its focus key.
 ## Story: Keep my place when the screen changes under me
 
 > As the owner using TalkBack or a keyboard, I want focus to land on the new
-> screen's title, the drawer's search or Home, to come back to the control
+> screen's title or Home, to come back to the control
 > that opened a sheet once it closes, and never to be pulled away from where
 > I put it.
 
@@ -48,9 +48,9 @@ pure val targetValues = Set(Search, Title, Region)
 
 ### A new screen is given focus within twelve frames, unless the owner has already moved it there
 
-After a screen changes, an app, Home or the drawer, the shell looks each
-frame for the screen's target: a screen that focuses itself, the drawer's
-search, Home's first control, the app's title, or else the app's region. A
+After a screen changes, an app or Home, the shell looks each
+frame for the screen's target: a screen that focuses itself, a search
+field, Home's first control, the app's title, or else the app's region. A
 control that holds focus on the new screen keeps it. A resize that took
 the focused control away asks for the same, only while that control is
 still gone, and never over a screen change on its way.
@@ -170,7 +170,7 @@ pure def stepARowIsTheOneNoted(before: Focus, via: str, after: Focus): bool =
 pure def sometimesARowGetsFocusBack(f: Focus): bool = f.lastRow != ""
 ```
 
-### Home's tiles and the drawer's apps show a focus ring only while the owner moves by keyboard; every other control, a field above all, shows its ring whenever it has focus
+### Home's tiles show a focus ring only while the owner moves by keyboard; every other control, a field above all, shows its ring whenever it has focus
 
 A Tab or an arrow key starts moving by keyboard and a press ends it.
 

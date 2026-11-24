@@ -1,0 +1,47 @@
+// spec/app/shell/landing.md, "Story: Come back to Alpha after authorizing a connection"
+import { Machine, machine } from "../../gen/app__shell__landing.effect.vibe"
+import type { Landing, Query } from "../../gen/app__shell__landing.effect.vibe"
+
+const known = new Set(["state", "code", "error", "error_description"])
+
+
+// spec/app/shell/landing.md, "The landing holds the return it was handed, summarised, whether its address still holds it, where it is in deciding, the way back it offers and what it says"
+/** The counts and shapes of a return's query, from its raw search string. */
+export function queryOf(search: string): Query {
+  const params = new URLSearchParams(search)
+  const code = params.get("code") ?? ""
+  const keys = [...params.keys()]
+  return {
+    states: params.getAll("state").length,
+    stateValid: /^[-\w]{43}$/.test(params.get("state") ?? ""),
+    codes: params.getAll("code").filter((value) => value !== "").length,
+    codeFits: code.length <= 4096,
+    errors: params.getAll("error").filter((value) => value !== "").length,
+    descriptions: params.getAll("error_description").length,
+    descriptionFits: (params.get("error_description") ?? "").length <= 2000,
+    knownKeys: keys.every((key) => known.has(key)),
+    empty: keys.length === 0,
+  }
+}
+
+// spec/app/shell/landing.md, "The landing reads the return once, and cleans its address before it decides anything"; spec/app/shell/landing.md, "Only a well-formed return with exactly one result is handed back: one state of the right shape, a code or an error but never both, at most one of each, a description only beside an error, and no other key"
+/**
+ * The landing's decision on the return `search`, made only after `scrub` has cleaned the address, and the one way
+ * back into Alpha it offers: the state with the code, or with the denial, never the provider's own text; empty for a
+ * return it cannot vouch for.
+ */
+export effect function land(search: string, scrub: () => void) {
+  provide machine() {
+    const page = try Machine
+    try page.send({ type: "arrive", q: queryOf(search) })
+    try sync(scrub)
+    try page.send({ type: "scrub" })
+    const decided: Landing = try page.send({ type: "validate" })
+    const params = new URLSearchParams(search)
+    const back = new URL("alphaphone://cloud-delegation")
+    back.searchParams.set("state", params.get("state") ?? "")
+    if (decided.link === "CodeLink") back.searchParams.set("code", params.get("code") ?? "")
+    if (decided.link === "DeniedLink") back.searchParams.set("error", "access_denied")
+    return { landing: decided, href: decided.link === "NoLink" ? "" : back.href }
+  }
+}

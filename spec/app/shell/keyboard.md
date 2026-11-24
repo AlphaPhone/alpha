@@ -199,8 +199,8 @@ pure def sometimesTheAgendaAtLargeText(c: Canvas): bool = c.agenda and c.mounted
 
 ### Ask Alpha's footprint is what it covers now and its bar alone, which is never more; while nothing of Ask Alpha shows, the last footprint stays
 
-The header clearance is the bottom of the header that shows: an app's, the
-drawer's, an open sheet's, or Ask Alpha's own when it fills the screen.
+The header clearance is the bottom of the header that shows: an app's, an
+open sheet's, or Ask Alpha's own when it fills the screen.
 
 ```quint
 pure def canDockMeasured(c: Canvas, clearance: int, bar: int): bool = bar > 0 and bar <= clearance

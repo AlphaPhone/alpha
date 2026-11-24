@@ -6,6 +6,11 @@ import { Machine as Layers } from "../gen/app__shell__layers.effect.vibe";
 import type { Event as LayerEvent } from "../gen/app__shell__layers.ts";
 import { closeAll, drawn, hardware, later, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
+import { Effect } from "effect";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { LandingPage } from "../src/shell/Landing.tsx";
+import { land } from "../src/shell/landing.vibe";
 
 underAct();
 afterEach(closeAll);
@@ -69,7 +74,7 @@ describe("the shell", () => {
     await until(alpha, alpha.runtime, Focus, (f) => f.restores === 1);
     expect(focused()).toBe("Back");
 
-    // spec/app/shell/focus.md, "Home's tiles and the drawer's apps show a focus ring only while the owner moves by keyboard; every other control, a field above all, shows its ring whenever it has focus"
+    // spec/app/shell/focus.md, "Home's tiles show a focus ring only while the owner moves by keyboard; every other control, a field above all, shows its ring whenever it has focus"
     await drawn(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab" })));
     await until(alpha, alpha.runtime, Focus, (f) => f.keyboard);
     expect(document.documentElement.hasAttribute("data-alpha-keyboard")).toBe(true);
@@ -96,5 +101,29 @@ describe("the shell", () => {
     await swiped({ x: 5, y: 300 }, { x: 80, y: 300 });
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
   });
-});
 
+  // spec/app/shell/landing.md, "Story: Come back to Alpha after authorizing a connection"
+  it("Come back to Alpha after authorizing a connection (spec/app/shell/landing.md, \"Story: Come back to Alpha after authorizing a connection\")", async () => {
+    const state = "a".repeat(43);
+    const page = document.body.appendChild(document.createElement("div"));
+    const root = createRoot(page);
+    const landed = async (search: string) => {
+      let cleaned = false;
+      const { landing, href } = Effect.runSync(land(search, () => { cleaned = true; }));
+      await act(async () => { root.render(<LandingPage message={landing.message} href={href} />); });
+      return { cleaned, message: landing.message, link: page.querySelector("a")?.getAttribute("href") ?? undefined };
+    };
+
+    // spec/app/shell/landing.md, "The landing reads the return once, and cleans its address before it decides anything"; spec/app/shell/landing.md, "Only a well-formed return with exactly one result is handed back: one state of the right shape, a code or an error but never both, at most one of each, a description only beside an error, and no other key"
+    expect(await landed(`?state=${state}&code=4%2Fxyz`)).toEqual({ cleaned: true, message: "MessageContinue", link: `alphaphone://cloud-delegation?state=${state}&code=4%2Fxyz` });
+    // spec/app/shell/landing.md, "The way back carries a code only for a code, and a denial only for an error without one": the provider's text never crosses.
+    expect(await landed(`?state=${state}&error=access_denied&error_description=The+user+said+no`)).toEqual({ cleaned: true, message: "MessageCancelled", link: `alphaphone://cloud-delegation?state=${state}&error=access_denied` });
+    // spec/app/shell/landing.md, "Only an accepted return is offered a way back, and a rejected one never is"
+    expect(await landed(`?state=${state}&code=1&error=x`)).toEqual({ cleaned: true, message: "MessageInvalid", link: undefined });
+    expect(await landed(`?state=short&code=1`)).toEqual({ cleaned: true, message: "MessageInvalid", link: undefined });
+    expect(await landed(`?state=${state}&code=1&next=evil`)).toEqual({ cleaned: true, message: "MessageInvalid", link: undefined });
+    expect(await landed("")).toEqual({ cleaned: true, message: "MessageReopened", link: undefined });
+    await act(async () => { root.unmount(); });
+    page.remove();
+  });
+});

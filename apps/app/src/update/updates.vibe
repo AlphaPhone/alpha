@@ -151,7 +151,7 @@ const shown = started(effect {
 
 /** What the owner's activity is read from: the shell, what covers or holds the phone, a call, Alpha in front, a field with focus and the other areas' reports. */
 interface Facts {
-  readonly shell: { readonly trail: ReadonlyArray<unknown>; readonly drawer: boolean; readonly assistant: string }
+  readonly shell: { readonly trail: ReadonlyArray<unknown>; readonly assistant: string }
   readonly layers: { readonly open: ReadonlyArray<{ readonly kind: string }>; readonly holds: ReadonlyArray<string>; readonly steps: ReadonlyArray<string> }
   readonly call: boolean
   readonly front: boolean
@@ -163,8 +163,8 @@ interface Facts {
 function activityOf({ shell, layers, call, front, typing, reported }: Facts): Activity {
   const held = layers.holds.some((id) => id !== holder)
   return Updates.withSignIn({
-    home: shell.trail.length === 0 && !shell.drawer,
-    open: shell.trail.length > 0 || shell.drawer || shell.assistant !== "Bar" || layers.open.length > 0 || layers.steps.length > 0 || held,
+    home: shell.trail.length === 0,
+    open: shell.trail.length > 0 || shell.assistant !== "Bar" || layers.open.length > 0 || layers.steps.length > 0 || held,
     typing: typing || shell.assistant === "Typing", voice: reported.voice, dialog: layers.open.some((layer) => layer.kind === "DialogLayer"),
     busy: reported.connecting, recording: reported.recording, front, call, audio: !call,
   }, reported.card)

@@ -120,7 +120,7 @@ a dialog, the actions menu, a question or the notes from before open: it is
 covered. Nothing opens over it. With one thing open at a time, the shell
 sends Back to the one part of Notes that has something open, and only when
 none has does Back close Notes ([Shell](../shell/index.md), "Back closes
-one layer: the drawer, then Ask Alpha by a step, then the app on top").
+one layer: Ask Alpha by a step, then the app on top").
 
 ```quint
 pure def mayOpen(covered: bool, by: Actor): bool = by == Owner and not(covered)

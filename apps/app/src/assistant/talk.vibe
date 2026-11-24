@@ -2,6 +2,7 @@
 import { ConversationRecord } from "@elizaos/agent/client"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type { Failure, Fix } from "../../gen/app__assistant__reply.ts"
+import type { Sighting } from "../platform/location.vibe"
 
 /** One message of the conversation showing, as the agent keeps it. */
 export interface Line {
@@ -62,6 +63,8 @@ export interface Board {
   /** The id the last message was posted under, as the agent keeps it, or "" where its post never said. */
   lastSentId: string
   sendWhenMade: boolean
+  /** The last position the locator took, which a turn tells while the locator says it may. */
+  position: Sighting | undefined
   change(patch: Partial<Seen>): void
   /** The number of the conversation the agent names `record`, given the first time it is seen; its title where one is given. */
   numberOf(record: ConversationRecord, title?: string): number
@@ -124,6 +127,7 @@ export const talk = Layer.effect(Talk, effect {
     lastSent: "",
     lastSentId: "",
     sendWhenMade: false,
+    position: undefined,
     change: (patch) => {
       seen = { ...seen, ...patch }
       for (const listener of listeners) listener()
