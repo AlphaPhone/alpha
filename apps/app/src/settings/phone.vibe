@@ -100,8 +100,8 @@ function carrierTimers(state: Carrier.Carrier): ReadonlyArray<Due<Carrier.Event,
 const carrier = together(
   reacting(Carrier, { carry: carryCarrier, timers: carrierTimers }),
   // spec/app/settings/carrier.md, "Opening the page reads nothing; leaving it, the phone locking or Alpha going to the background forgets everything it read, and an answer that comes later is refused"
-  following(Pages.Machine, (state) => state.page === "CarrierPage", Carrier.Machine, (shown): Carrier.Event => (shown ? { type: "show" } : { type: "hide" })),
-  hearing(Stream.unwrap(effect { return (try Device).visible }), Carrier.Machine, (visible): Carrier.Event | undefined => (visible ? undefined : { type: "hide" })),
+  following(Pages.Machine, (state) => state.page === "CarrierPage", Carrier.Machine, (shown): Carrier.Event => (shown ? { type: "show" } : { type: "hidden" })),
+  hearing(Stream.unwrap(effect { return (try Device).visible }), Carrier.Machine, (visible): Carrier.Event | undefined => (visible ? undefined : { type: "hidden" })),
 )
 
 // spec/app/settings/passwords.md, "The vault is unavailable for a reason, locked, damaged, or unlocked still, which lists the entries"
