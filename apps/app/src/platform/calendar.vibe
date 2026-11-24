@@ -1,0 +1,47 @@
+// spec/app/calendar/index.md, "Only the newest ticket's answer of the phone is taken; access Android refused hides its rows at once"; spec/kit/permission.md, "Story: Ask for access"
+import type { AndroidCalendarList, CalendarClient, CalendarRange } from "@elizaos/os/bridges/calendar"
+import { registered } from "./device.vibe"
+
+module held {
+  import { calendarClient } from "@elizaos/os/bridges/calendar"
+
+  let made: ReturnType<typeof calendarClient> | undefined
+  /** eliza's client of the calendar plugin, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
+  export function client(): ReturnType<typeof calendarClient> {
+    return (made ??= calendarClient())
+  }
+}
+import { client } from held
+
+/** The phone's calendar could not be read: the plugin refused, or did not answer. */
+export error CalendarUnread { cause: unknown }
+
+/**
+ * The phone's own calendars, through eliza's `ElizaCalendar` plugin: whether this phone has them, a read of one range,
+ * which says when Android wants Calendar access, and Android's one prompt for it.
+ */
+export service PhoneCalendar {
+  readonly present: boolean
+  list(range: CalendarRange): AndroidCalendarList!CalendarUnread
+  requestAccess(): boolean!CalendarUnread
+}
+
+const plugin = "ElizaCalendar"
+
+/** On the phone: eliza's `calendarClient()` of `@elizaos/os/bridges/calendar`, where the host registered the plugin. */
+export const phoneCalendar = Layer.sync(PhoneCalendar, () => {
+  const present = registered(plugin)
+  const calendar = (): CalendarClient => client()
+  return {
+    present,
+    list: (range: CalendarRange) => tryPromise({ try: () => calendar().list(range), catch: (cause) => new CalendarUnread({ cause }) }),
+    requestAccess: () => tryPromise({ try: async () => (await calendar().requestAccess()).status === "granted", catch: (cause) => new CalendarUnread({ cause }) }),
+  }
+})
+
+/** In a browser: no phone, so no phone calendars. */
+export const browserCalendar = Layer.succeed(PhoneCalendar, {
+  present: false,
+  list: () => fail(new CalendarUnread({ cause: "a browser has no phone calendars" })),
+  requestAccess: () => fail(new CalendarUnread({ cause: "a browser has no phone calendars" })),
+})
