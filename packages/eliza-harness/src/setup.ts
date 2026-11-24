@@ -3,6 +3,8 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import type { TestProject } from "vitest/node";
+import { startSlackProvider } from "./providers/slack-provider.ts";
+import { startTelegramProvider } from "./providers/telegram-provider.ts";
 import { type Agent, type Cloud, type DeviceKey, characterOf, scratch, startAgent, startCloud } from "./services.ts";
 
 /** What a journey is told of its owner: where their agent, the cloud and the scripted model answer, and their account and device key. */
@@ -18,6 +20,10 @@ declare module "vitest" {
   export interface ProvidedContext {
     /** Where this run's eliza services are asked for. */
     eliza: string;
+    /** Loopback origin of the stateful Slack user-account HTTP+SSE provider. */
+    slackOrigin: string;
+    /** Loopback origin of the stateful Telegram user-account HTTP+SSE provider. */
+    telegramOrigin: string;
   }
 }
 
@@ -49,9 +55,15 @@ export default async function setup(project: TestProject) {
     asked.then((found) => response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(found)), (cause: unknown) => response.writeHead(500).end(String(cause)));
   });
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+  const slack = await startSlackProvider();
+  const telegram = await startTelegramProvider();
   project.provide("eliza", `http://127.0.0.1:${(server.address() as AddressInfo).port}`);
+  project.provide("slackOrigin", slack.origin);
+  project.provide("telegramOrigin", telegram.origin);
   return async () => {
     server.close();
+    await slack.stop();
+    await telegram.stop();
     await Promise.allSettled([...owners.values()]);
     for (const agent of agents) await agent.stop();
     await (await cloud?.catch(() => undefined))?.stop();
