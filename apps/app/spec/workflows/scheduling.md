@@ -16,6 +16,8 @@ bounds, and the worker the phone stages for it (legacy `WorkflowScheduleTasks`, 
 
 ### An occurrence more than thirty minutes late is missed, and one that never came due while the agent ran is missed too
 
+Enforced by the agent, not by Alpha: upstream spec/workflow/schedule.md, "A fresh occurrence uses the current reviewed version and exact cron instant", with core's window in spec/core/occurrenceWindow.md, "An occurrence more than thirty minutes past its scheduled instant is missed, and stays missed". Alpha shows the outcome it records.
+
 A doze delay while the agent was running still runs inside the window (#650). A second occurrence
 of the same instant is the existing one; an earlier unfinished run makes this one an overlap.
 
@@ -51,6 +53,8 @@ pure def lawOnlyAYearAheadIsNamed(daysAhead: int): bool = skippedDayShown(daysAh
 ```
 
 ### The phone answers a digest's read only near its occurrence: up to 35 minutes late and 2 minutes early
+
+Enforced by the phone's native digest source: `NativeDigestSources.checkOccurrence` (android), which `NativeDigestHost` calls before it answers a read.
 
 ```quint
 pure val nativeReadPastMs = 2100000
@@ -92,7 +96,13 @@ pure def lawADifferentScheduleIsRefused(before: TypedTrigger, after: TypedTrigge
 > As the owner, I want a parked run to wake when its timer or event is due and never earlier than
 > the engine can hold, and my workflows to run only on the worker built from the reviewed source.
 
+`scripts/build-workflow-worker.ts` stages the worker through upstream's `workerProvenance`; whether a
+staged worker is published, kept or reused is upstream spec/workflow/worker.md, "Producer, package
+and installed tree must each prove their own identity", so Alpha states no staging rule of its own.
+
 ### A parked run wakes 100 ms after its earliest open timer, at most 2^31−1 ms ahead, and after a minute when no timer is open
+
+Enforced by the agent's workflow engine: upstream spec/workflow/execution.md, "A wakeup reserves the earliest due attempt for a persisted run".
 
 ```quint
 pure val maximumDelayMs = 2147483647
@@ -118,32 +128,9 @@ pure def lawAReadyAdmissionHasNoOverlap(late: bool, otherActive: bool): bool = a
 
 ### A raced fire carries no task; any other names the task it fired
 
+Enforced by the agent: upstream spec/agent/schedule/scheduledTasks.md, "Fire now reports fired, skipped, deferred, failed or raced". Alpha reads the reply through `fireOutcome` (spec/workflows/agentSchedules.md).
+
 ```quint
 pure def fireReplyWellFormed(raced: bool, carriesTask: bool): bool = if (raced) not(carriesTask) else carriesTask
 pure def lawARacedFireNamesNoTask(carriesTask: bool): bool = fireReplyWellFormed(true, carriesTask) implies not(carriesTask)
-```
-
-### A staged worker is published only from a verified source, and a refused staging keeps the previous one
-
-A storage fault while restoring strands the target with its backup kept; a fault while cleaning up
-publishes with the backup still pending.
-
-```quint
-type StageFault = NoFault | CopyBytes | ManifestDrift | PublishRefusal | RestoreRefusal | CleanupRefusal
-type StageResult = Published | PublishUnconfirmed | Stranded | StageRefused
-pure def stageResult(healthy: bool, fault: StageFault): StageResult =
-  if (healthy and fault == NoFault) Published
-  else if (healthy and fault == CleanupRefusal) PublishUnconfirmed
-  else if (healthy and fault == RestoreRefusal) Stranded
-  else StageRefused
-pure def lawAnUnhealthySourceIsNeverPublished(fault: StageFault): bool = stageResult(false, fault) == StageRefused
-```
-
-### A prepared worker is reused only when its output matches the current source and lock
-
-```quint
-type Prepared = { valid: bool, stamp: int, lock: int, outputStamp: int, outputLock: int, building: bool }
-pure def reusable(p: Prepared): bool = p.valid and not(p.building) and p.outputStamp == p.stamp and p.outputLock == p.lock
-pure val pValues = Set({ valid: true, stamp: 1, lock: 1, outputStamp: 1, outputLock: 1, building: false }, { valid: true, stamp: 2, lock: 1, outputStamp: 1, outputLock: 1, building: false })
-pure def lawAStaleWorkerIsNeverReused(p: Prepared): bool = p.outputStamp != p.stamp implies not(reusable(p))
 ```

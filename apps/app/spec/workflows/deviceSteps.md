@@ -213,6 +213,8 @@ pure def lawOnlySucceededIsApplied(answer: PostedAnswer): bool = postedOutcome(a
 
 ### A run-day read needs protocol 5 and the run's persisted anchor; an unanchored review allows 15 minutes' grace
 
+Enforced by the agent when it proposes the read: upstream spec/workflow/runScope.md, "A relative range resolves from the run's own day and needs a device that understands it" (`WORKFLOW_LEGACY_DAY_GRACE_MS`).
+
 Switching a run-day read to fixed dates keeps N days from today's local midnight (#1213, #1250).
 
 ```quint
