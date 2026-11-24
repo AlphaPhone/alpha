@@ -1,6 +1,6 @@
 // spec/workflows/vocabulary.md, "Story: Send only the requests Workflows owns"; spec/workflows/vocabulary.md, "Story: See what my agent changed"; spec/workflows/agentSchedules.md, "Story: Save and run a prompt my agent sends on a schedule"; spec/workflows/agentSchedules.md, "Story: Answer a scheduled item from Workflows"; spec/workflows/runs.md, "Story: Open a workflow and see its runs"; spec/workflows/lifecycle.md, "Story: Remove a workflow only once its runs have settled, and restore it safely"; spec/workflows/digestSources.md, "Story: Renew my phone source before its week ends"
 import { assert, describe, it } from "@effect/vitest"
-import type { PhoneWorkflowSpec } from "@elizaos/plugin-workflow/client"
+import { type PhoneWorkflowSpec, workflowSha } from "@elizaos/plugin-workflow/client"
 import type { DigestResult } from "@elizaos/plugin-workflow/digests"
 import { Machine as AutomationsMachine } from "../../gen/workflows__automations.effect.vibe"
 import { Machine as ClockMachine } from "../../gen/workflows__clockDraft.effect.vibe"
@@ -28,7 +28,7 @@ import { SimulatedTriggers, SimulatedWorkflows } from "../../src/workflows/simul
 import { DigestSourcesService } from "../../src/workflows/sources.vibe"
 import { WorkflowsPlace, followRoute } from "../../src/workflows/place.vibe"
 import { Machine as PlaceMachine } from "../../gen/workflows__place.effect.vibe"
-import { type Handler, type NativeCall, type ReportedBrief, type Sent, engineStatus, navigationOf, statusRoute, workflowsOf } from "./fakes.vibe"
+import { type Handler, type NativeCall, type NativeHandler, type ReportedBrief, type Sent, engineStatus, navigationOf, statusRoute, workflowsOf } from "./fakes.vibe"
 
 const alarm: AlarmRequest = { hour: 7, minute: 30, label: "Wake", days: [] }
 const definition = { id: "w1", name: "Morning", active: true, versionId: "v1", steps: [] }
@@ -717,6 +717,48 @@ describe("Kept description (spec/workflows/authoring.md, \"Story: Describe a wor
       const back = try definitions.keptText()
       const noReview = try definitions.back()
       try Effect.try(() => assert.deepStrictEqual({ kept, back, noReview }, { kept: true, back: "Every weekday at 7, read my calendar aloud", noReview: false }))
+    }
+  })
+})
+
+describe("Previous draft (spec/workflows/authoring.md, \"Story: Keep the workflow draft I was writing before this version\")", () => {
+  const catalogRoute: Handler = (m, p) => m === "GET" && p === "/api/workflow/phone/catalog" ? {
+    status: 200, data: { specVersion: 1, maximumSteps: 32, maximumSpecBytes: 65536, catalogRevision: "c1", compilerRevision: "r1", triggers: [], palette: [] },
+  } : undefined
+  const spec = { version: 1, name: "Morning note", description: "", trigger: { kind: "manual" }, steps: [{ id: "s1", kind: "Read", operation: "supplied_text", text: "Good morning" }] }
+  /** The earlier Alpha's encrypted slots and the secure store, as the bridge answers them. */
+  function slotsOf(legacy: Map<string, string>, secure: Map<string, string>): NativeHandler {
+    return (plugin, method, args) => {
+      const a = args as { slot?: string; key?: string; expectedValue?: string | null; expected?: string | null; value?: string | null }
+      const exchange = (slots: Map<string, string>, slot: string, expected: string | null | undefined, value: string | null | undefined) => {
+        if ((slots.get(slot) ?? null) !== (expected ?? null)) return false
+        if (value === null || value === undefined) slots.delete(slot)
+        else slots.set(slot, value)
+        return true
+      }
+      if (plugin === "AlphaConnection" && method === "secureRead") return { value: legacy.get(a.slot ?? "") ?? null }
+      if (plugin === "AlphaConnection" && method === "secureCompareExchange") return { status: exchange(legacy, a.slot ?? "", a.expectedValue, a.value) ? "saved" : "conflict" }
+      if (plugin === "ElizaSecureStore" && method === "get") return { value: secure.get(a.key ?? "") ?? null }
+      if (plugin === "ElizaSecureStore" && method === "compareAndExchange") return { exchanged: exchange(secure, a.key ?? "", a.expected, a.value) }
+      return undefined
+    }
+  }
+
+  it.effect("the draft the previous version kept is shown once, its slots clear after it reads back, and a later one never replaces it (spec/workflows/authoring.md, \"The previous version's draft comes in once, only while none is kept, and its slot clears only after the kept draft reads back\")", () => effect {
+    const identity = try workflowSha(["https://device.alpha.invalid", "owner-1", "agent-1"])
+    const slot = `workflow-draft:v1:${identity}`
+    const legacy = new Map([[slot, JSON.stringify({ format: 1, identity, spec })]])
+    const secure = new Map<string, string>()
+    provide workflowsOf([catalogRoute], [], { native: slotsOf(legacy, secure) }) {
+      const definitions = try WorkflowDefinitions
+      const restored = try definitions.restore()
+      const cleared = { legacy: legacy.size, secure: secure.size }
+      legacy.set(slot, JSON.stringify({ format: 1, identity, spec: { ...spec, name: "Another" } }))
+      const again = try definitions.restore()
+      try Effect.try(() => assert.deepStrictEqual(
+        { restored, cleared, again: again?.name, waiting: secure.has(slot) },
+        { restored: spec, cleared: { legacy: 0, secure: 0 }, again: "Morning note", waiting: true },
+      ))
     }
   })
 })

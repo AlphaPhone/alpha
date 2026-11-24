@@ -131,3 +131,40 @@ pure def canRestart(a: Authoring): bool = a.busy or a.unreceipted or a.resendRev
 pure def restart(a: Authoring): Authoring = { ...a, busy: false, unreceipted: false, resendReview: false, discardAsk: false, review: -1 }
 pure def sometimesDiscarded(a: Authoring): bool = not(a.draft) and not(a.committed)
 ```
+
+## Story: Keep the workflow draft I was writing before this version
+
+> As the owner, I was partway through a workflow draft when Alpha updated, and I want to find it
+> when I next open a new workflow: once, never over a draft I wrote since, and never lost in the move.
+
+### The previous version's draft comes in once, only while none is kept, and its slot clears only after the kept draft reads back
+
+The earlier Alpha kept one unsaved workflow draft per agent in the connection plugin's encrypted
+slot `workflow-draft:v1:` followed by the SHA-256 of the JSON `[origin, owner, agent]` of the
+resident session it was written under. When the draft sheet opens on the phone, that slot is first
+moved into the secure store as spec/platform/storage.md moves a legacy slot, then read. A draft for
+this session, of the previous format, whose steps this version reads as a phone workflow, is kept
+as this version's draft only when this phone keeps no draft of its own: a draft written since wins,
+and the previous one waits in its slot until none is kept. A draft whose save the previous version
+had sent and not yet seen answered comes in with that save kept under its own mutation id, so the
+first thing offered is asking the agent for it, never a second save. The slot is cleared only once
+the draft this phone keeps reads back as exactly that draft, so a draft taken in whose slot could
+not be cleared is never taken in a second time; a slot that cannot be read as such a draft is never
+cleared. The draft is taken in only while the agent's phone catalog can be read, since a draft is
+kept with the compiler revision it is saved under. A development browser build never kept one, so
+nothing moves there.
+
+```quint
+type PreviousDraft = NoPreviousDraft | UnreadablePreviousDraft | PreviousDraftHeld | PreviousSaveSent
+pure def previousDraftAdopted(previous: PreviousDraft, kept: bool): bool =
+  not(kept) and (previous == PreviousDraftHeld or previous == PreviousSaveSent)
+pure def previousDraftSlotClears(previous: PreviousDraft, readBack: bool): bool =
+  (previous == PreviousDraftHeld or previous == PreviousSaveSent) and readBack
+pure def previousSaveKept(previous: PreviousDraft, kept: bool): bool =
+  previousDraftAdopted(previous, kept) and previous == PreviousSaveSent
+pure val previousValues = Set(NoPreviousDraft, UnreadablePreviousDraft, PreviousDraftHeld, PreviousSaveSent)
+pure val readBackValues = Set(true, false)
+pure def lawADraftWrittenSinceIsNeverReplaced(previous: PreviousDraft): bool = not(previousDraftAdopted(previous, true))
+pure def lawAnUnreadableDraftStaysInItsSlot(readBack: bool): bool = not(previousDraftSlotClears(UnreadablePreviousDraft, readBack))
+pure def lawTheSlotClearsOnlyOnceTheDraftReadsBack(previous: PreviousDraft): bool = not(previousDraftSlotClears(previous, false))
+```

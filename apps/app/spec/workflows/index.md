@@ -18,7 +18,7 @@ receipts; these specs state what Alpha shows, sends and keeps.
 - [Prompts and scheduled items](./agentSchedules.md): saving, switching and running prompts; answering scheduled items.
 - [Runs](./runs.md): the open workflow, its history, the exact run shown, and one reviewed run request.
 - [Remove, restore and rename](./lifecycle.md): definition changes kept until their receipt.
-- [Typed drafts](./authoring.md): describing, reviewing and saving a phone workflow once.
+- [Typed drafts](./authoring.md): describing, reviewing and saving a phone workflow once, and the draft the previous version kept.
 - [Phone steps](./deviceSteps.md): approving a phone step exactly as reviewed.
 - [Approval notices](./notices.md): one notice per waiting step, for the current owner only.
 - [Scheduling](./scheduling.md): powered-on schedules, the missed window, typed triggers, wakeups and the staged worker.

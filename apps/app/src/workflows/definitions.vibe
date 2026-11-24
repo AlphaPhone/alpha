@@ -1,15 +1,23 @@
-// spec/workflows/lifecycle.md, "Story: Remove a workflow only once its runs have settled, and restore it safely"; spec/workflows/authoring.md, "Story: Describe a workflow and keep only what this phone can do"; spec/workflows/authoring.md, "The unsent description is kept for its owner across closing and reopening"; spec/workflows/authoring.md, "Story: Save exactly the draft I reviewed, once"; spec/workflows/scheduling.md, "A generated draft that changes the schedule is refused"; spec/workflows/scheduling.md, "Story: Schedule a typed workflow at a local time"; spec/workflows/scheduling.md, "Story: Have my schedules run only while my phone and agent are on"
+// spec/workflows/lifecycle.md, "Story: Remove a workflow only once its runs have settled, and restore it safely"; spec/workflows/authoring.md, "The previous version's draft comes in once, only while none is kept, and its slot clears only after the kept draft reads back"; spec/platform/storage.md, "A legacy slot is cleared only once the secure store holds a value for it"; spec/workflows/authoring.md, "Story: Describe a workflow and keep only what this phone can do"; spec/workflows/authoring.md, "The unsent description is kept for its owner across closing and reopening"; spec/workflows/authoring.md, "Story: Save exactly the draft I reviewed, once"; spec/workflows/scheduling.md, "A generated draft that changes the schedule is refused"; spec/workflows/scheduling.md, "Story: Schedule a typed workflow at a local time"; spec/workflows/scheduling.md, "Story: Have my schedules run only while my phone and agent are on"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import {
   type PhoneWorkflowCatalog, type PhoneWorkflowSpec, type PhoneWorkflowTrigger, type RemoteWorkflow, WorkflowActivationRejected, WorkflowLifecycleRejected,
-  WorkflowMetadataRejected, WorkflowPauseRejected, WorkflowResponseInvalid, WorkflowTypedRejected, phoneTriggerClockChangeNote, workflowSpecDigest, workflowUuid,
+  WorkflowMetadataRejected, WorkflowPauseRejected, WorkflowResponseInvalid, WorkflowTypedRejected, phoneTriggerClockChangeNote, validatePhoneWorkflowSpec,
+  workflowSha, workflowSpecDigest, workflowUuid,
 } from "@elizaos/plugin-workflow/client"
 import { type TypedTrigger, generatedKeepsSchedule, missedWindowMs, validTrigger } from "../../gen/workflows__scheduling.effect.vibe"
 import { type WorkflowScopeCategory, checkWorkflowScope } from "@elizaos/plugin-workflow/scope"
 import { type LifeOp, type LifeReply, Machine as LifecycleMachine, stored as lifecycleStored } from "../../gen/workflows__lifecycle.effect.vibe"
-import { type Category, Machine as DraftMachine, keptTextShown, scopeRefused, stored as draftStored } from "../../gen/workflows__authoring.effect.vibe"
+import {
+  type Category, type PreviousDraft, Machine as DraftMachine, keptTextShown, previousDraftAdopted, previousDraftSlotClears, previousSaveKept, scopeRefused,
+  stored as draftStored,
+} from "../../gen/workflows__authoring.effect.vibe"
+import { adoptLegacySlot } from "../platform/legacy-slots.vibe"
+import { Native } from "../platform/native.vibe"
+import { SecureSlotRead } from "../platform/native.schema.vibe"
+import { ResidentControl } from "../platform/resident-control.vibe"
 import { ownerKey } from "../platform/storage.vibe"
-import { WorkflowApi } from "./api.vibe"
+import { WorkflowApi, residentOrigin } from "./api.vibe"
 import { WorkflowVersions } from "./runs.vibe"
 
 export const LIFECYCLE_KEY = ownerKey("device", "workflows/lifecycle")
@@ -60,6 +68,23 @@ interface KeptDraft {
   readonly versionId?: string
 }
 
+/** The secure store the previous version's draft slot is moved into before it is read. */
+const SECURE_STORE = "ElizaSecureStore"
+
+/** The previous version's unsaved draft, as it kept it in its slot. */
+interface PreviousSlotDraft {
+  readonly format?: unknown
+  readonly identity?: unknown
+  readonly spec?: unknown
+  readonly workflowId?: unknown
+  readonly versionId?: unknown
+  readonly pending?: { readonly mutationId?: unknown; readonly specDigest?: unknown; readonly compilerRevision?: unknown; readonly workflowId?: unknown; readonly versionId?: unknown }
+}
+
+function text(value: unknown): string | undefined {
+  return typeof value === "string" && value !== "" ? value : undefined
+}
+
 /** Remove, restore and rename workflows, switch them, and describe and save typed drafts. */
 export service WorkflowDefinitions {
   /** Read the workflow `workflowId` as the lifecycle sees it. */
@@ -87,6 +112,8 @@ export service WorkflowDefinitions {
   resendSave(): ChangeOutcome!!
   /** Discard the draft: the first tap asks. */
   discard(): void!!
+  /** The draft this phone keeps, after taking in the previous version's draft once where none is kept; undefined when none is kept. */
+  restore(): (PhoneWorkflowSpec | undefined)!!
   /** When the reviewed draft runs, as its review discloses it. */
   scheduleNote(spec: PhoneWorkflowSpec): ScheduleNote!!
   /** Keep the description the owner is still typing for this owner; false when the phone did not keep it. */
@@ -106,6 +133,8 @@ export const definitions = Layer.provideMerge(Layer.provideMerge(Layer.effect(Wo
   const agent = try WorkflowApi
   const seen = try WorkflowVersions
   const store = try KeyValueStore.KeyValueStore
+  const native = try Native
+  const resident = try ResidentControl
   const client = agent.workflow
   const catalogRef = try Ref.make<PhoneWorkflowCatalog | undefined>(undefined)
   const nameRef = try Ref.make({ name: "", description: "" })
@@ -184,6 +213,66 @@ export const definitions = Layer.provideMerge(Layer.provideMerge(Layer.effect(Wo
   effect function keptDraft() {
     const raw = (store.get(DRAFT_BYTES_KEY) catch () => undefined)
     return raw === undefined ? undefined : (Effect.try(() => JSON.parse(raw) as KeptDraft) catch () => undefined)
+  }
+
+  /** The previous version's draft read from `raw`, kept for `identity`, as this version keeps a draft. */
+  effect function previousOf(raw: string, identity: string, compilerRevision: string): { readonly previous: PreviousDraft; readonly kept?: KeptDraft }!! {
+    const unreadable = { previous: "UnreadablePreviousDraft" as PreviousDraft }
+    if (raw.length > 100000) return unreadable
+    const parsed = (Effect.try(() => JSON.parse(raw) as PreviousSlotDraft | null) catch () => null)
+    if (parsed === null || typeof parsed !== "object" || parsed.format !== 1 || parsed.identity !== identity) return unreadable
+    const spec = (validatePhoneWorkflowSpec(parsed.spec) catch () => undefined)
+    if (spec === undefined) return unreadable
+    const pending = parsed.pending
+    if (pending !== undefined && pending !== null) {
+      const mutation = text(pending.mutationId)
+      const specDigest = text(pending.specDigest)
+      const revision = text(pending.compilerRevision)
+      const workflowId = text(pending.workflowId)
+      if (mutation === undefined || specDigest === undefined || revision === undefined) return unreadable
+      return { previous: "PreviousSaveSent", kept: { spec, mutation, specDigest, compilerRevision: revision,
+        ...(workflowId === undefined ? {} : { workflowId, versionId: text(pending.versionId) ?? "" }) } }
+    }
+    const workflowId = text(parsed.workflowId)
+    return { previous: "PreviousDraftHeld", kept: { spec, mutation: try workflowUuid(), specDigest: try workflowSpecDigest(spec), compilerRevision,
+      ...(workflowId === undefined ? {} : { workflowId, versionId: text(parsed.versionId) ?? "" }) } }
+  }
+
+  /** Take in the draft the previous version kept for this resident session, once and only while this phone keeps none (spec/workflows/authoring.md). */
+  effect function takePrevious() {
+    if (!(native.available(SECURE_STORE) catch () => false)) return
+    const session = (resident.session() catch () => undefined)
+    const known = try catalog()
+    if (session === undefined || known === undefined) return
+    const identity = (workflowSha([residentOrigin, session.owner, session.agent]) catch () => "")
+    if (identity === "") return
+    const slot = `workflow-draft:v1:${identity}`
+    Effect.provideService(adoptLegacySlot(slot, slot), Native, native) catch () => undefined
+    const answer = (effect { return try Schema.decodeUnknownEffect(SecureSlotRead)(try native.invoke(SECURE_STORE, "get", { key: slot })) } catch () => undefined)
+    const raw = answer?.value
+    if (typeof raw !== "string") return
+    const { previous, kept } = try previousOf(raw, identity, known.compilerRevision)
+    if (kept === undefined) return
+    const current = (store.get(DRAFT_BYTES_KEY) catch () => undefined)
+    const authoring = try drafts.get()
+    const held = current !== undefined || authoring.pending !== 0 || !authoring.draft
+    const bytes = JSON.stringify(kept)
+    if (previousDraftAdopted(previous, held)) {
+      const wrote = (store.set(DRAFT_BYTES_KEY, bytes) catch () => "failed")
+      if (wrote === "failed") return
+      if (previousSaveKept(previous, held)) {
+        // The previous version sent this save and never saw its answer: keep it as a sent save, so the agent is asked for it first.
+        drafts.send({ type: "saveTap" }) catch () => undefined
+        drafts.send({ type: "saveTap" }) catch () => undefined
+        drafts.send({ type: "unknownReply", seen: false }) catch () => undefined
+      }
+    }
+    const readBack = (store.get(DRAFT_BYTES_KEY) catch () => undefined)
+    const same = readBack !== undefined && (Effect.try(() => {
+      const now = JSON.parse(readBack) as KeptDraft
+      return JSON.stringify(now.spec) === JSON.stringify(kept.spec) && (previous !== "PreviousSaveSent" || now.mutation === kept.mutation)
+    }) catch () => false)
+    if (previousDraftSlotClears(previous, same)) native.invoke(SECURE_STORE, "compareAndExchange", { key: slot, expected: raw, value: null }) catch () => undefined
   }
 
   function expectation(kept: KeptDraft) {
@@ -335,6 +424,10 @@ export const definitions = Layer.provideMerge(Layer.provideMerge(Layer.effect(Wo
         store.remove(DRAFT_BYTES_KEY) catch () => undefined
         store.remove(DRAFT_TEXT_KEY) catch () => undefined
       }
+    },
+    effect restore() {
+      try takePrevious()
+      return (try keptDraft())?.spec
     },
     effect scheduleNote(spec: PhoneWorkflowSpec) {
       const now = try Clock.currentTimeMillis

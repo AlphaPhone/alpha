@@ -6,6 +6,7 @@ import { NotesCollection, NotesRetired } from "../../src/notes/collection.vibe"
 import { Build } from "../../src/platform/build.vibe"
 import { Native, NativeUnavailable } from "../../src/platform/native.vibe"
 import { Resident, ResidentRefused } from "../../src/platform/resident.vibe"
+import { ResidentControl } from "../../src/platform/resident-control.vibe"
 import { memoryStore } from "../../src/platform/storage.vibe"
 import { Foreground } from "../../src/shell/foreground.vibe"
 import { Navigation } from "../../src/shell/navigation.vibe"
@@ -47,6 +48,15 @@ export function residentOf(handlers: ReadonlyArray<Handler>, sent: Sent[]) {
     stream: () => Stream.empty,
   })
 }
+
+/** The resident session the earlier Alpha keyed its workflow draft by: owner `owner-1`, agent `agent-1`. */
+export const residentSession = Layer.succeed(ResidentControl, {
+  changes: Stream.empty,
+  session: () => succeed({ owner: "owner-1", agent: "agent-1", generation: 1, epoch: 1 }),
+  refreshAccount: () => Effect.void,
+  stop: () => Effect.void,
+  recovered: () => Effect.void,
+} as unknown as ResidentControl.Shape)
 
 /** A native bridge answering from `handler`, recording every call; with no handler no plugin is installed. */
 export function nativeOf(handler: NativeHandler | undefined, calls: NativeCall[]) {
@@ -170,7 +180,7 @@ export interface Rig {
 /** Workflows' layer over the fake agent, bridge, build, navigation and memory storage. */
 export function workflowsOf(handlers: ReadonlyArray<Handler>, sent: Sent[], rig: Rig = {}) {
   const platform = Layer.mergeAll(
-    residentOf(handlers, sent), nativeOf(rig.native, rig.calls ?? []), buildOf(rig.variant ?? "launcher", rig.testMocks ?? false), memoryStore,
+    residentOf(handlers, sent), residentSession, nativeOf(rig.native, rig.calls ?? []), buildOf(rig.variant ?? "launcher", rig.testMocks ?? false), memoryStore,
     navigationOf(rig.opened ?? [], rig.routes ?? []), inFront, deviceReviewOf(rig.workflowStep), notesOf(rig.invalidated ?? []),
     overviewOf(rig.briefs ?? []), signedIn,
   )
