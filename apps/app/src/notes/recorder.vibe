@@ -133,8 +133,17 @@ const make = effect {
     for (let index = before; index < segments.length; index += 1) try record({ type: "segmentFinished", journaled: true })
     for (const segment of segments) if (segment.text !== undefined && !(try Ref.get(texts)).has(segment.segmentId)) {
       try Ref.update(texts, (known) => new Map([...known, [segment.segmentId, segment.text ?? ""]]))
-      // spec/notes/recordingJournal.md: the text the native journal holds for a finished segment is journaled with it.
+    }
+    // spec/notes/recordingJournal.md: the text the native journal holds for its finished segments, in segment order, is journaled
+    // with them; text the journal could not take yet is journaled the next time the recorder learns the recording.
+    let held = 0
+    while (held < segments.length && segments[held]?.text !== undefined) held += 1
+    let journaled = (try journal.get()).texts
+    while (journaled < held) {
       try record({ type: "textJournaled" })
+      const now = (try journal.get()).texts
+      if (now === journaled) break
+      journaled = now
     }
   }
 
