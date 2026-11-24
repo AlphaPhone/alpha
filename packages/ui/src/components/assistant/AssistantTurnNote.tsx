@@ -33,14 +33,15 @@ const notes: Record<AssistantTurnStatus, { status: StatusDotProps["status"]; lab
 };
 
 /**
- * The state of the turn at the foot of the conversation: a shape and a few words, with Check for reply where one read can say more.
+ * The state of the turn at the foot of the conversation: a shape whose word is its accessible name, never written beside
+ * the composer; only the agent's own label is shown, and Check for reply where one read can say more.
  * @model spec/app/assistant/index.md
  */
 export function AssistantTurnNote({ status, label, onCheck, ...props }: AssistantTurnNoteProps) {
   const note = notes[status];
   return (
     <div role="status" className="flex min-h-11 items-center gap-3" {...props}>
-      <StatusDot status={note.status} label={label ?? note.label} showLabel />
+      <StatusDot status={note.status} label={label ?? note.label} showLabel={label !== undefined} />
       {onCheck ? <Button variant="secondary" size="sm" onClick={onCheck}>Check for reply</Button> : null}
     </div>
   );

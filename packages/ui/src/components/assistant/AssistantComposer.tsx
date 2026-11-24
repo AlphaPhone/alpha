@@ -1,7 +1,6 @@
 import type { ComponentProps, ReactNode, Ref } from "react";
 import { ArrowUp, Mic, Plus, Square } from "lucide-react";
 import { cn } from "../../lib/cn.ts";
-import { Banner } from "../Banner.tsx";
 import { Button } from "../Button.tsx";
 import { Mark } from "../Mark.tsx";
 import { Textarea } from "../Textarea.tsx";
@@ -21,7 +20,7 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
   closed?: boolean;
   /** Something to tell or ask about the saved draft, above the field. */
   notice?: AssistantDraftNoticeProps;
-  /** Why nothing can be sent now: Alpha cannot be reached, or the screen is sensitive and is never sent. */
+  /** Why nothing can be sent now: Alpha cannot be reached, or the screen is sensitive and is never sent. Said to a screen reader only; no text is written by the composer. */
   unavailable?: "away" | "sensitive";
   /** What waits to go with the message. */
   attachments?: AssistantAttachment[];
@@ -77,7 +76,7 @@ export function AssistantComposer({
   return (
     <div data-host-chrome={bar ? "" : undefined} className={cn("flex shrink-0 flex-col gap-2", bar ? "mx-4 mb-[max(1.75rem,calc(env(safe-area-inset-bottom)_+_0.75rem))]" : "mx-3 mb-[max(1.875rem,calc(env(safe-area-inset-bottom)_+_0.75rem))]", className)} style={lift ? { marginBottom: lift, ...style } : style} {...props}>
       {notice ? <AssistantDraftNotice {...notice} /> : null}
-      {unavailable ? <Banner variant="warn">{reasons[unavailable]}</Banner> : null}
+      {unavailable ? <span role="status" className="sr-only">{reasons[unavailable]}</span> : null}
       {attachments.length ? <AssistantPendingAttachments attachments={attachments} limit={limit} onRemove={onRemoveAttachment} onPreview={onPreviewAttachment} /> : null}
       {quote ? <AssistantQuoteBar kind="quote" text={quote} onRemove={onUnquote} /> : null}
       {editing ? <AssistantQuoteBar kind="editing" /> : null}

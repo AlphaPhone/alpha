@@ -1,4 +1,4 @@
-import { fn } from "storybook/test";
+import { expect, fn, within } from "storybook/test";
 import type { ComponentMeta } from "vibestack/stories";
 import type { AssistantTurnNoteProps } from "./AssistantTurnNote.tsx";
 import { presses } from "./plays.ts";
@@ -15,6 +15,12 @@ export const meta: ComponentMeta<AssistantTurnNoteProps> = {
     Acknowledged: { status: "replying", label: "Checking your calendar" },
   },
   play: {
-    Unknown: presses("Check for reply", onCheck),
+    Unknown: async (context) => {
+      await expect([within(context.canvasElement).getByRole("img", { name: "May not have arrived" }) !== null, context.canvasElement.textContent]).toEqual([true, "Check for reply"]);
+      await presses("Check for reply", onCheck)(context);
+    },
+    Acknowledged: async ({ canvasElement }) => {
+      await expect(canvasElement.textContent).toBe("Checking your calendar");
+    },
   },
 };
