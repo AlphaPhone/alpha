@@ -272,6 +272,34 @@
       ],
       "outputs": []
     },
+    "@repo/agent#build": {
+      "dependsOn": [
+        "gen",
+        "//#gen",
+        "^build"
+      ],
+      "inputs": [
+        "$TURBO_ROOT$/eliza.lock.json",
+        "$TURBO_ROOT$/packages/deployment/deployments.json",
+        "host/**",
+        "src/**",
+        "gen/**",
+        "package.json",
+        "tsconfig.json",
+        "tsconfig.build.json"
+      ],
+      "outputs": [
+        "dist/**"
+      ]
+    },
+    "@repo/agent#test": {
+      "dependsOn": [
+        "@repo/agent#build"
+      ],
+      "outputs": [
+        ".cache/test-result-*.json"
+      ]
+    },
     "//#check": {
       "dependsOn": [
         "//#build",
@@ -284,6 +312,9 @@
         "@repo/eliza-harness#build",
         "@repo/eliza-harness#typecheck",
         "@repo/eliza-harness#test",
+        "@repo/agent#build",
+        "@repo/agent#typecheck",
+        "@repo/agent#test",
         "@repo/deployment#build",
         "@repo/deployment#typecheck",
         "@repo/deployment#test"
@@ -295,6 +326,7 @@
         "@repo/design-system#build",
         "@repo/app#typecheck",
         "@repo/eliza-harness#typecheck",
+        "@repo/agent#typecheck",
         "@repo/deployment#typecheck",
         "vibestack-studio#typecheck"
       ],

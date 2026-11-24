@@ -76,6 +76,16 @@ export default {
         "openssl"
       ]
     },
+    "apps/agent": {
+      "entry": [
+        "src/main.vibe",
+        "test/**/*.test.{ts,vibe}"
+      ],
+      "project": [
+        "src/**/*.{ts,vibe,vibex}",
+        "test/**/*.{ts,vibe,vibex}"
+      ]
+    },
     "packages/deployment": {
       "entry": [
         "src/deployment.vibe",
