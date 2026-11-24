@@ -67,7 +67,7 @@ function neighbors(rows = [{ connectionId: grantA, grantId: grantA, email: "ann@
     Layer.succeed(Navigation, { changes: Stream.empty, open: (app: string) => sync(() => { opened.push(app); return true }), openLayer: () => succeed(true), closeLayer: () => succeed(true) } as unknown as Navigation.Shape),
     Layer.succeed(Overview, { reportAttention: () => Effect.void } as unknown as Overview.Shape),
     Layer.succeed(ShellMail, { send: () => succeed("Unsent" as const), fill: () => Effect.void } as unknown as ShellMail.Shape),
-    Layer.succeed(ResidentControl, { changes: Stream.empty, session: () => succeed({ agent: "agent-test", generation: 1 }), refreshAccount: () => Effect.void, stop: () => Effect.void, recovered: () => Effect.void } as unknown as ResidentControl.Shape),
+    Layer.succeed(ResidentControl, { changes: Stream.empty, session: () => succeed({ agent: "agent-test", generation: 1 }), refreshAccount: () => Effect.void, stop: () => Effect.void, refusal: () => succeed(undefined), retry: () => Effect.void } as unknown as ResidentControl.Shape),
     Layer.succeed(BrowserAgent, { openApproved: () => succeed({ tab: "t", present: Effect.void }) } as unknown as BrowserAgent.Shape),
     Layer.succeed(FilePicker, { choose: () => succeed([]) } as unknown as FilePicker.Shape),
     Layer.succeed(Preferences, { loadsMailImages: () => succeed(false) } as unknown as Preferences.Shape),

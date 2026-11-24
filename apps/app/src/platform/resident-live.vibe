@@ -1,12 +1,12 @@
-// spec/platform/index.md, "Story: Talk to the resident agent"; spec/platform/index.md, "A request crosses to the resident only as the owner route table allows, and an unclaimed path only reads or posts"; spec/platform/resident.md, "Story: Start my agent and keep it running"; spec/platform/resident.md, "Story: Keep my agent with my current Cloud account"; spec/platform/resident.md, "Story: Wait for a feature that is still starting"; spec/platform/resident.md, "Story: Stop waiting for a request I no longer need"; spec/platform/index.md, "A refusal carries a wait only when the resident answered 429 with a whole number of seconds"; spec/platform/index.md, "A request carries only the device headers the resident reads, each one bounded line"; spec/platform/resident.md, "A turn holds the session busy until it settles"
+// spec/platform/index.md, "Story: Talk to the resident agent"; spec/platform/index.md, "A request crosses to the resident only as the owner route table allows, and an unclaimed path only reads or posts"; spec/platform/resident.md, "Story: Start my agent and keep it running"; spec/platform/resident.md, "Story: Keep my agent with my current Cloud account"; spec/platform/resident.md, "Story: Wait for a feature that is still starting"; spec/platform/resident.md, "Story: Stop waiting for a request I no longer need"; spec/platform/index.md, "A refusal carries a wait only when the resident answered 429 with a whole number of seconds"; spec/platform/index.md, "A request carries only the device headers the resident reads, each one bounded line"; spec/platform/resident.md, "A turn holds the session busy until it settles"; spec/platform/resident.md, "A lost connection is started again by itself at once, then after each failed start a little later, up to a minute"; spec/assistant/recovery.md, "Try again is offered while the resident is refused with nothing held, and starts it once per tap"
 import { createRuntimeJsonClient, RuntimeRequestError, type RuntimeStreamFrame } from "@elizaos/agent/client"
 import { agentClient, agentPlugin } from "@elizaos/os/bridges/agent"
 import type { ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent"
 import { adviceOf, answerOf, headerAdmitted, methodAdmitted, pathAdmitted, type DeviceHeader, type PathShape } from "../../gen/platform.effect.vibe"
-import { Machine as Connection, admissionOf, machine as connectionMachine, recoveryAfterArchive, recoveryAfterReview, retriesDeferred, retryDelayMs } from "../../gen/platform__resident.effect.vibe"
+import { Machine as Connection, admissionOf, autoStartDue, machine as connectionMachine, recoveryAfterArchive, recoveryAfterReview, retriesDeferred, retryDelayMs } from "../../gen/platform__resident.effect.vibe"
 import { routeCrosses } from "../shell/ownerRoutes.vibe"
 import { Resident, ResidentRefused, ResidentUnavailable, type ResidentAnswer, type ResidentHeaders } from "./resident.vibe"
-import { ResidentControl, ResidentRecovery, type HeldRecovery, type ResidentSession } from "./resident-control.vibe"
+import { ResidentControl, ResidentRecovery, type HeldRecovery, type ResidentSession, type StartRefusal } from "./resident-control.vibe"
 import { agentBridge, agentReport, agentRequest, relayFrames, stopAgent, withdraw } from "./resident-bridge.vibe"
 import { FeatureStarting, RecoveryArchive, RecoveryReview, ResidentAgents, ResidentRefusal, ResidentWhoAmI } from "./native.schema.vibe"
 import { developmentAgentBase } from "./build-flags.ts"
@@ -125,6 +125,7 @@ export function residentOver(agent: ElizaAgentPlugin, present: boolean, httpBase
   const parts = Layer.effect(ResidentParts, effect {
     const conn = try Effect.provide(effect { return try Connection }, connectionMachine())
     const verifiedEpoch = try Ref.make(0)
+    const refusedFor = try Ref.make<StartRefusal>("StartRefused")
     const connecting = try Semaphore.make(1)
     const bridge = agentBridge(agent)
     const client = try Effect.orDie(Effect.try(() => createRuntimeJsonClient({
@@ -135,7 +136,8 @@ export function residentOver(agent: ElizaAgentPlugin, present: boolean, httpBase
       requestTimeoutMs: REQUEST_TIMEOUT_MS,
     })))
 
-    effect function fail(gen: number, retryable: boolean, reason: string): never!ResidentUnavailable {
+    effect function fail(gen: number, retryable: boolean, reason: string, refusal: StartRefusal = "StartRefused"): never!ResidentUnavailable {
+      if (!retryable) try Ref.set(refusedFor, refusal)
       conn.send({ type: "startFailed", ofGen: gen, retryable }) catch () => undefined
       throw new ResidentUnavailable({ state: retryable ? "starting" : "stopped", reason })
     }
@@ -167,7 +169,7 @@ export function residentOver(agent: ElizaAgentPlugin, present: boolean, httpBase
         first?.status === "running",
       )
       if (admission === "NotReady") try fail(gen, true, "LOCAL_AGENT_NOT_READY")
-      if (admission === "Distrust" || owner === undefined || agentId === undefined) try fail(gen, false, "The local runtime did not verify local owner access.")
+      if (admission === "Distrust" || owner === undefined || agentId === undefined) try fail(gen, false, "The local runtime did not verify local owner access.", "OwnerUnverified")
       const report = try agentReport(agent, 0)
       const admitted = conn.send({ type: "verified", ofGen: gen, owner: owner!, agent: agentId! }) catch () => undefined
       if (admitted === undefined) throw new ResidentUnavailable({ state: "starting", reason: "AccountChanged" })
@@ -294,8 +296,8 @@ export function residentOver(agent: ElizaAgentPlugin, present: boolean, httpBase
         try sleep(LIVENESS_TICK)
         conn.send({ type: "tick" }) catch () => undefined
         const before = try conn.get()
-        if (before.phase === "Lost" && !before.busy) {
-          ensureRunning() catch () => undefined
+        if (before.phase === "Lost") {
+          if (autoStartDue(before)) ensureRunning() catch () => undefined
           continue
         }
         const checked = conn.send({ type: "checkLiveness" }) catch () => undefined
@@ -314,6 +316,15 @@ export function residentOver(agent: ElizaAgentPlugin, present: boolean, httpBase
       ensureRunning,
       json,
       stream,
+    }
+    effect function review(): HeldRecovery!! {
+      const said = tryPromise(() => agent.reviewRecovery()) catch () => undefined
+      const held = Schema.decodeUnknownEffect(RecoveryReview)(said) catch () => undefined
+      const token = held?.reviewToken
+      const kept = held?.retainedCount
+      const offered = held?.kind === "reviewable" && token !== undefined && REVIEW_TOKEN.test(token) && kept !== undefined && kept > 0 && kept <= RETAINED_LIMIT
+      if (recoveryAfterReview(offered) !== "Reviewable" || token === undefined || kept === undefined) return { reviewable: false }
+      return { reviewable: true, reviewToken: token, retainedCount: kept }
     }
     const control: ResidentControl.Shape = {
       changes: conn.changes,
@@ -335,20 +346,19 @@ export function residentOver(agent: ElizaAgentPlugin, present: boolean, httpBase
         try mapError(stopAgent(agent), (error) => new ResidentUnavailable({ state: "stopped", reason: error.message }))
         conn.send({ type: "stopped", ofGen: gen }) catch () => undefined
       },
-      effect recovered() {
-        conn.send({ type: "recovered" }) catch () => undefined
+      effect refusal(): (StartRefusal | undefined)!! {
+        return (try conn.get()).phase === "Refused" ? try Ref.get(refusedFor) : undefined
+      },
+      effect retry() {
+        if ((try conn.get()).phase === "Refused") {
+          if ((try review()).reviewable) throw new ResidentUnavailable({ state: "stopped", reason: "needs-review" })
+          conn.send({ type: "recovered" }) catch () => undefined
+        }
+        try ensureRunning()
       },
     }
     const recovery: ResidentRecovery.Shape = {
-      effect review(): HeldRecovery!! {
-        const said = tryPromise(() => agent.reviewRecovery()) catch () => undefined
-        const held = Schema.decodeUnknownEffect(RecoveryReview)(said) catch () => undefined
-        const token = held?.reviewToken
-        const kept = held?.retainedCount
-        const offered = held?.kind === "reviewable" && token !== undefined && REVIEW_TOKEN.test(token) && kept !== undefined && kept > 0 && kept <= RETAINED_LIMIT
-        if (recoveryAfterReview(offered) !== "Reviewable" || token === undefined || kept === undefined) return { reviewable: false }
-        return { reviewable: true, reviewToken: token, retainedCount: kept }
-      },
+      review,
       effect restart(reviewToken: string) {
         if ((try conn.get()).phase !== "Refused") throw new ResidentUnavailable({ state: "stopped", reason: "not-held" })
         if (!REVIEW_TOKEN.test(reviewToken)) throw new ResidentUnavailable({ state: "stopped", reason: "Restart blocked" })

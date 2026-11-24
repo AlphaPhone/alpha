@@ -21,5 +21,6 @@ export const meta: ComponentMeta<AboutPagesProps> = {
     FlaggedLicence: { nav: { ...nav, page: "LicenseDetail", licence: 1 }, diagnostics: notices },
     LicencesUnavailable: { nav: { ...nav, page: "Licenses" }, diagnostics: { ...diagnostics, licences: "NoticesUnavailable" } },
     Browser: { native: false, onActivity: undefined },
+    AgentNeedsYou: { agent: "AgentNeedsYou" },
   },
 };

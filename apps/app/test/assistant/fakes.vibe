@@ -1,6 +1,6 @@
 // spec/assistant/send.md, "Story: Send a message and know what happened to it"
 import { Native, NativeUnavailable } from "../../src/platform/native.vibe"
-import { Resident, ResidentRefused, type ResidentHeaders } from "../../src/platform/resident.vibe"
+import { Resident, ResidentRefused, ResidentUnavailable, type ResidentHeaders } from "../../src/platform/resident.vibe"
 import { ResidentControl, ResidentRecovery } from "../../src/platform/resident-control.vibe"
 import { initial as residentStart } from "../../gen/platform__resident.ts"
 import { memoryStore } from "../../src/platform/storage.vibe"
@@ -391,14 +391,15 @@ export function fakePreferences(said: { asks: boolean; shares: boolean }) {
 }
 
 /** The resident connection as it reports itself, connected unless `refused`, and the agent service's recovery review: held under "t1" while `held.reviewable`, restarted at most once. */
-export function fakeResidentControl(refused = false, held: { reviewable: boolean; restarts: number } = { reviewable: false, restarts: 0 }) {
+export function fakeResidentControl(refused = false, held: { reviewable: boolean; restarts: number; retries?: number; ownerUnverified?: boolean } = { reviewable: false, restarts: 0 }) {
   return Layer.mergeAll(
     Layer.succeed(ResidentControl, {
       changes: Stream.make({ ...residentStart, phase: refused ? "Refused" as const : "Connected" as const }),
       session: () => succeed(undefined),
       refreshAccount: () => succeed(undefined),
       stop: () => succeed(undefined),
-      recovered: () => succeed(undefined),
+      refusal: () => succeed(refused ? (held.ownerUnverified === true ? "OwnerUnverified" as const : "StartRefused" as const) : undefined),
+      retry: () => held.reviewable ? Effect.fail(new ResidentUnavailable({ state: "stopped", reason: "needs-review" })) : sync(() => { held.retries = (held.retries ?? 0) + 1 }),
     }),
     Layer.succeed(ResidentRecovery, {
       review: () => sync(() => held.reviewable ? { reviewable: true as const, reviewToken: "t1", retainedCount: 1 } : { reviewable: false as const }),

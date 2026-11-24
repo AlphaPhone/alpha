@@ -31,7 +31,7 @@ import { ReviewRows } from "../telephony/ReviewRows.tsx";
 import { ChatSearchPanel } from "./ChatSearchPanel.tsx";
 import { ComposerBar } from "./ComposerBar.tsx";
 import { Transcript } from "./Transcript.tsx";
-import { dictationTargetNow, emergencyNow, filesStream, inferenceOf, ownAddressNow, restartBusyStream, restartStream, targetStream, transcriptStream } from "./services.ts";
+import { dictationTargetNow, emergencyNow, filesStream, inferenceOf, noOffer, ownAddressNow, restartBusyStream, restartStream, targetStream, transcriptStream } from "./services.ts";
 import { act, perform, useServiceStream } from "../shell/services.ts";
 import { runtime } from "./runtime.ts";
 
@@ -60,7 +60,7 @@ export function ChatPanel({ open, onTalk }: ChatPanelProps) {
   const { state: drafts = draftsStart, send: sendDraft } = useDrafts(runtime);
   const { state: sends = sendsStart } = useSends(runtime);
   const { state: searchState = searchStart } = useSearch(runtime);
-  const restartOffered = useServiceStream("assistant/restart", restartStream, false);
+  const restartOffer = useServiceStream("assistant/restart", restartStream, noOffer);
   const restartBusy = useServiceStream("assistant/restart-busy", restartBusyStream, false);
   const searching = searchState.open;
   const text = draftText(drafts);
@@ -151,7 +151,7 @@ export function ChatPanel({ open, onTalk }: ChatPanelProps) {
         onClearTarget={() => { mapsComposer(text.trim() !== "", false); composer((c) => c.aim(undefined)); }}
         onReviewUnsettled={(restore) => { void sendDraft({ type: "reviewUnsettled", restore }); }}
         dictation={<DictationControl target={dictationTargetNow()} />}
-        restartOffered={restartOffered}
+        restartOffer={restartOffer}
         restartBusy={restartBusy}
         onRestart={() => act(Effect.flatMap(Effect.service(AgentRestart), (restart) => restart.restart()))}
       />

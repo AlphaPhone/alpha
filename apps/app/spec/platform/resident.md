@@ -32,12 +32,15 @@ type Resident = {
   checking: bool,
   clock: int,
   lastCheck: int,
-  restarts: int
+  restarts: int,
+  failures: int,
+  failedAt: int
 }
 
 pure val initial: Resident = {
   phase: Stopped, generation: 0, owner: "", agent: "", deployment: 0, account: 0,
-  attached: false, busy: false, checking: false, clock: 0, lastCheck: -2, restarts: 0
+  attached: false, busy: false, checking: false, clock: 0, lastCheck: -2, restarts: 0,
+  failures: 0, failedAt: 0
 }
 
 pure val ofGenValues = 0.to(4)
@@ -78,12 +81,35 @@ waits for the owner's guarded restart.
 ```quint
 pure def canStartFailed(r: Resident, ofGen: int): bool = (r.phase == Starting or r.phase == Verifying) and ofGen == r.generation
 pure def startFailed(r: Resident, ofGen: int, retryable: bool): Resident =
-  { ...r, phase: if (retryable) Lost else Refused, owner: "", agent: "", attached: false }
+  { ...r, phase: if (retryable) Lost else Refused, owner: "", agent: "", attached: false, failures: r.failures + 1, failedAt: r.clock }
 
 pure def canRecovered(r: Resident): bool = r.phase == Refused
-pure def recovered(r: Resident): Resident = { ...r, phase: Stopped }
+pure def recovered(r: Resident): Resident = { ...r, phase: Stopped, failures: 0 }
 
 pure def sometimesRefused(r: Resident): bool = r.phase == Refused
+```
+
+### A lost connection is started again by itself at once, then after each failed start a little later, up to a minute
+
+The liveness tick (five seconds) starts a lost connection again with no turn in flight. The first
+start after a loss runs at the next tick; after one, two, three and more failed starts in a row it
+waits one, two, six and then twelve ticks (5, 10 and 30 seconds, then every minute) for as long as
+starting keeps failing, so a start that keeps failing never runs every tick. A verified connection
+or the owner's Try again begins the count again. A request the owner makes starts at once.
+
+```quint
+pure val autoStartLongestWait = 12
+pure def autoStartWait(failures: int): int =
+  if (failures <= 0) 0 else if (failures == 1) 1 else if (failures == 2) 2 else if (failures == 3) 6 else autoStartLongestWait
+pure def autoStartDue(r: Resident): bool = r.phase == Lost and not(r.busy) and r.clock - r.failedAt >= autoStartWait(r.failures)
+
+pure val failuresValues = 0.to(6)
+
+pure def lawAFailingStartWaitsAtMostAMinute(failures: int): bool =
+  autoStartWait(failures) <= autoStartLongestWait and (failures >= 1 implies autoStartWait(failures) >= 1)
+pure def lawEachFailedStartWaitsNoLess(failures: int): bool = autoStartWait(failures + 1) >= autoStartWait(failures)
+pure def alwaysAVerifiedConnectionCountsNoFailures(r: Resident): bool = r.phase == Connected implies r.failures == 0
+pure def sometimesBackingOff(r: Resident): bool = r.phase == Lost and r.failures >= 2 and not(autoStartDue(r))
 ```
 
 ### A held start runs again only after the owner reviewed what the service kept and the service archived it
@@ -128,7 +154,7 @@ pure def lawAdmittedMeansOneRunningOwnedAgent(ownerIdentity: bool, ownerRole: bo
 pure def canVerified(r: Resident, ofGen: int, owner: str, agent: str): bool =
   r.phase == Verifying and ofGen == r.generation and owner != "" and agent != ""
 pure def verified(r: Resident, ofGen: int, owner: str, agent: str): Resident =
-  { ...r, phase: Connected, owner: owner, agent: agent, deployment: r.account }
+  { ...r, phase: Connected, owner: owner, agent: agent, deployment: r.account, failures: 0 }
 
 pure def alwaysASessionIsWholeOrAbsent(r: Resident): bool =
   (r.phase == Connected iff r.owner != "") and (r.owner != "" iff r.agent != "")

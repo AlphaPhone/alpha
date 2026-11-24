@@ -495,16 +495,31 @@ it.effect("Act only on what I asked for, when the set cannot be listed (spec/ass
 })
 
 it.effect("Restart my agent when it stopped for review (spec/assistant/recovery.md, \"Restart is offered only while the resident is refused and holds a reviewable recovery, once per tap\")", () => effect {
-  const held = { reviewable: true, restarts: 0 }
+  const held = { reviewable: true, restarts: 0, retries: 0 }
   provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 }), noNative, fakePreferences({ asks: false, shares: false }), fakeResidentControl(true, held)) {
     const restart = try AgentRestart
     try settle()
     const offered = try Stream.runHead(restart.offered)
     const first = try restart.restart()
+    // The archived hold is gone: a tap while the agent is still refused is a Try again, never a second archive.
     const second = try restart.restart()
     try Effect.try(() => assert.deepStrictEqual(
-      { offered: Option.getOrUndefined(offered), first, second, restarts: held.restarts },
-      { offered: true, first: true, second: false, restarts: 1 },
+      { offered: Option.getOrUndefined(offered), first, second, restarts: held.restarts, retries: held.retries },
+      { offered: { kind: "restart" }, first: true, second: true, restarts: 1, retries: 1 },
+    ))
+  }
+})
+
+it.effect("Start my agent again when it would not start (spec/assistant/recovery.md, \"Try again is offered while the resident is refused with nothing held, and starts it once per tap\")", () => effect {
+  const held = { reviewable: false, restarts: 0, retries: 0, ownerUnverified: true }
+  provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 }), noNative, fakePreferences({ asks: false, shares: false }), fakeResidentControl(true, held)) {
+    const restart = try AgentRestart
+    try settle()
+    const offered = try Stream.runHead(restart.offered)
+    const tried = try restart.restart()
+    try Effect.try(() => assert.deepStrictEqual(
+      { offered: Option.getOrUndefined(offered), tried, restarts: held.restarts, retries: held.retries },
+      { offered: { kind: "retry", refusal: "StartupCheckFailed" }, tried: true, restarts: 0, retries: 1 },
     ))
   }
 })

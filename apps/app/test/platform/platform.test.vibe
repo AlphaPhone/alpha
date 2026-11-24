@@ -496,6 +496,57 @@ it.live("restart my agent only after I reviewed what the service held", () => ef
   }
 })
 
+// spec/assistant/recovery.md, "Try again is offered while the resident is refused with nothing held, and starts it once per tap"
+it.live("start my agent again when it would not start and nothing is held, and never past a hold", () => effect {
+  const stranger = { ...owned, "GET /api/auth/me": { status: 200, data: { identity: { kind: "agent", id: "x" }, access: { role: "USER", mode: "remote" } } } }
+  const phone = agent(stranger)
+  provide residentOver(phone.plugin, true, undefined) {
+    const control = try ResidentControl
+    try Effect.flip((try Resident).ensureRunning())
+    const refusal = try control.refusal()
+    phone.routes["GET /api/auth/me"] = owned["GET /api/auth/me"]
+    try control.retry()
+    const session = try control.session()
+    const after = try control.refusal()
+    try Effect.try(() => assert.deepStrictEqual([refusal, session?.owner, after], ["OwnerUnverified", "ann", undefined]))
+  }
+  const held = agent(stranger, { review: { kind: "reviewable", reviewToken: "0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b", retainedCount: 1 } })
+  provide residentOver(held.plugin, true, undefined) {
+    const control = try ResidentControl
+    try Effect.flip((try Resident).ensureRunning())
+    held.routes["GET /api/auth/me"] = owned["GET /api/auth/me"]
+    const skipped = try Effect.flip(control.retry())
+    const session = try control.session()
+    try Effect.try(() => assert.deepStrictEqual([skipped.reason, session], ["needs-review", undefined]))
+  }
+})
+
+// spec/platform/resident.md, "A lost connection is started again by itself at once, then after each failed start a little later, up to a minute"
+it.effect("try a start that keeps failing less and less often, never every tick", () => effect {
+  const phone = agent({ ...owned, "GET /api/agents": { status: 200, data: { agents: [{ id: "eliza", status: "starting" }] } } })
+  const starts = () => phone.sent.filter((request) => request.path === "/api/agents").length
+  provide residentOver(phone.plugin, true, undefined) {
+    const control = try ResidentControl
+    try Effect.flip((try Resident).ensureRunning())
+    const seen: number[] = []
+    for (let tick = 0; tick < 9; tick++) {
+      try TestClock.adjust("5 seconds")
+      try promise(settle)
+      seen.push(starts())
+    }
+    phone.routes["GET /api/agents"] = owned["GET /api/agents"]
+    for (let tick = 0; tick < 12; tick++) {
+      try TestClock.adjust("5 seconds")
+      try promise(settle)
+    }
+    const now = try Stream.runHead(control.changes)
+    try Effect.try(() => assert.deepStrictEqual(
+      { seen, now: now._tag === "Some" ? [now.value.phase, now.value.failures] : undefined },
+      { seen: [2, 2, 3, 3, 3, 3, 3, 3, 4], now: ["Connected", 0] },
+    ))
+  }
+})
+
 // spec/platform/resident.md, "Story: Keep my agent with my current Cloud account"
 it.live("rebind my running agent when my Cloud account changes", () => effect {
   const phone = agent(owned)

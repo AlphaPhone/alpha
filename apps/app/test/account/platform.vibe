@@ -138,7 +138,8 @@ export function platform(calls: Calls, native: Record<string, Answer>, cloud: Re
       session: () => Effect.succeed({ owner: verified.owner, agent: verified.agent, generation: 1, epoch: 1 }),
       refreshAccount: () => Effect.void,
       stop: () => Effect.void,
-      recovered: () => Effect.void
+      refusal: () => Effect.succeed(undefined),
+      retry: () => Effect.void
     }),
     Layer.succeed(AppLifecycle, {
       changes: Stream.make(app),

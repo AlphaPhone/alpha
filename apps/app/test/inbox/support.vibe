@@ -105,7 +105,7 @@ export function neighbors(log: Calls, options: { readonly mailImages?: boolean; 
       openLayer: () => succeed(true), closeLayer: () => succeed(true)
     } as unknown as Navigation.Shape),
     Layer.succeed(Overview, { reportAttention: (_: unknown, unread: number, more: boolean, _at: number, connected: boolean) => sync(() => { log.attention.push({ unread, more, connected }) }) } as unknown as Overview.Shape),
-    Layer.succeed(ResidentControl, { changes: Stream.empty, session: () => succeed({ agent: "agent-test", generation: 1 }), refreshAccount: () => Effect.void, stop: () => Effect.void, recovered: () => Effect.void } as unknown as ResidentControl.Shape),
+    Layer.succeed(ResidentControl, { changes: Stream.empty, session: () => succeed({ agent: "agent-test", generation: 1 }), refreshAccount: () => Effect.void, stop: () => Effect.void, refusal: () => succeed(undefined), retry: () => Effect.void } as unknown as ResidentControl.Shape),
     Layer.succeed(ShellMail, { send: () => succeed("Unsent" as SendAnswer), fill: (sender: MailSender) => sync(() => { log.filled.push(sender) }) } as unknown as ShellMail.Shape),
     Layer.succeed(BrowserAgent, { openApproved: (url: string) => sync(() => { log.opened.push(url); return { tab: "t", present: Effect.void } }) } as unknown as BrowserAgent.Shape),
     Layer.succeed(FilePicker, { choose: () => succeed(options.picked ?? []) } as unknown as FilePicker.Shape),

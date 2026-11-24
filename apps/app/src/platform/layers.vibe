@@ -94,7 +94,8 @@ export function fakeResident(routes: { readonly [route: string]: FakeRoute }, st
     session: () => succeed({ owner, agent: "agent-test", generation: 1, epoch: 1 }),
     refreshAccount: () => Effect.void,
     stop: () => Effect.void,
-    recovered: () => Effect.void,
+    refusal: () => succeed(undefined),
+    retry: () => Effect.void,
   }
   const recovery: ResidentRecovery.Shape = {
     review: () => succeed({ reviewable: false }),

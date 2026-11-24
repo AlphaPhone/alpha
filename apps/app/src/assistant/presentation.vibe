@@ -1,5 +1,6 @@
-// spec/assistant/receipts.md, "A receipt's title says what the journal proves"; spec/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/receipts.md, "A reply cut off after an effect says so, and a queued approval request reads as needing approval"
+// spec/assistant/receipts.md, "A receipt's title says what the journal proves"; spec/assistant/recovery.md, "Try again is offered while the resident is refused with nothing held, and starts it once per tap"; spec/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/receipts.md, "A reply cut off after an effect says so, and a queued approval request reads as needing approval"
 import type { CutOff, ReceiptTitle } from "../../gen/assistant__receipts.ts"
+import type { Refusal } from "../../gen/assistant__recovery.ts"
 import { showsWait, waitSeconds, type FailureKind, type PlanAction } from "../../gen/assistant__reply.ts"
 import { hostOf } from "./grounding.vibe"
 
@@ -76,6 +77,12 @@ export const copy = {
   restartExplained: "Your agent stopped and is held for review. Restart it to keep chatting; nothing it kept is replayed.",
   restartFailed: "Your agent couldn’t restart. Try again.",
   restartAction: "Restart Alpha",
+  startCheckFailed: "Startup check failed",
+  startCheckExplained: "The phone couldn’t confirm your agent runs for you, so it didn’t start. Nothing is held for review.",
+  startFailed: "Couldn’t start",
+  startExplained: "Your agent didn’t start, and nothing is held for review. Try again to start it.",
+  startFailedAgain: "Your agent still couldn’t start.",
+  retryAction: "Try again",
   notesChanged: "Notes changed",
   calendarChanged: "Calendar changed",
   openWorkflows: "Change this in Workflows",
@@ -86,6 +93,14 @@ export const copy = {
 export const changeWords = {
   Created: "Created", Updated: "Updated", TurnedOn: "Turned on", PausedWord: "Paused", Restored: "Restored", Renamed: "Renamed", RemovedWord: "Removed", Changed: "Changed",
 } as const
+
+/** What a refused agent's offer says and does: its headline, its explanation and its button. */
+export function offerText(refusal: Refusal | undefined): { readonly title: string; readonly explained: string; readonly action: string } {
+  if (refusal === undefined) return { title: copy.restartNeeded, explained: copy.restartExplained, action: copy.restartAction }
+  return refusal === "StartupCheckFailed"
+    ? { title: copy.startCheckFailed, explained: copy.startCheckExplained, action: copy.retryAction }
+    : { title: copy.startFailed, explained: copy.startExplained, action: copy.retryAction }
+}
 
 /** The title of a receipt for what the journal proves. */
 export function receiptTitle(title: ReceiptTitle): string {

@@ -1,31 +1,44 @@
-// spec/assistant/recovery.md, "Story: Restart my agent when it stopped for review"; spec/assistant/recovery.md, "Restart is offered only while the resident is refused and holds a reviewable recovery, once per tap"
-import { restartOffered, restartRuns } from "../../gen/assistant__recovery.effect.vibe"
+// spec/assistant/recovery.md, "Story: Restart my agent when it stopped for review"; spec/assistant/recovery.md, "Restart is offered only while the resident is refused and holds a reviewable recovery, once per tap"; spec/assistant/recovery.md, "Story: Start my agent again when it would not start"; spec/assistant/recovery.md, "Try again is offered while the resident is refused with nothing held, and starts it once per tap"
+import type { Refusal } from "../../gen/assistant__recovery.ts"
+import { refusalOf, restartOffered, restartRuns, retryOffered } from "../../gen/assistant__recovery.effect.vibe"
 import { ResidentControl, ResidentRecovery } from "../platform/resident-control.vibe"
 import { AssistantHost } from "./host.vibe"
 import { copy } from "./presentation.vibe"
 
-/** The composer's guarded restart of an agent the service holds for review. */
+/** What the composer offers for a refused agent: nothing, Restart Alpha over a reviewable hold, or Try again, with why it was refused, when nothing is held. */
+export type RestartOffer =
+  | { readonly kind: "none" }
+  | { readonly kind: "restart" }
+  | { readonly kind: "retry"; readonly refusal: Refusal }
+
+const none: RestartOffer = { kind: "none" }
+
+/** The composer's guarded restart of a refused agent: Restart Alpha over what the service holds for review, Try again when it holds nothing. */
 export service AgentRestart {
-  /** Whether Restart Alpha is offered now, then each change of it. */
-  readonly offered: Stream.Stream<boolean>
-  /** Whether a restart is running now, then each change of it. */
+  /** What is offered now, then each change of it. */
+  readonly offered: Stream.Stream<RestartOffer>
+  /** Whether a restart or a try is running now, then each change of it. */
   readonly busy: Stream.Stream<boolean>
-  /** Archive what the service kept and start the agent again; false when it is not offered, the assistant is not in front, nothing is held or the restart failed. */
+  /** Restart Alpha or Try again, whichever is offered; false when nothing is offered, the assistant is not in front, what was offered changed or the agent did not start. */
   restart(): boolean!!
 }
 
-/** The restart offer over the resident connection and the agent service's recovery review. */
+/** The offer over the resident connection and the agent service's recovery review. */
 export const restartLayer = Layer.effect(AgentRestart, effect {
   const control = try ResidentControl
   const recovery = try ResidentRecovery
   const host = try AssistantHost
-  const shown = try SubscriptionRef.make(false)
+  const shown = try SubscriptionRef.make<RestartOffer>(none)
   const running = try SubscriptionRef.make(false)
   let refused = false
   effect function offer() {
     const restarting = try SubscriptionRef.get(running)
     const held = refused && !restarting ? try recovery.review() : { reviewable: false as const }
-    try SubscriptionRef.set(shown, restartOffered(refused, held.reviewable, restarting))
+    const why = try control.refusal()
+    const next: RestartOffer = restartOffered(refused, held.reviewable, restarting) ? { kind: "restart" }
+      : retryOffered(refused, held.reviewable, restarting) ? { kind: "retry", refusal: refusalOf(why === "OwnerUnverified") }
+      : none
+    try SubscriptionRef.set(shown, next)
   }
   fork.scoped (effect {
     for try (const connection of control.changes) {
@@ -33,22 +46,29 @@ export const restartLayer = Layer.effect(AgentRestart, effect {
       try offer()
     }
   })
+  effect function restartHeld() {
+    const held = try recovery.review()
+    if (!held.reviewable) return false
+    const done = map(recovery.restart(held.reviewToken), () => true) catch () => false
+    if (!done) try host.toast(copy.restartFailed)
+    return done
+  }
+  effect function tryAgain() {
+    const done = map(control.retry(), () => true) catch () => false
+    if (!done) try host.toast(copy.startFailedAgain)
+    return done
+  }
   return {
     offered: SubscriptionRef.changes(shown),
     busy: SubscriptionRef.changes(running),
     restart: () => effect {
       const visible = !(try host.screen()).exposure.hidden
-      if (!restartRuns(try SubscriptionRef.get(shown), visible)) return false
-      const held = try recovery.review()
-      if (!held.reviewable) {
-        try offer()
-        return false
-      }
+      const offered = try SubscriptionRef.get(shown)
+      if (!restartRuns(offered.kind !== "none", visible)) return false
       try SubscriptionRef.set(running, true)
       try offer()
-      const done = map(recovery.restart(held.reviewToken), () => true) catch () => false
+      const done = offered.kind === "restart" ? try restartHeld() : try tryAgain()
       try SubscriptionRef.set(running, false)
-      if (!done) try host.toast(copy.restartFailed)
       try offer()
       return done
     },

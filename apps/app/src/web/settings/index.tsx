@@ -1,9 +1,9 @@
 // spec/settings/index.md, "Story: Find a setting in a few taps"; spec/settings/index.md, "A page opens from its parent, and Back returns to that parent"; spec/settings/passwords.md, "Story: Use my saved passwords only after Android unlocks them"; spec/settings/passwords.md, "Android's Back cancels a pending confirmation first, then closes the entry shown"; spec/settings/updates.md, "Story: Let Android finish an update without losing what I typed"
-import { Effect } from "effect";
+import { Effect, Stream } from "effect";
 import { KeyRound, Settings as Gear } from "lucide-react";
 import { useState } from "react";
 import { useMachine as useNavigation } from "../../../gen/settings.react.ts";
-import { initial as navigationStart } from "../../../gen/settings.ts";
+import { agentStateOf, initial as navigationStart, type AgentState } from "../../../gen/settings.ts";
 import { useMachine as useAppearance } from "../../../gen/settings__appearance.react.ts";
 import { dark, initial as appearanceStart } from "../../../gen/settings__appearance.ts";
 import { useMachine as useDiagnostics } from "../../../gen/settings__diagnostics.react.ts";
@@ -24,6 +24,7 @@ import { useMachine as useUpdates } from "../../../gen/settings__updates.react.t
 import { initial as updatesStart } from "../../../gen/settings__updates.ts";
 import { Build } from "../../platform/build.vibe";
 import { Native } from "../../platform/native.vibe";
+import { ResidentControl } from "../../platform/resident-control.vibe";
 import { Appearance } from "../../settings/appearance.vibe";
 import { Diagnostics } from "../../settings/diagnostics.vibe";
 import { DeviceFacts } from "../../settings/facts.vibe";
@@ -42,13 +43,17 @@ import { backDialog, closeDialog, openDialog, useDialog } from "./dialogs.ts";
 import { PasswordsScreen } from "./PasswordsScreen.tsx";
 import { SettingsScreen } from "./SettingsScreen.tsx";
 import { UpdateActivation } from "./UpdateActivation.tsx";
-import { now, perform } from "../shell/services.ts";
+import { now, perform, useServiceStream } from "../shell/services.ts";
 import { runtime } from "./runtime.ts";
 import { testMocksBuilt } from "../../platform/build-flags.ts";
 
 const mocks = testMocksBuilt;
 
 const pages = <A,>(use: (p: SettingsPages.Shape) => Effect.Effect<A>) => perform(Effect.flatMap(Effect.service(SettingsPages), use));
+
+/** The on-device agent's state as About's Agent activity shows it (spec/settings/index.md). */
+const agentStream = Effect.map(Effect.service(ResidentControl), (control) => Stream.map(control.changes, (connection) =>
+  agentStateOf(connection.phase === "Connected", connection.phase === "Starting" || connection.phase === "Verifying" || connection.phase === "Lost", connection.phase === "Refused")));
 
 /** Settings' Back: the shown page's dialog, then the vault's or the problem log's own, then one page up; false on the root. */
 async function settingsBack(): Promise<boolean> {
@@ -83,12 +88,13 @@ function SettingsApp({ onClose }: ScreenProps) {
   const readable = now(Effect.flatMap(Effect.service(Preferences), (p) => Effect.map(p.current(), (c) => c.readable)), false);
   const route = now(Effect.flatMap(Effect.service(PrivacyRow), (p) => p.route()), "RouteUnavailable");
   const account = useAccountRows();
+  const agent = useServiceStream<AgentState | undefined>("settings/agent", agentStream, undefined);
   const dialog = useDialog(nav);
   if (nav.page === "Passwords") return <PasswordsApp onClose={() => void pages((p) => p.back())} />;
   return (
     <SettingsScreen
       model={{
-        nav, facts, appearance, network, updates, reset, variant, account,
+        nav, facts, appearance, network, updates, reset, variant, account, agent,
         preferences: { value: preferences.state ?? preferencesStart, readable: preferences.cause === undefined && readable },
       }}
       act={{

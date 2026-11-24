@@ -1,4 +1,4 @@
-// spec/settings/vocabulary.md, "Story: See only what Android reported"; spec/settings/reset.md, "The native answer is worded by Alpha, and one Alpha does not know claims nothing"; spec/settings/facts.md, "A broader page is named for what it covers"; spec/settings/diagnostics.md, "A licence flag is shown by Alpha's name for it, an unlisted flag as written, with what it obliges"
+// spec/settings/vocabulary.md, "Story: See only what Android reported"; spec/settings/index.md, "About's Agent activity says whether the agent runs, is starting, is stopped or needs the owner"; spec/settings/reset.md, "The native answer is worded by Alpha, and one Alpha does not know claims nothing"; spec/settings/facts.md, "A broader page is named for what it covers"; spec/settings/diagnostics.md, "A licence flag is shown by Alpha's name for it, an unlisted flag as written, with what it obliges"
 import type { Access, RoleHold, Switch } from "../../../gen/settings__vocabulary.ts";
 import type { BroaderNotice, ShadeAnswer } from "../../../gen/settings__facts.ts";
 import type { Export } from "../../../gen/settings__diagnostics.ts";
@@ -6,10 +6,16 @@ import type { Notice } from "../../../gen/settings__reset.ts";
 import type { JoinPhase, Online } from "../../../gen/settings__network.ts";
 import type { Outcome, Permission } from "../../../gen/settings__updates.ts";
 import type { Listening } from "../../../gen/settings__privacy.ts";
+import type { AgentState } from "../../../gen/settings.ts";
 
 /** A state's word and the token its dot is drawn in; an unknown state has no dot. */
 export interface StateWord { readonly word: string; readonly tone?: "ok" | "warn" | "muted" | "destructive" }
 
+/** About's Agent activity row: the agent's state (spec/settings/index.md). */
+export const AGENT: Record<AgentState, StateWord> = {
+  AgentRunning: { word: "Running", tone: "ok" }, AgentStarting: { word: "Starting", tone: "muted" },
+  AgentNeedsYou: { word: "Needs you", tone: "warn" }, AgentStopped: { word: "Stopped", tone: "muted" },
+};
 export const SWITCH: Record<Switch, StateWord> = { On: { word: "On", tone: "ok" }, Off: { word: "Off", tone: "muted" }, Unknown: { word: "Open settings" } };
 export const ACCESS: Record<Access, StateWord> = {
   Allowed: { word: "Allowed", tone: "ok" }, Partial: { word: "Limited", tone: "warn" }, Asks: { word: "Ask", tone: "warn" },

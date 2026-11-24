@@ -8,7 +8,7 @@ import { AssistantDraft } from "../../assistant/draft.vibe";
 import { ChatSearch } from "../../assistant/search.vibe";
 import { AssistantHost } from "../../assistant/host.vibe";
 import { AssistantEmail } from "../../assistant/ports.vibe";
-import { AgentRestart } from "../../assistant/restart.vibe";
+import { AgentRestart, type RestartOffer } from "../../assistant/restart.vibe";
 import { Navigation } from "../../shell/navigation.vibe";
 
 /** The composer's transcript stream. */
@@ -27,8 +27,10 @@ export const inferenceOf = () => readNow(Effect.flatMap(Effect.service(Assistant
 export const ownAddressNow = () => readNow(Effect.flatMap(Effect.service(AssistantEmail), (mail) => mail.address()));
 /** Whether an emergency call is live now. */
 export const emergencyNow = () => readNow(Effect.flatMap(Effect.service(AssistantHost), (host) => host.emergency()));
-/** Whether Restart Alpha is offered for an agent the service holds for review. */
+/** What a refused agent is offered: Restart Alpha over a hold for review, Try again when nothing is held, or nothing. */
 export const restartStream = Effect.map(Effect.service(AgentRestart), (restart) => restart.offered);
+/** Nothing offered, before the first offer is read. */
+export const noOffer: RestartOffer = { kind: "none" };
 /** Whether a restart of the agent is running. */
 export const restartBusyStream = Effect.map(Effect.service(AgentRestart), (restart) => restart.busy);
 /** The open draft as voice dictation fills it. */

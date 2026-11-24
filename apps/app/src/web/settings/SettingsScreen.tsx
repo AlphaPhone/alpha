@@ -5,7 +5,7 @@ import {
   Wifi as WifiIcon,
 } from "lucide-react";
 import type { FormEvent, ReactNode } from "react";
-import type { AppRow, Elsewhere, Page, Settings } from "../../../gen/settings.ts";
+import type { AgentState, AppRow, Elsewhere, Page, Settings } from "../../../gen/settings.ts";
 import { appListed, elsewhereShown } from "../../../gen/settings.ts";
 import type { Appearance, Choice } from "../../../gen/settings__appearance.ts";
 import { dark, notSaved } from "../../../gen/settings__appearance.ts";
@@ -57,6 +57,8 @@ export interface SettingsModel {
   readonly variant: "launcher" | "aosp" | "browser";
   /** The account's words for the root's Account and AI provider rows. */
   readonly account: AccountRows;
+  /** The on-device agent's state, for About's Agent activity. */
+  readonly agent?: AgentState;
 }
 
 /** What the owner can do on the Settings pages. */
@@ -147,7 +149,7 @@ export function SettingsScreen({ model, act, onClose, dialog, onDialog, notifica
           {(nav.page === "About" || nav.page === "Problems" || nav.page === "Licenses" || nav.page === "LicenseDetail") && (
             <AboutPages nav={nav} facts={facts} native={native} diagnostics={diagnostics} aboutActs={aboutActs}
               onOpen={act.open} onOpenLicence={act.openLicence} onAppInfo={() => act.openPage("PageAppInfo")}
-              onActivity={elsewhereShown("AgentActivity", model.variant === "aosp", native) ? () => act.openElsewhere("AgentActivity") : undefined} />
+              onActivity={elsewhereShown("AgentActivity", model.variant === "aosp", native) ? () => act.openElsewhere("AgentActivity") : undefined} agent={model.agent} />
           )}
           {nav.page === "Developer" && nav.developer && (
             <DeveloperPage developerActs={developerActs} version={facts.read.version} native={native} onHandoff={act.openPage} />

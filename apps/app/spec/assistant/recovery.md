@@ -80,3 +80,33 @@ pure def lawOneRestartPerTap(refused: bool, reviewable: bool): bool = not(restar
 pure def lawAHiddenTapRestartsNothing(offered: bool): bool = not(restartRuns(offered, false))
 pure def lawAnotherOwnerNeverGetsTheDraft(sameOwner: bool): bool = draftKept(sameOwner) implies sameOwner
 ```
+
+## Story: Start my agent again when it would not start
+
+> As the owner, when my agent would not start and the phone holds nothing for my review, I want
+> the chat and Agent activity to say why and offer Try again, so that I am never left with a chat
+> that cannot reach my agent and no way to bring it back.
+
+### Try again is offered while the resident is refused with nothing held, and starts it once per tap
+
+While the resident connection is refused and the agent service reports nothing reviewable, the
+composer and Agent activity say the agent could not start and offer Try again; Restart is never
+offered at the same time, and Try again never runs over a reviewable hold, so nothing kept is
+skipped past the owner's review. A start whose owner check failed says "Startup check failed";
+any other refused start says "Couldn’t start". The tap runs only while the assistant is in front and
+no restart or try is running; it lets the agent start again and starts it. A start that is refused
+again returns to the same offer, with its own reason, and says it did not start.
+
+```quint
+type Refusal = StartupCheckFailed | CouldNotStart
+pure def retryOffered(refused: bool, reviewable: bool, restarting: bool): bool = refused and not(reviewable) and not(restarting)
+pure def refusalOf(ownerUnverified: bool): Refusal = if (ownerUnverified) StartupCheckFailed else CouldNotStart
+pure def lawTryAgainNeverSkipsAHold(refused: bool, restarting: bool): bool = not(retryOffered(refused, true, restarting))
+pure def lawNoTryAgainWhileConnected(reviewable: bool): bool = not(retryOffered(false, reviewable, false))
+pure def lawOneTryPerTap(refused: bool, reviewable: bool): bool = not(retryOffered(refused, reviewable, true))
+pure def lawRestartOrTryAgainNeverBoth(refused: bool, reviewable: bool, restarting: bool): bool =
+  not(restartOffered(refused, reviewable, restarting) and retryOffered(refused, reviewable, restarting))
+pure def lawARefusedConnectionAlwaysOffersAWayBack(reviewable: bool): bool =
+  restartOffered(true, reviewable, false) or retryOffered(true, reviewable, false)
+pure def lawAFailedOwnerCheckIsNamed(ownerUnverified: bool): bool = (refusalOf(ownerUnverified) == StartupCheckFailed) iff ownerUnverified
+```

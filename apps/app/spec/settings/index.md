@@ -151,6 +151,21 @@ pure def lawThePhoneRowOnlyOnTheImage(onPhone: bool): bool = not(elsewhereShown(
 pure def lawNoAgentActivityInABrowser(aosp: bool): bool = not(elsewhereShown(AgentActivity, aosp, false))
 ```
 
+### About's Agent activity says whether the agent runs, is starting, is stopped or needs the owner
+
+The row carries the resident connection's state, so a stopped or refused agent is seen from
+Settings: running while connected; starting while it starts, verifies or is started again after a
+loss; needs you while it is refused, where Agent activity offers Restart Alpha or Try again
+(spec/assistant/recovery.md); and stopped otherwise.
+
+```quint
+type AgentState = AgentRunning | AgentStarting | AgentNeedsYou | AgentStopped
+pure def agentStateOf(connected: bool, starting: bool, refused: bool): AgentState =
+  if (refused) AgentNeedsYou else if (connected) AgentRunning else if (starting) AgentStarting else AgentStopped
+pure def lawARefusedAgentNeedsTheOwner(connected: bool, starting: bool): bool = agentStateOf(connected, starting, true) == AgentNeedsYou
+pure def lawRunningOnlyWhileConnected(starting: bool, refused: bool): bool = agentStateOf(false, starting, refused) != AgentRunning
+```
+
 ### Privacy's Access setup reopens the first-run access walkthrough at its first step
 
 ```quint

@@ -1,17 +1,17 @@
-// spec/assistant/receipts.md, "Story: Settle an action whose outcome is unknown"; spec/assistant/receipts.md, "An action is reconciled as applied only with its exact saved receipt, and only a handoff may stay unresolved"; spec/assistant/recovery.md, "Story: Restart my agent when it stopped for review"; spec/assistant/approvals.md, "Story: Decline or let a card expire"
+// spec/assistant/receipts.md, "Story: Settle an action whose outcome is unknown"; spec/assistant/receipts.md, "An action is reconciled as applied only with its exact saved receipt, and only a handoff may stay unresolved"; spec/assistant/recovery.md, "Story: Restart my agent when it stopped for review"; spec/assistant/recovery.md, "Story: Start my agent again when it would not start"; spec/assistant/approvals.md, "Story: Decline or let a card expire"
 import { Effect, Stream } from "effect";
 import { ArrowLeft, MessageSquarePlus, RotateCcw } from "lucide-react";
 import { useState } from "react";
 import { DeviceEnrollment } from "../../account/enrollment.vibe";
 import { Composer } from "../../assistant/composer.vibe";
 import { Conversations } from "../../assistant/conversations.vibe";
-import { copy } from "../../assistant/presentation.vibe";
+import { copy, offerText } from "../../assistant/presentation.vibe";
 import { AgentRestart } from "../../assistant/restart.vibe";
 import { DeviceReview, type HistoryItem, type HistoryOutcome } from "../../assistant/review.vibe";
 import type { ProposalCard } from "../../assistant/transcript.vibe";
 import { Alert, Button, Card, CardFooter, CardTitle, EmptyState, ListRow, ScrollArea, Separator } from "../components/ui/index.ts";
 import { ActionCardView } from "./ActionCardView.tsx";
-import { emergencyNow, restartBusyStream, restartStream } from "./services.ts";
+import { emergencyNow, noOffer, restartBusyStream, restartStream } from "./services.ts";
 import { act, perform, useServiceStream } from "../shell/services.ts";
 
 /** Where Agent activity leaves to. */
@@ -51,7 +51,8 @@ export function AgentActivity({ onBack }: AgentActivityProps) {
     once(Effect.flatMap(Effect.service(DeviceReview), (review) => review.history())), loading);
   const pending = useServiceStream(`assistant/activity/pending/${round}`,
     once(Effect.flatMap(Effect.service(DeviceReview), (review) => Effect.map(review.pending(), (found) => found.ok ? found.cards : undefined))), loading);
-  const restartOffered = useServiceStream("assistant/restart", restartStream, false);
+  const restartOffer = useServiceStream("assistant/restart", restartStream, noOffer);
+  const offered = restartOffer.kind === "none" ? undefined : offerText(restartOffer.kind === "retry" ? restartOffer.refusal : undefined);
   const chatOnly = useServiceStream("assistant/activity/chat-only", chatOnlyStream, false);
   const restartBusy = useServiceStream("assistant/restart-busy", restartBusyStream, false);
   const again = () => setRound((n) => n + 1);
@@ -71,10 +72,10 @@ export function AgentActivity({ onBack }: AgentActivityProps) {
       </header>
       <ScrollArea className="min-h-0 flex-1 px-4">
         <div className="flex flex-col gap-4 pb-6">
-          {restartOffered && (
+          {offered && (
             <Alert className="flex items-center justify-between gap-2" role="status">
-              <span><span className="font-medium">{copy.restartNeeded}.</span> {copy.restartExplained}</span>
-              <Button size="sm" disabled={restartBusy} onClick={() => perform(Effect.flatMap(Effect.service(AgentRestart), (restart) => restart.restart())).finally(again)}>{copy.restartAction}</Button>
+              <span><span className="font-medium">{offered.title}.</span> {offered.explained}</span>
+              <Button size="sm" disabled={restartBusy} onClick={() => perform(Effect.flatMap(Effect.service(AgentRestart), (restart) => restart.restart())).finally(again)}>{offered.action}</Button>
             </Alert>
           )}
           <Button variant="outline" className="justify-start" onClick={() => openConversation(null)}><MessageSquarePlus aria-hidden className="size-4" />New conversation</Button>

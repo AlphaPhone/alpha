@@ -11,8 +11,10 @@ export const meta: ComponentMeta<ComposerBarProps> = {
     Replying: { typing: true },
     Unsettled: { unsettled: true },
     Hosted: { text: "Hi", canSend: true, disclosure: "Prompts and the context you share go to Eliza Cloud.", locationShared: true },
-    RestartNeeded: { text: "Still here", canSend: true, restartOffered: true },
-    Restarting: { restartOffered: true, restartBusy: true },
+    RestartNeeded: { text: "Still here", canSend: true, restartOffer: { kind: "restart" } },
+    Restarting: { restartOffer: { kind: "restart" }, restartBusy: true },
+    CouldNotStart: { restartOffer: { kind: "retry", refusal: "CouldNotStart" } },
+    StartupCheckFailed: { restartOffer: { kind: "retry", refusal: "StartupCheckFailed" }, restartBusy: true },
   },
   play: {
     Typed: async ({ args, canvasElement }: { args: ComposerBarProps; canvasElement: HTMLElement }) => {
@@ -25,5 +27,11 @@ export const meta: ComponentMeta<ComposerBarProps> = {
       await expect(args.onRestart).toHaveBeenCalledTimes(1);
     },
     Restarting: ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).getByRole("button", { name: "Restart Alpha" })).toBeDisabled(),
+    CouldNotStart: async ({ args, canvasElement }: { args: ComposerBarProps; canvasElement: HTMLElement }) => {
+      await expect(within(canvasElement).getByText("Couldn’t start.")).toBeTruthy();
+      await userEvent.click(within(canvasElement).getByRole("button", { name: "Try again" }));
+      await expect(args.onRestart).toHaveBeenCalledTimes(1);
+    },
+    StartupCheckFailed: ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).getByRole("button", { name: "Try again" })).toBeDisabled(),
   },
 };

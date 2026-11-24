@@ -1,4 +1,4 @@
-// spec/platform/resident.md, "Story: Start my agent and keep it running"; spec/platform/resident.md, "Story: Keep my agent with my current Cloud account"; spec/platform/resident.md, "A held start runs again only after the owner reviewed what the service kept and the service archived it"
+// spec/platform/resident.md, "Story: Start my agent and keep it running"; spec/assistant/recovery.md, "Try again is offered while the resident is refused with nothing held, and starts it once per tap"; spec/platform/resident.md, "Story: Keep my agent with my current Cloud account"; spec/platform/resident.md, "A held start runs again only after the owner reviewed what the service kept and the service archived it"
 import type { Resident as ResidentConnection } from "../../gen/platform__resident.ts"
 import type { ResidentUnavailable } from "./resident.vibe"
 
@@ -20,9 +20,14 @@ export service ResidentControl {
   refreshAccount(): void!ResidentUnavailable
   /** Stops the agent and waits until the service confirms it stopped. */
   stop(): void!ResidentUnavailable
-  /** After the owner reviewed a held recovery, lets the agent start again. */
-  recovered(): void!!
+  /** Why the connection is refused, while it is. */
+  refusal(): (StartRefusal | undefined)!!
+  /** The owner's Try again: lets a refused agent with nothing held for review start again, and starts it; refused while a reviewable hold waits for the owner's review. */
+  retry(): void!ResidentUnavailable
 }
+
+/** Why a start was refused: the resident did not verify the local owner, or it refused the start for another reason. */
+export type StartRefusal = "OwnerUnverified" | "StartRefused"
 
 /** What the agent service holds after a start it will not retry: a reviewable hold with its one-use token and how many interrupted requests it kept, or nothing to review. */
 export type HeldRecovery =

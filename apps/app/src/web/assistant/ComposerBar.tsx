@@ -1,9 +1,10 @@
-// spec/assistant/send.md, "A composer send holds its text and clears the composer; a handed-over prompt leaves the composer alone"; spec/assistant/recovery.md, "Restart is offered only while the resident is refused and holds a reviewable recovery, once per tap"; spec/assistant/send.md, "A dictated draft sent exactly as inserted is timed as a voice turn, and its reply is never spoken"; spec/assistant/draft.md, "A held send found by a restart is offered for review and never sent again on its own"; spec/assistant/context.md, "A hosted provider is disclosed wherever the owner can send, and on-device inference is never claimed for it"; spec/assistant/attachments.md, "At most four attachments, each within its cap, and a batch within 19 MiB of base64"
+// spec/assistant/send.md, "A composer send holds its text and clears the composer; a handed-over prompt leaves the composer alone"; spec/assistant/recovery.md, "Restart is offered only while the resident is refused and holds a reviewable recovery, once per tap"; spec/assistant/recovery.md, "Try again is offered while the resident is refused with nothing held, and starts it once per tap"; spec/assistant/send.md, "A dictated draft sent exactly as inserted is timed as a voice turn, and its reply is never spoken"; spec/assistant/draft.md, "A held send found by a restart is offered for review and never sent again on its own"; spec/assistant/context.md, "A hosted provider is disclosed wherever the owner can send, and on-device inference is never claimed for it"; spec/assistant/attachments.md, "At most four attachments, each within its cap, and a batch within 19 MiB of base64"
 import { ArrowUp, Mic, Paperclip, Square, X } from "lucide-react";
 import type { KeyboardEvent, ReactNode } from "react";
 import type { Target } from "../../assistant/composer.vibe";
 import type { ChatFile } from "../../assistant/transcript.vibe";
-import { copy } from "../../assistant/presentation.vibe";
+import { copy, offerText } from "../../assistant/presentation.vibe";
+import type { RestartOffer } from "../../assistant/restart.vibe";
 import { Button, Textarea } from "../components/ui/index.ts";
 import { cn } from "../lib/cn.ts";
 
@@ -31,11 +32,11 @@ export type ComposerBarProps = {
   placeholder?: string;
   /** The dictation control the voice area mounts beside the editor, filling this draft. */
   dictation?: ReactNode;
-  /** Restart Alpha is offered for an agent the service holds for review. */
-  restartOffered?: boolean;
-  /** A restart is running. */
+  /** Restart Alpha for an agent the service holds for review, or Try again for one that would not start. */
+  restartOffer?: RestartOffer;
+  /** A restart or a try is running. */
   restartBusy?: boolean;
-  /** The owner tapped Restart Alpha. */
+  /** The owner tapped Restart Alpha or Try again. */
   onRestart?: () => void;
   /** The owner typed. */
   onText: (text: string) => void;
@@ -78,12 +79,15 @@ export function ComposerBar(props: ComposerBarProps) {
           </div>
         </div>
       )}
-      {props.restartOffered && (
-        <div role="status" className="flex flex-col gap-2 rounded-md bg-secondary p-3 text-sm">
-          <p><span className="font-medium">{copy.restartNeeded}.</span> {copy.restartExplained}</p>
-          <div><Button size="sm" disabled={props.restartBusy} onClick={props.onRestart}>{copy.restartAction}</Button></div>
-        </div>
-      )}
+      {props.restartOffer !== undefined && props.restartOffer.kind !== "none" && (() => {
+        const said = offerText(props.restartOffer.kind === "retry" ? props.restartOffer.refusal : undefined);
+        return (
+          <div role="status" className="flex flex-col gap-2 rounded-md bg-secondary p-3 text-sm">
+            <p><span className="font-medium">{said.title}.</span> {said.explained}</p>
+            <div><Button size="sm" disabled={props.restartBusy} onClick={props.onRestart}>{said.action}</Button></div>
+          </div>
+        );
+      })()}
       {props.target && (
         <p className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="min-w-0 flex-1 truncate">{props.target.kind === "edit" ? "Editing message: " : props.target.quote.from === "user" ? "Replying to your message: " : "Replying to Alpha: "}{(props.target.kind === "edit" ? props.target.text : props.target.quote.text).replace(/\s+/g, " ").slice(0, 160)}</span>

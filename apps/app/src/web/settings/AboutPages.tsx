@@ -1,13 +1,13 @@
-// spec/settings/diagnostics.md, "Story: See what went wrong and share it with support"; spec/settings/diagnostics.md, "Story: Read the licences Alpha ships"; spec/settings/diagnostics.md, "A licence flag is shown by Alpha's name for it, an unlisted flag as written, with what it obliges"; spec/settings/index.md, "General's Phone row opens Phone's line details on the Alpha image only, and About's Agent activity opens the assistant's activity on the phone"
+// spec/settings/diagnostics.md, "Story: See what went wrong and share it with support"; spec/settings/diagnostics.md, "Story: Read the licences Alpha ships"; spec/settings/diagnostics.md, "A licence flag is shown by Alpha's name for it, an unlisted flag as written, with what it obliges"; spec/settings/index.md, "General's Phone row opens Phone's line details on the Alpha image only, and About's Agent activity opens the assistant's activity on the phone"; spec/settings/index.md, "About's Agent activity says whether the agent runs, is starting, is stopped or needs the owner"
 import { FileText, History, Share2, Trash2 } from "lucide-react";
 import { useState } from "react";
-import type { Page, Settings } from "../../../gen/settings.ts";
+import type { AgentState, Page, Settings } from "../../../gen/settings.ts";
 import type { Diagnostics } from "../../../gen/settings__diagnostics.ts";
 import { flagShown } from "../../../gen/settings__diagnostics.ts";
 import type { Facts } from "../../../gen/settings__facts.ts";
 import { Button, EmptyState, Input } from "../components/ui/index.ts";
 import { Section, SettingRow } from "./Rows.tsx";
-import { CLEAR_FAILED, EXPORT, FLAGS } from "./words.ts";
+import { AGENT, CLEAR_FAILED, EXPORT, FLAGS } from "./words.ts";
 
 /** What the owner can do in About. */
 export interface AboutActs {
@@ -32,13 +32,15 @@ export interface AboutPagesProps {
   readonly onAppInfo: () => void;
   /** Open the assistant's Agent activity; undefined where the build has no on-device agent. */
   readonly onActivity?: () => void;
+  /** The on-device agent's state, shown on Agent activity. */
+  readonly agent?: AgentState;
 }
 
 /**
  * About, the problem log and the licences.
  * @model spec/settings/diagnostics.md
  */
-export function AboutPages({ nav, facts, native, diagnostics, aboutActs, onOpen, onOpenLicence, onAppInfo, onActivity }: AboutPagesProps) {
+export function AboutPages({ nav, facts, native, diagnostics, aboutActs, onOpen, onOpenLicence, onAppInfo, onActivity, agent }: AboutPagesProps) {
   const [query, setQuery] = useState("");
   const read = facts.read;
   const exporting = diagnostics.exportState === "Exporting";
@@ -113,7 +115,7 @@ export function AboutPages({ nav, facts, native, diagnostics, aboutActs, onOpen,
         {native && read.android && <SettingRow label="Android version" state={{ word: read.android }} />}
         {native && read.installedAt > 0 && <SettingRow label="Installed or last updated" state={{ word: new Date(read.installedAt).toLocaleDateString() }} />}
         {native && <SettingRow label="App info" onHandoff={onAppInfo} ariaLabel="Alpha's app info in Android" />}
-        {onActivity && <SettingRow label="Agent activity" icon={<History aria-hidden className="size-5" />} onOpen={onActivity} />}
+        {onActivity && <SettingRow label="Agent activity" state={agent === undefined ? undefined : AGENT[agent]} icon={<History aria-hidden className="size-5" />} onOpen={onActivity} />}
         <SettingRow label="Problem log" ariaLabel={count ? `Problem log, ${count}` : "Problem log"} state={count === undefined ? { word: "Unavailable" } : count > 0 ? { word: String(count), tone: "warn" } : undefined}
           onOpen={() => onOpen("Problems")} />
         {exportRow}
