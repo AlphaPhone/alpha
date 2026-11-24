@@ -79,6 +79,10 @@ export type CalendarScreenViewProps = {
   onOpenRow: (row: CalendarRow) => void;
   onOpenLink: (url: string) => void;
   onDelete: (row: CalendarRow, scope: RecurrenceScope) => void;
+  /** Answers the open invitation Going or Maybe. */
+  onAnswer: (row: CalendarRow, answer: "accepted" | "tentative") => void;
+  /** An invitation answer is being sent. */
+  answering: boolean;
   onPlace: (row: CalendarRow) => void;
   onOpenOrigin: (row: CalendarRow) => void;
   onCloseRow: () => void;
@@ -96,7 +100,7 @@ export type CalendarScreenViewProps = {
  */
 export function CalendarScreenView({
   presentation: p, can, agent, device, writes, draft, link, rows, facts, origin, editing, timingLocked, problem, zone, now,
-  onClose, onEvent, onOpenSources, onCloseSources, onLink, onRetry, onConnectDevice, onOpenRow, onOpenLink, onDelete, onPlace, onOpenOrigin, onCloseRow,
+  onClose, onEvent, onOpenSources, onCloseSources, onLink, onRetry, onConnectDevice, onOpenRow, onOpenLink, onDelete, onAnswer, answering, onPlace, onOpenOrigin, onCloseRow,
   onStartEditor, draftActions, onSave, onCloseEditor,
 }: CalendarScreenViewProps) {
   const [query, setQuery] = useState("");
@@ -173,6 +177,7 @@ export function CalendarScreenView({
           canEdit={open !== undefined && can({ type: "editForm", editable: open.writable })} canDelete={open !== undefined && can({ type: "askDelete", editable: open.writable })}
           onEdit={() => onStartEditor(open)} onAskDelete={() => open && go({ type: "askDelete", editable: open.writable })}
           onDelete={(scope) => open && onDelete(open, scope)}
+          onAnswer={(answer) => open && onAnswer(open, answer)} answering={answering}
           onCloseDelete={() => go({ type: "closeDeleteSheet" })} onCheckAgain={onRetry}
           onOpenLink={onOpenLink} onPlace={() => open && onPlace(open)}
           {...(open === undefined || origin === undefined ? {} : { origin, onOpenOrigin: () => onOpenOrigin(open) })}

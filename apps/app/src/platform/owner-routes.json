@@ -114,6 +114,15 @@
         },
         {
           "methods": [
+            "POST"
+          ],
+          "paths": [
+            "/api/lifeops/calendar/events/{id}/response"
+          ],
+          "query": []
+        },
+        {
+          "methods": [
             "DELETE"
           ],
           "paths": [

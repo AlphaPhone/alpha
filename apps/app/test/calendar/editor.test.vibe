@@ -1,4 +1,4 @@
-// spec/calendar/editor.md, "Story: Set an event's time with controls that never produce an impossible range"; spec/calendar/editor.md, "Story: Change an event only where Alpha can do it exactly"; spec/calendar/editor.md, "Story: Know why Save is off"; spec/calendar/drafts.md, "Story: Save an event from its draft exactly once"; spec/calendar/drafts.md, "Story: Recover a draft whose storage cannot be read"; spec/calendar/drafts.md, "Story: Keep each account's draft with that account"; spec/calendar/drafts.md, "Story: Turn a note or a scan into an event I review"
+// spec/calendar/editor.md, "Story: Set an event's time with controls that never produce an impossible range"; spec/calendar/editor.md, "Story: Change an event only where Alpha can do it exactly"; spec/calendar/editor.md, "Story: Know why Save is off"; spec/calendar/drafts.md, "Story: Save an event from its draft exactly once"; spec/calendar/drafts.md, "Story: Recover a draft whose storage cannot be read"; spec/calendar/drafts.md, "Story: Keep each account's draft with that account"; spec/calendar/drafts.md, "Story: Turn a note or a scan into an event I review"; spec/calendar/editor.md, "An invitee answers Going or Maybe from the invitation; Decline stays the deletion's decline"
 import { assert, describe, it } from "@effect/vitest"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { ownerKey } from "../../src/platform/storage.vibe"
@@ -8,6 +8,7 @@ import { formSpan, moveEnd, moveStart, nudgeEnd, nudgeStart } from "../../src/ca
 import { type CalendarScan, scanFields } from "../../src/calendar/handoffs.vibe"
 import type { CalendarRow } from "../../src/calendar/model.vibe"
 import { rowTimingLocked, saveEditor } from "../../src/calendar/screen.vibe"
+import { answersOffered, goingOffered, maybeOffered, ownAnswer } from "../../gen/calendar__editor.ts"
 import { calendarOver, same } from "./harness.vibe"
 import { CalendarAgentFake, DeviceCalendarFake } from "./resident-fake.ts"
 
@@ -37,6 +38,20 @@ describe("Calendar editor and drafts (spec/calendar/editor.md, spec/calendar/dra
     const row: CalendarRow = { id: "agent:a", source: "agent", sourceKey: "agent", title: "A", notes: "", where: "", begin: 0, end: 30, allDay: false, offset: 0, endOffset: 1,
       revision: "r", calendarName: "", account: "", writable: true, recurring: false, timeZone: "UTC" }
     try same([rowTimingLocked(row), rowTimingLocked({ ...row, end: 3_600_000 })], [true, false])
+  })
+
+  it("an invitee is offered the answers not yet given, only on a one-off invitation outside the managed calendar (spec/calendar/editor.md, \"Story: Change an event only where Alpha can do it exactly\")", () => {
+    // spec/calendar/editor.md, "An invitee answers Going or Maybe from the invitation; Decline stays the deletion's decline"
+    assert.deepStrictEqual(["needsAction", "needs-action", "accepted", "tentative", "declined", "delegated"].map((status) => ownAnswer(true, status)),
+      ["AnswerAwaited", "AnswerAwaited", "AnsweredGoing", "AnsweredMaybe", "AnsweredDeclined", "NotInvited"])
+    assert.strictEqual(ownAnswer(false, "accepted"), "NotInvited")
+    const offered = answersOffered("DeclineInvitation", "AnsweredMaybe", true, false, false)
+    assert.deepStrictEqual([offered, goingOffered("AnsweredMaybe", offered), maybeOffered("AnsweredMaybe", offered)], [true, true, false])
+    assert.deepStrictEqual([
+      answersOffered("OrganizerCancel", "AnswerAwaited", true, false, false), answersOffered("DeclineInvitation", "NotInvited", true, false, false),
+      answersOffered("DeclineInvitation", "AnswerAwaited", true, true, false), answersOffered("DeclineInvitation", "AnswerAwaited", true, false, true),
+      answersOffered("DeclineInvitation", "AnswerAwaited", false, false, false),
+    ], [false, false, false, false, false])
   })
 
   it.effect("a missing wall time and an end before the start are refused and nothing is saved (spec/calendar/editor.md, \"Story: Know why Save is off\")", () => effect {
