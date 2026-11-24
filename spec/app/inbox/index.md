@@ -391,6 +391,22 @@ pure def unchoose(s: Mailbox, message: int): Mailbox =
   { ...s, chosen: s.chosen.exclude(Set(message)), revision: s.revision + 1 }
 ```
 
+### Select all chooses every message the list shows, in one change
+
+The messages are those on screen, which the shell names; a choice that
+adds nothing is no change.
+
+```quint
+pure val shownValues = Set(Set(1), Set(1, 2))
+
+pure def canChooseAll(s: Mailbox, shown: Set[int]): bool =
+  readable(s) and s.pages > 0 and not(s.saved) and shown.size() >= 1 and not(shown.contains(0))
+    and not(shown.subseteq(s.chosen))
+
+pure def chooseAll(s: Mailbox, shown: Set[int]): Mailbox =
+  { ...s, chosen: s.chosen.union(shown), revision: s.revision + 1 }
+```
+
 ### A swipe chooses that message alone, to be archived
 
 ```quint
