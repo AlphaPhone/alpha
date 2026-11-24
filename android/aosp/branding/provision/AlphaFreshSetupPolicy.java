@@ -9,6 +9,19 @@ final class AlphaFreshSetupPolicy {
     static boolean roleVerified(boolean accepted, boolean alphaHoldsRole) {
         return accepted && alphaHoldsRole;
     }
+    enum NavigationResult { SKIPPED, EXISTING_CHOICE, READY, FAILED }
+    interface NavigationPort {
+        boolean eligible();
+        boolean hasEnabledMode();
+        boolean selectGesturesIfUnchosen();
+    }
+    static NavigationResult ensureNavigation(NavigationPort port) {
+        if (!port.eligible()) return NavigationResult.SKIPPED;
+        if (port.hasEnabledMode()) return NavigationResult.EXISTING_CHOICE;
+        if (port.selectGesturesIfUnchosen()) return NavigationResult.READY;
+        if (!port.eligible()) return NavigationResult.SKIPPED;
+        return port.hasEnabledMode() ? NavigationResult.EXISTING_CHOICE : NavigationResult.FAILED;
+    }
     enum ImeResult { SKIPPED, EXISTING_CHOICE, READY, FAILED }
     interface ImePort {
         boolean eligible();

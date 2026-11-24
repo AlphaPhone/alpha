@@ -26,7 +26,7 @@ type Upcoming = NoUpcoming | UpcomingShown | NothingUpcoming
 type ReadError = NoReadError | LoadError | FeedLoadError | UpcomingLoadError | AccessRefused | IntegrityError
 type ReadJob = { id: int, owner: str, session: int, query: str, revalidating: bool, phase: ReadPhase,
   feed: FeedReply, sources: SourcesReply, upcoming: UpcomingReply }
-type WriteKind = CreateEvent | UpdateEvent | DeleteEvent
+type WriteKind = CreateEvent | UpdateEvent | AnswerInvitation | DeleteEvent
 type WritePhase = NoWrite | Dispatched | ReadingBack
 type WriteJob = { id: int, epoch: int, owner: str, session: int, kind: WriteKind, phase: WritePhase }
 type WriteOutcome = NoOutcome | WriteBusy | WriteNotAdmitted | WriteOwnerChanged | WriteTransport
@@ -200,8 +200,8 @@ pure def upcomingEnded(s: AgentCalendar): AgentCalendar = { ...s, upcoming: NoUp
 
 ## Story: Change my agent's Calendar only as I reviewed, and be told what happened
 
-> As the owner, I want a create, change or deletion I confirmed to run once, against the account I
-> confirmed it in, and to be told it was saved only when Calendar read it back.
+> As the owner, I want a create, change, invitation answer or deletion I confirmed to run once,
+> against the account I confirmed it in, and to be told it was saved only when Calendar read it back.
 
 ### A write runs only between reads, from a ready feed, for the current binding
 
@@ -271,6 +271,23 @@ pure def readbackReply(s: AgentCalendar, id: int, readback: Readback): AgentCale
 pure def lawSavedNeedsReadback(kind: WriteKind): bool = readbackOutcome(kind, ReadbackMissing) != Saved and readbackOutcome(kind, ReadbackFailed) != Saved
 pure def sometimesSavedAfterReadback(s: AgentCalendar): bool = s.outcome == Saved
 pure def sometimesDeferredReadRuns(s: AgentCalendar): bool = s.read.id != 0 and s.outcome != NoOutcome and s.outcomeId >= 1
+```
+
+### An invitation answer is sent only by the invitee, at the version shown, and is saved only when a read shows the answer
+
+The answer goes to the agent's response route with the version the detail shows and an operation
+key made from the answer and that version, so a repeated tap of the same answer is the same
+request. An event the owner organizes, one no longer shown, or one whose version changed is
+refused before anything is sent. The readback is the change's: the calendar the receipt names, at
+the event's start, and only the same event with the owner's attendee giving the answer asked for
+says saved.
+
+```quint
+pure def answerAdmitted(invitee: bool, versionShown: bool, keyed: bool): bool = invitee and versionShown and keyed
+pure def answerReadback(found: bool, answered: bool): Readback = if (found and answered) ReadbackFound else ReadbackMissing
+pure def lawAnOrganizerNeverAnswers(versionShown: bool, keyed: bool): bool = not(answerAdmitted(false, versionShown, keyed))
+pure def lawAnAnswerIsSavedOnlyAsAsked(found: bool, answered: bool): bool =
+  readbackOutcome(AnswerInvitation, answerReadback(found, answered)) == Saved implies (found and answered)
 ```
 
 ### An applied deletion is never reported as an event Calendar could not look up

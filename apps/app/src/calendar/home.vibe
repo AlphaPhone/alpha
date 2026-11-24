@@ -1,7 +1,7 @@
 // spec/calendar/home.md, "Story: See what is next on Home, and trust \"nothing planned\""; spec/calendar/presentation.md, "A hidden source's rows show neither in Calendar nor on Home, and Home never calls a hidden calendar empty"
 import { type HomeAgendaState, confirmedEmpty, coversPeriods, homeAgenda, homeReadable, periodRank, ranksBefore, stillToCome, tapRereads } from "../../gen/calendar__home.effect.vibe"
 import { Machine as PresentationMachine, homeHidden } from "../../gen/calendar__presentation.effect.vibe"
-import { sourceKeyId, utcInstant } from "@elizaos/plugin-calendar"
+import { sourceKeyId, utcInstant } from "./source-key.ts"
 import { AgentCalendar, type AgentView } from "./agent.vibe"
 import type { EventRecord } from "./feed.schema.vibe"
 import { DAY, agentEventKey, eventSourceKey, readableSource } from "./model.vibe"

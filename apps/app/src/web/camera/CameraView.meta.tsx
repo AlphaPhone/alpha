@@ -13,6 +13,7 @@ export const meta: ComponentMeta<CameraViewProps> = {
     MicrophoneRefused: { camera: microphone },
     BrowserNotice: { camera: denied, browser: true },
     Grid: { camera: { ...readyPhoto, grid: true } },
+    WideRatio: { camera: { ...readyPhoto, aspect: "Aspect16x9", aspectChoice: true } },
     Zoomed: { camera: { ...readyPhoto, zoom: 20 } },
     Notice: { said: "Saved · max length" },
   },

@@ -1,5 +1,9 @@
-// spec/notes/collection.md, "Story: Save a scanned page or a reviewed summary as one note"; spec/notes/collection.md, "Reviewed text becomes one note under its own creation identity"
+// spec/notes/collection.md, "Story: Save a scanned page or a reviewed summary as one note"; spec/notes/collection.md, "Reviewed text becomes one note under its own creation identity"; spec/notes/list.md, "Story: Open a note by saying its title"; spec/notes/list.md, "The agent opens the one saved note I named, and never over another note's unsaved edit"
+import { Machine as EditorMachine, dirty } from "../../gen/notes__editor.effect.vibe"
+import { agentOpensNote, noteOpenWaitMs } from "../../gen/notes__list.effect.vibe"
+import { NotesViews } from "../assistant/ports.vibe"
 import type { CameraHandoffs } from "../camera/ports.vibe"
+import { NotesCollection } from "./collection.vibe"
 import { NotesEditor } from "./editor.vibe"
 
 /** Notes' side of Camera's handoffs, for the shell to merge into `CameraHandoffs`: reviewed scanned text becomes one note, true only once it is committed. */
@@ -13,3 +17,35 @@ export effect function scannedNoteHandoff() {
   }
   return handoff
 }
+
+/** Notes' side of a prepared Notes view that names a saved note: it opens in the editor only over no other unsaved edit. */
+export const notesViewsLayer = Layer.effect(NotesViews, effect {
+  const editor = try NotesEditor
+  const machine = try EditorMachine
+  const collection = try NotesCollection
+
+  effect function held(noteId: string): boolean!! {
+    return ((try collection.current())?.snapshot.notes ?? []).some((note) => note.id === noteId)
+  }
+
+  return {
+    effect openSaved(noteId: string) {
+      // spec/notes/list.md: a note the phone does not hold yet, such as one saved in this same turn, is read again first.
+      if (!(try held(noteId))) {
+        try collection.refresh()
+        if (!(try held(noteId))) return false
+      }
+      // The editor learns the collection through its own subscription, so it is given a moment to know the note.
+      const known = timeout(Stream.runHead(Stream.filter(machine.changes, (s) => s.known.includes(noteId))), noteOpenWaitMs) catch () => undefined
+      if (known === undefined || known._tag === "None") return false
+      const state = try machine.get()
+      const alreadyOpen = state.present && state.draftId === noteId
+      if (!agentOpensNote(alreadyOpen, dirty(state))) return false
+      if (!alreadyOpen && !(try editor.leave(noteId))) return false
+      return (try editor.selection())?.id === noteId
+    },
+    effect shown() {
+      return (try editor.selection())?.id
+    },
+  }
+})

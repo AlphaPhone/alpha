@@ -397,6 +397,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaFilesPlugin.class);
   registerPlugin(AlphaMailAttachmentsPlugin.class);
   registerPlugin(AlphaDevicePlugin.class);
+  registerPlugin(AlphaCarrierSetupPlugin.class);
   // AP-16 AC-19: Telecom's call state, read-only.
   registerPlugin(AlphaCallStatePlugin.class);
   registerPlugin(AlphaConnectionPlugin.class);

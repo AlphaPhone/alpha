@@ -2,7 +2,7 @@
 // What Clock needs of the shell, account, assistant, workflows and notes areas, each captured once when a layer is built.
 import type { AppId } from "../web/app-screen.ts"
 import { Navigation } from "../shell/navigation.vibe"
-import { CloudSession, ownerOf } from "../account/layer.vibe"
+import { CloudSession, ownerOf } from "../account/session.vibe"
 import { Composer } from "../assistant/composer.vibe"
 import { Assistant } from "../assistant/assistant.vibe"
 import { AssistantDraft, type AskSource, type QuestionReview } from "../assistant/draft.vibe"

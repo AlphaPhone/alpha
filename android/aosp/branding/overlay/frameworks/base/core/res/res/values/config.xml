@@ -8,7 +8,7 @@
     <integer name="config_keyChordPowerVolumeUp">2</integer>
     <color name="config_defaultNotificationColor">#FF0000FF</color>
     <integer name="config_defaultNightMode">2</integer>
-    <!-- Three-button navigation (Back, Home, Recents) by default. Android's own navigation-mode
-         overlays and dimensions apply; the owner can still choose gestures in Settings. -->
+    <!-- Safe pre-setup fallback. Alpha Welcome selects Android's standard gesture
+         overlay on fresh setup when a navigation mode has not been selected. -->
     <integer name="config_navBarInteractionMode">0</integer>
 </resources>

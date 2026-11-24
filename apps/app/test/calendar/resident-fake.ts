@@ -3,8 +3,8 @@
 
 const DAY = 86_400_000;
 
-/** One stored agent Calendar event. */
-export interface FakeEvent { id: string; title: string; startAt: string; endAt: string; etag: string; status: string }
+/** One stored agent Calendar event; `answer` makes it an invitation the owner was sent, with the owner's reply. */
+export interface FakeEvent { id: string; title: string; startAt: string; endAt: string; etag: string; status: string; answer?: string }
 
 /** The agent's calendar routes over a list of events in its own calendar. */
 export class CalendarAgentFake {
@@ -14,6 +14,14 @@ export class CalendarAgentFake {
   resolved: { id: string; body: unknown }[] = [];
   writes: { method: string; path: string; body: unknown }[] = [];
   refuseReads = false;
+  /**
+   * Answer invitations as upstream's agent does on a linked provider calendar: file the answer for the owner's approval and change nothing yet.
+   * Upstream refuses an answer on its own resident calendar (not_invitee) and queues every provider answer, so the applied answer this fake
+   * gives otherwise models only Alpha's readback of an applied answer, not a path the pinned agent takes.
+   */
+  queueAnswers = false;
+  /** The feed reads asked of the agent. */
+  feedReads = 0;
   /** The linked-sync control, its writable Google calendars and the linked events, as upstream's sync-control routes keep them. */
   control = { revision: 0, paused: true, destination: null as { connectorAccountId: string; providerCalendarId: string } | null, pendingDispatch: null, conflicts: 0 };
   candidates: { connectorAccountId: string; providerCalendarId: string; side: "owner"; accessRole: string; primary: boolean; accountEmail: string | null }[] = [];
@@ -24,7 +32,12 @@ export class CalendarAgentFake {
     return {
       id: record.id, externalId: record.id, agentId: this.agentId, provider: "eliza", side: "owner", calendarId: "primary", title: record.title,
       description: "", location: "", status: record.status, startAt: record.startAt, endAt: record.endAt, isAllDay: false, timezone: "UTC",
-      htmlLink: null, conferenceLink: null, organizer: { self: true }, attendees: [], metadata: { etag: record.etag }, syncedAt: record.startAt,
+      htmlLink: null, conferenceLink: null, organizer: record.answer === undefined ? { self: true } : { self: false, email: "host@example.com" },
+      attendees: record.answer === undefined ? [] : [
+        { email: "host@example.com", displayName: "Host", responseStatus: "accepted", self: false, organizer: true, optional: false },
+        { email: "owner@example.com", displayName: null, responseStatus: record.answer, self: true, organizer: false, optional: false },
+      ],
+      metadata: { etag: record.etag }, syncedAt: record.startAt,
       updatedAt: record.startAt, grantId: "eliza-calendar", connectorAccountId: "",
     };
   }
@@ -39,6 +52,7 @@ export class CalendarAgentFake {
     const url = new URL(path, "http://agent.test");
     if (this.refuseReads && method === "GET") throw Object.assign(new Error("refused"), { status: 401 });
     if (url.pathname === "/api/lifeops/calendar/feed") {
+      this.feedReads += 1;
       const timeMin = url.searchParams.get("timeMin") ?? "";
       const timeMax = url.searchParams.get("timeMax") ?? "";
       const begin = Date.parse(timeMin);
@@ -57,6 +71,18 @@ export class CalendarAgentFake {
       const created: FakeEvent = { id: `event-${this.events.length + 1}`, title: request.title, startAt: request.startAt, endAt: request.endAt, etag: "etag-1", status: "confirmed" };
       this.events.push(created);
       return { status: 200, data: { event: this.event(created), receipt: { operation: "create", source: this.sourceKey(), eventId: created.id, providerVersion: created.etag, event: this.event(created), target: null, acceptedAt: created.startAt } } };
+    }
+    const answered = /^\/api\/lifeops\/calendar\/events\/([^/]+)\/response$/.exec(url.pathname);
+    if (answered && method === "POST") {
+      this.writes.push({ method, path, body });
+      const target = this.events.find((event) => event.id === decodeURIComponent(answered[1]!));
+      if (!target) throw Object.assign(new Error("missing"), { status: 404 });
+      const request = body as { expectedProviderVersion: string; responseStatus: string };
+      if (request.expectedProviderVersion !== target.etag) throw Object.assign(new Error("version"), { status: 409 });
+      if (target.answer === undefined) throw Object.assign(new Error("not invitee"), { status: 403 });
+      if (this.queueAnswers) return { status: 202, data: { approvalRequestId: `approval-${this.writes.length}` } };
+      Object.assign(target, { answer: request.responseStatus, etag: `${target.etag}+` });
+      return { status: 200, data: { event: this.event(target), receipt: { operation: "respond_invitation", source: this.sourceKey(), eventId: target.id, providerVersion: target.etag, event: this.event(target), target: this.event(target), acceptedAt: target.startAt } } };
     }
     const match = /^\/api\/lifeops\/calendar\/events\/(.+)$/.exec(url.pathname);
     if (match) {
@@ -98,6 +124,12 @@ export class CalendarAgentFake {
 
   private sourceKey() {
     return { provider: "eliza", side: "owner", grantId: "eliza-calendar", connectorAccountId: "", calendarId: "primary" };
+  }
+
+  /** Add an invitation `day` days from today at `hour` UTC, with the owner's reply. @throws {never} */
+  invite(id: string, title: string, day: number, hour: number, answer: string) {
+    this.add(id, title, day, hour);
+    this.events[this.events.length - 1]!.answer = answer;
   }
 
   /** Add an event today at `hour` UTC. @throws {never} */

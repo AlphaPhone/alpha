@@ -14,7 +14,7 @@ export const meta: ComponentMeta<CalendarScreenViewProps> = {
     presentation, can: () => true, agent: agentReady, device: deviceAllowed, writes, draft: openDraft, link: linkView, rows, facts: organizerFacts,
     timingLocked: false, problem: "", zone: "UTC", now,
     onClose: none, onEvent: none, onOpenSources: none, onCloseSources: none, onLink: none, onRetry: none, onConnectDevice: none, onOpenRow: none, onOpenLink: none,
-    onDelete: none, onPlace: none, onOpenOrigin: none, onCloseRow: none, onStartEditor: none, draftActions, onSave: none, onCloseEditor: none,
+    onDelete: none, onAnswer: none, answering: false, onPlace: none, onOpenOrigin: none, onCloseRow: none, onStartEditor: none, draftActions, onSave: none, onCloseEditor: none,
   },
   examples: {
     Week: { presentation: { ...presentation, view: "WeekView" } },
