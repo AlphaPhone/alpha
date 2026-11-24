@@ -32,3 +32,4 @@ export * from "./components/Tabs.tsx";
 export * from "./components/Textarea.tsx";
 export * from "./components/Toast.tsx";
 export * from "./components/Wordmark.tsx";
+export * from "./components/MapView.tsx";

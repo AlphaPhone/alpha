@@ -73,3 +73,17 @@ export function coordinateOf(p: Point) {
 export function pointOf(c: { readonly latitude: number; readonly longitude: number }): Point {
   return { lat: Math.round(c.latitude * 1e6), lng: Math.round(c.longitude * 1e6) };
 }
+
+/** Where `p` lies on the world's tiles at `zoom`, in tiles from the top left, as Web Mercator draws it. @throws {never} */
+export function tileAt(p: Point, zoom: number): { x: number; y: number } {
+  const scale = 2 ** zoom;
+  const lat = Math.max(-85.0511, Math.min(85.0511, p.lat / 1e6)) * (Math.PI / 180);
+  return { x: ((p.lng / 1e6 + 180) / 360) * scale, y: ((1 - Math.log(Math.tan(lat) + 1 / Math.cos(lat)) / Math.PI) / 2) * scale };
+}
+
+/** Where `p` is drawn on a view of `width` by `height` pixels centred on `centre` at `zoom`, with tiles of 256 pixels. @throws {never} */
+export function pixelOf(p: Point, centre: Point, zoom: number, width: number, height: number): { x: number; y: number } {
+  const at = tileAt(p, zoom);
+  const middle = tileAt(centre, zoom);
+  return { x: Math.round((at.x - middle.x) * 256 + width / 2), y: Math.round((at.y - middle.y) * 256 + height / 2) };
+}

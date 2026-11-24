@@ -3,14 +3,20 @@ import type { LocationResult, LocationPermissionStatus } from "@elizaos/os/bridg
 
 module held {
   import { type LocationClient, locationClient } from "@elizaos/os/bridges/location"
+  import { systemClient } from "@elizaos/os/bridges/system"
 
   let made: LocationClient | undefined
+  let system: ReturnType<typeof systemClient> | undefined
   /** eliza's client of the phone's `ElizaLocation` plugin, made once: Capacitor registers a plugin a single time. @throws {never} */
   export function client(): LocationClient {
     return (made ??= locationClient())
   }
+  /** eliza's client of the phone's `ElizaSystem` plugin, made once. @throws {never} */
+  export function settings(): ReturnType<typeof systemClient> {
+    return (system ??= systemClient())
+  }
 }
-import { client } from held
+import { client, settings } from held
 
 /** What Android answers about location: allowed precisely, allowed only roughly, refused, or not yet asked. */
 export type Grant = "precise" | "approximate" | "denied" | "prompt"
@@ -39,6 +45,8 @@ export service Location {
   watch(): Stream.Stream<Heard, Unavailable>
   /** Remove every native watch this page started: whether Android confirmed it. */
   clear(): boolean!!
+  /** Android's location settings, where the owner can allow what they refused: whether they opened. */
+  openSettings(): boolean!!
 }
 
 export function grantOf(status: LocationPermissionStatus): Grant {
@@ -75,6 +83,7 @@ export const phoneLocation = Layer.sync(Location, () => {
       }
       return confirmed
     },
+    openSettings: () => tryPromise(() => settings().openSettingsPage({ page: "location" })) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false),
   }
 })
 
@@ -84,4 +93,5 @@ export const browserLocation = Layer.succeed(Location, {
   request: () => succeed<Grant>("denied"),
   watch: () => Stream.fail(new Unavailable({ cause: "a browser gives Maps no location" })),
   clear: () => succeed(true),
+  openSettings: () => succeed(false),
 })

@@ -2,10 +2,6 @@
 import { act } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Screen } from "../gen/app__maps.effect.vibe";
-import { Machine as Connection } from "../gen/app__maps__connection.effect.vibe";
-import { Machine as Guidance } from "../gen/app__maps__guidance.effect.vibe";
-import { Machine as Locator } from "../gen/app__maps__location.effect.vibe";
-import { Machine as Saved } from "../gen/app__maps__saved.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import maps from "../src/maps/index.tsx";
 import { button, closeAll, fill, hardware, later, only, open, press, underAct, until } from "./alpha.tsx";
@@ -24,151 +20,148 @@ const enter = (name: string) => act(async () => {
   field.form.requestSubmit();
 });
 
+/** Focus the field whose accessible name is `name`. */
+const focus = (name: string) => act(async () => {
+  [...document.querySelectorAll("input")].find((found) => found.getAttribute("aria-label") === name)?.focus();
+});
+
 /** The places the results list shows, by name. */
 const results = () => [...document.querySelectorAll("section[aria-label=Maps] button")].map((found) => found.getAttribute("aria-label")).filter((name) => name?.startsWith("Harbour"));
 
 describe("Maps on a phone", () => {
-  // spec/app/maps/index.md, "Story: Find a place"; spec/app/maps/index.md, "Story: Plan directions and choose a route"; spec/app/maps/guidance.md, "Story: Guide me along the route I started"
-  it("Find a place, plan a route and be guided there (spec/app/maps/index.md, \"Story: Find a place\"; spec/app/maps/index.md, \"Story: Plan directions and choose a route\"; spec/app/maps/guidance.md, \"Story: Guide me along the route I started\")", async () => {
+  it("Search for a place, get directions and navigate (spec/app/maps/index.md, \"Story: Search for a place\"; spec/app/maps/index.md, \"Story: Get directions\"; spec/app/maps/index.md, \"Story: Navigate\")", async () => {
     const world = { ...scene(), phone: true };
     const start = { latitude: 43.7300, longitude: 7.4200 };
-    world.maps.routes = [cloudRoute("fast", start, harbour.coordinate, 400, 3), cloudRoute("slow", start, harbour.coordinate, 900, 2)];
+    world.maps.routes = [cloudRoute("fast", start, harbour.coordinate, 400, 3)];
     const { alpha } = await open(world, withMaps);
     await press("Maps");
     const runtime = maps.runtime(alpha);
 
-    // spec/app/maps/connection.md, "Only the newest read for the bound account installs the provider, and coverage with no provider or no mode is Maps not offered"
-    await until(alpha, runtime, Connection, (s) => s.phase === "Installed" && s.account === "u1");
-    // spec/app/maps/index.md, "The quiet fix taken on opening centres the map only while nothing is chosen, listed or being located, and its failure says nothing"
-    await until(alpha, runtime, Locator, (s) => s.located && s.purpose === "NoPurpose");
+    // spec/app/maps/index.md, "Opening Maps, the network returning or Retry reads the coverage when no provider works, and leaves a working one alone"
+    await until(alpha, runtime, Screen, (s) => s.link.provider !== 0 && s.link.offer.walk && !s.link.offer.transit);
 
-    // spec/app/maps/index.md, "Typing waits 350 milliseconds and then searches; Enter searches at once, and Enter again on the same text reuses its answer"
+    // spec/app/maps/index.md, "Only the newest search's answer is shown: results, none, or a failure"
+    await focus("Search Maps");
     await fill("Search Maps", "harbour");
-    await later(alpha, 350);
-    await until(alpha, runtime, Screen, (s) => s.search.status === "Loaded");
-    expect(results()).toEqual(["Harbour Cafe", "Harbour Gallery"]);
-    // spec/app/maps/connection.md, "Every Maps request goes through eliza's cloud client under its own request key, and a tile comes back as its image"
-    const search = world.maps.asked.at(-1);
-    expect([search?.path, search?.body, typeof search?.key]).toEqual(["/api/v1/maps/places/search", { query: "harbour", limit: 10, near: start }, "string"]);
-    const searched = world.maps.asked.length;
     await enter("Search Maps");
-    expect(world.maps.asked.length).toBe(searched);
+    await until(alpha, runtime, Screen, (s) => s.search.status === "Loaded" && s.results === 2);
+    expect(results()).toEqual(["Harbour Cafe", "Harbour Gallery"]);
+    const search = world.maps.asked.at(-1);
+    expect([search?.path, (search?.body as { query?: string }).query, typeof search?.key]).toEqual(["/api/v1/maps/places/search", "harbour", "string"]);
 
-    // spec/app/maps/index.md, "A place opens from a result, a saved place or a pin, and a result's details are asked for under the next ticket"
+    // spec/app/maps/index.md, "A result opens its place"
     await press("Harbour Cafe");
-    await until(alpha, runtime, Screen, (s) => s.details.status === "Loaded");
-    expect(world.maps.asked.at(-1)?.path).toBe("/api/v1/maps/places/details");
+    await until(alpha, runtime, Screen, (s) => s.place !== 0 && s.sheet === "Half");
 
-    // spec/app/maps/index.md, "Locate shows the phone's position, or makes it the starting point in directions"
+    // spec/app/maps/index.md, "\"Use my location\" locates once when allowed, asks when it may, and otherwise opens Settings"; spec/app/maps/index.md, "A fix goes to whoever holds the location"
     await press("Directions");
-    await press("Your location");
-    await until(alpha, runtime, Screen, (s) => s.route.status === "Loaded");
-    const planned = world.maps.asked.length;
+    await press("From my location");
+    await until(alpha, runtime, Screen, (s) => s.trip.route !== 0 && s.trip.origin === "MyLocation" && s.link.locator === "Nobody");
+    expect(world.maps.asked.at(-1)?.body).toMatchObject({ from: start, to: harbour.coordinate, mode: "drive" });
 
-    // spec/app/maps/index.md, "The provider's routes are listed in order, and choosing one asks nothing new"
-    await press("Alternative 1");
-    await until(alpha, runtime, Screen, (s) => s.chosen === 1);
-    expect(world.maps.asked.length).toBe(planned);
-    await press("Recommended");
+    // spec/app/maps/index.md, "Directions are asked for a way of travelling the provider offers, and another way asks again from the same start"
+    expect(button("Transit")).toBeUndefined();
+    await press("Walk");
+    await until(alpha, runtime, Screen, (s) => s.trip.travel === "Walk" && s.trip.plan.status === "Loaded");
+    expect(world.maps.asked.at(-1)?.body).toMatchObject({ mode: "walk" });
 
-    // spec/app/maps/guidance.md, "Start begins a new session from a ready route, and starts the guidance watch"
+    // spec/app/maps/index.md, "Start guides along the route shown, with location allowed"
     await press("Start");
-    await until(alpha, runtime, Guidance, (s) => s.phase === "Guiding" && s.fixUsable);
-    expect(button("Swap ends")).toBeUndefined();
+    await until(alpha, runtime, Screen, (s) => s.trip.guidance === "Going" && s.link.locator === "Guide");
 
-    // spec/app/maps/guidance.md, "A fix guides only when it is usable, and only for the current session"
+    // spec/app/maps/navigation.md, "A fix moves guidance only when it is precise, fresh and close: arrival within 25 meters, a turn passed within 40 meters or beyond 60, the route left beyond 75"
     move(world.maps, harbour.coordinate.latitude, harbour.coordinate.longitude, 8, world.now);
-    await until(alpha, runtime, Guidance, (s) => s.phase === "Arrived");
-    await until(alpha, runtime, Locator, (s) => s.purpose === "NoPurpose");
-    expect(world.maps.watches.size).toBe(0);
+    await until(alpha, runtime, Screen, (s) => s.trip.guidance === "Arrived" && s.link.locator === "Nobody");
+    await until(alpha, runtime, Screen, () => world.maps.watches.size === 0);
 
-    // spec/app/maps/guidance.md, "Ending, the provider's retirement, a failed watch or the navigation service ends the session"
+    // spec/app/maps/index.md, "End stops guidance and its location and goes back to the directions"
     await press("End");
-    await until(alpha, runtime, Guidance, (s) => s.phase === "NotGuiding");
-    expect(Boolean(button("Start"))).toBe(true);
+    await until(alpha, runtime, Screen, (s) => s.trip.guidance === "Stopped" && s.directions);
 
-    // spec/app/maps/index.md, "Back closes one layer at a time: the choice of a start, the directions, the place, then the search"
+    // spec/app/maps/index.md, "Back leaves one mode: navigation to its directions, directions to the place, the place to the search, the search to the map"
     await hardware("back");
-    await until(alpha, runtime, Screen, (s) => !s.directions && s.choice === "ResultChoice");
+    await until(alpha, runtime, Screen, (s) => !s.directions && s.place !== 0);
     await hardware("back");
-    await until(alpha, runtime, Screen, (s) => s.choice === "NoChoice" && s.searching);
+    await until(alpha, runtime, Screen, (s) => s.place === 0 && s.searching && s.trip.route === 0);
     await hardware("back");
-    await until(alpha, runtime, Screen, (s) => !s.searching && s.query === "");
+    await until(alpha, runtime, Screen, (s) => !s.searching && s.query === "" && s.recent[0] === "harbour");
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
   });
 
-  // spec/app/maps/connection.md, "A coverage read starts only for a signed-in account under the next generation, and a signed-out one asks nothing"
-  it("Signed out, Maps asks Cloud nothing and says to sign in (spec/app/maps/connection.md, \"Story: Keep Cloud Maps on the account that asked for it\")", async () => {
+  it("Signed out, Maps asks Cloud nothing and says to sign in (spec/app/maps/index.md, \"Story: Connect through my cloud account\")", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     const { alpha } = await open(world, withMaps);
     await press("Maps");
     const runtime = maps.runtime(alpha);
-    await until(alpha, runtime, Connection, (s) => s.phase === "ReadFailed" && s.failure === "SignedOut");
-    expect([world.maps.asked, Boolean(button("Retry"))]).toEqual([[], true]);
+    // spec/app/maps/connection.md, "Signing in, out or to another account retires the provider and reads the new account's coverage"
+    await until(alpha, runtime, Screen, (s) => s.link.account === 0 && s.link.basemap === "World");
+    await later(alpha, 1000);
+    expect(world.maps.asked).toEqual([]);
   });
 });
 
 describe("Maps in a browser", () => {
-  // spec/app/maps/saved.md, "Story: Keep the places I care about on this phone"
-  it("Keep the places I care about on this phone (spec/app/maps/saved.md, \"Story: Keep the places I care about on this phone\")", async () => {
+  it("Look at a place and keep it (spec/app/maps/index.md, \"Story: Look at a place\")", async () => {
     const world = scene();
     const first = await open(world, withMaps);
     await press("Maps");
     const runtime = maps.runtime(first.alpha);
-    await until(first.alpha, runtime, Connection, (s) => s.phase === "Installed");
+    await until(first.alpha, runtime, Screen, (s) => s.link.provider !== 0);
 
-    // spec/app/maps/index.md, "A place opens from a result, a saved place or a pin, and a result's details are asked for under the next ticket"
+    // spec/app/maps/index.md, "Coordinates typed into Search drop a pin"
+    await focus("Search Maps");
     await fill("Search Maps", "43.73, 7.42");
     await enter("Search Maps");
-    await until(first.alpha, runtime, Screen, (s) => s.choice === "PinChoice");
+    await until(first.alpha, runtime, Screen, (s) => s.place !== 0);
     expect(world.maps.asked).toEqual([]);
 
-    // spec/app/maps/saved.md, "A place is saved with a name and a valid identity, and saving it again renames the same entry"
+    // spec/app/maps/index.md, "The place on the card is saved under a name, renamed under another, or forgotten"
+    await fill("Name", "Quay");
     await press("Save");
-    await until(first.alpha, runtime, Saved, (s) => s.items.length === 1);
+    await until(first.alpha, runtime, Screen, (s) => s.saved.length === 1 && s.saved[0]?.name === "Quay");
     await first.close();
 
-    // spec/app/maps/saved.md, "When Alpha opens again the saved places are as they were"
+    // spec/app/maps/index.md, "Saved places are kept on the phone, and are what survives a restart"
     world.maps.coverage = { ...world.maps.coverage, providerId: "eliza-cloud-google" } as typeof world.maps.coverage;
     const second = await open(world, withMaps);
     await press("Maps");
     const again = maps.runtime(second.alpha);
-    await until(second.alpha, again, Saved, (s) => s.items.length === 1);
-    expect(Boolean(button("43.73, 7.42"))).toBe(true);
+    await until(second.alpha, again, Screen, (s) => s.saved.length === 1 && s.link.google);
+    expect(Boolean(button("Quay"))).toBe(true);
 
-    // spec/app/maps/vocabulary.md, "A Google place is never saved, shared, renamed or copied, and Google guidance is never spoken"
-    await until(second.alpha, again, Connection, (s) => s.coverage.kind === "GoogleProvider");
+    // spec/app/maps/connection.md, "Google's content is drawn only on Google's own map, whose only credit is the Google Maps badge"; spec/app/maps/places.md, "At most 200 places are saved: a full list only renames"
+    await focus("Search Maps");
     await fill("Search Maps", "gallery");
     await enter("Search Maps");
     await until(second.alpha, again, Screen, (s) => s.search.status === "Loaded");
     await press("Harbour Gallery");
-    await until(second.alpha, again, Screen, (s) => s.details.status === "Loaded");
-    expect([Boolean(button("Directions")), Boolean(button("Save"))]).toEqual([true, false]);
+    await until(second.alpha, again, Screen, (s) => s.place !== 0);
+    expect([Boolean(button("Directions")), Boolean(button("Save")), Boolean(button("Share"))]).toEqual([true, false, false]);
   });
 
-  // spec/app/maps/connection.md, "Story: Back off when Maps asks me to wait"
-  it("Back off when Maps asks me to wait (spec/app/maps/connection.md, \"Story: Back off when Maps asks me to wait\")", async () => {
+  it("Back off when Maps asks me to wait (spec/app/maps/connection.md, \"Story: Serve Maps through my cloud account\")", async () => {
     const world = scene();
     const { alpha } = await open(world, withMaps);
     await press("Maps");
     const runtime = maps.runtime(alpha);
-    await until(alpha, runtime, Connection, (s) => s.phase === "Installed");
+    await until(alpha, runtime, Screen, (s) => s.link.provider !== 0);
 
-    // spec/app/maps/connection.md, "A refusal asking to wait, for the current generation, pauses every data request until its wait ends"
+    // spec/app/maps/connection.md, "A wait Cloud names holds every Maps request back until it ends: a rate limit for at most a day, a spent allowance for at most 400 days, and any other wait one minute"
     world.maps.limited = 120;
+    await focus("Search Maps");
     await fill("Search Maps", "harbour");
     await enter("Search Maps");
     await until(alpha, runtime, Screen, (s) => s.search.status === "Failed");
-    await until(alpha, runtime, Connection, (s) => s.pausedUntil > world.now);
     const asked = world.maps.asked.length;
+    await fill("Search Maps", "harbour cafe");
     await enter("Search Maps");
-    await until(alpha, runtime, Screen, (s) => s.search.status === "Failed");
+    await until(alpha, runtime, Screen, (s) => s.search.status === "Failed" && s.query === "harbour cafe");
     expect(world.maps.asked.length).toBe(asked);
 
-    // spec/app/maps/connection.md, "A wait Cloud names is kept when it is at most a day, an allowance reset when at most 400 days, and any other wait is one minute"
     await later(alpha, 120_000);
+    await fill("Search Maps", "harbour");
     await enter("Search Maps");
-    await until(alpha, runtime, Screen, (s) => s.search.status === "Loaded" && s.results.length === 2);
+    await until(alpha, runtime, Screen, (s) => s.search.status === "Loaded" && s.results === 2);
   });
 });
