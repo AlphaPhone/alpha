@@ -2,7 +2,7 @@
 import { actionJournalPlugin, createDeferredDeletions, type DeferredDeletionsClient } from "@elizaos/os/bridges/action-journal"
 import { rejectionCode } from "@elizaos/os/bridges/bridge"
 import { addressBookPlugin, createAddressBookClient, createContactNames, type AddressBookClient, type ContactNamesClient, type NameSurface } from "@elizaos/os/bridges/contacts"
-import { messagesClient, messagesPlugin, type MessagesClient } from "@elizaos/os/bridges/messages"
+import { messagesClient, messagesPlugin, type DirectSmsReview, type MessagesClient, type OperationId, type SmsSendResult } from "@elizaos/os/bridges/messages"
 import { phoneClient, telephonyPlugin, type PhoneClient } from "@elizaos/os/bridges/phone"
 import { telephonyOffered, type BuildVariant } from "../../gen/telephony__common.effect.vibe"
 import { Build, type BuildInfo } from "../platform/build.vibe"
@@ -83,6 +83,18 @@ export effect function bridgeCall<A>(method: string, run: (clients: TelephonyCli
 
 /** A bridge caller, as the layers capture one. */
 export type BridgeCaller = ReturnType<typeof callerOf>
+
+/** Watch only the native result of the already-dispatched, exact SMS. */
+export effect function watchSubmittedSms(call: BridgeCaller, review: DirectSmsReview, id: OperationId, initial: SmsSendResult) {
+  let result = initial
+  for (let read = 0; result.status === "submitted" && read < 6; read++) {
+    try sleep("500 millis")
+    const again = (call("smsSendResult", (c) => c.messages.smsSendResult(review, id)) catch () => undefined)
+    if (again === undefined) break
+    result = again
+  }
+  return result
+}
 
 /** The tag of a typed refusal the upstream clients throw, such as `RecentCallsRefused`. */
 export function refusalTag(failure: TelephonyRefused): string {

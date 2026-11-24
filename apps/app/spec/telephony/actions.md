@@ -168,6 +168,9 @@ pure def sometimesTheGuardRefused(a: Actions): bool = resultOf(a.ongoing) == Ref
 A coded native refusal (no phone-app role, no call grant, no write access, Contacts closed) is the
 phone refusing before it acted: unavailable. A lost reply may follow an accepted call, a radio that
 took the text, or a committed contact write, so it is unconfirmed, and the run is never retried.
+When Android reports an approved SMS was submitted, Alpha checks the send record for that exact
+operation and reviewed text up to six times at half-second intervals. These checks never dispatch
+another SMS.
 
 Each receipt is one sentence chosen by the result's own kind and status: a text Android only
 accepted reads "Message handed to Android.", one the radio sent "Message sent.", and only a

@@ -8,12 +8,10 @@ import {
   Machine as DraftsMachine, maxPictures, occupied, slotOf, type Event as DraftsEvent, type Operation, type Receipt, type SendKind, type Slot,
 } from "../../gen/telephony__drafts.effect.vibe"
 import { Machine as MessagesMachine, type OutgoingState } from "../../gen/telephony__messages.effect.vibe"
-import { callerOf, refusalTag, TelephonyBridges, TelephonyRefused, TelephonyUnavailable } from "./bridges.vibe"
+import { callerOf, refusalTag, TelephonyBridges, TelephonyRefused, TelephonyUnavailable, watchSubmittedSms } from "./bridges.vibe"
 import { newId as newOperationId } from "../platform/ids.ts"
 import { CloudSession } from "../account/session.vibe"
 
-/** How long a text Android has only handed to the carrier is watched for the radio's answer. */
-export const SMS_SETTLE = { reads: 6, every: "500 millis" } as const
 /** The largest picture Messages attaches. */
 export const MMS_PICTURE_BYTES = 1024 * 1024
 const PICTURE_TYPES: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/gif": "gif" }
@@ -159,13 +157,9 @@ export const draftSendsLayer = Layer.effect(DraftSends, effect {
         try note({ type: "outgoingSettled", operationId })
         return undefined
       }
-      let result = sent
-      for (let read = 0; checked.sms !== undefined && result.status === "submitted" && read < SMS_SETTLE.reads; read++) {
-        try sleep(SMS_SETTLE.every)
-        const again = (bridgeCall("smsSendResult", (c) => c.messages.smsSendResult(checked.sms, id)) catch () => undefined)
-        if (again === undefined) break
-        result = again
-      }
+      const result = checked.sms !== undefined && sent.kind === "sms-send"
+        ? try watchSubmittedSms(bridgeCall, checked.sms, id, sent)
+        : sent
       try settle(thread, operationId, result.status, result.createdAt)
       return undefined
     },
