@@ -80,8 +80,8 @@ pure def passive(t: Toast): bool = t.message != "" and t.undo == "" and not(t.fa
 
 pure def armed(n: Notices): int =
   val whole = durationOf(n.shown, n.scale)
-  val least = shortest * n.scale / 100
-  if (passive(n.shown) and n.queued.length() > 0 and least < whole) least else whole
+  val soonest = shortest * n.scale / 100
+  if (passive(n.shown) and n.queued.length() > 0 and soonest < whole) soonest else whole
 
 pure def presenting(t: Toast, n: Notices, now: int): Notices =
   val shown = { ...n, shown: t, seq: n.seq + 1, since: now, held: false }
