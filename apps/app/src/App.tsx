@@ -1,7 +1,8 @@
-// spec/app/shell/index.md, "Story: Move between Home and the apps"; spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back"; spec/app/shell/gestures.md, "On the launcher a pull down that Home allows opens Android's shade, and a swipe up from the bottom bar goes Home; nothing else is a swipe"; spec/app/shell/layers.md, "The page under a layer or a hold takes no touch, and a covering layer or a hold takes none for Ask Alpha either"
+// spec/app/shell/index.md, "Story: Move between Home and the apps"; spec/app/shell/index.md, "On Phone, Messages and Contacts the app's own bar stands in for Ask Alpha at rest, until Ask Alpha rises"; spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back"; spec/app/shell/gestures.md, "On the launcher a pull down that Home allows opens Android's shade, and a swipe up from the bottom bar goes Home; nothing else is a swipe"; spec/app/shell/layers.md, "The page under a layer or a hold takes no touch, and a covering layer or a hold takes none for Ask Alpha either"
 import { Alert, AppHeader, Button } from "@repo/ui";
 import { ChevronLeft } from "lucide-react";
 import { type PointerEvent, useRef } from "react";
+import { askAlphaDrawn } from "../gen/app__shell.ts";
 import { useMachine } from "../gen/app__shell.react.ts";
 import { useMachine as useCanvas } from "../gen/app__shell__keyboard.react.ts";
 import { useMachine as useLayers } from "../gen/app__shell__layers.react.ts";
@@ -59,7 +60,7 @@ export function App({ alpha }: AppProps) {
             </>
           )}
       </div>
-      <div inert={layers !== undefined && assistantInert(layers)}>{alpha.slot("assistant")}</div>
+      <div hidden={!askAlphaDrawn(state)} inert={layers !== undefined && assistantInert(layers)}>{alpha.slot("assistant")}</div>
       {alpha.slot("overlay")}
       {alpha.slot("notice")}
     </main>
