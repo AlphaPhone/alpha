@@ -1,7 +1,7 @@
 {
   "url": "https://github.com/elizaOS/eliza.git",
   "branch": "develop",
-  "commit": "4ec8db5177ce7859b5179e8fe6091bc1e9759ecb",
+  "commit": "f360d17bfc20db1741a1ed2184f8f39c2f7eed55",
   "appSource": "apps/app",
   "osSource": "packages/os",
   "androidSource": "packages/os/android",

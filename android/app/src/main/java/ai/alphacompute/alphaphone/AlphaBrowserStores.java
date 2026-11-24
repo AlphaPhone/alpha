@@ -32,6 +32,8 @@ final class AlphaBrowserStores {
  static final BrowserTabHostConfig IDENTITY=BrowserTabHostConfig.builder(PERSISTENT_PROFILE,PRIVATE_PREFIX,"alpha-browser")
   .names("Alpha Phone","Alpha","Alpha Browser")
   .hostScheme("alphaphone")
+  // A tapped app link (whatsapp:, zoommtg:, tg:, msteams:) opens its app, as in Chrome.
+  .appLinks(true)
   // The integrated vault's per-field and top-level origin extras for engine-bound login fields.
   .autofillExtras(new BrowserAutofillExtras(PasswordAutofillPolicy.FIELD_ORIGIN,PasswordFormPolicy.TOP_ORIGIN_EXTRA))
   .debugLogging(BuildConfig.DEBUG)

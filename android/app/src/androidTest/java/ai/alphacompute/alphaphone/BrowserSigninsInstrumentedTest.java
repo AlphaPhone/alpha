@@ -86,13 +86,13 @@ public final class BrowserSigninsInstrumentedTest {
 
  @Test public void externalLinkIntentsAreImplicitBrowsableAndNeverTargetAlpha() {
   String own=InstrumentationRegistry.getInstrumentation().getTargetContext().getPackageName();
-  Intent mail=BrowserExternalHandoff.intentFor("mailto:alpha@example.com",own,AlphaBrowserStores.HOST_SCHEMES);
+  Intent mail=BrowserExternalHandoff.intentFor("mailto:alpha@example.com",own,AlphaBrowserStores.IDENTITY);
   assertEquals(Intent.ACTION_SENDTO,mail.getAction());assertEquals("mailto",mail.getData().getScheme());
-  Intent tel=BrowserExternalHandoff.intentFor("tel:+15555550100",own,AlphaBrowserStores.HOST_SCHEMES);
+  Intent tel=BrowserExternalHandoff.intentFor("tel:+15555550100",own,AlphaBrowserStores.IDENTITY);
   assertEquals("A tel link only opens the dialer",Intent.ACTION_DIAL,tel.getAction());
-  Intent market=BrowserExternalHandoff.intentFor("market://details?id=com.example.app",own,AlphaBrowserStores.HOST_SCHEMES);
+  Intent market=BrowserExternalHandoff.intentFor("market://details?id=com.example.app",own,AlphaBrowserStores.IDENTITY);
   assertEquals(Intent.ACTION_VIEW,market.getAction());assertTrue(market.hasCategory(Intent.CATEGORY_BROWSABLE));
-  Intent parsed=BrowserExternalHandoff.intentFor("intent://scan/#Intent;scheme=zxing;package=com.example.scanner;component=com.example.scanner/.Private;launchFlags=0x10000001;S.secret=value;SEL;action=android.intent.action.MAIN;end",own,AlphaBrowserStores.HOST_SCHEMES);
+  Intent parsed=BrowserExternalHandoff.intentFor("intent://scan/#Intent;scheme=zxing;package=com.example.scanner;component=com.example.scanner/.Private;launchFlags=0x10000001;S.secret=value;SEL;action=android.intent.action.MAIN;end",own,AlphaBrowserStores.IDENTITY);
   assertNotNull(parsed);
   assertNull("Page-chosen component removed",parsed.getComponent());
   assertNull("Page-chosen selector removed",parsed.getSelector());
@@ -100,16 +100,17 @@ public final class BrowserSigninsInstrumentedTest {
   assertNull("Page extras are not forwarded",parsed.getExtras());
   assertTrue(parsed.hasCategory(Intent.CATEGORY_BROWSABLE));
   assertEquals(Intent.ACTION_VIEW,parsed.getAction());assertEquals("zxing",parsed.getData().getScheme());assertEquals("com.example.scanner",parsed.getPackage());
-  assertNull("Alpha's own delegation route is refused",BrowserExternalHandoff.intentFor("intent://cloud-delegation#Intent;scheme=alphaphone;end",own,AlphaBrowserStores.HOST_SCHEMES));
-  assertNull("Alpha package is refused",BrowserExternalHandoff.intentFor("intent://x#Intent;scheme=https;package="+own+";end",own,AlphaBrowserStores.HOST_SCHEMES));
-  assertNull("Non-VIEW actions are refused",BrowserExternalHandoff.intentFor("intent:#Intent;action=android.intent.action.CALL;S.number=1;end",own,AlphaBrowserStores.HOST_SCHEMES));
-  assertNull("File data is refused",BrowserExternalHandoff.intentFor("intent:///sdcard/x#Intent;scheme=file;end",own,AlphaBrowserStores.HOST_SCHEMES));
-  assertNull("Content data is refused",BrowserExternalHandoff.intentFor("intent://media/1#Intent;scheme=content;end",own,AlphaBrowserStores.HOST_SCHEMES));
-  assertNull("JavaScript is not an external link",BrowserExternalHandoff.intentFor("javascript:alert(1)",own,AlphaBrowserStores.HOST_SCHEMES));
-  assertNull("Malformed intent URI is refused",BrowserExternalHandoff.intentFor("intent:#Intent;component=;end\n",own,AlphaBrowserStores.HOST_SCHEMES));
+  assertNull("Alpha's own delegation route is refused",BrowserExternalHandoff.intentFor("intent://cloud-delegation#Intent;scheme=alphaphone;end",own,AlphaBrowserStores.IDENTITY));
+  assertNull("Alpha package is refused",BrowserExternalHandoff.intentFor("intent://x#Intent;scheme=https;package="+own+";end",own,AlphaBrowserStores.IDENTITY));
+  assertNull("Non-VIEW actions are refused",BrowserExternalHandoff.intentFor("intent:#Intent;action=android.intent.action.CALL;S.number=1;end",own,AlphaBrowserStores.IDENTITY));
+  assertNull("File data is refused",BrowserExternalHandoff.intentFor("intent:///sdcard/x#Intent;scheme=file;end",own,AlphaBrowserStores.IDENTITY));
+  assertNull("Content data is refused",BrowserExternalHandoff.intentFor("intent://media/1#Intent;scheme=content;end",own,AlphaBrowserStores.IDENTITY));
+  assertNull("JavaScript is not an external link",BrowserExternalHandoff.intentFor("javascript:alert(1)",own,AlphaBrowserStores.IDENTITY));
+  assertNull("Malformed intent URI is refused",BrowserExternalHandoff.intentFor("intent:#Intent;component=;end\n",own,AlphaBrowserStores.IDENTITY));
   assertEquals("https://example.com/app",BrowserExternalHandoff.fallback("intent://x#Intent;scheme=zxing;S.browser_fallback_url=https%3A%2F%2Fexample.com%2Fapp;end"));
   assertNull("Only HTTPS fallbacks are followed",BrowserExternalHandoff.fallback("intent://x#Intent;scheme=zxing;S.browser_fallback_url=javascript%3Aalert(1);end"));
-  assertTrue(BrowserExternalHandoff.external("TEL:123"));assertFalse(BrowserExternalHandoff.external("https://example.com/"));
+  assertTrue(BrowserExternalHandoff.external("TEL:123",AlphaBrowserStores.IDENTITY));assertFalse(BrowserExternalHandoff.external("https://example.com/",AlphaBrowserStores.IDENTITY));
+  assertTrue("An app link goes to its app",BrowserExternalHandoff.external("whatsapp://send?text=hi",AlphaBrowserStores.IDENTITY));assertFalse("Alpha's own scheme is never an app link",BrowserExternalHandoff.external("alphaphone://x",AlphaBrowserStores.IDENTITY));
  }
 
  @Test public void signInSurvivesTabCloseUntilClearBrowsingData()throws Exception{
