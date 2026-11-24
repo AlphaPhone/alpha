@@ -1,0 +1,27 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "allowArbitraryExtensions": true,
+    "types": [
+      "node"
+    ],
+    "rootDir": ".",
+    "rootDirs": [
+      ".",
+      ".vibe/declarations"
+    ],
+    "resolveJsonModule": true
+  },
+  "include": [
+    "src",
+    "test",
+    "gen/*.ts",
+    "gen/*.vibe",
+    "profile",
+    "seed",
+    "*.config.ts"
+  ],
+  "vibe": {
+    "sidecarDir": ".vibe/declarations"
+  }
+}
