@@ -101,6 +101,8 @@ pure val dxValues = Set(-120, -10, 120)
 
 The composer's draft id and the exact content it showed are recorded with a send or a Gmail draft
 save; a send also records the local draft it came from. Only one operation per account can wait.
+The journal binds to the account selected now before it records a proposal, so the proposal is
+recorded under the same account Gmail is asked for.
 
 ```quint
 type ReceiptState = NoReceipt | PreparedReceipt | DispatchedReceipt | SucceededReceipt | RejectedReceipt | UnknownReceipt

@@ -6,7 +6,7 @@ import { type BrowserTab, type Session, freshTab, initial } from "../../../gen/b
 
 const page = (url: string, title: string, sequence: number): TabPage => ({
   url, title, navigation: String(sequence), sequence, loading: false, committed: true, failed: false,
-  canBack: sequence > 2, canForward: false, externalOnly: false, web: true, secure: url.startsWith("https:"), problem: "",
+  canBack: sequence > 2, canForward: false, externalOnly: false, web: true, secure: url.startsWith("https:"), problem: "", elsewhere: "",
 });
 
 const live = (id: string, url: string, title: string, sequence = 2): BrowserTab => ({ ...freshTab(id, "Normal"), stage: "Live", revision: 1, savedUrl: url, page: page(url, title, sequence) });
@@ -38,6 +38,12 @@ export const loadingSession: Session = {
 export const failedSession: Session = {
   ...loadedSession,
   tabs: loadedSession.tabs.map((t) => (t.id === "b1" ? { ...t, page: { ...t.page, committed: false, failed: true, problem: "Page could not load. Check the address and connection, then reload." } } : t)),
+};
+
+/** The selected page failed for the network's reason, and the native host names it for another browser. */
+export const failedElsewhereSession: Session = {
+  ...failedSession,
+  tabs: failedSession.tabs.map((t) => (t.id === "b1" ? { ...t, page: { ...t.page, elsewhere: t.page.url } } : t)),
 };
 
 /** Find in page with matches on the selected page. */

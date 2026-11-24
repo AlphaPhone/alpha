@@ -51,7 +51,7 @@ export const nativePlugins = {
     methods: [
       "create", "find", "findNext", "clearFind", "navigate", "command", "present", "bookmarks", "setBookmark",
       "browsingState", "saveBrowsingState", "clearBrowsingData", "clearSiteData", "readingSupport", "reviewQuestion",
-      "reviewReading", "cancelReading", "pageContext", "share", "openExternalBrowser", "downloads", "loginFillStatus", "close",
+      "reviewReading", "cancelReading", "pageContext", "share", "openExternalBrowser", "openFailedPage", "downloads", "loginFillStatus", "close",
     ],
     events: ["findResult", "fullscreen", "notice", "showDownloads", "stateChanged", "tabClosed", "tabOpened"],
   },

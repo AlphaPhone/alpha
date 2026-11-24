@@ -1,6 +1,6 @@
 // spec/assistant/review.md, "Story: Let my agent act only with my say-so"; spec/assistant/recovery.md, "A listing is read once per key, applies only to its own key, and a failed one waits for a new key"; spec/assistant/review.md, "A card is listed only on the foreground, recovered only under the current screen, and approved only under the session that listed it"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/review.md, "A call, dial or text that contradicts the number I wrote gets a notice instead of a card, and is rejected so a reload cannot bring it back"; spec/assistant/receipts.md, "A receipt that could not reach the agent keeps its result and says it is not synced yet"; spec/assistant/review.md, "The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote or my own ask for its tab list"; spec/assistant/review.md, "A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it"; spec/assistant/receipts.md, "An action is reconciled as applied only with its exact saved receipt, and only a handoff may stay unresolved"; spec/assistant/receipts.md, "A result is shown only after its journal entry and receipt settled"; spec/assistant/review.md, "A card opens the view its family names, or else the view of its operation's class"; spec/assistant/review.md, "A comms card is staged on the comms bar when it is listed, and only the stage's open, live proposal is approved, once"; spec/assistant/review.md, "A workflow-bound proposal runs only from its own run's step review, once, and its executor knows the run"
 import { DeviceExecution, type ApproveResult, type DeviceAgent, type DeviceJournal, type DeviceProposal, type DeviceReceipt, type ExecutorCall } from "@elizaos/agent/client"
-import { Machine as RoutesMachine, machine as routesMachine, initial as routesStart, type CardState, type Event as RoutesEvent, type Routes } from "../../gen/assistant__approvals.effect.vibe"
+import { Machine as RoutesMachine, canTapApprove, machine as routesMachine, initial as routesStart, type CardState, type Event as RoutesEvent, type Routes } from "../../gen/assistant__approvals.effect.vibe"
 import { Machine as CustodyMachine, approvable, browserCarded, browserCommanded, mayDirect, cardOffered, commsApproved, contradicts, destinationOf, ownerTyped, workflowStepRuns, type Event as CustodyEvent, type Listing, type Op, type Preference, type Target } from "../../gen/assistant__review.effect.vibe"
 import type { ProposalKind } from "../../gen/telephony__comms.ts"
 import { offered, titleOf, type Evidence, type Resolution, type Result } from "../../gen/assistant__receipts.effect.vibe"
@@ -43,6 +43,8 @@ export interface OperationPorts {
   present?(operation: unknown, call: ExecutorCall): void
   /** Whether the operation shows Browser's local tab list. */
   tabList?(operation: unknown): boolean
+  /** Whether the operation is a text that sends to the number or numbers its card shows, which reads its button Send and may be sent by voice. */
+  addressedText?(operation: unknown): boolean
 }
 
 /** What the assistant knows of one executor call: whether the owner approved its card, the owner message it answers and that message's words. */
@@ -93,6 +95,8 @@ export service DeviceReview {
   approve(card: ProposalCard, fromStage?: boolean): Approval!!
   /** The card last drawn for `proposalId`, such as the comms bar's open proposal, or undefined. */
   cardOf(proposalId: string): (ProposalCard | undefined)!!
+  /** Whether a tap on `proposalId`'s Approve would start its approval now: no emergency call, and no approval of it under way or done. */
+  tappable(proposalId: string): boolean!!
   /** Run the device proposal bound to exactly this workflow run and step, once, after the owner approved the step in Workflows and the agent admitted it; undefined when none is pending or it already ran. */
   workflowStep(runId: string, stepId: string): (Approval | undefined)!!
   /** Decline a card; nothing runs. */
@@ -101,7 +105,8 @@ export service DeviceReview {
   expire(card: ProposalCard): ProposalCard!!
   /** Run the direct pass over the proposals of the owner's message; what still needs review is returned as cards. */
   /** `pageLinks` are the links of the Browser page the message carried; an open of one keeps its card and never runs directly. */
-  directPass(messageId: string, text: string, pageLinks?: readonly string[]): { readonly receipts: readonly Approval[]; readonly cards: readonly ProposalCard[]; readonly notices: readonly string[] }!!
+  /** `answering` names the cards whose proposal answers this message, not one the agent made for review or listed earlier. */
+  directPass(messageId: string, text: string, pageLinks?: readonly string[]): { readonly receipts: readonly Approval[]; readonly cards: readonly ProposalCard[]; readonly notices: readonly string[]; readonly answering?: readonly string[] }!!
   /** Upload every settled receipt the journal still holds. */
   sync(): void!!
   /** What the assistant knows of an executor call it started. */
@@ -325,6 +330,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
       expiresAt: expiryOf(proposal.expiresAt), state: recovered ? "RecoveredCard" : "LiveCard", recovered, session,
       ...(destination === undefined ? {} : { destination }),
       ...(items === undefined ? {} : { items }),
+      ...(ports.addressedText?.(proposal.operation) === true ? { addressedText: true as const } : {}),
     }
     drawn.set(proposal.id, card)
     while (drawn.size > 64) drawn.delete(drawn.keys().next().value ?? "")
@@ -511,6 +517,11 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
     },
     approve,
     cardOf: (proposalId: string) => sync(() => drawn.get(proposalId)),
+    tappable: (proposalId: string) => effect {
+      if ((try host.emergency()) || consumed.has(proposalId)) return false
+      const routes = cards.get(proposalId)
+      return routes === undefined || canTapApprove(try routes.get())
+    },
     workflowStep: (runId: string, stepId: string) => effect {
       const identity = try enrolledIdentity()
       if (identity === undefined) return undefined
@@ -547,6 +558,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
       const receipts: Approval[] = []
       const left: ProposalCard[] = []
       const notices: string[] = []
+      const answering: string[] = []
       for (const proposal of listed) {
         if (proposal.workflow !== undefined) {
           notices.push(copy.workflowStepElsewhere)
@@ -575,11 +587,13 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
           continue
         }
         const done = try directOne(proposal, text, messageId, pageLink)
-        if (done === undefined) left.push(card)
-        else receipts.push({ card: { ...card, state: done.outcome === "Applied" ? "DoneCard" : "UnconfirmedCard", summary: done.summary }, receipt: { title: done.title, summary: done.summary } })
+        if (done === undefined) {
+          left.push(card)
+          answering.push(card.proposalId)
+        } else receipts.push({ card: { ...card, state: done.outcome === "Applied" ? "DoneCard" : "UnconfirmedCard", summary: done.summary }, receipt: { title: done.title, summary: done.summary } })
       }
       try stage(left)
-      return { receipts, cards: left, notices }
+      return { receipts, cards: left, notices, answering }
     },
     sync: () => effect {
       const identity = try enrolledIdentity()

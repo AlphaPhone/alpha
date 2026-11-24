@@ -1,10 +1,10 @@
 # Automations list
 
-The Workflows list: the agent's workflows and prompts (`/api/automations`), its owner-visible
-scheduled tasks, its reminders, and its routines and goals, each read on its own so that one
-source failing never hides the others. A change the owner asks for is held, one per owner, until
-the agent's answer or a complete re-read settles it, so a lost answer never lets a second copy go
-(PRD AP-07; legacy `AutomationRequestSettlement`).
+The Workflows list: the agent's workflows and prompts (`/api/workflow/workflows` and
+`/api/triggers`), its owner-visible scheduled tasks, its reminders, and its routines and goals,
+each read on its own so that one source failing never hides the others. A change the owner asks
+for is held, one per owner, until the agent's answer or a complete re-read settles it, so a lost
+answer never lets a second copy go (PRD AP-07; legacy `AutomationRequestSettlement`).
 
 ## Domain
 
@@ -147,9 +147,9 @@ pure def stepAFailedReadKeepsTheRows(before: Automations, via: str, after: Autom
 An applied answer and a refusal both release it, a refused create included, so a refusal never
 locks new prompts. A lost answer leaves the outcome unknown and the change held. A 4xx answer, a
 definite 404 included, is a refusal released before the list is read again; a 5xx or a reply that
-never came is unknown; a request that was never sent is refused (#1209). A change released by a
-complete re-read or by the owner's Allow another leaves no answer waiting: the unknown answer
-belonged to the change, and with nothing held it is no longer shown.
+never came is unknown; a request that was never sent is refused (#1209). A change a complete re-read
+settles counts as applied, and one released by the owner's Allow another leaves no answer waiting:
+the unknown answer belonged to the change, and with nothing held it is no longer shown.
 
 ```quint
 pure def answerOfStatus(httpStatus: int, delivered: bool): Answer =
@@ -162,7 +162,7 @@ pure def lawADefiniteNotFoundIsARefusal(delivered: bool): bool = answerOfStatus(
 pure def releaseHeld(why: Release, a: Automations): Automations = {
   val h = heldFor(a, a.owner)
   { ...a, held: a.held.select(o => o.owner != a.owner), busy: false, released: why, releasedKind: h.kind,
-    answer: if (why == ByReply) AnswerApplied else if (why == ByRefusal) AnswerRefused else NoAnswer }
+    answer: if (why == ByReply or why == ByList) AnswerApplied else if (why == ByRefusal) AnswerRefused else NoAnswer }
 }
 pure def canAnswered(a: Automations, id: int, answer: Answer): bool = a.busy and heldFor(a, a.owner).id == id and answer != NoAnswer
 pure def answered(a: Automations, id: int, answer: Answer): Automations =
@@ -175,7 +175,8 @@ pure def sometimesUnknownHeld(a: Automations): bool = a.answer == AnswerUnknown 
 ### Only a complete re-read settles a held delete or switch, and never a run, snooze, verb, edit or create
 
 A delete is settled when its row is gone, a switch when its row shows the chosen state; a source
-that failed or a partial workflow list settles nothing (#680f151).
+that failed or a partial workflow list settles nothing (#680f151). A change the list settles
+counts as applied.
 
 ```quint
 pure def settledByList(a: Automations): bool = {
@@ -202,7 +203,8 @@ pure def sometimesSettledByList(a: Automations): bool = a.released == ByList
 
 The review says the earlier change may still apply. It is offered only while nothing is in flight,
 and it names the exact held change it reviewed: a confirmation of a review whose change was
-replaced, or whose owner changed, releases nothing (#1014).
+replaced, or whose owner changed, releases nothing (#1014). The released change has no answer, so an
+unknown outcome is only ever shown while its change is held.
 
 ```quint
 pure def canAllowAnother(a: Automations, id: int): bool = not(a.busy) and holds(a) and heldFor(a, a.owner).id == id

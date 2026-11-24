@@ -1,5 +1,6 @@
 // spec/notes/organize.md, "Story: Let a workflow read the notes I selected for it"; spec/notes/organize.md, "Story: Let a workflow save the note its step wrote"; spec/notes/editor.md, "Story: Leave a note the way Back does"; spec/notes/list.md, "Story: Narrow the list to what I am looking for"
 import { assert, describe, it } from "@effect/vitest"
+import { NOT_DISPATCHED } from "@elizaos/agent/client"
 import type { StickyNote } from "@elizaos/plugin-notes/types"
 import { Machine as EditorMachine } from "../../gen/notes__editor.effect.vibe"
 import { Machine as TrashMachine } from "../../gen/notes__trash.effect.vibe"
@@ -7,7 +8,7 @@ import { AssistantHost } from "../../src/assistant/host.vibe"
 import { NotesCollection } from "../../src/notes/collection.vibe"
 import { NotesEditor } from "../../src/notes/editor.vibe"
 import { notesRouteOf, notesRouteRequest } from "../../src/notes/list.vibe"
-import { operationPorts } from "../../src/notes/operations.vibe"
+import { NotesCalls, operationPorts } from "../../src/notes/operations.vibe"
 import { NotesHandoff } from "../../src/notes/origins.vibe"
 import { sha256Hex } from "../../src/notes/platform.ts"
 import { NotesRecorder } from "../../src/notes/recorder.vibe"
@@ -31,6 +32,9 @@ function host(hidden: boolean, view = "workflows") {
   const screen = { exposure: { privateView: false, locked: false, hidden, connectionDialog: false }, observation: { view, revision: 1, sensitive: false }, onCalendar: false, contextKey: `${view}:` }
   return Layer.succeed(AssistantHost, { screen: () => succeed(screen), identity: () => succeed(undefined) } as unknown as AssistantHost.Shape)
 }
+
+/** The assistant's facts for a call it ran from the open run's own step review. */
+const fromRunStep = Layer.succeed(NotesCalls, { workflow: () => succeed({ workflowId: "wf-1", versionId: "v-1", runId: "run-1", stepId: "step-1" }) })
 
 interface Place { readonly app: string; readonly route: string; readonly inner: boolean }
 interface Shown { readonly app: string; readonly places: readonly Place[] }
@@ -84,14 +88,14 @@ describe("Notes device operations, Back and routes", () => {
       const ports = try operationPorts
       const revision = try promise(() => sha256Hex(JSON.stringify(["Plan", "Buy milk"])))
       const answer = try promise(() => ports.execute({ type: "read_selected_notes", notes: [{ id: "plan", revision }] }, { proposalId: "p2", operationId: "op_2", attemptId: 1 }))
-      try check(() => assert.deepStrictEqual(answer, { kind: "refused", code: "not_dispatched" }))
+      try check(() => assert.deepStrictEqual(answer, { kind: "refused", code: NOT_DISPATCHED }))
     }
   })
 
   it.live("A workflow saves the note its step wrote once, from the open run (spec/notes/organize.md, \"Story: Let a workflow save the note its step wrote\")", () => effect {
     const agent = seeded()
     const device = new DeviceFake()
-    provide notesOver(agent, device), host(false) {
+    provide notesOver(agent, device), host(false), fromRunStep {
       try bound()
       const ports = try operationPorts
       const collection = try NotesCollection
@@ -118,7 +122,7 @@ describe("Notes device operations, Back and routes", () => {
       const collection = try NotesCollection
       const answer = try promise(() => ports.execute({ type: "create_note", title: "Groceries", body: "" }, { proposalId: "p6", operationId: "op_6", attemptId: 1 }))
       const count = ((try collection.current())?.snapshot.notes ?? []).length
-      try check(() => assert.deepStrictEqual({ answer, count }, { answer: { kind: "refused", code: "not_dispatched" }, count: 1 }))
+      try check(() => assert.deepStrictEqual({ answer, count }, { answer: { kind: "refused", code: NOT_DISPATCHED }, count: 1 }))
     }
   })
 
