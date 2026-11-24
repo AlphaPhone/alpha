@@ -113,7 +113,7 @@ function mmsReview(send: Outgoing, sim: number): MmsReview {
   return { recipients: [...send.to] as PhoneNumber[], body: send.body, subscriptionId: sim, attachments: send.pictures.map((one) => ({ name: one.name, contentType: one.contentType, bytes: one.bytes })) }
 }
 
-effect function receiptOf(send: Outgoing, sim: number, operation: OperationId): SmsSendStatus | undefined!!Telephony {
+effect function receiptOf(send: Outgoing, sim: number, operation: OperationId): (SmsSendStatus | undefined)!!Telephony {
   if (usingMms(send.to.length, send.pictured)) {
     // Picture bytes are visit-only. A process restart may keep the operation without enough data to bind its result.
     if (send.pictured && send.pictures.length === 0) return undefined
