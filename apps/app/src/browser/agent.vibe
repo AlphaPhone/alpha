@@ -165,6 +165,12 @@ export const agentLayer = Layer.provide(Layer.effect(BrowserAgent, effect {
     return presentedRan(presentation, (try tabs.dispatch(event)).accepted)
   }
 
+  effect function showTabs() {
+    const state = try tabs.get()
+    if (!canAgentShowTabs(state, state.cur)) throw new BrowserOpenRefused({ message: "Browser is unavailable." })
+    return deferred("PresentTabList", { type: "agentShowTabs", selected: state.cur })
+  }
+
   effect function outcome(event: SessionEvent, request: string) {
     const settled = try settleOf(event, request)
     if (settled === undefined) throw refuse("RefusedChanged")
@@ -221,7 +227,6 @@ export const agentLayer = Layer.provide(Layer.effect(BrowserAgent, effect {
       const request = newId()
       const observedTab = observed === undefined ? "" : observed.id.slice(observed.id.indexOf(":") + 1)
       const observedRevision = observed === undefined ? 0 : Number(observed.revision)
-      // browser_tabs_show is not in the pinned contract's BrowserControlOperation yet (elizaOS/eliza#40331); once the pin includes it, add its case here delegating to showTabs().
       switch (operation.type) {
         case "browser_search": {
           const opened = try open(searchAddress(operation.query), false)
@@ -238,12 +243,14 @@ export const agentLayer = Layer.provide(Layer.effect(BrowserAgent, effect {
           return deferred("PresentSwitch", { type: "agentPresent", tab: target, selected, edit: false })
         }
         case "browser_tab_close": {
+          if (operation.all === true) throw new BrowserOpenRefused({ message: "Closing all tabs requires a reviewed tab list." })
           if (operation.target === undefined && isPrivateTab(state, selected) && !shown) throw refuse("RefusedPrivate")
           const target = operation.target === undefined ? "" : try chosen(operation.target, true, choose)
           const settled = try outcome({ type: "agentClose", request, target, inBrowser: shown, fallback: newTabId() }, request)
           if (settled.tab !== selected) return brought({ type: "agentPresent", tab: (try tabs.get()).cur, selected, edit: false })
           return deferred("PresentCloseShown", { type: "agentCloseShown", tab: selected, selected, fallback: newTabId() })
         }
+        case "browser_tabs_show": return try showTabs()
         case "browser_find": {
           try outcome({ type: "agentFind", request, query: operation.text }, request)
           try tabs.typeFind(operation.text)
@@ -257,11 +264,7 @@ export const agentLayer = Layer.provide(Layer.effect(BrowserAgent, effect {
         }
       }
     },
-    effect showTabs() {
-      const state = try tabs.get()
-      if (!canAgentShowTabs(state, state.cur)) throw new BrowserOpenRefused({ message: "Browser is unavailable." })
-      return deferred("PresentTabList", { type: "agentShowTabs", selected: state.cur })
-    },
+    showTabs,
     command: viewCommand,
     effect interact(capability: string, raw: unknown, selection: unknown) {
       const kind: Interaction = capability === "get-text" ? "GetText" : capability === "browser-command" ? "BrowserCommand" : "OtherInteraction"

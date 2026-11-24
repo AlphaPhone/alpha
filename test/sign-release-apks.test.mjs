@@ -71,8 +71,8 @@ test("key files sign the launcher release, replace the unsigned files only after
   const real = fs.realpathSync(dir);
   assert.deepEqual(calls()[0].argv, ["sign", "--key", path.join(real, "alphaphone_app.pk8"), "--cert", path.join(real, "alphaphone_app.x509.pem"),
     "--v4-signing-enabled", "false", "--out", path.join(root, "artifacts/launcher-release.apk.partial"), path.join(root, "artifacts/launcher-release-unsigned.apk")]);
-  assert.deepEqual(result.ran.map(args => args[0]), ["scripts/verify-apks.ts", "scripts/generate-sbom.ts"]);
-  assert.deepEqual(result.ran[0], ["scripts/verify-apks.ts"]);
+  assert.deepEqual(result.ran.map(args => args.find(arg => arg.startsWith("scripts/"))), ["scripts/verify-apks.ts", "scripts/generate-sbom.ts"]);
+  assert.deepEqual(result.ran[0], ["--conditions=eliza-source", "--import", "vibelang/register", "scripts/verify-apks.ts"]);
   assert.ok(result.ran[1].includes("--apks"));
 });
 
@@ -82,7 +82,7 @@ test("re-verification takes no profile option; a build record that is not the na
   fs.writeFileSync(path.join(current, "artifacts/build-config.json"), JSON.stringify({ testMocks: false, runtimeProfile: "native" }));
   const signed = await sign(current, ["--keys-dir", keys(t), "--apksigner", tool]);
   assert.equal(signed.code, 0, signed.err);
-  assert.deepEqual(signed.ran[0], ["scripts/verify-apks.ts"]);
+  assert.deepEqual(signed.ran[0], ["--conditions=eliza-source", "--import", "vibelang/register", "scripts/verify-apks.ts"]);
   for (const record of [{ testMocks: false, runtimeProfile: "cloud" }, { testMocks: false, runtimeProfile: "native", localEmbeddings: true }]) {
     const stale = product(t);
     fs.writeFileSync(path.join(stale, "artifacts/build-config.json"), JSON.stringify(record));
@@ -239,7 +239,7 @@ test("a real apksigner signs an APK with ceremony-layout key files, and the resu
     { root, env: process.env, log: line => out.push(line), error: line => err.push(line) });
   assert.equal(code, 0, err.join("\n"));
   const { signerDigest } = await import("../scripts/apk.ts");
-  assert.equal(signerDigest(path.join(work, "app-release.apk")), certificate);
+  assert.equal(await signerDigest(path.join(work, "app-release.apk")), certificate);
   assert.equal(fs.existsSync(path.join(work, "app-release.apk.idsig")), false, "no v4 side file is written");
   // The same key against a different recorded signer is refused and leaves nothing behind.
   const other = product(t, "0".repeat(64));

@@ -150,7 +150,7 @@ test("the packaged agent bundle is hashed whatever its size, and an unreadable b
   assert.deepEqual(apkRuntimeIdentity(zip("no-runtime.apk", "assets/agent/agent-bundle.js")), { runtime: "NOT_PACKAGED" });
 });
 
-test("an admitted APK whose own contents contradict its manifest row is refused before any device is touched", t => {
+test("an admitted APK whose own contents contradict its manifest row is refused before any device is touched", async t => {
   const release = admitUnitApk(build(t, DISTRIBUTABLE), { variant: "launcher", build: "release" }, { descriptor: descriptor() });
   const good = { testMocks: false, debuggable: false, runtime: "PACKAGED", signerSha256: SIGNER, updateChannel: "legacy" };
   const check = (apk, facts) => apkContradictions(apk, { descriptor: descriptor(), facts });
@@ -163,10 +163,10 @@ test("an admitted APK whose own contents contradict its manifest row is refused 
   assert.match(check(release, { ...good, testMocks: true }).join(), /not a verified flag-off build/);
   // A fact that could not be read is never taken as good.
   assert.equal(check(release, { testMocks: null, debuggable: null, runtime: null, signerSha256: null, updateChannel: null }).length, 5);
-  assert.throws(() => requireConsistentApk(release, { descriptor: descriptor(), facts: { ...good, runtime: "NOT_PACKAGED" } }), /contradicts the manifest row that admitted it:\n  - it does not package the resident runtime/);
+  await assert.rejects(() => requireConsistentApk(release, { descriptor: descriptor(), facts: { ...good, runtime: "NOT_PACKAGED" } }), /contradicts the manifest row that admitted it:\n  - it does not package the resident runtime/);
   // The synthetic file in this test is not an APK: reading it yields no fact, so it is refused.
-  assert.deepEqual(apkFacts(release.file), { testMocks: null, debuggable: null, signerSha256: null, runtime: "NOT_PACKAGED", updateChannel: null });
-  assert.throws(() => requireConsistentApk(release, { descriptor: descriptor() }), /contradicts the manifest row/);
+  assert.deepEqual(await apkFacts(release.file), { testMocks: null, debuggable: null, signerSha256: null, runtime: "NOT_PACKAGED", updateChannel: null });
+  await assert.rejects(() => requireConsistentApk(release, { descriptor: descriptor() }), /contradicts the manifest row/);
   // The rehearsal build must really be the debug build, flag-off; a release relabelled "debug" is not a rehearsal.
   const rehearsal = admitUnitApk(build(t, { mode: "debug", signed: true }), { variant: "launcher", build: "debug" }, { descriptor: descriptor() });
   assert.deepEqual(check(rehearsal, { testMocks: false, debuggable: true, runtime: "NOT_PACKAGED", signerSha256: "c".repeat(64) }), []);

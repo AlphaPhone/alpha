@@ -1,4 +1,5 @@
 import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
+import { withApkEvidence } from "../scripts/apk-evidence.ts";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -56,7 +57,7 @@ test('an APK with a signing-key rotation is refused, and so is a signer record t
     assert.throws(() => admitUpdateApkIdentity(row,retired,archive,signing), /Delete the apkSigningRotation object from android\/release-signer\.json/);
 });
 
-test('real SDK signatures bind binary identity, and an embedded rotation is refused', {timeout:scaledTimeout(120_000)}, t => {
+test('real SDK signatures bind binary identity, and an embedded rotation is refused', {timeout:scaledTimeout(120_000)}, async t => {
   let env;
   try {env = androidEnv();} catch {t.skip('Android SDK and JDK 21 are required');return;}
   const aapt2=tool('aapt2'), apksigner=tool('apksigner'), androidJar=path.join(env.ANDROID_HOME,'platforms/android-36/android.jar');
@@ -81,7 +82,7 @@ test('real SDK signatures bind binary identity, and an embedded rotation is refu
       '--v1-signing-enabled','false','--v2-signing-enabled','false','--v3-signing-enabled','true','--v4-signing-enabled','false',...extra,'--out',file,input]);
     return {file,sha256:sha(fs.readFileSync(file)),...row};
   };
-  const original=sign('original',first), actualOriginal=verifiedUpdateSigning(original), binary=inspectApk(original.file);
+  const original=sign('original',first), actualOriginal=verifiedUpdateSigning(original), binary=await withApkEvidence(original.file, inspectApk);
   assert.equal(admitPublicUpdateChannel(binary.xml,publicUrl).kind,'public', 'channel admission consumes actual binary-manifest output');
   assert.equal(actualOriginal.activeSignerSha256,first.digest);
   assert.equal(actualOriginal.signerRootSha256,first.digest);
@@ -106,7 +107,8 @@ test('real SDK signatures bind binary identity, and an embedded rotation is refu
   assert.equal(actualRotation.activeSignerSha256,second.digest);
   assert.equal(actualRotation.signerRootSha256,first.digest);
   assert.equal(actualRotation.lineageSha256,sha(fs.readFileSync(lineage)), 'the verified embedded lineage matches exact public file bytes');
-  assert.throws(()=>admitUpdateApkIdentity(replacement,{signerSha256:second.digest},inspectApk(replacement.file),actualRotation), /carries a signing-key rotation/);
+  const rotatedArchive = await withApkEvidence(replacement.file, inspectApk);
+  assert.throws(()=>admitUpdateApkIdentity(replacement,{signerSha256:second.digest},rotatedArchive,actualRotation), /carries a signing-key rotation/);
   assert.throws(()=>verifiedUpdateSigning({...replacement,sha256:'0'.repeat(64)}), /Command failed/);
   fs.appendFileSync(replacement.file,'tampered');
   assert.throws(()=>verifiedUpdateSigning({...replacement,sha256:sha(fs.readFileSync(replacement.file))}), /Command failed/,'rehashing modified signed bytes does not grant signing authority');

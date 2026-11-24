@@ -2,14 +2,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { distributionProblems } from '../scripts/apk.ts';
 
-function assess({appId="ai.alphacompute.alphaphone",policyAppId=appId,name='.AlphaPowerVoiceActivity', permission='android.permission.STATUS_BAR_SERVICE', tag='activity', extra=''}={}) {
+function assess({appId="ai.alphacompute.alphaphone",policyAppId=appId,name='.AlphaPowerVoiceActivity', permission='android.permission.STATUS_BAR_SERVICE', tag='activity', applicationAttributes='', extra=''}={}) {
   return distributionProblems({xml:`E: manifest
   A: package="${appId}"
   E: application
     A: android:allowBackup=(type 0x12)0x0
     A: android:usesCleartextTraffic=(type 0x12)0x0
     A: android:networkSecurityConfig=@0x7f010001
-    E: ${tag}
+${applicationAttributes}    E: ${tag}
       A: android:name="${name}"
       A: android:exported=(type 0x12)0xffffffff
       ${permission ? `A: android:permission="${permission}"` : ''}
@@ -18,6 +18,10 @@ ${extra}`, badging:`package: name='${appId}' versionCode='15' versionName='15'`,
 
 test('release admits the exact platform-protected Power activity', () => {
   assert.deepEqual(assess(), []);
+});
+test('a debuggable APK cannot be recorded as a release', () => {
+  const applicationAttributes = '    A: android:debuggable=(type 0x12)0xffffffff\n';
+  assert.match(assess({applicationAttributes}).join('\n'), /Release manifest must not allow debugging/);
 });
 test('release refuses unprotected or incorrectly protected Power entry', () => {
   for (const permission of ['', 'android.permission.INTERNET', 'android.permission.BIND_QUICK_SETTINGS_TILE'])

@@ -2,47 +2,30 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { androidEnv, tool } from "./toolchain.ts";
-import {
-  apkDistributionProblems, extractApkWebPayload, parseApkSignerDigest, readApk, readApkSignerDigest,
-} from "../vendor/eliza/packages/os/android/apk-distribution.mjs";
-import { manifestFacts as readManifestFacts, parseXmlTree as parseAaptTree } from "../vendor/eliza/packages/os/android/android-manifest-facts.mjs";
+import { run } from "./run-os-program.ts";
+import { withApkEvidence, withPackagedWeb, type ApkEvidence } from "./apk-evidence.ts";
+import { manifestFacts as readManifestFacts, parseXmlTree, readApkSignerDigest } from "@elizaos/os/image";
+
+export { parseXmlTree };
+export const manifestFacts = (xml: string, badging?: string) => {
+  const facts = readManifestFacts(xml, badging);
+  return {
+    ...facts,
+    packageName: facts.packageName ?? undefined,
+    versionCode: Number.isSafeInteger(facts.versionCode) && facts.versionCode! > 0 ? facts.versionCode : null,
+  };
+};
+
+export type ManifestNode = ReturnType<typeof parseXmlTree>;
 
 export type ApkMode = "debug" | "release";
 export type ApkVariant = "launcher";
 
-export interface ManifestNode {
-  name: string;
-  attrs: Record<string, string | undefined>;
-  children: ManifestNode[];
-  indent: number;
-}
-interface ManifestComponent {
-  name: string;
-  tag: string;
-  exported: boolean;
-  permission: string | null;
-}
-interface ManifestFacts {
-  packageName: string | undefined;
-  versionCodeText: string | null;
-  versionCode: number | null;
-  versionName: string | null;
-  permissions: string[];
-  components: ManifestComponent[];
-  exported: ManifestComponent[];
-  queriedPackages: string[];
-  application: {
-    allowBackup: string | null;
-    usesCleartextTraffic: string | null;
-    networkSecurityConfig: string | null;
-    debuggable: string | null;
-  };
-}
 interface DistributionInput {
   xml: string;
   home?: boolean;
   badging?: string;
-  names: string[];
+  names: readonly string[];
   dexClasses?: string[];
   forbiddenDex?: string[];
   removedSpeechClasses?: string[];
@@ -61,20 +44,7 @@ interface ApkInspection extends DistributionInput {
   removedSpeechClasses: string[];
 }
 
-// Upstream's JS parser builds children and attributes after initialization.
-export const parseXmlTree = parseAaptTree as (text: string, options?: {decodeAttribute?: (encoded: string) => string}) => ManifestNode;
-export const manifestFacts = readManifestFacts as (xml: string, badging?: string) => ManifestFacts;
-const assessDistribution = apkDistributionProblems as (
-  apk: DistributionInput,
-  policy: Omit<typeof DISTRIBUTION_POLICY, "exportedComponents"> & {exportedComponents: Readonly<Record<string, string | null>>},
-  options?: DistributionOptions,
-) => {facts: ManifestFacts; problems: string[]};
-
-
-// Alpha's distribution policy as data for the upstream APK inspection
-// (vendor/eliza/packages/os/android/apk-distribution.mjs).
-// Development hooks no APK may package. The upstream inspection admits them only in a test-mocks
-// debug build, and Alpha never builds one, so every APK is refused if it carries them.
+// No Alpha distribution APK may package development hooks.
 export const DEVELOPMENT_CLASSES = Object.freeze([
   "SyntheticAutofillService",
   "DevelopmentAgentPlugin",
@@ -173,19 +143,66 @@ export const DISTRIBUTION_POLICY = Object.freeze({
 /**
  * Pure release-policy assessment. `apk` holds aapt dumps, zip entry names and
  * the development class names found in dex. Returns `{ facts, problems }`.
- * The upstream inspection applies DISTRIBUTION_POLICY; the Power entry's
- * component kind and the Quick Settings tile shape and target are Alpha's own checks.
+ * The mode and selected identity apply to the package inspected by aapt.
  */
 export function distributionProblems(apk: DistributionInput, { mode, appId = CANONICAL_APP_ID }: DistributionOptions = {}) {
   // The caller selects the admitted installation identity. Only product-owned names move;
   // shared/platform components keep their exact names and all permission checks remain intact.
   const exportedComponents = Object.fromEntries(Object.entries(EXPORTED_COMPONENTS).map(([name, permission]) =>
     [name.startsWith(CANONICAL_APP_ID + ".") ? appId + name.slice(CANONICAL_APP_ID.length) : name, permission]));
-  const { facts, problems } = assessDistribution(
-    { ...apk, forbiddenDex: apk.forbiddenDex ?? apk.removedSpeechClasses },
-    {...DISTRIBUTION_POLICY, exportedComponents},
-    { mode },
-  );
+  const facts = manifestFacts(apk.xml, apk.badging);
+  const problems: string[] = [];
+  const policy = DISTRIBUTION_POLICY;
+  for (const name of policy.developmentClasses) {
+    if (apk.xml.includes(name) || apk.dexClasses?.includes(name))
+      problems.push(`Development class ${name} is packaged`);
+  }
+  for (const text of policy.developmentManifestText) {
+    if (apk.xml.includes(text)) problems.push(`${text} permission or package query is packaged`);
+  }
+  for (const name of apk.names.filter(entry => policy.developmentEntries.some(pattern => pattern.test(entry)))) {
+    problems.push(`Development entry ${name} is packaged`);
+  }
+  const { declared, debuggable, allowBackup, usesCleartextTraffic, networkSecurityConfig } = facts.application;
+  if (!declared)
+    problems.push("APK manifest has no application");
+  if (mode === "release" && debuggable !== null && debuggable !== "0x0")
+    problems.push("Release manifest must not allow debugging");
+  if (usesCleartextTraffic !== "0x0")
+    problems.push(`usesCleartextTraffic must be false (found ${usesCleartextTraffic ?? "unset"})`);
+  if (mode === "release" && !networkSecurityConfig)
+    problems.push("Release manifest has no networkSecurityConfig");
+  if (allowBackup !== "0x0")
+    problems.push(`allowBackup must be false (found ${allowBackup ?? "unset"})`);
+  for (const component of facts.exported) {
+    if (!Object.hasOwn(exportedComponents, component.name)) {
+      problems.push(`Unexpected exported ${component.tag} ${component.name}`);
+      continue;
+    }
+    const permission = exportedComponents[component.name];
+    if (permission && component.permission !== permission)
+      problems.push(`Exported ${component.name} must require ${permission}`);
+  }
+  const manifestNames = [...facts.components.map(component => component.name), ...facts.permissions, ...facts.queriedPackages];
+  for (const name of manifestNames.filter(value => /mock|fixture/i.test(value))) {
+    problems.push(`Test-only manifest entry ${name}`);
+  }
+  for (const permission of policy.forbiddenPermissions) {
+    if (facts.permissions.includes(permission)) problems.push(`${permission.split(".").pop()} is requested`);
+  }
+  const maps = apk.names.filter(name => name.startsWith("assets/") && name.endsWith(".map"));
+  if (maps.length) problems.push(`Source maps are packaged: ${maps.slice(0, 3).join(", ")}`);
+  const forbidden = apk.names.filter(name => policy.forbiddenEntries.test(name));
+  if (forbidden.length) problems.push(`${policy.forbiddenEntriesLabel}: ${forbidden.slice(0, 3).join(", ")}`);
+  const forbiddenDex = apk.forbiddenDex ?? apk.removedSpeechClasses;
+  if (forbiddenDex?.length) problems.push(`${policy.forbiddenDexLabel}: ${forbiddenDex.join(", ")}`);
+  for (const entry of policy.requiredEntries) {
+    if (!apk.names.includes(entry)) problems.push(`${entry} is missing`);
+  }
+  if (facts.versionCode === null)
+    problems.push(`versionCode must be a positive integer (found ${facts.versionCodeText ?? "none"})`);
+  if (!facts.versionName || facts.versionName === "0")
+    problems.push(`versionName must be set (found ${facts.versionName ?? "none"})`);
   if (facts.packageName && facts.packageName !== appId)
     problems.push("APK package differs from selected application identity");
   problems.push(...legacyStorageProblems(apk.xml));
@@ -254,14 +271,24 @@ export function legacyStorageProblems(xml: string) {
   return problems;
 }
 
-export function inspectApk(file: string): ApkInspection {
-  const { forbiddenDex, ...apk } = readApk(file, { aapt: tool("aapt"), policy: DISTRIBUTION_POLICY });
-  return { ...apk, removedSpeechClasses: forbiddenDex };
-}
-
-/** Extract assets/public into a fresh temporary directory; caller removes it. */
-export function extractWebPayload(file: string): {root: string; public: string} {
-  return extractApkWebPayload(file, { prefix: "alpha-apk-public-" });
+export async function inspectApk(apk: ApkEvidence): Promise<ApkInspection> {
+  const { badging, xml, facts } = await apk.manifest();
+  const dex = await apk.entries(apk.names.filter(entry => /^classes\d*\.dex$/.test(entry)), { label: "DEX evidence" });
+  const contents = [...dex.values()];
+  return {
+    file: apk.sourceFile,
+    packageName: /package: name='([^']+)'/.exec(badging)?.[1],
+    home: xml.includes("android.intent.category.HOME"),
+    launcher: xml.includes("android.intent.category.LAUNCHER"),
+    debuggable: facts.application.debuggable === "0xffffffff",
+    webPayload: apk.names.includes("assets/public/index.html"),
+    sha256: apk.sha256,
+    badging,
+    xml,
+    names: apk.names,
+    dexClasses: DEVELOPMENT_CLASSES.filter(name => contents.some(bytes => bytes.includes(`/${name};`))),
+    removedSpeechClasses: REMOVED_SPEECH_CLASSES.filter(prefix => contents.some(bytes => bytes.includes(prefix))),
+  };
 }
 
 /** Read the build-time flag record that vite writes beside the web bundle. */
@@ -275,11 +302,10 @@ export function readBuildFlags(publicDir: string): {testMocks: boolean} {
 }
 
 /** Check that the packaged Android owner-route table is generated from the renderer source. */
-export function verifyOwnerRouteTable(file: string) {
-  let packaged;
-  try { packaged = execFileSync("unzip", ["-p", file, "assets/owner-routes.json"], { stdio: ["ignore", "pipe", "pipe"] }); }
-  catch { throw new Error("assets/owner-routes.json is missing"); }
-  if (!packaged.equals(fs.readFileSync(new URL('../apps/app/src/platform/owner-routes.json', import.meta.url))))
+export async function verifyOwnerRouteTable(apk: ApkEvidence) {
+  const entry = "assets/owner-routes.json";
+  const packaged = await apk.entries([entry], { label: "owner route table", maxEntryBytes: 1 << 20 });
+  if (!packaged.get(entry)?.equals(fs.readFileSync(new URL("../apps/app/src/platform/owner-routes.json", import.meta.url))))
     throw new Error("assets/owner-routes.json differs from the generated owner-route table");
 }
 
@@ -298,14 +324,12 @@ export function auditBundle(directory: string, { script = AUDIT_SCRIPT } = {}) {
   }
 }
 
-/** apksigner certificate digest of the first signer (upstream parser), or a thrown error. */
-interface SignerOptions {apiLevel?: number}
-type ReadSigner = (file: string, options: SignerOptions & {apksigner: string; env: NodeJS.ProcessEnv}) => string;
-
-export function signerDigest(file: string, { apiLevel }: SignerOptions = {}): string {
-  return (readApkSignerDigest as ReadSigner)(file, { apksigner: tool("apksigner"), apiLevel, env: androidEnv() });
+/** Read the verified signer of an APK already held by the caller. */
+export async function signerDigest(file: string, { apiLevel }: { apiLevel?: number } = {}) {
+  if (apiLevel !== undefined && (!Number.isSafeInteger(apiLevel) || apiLevel < 1))
+    throw new Error("Invalid Android API level");
+  return run(readApkSignerDigest(file, { apksigner: tool("apksigner"), apiLevel, env: androidEnv() }));
 }
-export const parseSignerDigest = parseApkSignerDigest as (output: string, options?: SignerOptions) => string;
 
 /** The image provisioner must be able to prepare the launcher before its first activity starts. */
 export function telephonySetupReceiverProblems(tree: ManifestNode, {appId = CANONICAL_APP_ID}: {appId?: string} = {}): string[] {
@@ -329,8 +353,11 @@ export function telephonySetupReceiverProblems(tree: ManifestNode, {appId = CANO
   return problems;
 }
 
-export function validateApk(file: string, identity: {appId: string}, inspect: (file: string) => ApkInspection = inspectApk) {
-  const data = inspect(file);
+export function validateApk(file: string, identity: {appId: string}, inspect: (file: string) => ApkInspection) {
+  return validateApkInspection(inspect(file), identity, file);
+}
+
+export function validateApkInspection(data: ApkInspection, identity: {appId: string}, file = data.file) {
   if (data.packageName !== identity.appId)
     throw new Error(`Wrong package in ${file}: ${data.packageName}`);
   if (!data.home || !data.launcher || !data.webPayload)
@@ -387,14 +414,22 @@ export function validateApk(file: string, identity: {appId: string}, inspect: (f
 }
 
 /** Archive the verified APK payload, independent of the working web bundle. */
-export function archiveWebPayload(apkFile: string, destination: string) {
-  const payload = extractWebPayload(apkFile);
+export async function archiveWebPayload(apkFile: string, destination: string, expectedSha256: string) {
+  const staging = fs.mkdtempSync(path.join(path.dirname(destination), ".alpha-apk-web-"));
+  const stagedWeb = path.join(staging, "web");
   try {
-    const flags = readBuildFlags(payload.public);
-    if (flags.testMocks !== false) throw new Error(`APK web payload has testMocks=${flags.testMocks}; an APK packages only a flag-off bundle`);
-    auditBundle(payload.public);
-    fs.cpSync(payload.public, destination, { recursive: true, errorOnExist: true, force: false });
+    await withApkEvidence(apkFile, async apk => {
+      if (apk.sha256 !== expectedSha256) throw new Error("APK archive changed after verification: " + apkFile);
+      await withPackagedWeb(apk, publicDir => {
+        const flags = readBuildFlags(publicDir);
+        if (flags.testMocks !== false) throw new Error("APK web payload has testMocks=" + flags.testMocks);
+        auditBundle(publicDir);
+        fs.cpSync(publicDir, stagedWeb, { recursive: true, errorOnExist: true, force: false });
+      });
+    });
+    if (fs.existsSync(destination)) throw new Error("APK web archive already exists: " + destination);
+    fs.renameSync(stagedWeb, destination);
   } finally {
-    fs.rmSync(payload.root, { recursive: true, force: true });
+    fs.rmSync(staging, { recursive: true, force: true });
   }
 }

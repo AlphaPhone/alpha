@@ -26,13 +26,13 @@ const EMPTY_SHA256 = sha256('');
 const SCHEMA = 'alpha-wireless-launcher-readback/v2';
 const HOME = 'android.intent.category.HOME';
 
-function inspectReadbackApk(apk: ReturnType<typeof admitUnitApk>, descriptor: ReturnType<typeof readReleaseSigner>) {
+async function inspectReadbackApk(apk: ReturnType<typeof admitUnitApk>, descriptor: ReturnType<typeof readReleaseSigner>) {
   const {versionCode} = apk;
   assert.ok(versionCode !== null, 'Release version code is missing');
   const directory = mkdtempSync(path.join(tmpdir(), 'alpha-wireless-apk-'));
   try {
     const snapshot = snapshotUnitApk(apk, directory);
-    const {signerRootSha256} = inspectUpdateApk({...snapshot, versionCode}, {descriptor});
+    const {signerRootSha256} = await inspectUpdateApk({...snapshot, versionCode}, {descriptor});
     const runtime = apkRuntimeIdentity(snapshot.file);
     assert.ok(runtime.runtime === 'PACKAGED' && runtime.base && GIT_COMMIT.test(runtime.base), 'Release SDK revision is missing');
     return {signerRootSha256, sdkCommit: runtime.base, versionCode};
@@ -326,7 +326,7 @@ async function main() {
   assert.equal(updateManifestUrl, appUpdateManifestUrl(), 'The configured launcher channel differs from the public release');
   const descriptor = readReleaseSigner();
   const apk = admitUnitApk(values['apk-manifest'], {variant: 'launcher', build: 'release'}, {descriptor, installedReadback: true});
-  const {signerRootSha256, sdkCommit, versionCode} = inspectReadbackApk(apk, descriptor);
+  const {signerRootSha256, sdkCommit, versionCode} = await inspectReadbackApk(apk, descriptor);
   const image = recordFile && vbmetaDigest ? readImageExpectation(recordFile, vbmetaDigest, apk)
     : baseline?.record.image ?? previous?.record.image;
   const offer = await readPublicLauncherOffer();

@@ -14,18 +14,25 @@ export const GENERATED_UPSTREAM_DIRECTORIES = [
 );
 /**
  * The upstream root's turbo logs from pnpm build:upstream, and the single-file outputs upstream's own
- * package builds write outside a build directory (the os build writes the browser control channel).
+ * package builds write outside a build directory. The OS Vitest project writes its manifest and
+ * one generated test per pinned schema. The rest of the package cache remains subject to verification.
  */
 export const GENERATED_UPSTREAM_FILES = [
 	".turbo/turbo-build.log", ".turbo/turbo-gen.log", "packages/os/android/browser-surface/resources/control-channel.js",
+	"packages/os/.cache/generated/tests/manifest.json",
+	"packages/os/.cache/generated/tests/src/bridges/media.schema.test.ts",
+	"packages/os/.cache/generated/tests/src/bridges/passwords.schema.test.ts",
+	"packages/os/.cache/generated/tests/src/bridges/sign-in.schema.test.ts",
+	"packages/os/.cache/generated/tests/src/build/runtime-payload.schema.test.ts",
 ];
 
 /** Authenticate vendor bytes at the pinned commit before resolving or compiling consumer source. */
 export async function verifyPinnedUpstream(root: string) {
 	const commit = pinnedCommit(root);
 	const directory = path.join(root, "vendor/eliza");
-	const { verifyCommittedWorkspace } = await import("./upstream-os.ts");
-	await verifyCommittedWorkspace(directory, commit, { generatedDirectories: GENERATED_UPSTREAM_DIRECTORIES, generatedFiles: GENERATED_UPSTREAM_FILES });
+	const { verifyCommittedWorkspace } = await import("@elizaos/os/build");
+	const { run } = await import("./run-os-program.ts");
+	await run(verifyCommittedWorkspace(directory, commit, { generatedDirectories: GENERATED_UPSTREAM_DIRECTORIES, generatedFiles: GENERATED_UPSTREAM_FILES }));
 	return { directory, commit };
 }
 

@@ -87,7 +87,7 @@ test('a planner receipt that differs from the admission or archive is refused be
 
 test('the stage-aosp CLI refuses a development or non-Pixel source packet before reading any input', () => {
   const stageAosp = (...args) => {
-    try { execFileSyncLocal(['scripts/stage-aosp.ts', ...args]); return ''; } catch (error) { return String(error.stderr); }
+    try { execFileSyncLocal(['--conditions=eliza-source', '--import', 'vibelang/register', 'scripts/stage-aosp.ts', ...args]); return ''; } catch (error) { return String(error.stderr); }
   };
   assert.match(stageAosp('--target', 'cuttlefish', '--aosp-source', '/missing', '--apk', '/missing.apk', '--output', '/missing-out',
     '--development', '--branding-assets', '/assets', '--branding-assets-report-sha256', hex('a')), /Pixel image contract.*production launcher admission/s);

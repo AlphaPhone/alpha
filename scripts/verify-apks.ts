@@ -2,7 +2,7 @@ import {androidIdentity, stageAndroidIdentity, verifyAndroidIdentity} from './an
 /**
  * Verify the launcher APKs of one build and record the result in apk-manifest.json.
  *
- *   node scripts/verify-apks.ts [--signer-api-level=N] [--cloud-voice-evidence=FILE]
+ *   npm run android:verify -- [--signer-api-level=N] [--cloud-voice-evidence=FILE]
  *
  * It verifies the debug APK, and the release APK unless the build record says the build was
  * debug-only (`release: false`, a local `pnpm android:build:local`).
@@ -38,24 +38,24 @@ import {apkUpdateChannel,validateUpdateChannel} from './update-channel.ts';
 import type {UpdateChannel} from './update-channel.ts';
 import {releaseBlockers} from './release-blockers.ts';
 import {
-  auditBundle, distributionProblems, extractWebPayload, parseXmlTree, readBuildFlags, signerDigest, validateApk, verifyOwnerRouteTable,
+  auditBundle, distributionProblems, inspectApk, parseXmlTree, readBuildFlags, validateApkInspection, verifyOwnerRouteTable,
 } from "./apk.ts";
 import type {ApkMode, ApkVariant} from "./apk.ts";
 import { androidEnv, tool } from "./toolchain.ts";
-import { readApkEntries } from "../vendor/eliza/packages/os/android/apk-distribution.mjs";
+import { withApkEvidence, withPackagedWeb, type ApkEvidence } from "./apk-evidence.ts";
 import { readReleaseSigner, releaseAdmission, RELEASE_SIGNER_FILE, SIGNING_ENV } from "./build-android.ts";
 import { RUNTIME_ENTRY } from "./generate-licenses.ts";
 import { fontCheckFailedItem, fontLicenceCheck, fontLicenceLine } from "./font-license-blockers.ts";
 import { licenceFlagLines, licenceFlagRecords } from "./licence-policy.ts";
 import { packagedGzipProblems } from "./android-gzip-assets.ts";
 import { appLinkFilters, requiredAppLinkProblems, webViewFilterProblems } from "./render-assetlinks.ts";
-import { readVoiceHost, voiceBundleAdmission } from "./voice-host.ts";
+import { readVoiceHost, voiceBundleAdmission, VOICE_BUNDLE_ASSETS } from "./voice-host.ts";
 import {embeddingApkProblems,type EmbeddingManifest} from './stage-embedding-host.ts';
 import {readNativeBuildReceipt} from './native-build-inputs.ts';
-import { apkPermissions, checkListenerPermissions, checkListenerSpeechBundle, listenerPackage } from "./aosp-listener.ts";
+import { apkPermissions, checkListenerPermissions, checkListenerSpeechBundle, listenerPackage, LISTENER_BUNDLE_MANIFEST } from "./aosp-listener.ts";
 
 import {cloudVoiceAdmission} from './os-ported/os/apk-release-record.mjs';
-const USAGE = "Usage: node scripts/verify-apks.ts [--signer-api-level=N] [--cloud-voice-evidence=FILE]";
+const USAGE = "Usage: npm run android:verify -- [--signer-api-level=N] [--cloud-voice-evidence=FILE]";
 interface RuntimePackaging {
   apk: string;
   runtime: "PACKAGED";
@@ -70,8 +70,8 @@ interface BuildRecord {
   mapsProvider?: string;
   release?: boolean;
 }
-type ApkInspection = ReturnType<typeof validateApk>;
-type RuntimeVoiceHost = ReturnType<typeof voiceHostAdmission>;
+type ApkInspection = ReturnType<typeof validateApkInspection>;
+type RuntimeVoiceHost = ReturnType<typeof voiceBundleAdmission>;
 type VerificationRow = Omit<ApkInspection, "badging" | "xml" | "names" | "dexClasses" | "removedSpeechClasses"> & {
   variant: ApkVariant;
   mode: ApkMode;
@@ -170,21 +170,49 @@ function releaseFile(dir: string) {
 }
 
 /** The packaged voice bundle and engine libraries against qualified-voice-host.json (scripts/voice-host.ts). */
-function voiceHostAdmission(file: string, names: string[]) {
-  return voiceBundleAdmission({ names, read: (entry: string) => execFileSync("unzip", ["-p", file, entry], { maxBuffer: 1536 * 1024 * 1024 }) }, () => readVoiceHost("."));
+async function voiceHostAdmission(apk: ApkEvidence): Promise<RuntimeVoiceHost> {
+  const root = VOICE_BUNDLE_ASSETS + "/";
+  if (!apk.names.some(name => name.startsWith(root)))
+    return voiceBundleAdmission({ names: apk.names, read: () => { throw Error("No voice entry"); } }, () => readVoiceHost("."));
+  const host = readVoiceHost(".");
+  const expected = new Set([
+    root + "manifest.json",
+    ...host.models.map(model => root + model.path),
+    ...host.abis.flatMap(({ abi, libraries }) => libraries.map(({ name }) => `lib/${abi}/${name}`)),
+  ]);
+  const bytes = await apk.entries(apk.names.filter(name => expected.has(name)), { label: "qualified voice host" });
+  return voiceBundleAdmission({ names: apk.names, read: entry => bytes.get(entry)! }, host);
+}
+
+function verifyResidentRuntime(apk: ApkEvidence, mode: ApkMode): RuntimePackaging {
+  const args = mode === "release" ? ["--release", apk.toolFile] : [apk.toolFile];
+  let output: string;
+  try {
+    output = execFileSync("python3", ["scripts/verify-packaged-runtime.py", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  } catch (error) {
+    const stdout = error instanceof Error && "stdout" in error ? error.stdout : "";
+    const stderr = error instanceof Error && "stderr" in error ? error.stderr : "";
+    throw new Error(`Packaged runtime verification failed:
+${stdout ?? ""}${stderr ?? ""}`);
+  }
+  const [row]: RuntimePackaging[] = JSON.parse(output);
+  if (row?.apk !== apk.toolFile || row.runtime !== "PACKAGED")
+    throw new Error(`Missing packaged runtime verification for ${apk.sourceFile}`);
+  return { ...row, apk: apk.sourceFile };
 }
 const embeddingManifest:EmbeddingManifest=readNativeBuildReceipt('.')?.embedding as EmbeddingManifest ?? JSON.parse(fs.readFileSync('android/embedding-host/qualified-host.json','utf8'));
 
 const results: VerificationRow[] = [];
 const failures: string[] = [];
 const flagLines = new Set<string>();
-const entriesByApk = new Map<string, string[]>();
+const runtimePackaging: RuntimePackaging[] = [];
 for (const mode of modes) {
     const { file, signed } = mode === "release"
       ? releaseFile(directory)
       : { file: path.join(directory, `${variant}-debug.apk`), signed: true };
     if (!fs.existsSync(file)) throw new Error(`Missing ${file}`);
-    const d = validateApk(file, identity);
+    await withApkEvidence(file, async apk => {
+    const d = validateApkInspection(await inspectApk(apk), identity);
     if (d.debuggable !== (mode === "debug"))
       throw new Error(`Wrong debug flag: ${file}`);
     const { facts, problems } = distributionProblems(d, { mode, appId: identity.appId });
@@ -198,60 +226,70 @@ for (const mode of modes) {
     }));
     problems.push(...webViewFilterProblems(tree, webViewFiltersAllowed));
     // Shared web bundle audit on the exact packaged payload.
-    const payload = extractWebPayload(file);
-    let flags: ReturnType<typeof readBuildFlags> | undefined;
-    // A PACKAGED distribution must ship notices regenerated with --packaged-runtime (Node.js and
-    // the bundled agent/worker packages); the committed notices carry only the umbrella entry.
-    let runtimeNotices = false;
-    // The font check is recorded in full; only its `blockers` (policy constant) affect distributable.
-    // A check that could not run has no result: it is recorded and printed as blocking under
-    // either policy, and releaseBlockers blocks its item.
-    let fontCheck: ReturnType<typeof fontLicenceCheck>;
-    try { fontCheck = fontLicenceCheck(payload.public); }
-    catch (error) { const items = [fontCheckFailedItem(message(error))]; fontCheck = { ...fontLicenceCheck(path.join(payload.root, "absent")), status: "unresolved", blocksDistribution: true, items, blockers: items }; }
-    const licenceBlockers = fontCheck.blockers;
-    // Flags are a record of the packaged notices. They are never a blocker.
-    let licenceFlags: ReturnType<typeof licenceFlagRecords> = [];
-    try {
-      const notices = path.join(payload.public, "licenses", "third-party-notices.json");
-      const entries = fs.existsSync(notices) ? JSON.parse(fs.readFileSync(notices, "utf8")) : [];
-      runtimeNotices = Array.isArray(entries) && entries.some(entry => entry?.name === RUNTIME_ENTRY);
-      licenceFlags = licenceFlagRecords(entries);
-      for (const line of licenceFlagLines(entries)) flagLines.add(line);
-    } catch { runtimeNotices = false; }
-    try {
-      flags = readBuildFlags(payload.public);
-      if (Object.hasOwn(flags, "runtimeProfile")) problems.push("Packaged web bundle names a removed runtime profile");
-      if (flags.testMocks !== false)
-        problems.push(`Packaged web bundle has testMocks=${flags.testMocks}; an APK packages only a flag-off bundle`);
-      auditBundle(payload.public);
-      // The asset merger unpacks *.gz; the scan engine needs its model under the published name.
-      problems.push(...packagedGzipProblems(payload.public));
-    } catch (error) {
-      problems.push(message(error));
-    } finally {
-      fs.rmSync(payload.root, { recursive: true, force: true });
-    }
-    try { verifyOwnerRouteTable(file); }
+    const { flags, runtimeNotices, fontCheck, licenceBlockers, licenceFlags } = await withPackagedWeb(apk, publicDir => {
+      let flags: ReturnType<typeof readBuildFlags> | undefined;
+      // A PACKAGED distribution must ship notices regenerated with --packaged-runtime (Node.js and
+      // the bundled agent/worker packages); the committed notices carry only the umbrella entry.
+      let runtimeNotices = false;
+      // The font check is recorded in full; only its `blockers` (policy constant) affect distributable.
+      // A check that could not run has no result: it is recorded and printed as blocking under
+      // either policy, and releaseBlockers blocks its item.
+      let fontCheck: ReturnType<typeof fontLicenceCheck>;
+      try { fontCheck = fontLicenceCheck(publicDir); }
+      catch (error) { const items = [fontCheckFailedItem(message(error))]; fontCheck = { ...fontLicenceCheck(path.join(publicDir, "__absent_font_audit__")), status: "unresolved", blocksDistribution: true, items, blockers: items }; }
+      // Flags are a record of the packaged notices. They are never a blocker.
+      let licenceFlags: ReturnType<typeof licenceFlagRecords> = [];
+      try {
+        const notices = path.join(publicDir, "licenses", "third-party-notices.json");
+        const entries = fs.existsSync(notices) ? JSON.parse(fs.readFileSync(notices, "utf8")) : [];
+        runtimeNotices = Array.isArray(entries) && entries.some(entry => entry?.name === RUNTIME_ENTRY);
+        licenceFlags = licenceFlagRecords(entries);
+        for (const line of licenceFlagLines(entries)) flagLines.add(line);
+      } catch { runtimeNotices = false; }
+      try {
+        flags = readBuildFlags(publicDir);
+        if (Object.hasOwn(flags, "runtimeProfile")) problems.push("Packaged web bundle names a removed runtime profile");
+        if (flags.testMocks !== false)
+          problems.push(`Packaged web bundle has testMocks=${flags.testMocks}; an APK packages only a flag-off bundle`);
+        auditBundle(publicDir);
+        // The asset merger unpacks *.gz; the scan engine needs its model under the published name.
+        problems.push(...packagedGzipProblems(publicDir));
+      } catch (error) {
+        problems.push(message(error));
+      }
+      const licenceBlockers = fontCheck.blockers;
+      return { flags, runtimeNotices, fontCheck, licenceBlockers, licenceFlags };
+    });
+    try { await verifyOwnerRouteTable(apk); }
     catch (error) { problems.push(`Owner route table: ${message(error)}`); }
     try {
       if (identityProjection) {
         const expected = fs.readFileSync(path.join(identityProjection.root, 'identity.json'));
-        if (!execFileSync('unzip', ['-p', file, 'assets/android-identity.json']).equals(expected))
+        const name = 'assets/android-identity.json';
+        const identityBytes = await apk.entries([name], { label: "installation identity", maxEntryBytes: 1 << 20 });
+        if (!identityBytes.get(name)?.equals(expected))
           throw Error('Packaged Android identity differs from the authenticated source view');
       } else if (d.names.includes('assets/android-identity.json')) throw Error('Canonical APK contains an unexpected installation identity view');
     } catch (error) { problems.push(`Android installation identity: ${message(error)}`); }
-    problems.push(...embeddingApkProblems({names:d.names,read:entry=>execFileSync('unzip',['-p',file,entry],{maxBuffer:256*1024*1024})},embeddingManifest));
+    const libraries = await apk.entries(d.names.filter(entry => /^lib\/[^/]+\/(libelizainference|libparadeevoicejni|libc\+\+_shared)\.so$/.test(entry)), { label: "embedding host libraries" });
+    problems.push(...embeddingApkProblems({ names: d.names, read: entry => libraries.get(entry)! }, embeddingManifest));
     let signerSha256: string | null = null;
     if (signed) {
-      try { signerSha256 = signerDigest(file, {apiLevel: signerApiLevel}); }
+      try { signerSha256 = await apk.signer(signerApiLevel); }
       catch (error) { problems.push(`apksigner verify failed for ${file}: ${message(error)}`); }
     }
     if (problems.length) failures.push(`${file}:\n  - ${problems.join("\n  - ")}`);
+    if (problems.length) return;
     const { badging, xml, names, dexClasses, removedSpeechClasses, ...record } = d;
-    entriesByApk.set(file, names);
+    const runtime = verifyResidentRuntime(apk, mode);
+    const voiceHost = await voiceHostAdmission(apk);
+    if (voiceHost.differences.length)
+      throw new Error(`On-device voice in ${file} is not admitted:\n  - ${voiceHost.differences.join("\n  - ")}`);
+    runtimePackaging.push(runtime);
     results.push({
       ...record,
+      runtime: runtime.runtime,
+      voiceHost,
       variant,
       mode,
       updateChannel,
@@ -263,13 +301,14 @@ for (const mode of modes) {
       exportedComponents: facts.exported.map(component => component.name).sort(),
       appLinks: appLinkFilters(xml),
       testMocks: flags?.testMocks ?? null,
-      bundleAudit: problems.length ? "failed" : "passed",
+      bundleAudit: "passed",
       runtimeNotices,
       licenceFlags,
       fontLicenceCheck: { check: fontCheck.check, status: fontCheck.status, blocksDistribution: fontCheck.blocksDistribution, items: fontCheck.items, resolved: fontCheck.resolved },
       licenceBlockers,
     });
-  }
+    });
+}
 if (failures.length)
   throw new Error(`APK distribution verification failed:\n${failures.join("\n")}`);
 
@@ -294,40 +333,10 @@ for (const row of release) {
     throw new Error(`Release signing admission failed for ${row.file}: ${row.releaseAdmission.failures.join("; ")}`);
 }
 
-// Every APK packages the authenticated resident runtime.
-let runtimeOutput: string;
-try {
-  runtimeOutput = execFileSync("python3", ["scripts/verify-packaged-runtime.py", ...release.flatMap(row => ["--release", row.file]), ...results.filter(row => row.mode === "debug").map(row => row.file)], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-} catch (error) {
-  const stdout = error instanceof Error && "stdout" in error ? error.stdout : "";
-  const stderr = error instanceof Error && "stderr" in error ? error.stderr : "";
-  throw new Error(`Packaged runtime verification failed:\n${stdout ?? ""}${stderr ?? ""}`);
-}
-const runtimePackaging: RuntimePackaging[] = JSON.parse(runtimeOutput);
-const runtimeByApk = new Map(runtimePackaging.map(entry => [entry.apk, entry]));
-function checkedRuntime(file: string) {
-  const runtime = runtimeByApk.get(file);
-  if (!runtime) throw new Error(`Missing packaged runtime verification for ${file}`);
-  return runtime;
-}
-function checkedVoiceHost(file: string) {
-  const names = entriesByApk.get(file);
-  if (!names) throw new Error(`Missing inspected APK entries for ${file}`);
-  const voiceHost = voiceHostAdmission(file, names);
-  if (voiceHost.differences.length)
-    throw new Error(`On-device voice in ${file} is not admitted:\n  - ${voiceHost.differences.join("\n  - ")}`);
-  return voiceHost;
-}
 const blockersByApk = new Map<string, string[]>();
 for (const row of release) {
   if (!row.releaseAdmission) throw new Error(`Missing release signing admission for ${row.file}`);
-  row.runtime = checkedRuntime(row.file).runtime;
-  // Signing is recorded separately (row.signed). The packaged voice
-  // bundle must match android/voice-host/qualified-voice-host.json byte for byte.
   // A supplied Cloud speech receipt is recorded for these exact APK bytes.
-  row.voiceHost = checkedVoiceHost(row.file);
-  if (row.voiceHost.differences.length)
-    throw new Error(`On-device voice in ${row.file} is not admitted:\n  - ${row.voiceHost.differences.join("\n  - ")}`);
   if (cloudEvidenceSha256 !== undefined) row.cloudVoice = cloudVoiceAdmission(row.sha256, cloudEvidence, cloudEvidenceSha256);
   // The one admission decision (scripts/release-blockers.ts). The row is judged as the verdict
   // being recorded, so the shared "not recorded as distributable" item cannot refer to itself.
@@ -335,30 +344,27 @@ for (const row of release) {
   blockersByApk.set(row.file, blockers);
   row.distributable = blockers.length === 0;
 }
-for (const row of results.filter(row => row.mode === "debug")) {
-  row.runtime = checkedRuntime(row.file).runtime;
-  row.voiceHost = checkedVoiceHost(row.file);
-}
-
 // Inspect the separate image-only listener APKs when they are present beside the app APKs.
-function listenerFacts(file: string, mode: ApkMode, signed: boolean) {
+async function listenerFacts(apk: ApkEvidence, mode: ApkMode, signed: boolean) {
+  const file = apk.sourceFile;
   const facts: {
     file: string; mode: ApkMode; signed: boolean; sha256: string;
     signerSha256?: string | null; permissionProblem?: string;
     packageName?: string | null; requested?: string[];
     voiceBundle?: {packaged: boolean; abis?: ReturnType<typeof checkListenerSpeechBundle>; problem?: string};
-  } = { file, mode, signed, sha256: sha256File(file) };
+  } = { file, mode, signed, sha256: apk.sha256 };
   if (signed) {
-    try { facts.signerSha256 = signerDigest(file, {apiLevel: signerApiLevel}); }
+    try { facts.signerSha256 = await apk.signer(signerApiLevel); }
     catch (error) { facts.permissionProblem = `apksigner verify failed: ${message(error)}`; }
   }
-  const dump = execFileSync(tool("aapt"), ["dump", "permissions", file], { encoding: "utf8", env: androidEnv(), maxBuffer: 16 << 20 });
+  const dump = execFileSync(tool("aapt"), ["dump", "permissions", apk.toolFile], { encoding: "utf8", env: androidEnv(), maxBuffer: 16 << 20 });
   Object.assign(facts, apkPermissions(dump));
   try { checkListenerPermissions(dump, renderSensePermissions(identity.appId), listenerPackage(identity.appId)); }
   catch (error) { facts.permissionProblem ??= message(error); }
-  const entries = readApkEntries(file);
+  const entries = apk.names;
   try {
-    const abis = checkListenerSpeechBundle(entries, readVoiceHost("."), (entry: string) => execFileSync("unzip", ["-p", file, entry], { encoding: "utf8", maxBuffer: 1 << 20 }));
+    const evidence = await apk.entries([LISTENER_BUNDLE_MANIFEST], { label: "listener voice manifest", maxEntryBytes: 1 << 20 });
+    const abis = checkListenerSpeechBundle(entries, readVoiceHost("."), (entry: string) => evidence.get(entry)!.toString("utf8"));
     facts.voiceBundle = { packaged: true, abis };
   } catch (error) { facts.voiceBundle = { packaged: false, problem: message(error) }; }
   const network = (facts.requested ?? []).filter(name => /\.(INTERNET|ACCESS_NETWORK_STATE)$/.test(name));
@@ -383,9 +389,11 @@ function listenerFacts(file: string, mode: ApkMode, signed: boolean) {
   };
 }
 const listenerApks = [["sense-debug.apk", "debug", true], ["sense-release.apk", "release", true], ["sense-release-unsigned.apk", "release", false]] as const;
-const listenerRows = listenerApks
-  .filter(([name]) => fs.existsSync(path.join(directory, name)))
-  .map(([name, mode, signed]) => listenerFacts(path.join(directory, name), mode, signed));
+const listenerRows: Awaited<ReturnType<typeof listenerFacts>>[] = [];
+for (const [name, mode, signed] of listenerApks) {
+  const file = path.join(directory, name);
+  if (fs.existsSync(file)) listenerRows.push(await withApkEvidence(file, apk => listenerFacts(apk, mode, signed)));
+}
 const listenerFailures = listenerRows.filter(row => row.problems.length);
 if (listenerFailures.length)
   throw new Error(`Listener APK verification failed:\n${listenerFailures.map(row => `${row.file}:\n  - ${row.problems.join("\n  - ")}`).join("\n")}`);
@@ -401,41 +409,49 @@ let apksignerVersion: string | null = null;
 try { apksignerVersion = execFileSync(tool("apksigner"), ["--version"], { encoding: "utf8", env: androidEnv() }).trim(); }
 catch { /* recorded as unknown */ }
 
-fs.writeFileSync(
-  manifestFile,
-  JSON.stringify(
-    {
-      createdAt: new Date().toISOString(),
-      evidence: "apk-build",
-      // Constant fields that provisioning, qualification and release admission compare.
-      testMocks: false,
-      demoEntryPoints: false,
-      allowUnpackagedRuntime: false,
-      mapsProvider: "cloud",
-      runtimeProfile,
-      applicationId: identity.appId,
-      updateChannel,
-      version: { code: versionCode, name: versionName },
-      signing: {
-        // null for a debug-only build, which assembled no release APK.
-        release: release.length === 0 ? null : release.every(row => row.signed) ? { signed: true, signerSha256: release[0].signerSha256 } : { signed: false },
-        debugSignerSha256: results.find(row => row.mode === "debug")?.signerSha256 ?? null,
-        apksigner: apksignerVersion,
-        apiLevel: signerApiLevel ?? null,
-        scope: signerApiLevel === undefined ? "unscoped legacy signer" : "specified Android API; device admission is checked separately",
-        descriptor: { file: RELEASE_SIGNER_FILE, signerSha256: releaseSigner.signerSha256, lastReleaseVersionCode: releaseSigner.lastRelease.versionCode },
-      },
-      mappings,
-      instrumentation,
-      upstream: readUpstreamPin(process.cwd()),
-      results,
-      runtimePackaging,
-      listener,
+const manifestJson = JSON.stringify(
+  {
+    createdAt: new Date().toISOString(),
+    evidence: "apk-build",
+    // Constant fields that provisioning, qualification and release admission compare.
+    testMocks: false,
+    demoEntryPoints: false,
+    allowUnpackagedRuntime: false,
+    mapsProvider: "cloud",
+    runtimeProfile,
+    applicationId: identity.appId,
+    updateChannel,
+    version: { code: versionCode, name: versionName },
+    signing: {
+      // null for a debug-only build, which assembled no release APK.
+      release: release.length === 0 ? null : release.every(row => row.signed) ? { signed: true, signerSha256: release[0].signerSha256 } : { signed: false },
+      debugSignerSha256: results.find(row => row.mode === "debug")?.signerSha256 ?? null,
+      apksigner: apksignerVersion,
+      apiLevel: signerApiLevel ?? null,
+      scope: signerApiLevel === undefined ? "unscoped legacy signer" : "specified Android API; device admission is checked separately",
+      descriptor: { file: RELEASE_SIGNER_FILE, signerSha256: releaseSigner.signerSha256, lastReleaseVersionCode: releaseSigner.lastRelease.versionCode },
     },
-    null,
-    2,
-  ) + "\n",
-);
+    mappings,
+    instrumentation,
+    upstream: readUpstreamPin(process.cwd()),
+    results,
+    runtimePackaging,
+    listener,
+  },
+  null,
+  2,
+) + "\n";
+const manifestStage = fs.mkdtempSync(path.join(path.dirname(manifestFile), ".alpha-apk-manifest-"));
+try {
+  const candidate = path.join(manifestStage, path.basename(manifestFile));
+  fs.writeFileSync(candidate, manifestJson, { flag: "wx" });
+  for (const { file, sha256 } of [...results, ...listenerRows, ...Object.values(instrumentation)]) {
+    if (sha256File(file) !== sha256) throw new Error(`APK changed before evidence publication: ${file}`);
+  }
+  fs.renameSync(candidate, manifestFile);
+} finally {
+  fs.rmSync(manifestStage, { recursive: true, force: true });
+}
 console.log(JSON.stringify(results, null, 2));
 const undistributable = release.filter(row => !row.distributable);
 if (undistributable.length)

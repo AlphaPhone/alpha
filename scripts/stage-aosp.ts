@@ -15,7 +15,8 @@ import { provisioningComponents, writeProvisioningOverlay } from "./aosp-provisi
 import { aospTelephonyRoleComponents, writeAospTelephonyRoleOverrides } from "./aosp-telephony-roles.ts";
 import { writeImageCapability } from "./aosp-image-capability.ts";
 import { releaseBlockers } from "./release-blockers.ts";
-import {auditBundle, extractWebPayload, parseXmlTree, signerDigest, telephonySetupReceiverProblems, verifyOwnerRouteTable} from "./apk.ts";
+import {auditBundle, parseXmlTree, signerDigest, telephonySetupReceiverProblems, verifyOwnerRouteTable} from "./apk.ts";
+import {withApkEvidence, withPackagedWeb} from "./apk-evidence.ts";
 import {apkUpdateChannelOrLegacy, assertProvisioningUpdateChannel, recordedProvisioningUpdateChannel} from "./update-channel.ts";
 import {updateArtifactDigest} from "./update-artifact.ts";
 import { aaptManifestTree, admitImageApk, manifestTreeIsDebuggable, readApkBuildFlags, reviewedSourceOverrides as sharedReviewedSourceOverrides } from "./os-ported/os/image-apk-admission.mjs";
@@ -100,11 +101,12 @@ export function assertOwnerTelephonyOptions({development, target, senseImage}: {
  * production-bundle audit (scripts/audit-production-bundle.ts) and the generated owner-route table.
  * A locally signed launcher never gets a verify-apks row, so owner admission runs them itself.
  */
-export function auditOwnerLauncherPayload(apk: string) {
-  const payload = extractWebPayload(apk);
-  try { auditBundle(payload.public); }
-  finally { fs.rmSync(payload.root, {recursive: true, force: true}); }
-  verifyOwnerRouteTable(apk);
+export function auditOwnerLauncherPayload(file: string, expectedSha256: string) {
+  return withApkEvidence(file, async apk => {
+    if (apk.sha256 !== expectedSha256) throw new Error(`APK changed before owner launcher admission: ${file}`);
+    await withPackagedWeb(apk, auditBundle);
+    await verifyOwnerRouteTable(apk);
+  });
 }
 
 /**
@@ -115,10 +117,10 @@ export function auditOwnerLauncherPayload(apk: string) {
  * web payload always passes the production-bundle audit and the owner-route table check, and a
  * row, when one is recorded, must be a release row.
  */
-export function admitOwnerTelephonyApk({apk, hash, manifestFile, testMocksDir = path.resolve("artifacts/test-mocks"), readBuildFlags = readApkBuildFlags, readManifestTree, auditPayload = auditOwnerLauncherPayload}: {
+export async function admitOwnerTelephonyApk({apk, hash, manifestFile, testMocksDir = path.resolve("artifacts/test-mocks"), readBuildFlags = readApkBuildFlags, readManifestTree, auditPayload = auditOwnerLauncherPayload}: {
   apk: string; hash: string; manifestFile: string; testMocksDir?: string;
   readBuildFlags?: (apk: string) => {testMocks?: unknown}; readManifestTree: (apk: string) => string;
-  auditPayload?: (apk: string) => void;
+  auditPayload?: (apk: string, expectedSha256: string) => void | Promise<void>;
 }) {
   const mocks = [path.resolve(testMocksDir), ...(fs.existsSync(testMocksDir) ? [fs.realpathSync(testMocksDir)] : [])];
   for (const candidate of [path.resolve(apk), fs.realpathSync(apk)])
@@ -133,7 +135,7 @@ export function admitOwnerTelephonyApk({apk, hash, manifestFile, testMocksDir = 
   if (entry && entry.mode !== "release") throw Error(`Refusing ${apk}: --owner-telephony stages a release launcher; ${manifestFile} records a ${entry.mode} build.`);
   if (manifestTreeIsDebuggable(readManifestTree(apk)))
     throw Error(`Refusing ${apk}: --owner-telephony stages a release (non-debuggable) launcher; Alpha never admits image telephony in a debuggable build.`);
-  try { auditPayload(apk); }
+  try { await auditPayload(apk, hash); }
   catch (error) { throw Error(`Refusing ${apk}: its packaged web payload fails the production checks: ${error instanceof Error ? error.message : String(error)}`); }
 }
 
@@ -387,7 +389,7 @@ const hash = sha256File(apk);
 const manifestFile = get('--apk-manifest') || 'artifacts/apk-manifest.json';
 // An owner image admits its locally signed release launcher; it records no reviewed update channel.
 if (ownerTelephony)
-  admitOwnerTelephonyApk({apk, hash, manifestFile, readManifestTree: file => aaptManifestTree(file, {aapt: tool("aapt"), env: androidEnv()})});
+  await admitOwnerTelephonyApk({apk, hash, manifestFile, readManifestTree: file => aaptManifestTree(file, {aapt: tool("aapt"), env: androidEnv()})});
 const reviewedUpdateChannel = ownerTelephony ? null : admitApk({
   apk,
   hash,
@@ -403,7 +405,7 @@ if (descriptor) {
 const cameraSource = verifySecureCameraSource(source, undefined, reviewedSourceOverrides({physicalSource, source, appliedPatches}));
 const env = androidEnv();
 if (!descriptor) {
-  const signer = signerDigest(apk);
+  const signer = await signerDigest(apk);
   fs.mkdirSync("artifacts", { recursive: true });
   descriptor = `artifacts/launcher-${hash.slice(0, 12)}.json`;
   fs.writeFileSync(

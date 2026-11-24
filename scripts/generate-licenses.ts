@@ -778,12 +778,16 @@ function voiceHostEntries(root: string, templates: Templates, errors: string[]):
 
 export const AGENT_ASSETS = 'android/app/src/main/assets/agent';
 
-/** The installed directory of name@version: a workspace package of the pinned upstream, or pnpm's store entry. */
+const RESIDENT_PACKAGE = 'scripts/resident';
+
+/** The source directory of a bundled name@version, including Alpha's private resident entry. */
 export function installedPackageDirectory(root: string, sourceDir: string, name: string, version: string): string | undefined {
   const matches = (dir: string) => {
     try { const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')); return manifest.name === name && manifest.version === version; }
     catch { return false; }
   };
+  const resident = path.join(root, RESIDENT_PACKAGE);
+  if (matches(resident)) return resident;
   for (const workspace of ['packages', 'vibestack']) {
     const base = path.join(sourceDir, workspace);
     if (!fs.existsSync(base)) continue;
@@ -807,13 +811,13 @@ export function packagedRuntimePresent(root = ROOT, agentDir = path.join(root, A
   return fs.existsSync(path.join(agentDir, 'agent.mjs')) && fs.existsSync(path.join(agentDir, 'inventory.json'));
 }
 
-function runtimePackageEntry(dir: string, bundle: string, templates: Templates, errors: string[]): RuntimePackageNotice | null {
+function runtimePackageEntry(dir: string, bundle: string, templates: Templates, errors: string[], source?: string): RuntimePackageNotice | null {
   if (!fs.existsSync(path.join(dir, 'package.json'))) { errors.push(`${bundle}: ${dir} is not in the prepared runtime source; run pnpm agent:bundle`); return null; }
   const manifest = readManifest(dir, `${bundle}: ${dir}`, errors);
   if (!manifest) return null;
   if (typeof manifest.name !== 'string' || typeof manifest.version !== 'string') { errors.push(`${bundle}: ${dir}/package.json has no name and version`); return null; }
   const notice = packageNotice({declared: manifestLicense(manifest), text: licenseFilesText(dir), dir, manifest, templates});
-  return {name: manifest.name, version: manifest.version, source: `https://www.npmjs.com/package/${manifest.name}/v/${manifest.version}`, ...notice, _bundles: [bundle]};
+  return {name: manifest.name, version: manifest.version, source: source ?? `https://www.npmjs.com/package/${manifest.name}/v/${manifest.version}`, ...notice, _bundles: [bundle]};
 }
 
 /** The pinned Node runtime (vendor/eliza/packages/os/aosp/runtime/node.lock.json) packaged as libeliza_node.so. */
@@ -864,7 +868,10 @@ export function runtimeEntries(root: string, templates: Templates, errors: strin
     for (const {name, version} of manifest.packages ?? []) {
       const directory = installedPackageDirectory(root, sourceDir, name, version);
       if (!directory) { errors.push(`agent bundle: ${name}@${version} is not installed in this workspace; run pnpm install`); continue; }
-      add(runtimePackageEntry(directory, 'agent bundle', templates, errors));
+      const localSource = directory === path.join(root, RESIDENT_PACKAGE)
+        ? `https://github.com/eliza-research/alpha/tree/vibestack/${RESIDENT_PACKAGE}`
+        : undefined;
+      add(runtimePackageEntry(directory, 'agent bundle', templates, errors, localSource));
     }
   } catch (error) { errors.push(errorMessage(error)); }
   // The workflow worker artifact (@elizaos/plugin-workflow/worker) records its npm dependencies by name and version

@@ -83,13 +83,15 @@ export const filesFilterChipCountsItsResults = always(() => {
   return f === null || f.chipCount < 0 || f.chipCount === f.results;
 });
 
-const selectionCount = extract(({ document }) => {
+const selectionHasActionsWithoutRows = extract(({ document }) => {
   const bar = document.querySelector('main[aria-label="Files"] [role="toolbar"][aria-label="Selection"]');
-  return bar === null ? -1 : Number(/(\d+) selected/.exec(bar.textContent ?? "")?.[1] ?? "0");
+  if (bar === null || !/\b0 selected\b/.test(bar.textContent ?? "")) return false;
+  const fileActions = ["Share", "Move", "Copy", "Rename", "Details", "Move to Trash", "Download"];
+  return Array.from(bar.querySelectorAll("button")).some((button) => !button.disabled && fileActions.includes(button.getAttribute("aria-label") ?? ""));
 });
 
-/** An empty selection ends: the selection bar never counts zero rows. */
-export const filesEmptySelectionEnds = always(() => selectionCount.current !== 0);
+/** Select can show zero rows while the owner chooses. Actions on files still need a row. */
+export const filesActionsNeedSelection = always(() => !selectionHasActionsWithoutRows.current);
 
 const storageShares = extract(({ document }) =>
   Array.from(document.querySelectorAll('ul[aria-label="Storage"] [role="progressbar"]')).map((bar) => bar.getAttribute("aria-valuenow")));

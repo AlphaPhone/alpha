@@ -2,7 +2,7 @@ import {androidIdentity} from './android-identity.ts';
 /**
  * Verify, build the launcher APKs and retain immutable matching app/test artifacts.
  *
- *   node scripts/build-archive.ts test-results/<new-archive>
+ *   node --conditions=eliza-source --import vibelang/register scripts/build-archive.ts test-results/<new-archive>
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -14,7 +14,7 @@ import {buildEnv as androidBuildEnv} from './build-android.ts';
 import {publicUpdateChannel} from './update-channel.ts';
 const cli=process.argv.slice(2);
 const runtimeProfile='native';
-assert.ok(cli.length===1&&!cli[0].startsWith('--'),'Use: node scripts/build-archive.ts test-results/<new-archive>');
+assert.ok(cli.length===1&&!cli[0].startsWith('--'),'Use: node --conditions=eliza-source --import vibelang/register scripts/build-archive.ts test-results/<new-archive>');
 const [destination]=cli;
 // Full verification compiles Calendar host tests which run real SQLite queries.
 // Check this before preparation or model verification starts.
@@ -32,10 +32,11 @@ const snapshot=()=>JSON.parse(execFileSync(process.execPath,['scripts/source-sna
 // Generated native Java is a build input: finish its normal source admission
 // before freezing the baseline. Gradle repeats this stage; final equality below
 // still rejects any non-deterministic regeneration or later source drift.
+const generateHost=['--conditions=eliza-source','--import','vibelang/register','scripts/android-host.ts'];
 const nativeStageLog=fs.openSync(path.join(destination,'native-source-prestage.log'),'wx');
 try{
  // The generated Gradle host is a build input too; android:build regenerates identical bytes.
- execFileSync(process.execPath,['--conditions=eliza-source','--import','vibelang/register','scripts/android-host.ts'],{stdio:['ignore',nativeStageLog,nativeStageLog],timeout:180000,env:buildEnv});
+ execFileSync(process.execPath,generateHost,{stdio:['ignore',nativeStageLog,nativeStageLog],timeout:180000,env:buildEnv});
 }
 finally{fs.closeSync(nativeStageLog);}
 // Capacitor generates res/xml/config.xml, an authenticated native build input.
@@ -43,8 +44,8 @@ finally{fs.closeSync(nativeStageLog);}
 // below still rejects drift in this file or any other captured input.
 const capacitorStageLog=fs.openSync(path.join(destination,'capacitor-prestage.log'),'wx');
 try{
- execFileSync(process.execPath,['run','android:sync'],{stdio:['ignore',capacitorStageLog,capacitorStageLog],timeout:600000,env:buildEnv});
- execFileSync(process.execPath,['scripts/android-host.ts'],{stdio:['ignore',capacitorStageLog,capacitorStageLog],timeout:180000,env:buildEnv});
+ execFileSync('pnpm',['run','android:sync'],{stdio:['ignore',capacitorStageLog,capacitorStageLog],timeout:600000,env:buildEnv});
+ execFileSync(process.execPath,generateHost,{stdio:['ignore',capacitorStageLog,capacitorStageLog],timeout:180000,env:buildEnv});
 }
 finally{fs.closeSync(capacitorStageLog);}
 const before=snapshot();
@@ -55,7 +56,7 @@ for(const command of ['verify','android:build']){
  // Full verification includes the real staged JVM/runtime campaigns. Retain a
  // finite two-hour verification budget and the existing twenty-minute APK budget.
  // An archive retains the release APK, so the Android build is never debug-only here.
- try{execFileSync(process.execPath,['run',command,...(command==='android:build'?['--release']:[])],{stdio:['ignore',log,log],timeout:command==='verify'?7200000:1200000,env:command==='verify'?verifyEnv:buildEnv});}
+ try{execFileSync('pnpm',['run',command,...(command==='android:build'?['--release']:[])],{stdio:['ignore',log,log],timeout:command==='verify'?7200000:1200000,env:command==='verify'?verifyEnv:buildEnv});}
  finally{fs.closeSync(log);}
  console.log(command+': passed');
 }
@@ -92,6 +93,6 @@ if(fs.existsSync(mapping)){
 fs.writeFileSync(path.join(destination,'release-mappings.json'),JSON.stringify(mappings,null,2)+'\n',{flag:'wx'});
 fs.copyFileSync(path.join(sourceDir,'apk-manifest.json'),path.join(destination,'apk-verification.json'),fs.constants.COPYFILE_EXCL);
 // Preserve the exact web payload from the hash-checked, archived APK.
-archiveWebPayload(path.join(destination,'launcher-debug.apk'),path.join(destination,'web-dist'));
+await archiveWebPayload(path.join(destination,'launcher-debug.apk'),path.join(destination,'web-dist'),manifest['launcher-debug.apk']);
 fs.writeFileSync(path.join(destination,'apk-manifest.json'),JSON.stringify(manifest,null,2));
 console.log(JSON.stringify({archive:destination,sourceFingerprint:after.digest,apks:Object.keys(manifest).length}));

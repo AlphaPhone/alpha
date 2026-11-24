@@ -51,9 +51,8 @@ on dispatch: one job builds the launcher APKs and runs the default instrumentati
 reading suites on hosted emulators. `resident-android.yml` builds the unsigned native candidate on
 each `main` push, and a dispatched build or embedding-qualification publication on request. The
 release workflows run only on dispatch.
-The native candidate keeps the bounded, hash-pinned Bun acquisition check with credentials
-limited to its download step. Runtime staging, mobile bundle checks, notices and distribution
-archiving retain separate deadlines. The emulator lane retains its exact debug and instrumentation
+The native candidate uses the pinned Android Node runtime. Runtime staging, mobile bundle
+checks, notices and distribution archiving retain separate deadlines. The emulator lane retains its exact debug and instrumentation
 APKs with their manifest for later byte-level audits. Required prepared-SDK tests fail when the
 Cloud recording classifier dependency is missing.
 
@@ -237,7 +236,10 @@ automatically prepares the pinned native inputs before preparing the resident
 source and workflow worker. Run `pnpm agent:build-embedding-host` to prepare
 just the voice and embedding inputs; `pnpm android:build:inputs` reports their
 current state without building them. Build inputs must agree with the staged
-runtime and native libraries.
+runtime and native libraries. The SDK pin must match or descend from the
+protected Alpha release line. During the Vibestack transition, fetch
+`origin/vibestack` for the reviewed baseline. Once `origin/main` carries
+the Vibestack SDK, its pin becomes the baseline for that SDK history.
 
 The native producer supports Apple Silicon macOS and x86-64 Linux with glibc
 2.28 or newer. Windows developers can use an x86-64 Linux WSL environment. The
@@ -354,17 +356,16 @@ The canonical package reads the `app-stable-alphacompute` release. The publisher
 still checks the version floor from `app-stable`. Android may require
 installation confirmation.
 
-The app and OS update URLs target `alphacompute/alpha`. Release hosting must be
-available there before distribution. Verify anonymous readback of the app
-manifest, the pilot OTA manifest and their downloads at the new URLs. Existing
-release pointers may need their APK URLs updated to the canonical repository.
+The app and OS update URLs target `eliza-research/alpha`. Before distribution,
+verify anonymous readback of the app manifest, the pilot OTA manifest and their
+downloads in that repository. Retained release pointers may use historical URLs.
 
 Protected release jobs bind dispatches to the reviewed commit on `main`.
-After the repository moves, the release owner applies the repository ID,
-Alpha Compute owner ID and workflow reference allowlist in
+The repository ID, owner ID and workflow reference allowlist in
 [`scripts/ci/private-artifact-identity.json`](../scripts/ci/private-artifact-identity.json)
-to the existing Workload Identity Federation provider before protected signing
-or publication uses private artifact storage.
+must match the Workload Identity Federation provider before protected signing
+or publication uses private artifact storage. A repository transfer requires the
+release owner to update that binding and verify release hosting before distribution.
 
 On both sideloaded and image-preinstalled phones, check the update controls in
 **Settings → General** before distributing the unit. If **Allow automatic
@@ -524,7 +525,7 @@ signed `launcher-release.apk`. If you download the public APK asset, save it
 under that filename. For the baked launcher, use the post-signing manifest for
 the exact APK in the image. Both wireless captures verify the installed bytes
 against the reviewed `android/release-signer.json` policy, including for
-versions already recorded as released. The [wireless drill](https://github.com/alphacompute/alpha/issues/889)
+versions already recorded as released. The [wireless drill](https://github.com/eliza-research/alpha/issues/889)
 requires Android 14 or later for package installer provenance. Keep the phone
 offline from baseline installation through HOME selection, any one-time Android
 installation permission, and the `before` capture. Keep the host online and

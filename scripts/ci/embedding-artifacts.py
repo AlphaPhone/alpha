@@ -14,7 +14,6 @@ import urllib.parse
 import urllib.request
 import zipfile
 
-REPOSITORY = 'alphacompute/alpha'
 REPOSITORY_ID = 1396333361
 REPOSITORY_API = f'https://api.github.com/repositories/{REPOSITORY_ID}/'
 LIBRARIES = ('libelizainference.so', 'libelizavoicejni.so', 'libc++_shared.so')

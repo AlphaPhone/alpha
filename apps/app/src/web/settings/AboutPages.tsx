@@ -5,6 +5,7 @@ import type { Page, Settings } from "../../../gen/settings.ts";
 import type { Diagnostics } from "../../../gen/settings__diagnostics.ts";
 import { flagShown } from "../../../gen/settings__diagnostics.ts";
 import type { Facts } from "../../../gen/settings__facts.ts";
+import { testMocksBuilt } from "../../platform/build-flags.ts";
 import { Button, EmptyState, Input } from "../components/ui/index.ts";
 import { Section, SettingRow } from "./Rows.tsx";
 import { CLEAR_FAILED, EXPORT, FLAGS } from "./words.ts";
@@ -118,7 +119,7 @@ export function AboutPages({ nav, facts, native, diagnostics, aboutActs, onOpen,
           onOpen={() => onOpen("Problems")} />
         {exportRow}
         <SettingRow label="Licenses" onOpen={() => onOpen("Licenses")} />
-        {nav.developer && <SettingRow label="Update channel (development)" state={{ word: "Off" }} />}
+        {testMocksBuilt && nav.developer && <SettingRow label="Update channel (development)" state={{ word: "Off" }} />}
       </Section>
     </>
   );
