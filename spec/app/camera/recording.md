@@ -26,9 +26,10 @@ type Film = {
   deadline: int, checked: bool, video: int,
 }
 
-pure val maxBytes = 100
+pure val maxBytes = 104857600
 pure val maxSeconds = 300
-pure val stopGrace = 10
+pure val stopGrace = 10000
+pure val second = 1000
 
 pure val initial: Film = {
   stage: Idle, sound: false, since: 0, elapsed: 0, bytes: 0, truncated: false, preempted: false,
@@ -47,8 +48,8 @@ pure def stopping(now: int, f: Film): Film = { ...f, stage: Stopping, deadline: 
 ### What the simulator tries
 
 ```quint
-pure val pieceValues = Set(40, 70)
-pure val nowValues = Set(0, 150, 300, 450)
+pure val pieceValues = Set(41943040, 73400320)
+pure val nowValues = Set(0, 150000, 300000, 450000)
 pure val videoValues = Set(0, 7)
 pure val weight_chunk = 3
 ```
@@ -79,10 +80,11 @@ pure def started(f: Film, ok: bool, now: int): Film =
 ### The timer runs forward from the recording's start, and five minutes stops it
 
 ```quint
-pure def canTick(f: Film, now: int): bool = f.stage == Running and now >= f.since + f.elapsed
+pure def canTick(f: Film, now: int): bool = f.stage == Running and now >= f.since + f.elapsed * second
 
 pure def tick(f: Film, now: int): Film =
-  val timed = { ...f, elapsed: if (now - f.since > maxSeconds) maxSeconds else now - f.since }
+  val seconds = (now - f.since) / second
+  val timed = { ...f, elapsed: if (seconds > maxSeconds) maxSeconds else seconds }
   if (timed.elapsed >= maxSeconds) stopping(now, timed) else timed
 ```
 

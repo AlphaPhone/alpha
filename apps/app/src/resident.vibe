@@ -1,4 +1,5 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"
+import { scanEntry } from "./files/scanEntry.vibe"
 import { together, whole } from "./runtime/reactor.vibe"
 import { pages } from "./settings/pages.vibe"
 import { preferences } from "./settings/preferences.vibe"
@@ -33,6 +34,7 @@ import { remindersResident } from "./reminders/reminders.vibe"
  * any order: they find each other once all are built. Lines are only ever added.
  */
 const machines = together(
+  scanEntry,
   shell,
   toasts,
   haptics,

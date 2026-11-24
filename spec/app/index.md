@@ -13,6 +13,8 @@ rules.
 - [Account](./account/): the agent as the owner sees it, signing in to Alpha Cloud and the session
 - [Notes](./notes/): the notes list, a note, the editor and what the agent may propose
 - [Calendar](./calendar/): the agenda of the phone's and the agent's calendars, an event, its form and reviewed writes
+- [Camera](./camera/): camera preview, captures, recordings and agent requests
+- [Photos](./photos/): the permitted library, albums, media viewing and reviewed changes
 - [Files](./files/): shared storage, folders, selections and approved changes
 - [Ask Alpha](./ask/): one conversation with the resident agent
 - [Clock](./clock/): alarms, timers, world clock, stopwatch, ringing alerts and agent sync
