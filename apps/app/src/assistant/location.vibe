@@ -43,7 +43,7 @@ export const locationLayer = Layer.effect(PhoneLocation, effect {
   let adopted: NetworkPosition | undefined
   let clockAt = try Clock.currentTimeMillis
   let refreshing = false
-  const send = (event: LocatorEvent) => map(locator.send(event), () => undefined) catch () => undefined
+  const send = (event: LocatorEvent) => Effect.catch(Effect.asVoid(locator.send(event)), () => Effect.void)
   effect function tick() {
     const now = try Clock.currentTimeMillis
     const seconds = Math.floor((now - clockAt) / 1000)

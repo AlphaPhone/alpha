@@ -29,7 +29,7 @@ export service ReminderTaps {
   /** A hidden page, the connection chooser, a sensitive context or an open form holds checks back. */
   setBlocked(blocked: boolean): void!!
   /** The question the open review is about, while one is open. */
-  question(): ReminderQuestion | undefined!!
+  question(): (ReminderQuestion | undefined)!!
   /** Closes the question review: a draft continues into the composer, none releases the tap. */
   closeQuestion(draft: string | undefined): void!!
   /** Dismisses the pending link the banner shows. */

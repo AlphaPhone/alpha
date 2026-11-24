@@ -1,0 +1,95 @@
+__vite_ssr_exportName__("maxSafeInteger", () => { try { return maxSafeInteger } catch {} });
+__vite_ssr_exportName__("integerIsMissing", () => { try { return integerIsMissing } catch {} });
+__vite_ssr_exportName__("integerIsInvalid", () => { try { return integerIsInvalid } catch {} });
+__vite_ssr_exportName__("integerIsZero", () => { try { return integerIsZero } catch {} });
+__vite_ssr_exportName__("appendDigit", () => { try { return appendDigit } catch {} });
+__vite_ssr_exportName__("canonicalDecimal", () => { try { return canonicalDecimal } catch {} });
+__vite_ssr_exportName__("lawBlankNumberIsMissing", () => { try { return lawBlankNumberIsMissing } catch {} });
+__vite_ssr_exportName__("lawPaddedNumberIsInvalid", () => { try { return lawPaddedNumberIsInvalid } catch {} });
+__vite_ssr_exportName__("lawLeadingZeroIsInvalid", () => { try { return lawLeadingZeroIsInvalid } catch {} });
+__vite_ssr_exportName__("lawDecimalZeroAccepted", () => { try { return lawDecimalZeroAccepted } catch {} });
+__vite_ssr_exportName__("exact_core__numbers", () => { try { return exact_core__numbers } catch {} });
+__vite_ssr_exportName__("quotient_core__numbers", () => { try { return quotient_core__numbers } catch {} });
+/** Story: Reject malformed numeric boundary data explicitly / Canonical integers reject signs, leading zeroes, padding, fractions and unsafe values (spec/core/numbers.md) */
+const maxSafeInteger = 9007199254740991;
+/** Story: Reject malformed numeric boundary data explicitly / Canonical integers reject signs, leading zeroes, padding, fractions and unsafe values (spec/core/numbers.md) */
+//@ pure
+function integerIsMissing(result) {
+	return result.tag === "MissingInteger" ? true : false;
+};
+/** Story: Reject malformed numeric boundary data explicitly / Canonical integers reject signs, leading zeroes, padding, fractions and unsafe values (spec/core/numbers.md) */
+//@ pure
+function integerIsInvalid(result) {
+	return result.tag === "InvalidInteger" ? true : false;
+};
+/** Story: Reject malformed numeric boundary data explicitly / Canonical integers reject signs, leading zeroes, padding, fractions and unsafe values (spec/core/numbers.md) */
+//@ pure
+function integerIsZero(result) {
+	return result.tag === "ParsedInteger" ? result.value === 0 : false;
+};
+/** Story: Reject malformed numeric boundary data explicitly / Canonical integers reject signs, leading zeroes, padding, fractions and unsafe values (spec/core/numbers.md) */
+//@ pure
+function appendDigit(a, digit) {
+	return !a.valid || digit < 0 || digit > 9 || a.value > quotient_core__numbers(exact_core__numbers(maxSafeInteger - digit), 10) ? {
+		value: a.value,
+		valid: false
+	} : {
+		value: exact_core__numbers(exact_core__numbers(a.value * 10) + digit),
+		valid: true
+	};
+};
+/** Story: Reject malformed numeric boundary data explicitly / Canonical integers reject signs, leading zeroes, padding, fractions and unsafe values (spec/core/numbers.md) */
+//@ pure
+function canonicalDecimal(digits, blank, padded, malformed, minimum, maximum, clamp) {
+	const local_0 = digits.reduce((a, digit) => appendDigit(a, digit), {
+		value: 0,
+		valid: true
+	});
+	return blank ? { tag: "MissingInteger" } : padded || malformed || digits.length === 0 || !local_0.valid ? { tag: "InvalidInteger" } : digits.length > 1 && (0 <= 0 && 0 < digits.length ? digits[0] : 0) === 0 ? { tag: "InvalidInteger" } : minimum > maximum || minimum < exact_core__numbers(0 - maxSafeInteger) || maximum > maxSafeInteger ? { tag: "BoundsError" } : clamp ? {
+		tag: "ParsedInteger",
+		value: local_0.value < minimum ? minimum : local_0.value > maximum ? maximum : local_0.value
+	} : local_0.value < minimum || local_0.value > maximum ? { tag: "InvalidInteger" } : {
+		tag: "ParsedInteger",
+		value: local_0.value
+	};
+};
+/** Story: Reject malformed numeric boundary data explicitly / Canonical integers reject signs, leading zeroes, padding, fractions and unsafe values (spec/core/numbers.md) */
+//@ pure
+function lawBlankNumberIsMissing(digits, minimum, maximum) {
+	//@ ensures \result === true
+	return integerIsMissing(canonicalDecimal(digits, true, false, false, minimum, maximum, false));
+};
+/** Story: Reject malformed numeric boundary data explicitly / Canonical integers reject signs, leading zeroes, padding, fractions and unsafe values (spec/core/numbers.md) */
+//@ pure
+function lawPaddedNumberIsInvalid(digits, minimum, maximum) {
+	//@ ensures \result === true
+	return integerIsInvalid(canonicalDecimal(digits, false, true, false, minimum, maximum, false));
+};
+/** Story: Reject malformed numeric boundary data explicitly / Canonical integers reject signs, leading zeroes, padding, fractions and unsafe values (spec/core/numbers.md) */
+//@ pure
+function lawLeadingZeroIsInvalid(tailDigit) {
+	//@ ensures \result === true
+	return integerIsInvalid(canonicalDecimal([0, tailDigit], false, false, false, 0, maxSafeInteger, false));
+};
+/** Story: Reject malformed numeric boundary data explicitly / Canonical integers reject signs, leading zeroes, padding, fractions and unsafe values (spec/core/numbers.md) */
+//@ pure
+function lawDecimalZeroAccepted(maximum) {
+	//@ ensures \result === true
+	return !(maximum >= 0 && maximum <= maxSafeInteger) || integerIsZero(canonicalDecimal([0], false, false, false, 0, maximum, false));
+};
+/** An integer result, which must be exact: past 2^53 a number is rounded, where Quint's and the proof's integers are not. */
+function exact_core__numbers(n) {
+	if (!Number.isSafeInteger(n)) throw new RangeError(`an integer result is ${n}, beyond 2^53, where TypeScript cannot hold it exactly`);
+	return n;
+};
+/** Whole-number division as Quint does it: towards zero. */
+//@ pure
+function quotient_core__numbers(a, b) {
+	//@ requires b !== 0
+	if (b === 0) throw new RangeError(`${a} cannot be divided by zero`);
+	return (a < 0 === b < 0 ? 1 : -1) * Math.floor(Math.abs(a) / Math.abs(b)) + 0;
+}
+//# sourceMappingSource=vite-generated
+//# sourceMappingURL=data:application/json;base64,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SSxDQUFDLElBQUksS0FBSyxJQUFJLENBQUMsQ0FBQyxJQUFJO0FBQzlFIiwibmFtZXMiOltdLCJpZ25vcmVMaXN0IjpbXSwic291cmNlcyI6WyJjb3JlX19udW1iZXJzLnRzIl0sInNvdXJjZXNDb250ZW50IjpbIi8vIEdFTkVSQVRFRCBmcm9tIHNwZWMvY29yZS9udW1iZXJzLm1kIGJ5IHZpYmVzdGFjay9zcGVjLnRzLiBEbyBub3QgZWRpdDogY2hhbmdlIHRoZSBzcGVjIGFuZCBydW4gYHBucG0gZ2VuYC5cbi8vQCBiYWNrZW5kIGRhZm55XG5cbi8qKiBTdG9yeTogUmVqZWN0IG1hbGZvcm1lZCBudW1lcmljIGJvdW5kYXJ5IGRhdGEgZXhwbGljaXRseSAvIENhbm9uaWNhbCBpbnRlZ2VycyByZWplY3Qgc2lnbnMsIGxlYWRpbmcgemVyb2VzLCBwYWRkaW5nLCBmcmFjdGlvbnMgYW5kIHVuc2FmZSB2YWx1ZXMgKHNwZWMvY29yZS9udW1iZXJzLm1kKSAqL1xuZXhwb3J0IGludGVyZmFjZSBEZWNpbWFsQWNjdW11bGF0aW9uIHsgdmFsdWU6IG51bWJlcjsgdmFsaWQ6IGJvb2xlYW4gfVxuLyoqIFN0b3J5OiBSZWplY3QgbWFsZm9ybWVkIG51bWVyaWMgYm91bmRhcnkgZGF0YSBleHBsaWNpdGx5IC8gQ2Fub25pY2FsIGludGVnZXJzIHJlamVjdCBzaWducywgbGVhZGluZyB6ZXJvZXMsIHBhZGRpbmcsIGZyYWN0aW9ucyBhbmQgdW5zYWZlIHZhbHVlcyAoc3BlYy9jb3JlL251bWJlcnMubWQpICovXG5leHBvcnQgdHlwZSBJbnRlZ2VyUmVzdWx0ID1cbiAgfCB7IHRhZzogXCJNaXNzaW5nSW50ZWdlclwiIH1cbiAgfCB7IHRhZzogXCJJbnZhbGlkSW50ZWdlclwiIH1cbiAgfCB7IHRhZzogXCJCb3VuZHNFcnJvclwiIH1cbiAgfCB7IHRhZzogXCJQYXJzZWRJbnRlZ2VyXCI7IHZhbHVlOiBudW1iZXIgfTtcblxuLyoqIFN0b3J5OiBSZWplY3QgbWFsZm9ybWVkIG51bWVyaWMgYm91bmRhcnkgZGF0YSBleHBsaWNpdGx5IC8gQ2Fub25pY2FsIGludGVnZXJzIHJlamVjdCBzaWducywgbGVhZGluZyB6ZXJvZXMsIHBhZGRpbmcsIGZyYWN0aW9ucyBhbmQgdW5zYWZlIHZhbHVlcyAoc3BlYy9jb3JlL251bWJlcnMubWQpICovXG5leHBvcnQgY29uc3QgbWF4U2FmZUludGVnZXI6IG51bWJlciA9IDkwMDcxOTkyNTQ3NDA5OTE7XG5cbi8qKiBTdG9yeTogUmVqZWN0IG1hbGZvcm1lZCBudW1lcmljIGJvdW5kYXJ5IGRhdGEgZXhwbGljaXRseSAvIENhbm9uaWNhbCBpbnRlZ2VycyByZWplY3Qgc2lnbnMsIGxlYWRpbmcgemVyb2VzLCBwYWRkaW5nLCBmcmFjdGlvbnMgYW5kIHVuc2FmZSB2YWx1ZXMgKHNwZWMvY29yZS9udW1iZXJzLm1kKSAqL1xuLy9AIHB1cmVcbmV4cG9ydCBmdW5jdGlvbiBpbnRlZ2VySXNNaXNzaW5nKHJlc3VsdDogSW50ZWdlclJlc3VsdCk6IGJvb2xlYW4ge1xuICByZXR1cm4gcmVzdWx0LnRhZyA9PT0gXCJNaXNzaW5nSW50ZWdlclwiID8gdHJ1ZSA6IGZhbHNlO1xufVxuXG4vKiogU3Rvcnk6IFJlamVjdCBtYWxmb3JtZWQgbnVtZXJpYyBib3VuZGFyeSBkYXRhIGV4cGxpY2l0bHkgLyBDYW5vbmljYWwgaW50ZWdlcnMgcmVqZWN0IHNpZ25zLCBsZWFkaW5nIHplcm9lcywgcGFkZGluZywgZnJhY3Rpb25zIGFuZCB1bnNhZmUgdmFsdWVzIChzcGVjL2NvcmUvbnVtYmVycy5tZCkgKi9cbi8vQCBwdXJlXG5leHBvcnQgZnVuY3Rpb24gaW50ZWdlcklzSW52YWxpZChyZXN1bHQ6IEludGVnZXJSZXN1bHQpOiBib29sZWFuIHtcbiAgcmV0dXJuIHJlc3VsdC50YWcgPT09IFwiSW52YWxpZEludGVnZXJcIiA/IHRydWUgOiBmYWxzZTtcbn1cblxuLyoqIFN0b3J5OiBSZWplY3QgbWFsZm9ybWVkIG51bWVyaWMgYm91bmRhcnkgZGF0YSBleHBsaWNpdGx5IC8gQ2Fub25pY2FsIGludGVnZXJzIHJlamVjdCBzaWducywgbGVhZGluZyB6ZXJvZXMsIHBhZGRpbmcsIGZyYWN0aW9ucyBhbmQgdW5zYWZlIHZhbHVlcyAoc3BlYy9jb3JlL251bWJlcnMubWQpICovXG4vL0AgcHVyZVxuZXhwb3J0IGZ1bmN0aW9uIGludGVnZXJJc1plcm8ocmVzdWx0OiBJbnRlZ2VyUmVzdWx0KTogYm9vbGVhbiB7XG4gIHJldHVybiByZXN1bHQudGFnID09PSBcIlBhcnNlZEludGVnZXJcIiA/IHJlc3VsdC52YWx1ZSA9PT0gMCA6IGZhbHNlO1xufVxuXG4vKiogU3Rvcnk6IFJlamVjdCBtYWxmb3JtZWQgbnVtZXJpYyBib3VuZGFyeSBkYXRhIGV4cGxpY2l0bHkgLyBDYW5vbmljYWwgaW50ZWdlcnMgcmVqZWN0IHNpZ25zLCBsZWFkaW5nIHplcm9lcywgcGFkZGluZywgZnJhY3Rpb25zIGFuZCB1bnNhZmUgdmFsdWVzIChzcGVjL2NvcmUvbnVtYmVycy5tZCkgKi9cbi8vQCBwdXJlXG5leHBvcnQgZnVuY3Rpb24gYXBwZW5kRGlnaXQoYTogRGVjaW1hbEFjY3VtdWxhdGlvbiwgZGlnaXQ6IG51bWJlcik6IERlY2ltYWxBY2N1bXVsYXRpb24ge1xuICByZXR1cm4gIWEudmFsaWQgfHwgZGlnaXQgPCAwIHx8IGRpZ2l0ID4gOSB8fCBhLnZhbHVlID4gcXVvdGllbnRfY29yZV9fbnVtYmVycyhleGFjdF9jb3JlX19udW1iZXJzKG1heFNhZmVJbnRlZ2VyIC0gZGlnaXQpLCAxMCkgPyAoeyB2YWx1ZTogYS52YWx1ZSwgdmFsaWQ6IGZhbHNlIH0gYXMgRGVjaW1hbEFjY3VtdWxhdGlvbikgOiAoeyB2YWx1ZTogZXhhY3RfY29yZV9fbnVtYmVycyhleGFjdF9jb3JlX19udW1iZXJzKGEudmFsdWUgKiAxMCkgKyBkaWdpdCksIHZhbGlkOiB0cnVlIH0gYXMgRGVjaW1hbEFjY3VtdWxhdGlvbik7XG59XG5cbi8qKiBTdG9yeTogUmVqZWN0IG1hbGZvcm1lZCBudW1lcmljIGJvdW5kYXJ5IGRhdGEgZXhwbGljaXRseSAvIENhbm9uaWNhbCBpbnRlZ2VycyByZWplY3Qgc2lnbnMsIGxlYWRpbmcgemVyb2VzLCBwYWRkaW5nLCBmcmFjdGlvbnMgYW5kIHVuc2FmZSB2YWx1ZXMgKHNwZWMvY29yZS9udW1iZXJzLm1kKSAqL1xuLy9AIHB1cmVcbmV4cG9ydCBmdW5jdGlvbiBjYW5vbmljYWxEZWNpbWFsKGRpZ2l0czogbnVtYmVyW10sIGJsYW5rOiBib29sZWFuLCBwYWRkZWQ6IGJvb2xlYW4sIG1hbGZvcm1lZDogYm9vbGVhbiwgbWluaW11bTogbnVtYmVyLCBtYXhpbXVtOiBudW1iZXIsIGNsYW1wOiBib29sZWFuKTogSW50ZWdlclJlc3VsdCB7XG4gIGNvbnN0IGxvY2FsXzA6IERlY2ltYWxBY2N1bXVsYXRpb24gPSBkaWdpdHMucmVkdWNlKChhOiBEZWNpbWFsQWNjdW11bGF0aW9uLCBkaWdpdDogbnVtYmVyKSA9PiBhcHBlbmREaWdpdChhLCBkaWdpdCksICh7IHZhbHVlOiAwLCB2YWxpZDogdHJ1ZSB9IGFzIERlY2ltYWxBY2N1bXVsYXRpb24pKTtcbiAgcmV0dXJuIGJsYW5rID8gKHsgdGFnOiBcIk1pc3NpbmdJbnRlZ2VyXCIgfSBhcyBJbnRlZ2VyUmVzdWx0KSA6IChwYWRkZWQgfHwgbWFsZm9ybWVkIHx8IGRpZ2l0cy5sZW5ndGggPT09IDAgfHwgIWxvY2FsXzAudmFsaWQgPyAoeyB0YWc6IFwiSW52YWxpZEludGVnZXJcIiB9IGFzIEludGVnZXJSZXN1bHQpIDogKGRpZ2l0cy5sZW5ndGggPiAxICYmICgwIDw9IDAgJiYgMCA8IGRpZ2l0cy5sZW5ndGggPyBkaWdpdHNbMF0gOiAwKSA9PT0gMCA/ICh7IHRhZzogXCJJbnZhbGlkSW50ZWdlclwiIH0gYXMgSW50ZWdlclJlc3VsdCkgOiAobWluaW11bSA+IG1heGltdW0gfHwgbWluaW11bSA8IGV4YWN0X2NvcmVfX251bWJlcnMoMCAtIG1heFNhZmVJbnRlZ2VyKSB8fCBtYXhpbXVtID4gbWF4U2FmZUludGVnZXIgPyAoeyB0YWc6IFwiQm91bmRzRXJyb3JcIiB9IGFzIEludGVnZXJSZXN1bHQpIDogKGNsYW1wID8gKHsgdGFnOiBcIlBhcnNlZEludGVnZXJcIiwgdmFsdWU6IGxvY2FsXzAudmFsdWUgPCBtaW5pbXVtID8gbWluaW11bSA6IChsb2NhbF8wLnZhbHVlID4gbWF4aW11bSA/IG1heGltdW0gOiBsb2NhbF8wLnZhbHVlKSB9IGFzIEludGVnZXJSZXN1bHQpIDogKGxvY2FsXzAudmFsdWUgPCBtaW5pbXVtIHx8IGxvY2FsXzAudmFsdWUgPiBtYXhpbXVtID8gKHsgdGFnOiBcIkludmFsaWRJbnRlZ2VyXCIgfSBhcyBJbnRlZ2VyUmVzdWx0KSA6ICh7IHRhZzogXCJQYXJzZWRJbnRlZ2VyXCIsIHZhbHVlOiBsb2NhbF8wLnZhbHVlIH0gYXMgSW50ZWdlclJlc3VsdCkpKSkpKTtcbn1cblxuLyoqIFN0b3J5OiBSZWplY3QgbWFsZm9ybWVkIG51bWVyaWMgYm91bmRhcnkgZGF0YSBleHBsaWNpdGx5IC8gQ2Fub25pY2FsIGludGVnZXJzIHJlamVjdCBzaWducywgbGVhZGluZyB6ZXJvZXMsIHBhZGRpbmcsIGZyYWN0aW9ucyBhbmQgdW5zYWZlIHZhbHVlcyAoc3BlYy9jb3JlL251bWJlcnMubWQpICovXG4vL0AgcHVyZVxuZXhwb3J0IGZ1bmN0aW9uIGxhd0JsYW5rTnVtYmVySXNNaXNzaW5nKGRpZ2l0czogbnVtYmVyW10sIG1pbmltdW06IG51bWJlciwgbWF4aW11bTogbnVtYmVyKTogYm9vbGVhbiB7XG4gIC8vQCBlbnN1cmVzIFxccmVzdWx0ID09PSB0cnVlXG4gIHJldHVybiBpbnRlZ2VySXNNaXNzaW5nKGNhbm9uaWNhbERlY2ltYWwoZGlnaXRzLCB0cnVlLCBmYWxzZSwgZmFsc2UsIG1pbmltdW0sIG1heGltdW0sIGZhbHNlKSk7XG59XG5cbi8qKiBTdG9yeTogUmVqZWN0IG1hbGZvcm1lZCBudW1lcmljIGJvdW5kYXJ5IGRhdGEgZXhwbGljaXRseSAvIENhbm9uaWNhbCBpbnRlZ2VycyByZWplY3Qgc2lnbnMsIGxlYWRpbmcgemVyb2VzLCBwYWRkaW5nLCBmcmFjdGlvbnMgYW5kIHVuc2FmZSB2YWx1ZXMgKHNwZWMvY29yZS9udW1iZXJzLm1kKSAqL1xuLy9AIHB1cmVcbmV4cG9ydCBmdW5jdGlvbiBsYXdQYWRkZWROdW1iZXJJc0ludmFsaWQoZGlnaXRzOiBudW1iZXJbXSwgbWluaW11bTogbnVtYmVyLCBtYXhpbXVtOiBudW1iZXIpOiBib29sZWFuIHtcbiAgLy9AIGVuc3VyZXMgXFxyZXN1bHQgPT09IHRydWVcbiAgcmV0dXJuIGludGVnZXJJc0ludmFsaWQoY2Fub25pY2FsRGVjaW1hbChkaWdpdHMsIGZhbHNlLCB0cnVlLCBmYWxzZSwgbWluaW11bSwgbWF4aW11bSwgZmFsc2UpKTtcbn1cblxuLyoqIFN0b3J5OiBSZWplY3QgbWFsZm9ybWVkIG51bWVyaWMgYm91bmRhcnkgZGF0YSBleHBsaWNpdGx5IC8gQ2Fub25pY2FsIGludGVnZXJzIHJlamVjdCBzaWducywgbGVhZGluZyB6ZXJvZXMsIHBhZGRpbmcsIGZyYWN0aW9ucyBhbmQgdW5zYWZlIHZhbHVlcyAoc3BlYy9jb3JlL251bWJlcnMubWQpICovXG4vL0AgcHVyZVxuZXhwb3J0IGZ1bmN0aW9uIGxhd0xlYWRpbmdaZXJvSXNJbnZhbGlkKHRhaWxEaWdpdDogbnVtYmVyKTogYm9vbGVhbiB7XG4gIC8vQCBlbnN1cmVzIFxccmVzdWx0ID09PSB0cnVlXG4gIHJldHVybiBpbnRlZ2VySXNJbnZhbGlkKGNhbm9uaWNhbERlY2ltYWwoKFswLCB0YWlsRGlnaXRdIGFzIG51bWJlcltdKSwgZmFsc2UsIGZhbHNlLCBmYWxzZSwgMCwgbWF4U2FmZUludGVnZXIsIGZhbHNlKSk7XG59XG5cbi8qKiBTdG9yeTogUmVqZWN0IG1hbGZvcm1lZCBudW1lcmljIGJvdW5kYXJ5IGRhdGEgZXhwbGljaXRseSAvIENhbm9uaWNhbCBpbnRlZ2VycyByZWplY3Qgc2lnbnMsIGxlYWRpbmcgemVyb2VzLCBwYWRkaW5nLCBmcmFjdGlvbnMgYW5kIHVuc2FmZSB2YWx1ZXMgKHNwZWMvY29yZS9udW1iZXJzLm1kKSAqL1xuLy9AIHB1cmVcbmV4cG9ydCBmdW5jdGlvbiBsYXdEZWNpbWFsWmVyb0FjY2VwdGVkKG1heGltdW06IG51bWJlcik6IGJvb2xlYW4ge1xuICAvL0AgZW5zdXJlcyBcXHJlc3VsdCA9PT0gdHJ1ZVxuICByZXR1cm4gIShtYXhpbXVtID49IDAgJiYgbWF4aW11bSA8PSBtYXhTYWZlSW50ZWdlcikgfHwgaW50ZWdlcklzWmVybyhjYW5vbmljYWxEZWNpbWFsKChbMF0gYXMgbnVtYmVyW10pLCBmYWxzZSwgZmFsc2UsIGZhbHNlLCAwLCBtYXhpbXVtLCBmYWxzZSkpO1xufVxuXG4vKiogQW4gaW50ZWdlciByZXN1bHQsIHdoaWNoIG11c3QgYmUgZXhhY3Q6IHBhc3QgMl41MyBhIG51bWJlciBpcyByb3VuZGVkLCB3aGVyZSBRdWludCdzIGFuZCB0aGUgcHJvb2YncyBpbnRlZ2VycyBhcmUgbm90LiAqL1xuZXhwb3J0IGZ1bmN0aW9uIGV4YWN0X2NvcmVfX251bWJlcnMobjogbnVtYmVyKTogbnVtYmVyIHtcbiAgaWYgKCFOdW1iZXIuaXNTYWZlSW50ZWdlcihuKSkgdGhyb3cgbmV3IFJhbmdlRXJyb3IoYGFuIGludGVnZXIgcmVzdWx0IGlzICR7bn0sIGJleW9uZCAyXjUzLCB3aGVyZSBUeXBlU2NyaXB0IGNhbm5vdCBob2xkIGl0IGV4YWN0bHlgKTtcbiAgcmV0dXJuIG47XG59XG5cbi8qKiBXaG9sZS1udW1iZXIgZGl2aXNpb24gYXMgUXVpbnQgZG9lcyBpdDogdG93YXJkcyB6ZXJvLiAqL1xuLy9AIHB1cmVcbmV4cG9ydCBmdW5jdGlvbiBxdW90aWVudF9jb3JlX19udW1iZXJzKGE6IG51bWJlciwgYjogbnVtYmVyKTogbnVtYmVyIHtcbiAgLy9AIHJlcXVpcmVzIGIgIT09IDBcbiAgaWYgKGIgPT09IDApIHRocm93IG5ldyBSYW5nZUVycm9yKGAke2F9IGNhbm5vdCBiZSBkaXZpZGVkIGJ5IHplcm9gKTtcbiAgcmV0dXJuIChhIDwgMCA9PT0gYiA8IDAgPyAxIDogLTEpICogTWF0aC5mbG9vcihNYXRoLmFicyhhKSAvIE1hdGguYWJzKGIpKSArIDA7XG59XG4iXSwiZmlsZSI6Ii9AZnMvdG1wL3Jldmlldy1vcGVuLXBycy5aYUlVaUUvYWxwaGEtdmliZXN0YWNrLXByL3ZlbmRvci9lbGl6YS9wYWNrYWdlcy9jbG91ZC9nZW4vY29yZV9fbnVtYmVycy50cyJ9
+
+//# vitestCache=W3siZmlsZSI6IjEiLCJpZCI6IjEiLCJpbXBvcnRzIjoiMiIsIm1hcHBpbmdzIjpmYWxzZSwiZGVwcyI6IjMiLCJkeW5hbWljRGVwcyI6IjQiLCJzdGF0aWNNb2NrcyI6bnVsbCwiaGFzQ292ZXJhZ2VEYXRhIjpmYWxzZX0sIi90bXAvcmV2aWV3LW9wZW4tcHJzLlphSVVpRS9hbHBoYS12aWJlc3RhY2stcHIvdmVuZG9yL2VsaXphL3BhY2thZ2VzL2Nsb3VkL2dlbi9jb3JlX19udW1iZXJzLnRzIix7InVybHMiOiI1IiwiaWRzIjoiNiJ9LFtdLFtdLFtdLHt9XQ==

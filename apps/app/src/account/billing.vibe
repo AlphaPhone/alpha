@@ -236,23 +236,60 @@ export const billingService = Layer.effect(Membership, effect {
 
   effect function perform(out: ReadonlyArray<BillingEffect>): void!! {
     for (const effectOf of out) {
-      match (effectOf) {
-        when "LoadPlans": {
+      switch (effectOf) {
+        case "LoadPlans": {
           const loaded = loadPlans() catch () => ({ ok: false, current: { tag: "NoPaidPlan" } as const })
           try send({ type: "managerLoaded", present: loaded.current, ok: loaded.ok })
-        };
-        when "StartCheckout": startCheckout() catch () => undefined;
-        when "ConfirmCheckout": confirmCheckout() catch () => undefined;
-        when "SendAccountCode": try sendAccountCode();
-        when "ReviewChange": try reviewChange();
-        when "ConfirmChange": try confirmPlanChange();
-        when "PerformCancel": try lifecycle("cancel");
-        when "PerformKeep": try lifecycle("undo-cancel");
-        when "OpenPaymentPage": try entitlement.paymentPageOpened();
-        when "StartFundsCheckout": fundsCheckout() catch () => undefined;
-        when "RedeemCode": redeemCode() catch () => undefined;
-        when "ApplyReferral": referralCode() catch () => undefined;
-        when "RecheckPlan": try entitlement.recheck();
+          break
+        }
+        case "StartCheckout": {
+          startCheckout() catch () => undefined
+          break
+        }
+        case "ConfirmCheckout": {
+          confirmCheckout() catch () => undefined
+          break
+        }
+        case "SendAccountCode": {
+          try sendAccountCode()
+          break
+        }
+        case "ReviewChange": {
+          try reviewChange()
+          break
+        }
+        case "ConfirmChange": {
+          try confirmPlanChange()
+          break
+        }
+        case "PerformCancel": {
+          try lifecycle("cancel")
+          break
+        }
+        case "PerformKeep": {
+          try lifecycle("undo-cancel")
+          break
+        }
+        case "OpenPaymentPage": {
+          try entitlement.paymentPageOpened()
+          break
+        }
+        case "StartFundsCheckout": {
+          fundsCheckout() catch () => undefined
+          break
+        }
+        case "RedeemCode": {
+          redeemCode() catch () => undefined
+          break
+        }
+        case "ApplyReferral": {
+          referralCode() catch () => undefined
+          break
+        }
+        case "RecheckPlan": {
+          try entitlement.recheck()
+          break
+        }
       }
     }
   }

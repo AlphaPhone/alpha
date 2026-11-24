@@ -25,7 +25,7 @@ export const legacySlots: Readonly<Record<string, string>> = {
 }
 
 /** One slot's raw value: the hardware-backed secure store on Android, after moving what the earlier Alpha kept for it, and the WebView's private storage elsewhere. */
-export effect function readSlot(slot: string): string | undefined!SlotUnavailable {
+export effect function readSlot(slot: string): (string | undefined)!SlotUnavailable {
   const native = try Native
   if (try native.available(plugin)) {
     const legacy = legacySlots[slot]

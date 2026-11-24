@@ -157,13 +157,31 @@ export const providerService = Layer.effect(AiProvider, effect {
 
   effect function perform(out: ReadonlyArray<ProviderEffect>): void!! {
     for (const effectOf of out) {
-      match (effectOf) {
-        when "ReadProvider": try readBack();
-        when "SaveKeys": try saveKeys();
-        when "SelectRoute": try selectRoute();
-        when "RemoveKey": try removeKey();
-        when "RevealKey": try revealKey();
-        when "OpenSignIn": try signIn.open();
+      switch (effectOf) {
+        case "ReadProvider": {
+          try readBack()
+          break
+        }
+        case "SaveKeys": {
+          try saveKeys()
+          break
+        }
+        case "SelectRoute": {
+          try selectRoute()
+          break
+        }
+        case "RemoveKey": {
+          try removeKey()
+          break
+        }
+        case "RevealKey": {
+          try revealKey()
+          break
+        }
+        case "OpenSignIn": {
+          try signIn.open()
+          break
+        }
       }
     }
   }

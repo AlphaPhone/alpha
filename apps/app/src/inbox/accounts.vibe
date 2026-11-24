@@ -47,7 +47,7 @@ export service InboxAccounts {
   readonly changes: Stream.Stream<MailAccounts>
   get(): MailAccounts!!
   /** The Cloud owner now, if one is signed in. */
-  owner(): MailOwner | undefined!!
+  owner(): (MailOwner | undefined)!!
   /** The key of the selected account's drafts and operations, or "" when none is selected. */
   selectedKey(): string!!
   /** Shows the saved accounts of this owner while Cloud restores. */

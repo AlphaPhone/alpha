@@ -47,7 +47,7 @@ export service WorkflowNotices {
   /** The workflows view refreshed or reset: a read under the old view is read again. */
   viewMoved(): void!!
   /** The tapped notice `id` under question, read again: undefined, and the question ended as changed, unless it is the same token, notice, revision and owner on a visible page. */
-  current(id: string): OwnNotice | undefined!!
+  current(id: string): (OwnNotice | undefined)!!
   /** Add to chat on the question about `id`: consumes its tap once at the notice's revision; false when it was not kept. */
   consume(id: string): boolean!!
   /** The assistant's question review now shows the notice `id`, or none: the asked notice's review closing unadded is the owner's Cancel, a newer review replacing it an interruption. */

@@ -20,7 +20,7 @@ export schema AutomationRecord {
 export schema AutomationList {
   automations: ReadonlyArray<AutomationRecord>
   workflowFetchError?: string
-  executionFetchErrors?: ReadonlyArray<unknown>
+  executionFetchErrors?: readonly Schema.Unknown[]
 }
 
 /** A scheduled task's trigger as the agent lists it. */

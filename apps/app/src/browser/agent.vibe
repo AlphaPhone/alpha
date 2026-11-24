@@ -69,7 +69,7 @@ export service BrowserAgent {
   /** Asks the owner to approve a reviewed control on the shown, unlocked phone. */
   review(operation: unknown): boolean!BrowserOpenRefused
   /** The tabs the close-every-tab card of `proposalId` lists: bound by its first listing, and null once Browser's tabs differ from it. */
-  tabsClosing(proposalId: string): readonly BrowserTabLine[] | null!!
+  tabsClosing(proposalId: string): (readonly BrowserTabLine[] | null)!!
   /** Whether the card of `proposalId` was listed and still lists the tabs that would close; it never binds a listing. */
   closingListed(proposalId: string): boolean!!
   /** Closes exactly the tabs the card of `proposalId` listed, or refuses before any effect; the returned presentation closes the tab showing in Browser. */

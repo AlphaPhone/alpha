@@ -25,23 +25,32 @@ export const bookmarksLayer = Layer.provideMerge(Layer.effect(BrowserBookmarks, 
   const lastFailure = try Ref.make("")
 
   effect function perform(out: BookmarkEffect) {
-    match (out) {
-      when { tag: "ReadMarks" }: {
+    switch (out.tag) {
+      case "ReadMarks": {
         const read = effect { return try Schema.decodeUnknownEffect(MarkList)(try host.call("bookmarks")) } catch (error) => error
         if (read instanceof BrowserCallFailed || read instanceof Error) {
           try Ref.set(lastFailure, read instanceof BrowserCallFailed ? read.message : "Saved bookmarks could not be read. Existing bookmarks were not changed.")
           try send({ type: "readSettled", ok: false, urls: [], damaged: !host.onDevice && !(read instanceof BrowserCallFailed && read.unavailable), missing: read instanceof BrowserCallFailed && read.unavailable })
         } else try send({ type: "readSettled", ok: true, urls: [...read.urls], damaged: false, missing: false })
+        break
       }
-      when { tag: "WriteMark", let url, let saved }: {
+      case "WriteMark": {
+        const { url, saved } = out
         const wrote = effect { return try Schema.decodeUnknownEffect(MarkList)(try host.call("setBookmark", { url, saved })) } catch (error) => error
         if (wrote instanceof BrowserCallFailed || wrote instanceof Error) {
           try Ref.set(lastFailure, wrote instanceof BrowserCallFailed ? wrote.message : "")
           try send({ type: "writeSettled", ok: false, urls: [] })
         } else try send({ type: "writeSettled", ok: true, urls: [...wrote.urls] })
+        break
       }
-      when { tag: "OfferRecovery" }: try toasts.show("Saved bookmarks need recovery. Open Bookmarks to recover them.")
-      when { tag: "ReportMarksFailed" }: try toasts.show(refusalText(try Ref.get(lastFailure), "Bookmarks couldn’t be updated."))
+      case "OfferRecovery": {
+        try toasts.show("Saved bookmarks need recovery. Open Bookmarks to recover them.")
+        break
+      }
+      case "ReportMarksFailed": {
+        try toasts.show(refusalText(try Ref.get(lastFailure), "Bookmarks couldn’t be updated."))
+        break
+      }
     }
   }
 

@@ -4,4 +4,4 @@
 export schema SavedAppearance { choice: "FollowSystem" | "Light" | "Dark"; legible: boolean }
 
 /** The last feed answer kept on the phone: when it came, the feed, and Android's digest of it. */
-export schema SavedFeed { checkedAt: number; feed: unknown; digest?: string }
+export schema SavedFeed { checkedAt: number; feed: Schema.Unknown; digest?: string }

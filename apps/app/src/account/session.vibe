@@ -116,15 +116,27 @@ export const sessionService = Layer.effect(CloudSession, effect {
 
   effect function perform(out: ReadonlyArray<SessionEffect>): void!! {
     for (const effectOf of out) {
-      match (effectOf) {
-        when { tag: "EnsureResident" }: try ensureResident(resident);
-        when { tag: "UnbindInference" }: try unbindInference(native);
-        when { tag: "RevokeKey", let credentialId }: {
+      switch (effectOf.tag) {
+        case "EnsureResident": {
+          try ensureResident(resident)
+          break
+        }
+        case "UnbindInference": {
+          try unbindInference(native)
+          break
+        }
+        case "RevokeKey": {
+          const { credentialId } = effectOf
           const revoked = try revoke(credentialId)
           native.invoke(plugin, "clearCredentialState") catch () => undefined
           try send({ type: "signOutSettled", revoked })
-        };
-        when { tag: "ShowIncomplete", let restarted }: try PubSub.publish(notices, { restarted });
+          break
+        }
+        case "ShowIncomplete": {
+          const { restarted } = effectOf
+          try PubSub.publish(notices, { restarted })
+          break
+        }
       }
     }
   }

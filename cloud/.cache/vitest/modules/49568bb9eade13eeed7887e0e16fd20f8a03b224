@@ -1,0 +1,15 @@
+__vite_ssr_exportName__("sha256Hex", () => { try { return sha256Hex } catch {} });
+const __vite_ssr_import_0__ = await __vite_ssr_import__("node:crypto", {"importedNames":["createHash"]});
+// spec/cloud/deployment.md, "Story: Configure a deployment from one reviewed profile"
+
+/**
+* The lower-case hex SHA-256 of a UTF-8 string.
+* @throws {never}
+*/
+function sha256Hex(text) {
+	return (0,__vite_ssr_import_0__.createHash)("sha256").update(text, "utf8").digest("hex");
+}
+//# sourceMappingSource=vite-generated
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJtYXBwaW5ncyI6IkFBQUEsQ0FBQTtBQUNBOzs7Ozs7O0FBTU8sU0FBUyxVQUFVLE1BQXNCO0NBQzlDLE9BQU8scUNBQVcsUUFBUSxDQUFDLENBQUMsT0FBTyxNQUFNLE1BQU0sQ0FBQyxDQUFDLE9BQU8sS0FBSztBQUMvRCIsIm5hbWVzIjpbXSwiaWdub3JlTGlzdCI6W10sInNvdXJjZXMiOlsiZGlnZXN0LnRzIl0sInNvdXJjZXNDb250ZW50IjpbIi8vIHNwZWMvY2xvdWQvZGVwbG95bWVudC5tZCwgXCJTdG9yeTogQ29uZmlndXJlIGEgZGVwbG95bWVudCBmcm9tIG9uZSByZXZpZXdlZCBwcm9maWxlXCJcbmltcG9ydCB7IGNyZWF0ZUhhc2ggfSBmcm9tIFwibm9kZTpjcnlwdG9cIjtcblxuLyoqXG4gKiBUaGUgbG93ZXItY2FzZSBoZXggU0hBLTI1NiBvZiBhIFVURi04IHN0cmluZy5cbiAqIEB0aHJvd3Mge25ldmVyfVxuICovXG5leHBvcnQgZnVuY3Rpb24gc2hhMjU2SGV4KHRleHQ6IHN0cmluZyk6IHN0cmluZyB7XG4gIHJldHVybiBjcmVhdGVIYXNoKFwic2hhMjU2XCIpLnVwZGF0ZSh0ZXh0LCBcInV0ZjhcIikuZGlnZXN0KFwiaGV4XCIpO1xufVxuIl0sImZpbGUiOiIvc3JjL2RpZ2VzdC50cyJ9
+
+//# vitestCache=W3siZmlsZSI6IjEiLCJpZCI6IjEiLCJpbXBvcnRzIjoiMiIsIm1hcHBpbmdzIjpmYWxzZSwiZGVwcyI6IjMiLCJkeW5hbWljRGVwcyI6IjQiLCJzdGF0aWNNb2NrcyI6bnVsbCwiaGFzQ292ZXJhZ2VEYXRhIjpmYWxzZX0sIi90bXAvcmV2aWV3LW9wZW4tcHJzLlphSVVpRS9hbHBoYS12aWJlc3RhY2stcHIvY2xvdWQvc3JjL2RpZ2VzdC50cyIseyJ1cmxzIjoiNSIsImlkcyI6IjYifSxbIjciXSxbXSxbXSx7fSwibm9kZTpjcnlwdG8iXQ==

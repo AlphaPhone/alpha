@@ -82,7 +82,7 @@ export function routeAllowed(method: Verb, path: string): boolean {
 }
 
 /** The resident's closed read barrier, as `feature_starting` with its hint in milliseconds, where `data` is exactly that refusal. */
-export effect function featureStartingHint(httpStatus: number, data: unknown): number | undefined!! {
+export effect function featureStartingHint(httpStatus: number, data: unknown): (number | undefined)!! {
   if (httpStatus !== 503) return undefined
   const barrier = Schema.decodeUnknownEffect(FeatureStarting)(data) catch () => undefined
   if (barrier === undefined) return undefined
@@ -230,7 +230,7 @@ export function residentOver(agent: ElizaAgentPlugin, present: boolean, httpBase
       }
     }
 
-    effect function relayed(reading: Ref.Ref<Reading>, gen: number, frame: RuntimeStreamFrame): Uint8Array | undefined!(ResidentUnavailable | ResidentRefused) {
+    effect function relayed(reading: Ref.Ref<Reading>, gen: number, frame: RuntimeStreamFrame): (Uint8Array | undefined)!(ResidentUnavailable | ResidentRefused) {
       try current(gen)
       const now = try Ref.get(reading)
       if (frame.kind === "head" && now.phase === "head") {

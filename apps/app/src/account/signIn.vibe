@@ -41,7 +41,7 @@ export service SignInScreen {
   /** The host holds own keys in use, or no longer: the entry ends, or comes back. */
   useOwnKeys(using: boolean): void!!
   /** The deployment's Terms and Privacy, or undefined when they cannot be read. */
-  serviceInfo(): ServiceInfo | undefined!!
+  serviceInfo(): (ServiceInfo | undefined)!!
   /** Opens Android's network settings from the network notice; whether they opened. */
   openWifiSettings(): boolean!!
 }
@@ -100,14 +100,35 @@ export const signInService = Layer.effect(SignInScreen, effect {
 
   effect function perform(out: ReadonlyArray<SignInEffect>): void!! {
     for (const effectOf of out) {
-      match (effectOf) {
-        when "ReadMethods": fork.in(scope) readMethods();
-        when "StartGoogle": try runGoogle();
-        when "SendCode": try runSend();
-        when "VerifyCode": try runVerify();
-        when "CancelAttempt": native.invoke(plugin, "cancel", { requestId: try Ref.get(requestId) }) catch () => undefined;
-        when "EnsureResident": try ensureResident(resident);
-        when "Adopted": try session.adopt(try Ref.get(news));
+      switch (effectOf) {
+        case "ReadMethods": {
+          fork.in(scope) readMethods()
+          break
+        }
+        case "StartGoogle": {
+          try runGoogle()
+          break
+        }
+        case "SendCode": {
+          try runSend()
+          break
+        }
+        case "VerifyCode": {
+          try runVerify()
+          break
+        }
+        case "CancelAttempt": {
+          native.invoke(plugin, "cancel", { requestId: try Ref.get(requestId) }) catch () => undefined
+          break
+        }
+        case "EnsureResident": {
+          try ensureResident(resident)
+          break
+        }
+        case "Adopted": {
+          try session.adopt(try Ref.get(news))
+          break
+        }
       }
     }
   }

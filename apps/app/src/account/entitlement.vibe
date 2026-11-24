@@ -111,10 +111,19 @@ export const entitlementService = Layer.effect(Entitlement, effect {
 
   effect function perform(out: ReadonlyArray<AdmissionEffect>): void!! {
     for (const effectOf of out) {
-      match (effectOf) {
-        when "ReadPlan": fork.in(scope) admitting();
-        when "BindInference": fork.in(scope) bind();
-        when "UnbindInference": fork.in(scope) unbind();
+      switch (effectOf) {
+        case "ReadPlan": {
+          fork.in(scope) admitting()
+          break
+        }
+        case "BindInference": {
+          fork.in(scope) bind()
+          break
+        }
+        case "UnbindInference": {
+          fork.in(scope) unbind()
+          break
+        }
       }
     }
   }

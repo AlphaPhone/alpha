@@ -51,9 +51,9 @@ export service DeviceEnrollment {
   readonly changes: Stream.Stream<Enrollment>
   current(): Enrollment!!
   /** The enrollment the agent confirmed for the connection now, or undefined while there is none and the phone is chat only. */
-  enrolled(): EnrolledDevice | undefined!!
+  enrolled(): (EnrolledDevice | undefined)!!
   /** The device headers a request to the resident carries for this enrollment, or undefined while there is none. */
-  headers(): ResidentHeaders | undefined!!
+  headers(): (ResidentHeaders | undefined)!!
   /** Follow the resident's connection and enroll each verified one; runs for the app's life. */
   run(): void!!
 }
@@ -121,10 +121,20 @@ export const enrollmentService = Layer.effect(DeviceEnrollment, effect {
 
   effect function perform(out: ReadonlyArray<EnrollEffect>): void!! {
     for (const effectOf of out) {
-      match (effectOf) {
-        when { tag: "Register", let protocol }: try register(protocol);
-        when { tag: "NegotiateViews" }: try negotiate();
-        when { tag: "CommitEnrollment" }: try commit();
+      switch (effectOf.tag) {
+        case "Register": {
+          const { protocol } = effectOf
+          try register(protocol)
+          break
+        }
+        case "NegotiateViews": {
+          try negotiate()
+          break
+        }
+        case "CommitEnrollment": {
+          try commit()
+          break
+        }
       }
     }
   }

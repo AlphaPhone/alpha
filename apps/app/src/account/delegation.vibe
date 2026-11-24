@@ -118,8 +118,8 @@ export const delegationService = Layer.effect(CloudDelegation, effect {
     const d = try machine.get()
     const record = readRecord() catch () => undefined
     for (const effectOf of out) {
-      match (effectOf) {
-        when "StartAuthorization": {
+      switch (effectOf) {
+        case "StartAuthorization": {
           const kinds = try SubscriptionRef.get(details)
           const started = effect {
             return try Schema.decodeUnknownEffect(Started)(try call("start", { confirmed: true, mutationId: freshKey(), kinds: [...(kinds.email ? ["email"] : []), ...(kinds.calendar ? ["calendar"] : [])] }))
@@ -135,8 +135,9 @@ export const delegationService = Layer.effect(CloudDelegation, effect {
             if (saved) services.openExternal(started.authUrl) catch () => undefined
           }
           try send({ type: "startEnds" })
-        };
-        when "ReadReturn": {
+          break
+        }
+        case "ReadReturn": {
           const callback = readCallback() catch () => undefined
           let after: CloudSide = "CloudWaiting"
           if (callback !== undefined && record !== undefined && record.state === callback.state && callback.code !== undefined && Date.parse(record.expiresAt) > (try Clock.currentTimeMillis)) {
@@ -151,8 +152,9 @@ export const delegationService = Layer.effect(CloudDelegation, effect {
             }
           }
           try send({ type: "callbackEnds", failed: callback === undefined && d.retained !== "OtherReturn", cloudAfter: after })
-        };
-        when "ReadStatus": {
+          break
+        }
+        case "ReadStatus": {
           const found = record === undefined ? undefined : try status(record)
           if (found?.status === "waiting" && record?.code !== undefined && d.record === "FinishingRecord") call("complete", { state: record.state, code: record.code }) catch () => undefined
           const again = found?.status === "waiting" && record?.code !== undefined && record !== undefined ? try status(record) : found
@@ -160,18 +162,23 @@ export const delegationService = Layer.effect(CloudDelegation, effect {
           const running = (try machine.get()).running
           if (running === "StatusStep") try send({ type: "statusEnds", failed: again === undefined, cloudAfter: again === undefined ? "CloudWaiting" : cloudSides[again.status] })
           if (running === "CancelStep") try send({ type: "cancelEnds", failed: again === undefined })
-        };
-        when "CompleteAuthorization": undefined;
-        when "CancelAuthorization": {
+          break
+        }
+        case "CompleteAuthorization": {
+          break
+        }
+        case "CancelAuthorization": {
           if (record !== undefined) {
             call("cancel", { state: record.state, confirmed: true }) catch () => undefined
             swapRecord(record, undefined) catch () => false
           }
           if ((try machine.get()).running === "CancelStep") try send({ type: "cancelEnds", failed: false })
-        };
-        when "ReleaseReturn": {
+          break
+        }
+        case "ReleaseReturn": {
           if (record !== undefined) native.invoke("AlphaConnection", "clearDelegationCallback", { state: record.state }) catch () => undefined
-        };
+          break
+        }
       }
     }
   }

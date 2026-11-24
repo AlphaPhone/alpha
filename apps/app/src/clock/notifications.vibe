@@ -74,7 +74,7 @@ export service Notifications {
   /** The own rows listed now, for the agent's inspection; other apps' rows never leave the phone. */
   own(): ReadonlyArray<NoticeRow>!!
   /** The own notice `id` as the phone lists it now, read again; undefined when it is gone, hidden, not askable or its text changed under the same revision. */
-  current(id: string): OwnNotice | undefined!!
+  current(id: string): (OwnNotice | undefined)!!
   /** Consumes the notice once through the phone at the revision listed now, or once for this session where the phone cannot; false when it was already consumed, changed or is no longer listed. */
   consume(id: string): boolean!!
 }

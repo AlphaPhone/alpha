@@ -69,9 +69,9 @@ export service AgentCalendar {
   /** Whether an event left for Maps is still the version left, for the same binding; with `sourceRevision`, also from the same calendar selection. */
   verifyReturn(eventKey: string, revision: string, begin: number, sourceRevision?: string): EventReturn!!
   /** The key of the event a confirmed create with this idempotency key read back, for the note it came from. */
-  createdEvent(idempotencyKey: string): string | undefined!!
+  createdEvent(idempotencyKey: string): (string | undefined)!!
   /** One complete read of one calendar at an instant, for a review of an event outside the loaded window. */
-  readSourceAt(sourceKey: string, at: number): { readonly calendars: readonly CalendarSummary[]; readonly events: readonly EventRecord[] } | undefined!!
+  readSourceAt(sourceKey: string, at: number): ({ readonly calendars: readonly CalendarSummary[]; readonly events: readonly EventRecord[] } | undefined)!!
   /** Drop an ended next event. */
   upcomingEnded(): void!!
 }

@@ -93,13 +93,13 @@ export service PhotoLibrary {
   /** The rows the open list shows, in grid order. */
   rows(): readonly Row[]!!
   /** The item the viewer shows. */
-  shown(): ShownItem | undefined!!
+  shown(): (ShownItem | undefined)!!
   /** The Photos observation for the assistant's turn. */
   observation(sensitive: boolean): ReturnType<typeof photosObservation>!!
   /** "This photo" under the capabilities the assistant named. */
   shownTarget(header: string | undefined): ReturnType<typeof shownPhotoFor>!!
   /** Read one item, in the window or in the library. */
-  find(id: string): Row | undefined!!
+  find(id: string): (Row | undefined)!!
 }
 
 /** The library service over the catalog, browse and album Machines and the photo store. */

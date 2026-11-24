@@ -48,17 +48,25 @@ export const handoffLayer = Layer.provide(Layer.effect(BrowserHandoff, effect {
   }
 
   effect function perform(out: HandoffEffect) {
-    match (out) {
-      when { tag: "AskLeavePrivate", let url }: {
+    switch (out.tag) {
+      case "AskLeavePrivate": {
+        const { url } = out
         const approved = try reviews.confirm("external-browser", "LeavePrivate", url)
         try send({ type: "reviewed", approved })
+        break
       }
-      when { tag: "Dispatch", let tab, let url, let navigation, let priv }: {
+      case "Dispatch": {
+        const { tab, url, navigation, priv } = out
         const opened = host.call("openExternalBrowser", { id: tab, url, navigation, privateConfirmed: priv }) catch (error) => error
         if (opened instanceof BrowserCallFailed) try toasts.show(refusalText(opened.message))
         try send({ type: "dispatched", ok: !(opened instanceof BrowserCallFailed) })
+        break
       }
-      when { tag: "Notice", let problem }: if (problem !== "NotOpened") try toasts.show(HANDOFF_NOTICES[problem])
+      case "Notice": {
+        const { problem } = out
+        if (problem !== "NotOpened") try toasts.show(HANDOFF_NOTICES[problem])
+        break
+      }
     }
   }
 

@@ -42,10 +42,12 @@ export const sheetService = Layer.effect(AccountSheet, effect {
 
   effect function perform(out: ReadonlyArray<SheetEffect>): void!! {
     for (const effectOf of out) {
-      match (effectOf) {
-        when { tag: "SignOut", let signingOut }: {
+      switch (effectOf.tag) {
+        case "SignOut": {
+          const { signingOut } = effectOf
           if (signingOut === (try session.owner())) try session.signOut()
-        };
+          break
+        }
       }
     }
   }

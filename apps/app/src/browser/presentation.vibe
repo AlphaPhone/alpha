@@ -33,13 +33,18 @@ export const presenterLayer = Layer.provide(Layer.effect(BrowserPresenter, effec
   const lastFailure = try Ref.make("")
 
   effect function perform(out: PresentEffect) {
-    match (out) {
-      when { tag: "Present", let request }: {
+    switch (out.tag) {
+      case "Present": {
+        const { request } = out
         const shown = host.call("present", payloadOf(request)) catch (error) => error
         if (shown instanceof BrowserCallFailed) try Ref.set(lastFailure, shown.message)
         try send({ type: "answered", ok: !(shown instanceof BrowserCallFailed) })
+        break
       }
-      when { tag: "ReportPresentFailed" }: try toasts.show(refusalText(try Ref.get(lastFailure)))
+      case "ReportPresentFailed": {
+        try toasts.show(refusalText(try Ref.get(lastFailure)))
+        break
+      }
     }
   }
 

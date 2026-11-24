@@ -46,22 +46,36 @@ export const egressLayer = Layer.provide(Layer.effect(BrowserEgress, effect {
   }
 
   effect function perform(out: EgressEffect) {
-    match (out) {
-      when { tag: "ShareSheet", let tab, let url, let navigation }: {
+    switch (out.tag) {
+      case "ShareSheet": {
+        const { tab, url, navigation } = out
         const shared = host.call("share", { id: tab, url, navigation }) catch (error) => error
         if (shared instanceof BrowserCallFailed) try toasts.show(refusalText(shared.message))
         try send({ type: "shareSettled", ok: !(shared instanceof BrowserCallFailed) })
+        break
       }
-      when { tag: "ComposeEmail", let url, let title }: {
+      case "ComposeEmail": {
+        const { url, title } = out
         const refused = try mail.compose(title || "Shared page", url)
         if (refused !== undefined) try toasts.show(refused)
+        break
       }
-      when { tag: "CopyLink", let url }: {
+      case "CopyLink": {
+        const { url } = out
         const copied = tryPromise(() => copyText(url)) catch () => false
         try send({ type: "copied", ok: copied !== false })
+        break
       }
-      when { tag: "ToggleMark", let url, let title, let saved }: try marks.set(url, title, saved)
-      when { tag: "Say", let problem }: try toasts.show(EGRESS_NOTICES[problem])
+      case "ToggleMark": {
+        const { url, title, saved } = out
+        try marks.set(url, title, saved)
+        break
+      }
+      case "Say": {
+        const { problem } = out
+        try toasts.show(EGRESS_NOTICES[problem])
+        break
+      }
     }
   }
 

@@ -22,8 +22,8 @@ export interface DocumentReceipt { readonly visit: number; readonly notice: Shar
 export service NotesShare {
   readonly receipts: Stream.Stream<DocumentReceipt>
   share(noteId: string, snapshot: string, channel: ShareChannel): ShareNotice!!
-  snapshotOf(noteId: string): string | undefined!!
-  importText(): ShareNotice | "imported"!!
+  snapshotOf(noteId: string): (string | undefined)!!
+  importText(): (ShareNotice | "imported")!!
   visit(active: boolean): void!!
   visibility(): void!!
 }
@@ -41,7 +41,7 @@ const make = effect {
   const machine = try TransferMachine
   const receipts = try PubSub.unbounded<DocumentReceipt>()
 
-  effect function send(event: TransferEvent): Transfer | undefined!! {
+  effect function send(event: TransferEvent): (Transfer | undefined)!! {
     return try (machine.send(event) catch () => undefined)
   }
 
@@ -49,11 +49,11 @@ const make = effect {
     if (after !== undefined && after.shown > before.shown) try PubSub.publish(receipts, { visit: after.lastShownVisit, notice })
   }
 
-  effect function note(noteId: string): StickyNote | undefined!! {
+  effect function note(noteId: string): (StickyNote | undefined)!! {
     return (try collection.current())?.snapshot.notes.find((item) => item.id === noteId)
   }
 
-  effect function snapshotOf(noteId: string): string | undefined!! {
+  effect function snapshotOf(noteId: string): (string | undefined)!! {
     const found = try note(noteId)
     const text = found === undefined ? undefined : shareable(found)
     return text === undefined ? undefined : JSON.stringify(text)

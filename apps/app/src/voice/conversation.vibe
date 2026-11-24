@@ -77,7 +77,7 @@ export service VoiceConversation {
   /** Run the agent's screen change `go` under a claim; voice stays on only when it switched, pinned its context and `contextCurrent` still holds. True when voice stayed on. */
   followScreen(go: () => boolean!!, contextCurrent: () => boolean): boolean!!
   /** Read a message aloud the owner asked to hear: a running conversation retires first, and the reading starts once replies have stopped. */
-  readAloud(text: string): void!SpeechRefused | SpeechUnavailable | SpeechInterrupted | SpeechNotStopped
+  readAloud(text: string): void!(SpeechRefused | SpeechUnavailable | SpeechInterrupted | SpeechNotStopped)
 }
 
 const CLEF_PATH = "/api/v1/decisions"
