@@ -1,26 +1,33 @@
-// spec/app/files/index.md, "Story: Browse my storage"; spec/app/files/index.md, "Story: Arrange and filter what I see"; spec/app/files/index.md, "Story: Change my files"
+// spec/app/files/index.md, "Story: Browse my storage"; spec/app/files/index.md, "Story: Arrange and filter what I see"; spec/app/files/index.md, "Story: Change my files"; spec/app/files/index.md, "Folders come before files in every sort: by name in the phone's order of names, by date the newest first, by size the largest first; choosing the sort again turns the order within the folders and within the files"; spec/app/files/index.md, "The owner sees a listed item's details: what it is, how big it is, when it last changed and where it is; they close when the owner closes them or moves, or when the item is no longer listed"
 import { Alert, Button, Checkbox, Chip, Dialog, DialogContent, DialogTitle, EmptyState, Input, ListGroup, ListRow, Progress, SearchField, Sheet, SheetContent, Spinner } from "@repo/ui";
 import { Effect, Option, type ManagedRuntime } from "effect";
 import { useState } from "react";
 import type { Machine, Order } from "../../gen/app__files.effect.vibe";
-import { browse, chosen, empty, filled } from "../../gen/app__files.ts";
+import { ahead, browse, chosen, detailed, empty, filled } from "../../gen/app__files.ts";
 import { useMachine } from "../../gen/app__files.react.ts";
 import type { Dest, Work } from "../../gen/app__files__change.ts";
 import { finding } from "../../gen/app__files__search.ts";
+import type { Filter } from "../../gen/app__files__search.ts";
 import type { Item, Kind } from "../../gen/app__files__shared.ts";
 import type { Machine as TrashMachine } from "../../gen/app__files__trash.effect.vibe";
 import type { Time } from "../runtime/time.vibe";
 import { Handles } from "./handles.vibe";
+import type { Machine as PreviewMachine } from "../../gen/app__files__preview.effect.vibe";
+import type { Machine as RecentMachine } from "../../gen/app__files__recent.effect.vibe";
+import type { Opened } from "./preview.vibe";
+import { Preview, RecentFiles } from "./Preview.tsx";
 import { Trash, Undo } from "./Trash.tsx";
 
 export interface FilesProps {
   /** Provides Files and its Trash, `files` of files.vibe, the numbers of the phone's storage and Alpha's time. */
-  runtime: ManagedRuntime.ManagedRuntime<Machine | TrashMachine | Handles | Time, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Machine | TrashMachine | PreviewMachine | RecentMachine | Opened | Handles | Time, unknown>;
 }
 
 const categories: readonly [Kind, string][] = [["Download", "Downloads"], ["Image", "Images"], ["Video", "Videos"], ["Audio", "Audio"], ["Document", "Documents"]];
 const orders: readonly [Order, string][] = [["ByName", "Name"], ["ByDate", "Date"], ["BySize", "Size"]];
-const shares: readonly [Dest, string][] = [["Chooser", "Share to an app"], ["Email", "Email"], ["Copy", "Copy"], ["SaveTo", "Save to"]];
+const shares: readonly [Dest, string][] = [["Chooser", "Share to an app"], ["Email", "Email"], ["Copy", "Copy"]];
+const kinds: readonly [Kind | undefined, string][] = [[undefined, "Any kind"], ["Image", "Images"], ["Video", "Videos"], ["Audio", "Audio"], ["Document", "Documents"]];
+const kindNames: Record<Kind, string> = { Folder: "Folder", Image: "Image", Video: "Video", Audio: "Audio", Document: "Document", Download: "Download", Other: "File" };
 /** A name no folder holds, since it is a path's separator: what asks whether a new name would be taken at all. */
 const unnamed = "/";
 /** A size in the units the owner reads, to one decimal above a kilobyte. */
@@ -47,6 +54,7 @@ export function Files({ runtime }: FilesProps) {
   const { state, cause, can, send } = useMachine(runtime);
   const [text, setText] = useState("");
   const [naming, setNaming] = useState<{ work: Work; name: string } | undefined>(undefined);
+  const [kind, setKind] = useState<Kind | undefined>(undefined);
   if (cause) return <Alert variant="destructive" className="m-4">Alpha could not open Files</Alert>;
   if (!state) return null;
   const owner = <E extends Parameters<typeof can>[0]>(event: E) => can(event, "Owner");
@@ -65,11 +73,9 @@ export function Files({ runtime }: FilesProps) {
   if (state.trash) return <Trash runtime={runtime} onBack={owner({ type: "closeTrash" }) ? () => tell({ type: "closeTrash" }) : undefined} />;
   const looked = finding(state.search);
   const picked = chosen(state);
-  const weight = (handle: number) => runtime.runSync(Effect.flatMap(Handles, (handles) => handles.weight(handle)));
-  const sorted = [...state.items].sort((a, b) => {
-    const by = state.order === "ByName" ? a.name.localeCompare(b.name) : state.order === "ByDate" ? b.revision - a.revision : weight(b.id) - weight(a.id);
-    return (a.kind === "Folder" ? 0 : 1) - (b.kind === "Folder" ? 0 : 1) || (state.reversed ? -by : by);
-  });
+  const sorted = [...state.items].sort((a, b) => (ahead(state.order, state.reversed, a, b) ? -1 : ahead(state.order, state.reversed, b, a) ? 1 : 0));
+  const wanted: Filter = { text: text.trim(), kind: kind ?? "Other", anyKind: kind === undefined };
+  const [details] = detailed(state);
   const row = (item: Item) => {
     const toggle = { type: "toggle", target: item.id } as const;
     const open = item.kind === "Folder" ? ({ type: "openFolder", target: item.id } as const) : ({ type: "view", file: item } as const);
@@ -116,6 +122,7 @@ export function Files({ runtime }: FilesProps) {
             })}
             {owner({ type: "openTrash" }) && <ListRow title="Trash" aria-label="Trash" aria-description={state.tally.trashed > 0 ? String(state.tally.trashed) : undefined} trailing={state.tally.trashed > 0 && state.tally.trashed} onClick={() => tell({ type: "openTrash" })} />}
           </ListGroup>
+          <RecentFiles runtime={runtime} />
         </>
       ) : (
         <>
@@ -140,13 +147,22 @@ export function Files({ runtime }: FilesProps) {
             {owner({ type: "refresh" }) && <Button variant="ghost" size="sm" onClick={() => tell({ type: "refresh" })}>Refresh</Button>}
             {owner({ type: "begin", work: "NewFolder", name: unnamed }) && <Button variant="ghost" size="sm" onClick={() => setNaming({ work: "NewFolder", name: "" })}>New folder</Button>}
           </div>
-          <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); tell({ type: "searchFor", wanted: { text: text.trim(), kind: "Other", anyKind: true } }); }}>
-            <SearchField aria-label="Filter" value={text} onValueChange={setText} className="flex-1" />
-            {owner({ type: "searchFor", wanted: { text: text.trim(), kind: "Other", anyKind: true } }) && <Button type="submit" variant="outline">Filter</Button>}
+          <form className="flex flex-col gap-2" onSubmit={(event) => { event.preventDefault(); tell({ type: "searchFor", wanted }); }}>
+            <div className="flex gap-2">
+              <SearchField aria-label="Filter" value={text} onValueChange={setText} className="flex-1" />
+              {owner({ type: "searchFor", wanted }) && <Button type="submit" variant="outline">Filter</Button>}
+            </div>
+            {owner({ type: "searchFor", wanted }) && (
+              <div role="group" aria-label="Kind" className="flex flex-wrap gap-1">
+                {kinds.map(([one, name]) => <Button key={name} type="button" variant={kind === one ? "secondary" : "ghost"} size="sm" aria-pressed={kind === one} onClick={() => setKind(one)}>{name}</Button>)}
+              </div>
+            )}
           </form>
           {looked !== "NoFilter" && (
             <div className="flex flex-col gap-2">
-              <Chip onClear={owner({ type: "clearFilter" }) ? () => tell({ type: "clearFilter" }) : undefined} clearLabel="Clear the filter">{state.search.filter.text === "" ? "Everything" : `“${state.search.filter.text}”`}</Chip>
+              <Chip onClear={owner({ type: "clearFilter" }) ? () => tell({ type: "clearFilter" }) : undefined} clearLabel="Clear the filter">
+                {[state.search.filter.anyKind ? "" : kinds.find(([one]) => one === state.search.filter.kind)?.[1] ?? "", state.search.filter.text === "" ? "" : `“${state.search.filter.text}”`].filter(Boolean).join(" · ") || "Everything"}
+              </Chip>
               {looked === "Looking" && <Spinner label="Looking" />}
               {looked === "Nothing" && <EmptyState title="Nothing matches" />}
               {looked === "Trouble" && <Alert variant="warn">The search could not finish</Alert>}
@@ -172,6 +188,7 @@ export function Files({ runtime }: FilesProps) {
               {owner({ type: "openMoveTo" }) && <Button variant="outline" size="sm" onClick={() => tell({ type: "openMoveTo" })}>Move or copy</Button>}
               {owner({ type: "openShare", mail: false }) && <Button variant="outline" size="sm" onClick={() => tell({ type: "openShare", mail: false })}>Share</Button>}
               {owner({ type: "begin", work: "Rename", name: unnamed }) && <Button variant="outline" size="sm" onClick={() => setNaming({ work: "Rename", name: picked[0]?.name ?? "" })}>Rename</Button>}
+              {picked.length === 1 && picked[0] && owner({ type: "showDetails", target: picked[0].id }) && <Button variant="outline" size="sm" onClick={() => picked[0] && tell({ type: "showDetails", target: picked[0].id })}>Details</Button>}
               {owner({ type: "cancelSelection" }) && <Button variant="ghost" size="sm" onClick={() => tell({ type: "cancelSelection" })}>Cancel</Button>}
             </div>
           )}
@@ -185,6 +202,19 @@ export function Files({ runtime }: FilesProps) {
             {owner({ type: "keepFiles" }) && <Button variant="secondary" onClick={() => tell({ type: "keepFiles" })}>Keep</Button>}
             {owner({ type: "confirmDelete" }) && <Button variant="destructive" onClick={() => tell({ type: "confirmDelete" })}>Delete</Button>}
           </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={details !== undefined} onOpenChange={(open) => { if (!open && owner({ type: "closeDetails" })) tell({ type: "closeDetails" }); }}>
+        <DialogContent closeLabel="Close">
+          <DialogTitle>{details?.name}</DialogTitle>
+          {details && (
+            <dl aria-label="Details" className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+              <dt>Kind</dt><dd>{kindNames[details.kind]}</dd>
+              {details.kind !== "Folder" && <><dt>Size</dt><dd>{sized(details.bytes)}</dd></>}
+              <dt>Changed</dt><dd><time dateTime={new Date(details.revision).toISOString()}>{new Date(details.revision).toLocaleString()}</time></dd>
+              <dt>Where</dt><dd>{state.trail.map(label).join(" › ")}</dd>
+            </dl>
+          )}
         </DialogContent>
       </Dialog>
       <Dialog open={naming !== undefined} onOpenChange={(open) => { if (!open) setNaming(undefined); }}>
@@ -236,6 +266,7 @@ export function Files({ runtime }: FilesProps) {
           </ListGroup>
         </SheetContent>
       </Sheet>
+      <Preview runtime={runtime} />
       <Sheet open={change.panel !== 0} onOpenChange={(open) => { if (!open && owner({ type: "closeShare" })) tell({ type: "closeShare" }); }}>
         <SheetContent title="Share">
           <ListGroup surface="plain">
