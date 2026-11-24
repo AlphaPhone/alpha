@@ -439,3 +439,48 @@ pure def sometimesDone(r: Request): bool = r.ending == Done and r.ask == Dial
 pure def sometimesTextSent(r: Request): bool = r.ending == Done and r.ask == Text and r.lookup.status == R::Loaded
 pure def sometimesUnknown(r: Request): bool = r.ending == Unsure and r.ask == ChangeContact
 ```
+
+## Story: Let the agent read what I have open
+
+> As the owner, I want the agent to read only what I have open on the
+> phone, to name the sender of my latest text by its number and never its
+> words, and to open the keypad or my contacts for me without doing
+> anything there.
+
+### The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it
+
+A read shares the open conversation's last twenty messages, the open
+voicemail with the transcript made of it, or the open contact's name,
+numbers and addresses. With nothing open, or with what is open not yet
+read, the agent is told none is selected. A read asks the phone nothing
+new and changes nothing. The agent may also open the keypad filled in with
+a number, as a number handed to [Phone](../phone/), or Contacts on a
+search, learning only whether a contact matched: only the owner's tap then
+calls or changes anything.
+
+```quint
+type Opened = NothingOpen | OpenUnread | OpenRead
+type Shared = SharesIt | NoneSelected
+
+pure def readOf(opened: Opened): Shared = if (opened == OpenRead) SharesIt else NoneSelected
+
+pure def lawOnlyWhatIsOpenAndReadIsShared(opened: Opened): bool = (readOf(opened) == SharesIt) iff (opened == OpenRead)
+```
+
+### The latest text's sender is named by its number alone, and the whole number only where the agent asked for it
+
+The phone reads the newest incoming text's address, never its words: the
+last four digits, or the whole number and its conversation when the agent
+asked for it, so a reply can be drafted to that sender. No text, a sender
+that is not a number, and a failed read are each said as such.
+
+```quint
+type SenderSaid = WholeNumber | LastFour | NoText | NotANumber | ReadFailed
+
+pure def senderSaid(read: bool, texts: bool, dialable: bool, whole: bool): SenderSaid =
+  if (not(read)) ReadFailed else if (not(texts)) NoText else if (not(dialable)) NotANumber
+  else if (whole) WholeNumber else LastFour
+
+pure def lawTheWholeNumberOnlyWhenAsked(read: bool, texts: bool, dialable: bool, whole: bool): bool =
+  (senderSaid(read, texts, dialable, whole) == WholeNumber) implies whole
+```

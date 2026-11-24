@@ -11,7 +11,10 @@ import { together, untimed, whole } from "../src/runtime/reactor.vibe";
 import { shell } from "../src/shell/shell.vibe";
 import { placeOf, voicing } from "../src/voice/voice.vibe";
 import { fakeWorld } from "./fakes/world.vibe";
-import { type Asking, propose } from "../src/contacts/requests.vibe";
+import { type Asking, propose, withdrawn } from "../src/contacts/requests.vibe";
+import { type Reading, answerReading } from "../src/contacts/reads.vibe";
+import { Machine as Messages } from "../gen/app__messages.effect.vibe";
+import { Machine as Composer } from "../gen/app__messages__composer.effect.vibe";
 import { closeAll, later, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
@@ -135,6 +138,11 @@ describe("Contacts on an Alpha image", () => {
     await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Choosing");
     await press("Not now");
     await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "Declined");
+    await ask({ type: "phone_call", target: { kind: "contact", query: "Ben" } });
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Choosing");
+    expect(await alpha.runtime.runPromise(withdrawn())).toBe(true);
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "Withdrawn");
+    expect(document.querySelector("[role=dialog]")).toBeNull();
 
     // spec/app/contacts/agent.md, "A change that would leave the contact as it is is never offered"
     await ask({ type: "contact_update", query: "Ben", add: { phoneNumbers: ["+14155550122"] } });
@@ -153,6 +161,49 @@ describe("Contacts on an Alpha image", () => {
     await press("Approve");
     await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "Done");
     expect(world.telephony.people.filter((one) => one.displayName === "Maya Chen").length).toBe(2);
+  });
+
+  it("Let the agent read what I have open, and draft a reply that never sends (spec/app/contacts/agent.md, \"Story: Let the agent read what I have open\"; spec/app/messages/composer.md, \"Story: Let Alpha suggest a draft\")", async () => {
+    const world = image();
+    const { alpha } = await open(world);
+    await until(alpha, alpha.runtime, Shell, (s) => s.image);
+    const read = (operation: Reading) => alpha.runtime.runPromise(answerReading(operation));
+
+    // spec/app/contacts/agent.md, "The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it"
+    expect([await read({ type: "messages_read_selected" }), await read({ type: "voicemail_read_selected" }), await read({ type: "contact_read_selected" }), await read({ type: "sms_reply_selected", body: "On my way" })]).toEqual([
+      { kind: "messages-read", status: "none-selected" }, { kind: "voicemail-read", status: "none-selected" }, { kind: "contact-read", status: "none-selected" }, { kind: "sms-reply", status: "none-selected" },
+    ]);
+
+    // spec/app/contacts/agent.md, "The latest text's sender is named by its number alone, and the whole number only where the agent asked for it"
+    expect([await read({ type: "sms_latest_sender" }), await read({ type: "sms_latest_sender", includeAddress: true })]).toEqual([
+      { kind: "sms-latest-sender", status: "found", numberEnding: "0100" }, { kind: "sms-latest-sender", status: "found", address: "+14155550100", threadId: "thread:1" },
+    ]);
+
+    await press("Messages");
+    await until(alpha, alpha.runtime, Messages, (s) => s.list.status === "Loaded" && s.threads === 1);
+    await press("Maya Chen");
+    await until(alpha, alpha.runtime, Messages, (s) => s.pane === "Conversation" && s.page.status === "Loaded");
+    await until(alpha, alpha.runtime, Composer, (s) => s.thread > 0);
+    expect(await read({ type: "messages_read_selected" })).toEqual({ kind: "messages-read", status: "read", participant: "Maya Chen", messages: [{ direction: "in", date: 1_700_000_050_000, body: "See you at five" }], truncated: false });
+
+    // spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"
+    expect(await read({ type: "sms_reply_selected", body: "On my way" })).toEqual({ kind: "sms-reply", status: "drafted" });
+    await until(alpha, alpha.runtime, Composer, (s) => s.slot.author === "AlphaWrote");
+    expect([await read({ type: "sms_reply_selected", body: "Running late" }), (document.querySelector("textarea[aria-label=Message]") as HTMLTextAreaElement).value, world.telephony.sent]).toEqual([
+      { kind: "sms-reply", status: "occupied" }, "On my way", [],
+    ]);
+
+    // spec/app/phone/index.md, "A number handed to Phone opens the keypad with it filled in, and never dials"
+    expect(await read({ type: "phone_keypad", number: "+14155550122" })).toEqual({ kind: "phone-keypad", status: "opened" });
+    await until(alpha, alpha.runtime, Phone, (s) => s.front && s.tab === "Keypad" && s.digits === 12);
+    expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
+
+    // spec/app/contacts/index.md, "Searching or changing the filter chip starts a new list"
+    expect(await read({ type: "contact_show", query: "Ben" })).toEqual({ kind: "contact-show", status: "shown" });
+    await until(alpha, alpha.runtime, Contacts, (s) => s.front && s.sought && s.list.status === "Loaded" && s.rows === 1);
+    await press("Ben Ortiz");
+    await until(alpha, alpha.runtime, Contacts, (s) => s.opened && s.card.status === "Loaded");
+    expect(await read({ type: "contact_read_selected" })).toEqual({ kind: "contact-read", status: "read", contact: { displayName: "Ben Ortiz", phoneNumbers: ["+14155550122"], emailAddresses: [] } });
   });
 
   it("A text the agent proposes on a turn is shown on its card, a draft too, sent once on the owner's tap, and never asked again (spec/app/contacts/agent.md, \"Story: Let the agent ask for a call or a contact change\"; spec/app/contacts/agent.md, \"Story: Approve what the agent asked\"; spec/app/contacts/agent.md, \"Story: Learn how the request ended\")", async () => {
