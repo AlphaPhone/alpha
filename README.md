@@ -45,9 +45,13 @@ pnpm verify   # everything CI runs
 `pnpm eliza` builds the commit `eliza.lock.json` pins outside the repository, in
 `~/.cache/alpha/eliza-vibestack/<commit>` (or the directory `ALPHA_ELIZA_DIR`
 names), and links it as `.eliza`; every worktree shares that build, and
-typecheck, test, build and dev say so where it is missing. `pnpm dev` starts
-eliza's cloud command and its agent as processes of that run, with a scripted
-model in place of a paid one, and stops them with it. `ALPHA_FAKES=1 pnpm dev`
+typecheck, test, build and dev say so where it is missing. `pnpm dev` builds
+the agent pack as `@repo/agent` does for the phone, then starts eliza's cloud
+command and that pack's agent, with every plugin and action the phone's pack
+allows, as processes of that run, with a scripted model in place of a paid
+one, and stops them with it; the journeys run the same pack.
+`ALPHA_DEV_MODEL=cerebras` asks Cerebras's own API on the owner's key
+instead, so the agent's real tools run on a real model. `ALPHA_FAKES=1 pnpm dev`
 serves the app over the journeys' fakes instead, and `ALPHA_FAKES=phone` over
 the fake phone's plugins.
 

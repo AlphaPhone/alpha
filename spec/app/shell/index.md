@@ -21,7 +21,7 @@ Home is the empty trail; the app showing is the last one on it. Ask Alpha
 rests as a bar, takes typing, opens as a sheet, or fills the screen.
 
 ```quint
-type View = Phone | Messages | Inbox | Calendar | Browser | Camera | Photos | Maps | Notes | Contacts | Files | Workflows | Settings
+type View = Phone | Messages | Inbox | Calendar | Clock | Reminders | Browser | Camera | Photos | Maps | Notes | Contacts | Files | Workflows | Settings
 type Detent = Bar | Typing | Sheet | Full
 type Shell = { trail: List[View], drawer: bool, assistant: Detent, image: bool, contacts: bool }
 

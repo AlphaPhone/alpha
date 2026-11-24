@@ -69,6 +69,17 @@ describe("Messages on an Alpha image", () => {
     await until(alpha, alpha.runtime, Composer, (s) => s.slot.author === "OwnerWrote");
     expect(world.telephony.sent).toEqual([]);
 
+    // spec/app/phone/comms.md, "Story: Address the person or Alpha from one bar"
+    expect(document.querySelectorAll("[data-alpha-composer]")).toHaveLength(1);
+    await press("Open Alpha");
+    await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
+    expect(document.querySelectorAll("[data-alpha-composer]")).toHaveLength(1);
+    await write("Ask Alpha", "What did I miss?");
+    await press("Back to texting Maya Chen");
+    await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar");
+    expect([document.querySelectorAll("[data-alpha-composer]").length, document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value, world.telephony.sent])
+      .toEqual([1, "On my way", []]);
+
     // spec/app/messages/composer.md, "Only the owner's Send sends: a draft or a picture, with send access, a SIM where there is a choice, and never during a call that may be an emergency call"
     await press("Send");
     await until(alpha, alpha.runtime, Composer, (s) => s.outgoing.op.outcome === "Confirmed" && s.slot.author === "Nobody");

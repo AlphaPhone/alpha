@@ -8,14 +8,14 @@ export const savedKey = "alpha.home.tiles"
 /** Where an earlier Alpha kept them: its Alpha apps as `alpha:<app>`, and each installed app by its launcher key. */
 const earlierKey = "alpha.launcher.favorites.v1"
 
-/** Today's view of each name an earlier Alpha saved an app of its own under; Clock, Wallet and the assistant are no tile. */
+/** Today's view of each name an earlier Alpha saved an app of its own under; Wallet and the assistant are no tile. */
 const earlierViews: Readonly<Record<string, View>> = {
-  phone: "Phone", messages: "Messages", inbox: "Inbox", calendar: "Calendar", browser: "Browser", camera: "Camera",
-  photos: "Photos", maps: "Maps", notes: "Notes", contacts: "Contacts", files: "Files", workflows: "Workflows",
-  automations: "Workflows", settings: "Settings",
+  phone: "Phone", messages: "Messages", inbox: "Inbox", calendar: "Calendar", clock: "Clock", reminders: "Reminders",
+  browser: "Browser", camera: "Camera", photos: "Photos", maps: "Maps", notes: "Notes", contacts: "Contacts",
+  files: "Files", workflows: "Workflows", automations: "Workflows", settings: "Settings",
 }
 
-const views: ReadonlyArray<View> = ["Phone", "Messages", "Inbox", "Calendar", "Browser", "Camera", "Photos", "Maps", "Notes", "Contacts", "Files", "Workflows", "Settings"]
+const views: ReadonlyArray<View> = ["Phone", "Messages", "Inbox", "Calendar", "Clock", "Reminders", "Browser", "Camera", "Photos", "Maps", "Notes", "Contacts", "Files", "Workflows", "Settings"]
 
 schema OwnTile { readonly tag: "Own"; readonly view: string }
 schema InstalledTile { readonly tag: "Installed"; readonly app: string }
