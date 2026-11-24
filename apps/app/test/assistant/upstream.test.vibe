@@ -221,12 +221,12 @@ it.effect(`A turn tells the agent direct requests are allowed only with review-f
       const composer = try Composer
       try composer.edit("Open Settings")
       try composer.send()
-      return (turnBodies(seen)[0] as { readonly metadata?: { readonly voiceUi?: unknown } } | undefined)?.metadata?.voiceUi
+      return (turnBodies(seen)[0] as { readonly metadata?: { readonly voiceUi?: { readonly agentActionMode?: unknown } } } | undefined)?.metadata?.voiceUi?.agentActionMode
     }
   }
   const direct = try sent(false)
   const asking = try sent(true)
-  try Effect.try(() => assert.deepStrictEqual({ direct, asking }, { direct: { agentActionMode: "direct-request-v1" }, asking: undefined }))
+  try Effect.try(() => assert.deepStrictEqual({ direct, asking }, { direct: "direct-request-v1", asking: undefined }))
 })
 
 it.effect("An open of a link from the page my message carried keeps its card (spec/assistant/review.md, \"The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote or my own ask for its tab list\")", () => effect {

@@ -62,6 +62,7 @@ export interface ResidentScript {
   readonly hits?: readonly unknown[]
   readonly listingStatus?: number
   readonly actionResults?: readonly { readonly action: string; readonly data: unknown }[]
+  readonly viewClaimTarget?: unknown
   /** Frames the turn's stream sends before its reply: the cue as text, the agent's acknowledgment, a text restart and its tools. */
   readonly before?: readonly unknown[]
 }
@@ -73,7 +74,7 @@ export function fakeResident(seen: Seen, script: ResidentScript) {
     ensureRunning: () => succeed(undefined),
     json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown, headers?: { readonly [name: string]: string }) => effect {
       seen.calls.push({ method, path, body, ...(headers === undefined ? {} : { headers }) })
-      if (path === "/api/views/interact-claim") return { status: 200, data: { claimId: "claim-1" } }
+      if (path === "/api/views/interact-claim") return { status: 200, data: { claimId: "claim-1", ...(script.viewClaimTarget === undefined ? {} : { target: script.viewClaimTarget }) } }
       if (path === "/api/views/interact-result") return { status: 200, data: { accepted: true } }
       if (path === "/api/conversations" && method === "POST") return { status: 200, data: { conversation: { id: "c1", roomId: "r1" } } }
       if (path === "/api/conversations") return { status: 200, data: { conversations: [{ id: "c1", roomId: "r1" }] } }
@@ -237,18 +238,29 @@ export const browserScreen: ScreenFacts = {
 }
 
 /** The shell's side of the assistant, signed in on Home, and Inbox delivering email cards; toasts and emails are collected; `compared` when the peer was compared for this turn and takes the optional fields, such as the Browser page. */
-export function fakeHost(toasts: string[], screen: ScreenFacts = homeScreen, emails: unknown[] = [], compared = false, resetsAt?: number) {
+export function fakeHost(toasts: string[], screen: ScreenFacts = homeScreen, emails: unknown[] = [], compared = false, resetsAt?: number,
+  note?: { readonly visible: string | undefined; readonly opened: string[] }) {
+  let front = screen
+  let shown: string | undefined
   const inbox = Layer.succeed(AssistantEmail, {
     send: (email: ReviewedEmail) => sync(() => { emails.push(email); return "Delivered" as const }),
     address: () => succeed("owner@example.com"),
   })
   return Layer.mergeAll(inbox, Layer.succeed(AssistantHost, {
     identity: () => succeed({ origin: "https://agent.local", owner: "o1", agent: "a1", session: "s1", installationId: "i1", enrollmentId: "e1" }),
-    screen: () => succeed(screen),
+    screen: () => sync(() => front),
     peer: () => succeed({ optionalFields: compared, takesLocation: false }),
     inference: () => succeed({ where: "OnDevice" as const, provider: "this phone" }),
     emergency: () => succeed(false),
     openView: () => succeed(true),
+    openSavedNote: (id: string, current: boolean!!) => effect {
+      if (note === undefined || !(try current)) return false
+      note.opened.push(id)
+      front = { ...front, contextKey: "notes:" + id, observation: { ...front.observation, view: "notes" } }
+      shown = note.visible
+      return true
+    },
+    shownSavedNote: () => sync(() => shown),
     toast: (text: string) => sync(() => { toasts.push(text) }),
     allowanceResetsAt: () => succeed(resetsAt),
   }))

@@ -1,6 +1,6 @@
 // spec/assistant/views.md, "Story: Have my agent open the screen it means"; spec/assistant/views.md, "A prepared view opens once under a returned claim, only while the screen and the session are the ones the turn was sent from, and every claim is settled once"; spec/assistant/views.md, "Maps' view is delivered by Maps, at most once per effect"; spec/assistant/views.md, "Story: Let my agent press back or reload only on the page I am looking at"; spec/assistant/views.md, "A view command is claimed once, refused under \"Ask before Alpha acts\", run only in Browser, and answered once"
 import { observes } from "../../gen/assistant.effect.vibe"
-import { answerOf, assistantClaims, claimWaitMs, claims, delivered, interactionWaitMs, mapsDelivers, negativeSent, negativeWaitMs, reported, taken, type Delivered } from "../../gen/assistant__views.effect.vibe"
+import { answerOf, assistantClaims, claimWaitMs, claims, delivered, interactionWaitMs, mapsDelivers, negativeSent, negativeWaitMs, reported, savedNoteShown, taken, type Delivered } from "../../gen/assistant__views.effect.vibe"
 import { newId } from "../platform/ids.ts"
 import { Resident } from "../platform/resident.vibe"
 import { ResidentFeeds } from "../platform/view-events.vibe"
@@ -9,7 +9,7 @@ import { appOfKey, BUILTIN_PREFIX } from "../shell/apps.vibe"
 import { Navigation } from "../shell/navigation.vibe"
 import type { AppId } from "../web/app-screen.ts"
 import { AssistantHost } from "./host.vibe"
-import { ViewClaim, ViewHandoff, ViewInteraction, ViewResultAnswer } from "./payloads.schema.vibe"
+import { SavedNoteTarget, ViewBinding, ViewClaim, ViewHandoff, ViewInteraction, ViewResultAnswer } from "./payloads.schema.vibe"
 import { AdvertisedCapabilities, BrowserViews, MapsViews, type ViewAnswer } from "./ports.vibe"
 import { ask } from "./transport.vibe"
 
@@ -18,6 +18,7 @@ const RESULT = "/api/views/interact-result"
 const REVIEW_REQUIRED = "review-required: the owner reviews phone actions first"
 const NO_VIEW_COMMAND = "UNSUPPORTED: This phone has no agent command for that view."
 const UNKNOWN_OUTCOME = "Native view command failed or its outcome is unknown; it was not repeated"
+export const SAVED_NOTE_PROTOCOL = "saved-note-v1"
 
 /** What a turn tells the agent about this renderer, so a view it prepares can be delivered here. */
 export interface ViewTurnFields {
@@ -89,7 +90,7 @@ export const viewsLayer = Layer.effect(AgentViews, effect {
   effect function claimOf(binding: unknown, waitMs: number) {
     const answer = timeout(post(CLAIM, binding), waitMs) catch () => undefined
     const claim = Schema.decodeUnknownOption(ViewClaim)(answer)
-    return Option.isSome(claim) ? claim.value.claimId : undefined
+    return Option.getOrUndefined(claim)
   }
 
   effect function settle(binding: object, claimId: string, outcome: { readonly success: boolean; readonly result?: unknown; readonly error?: string }, waitMs?: number) {
@@ -111,6 +112,34 @@ export const viewsLayer = Layer.effect(AgentViews, effect {
     return observes(screen.exposure) && (target === "home" ? view === "home" || view === "library" : view === target)
   }
 
+  /** A saved editor takes its ID from the returned claim, never from reply data. */
+  effect function deliverSavedNote(binding: typeof ViewBinding.Type, contextKey: string, label: string) {
+    const before = try host.identity()
+    if (before === undefined || before.installationId !== binding.installationId) return { status: "none" } satisfies ViewDelivery
+    const sameSession = effect {
+      const now = try host.identity()
+      return now !== undefined && now.origin === before.origin && now.owner === before.owner && now.agent === before.agent &&
+        now.session === before.session && now.installationId === before.installationId && now.enrollmentId === before.enrollmentId
+    }
+    const fresh = effect { return (try sameSession) && (try current(contextKey)) }
+    if (!(try fresh)) return { status: "none" } satisfies ViewDelivery
+    const claim = try claimOf({ ...binding, targetProtocol: SAVED_NOTE_PROTOCOL }, claimWaitMs)
+    if (claim === undefined) return { status: "unknown" } satisfies ViewDelivery
+    const target = Option.getOrUndefined(Schema.decodeUnknownOption(SavedNoteTarget)(claim.target))
+    if (!(try sameSession)) return { status: "unknown" } satisfies ViewDelivery
+    const noteId = target?.noteId
+    const valid = noteId !== undefined && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u.test(noteId)
+    const shown = effect {
+      return (try sameSession) && (try inFront("notes")) && savedNoteShown(noteId ?? "", (try host.shownSavedNote()) ?? "")
+    }
+    const switched = valid && (try fresh) && (try host.openSavedNote(noteId, fresh)) && (try shown)
+    if (!(try sameSession)) return { status: "unknown" } satisfies ViewDelivery
+    const answer = switched ? { success: true, result: { switched: true, shown: target } } : { success: false, result: { switched: false } }
+    const accepted = try settle(binding, claim.claimId, answer, switched ? undefined : negativeWaitMs)
+    const outcome = delivered(true, switched, accepted, switched && (try shown))
+    return outcome === "DeliveredView" ? { status: "delivered", label } satisfies ViewDelivery : { status: "unknown" } satisfies ViewDelivery
+  }
+
   effect function effectKeyOf(requestId: string) {
     const known = effects.get(requestId)
     if (known !== undefined) return known
@@ -125,7 +154,10 @@ export const viewsLayer = Layer.effect(AgentViews, effect {
     if (handoff === undefined) return { status: "none" } satisfies ViewDelivery
     const binding = handoff.navigationBinding
     const ours = binding.clientId === clientId
-    const target = handoff.subview === true || (handoff.viewPath !== undefined && handoff.viewPath !== "" && handoff.viewPath !== "/") ? undefined : appOfView(handoff.viewId)
+    const savedNote = handoff.subview === SAVED_NOTE_PROTOCOL && handoff.viewId === "notes" && binding.viewId === "notes"
+    const subpage = handoff.subview === true || typeof handoff.subview === "string" ||
+      (handoff.viewPath !== undefined && handoff.viewPath !== "" && handoff.viewPath !== "/")
+    const target = savedNote ? "notes" : subpage ? undefined : appOfView(handoff.viewId)
     const said: Delivered = reported(true, ours, target !== undefined)
     if (said === "UnavailableView") {
       const parent = appOfView(handoff.viewId)
@@ -133,6 +165,7 @@ export const viewsLayer = Layer.effect(AgentViews, effect {
     }
     if (target === undefined || !claims(true, ours, true, try current(contextKey))) return { status: "none" } satisfies ViewDelivery
     const label = target === "home" ? "Home" : handoff.label ?? target
+    if (savedNote) return try deliverSavedNote(binding, contextKey, label)
     if (mapsDelivers(target)) {
       requests += 1
       const apply = map(host.openView("maps"), () => undefined)
@@ -140,8 +173,9 @@ export const viewsLayer = Layer.effect(AgentViews, effect {
       return (try inFront("maps")) ? { status: "delivered", label } satisfies ViewDelivery : { status: "unknown" } satisfies ViewDelivery
     }
     if (!assistantClaims(target, true)) return { status: "none" } satisfies ViewDelivery
-    const claimId = try claimOf(binding, claimWaitMs)
-    if (claimId === undefined) return { status: "unknown" } satisfies ViewDelivery
+    const claim = try claimOf(binding, claimWaitMs)
+    if (claim === undefined) return { status: "unknown" } satisfies ViewDelivery
+    const { claimId } = claim
     if (!(try current(contextKey))) {
       if (negativeSent(true, false)) try settle(binding, claimId, { success: false, result: { switched: false } }, negativeWaitMs)
       return { status: "unknown" } satisfies ViewDelivery
@@ -164,8 +198,9 @@ export const viewsLayer = Layer.effect(AgentViews, effect {
 
   effect function command(frame: typeof ViewInteraction.Type, contextKey: string) {
     const identity = { requestId: frame.requestId, clientId, viewId: frame.viewId, viewType: frame.viewType, installationId: frame.installationId }
-    const claimId = try claimOf(identity, interactionWaitMs)
-    if (claimId === undefined) return
+    const claim = try claimOf(identity, interactionWaitMs)
+    if (claim === undefined) return
+    const { claimId } = claim
     const asks = preferences.asksBeforeActions() catch () => true
     const browserView = frame.viewId === "browser"
     const isCommand = frame.capability === "browser-command"

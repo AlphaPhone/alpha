@@ -154,6 +154,24 @@ describe("Notes stories", () => {
     }
   })
 
+  it.live("A claimed saved note leaves an edited draft untouched (spec/notes/editor.md, \"A draft opens from a note at the current revision, or starts as a new note\")", () => effect {
+    const agent = seeded(note("ferry", "Ferry", "\nBook the ferry", 1), note("dinner", "Dinner", "\nMake a reservation", 2))
+    provide notesOver(agent, new DeviceFake()) {
+      const editor = try NotesEditor
+      try bound()
+      const first = try editor.openClaimedNote("ferry")
+      const selected = (try editor.selection())?.id
+      try editor.edit({ body: "Change not saved" })
+      const revision = agent.revision
+      const refused = try editor.openClaimedNote("dinner")
+      const kept = (try editor.draft())?.body
+      try check(() => assert.deepStrictEqual(
+        { first, selected, refused, kept, unchanged: agent.revision === revision },
+        { first: true, selected: "ferry", refused: false, kept: "Change not saved", unchanged: true },
+      ))
+    }
+  })
+
   it.live("Deleting an edited note saves my last words first, and a restore brings back that note (spec/notes/editor.md, \"Story: Delete and restore a note from the editor\")", () => effect {
     const agent = seeded(note("plan", "Plan", "\nFirst draft", 1))
     const device = new DeviceFake()

@@ -256,6 +256,40 @@ it.effect("Have my agent open the screen it means (spec/assistant/views.md, \"A 
   }
 })
 
+it.effect('A saved-note claim is confirmed only when its exact editor is shown (spec/assistant/views.md, "A claimed saved Notes editor confirms only the note that is shown")', () => effect {
+  const observe = effect function (visible: string | undefined, contextKey: string, claimTarget: unknown) {
+    const seen: Seen = { calls: [] }
+    const opened: string[] = []
+    const host = fakeHost([], homeScreen, [], true, undefined, { visible, opened })
+    provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "I found the note." }, proposals: [], viewClaimTarget: claimTarget }), host, countingExecutors({ count: 0 })) {
+      const views = try AgentViews
+      const binding = { clientId: views.clientId, requestId: "request-note", viewId: "notes", viewType: "gui", installationId: "i1" }
+      const values = { viewId: "notes", viewPath: "/notes", subview: "saved-note-v1", navigationPrepared: true, navigationBinding: binding, noteId: "from-reply" }
+      const delivery = try views.deliver([{ action: "VIEWS", data: { values } }], contextKey)
+      const claim = seen.calls.find((call) => call.path === "/api/views/interact-claim")?.body
+      const results = seen.calls.filter((call) => call.path === "/api/views/interact-result").map((call) => call.body)
+      return { delivery, binding, claim, opened, results }
+    }
+  }
+  const saved = { kind: "saved-note", noteId: "actual-note" }
+  const exact = try observe("actual-note", homeScreen.contextKey, saved)
+  const wrong = try observe("other-note", homeScreen.contextKey, saved)
+  const absent = try observe(undefined, homeScreen.contextKey, undefined)
+  const stale = try observe("actual-note", "calendar:", saved)
+  try Effect.try(() => {
+    assert.deepStrictEqual(exact.claim, { ...exact.binding, targetProtocol: "saved-note-v1" })
+    assert.deepStrictEqual(exact.opened, ["actual-note"])
+    assert.strictEqual(exact.delivery.status, "delivered")
+    assert.deepStrictEqual(exact.results, [{ ...exact.binding, claimId: "claim-1", success: true, result: { switched: true, shown: saved } }])
+    assert.deepStrictEqual(wrong.results, [{ ...wrong.binding, claimId: "claim-1", success: false, result: { switched: false } }])
+    assert.strictEqual(wrong.delivery.status, "unknown")
+    assert.deepStrictEqual(absent.opened, [])
+    assert.deepStrictEqual(absent.results, [{ ...absent.binding, claimId: "claim-1", success: false, result: { switched: false } }])
+    assert.strictEqual(stale.claim, undefined)
+    assert.deepStrictEqual(stale.results, [])
+  })
+})
+
 it.effect("Let my agent press back or reload only on the page I am looking at (spec/assistant/views.md, \"A view command is claimed once, refused under \"Ask before Alpha acts\", run only in Browser, and answered once\")", () => effect {
   const answered = effect function (asks: boolean) {
     const seen: Seen = { calls: [] }

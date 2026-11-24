@@ -29,7 +29,7 @@ import { timerCeilingMs } from "../../gen/assistant__approvals.effect.vibe"
 import { turnTransport } from "./transport.vibe"
 import { bindingOf, textOf, unitsOf } from "./units.vibe"
 import { EmailShelf, type EmailRow } from "./email-shelf.vibe"
-import { AgentViews, type ViewDelivery } from "./views.vibe"
+import { AgentViews, SAVED_NOTE_PROTOCOL, type ViewDelivery } from "./views.vibe"
 
 /** What the composer is doing to a sent message: quoting it in a reply, or correcting it. */
 export type Target = { readonly kind: "reply"; readonly quote: Quote } | { readonly kind: "edit"; readonly messageId: string; readonly text: string; readonly requestId: string }
@@ -275,7 +275,7 @@ export const composerLayer = Layer.effect(Composer, effect {
   }
   // spec/assistant/context.md, "A spoken turn carries the screen context a typed turn sent at that moment would": typed and
   // spoken turns read the screen here, once per turn, so both tell the agent the same observation, page and request mode.
-  effect function screenContext(peering: PeerFacts!!) {
+  effect function screenContext(peering: PeerFacts!!, canDeliverView: boolean) {
     const screen = try host.screen()
     const observed = observes(screen.exposure)
     const asksFirst = try preferences.asksBeforeActions()
@@ -299,12 +299,16 @@ export const composerLayer = Layer.effect(Composer, effect {
     } : undefined
     const page = observation === undefined ? undefined : try pageForTurn(pages, observed, observation, browserTab, peer.optionalFields)
     const browserPage = page === undefined ? undefined : wirePage(page)
-    const voiceUi = statesDirectRequests(asksFirst ? "PreferenceOn" : "PreferenceOff") ? { agentActionMode: "direct-request-v1" as const } : undefined
+    const viewFields = canDeliverView ? try views.turnFields(observed, screen.observation.view) : undefined
+    const voiceUi = {
+      ...(statesDirectRequests(asksFirst ? "PreferenceOn" : "PreferenceOff") ? { agentActionMode: "direct-request-v1" as const } : {}),
+      ...(viewFields === undefined ? {} : { uiClientId: viewFields.viewClientId, viewDelivery: viewFields.viewDelivery, uiNotesEditor: SAVED_NOTE_PROTOCOL }),
+    }
     const context = encodeTurnContext({
       ...(observation === undefined ? {} : { observation, ...(browserPage === undefined ? {} : { browserPage }) }),
-      ...(voiceUi === undefined ? {} : { voiceUi }),
+      ...(Object.keys(voiceUi).length === 0 ? {} : { voiceUi }),
     }, { optionalFields: peer.optionalFields })
-    return { screen, observed, context, browserPage, links: (page?.links ?? []).map((link) => link.url) }
+    return { screen, observed, context, viewFields, browserPage, links: (page?.links ?? []).map((link) => link.url) }
   }
   effect function send(handed?: string) {
     const identity = try host.identity()
@@ -371,8 +375,7 @@ export const composerLayer = Layer.effect(Composer, effect {
     if (!(try attachments.hold(pendingSlot, composed))) {
       try host.toast(copy.attachmentSaveFailed)
     }
-    const { screen, observed, context, browserPage, links } = try screenContext(Fiber.join(peering))
-    const viewFields = try views.turnFields(observed, screen.observation.view)
+    const { screen, context, viewFields, browserPage, links } = try screenContext(Fiber.join(peering), true)
     const pageLinks = browserPage === undefined ? [] : links
     const userId = `local-user-${attempt}`
     const replyId = `local-reply-${attempt}`
@@ -598,7 +601,7 @@ export const composerLayer = Layer.effect(Composer, effect {
       const conversation = (try SubscriptionRef.get(transcript)).conversation
       if (row.kind === "email" && identity !== undefined && conversation !== null) try shelf.keep([identity.origin, identity.owner, identity.agent, conversation], row)
     },
-    turnContext: () => map(screenContext(host.peer()), (read) => read.context as { readonly [key: string]: unknown }),
+    turnContext: () => map(screenContext(host.peer(), false), (read) => read.context as { readonly [key: string]: unknown }),
     talkOutOfFunds: (conversation: string) => effect {
       if ((try SubscriptionRef.get(transcript)).conversation !== conversation) return
       const resetsAt = try host.allowanceResetsAt()

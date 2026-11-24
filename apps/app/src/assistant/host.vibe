@@ -38,6 +38,10 @@ export service AssistantHost {
   emergency(): boolean!!
   /** Open an app view, keeping the chat detent. */
   openView(app: string, route?: string): boolean!!
+  /** Present the exact saved note if the claimed turn is still current, without saving an open edit. */
+  openSavedNote(id: string, current: boolean!!): boolean!!
+  /** The saved note that Notes is currently showing, if any. */
+  shownSavedNote(): (string | undefined)!!
   /** A short message at the top of the screen. */
   toast(text: string): void!!
   /** When the plan Alpha last read resets its allowance, while that lies ahead; undefined when no reset is known. */

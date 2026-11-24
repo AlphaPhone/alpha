@@ -14,6 +14,8 @@ import { FilesAgent } from "../files/agent.vibe"
 import { inboxCapabilities } from "../inbox/handoffs.vibe"
 import { mapsDeviceCapabilities } from "../maps/agent.vibe"
 import { NotesOrganize } from "../notes/organize.vibe"
+import { NotesCollection } from "../notes/collection.vibe"
+import { NotesEditor } from "../notes/editor.vibe"
 import { Build } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
@@ -72,6 +74,8 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
   const calls = try CallWatch
   const voice = try VoiceConversation
   const resident = try Resident
+  const notes = try NotesCollection
+  const notesEditor = try NotesEditor
   const learned = try Ref.make<{ readonly connection: string; readonly support: PeerSupport }>({ connection: "", support: { tag: "NotLearned" } })
 
   effect function status() {
@@ -112,6 +116,27 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
     return opened
   }
 
+  effect function openView(app: string, route?: string) {
+    const known = appOfKey(`alpha:${app}`)
+    if (known === undefined) return false
+    if (!(try navigation.get()).voice) return try open(known as AppId, route)
+    let opened = false
+    try voice.followScreen(() => effect {
+      opened = try open(known as AppId, route)
+      return opened
+    }, () => opened)
+    return opened
+  }
+
+  effect function shownSavedNote() {
+    const nav = try navigation.get()
+    if (nav.app !== "notes") return undefined
+    const owner = try session.ownerKey("notes")
+    if (owner === undefined || (try notes.current())?.owner !== owner) return undefined
+    const shown = try notesEditor.selection()
+    return nav.places.find((place) => place.app === "notes")?.route === shown?.id ? shown?.id : undefined
+  }
+
   return {
     identity: () => bindings.identity(),
     effect screen() {
@@ -140,17 +165,18 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
       const now = try Clock.currentTimeMillis
       return typeof at === "number" && at > now ? at : undefined
     },
-    effect openView(app: string, route?: string) {
-      const known = appOfKey(`alpha:${app}`)
-      if (known === undefined) return false
-      if (!(try navigation.get()).voice) return try open(known as AppId, route)
-      let opened = false
-      try voice.followScreen(() => effect {
-        opened = try open(known as AppId, route)
-        return opened
-      }, () => opened)
-      return opened
+    openView,
+    effect openSavedNote(id: string, current: Effect.Effect<boolean>) {
+      const owner = try session.ownerKey("notes")
+      if (owner === undefined || !(try current)) return false
+      const before = try notes.current()
+      if (before?.owner !== owner || !before.snapshot.notes.some((note) => note.id === id)) try notes.refresh()
+      if (!(try current) || (try session.ownerKey("notes")) !== owner || (try notes.current())?.owner !== owner) return false
+      if (!(try notesEditor.openClaimedNote(id))) return false
+      if (!(try current)) return (try shownSavedNote()) === id
+      return try openView("notes", id)
     },
+    shownSavedNote,
     toast: (text: string) => notices.show(text),
   }
 })

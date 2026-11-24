@@ -45,6 +45,8 @@ export service NotesEditor {
   readonly unsaved: Stream.Stream<string>
   draft(): (DraftContent | undefined)!!
   openNote(id: string): boolean!!
+  /** Open a claimed saved note without saving an edit or leaving a pending review. */
+  openClaimedNote(id: string): boolean!!
   newNote(kind: "text" | "list", folderId?: string): boolean!!
   edit(patch: DraftPatch): boolean!!
   save(): boolean!!
@@ -293,6 +295,12 @@ const make = effect {
     unsaved: Stream.fromPubSub(unsaved),
     draft: () => SubscriptionRef.get(content),
     openNote,
+    effect openClaimedNote(id: string) {
+      const state = try machine.get()
+      if (state.saving || state.review || state.mutation !== "NoMutation" || dirty(state)) return false
+      if (state.present && state.draftId === id) return selectionCurrent(state)
+      return try openNote(id)
+    },
     effect newNote(kind: "text" | "list", folderId?: string) {
       if (!(try leave())) return false
       const current = try collection.current()

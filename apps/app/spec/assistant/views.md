@@ -30,7 +30,7 @@ nothing. After a claim, the view switch happens at most once, and the one
 result says whether the view in front is now the target on a screen that is
 not private. A failure after the claim and before the switch sends one
 negative result within 1.5 seconds; a lost result is never sent again. A
-view this phone does not have, a page inside a view it does have, or a
+view this phone does not have, an unsupported page inside a view it has, or a
 binding for another renderer is reported in the chat and nothing is
 claimed. A view switch the delivery makes is the assistant's own and does
 not retire the turn's cards.
@@ -62,6 +62,21 @@ claim. The assistant claims nothing for it itself.
 pure def mapsDelivers(target: str): bool = target == "maps"
 pure def assistantClaims(target: str, known: bool): bool = known and not(mapsDelivers(target))
 pure def lawMapsIsNeverClaimedTwice(known: bool): bool = not(assistantClaims("maps", known))
+```
+
+### A claimed saved Notes editor confirms only the note that is shown
+
+An observed turn advertises `saved-note-v1` for its own renderer. For a prepared
+Notes editor the renderer asks for that claim protocol. The saved note ID
+comes from the claim, and the one success result names it only while the same
+session shows that editor. An absent record, an open dirty draft, or a
+changed screen before the switch leaves the claim without a success.
+
+```quint
+pure def savedNoteShown(claimNote: str, shownNote: str): bool =
+  claimNote != "" and claimNote == shownNote
+pure def lawAnotherNoteDoesNotSatisfyTheClaim(claimNote: str, shownNote: str): bool =
+  claimNote != shownNote implies not(savedNoteShown(claimNote, shownNote))
 ```
 
 ## Story: Let my agent press back or reload only on the page I am looking at

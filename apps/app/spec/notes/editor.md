@@ -18,6 +18,7 @@ untouched new note is dropped when the owner leaves it. Published snapshots keep
 the Trash apart; a clean draft follows the snapshot, a clean draft of a note that disappeared closes, and
 an edited draft whose base is no longer current goes to review. A new draft has no record to overwrite,
 so it simply follows the current revision.
+A claimed saved editor never replaces or saves a dirty draft.
 
 ```quint
 type Mutation = NoMutation | DeleteAfterSave | Deleting | Restoring
@@ -46,7 +47,7 @@ pure def publish(s: Editor, revision: int, notes: Set[str], trashed: Set[str]): 
   else { ...following, base: revision }
 }
 pure def canOpenNote(s: Editor, id: str): bool =
-  s.current and s.revision >= 0 and s.known.contains(id) and not(s.saving) and s.mutation == NoMutation and not(s.present and s.draftId == id)
+  s.current and s.revision >= 0 and s.known.contains(id) and not(s.saving or dirty(s)) and s.mutation == NoMutation and not(s.present and s.draftId == id)
 pure def openNote(s: Editor, id: str, authored: bool): Editor =
   { ...s, present: true, token: s.nextToken + 1, nextToken: s.nextToken + 1, draftId: id, base: s.revision, version: 0,
     authored: authored, defaultOnly: false, queued: -1 }
@@ -66,6 +67,7 @@ pure val trashedValues = Set(Set(), Set("b"))
 pure val revisionValues = Set(0, 1, 2, 3)
 pure def alwaysVersionsNonnegative(s: Editor): bool = s.version >= 0 and s.capturedVersion >= 0 and s.token >= 0 and s.nextToken >= s.token
 pure def alwaysCollectionDisjoint(s: Editor): bool = s.known.intersect(s.trash).size() == 0
+pure def lawAnEditedDraftCannotBeReplaced(s: Editor, id: str): bool = dirty(s) implies not(canOpenNote(s, id))
 ```
 
 ### A save captures the draft, runs only on its own base, and queues a later edit
