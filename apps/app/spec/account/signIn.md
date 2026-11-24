@@ -244,6 +244,29 @@ pure def cooldownEnds(s: SignIn): SignIn = { ...s, cooldown: false }
 pure def sometimesFailedResendKeepsTheAttempt(s: SignIn): bool = s.fault == ResendFailed and s.screen == CodeStep and s.attempt != 0
 ```
 
+### A typed phone number is sent in international form
+
+The host takes a number in international (E.164) form only. Spaces, dashes, dots and parentheses
+the owner types are dropped, and a leading `+` keeps the country the owner dialled; a leading `00`
+dials a country too and becomes `+`. A bare ten-digit number, or eleven digits starting with 1, is
+a North American number (`+1`). Any other number is sent without its separators and the host
+refuses it, asking for a country code: no country is guessed for it. Letters or other symbols are
+never dropped, so such a number is refused rather than rewritten.
+
+```quint
+type Dialled = PlusDialled | ZeroZeroDialled | Undialled
+type CountryCode = CountryDialled | NorthAmerican | NoCountry
+pure def countryOf(dialled: Dialled, digits: int, leadingOne: bool): CountryCode =
+  if (dialled != Undialled) CountryDialled
+  else if (digits == 10 or (digits == 11 and leadingOne)) NorthAmerican
+  else NoCountry
+pure val digitsValues = Set(0, 7, 10, 11, 12)
+pure def lawADialledCountryIsKept(digits: int, leadingOne: bool): bool =
+  countryOf(PlusDialled, digits, leadingOne) == CountryDialled and countryOf(ZeroZeroDialled, digits, leadingOne) == CountryDialled
+pure def lawOnlyANorthAmericanLengthGetsACountry(digits: int, leadingOne: bool): bool =
+  (countryOf(Undialled, digits, leadingOne) == NorthAmerican) iff (digits == 10 or (digits == 11 and leadingOne))
+```
+
 ### An address typed and not yet sent is the owner's work in progress
 
 Text in the address field, sent or not, means the card is no longer untouched, so a hands-off update

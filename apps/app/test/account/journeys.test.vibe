@@ -11,7 +11,7 @@ import { AiProvider } from "../../src/account/provider.vibe"
 import { AccountPresentation } from "../../src/account/presentation.vibe"
 import { CloudSession } from "../../src/account/session.vibe"
 import { AccountSheet } from "../../src/account/sheet.vibe"
-import { SignInScreen } from "../../src/account/signIn.vibe"
+import { SignInScreen, internationalNumber } from "../../src/account/signIn.vibe"
 import { type Answer, type Calls, account, cloudAnswers, expiresAt, found, names, now, providerStatus, signedInNative, snapshot, until } from "./platform.vibe"
 
 /** A signed-out host whose next sign-in stores `key-2`. */
@@ -180,6 +180,42 @@ it.live(`A wrong code keeps the step and the right one signs in (spec/account/si
         verified: ["000000", "123456"],
         prior: true, created: false
       }))
+    })
+  }
+})
+
+// spec/account/signIn.md, "Story: Sign in with a code"
+it.effect(`A typed phone number reads as the international number the host takes (spec/account/signIn.md, "Story: Sign in with a code")`, () => effect {
+  // spec/account/signIn.md, "A typed phone number is sent in international form"
+  const typed = [" (415) 555-0100 ", "415.555.0100", "1-415-555-0100", "+1 415 555 0100", "0044 20 7946 0958", "+44 (20) 7946-0958", "020 7946 0958", "+1 (415) 555-010a", "4155550100x"]
+  try Effect.try(() => assert.deepStrictEqual(typed.map(internationalNumber), [
+    "+14155550100", "+14155550100", "+14155550100", "+14155550100", "+442079460958", "+442079460958", "02079460958", "+1415555010a", "4155550100x"
+  ]))
+})
+
+// spec/account/signIn.md, "Story: Sign in with a code"
+it.live(`A code is sent to the typed phone number in international form (spec/account/signIn.md, "Story: Sign in with a code")`, () => effect {
+  const calls: Calls = []
+  const host = {
+    ...signedOutNative({ key: false }),
+    "AlphaCloudSignIn.status": { inApp: true, methodsKnown: true, google: true, email: true, phone: true },
+    "AlphaCloudSignIn.startPhone": { attemptId: "attempt-1", expiresAt, resendAt: now }
+  }
+  provide account(calls, host) {
+    try scoped(effect {
+      const session = try CloudSession
+      const signIn = try SignInScreen
+      fork.scoped session.run()
+      fork.scoped signIn.run()
+      try until(signIn.changes, (s) => s.screen === "Choose" && s.methods.known)
+      try signIn.choose("PhoneCode")
+      // spec/account/signIn.md, "A typed phone number is sent in international form"
+      try signIn.submit(" (415) 555-0100 ")
+      const step = try found(try until(signIn.changes, (s) => s.screen === "CodeStep" && s.work === "NoWork"))
+      try Effect.try(() => assert.deepStrictEqual(
+        { phone: (calls.find((c) => c.name === "AlphaCloudSignIn.startPhone")?.args as { phone?: string } | undefined)?.phone, step: [step.screen, step.method] },
+        { phone: "+14155550100", step: ["CodeStep", "PhoneCode"] }
+      ))
     })
   }
 })

@@ -1,7 +1,7 @@
-// spec/account/signIn.md, "Story: Choose how to sign in"; spec/account/signIn.md, "Story: Sign in with Google"; spec/account/signIn.md, "Story: Sign in with a code"; spec/account/signIn.md, "Story: Leave sign-in"; spec/account/signIn.md, "Story: Read the service's terms before signing in"
+// spec/account/signIn.md, "Story: Choose how to sign in"; spec/account/signIn.md, "Story: Sign in with Google"; spec/account/signIn.md, "Story: Sign in with a code"; spec/account/signIn.md, "A typed phone number is sent in international form"; spec/account/signIn.md, "Story: Leave sign-in"; spec/account/signIn.md, "Story: Read the service's terms before signing in"
 import {
   type CodeMethod, type FactorKind, type Host, type Methods, type Net, type SignIn, type SignInEffect, type VerifyOutcome,
-  Machine as SignInMachine, canTapGoogle, enabled, entryOf, machine as signInMachine, mayReopenGoogle, readinessWaitMs, unknownMethods
+  Machine as SignInMachine, canTapGoogle, countryOf, enabled, entryOf, machine as signInMachine, mayReopenGoogle, readinessWaitMs, unknownMethods
 } from "../../gen/account__signIn.effect.vibe"
 import type { Net as LifeNet } from "../../gen/platform__lifecycle.ts"
 import { Build } from "../platform/build.vibe"
@@ -72,6 +72,20 @@ export function verifyRefusal(code: string | undefined): VerifyOutcome {
   return { tag: "CodeFailed" }
 }
 
+/** The number the host takes (E.164) from what the owner typed: separators go, `+` or `00` keeps the dialled country, and only a North American length is given +1. */
+export function internationalNumber(typed: string): string {
+  const text = typed.trim()
+  const plus = text.startsWith("+")
+  // Only separators are dropped: letters or other symbols stay, so such a number is refused, not rewritten.
+  const rest = (plus ? text.slice(1) : text).replace(/[\s().-]/g, "")
+  const zeroZero = !plus && rest.startsWith("00")
+  const digits = zeroZero ? rest.slice(2) : rest
+  const country = countryOf(plus ? "PlusDialled" : zeroZero ? "ZeroZeroDialled" : "Undialled", /^[0-9]*$/.test(digits) ? digits.length : 0, digits.startsWith("1"))
+  if (country === "CountryDialled") return `+${digits}`
+  if (country === "NorthAmerican") return digits.length === 10 ? `+1${digits}` : `+${digits}`
+  return digits
+}
+
 /** The second verification a host answer names. */
 export function factorOf(method: string | undefined): FactorKind {
   return method === "sms" ? "SmsFactor" : method === "passkey" ? "PasskeyFactor" : "TotpFactor"
@@ -130,6 +144,11 @@ export const signInService = Layer.effect(SignInScreen, effect {
     try send({ type: "probeSettles", methods: unknownMethods, lateFollows: true })
     const late = try Fiber.join(reading)
     try send({ type: "lateMethods", methods: methodsOf(late) })
+  }
+
+  /** What the host is sent for the address the owner typed: a phone number in international form. */
+  effect function sentAddress(address: string) {
+    return (try machine.get()).method === "PhoneCode" ? internationalNumber(address) : address.trim()
   }
 
   effect function held<A>(work: A!!) {
@@ -323,11 +342,11 @@ export const signInService = Layer.effect(SignInScreen, effect {
       if (canTapGoogle(try machine.get())) try send({ type: "tapGoogle" })
     },
     effect submit(address: string) {
-      try Ref.set(typed, { address: address.trim(), code: "" })
+      try Ref.set(typed, { address: try sentAddress(address), code: "" })
       try send({ type: "submitAddress" })
     },
     effect resend(address: string) {
-      try Ref.set(typed, { address: address.trim(), code: "" })
+      try Ref.set(typed, { address: try sentAddress(address), code: "" })
       try send({ type: "resend" })
     },
     effect verify(code: string) {
