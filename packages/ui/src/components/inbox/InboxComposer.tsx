@@ -88,7 +88,7 @@ export function InboxComposer({
   onRestoreMine, onUseSaved, notice, onNoticeAction, outcome, storage, onReloadStorage, keeping, gmail, sent, onKeepAgain, onSend, onSaveToGmail, onDeleteGmailCopy, onSetAside, onDiscard,
 }: InboxComposerProps) {
   const [more, setMore] = useState(false);
-  const showMore = more || cc.recipients.length > 0 || bcc.recipients.length > 0;
+  const showMore = more || cc.recipients.length > 0 || bcc.recipients.length > 0 || cc.value !== "" || bcc.value !== "";
   const menu = onSaveToGmail || onDeleteGmailCopy || onDiscard;
   return (
     <Screen

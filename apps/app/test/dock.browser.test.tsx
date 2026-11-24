@@ -78,4 +78,3 @@ describe("Ask Alpha dock", () => {
     expect(document.querySelector("button[aria-label='Resize chat']")?.checkVisibility()).toBe(false);
   });
 });
-});
