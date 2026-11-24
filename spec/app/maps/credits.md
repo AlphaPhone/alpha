@@ -22,13 +22,13 @@ copyright covers; `pending` is the copyright request on its way, for
 ```quint
 type Effect = Copyright({ token: int })
 type Credits = {
-  plane: int, raster: bool, view: int, nextToken: int, pending: int, requestedView: int, shownView: int,
+  plane: int, raster: bool, drawn: bool, view: int, nextToken: int, pending: int, requestedView: int, shownView: int,
   copyrightShown: bool, copyrightFailed: bool, infoOpen: bool, copyright: str,
 }
 type Moved = { state: Credits, out: List[Effect] }
 
 pure val initial: Credits = {
-  plane: 0, raster: false, view: 0, nextToken: 1, pending: 0, requestedView: -1, shownView: -1,
+  plane: 0, raster: false, drawn: false, view: 0, nextToken: 1, pending: 0, requestedView: -1, shownView: -1,
   copyrightShown: false, copyrightFailed: false, infoOpen: false, copyright: "",
 }
 
@@ -43,7 +43,7 @@ pure val textValues = Set("", "Map data ©2026 Google")
 pure def canDrawnOn(s: Credits, plane: int, raster: bool): bool = plane > s.plane
 
 pure def drawnOn(s: Credits, plane: int, raster: bool): Credits =
-  { ...s, plane: plane, raster: raster, pending: 0, requestedView: -1, shownView: -1,
+  { ...s, plane: plane, raster: raster, drawn: false, pending: 0, requestedView: -1, shownView: -1,
     copyrightShown: false, copyrightFailed: false, infoOpen: false, copyright: "" }
 ```
 
@@ -186,13 +186,18 @@ pure def sometimesRecoveredAfterAFailure(s: Credits): bool = s.copyrightShown an
 
 ### The credits panel opens from the badge or the information button of a drawn surface
 
-On a portrait screen the credits, My location and the sheets beneath them
+A surface that is still drawing or could not be drawn offers neither. On a
+portrait screen the credits, My location and the sheets beneath them
 end above Ask Alpha's bar, so a taller composer never covers them; in
 guidance, Recenter sits in the guidance bar at the top. Back closes an
 open panel before it leaves anything else of Maps.
 
 ```quint
-pure def canOpenInfo(s: Credits): bool = s.plane > 0 and not(s.infoOpen)
+pure def canPlaneDrawn(s: Credits, plane: int): bool = plane == s.plane and plane > 0 and not(s.drawn)
+
+pure def planeDrawn(s: Credits, plane: int): Credits = { ...s, drawn: true }
+
+pure def canOpenInfo(s: Credits): bool = s.plane > 0 and s.drawn and not(s.infoOpen)
 
 pure def openInfo(s: Credits): Credits = { ...s, infoOpen: true }
 
@@ -200,5 +205,5 @@ pure def canCloseInfo(s: Credits): bool = s.infoOpen
 
 pure def closeInfo(s: Credits): Credits = { ...s, infoOpen: false }
 
-pure def alwaysTheInfoNeedsASurface(s: Credits): bool = s.infoOpen implies s.plane > 0
+pure def alwaysTheInfoNeedsASurface(s: Credits): bool = s.infoOpen implies (s.plane > 0 and s.drawn)
 ```

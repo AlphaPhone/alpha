@@ -73,3 +73,52 @@ pure def lawForgettingKeepsTheRest(saved: List[Saved], place: int): bool =
   distinctAndNamed(saved) implies
     (distinctAndNamed(forgotten(saved, place)) and not(isSaved(forgotten(saved, place), place)))
 ```
+
+## Story: Keep only what identifies a saved place
+
+> As the owner, I want my phone to keep of a saved place only its name and
+> what finds it again, and the same place never saved twice.
+
+### A saved place keeps its name, its coordinates and the provider's identity of it, and nothing else
+
+No address, hours, number or website is kept. Two places are the same when
+their provider and its id for them match, or, for places no provider named,
+when their coordinates match exactly. Coordinates are whole millionths of a
+degree, and a place's number is never given to another.
+
+```quint
+type Kept = { name: str, lat: int, lng: int, provider: str, providerPlaceId: str }
+
+pure def samePlace(one: Kept, other: Kept): bool =
+  if (one.provider != "" or other.provider != "") one.provider == other.provider and one.providerPlaceId == other.providerPlaceId
+  else one.lat == other.lat and one.lng == other.lng
+
+pure val oneValues = Set(
+  { name: "Home", lat: 43730000, lng: 7420000, provider: "", providerPlaceId: "" },
+  { name: "Cafe", lat: 43731000, lng: 7421000, provider: "osm", providerPlaceId: "n1" },
+  { name: "Other", lat: 43731000, lng: 7421000, provider: "", providerPlaceId: "" },
+)
+pure val otherValues = oneValues
+
+pure def lawSamePlaceIsMutual(one: Kept, other: Kept): bool = samePlace(one, other) == samePlace(other, one)
+
+pure def lawAPlaceIsItself(one: Kept): bool = samePlace(one, one)
+```
+
+### A saved provider place is used only with the open-data provider that served it
+
+A saved place of another provider, or of a Google provider, is shown under
+its name and can be removed, but is restricted as Google content is and is
+never a starting point: the owner reads "Enter a saved place or latitude,
+longitude as the starting point."
+
+```quint
+pure def servedHere(provider: str, serving: str, google: bool): bool =
+  provider == "" or (provider == serving and not(google))
+
+pure val providerValues = Set("", "osm", "google")
+pure val servingValues = Set("osm", "google")
+
+pure def lawAnotherProvidersPlaceIsRestricted(provider: str, serving: str, google: bool): bool =
+  (provider != "" and (provider != serving or google)) implies not(servedHere(provider, serving, google))
+```

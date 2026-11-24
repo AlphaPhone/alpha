@@ -22,8 +22,9 @@ its coverage or the regional map outside it. The map surface is numbered
 and is drawing, drawn or broken. Location is Android's permission, whether
 the owner has seen Alpha's location disclosure, and the location session:
 whose it is (the screen's "Use my location" or guidance) and its number.
-A wait Cloud named is `held` seconds long, the `holds`-th named, and ends at
-`holdEnds`.
+A wait Cloud named is of a kind, `held` seconds long, the `holds`-th named,
+and ends at `holdEnds`. `unoffered` is a healthy read that found no Maps
+offered to the account.
 
 ```quint
 import read as R from "../../kit/read"
@@ -35,16 +36,16 @@ type Surface = Drawing | Drawn | Broken
 type Locator = Nobody | Finder | Guide
 type Connection = {
   account: int, known: bool, coverage: R::Read, provider: int, google: bool, offer: N::Offer, basemap: Basemap,
-  plane: int, surface: Surface,
-  location: P::Permission, disclosed: bool, locator: Locator, session: int,
-  held: int, holds: int, holdEnds: int,
+  unoffered: bool, plane: int, surface: Surface,
+  location: P::Permission, disclosed: bool, prompting: bool, locator: Locator, session: int,
+  wait: Wait, held: int, holds: int, holdEnds: int,
 }
 
 pure val initial: Connection = {
   account: 0, known: false, coverage: R::unread, provider: 0, google: false, offer: N::noOffer, basemap: World,
-  plane: 1, surface: Drawing,
-  location: P::unasked, disclosed: false, locator: Nobody, session: 0,
-  held: 0, holds: 0, holdEnds: 0,
+  unoffered: false, plane: 1, surface: Drawing,
+  location: P::unasked, disclosed: false, prompting: false, locator: Nobody, session: 0,
+  wait: Unnamed, held: 0, holds: 0, holdEnds: 0,
 }
 
 pure val accountValues = Set(0, 1, 2)
@@ -78,17 +79,17 @@ pure def canChangeAccount(c: Connection, account: int): bool =
 
 pure def changeAccount(c: Connection, account: int): Connection =
   redrawn(World, { ...c, account: account, known: true, provider: 0, google: false, offer: N::noOffer, held: 0,
-    coverage: if (account != 0) R::ask(c.coverage) else c.coverage })
+    unoffered: false, coverage: if (account != 0) R::ask(c.coverage) else c.coverage })
 ```
 
 ### Opening Maps, regaining the network or Retry reads the coverage again only when no provider is working
 
 A read already under way is not repeated, and a working provider is left
-alone.
+alone. The coverage is metadata: a wait Cloud named never holds it back.
 
 ```quint
 pure def canConnect(c: Connection): bool =
-  c.account != 0 and not(working(c)) and c.coverage.status != R::Loading and not(holding(c))
+  c.account != 0 and not(working(c)) and c.coverage.status != R::Loading
 
 pure def connect(c: Connection): Connection = { ...c, coverage: R::ask(c.coverage) }
 ```
@@ -96,22 +97,33 @@ pure def connect(c: Connection): Connection = { ...c, coverage: R::ask(c.coverag
 ### Only the newest read's answer is taken, while signed in, and a healthy answer installs the provider for that account
 
 Google's map covers the world, so a Google provider is always drawn on its
-own map.
+own map. A healthy answer that names no way of travelling is the deployment
+not offering Maps: no provider is installed, the owner reads "Maps
+unavailable", and nothing is read again on its own until Maps opens again
+or the owner searches.
 
 ```quint
+pure def anyWay(o: N::Offer): bool = o.drive or o.transit or o.walk or o.bicycle
+
 pure def canAnswerCoverage(c: Connection, ticket: int, ok: bool, covered: bool, google: bool, offer: N::Offer): bool =
   R::canAnswer(c.coverage, ticket) and c.account != 0
 
 pure def answerCoverage(c: Connection, ticket: int, ok: bool, covered: bool, google: bool, offer: N::Offer): Connection =
-  val answered = { ...c, coverage: R::answer(c.coverage, ok) }
-  if (ok) redrawn(if (covered or google) Cloud else Regional, { ...answered, provider: c.account, google: google, offer: offer })
+  val answered = { ...c, coverage: R::answer(c.coverage, ok), unoffered: ok and not(anyWay(offer)) }
+  if (ok and anyWay(offer)) redrawn(if (covered or google) Cloud else Regional, { ...answered, provider: c.account, google: google, offer: offer })
   else answered
+
+pure def alwaysAnUnofferedDeploymentHasNoProvider(c: Connection): bool =
+  c.unoffered implies (not(working(c)) and c.coverage.status == R::Loaded)
+
+pure def sometimesUnoffered(c: Connection): bool = c.unoffered and c.account != 0
 ```
 
 ### Google's content is drawn only on Google's own map, whose only credit is the Google Maps badge
 
 Google's places and routes are never drawn on the world map or the regional
-map. On Google's map the badge is the only credit; tapping it opens the
+map: a Google provider that sends no raster leaves the screen saying "The
+Google map is missing." in place of a map. On Google's map the badge is the only credit; tapping it opens the
 copyright of the view and the disclosure. Other maps keep their credit
 links and an information button. Whatever Google served is never kept on
 the phone, shared or renamed, and no prompt for coordinates is offered.
@@ -126,23 +138,33 @@ pure def alwaysGoogleIsDrawnOnItsOwnMap(c: Connection): bool =
 ### A wait Cloud names holds every Maps request back until it ends: a rate limit for at most a day, a spent allowance for at most 400 days, and any other wait one minute
 
 A rate limit or a spent allowance that names no end, or names one outside
-its bound, and any other wait Cloud asks for, hold one minute. A later wait
-replaces the one in force. While a wait holds, the owner reads "Maps request
-limit reached. Try again in N minutes.", nothing is searched, routed or read
-again, and the shell answers any tile, copyright, reroute or route from a
-fix asked in that time as failed without asking Cloud. The wait ends at its
-time, or with the account.
+its bound, and any other wait Cloud asks for, hold one minute. A wait only
+lengthens the one in force, and a refusal of a request asked for an earlier
+account changes nothing. While a wait holds, the owner reads "Maps request
+limit reached. Try again in N minutes." for a rate limit, "You have used
+your Maps allowance for this period. It resets in N days." for a spent
+allowance, and "Maps request limit reached. Try again later." for any other
+wait; the number is Cloud's, the sentence Alpha's. Nothing is searched,
+routed or read again, and the shell answers any tile, copyright, reroute or
+route from a fix asked in that time as failed without asking Cloud. The wait
+ends at its time, or with the account.
 
 ```quint
 type Wait = RateLimited | AllowanceSpent | Unnamed
 
 pure def holding(c: Connection): bool = c.held > 0
 
-pure def canHoldRequests(c: Connection, wait: Wait, seconds: int, now: int): bool = c.account != 0 and now >= 0
+pure def canHoldRequests(c: Connection, wait: Wait, seconds: int, now: int, account: int): bool =
+  c.account != 0 and account == c.account and now >= 0
 
-pure def holdRequests(c: Connection, wait: Wait, seconds: int, now: int): Connection =
+pure def holdRequests(c: Connection, wait: Wait, seconds: int, now: int, account: int): Connection =
   val held = heldSeconds(wait, seconds)
-  { ...c, held: held, holds: c.holds + 1, holdEnds: now + held * 1000 }
+  val ends = now + held * 1000
+  if (holding(c) and ends <= c.holdEnds) c
+  else { ...c, wait: wait, held: held, holds: c.holds + 1, holdEnds: ends }
+
+pure def stepAWaitOnlyLengthens(before: Connection, via: str, after: Connection): bool =
+  (via == "holdRequests" and holding(before)) implies after.holdEnds >= before.holdEnds
 
 pure def canWaitEnded(c: Connection, hold: int): bool = holding(c) and hold == c.holds
 
@@ -258,6 +280,14 @@ pure def canRetryMap(c: Connection): bool = c.surface == Broken
 pure def retryMap(c: Connection): Connection = { ...c, plane: c.plane + 1, surface: Drawing }
 ```
 
+### Leaving Maps, hiding it or another account releases the surface, and coming back draws a new one
+
+```quint
+pure def canReleaseMap(c: Connection): bool = c.plane > 0
+
+pure def releaseMap(c: Connection): Connection = { ...c, plane: c.plane + 1, surface: Drawing }
+```
+
 ### One map surface is alive at a time: a new one replaces the last and starts drawing
 
 ```quint
@@ -290,22 +320,25 @@ pure def canDisclose(c: Connection): bool = not(c.disclosed)
 
 pure def disclose(c: Connection): Connection = { ...c, disclosed: true }
 
-pure def canAskLocation(c: Connection): bool = c.disclosed and P::canAsk(c.location)
+pure def canAskLocation(c: Connection): bool = c.disclosed and P::canAsk(c.location) and not(c.prompting)
 
-pure def askLocation(c: Connection): Connection = { ...c, location: P::ask(c.location) }
+pure def askLocation(c: Connection): Connection = { ...c, location: P::ask(c.location), prompting: true }
 ```
 
 ### Android is asked only after the disclosure
 
 ```quint
-pure def alwaysAskedAfterTheDisclosure(c: Connection): bool = c.location.asked implies c.disclosed
+pure def alwaysAskedAfterTheDisclosure(c: Connection): bool =
+  (c.location.asked implies c.disclosed) and (c.prompting implies c.location.asked)
 ```
 
 ### What Android reports replaces what Alpha believed, and without permission no session goes on
 
+It also ends Android's prompt.
+
 ```quint
 pure def observeLocation(c: Connection, grant: P::Grant): Connection =
-  val seen = { ...c, location: P::observe(c.location, grant) }
+  val seen = { ...c, location: P::observe(c.location, grant), prompting: false }
   if (P::allows(seen.location)) seen else { ...seen, locator: Nobody }
 ```
 
@@ -319,12 +352,15 @@ pure def needsSettings(c: Connection): bool = P::needsSettings(c.location) and n
 
 "Use my location" takes one fix and ends; guidance follows until it ends.
 Guidance takes the location from "Use my location"; nothing takes it from
-guidance.
+guidance. A session is admitted one at a time: none starts while Android's
+prompt is open ("Location is still starting. Try again in a moment."), and
+the phone starts a new watch only once it has confirmed that the watch
+before it was cleared.
 
 ```quint
 pure def canLocate(c: Connection, owner: Locator): bool =
   owner != Nobody and P::allows(c.location) and c.locator != Guide
-    and not(owner == Finder and c.locator == Finder)
+    and not(owner == Finder and c.locator == Finder) and not(c.prompting)
 
 pure def locate(c: Connection, owner: Locator): Connection =
   { ...c, locator: owner, session: c.session + 1 }
@@ -333,7 +369,10 @@ pure def locate(c: Connection, owner: Locator): Connection =
 ### "Use my location" gives up after 15 seconds without a fix
 
 While GPS has said nothing for 4 seconds, the network's position stands in,
-approximate, until GPS answers.
+approximate, until GPS answers. It comes through Alpha's network-location
+client, the one the assistant uses too: one cache, one lookup at a time and
+one back-off. A fix older than 30 seconds or more than 5 seconds ahead is
+skipped, and the watch keeps running for the next.
 
 ```quint
 pure val findTimeoutMs = 15000
