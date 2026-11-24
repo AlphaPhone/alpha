@@ -41,7 +41,7 @@ function defaultAnswer(method: string): unknown {
   return {}
 }
 
-/** A tab host that answers every call, records it, and sends the events a test publishes, under the real Browser layer. */
+/** A tab host that answers every call, records it, and sends the events a test publishes, under the real Browser layer; `base` is its platform without the shell. */
 export effect function fakeHost(options: FakeOptions = {}) {
   const answers = options.answers ?? {}
   const calls = try Ref.make<Call[]>([])
@@ -73,7 +73,7 @@ export effect function fakeHost(options: FakeOptions = {}) {
     try Ref.update(spoken, (all) => [...all, text])
     if (!voice.speaks) throw new ReadingSpeechFailed({ reason: "Speech stopped" })
   }
-  const platform = Layer.mergeAll(
+  const base = Layer.mergeAll(
     native,
     Layer.succeed(Build, { info: { version: "test", variant: "launcher", testMocks: true } }),
     Layer.succeed(Cloud, {
@@ -83,11 +83,6 @@ export effect function fakeHost(options: FakeOptions = {}) {
         return options.cloud === undefined ? { accounts: [] } : try options.cloud(method, path, body)
       },
     }),
-    Layer.succeed(Navigation, {
-      open: (app: string, route?: string) => Effect.as(Ref.update(opened, (all) => [...all, route === undefined ? app : `${app}:${route}`]), true),
-    } as unknown as Navigation.Shape),
-    Layer.succeed(Toasts, { show: (text: string) => Ref.update(toasts, (all) => [...all, text]) } as unknown as Toasts.Shape),
-    Layer.succeed(Foreground, { changes: SubscriptionRef.changes(foreground), get: () => SubscriptionRef.get(foreground) }),
     Layer.succeed(Preferences, {
       sharesBrowserPage: () => Ref.get(sharing),
       asksBeforeActions: () => succeed(false),
@@ -107,7 +102,15 @@ export effect function fakeHost(options: FakeOptions = {}) {
       },
     }),
   )
-  return { calls, events, opened, toasts, drafts, mails, spoken, cloudCalls, foreground, sharing, live: Layer.provideMerge(layer, platform) }
+  const shell = Layer.mergeAll(
+    Layer.succeed(Navigation, {
+      open: (app: string, route?: string) => Effect.as(Ref.update(opened, (all) => [...all, route === undefined ? app : `${app}:${route}`]), true),
+    } as unknown as Navigation.Shape),
+    Layer.succeed(Toasts, { show: (text: string) => Ref.update(toasts, (all) => [...all, text]) } as unknown as Toasts.Shape),
+    Layer.succeed(Foreground, { changes: SubscriptionRef.changes(foreground), get: () => SubscriptionRef.get(foreground) }),
+  )
+  // `base` is everything but the shell, for a journey that runs Browser under the real shell.
+  return { calls, events, opened, toasts, drafts, mails, spoken, cloudCalls, foreground, sharing, base, live: Layer.provideMerge(layer, Layer.merge(base, shell)) }
 }
 
 /** The calls the fake host received for `method`. */
