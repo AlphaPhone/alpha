@@ -1,15 +1,16 @@
-// spec/cloud/local.md, "Story: Check Alpha's contract on my computer"; spec/cloud/index.md, "Story: Keep Alpha's own cloud ready for the cutover"; spec/cloud/index.md, "Story: Reach my account's services from the app"; spec/cloud/rollout.md, "Story: Deploy an environment without reading a secret into the repository"
+// spec/cloud/local.md, "Story: Check Alpha's contract on my computer"; spec/cloud/index.md, "Story: Keep Alpha's own cloud ready for the cutover"; spec/cloud/index.md, "Story: Reach my account's services from the app"; spec/cloud/rollout.md, "Story: Deploy an environment without reading a secret into the repository"; spec/cloud/index.md, "Story: Register Alpha's app with the cloud"; spec/cloud/index.md, "Story: Come back to Alpha after authorizing a connection in my browser"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { createCloudClient } from "@elizaos/cloud/client"
+import { deployment } from "@repo/deployment"
 import { prepared } from "@repo/eliza-harness/checkout"
 import { said } from "@repo/eliza-harness/services"
 import { ChildProcess } from "effect/process"
 import { ChildProcessSpawner } from "effect/process/ChildProcessSpawner"
-import { assetLinksNameAlpha } from "../gen/cloud.effect.vibe"
+import { alphaName, alphaPackage, assetLinksNameAlpha, profileFits, releaseSigner, returnAnswer, returnsOffApi } from "../gen/cloud.effect.vibe"
 import { Machine, type Gate, gateAt, gates, machine } from "../gen/cloud__local.effect.vibe"
 import { Machine as Rollout, machine as rollout } from "../gen/cloud__rollout.effect.vibe"
-import { entryOf, loopbackOnly, profileNamed, stagingSeed, statementsIn } from "../src/alpha.vibe"
+import { assetLinks, entryOf, loopbackOnly, profileNamed, registrationAt, stagingSeed, statementsIn } from "../src/alpha.vibe"
 import { candidateProblems, candidates } from "../src/candidate.vibe"
 import { reconcileResources } from "../src/cloudflare.vibe"
 import { operate } from "../src/commands.vibe"
@@ -31,6 +32,7 @@ module node {
   import { createHash, randomBytes } from "node:crypto"
   import http from "node:http"
   import type { AddressInfo } from "node:net"
+  import { runInNewContext } from "node:vm"
 
   type Plans = Readonly<Record<"plus_monthly" | "pro_monthly", { readonly priceId: string; readonly productId: string }>>
 
@@ -67,8 +69,34 @@ module node {
   export function challengeOf(verifier: string): string {
     return createHash("sha256").update(verifier, "ascii").digest("base64url")
   }
+
+  /** What the return page's markup holds: its inline scripts, its policy by directive, whether it sends a referrer, and the elements that would load or submit anything. @throws {never} */
+  export function returnPageParts(html: string) {
+    const scripts = [...html.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/g)].map((found) => ({ attributes: (found[1] ?? "").trim(), text: found[2] ?? "" }))
+    const policies = [...html.matchAll(/<meta http-equiv="Content-Security-Policy" content="([^"]*)">/g)].map((found) => found[1] ?? "")
+    const policy = Object.fromEntries((policies[0] ?? "").split(";").map((part) => part.trim().split(/\s+/)).map(([name, ...sources]) => [name ?? "", sources]))
+    return {
+      scripts, policies: policies.length, policy,
+      hashes: scripts.map((script) => `'sha256-${createHash("sha256").update(script.text, "utf8").digest("base64")}'`),
+      noReferrer: /<meta name="referrer" content="no-referrer">/.test(html),
+      loads: [...html.matchAll(/<(?:link|img|iframe|form|object|embed|audio|video|source)\b/gi)].length,
+    }
+  }
+
+  /** Runs the return page's script at `href`: the address it leaves, its message, and the link it offers, if any. @throws {never} */
+  export function returnPageAt(script: string, href: string) {
+    const url = new URL(href)
+    const shown = { message: "checking", link: undefined as string | undefined }
+    const message = { set textContent(text: string) { shown.message = text } }
+    const link = { set href(target: string) { shown.link = target }, set hidden(_hidden: boolean) {} }
+    const location = { get search() { return url.search }, get pathname() { return url.pathname }, get href() { return url.href } }
+    const history = { replaceState: (_state: unknown, _title: string, target: string) => { url.href = new URL(target, url).href } }
+    const document = { getElementById: (id: string) => (id === "message" ? message : id === "return" ? link : null) }
+    runInNewContext(script, { location, history, document, URL, URLSearchParams })
+    return { address: url.href, ...shown }
+  }
 }
-import { catalog, challengeOf, random } from node
+import { catalog, challengeOf, random, returnPageAt, returnPageParts } from node
 
 /** The cloud stopped, or said nothing of serving, before its deadline. */
 error NotServing { output: string }
@@ -414,4 +442,63 @@ describe(`A deployed environment is ready when every public gate passes (spec/cl
     try holds(() => assert.deepStrictEqual(gates.filter((gate) => !gate.passed), []))
     try holds(() => assert.strictEqual(gates.length, 8))
   } |> scoped(%) |> Effect.provide(%, NodeServices.layer), 600_000)
+})
+
+describe(`Alpha's app is registered with each cloud it talks to (spec/cloud/index.md, "Story: Register Alpha's app with the cloud")`, () => {
+  it.effect("registers Alpha's package once per hosted environment at its App Link host, with the release signer in production and its returns off the API origin, and serves asset links that name it alone", () => effect {
+    for (const [name, environment] of [["staging", "Staging"], ["production", "Production"]] as const) {
+      const row = try deployment(name)
+      if (row.kind !== "hosted") throw new GateRefused({ gate: "Health", answer: `${name} is not hosted` })
+      const settings = (try profileNamed(row.profile)).environments[row.profile]
+      try holds(() => assert.ok(profileFits(row, { api: settings.api, webHost: settings.web.replace(/^https:\/\//, "") }), `${name}: the profile answers at its deployment's cloud`))
+      const registration = registrationAt(environment, row.appLinkHost)
+      try holds(() => assert.deepStrictEqual(
+        [registration.clientId, registration.androidPackage, registration.displayName, registration.certFingerprints[0], registration.signInReturn, registration.billingReturn],
+        [alphaPackage, alphaPackage, alphaName, releaseSigner, { origin: `https://${row.appLinkHost}`, path: "/alphaphone/auth/callback" }, { origin: `https://${row.appLinkHost}`, path: "/alphaphone/billing/return" }]))
+      try holds(() => assert.ok(returnsOffApi(registration, settings.api)))
+      try holds(() => assert.ok(assetLinksNameAlpha(try assetLinks(registration, settings.api), environment)))
+      const debugSigned = { ...registration, certFingerprints: [...registration.certFingerprints, "00:".repeat(31) + "00"] }
+      try holds(() => assert.ok(!assetLinksNameAlpha(try assetLinks(debugSigned, settings.api), environment), `${name}: a signer the environment does not trust is refused`))
+      if (environment === "Staging") try holds(() => assert.deepStrictEqual(stagingSeed.clients, [entryOf(registration)]))
+    }
+  } |> Effect.provide(%, NodeServices.layer))
+})
+
+describe(`Alpha's return page hands an authorization back to the app (spec/cloud/index.md, "Story: Come back to Alpha after authorizing a connection in my browser")`, () => {
+  const page = "../app/public/delegation-return.html"
+
+  it.effect(`runs one inline script its policy names by hash, sends no referrer and loads nothing else (spec/cloud/index.md, "The return page runs only its own hashed script, sends no referrer and loads nothing else")`, () => effect {
+    const parts = returnPageParts(try (try FileSystem.FileSystem).readFileString(page))
+    try holds(() => assert.deepStrictEqual([parts.scripts.length, parts.scripts[0]?.attributes, parts.policies], [1, "", 1]))
+    try holds(() => assert.deepStrictEqual(
+      [parts.policy["script-src"], parts.policy["default-src"], parts.policy["base-uri"], parts.policy["form-action"], parts.noReferrer, parts.loads],
+      [parts.hashes, ["'none'"], ["'none'"], ["'none'"], true, 0]))
+  } |> Effect.provide(%, NodeServices.layer))
+
+  it.effect(`clears its address and offers Alpha's link only for a well-formed return with one result (spec/cloud/index.md, "The return page clears the query from its address, and hands back only a well-formed return with exactly one result")`, () => effect {
+    const [script] = returnPageParts(try (try FileSystem.FileSystem).readFileString(page)).scripts
+    const state = "A".repeat(43)
+    const well = { keys: 2, repeated: false, unknown: false, stateValid: true, hasCode: true, codeFits: true, hasError: false, hasDescription: false, descriptionFits: true }
+    const cases = [
+      { query: `?state=${state}&code=granted`, shape: well, link: `alphaphone://cloud-delegation?state=${state}&code=granted` },
+      { query: `?state=${state}&error=access_denied&error_description=declined`, shape: { ...well, keys: 3, hasCode: false, hasError: true, hasDescription: true }, link: `alphaphone://cloud-delegation?state=${state}&error=access_denied` },
+      { query: "", shape: { ...well, keys: 0, hasCode: false, stateValid: false }, link: undefined },
+      { query: `?state=${state}&code=granted&error=access_denied`, shape: { ...well, keys: 3, hasError: true }, link: undefined },
+      { query: `?state=${state}&code=granted&code=again`, shape: { ...well, keys: 3, repeated: true }, link: undefined },
+      { query: `?state=${state}&code=granted&next=elsewhere`, shape: { ...well, keys: 3, unknown: true }, link: undefined },
+      { query: `?state=short&code=granted`, shape: { ...well, stateValid: false }, link: undefined },
+      { query: `?state=${state}&code=${"c".repeat(4097)}`, shape: { ...well, codeFits: false }, link: undefined },
+      { query: `?state=${state}&code=granted&error_description=stray`, shape: { ...well, keys: 3, hasDescription: true }, link: undefined },
+      { query: `?state=${state}&error=access_denied&error_description=${"d".repeat(2001)}`, shape: { ...well, keys: 3, hasCode: false, hasError: true, hasDescription: true, descriptionFits: false }, link: undefined },
+    ]
+    for (const { query, shape, link } of cases) {
+      const shown = returnPageAt(script?.text ?? "", `https://return.alpha.test/delegation-return.html${query}`)
+      const answer = returnAnswer(shape)
+      try holds(() => assert.strictEqual(shown.address, "https://return.alpha.test/delegation-return.html", query))
+      try holds(() => assert.strictEqual(shown.link, link, query))
+      try holds(() => assert.strictEqual(shown.link !== undefined, answer === "Continue" || answer === "Cancelled", query))
+      try holds(() => assert.strictEqual(/reopened/.test(shown.message), answer === "Reopened", query))
+      try holds(() => assert.strictEqual(/cancelled/.test(shown.message), answer === "Cancelled", query))
+    }
+  } |> Effect.provide(%, NodeServices.layer))
 })
