@@ -85,6 +85,7 @@ export function Calendar({ runtime }: CalendarProps) {
   useSyncExternalStore(shown.subscribe, shown.snapshot, shown.snapshot);
   const s = view.state;
   if (!s) return <Spinner />;
+  const send = (event: View.Event) => () => void view.send(event);
   const visible = shown.visible(s.hidden, allows(s.access), s.connected);
   const dayRows = (day: number) => visible.filter((row) => onDay(row, day));
   const rows = s.layout === "Agenda" ? visible.filter((row) => row.end > dayStart(s.today)) : dayRows(s.anchor);
@@ -96,7 +97,6 @@ export function Calendar({ runtime }: CalendarProps) {
       trailing={<span className="text-xs text-muted-foreground">{row.source === "Phone" ? "Phone" : "Google"}</span>} />
   );
   const week = Array.from({ length: 7 }, (_, at) => weekStart(s.anchor) + at);
-  const send = (event: View.Event) => () => void view.send(event);
   const offer = (event: View.Event, label: string, variant: "primary" | "outline" | "ghost" = "outline") =>
     view.can(event) ? <Button variant={variant} onClick={send(event)}>{label}</Button> : null;
   const newEvent: Editor.Event = { type: "newEvent", day: s.anchor };
