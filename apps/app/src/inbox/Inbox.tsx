@@ -177,7 +177,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   if (!state || state.message === 0) return null;
   const access = accessOf(list, state.account);
   const read = mailOf(runtime, (mail) => mail.body(state.body.ticket));
-  const card = read?.message ?? mailOf(runtime, (mail) => mail.card(state.message));
+  const card = mailOf(runtime, (mail) => mail.card(state.message)) ?? read?.message;
   const loaded = state.body.status === "Loaded" && read !== undefined;
   const unread = card?.isUnread ?? false;
   const mark = { type: "mark", access, account: state.account, message: state.message, unread: !unread } as const;
@@ -293,6 +293,7 @@ export function Inbox({ runtime }: InboxProps) {
   if (drafts.state.open) return <><Compose runtime={runtime} list={state} /><ChangeReview runtime={runtime} list={state} cards={(number) => mailOf(runtime, (mail) => mail.card(number))} /><FileOffer runtime={runtime} /><Suggested runtime={runtime} /></>;
   const cards = (number: number) => mailOf(runtime, (mail) => mail.card(number));
   const refresh = can({ type: "refresh" }) ? () => void send({ type: "refresh" }) : undefined;
+  const retryList = refresh ?? (can({ type: "checkAccess" }) ? () => void send({ type: "checkAccess" }) : undefined);
   const review = <ChangeReview runtime={runtime} list={state} cards={cards} />;
   if (message.state.message !== 0) return <>{<Opened runtime={runtime} list={state} onRefresh={refresh} onBegin={onBegin} />}{review}</>;
   const settings = shell.can({ type: "openView", view: "Settings" }) ? () => void shell.send({ type: "openView", view: "Settings" }) : undefined;
@@ -347,12 +348,15 @@ export function Inbox({ runtime }: InboxProps) {
         onSearchChange={(text) => setTyped({ text, over: state.selected.query })}
         onSearch={readable(state) && searchableIn(state.selected.folder, state) ? (text) => {
           const event = { type: "search", query: text } as const;
-          if (can(event)) void send(event);
+          if (can(event)) {
+            setTyped(undefined);
+            void send(event);
+          }
         } : undefined}
         notice={noticeOf(state)}
-        onNoticeAction={noticeOf(state) === "reconnect" ? settings : refresh}
+        onNoticeAction={noticeOf(state) === "reconnect" ? settings : retryList}
         state={mustChoose ? undefined : kind}
-        onStateAction={kind === "offline" || kind === "failed" ? refresh : settings}
+        onStateAction={kind === "offline" || kind === "failed" ? retryList : settings}
         chosen={state.chosen.length}
         onChooseAll={can(chooseAll) ? () => void send(chooseAll) : undefined}
         onArchive={state.selected.folder === "Archived" ? undefined : chosenChange("Archive")}

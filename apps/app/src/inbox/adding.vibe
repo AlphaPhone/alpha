@@ -73,13 +73,14 @@ export const incoming = Layer.sync(Incoming, () => {
 effect function picked(ticket: number): Event!!(Incoming | Drafts.Machine | Mail) {
   const composer = try (try Drafts.Machine).get()
   const { policy } = (try Mail).limits(composer.letter.account)
-  const file = try tryPromise({ try: () => chooseFile(), catch: () => undefined }) catch () => undefined
-  if (file === undefined) return { type: "picked", ticket, result: "Cancelled", mib: 1, room: false }
+  const file = tryPromise({ try: () => chooseFile(), catch: () => undefined }) catch () => undefined
+  if (file === undefined || file === null) return { type: "picked", ticket, result: "Cancelled", mib: 1, room: false }
   const mib = mibOf(file.size)
   if (mib > policy.mib) return { type: "picked", ticket, result: "TooLarge", mib, room: false }
-  const data = try tryPromise({ try: () => base64Of(file), catch: () => undefined }) catch () => undefined
+  const data = tryPromise({ try: () => base64Of(file), catch: () => undefined }) catch () => undefined
   if (data === undefined) return { type: "picked", ticket, result: "Unreadable", mib, room: false }
-  try (try Incoming).hold({ name: file.name, mimeType: file.type || "application/octet-stream", size: file.size, data }, "Picker")
+  const holder = try Incoming
+  holder.hold({ name: file.name, mimeType: file.type || "application/octet-stream", size: file.size, data }, "Picker")
   const result: Picked = "Fits"
   return { type: "picked", ticket, result, mib, room: composer.open && canAttach(composer.letter, policy, mib) }
 }
@@ -144,7 +145,8 @@ export effect function handOver(file: Attached, source: "Files" | "Photos"): boo
   const event: Event = { type: "bring", thing: 1, mib: mibOf(file.size), draft, account: draft === 0 ? list.selected.account : 0 }
   const sent = try exit(adding.send(event))
   if (!Exit.isSuccess(sent)) return false
-  try (try Incoming).hold(file, source)
+  const holder = try Incoming
+  holder.hold(file, source)
   try ignore((try Shell).send({ type: "openView", view: "Inbox" }))
   return true
 }

@@ -51,18 +51,34 @@ module pure {
     } catch { return undefined }
   }
 
+  /** Whether `cause`, or what it wraps, is the page's storage refusing a write for want of room. @throws {never} */
+  export function exhausted(cause: unknown): boolean {
+    let at: unknown = cause
+    for (let depth = 0; at !== null && typeof at === "object" && depth < 8; depth += 1) {
+      if ((at as { readonly name?: unknown }).name === "QuotaExceededError") return true
+      at = (at as { readonly cause?: unknown }).cause
+    }
+    return false
+  }
+
   /** Whether `address` is one Gmail accepts: one mailbox, written whole. @throws {never} */
   export function acceptable(address: string): boolean {
     return /^[^\s@<>,;"]+@[^\s@<>,;"]+\.[^\s@<>,;"]+$/u.test(address)
   }
 }
-import { type Attached, type Forwarded, type Words, acceptable, readWords } from pure
+import { type Attached, type Forwarded, type Words, acceptable, exhausted, readWords } from pure
 export { type Attached, type Forwarded, type Words, acceptable }
 
 /** A draft with nothing written yet. */
 export const nothing: Words = { to: [], cc: [], bcc: [], subject: "", text: "", files: [], answers: undefined, mode: "compose" }
 
 const key = "alpha/inbox/letters"
+
+/** How a write of the drafts to the phone ended: kept, or not, and if not whether the phone's storage was full. */
+export interface Keeping {
+  readonly ok: boolean
+  readonly full: boolean
+}
 
 /**
  * The words of each draft of this session, by its number: what the screen shows and edits, what a write keeps on the
@@ -71,8 +87,8 @@ const key = "alpha/inbox/letters"
 export service Letters {
   words(draft: number): Words
   set(draft: number, words: Words): void
-  /** Write the words of `draft` to the phone; whether the phone kept them. */
-  keep(draft: number): boolean!!
+  /** Write the words of `draft` to the phone; whether the phone kept them, and whether it refused them for want of room. */
+  keep(draft: number): Keeping!!
   /** Read back what the phone kept; whether it could be read. */
   load(): boolean!!
   forget(draft: number): void!!
@@ -87,9 +103,10 @@ export const letters = Layer.effect(Letters, effect {
   const store = try KeyValueStore.KeyValueStore
   let held: Record<string, Words> = readWords(store.get(key) catch () => undefined) ?? {}
   const copies = new Map<number, { readonly id: string; readonly digest: string }>()
+  // spec/app/inbox/drafts.md, "Only the newest write's answer is taken: one that lands becomes the copy kept; one that fails says the draft is not kept on this phone, or that the phone's storage is full, and is tried again with the next edit or Retry"
   const kept = effect () => {
-    const written = store.set(key, JSON.stringify(held)) catch () => false
-    return written !== false
+    const written = store.set(key, JSON.stringify(held)) catch (cause) => (exhausted(cause) ? "full" : "failed")
+    return { ok: written !== "full" && written !== "failed", full: written === "full" }
   }
   return {
     words: (draft: number) => held[String(draft)] ?? nothing,
@@ -139,8 +156,8 @@ effect function inSent(ticket: number, draft: number, account: number): Event!!(
 }
 
 effect function written(ticket: number, draft: number): Event!!Letters {
-  const ok = try (try Letters).keep(draft)
-  return { type: "written", ticket, ok, full: false }
+  const { ok, full } = try (try Letters).keep(draft)
+  return { type: "written", ticket, ok, full }
 }
 
 effect function loaded(ticket: number): Event!!Letters {
