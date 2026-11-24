@@ -1,7 +1,7 @@
 // spec/account/signIn.md, "Story: Choose how to sign in"; spec/account/signIn.md, "Story: Sign in with Google"; spec/account/signIn.md, "Story: Sign in with a code"; spec/account/signIn.md, "Story: Leave sign-in"; spec/account/signIn.md, "Story: Read the service's terms before signing in"
 import {
   type CodeMethod, type FactorKind, type Host, type Methods, type Net, type SignIn, type SignInEffect, type VerifyOutcome,
-  Machine as SignInMachine, canTapGoogle, enabled, entryOf, machine as signInMachine, mayReopenGoogle, readinessWaitMs, unknownMethods
+  Machine as SignInMachine, canTapGoogle, enabled, entryOf, machine as signInMachine, mayReopenGoogle, readinessWaitMs, sentAs, unknownMethods
 } from "../../gen/account__signIn.effect.vibe"
 import type { Net as LifeNet } from "../../gen/platform__lifecycle.ts"
 import { Build } from "../platform/build.vibe"
@@ -51,6 +51,24 @@ export service SignInScreen {
 }
 
 const methodNames = { EmailCode: { start: "startEmail", verify: "verifyEmail", field: "email" }, PhoneCode: { start: "startPhone", verify: "verifyPhone", field: "phone" } } as const
+
+/** The phone number the owner typed, in the E.164 form the host accepts; a number it cannot place keeps no separators and is refused. */
+export function normalizeSignInPhone(typed: string): string {
+  const text = typed.trim()
+  const plus = text.startsWith("+")
+  const digits = text.slice(plus ? 1 : 0).replace(/[\s().-]/g, "")
+  const kind = plus ? "WithPlus" : digits.startsWith("00") ? "WithZeroZero" : /^[0-9]{10}$/.test(digits) ? "TenDigits" : /^1[0-9]{10}$/.test(digits) ? "ElevenFromOne" : "OtherNumber"
+  const sent = sentAs(kind)
+  if (sent === "KeepsItsPlus" || sent === "PlusAdded") return `+${digits}`
+  if (sent === "PlusForZeroZero") return `+${digits.slice(2)}`
+  if (sent === "PlusOneAdded") return `+1${digits}`
+  return digits
+}
+
+/** What the address field holds, as it is sent for the chosen method. */
+function sentAddress(method: CodeMethod, address: string): string {
+  return method === "PhoneCode" ? normalizeSignInPhone(address) : address.trim()
+}
 
 /** What Android says of the network, as AppLifecycle reports it and with its validation fact on the phone, as the screen's network state. */
 export function netOf(status: NetworkStatus, android: boolean): Net {
@@ -323,11 +341,11 @@ export const signInService = Layer.effect(SignInScreen, effect {
       if (canTapGoogle(try machine.get())) try send({ type: "tapGoogle" })
     },
     effect submit(address: string) {
-      try Ref.set(typed, { address: address.trim(), code: "" })
+      try Ref.set(typed, { address: sentAddress((try machine.get()).method, address), code: "" })
       try send({ type: "submitAddress" })
     },
     effect resend(address: string) {
-      try Ref.set(typed, { address: address.trim(), code: "" })
+      try Ref.set(typed, { address: sentAddress((try machine.get()).method, address), code: "" })
       try send({ type: "resend" })
     },
     effect verify(code: string) {

@@ -244,6 +244,25 @@ pure def cooldownEnds(s: SignIn): SignIn = { ...s, cooldown: false }
 pure def sometimesFailedResendKeepsTheAttempt(s: SignIn): bool = s.fault == ResendFailed and s.screen == CodeStep and s.attempt != 0
 ```
 
+### A typed phone number is sent in E.164, and no country is guessed
+
+The host accepts only an E.164 number, so the number the owner typed is sent, resent and shown on
+the code step in that form: spaces, dashes, dots and parentheses are dropped and nothing else is
+(letters stay, so the number is refused rather than rewritten); a leading `+` is kept; a leading
+`00` becomes `+`; a bare ten-digit number, or eleven digits starting with 1, is a North American
+number and gains `+1` or `+`. Anything else is sent without its separators and the host refuses it.
+
+```quint
+type TypedNumber = WithPlus | WithZeroZero | TenDigits | ElevenFromOne | OtherNumber
+type SentNumber = KeepsItsPlus | PlusForZeroZero | PlusOneAdded | PlusAdded | NoPlusAdded
+pure def sentAs(typed: TypedNumber): SentNumber =
+  if (typed == WithPlus) KeepsItsPlus else if (typed == WithZeroZero) PlusForZeroZero
+  else if (typed == TenDigits) PlusOneAdded else if (typed == ElevenFromOne) PlusAdded else NoPlusAdded
+pure def lawOnlyANorthAmericanNumberGainsItsCountry(typed: TypedNumber): bool =
+  (sentAs(typed) == PlusOneAdded or sentAs(typed) == PlusAdded) iff (typed == TenDigits or typed == ElevenFromOne)
+pure def lawAnUnrecognisedNumberGainsNoCountry(typed: TypedNumber): bool = typed == OtherNumber implies sentAs(typed) == NoPlusAdded
+```
+
 ### An address typed and not yet sent is the owner's work in progress
 
 Text in the address field, sent or not, means the card is no longer untouched, so a hands-off update
