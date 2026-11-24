@@ -4,14 +4,19 @@ import { damaged, unlocked } from "./fixtures.ts";
 import type { PasswordsScreenProps } from "./PasswordsScreen.tsx";
 
 const none = () => undefined;
+const base: PasswordsScreenProps = {
+  vault: unlocked,
+  onClose: none,
+  acts: { run: none, edit: none, askRemove: none, askReset: none, openEntry: none, closeEntry: none, refresh: none },
+};
 
 export const meta: ComponentMeta<PasswordsScreenProps> = {
-  args: { vault: unlocked, onClose: none, acts: { run: none, edit: none, askRemove: none, askReset: none, openEntry: none, closeEntry: none, refresh: none } },
+  args: base,
   states: {
-    Damaged: { vault: damaged },
-    ResetAsked: { vault: { ...damaged, confirmReset: true } },
-    Locked: { vault: { ...unlocked, phase: { tag: "Locked" }, entries: [] } },
-    Entry: { vault: { ...unlocked, selected: "a" } },
-    RemoveAsked: { vault: { ...unlocked, selected: "a", confirmRemove: "a" } },
+    Damaged: { ...base, vault: damaged },
+    ResetAsked: { ...base, vault: { ...damaged, confirmReset: true } },
+    Locked: { ...base, vault: { ...unlocked, phase: { tag: "Locked" }, entries: [] } },
+    Entry: { ...base, vault: { ...unlocked, selected: "a" } },
+    RemoveAsked: { ...base, vault: { ...unlocked, selected: "a", confirmRemove: "a" } },
   },
 };

@@ -6,20 +6,21 @@ import { general, notices, problems } from "./fixtures.ts";
 import type { AboutPagesProps } from "./AboutPages.tsx";
 
 const none = () => undefined;
+const base: AboutPagesProps = {
+  nav: { ...nav, page: "About" }, facts: general.facts, native: true, diagnostics: problems, onOpen: none, onOpenLicence: none, onAppInfo: none, onActivity: none,
+  aboutActs: { readLog: none, askClear: none, cancelClear: none, clear: none, exportReport: none, loadLicences: none },
+};
 
 export const meta: ComponentMeta<AboutPagesProps> = {
-  args: {
-    nav: { ...nav, page: "About" }, facts: general.facts, native: true, diagnostics: problems, onOpen: none, onOpenLicence: none, onAppInfo: none, onActivity: none,
-    aboutActs: { readLog: none, askClear: none, cancelClear: none, clear: none, exportReport: none, loadLicences: none },
-  },
+  args: base,
   states: {
-    ProblemLog: { nav: { ...nav, page: "Problems" } },
-    ClearFailed: { nav: { ...nav, page: "Problems" }, diagnostics: { ...problems, clearFailed: true } },
-    ExportFailed: { diagnostics: { ...problems, exportState: "ExportFailed" } },
-    LogUnavailable: { nav: { ...nav, page: "Problems" }, diagnostics: { ...diagnostics, log: "LogUnavailable" } },
-    Licences: { nav: { ...nav, page: "Licenses" }, diagnostics: notices },
-    FlaggedLicence: { nav: { ...nav, page: "LicenseDetail", licence: 1 }, diagnostics: notices },
-    LicencesUnavailable: { nav: { ...nav, page: "Licenses" }, diagnostics: { ...diagnostics, licences: "NoticesUnavailable" } },
-    Browser: { native: false, onActivity: undefined },
+    ProblemLog: { ...base, nav: { ...nav, page: "Problems" } },
+    ClearFailed: { ...base, nav: { ...nav, page: "Problems" }, diagnostics: { ...problems, clearFailed: true } },
+    ExportFailed: { ...base, diagnostics: { ...problems, exportState: "ExportFailed" } },
+    LogUnavailable: { ...base, nav: { ...nav, page: "Problems" }, diagnostics: { ...diagnostics, log: "LogUnavailable" } },
+    Licences: { ...base, nav: { ...nav, page: "Licenses" }, diagnostics: notices },
+    FlaggedLicence: { ...base, nav: { ...nav, page: "LicenseDetail", licence: 1 }, diagnostics: notices },
+    LicencesUnavailable: { ...base, nav: { ...nav, page: "Licenses" }, diagnostics: { ...diagnostics, licences: "NoticesUnavailable" } },
+    Browser: { ...base, native: false, onActivity: undefined },
   },
 };
