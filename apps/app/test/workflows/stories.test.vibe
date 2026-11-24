@@ -47,7 +47,7 @@ const workflowRoutes = (runs: ReadonlyArray<unknown>, approvals: ReadonlyArray<u
   (m, p) => m === "GET" && p === "/api/workflow/executions/r1/approvals" ? { status: 200, data: receiptOf(approvals) } : undefined,
 ]
 const emptySources: Handler[] = [
-  (m, p) => m === "GET" && p === "/api/automations" ? { status: 200, data: { automations: [] } } : undefined,
+  (m, p) => m === "GET" && p === "/api/triggers" ? { status: 200, data: { triggers: [] } } : undefined,
   (m, p) => m === "GET" && p === "/api/lifeops/reminders" ? { status: 200, data: { reminders: [] } } : undefined,
   (m, p) => m === "GET" && p === "/api/lifeops/definitions" ? { status: 200, data: { definitions: [] } } : undefined,
 ]
@@ -98,7 +98,7 @@ describe("Agent changes (spec/workflows/vocabulary.md, \"Story: See what my agen
         "not a result",
       ])
       try Effect.try(() => assert.deepStrictEqual(
-        { summary, refreshed: sent.some((s) => s.method === "GET" && s.path === "/api/automations") },
+        { summary, refreshed: sent.some((s) => s.method === "GET" && s.path === "/api/triggers") },
         {
           summary: { workflows: [{ workflowId: "w1", word: "Updated" }, { workflowId: "w2", word: "Changed" }], automations: true, notesRevision: 4, calendar: false, openWorkflows: true },
           refreshed: true,
@@ -112,7 +112,7 @@ describe("Agent changes (spec/workflows/vocabulary.md, \"Story: See what my agen
     provide workflowsOf(emptySources, sent) {
       const summary = try (try AgentChanges).settle([{ success: true, effectReceipts: [{ operation: "workflow.create", outcome: "preview", resource: { kind: "workflow.definition", id: "w1" } }] }])
       try Effect.try(() => assert.deepStrictEqual(
-        { workflows: summary.workflows.length, automations: summary.automations, refreshed: sent.some((s) => s.path === "/api/automations") },
+        { workflows: summary.workflows.length, automations: summary.automations, refreshed: sent.some((s) => s.path === "/api/triggers") },
         { workflows: 0, automations: false, refreshed: false },
       ))
     }
@@ -197,9 +197,9 @@ describe("Removed workflows (spec/workflows/automations.md, \"A change is held b
 describe("Held changes (spec/workflows/automations.md, \"Story: Change an automation once, even when the answer is lost\")", () => {
   it.effect("a definite 404 releases the change, and Allow another releases only the change it reviewed (spec/workflows/automations.md, \"Allow another releases a held change only after the owner confirms it\")", () => effect {
     const sent: Sent[] = []
-    const prompt = { id: "a1", type: "coordinator_text", title: "Plan", enabled: true, status: "active", triggerId: "t1" }
+    const prompt = { id: "t1", displayName: "Plan", instructions: "Plan my day", enabled: true, triggerType: "cron", cronExpression: "0 7 * * *" }
     const handlers: Handler[] = [
-      (m, p) => m === "GET" && p === "/api/automations" ? { status: 200, data: { automations: [prompt] } } : undefined,
+      (m, p) => m === "GET" && p === "/api/triggers" ? { status: 200, data: { triggers: [prompt] } } : undefined,
       ...emptySources.slice(1),
       (m, p) => m === "GET" && p.startsWith("/api/scheduled-tasks") ? { status: 200, data: { tasks: [] } } : undefined,
       (m, p) => m === "DELETE" && p === "/api/triggers/t1" ? { status: 404 } : undefined,
@@ -209,9 +209,9 @@ describe("Held changes (spec/workflows/automations.md, \"Story: Change an automa
       const list = try Automations
       const held = try AutomationsMachine
       try list.refresh()
-      const removed = try list.remove("a1")
+      const removed = try list.remove("trigger:t1")
       const afterRemove = (try held.get()).held.length
-      const ran = try list.run("a1")
+      const ran = try list.run("trigger:t1")
       const kept = try held.get()
       const id = kept.held[0]?.id ?? 0
       try list.allowAnother(id + 1)
@@ -354,7 +354,7 @@ describe("Digests (spec/workflows/digests.md, \"Story: See my digests and the ne
       const panel = try (try DigestsMachine).get()
       let waited = 0
       while (briefs.length === 0 && waited < 100) {
-        try Effect.sleep("20 millis")
+        try TestClock.adjust("20 millis")
         waited += 1
       }
       // spec/shell/overview.md, "The brief card shows the newest retained brief, and says when it failed or did not run"

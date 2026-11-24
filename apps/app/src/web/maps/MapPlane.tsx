@@ -160,12 +160,20 @@ export function MapPlane(props: MapPlaneProps) {
       return { data: tile.bytes.buffer.slice(tile.bytes.byteOffset, tile.bytes.byteOffset + tile.bytes.byteLength) };
     });
     const raster = basemap !== "WorldMap";
-    const instance = new maplibregl.Map({
-      container: node, style: styleFor(basemap, protocol, tileSize, minZoom, maxZoom), center: OPENING.center,
-      zoom: raster ? Math.max(OPENING.zoom, minZoom) : OPENING.zoom,
-      ...(raster ? { minZoom, maxZoom: Math.min(maxZoom, 22) } : {}),
-      attributionControl: false, cancelPendingTileRequestsWhileZooming: false,
-    });
+    let instance: MapLibre;
+    try {
+      instance = new maplibregl.Map({
+        container: node, style: styleFor(basemap, protocol, tileSize, minZoom, maxZoom), center: OPENING.center,
+        zoom: raster ? Math.max(OPENING.zoom, minZoom) : OPENING.zoom,
+        ...(raster ? { minZoom, maxZoom: Math.min(maxZoom, 22) } : {}),
+        attributionControl: false, cancelPendingTileRequestsWhileZooming: false,
+      });
+    } catch {
+      // A map that cannot be built, such as one without WebGL2, failed before its style loaded and not on a tile: it fails the plane, which offers Retry.
+      maplibregl.removeProtocol(protocol);
+      if (failsThePlane(false, false, false)) props.onState(generation, "PlaneFailed");
+      return;
+    }
     const painted = painter(instance, props.onPin);
     let stop: (() => void) | undefined;
     let styleLoaded = false;

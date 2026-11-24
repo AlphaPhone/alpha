@@ -1,7 +1,7 @@
 // spec/files/browser.md, "Story: Open Files and see my storage"; spec/files/browser.md, "Story: Walk my folders and categories"; spec/files/browser.md, "Story: Select files and act on them together"; spec/files/mutations.md, "Story: Change many files and be told truthfully what changed"; spec/files/preview.md, "Story: Do something with the file I am looking at"; spec/files/trash.md, "Story: Restore or delete several Trash items together"; spec/files/filter.md, "Story: Let the agent show me the files I asked about"
 import { Effect } from "effect";
 import { ArrowLeft, FolderPlus, FolderUp } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import type { Browser, Event as BrowserEvent } from "../../../gen/files__browser.ts";
 import type { Event as TrashEvent, TrashView as Trash } from "../../../gen/files__trash.ts";
 import type { Event as FilterEvent, Filtering } from "../../../gen/files__filter.ts";
@@ -240,7 +240,8 @@ export function FilesScreenView({
     if (browser.place.tag === "Browse") navigate({ tag: "InFolder", path: "", volume: "" });
     showNaming({ op: "create", initial: "", parent, volume: browser.place.tag === "InFolder" ? browser.place.volume : "" });
   };
-  const visit = (node: HTMLElement | null) => {
+  // Files is visited once per element and route: a ref callback made anew each render would leave and visit again on every render.
+  const visit = useCallback((node: HTMLElement | null) => {
     if (!node) return;
     const stop = start(Effect.gen(function* () {
       yield* FilesPreview.use((p) => p.enter());
@@ -253,7 +254,7 @@ export function FilesScreenView({
       void perform(FilesShare.use((s) => s.retire()));
       void perform(Navigation.use((n) => Effect.forEach(filesDialogLayers, (id) => n.closeLayer(id), { discard: true })));
     };
-  };
+  }, [route, start, perform]);
   const back = () => void perform(FilesBack.use((b) => b.back())).then((handled) => !handled && onClose());
   const clearFilter = () => void sendFilter({ type: "clearFilter" });
   const allow = () => void perform(FilesBrowser.use((b) => b.requestAccess()));
