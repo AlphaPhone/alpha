@@ -1,5 +1,5 @@
 // spec/camera/libraryReview.md, "Photos operations reach a phone only when the assistant and the phone both offer their capability"; spec/camera/agentLibrary.md, "The selected form names the open viewer item, and only for an assistant that offered it"; spec/camera/agentCapture.md, "A saved photo with its library identity succeeds; a write without one, or a lost answer, is unknown and never repeated"
-import { negotiation, shownPhoto, type ShownPhoto } from "@elizaos/agent/device-actions"
+import { negotiation, shownPhoto, type ShownPhoto } from "@elizaos/agent/operations"
 
 /** The camera and Photos capabilities this phone advertises in `x-eliza-device-capabilities`. */
 export const cameraCapabilities: readonly string[] = [

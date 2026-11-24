@@ -1,4 +1,4 @@
-// spec/assistant/receipts.md, "A receipt's title says what the journal proves"; spec/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/receipts.md, "A reply cut off after an effect says so, and a queued approval request reads as needing approval"
+// spec/assistant/receipts.md, "A receipt's title says what the journal proves"; spec/voice/conversation.md, "Out of plan allowance and credits ends voice quietly as Stop does, and the chat gets the one line"; spec/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/receipts.md, "A reply cut off after an effect says so, and a queued approval request reads as needing approval"
 import type { CutOff, ReceiptTitle } from "../../gen/assistant__receipts.ts"
 import { showsWait, waitSeconds, type FailureKind, type PlanAction } from "../../gen/assistant__reply.ts"
 import { hostOf } from "./grounding.vibe"
@@ -136,6 +136,19 @@ export function retryDuration(waitMs: number): string {
 /** The live wait a failed reply carries, in milliseconds, or -1 for none. */
 export function liveWaitOf(raw: unknown): number {
   return typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0 ? raw : -1
+}
+
+/** The one out-of-funds line a voice conversation it ended posts to the chat; it names the allowance reset only while one lies ahead. */
+export function outOfFundsLine(resetsAt: number | undefined, now: number): string {
+  let day = ""
+  if (resetsAt !== undefined && Number.isFinite(resetsAt) && resetsAt > now) {
+    try {
+      day = new Intl.DateTimeFormat(undefined, { month: "long", day: "numeric" }).format(resetsAt)
+    } catch {
+      day = ""
+    }
+  }
+  return `You’re out of plan allowance and credits, so Talk stopped.${day === "" ? "" : ` Your allowance resets on ${day}.`}`
 }
 
 /** Alpha's sentence for a failed reply; a rate limit answered live says how long to wait. */

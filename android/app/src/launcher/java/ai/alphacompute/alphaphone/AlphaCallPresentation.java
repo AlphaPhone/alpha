@@ -29,7 +29,7 @@ final class AlphaCallPresentation {
      * @param canHold the call has {@code CAPABILITY_HOLD}.
      */
     public static Controls controls(int state, boolean audioKnown, boolean speakerRoutable, boolean canHold) {
-        if (state == Call.STATE_RINGING) return new Controls(true, true, false, false, false, false, false);
+        if (ringing(state)) return new Controls(true, true, false, false, false, false, false);
         if (state == Call.STATE_DISCONNECTED || state == Call.STATE_DISCONNECTING) {
             return new Controls(false, false, false, false, false, false, false);
         }
@@ -83,8 +83,8 @@ final class AlphaCallPresentation {
      * @param connectMillis {@code Call.Details.getConnectTimeMillis()}; 0 when Telecom has not set it.
      */
     public static String secondaryLine(int state, String numberWhenNamed, long connectMillis, long nowMillis) {
+        if (ringing(state)) return numberWhenNamed == null ? "" : numberWhenNamed;
         switch (state) {
-            case Call.STATE_RINGING: return numberWhenNamed == null ? "" : numberWhenNamed;
             case Call.STATE_ACTIVE: return connectMillis > 0 ? elapsed(nowMillis - connectMillis) : "";
             case Call.STATE_HOLDING: return "On hold";
             case Call.STATE_DISCONNECTING:
@@ -101,9 +101,9 @@ final class AlphaCallPresentation {
 
     /** A chip for a call that is not the one shown: who it is and what it is doing. */
     public static String chipLabel(String who, int state) {
+        if (ringing(state)) return who + " · Incoming";
         String doing;
         switch (state) {
-            case Call.STATE_RINGING: doing = "Incoming"; break;
             case Call.STATE_ACTIVE: doing = "In call"; break;
             case Call.STATE_HOLDING: doing = "On hold"; break;
             case Call.STATE_DISCONNECTING:
@@ -120,8 +120,8 @@ final class AlphaCallPresentation {
 
     /** What the call notice says under the caller, by Telecom state. */
     public static String stateLabel(int state) {
+        if (ringing(state)) return "Incoming call";
         switch (state) {
-            case Call.STATE_RINGING: return "Incoming call";
             case Call.STATE_DIALING: return "Calling…";
             case Call.STATE_CONNECTING: return "Connecting…";
             case Call.STATE_ACTIVE: return "In call";
@@ -173,7 +173,7 @@ final class AlphaCallPresentation {
      * equal results describe the same notice, so the second need not be posted.
      */
     static String noticeContent(String label, int state) {
-        return label + '\n' + stateLabel(state) + '\n' + (state == Call.STATE_RINGING);
+        return label + '\n' + stateLabel(state) + '\n' + ringing(state);
     }
 
     /**

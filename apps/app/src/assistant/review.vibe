@@ -1,7 +1,7 @@
-// spec/assistant/review.md, "Story: Let my agent act only with my say-so"; spec/assistant/recovery.md, "A listing is read once per key, applies only to its own key, and a failed one waits for a new key"; spec/assistant/review.md, "A card is listed only on the foreground, recovered only under the current screen, and approved only under the session that listed it"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/review.md, "A call, dial or text that contradicts the number I wrote gets a notice instead of a card, and is rejected so a reload cannot bring it back"; spec/assistant/receipts.md, "A receipt that could not reach the agent keeps its result and says it is not synced yet"; spec/assistant/review.md, "The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote"; spec/assistant/review.md, "A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it"; spec/assistant/receipts.md, "An action is reconciled as applied only with its exact saved receipt, and only a handoff may stay unresolved"; spec/assistant/receipts.md, "A result is shown only after its journal entry and receipt settled"; spec/assistant/review.md, "A card opens the view its family names, or else the view of its operation's class"; spec/assistant/review.md, "A comms card is staged on the comms bar when it is listed, and only the stage's open, live proposal is approved, once"; spec/assistant/review.md, "A workflow-bound proposal runs only from its own run's step review, once, and its executor knows the run"
+// spec/assistant/review.md, "Story: Let my agent act only with my say-so"; spec/assistant/recovery.md, "A listing is read once per key, applies only to its own key, and a failed one waits for a new key"; spec/assistant/review.md, "A card is listed only on the foreground, recovered only under the current screen, and approved only under the session that listed it"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/review.md, "A call, dial or text that contradicts the number I wrote gets a notice instead of a card, and is rejected so a reload cannot bring it back"; spec/assistant/receipts.md, "A receipt that could not reach the agent keeps its result and says it is not synced yet"; spec/assistant/review.md, "The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote or my own ask for its tab list"; spec/assistant/review.md, "A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it"; spec/assistant/receipts.md, "An action is reconciled as applied only with its exact saved receipt, and only a handoff may stay unresolved"; spec/assistant/receipts.md, "A result is shown only after its journal entry and receipt settled"; spec/assistant/review.md, "A card opens the view its family names, or else the view of its operation's class"; spec/assistant/review.md, "A comms card is staged on the comms bar when it is listed, and only the stage's open, live proposal is approved, once"; spec/assistant/review.md, "A workflow-bound proposal runs only from its own run's step review, once, and its executor knows the run"
 import { DeviceExecution, type ApproveResult, type DeviceAgent, type DeviceJournal, type DeviceProposal, type DeviceReceipt, type ExecutorCall } from "@elizaos/agent/client"
 import { Machine as RoutesMachine, machine as routesMachine, initial as routesStart, type CardState, type Event as RoutesEvent, type Routes } from "../../gen/assistant__approvals.effect.vibe"
-import { Machine as CustodyMachine, approvable, browserCarded, mayDirect, cardOffered, commsApproved, contradicts, destinationOf, ownerTyped, workflowStepRuns, type Event as CustodyEvent, type Listing, type Op, type Preference, type Target } from "../../gen/assistant__review.effect.vibe"
+import { Machine as CustodyMachine, approvable, browserCarded, browserCommanded, mayDirect, cardOffered, commsApproved, contradicts, destinationOf, ownerTyped, workflowStepRuns, type Event as CustodyEvent, type Listing, type Op, type Preference, type Target } from "../../gen/assistant__review.effect.vibe"
 import type { ProposalKind } from "../../gen/telephony__comms.ts"
 import { offered, titleOf, type Evidence, type Resolution, type Result } from "../../gen/assistant__receipts.effect.vibe"
 import { Native } from "../platform/native.vibe"
@@ -15,6 +15,7 @@ import { AdvertisedCapabilities, type WorkflowStepRef } from "./ports.vibe"
 import { actionResultText, copy, receiptTitle, unsyncedSummary } from "./presentation.vibe"
 import type { CardDestination, ItemizedSet, ProposalCard } from "./transcript.vibe"
 import { ask } from "./transport.vibe"
+import { directBrowserTabList } from "@elizaos/plugin-browser/grounding"
 import { browserCommand, writtenNumbers } from "./grounding.vibe"
 import { WithdrawableRequests } from "./withdrawable.vibe"
 
@@ -40,6 +41,8 @@ export interface OperationPorts {
   handoff?(operation: unknown): boolean
   /** Show an applied operation's result, such as bringing Browser forward, only after its journal entry and receipt settled (#1226, #1438). */
   present?(operation: unknown, call: ExecutorCall): void
+  /** Whether the operation shows Browser's local tab list. */
+  tabList?(operation: unknown): boolean
 }
 
 /** What the assistant knows of one executor call: whether the owner approved its card, the owner message it answers and that message's words. */
@@ -468,7 +471,9 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
   effect function directOne(proposal: PendingProposal, text: string, messageId: string, pageLink: boolean) {
     const op = ports.classOf(proposal.operation)
     const bound = proposal.requestMessageId === messageId
-    const grounded = op !== "BrowserNavigate" || (ownerTyped(ports.target(proposal.operation, text).tag !== "NoTarget", pageLink) && browserCommand(text))
+    const tabList = ports.tabList?.(proposal.operation) === true
+    const commanded = browserCommanded(browserCommand(text), tabList, tabList && directBrowserTabList(text, "Alpha"))
+    const grounded = op !== "BrowserNavigate" || (ownerTyped(ports.target(proposal.operation, text).tag !== "NoTarget", pageLink) && commanded)
     try custodyStep({ type: "prefer", value: try preference() })
     try custodyStep({ type: "propose", op, workflow: proposal.workflow !== undefined, bound, grounded, listed: false })
     try custodyStep({ type: "review", visible: true })

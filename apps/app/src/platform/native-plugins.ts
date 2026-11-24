@@ -51,7 +51,7 @@ export const nativePlugins = {
     methods: [
       "create", "find", "findNext", "clearFind", "navigate", "command", "present", "bookmarks", "setBookmark",
       "browsingState", "saveBrowsingState", "clearBrowsingData", "clearSiteData", "readingSupport", "reviewQuestion",
-      "reviewReading", "cancelReading", "pageContext", "share", "openExternalBrowser", "downloads", "loginFillStatus", "close",
+      "reviewReading", "cancelReading", "pageContext", "share", "openExternalBrowser", "openFailedPage", "downloads", "loginFillStatus", "close",
     ],
     events: ["findResult", "fullscreen", "notice", "showDownloads", "stateChanged", "tabClosed", "tabOpened"],
   },
@@ -66,6 +66,7 @@ export const nativePlugins = {
     events: [],
   },
   AlphaCallState: { reach: "AnyNative", methods: ["callState"], events: ["callState"] },
+  AlphaCarrierSetup: { reach: "AnyNative", methods: ["read", "readEid", "openSettings"], events: ["foregroundEnded"] },
   AlphaCloudSignIn: {
     reach: "AnyNative",
     methods: [
@@ -216,7 +217,7 @@ export const nativePlugins = {
   ElizaCamera: {
     reach: "AnyNative",
     methods: [
-      "checkPermissions", "startPreview", "stopPreview", "setCaptureMode", "switchCamera", "capturePhoto", "startRecording",
+      "checkPermissions", "getDevices", "startPreview", "stopPreview", "setCaptureMode", "switchCamera", "capturePhoto", "startRecording",
       "stopRecording", "getRecordingState", "setSettings", "setZoom", "setFocusPoint",
     ],
     events: [],

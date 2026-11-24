@@ -71,11 +71,14 @@ test('--owner-telephony is refused outside a plain development Pixel 10a or Cutt
     assert.doesNotThrow(() => assertOwnerTelephonyOptions({development: true, target, senseImage: false}));
 });
 
+// stage-aosp.ts loads upstream VibeLang (@elizaos/os/image), so it runs as package.json's aosp:stage runs it.
+const VIBE = ['--conditions=eliza-source', '--import', import.meta.resolve('vibelang/register')];
+
 test('stage-aosp refuses --owner-telephony without --development before reading any input', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-owner-stage-'));
   try {
     fs.copyFileSync(path.join(root, 'app.config.json'), path.join(dir, 'app.config.json'));
-    const out = spawnSync(process.execPath, [path.join(root, 'scripts/stage-aosp.ts'), '--target', 'cuttlefish',
+    const out = spawnSync(process.execPath, [...VIBE, path.join(root, 'scripts/stage-aosp.ts'), '--target', 'cuttlefish',
       '--aosp-source', 'absent-source', '--apk', 'absent.apk', '--owner-telephony'], {cwd: dir, encoding: 'utf8'});
     assert.notEqual(out.status, 0);
     assert.match(out.stderr, /--owner-telephony requires --development/);
@@ -87,7 +90,7 @@ test('stage-aosp refuses --owner-telephony on any target but pixel10a or cuttlef
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-owner-stage-'));
   try {
     fs.copyFileSync(path.join(root, 'app.config.json'), path.join(dir, 'app.config.json'));
-    const out = spawnSync(process.execPath, [path.join(root, 'scripts/stage-aosp.ts'), '--development', '--target', 'cuttlefish_x86_64',
+    const out = spawnSync(process.execPath, [...VIBE, path.join(root, 'scripts/stage-aosp.ts'), '--development', '--target', 'cuttlefish_x86_64',
       '--aosp-source', 'absent-source', '--apk', 'absent.apk', '--owner-telephony'], {cwd: dir, encoding: 'utf8'});
     assert.notEqual(out.status, 0);
     assert.match(out.stderr, /requires --target pixel10a or --target cuttlefish/);

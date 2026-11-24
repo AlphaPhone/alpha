@@ -265,6 +265,7 @@ it.effect("Go to Android's own page (spec/settings/facts.md, \"Story: Go to Andr
     "ElizaSystem.openSettingsPage": { status: "opened", specific: false },
     "AlphaDevice.openSettings": { status: "opened" },
     "ElizaSystem.openNotificationShade": { status: "permission-missing" },
+    "AlphaCarrierSetup.openSettings": (args: unknown) => ({ status: "opened", page: (args as { page: string }).page, specific: (args as { page: string }).page === "sim" }),
   })
   provide Layer.provideMerge(deviceFacts, Layer.mergeAll(factsMachine(), native, build(), noStorage)) {
     const facts = try DeviceFacts
@@ -277,13 +278,20 @@ it.effect("Go to Android's own page (spec/settings/facts.md, \"Story: Go to Andr
     const shade = try facts.openShade()
     try facts.openPage("PageAppInfo")
     const appInfo = (try machine.get()).handoff
+    // spec/settings/facts.md, "One handoff runs at a time, and its answer names whether the specific page opened": Carrier & SIM setup's SIMs and APN pages
+    try facts.openPage("PageSim")
+    const sim = (try machine.get()).handoff
+    try facts.openPage("PageApn")
+    const apn = try machine.get()
     const got1 = try machine.get()
     try Effect.try(() => assert.deepStrictEqual(
-      { dnd: [dnd.handoff, dnd.handoffPage], home, shade: [shade, got1.shade], appInfo, opened: calls.filter((c) => c.name.includes("pen")).map((c) => [c.name, c.args]) },
+      { dnd: [dnd.handoff, dnd.handoffPage], home, shade: [shade, got1.shade], appInfo, sim, apn: [apn.handoff, apn.handoffPage], opened: calls.filter((c) => c.name.includes("pen")).map((c) => [c.name, c.args]) },
       {
         dnd: [{ tag: "HandoffOpened", specific: false }, "PageDnd"], home: { tag: "HandoffOpened", specific: true },
         shade: ["ShadePermissionMissing", "ShadePermissionMissing"], appInfo: { tag: "HandoffRefused" },
-        opened: [["ElizaSystem.openSettingsPage", { page: "dnd" }], ["AlphaDevice.openSettings", { page: "system" }], ["ElizaSystem.openNotificationShade", undefined], ["ElizaSystem.openAppInfo", { packageName: "ai.alphacompute.alphaphone" }]],
+        sim: { tag: "HandoffOpened", specific: true }, apn: [{ tag: "HandoffOpened", specific: false }, "PageApn"],
+        opened: [["ElizaSystem.openSettingsPage", { page: "dnd" }], ["AlphaDevice.openSettings", { page: "system" }], ["ElizaSystem.openNotificationShade", undefined], ["ElizaSystem.openAppInfo", { packageName: "ai.alphacompute.alphaphone" }],
+          ["AlphaCarrierSetup.openSettings", { page: "sim" }], ["AlphaCarrierSetup.openSettings", { page: "apn" }]],
       },
     ))
   }

@@ -11,7 +11,7 @@ Settings, SystemUI, the keyguard, navigation controllers, permissions or account
 | Lock/Home wallpaper | Existing Alpha launcher mark and palette; Android WallpaperManager | True-black wallpaper with no artwork ("Ink"); native clock and notifications remain |
 | Native Settings, Wi-Fi, screen security | Complete AOSP Settings activities and preference hierarchy | DeviceDefault/Material color roles and app label |
 | Shade and Quick Settings | Complete AOSP SystemUI controllers, tiles and notification layouts | Shared system palette and Alpha labels |
-| Navigation | Existing Android three-button navigation bar and security gates | Back, Home and Recents buttons by default; gestures remain an owner choice in Settings |
+| Navigation | Existing Android navigation overlays and security gates | Gesture navigation selected at fresh Alpha setup; three buttons remain a Settings option and recovery fallback |
 | Keyboard | Complete AOSP LatinIME input engine, languages, suggestions and accessibility | Alpha light/dark colors; dark default when no theme preference has been saved |
 | First-run setup | Existing Provision enterprise branch, completion and disable logic; existing Alpha account/permission onboarding | An additive welcome step links to the full native Wi-Fi/security screens and then Alpha |
 
@@ -46,9 +46,11 @@ Never reset device provisioning or wipe the owner merely to preview the welcome 
 
 ## Home/Back and keyboard policy
 
-The owner asked for Android's three navigation buttons: Back, Home and Recents (2026-11-16).
-The framework overlay selects three-button mode and leaves Android's own navigation-mode
-dimensions and layout in place, so the owner can still switch to gestures in Settings.
+The Alpha OS welcome selects Android's standard gestural navigation overlay before
+completing fresh primary-user setup. An enabled navigation mode is kept. Completed
+setup, managed profiles and secondary users keep their settings. Android owns the
+gesture regions and dimensions. Three-button navigation stays available in Settings
+and supplies the system fallback before setup or when gesture activation is unavailable.
 `home-back-keyboard.patch` keeps its default-off Launcher3 product resource
 (`config_alpha_home_back_only`); Alpha's overlay now leaves it off, so Recents and
 quick-switch work as in AOSP. The hidden gesture handle draw guard follows the same flag.

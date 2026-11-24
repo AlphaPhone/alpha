@@ -1,4 +1,4 @@
-// spec/assistant/emailCard.md, "Story: Send an email my agent drafted, from the chat"; spec/assistant/context.md, "A turn carries the page Browser hands it for the observed tab, beside the observation, only to a peer that declares it"; spec/assistant/context.md, "A turn names the place, route or search Maps shows as its selected object only while Maps is in front"; spec/assistant/context.md, "Every assistant request carries the capabilities this phone advertises of those the agent offered, and none when it offered none"; spec/assistant/views.md, "Maps' view is delivered by Maps, at most once per effect"; spec/assistant/review.md, "A workflow-bound proposal runs only from its own run's step review, once, and its executor knows the run"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/receipts.md, "Story: Know what my agent changed"; spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"; spec/assistant/decision.md, "Story: Approve or deny a workflow step once"
+// spec/assistant/emailCard.md, "Story: Send an email my agent drafted, from the chat"; spec/assistant/context.md, "A turn carries the page Browser hands it for the observed tab, beside the observation, only to a peer that declares it"; spec/assistant/context.md, "A turn names the place, route or search Maps shows as its selected object only while Maps is in front"; spec/assistant/context.md, "Every assistant request carries the capabilities this phone advertises of those the agent offered, and none when it offered none"; spec/assistant/views.md, "Maps' view is delivered by Maps, at most once per effect"; spec/assistant/views.md, "A prepared Notes view that names a saved note opens that note's editor, and is delivered only while exactly that note is in front"; spec/assistant/review.md, "A workflow-bound proposal runs only from its own run's step review, once, and its executor knows the run"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/receipts.md, "Story: Know what my agent changed"; spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"; spec/assistant/decision.md, "Story: Approve or deny a workflow step once"
 import type { SendAnswer } from "../../gen/assistant__emailCard.ts"
 import type { ChatMessage, ChatTaken } from "../camera/chat.vibe"
 import type { ChangeSummary } from "../workflows/changes.vibe"
@@ -169,6 +169,18 @@ export service MapsViews {
   static readonly defaultValue = () => ({
     shown: () => succeed(undefined),
     deliver: (_request: number, _effectKey: number, _binding: { readonly [field: string]: unknown }, _apply: Effect.Effect<void>) => succeed(undefined),
+  })
+}
+
+/** Notes' side of a prepared Notes view that names one saved note; unprovided, no note opens. */
+export service NotesViews {
+  /** Open the saved note `noteId` in Notes' editor, saving nothing on the owner's behalf; true only once exactly that note is in the editor. */
+  openSaved(noteId: string): boolean!!
+  /** The saved note in Notes' editor, or undefined when none is open. */
+  shown(): (string | undefined)!!
+  static readonly defaultValue = () => ({
+    openSaved: (_noteId: string) => succeed(false),
+    shown: () => succeed(undefined),
   })
 }
 

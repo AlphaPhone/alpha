@@ -114,6 +114,7 @@ export function controlSummary(operation: BrowserControlOperation): string {
     case "browser_tab_new": return operation.private === true ? "Opened a private tab." : "Opened a new tab."
     case "browser_tab_switch": return "Switched tabs in Browser."
     case "browser_tab_close": return "Closed the tab."
+    case "browser_tabs_show": return TABS_SHOWN_SUMMARY
     case "browser_find": return `Finding “${operation.text}” in the page.`
     case "browser_history": return { back: "Went back a page.", forward: "Went forward a page.", reload: "Reloading the page.", stop: "Stopped loading the page." }[operation.action]
   }
@@ -284,6 +285,7 @@ export const operationPorts = effect {
       if (op.kind === "tabsShow") return TABS_SHOWN_SUMMARY
       return op.kind === "navigate" ? browserNavigationSummary(op.url) : controlSummary(op.operation)
     },
+    tabList: (operation) => decoded(operation)?.kind === "tabsShow",
     itemized: (operation) => decoded(operation)?.kind === "closeAll",
     itemize: (operation, proposalId) => decoded(operation)?.kind === "closeAll" ? listed(proposalId) : undefined,
     stillListed: (operation, proposalId) => {

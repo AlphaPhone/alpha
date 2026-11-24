@@ -41,12 +41,16 @@ export const groups: readonly ListGroup[] = [
 ];
 
 /** An organizer's event with a meeting link. */
-export const organizerFacts: EventFacts = { mode: "OrganizerCancel", managed: false, join: "https://meet.example.com/abc", provider: undefined, repeat: "", invitePending: false,
+export const organizerFacts: EventFacts = { mode: "OrganizerCancel", managed: false, join: "https://meet.example.com/abc", provider: undefined, repeat: "", answer: "NotInvited",
   people: [{ key: "0:owner@example.com", name: "Sam Rivera", reply: "WordOrganizer" }, { key: "1:ada@example.com", name: "Ada Park", reply: "WordGoing" }, { key: "2:lee@example.com", name: "lee@example.com", reply: "WordAwaiting" }] };
 
 /** An unanswered invitation in a managed Google calendar. */
-export const inviteFacts: EventFacts = { mode: "DeclineInvitation", managed: true, join: undefined, provider: "https://calendar.google.com/event", repeat: "Repeats weekly on Fri", invitePending: true,
+export const inviteFacts: EventFacts = { mode: "DeclineInvitation", managed: true, join: undefined, provider: "https://calendar.google.com/event", repeat: "Repeats weekly on Fri", answer: "AnswerAwaited",
   people: [{ key: "0:host@example.com", name: "Host", reply: "WordOrganizer" }, { key: "1:owner@example.com", name: "You", reply: "WordAwaiting" }] };
+
+/** A one-off invitation in a linked Google calendar the owner answered maybe. */
+export const answeredFacts: EventFacts = { ...inviteFacts, managed: false, repeat: "", answer: "AnsweredMaybe",
+  people: [{ key: "0:host@example.com", name: "Host", reply: "WordOrganizer" }, { key: "1:owner@example.com", name: "You", reply: "WordMaybe" }] };
 
 /** A new event's fields, today at ten for an hour. */
 export const newEventFields: DraftFieldsRecord = { title: "Lunch with Ada", body: "", location: "Cafe", start: "2026-11-20T10:00", end: "2026-11-20T11:00", zone: "UTC",
