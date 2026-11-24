@@ -111,5 +111,7 @@ jobs:
         if: always()
         with:
           name: release-ledger
-          path: ${{ runner.temp }}/candidate/run.json
+          path: |
+            ${{ runner.temp }}/candidate/run.json
+            ${{ runner.temp }}/candidate/upstream.json
           retention-days: 90

@@ -1,0 +1,150 @@
+name: release-os-ota-signing
+run-name: Preserving OS update signing ${{ inputs.plan_sha256 }}
+
+# spec/release/os.md, "Story: Sign a preserving OS update". The release owner dispatches this on main with the
+# commit and the exact plan text they reviewed. The plan is admitted before anything private is read; the build and
+# tools are read from Alpha's private storage at the generations the plan pins; `pnpm release os-sign` signs on
+# memory that never reaches a disk and keeps the update only when the enrolled key signed it whole for the planned
+# build with no wipe and no downgrade; the signed update is retained privately, never over an existing object.
+on:
+  workflow_dispatch:
+    inputs:
+      workflow_commit:
+        description: The exact reviewed commit on main
+        required: true
+        type: string
+      signing_plan:
+        description: The reviewed preserving OS update plan, as JSON
+        required: true
+        type: string
+      plan_sha256:
+        description: The SHA-256 of the exact plan text
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: preserving-os-ota-signing
+  cancel-in-progress: false
+
+env:
+  TURBO_TELEMETRY_DISABLED: "1"
+  STORAGE: https://storage.googleapis.com
+
+jobs:
+  sign:
+    if: github.repository_id == '1396333361' && github.ref == 'refs/heads/main' && inputs.workflow_commit == github.sha
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          job: release-os-ota
+          verification: "false"
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Prepare the signing workspace
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          sudo swapoff -a
+          if [ "$(df --output=avail -B1 "$RUNNER_TEMP" | tail -1)" -lt $((45 * 1024 * 1024 * 1024)) ]; then
+            sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /opt/hostedtoolcache/CodeQL
+          fi
+          test "$(df --output=avail -B1 "$RUNNER_TEMP" | tail -1)" -ge $((45 * 1024 * 1024 * 1024))
+      - name: Admit the reviewed plan before anything private is read
+        working-directory: apps/app
+        env:
+          SIGNING_PLAN: ${{ inputs.signing_plan }}
+          PLAN_SHA256: ${{ inputs.plan_sha256 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          plan="$RUNNER_TEMP/os-plan.json"
+          printf '%s' "$SIGNING_PLAN" > "$plan"
+          pnpm -s release os-plan --plan "$plan" --plan-sha256 "$PLAN_SHA256" > "$RUNNER_TEMP/os-plan-admitted.json"
+          printf 'ALPHA_OS_PLAN=%s\nALPHA_OS_WORK=%s\n' "$plan" "$RUNNER_TEMP/alpha-os-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+      - name: Check the OS signing admission journeys
+        run: pnpm --filter @repo/app exec vitest run test/image.test.ts -t "Sign a preserving OS update"
+      - id: input_auth
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: alpha-aosp-lab-20261024
+          workload_identity_provider: projects/484320254111/locations/global/workloadIdentityPools/alpha-github-release/providers/github
+          service_account: alpha-release-artifacts@alpha-aosp-lab-20261024.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_lifetime: 3600s
+          access_token_scopes: https://www.googleapis.com/auth/devstorage.read_write
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Read the pinned build and tools from private storage, without signing keys
+        env:
+          TOKEN: ${{ steps.input_auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          umask 077
+          inputs="$RUNNER_TEMP/os-inputs"
+          mkdir -m 700 "$inputs"
+          for field in targetFiles otaTools; do
+            bucket=$(node -p 'require(process.argv[1])[process.argv[2]].bucket' "$RUNNER_TEMP/os-plan-admitted.json" "$field")
+            object=$(node -p 'encodeURIComponent(require(process.argv[1])[process.argv[2]].object)' "$RUNNER_TEMP/os-plan-admitted.json" "$field")
+            generation=$(node -p 'require(process.argv[1])[process.argv[2]].generation' "$RUNNER_TEMP/os-plan-admitted.json" "$field")
+            curl -fsS --proto '=https' --max-redirs 0 -H "Authorization: Bearer $TOKEN" -o "$inputs/$field.zip" \
+              "$STORAGE/storage/v1/b/$bucket/o/$object?generation=$generation&alt=media"
+          done
+      - name: Sign the admitted preserving update
+        working-directory: apps/app
+        env:
+          ALPHA_OS_RELEASE_KEYS_PART1_B64: ${{ secrets.ALPHA_OS_RELEASE_KEYS_PART1_B64 }}
+          ALPHA_OS_RELEASE_KEYS_PART2_B64: ${{ secrets.ALPHA_OS_RELEASE_KEYS_PART2_B64 }}
+          ALPHA_OS_RELEASE_KEYS_PASSPHRASE: ${{ secrets.ALPHA_OS_RELEASE_KEYS_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          ulimit -c 0
+          inputs="$RUNNER_TEMP/os-inputs"
+          pnpm -s release os-sign --plan "$ALPHA_OS_PLAN" --plan-sha256 "${{ inputs.plan_sha256 }}" \
+            --target-files "$inputs/targetFiles.zip" --ota-tools "$inputs/otaTools.zip" --work "$ALPHA_OS_WORK" --scratch /dev/shm
+      - id: output_auth
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: alpha-aosp-lab-20261024
+          workload_identity_provider: projects/484320254111/locations/global/workloadIdentityPools/alpha-github-release/providers/github
+          service_account: alpha-release-artifacts@alpha-aosp-lab-20261024.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_lifetime: 3600s
+          access_token_scopes: https://www.googleapis.com/auth/devstorage.read_write
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Retain the signed update privately, never over an existing object
+        env:
+          TOKEN: ${{ steps.output_auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          receipt="$ALPHA_OS_WORK/signing-receipt.json"
+          test "$(sha256sum "$ALPHA_OS_WORK/ota.zip" | cut -d ' ' -f 1)" = "$(node -p 'require(process.argv[1]).sha256' "$receipt")"
+          bucket=$(node -p 'require(process.argv[1]).targetFiles.bucket' "$RUNNER_TEMP/os-plan-admitted.json")
+          object=$(node -p 'encodeURIComponent(require(process.argv[1]).outputObject)' "$receipt")
+          curl -fsS --proto '=https' --max-redirs 0 -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/zip" \
+            -X POST --upload-file "$ALPHA_OS_WORK/ota.zip" -o "$ALPHA_OS_WORK/private-storage.json" \
+            "$STORAGE/upload/storage/v1/b/$bucket/o?uploadType=media&name=$object&ifGenerationMatch=0"
+          node -e 'const fs=require("node:fs");const [receipt,stored,out]=process.argv.slice(1);const r=JSON.parse(fs.readFileSync(receipt));const s=JSON.parse(fs.readFileSync(stored));if(s.name!==r.outputObject||Number(s.size)!==r.bytes)process.exit(1);fs.writeFileSync(out,JSON.stringify({...r,privateStorage:{bucket:s.bucket,object:s.name,generation:s.generation,bytes:Number(s.size)}},null,2)+"\n")' \
+            "$receipt" "$ALPHA_OS_WORK/private-storage.json" "$ALPHA_OS_WORK/private-storage-receipt.json"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: preserving-os-ota-delivery-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.ALPHA_OS_WORK }}/private-storage-receipt.json
+          if-no-files-found: error
+          retention-days: 14

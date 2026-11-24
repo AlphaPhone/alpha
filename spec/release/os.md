@@ -298,6 +298,56 @@ pure def sometimesAllDrillsPassed(s: Os): bool = allDrillsPassed(s)
 pure def sometimesEnabled(s: Os): bool = s.enabled
 ```
 
+## Story: Sign a preserving OS update
+
+> As the release owner, I want a pilot image update signed only from the
+> exact build I reviewed, keeping every key and the phone's data, so that a
+> phone that takes it keeps everything it had.
+
+### A preserving update is signed only from a plan that names exactly one reviewed build, by a reviewed producer, with the pinned tools, for Alpha's product and device
+
+The plan names the unsigned build's bytes, the commits that produced it, its
+fingerprint and build time, the OTA tools' bytes, and the one private place
+the signed update goes. Signing starts only from a plan whose text has the
+digest the release owner reviewed, and only on the build and tools whose
+bytes have the digests the plan names.
+
+```quint
+type OsPlan = { reviewed: int, producer: bool, tools: bool, product: bool, output: bool, inputs: bool }
+
+pure def osPlanAdmitted(plan: OsPlan): bool =
+  plan.reviewed == 1 and plan.producer and plan.tools and plan.product and plan.output and plan.inputs
+
+pure def lawTwoReviewedBuildsAreNoBinding(plan: OsPlan): bool = plan.reviewed != 1 implies not(osPlanAdmitted(plan))
+```
+
+### The build keeps its own APK signers and verified-boot keys, replaces no data or trust-state partition, and brings no signing hook of its own
+
+```quint
+type OsBuild = { signersKept: bool, bootKeysKept: bool, abUpdate: bool, dataPartitions: bool, hooks: bool, identity: bool }
+
+pure def osBuildAdmitted(unsigned: OsBuild): bool =
+  unsigned.signersKept and unsigned.bootKeysKept and unsigned.abUpdate and not(unsigned.dataPartitions) and not(unsigned.hooks) and unsigned.identity
+
+pure def lawABuildThatReplacesDataIsNeverSigned(unsigned: OsBuild): bool = unsigned.dataPartitions implies not(osBuildAdmitted(unsigned))
+```
+
+### The signed update is kept only when one certificate, the enrolled release key's, signs it whole, for the planned build and time, with no wipe and no downgrade
+
+The release key is read only into memory that never reaches a disk, and is
+proven to pair with the enrolled certificate before it signs. The signed
+update is retained privately, never over an object already there; it is
+not yet qualified for any phone.
+
+```quint
+type OsSigned = { enrolled: bool, oneSigner: bool, postBuild: bool, postTime: bool, wipes: bool, downgrades: bool }
+
+pure def osSignedKept(signed: OsSigned): bool =
+  signed.enrolled and signed.oneSigner and signed.postBuild and signed.postTime and not(signed.wipes) and not(signed.downgrades)
+
+pure def lawAWipingUpdateIsNeverKept(signed: OsSigned): bool = signed.wipes implies not(osSignedKept(signed))
+```
+
 ### What the simulator tries
 
 ```quint
@@ -310,6 +360,12 @@ pure val goalValues =
   Set(release(1)).union(Set(release(2))).union(Set({ ...release(2), wipe: true }))
     .union(Set({ ...release(2), certificate: "rotated" }))
 pure val imageValues = Set(stockFactoryImage).union(Set("another archive"))
+pure val reviewedPlan: OsPlan = { reviewed: 1, producer: true, tools: true, product: true, output: true, inputs: true }
+pure val planValues = Set(reviewedPlan, { ...reviewedPlan, reviewed: 2 }, { ...reviewedPlan, tools: false })
+pure val keptBuild: OsBuild = { signersKept: true, bootKeysKept: true, abUpdate: true, dataPartitions: false, hooks: false, identity: true }
+pure val unsignedValues = Set(keptBuild, { ...keptBuild, dataPartitions: true }, { ...keptBuild, signersKept: false })
+pure val signedUpdate: OsSigned = { enrolled: true, oneSigner: true, postBuild: true, postTime: true, wipes: false, downgrades: false }
+pure val signedValues = Set(signedUpdate, { ...signedUpdate, wipes: true }, { ...signedUpdate, enrolled: false })
 pure val weight_pass = 12
 pure val weight_recordDrill = 6
 pure val weight_enable = 4

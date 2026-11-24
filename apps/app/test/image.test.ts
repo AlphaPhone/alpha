@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { alphaPrivileged, firstBootGrants } from "../gen/app__image.ts";
 import { aosp, otaArguments, place } from "../scripts/aosp.ts";
 import { inventory, licences } from "../scripts/licences.ts";
-import { type Adb, type Offer, avbMetadata, compareUrl, compared, custodyProof, kept, pilotUpdate, readBack, release } from "../scripts/release.ts";
+import { type Adb, type Offer, type ToolsPin, avbMetadata, compareUrl, compared, custodyProof, kept, osBuildOf, osPlanOf, osSignedOf, pilotUpdate, readBack, release } from "../scripts/release.ts";
 
 const scratches: string[] = [];
 afterEach(() => { for (const directory of scratches.splice(0)) rmSync(directory, { recursive: true, force: true }); });
@@ -395,4 +395,74 @@ describe("Prove the protected release keys (spec/release/index.md, \"Story: Sign
     copyFileSync(join(committed, "media.x509.pem"), join(committed, "platform.x509.pem"));
     expect(custodyProof({ secrets, enrolled, scratch: directory }).custody).toEqual({ pairs: 12, matching: 11, distinct: true, testKeys: false });
   }, 300_000);
+});
+
+describe("Sign a preserving OS update (spec/release/os.md, \"Story: Sign a preserving OS update\")", () => {
+  const pin = JSON.parse(readFileSync(place("aosp/signing/ota-tools.json"), "utf8")) as ToolsPin & { reviewedTargets: { targetFilesSha256: string; sourceCommit: string; sdkCommit: string; targetFingerprint: string; buildTimestamp: number }[] };
+  const target = pin.reviewedTargets[0]!;
+  const stored = (prefix: string, sha256: string) => ({ bucket: "alpha-aosp-lab-20261024-private-apks", object: `unsigned/${prefix}/${sha256}.zip`, generation: "1794604543000000", bytes: 4096, sha256 });
+  const plan = {
+    schema: "alpha-preserving-os-ota-signing/v1", purpose: "pilot-no-platform-key-rotation", sourceCommit: target.sourceCommit, sdkCommit: target.sdkCommit,
+    targetFiles: stored("os", target.targetFilesSha256), otaTools: stored("os-tools", pin.sha256), outputObject: `signed/os-ota/${target.targetFilesSha256}/${"0".repeat(32)}/ota.zip`,
+    product: "alpha_stallion_phone", device: "stallion", targetFingerprint: target.targetFingerprint, buildTimestamp: target.buildTimestamp,
+  };
+  const text = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
+  const zipped = (directory: string, name: string, entries: Record<string, string>) => {
+    const root = join(directory, `${name}-entries`);
+    for (const [entry, content] of Object.entries(entries)) {
+      mkdirSync(join(root, entry, ".."), { recursive: true });
+      writeFileSync(join(root, entry), content);
+    }
+    execFileSync("zip", ["-qrX", join(directory, `${name}.zip`), "."], { cwd: root });
+    return join(directory, `${name}.zip`);
+  };
+
+  it("admits only the reviewed text of a plan that names one reviewed build, a reviewed producer and the pinned tools", async () => {
+    const bytes = text(plan);
+    const reviewed = createHash("sha256").update(bytes).digest("hex");
+    // spec/release/os.md, "A preserving update is signed only from a plan that names exactly one reviewed build, by a reviewed producer, with the pinned tools, for Alpha's product and device"
+    expect(osPlanOf(bytes, reviewed, pin).facts).toEqual({ reviewed: 1, producer: true, tools: true, product: true, output: true, inputs: false });
+    expect(() => osPlanOf(bytes, digest("another plan"), pin)).toThrow("not the text that was reviewed");
+    const twice = { ...pin, reviewedTargets: [target, target] };
+    expect(osPlanOf(bytes, reviewed, twice).facts.reviewed).toBe(2);
+    const other = text({ ...plan, sourceCommit: "f".repeat(40), outputObject: "signed/os-ota/elsewhere/ota.zip" });
+    expect(osPlanOf(other, createHash("sha256").update(other).digest("hex"), pin).facts).toMatchObject({ reviewed: 0, producer: false, output: false });
+    const directory = scratch();
+    const file = join(directory, "plan.json");
+    writeFileSync(file, bytes);
+    expect(await released("os-plan", "--plan", file, "--plan-sha256", reviewed)).toMatchObject({ ok: true, value: { admitted: true, outputObject: plan.outputObject } });
+    expect(await released("os-sign", "--plan", file, "--plan-sha256", reviewed, "--target-files", file, "--ota-tools", file, "--work", join(directory, "work")))
+      .toMatchObject({ ok: false, tag: "ReleaseRefused", said: expect.stringContaining("\"inputs\":false") });
+  });
+
+  it("signs from a build that keeps its keys and its phone's data, and from no build that replaces data or brings a hook", () => {
+    const directory = scratch();
+    const signers = 'name="Settings.apk" certificate="build/make/target/product/security/platform.x509.pem" private_key="build/make/target/product/security/platform.pk8"';
+    const keptSigners = createHash("sha256").update('{"Settings.apk":{"certificate":"build/make/target/product/security/platform.x509.pem","private_key":"build/make/target/product/security/platform.pk8"}}').digest("hex");
+    const keptBoot = createHash("sha256").update('{"avb_vbmeta_algorithm":"SHA256_RSA4096","avb_vbmeta_key_path":"external/avb/test/data/testkey_rsa4096.pem"}').digest("hex");
+    const ours = { ...pin, apkSignerMappingsSha256: keptSigners, avbKeyConfigurationSha256: keptBoot, reviewedTargets: [{ ...target }] };
+    const build = (more: Record<string, string> = {}, partitions = "system\nvendor\nboot") => zipped(directory, `build-${Object.keys(more).length}-${partitions.length}`, {
+      "META/misc_info.txt": "ab_update=true\navb_vbmeta_key_path=external/avb/test/data/testkey_rsa4096.pem\navb_vbmeta_algorithm=SHA256_RSA4096\nother=1\n",
+      "META/ab_partitions.txt": partitions, "META/apkcerts.txt": `${signers}\n`,
+      "PRODUCT/etc/build.prop": `ro.build.fingerprint=${target.targetFingerprint}\nro.build.date.utc=${target.buildTimestamp}\n`, ...more,
+    });
+    const read = (zip: string) => osBuildOf(zip, plan, ours, ours.reviewedTargets[0]).build;
+    // spec/release/os.md, "The build keeps its own APK signers and verified-boot keys, replaces no data or trust-state partition, and brings no signing hook of its own"
+    expect(read(build())).toEqual({ signersKept: true, bootKeysKept: true, abUpdate: true, dataPartitions: false, hooks: false, identity: true });
+    expect(read(build({}, "system\nuserdata"))).toMatchObject({ dataPartitions: true });
+    expect(read(build({ "META/releasetools.py": "print()" }))).toMatchObject({ hooks: true });
+    expect(osBuildOf(build(), plan, { ...ours, avbKeyConfigurationSha256: digest("rotated") }, ours.reviewedTargets[0]).build.bootKeysKept).toBe(false);
+  });
+
+  it("keeps no update its metadata says wipes or downgrades, nor one that no certificate signs whole", () => {
+    const directory = scratch();
+    const update = (extra: string) => zipped(directory, `ota-${extra.length}`, {
+      "META-INF/com/android/metadata": `ota-type=AB\npre-device=stallion\npost-build=${target.targetFingerprint}\npost-timestamp=${target.buildTimestamp}\n${extra}`,
+      "payload.bin": "payload",
+    });
+    // spec/release/os.md, "The signed update is kept only when one certificate, the enrolled release key's, signs it whole, for the planned build and time, with no wipe and no downgrade"
+    expect(osSignedOf(update(""), plan, target.buildTimestamp, digest("enrolled"), directory)).toEqual({ enrolled: false, oneSigner: false, postBuild: true, postTime: true, wipes: false, downgrades: false });
+    expect(osSignedOf(update("ota-wipe=yes\n"), plan, target.buildTimestamp, digest("enrolled"), directory)).toMatchObject({ wipes: true });
+    expect(osSignedOf(update("ota-downgrade=yes\n"), plan, target.buildTimestamp + 1, digest("enrolled"), directory)).toMatchObject({ downgrades: true, postTime: false });
+  });
 });
