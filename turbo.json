@@ -6,11 +6,14 @@
     "//#build:upstream": {
       "cache": false
     },
+    "tokens": {
+      "outputs": ["generated/**"]
+    },
     "gen": {
       "outputs": ["gen/**", "generated/**"]
     },
     "build": {
-      "dependsOn": ["gen", "//#build:upstream"],
+      "dependsOn": ["gen", "tokens", "//#build:upstream"],
       "env": ["ELIZA_DEV_ALLOW_TEST_MOCKS", "ALPHA_CLOUD_CUTOVER", "ALPHA_CLOUD_DEPLOYMENT_FILE", "VITE_*"],
       "outputs": ["dist/**", "generated/**", "storybook-static/**", "../../web-dist/**"]
     },
@@ -19,15 +22,19 @@
       "outputs": [".vibe/declarations/**"]
     },
     "test": {
-      "dependsOn": ["gen", "//#build:upstream"],
+      "dependsOn": ["gen", "tokens", "//#build:upstream"],
       "outputs": [".cache/test-result-*.json"]
+    },
+    "@alphacompute/alpha-cloud#test": {
+      "dependsOn": ["gen", "//#build:upstream"],
+      "outputs": []
     },
     "test:browser": {
       "dependsOn": ["gen", "//#build:upstream"],
       "outputs": []
     },
     "lint": {
-      "dependsOn": ["gen"],
+      "dependsOn": ["gen", "tokens"],
       "outputs": []
     },
     "check": {
@@ -35,7 +42,7 @@
       "cache": false
     },
     "dev": {
-      "dependsOn": ["gen", "//#build:upstream"],
+      "dependsOn": ["gen", "tokens", "//#build:upstream"],
       "cache": false,
       "persistent": true
     }
