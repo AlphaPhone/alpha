@@ -53,4 +53,7 @@ public final class AlphaNotificationProjection {
     public static JSONObject page(JSONObject input, JSONObject cursor) throws Exception { return NativeNotificationWire.page(input, cursor); }
 
     public static String view(String deepLink) { return NativeNotificationRoute.view(deepLink); }
+
+    /** The channel groups Alpha itself assigns to eliza_updates, so the shared routing does not read them as an owner choice. */
+    public static void setHostAssignedGroups(java.util.Collection<String> groups) { NativeNotificationChannels.setHostAssignedGroups(groups); }
 }
