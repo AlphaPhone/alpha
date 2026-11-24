@@ -27,7 +27,7 @@ module held {
 import { bridge, details, found } from held
 export { details, found }
 
-/** eliza's client of the phone's `ElizaSystem` plugin, from the one bridge the launcher loads. @throws {never} */
+/** eliza's client of the phone's `ElizaSystem` plugin, from the one bridge the launcher loads. */
 export function phoneSystem(): Promise<SystemClient> {
   return bridge().then((loaded) => loaded.System)
 }
