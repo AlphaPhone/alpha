@@ -84,10 +84,10 @@ public class FreshTest {
   return stage.build_plan(root,ASSETS,stage.digest((ASSETS/'branding-assets.json').read_bytes()),INPUT,product_mk_hash=before,core_baseline=core_baseline)
 
  def test_image_identity_rechecks_canonical_signed_apk_and_all_admission_bindings(self):
-  bun=os.environ.get('ALPHA_BUN','bun')
+  node='node'
   selected='ai.alphacompute.alphaphone'
   # A real nine-handler canonical launcher manifest runs through the production TS qualifiers.
-  tree=lambda *flags:subprocess.check_output([bun,'test/fixtures/telephony-launcher-tree.mjs',selected,*flags],text=True,cwd=REPO)
+  tree=lambda *flags:subprocess.check_output([node,'test/fixtures/telephony-launcher-tree.mjs',selected,*flags],text=True,cwd=REPO)
   manifest={'tree':tree()}
   with tempfile.TemporaryDirectory(prefix='alpha-image-identity-') as d:
    root=Path(d);apk=root/'Launcher.apk';apk.write_bytes(b'isolated signed-tool boundary fixture, not an APK')
@@ -106,7 +106,7 @@ public class FreshTest {
    run=subprocess.check_output
    def tools(args,**kwargs):
     if args[0]=='apksigner-fixture':return 'Signer #1 certificate SHA-256 digest: '+signer+'\n'
-    if args[0]==bun:return run(args,**kwargs)
+    if args[0]==node:return run(args,**kwargs)
     if args[0]=='git':
      # Pinned Provision objects from the source checkout; only `git show REV:path` is expected.
      self.assertEqual(args[1],'-C');self.assertEqual(args[3],'show')
@@ -128,10 +128,10 @@ public class FreshTest {
     def policy(root,read_baseline=None):
      return policy_plan(root,core_baseline)
     # The exact production invocation: stage-aosp pins and brands the stage product.mk itself.
-    command=json.loads(run([bun,'-e','const [output, source, assets, reportSha256] = process.argv.slice(-4);'
+    command=json.loads(run([node,'--conditions=eliza-source','--import','vibelang/register','--input-type=module','-e','const [output, source, assets, reportSha256] = process.argv.slice(-4);'
       'console.log(JSON.stringify((await import("./scripts/stage-aosp.ts")).brandingPacketCommand('
       '{output, source, assets, reportSha256, aapt: "aapt-fixture", apksigner: "apksigner-fixture"})));',
-      str(root),str(aosp),str(ASSETS),stage.digest((ASSETS/'branding-assets.json').read_bytes())],text=True,cwd=REPO))
+      '--',str(root),str(aosp),str(ASSETS),stage.digest((ASSETS/'branding-assets.json').read_bytes())],text=True,cwd=REPO))
     self.assertEqual(command[0],'scripts/stage-alpha-os-branding.py')
     self.assertNotIn('--source-inputs',command)
     self.assertEqual((root/'product.mk').read_bytes(),

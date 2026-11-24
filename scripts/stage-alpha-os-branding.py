@@ -169,11 +169,12 @@ def image_identity(image_stage, aapt, apksigner):
     tree = subprocess.check_output([aapt, 'dump', 'xmltree', str(apk), 'AndroidManifest.xml'], text=True)
     with tempfile.TemporaryDirectory(prefix='alpha-image-manifest-') as temporary:
         manifest=Path(temporary)/'manifest.txt';manifest.write_text(tree)
-        code="""const [file, appId, stage, roles] = process.argv.slice(-4);
-const tree = await Bun.file(file).text();
+        code="""import {readFile} from 'node:fs/promises';
+const [file, appId, stage, roles] = process.argv.slice(-4);
+const tree = await readFile(file, 'utf8');
 (await import(stage)).assertImageLauncherManifest(tree, true, appId);
 (await import(roles)).aospTelephonyRoleComponents(tree, appId);"""
-        subprocess.check_output([os.environ.get('ALPHA_BUN','bun'), '-e', code, str(manifest),
+        subprocess.check_output(['node', '--conditions=eliza-source', '--import', 'vibelang/register', '--input-type=module', '-e', code, '--', str(manifest),
             admission['packageName'], str(REPO/'scripts/stage-aosp.ts'), str(REPO/'scripts/aosp-telephony-roles.ts')], text=True, cwd=REPO)
     return admission
 
