@@ -152,6 +152,9 @@ pure def lawAPassageIsBounded(chars: int): bool = passageFits(chars) implies cha
 ### A spoken reply refuses only a likely password, key or card; everything else it cannot say becomes a pause
 
 A reply with nothing left to say is silent, not an error.
+Before synthesis, Alpha expands named dates and clock ranges, says percentages, and pauses after
+prose headings. Replies interpret a bare clock only in a clock context. The original chat text is
+kept, and screening checks the original text before formatting can alter a secret label.
 
 ```quint
 type Screened = SpeakIt | RefusedSecret | NothingToSay | RefusedLink | RefusedCharacters | RefusedLength

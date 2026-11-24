@@ -14,7 +14,7 @@ import { layer } from "../../src/voice/layer.vibe"
 import { Listener } from "../../src/voice/listener.vibe"
 import { VoiceRoute } from "../../src/voice/route.vibe"
 import { Speech } from "../../src/voice/speech.vibe"
-import { replyActionOf, spokenLineOf, EMAIL_DRAFT_READY } from "../../src/voice/spoken-text.ts"
+import { planReading, planReply, replyActionOf, spokenLineOf, EMAIL_DRAFT_READY } from "../../src/voice/spoken-text.ts"
 import { ReadingVoice } from "../../src/browser/ports.vibe"
 import { VoicemailTranscriber } from "../../src/telephony/ports.vibe"
 
@@ -243,4 +243,24 @@ it.effect(`Hear a short line for an action (spec/voice/speech.md, "Story: Hear a
   const plain = spokenLineOf("It is sunny.", replyActionOf(undefined))
   const verbatim = spokenLineOf("Event ID: ev_123 is booked.", replyActionOf({ kind: "CALENDAR_CREATE", validatedCard: false, verbatimAsked: true }))
   try Effect.try(() => assert.deepStrictEqual({ drafted, plain, verbatim }, { drafted: EMAIL_DRAFT_READY, plain: "It is sunny.", verbatim: "Event ID: ev_123 is booked." }))
+})
+
+
+it.effect(`Say calendar dates and times naturally (spec/voice/speech.md, "Story: Never have a secret read aloud")`, () => effect {
+  try Effect.try(() => {
+    assert.deepStrictEqual(planReply("Availability: Sun, Nov 22, 12:00 PM – 12:30 PM."), {
+      kind: "speak", pieces: ["Availability, Sunday, November twenty second, noon to twelve thirty P M."],
+    })
+    assert.deepStrictEqual(planReply("Sun Microsystems. Deadline: Sept. 1 at 9:05 a.m."), {
+      kind: "speak", pieces: ["Sun Microsystems. Deadline, September first at nine oh five A M."],
+    })
+    assert.deepStrictEqual(planReading("Lunch at 7:00 then 9:05."), {
+      kind: "speak", pieces: ["Lunch at seven o'clock then nine oh five."],
+    })
+    assert.deepStrictEqual(planReply("2% of $1,299.50. Ratio 2:10."), {
+      kind: "speak", pieces: ["2 percent of 1299 dollars 50.", "Ratio 2 colon 10."],
+    })
+    assert.deepStrictEqual(planReply("The secret: example"), { kind: "refused", reason: "secret" })
+    assert.deepStrictEqual(planReading("Card 1234 5678 9012 may be saved."), { kind: "refused", reason: "secret" })
+  })
 })
