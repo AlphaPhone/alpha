@@ -127,6 +127,21 @@ pure def lawTheBodyIsBounded(held: int, bytes: int): bool =
   (held >= 0 and chunkTaken(held, bytes)) implies (held + bytes >= 0 and held + bytes <= bodyLimit)
 ```
 
+### A stream Alpha stops reading is withdrawn from the phone, and may still have reached the agent
+
+A stream ends for Alpha when the screen that reads it goes, when the caller
+withdraws it, or when it says nothing for longer than its listener allows.
+Its listeners are then removed and the phone is asked to abort it, so
+nothing of it keeps running for a page that no longer reads it. Whether or
+not its answer had begun, the agent may have heard it: only the phone's
+refusal before the answer says a stream never left Alpha.
+
+```quint
+pure def lawAWithdrawnStreamMayHaveBeenSent(answered: bool): bool = deliveryOf(answered, Withdrawn) == MaybeSent
+
+pure def lawAStreamThatErredMayHaveBeenSent(answered: bool): bool = deliveryOf(answered, Errored) == MaybeSent
+```
+
 ## Story: Be told when to try again
 
 > As the owner, I want a request the agent or the cloud turned away for
@@ -156,6 +171,43 @@ pure def lawAnAdvisedWaitIsWithinADay(status: int, given: bool, seconds: int): b
 pure def lawAnUngivenWaitIsNeverAdvised(status: int, seconds: int): bool = not(waitAdvised(status, false, seconds))
 ```
 
+### Only a 2xx answer is the reply; every other status is a refusal
+
+An answer of the agent or the cloud whose status is not 2xx is never read
+as what was asked for: it is a refusal with its status, and the wait the
+rule above admits.
+
+```quint
+pure def replied(status: int): bool = status >= 200 and status < 300
+
+pure def lawA2xxIsTheReply(status: int): bool = replied(status) iff (status >= 200 and status <= 299)
+```
+
+## Story: Be told when I must sign in
+
+> As the owner, I want a cloud request my phone holds back because I am
+> signed out to say so, as the cloud itself would, so that Alpha asks me to
+> sign in rather than calling the cloud unreachable.
+
+### A cloud request the phone holds back for want of a sign-in reads as the cloud's own 401
+
+The phone's cloud plugin holds the account's key and sends nothing for an
+account that is signed out or must sign in again. Alpha reads that as the
+cloud's 401, through eliza's cloud client as through a plain read, so an
+area tells a signed-out owner from an unreachable cloud. Such a request
+never left the phone, so what it asked is known not to have been done. Every
+other answer keeps the cloud's own status.
+
+```quint
+pure val signInStatus = 401
+
+pure def cloudStatusOf(heldForSignIn: bool, status: int): int = if (heldForSignIn) signInStatus else status
+
+pure def lawAHoldForSignInReadsAs401(status: int): bool = cloudStatusOf(true, status) == 401
+
+pure def lawOtherwiseTheCloudsStatusStands(status: int): bool = cloudStatusOf(false, status) == status
+```
+
 ## Story: Send while my phone has a network
 
 > As the owner, I want a message to go out whenever Android says my phone
@@ -164,7 +216,12 @@ pure def lawAnUngivenWaitIsNeverAdvised(status: int, seconds: int): bool = not(w
 ### A request is refused for want of a network only when Android confirms the app's network is down
 
 The page's own offline hint is never trusted: where Android has said
-nothing, the request goes out and its own answer says how it went.
+nothing, the request goes out and its own answer says how it went. Android
+says it by eliza's Wi-Fi plugin, whose read of the active network is online
+when that network offers Internet, whatever kind it is. Only a request to
+the cloud needs the network: the resident agent runs on the phone and is
+reached without one. A cloud request refused for want of a network never
+left the phone.
 
 ```quint
 type Net = NetUnknown | NetOnline | NetOffline
@@ -172,6 +229,34 @@ type Net = NetUnknown | NetOnline | NetOffline
 pure def refusedOffline(network: Net): bool = network == NetOffline
 
 pure def lawOnlyAConfirmedOfflineRefuses(network: Net): bool = refusedOffline(network) iff network == NetOffline
+```
+
+## Story: Keep my phone's state across restarts
+
+> As the owner, I want what each screen kept to be there after a restart,
+> and a kept value Alpha can no longer read to be set aside rather than
+> lost.
+
+### A kept value that is no longer a state is set aside where nothing is held, and its machine starts afresh
+
+A machine's state is kept under its spec's path and the version its area
+raises when the state's shape changes. What is kept there and is no longer a
+state, after such a change or a change of one of its rules, is copied aside
+beside its key, into the first of its places for copies that holds nothing,
+and the machine starts afresh, so one area's state never keeps Alpha from
+opening. A copy waiting there is never written over: where every place is
+taken, the value stays where it was and the machine runs in memory, as it
+does where the store cannot be read at all. Erasing Alpha's data removes the
+copies with the rest.
+
+```quint
+type Kept = KeptState | KeptUnreadable | KeptNothing
+
+pure def setAside(kept: Kept, placeHeld: bool): bool = kept == KeptUnreadable and not(placeHeld)
+
+pure def lawAHeldCopyIsNeverWrittenOver(kept: Kept): bool = not(setAside(kept, true))
+
+pure def lawOnlyAnUnreadableValueIsSetAside(kept: Kept, placeHeld: bool): bool = setAside(kept, placeHeld) implies kept == KeptUnreadable
 ```
 
 ## Story: Ship only what this build allows

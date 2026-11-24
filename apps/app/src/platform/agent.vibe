@@ -1,8 +1,8 @@
-// spec/kit/read.md, "Story: Read from outside"; spec/app/platform/index.md, "Story: Talk to the resident agent"; spec/app/platform/feed.md, "Story: Follow what my agent does on my screen"
+// spec/kit/read.md, "Story: Read from outside"; spec/app/platform/index.md, "Story: Talk to the resident agent"; spec/app/platform/index.md, "A stream Alpha stops reading is withdrawn from the phone, and may still have reached the agent"; spec/app/platform/feed.md, "Story: Follow what my agent does on my screen"
 import { type RuntimeJsonBridge, type RuntimeRequestHeaders, type RuntimeStatus, type RuntimeStreamFrame, RuntimeRequestError, createRuntimeJsonClient } from "@elizaos/agent/client"
 import { BridgeUnavailable } from "@elizaos/os/bridges/bridge"
 import type { AgentEvent, AgentMethod, AgentRoute, AgentStatus, AgentStreamData, AgentStreamEnd, AgentTopic, ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent"
-import { chunkTaken, deliveryOf } from "../../gen/app__platform.effect.vibe"
+import { chunkTaken, deliveryOf, replied } from "../../gen/app__platform.effect.vibe"
 import { Machine as Feed, type FrameKind, machine as feedMachine } from "../../gen/app__platform__feed.effect.vibe"
 import { fresh } from "../runtime/attempts.vibe"
 import { type Failure, type Listening, type Opened, type Remote, type Wired, Refused, Unreachable, Unsent, parsed, patience, refusal, remoteAt, sse } from "./remote.vibe"
@@ -267,7 +267,7 @@ function plugged(plugin: ElizaAgentPlugin): Remote {
         when Unsent: throw cause;
         default: throw new Unreachable({ cause });
       }
-      if (answered.status < 200 || answered.status >= 300) throw new Refused({ status: answered.status })
+      if (!replied(answered.status)) throw refusal(answered.status, undefined)
       return answered.data
     },
     events(request: HttpClientRequest.HttpClientRequest, listening?: Listening) {
@@ -276,7 +276,7 @@ function plugged(plugin: ElizaAgentPlugin): Remote {
           when Unsent: throw cause;
           default: throw new Unreachable({ cause });
         }
-        if (status < 200 || status >= 300) throw new Refused({ status })
+        if (!replied(status)) throw new Refused({ status })
         return sse(body, listening)
       })
     },

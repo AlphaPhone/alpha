@@ -8,10 +8,12 @@ export interface PlatformScene {
   readonly listening: Set<{ readonly topic: string; readonly clientId: string | null; readonly send: (data: unknown) => void }>;
   /** What the earlier Alpha kept in its connection plugin's encrypted slots, by slot. */
   readonly earlier: Map<string, string>;
+  /** The streams the agent is still writing for `/api/platform/drip`, which says one thing and then waits. */
+  readonly dripping: Set<object>;
 }
 
 export function platformScene(): PlatformScene {
-  return { listening: new Set(), earlier: new Map() };
+  return { listening: new Set(), earlier: new Map(), dripping: new Set() };
 }
 
 /**
@@ -47,6 +49,12 @@ export function platformRoutes(scene: PlatformScene): Route[] {
       ? Response.json(Object.fromEntries([...request.headers].filter(([name]) => name.startsWith("x-eliza")))) : undefined),
     (request, url) => (request.method === "GET" && url.pathname === "/api/platform/busy" ? busy(Number(url.searchParams.get("status"))) : undefined),
     (request, url) => (request.method === "POST" && url.pathname === "/api/platform/flood" ? flood(Number(url.searchParams.get("size"))) : undefined),
+    (request, url) => (request.method === "POST" && url.pathname === "/api/platform/drip" ? feed((send) => {
+      const one = {};
+      scene.dripping.add(one);
+      send("first");
+      return () => scene.dripping.delete(one);
+    }) : undefined),
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== "/api/events") return undefined;
       return feed((send) => {
