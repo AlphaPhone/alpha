@@ -31,6 +31,7 @@ schema Replied { fullText: string }
 describe("Run Alpha's agent on the phone", () => {
   // spec/agent/index.md, "The page reaches exactly the routes its platform services call, and nothing else"
   // spec/agent/index.md, "The agent keeps its memory across restarts, without embeddings"
+  // spec/agent/index.md, "The agent swaps the owner's secrets and personal details out of what it sends the cloud"
   // spec/agent/index.md, "A launch never names the workflow worker, and the agent refuses one that does with its configuration code"
   it.live("Run Alpha's agent on the phone", () => scoped(effect {
     const run = try acquireRelease(promise(() => startRun()), (started) => promise(() => started.stop()))

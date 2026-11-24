@@ -91,6 +91,20 @@ pure val persistMemory: bool = true
 pure val localEmbeddings: bool = false
 ```
 
+### The agent swaps the owner's secrets and personal details out of what it sends the cloud
+
+The old agent was launched with eliza's secret swap and personal-detail
+swap on (`legacy/android/app/src/main/java/ai/alphacompute/alphaphone/AlphaLocalAgentPlugin.java`,
+`ELIZA_SECRET_SWAP_ENABLED` and `ELIZA_PII_SWAP_ENABLED`), so a key, a
+number or an address the owner writes reaches the model only as a stable
+reference. The launch asks eliza's privacy service for both.
+
+```quint
+pure val secretSwap: bool = true
+pure val personalDetailSwap: bool = true
+pure def privacyAdmitted(secrets: bool, details: bool): bool = secrets == secretSwap and details == personalDetailSwap
+```
+
 ### The agent's text goes to the owner's cloud account, which is asked for the model the old agent used
 
 The old agent's default model was `qwen-3.8-27b` (the old tree's agent model script at

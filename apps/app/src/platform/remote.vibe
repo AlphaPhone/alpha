@@ -1,13 +1,21 @@
-// spec/kit/read.md, "Story: Read from outside"; spec/kit/attempt.md, "A sent attempt ends as its own answer says, or as unknown when no answer can be trusted"
+// spec/kit/read.md, "Story: Read from outside"; spec/kit/attempt.md, "A sent attempt ends as its own answer says, or as unknown when no answer can be trusted"; spec/app/platform/index.md, "A refusal carries a wait only when the other side answered 429 with a whole number of seconds, at most a day"
 import * as Sse from "effect/encoding/Sse"
+import { adviceOf } from "../../gen/app__platform.effect.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 
 /** The request provably never left Alpha: its route is not one the phone relays, or the bridge was busy or is not there. */
 export error Unsent { cause: unknown }
 /** The other side could not be reached, did not answer in time, or stopped mid-answer: it may have acted. */
 export error Unreachable { cause: unknown }
-/** The other side answered with a status other than 2xx. */
-export error Refused { status: number }
+/** The other side answered with a status other than 2xx, and how many seconds it asked Alpha to wait, where it asked. */
+export error Refused { status: number; wait?: number }
+
+/** The refusal of `status`, with the wait `said` gave where the platform's rule takes it: a `Retry-After` of whole seconds, or seconds already read. */
+export function refusal(status: number, said: string | number | undefined): Refused {
+  const seconds = typeof said === "number" ? said : said !== undefined && /^\d+$/.test(said.trim()) ? Number(said.trim()) : undefined
+  const advice = adviceOf(status, seconds !== undefined && Number.isSafeInteger(seconds), seconds ?? 0)
+  return new Refused(typeof advice === "object" && advice._tag === "WaitSeconds" ? { status, wait: advice.value } : { status })
+}
 /** The other side answered 2xx with something that is not what was asked for. */
 export error Garbled { cause: unknown }
 
@@ -108,7 +116,7 @@ export effect function remoteAt(base: string): Wired!!HttpClient.HttpClient {
   }
   effect function answered(request: HttpClientRequest.HttpClientRequest): Opened!(Unreachable | Refused) {
     const opened = try open(request)
-    if (opened.status < 200 || opened.status >= 300) throw new Refused({ status: opened.status })
+    if (opened.status < 200 || opened.status >= 300) throw refusal(opened.status, opened.headers["retry-after"])
     return opened
   }
   return {

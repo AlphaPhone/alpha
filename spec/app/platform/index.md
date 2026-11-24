@@ -127,6 +127,39 @@ pure def lawTheBodyIsBounded(held: int, bytes: int): bool =
   (held >= 0 and chunkTaken(held, bytes)) implies (held + bytes >= 0 and held + bytes <= bodyLimit)
 ```
 
+## Story: Be told when to try again
+
+> As the owner, I want a request the agent or the cloud turned away for
+> now to say how long to wait, and never to invent a wait it was not given.
+
+### A refusal carries a wait only when the other side answered 429 with a whole number of seconds, at most a day
+
+The wait is the `Retry-After` the cloud or the agent's address gave, or
+the one eliza's runtime client read from the agent's refusal. Every other
+refusal keeps only its status.
+
+```quint
+type Advice = NoAdvice | WaitSeconds(int)
+
+pure val maxWaitSeconds = 86400
+
+pure def adviceOf(status: int, given: bool, seconds: int): Advice =
+  if (status == 429 and given and seconds >= 0 and seconds <= maxWaitSeconds) WaitSeconds(seconds) else NoAdvice
+
+pure val statusValues = Set(200, 401, 429, 503)
+pure val secondsValues = Set(-1, 0, 30, 86401)
+
+pure def lawAWaitIsAdvisedOnlyOn429(status: int, given: bool, seconds: int): bool =
+  adviceOf(status, given, seconds) != NoAdvice implies status == 429
+
+pure def lawAnAdvisedWaitIsWithinADay(status: int, given: bool, seconds: int): bool = match adviceOf(status, given, seconds) {
+  | WaitSeconds(s) => s >= 0 and s <= maxWaitSeconds
+  | NoAdvice => true
+}
+
+pure def lawAnUngivenWaitIsNeverAdvised(status: int, seconds: int): bool = adviceOf(status, false, seconds) == NoAdvice
+```
+
 ## Story: Send while my phone has a network
 
 > As the owner, I want a message to go out whenever Android says my phone
