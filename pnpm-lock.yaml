@@ -337,6 +337,9 @@ importers:
       '@elizaos/os':
         specifier: link:../../.eliza/packages/os
         version: link:../../.eliza/packages/os
+      '@elizaos/plugin-inbox':
+        specifier: link:../../.eliza/packages/plugin-inbox
+        version: link:../../.eliza/packages/plugin-inbox
       '@elizaos/plugin-notes':
         specifier: link:../../.eliza/packages/plugin-notes
         version: link:../../.eliza/packages/plugin-notes

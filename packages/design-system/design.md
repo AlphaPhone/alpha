@@ -20,12 +20,15 @@ do next.
 - **Type.** `font-sans` is Public Sans, for everything read or pressed. `font-display` is Denton, with
   Fraunces behind it, at weight `light`: a screen's one title, the date on Home, a large figure. The sizes
   are in rem, so Android's text size scales them: `base` is body text, `3xl` a screen title, `4xl` the
-  Home date. `tracking-caps` with `text-xs` is a small uppercase label. A list row reads `text-base`,
+  Home date. `tracking-caps` with `text-xs` is a small uppercase label; `text-label` names an app tile on
+  Home and in the drawer. A list row reads `text-base`,
   `text-subject` and `text-snippet` line by line; `text-meta` is a status line under a header, and `text-body`
   the text of a message or of a field being typed; `text-2xs` is the time under a text message or a
   keypad key's letters; `text-keypad-number` the number being dialled, `text-keypad-digit` a key's
-  digit and `text-keypad-letters` the letters under it. `text-lead` is the street of the next turn,
+  digit and `text-keypad-letters` the letters under it; `text-contact-name` and `text-contact-initials`, in
+  `font-display`, are a contact's name and initials at the top of their card. `text-lead` is the street of the next turn,
   `text-title` a document's name over its preview, and `text-figure` and `text-figure-sm` a route's time.
+  `leading-row` sets `text-body` as a note's or a routine's title in a list.
 - **Shape.** `radius` is a card or a row group; `rounded-home-card` is a Home overview card;
   `rounded-drawer-icon` rounds an installed app icon; `rounded-option` is a row of a floating menu and
   `rounded-box` the box of a list row's selection check. `rounded-tile` is an app tile, a menu and a dialog;
@@ -108,6 +111,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.2xs.leading` | 1.4 |
 | `text.xs.size` | 0.75rem |
 | `text.xs.leading` | 1.25 |
+| `text.label.size` | 0.75rem |
+| `text.label.leading` | 1.1667 |
 | `text.meta.size` | 0.8125rem |
 | `text.meta.leading` | 1.25 |
 | `text.snippet.size` | 0.84375rem |
@@ -151,6 +156,11 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.keypad-number.size` | 2.375rem |
 | `text.keypad-number.leading` | 1.2 |
 | `text.keypad-number.tracking` | 0.02em |
+| `text.contact-name.size` | 2.125rem |
+| `text.contact-name.leading` | 1.1 |
+| `text.contact-name.tracking` | -0.01em |
+| `text.contact-initials.size` | 2.625rem |
+| `text.contact-initials.leading` | 1 |
 | `weight.light` | 300 |
 | `weight.normal` | 400 |
 | `weight.medium` | 500 |
@@ -159,6 +169,7 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `leading.none` | 1 |
 | `leading.tight` | 1.1 |
 | `leading.snug` | 1.25 |
+| `leading.row` | 1.3 |
 | `leading.normal` | 1.4 |
 | `leading.relaxed` | 1.6 |
 | `tracking.tight` | -0.01em |
