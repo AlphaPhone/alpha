@@ -16,8 +16,8 @@ at once and are replaced by the next read.
 Choosing another account, a new read epoch, another folder or a new search starts a new list and
 retires every read in flight for the previous one. Without a selected account the list is empty.
 Checking the accounts again under the same selection and read epoch keeps a live list that is
-shown or being read, with the pages loaded so far; only a list that failed, or a saved one, is read
-again.
+shown or being read, with the pages loaded so far; a list that failed, a saved one, or one whose
+account was granted other access is read again.
 
 ```quint
 import failures.* from "./failures"
