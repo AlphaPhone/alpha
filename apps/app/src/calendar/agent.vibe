@@ -1,15 +1,15 @@
-// spec/calendar/agent.md, "Story: See my agent's Calendar for the account I am signed in to"; spec/calendar/agent.md, "Story: Change my agent's Calendar only as I reviewed, and be told what happened"; spec/calendar/agent.md, "An applied create or change is read back through the same scoped calendar; only a readback that finds it says saved"; spec/calendar/agent.md, "Story: Return to the event I left Calendar from"
+// spec/calendar/agent.md, "Story: See my agent's Calendar for the account I am signed in to"; spec/calendar/agent.md, "Story: Change my agent's Calendar only as I reviewed, and be told what happened"; spec/calendar/agent.md, "An applied create or change is read back through the same scoped calendar; only a readback that finds it says saved"; spec/calendar/agent.md, "An invitation answer is sent only by the invitee, at the version shown, and is saved only when a read shows the answer"; spec/calendar/agent.md, "Story: Return to the event I left Calendar from"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import {
   type AgentCalendar as AgentState, type FeedReply, type ProviderReply, type Readback, type SourcesReply,
-  type UpcomingReply, type WriteKind, type Event as AgentEvent, type WriteOutcome, type EventReturn, type ReturnFeed, Machine as AgentMachine, eventReturn,
+  type UpcomingReply, type WriteKind, type Event as AgentEvent, type WriteOutcome, type EventReturn, type ReturnFeed, Machine as AgentMachine, answerAdmitted, answerReadback, eventReturn,
 } from "../../gen/calendar__agent.effect.vibe"
 import { sourceKeyId, utcInstant } from "@elizaos/plugin-calendar"
 import { namedReadWindow } from "@elizaos/plugin-calendar/client"
 import { Resident, ResidentRefused, ResidentUnavailable } from "../platform/resident.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 import { type CalendarRecord as CalendarSummary, type EventRecord, type FeedRecord, decodeCalendars, decodeFeed, decodeNext } from "./feed.schema.vibe"
-import type { CalendarChangeReply, CalendarCreateRequest, CalendarDeleteRequest, CalendarUpdateRequest } from "@elizaos/plugin-calendar/client"
+import type { CalendarChangeReply, CalendarCreateRequest, CalendarDeleteRequest, CalendarRespondRequest, CalendarUpdateRequest } from "@elizaos/plugin-calendar/client"
 import { residentClients } from "./client.vibe"
 import { sha256Hex } from "./digest.ts"
 import { type InstantRange, agentEventKey, eventSourceKey, readableSource, windowKey } from "./model.vibe"
@@ -37,6 +37,9 @@ export interface CreateRequest { readonly sourceKey: string; readonly request: C
 
 /** A reviewed change of one event at the version reviewed. */
 export interface UpdateRequest { readonly eventKey: string; readonly request: CalendarUpdateRequest; readonly admitted: boolean }
+
+/** The owner's Going or Maybe for one invitation at the version shown; `invitee` says the owner was invited and does not organize it. */
+export interface AnswerRequest { readonly eventKey: string; readonly request: CalendarRespondRequest & { readonly responseStatus: "accepted" | "tentative" }; readonly invitee: boolean }
 
 /** A reviewed deletion or decline of one event at the version reviewed. */
 /**
@@ -69,6 +72,8 @@ export service AgentCalendar {
   refresh(window: CalendarWindow): void!!
   create(request: CreateRequest): WriteOutcome!!
   update(request: UpdateRequest): WriteOutcome!!
+  /** Answer an invitation Going or Maybe; a decline is `remove` with its decline mode. */
+  answer(request: AnswerRequest): WriteOutcome!!
   remove(request: DeleteRequest): WriteOutcome!!
   /** Whether an event left for Maps is still the version left, for the same binding; with `sourceRevision`, also from the same calendar selection. */
   verifyReturn(eventKey: string, revision: string, begin: number, sourceRevision?: string): EventReturn!!
@@ -338,6 +343,19 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
           ? "ReadbackFound" : "ReadbackMissing"
       }
       return try write("UpdateEvent", admitted, () => api.updateLifeOpsCalendarEvent(event?.id ?? "", request), find,
+        receiptSource(event === undefined ? "" : eventSourceKey(event)), at, event?.timezone ?? "UTC")
+    },
+    effect answer(change: AnswerRequest) {
+      const request = change.request
+      const event = try currentEvent(change.eventKey)
+      const etag = typeof event?.metadata.etag === "string" ? event.metadata.etag.trim() : ""
+      const admitted = event !== undefined && answerAdmitted(change.invitee, etag !== "" && etag === request.expectedProviderVersion, request.idempotencyKey.trim() !== "")
+      const at = utcInstant(event?.startAt ?? "") ?? Number.NaN
+      const find = (events: readonly EventRecord[]): Readback => {
+        const found = events.find((candidate) => candidate.id === event?.id)
+        return answerReadback(found !== undefined, found?.attendees.some((guest) => guest.self === true && guest.organizer !== true && guest.responseStatus === request.responseStatus) === true)
+      }
+      return try write("AnswerInvitation", admitted, () => api.respondToLifeOpsCalendarEvent(event?.id ?? "", request), find,
         receiptSource(event === undefined ? "" : eventSourceKey(event)), at, event?.timezone ?? "UTC")
     },
     effect remove(change: DeleteRequest) {
