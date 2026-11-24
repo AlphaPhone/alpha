@@ -1,4 +1,18 @@
+{ "method": "GET", "path": "/api/health" }
 { "method": "POST", "path": "/api/conversations" }
+{ "method": "GET", "path": "/api/conversations" }
+{ "method": "GET", "path": "/api/conversations/messages/search" }
+{ "method": "GET", "path": "/api/conversations/{id}/messages" }
 { "method": "POST", "path": "/api/conversations/{id}/messages" }
 { "method": "POST", "path": "/api/conversations/{id}/messages/stream", "stream": true }
+{ "method": "POST", "path": "/api/conversations/{id}/fork" }
 { "method": "POST", "path": "/api/turns/{roomId}/abort" }
+{ "method": "GET", "path": "/api/client-devices/capabilities" }
+{ "method": "GET", "path": "/api/approvals" }
+{ "method": "POST", "path": "/api/approvals/{id}/resolve" }
+{ "method": "GET", "path": "/api/lifeops/calendar/feed" }
+{ "method": "GET", "path": "/api/lifeops/calendar/calendars" }
+{ "method": "POST", "path": "/api/lifeops/calendar/events" }
+{ "method": "PATCH", "path": "/api/lifeops/calendar/events/{eventId}" }
+{ "method": "DELETE", "path": "/api/lifeops/calendar/events/{eventId}" }
+{ "method": "POST", "path": "/api/lifeops/calendar/events/{eventId}/response" }
