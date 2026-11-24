@@ -21,7 +21,7 @@ export interface Checkout {
 }
 
 /** The repository root: the nearest directory above this file that holds `eliza.lock.json`, from `src/` and from `dist/src/` alike. */
-const repository = (function rootOf(directory: string): string {
+export const repository =(function rootOf(directory: string): string {
   return fs.existsSync(path.join(directory, "eliza.lock.json")) || path.dirname(directory) === directory ? directory : rootOf(path.dirname(directory));
 })(import.meta.dirname);
 
@@ -63,7 +63,7 @@ export function prepared(): Checkout {
   return at;
 }
 
-function run(cwd: string, command: string, ...args: string[]) {
+export function run(cwd: string, command: string, ...args: string[]) {
   const started = Date.now();
   process.stdout.write(`$ ${command} ${args.join(" ")}\n`);
   execFileSync(command, args, { cwd, stdio: "inherit", env: { ...process.env, CI: "1" } });
@@ -71,7 +71,7 @@ function run(cwd: string, command: string, ...args: string[]) {
 }
 
 /** Only one worktree builds the checkout all of them share: the others wait for it, and then find it ready. */
-async function alone<A>(at: Checkout, work: () => Promise<A>): Promise<A> {
+export async function alone<A>(at: Pick<Checkout, "commit" | "root">, work: () => Promise<A>): Promise<A> {
   const lock = `${at.root}.building`;
   fs.mkdirSync(path.dirname(at.root), { recursive: true });
   for (let waited = 0; ; waited += 1) {
