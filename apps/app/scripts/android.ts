@@ -288,6 +288,8 @@ export function checkApk(file: string, mode: "debug" | "release", env: NodeJS.Pr
   const debuggable = badging.includes("application-debuggable");
   if (debuggable !== (mode === "debug")) throw new Error(`${name} is ${debuggable ? "" : "not "}debuggable`);
   const entries = execFileSync(aapt, ["list", file], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 }).split("\n").filter((entry) => entry !== "");
+  const bunLibraries = entries.filter((entry) => /^lib\/[^/]+\/libeliza_bun\.so$/.test(entry));
+  if (bunLibraries.length > 0) throw new Error(`${name} carries the Bun runtime: ${bunLibraries.join(", ")}`);
   const inference = entries.filter((entry) => INFERENCE_ENTRY.test(entry));
   if (inference.length > 0) throw new Error(`${name} carries local inference or a model: ${inference.join(", ")}`);
   const abiList = entries.flatMap((entry) => /^lib\/([^/]+)\/libeliza_node\.so$/.exec(entry)?.slice(1) ?? []);
